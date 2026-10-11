@@ -49,7 +49,7 @@ should be filed as an issue.
 |---|---|
 | Research | Done (October 2026). 46 language analyses (~14,000 lines), 15 topic syntheses, 4 evidence dossiers. |
 | Proposal | Draft 1. Every area has a proposed design and rationale. |
-| Open questions | 41 recorded, each with options, a current lean and what would resolve it. |
+| Open questions | 41 recorded; 38 decided by the project owner (October 2026), 3 open (runtime stacks, governance details, numerics). |
 | Prototype | Not started. |
 
 ## Contributing to the design

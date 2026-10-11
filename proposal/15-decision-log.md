@@ -37,27 +37,27 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 *Alternatives:* tracing GC (Go, Java, OCaml); reference counting everywhere (Swift, Nim); Rust's first-class references with lifetimes; Hylo's pure mutable value semantics; Vale's generational references; Austral's linear types.
 *Evidence:* Memory-safety data rules out unsafe defaults. Rust's surveys show the learning curve concentrated in non-adopters and ex-users, with lifetimes and borrowing the named obstacle ([evidence/surveys.md](../research/evidence/surveys.md)); Graydon Hoare's retrospective and Hylo's papers identify first-class references as the source of annotation burden ([rust.md](../research/languages/rust.md), [hylo.md](../research/languages/hylo.md)); Swift's `~Escapable` and Mojo's inferred origins are moves in the same direction ([swift.md](../research/languages/swift.md), [mojo.md](../research/languages/mojo.md)). GC rejected as the *default* because of priority 3 and the embedded/WebAssembly targets; its absence is the largest open risk.
 *Consequences:* No `Pin`, no `'a`; view types; `Shared` for graphs; arena handles idiomatic. See [04](04-memory-and-ownership.md).
-*Status:* leaning; Q-1, Q-2.
+*Status:* decided (Q-1 closed: no GC tier; the prototype corpus still validates expressiveness per [16](16-validation-plan.md)).
 
 ### D-005 Shared ownership is `Shared[T]`: atomic RC with Perceus-style reuse
 
 *Alternatives:* `Rc`/`Arc` split (Rust); tracing GC for the shared tier (Nim's ORC cycle collector; a GC'd region as in Verona); no shared ownership (pure MVS).
 *Evidence:* Koka/Lean/Roc show RC with reuse analysis competitive with tracing for functional workloads ([koka-effekt.md](../research/languages/koka-effekt.md), [roc.md](../research/languages/roc.md)); Swift shows the cost of RC on pointer-heavy code; Rust's `Rc`/`Arc` split is a frequent source of "wrong one" refactors.
-*Consequences:* Cycles need `Weak`. Single-task non-atomic variant and a cycle collector are Q-2.
-*Status:* leaning; Q-2.
+*Consequences:* Cycles need `Weak`. The compiler chooses atomic or non-atomic counting by escape analysis; the developer never chooses (Q-2 closed).
+*Status:* decided.
 
 ### D-006 Parameter conventions `x` (borrow), `mut x` (in-place), `own x` (consume); `mut` visible at call sites
 
 *Alternatives:* owned by default (Rust); convention in the type (`&T`, `&mut T`); Hylo's `let`/`inout`/`sink`/`set`; Swift's compiler-chosen with `borrowing`/`consuming` overrides.
 *Evidence:* Swift and Hylo (borrow default is what most functions want; [swift.md](../research/languages/swift.md), [hylo.md](../research/languages/hylo.md)); Rust's "should this take `&T` or `T`" API-design burden ([rust.md](../research/languages/rust.md)); Swift's and Hylo's `&x` call-site marker for in-place mutation praised for visibility.
 *Consequences:* `ref T` appears only in return types, locals and views.
-*Status:* decided; naming of `own` is Q-18.
+*Status:* decided (Q-18: `own`, `mut`, call-site `mut`).
 
 ### D-007 Explicit `.copy()`; `Copy` is opt-in for trivially copyable types
 
 *Alternatives:* implicit copy with copy-on-write (Swift); implicit copy for all `Copyable` (Hylo); `.clone()` only (Rust).
 *Evidence:* Priority 3 (visible cost); Swift's COW makes allocation invisible and is the cause of its "unexpected copy" performance issues ([swift.md](../research/languages/swift.md)); Rust's model is well-understood.
-*Status:* leaning; Q-3.
+*Status:* decided (Q-3).
 
 ### D-008 Deterministic destruction at scope end, reverse declaration order
 
@@ -90,11 +90,12 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 *Evidence:* "Composition over inheritance" (GoF 1994 onward); Kotlin's final-by-default and Go's and Rust's success without it; Swift's protocol-oriented programming ([swift.md](../research/languages/swift.md)); GUI frameworks (the strongest case for inheritance) being written without it in Rust/Go/Elm.
 *Status:* decided; whether delegation suffices for OOP-heavy domains is Q-28.
 
-### D-013 Explicit `impl Trait for Type`; global coherence (orphan rule)
+### D-013 Explicit `impl Trait for Type`; global coherence, with orphan implementations allowed in the root package
 
 *Alternatives:* implicit structural satisfaction (Go, TypeScript); scoped instances (Scala `given`; OCaml's modular implicits, proposed 2014, never shipped, with a reduced "modular explicits" arriving in OCaml 5.5 in 2026); no coherence (Haskell orphans allowed with warnings).
-*Evidence:* Go's accidental satisfaction and inability to attach defaults ([go.md](../research/languages/go.md)); Rust's coherence making collections behave uniformly; Scala implicits' documented confusion and Scala 3 redesign ([scala.md](../research/languages/scala.md)).
-*Status:* leaning; Q-11.
+*Evidence:* Go's accidental satisfaction and inability to attach defaults ([go.md](../research/languages/go.md)); Rust's coherence making collections behave uniformly; Scala implicits' documented confusion and Scala 3 redesign ([scala.md](../research/languages/scala.md)); the Rust orphan rule as a problem for 15.8% of survey respondents ([rust.md](../research/languages/rust.md)).
+*Consequences:* Libraries keep the orphan rule. The root package of a build may implement any trait for any type: there is exactly one root and nothing depends on it, so coherence holds without newtypes in application code. A library that later adds the same impl produces a compile error in the root, fixed by deleting the root's copy.
+*Status:* decided (Q-11).
 
 ### D-014 Colourless structured concurrency: tasks on a runtime scheduler, `scope`/`spawn`, no `async`/`await`
 
@@ -113,7 +114,7 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 
 *Alternatives:* none implicit (Rust); C's implicit everything; Zig/Swift middle.
 *Evidence:* Rust's `as usize` paper-cut ([rust.md](../research/languages/rust.md)); C's conversion bugs ([c.md](../research/languages/c.md)).
-*Status:* leaning; Q-13.
+*Status:* decided (Q-13).
 
 ### D-017 Generics: `[T]` syntax, trait bounds checked at definition, monomorphised with instantiation sharing, explicit `dyn`
 
@@ -125,7 +126,7 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 
 *Alternatives:* proc macros (Rust), AST macros (Lisp, Elixir, Nim, Julia), template metaprogramming (C++), CTFE + string mixins (D).
 *Evidence:* [08](08-metaprogramming.md); Zig ([zig.md](../research/languages/zig.md)); Rust compile-time complaints; D's string-mixin regret ([d.md](../research/languages/d.md)); Dart's cancelled macros ([dart.md](../research/languages/dart.md)); the Lisp curse ([lisp-scheme-racket.md](../research/languages/lisp-scheme-racket.md)).
-*Status:* leaning; Q-15.
+*Status:* decided (Q-15: no macros).
 
 ### D-019 File = module, directory = module, no headers, no `mod` declarations, no package cycles
 
@@ -160,7 +161,7 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 
 *Alternatives:* free shadowing (Rust); no shadowing (Go warns in vet; Zig errors).
 *Evidence:* Rust's shadowing is widely liked for `let x = parse(x)?` chains; Zig's ban is cited as friction; cross-scope shadowing bugs appear in the Go vet rationale.
-*Status:* leaning; Q-35.
+*Status:* decided (Q-35).
 
 ### D-025 `and`, `or`, `not` as words; `!` reserved for error types
 
@@ -200,7 +201,7 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 
 *Alternatives:* MVS without a lockfile (Go); flat namespace (crates.io, PyPI); mutable packages (npm historically).
 *Evidence:* [09](09-modules-packages-and-build.md); Elm's enforced semver ([elm-purescript.md](../research/languages/elm-purescript.md)); Go sumdb ([go.md](../research/languages/go.md)); left-pad and the npm incident history ([javascript.md](../research/languages/javascript.md)); Unison's content addressing ([unison.md](../research/languages/unison.md)).
-*Status:* decided; MVS Q-20; registry federation Q-19.
+*Status:* decided (Q-19: central registry plus private registries; Q-20: lockfile with newest-satisfying resolution).
 
 ### D-032 No build scripts; `[trust]` lists packages allowed `unsafe`/`extern`
 
@@ -242,7 +243,7 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 ### D-039 Unstable Sisu ABI; C ABI for stable boundaries
 
 *Evidence:* Swift's library-evolution cost ([swift.md](../research/languages/swift.md)); Rust's choice ([rust.md](../research/languages/rust.md)).
-*Status:* leaning; Q-31.
+*Status:* decided for now (Q-31).
 
 ### D-040 Panics unwind to the enclosing task scope; no `catch`; scope observes `TaskPanicked`
 
@@ -287,10 +288,11 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 *Evidence:* Zig's `defer`/`errdefer` ergonomics; Rust's `scopeguard` crate as the demand signal; Go's function scoping as the trap to avoid.
 *Status:* decided.
 
-### D-048 ASCII-only identifiers
+### D-048 Non-ASCII identifiers allowed, with confusable and mixed-script lints on by default
 
-*Evidence:* Homoglyph attacks (CVE-2021-42574 "Trojan Source" and the identifier variants); Rust's non-ASCII identifier lints added after allowing them.
-*Status:* leaning; Q-33.
+*Alternatives:* ASCII only (the first draft's lean).
+*Evidence:* Python, Go, Rust, Swift and Julia allow them; Rust's experience is that the risk (CVE-2021-42574 "Trojan Source" and homoglyph identifiers) is handled by NFC normalisation plus `uncommon_codepoints`, `confusable_idents` and `mixed_script_confusables` lints; the teaching and non-English-ecosystem argument decided it.
+*Status:* decided (Q-33 reversed the lean).
 
 ### D-049 `Map` iteration randomised; SipHash keyed per process
 
@@ -302,6 +304,26 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 *Alternatives:* overloading (C++, Java, C#, Swift); none (Go, Rust, Zig).
 *Evidence:* Swift's overload resolution as its type-checker cost centre ([swift.md](../research/languages/swift.md)); Rust and Go do without; named arguments cover the readability case (Python, Kotlin).
 *Status:* decided.
+
+### D-052 Interpreter mode is a feature and the first implementation
+
+*Alternatives:* AOT only with a fast debug backend (the first draft's lean).
+*Evidence:* Python's and Julia's exploratory workflow as an adoption driver ([python.md](../research/languages/python.md), [julia.md](../research/languages/julia.md)); the `comptime` evaluator already requires an interpreter over the typed IR; building the interpreter first gives a runnable 0.1 in the shortest time, which the research on Carbon, Hylo, Roc and Pony identifies as the main survival factor ([16](16-validation-plan.md)).
+*Consequences:* `sisu run`, the REPL and scripts use the interpreter; the debug native backend comes second; semantics are defined once over the typed IR and shared by both.
+*Status:* decided (Q-30).
+
+### D-053 Hot function replacement in debug builds
+
+*Evidence:* Smalltalk, Lisp and Clojure live development; Dart's hot reload as a measured adoption driver ([dart.md](../research/languages/dart.md), [smalltalk.md](../research/languages/smalltalk.md), [clojure.md](../research/languages/clojure.md)).
+*Consequences:* The debug ABI keeps frames reifiable; every top-level definition has an indirection point in debug builds that release builds remove; image-based deployment stays out of scope.
+*Status:* decided (Q-22).
+
+### D-054 `@must_consume` types
+
+*Alternatives:* lint only; full linear types (Austral).
+*Evidence:* Austral's finding that strict linearity is hostile to loops and early return, and its author's own recommendation of opt-in linearity per resource type ([austral.md](../research/languages/austral.md)); Idris 2's multiplicities as the proven form ([idris-agda-lean.md](../research/languages/idris-agda-lean.md)); Vale's "Higher RAII" ([vale.md](../research/languages/vale.md)).
+*Consequences:* A value of a `@must_consume` type that goes out of scope without being passed to an `own` parameter is a compile error; unwinding on panic is exempt.
+*Status:* decided (Q-37).
 
 ### D-051 No implicit zero values; initialisation is mandatory; `Default` is a trait
 

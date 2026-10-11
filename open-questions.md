@@ -1,5 +1,11 @@
 # Open questions
 
+**Status (October 2026):** the project owner has answered every question
+below; 38 are decided and 3 (Q-6, Q-21, Q-23) remain open. Each question
+keeps its original options and evidence, followed by the decision, so the
+reasoning stays auditable. The proposal documents and the decision log
+have been updated to match.
+
 What the research could not settle. Each question states the options, the
 evidence for each, the proposal's current lean (what the design documents
 assume), and what would settle it. Questions are grouped by area and
@@ -49,6 +55,8 @@ compiler with a graph IR) written by people who are not the language's
 designers, measuring the count of `Shared`/`Weak`/arena uses and the time
 spent on ownership errors.
 
+**Decision (October 2026).** No tracing GC. Ownership with deterministic destruction is the single memory model, and the design effort goes into making it easy: borrow-by-default conventions, no named lifetimes, view types, arenas, and diagnostics that name the fix. Closes D-004's open status.
+
 ### Q-2. `Shared[T]`: atomic only, or also a non-atomic single-task variant? Cycle collector or not?
 
 **Options.** Rust's `Rc`/`Arc` split (fast when you pick right, refactor
@@ -66,6 +74,8 @@ if the escape analysis proves weak.
 **What would settle it.** Benchmarks on the prototype comparing the elision
 strategy against a manual `Rc`/`Arc` split on allocation-heavy code.
 
+**Decision (October 2026).** One `Shared[T]`. The compiler decides atomic versus non-atomic reference counting by escape analysis (atomic only when the value can reach another task); the developer never chooses and is never unsafe. No cycle collector; `Weak` for back-references.
+
 ### Q-3. Implicit copying: never, for `Copy` types only, or always with copy-on-write?
 
 **Options.** Rust (explicit `.clone()`, `Copy` opt-in): costs visible, some
@@ -78,6 +88,8 @@ allocation, the "unexpected copy" performance bug class. Hylo (implicit for
 **What would settle it.** The same corpus as Q-1, counting `.copy()` calls
 and the number of "why is this slow" incidents attributable to implicit
 copies in a Swift-style variant.
+
+**Decision (October 2026).** Rust's model: `Copy` opt-in for trivially copyable types, explicit `.copy()` otherwise.
 
 ### Q-4. Allocation failure: panic, or `! OutOfMemory` everywhere?
 
@@ -92,12 +104,16 @@ against the infallible forms.
 whether the `try_` variants are sufficient or whether they would want a
 package-wide switch.
 
+**Decision (October 2026).** Allocation failure panics. `try_` variants return `! OutOfMemory` for code that must handle it.
+
 ### Q-18. Naming of the parameter conventions
 
 `own` versus `sink` (Hylo), `consuming` (Swift), `take`, `move`. And
 whether `mut` at call sites should be `mut v`, `&v` (Swift, Hylo) or
 `inout v`. Pure bikeshed with a real ergonomic component; to be settled by
 a usability test on the prototype, not by argument.
+
+**Decision (October 2026).** `own` and `mut` on parameters; `mut` repeated at the call site.
 
 ### Q-37. Linear (must-consume) types as a type rule rather than a lint
 
@@ -115,6 +131,9 @@ generic container).
 
 **What would settle it.** Whether generic containers (`List[File]`) need
 special handling in practice; try it in the standard library first.
+
+**Decision (October 2026).** `@must_consume` types: not consuming one is a compile error; panics are exempt.
+
 
 ## Concurrency and runtime
 
@@ -144,6 +163,8 @@ Odin's untracked implicit context.
 corpus. If median I/O-doing functions carry more than two capability
 parameters, add `with`.
 
+**Decision (October 2026).** Standard streams are ambient; everything else is an explicit capability. The `with Fs, Clock` tracked-capability clause stays reserved for after the prototype measures the parameter burden.
+
 ### Q-6. Task runtime details: stacks, and should spawning require a capability?
 
 **Question.** Without a moving GC, task stacks cannot be relocated. Options
@@ -162,6 +183,8 @@ memory per task against Go and Java virtual threads; and whether any real
 supply-chain attack would be stopped by gating spawn (none found in the
 research: attacks exfiltrate, they do not need to spawn).
 
+**Decision (October 2026).** Open. To be settled by the prototype's runtime experiment ([proposal/16](proposal/16-validation-plan.md), bet 3).
+
 ### Q-34. Preemption
 
 Cooperative scheduling with compiler-inserted yield points (current lean)
@@ -170,6 +193,8 @@ cheaper and deterministic; the latter handles tight loops in FFI and
 `unsafe` code that the compiler cannot instrument. Settled by whether
 the prototype's yield-point insertion leaves measurable starvation in
 benchmarks that mix compute and I/O tasks.
+
+**Decision (October 2026).** As leaned: cooperative scheduling with compiler-inserted yield points; revisit if the prototype measures starvation.
 
 ### Q-17. Should Sisu have an effect system?
 
@@ -194,6 +219,9 @@ effects as well as capabilities.
 with published ergonomic data, or Scala's capture checking stabilising and
 being adopted.
 
+**Decision (October 2026).** No effect system. `pure` is the one tracked property; the `with` clause is reserved for tracked capabilities.
+
+
 ## Errors
 
 ### Q-7. Residual error-syntax questions
@@ -204,6 +232,8 @@ handler? Should `?` on an `Option` inside a function returning `T ! E`
 convert `None` to a standard `NoneError` (Rust: no, needs `.ok_or`)? To be
 settled by writing the standard library and counting the friction.
 
+**Decision (October 2026).** Resolve while writing the standard library, following the current lean: inferred error sets on `pub` functions are a lint; `else { e -> ... }` is the handler form; `?` on an `Option` inside a function returning `T ! E` requires an explicit conversion.
+
 ### Q-36. A restart/condition system for the application tier
 
 Common Lisp's conditions let the *signaller's* frame offer recovery
@@ -213,6 +243,9 @@ and long-running systems (retry with a different file, skip the record,
 use a default). It needs dynamic scope. Lean: not in v1; a library can
 approximate it with a capability carrying a handler table. Settled by
 whether that library approximation is used.
+
+**Decision (October 2026).** No condition system.
+
 
 ## Types
 
@@ -225,6 +258,8 @@ in v1, syntax reserved. Settled by whether the standard library's
 abstraction duplication becomes a maintenance cost, which will be visible
 within the first year of the prototype.
 
+**Decision (October 2026).** Reserved syntax; to be considered after the prototype shows whether the standard library duplicates abstractions.
+
 ### Q-11. Coherence: orphan rule versus scoped instances
 
 Global coherence (Rust, Haskell) makes `impl` resolution predictable and
@@ -234,12 +269,16 @@ boilerplate and reintroduce "which instance is in scope" confusion.
 Lean: orphan rule plus `@delegate`. Settled by counting newtype wrappers in
 the corpus.
 
+**Decision (October 2026).** Avoid newtype boilerplate. Coherence is kept, but the *root package of a build* (the application) may implement any trait for any type, because there is exactly one root and nothing depends on it, so no two packages can conflict; libraries keep the orphan rule and use `@delegate`. Scoped instances are rejected.
+
 ### Q-13. Implicit lossless widening versus no implicit conversions at all
 
 Convenience versus inference complexity. Lean: widening allowed. Settled by
 the prototype's type checker: if widening introduces ambiguity in overload-
 free code it stays; if it forces a defaulting rule that surprises people,
 it goes.
+
+**Decision (October 2026).** Implicit lossless widening stays.
 
 ### Q-14. Grapheme clusters versus scalar values as the default `str` unit
 
@@ -249,12 +288,16 @@ scalar, with `graphemes()` one call away and the linter flagging `chars()`
 on strings that flow to the UI. Settled by whether the linter heuristic is
 good enough.
 
+**Decision (October 2026).** Scalar values are the default string unit; `graphemes()` one call away; a linter heuristic flags `chars()` on strings that flow to user-visible output.
+
 ### Q-16. Verification beyond contracts: ghost code, loop invariants, a verifier
 
 Lean: reserve `decreases`/`invariant` on loops and a `ghost` modifier;
 ship a verifier as `std.x.verify` after v1 if SPARK-style discharge of
 bounds and overflow proves tractable on Sisu's IR. Settled by a feasibility
 study on the prototype.
+
+**Decision (October 2026).** As leaned: `decreases`, loop `invariant` and `ghost` reserved; the verifier is post-1.0 tooling.
 
 ### Q-28. Is composition plus delegation enough for OOP-heavy domains?
 
@@ -273,6 +316,8 @@ architecture patterns documented in the standard library guides.
 `dyn` trait objects plus delegation and reports it as natural, the
 question closes; if they emulate inheritance with boilerplate, it reopens.
 
+**Decision (October 2026).** No inheritance. Composition, traits and `@delegate`.
+
 ### Q-26. Anonymous structs and row polymorphism
 
 OCaml's objects, PureScript's and Roc's records, and TypeScript's object
@@ -281,6 +326,8 @@ tuples. Lean: no; `@derive` and tuples cover the ad-hoc cases, and nominal
 types give better errors and documentation. Settled by whether JSON-shaped
 configuration handling becomes noticeably verbose in practice.
 
+**Decision (October 2026).** No anonymous or row-polymorphic records. Nominal structs and tuples only, for simplicity.
+
 ### Q-27. Comptime-parameterised types alongside trait generics
 
 Zig's `fn List(T: type) type` style is expressive for things traits
@@ -288,6 +335,9 @@ express badly (layout-dependent specialisation, SoA transforms). Lean: allow
 `comptime` functions returning types for *type construction*, but all
 generic *bounds* go through traits. Settled by whether the two mechanisms
 are confusable in the standard library.
+
+**Decision (October 2026).** As leaned: `comptime` functions may construct types; all generic bounds go through traits.
+
 
 ## Metaprogramming
 
@@ -321,6 +371,9 @@ a strongly curated standard library to counter the Lisp curse
 comptime plus reflection plus trailing closures; the first candidates are
 an HTML templating library and an embedded query language.
 
+**Decision (October 2026).** No macros. Revisit only when the validation corpus produces a need that `comptime` plus reflection cannot meet.
+
+
 ## Syntax
 
 ### Q-8. Braces versus indentation
@@ -331,12 +384,16 @@ Lean: braces. Settled by nothing short of a controlled study, which nobody
 has run on experienced programmers; absent that, the tooling argument
 stands.
 
+**Decision (October 2026).** Indentation-based syntax, following Python idioms wherever a Python idiom is not itself a documented mistake. Every deviation from Python is recorded with its reason in [proposal/02](proposal/02-syntax.md), and the evidence on how to do indentation well in a compiled language is in [research/topics/indentation-syntax.md](research/topics/indentation-syntax.md).
+
 ### Q-9. Last-expression block values versus explicit `return` only
 
 Rust's rule confuses newcomers; Kotlin requires `return` in block bodies.
 Lean: last-expression values, because `if`/`match` as expressions need
 them anyway. Settled by the error-message corpus: if "expected (), found
 int" is a top-ten diagnostic in the prototype, reconsider.
+
+**Decision (October 2026).** Explicit `return` only; blocks never have a value. `if` and `match` have expression forms only when every branch is a single expression. The named-result-variable alternative (MATLAB output variables, Go named results, Nim's `result`, Pascal's `Result`) is assessed in [research/topics/function-results.md](research/topics/function-results.md); the short version is that it is kept only as the way `ensures` clauses name the result, not as a way to return.
 
 ### Q-12. Uniform function call syntax
 
@@ -346,10 +403,14 @@ and collides with trait methods. Lean: no; extension traits (`impl MyExt
 for str`) cover the use case. Settled by counting extension traits in the
 corpus.
 
+**Decision (October 2026).** No uniform function call syntax. Extension is explicit: an `impl Type:` block in another module adds methods, visible where that module is imported.
+
 ### Q-25. Implicit closure parameter (`it`, `$0`)
 
 Lean: no; `{ x -> x * 2 }` is five characters longer than `{ it * 2 }` and
 unambiguous. Settled by usability testing.
+
+**Decision (October 2026).** Yes: a single-parameter closure may use the implicit parameter `it`.
 
 ### Q-33. Non-ASCII identifiers
 
@@ -358,9 +419,14 @@ practical reality that ecosystems are English-identifier-only argue
 against. Lean: ASCII only. Settled by demand from a non-English-dominant
 user community, which is a real consideration for teaching.
 
+**Decision (October 2026).** Non-ASCII identifiers are allowed (NFC-normalised), with the Unicode confusable and mixed-script lints Rust added after allowing them, on by default.
+
 ### Q-35. Cross-scope shadowing: warn or allow
 
 Lean: warn. Settled by lint noise measurements in the corpus.
+
+**Decision (October 2026).** As leaned: rebinding in the same scope is allowed; shadowing an outer scope warns.
+
 
 ## Packages and tooling
 
@@ -372,6 +438,8 @@ module paths) avoids a central point of failure and control at the cost of
 link rot and the proxy infrastructure Go had to build anyway. Settled by
 governance (Q-21).
 
+**Decision (October 2026).** The Cargo model: one central registry run by the foundation, plus `[registries]` in the manifest for private mirrors.
+
 ### Q-20. Lockfile with max-satisfying resolution versus minimal version selection
 
 Cargo and npm pick the newest matching version and record it in a lockfile;
@@ -381,10 +449,14 @@ manual. Lean: lockfile with max-satisfying. Settled by whether the API-diff
 semver enforcement (which makes "newest compatible" actually compatible)
 holds up; if it does, max-satisfying is safe.
 
+**Decision (October 2026).** Lockfile with newest-satisfying resolution.
+
 ### Q-29. Default visibility within a package
 
 Private-to-module by default (Rust) means a lot of `pub(package)`. Lean:
 private to module. Settled by counting `pub(package)` in the corpus.
+
+**Decision (October 2026).** Private to the module by default.
 
 ### Q-30. A real interpreter for scripts
 
@@ -393,11 +465,15 @@ start-instantly workflow is the competitor. Lean: the debug backend's speed
 plus a compilation cache makes this fast enough; add an interpreter mode
 only if measured startup exceeds 200 ms for small scripts.
 
+**Decision (October 2026).** An interpreter mode is a language feature (`sisu run` on the interpreter, the REPL, scripts), and the interpreter is also the first implementation of the language in the experiment: it is how the design is tested before any native backend exists.
+
 ### Q-32. Unused imports and variables: warning or error
 
 Go errors (hated during development, clean in CI); Rust warns. Lean: warn,
 auto-fix in `fmt`, `--deny-warnings` in CI. Settled by the Go survey's
 evidence, which is already fairly strong for "warn".
+
+**Decision (October 2026).** Warnings, auto-fixed by `sisu fmt` where mechanical, with `--deny-warnings` in CI.
 
 ### Q-22. Live programming
 
@@ -410,6 +486,9 @@ be a post-v1 tooling feature; full image-based development is out of
 scope. Settled by demand and by whether the debug backend can support
 function replacement cheaply.
 
+**Decision (October 2026).** Hot function replacement in debug builds is a committed feature: the debug ABI keeps frames reifiable and each top-level definition has an indirection point that release builds remove. Full image-based development remains out of scope.
+
+
 ## Interop and platform
 
 ### Q-24. Direct C++ interop
@@ -418,10 +497,14 @@ Lean: no (Carbon's domain). Would be reopened only if a major C++ codebase
 wants to adopt Sisu incrementally and the C-ABI wrapper route proves too
 costly.
 
+**Decision (October 2026).** No direct C++ interop. C ABI wrappers only.
+
 ### Q-31. A stable Sisu ABI for dynamic libraries
 
 Lean: unstable; C ABI at boundaries. Reopened if an operating-system vendor
 wants to ship Sisu system libraries.
+
+**Decision (October 2026).** Unstable Sisu ABI for the time being; C ABI at boundaries.
 
 ### Q-23. Numerics: SIMD types, rank-polymorphic arrays, broadcasting
 
@@ -437,6 +520,9 @@ Settled by whether the library can express rank polymorphism without HKTs
 (Q-10) and whether numerical kernels with overlapping mutable views are
 writable without `unsafe`.
 
+**Decision (October 2026).** Open; further research needed before `std.simd` and `std.x.ndarray` are designed.
+
+
 ## Governance
 
 ### Q-21. Governance details
@@ -447,6 +533,8 @@ consensus, how the foundation is funded. The proposal fixes the shape
 majority); the people and the money are not design questions and are
 left to whoever starts the project.
 
+**Decision (October 2026).** Open. Not a design question; left to whoever starts the project.
+
 ### Q-38. Mechanised core semantics
 
 Austral and WebAssembly have formal semantics; Standard ML has a formal
@@ -454,6 +542,9 @@ definition; Rust has a retroactive specification. Lean: prose
 specification plus a conformance test suite for 1.0; a mechanised core
 (ownership and `Send`/`Sync` soundness) as a research collaboration after.
 Settled by whether a research group wants to do it.
+
+**Decision (October 2026).** As leaned: prose specification plus a conformance test suite for 1.0; a mechanised core as a later research collaboration.
+
 
 ## Open questions about the open questions
 
@@ -468,6 +559,8 @@ generics, `unsafe`, `comptime`, concurrency and `ref`, with diagnostics
 written for first-year students. Settled by a classroom trial once the
 prototype exists.
 
+**Decision (October 2026).** A compiler-enforced teaching profile is planned.
+
 ### Q-39. Have we studied the right languages?
 
 The research covers about 45 languages. Notable omissions: Objective-C,
@@ -478,6 +571,8 @@ proof assistants beyond Lean/Agda/Idris. Each could contribute a lesson
 None is expected to change a core decision; any one could add a library
 design.
 
+**Decision (October 2026).** The coverage is sufficient.
+
 ### Q-40. Is "only the upsides" even coherent?
 
 Several upsides are mutually exclusive: GC convenience and deterministic
@@ -486,3 +581,6 @@ tooling simplicity; purity and ergonomic I/O. The proposal resolves each by
 the priority order in D-001. A reader who rejects that order will reject
 some decisions; the decision log is written so that they can see exactly
 which ones.
+
+**Decision (October 2026).** Accepted as a framing: "only upsides" means the best available assumptions under the priority order in D-001, revisited as evidence arrives.
+
