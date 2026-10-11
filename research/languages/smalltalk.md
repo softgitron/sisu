@@ -33,6 +33,24 @@ a language. There shouldn't be one." Kay in 1998: "The big idea is
 ago coined the term 'objects'" because it leads people "to focus on the
 lesser idea" [3].
 
+## Coverage of the 15 evaluation dimensions
+
+1. **Syntax and readability.** Unary, binary and keyword messages, blocks, cascades (`;`), six reserved words; fits on a postcard; keyword messages read as sentences; precedence (unary before binary before keyword) is the one trap.
+2. **Type system.** Dynamic, strong; everything is an object; no static checking; Strongtalk proved optional types feasible but was abandoned; Pharo has pragma-based type hints for tools only.
+3. **Memory management and safety.** Generational GC in the VM; memory-safe except through FFI and VM plugins; `become:` (swap object identities) is a powerful and dangerous primitive.
+4. **Mutability, aliasing and value semantics.** Mutable objects with shared references by default; literals (numbers, symbols, some strings) are value-like; no immutability guarantees (Pharo added an optional read-only object bit in the VM).
+5. **Error handling.** Resumable exceptions (`on:do:`, `retry`, `resume:`, `return:`, `pass`, `outer`) with the debugger as default handler; closer to CL's condition system than to Java's exceptions.
+6. **Concurrency and parallelism.** Green threads (`Process`, `Semaphore`, `Mutex`) scheduled by the VM on one OS thread; no parallelism in the classic VM; no data-race prevention.
+7. **Polymorphism.** Single inheritance, late-bound message sends, protocols (duck typing); traits (Pharo, Squeak) for reuse without inheritance; `doesNotUnderstand:` for proxies.
+8. **Metaprogramming.** Total reflection (classes, methods, contexts are objects), `perform:`, `thisContext`, compiling source at run time, method wrappers/proxies; the compiler and tools are in the image.
+9. **Modules, packages, build.** Packages/categories in the image; Monticello then Iceberg (Git with Tonel text files) in Pharo; Metacello for dependency loading; no compile step; builds are "load into a clean image" scripts.
+10. **Tooling.** The original IDE: class browser, inspector, debugger with fix-and-resume, refactoring browser, SUnit, code critics, Calypso browser and Spec UI in Pharo; everything is live and scriptable.
+11. **Interop and platforms.** Unified FFI (Pharo), VM plugins in Slang (a Smalltalk subset compiled to C); VM runs on Linux/macOS/Windows/ARM; deployment is image plus VM.
+12. **Performance and compilation model.** Bytecode plus Cog JIT with inline caches; dynamic dispatch everywhere; roughly comparable to other dynamic JIT languages; no AOT.
+13. **Standard library and ecosystem.** Large class library in the image (collections, streams, GUI, networking); ecosystem small; Seaside, Roassal (visualisation), Moose, Glamorous Toolkit are the notable projects.
+14. **Learnability.** Syntax learned in an hour; the environment and the "where is my code?" image model take longer; historically the language used to teach OOP; Pharo MOOC exists.
+15. **Evolution and governance.** Pharo: open consortium, yearly releases (13 in 2025; 14 delayed in 2026); Squeak: oversight board; commercial dialects vendor-driven; ANSI standard (1998) effectively dormant; dialects diverge.
+
 ## Strengths
 
 ### A uniform object/message model with a syntax that fits on a postcard

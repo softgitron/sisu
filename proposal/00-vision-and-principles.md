@@ -20,10 +20,11 @@ the languages that dominate today each got a few things right at great cost
 elsewhere.
 
 - Rust proved that memory safety and data-race freedom without a garbage
-  collector are achievable in production, but its learning curve, compile
-  times and `async` ergonomics are the top complaints in its own survey every
-  year, and its original designer has written that he would have made
-  different choices on most of the points people struggle with.
+  collector are achievable in production, but compile times and `async`
+  ergonomics are the top complaints of its users, its learning curve is the
+  top reason given by the people who have not adopted it or have left, and
+  its original designer has written that he would have made different
+  choices on most of the points people struggle with.
 - Go proved that fast builds, one formatter, a batteries-included standard
   library and colourless concurrency drive adoption, but it shipped without
   generics, sum types or null safety, and its own team has now given up on

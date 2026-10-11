@@ -13,7 +13,11 @@ Android all report around 70%), and when a project moves new code to a
 memory-safe language that share falls faster than the code is replaced
 (Android: from 76% in 2019 to under 25% in 2024). A new language that is
 not memory-safe by default would be ignoring the strongest single result in
-the research.
+the research. Within that class, temporal errors dominate: half of
+Chromium's memory bugs and 17 of Project Zero's 39 in-the-wild memory
+corruption 0-days in 2021 were use-after-free. Bounds checking alone (the
+Zig/Odin position) addresses the smaller half; a lifetime discipline is
+what addresses the larger.
 
 The approaches, with their documented costs:
 
@@ -21,7 +25,7 @@ The approaches, with their documented costs:
 |---|---|---|
 | Tracing GC | Java, Go, C#, OCaml, Haskell, JS | Runtime, pauses or barrier overhead, memory headroom (Hertz & Berger: 2-5x for equal throughput), no deterministic destruction, unsuitable for the smallest targets |
 | Reference counting | Swift, Python, Nim, Koka/Lean (Perceus) | Retain/release traffic (Swift's measured 10-30% on pointer-heavy code), cycles leak without a collector or `weak`, still no aliasing control |
-| Ownership + borrowing with lifetimes | Rust | Learning curve (top Rust survey complaint every year), lifetime annotations, self-referential structures, async interaction, API design burden |
+| Ownership + borrowing with lifetimes | Rust | Learning curve (the top reason non-adopters and ex-users give in Rust's surveys; about one current user in ten calls the borrow checker a big problem), lifetime annotations, self-referential structures, async interaction, API design burden |
 | Mutable value semantics, no first-class references | Hylo, (Swift partially) | Immature; some patterns (graphs, intrusive structures, callbacks) need escape hatches |
 | Linear types | Austral, (Idris 2) | Every value used exactly once: very explicit, verbose for plain data |
 | Generational references | Vale (archived 2025; its successor Valen moved to "group borrowing") | Runtime check per dereference (5-11% on the one published benchmark); no shipped language uses it as the primary model |

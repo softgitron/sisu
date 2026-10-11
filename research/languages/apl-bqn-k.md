@@ -29,6 +29,24 @@ language, "much simpler than both" APL and J, with first-class functions,
 a context-free grammar and no interpreter state, while having "no intention
 of being the last word in programming" [2].
 
+## Coverage of the 15 evaluation dimensions
+
+1. **Syntax and readability.** Right-to-left evaluation with no precedence, one glyph per primitive (APL/BQN), overloaded ASCII (K/J); extreme density; readable only with the idiom vocabulary; context-free grammar in BQN, not in APL.
+2. **Type system.** Dynamic; arrays carry rank, shape and element kind; no static shape checking; `RANK ERROR`/`LENGTH ERROR` at run time.
+3. **Memory management and safety.** Reference-counted or traced arrays; copy-on-write; memory-safe; whole-array primitives in C with SIMD.
+4. **Mutability, aliasing and value semantics.** Arrays are values; assignment copies logically (shared until modified); K/q tables mutate in place via keyed updates; BQN has `↩` for modification.
+5. **Error handling.** Run-time errors with terse codes; `⎕TRAP`/`:Trap` (Dyalog), `'` signal and `.[f;x;g]` trap (K); no result types; error handling is rarely idiomatic.
+6. **Concurrency and parallelism.** Data parallelism inside primitives; Dyalog has isolates/futures; kdb+ uses multi-process architectures and `peach`; no shared-memory threading model for users.
+7. **Polymorphism.** Rank polymorphism (every primitive works at every rank); no user-level generics beyond dynamic typing; operators (higher-order functions) parameterise functions.
+8. **Metaprogramming.** Execute (`⍎`) evaluates strings; tacit/trains compose functions as data; K's parse trees are lists; Dyalog 20.0 array notation serialises namespaces; no hygienic macro system.
+9. **Modules, packages, build.** Workspaces (APL), namespaces (Dyalog, BQN), scripts; Dyalog has Tatin package manager (2022); no cross-dialect ecosystem.
+10. **Tooling.** Dyalog IDE (RIDE), inline tracing (20.0), BQN REPL and online editor, kdb+ console; debugging is by inspecting intermediate arrays at the REPL.
+11. **Interop and platforms.** Dyalog: .NET, Python, C FFI, HTTP; kdb+: C API, IPC protocol, Python (PyKX); BQN: C FFI in CBQN; Dyalog runs on Windows/Linux/macOS/ARM; K/q proprietary binaries.
+12. **Performance and compilation model.** Interpreters whose primitives are vectorised C; per-primitive overhead; excellent on wide arrays, poor on scalar loops; kdb+ is among the fastest in-memory time-series engines; no mainstream JIT.
+13. **Standard library and ecosystem.** Primitives are the library; Dyalog ships `⎕` system functions, HTTP, JSON, SQL links; q ships a database; BQN has a small `•` system namespace and community libraries.
+14. **Learnability.** Days to first useful programs, months to read idiomatic code; the glyph input barrier is real but was measured as minor for typing; conceptually unfamiliar (no loops, no named intermediate values) for most programmers.
+15. **Evolution and governance.** Dyalog and KX are companies with yearly versions; BQN, J, Uiua are single-maintainer projects; ISO Extended APL (2001) is ignored; no convergence between dialects.
+
 ## Strengths
 
 ### Rank polymorphism and implicit iteration

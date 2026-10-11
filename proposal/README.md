@@ -43,7 +43,8 @@ safe code, a garbage collector, build scripts, formatter options.
 | 12 | [Interop and targets](12-interop-and-targets.md) | Targets, runtime profiles, C interop, ABI |
 | 13 | [Evolution and governance](13-evolution-and-governance.md) | Compatibility, editions, specification, governance phases |
 | 14 | [Non-goals](14-non-goals.md) | What Sisu will not try to be |
-| 15 | [Decision log](15-decision-log.md) | Fifty decisions with alternatives, evidence and status |
+| 15 | [Decision log](15-decision-log.md) | Fifty-one decisions with alternatives, evidence and status |
+| 16 | [Validation plan](16-validation-plan.md) | What the prototype must test first, and what would change the design |
 | | [Examples](examples/) | Sisu source files |
 | | [Open questions](../open-questions.md) | What is not settled, and what would settle it |
 

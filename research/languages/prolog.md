@@ -28,6 +28,24 @@ functional language with a handful of operators (`==`, `fresh`, `conde`),
 keeping completeness (interleaving search) that Prolog's depth-first search
 lacks [1].
 
+## Coverage of the 15 evaluation dimensions
+
+1. **Syntax and readability.** Horn clauses (`head :- body.`), terms, user-definable operators, DCG rules; readable for relations, opaque when cut and side effects accumulate; clause order carries meaning.
+2. **Type system.** Untyped terms; Mercury and Ciao add types and modes; Datalog systems (Soufflé, Flix) are statically typed with declared relations.
+3. **Memory management and safety.** Automatic (heap, trail, choice-point stack) with GC; memory-safe; unbounded backtracking can exhaust stacks.
+4. **Mutability, aliasing and value semantics.** Logic variables are single-assignment (bound by unification, undone on backtracking); terms are values; global state via `assert`/`retract` and global variables is impure and common.
+5. **Error handling.** ISO `catch/3`/`throw/1` exceptions plus *failure* as a control outcome; the two are easily confused (a typo makes a goal fail silently instead of erroring).
+6. **Concurrency and parallelism.** Implementation-specific threads (SWI, SICStus); or-parallelism research never went mainstream; Datalog engines (Soufflé) parallelise bottom-up evaluation.
+7. **Polymorphism.** None in the static sense; predicates accept any term; multifile/dynamic predicates allow open extension; Logtalk adds objects.
+8. **Metaprogramming.** Programs are terms: `assert`, `clause/2`, `read_term`, `term_expansion`/`goal_expansion`, operator definitions; meta-interpreters are a few lines.
+9. **Modules, packages, build.** ISO module standard (2000) largely ignored; SWI, SICStus, Ciao have incompatible module systems; SWI packs are the only package ecosystem; portability is the field's self-identified main problem.
+10. **Tooling.** SWI-Prolog: interactive top level, graphical tracer, profiler, unit tests (plunit), web server, Jupyter kernel; other systems lag; no shared LSP of note.
+11. **Interop and platforms.** SWI: C, Python (Janus), JavaScript (SWI via WASM); SICStus: Java, C, .NET; Datalog engines embed into host languages (Soufflé generates C++; Datomic is a JVM library; CodeQL is a hosted service).
+12. **Performance and compilation model.** WAM-based compilation; indexing on first argument (JIT multi-argument indexing in SWI); tabling for termination; typically 10-100x slower than C for procedural code, competitive for search; Datalog engines compiled to C++ scale to billions of tuples.
+13. **Standard library and ecosystem.** ISO builtins plus implementation libraries (CLP(FD), DCGs, assoc, strings in SWI); ecosystem small and fragmented; Datalog ecosystems are per-engine.
+14. **Learnability.** Easy to write first relations, hard to reason about backtracking, cut and termination; the classic university language for logic programming courses; little industrial onboarding material.
+15. **Evolution and governance.** ISO WG17 publishes corrigenda and parts slowly (DCGs standardised in 2025); implementations evolve independently; no coordinated roadmap; Datalog has no standard at all.
+
 ## Strengths
 
 ### Unification: pattern matching that runs both ways

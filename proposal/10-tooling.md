@@ -191,6 +191,17 @@ Julia adoption. A single `.sisu` file with a `#!/usr/bin/env sisu` line
 runs as a script, with dependencies declared in a leading comment block
 (the Rust `cargo script` / Python PEP 723 inline-metadata design).
 
+## AI-assisted development
+
+A new language starts with no training data, and model assistance tracks
+training-data share ([`../research/evidence/studies.md`](../research/evidence/studies.md),
+Cassano et al.). Two things reduce the penalty and are planned for: a
+test-validated corpus translated from Python and Rust programs (the
+MultiPL-T method) published with the language, and the type checker
+exposed as a library so that type-constrained generation (Mündler et al.
+2025, which halves compilation errors) can use it. A sound, fast, decidable
+type system is an asset here; an unsound or slow one is not.
+
 ## Migration
 
 `sisu fix --edition 2030` rewrites a package for a new edition using the

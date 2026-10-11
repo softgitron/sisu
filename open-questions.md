@@ -35,7 +35,13 @@ the right amount of thinking for application code, or should there be a
   differently (finalisation timing) on the other.
 
 **Current lean.** No GC. `Shared` with Perceus-style reuse and `Weak` for
-cycles; `Arena` with generational handles for graphs.
+cycles; `Arena` with generational handles for graphs. A fourth option,
+Vale-style generation-checked references outside arenas (5-11% runtime on
+the one published benchmark, elidable under static ownership), is the
+fallback if the corpus in [proposal/16](proposal/16-validation-plan.md)
+shows arenas are not enough; note that Vale itself is archived and its
+successor Valen abandoned the mechanism for "group borrowing"
+([research/languages/vale.md](research/languages/vale.md)).
 
 **What would settle it.** A prototype plus a corpus of three application-
 style programs (a web service with a cache, a GUI with a widget tree, a
@@ -112,7 +118,7 @@ special handling in practice; try it in the standard library first.
 
 ## Concurrency and runtime
 
-### Q-5. How much ambient authority? Standard streams, implicit context
+### Q-5. How much ambient authority? Standard streams, implicit or tracked context
 
 **Question.** `println` without a capability is convenient and almost
 harmless; it is also the thin end of a wedge. Implicit context passing
@@ -129,7 +135,10 @@ dependencies.
 
 **Current lean.** Stdio ambient; everything else explicit; no implicit
 context in v1. The `with` clause form is the most likely future addition
-because it keeps the signature honest.
+because it keeps the signature honest; the Zig research
+([research/languages/zig.md](research/languages/zig.md)) recommends exactly
+this "tracked capability" shape over both Zig's explicit parameter and
+Odin's untracked implicit context.
 
 **What would settle it.** The capability-parameter count in the Q-1
 corpus. If median I/O-doing functions carry more than two capability
@@ -247,6 +256,23 @@ ship a verifier as `std.x.verify` after v1 if SPARK-style discharge of
 bounds and overflow proves tractable on Sisu's IR. Settled by a feasibility
 study on the prototype.
 
+### Q-28. Is composition plus delegation enough for OOP-heavy domains?
+
+**Question.** GUI toolkits, game entity hierarchies and ORM-style
+frameworks are the domains where class inheritance is most used. Sisu has
+traits, composition and `@delegate`. Rust (egui, Bevy's ECS), Go, Elm (The
+Elm Architecture) and Swift's protocol-oriented style show these domains
+can be served without inheritance; Swift and Kotlin kept classes anyway
+for framework interop.
+
+**Current lean.** No inheritance; `@delegate` for forwarding; ECS and
+architecture patterns documented in the standard library guides.
+
+**What would settle it.** The widget-tree program in the validation corpus
+([proposal/16](proposal/16-validation-plan.md)): if its author reaches for
+`dyn` trait objects plus delegation and reports it as natural, the
+question closes; if they emulate inheritance with boilerplate, it reopens.
+
 ### Q-26. Anonymous structs and row polymorphism
 
 OCaml's objects, PureScript's and Roc's records, and TypeScript's object
@@ -262,6 +288,38 @@ express badly (layout-dependent specialisation, SoA transforms). Lean: allow
 `comptime` functions returning types for *type construction*, but all
 generic *bounds* go through traits. Settled by whether the two mechanisms
 are confusable in the standard library.
+
+## Metaprogramming
+
+### Q-15. Hygienic AST macros after version 1?
+
+**Question.** Version 1 has `comptime` evaluation and reflection but no
+way to define new syntax. Rust's proc macros, Elixir's macros, Julia's
+`@macro`s, Lean 4's elaborator and Lisp's `defmacro` are the strongest
+tools in their ecosystems and the largest sources of compile time,
+tooling opacity and fragmentation.
+
+**Options.**
+- *Never* (Gleam, Go, Zig). Checked string DSLs and trailing closures cover
+  most demand; the Zig standard library shows serialisation needs none.
+- *Hygienic, declarative macros* (Scheme `syntax-rules`, Rust
+  `macro_rules!`) with expansion visible in the IDE, no procedural tier.
+- *Typed AST macros as a stable API* (Nim's direction with Nimony, Lean 4),
+  with the cost model decided first: Dart cancelled type-aware macros
+  because they could not be fast enough for hot reload; Swift's syntax-only
+  macros are slow to build ([research/languages/dart.md](research/languages/dart.md),
+  [research/languages/swift.md](research/languages/swift.md)).
+
+**Current lean.** Never, until the corpus in
+[proposal/16](proposal/16-validation-plan.md) produces a concrete need that
+comptime cannot meet. If added: hygienic and declarative by default,
+procedural as a separately marked tier, expansion exposed to tooling, and
+a strongly curated standard library to counter the Lisp curse
+([research/languages/lisp-scheme-racket.md](research/languages/lisp-scheme-racket.md)).
+
+**What would settle it.** A library that cannot be written acceptably with
+comptime plus reflection plus trailing closures; the first candidates are
+an HTML templating library and an embedded query language.
 
 ## Syntax
 
@@ -370,8 +428,14 @@ wants to ship Sisu system libraries.
 APL/Julia/NumPy-style array programming is a genuine upside the mainstream
 lacks. Lean: `std.x.ndarray` with operator overloading and comptime-checked
 shapes; portable SIMD vector types in `std.simd`; no language-level
-broadcasting. Settled by whether the library can express rank polymorphism
-without HKTs (Q-10).
+broadcasting. Fortran's lesson that rank, shape and declared non-aliasing
+in the type are what let a compiler vectorise applies: Sisu's exclusivity
+rule gives the backend `noalias` with enforcement, but mutable sub-views of
+one array (which Fortran's trust model allows and Rust's rules make
+awkward) are the case to test ([research/languages/fortran.md](research/languages/fortran.md)).
+Settled by whether the library can express rank polymorphism without HKTs
+(Q-10) and whether numerical kernels with overlapping mutable views are
+writable without `unsafe`.
 
 ## Governance
 
@@ -392,6 +456,17 @@ specification plus a conformance test suite for 1.0; a mechanised core
 Settled by whether a research group wants to do it.
 
 ## Open questions about the open questions
+
+### Q-41. A compiler-enforced teaching profile
+
+Racket's HtDP language ladder and Pyret show that restricting the language
+for novices measurably helps, and that conventional syntax helps more than
+S-expressions ([research/languages/lisp-scheme-racket.md](research/languages/lisp-scheme-racket.md)).
+Ada's restriction profiles show a compiler-checked subset is a shipped
+mechanism. Lean: a `profile = "teaching"` manifest setting that disables
+generics, `unsafe`, `comptime`, concurrency and `ref`, with diagnostics
+written for first-year students. Settled by a classroom trial once the
+prototype exists.
 
 ### Q-39. Have we studied the right languages?
 

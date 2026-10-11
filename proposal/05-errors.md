@@ -2,10 +2,14 @@
 
 ## The two kinds of failure
 
-Every language studied eventually distinguishes two things, and the ones
-that conflate them (Java, Python, C++) are the ones with the most error-
-handling bugs in the studies
-([`../research/evidence/studies.md`](../research/evidence/studies.md)):
+Every language studied eventually distinguishes two things. The field
+studies of exception handling
+([`../research/evidence/studies.md`](../research/evidence/studies.md))
+find degenerate handlers under every regime, so no mechanism can claim to
+reduce faults; what they show is that handlers are empty, over-broad or
+missing wherever the language lets the error path be ignored at the point
+it occurs. The design goal is therefore visibility and cheap correct
+handling, and the distinction is:
 
 - **Expected failures** that a correct program must handle: a file is
   missing, input is malformed, the network is down. These are part of a
@@ -35,6 +39,11 @@ for errors-as-values over exceptions:
 - The studies on exception-handling bugs (Ebert et al., Cabral & Marques)
   find that catch blocks are routinely empty, over-broad, or wrong, because
   the language lets the error path be ignored at the point where it occurs.
+  Errors-as-values do not remove the failure mode, they move it: Cloudflare's
+  November 2025 outage was a `Result::unwrap()` on an unexpected `Err`. The
+  consequence for Sisu is that `expect` and `unwrap` are panic sites that
+  `sisu audit` lists, and that internal configuration is validated like
+  user input.
 
 The evidence against the naive version of errors-as-values comes from Go:
 `if err != nil { return err }` is the number-one complaint in every Go

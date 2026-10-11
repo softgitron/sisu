@@ -26,6 +26,24 @@ by professionals wherever its host language, e.g., Java, would be" [2]. Three
 non-negotiables run through every talk: data over objects, values over
 places, and simplicity (lack of interleaving) over ease (familiarity).
 
+## Coverage of the 15 evaluation dimensions
+
+1. **Syntax and readability.** S-expressions with literal vectors `[]`, maps `{}` and sets `#{}`; almost no syntax; readable with structured editing, hard without; destructuring and threading macros carry most readability.
+2. **Type system.** Dynamic, strong; optional runtime contracts (`spec`, alpha since 2017; `malli`); type hints only for interop performance; core.typed failed to gain adoption.
+3. **Memory management and safety.** Host GC (JVM/JS/CLR); no memory unsafety; `nil` is pervasive and nil-punning is idiomatic rather than checked.
+4. **Mutability, aliasing and value semantics.** Immutable persistent collections by default; values compare by structure; mutation only through reference types (`atom`, `ref`, `agent`, `var`) with explicit coordination semantics; transients for local batch mutation.
+5. **Error handling.** Host exceptions (`try`/`catch`/`throw`, `ex-info` with data maps); no `Result` idiom in core; error messages and stack traces are the long-standing top complaint.
+6. **Concurrency and parallelism.** Immutable data plus atoms/STM/agents; `future`, `pmap`, `core.async` channels and `go` blocks (as a macro); Java virtual threads usable since 1.12; no data-race-freedom guarantee for mutable host objects.
+7. **Polymorphism.** Protocols (type-dispatched, open to extension), multimethods (arbitrary dispatch function), `reify`/`deftype`/`defrecord` for host interfaces; no inheritance in Clojure code.
+8. **Metaprogramming.** `defmacro` with syntax-quote and auto-gensym; no user reader macros; macros are the implementation vehicle for `core.async`, `spec`, threading forms.
+9. **Modules, packages, build.** Namespaces mapped to files; `deps.edn`/tools.deps (official) and Leiningen; Maven Central and git deps; `add-lib` at the REPL (1.12); no lockfile by default in tools.deps.
+10. **Tooling.** nREPL/CIDER/Calva/Cursive editor integration; `clj-kondo` linter; `cljfmt`/`zprint`; test frameworks (`clojure.test`); no official formatter; Babashka for scripting; startup time addressed outside the core.
+11. **Interop and platforms.** Zero-overhead Java interop (1.12 method values, functional interfaces); ClojureScript to JS with Google Closure; ClojureCLR, ClojureDart; GraalVM native-image for CLIs.
+12. **Performance and compilation model.** Compiled to JVM bytecode at load; JIT performance close to Java for hinted code; persistent-collection overhead versus arrays; slow startup; `*warn-on-reflection*` needed to avoid reflective calls.
+13. **Standard library and ecosystem.** Small, stable `clojure.core` (sequence library is the heart); contrib libraries; rich ecosystem for web/data (Ring, Reitit, next.jdbc, Datomic); conventions over frameworks.
+14. **Learnability.** Hard first weeks (parentheses, REPL workflow, error messages), then high retention; 82% of users have 6+ years of professional experience; only 1% arrive via university courses.
+15. **Evolution and governance.** BDFL (Hickey) with Cognitect/Nubank; roughly one minor release a year; no breaking changes as policy ("accrete, relax, fix"); slow issue intake is the recurring complaint.
+
 ## Strengths
 
 ### Persistent immutable collections as the default, copied widely

@@ -36,6 +36,24 @@ Valim came from Rails; the design bet was that the BEAM's runtime was the
 asset and that a modern surface (macros, tooling, a Ruby-flavoured syntax,
 first-class documentation) would make it adoptable outside telecoms.
 
+## Coverage of the 15 evaluation dimensions
+
+1. **Syntax and readability.** Erlang: Prolog-derived (`,`/`;`/`.` terminators, capitalised variables, atoms, tuples, no string type); terse but punctuation errors are the classic beginner trap. Elixir: Ruby-flavoured `do ... end`, `|>` pipelines, sigils, `{:ok, v}` conventions; reads well after a year, with charlist/binary and keyword-list/map ambiguities as remaining traps.
+2. **Type system.** Dynamic, strong (no implicit coercion). Erlang typespecs plus Dialyzer success typings (no false positives, many misses). Elixir 1.17-1.20: inferred gradual set-theoretic types checking every construct without annotations; signatures and typed structs still pending.
+3. **Memory management and safety.** Per-process generational copying GC; off-heap reference-counted binaries; no pointers, no manual memory, no use-after-free; NIFs are the unsafe boundary and can crash the VM.
+4. **Mutability, aliasing and value semantics.** All terms immutable; single assignment (Elixir allows rebinding names); process state is threaded through recursion or held in ETS/process dictionary; no aliasing of mutable data is possible, so no data races.
+5. **Error handling.** Exceptions exist (`throw`/`error`/`exit`, `try ... catch`) but idiom is tagged tuples `{ok, V} | {error, R}` for expected failures and crashing for bugs, with supervisors restarting; Elixir adds `with`, bang (`!`) variants and `raise`/`rescue`.
+6. **Concurrency and parallelism.** Share-nothing processes, asynchronous message passing, selective receive, links/monitors, preemptive reduction-based scheduling on one scheduler per core; no function colouring; distribution built in. Unbounded mailboxes are the main failure mode.
+7. **Polymorphism.** Pattern matching on data shape; behaviours (callback interfaces); Elixir protocols (Clojure-style, type-dispatched); no inheritance, no generics (dynamic).
+8. **Metaprogramming.** Erlang: parse transforms and preprocessor macros (`-define`). Elixir: hygienic AST macros (`quote`/`unquote`), compile-time code generation used by every major library.
+9. **Modules, packages, build.** Flat module namespace (atoms), applications and releases (OTP); rebar3/Mix build tools; Hex registry with lockfiles; `mix release` for self-contained deployments; no hot upgrades out of the box.
+10. **Tooling.** Observer, tracing (`dbg`, `recon`), `sys` debugging of behaviours, remote shells into live nodes; Elixir: `mix format`, ExUnit, ExDoc with doctests, Credo, Dialyxir; LSP/debugger still the top-requested improvement (2025 survey).
+11. **Interop and platforms.** Ports (external processes, safe), NIFs (C/Rust via Rustler, fast, unsafe), JInterface, `erl_call`; runs on Linux/macOS/Windows/BSD, embedded via Nerves and AtomVM; no stable ABI concern since code is bytecode.
+12. **Performance and compilation model.** Bytecode plus JIT (BeamAsm); excellent latency and fairness, mediocre throughput; copied messages, boxed floats, arbitrary-precision integers; numeric work goes to NIFs or Nx/XLA.
+13. **Standard library and ecosystem.** OTP is a large, old, uneven standard library (`gen_*`, Mnesia, `ssl`, `ssh`, `xmerl`); Elixir's core library is smaller and consistent; Phoenix/LiveView dominate (97%/86% use in 2025 survey).
+14. **Learnability.** Elixir: days to productivity for Ruby/Python programmers; traps are immutability of "variables", pattern-match failures, understanding supervision trees and when to use processes. Erlang's syntax was the documented barrier.
+15. **Evolution and governance.** OTP: one major release a year by Ericsson, EEPs, long deprecation cycles, occasional incompatibilities documented per release. Elixir: BDFL, strict semver minor releases every six months, no breaking changes since 1.0 (2014).
+
 ## Strengths
 
 ### "Let it crash": isolation plus supervision as the error-handling model

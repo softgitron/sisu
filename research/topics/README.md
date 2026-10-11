@@ -1,0 +1,25 @@
+# Topic syntheses
+
+Each document here takes one design dimension, compares the approaches
+found across the language analyses in [`../languages/`](../languages/),
+weighs the evidence in [`../evidence/`](../evidence/), and ends with a
+recommendation that the proposal adopts (with the decision-log IDs) and
+the open questions it leaves (with the open-question IDs).
+
+| Topic | Proposal document it feeds |
+|---|---|
+| [type-systems.md](type-systems.md) | [03](../../proposal/03-types-and-generics.md) |
+| [memory-management.md](memory-management.md) | [04](../../proposal/04-memory-and-ownership.md) |
+| [error-handling.md](error-handling.md) | [05](../../proposal/05-errors.md) |
+| [concurrency.md](concurrency.md) | [06](../../proposal/06-concurrency-and-capabilities.md) |
+| [capabilities-and-effects.md](capabilities-and-effects.md) | [06](../../proposal/06-concurrency-and-capabilities.md) |
+| [polymorphism-and-generics.md](polymorphism-and-generics.md) | [03](../../proposal/03-types-and-generics.md) |
+| [syntax-and-readability.md](syntax-and-readability.md) | [02](../../proposal/02-syntax.md) |
+| [metaprogramming.md](metaprogramming.md) | [08](../../proposal/08-metaprogramming.md) |
+| [modules-packages-build.md](modules-packages-build.md) | [09](../../proposal/09-modules-packages-and-build.md) |
+| [tooling-and-compile-speed.md](tooling-and-compile-speed.md) | [10](../../proposal/10-tooling.md) |
+| [contracts-and-verification.md](contracts-and-verification.md) | [07](../../proposal/07-contracts.md) |
+| [strings-and-numerics.md](strings-and-numerics.md) | [03](../../proposal/03-types-and-generics.md) |
+| [interop-and-platforms.md](interop-and-platforms.md) | [12](../../proposal/12-interop-and-targets.md) |
+| [evolution-and-governance.md](evolution-and-governance.md) | [13](../../proposal/13-evolution-and-governance.md) |
+| [learnability.md](learnability.md) | [00](../../proposal/00-vision-and-principles.md), [10](../../proposal/10-tooling.md) |

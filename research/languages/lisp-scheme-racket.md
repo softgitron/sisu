@@ -30,6 +30,24 @@ the domain" by building that vocabulary as a language, with "full-spectrum"
 protection from "C-level bit manipulation to soundly typed extensions" [3,
 4].
 
+## Coverage of the 15 evaluation dimensions
+
+1. **Syntax and readability.** S-expressions throughout; CL adds `loop`/`format` mini-languages; Racket adds `[]` and `#lang` readers; Rhombus (2026) adds a conventional syntax on the same macro system. Parentheses are a measured adoption cost; readability after a year is reported as high by users and the opposite by outsiders.
+2. **Type system.** Dynamic, strong; CL has optional declarations that SBCL checks and uses; Typed Racket is a sound gradual dialect with contract boundaries; Scheme is untyped.
+3. **Memory management and safety.** Tracing GC everywhere; CL has unsafe declarations (`(safety 0)`) that remove checks; Racket is memory-safe with `ffi/unsafe` as the boundary.
+4. **Mutability, aliasing and value semantics.** Mutable by default (`setf`, `set!`, mutable conses); Racket makes pairs immutable and offers immutable hashes/vectors; no value semantics beyond numbers and symbols; `eq`/`eql`/`equal` equality tiers are a classic trap.
+5. **Error handling.** CL: condition system with handlers run before unwinding and restarts; Scheme R7RS: `raise`/`with-exception-handler` plus `guard`; Racket: exceptions as structs, `with-handlers`, contracts with blame.
+6. **Concurrency and parallelism.** Not standardised in CL (Bordeaux-threads, SBCL native threads); Racket has green threads, places (OS-level parallelism), futures, and parallel threads with `#:pool` (9.0, 2025); Guile has POSIX threads; no data-race prevention.
+7. **Polymorphism.** CLOS generic functions with multiple dispatch, multiple inheritance and method combination; Racket class system plus generic interfaces and `match`; Scheme: none in the standard.
+8. **Metaprogramming.** The defining feature: `defmacro` (unhygienic, with `gensym`), `syntax-rules`/`syntax-case` (hygienic), Racket's sets-of-scopes expander, `#lang` reader/expander languages, compile-time evaluation (`eval-when`, phases), the MOP.
+9. **Modules, packages, build.** CL: packages (symbol namespaces), ASDF systems, Quicklisp (2010) with monthly curated dist; Scheme: R6RS/R7RS libraries, incompatible across implementations; Racket: modules with phases, `raco pkg` catalogue, reproducible installs.
+10. **Tooling.** SLIME/Sly (CL), DrRacket (IDE with macro stepper, built for teaching), `raco` (build/test/docs/Scribble); error messages across macro boundaries remain weak; Racket's documentation system (Scribble) is best in class.
+11. **Interop and platforms.** CL: CFFI (de facto standard), ECL embeds in C, Clasp links C++; Racket: `ffi/unsafe`, embedding via Chez Scheme runtime; Guile is the GNU extension language (GnuCash, LilyPond, Guix); portability across Scheme implementations is poor.
+12. **Performance and compilation model.** SBCL: native compiler with type inference, within 1-3x of C on numeric code when declared; Racket CS and Chez: native code with fast compilation; Guile: bytecode with JIT; macro expansion dominates compile time in large Racket programs.
+13. **Standard library and ecosystem.** CL: large frozen standard plus library sprawl (the Lisp curse); Scheme: tiny standard plus SRFIs; Racket: broad, curated distribution (GUI, web server, Typed Racket, math, plot, teaching languages).
+14. **Learnability.** HtDP/Racket is among the best-documented teaching outcomes in CS education; CL has a steep, under-documented entry; Scheme is classic teaching material (SICP) but implementations differ.
+15. **Evolution and governance.** CL: frozen since 1994, evolution by implementation extension; Scheme: RnRS working groups, the R6RS split, R7RS-large still unfinished; Racket: core team plus foundation, quarterly releases, backwards compatibility across `#lang` languages, Racket CS and Rhombus as major evolutions.
+
 ## Strengths
 
 ### Homoiconicity and macros: syntactic abstraction that reaches the whole program

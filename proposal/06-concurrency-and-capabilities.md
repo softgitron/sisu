@@ -148,6 +148,12 @@ implicitly aliased growable slices, both of which Sisu's ownership rules
 reject at compile time; only 2.5% involved channels. Go's race detector
 finds these at run time, on the paths a test happens to take.
 
+What the type system does not prevent is deadlock. No mainstream approach
+does ([`../research/evidence/studies.md`](../research/evidence/studies.md));
+Sisu's position is that `Mutex[T]` owning its data, structured scopes
+(no lock can outlive its frame) and bounded channels reduce the surface,
+and that a lock-order lint is tooling work after version 1.
+
 Atomics follow the C++11/C11 memory model verbatim (`Relaxed`, `Acquire`,
 `Release`, `AcqRel`, `SeqCst`). Every language since has converged on it
 ([`cpp.md`](../research/languages/cpp.md), Java's JSR 133 in

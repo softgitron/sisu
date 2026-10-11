@@ -29,6 +29,24 @@ code the problem needs. Factor's goal is to keep the concatenative model
 and make it a practical modern language (GC, objects, libraries, a native
 compiler).
 
+## Coverage of the 15 evaluation dimensions
+
+1. **Syntax and readability.** Whitespace-separated words in RPN; no grammar beyond word definitions; stack comments `( a b -- c )` are the only signature; readable only in very short words.
+2. **Type system.** None: cells are machine words; Factor adds dynamic types, classes and a static stack-effect checker.
+3. **Memory management and safety.** Manual (dictionary `ALLOT`, `ALLOCATE`/`FREE`), raw addresses, no bounds or stack-depth checks; Factor has a GC and safe objects.
+4. **Mutability, aliasing and value semantics.** Global mutable dictionary and variables; the stack is the only "value" discipline; no immutability.
+5. **Error handling.** `ABORT"`, `CATCH`/`THROW` (ANS) as non-local exits with integer codes; Factor has typed exceptions and restarts (borrowed from CL).
+6. **Concurrency and parallelism.** Implementation-specific multitasking (cooperative round-robin in polyForth and many embedded Forths); no standard; Factor has green threads.
+7. **Polymorphism.** None in traditional Forth (words are monomorphic over cells); `DEFER`/`IS` for late binding; Factor has generic words with multiple dispatch.
+8. **Metaprogramming.** Central: `IMMEDIATE` words run at compile time, `CREATE ... DOES>` defines defining words, parsing words read the input stream; the compiler is user-extensible.
+9. **Modules, packages, build.** Wordlists/vocabularies; `INCLUDE` of source files; no package ecosystem; Factor has vocabularies with a central library and dependency metadata.
+10. **Tooling.** The interactive interpreter is the tool; `SEE` decompiles words; Factor ships a listener, debugger, profiler, help system and GUI framework.
+11. **Interop and platforms.** Assembler words for the target CPU; `C` interop varies by implementation (Gforth has a C interface, Factor a full FFI); runs on anything from 8-bit MCUs to x86-64 and in boot ROMs.
+12. **Performance and compilation model.** Threaded code or native code; small and fast enough for firmware; Factor has an optimising compiler with inlining and escape analysis.
+13. **Standard library and ecosystem.** ANS/Forth-2012 core and optional word sets (floating, strings, locals, files); otherwise per-implementation; Factor's library is broad for its size.
+14. **Learnability.** Simple to start, hard to read others' code; the stack discipline and postfix notation are the barriers; little modern teaching material.
+15. **Evolution and governance.** Forth 200x committee updates the standard slowly; Moore rejects standardisation; implementations diverge by design; Factor is maintained by a small group with irregular releases (0.100 in 2024, 0.101 in 2025).
+
 ## Strengths
 
 ### The stack as implicit argument passing, and concatenative composition

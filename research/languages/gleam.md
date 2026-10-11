@@ -27,6 +27,24 @@ positioned as "a programming assistant" so refactoring is low risk [1]. The
 FAQ codifies the omissions: "Gleam will always be a small and cohesive
 language with a minimal feature set" [2].
 
+## Coverage of the 15 evaluation dimensions
+
+1. **Syntax and readability.** Rust/Elm-like with `fn`, `case`, `let`, `|>`, labelled arguments and `use`; no `if`, no loops, no return keyword; one formatter with no options. Reads uniformly; the main "after a year" cost is boilerplate from the absence of ad-hoc polymorphism.
+2. **Type system.** Static, sound, Hindley-Milner inference; custom types (sums with records), generics, opaque types, exhaustive matching; no subtyping, typeclasses, null or implicit conversions. `Dynamic` for untyped host data with decoder libraries.
+3. **Memory management and safety.** Target's GC (BEAM or JavaScript); no unsafe code in Gleam itself; FFI (`@external`) is the trust boundary.
+4. **Mutability, aliasing and value semantics.** All values immutable; locals are rebindable names; mutation only through host FFI, actors or ETS wrappers.
+5. **Error handling.** `Result(a, e)` and `Option` everywhere, composed with `result.try`/`use`; `panic`, `todo`, `assert`, `let assert` for bugs; no exceptions; host exceptions can be caught only via FFI.
+6. **Concurrency and parallelism.** On the BEAM via `gleam_otp` typed actors and tasks, inheriting preemption and isolation; on JavaScript, promises via FFI. No language-level concurrency syntax.
+7. **Polymorphism.** Parametric only; no typeclasses, overloading or interfaces; "pass the function" (explicit dictionary passing) is the idiom.
+8. **Metaprogramming.** None; explicitly not planned (no macros); code generation is delegated to language-server code actions and external generators.
+9. **Modules, packages, build.** One `gleam.toml`, Hex packages, lockfile, `gleam add/deps/publish/export`; git dependencies since 1.9; monorepo support; `dev/` directory since 1.11.
+10. **Tooling.** Compiler, formatter, LSP, test runner (`gleeunit`), docs generator and package publishing all in one `gleam` binary; language server is the most actively developed component.
+11. **Interop and platforms.** `@external` FFI to Erlang and JavaScript with typed signatures; generates `.app` files for Mix/rebar3 (1.19), escripts (1.17), TypeScript declarations; runs wherever BEAM or JS runs, including AtomVM.
+12. **Performance and compilation model.** Compiles to Erlang abstract forms (1.19) or JavaScript; inherits host performance; fast compiler written in Rust with incremental builds.
+13. **Standard library and ecosystem.** Deliberately small `gleam_stdlib`; ecosystem young (Lustre, Wisp, Mist, `gleam_json`, `gleam_time`); heavy reliance on wrapping Erlang/JS libraries.
+14. **Learnability.** Very fast for newcomers (the language tour is the main onboarding); traps are recursion instead of loops, decoding `Dynamic`, and the lack of generic `to_string`/`compare`.
+15. **Evolution and governance.** BDFL; semver with a backwards-compatibility commitment since 1.0 (March 2024); a release every six to eight weeks that adds diagnostics and tooling far more than language features.
+
 ## Strengths
 
 ### A feature set small enough to learn in an afternoon, verified by omission

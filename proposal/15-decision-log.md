@@ -35,7 +35,7 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 ### D-004 Ownership with value semantics and second-class references; no named lifetimes
 
 *Alternatives:* tracing GC (Go, Java, OCaml); reference counting everywhere (Swift, Nim); Rust's first-class references with lifetimes; Hylo's pure mutable value semantics; Vale's generational references; Austral's linear types.
-*Evidence:* Memory-safety data rules out unsafe defaults. Rust surveys rank lifetimes/borrowing as the top learning obstacle every year; Graydon Hoare's retrospective and Hylo's papers identify first-class references as the source of annotation burden ([rust.md](../research/languages/rust.md), [hylo.md](../research/languages/hylo.md)); Swift's `~Escapable` and Mojo's inferred origins are moves in the same direction ([swift.md](../research/languages/swift.md), [mojo.md](../research/languages/mojo.md)). GC rejected as the *default* because of priority 3 and the embedded/WebAssembly targets; its absence is the largest open risk.
+*Evidence:* Memory-safety data rules out unsafe defaults. Rust's surveys show the learning curve concentrated in non-adopters and ex-users, with lifetimes and borrowing the named obstacle ([evidence/surveys.md](../research/evidence/surveys.md)); Graydon Hoare's retrospective and Hylo's papers identify first-class references as the source of annotation burden ([rust.md](../research/languages/rust.md), [hylo.md](../research/languages/hylo.md)); Swift's `~Escapable` and Mojo's inferred origins are moves in the same direction ([swift.md](../research/languages/swift.md), [mojo.md](../research/languages/mojo.md)). GC rejected as the *default* because of priority 3 and the embedded/WebAssembly targets; its absence is the largest open risk.
 *Consequences:* No `Pin`, no `'a`; view types; `Shared` for graphs; arena handles idiomatic. See [04](04-memory-and-ownership.md).
 *Status:* leaning; Q-1, Q-2.
 
@@ -297,14 +297,14 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 *Evidence:* Hash-flooding DoS history (Python, Java, PHP, Ruby all patched); Go's deliberate randomisation.
 *Status:* decided.
 
-### D-051 No implicit zero values; initialisation is mandatory; `Default` is a trait
-
-*Alternatives:* zero-is-initialisation (Go, Odin, Jai); uninitialised memory (C); `late` (Dart).
-*Evidence:* Go's typed-nil and zero-value-connection-handle bugs ([go.md](../research/languages/go.md)); the Odin/Jai argument that types should be designed so the zero value is valid ([odin-jai-c3.md](../research/languages/odin-jai-c3.md)) is accepted as *library guidance* (`Default` impls) but not as a language rule, because a zero `Mutex` is fine and a zero file handle is not; Dart's `late` as an invisible runtime check ([dart.md](../research/languages/dart.md)).
-*Status:* decided.
-
 ### D-050 No function overloading by type; named and default arguments instead
 
 *Alternatives:* overloading (C++, Java, C#, Swift); none (Go, Rust, Zig).
 *Evidence:* Swift's overload resolution as its type-checker cost centre ([swift.md](../research/languages/swift.md)); Rust and Go do without; named arguments cover the readability case (Python, Kotlin).
+*Status:* decided.
+
+### D-051 No implicit zero values; initialisation is mandatory; `Default` is a trait
+
+*Alternatives:* zero-is-initialisation (Go, Odin, Jai); uninitialised memory (C); `late` (Dart).
+*Evidence:* Go's typed-nil and zero-value-connection-handle bugs ([go.md](../research/languages/go.md)); the Odin/Jai argument that types should be designed so the zero value is valid ([odin-jai-c3.md](../research/languages/odin-jai-c3.md)) is accepted as *library guidance* (`Default` impls) but not as a language rule, because a zero `Mutex` is fine and a zero file handle is not; Dart's `late` as an invisible runtime check ([dart.md](../research/languages/dart.md)).
 *Status:* decided.
