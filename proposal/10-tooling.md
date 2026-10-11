@@ -99,12 +99,16 @@ Every diagnostic has:
   unknown type, uses of `x` are not reported.
 
 Elm's "Compiler Errors for Humans" (2015) and Rust's diagnostics working
-group are the models; Becker et al.'s review of error-message research
-([`../research/evidence/studies.md`](../research/evidence/studies.md))
-supplies the measured effects: messages that state the problem, where it
-is, and how to fix it reduce time-to-fix and repeated errors for novices.
-Diagnostics are tested like any other feature: a corpus of wrong programs
-with expected messages, and a review process for new message text.
+group are the models. The evidence is honest about its shape: controlled
+studies of enhanced error messages for novices (Becker et al.'s review,
+Denny et al.) are mixed, while the survey evidence is strong (only 9% of
+Rust users call compiler messages a big problem after a decade of
+investment, against Clojure's and Julia's years at the top of their
+complaint lists; [`../research/evidence/surveys.md`](../research/evidence/surveys.md),
+[`studies.md`](../research/evidence/studies.md)). Diagnostics are therefore
+treated as a satisfaction feature and tested like any other: a corpus of
+wrong programs with expected messages, and a review process for new
+message text.
 
 Two specific commitments:
 

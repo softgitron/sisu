@@ -23,11 +23,14 @@ which design decisions trade learnability for something else.
    higher ([../evidence/surveys.md](../evidence/surveys.md)); single
    ownership and moves are the cheap part
    ([rust.md](../languages/rust.md), [../evidence/surveys.md](../evidence/surveys.md)).
-3. **Error messages are the lever with the most evidence.** Elm's
-   designed messages, Rust's diagnostics work (the *explanation* of borrow
-   errors, not the rule, is what improved), Gleam's per-release diagnostic
-   additions, Clojure's decade-long top complaint, and the error-message
-   research on novices (Becker et al.) ([elm-purescript.md](../languages/elm-purescript.md),
+3. **Error messages are the lever with the most survey evidence, and
+   mixed experimental evidence.** Elm's designed messages, Rust's
+   diagnostics work (the *explanation* of borrow errors, not the rule, is
+   what improved; only 9% of users now call messages a big problem),
+   Gleam's per-release diagnostic additions and Clojure's decade-long top
+   complaint are the survey side; the controlled studies on novices
+   (Becker et al.'s review, Denny et al.) are mixed or null, so the claim
+   is "strong satisfier", not "measured learning gain" ([elm-purescript.md](../languages/elm-purescript.md),
    [gleam.md](../languages/gleam.md), [clojure.md](../languages/clojure.md),
    [../evidence/studies.md](../evidence/studies.md)).
 4. **Simplicity is the size of the mental model, not the keyword

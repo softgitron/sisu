@@ -8,8 +8,10 @@ which *language* decisions determine both.
 ## What the evidence says
 
 1. **Compile time is the top productivity complaint wherever it is
-   slow.** Rust 2025 survey: 27.3% call compile times a big problem, 55%
-   wait more than ten seconds, 45% of people who left cite it; Scala lost
+   slow.** Rust's surveys: about a quarter call compile times a big problem
+   and 56% want them improved, making it the top limiter ahead of the
+   borrow checker (10.6%); 55% wait more than ten seconds and 45% of
+   people who left cite it ([../evidence/surveys.md](../evidence/surveys.md)); Scala lost
    the "better Java" niche to Kotlin partly on compiler speed; Swift's type
    checker timeouts; C++ builds; Julia's time-to-first-plot defined its
    image for a decade ([rust.md](../languages/rust.md),
@@ -39,11 +41,13 @@ which *language* decisions determine both.
    error messages as a decade-long top complaint because the language did
    not own them) ([kotlin.md](../languages/kotlin.md),
    [clojure.md](../languages/clojure.md)).
-5. **Error messages can be designed and the effect is measurable.** Elm's
-   "Compiler Errors for Humans", Rust's diagnostics working group, Gleam
-   listing new diagnostics in every release note, and the error-message
-   research (Becker et al., Denny et al.) on time-to-fix and repeated
-   errors for novices ([elm-purescript.md](../languages/elm-purescript.md),
+5. **Error messages can be designed, and surveys reward it.** Elm's
+   "Compiler Errors for Humans", Rust's diagnostics working group (9% of
+   users call messages a big problem, against the borrow checker's 10.6%
+   and compile times' roughly 25%), Gleam listing new diagnostics in every
+   release note; the controlled error-message studies on novices (Becker
+   et al., Denny et al.) are mixed, so the evidence is for satisfaction
+   rather than a measured learning gain ([elm-purescript.md](../languages/elm-purescript.md),
    [gleam.md](../languages/gleam.md), [../evidence/studies.md](../evidence/studies.md)).
    The Rust finding is specific: the *explanation* of borrow errors, not
    the rule, is what improved the learning curve.
