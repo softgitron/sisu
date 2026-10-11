@@ -47,8 +47,8 @@ def demo():
     print(describe(roni))                    # borrowed
     birthday(mut roni)                       # modified in place, visibly
     let copy = roni.copy()                   # explicit deep copy
-    var archive = list()
-    archive(roni, mut archive)               # moved
+    var old_users = list()
+    archive(roni, mut old_users)             # moved
     # print(roni.name)                       # error: roni was moved on the previous line
     print(copy.name)                         # the copy is still ours
 
@@ -85,13 +85,14 @@ def counter_demo():
     let hits = Shared(Mutex(0))
     task.scope do s:
         for _ in range(4):
-            s.spawn(() -> hits.lock().value += 1)
+            s.spawn do:
+                hits.lock().value += 1
     assert hits.lock().value == 4
 
 # Graphs: an arena with generational handles, not pointers.
 struct Node:
     label: String
-    edges: list[Handle[Node]]
+    edges: list[Key[Node]]                  # generational keys into the arena, not pointers
 
 def graph_demo():
     var nodes = Arena[Node]()

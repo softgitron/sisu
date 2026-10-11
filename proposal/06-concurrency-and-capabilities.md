@@ -25,7 +25,7 @@ def crawl(net: Net, roots: list[Url]) -> dict[Url, Page] ! CrawlError:
     let outcome = task.scope do s:
         for url in roots:
             s.spawn do:
-                let page = net.get(url)?           # ? returns from the task; the scope collects it
+                let page = http.get(net, url)?     # ? returns from the task; the scope collects it
                 pages.lock().insert(url, page)
                 return Ok(())
         return Ok(())
@@ -56,7 +56,7 @@ def crawl(net: Net, roots: list[Url]) -> dict[Url, Page] ! CrawlError:
 ### Cancellation
 
 Each scope has a cancellation flag. `s.cancel()` sets it for the subtree.
-Every blocking operation (`net.get`, `channel.recv`, `clock.sleep`,
+Every blocking operation (`http.get`, `channel.recv`, `clock.sleep`,
 `handle.join`) checks the flag and returns `Err(Cancelled)` promptly;
 `Cancelled` is a variant of the standard `TaskError` set and propagates via
 `?` like any error. Code that must finish (flush a file) uses
@@ -85,7 +85,7 @@ task.scope do s:
 
 ## Colourless I/O
 
-A call such as `net.get(url)` blocks the *task*. The runtime parks the task,
+A call such as `http.get(net, url)` blocks the *task*. The runtime parks the task,
 runs others on the same OS thread, and resumes it when the I/O completes.
 From the programmer's side there is nothing to annotate and no split
 between sync and async libraries. This is Go's and Erlang's model and the
@@ -202,8 +202,9 @@ def serve(fs: Fs, net: Net, clock: Clock) -> ! AppError: ...
 `System` is constructed by the runtime and passed to `main`. It cannot be
 constructed in safe code. Its fields are the root capabilities: `fs: Fs`,
 `net: Net`, `clock: Clock`, `rand: Rand`, `env: Env`, `proc: Proc`,
-`stdin`/`stdout`/`stderr`. Each is a value with methods; each can be
-*attenuated* into a weaker capability (`fs.restrict_to(dir)`,
+`stdin`/`stdout`/`stderr`. Each is a `Copy` handle (copying a capability grants nothing new; a fake's
+state lives behind the handle, which is how a test's `clock.advance` is
+seen by every copy); each can be *attenuated* into a weaker capability (`fs.restrict_to(dir)`,
 `fs.read_only()`, `net.only_hosts(...)`, `clock.frozen_at(t)` for tests) and
 passed on.
 
@@ -245,7 +246,8 @@ answers:
 - Capability parameters are ordinary values and compose: a struct that
   needs `Fs` and `Clock` stores them in fields at construction.
 - A small amount of ambient authority is kept deliberately: `print`,
-  `print_err` and `debug.print` write to the process's standard streams
+  `print_err`, `debug.print` and the `log` facade (which writes to the
+  standard error stream unless given a sink) write to the process's standard streams
   without a capability (open question Q-5 records the dissent), and
   `task.scope` is ambient (open question Q-6). Everything else is gated.
 - Implicit context passing (Odin's `context`, Scala's `using`, Kotlin's

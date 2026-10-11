@@ -1,7 +1,6 @@
 ##! wordcount: counts words in the files given on the command line and
 ##! prints the most common ones. A complete, realistic small tool.
 
-from std.cap import System, Fs
 import std.cli
 
 error AppError:
@@ -34,7 +33,7 @@ def main(sys: System) -> ! AppError:
     let fs = sys.fs.read_only()                       # this program never writes
     let counts = count_words(fs, opts.paths, opts.min_length)?
 
-    var ranked: list[(ref String, int)] = counts.iter().collect()
+    var ranked = [(word.copy(), n) for word, n in counts]   # owned copies: references cannot live in a list
     ranked.sort_by((a, b) -> b.1.cmp(a.1))            # descending by count
 
     for word, n in ranked.iter().take(opts.top):

@@ -1,8 +1,7 @@
 # Tests: discovery, assertions, fixtures via capabilities, parametrised,
 # property-based, snapshot and benchmark. See proposal/17-testing.md.
 
-from std.test import check, any, assert_snapshot, bench
-from std.cap import Fs, Clock
+from std.test import arbitrary, assert_snapshot, check
 
 # A test block is a declaration compiled only by `sisu test`.
 test "parse_int accepts digits":
@@ -41,7 +40,7 @@ test "cache entry expires after ttl":
 
 # Property tests: derived generators, shrinking, a replayed failure database.
 test "sort is idempotent":
-    check(any[list[int]]) do xs:
+    check(arbitrary[list[int]]) do xs:
         var once = xs.copy()
         once.sort()
         var twice = once.copy()
@@ -51,7 +50,7 @@ test "sort is idempotent":
 # Under `sisu test --fuzz` the same check is coverage-guided and saves failing
 # inputs under tests/corpus/.
 test "parser never panics":
-    check(any[String], text -> parse_int(text).is_ok() or parse_int(text).is_err())
+    check(arbitrary[String], text -> parse_int(text).is_ok() or parse_int(text).is_err())
 
 # Snapshot: the rendered value is stored in a .snap file next to the test;
 # a change fails with a diff; `sisu test --update` accepts it.
@@ -65,6 +64,6 @@ test "reads the real home directory"(sys: System):
 
 # Benchmarks are not run by `sisu test`; `sisu bench` runs them with a
 # harness-controlled loop and reports confidence intervals.
-bench "parse_int on a 9-digit number":
+bench "parse_int on a 9-digit number"(b: Bench):
     for _ in b.loop():
         black_box(parse_int("123456789"))

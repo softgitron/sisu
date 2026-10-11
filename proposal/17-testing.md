@@ -113,7 +113,7 @@ module's own mutable statics are behind locks.
 
 ```sisu
 test "sort is idempotent":
-    check(any[list[int]]) do xs:
+    check(arbitrary[list[int]]) do xs:
         var once = xs.copy()
         once.sort()
         var twice = once.copy()
@@ -121,7 +121,7 @@ test "sort is idempotent":
         return once == twice
 ```
 
-`check` is in `std.test`: generators are derived for every type (with
+`check` is in `std.test`: generators are derived for every type (`arbitrary[T]`; with
 `@derive(Arbitrary)` for custom shapes, and refinement predicates honoured
 as filters), shrinking is integrated, and failing examples are saved to a
 database and replayed first on the next run (Hypothesis). Under
@@ -160,7 +160,7 @@ suggestions, in review, where developers were measured to act on them.
 ## Benchmarks
 
 ```sisu
-bench "parse_int on a 9-digit number":
+bench "parse_int on a 9-digit number"(b: Bench):
     for _ in b.loop():
         black_box(parse_int("123456789"))
 ```
@@ -185,7 +185,7 @@ There is no mocking framework and no need for one. Every mocking framework
 exists to replace a dependency that code obtained ambiently; in Sisu every
 such dependency is a parameter, so the replacement is an ordinary value.
 Every standard capability ships an in-memory fake with a call log
-(`Fs.in_memory`, `Clock.frozen_at`, `Net.fake().respond_to(...)`,
+(`Fs.in_memory`, `Clock.frozen_at`, `http.FakeNet().respond_to(...)`,
 `Env.fake`, `Rand.seeded`). For user-defined traits, `sisu test` can derive
 a recording fake by compile-time reflection (`Fake[MyTrait]`), which
 records calls and returns configured values. Google's "don't mock types you

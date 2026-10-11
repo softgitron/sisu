@@ -108,7 +108,7 @@ explicit shared ownership**. Concretely:
   into an arena, or `unsafe`. The research on Rust shows this is already
   idiomatic practice (ECS architectures, `petgraph`'s index-based graphs,
   slotmaps); the research on Hylo shows the same answer. Sisu ships an
-  `Arena[T]` with generational handles in the standard library to make the
+  `Arena[T]` with generational keys (`Key[T]`) in the standard library to make the
   idiomatic answer the easy one. This is Vale's generation-checked
   reference idea ([`vale.md`](../research/languages/vale.md)) confined to
   an arena: a stale handle is detected at use, the check is elided when the
@@ -150,8 +150,10 @@ def get(self, i: int) -> ref mut Item: ...   # `self` wins when present
 ```
 
 Elision rules, in order: one borrowed parameter; otherwise `self`; otherwise
-a `from` clause is required. The same three rules as Rust's, with `from`
-replacing lifetime names.
+a `from` clause is required. A parameter counts as borrowed when it is
+passed without `own` and is not `Copy`, or when its type is a view (`str`,
+`Slice[T]`), since a result may point into a view. The same three rules as
+Rust's, with `from` replacing lifetime names.
 
 ### Views
 
@@ -188,7 +190,7 @@ separate declaration form.
 
 ## Unsafe
 
-`unsafe { }` blocks permit raw pointers (`ptr[T]`, `ptr mut T`), FFI calls,
+`unsafe:` blocks (and `unsafe e` for one expression) permit raw pointers (`ptr[T]`, `ptr mut T`), FFI calls,
 and the handful of operations whose safety the compiler cannot check. The
 rules follow Rust's: unsafe code must uphold the invariants safe code relies
 on, the block is the audit unit, and the compiler's safety guarantees apply

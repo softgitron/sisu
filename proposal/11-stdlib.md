@@ -28,8 +28,8 @@ have major versions.
 
 | Module | Contents |
 |---|---|
-| `std.core` (prelude) | `Option`, `Result`, error sets, `Copy`/`Drop`/`Eq`/`Ord`/`Hash`/`Len`/`Contains`/`Display`/`Debug`/`Default`/`Into`/`From`, `Iterator`, `Range`, `Never`, `Box`, `Shared`, `Weak`, `Cell`, `panic`, `assert`, and the prelude functions `print`, `len`, `range`, `enumerate`, `zip`, `sorted`, `reversed`, `min`, `max`, `sum`, `any`, `all`, `abs` |
-| `std.collections` | `list`, `Array`, `Slice`, `dict` (hash), `SortedDict` (B-tree), `set`, `SortedSet`, `Deque`, `Heap`, `Arena` with generational handles, `BitSet`; `persistent.{Vec, Map, Set}` (HAMT/RRB structural-sharing collections for data shared through `Shared` or sent between tasks without copying, from Clojure via Scala and Elm; [`clojure.md`](../research/languages/clojure.md)) |
+| `std.core` (prelude) | `Option`, `Result`, error sets, `Copy`/`Drop`/`Eq`/`Ord`/`Hash`/`Len`/`Contains`/`Display`/`Debug`/`Default`/`Into`/`From`, `Iterator`, `Range`, `Never`, `Box`, `Shared`, `Weak`, `Cell`, `panic`, `assert`, the sync and task primitives `Mutex`, `Atomic`, `channel`, `task`, the capability types, `Duration`, `Path`, and the prelude functions `print`, `print_err`, `len`, `range`, `enumerate`, `zip`, `sorted`, `reversed`, `min`, `max`, `sum`, `any`, `all`, `abs` |
+| `std.collections` | `list`, `Array`, `Slice`, `dict` (hash), `SortedDict` (B-tree), `set`, `SortedSet`, `Deque`, `Heap`, `Arena` with generational keys (`Key[T]`), `BitSet`; `persistent.Vec`, `persistent.Dict`, `persistent.Set` (HAMT/RRB structural-sharing collections for data shared through `Shared` or sent between tasks without copying, from Clojure via Scala and Elm; [`clojure.md`](../research/languages/clojure.md)) |
 | `std.string` | `String`, `str`, `char`, Unicode scalar and grapheme iteration, case mapping, normalisation forms, `Builder` |
 | `std.fmt` | Formatting traits and the interpolation machinery |
 | `std.num` | Integer and float traits, checked/wrapping/saturating ops, `BigInt`, `Decimal`, `Ratio` |
@@ -54,9 +54,10 @@ have major versions.
 
 Design points:
 
-- **`Map` iteration order is randomised** (Go, Rust): programs that depend
+- **`dict` iteration order is randomised** (Go, Rust): programs that depend
   on hash order break in production. `SortedDict` exists for when order
-  matters.
+  matters; Python's insertion-order guarantee is not promised, because it
+  lets code depend on it silently.
 - **Hashing is SipHash with a per-process random key** (Rust, Python):
   hash-flooding DoS has been exploited in every language that used a fast
   predictable hash.

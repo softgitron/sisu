@@ -77,7 +77,7 @@ is one.
 
 ## Option
 
-`T?` is sugar for `Option[T]`, an ordinary enum `{ Some(T), None }`. The
+`T?` is sugar for `Option[T]`, an ordinary enum with variants `Some(T)` and `None`. The
 sugar exists because optionals are pervasive, and the Kotlin and Swift
 experience is that `?.`, `??` and `if let` make them pleasant where Java's
 `Optional` method chains do not.
@@ -153,8 +153,10 @@ part of the design:
 
 ### Auto traits
 
-`Copy`, `Send`, `Sync`, `Sized` and `Escapable` are inferred structurally:
-a struct is `Send` if all its fields are. This is Rust's quiet success:
+`Send`, `Sync`, `Sized` and `Escapable` are inferred structurally:
+a struct is `Send` if all its fields are. `Copy` is the exception: the
+compiler infers *eligibility* and suggests it, but a type is `Copy` only
+when it asks to be. This is Rust's quiet success:
 thread safety composes without annotations. Swift adopted the same idea as
 `Sendable` in 2021-2024; the research notes that its retrofit was painful
 precisely because the inference was not there from the start.
@@ -231,7 +233,7 @@ Decisions:
   `String` is owned and growable, and views as `str` wherever a `str` is
   expected.
 - No integer indexing on `str`. `s.bytes()`, `s.chars()` (Unicode scalar
-  values) and `s.graphemes()` are iterators; `s.byte_slice(a..b)` is
+  values) and `s.graphemes()` are iterators; `s.byte_slice(a, b)` is
   explicit and checks boundaries. Swift's grapheme-first string is the most
   *correct* design in any language and also the one with the most
   complaints about ergonomics and performance; Rust's scalar-value model is
@@ -247,13 +249,13 @@ Decisions:
 
 `(A, B)` tuples with `.0`, `.1` access and destructuring. `()` is the unit
 type and the return type of functions with no `->`. `Never` is the type of
-`panic(...)`, `return`, `break`, `continue`, and `loop` without `break`; it
+`panic(...)`, `return`, `break`, `continue`, and `while True` without `break`; it
 coerces to any type.
 
 ## Type aliases and newtypes
 
-`type Id = int` is a transparent alias. `struct Id(int)` is a distinct
-type with no runtime cost. The research on Haskell (`newtype`), Rust
+`type Id = int` is a transparent alias. A one-field `struct Id:` with
+`value: int` is a distinct type with no runtime cost. The research on Haskell (`newtype`), Rust
 (`struct X(T)`), Ada (derived types), and F# (units of measure) agrees that
 cheap distinct types prevent a real bug class (mixing up units and IDs);
 Sisu makes the pattern cheaper with `@delegate` and with `@derive(Into,
@@ -273,7 +275,9 @@ dependent typing and is discussed in [07-contracts.md](07-contracts.md).
 
 ## What is not in the type system
 
-- No implicit conversions except lossless numeric widening and owned-to-view.
+- No implicit conversions except lossless numeric widening and owned-to-view;
+  *literals* take their expected type (`"x"` as a `Path`, `[1, 2]` as an
+  `Array`), which is typing, not conversion.
 - No subtyping between structs; no inheritance; no variance annotations
   needed by users (the only variance is in `ref`, error sets, and refined
   types, all handled by the compiler).

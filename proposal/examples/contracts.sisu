@@ -18,15 +18,15 @@ def binary_search[T: Ord](items: Slice[T], target: T) -> int?:
                 return Some(mid)
     return None
 
-def withdraw(mut acct: Account, amount: Money):
-    requires amount > Money.zero
-    ensures acct.balance == old(acct.balance) - amount
-    acct.balance -= amount
-
 struct Account:
     balance: Money
     limit: Money
     invariant self.balance >= -self.limit    # checked after construction and every `mut self` method
+
+    def withdraw(mut self, amount: Money):   # fields of a type with an invariant are assigned only in its own methods
+        requires amount > Money.ZERO
+        ensures self.balance == old(self.balance) - amount
+        self.balance -= amount
 
     def try_withdraw(mut self, amount: Money) -> ! Overdrawn:
         if self.balance - amount < -self.limit:
@@ -49,14 +49,14 @@ def demo(net: Net, user_input: int):
     let p: Port = 8080                         # constant: checked at compile time
     let q = Port.try_from(user_input) else:    # runtime: checked at construction
         return
-    listen(net, p)
+    _ = listen(net, p)
     # listen(net, 70000)                       # compile error: 70000 is not a Port
 
     let xs: NonEmpty[int] = NonEmpty.try_from([1, 2, 3]).expect("literal is non-empty")
     let first = xs.first()                     # NonEmpty.first returns T, not T?
 
 test "binary search finds every element":
-    check(any[list[int]]) do xs:
+    check(arbitrary[list[int]]) do xs:
         var sorted = xs.copy()
         sorted.sort()
         return sorted.iter().all(binary_search(sorted, it).is_some())

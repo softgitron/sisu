@@ -81,6 +81,7 @@ let q, r = divmod(17, 5)        # or unpack
 ## Structs, enums, pattern matching
 
 ```sisu
+@derive(Copy, Debug)
 struct Point:
     x: f64
     y: f64
@@ -95,12 +96,12 @@ struct Point:
         self.x *= k
         self.y *= k
 
-enum Shape:
+enum Figure:
     Circle(radius: f64)
     Rect(w: f64, h: f64)
     Empty
 
-def area(s: Shape) -> f64:
+def area(s: Figure) -> f64:
     match s:
         case Circle(radius):
             return PI * radius ** 2
@@ -120,7 +121,7 @@ a capitalised name is always a variant or constant.
 ## No null
 
 ```sisu
-def find_user(users: list[User], name: str) -> ref User?:
+def find_user(users: list[User], name: str) -> ref User? from users:
     for u in users:
         if u.name == name:
             return Some(u)
@@ -170,7 +171,7 @@ let port = load_port(fs, "port.txt") else: 8080            # fallback expression
 let port = load_port(fs, "port.txt") else as e: fallback_for(e)
 match parse_int(input):
     case Ok(n):
-        use(n)
+        show(n)
     case Err(BadDigit(at, found)):
         print("bad digit {found} at {at}")
     case Err(UnexpectedEnd):
@@ -251,6 +252,10 @@ trait Shape:
     def describe(self) -> String:                      # provided
         return "a shape of area {self.area():.2f}"
 
+@derive(Copy, Debug)
+struct Circle:
+    radius: f64
+
 impl Shape for Circle:
     def area(self) -> f64:
         return PI * self.radius ** 2
@@ -262,10 +267,9 @@ def print_all(shapes: list[Box[dyn Shape]]):      # dynamic dispatch is spelled 
     for s in shapes:
         print(s.describe())
 
-trait Container:
+trait Container(Len):                              # supertrait: a Container is also Len
     type Item                                       # associated type
     def get(self, i: int) -> ref Item?
-    def len(self) -> int
 
 def sum_of[C: Container](c: C) -> int where C.Item: Into[int]:
     var total = 0
@@ -328,14 +332,14 @@ read as control structures.
 ```sisu
 def fetch_all(net: Net, urls: list[Url]) -> list[Bytes] ! HttpError:
     return task.scope do s:
-        let handles = [s.spawn(() -> net.get(url)) for url in urls]
+        let handles = [s.spawn(() -> http.get(net, url)) for url in urls]
         var results = list.with_capacity(len(handles))
         for h in handles:
             results.push(h.join()?)
         return Ok(results)
 ```
 
-There is no `async` and no `await`. `net.get` is an ordinary function that
+There is no `async` and no `await`. `http.get` is an ordinary function that
 blocks the *task*, not the thread; the runtime multiplexes tasks over OS
 threads. A task can only be spawned inside a `scope`, and the scope does not
 return until every task in it has finished or been cancelled, which is why
@@ -361,7 +365,7 @@ task.scope do s:
         for job in rx:
             handle(job)
     for j in jobs:
-        tx.send(j)?
+        tx.send(j).expect("the receiver lives until the scope ends")
     tx.close()
 ```
 
@@ -407,13 +411,13 @@ library.
 ## Compile-time evaluation
 
 ```sisu
-def table(n: int) -> Array[int, n]:
+def table[const N: int]() -> Array[int, N]:
     var t = Array.filled(0)
-    for i in range(n):
+    for i in range(N):
         t[i] = i * i
     return t
 
-const SQUARES = comptime table(256)        # computed by the compiler, baked into the binary
+const SQUARES: Array[int, 256] = comptime table[256]()   # computed by the compiler, baked in
 
 def type_name[T](x: T) -> str:
     return comptime reflect.name_of(T)     # reflection is a compile-time API
@@ -437,7 +441,7 @@ test "rejects empty input":
     assert parse_int("") == Err(UnexpectedEnd)
 
 test "round-trips any int":
-    check(any[int], n -> parse_int("{n}") == Ok(n))   # property test
+    check(arbitrary[int].filter(it >= 0), n -> parse_int("{n}") == Ok(n))   # property test
 ```
 
 `assert` shows the value of every sub-expression when it fails. `sisu
@@ -449,8 +453,8 @@ has no options. See [17-testing.md](17-testing.md).
 
 ```sisu
 from std.collections import SortedDict
-from std.net import Http, Url
-import json                              # a dependency from sisu.toml
+import std.json                          # core library
+import http                              # a dependency from sisu.toml (the blessed std.x.http)
 from weather.parser import parse_int, ParseError   # this package's own module
 ```
 
@@ -466,7 +470,7 @@ edition = "2027"
 
 [dependencies]
 http = "1.2"
-json = "2"
+toml = "1"
 
 [trust]
 unsafe = ["http"]       # http may use unsafe/FFI; nothing else may
@@ -484,7 +488,7 @@ extern "C":
     def strlen(s: ptr[c_char]) -> c_size
 
 @export("sisu_checksum")
-def checksum(data: Slice[u8]) -> u32: ...
+def checksum(data: ptr[u8], len: c_size) -> u32: ...
 
 import c "zlib.h" as zlib                 # header import, no bindings to write
 ```

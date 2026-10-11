@@ -1,12 +1,11 @@
 # Structured, colourless concurrency.
 
-from std.task import scope, channel, select, Mutex
-from std.cap import Net, Clock
+import http
 
 # Fan out, join all, first error cancels the rest.
 def fetch_all(net: Net, urls: list[Url]) -> list[Bytes] ! HttpError:
-    return scope do s:
-        let handles = [s.spawn(() -> net.get(url)) for url in urls]
+    return task.scope do s:
+        let handles = [s.spawn(() -> http.get(net, url)) for url in urls]
         var out = list.with_capacity(len(handles))
         for h in handles:
             out.push(h.join()?)              # ? on a task failure cancels siblings
@@ -16,7 +15,7 @@ def fetch_all(net: Net, urls: list[Url]) -> list[Bytes] ! HttpError:
 def process_jobs(jobs: list[Job], workers: int) -> list[Outcome]:
     let tx, rx = channel[Job](capacity=32)
     let results = Mutex(list())
-    scope do s:
+    task.scope do s:
         for _ in range(workers):
             s.spawn do:
                 for job in rx:               # ends when tx is closed and drained
@@ -29,8 +28,8 @@ def process_jobs(jobs: list[Job], workers: int) -> list[Outcome]:
 
 # Timeouts and cancellation are structural.
 def fetch_with_timeout(net: Net, clock: Clock, url: Url) -> Bytes ! {HttpError, Timeout}:
-    return scope do s:
-        let h = s.spawn(() -> net.get(url))
+    return task.scope do s:
+        let h = s.spawn(() -> http.get(net, url))
         select:
             case r = h.join():
                 return r
@@ -40,7 +39,7 @@ def fetch_with_timeout(net: Net, clock: Clock, url: Url) -> Bytes ! {HttpError, 
 
 # Supervision: restart a worker that panics, stop on cancellation.
 def supervise(net: Net, port: int):
-    scope do s:
+    task.scope do s:
         while True:
             let worker = s.spawn(() -> serve(net, port))
             match worker.join():
@@ -54,14 +53,15 @@ def supervise(net: Net, port: int):
 # What the type system refuses.
 def refused():
     var counter = 0
-    scope do s:
-        # s.spawn(() -> counter += 1)
+    task.scope do s:
+        # s.spawn do:
+        #     counter += 1
         # error[E0412]: `counter` is modified by a task while borrowed by another
         #   help: wrap it: `let counter = Mutex(0)` or `Atomic(0)`
         s.spawn(() -> print(counter))        # reading a shared borrow is fine
 
     let cell = Cell(0)
-    scope do s:
+    task.scope do s:
         pass
         # s.spawn(() -> cell.set(1))
         # error[E0413]: `Cell[int]` is not Sync and cannot be shared between tasks

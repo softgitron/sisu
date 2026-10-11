@@ -24,7 +24,7 @@ different mechanisms.
 ## Errors are values
 
 A fallible function's return type is `T ! E`. This is `Result[T, E]`, an
-ordinary enum `{ Ok(T), Err(E) }`, with sugar in signatures. The evidence
+ordinary enum with variants `Ok(T)` and `Err(E)`, with sugar in signatures. The evidence
 for errors-as-values over exceptions:
 
 - Control flow is visible. Every call that can fail has a `?` or a `match`
@@ -102,9 +102,9 @@ match load(fs, path):
         return Err(e)                  # e still has the full set type
 ```
 
-- An error set may be *open* (`error AppError { ..., .. }`) to allow other
-  packages to add variants; matching an open set requires a wildcard.
-  Closed is the default.
+- An error set may be *open* (a trailing `..` line in its body, as in
+  `examples/wordcount.sisu`) to allow other packages to add variants;
+  matching an open set requires a wildcard. Closed is the default.
 
 ## Propagation
 
@@ -133,7 +133,8 @@ match fallible():
 ```
 
 `else` is the universal fallback form for both `T?` and `T ! E`. An
-expression on the same line as `else:` is the fallback value; an indented
+expression on the same line as `else:` is the fallback value, and a single
+diverging statement may stand there too (`else: return None`); an indented
 block after `else:` must diverge (`return`, `break`, `continue`, `panic`),
 because blocks have no value (D-056); `else as e:` binds the error. This is
 Rust's `let-else` with the error made available.

@@ -18,7 +18,7 @@ struct RingBuffer[T, const N: int]:
     head: int
     len: int
 
-    def new() -> Self:
+    def empty() -> Self:
         comptime assert N > 0 and N & (N - 1) == 0, "capacity {N} must be a power of two"
         return Self(items=Array.filled(None), head=0, len=0)
 
@@ -29,24 +29,24 @@ def to_json[T](value: T) -> String:
     elif comptime reflect.is_str(T):
         return json.quote(value)
     elif comptime reflect.is_list(T):
-        return "[" + value.iter().map(to_json(it)).join(",") + "]"
+        return "[{value.iter().map(to_json(it)).join(",")}]"
     elif comptime reflect.is_struct(T):
-        var out = String("{")
+        var out = String("{{")               # doubled: a lone brace opens an interpolation
         comptime for i, f in enumerate(reflect.fields_of(T)):
             if i > 0:
                 out.push(",")
             out.push("{json.quote(f.name)}:{to_json(value.[f])}")
-        out.push("}")
+        out.push("}}")
         return out
     else:
-        comptime error("to_json: unsupported type {reflect.name_of(T)}")
+        comptime panic("to_json: unsupported type {reflect.name_of(T)}")   # a compile error
 
 # A user-defined derive: any trait can provide one.
 trait Describe:
     def describe(self) -> String
 
     comptime def derive(T: type) -> impl Describe for T:
-        impl Describe for T:
+        return impl Describe for T:
             def describe(self) -> String:
                 var parts = list()
                 comptime for f in reflect.fields_of(T):
@@ -60,7 +60,7 @@ struct Point:
 
 # A checked string DSL: the SQL is parsed at compile time, errors point into
 # the literal, and the result is a typed query object. No new syntax needed.
-const FIND_USER = sql.query("SELECT id, name FROM users WHERE age > {min_age:int}")
+const FIND_USER: sql.Query = comptime sql.query(r"SELECT id, name FROM users WHERE age > {min_age:int}")   # raw: no interpolation
 
 def find(db: Db) -> list[(int, String)] ! DbError:
     return db.run(FIND_USER, min_age=18)     # parameter names and types come from the literal

@@ -23,9 +23,10 @@ Every departure from Python is listed at the end with its reason.
   `Shared`). Because variants are always capitalised, a lowercase
   name in a pattern is always a binding and a capitalised one is always a
   constant, which is the ambiguity PEP 635 could not resolve.
-- Comments: `#` to end of line. `##` is a documentation comment attached to
-  the item or field that follows; `##!` documents the enclosing module.
-  (`//` is floor division, as in Python.)
+- Comments: `#` to end of line. `##` on its own line is a documentation
+  comment attached to the item or field that follows; at the end of a
+  declaration line it documents that line; `##!` documents the enclosing
+  module. (`//` is floor division, as in Python.)
 - One statement per line. No semicolons. A logical line continues inside
   `()`, `[]` and `{}`, after a line ending in `,` or an open bracket, and
   on a line whose first token is a binary operator, `.`, `?.` or `??`.
@@ -39,12 +40,12 @@ Every departure from Python is listed at the end with its reason.
   legal; the formatter emits four. A dedent that matches no enclosing
   level is an error naming the candidate columns.
 - `pass` is the empty block.
-- Keywords (reserved): `and as break case comptime const continue def
-  defer do elif else enum error extern for from if impl import in let
-  match mut not or own pass pub ref return self Self struct test trait
-  type unsafe var view where while with yield`. Forty-one. Contextual
-  (keywords only in their position): `requires ensures invariant result
-  it bench suite`.
+- Keywords (reserved): `and as assert break case comptime const continue
+  def defer do elif else enum error extern for from if impl import in let
+  match mut not or own pass pub ref return select self Self struct test
+  trait type unsafe var view where while with yield`. Forty-six.
+  Contextual (keywords only in their position): `requires ensures
+  invariant decreases result it bench suite expect pure`.
 
 ## Literals
 
@@ -54,12 +55,12 @@ Every departure from Python is listed at the end with its reason.
 | Float | `1.0`, `2.5e-3`, `1.0f32` | `f64` unless suffixed or inferred |
 | Boolean | `True`, `False` | `bool` |
 | Character | `'a'`, `'\n'`, `'\u{1F600}'` | `char` |
-| String | `"text {interp}"`, `r"raw\no escapes"`, `"""multi-line"""`, `b"bytes"` | `str`, `str`, `str`, `Slice[u8]` |
+| String | `"plain"`, `"text {interp}"`, `r"raw\no escapes"`, `"""multi-line"""`, `b"bytes"` | `str`, `String`, `str` (no escapes, no interpolation), `str`, `Slice[u8]` |
 | List | `[1, 2, 3]` | `list[T]`, or `Array[T, N]`/`Slice[T]` when the expected type says so |
 | Map | `{"a": 1, "b": 2}`, `{}` | `dict[K, V]` |
 | Set | `{1, 2, 3}` | `set[T]` (the empty set is `set()`) |
 | Tuple | `(1, "a")`, `()` | `(int, str)`, unit |
-| Comprehension | `[x * x for x in xs if x > 0]`, `{k: v for (k, v) in pairs}`, `{x for x in xs}`, `(x for x in xs)` | `List`, `Map`, `Set`, lazy `Iter` |
+| Comprehension | `[x * x for x in xs if x > 0]`, `{k: v for k, v in pairs}`, `{x for x in xs}`, `(x for x in xs)` | `list`, `dict`, `set`, lazy `Iter` |
 
 String interpolation is `{expr}` in any ordinary string literal, with an
 optional format spec after a colon in Python's mini-language: `{x:.2f}`,
@@ -67,7 +68,12 @@ optional format spec after a colon in Python's mini-language: `{x:.2f}`,
 `}}`. There is no `f` prefix: interpolation is part of the grammar (PEP
 701's conclusion), so an interpolated literal is a `String` and a plain
 one is a `str`. Strings use double quotes only; single quotes are for
-`char`.
+`char`. A string literal takes the expected type when that type implements
+`FromLiteral[str]` (`Path`, `Url`, `String`), the same way `[1, 2, 3]`
+becomes an `Array` when the expected type says so; this applies to
+literals only and is not a conversion of values. `String` implements `Add`
+for concatenation, as in Python; interpolation is the idiom for
+formatting.
 
 ## Declarations
 
@@ -77,11 +83,15 @@ let x: T = expr
 let x: T                         # declared now, definitely assigned on every path before use
 var x = expr                     # mutable binding
 let a, b = pair                  # tuple unpacking
+let a, b = 1, 2                  # parentheses may be omitted around a tuple in let, var, assignment, return
 let first, *rest = xs            # star unpacking
-const NAME: T = expr             # compile-time constant
+let x = parse(x)?                # rebinding in the same scope is allowed; shadowing an outer scope warns
+const NAME: T = expr             # compile-time constant, type required
 
 def name[T: Bound](p: T, mut q: U, own r: V, d: W = default) -> R ! E:
     body
+pure def f(x: int) -> int: ...   # pure: no capabilities, no unsafe, no shared mutation; usable at compile time
+comptime def g(T: type) -> type: ...   # compile-time only; `type` is the type of types
 
 struct Name[T]:
     field: T                     ## documented field
@@ -99,11 +109,25 @@ enum Name:
 error Name:
     Variant
     Variant(x: T)
+    ..                           # a trailing `..` line makes the set open to other packages
 
 trait Name[T]:
     def m(self) -> T             # no body: required
     def n(self) -> T:            # body: provided
         return self.m()
+
+trait Container(Len):            # supertrait: implementing Container requires Len, Python's class syntax
+    def get(self, i: int) -> ref Item?
+
+test "name":                     # a test; `suite "name":` groups one level
+    assert f(1) == 2
+test "name" for a, b in cases:   # parametrised: one reported case per element
+    assert f(a) == b
+test "name"(sys: System):        # a test that needs a real capability runs serially
+    ...
+bench "name"(b: Bench):          # run by `sisu bench`, not `sisu test`
+    for _ in b.loop():
+        black_box(f(1))
 
 impl Trait for Type:             # trait implementation
     def m(self) -> T: ...
@@ -116,8 +140,9 @@ type Port = int where 1 <= self <= 65535     # refinement subtype
 
 import std.json                  # binds json
 import std.collections.SortedDict as Sorted
-from std.net import Http, Url as U
+from std.net import TcpListener, Url as U
 from weather.parser import parse_int         # package-absolute
+import c "zlib.h" as zlib with link="z"     # C header import (trusted packages only)
 
 extern "C":
     def strlen(s: ptr[c_char]) -> c_size
@@ -130,6 +155,9 @@ functions: `list.with_capacity(n)`, `Clock.frozen_at(t)`, `Url.parse(s)`.
 A `let x: T` without a value declares a binding that the compiler checks
 is definitely assigned before use on every path (Swift, Kotlin); this is
 how a `match` statement produces a value without blocks having one.
+
+Struct fields may have defaults in any position; positional arguments
+fill fields in declaration order and keyword arguments fill by name.
 
 `pub` precedes any item or field to export it; `pub(package)` limits
 visibility to the current package. Attributes are `@name(args)` on the
@@ -166,7 +194,13 @@ let area = match shape:
 
 An `if` expression must have an `else`; a `match` expression must be
 exhaustive. An arm that needs statements makes the whole thing a
-statement, and the value is assigned or returned in each arm. Python's
+statement, and the value is assigned or returned in each arm. Two other
+forms take a value from an expression on the same line: `let x = e else: v`
+(the fallback `v` is an expression, or a single diverging statement such as
+`return None`), and `unsafe e` (an `unsafe:` block is a statement; `unsafe
+e` marks one expression). The target of an assignment or augmented
+assignment is a place: a variable, a field, an index, or a call that
+returns `ref mut` (`counts.entry(k).or_insert(0) += 1`). Python's
 `a if c else b` is not adopted: `if c: a else: b` is the same length,
 works on one line and across lines, and mirrors the statement form.
 
@@ -174,7 +208,7 @@ Operator precedence, highest first:
 
 | Level | Operators | Notes |
 |---|---|---|
-| Postfix | `x.f`, `x[i]`, `x[i:j]`, `f(x)`, `x?`, `x?.f` | |
+| Postfix | `x.f`, `x[i]`, `x[i:j]`, `f(x)`, `x?`, `x?.f`, `x.[f]` (field named by a compile-time value) | |
 | Power | `**` | right-associative; mixing with unary minus requires parentheses |
 | Unary | `-x`, `~x`, `ref x`, `ref mut x` | |
 | Multiplicative | `* / // % *% /%` | `//` is floor division; `%` has the sign of the divisor |
@@ -224,7 +258,11 @@ while cond:
     ...
 while let Some(x) = it.next():
     ...
-for x in xs:
+for x in xs:                     # x: ref T
+    ...
+for x in mut xs:                 # x: ref mut T
+    ...
+for x in own xs:                 # consumes xs; x: T
     ...
 for i, x in enumerate(xs):
     ...
@@ -235,7 +273,18 @@ match value:
     case [first, *rest]: ...
     case 1 | 2 | 3: ...
     case Point(x=0, y): ...
+    case Point(x=0, ..): ...     # `..` ignores the remaining fields
     case _: ...
+
+select:                          # waits on several channel or timer operations
+    case e = rx.recv():
+        handle(e)
+    case _ = clock.after(Duration.seconds(1)):
+        timeout()
+
+assert cond                      # a statement, no parentheses; panics with sub-expression values
+assert cond, "message {x}"
+expect cond                      # in tests: records the failure and continues
 
 with fs.open(path)? as f:        # f is dropped at the end of the block
     ...
@@ -271,7 +320,7 @@ let total = xs.fold(0) do acc, x:
 
 task.scope do s:
     for url in urls:
-        s.spawn(() -> net.get(url))
+        s.spawn(() -> http.get(net, url))
 ```
 
 An inline closure is `params -> expr` and is a single expression. A
@@ -296,6 +345,8 @@ int  uint  i8 ... i128  u8 ... u128  f32  f64  bool  char  str  String
 T?                 # Option[T]
 T ! E              # Result[T, E] with error set E
 T !                # Result[T, inferred]
+! E                # () ! E, for functions that return nothing or fail
+{A, B}             # in type position: the union of error sets A and B
 ref T  ref mut T   # borrows
 own T              # only in parameter position; elsewhere T is owned
 list[T]  dict[K, V]  set[T]      # builtin collections, with literal forms
@@ -321,9 +372,11 @@ Python's builtin functions are kept where they read better than a method:
 generic functions over traits (`len[T: Len](x: T) -> int`,
 `sorted[T: Ord](xs: Iter[T]) -> list[T]`), not a dunder protocol, so a user
 type joins them by implementing the trait. The method spelling exists
-because the trait method does (`xs.len()`), and the linter prefers the
-function form for these names; everything else (`xs.push(x)`,
-`xs.iter().map(...)`, `s.trim()`) is a method, as in Python. `print(x, y)`
+because the trait method does: the function form is idiomatic at the
+start of an expression (`len(xs)`, `sorted(xs)`), the method form at the
+end of a chain (`xs.iter().map(f).sum()`), and the linter flags only
+`xs.len()`. Everything else (`xs.push(x)`, `xs.iter().map(...)`,
+`s.trim()`) is a method, as in Python. `print(x, y)`
 takes one argument: write `print("{x} {y}")`.
 
 ## Slicing and indexing

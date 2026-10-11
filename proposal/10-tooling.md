@@ -145,13 +145,13 @@ types and parameter conventions (`mut`/`own` at call sites), and a
 ## Testing
 
 ```sisu
-test "parses negative numbers":
-    assert parse_int("-5") == Ok(-5)
+test "accepts leading zeros":
+    assert parse_int("007") == Ok(7)
 
 test "any list round-trips through JSON":
-    check(any[list[int]], xs -> json.decode(json.encode(xs)) == Ok(xs))
+    check(arbitrary[list[int]], xs -> json.decode(json.encode(xs)) == Ok(xs))
 
-bench "parse a 9-digit number":
+bench "parse a 9-digit number"(b: Bench):
     for _ in b.loop():
         black_box(parse_int("123456789"))
 ```

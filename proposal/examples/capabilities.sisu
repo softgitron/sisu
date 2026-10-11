@@ -1,6 +1,6 @@
 # Capabilities: no ambient authority, attenuation, testing with fakes.
 
-from std.cap import System, Fs, Net, Clock, Rand
+import http      # the blessed std.x.http client; it works through the Net capability
 
 struct Cache:
     fs: Fs                   # a capability stored at construction, already narrowed
@@ -19,7 +19,7 @@ struct Cache:
 def fetch_cached(net: Net, cache: Cache, url: Url) -> Bytes ! HttpError:
     if let Some(hit) = cache.get(url.as_key()):
         return Ok(hit)
-    let body = net.get(url)?
+    let body = http.get(net, url)?
     _ = cache.put(url.as_key(), body)        # cache write failure is not a fetch failure
     return Ok(body)
 
@@ -47,8 +47,9 @@ test "cache expires entries":
     assert cache.get("k") == None
 
 test "fetch uses the cache before the network":
-    let net = Net.fake().respond_to("https://api.example.com/v1/data", b"from net")
-    let cache = Cache(fs=Fs.in_memory(), clock=Clock.frozen_at(DateTime.epoch()), ttl=Duration.hours(1))
+    let net = http.FakeNet().respond_to("https://api.example.com/v1/data", b"from net")
+    let clock = Clock.frozen_at(DateTime.epoch())
+    let cache = Cache(fs=Fs.in_memory(), clock=clock, ttl=Duration.hours(1))
     let url = Url.parse("https://api.example.com/v1/data").expect("valid")
 
     assert fetch_cached(net, cache, url) == Ok(b"from net")

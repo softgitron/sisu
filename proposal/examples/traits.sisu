@@ -37,17 +37,14 @@ def print_all(shapes: list[Box[dyn Shape]]):
         print(s.describe())
 
 # Associated types and where clauses.
-trait Container:
+trait Container(Len):                      # supertrait: list already implements Len
     type Item
     def get(self, i: int) -> ref Item?
-    def len(self) -> int
 
 impl[T] Container for list[T]:
     type Item = T
     def get(self, i: int) -> ref T?:
         return if i < len(self): Some(ref self[i]) else: None
-    def len(self) -> int:
-        return len(self)
 
 def first_display[C: Container](c: C) -> String where C.Item: Display:
     return c.get(0).map("{it}") ?? "<empty>"
@@ -94,5 +91,6 @@ def demo():
     let shapes: list[Box[dyn Shape]] = [Box(Circle(radius=1.0)), Box(Rect(w=2.0, h=3.0))]
     print_all(shapes)
     print(total_area([Circle(radius=1.0), Circle(radius=2.0)]))
-    print(Vec2(x=1.0, y=2.0) + Vec2(x=3.0, y=4.0))
+    let v = Vec2(x=1.0, y=2.0) + Vec2(x=3.0, y=4.0)
+    print("{v:?}")                               # Vec2 derives Debug, not Display
     print(first_display([1, 2, 3]))

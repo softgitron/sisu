@@ -31,7 +31,10 @@ Sisu ships one tool and designs the module system for it.
   reference each other freely. This is Go's rule and the reason Go builds
   are parallel at package granularity; it also forces layered designs.
 - There is no `prelude` magic beyond a fixed, documented list of names
-  (`Option`, `Result`, `Some`, `None`, `Ok`, `Err`, `list`, `dict`, `String`,
+  (`Option`, `Result`, `Some`, `None`, `Ok`, `Err`, `list`, `dict`, `set`,
+  `String`, `Box`, `Shared`, `Weak`, `Cell`, `Mutex`, `Atomic`, `Arena`,
+  `task`, `channel`, `Duration`, `Path`, the capability types `System`,
+  `Fs`, `Net`, `Clock`, `Rand`, `Env`, `Proc`, and the prelude functions
   `print`, `len`, ...), the same in every module.
 
 ## Package manifest
@@ -156,7 +159,7 @@ unchanged.
 
 ## Documentation
 
-`sisu doc` renders `///` comments (Markdown), signatures, contracts,
+`sisu doc` renders `##` comments (Markdown), signatures, contracts,
 inferred error sets, capability parameters, and examples. Doc examples are
 compiled and run by `sisu test`, which is how Rust's and Python's doctests
 keep documentation honest. A package without documentation on its `pub`

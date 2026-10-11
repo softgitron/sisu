@@ -32,7 +32,7 @@ comptime def assert_power_of_two(n: int):           # may only be called at comp
 struct RingBuffer[T, const N: int]:
     items: Array[T, N]
 
-    def new() -> Self:
+    def empty() -> Self:
         comptime assert_power_of_two(N)
         ...
 ```
@@ -63,11 +63,11 @@ comptime def field_names[T](_: type T) -> list[str]:
     return [f.name for f in reflect.fields_of(T)]
 
 def to_json[T](value: T) -> String where comptime reflect.is_struct(T):
-    var out = String("{")
+    var out = String("{{")                         # doubled: a lone brace opens an interpolation
     comptime for f in reflect.fields_of(T):          # unrolled at compile time
         out.push("\"{f.name}\":")
         out.push(to_json(value.[f]))                 # field access by compile-time name
-    out.push("}")
+    out.push("}}")
     return out
 ```
 
@@ -88,14 +88,15 @@ trait Hash:
     def hash(self, mut h: Hasher)
 
     comptime def derive(T: type) -> impl Hash for T:
-        impl Hash for T:
+        return impl Hash for T:
             def hash(self, mut h: Hasher):
                 comptime for f in reflect.fields_of(T):
                     self.[f].hash(mut h)
 ```
 
-The `impl ... for T` inside a comptime function is the one place where
-compile-time code produces a declaration, and it is constrained: it can
+`return impl ... for T:` with an indented body is an expression form (a
+trailing block, like `do`), and it is the one place where compile-time
+code produces a declaration; it is constrained: it can
 only produce an `impl` of the enclosing trait for the type it was given,
 which preserves coherence. User-defined traits get `derive` the same way;
 there is no privileged set.
