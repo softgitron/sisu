@@ -1,0 +1,18 @@
+# Examples
+
+Illustrative Sisu programs. They follow the proposal as written; nothing
+compiles yet. Each file focuses on one area and is referenced from the
+corresponding design document.
+
+| File | Shows |
+|---|---|
+| `hello.sisu` | Entry point, capabilities, printing |
+| `wordcount.sisu` | A complete command-line tool: arguments, files, errors, maps, sorting |
+| `errors.sisu` | Error sets, inference, propagation, handling, panics |
+| `ownership.sisu` | Parameter conventions, borrows, views, `Shared`, arenas |
+| `traits.sisu` | Traits, generics, `dyn`, derive, delegation |
+| `concurrency.sisu` | Scopes, tasks, channels, cancellation, `Send`/`Sync` errors |
+| `capabilities.sisu` | Attenuation and testing with fakes |
+| `contracts.sisu` | Pre/postconditions, invariants, refinement types |
+| `comptime.sisu` | Compile-time tables, reflection, a derive, a checked string DSL |
+| `ffi.sisu` | Header import, exporting a C ABI |

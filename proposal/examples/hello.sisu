@@ -1,0 +1,15 @@
+// The simplest program. Standard output needs no capability.
+fn main() {
+    println("Hei, maailma!")
+}
+
+// A program that touches the world receives `System`, the root of all
+// capabilities, and can return an error set. A returned error is printed
+// and becomes a non-zero exit status.
+fn main_with_capabilities(sys: System) -> ! IoError {
+    let now = sys.clock.now()
+    let name = sys.env.get("USER") ?? "stranger"
+    println("Hello, {name}. It is {now:%H:%M}.")
+    sys.fs.write_text("greeted.txt", "{name} at {now}")?
+    Ok(())
+}

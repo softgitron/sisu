@@ -1,0 +1,63 @@
+//! wordcount: counts words in the files given on the command line and
+//! prints the most common ones. A complete, realistic small tool.
+
+use std.collections.{Map, List}
+use std.cap.{System, Fs}
+use std.cli
+
+error AppError {
+    NoInput
+    ..                       // open set: IoError variants join through `?`
+}
+
+struct Options {
+    top: int = 10
+    min_length: int = 1
+    paths: List[Path]
+}
+
+fn parse_args(args: List[str]) -> Options ! cli.Error {
+    cli.parse[Options](args)             // derive-based parser from the struct's fields
+}
+
+fn count_words(fs: Fs, paths: List[Path], min_length: int) -> Map[String, int] ! IoError {
+    var counts = Map.new()
+    for path in paths {
+        let text = fs.read_to_string(path)?
+        for word in text.split_whitespace() {
+            if word.len() < min_length { continue }
+            let key = word.to_lowercase()
+            counts.entry(key).or_insert(0) += 1
+        }
+    }
+    Ok(counts)
+}
+
+fn main(sys: System) -> ! AppError {
+    let opts = parse_args(sys.env.args())?
+    if opts.paths.is_empty() { return Err(NoInput) }
+
+    let fs = sys.fs.read_only()                       // this program never writes
+    let counts = count_words(fs, opts.paths, opts.min_length)?
+
+    var ranked: List[(ref String, int)] = counts.iter().collect()
+    ranked.sort_by { a, b -> b.1.cmp(a.1) }           // descending by count
+
+    for (word, n) in ranked.iter().take(opts.top) {
+        println("{n:>8}  {word}")
+    }
+    Ok(())
+}
+
+test "counts case-insensitively" {
+    let fs = Fs.in_memory(["a.txt": "The the THE cat"])
+    let counts = count_words(fs, ["a.txt"], min_length: 1).expect("in-memory fs cannot fail")
+    assert_eq(counts["the"], 3)
+    assert_eq(counts["cat"], 1)
+}
+
+test "min_length filters short words" {
+    let fs = Fs.in_memory(["a.txt": "a bb ccc"])
+    let counts = count_words(fs, ["a.txt"], min_length: 2).expect("")
+    assert_eq(counts.len(), 2)
+}
