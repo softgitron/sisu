@@ -224,8 +224,10 @@ Decisions:
   width trap.
 - **Floats** are never implicitly converted to or from integers. `f64`
   implements `PartialOrd` not `Ord`, so a `dict[f64, _]` needs an explicit
-  total-order wrapper (`f64.total_order()`); NaN handling is documented
-  rather than surprising.
+  total-order wrapper (`f64.total_order()`); ordering algorithms such as
+  `sort_by` and `max_by` accept `PartialOrd` keys and panic on an
+  unordered comparison, so NaN handling is documented rather than
+  surprising.
 
 ## Strings and text
 
