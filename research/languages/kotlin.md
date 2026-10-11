@@ -178,8 +178,9 @@ Kotlin Symbol Processing (KSP) exists because KAPT (Java annotation processing o
 was too slow, a pattern (two generations of codegen tooling) that Dart repeated with build_runner.
 
 ### Design regrets the lead designer names
-Breslav (Pragmatic Engineer podcast, February 2026): omitting the ternary operator is his "biggest
-design regret"; he removed it to free `?` and `:` for nullable types and type annotations, expecting
+Breslav (Pragmatic Engineer podcast, February 2026): omitting the ternary operator is, in the
+write-up's own summary of the interview, his biggest design regret (the phrase is the write-up's,
+not a quotation of him); he removed it to free `?` and `:` for nullable types and type annotations, expecting
 `if` as an expression to suffice, and "by the time he agreed it was a mistake ... you can't retrofit
 the ternary operator in the current syntax". He has also said he is unhappy with how composition by
 delegation (`by`) works (Kotlin Slack discussion of a 2025 podcast; details not verified). In a 2020
@@ -213,8 +214,8 @@ JetBrains has not published a complexity budget. Breslav's successors have not (
 Scala-style "Lean Kotlin" moment, but the trajectory is the one Scala followed.
 
 ## Designer retrospectives
-- **Andrey Breslav** (creator): the ternary omission was his biggest regret and cannot be
-  retrofitted; delegation-by-`by` is a second; organisationally he regrets not building a team and a
+- **Andrey Breslav** (creator): the ternary omission is reported as his biggest regret (the
+  interviewer's summary) and in his own words cannot be retrofitted; delegation-by-`by` is a second; organisationally he regrets not building a team and a
   management mentor earlier and shipping after Java 8. He also stresses that Kotlin's success came
   from the IDE-first approach and from interop, not from language novelty (Pragmatic Engineer,
   February 2026; Habr, May 2020). His next project, CodeSpeak, abandons conventional language design
