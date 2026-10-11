@@ -54,11 +54,12 @@ options.
 ## How to read the decisions
 
 Each decision in the log has a status. *Decided* means the evidence was
-one-sided enough that the proposal commits. *Leaning* means the proposal
-commits provisionally and an open question names what could change it.
-Roughly a third of the decisions are leaning, and almost all of those are
-about the memory model, the shape of the runtime, and syntax, which is
-where the research found the least settled evidence.
+one-sided enough that the proposal commits, or that the project owner
+decided it in October 2026 after reading the options (the open-questions
+file records which). *Leaning* means the proposal commits provisionally
+and an open question names what could change it; after the owner's
+answers only the runtime's stack strategy (Q-6), governance details (Q-21)
+and numerics (Q-23) remain open.
 
 ## The three bets
 

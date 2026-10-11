@@ -16,6 +16,7 @@ evidence runs out.
 |---|---|
 | Understand what Sisu is in 10 minutes | [`proposal/README.md`](proposal/README.md) |
 | See code | [`proposal/01-tour.md`](proposal/01-tour.md) and [`proposal/examples/`](proposal/examples/) |
+| Know what happens next | [`proposal/18-next-steps.md`](proposal/18-next-steps.md) |
 | Know *why* a decision was made | [`proposal/15-decision-log.md`](proposal/15-decision-log.md), then the linked research |
 | Argue about something | [`open-questions.md`](open-questions.md) |
 | Check the evidence | [`research/evidence/`](research/evidence/) |
@@ -32,8 +33,11 @@ research/
   evidence/            surveys, studies, memory-safety data, designer retrospectives
 proposal/
   README.md            one-page summary and index
-  00-...13-*.md        the design, one document per area
+  00-...14-*.md        the design, one document per area
   15-decision-log.md   every decision, the alternatives, and the evidence
+  16-validation-plan   what a prototype must test first
+  17-testing.md        the testing design
+  18-next-steps.md     the experiment plan
   examples/            Sisu source files illustrating the design
 open-questions.md      what the research could not settle, with options and a current lean
 ```
@@ -47,8 +51,8 @@ should be filed as an issue.
 
 | Phase | Status |
 |---|---|
-| Research | Done (October 2026). 46 language analyses (~14,000 lines), 15 topic syntheses, 4 evidence dossiers. |
-| Proposal | Draft 1. Every area has a proposed design and rationale. |
+| Research | Done (October 2026). 46 language analyses (~14,000 lines), 19 topic syntheses, 4 evidence dossiers. |
+| Proposal | Draft 2 (October 2026). Indentation-based, Python-flavoured syntax; a testing design; an experiment plan with phases, corpus, measurements and decision points. |
 | Open questions | 41 recorded; 38 decided by the project owner (October 2026), 3 open (runtime stacks, governance details, numerics). |
 | Prototype | Not started. |
 
