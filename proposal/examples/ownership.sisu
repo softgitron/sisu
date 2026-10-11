@@ -38,7 +38,7 @@ enum TokenKind:
 def tokenize(source: str) -> list[Token]:
     var out = list()
     for piece in source.split_whitespace():
-        let kind = if piece.chars().all(it.is_digit()): Number else: Word
+        let kind: TokenKind = if piece.chars().all(it.is_digit()): Number else: Word
         out.push(Token(kind=kind, text=piece))
     return out                               # a list of views: itself view-like
 
@@ -71,10 +71,10 @@ struct Config:
 
 def shared_demo(own cfg: Config):
     let shared = Shared(cfg)
-    let a = shared                           # bumps the count; `shared` still usable
-    let b = shared
+    let a = shared.copy()                    # bumps the count; `shared` still usable
+    let b = shared.copy()
     task.scope do s:
-        s.spawn(() -> use_config(a))         # Shared[Config] is Send because Config is
+        s.spawn(() -> use_config(a))         # Shared[Config] is Send because Config is Sync (plain data)
         s.spawn(() -> use_config(b))
 
 def use_config(cfg: Shared[Config]):

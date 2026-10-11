@@ -29,12 +29,12 @@ have major versions.
 | Module | Contents |
 |---|---|
 | `std.core` (prelude) | `Option`, `Result`, error sets, `Copy`/`Drop`/`Eq`/`Ord`/`Hash`/`Len`/`Contains`/`Display`/`Debug`/`Default`/`Into`/`From`, `Iterator`, `Range`, `Never`, `Box`, `Shared`, `Weak`, `Cell`, `panic`, `assert`, the sync and task primitives `Mutex`, `Atomic`, `channel`, `task`, the capability types, `Duration`, `Path`, and the prelude functions `print`, `print_err`, `len`, `range`, `enumerate`, `zip`, `sorted`, `reversed`, `min`, `max`, `sum`, `any`, `all`, `abs` |
-| `std.collections` | `list`, `Array`, `Slice`, `dict` (hash), `SortedDict` (B-tree), `set`, `SortedSet`, `Deque`, `Heap`, `Arena` with generational keys (`Key[T]`), `BitSet`; `persistent.Vec`, `persistent.Dict`, `persistent.Set` (HAMT/RRB structural-sharing collections for data shared through `Shared` or sent between tasks without copying, from Clojure via Scala and Elm; [`clojure.md`](../research/languages/clojure.md)) |
+| `std.collections` | `list`, `Array`, `Slice`, `dict` (hash), `SortedDict` (B-tree), `set`, `SortedSet`, `Deque`, `Heap`, `Arena` with generational keys (`Key[T]`), `BitSet`; `persistent.List`, `persistent.Dict`, `persistent.Set` (HAMT/RRB structural-sharing collections for data shared through `Shared` or sent between tasks without copying, from Clojure via Scala and Elm; [`clojure.md`](../research/languages/clojure.md)) |
 | `std.string` | `String`, `str`, `char`, Unicode scalar and grapheme iteration, case mapping, normalisation forms, `Builder` |
 | `std.fmt` | Formatting traits and the interpolation machinery |
 | `std.num` | Integer and float traits, checked/wrapping/saturating ops, `BigInt`, `Decimal`, `Ratio` |
-| `std.mem` | Allocator trait, `Arena`, `ptr` types (unsafe), layout |
-| `std.task` | `scope`, `spawn`, `Handle`, `channel`, `select`, `Mutex`, `RwLock`, `Atomic`, `Condvar`, `Once`, cancellation, `shield` |
+| `std.mem` | Allocator trait, `Arena`, layout; raw pointer types live in `std.ffi` |
+| `std.task` | `scope`, `spawn`, `Handle`, `channel`, `Mutex`, `RwLock`, `Atomic`, `Condvar`, `Once`, cancellation, `shield` |
 | `std.cap` | Capability types: `System`, `Fs`, `Net`, `Clock`, `Rand`, `Env`, `Proc`, their attenuations, and in-memory fakes for all of them |
 | `std.io` | `Reader`, `Writer`, `BufReader`, `BufWriter`, `Seek`, byte and text streams |
 | `std.fs` | Paths, files, directories, metadata, watching (via `Fs`) |

@@ -1,10 +1,13 @@
 # Compile-time evaluation, reflection, derive, checked string DSLs.
 
+import std.json
+import sql       # the blessed std.x.sql package
+
 # An ordinary function, evaluated at compile time because `const` demands it.
 def crc32_table() -> Array[u32, 256]:
     var t = Array.filled(0u32)
     for i in range(256):
-        var c = i.to[u32]()
+        var c = i.truncate_to[u32]()
         for _ in range(8):
             c = if c & 1 == 1: 0xEDB88320 ^ (c >> 1) else: c >> 1
         t[i] = c
@@ -60,7 +63,8 @@ struct Point:
 
 # A checked string DSL: the SQL is parsed at compile time, errors point into
 # the literal, and the result is a typed query object. No new syntax needed.
-const FIND_USER: sql.Query = comptime sql.query(r"SELECT id, name FROM users WHERE age > {min_age:int}")   # raw: no interpolation
+const FIND_USER: sql.Query = comptime sql.query(
+    r"SELECT id, name FROM users WHERE age > {min_age:int}")   # raw literal: no interpolation
 
 def find(db: Db) -> list[(int, String)] ! DbError:
     return db.run(FIND_USER, min_age=18)     # parameter names and types come from the literal

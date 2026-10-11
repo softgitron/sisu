@@ -41,11 +41,13 @@ Every departure from Python is listed at the end with its reason.
   level is an error naming the candidate columns.
 - `pass` is the empty block.
 - Keywords (reserved): `and as assert break case comptime const continue
-  def defer do elif else enum error extern for from if impl import in let
-  match mut not or own pass pub ref return select self Self struct test
-  trait type unsafe var view where while with yield`. Forty-six.
+  def defer do dyn elif else enum error extern for from if impl import in
+  let match mut not or own pass pub ref return select self Self struct
+  test trait type unsafe var view where while with yield`. Forty-seven.
   Contextual (keywords only in their position): `requires ensures
-  invariant decreases result it bench suite expect pure`.
+  invariant decreases old result it bench suite expect pure`. After a `.`
+  and inside a module path a keyword is an ordinary identifier
+  (`log.error`, `x.or(d)`, `std.test`).
 
 ## Literals
 
@@ -55,7 +57,7 @@ Every departure from Python is listed at the end with its reason.
 | Float | `1.0`, `2.5e-3`, `1.0f32` | `f64` unless suffixed or inferred |
 | Boolean | `True`, `False` | `bool` |
 | Character | `'a'`, `'\n'`, `'\u{1F600}'` | `char` |
-| String | `"plain"`, `"text {interp}"`, `r"raw\no escapes"`, `"""multi-line"""`, `b"bytes"` | `str`, `String`, `str` (no escapes, no interpolation), `str`, `Slice[u8]` |
+| String | `"plain"`, `"text {interp}"`, `r"raw\no escapes"`, `"""multi-line"""`, `b"bytes"` | `str`, `String`, `str` (no escapes, no interpolation), `str`, `bytes` |
 | List | `[1, 2, 3]` | `list[T]`, or `Array[T, N]`/`Slice[T]` when the expected type says so |
 | Map | `{"a": 1, "b": 2}`, `{}` | `dict[K, V]` |
 | Set | `{1, 2, 3}` | `set[T]` (the empty set is `set()`) |
@@ -117,7 +119,15 @@ trait Name[T]:
         return self.m()
 
 trait Container(Len):            # supertrait: implementing Container requires Len, Python's class syntax
+    type Item                    # associated type
     def get(self, i: int) -> ref Item?
+
+impl[T: Display] Display for list[T]:   # generic implementation
+    ...
+struct Grid[T, const W: int]:    # const generics
+    cells: Array[T, W]
+def longest(a: str, b: str) -> ref str from a, b: ...   # which parameter a returned borrow comes from
+def show[T](x: T) where T: Display + Hash: ...        # bounds in a where clause
 
 test "name":                     # a test; `suite "name":` groups one level
     assert f(1) == 2
@@ -176,7 +186,8 @@ evaluated at each call, not at definition.
 Blocks never have a value. A function yields a value only with
 `return expr`; a non-unit function whose control flow can reach the end of
 its body without a `return` is a compile error, and `return` without a
-value is allowed only in unit functions. A `return` inside a closure
+value is allowed only in unit functions. A generator (a `def` that
+contains `yield` and returns `Iter[T]`) ends when its body ends. A `return` inside a closure
 returns from the closure. This is D-056; the alternatives, Rust's
 last-expression rule and MATLAB/Go/Nim named result variables, are
 assessed in [`function-results.md`](../research/topics/function-results.md).
@@ -194,11 +205,16 @@ let area = match shape:
 
 An `if` expression must have an `else`; a `match` expression must be
 exhaustive. An arm that needs statements makes the whole thing a
-statement, and the value is assigned or returned in each arm. Two other
+statement, and the value is assigned or returned in each arm. Three other
 forms take a value from an expression on the same line: `let x = e else: v`
-(the fallback `v` is an expression, or a single diverging statement such as
-`return None`), and `unsafe e` (an `unsafe:` block is a statement; `unsafe
-e` marks one expression). The target of an assignment or augmented
+and `let x = e else as err: v` (the fallback `v` is an expression, or a
+single diverging statement such as `return None`; `as err` binds the
+error), `unsafe e` (an `unsafe:` block is a statement; `unsafe e` marks
+one expression), and `comptime e` (evaluate `e` at compile time; `comptime
+for`, `comptime if` and `comptime assert` are the statement forms). The
+one block that yields a value is `return impl Trait for T:` inside a
+`comptime def` whose result type is `impl Trait for T`
+([08-metaprogramming.md](08-metaprogramming.md)). The target of an assignment or augmented
 assignment is a place: a variable, a field, an index, or a call that
 returns `ref mut` (`counts.entry(k).or_insert(0) += 1`). Python's
 `a if c else b` is not adopted: `if c: a else: b` is the same length,
@@ -211,7 +227,7 @@ Operator precedence, highest first:
 | Postfix | `x.f`, `x[i]`, `x[i:j]`, `f(x)`, `x?`, `x?.f`, `x.[f]` (field named by a compile-time value) | |
 | Power | `**` | right-associative; mixing with unary minus requires parentheses |
 | Unary | `-x`, `~x`, `ref x`, `ref mut x` | |
-| Multiplicative | `* / // % *% /%` | `//` is floor division; `%` has the sign of the divisor |
+| Multiplicative | `* / // % *% *\|` | `//` is floor division; `%` has the sign of the divisor |
 | Additive | `+ - +% -% +\| -\|` | `%` suffix wraps, `\|` suffix saturates |
 | Shift | `<< >>` | mixing with arithmetic requires parentheses |
 | Bitwise | `& ^ \|` | mixing with each other requires parentheses |
@@ -256,7 +272,7 @@ let Some(x) = opt else:          # bind or diverge; the block must return, break
 
 while cond:
     ...
-while let Some(x) = it.next():
+while let Some(x) = iter.next():
     ...
 for x in xs:                     # x: ref T
     ...
@@ -267,16 +283,17 @@ for x in own xs:                 # consumes xs; x: T
 for i, x in enumerate(xs):
     ...
 for i in range(10):              # 0..9; range(a, b), range(a, b, step)
+    ...
 
 match value:
     case Some(Rect(w, h)) if w == h: ...
     case [first, *rest]: ...
     case 1 | 2 | 3: ...
-    case Point(x=0, y): ...
+    case Point(x=0, y=y): ...   # keyword patterns, as in Python
     case Point(x=0, ..): ...     # `..` ignores the remaining fields
     case _: ...
 
-select:                          # waits on several channel or timer operations
+select:                          # waits on channel, timer, join and cancellation operations
     case e = rx.recv():
         handle(e)
     case _ = clock.after(Duration.seconds(1)):
@@ -348,7 +365,6 @@ T !                # Result[T, inferred]
 ! E                # () ! E, for functions that return nothing or fail
 {A, B}             # in type position: the union of error sets A and B
 ref T  ref mut T   # borrows
-own T              # only in parameter position; elsewhere T is owned
 list[T]  dict[K, V]  set[T]      # builtin collections, with literal forms
 Array[T, N]  Slice[T]  Iter[T]   # fixed-size array, view of a sequence, lazy iterator
 (A, B)  (a: A, b: B)  ()   # tuples, labelled tuples, unit
@@ -358,8 +374,9 @@ Box[T]  Shared[T]  Weak[T]  Cell[T]  Mutex[T]
 Never              # the type of expressions that do not return
 ```
 
-`?` binds tighter than `ref`, so `ref T?` is an optional reference. A
-function's result may be a labelled tuple, `-> (q: int, r: int)`, which
+`ref` binds tighter than `?`, so `ref T?` is `(ref T)?`, an optional
+reference, which is the common case. A function's result may be a labelled
+tuple, `-> (q: int, r: int)`, which
 documents the results, lets `ensures` name them and lets callers write
 `res.q`; the body still returns with `return (q, r)`. Inside `ensures`,
 the contextual name `result` refers to an unlabelled result (D-056).
@@ -367,8 +384,9 @@ the contextual name `result` refers to an unlabelled result (D-056).
 ## Prelude functions
 
 Python's builtin functions are kept where they read better than a method:
-`print`, `print_err`, `len`, `range`, `enumerate`, `zip`, `reversed`,
-`sorted`, `min`, `max`, `sum`, `any`, `all`, `abs`. They are ordinary
+`print`, `print_err`, `len`, `range`, `enumerate`, `zip`, `zip_shortest`,
+`reversed`, `sorted`, `min`, `max`, `sum`, `any`, `all`, `abs`, plus
+`panic`, `unreachable`, `todo`, `assert` and `debug_assert`. They are ordinary
 generic functions over traits (`len[T: Len](x: T) -> int`,
 `sorted[T: Ord](xs: Iter[T]) -> list[T]`), not a dunder protocol, so a user
 type joins them by implementing the trait. The method spelling exists
@@ -382,8 +400,9 @@ takes one argument: write `print("{x} {y}")`.
 ## Slicing and indexing
 
 `a[i]` is bounds-checked and traps on a negative index. `a[i:j]` is a
-half-open slice; `a[^1]` is the last element and `a[i:^1]` runs to the
-end (Nim's spelling), replacing Python's negative indices, whose silent
+half-open slice, `a[i:]` runs to the end, `a[^1]` is the last element and
+`a[i:^1]` drops the last element (Nim's spelling), replacing Python's
+negative indices, whose silent
 wrap-around is a bug source. `zip` stops with an error on unequal
 lengths; `zip_shortest` is explicit (PEP 618).
 
@@ -420,6 +439,7 @@ would recreate Scala 3's two-dialect split.
 | `lambda x: e` | `x -> e`, `it`, `do` blocks | `lambda` is "crippled" by its designer's own account; `do` gives the multi-line closure Python refused |
 | Truthiness | `bool` only | Nim, Codon, Swift, Rust and Go refuse it and Mojo warns about it; Python's own `datetime.time` midnight bug |
 | `None` | `T?` with `?.`, `??`, `if let` | PEP 505's own counts of the boilerplate `None` creates |
+| `bytes` literal is immutable and indexable by `int` | `b"..."` is `bytes`, viewed as `Slice[u8]` | kept; one owned byte string type beside `String` |
 | `is` | none | A dynamic-language operator; the small-int cache trap |
 | `try`/`except`/`finally` | `T ! E`, `?`, `else`, `defer`, `Drop` | D-011; PEP 765's 73% incorrect `finally` sites |
 | Mutable default arguments, late-binding closures | Defaults evaluated per call; per-iteration loop bindings | The two best-known Python traps |

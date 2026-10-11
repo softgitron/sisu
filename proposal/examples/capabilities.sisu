@@ -1,22 +1,24 @@
 # Capabilities: no ambient authority, attenuation, testing with fakes.
 
 import http      # the blessed std.x.http client; it works through the Net capability
+from std.net import Url
+from std.time import DateTime
 
 struct Cache:
     fs: Fs                   # a capability stored at construction, already narrowed
     clock: Clock
     ttl: Duration
 
-    def get(self, key: str) -> Bytes?:
+    def get(self, key: Path) -> bytes?:
         let meta = self.fs.metadata(key) else: return None
         if self.clock.now() - meta.modified > self.ttl:
             return None
         return self.fs.read(key).ok()
 
-    def put(self, key: str, value: Bytes) -> ! IoError:
+    def put(self, key: Path, value: bytes) -> ! IoError:
         return self.fs.write(key, value)
 
-def fetch_cached(net: Net, cache: Cache, url: Url) -> Bytes ! HttpError:
+def fetch_cached(net: Net, cache: Cache, url: Url) -> bytes ! HttpError:
     if let Some(hit) = cache.get(url.as_key()):
         return Ok(hit)
     let body = http.get(net, url)?
@@ -37,14 +39,14 @@ def main(sys: System) -> ! AppError:
 # Tests: no mocking framework, no global hooks. Fakes are standard.
 test "cache expires entries":
     let fs = Fs.in_memory()
-    let clock = Clock.frozen_at(DateTime.parse("2026-10-11T12:00:00Z"))
+    let clock = Clock.frozen_at(DateTime.parse("2026-10-11T12:00:00Z").expect("valid"))
     let cache = Cache(fs=fs, clock=clock, ttl=Duration.hours(1))
 
-    cache.put("k", b"value").expect("in-memory write")
-    assert cache.get("k") == Some(b"value")
+    cache.put(Path("k"), b"value").expect("in-memory write")
+    assert cache.get(Path("k")) == Some(b"value")
 
     clock.advance(Duration.hours(2))
-    assert cache.get("k") == None
+    assert cache.get(Path("k")) == None
 
 test "fetch uses the cache before the network":
     let net = http.FakeNet().respond_to("https://api.example.com/v1/data", b"from net")

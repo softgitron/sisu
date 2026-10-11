@@ -1,11 +1,10 @@
 ##! wordcount: counts words in the files given on the command line and
 ##! prints the most common ones. A complete, realistic small tool.
 
-import std.cli
+import cli               # the blessed std.x.cli argument parser
 
 error AppError:
     NoInput
-    ..                       # open set: IoError variants join through `?`
 
 struct Options:
     top: int = 10
@@ -25,7 +24,7 @@ def count_words(fs: Fs, paths: list[Path], min_length: int) -> dict[String, int]
             counts.entry(word.to_lowercase()).or_insert(0) += 1
     return Ok(counts)
 
-def main(sys: System) -> ! AppError:
+def main(sys: System) -> ! {AppError, IoError, cli.Error}:
     let opts = parse_args(sys.env.args())?
     if opts.paths.is_empty():
         return Err(NoInput)

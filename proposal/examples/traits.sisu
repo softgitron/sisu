@@ -1,5 +1,7 @@
 # Traits, generics, dynamic dispatch, derive, delegation.
 
+from std.math import PI
+
 trait Shape:
     def area(self) -> f64
     def perimeter(self) -> f64
@@ -60,11 +62,11 @@ impl Add for Vec2:
         return Vec2(x=self.x + other.x, y=self.y + other.y)
 
 # Newtypes with delegation: distinct type, zero cost, chosen traits forwarded.
-@delegate(Add, Sub, Ord, Display, to="value")
+@delegate(Add, Sub, PartialOrd, Display, to="value")
 struct Meters:
     value: f64
 
-@delegate(Add, Sub, Ord, Display, to="value")
+@delegate(Add, Sub, PartialOrd, Display, to="value")
 struct Seconds:
     value: f64
 

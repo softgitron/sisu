@@ -98,6 +98,6 @@ labels in `ensures`; an unlabelled one is `result`.
 - The static verifier (SMT-backed discharge of contracts) is a tooling
   project after version 1. The language is designed so that it needs no
   changes to add it.
-- Loop invariants and termination measures (`decreases`) are reserved
+- Loop invariants and termination measures (`decreases`) are contextual
   keywords without semantics in version 1.
 - Ghost code (specification-only variables) is open question Q-16.

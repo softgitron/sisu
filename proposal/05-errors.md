@@ -97,7 +97,7 @@ match load(fs, path):
     case Ok(c):
         cfg = c
     case Err(NotFound(path)):
-        cfg = Config.default_at(path)
+        cfg = Config.default_at(path)      # a variant of IoError, matched directly
     case Err(e):
         return Err(e)                  # e still has the full set type
 ```

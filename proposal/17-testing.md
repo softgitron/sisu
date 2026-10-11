@@ -102,8 +102,8 @@ fake, a seeded `Rand`, no `Net` unless requested, and a `Clock` that
 advances only when every task in the test is blocked. The last is Go's
 `testing/synctest` idea made the default: time-dependent code runs
 deterministically and instantly, and the "async wait" class that Luo et
-al. found to be 45% of flaky tests cannot occur. A test that asks for the
-real `System` is declared `@serial` and runs alone.
+al. found to be 45% of flaky tests cannot occur. A test that takes the
+real `System` as a parameter runs alone.
 
 Order dependency, the third flakiness cause, is impossible by construction:
 no test can see another's file system, environment or clock, and the

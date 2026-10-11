@@ -39,7 +39,8 @@ def crawl(net: Net, roots: list[Url]) -> dict[Url, Page] ! CrawlError:
   enforces that captured references are `Sync` (shared across tasks) and
   that moved values are `Send`.
 - A task returns a value; `s.spawn` returns a `Handle[T]` whose `join()`
-  yields it. If a task returns an error or panics and nobody joins it, the
+  yields it as `T ! TaskError`, flattened when `T` is itself a result
+  (`Handle[U ! E].join()` is `U ! {E, TaskError}`). If a task returns an error or panics and nobody joins it, the
   scope's result carries the first such failure after cancelling the rest
   and joining everything. There are no orphaned tasks and no silent task
   failures: the leading cause of Go goroutine leaks and of unobserved
@@ -73,7 +74,7 @@ A panicking task unwinds to its scope, which cancels siblings and reports
 ```sisu
 task.scope do s:
     while True:
-        let worker = s.spawn(() -> serve(net, port))
+        let worker = s.spawn(() -> worker_loop(net, port))
         match worker.join():
             case Err(TaskPanicked(message, ..)):
                 log.error("worker died: {message}, restarting")
@@ -205,7 +206,7 @@ constructed in safe code. Its fields are the root capabilities: `fs: Fs`,
 `stdin`/`stdout`/`stderr`. Each is a `Copy` handle (copying a capability grants nothing new; a fake's
 state lives behind the handle, which is how a test's `clock.advance` is
 seen by every copy); each can be *attenuated* into a weaker capability (`fs.restrict_to(dir)`,
-`fs.read_only()`, `net.only_hosts(...)`, `clock.frozen_at(t)` for tests) and
+`fs.read_only()`, `net.only_hosts(...)`, `Clock.frozen_at(t)` for tests) and
 passed on.
 
 ### Why

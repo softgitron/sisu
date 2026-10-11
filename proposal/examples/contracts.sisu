@@ -42,7 +42,7 @@ type Port = int where 1 <= self <= 65535
 type Percent = int where 0 <= self <= 100
 type NonEmpty[T] = list[T] where not self.is_empty()
 
-def listen(net: Net, port: Port) -> Listener ! NetError:
+def listen(net: Net, port: Port) -> TcpListener ! NetError:
     return net.listen(port)
 
 def demo(net: Net, user_input: int):
@@ -57,7 +57,7 @@ def demo(net: Net, user_input: int):
 
 test "binary search finds every element":
     check(arbitrary[list[int]]) do xs:
-        var sorted = xs.copy()
-        sorted.sort()
-        return sorted.iter().all(binary_search(sorted, it).is_some())
+        var ordered = xs.copy()
+        ordered.sort()
+        return ordered.iter().all(binary_search(ordered, it).is_some())
     # Every call inside a test checks `requires` and `ensures` too.

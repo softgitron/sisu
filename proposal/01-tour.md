@@ -81,6 +81,8 @@ let q, r = divmod(17, 5)        # or unpack
 ## Structs, enums, pattern matching
 
 ```sisu
+from std.math import PI
+
 @derive(Copy, Debug)
 struct Point:
     x: f64
@@ -115,7 +117,7 @@ def area(s: Figure) -> f64:
 
 `match` must be exhaustive; the compiler lists the missing cases. Patterns
 nest, destructure, and bind: `Some(Rect(w, _))`, `[first, *rest]`,
-`1 | 2 | 3`, `Point(x=0, y)`. A lowercase name in a pattern always binds;
+`1 | 2 | 3`, `Point(x=0, y=y)`. A lowercase name in a pattern always binds;
 a capitalised name is always a variant or constant.
 
 ## No null
@@ -135,9 +137,9 @@ let Some(user) = u else:                     # bind or bail out
     return
 ```
 
-`T?` is `Option[T]`. There is no `null`, no `nil`, no undefined. The `?`
-suffix on a type binds to the type immediately before it, so `ref User?`
-is an optional reference, which is the common case.
+`T?` is `Option[T]`. There is no `null`, no `nil`, no undefined. `ref`
+binds tighter than `?`, so `ref User?` is an optional reference, which is
+the common case.
 
 ## Errors are values
 
@@ -196,7 +198,7 @@ task to its enclosing scope; it is not caught by `match`. See
 def summarise(users: list[User]) -> String:          # users is borrowed (read)
     var out = String()
     for u in users:
-        out.push_line(u.name)
+        out.push("{u.name}\n")
     return out                                       # out is moved to the caller
 
 def add_user(mut users: list[User], own u: User):    # users borrowed mutably, u consumed
@@ -238,8 +240,8 @@ let q = p                      # Point is Copy, so this copies
 Shared ownership is a type you ask for:
 
 ```sisu
-let config = Shared(load_config())   # reference-counted, immutable
-let c2 = config                           # cheap: bumps the count
+let config = Shared(Config.default())    # reference-counted, immutable
+let c2 = config.copy()                    # cheap: bumps the count; copies are always written
 let counter = Shared(Mutex(0))    # shared *and* mutable: needs a lock
 counter.lock().value += 1
 ```
@@ -324,18 +326,18 @@ let first_ten = fib().take(10).collect[list[int]]()
 
 Closures are `x -> expr` inline, or `it` for a one-parameter closure
 (`xs.map(it * 2)`). A closure with a multi-line body is a trailing `do`
-block on the call that receives it, so `xs.each do x:` and `scope do s:`
+block on the call that receives it, so `xs.each do x:` and `task.scope do s:`
 read as control structures.
 
 ## Structured, colourless concurrency
 
 ```sisu
-def fetch_all(net: Net, urls: list[Url]) -> list[Bytes] ! HttpError:
+def fetch_all(net: Net, urls: list[Url]) -> list[bytes] ! {HttpError, TaskError}:
     return task.scope do s:
         let handles = [s.spawn(() -> http.get(net, url)) for url in urls]
         var results = list.with_capacity(len(handles))
         for h in handles:
-            results.push(h.join()?)
+            results.push(h.join()?)      # join flattens: the task's error set plus TaskError
         return Ok(results)
 ```
 

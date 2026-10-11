@@ -102,7 +102,7 @@ trait Iterator:
     type Item
     def next(mut self) -> Item?                                   # required
 
-    def map[U](own self, f: (Item) -> U) -> MapIter[Self, U]: ...  # provided
+    def map[U](own self, f: (Item) -> U) -> MapIter[Self, U]: ...  # provided; Iter[T] is `dyn Iterator` with Item = T
     def count(own self) -> int: ...
 ```
 
@@ -123,7 +123,7 @@ cannot implement a foreign trait for a foreign type, is paid for with cheap
 newtypes and delegation:
 
 ```sisu
-@delegate(Add, Sub, Ord, to="value")    # forward these traits to the wrapped field
+@delegate(Add, Sub, PartialOrd, to="value")   # forward these traits to the wrapped field
 struct Celsius:
     value: f64
 ```
@@ -133,8 +133,8 @@ alternative; they are listed as open question Q-11.
 
 ### Dispatch
 
-Generic functions are monomorphised: `def f[T: Show](x: T)` is compiled once
-per `T` used. Dynamic dispatch is opt-in and visible: `dyn Show` is a type,
+Generic functions are monomorphised: `def f[T: Display](x: T)` is compiled once
+per `T` used. Dynamic dispatch is opt-in and visible: `dyn Display` is a type,
 unsized, used behind `ref` or `Box`. A trait is object-safe (usable as
 `dyn`) under the same rules as Rust; the compiler says why when it is not.
 
@@ -241,7 +241,8 @@ Decisions:
 - `char` is a Unicode scalar value (Rust, Swift's `Unicode.Scalar`).
 - Interpolation `"{x}"` uses `Display`; `"{x:?}"` uses `Debug`. Format
   specs follow Python/Rust: `{x:>10.2}`.
-- Byte strings `b"..."` are `Slice[u8]`.
+- Byte strings `b"..."` are `bytes`, an immutable owned byte sequence that
+  views as `Slice[u8]`.
 - `String` is not `Send`-restricted or special in any way; it is a `list[u8]`
   with a validity invariant.
 

@@ -59,19 +59,24 @@ Rules:
 ## Reflection
 
 ```sisu
-comptime def field_names[T](_: type T) -> list[str]:
+comptime def field_names(T: type) -> list[str]:
     return [f.name for f in reflect.fields_of(T)]
 
-def to_json[T](value: T) -> String where comptime reflect.is_struct(T):
-    var out = String("{{")                         # doubled: a lone brace opens an interpolation
-    comptime for f in reflect.fields_of(T):          # unrolled at compile time
-        out.push("\"{f.name}\":")
-        out.push(to_json(value.[f]))                 # field access by compile-time name
-    out.push("}}")
-    return out
+def to_json[T](value: T) -> String:
+    if comptime reflect.is_struct(T):                # narrows T inside the branch
+        var out = String("{{")                     # doubled: a lone brace opens an interpolation
+        comptime for f in reflect.fields_of(T):      # unrolled at compile time
+            out.push("\"{f.name}\":{to_json(value.[f])}")   # field access by compile-time name
+        out.push("}}")
+        return out
+    else:
+        return "{value}"                              # numbers, strings and booleans via Display
 ```
 
-`reflect` is a compile-time-only module. It exposes types, fields, variants,
+`reflect` is a compile-time-only module, and `target` (`target.os`,
+`target.arch`) describes the build target. An `if comptime` on a fact about
+`T` narrows `T` inside the branch, which is the one way a generic body may
+depend on the shape of its type argument; both branches still type-check. It exposes types, fields, variants,
 methods, attributes, and the documentation of items, as values. It cannot
 create new *declarations*; it can only produce values and types for use in
 expressions. This is the line that keeps reflection from becoming a macro

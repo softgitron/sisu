@@ -1,7 +1,7 @@
 # Tests: discovery, assertions, fixtures via capabilities, parametrised,
 # property-based, snapshot and benchmark. See proposal/17-testing.md.
 
-from std.test import arbitrary, assert_snapshot, check
+from std.test import Bench, arbitrary, assert_snapshot, black_box, check
 
 # A test block is a declaration compiled only by `sisu test`.
 test "parse_int accepts digits":
@@ -34,9 +34,9 @@ test "config loads from a file":
 test "cache entry expires after ttl":
     let clock = Clock.frozen_at(DateTime.epoch())
     let cache = Cache(fs=Fs.in_memory(), clock=clock, ttl=Duration.seconds(30))
-    cache.put("k", b"v").expect("")
+    cache.put(Path("k"), b"v").expect("")
     clock.advance(Duration.seconds(31))
-    assert cache.get("k") == None
+    assert cache.get(Path("k")) == None
 
 # Property tests: derived generators, shrinking, a replayed failure database.
 test "sort is idempotent":
@@ -57,8 +57,7 @@ test "parser never panics":
 test "help text is stable":
     assert_snapshot(cli.help_text[Options]())
 
-# A test that needs the real System is serial and says so.
-@serial
+# A test that takes the real System runs serially; the parameter says so.
 test "reads the real home directory"(sys: System):
     assert sys.env.get("HOME").is_some()
 

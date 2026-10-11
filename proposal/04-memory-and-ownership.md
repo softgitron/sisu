@@ -58,7 +58,8 @@ explicit shared ownership**. Concretely:
    parsed tokens pointing into a source buffer, and `dyn Trait` references
    are all views.
 5. **Shared ownership is a type.** `Shared[T]` is an atomically
-   reference-counted, immutable-by-default pointer. Mutation through it goes
+   reference-counted, immutable-by-default pointer. Copying one is written
+   `.copy()` like any other copy; the cost is a count increment. Mutation through it goes
    through `Cell[T]` (single task) or `Mutex[T]`/`Atomic` (any task), and
    the `Send`/`Sync` rules make it impossible to pick the wrong one. Cycles
    are broken with `Weak[T]`; see open question Q-2 on whether to also ship a
@@ -145,7 +146,7 @@ xs.push(4)                  # fine
 def longest(a: str, b: str) -> ref str from a, b:
     return if len(a) > len(b): a else: b
 def head(xs: list[int]) -> ref int:          # single borrowed param: no `from` needed
-    return xs[0]
+    return ref xs[0]
 def get(self, i: int) -> ref mut Item: ...   # `self` wins when present
 ```
 
