@@ -45,6 +45,7 @@ safe code, a garbage collector, build scripts, formatter options.
 | 14 | [Non-goals](14-non-goals.md) | What Sisu will not try to be |
 | 15 | [Decision log](15-decision-log.md) | Fifty-one decisions with alternatives, evidence and status |
 | 16 | [Validation plan](16-validation-plan.md) | What the prototype must test first, and what would change the design |
+| 18 | [Next steps](18-next-steps.md) | The experiment: phases, corpus, measurements, team, decision points |
 | | [Examples](examples/) | Sisu source files |
 | | [Open questions](../open-questions.md) | What is not settled, and what would settle it |
 
@@ -72,7 +73,9 @@ together, and they are where the design could be wrong:
    `Io`; the outcome is not yet known.
 3. **Colourless tasks without a garbage collector are implementable with
    acceptable stack behaviour.** Go and Erlang relocate stacks because
-   their GCs can; Sisu cannot. Java's virtual threads on a non-moving heap
-   are the closest evidence that it works.
+   their GCs can, and Java's virtual threads copy frames into heap chunks
+   when a thread unmounts; Sisu can do neither. The closest precedents are
+   C and Rust stackful-coroutine libraries, and the experiment measures
+   against them first ([18-next-steps.md](18-next-steps.md), Phase 1).
 
 A prototype should attack these three before anything else.

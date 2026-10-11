@@ -23,3 +23,7 @@ the open questions it leaves (with the open-question IDs).
 | [interop-and-platforms.md](interop-and-platforms.md) | [12](../../proposal/12-interop-and-targets.md) |
 | [evolution-and-governance.md](evolution-and-governance.md) | [13](../../proposal/13-evolution-and-governance.md) |
 | [learnability.md](learnability.md) | [00](../../proposal/00-vision-and-principles.md), [10](../../proposal/10-tooling.md) |
+| [testing.md](testing.md) | [17](../../proposal/17-testing.md) |
+| [indentation-syntax.md](indentation-syntax.md) | [02](../../proposal/02-syntax.md) |
+| [python-idioms.md](python-idioms.md) | [02](../../proposal/02-syntax.md) |
+| [function-results.md](function-results.md) | [02](../../proposal/02-syntax.md), decision D-056 |

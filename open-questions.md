@@ -168,8 +168,10 @@ parameters, add `with`.
 ### Q-6. Task runtime details: stacks, and should spawning require a capability?
 
 **Question.** Without a moving GC, task stacks cannot be relocated. Options
-are lazily committed virtual-memory stacks (Java Loom on 64-bit; costs
-address space and page faults), segmented stacks (Go pre-1.3; the hot-split
+are lazily committed virtual-memory stacks (costs address space, page
+faults, and on Linux the `vm.max_map_count` limit when each task has a
+guard page; note that Java's virtual threads are *not* a precedent here,
+since Loom copies frames into heap stack-chunk objects on unmount), segmented stacks (Go pre-1.3; the hot-split
 problem), compiler-computed stack bounds (works only for non-recursive
 tasks), or a hybrid. Separately, Zig's design makes concurrency itself go
 through the `Io` value, so a library cannot spawn without being given the
@@ -178,8 +180,10 @@ means; Sisu's lean makes `task.scope` ambient.
 **Current lean.** Lazily committed stacks with a per-task maximum and
 compiler-computed bounds where possible; `task.scope` ambient.
 
-**What would settle it.** Prototype measurements of task creation cost and
-memory per task against Go and Java virtual threads; and whether any real
+**What would settle it.** The standalone stack harness in
+[proposal/18](proposal/18-next-steps.md) (Phase 1, weeks 1-8): task
+creation cost and memory per task for five stack strategies against Go,
+Java virtual threads, tokio and a C or Rust stackful-coroutine library; and whether any real
 supply-chain attack would be stopped by gating spawn (none found in the
 research: attacks exfiltrate, they do not need to spawn).
 
