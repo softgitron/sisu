@@ -17,8 +17,8 @@ a typed Python-syntax language that dropped it ([python.md](../languages/python.
 | Approach | Languages | Buys | Costs | Evidence |
 |---|---|---|---|---|
 | Python plus a typed sublanguage | Cython (`cdef` beside `def`) | Gradual speed-up of real Python | Two semantics per file: C-typed values "have C semantics"; `cdef` functions callable only from Cython; `noexcept` contracts | [35] |
-| Restricted subset, same syntax | RPython, Codon | "if you know Python, you already know 99% of Codon" | Every dynamic idiom is a trap: one type per variable, no run-time class definition, limited generators, no `**kwargs`, 64-bit `int` with silent wrap-around, C numeric semantics by default | [35] |
-| New language wearing Python's surface | Boo (2003), Cobra (2006), Nim (2008), Mojo (2023) | Familiarity for the largest language population; indentation, `def`, `elif`, comprehensions, keyword arguments transplant cleanly | Boo and Cobra died (last releases 2013). Nim rewrote what depends on dynamism (`var`/`let`, `discard`, `iterator`, bool-only conditions, no loop `else`). Mojo made types mandatory, replaced `class` with `struct`, kept `with`, loop `else`, `__dunder__` methods and one-expression lambdas; no `match`, no custom decorators, no f-strings | [mojo.md](../languages/mojo.md), [nim.md](../languages/nim.md), [34], [36] |
+| Restricted subset, same syntax | RPython, Codon | "if you know Python, you already know 99% of Codon" | Every dynamic idiom is a trap: RPython has one type per variable, no run-time class definition, limited generators and no `**kwargs`; Codon has a 64-bit `int` that wraps silently and C-style `//` and `%` by default | [35] |
+| New language wearing Python's surface | Boo (2003), Cobra (2006), Nim (2008), Mojo (2023) | Familiarity for the largest language population; indentation, `def`, `elif`, comprehensions, keyword arguments transplant cleanly | Cobra's last release and Boo's last stable release are from 2013, though Boo's repository still had commits in Sep 2026. Nim rewrote what depends on dynamism (`var`/`let`, `discard`, `iterator`, bool-only conditions, no loop `else`). Mojo made types mandatory, replaced `class` with `struct`, kept `with`, loop `else`, `__dunder__` methods and one-expression lambdas; no `match`, no custom decorators, no f-strings | [mojo.md](../languages/mojo.md), [nim.md](../languages/nim.md), [34], [36] |
 
 ## What the evidence says
 
@@ -29,29 +29,37 @@ a typed Python-syntax language that dropped it ([python.md](../languages/python.
    must declare types explicitly" [34] ([nim.md](../languages/nim.md)).
 2. **`class` is boilerplate; dataclasses are the admission.** PEP 557
    (2017): "Data Classes save you from writing and maintaining these
-   methods"; it raises `TypeError` for `list`, `dict` or `set` defaults [6].
-   Mojo replaced `class` with `struct`, "a statically typed alternative that
-   the compiler can optimize aggressively" [34] ([mojo.md](../languages/mojo.md)).
-3. **Indentation, `:`, `elif`, `pass`, `and`/`or`/`not` are what every
-   descendant kept.** The FAQ: the colon lets editors "look for colons to
-   decide when indentation needs to be increased" [4]; Nim's `discard`
-   doubles as its unused-value check [33]. One change is forced: Python's
+   methods"; the PEP says it raises `TypeError` for `list`, `dict` or `set`
+   defaults, but the shipped check raises `ValueError` (for any unhashable
+   default since 3.11) [6]. Mojo replaced `class` with `struct`, "a
+   statically typed alternative that the compiler can optimize
+   aggressively" [34] ([mojo.md](../languages/mojo.md)).
+3. **Indentation, `:`, `elif`, `pass`, `and`/`or`/`not` are what almost
+   every descendant kept.** The FAQ: the colon lets editors "look for
+   colons to decide when indentation needs to be increased" [4]; Nim has
+   no `pass`, and its `discard` is the null statement as well as its
+   unused-value check [33]. One change is forced: Python's
    `and`/`or` "return the last evaluated argument" [23]; without truthiness
    they return `bool`, and `x or default` becomes `??`
    ([studies.md](../evidence/studies.md) on word operators).
-4. **Chained comparisons: Julia copied them, nobody else did.** Python
-   admits "`x < y > z` is perfectly legal (though perhaps not pretty)" [23];
-   Julia finds chains "often quite convenient in numerical code" but leaves
-   evaluation order "undefined" [32] ([julia.md](../languages/julia.md)).
-5. **`in` as sugar for a named method was copied everywhere.** Nim: "`a in
-   b` is transformed into `contains(b, a)`" [33]; Kotlin: `b.contains(a)` [32].
+4. **Chained comparisons: Python's, shared by Julia, Mojo, CoffeeScript and
+   Raku, but not by most languages.** Python admits "`x < y > z` is
+   perfectly legal (though perhaps not pretty)" [23]; Julia notes "Unlike
+   most languages, with the notable exception of Python, comparisons can be
+   arbitrarily chained", finds chains "often quite convenient in numerical
+   code" but leaves evaluation order "undefined" [32]
+   ([julia.md](../languages/julia.md)). CoffeeScript "borrows chained
+   comparisons from Python"; Mojo and Raku chain too [34][40].
+5. **`in` as sugar for a named method was copied by Nim and Kotlin.** Nim:
+   "`a in b` is transformed into `contains(b, a)`" [33]; Kotlin:
+   `b.contains(a)` [32].
 6. **`is` is a dynamic-language operator and a known trap.** Python 3.8
    added a `SyntaxWarning` for `is` with literals, which "can often work by
    accident in CPython, but are not guaranteed by the language spec" [21];
    the accident is the small-integer cache, `-5` to `256` for decades and
-   `1024` since gh-133059 (merged 24 Sep 2025) [22]. PEP 8 needs `is` only
-   for `None` [2] ([python.md](../languages/python.md)).
-7. **Truthiness is the idiom every typed language refused.** Python treats
+   `1024` since gh-133059 (merged 24 Sep 2025, Python 3.15) [22]. PEP 8
+   needs `is` only for `None` [2] ([python.md](../languages/python.md)).
+7. **Truthiness is the idiom most typed languages refused.** Python treats
    `False`, `None`, "numeric zero of all types, and empty strings and
    containers" as false [23] and PEP 8 says to rely on it [2]. Python's own
    record: "Before Python 3.5, a `datetime.time` object was considered to be
@@ -60,24 +68,26 @@ a typed Python-syntax language that dropped it ([python.md](../languages/python.
    "implicit false may involve more risk than benefit" [28]. Swift's "type
    safety prevents non-Boolean values from being substituted for `Bool`"
    [30]; Rust "will not automatically try to convert non-Boolean types to a
-   Boolean" [29]; Go and Nim require a `bool` [31][33]; only Mojo keeps a
-   `Boolable` hook [34] ([swift.md](../languages/swift.md),
-   [rust.md](../languages/rust.md), [go.md](../languages/go.md)). `None`
-   generated the demand `T?`, `?.` and `??` answer: PEP 505 (2015, Deferred)
-   counted 449 None-coalescing `if` blocks and 120 coalescing `or`
-   expressions in the 3.7 standard library [7].
+   Boolean" [29]; Go and Nim require a `bool` [31][33]; C and C++ accept any
+   scalar [41]; Mojo keeps a `Boolable` hook [34]
+   ([swift.md](../languages/swift.md), [rust.md](../languages/rust.md),
+   [go.md](../languages/go.md)). `None` generated the demand `T?`, `?.` and
+   `??` answer: PEP 505 (2015, Deferred) counted up to 449 None-coalescing
+   `if` blocks and 120 possible coalescing `or` expressions in the 3.7
+   standard library [7].
 8. **The conditional expression's order was contested, then copied.** PEP
    308's 2003 vote (518 ballots, 82 rejecting all options) had no majority;
    Guido chose `X if C else Y` in 2005 after an expression-first draft "was
    found to be too uncomfortable" [17]. Mojo kept it [34]; Kotlin regretted
    dropping its ternary ([kotlin.md](../languages/kotlin.md)).
 9. **Comprehensions beat `map`/`filter` by the designer's judgement, and
-   both stayed.** PEP 202, 274 and 289: "List comprehensions greatly reduced
-   the need for filter() and map()" [8]. Guido, 2005: "filter(P, S) is
-   almost always written clearer as [x for x in S if P(x)]", then "lambda,
-   filter and map will stay... Only reduce will be removed" [9]. Copied by
-   Julia, Nim (`collect` [33]) and Mojo ("The syntax is essentially
-   identical" [34]) after Haskell's originals ([haskell.md](../languages/haskell.md)).
+   both stayed.** PEP 289, after PEP 202 and 274: "List comprehensions
+   greatly reduced the need for filter() and map()" [8]. Guido, 2005:
+   "filter(P, S) is almost always written clearer as [x for x in S if
+   P(x)]", then "lambda, filter and map will stay... Only reduce will be
+   removed" [9]. Copied by Julia, Nim (`collect` [33]) and Mojo ("The syntax
+   is essentially identical" [34]) after Haskell's originals
+   ([haskell.md](../languages/haskell.md)).
 10. **`lambda` is crippled by design; closures and defaults are
     evaluation-time traps.** PEP 3099: "Adding support for statements is a
     non-starter" [3]; PEP 8: "Always use a def statement instead of an
@@ -114,26 +124,32 @@ a typed Python-syntax language that dropped it ([python.md](../languages/python.
 14. **f-strings won, and PEP 701 says how to parse them.** PEP 498 (2015):
     older methods were "either error prone, inflexible, or cumbersome";
     PEP 701 (2022) lifted the quote, backslash and nesting limits because
-    tokenising f-strings "as `STRING` tokens" with a hand-written
-    post-parser "has led to inconsistencies and bugs" [11]. Mojo shipped
-    without f-strings [34, secondary] ([mojo.md](../languages/mojo.md)).
+    tokenising f-strings "as `STRING` tokens" with hand-written parsing code
+    "has historically led to a considerable number of inconsistencies and
+    bugs" [11]. Mojo shipped without f-strings [34, secondary]
+    ([mojo.md](../languages/mojo.md)).
 15. **Docstrings as runtime strings fail for attributes.** PEP 257: strings
     outside the first statement "are not recognized by the Python bytecode
     compiler"; PEP 224 (2000) was rejected ("It's not the implementation,
-    it's the syntax"); Sphinx needs `#:` comments [12]. Nim's `##` documents
+    it's the syntax"); Sphinx adds `#:` doc comments and also accepts a
+    docstring on the line after the definition [12]. Nim's `##` documents
     items and fields uniformly ([nim.md](../languages/nim.md)).
 16. **Decorators are a run-time call wearing declaration syntax.** PEP 318
     (2003): `@` was "a fairly arbitrary choice"; the dominant use is
-    registration (Flask: "Use the `route()` decorator to bind a function to
-    a URL") [13] ([python.md](../languages/python.md)). Mojo: "Mojo doesn't
-    support custom decorators. The decorators in this section are built
-    into the compiler" [34]; Nim uses `{.pragma.}` [33].
-17. **`with` is the scoped-resource idiom GC languages copied; RAII
+    registration [unverified] (Flask: "Use the `route()` decorator to bind
+    a function to a URL") [13] ([python.md](../languages/python.md)). Mojo:
+    "Mojo doesn't support custom decorators. The decorators in this section
+    are built into the compiler" [34]; Nim uses `{.pragma.}` [33].
+17. **`with` is the scoped-resource idiom GC languages share; RAII
     languages did not need it.** PEP 343 (2005) exists "to factor out
-    standard uses of `try/finally`" and rejected PEP 340 because "the
-    with-statement should not be usable as a loop" [14]. Java, C#, Kotlin
-    and JavaScript copied it ([python.md](../languages/python.md)); Rust and
-    Swift destroy at scope end; Mojo kept it [34]
+    standard uses of `try/finally`"; PEP 340 was rejected in its favour
+    after "a lot of opposition from people who didn't like the fact that it
+    was, under the covers, a (potential) looping construct" [14]. Java
+    (try-with-resources), C# (`using`, in ECMA-334 since 2001, before PEP
+    343), Kotlin (`use`) and JavaScript (`using`, with Python's `with`
+    listed as prior art) have equivalents [42]
+    ([python.md](../languages/python.md)); Rust drops at scope end, Swift
+    when ARC finds an instance "no longer needed" [30]; Mojo kept it [34]
     ([memory-management.md](memory-management.md)).
 18. **Implicit generator functions were argued against in their own PEP.**
     PEP 255 (2001): "A `yield` statement buried in the body is not enough
@@ -167,14 +183,18 @@ a typed Python-syntax language that dropped it ([python.md](../languages/python.
     regressed.** PEP 238 (2001): `/` "has an ambiguous meaning for numerical
     arguments"; PEP 465 (2014) justified `@` with counts (`dot` 0 per
     10,000 stdlib lines, 99 in scikit-learn) [17]. Mojo: "`/` returns a
-    value that always matches the type of the operands" [34]; Codon defaults
-    to C semantics [35] ([strings-and-numerics.md](strings-and-numerics.md)).
-22. **The walrus is the one PEP 3099 promise Python broke**: "There will be
-    no alternative binding operators such as `:=`" [3]; PEP 572 (2018)
-    added it and ended the BDFL role ([python.md](../languages/python.md)).
-    PEP 695's `def f[T]` and `type` went the other way, with variance
-    inferred because it "is not well understood by most Python developers"
-    [18].
+    value that always matches the type of the operands" [34]; Codon's `//`
+    and `%` follow C, not Python, by default (`-numerics=py` restores
+    Python's) [35] ([strings-and-numerics.md](strings-and-numerics.md)).
+22. **The walrus is the best-known PEP 3099 promise Python broke**: "There
+    will be no alternative binding operators such as `:=`" [3]; PEP 572
+    (2018) added it and ended the BDFL role
+    ([python.md](../languages/python.md)). Two more went: `zip()` "won't
+    grow keyword arguments" [3] (PEP 618 added `strict=` [19]) and "The
+    parser won't be more complex than LL(1)" [3] (PEP 617 replaced it with a
+    PEG parser in 3.9 [39]). PEP 695's `def f[T]` and `type` went the other
+    way, with variance inferred because it "is not well understood by most
+    Python developers" [18].
 23. **Underscore privacy, `__all__`, dunders, imports and `__main__` are
     conventions a compiler replaces.** PEP 8: internal names "should still
     be prefixed with a single leading underscore", modules "should
@@ -265,7 +285,7 @@ closures and `match` arms are restated in indentation form.
 3. PEP 3099, "Things that will Not Change in Python 3000". https://peps.python.org/pep-3099/ (4 Apr 2006)
 4. Python Design and History FAQ; Programming FAQ. https://docs.python.org/3/faq/design.html ; https://docs.python.org/3/faq/programming.html (2026)
 5. PEP 3107, "Function Annotations" (2 Dec 2006); PEP 484, "Type Hints" (2014). https://peps.python.org/pep-3107/ ; https://peps.python.org/pep-0484/
-6. PEP 557, "Data Classes". https://peps.python.org/pep-0557/ (2 Jun 2017)
+6. PEP 557, "Data Classes" (2 Jun 2017); `dataclasses`, "Mutable default values". https://peps.python.org/pep-0557/ ; https://docs.python.org/3/library/dataclasses.html (2026)
 7. PEP 505, "None-aware operators" (Deferred). https://peps.python.org/pep-0505/ (18 Sep 2015)
 8. PEP 202 (13 Jul 2000), PEP 274 (25 Oct 2001), PEP 289 (30 Jan 2002). https://peps.python.org/pep-0202/ ; https://peps.python.org/pep-0274/ ; https://peps.python.org/pep-0289/
 9. G. van Rossum, "The fate of reduce() in Python 3000". https://www.artima.com/weblogs/viewpost.jsp?thread=98196 (10 Mar 2005)
@@ -273,7 +293,7 @@ closures and `match` arms are restated in indentation form.
 11. PEP 498, "Literal String Interpolation" (1 Aug 2015); PEP 701, "Syntactic formalization of f-strings" (15 Nov 2022). https://peps.python.org/pep-0498/ ; https://peps.python.org/pep-0701/
 12. PEP 257, "Docstring Conventions" (29 May 2001); PEP 224, "Attribute Docstrings" (Rejected, 23 Aug 2000); Sphinx, "sphinx.ext.autodoc". https://peps.python.org/pep-0257/ ; https://peps.python.org/pep-0224/ ; https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html (2026)
 13. PEP 318, "Decorators for Functions and Methods" (5 Jun 2003); Flask 3.1 Quickstart, "Routing". https://peps.python.org/pep-0318/ ; https://flask.palletsprojects.com/en/stable/quickstart/ (2026)
-14. PEP 343, "The 'with' Statement". https://peps.python.org/pep-0343/ (13 May 2005)
+14. PEP 343, "The 'with' Statement" (13 May 2005); PEP 340, "Anonymous Block Statements" (Rejected, 27 Apr 2005). https://peps.python.org/pep-0343/ ; https://peps.python.org/pep-0340/
 15. PEP 255, "Simple Generators". https://peps.python.org/pep-0255/ (18 May 2001)
 16. PEP 634 and PEP 635, "Structural Pattern Matching" (12 Sep 2020). https://peps.python.org/pep-0634/ ; https://peps.python.org/pep-0635/
 17. PEP 308, "Conditional Expressions" (7 Feb 2003; decided 29 Sep 2005); PEP 238, "Changing the Division Operator" (11 Mar 2001); PEP 465, "A dedicated infix operator for matrix multiplication" (20 Feb 2014). https://peps.python.org/pep-0308/ ; https://peps.python.org/pep-0238/ ; https://peps.python.org/pep-0465/
@@ -289,12 +309,16 @@ closures and `match` arms are restated in indentation form.
 27. Black, "The Black code style", Strings; Ruff B006; pylint W0102. https://black.readthedocs.io/en/stable/the_black_code_style/current_style.html ; https://docs.astral.sh/ruff/rules/mutable-argument-default/ ; https://pylint.readthedocs.io/en/latest/user_guide/messages/warning/dangerous-default-value.html (2026)
 28. Google Python Style Guide (§2.2, 2.4, 2.5, 2.6, 2.7, 2.10-2.14, 2.17). https://google.github.io/styleguide/pyguide.html (2026)
 29. The Rust Programming Language, ch. 3.5; rustc deny-by-default lints, `bindings_with_variant_name`. https://doc.rust-lang.org/book/ch03-05-control-flow.html ; https://doc.rust-lang.org/rustc/lints/listing/deny-by-default.html (2026)
-30. The Swift Programming Language, "The Basics", Booleans; SE-0380, "`if` and `switch` expressions" (Swift 5.9, 2023). https://github.com/swiftlang/swift-book/blob/main/TSPL.docc/LanguageGuide/TheBasics.md ; https://github.com/swiftlang/swift-evolution/blob/main/proposals/0380-if-switch-expressions.md
+30. The Swift Programming Language, "The Basics", Booleans, and "Automatic Reference Counting"; SE-0380, "`if` and `switch` expressions" (Swift 5.9, 2023). https://github.com/swiftlang/swift-book/blob/main/TSPL.docc/LanguageGuide/TheBasics.md ; https://github.com/swiftlang/swift-book/blob/main/TSPL.docc/LanguageGuide/AutomaticReferenceCounting.md ; https://github.com/swiftlang/swift-evolution/blob/main/proposals/0380-if-switch-expressions.md
 31. The Go Programming Language Specification (if statements, short variable declarations, index and slice expressions). https://go.dev/ref/spec (2026)
 32. Julia Manual, "Chaining comparisons"; Kotlin docs, "Operator overloading". https://docs.julialang.org/en/v1/manual/mathematical-operations/ ; https://kotlinlang.org/docs/operator-overloading.html (2026)
 33. Nim Manual (grammar, Boolean type, discard, iterators, defaults, `in`/`contains`, pragmas); `std/assertions`; `std/sugar`. https://nim-lang.org/docs/manual.html ; https://nim-lang.org/docs/assertions.html ; https://nim-lang.org/docs/sugar.html (2026)
-34. Mojo 1.1 docs: "Compound statements", "Decorators", "Control flow", "Python to Mojo", `Boolable`; cheat sheet (t-strings, 1.0.0b2). https://mojolang.org/docs/reference/compound-statements/ ; https://mojolang.org/docs/reference/decorators/ ; https://mojolang.org/docs/manual/control-flow/ ; https://mojolang.org/docs/manual/python-to-mojo/ ; https://docs.modular.com/mojo/std/builtin/bool/Boolable (2026)
-35. Codon, "Language overview: Differences with Python"; RPython, "RPython Language"; Cython User Guide, "Language Basics". https://docs.exaloop.io/language/overview/ ; https://rpython.readthedocs.io/en/latest/rpython.html ; https://cython.readthedocs.io/en/latest/src/userguide/language_basics.html (2026)
-36. Wikipedia, "Boo (programming language)" (2003; 0.9.7, Mar 2013) and "Cobra (programming language)" (2006; 0.9.6, Dec 2013). https://en.wikipedia.org/wiki/Boo_(programming_language) ; https://en.wikipedia.org/wiki/Cobra_(programming_language) (2026)
+34. Mojo 1.1 docs: "Compound statements", "Decorators", "Control flow", "Operators", "Python to Mojo", `Boolable`; basics cheat sheet (t-strings, 1.0.0b2). https://mojolang.org/docs/reference/compound-statements/ ; https://mojolang.org/docs/reference/decorators/ ; https://mojolang.org/docs/manual/control-flow/ ; https://mojolang.org/docs/manual/operators/ ; https://mojolang.org/docs/manual/python-to-mojo/ ; https://docs.modular.com/mojo/std/builtin/bool/Boolable ; https://mojolang.org/docs/reference/cheat-sheets/basics/ (2026)
+35. Codon, "Language overview: Differences with Python" and `stdlib/internal/types/int.codon` (`__add__`, `__floordiv__`, `__mod__`); RPython, "RPython Language"; Cython User Guide, "Language Basics". https://docs.exaloop.io/language/overview/ ; https://github.com/exaloop/codon/blob/develop/stdlib/internal/types/int.codon ; https://rpython.readthedocs.io/en/latest/rpython.html ; https://cython.readthedocs.io/en/latest/src/userguide/language_basics.html (2026)
+36. Wikipedia, "Boo (programming language)" (2003; 0.9.7, Mar 2013) and "Cobra (programming language)" (2006; 0.9.6, Dec 2013); boo-lang/boo, commit history (commits to 22 Sep 2026). https://en.wikipedia.org/wiki/Boo_(programming_language) ; https://en.wikipedia.org/wiki/Cobra_(programming_language) ; https://github.com/boo-lang/boo/commits/master (2026)
 37. pytest, "How to write and report assertions in tests". https://docs.pytest.org/en/stable/how-to/assert.html (2026)
 38. T. Hunner, "Using else with a loop in Python" (Hettinger's `nobreak`, second-hand). https://www.pythonmorsels.com/for-else/ (2026) [unverified]
+39. PEP 617, "New PEG parser for CPython" (24 Mar 2020). https://peps.python.org/pep-0617/
+40. CoffeeScript, "Chained Comparisons"; Raku, "Operators" (chaining binary precedence). https://coffeescript.org/#chained-comparisons ; https://docs.raku.org/language/operators (2026)
+41. ISO C draft N1570, §6.8.4.1 "The if statement" (2011); C++ working draft, [stmt.pre] (conditions). https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf ; https://eel.is/c++draft/stmt.pre (2026)
+42. ECMA-334 1st ed., "C# Language Specification", §15.13 "The using statement" (Dec 2001); TC39, "Explicit Resource Management" proposal, "Prior Art". https://www.ecma-international.org/wp-content/uploads/ECMA-334_1st_edition_december_2001.pdf ; https://github.com/tc39/proposal-explicit-resource-management (2026)

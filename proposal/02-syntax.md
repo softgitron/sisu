@@ -365,7 +365,7 @@ would recreate Scala 3's two-dialect split.
 | `class`, `__init__` | `struct` with declared fields, no inheritance | PEP 557 is the admission that classes are boilerplate; D-012 |
 | `a if c else b` | `if c: a else: b` | One spelling for one line and many; mirrors the statement form |
 | `lambda x: e` | `x -> e`, `it`, `do` blocks | `lambda` is "crippled" by its designer's own account; `do` gives the multi-line closure Python refused |
-| Truthiness | `bool` only | Every typed descendant refused it; Python's own `datetime.time` midnight bug |
+| Truthiness | `bool` only | Nim, Codon, Swift, Rust and Go refuse it and Mojo warns about it; Python's own `datetime.time` midnight bug |
 | `None` | `T?` with `?.`, `??`, `if let` | PEP 505's own counts of the boilerplate `None` creates |
 | `is` | none | A dynamic-language operator; the small-int cache trap |
 | `try`/`except`/`finally` | `T ! E`, `?`, `else`, `defer`, `Drop` | D-011; PEP 765's 73% incorrect `finally` sites |

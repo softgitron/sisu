@@ -166,7 +166,7 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 ### D-025 `and`, `or`, `not` as words on `bool` only; `!` reserved for error types; no truthiness
 
 *Alternatives:* `&& || !` (C family); Python's operand-returning `and`/`or` and truthiness of empty containers.
-*Evidence:* Stefik & Siebert 2013 (word operators measurably help novices; [studies.md](../research/evidence/studies.md)); Python, Carbon, Ada; frees `!` for `T ! E`. Truthiness was refused by every typed descendant of Python (Nim, Mojo warns, Codon) and by Swift, Rust and Go; Python's own `datetime.time` midnight bug ([python-idioms.md](../research/topics/python-idioms.md)).
+*Evidence:* Stefik & Siebert 2013 (word operators measurably help novices; [studies.md](../research/evidence/studies.md)); Python, Carbon, Ada; frees `!` for `T ! E`. Truthiness was refused by Nim and Codon, is accepted by Mojo only for `Boolable` types with a documented warning, and is refused by Swift, Rust and Go; Python's own `datetime.time` midnight bug ([python-idioms.md](../research/topics/python-idioms.md)).
 *Status:* decided.
 
 ### D-026 Closures: `params -> expr` inline, implicit `it` for one parameter, `do params:` trailing blocks for bodies with statements; `own` to capture by move
