@@ -129,7 +129,7 @@ generic container).
 
 **Current lean.** Attribute making it an error, with panics exempt.
 
-**What would settle it.** Whether generic containers (`List[File]`) need
+**What would settle it.** Whether generic containers (`list[File]`) need
 special handling in practice; try it in the standard library first.
 
 **Decision (October 2026).** `@must_consume` types: not consuming one is a compile error; panics are exempt.
@@ -139,7 +139,7 @@ special handling in practice; try it in the standard library first.
 
 ### Q-5. How much ambient authority? Standard streams, implicit or tracked context
 
-**Question.** `println` without a capability is convenient and almost
+**Question.** `print` without a capability is convenient and almost
 harmless; it is also the thin end of a wedge. Implicit context passing
 (Odin `context`, Scala `using`, Kotlin context parameters) would remove
 the "thread `Fs` through every call" cost at the price of invisible
@@ -148,7 +148,7 @@ dependencies.
 **Options.**
 - Stdio ambient, everything else explicit (current lean).
 - Nothing ambient (Austral). Hello world takes a parameter.
-- Implicit context carrying capabilities, declared per function (`fn f()
+- Implicit context carrying capabilities, declared per function (`def f()
   with Fs, Clock`). Visible in the signature, not at the call site. This is
   close to an effect system (Q-17) and to Scala's capture checking.
 
@@ -231,12 +231,12 @@ being adopted.
 ### Q-7. Residual error-syntax questions
 
 Inferred error sets (`T !`) allowed on `pub` functions (Zig: yes; lean:
-lint, not error)? `else { e -> ... }` versus a `catch` keyword for the
+lint, not error)? `else as e:` versus a `catch` keyword for the
 handler? Should `?` on an `Option` inside a function returning `T ! E`
 convert `None` to a standard `NoneError` (Rust: no, needs `.ok_or`)? To be
 settled by writing the standard library and counting the friction.
 
-**Decision (October 2026).** Resolve while writing the standard library, following the current lean: inferred error sets on `pub` functions are a lint; `else { e -> ... }` is the handler form; `?` on an `Option` inside a function returning `T ! E` requires an explicit conversion.
+**Decision (October 2026).** Resolve while writing the standard library, following the current lean: inferred error sets on `pub` functions are a lint; `else as e:` is the handler form; `?` on an `Option` inside a function returning `T ! E` requires an explicit conversion.
 
 ### Q-36. A restart/condition system for the application tier
 
@@ -267,7 +267,7 @@ within the first year of the prototype.
 ### Q-11. Coherence: orphan rule versus scoped instances
 
 Global coherence (Rust, Haskell) makes `impl` resolution predictable and
-`Map[K, V]` safe, at the cost of newtype boilerplate. Scoped instances
+`dict[K, V]` safe, at the cost of newtype boilerplate. Scoped instances
 (Scala 3 `given`, OCaml's unshipped modular implicits) remove the
 boilerplate and reintroduce "which instance is in scope" confusion.
 Lean: orphan rule plus `@delegate`. Settled by counting newtype wrappers in
@@ -388,7 +388,7 @@ Lean: braces. Settled by nothing short of a controlled study, which nobody
 has run on experienced programmers; absent that, the tooling argument
 stands.
 
-**Decision (October 2026).** Indentation-based syntax, following Python idioms wherever a Python idiom is not itself a documented mistake. Every deviation from Python is recorded with its reason in [proposal/02](proposal/02-syntax.md), and the evidence on how to do indentation well in a compiled language is in [research/topics/indentation-syntax.md](research/topics/indentation-syntax.md).
+**Decision (October 2026).** Indentation-based syntax, following Python idioms wherever a Python idiom is not itself a documented mistake. The rules (layout in the lexer, spaces only, `do` trailing blocks, no brace dialect) come from [research/topics/indentation-syntax.md](research/topics/indentation-syntax.md); the idiom-by-idiom verdicts from [research/topics/python-idioms.md](research/topics/python-idioms.md); every deviation from Python is recorded with its reason in [proposal/02](proposal/02-syntax.md). Decisions D-027 (reversed), D-055.
 
 ### Q-9. Last-expression block values versus explicit `return` only
 
@@ -397,7 +397,7 @@ Lean: last-expression values, because `if`/`match` as expressions need
 them anyway. Settled by the error-message corpus: if "expected (), found
 int" is a top-ten diagnostic in the prototype, reconsider.
 
-**Decision (October 2026).** Explicit `return` only; blocks never have a value. `if` and `match` have expression forms only when every branch is a single expression. The named-result-variable alternative (MATLAB output variables, Go named results, Nim's `result`, Pascal's `Result`) is assessed in [research/topics/function-results.md](research/topics/function-results.md); the short version is that it is kept only as the way `ensures` clauses name the result, not as a way to return.
+**Decision (October 2026).** Explicit `return` only; blocks never have a value. `if` and `match` have expression forms only when every branch is a single expression (Swift SE-0380's rule). The MATLAB-style alternative the owner asked about, a result variable named in the signature, was assessed in [research/topics/function-results.md](research/topics/function-results.md): its documentation and contract benefits are real, but every shipped version (Go named results, Nim `result`, Pascal `Result`, Eiffel) carries the default-initialised-result and shadowing bug class, and every Go style guide restricts the naked return it enables. Sisu keeps the benefit without the variable: a function may declare *labelled* results, `def divmod(a: int, b: int) -> (q: int, r: int)`, which document the outputs, let `ensures` name them and let callers write `res.q`, while the body still writes `return (q, r)`; an unlabelled result is `result` inside `ensures` only. Decision D-056.
 
 ### Q-12. Uniform function call syntax
 
@@ -411,10 +411,10 @@ corpus.
 
 ### Q-25. Implicit closure parameter (`it`, `$0`)
 
-Lean: no; `{ x -> x * 2 }` is five characters longer than `{ it * 2 }` and
-unambiguous. Settled by usability testing.
+The first draft leaned no (`x -> x * 2` is a few characters longer than
+`it * 2` and unambiguous); the owner decided yes.
 
-**Decision (October 2026).** Yes: a single-parameter closure may use the implicit parameter `it`.
+**Decision (October 2026).** Yes: an argument expression that mentions `it` where a one-parameter function is expected is a closure (`xs.map(it * 2)`), and a `do:` block without parameters binds `it`. In nested calls `it` belongs to the innermost such argument. Decision D-026.
 
 ### Q-33. Non-ASCII identifiers
 

@@ -1,93 +1,98 @@
-// Traits, generics, dynamic dispatch, derive, delegation.
+# Traits, generics, dynamic dispatch, derive, delegation.
 
-trait Shape {
-    fn area(self) -> f64
-    fn perimeter(self) -> f64
-    fn describe(self) -> String {                       // provided method
-        "area {self.area():.2}, perimeter {self.perimeter():.2}"
-    }
-}
+trait Shape:
+    def area(self) -> f64
+    def perimeter(self) -> f64
+    def describe(self) -> String:                       # provided method
+        return "area {self.area():.2f}, perimeter {self.perimeter():.2f}"
 
 @derive(Copy, Debug, Eq)
-struct Circle { radius: f64 }
+struct Circle:
+    radius: f64
 
 @derive(Copy, Debug, Eq)
-struct Rect { w: f64, h: f64 }
+struct Rect:
+    w: f64
+    h: f64
 
-impl Shape for Circle {
-    fn area(self) -> f64 { PI * self.radius * self.radius }
-    fn perimeter(self) -> f64 { 2.0 * PI * self.radius }
-}
+impl Shape for Circle:
+    def area(self) -> f64:
+        return PI * self.radius ** 2
+    def perimeter(self) -> f64:
+        return 2.0 * PI * self.radius
 
-impl Shape for Rect {
-    fn area(self) -> f64 { self.w * self.h }
-    fn perimeter(self) -> f64 { 2.0 * (self.w + self.h) }
-}
+impl Shape for Rect:
+    def area(self) -> f64:
+        return self.w * self.h
+    def perimeter(self) -> f64:
+        return 2.0 * (self.w + self.h)
 
-// Static dispatch: monomorphised per S. Checked here, not at each use.
-fn total_area[S: Shape](shapes: List[S]) -> f64 {
-    shapes.iter().map { s -> s.area() }.sum()
-}
+# Static dispatch: monomorphised per S. Checked here, not at each use.
+def total_area[S: Shape](shapes: list[S]) -> f64:
+    return shapes.iter().map(it.area()).sum()
 
-// Dynamic dispatch, spelled out. `dyn Shape` is unsized; it lives behind ref or Box.
-fn print_all(shapes: List[Box[dyn Shape]]) {
-    for s in shapes { println(s.describe()) }
-}
+# Dynamic dispatch, spelled out. `dyn Shape` is unsized; it lives behind ref or Box.
+def print_all(shapes: list[Box[dyn Shape]]):
+    for s in shapes:
+        print(s.describe())
 
-// Associated types and where clauses.
-trait Container {
+# Associated types and where clauses.
+trait Container:
     type Item
-    fn get(self, i: int) -> ref Item?
-    fn len(self) -> int
-}
+    def get(self, i: int) -> ref Item?
+    def len(self) -> int
 
-impl[T] Container for List[T] {
+impl[T] Container for list[T]:
     type Item = T
-    fn get(self, i: int) -> ref T? { if i < self.len() { Some(ref self[i]) } else { None } }
-    fn len(self) -> int { self.len() }
-}
+    def get(self, i: int) -> ref T?:
+        return if i < len(self): Some(ref self[i]) else: None
+    def len(self) -> int:
+        return len(self)
 
-fn first_display[C: Container](c: C) -> String where C.Item: Display {
-    c.get(0).map { x -> "{x}" } ?? "<empty>"
-}
+def first_display[C: Container](c: C) -> String where C.Item: Display:
+    return c.get(0).map("{it}") ?? "<empty>"
 
-// Operator overloading on the fixed set, via traits.
+# Operator overloading on the fixed set, via traits.
 @derive(Copy, Debug, Eq)
-struct Vec2 { x: f64, y: f64 }
+struct Vec2:
+    x: f64
+    y: f64
 
-impl Add for Vec2 {
-    fn add(self, other: Vec2) -> Vec2 { Vec2 { x: self.x + other.x, y: self.y + other.y } }
-}
+impl Add for Vec2:
+    def add(self, other: Vec2) -> Vec2:
+        return Vec2(x=self.x + other.x, y=self.y + other.y)
 
-// Newtypes with delegation: distinct type, zero cost, chosen traits forwarded.
-struct Meters(f64)
-    @delegate(Add, Sub, Ord, Display) to self.0
+# Newtypes with delegation: distinct type, zero cost, chosen traits forwarded.
+@delegate(Add, Sub, Ord, Display, to="value")
+struct Meters:
+    value: f64
 
-struct Seconds(f64)
-    @delegate(Add, Sub, Ord, Display) to self.0
+@delegate(Add, Sub, Ord, Display, to="value")
+struct Seconds:
+    value: f64
 
-fn speed(d: Meters, t: Seconds) -> f64 { d.0 / t.0 }
-// speed(Seconds(1.0), Meters(2.0))    // compile error: the newtypes are distinct
+def speed(d: Meters, t: Seconds) -> f64:
+    return d.value / t.value
+# speed(Seconds(1.0), Meters(2.0))    # compile error: the newtypes are distinct
 
-// Enum vs trait: closed set of variants -> enum; open set of behaviours -> trait.
-enum Command {
-    Move { dx: int, dy: int }
+# Enum vs trait: closed set of variants -> enum; open set of behaviours -> trait.
+enum Command:
+    Move(dx: int, dy: int)
     Say(String)
     Quit
-}
 
-fn run(cmd: Command) {
-    match cmd {
-        Move { dx, dy } -> println("move {dx},{dy}")
-        Say(text) -> println(text)
-        Quit -> return
-    }
-}
+def run(cmd: Command):
+    match cmd:
+        case Move(dx, dy):
+            print("move {dx},{dy}")
+        case Say(text):
+            print(text)
+        case Quit:
+            return
 
-fn demo() {
-    let shapes: List[Box[dyn Shape]] = [Box.new(Circle { radius: 1.0 }), Box.new(Rect { w: 2.0, h: 3.0 })]
+def demo():
+    let shapes: list[Box[dyn Shape]] = [Box(Circle(radius=1.0)), Box(Rect(w=2.0, h=3.0))]
     print_all(shapes)
-    println(total_area([Circle { radius: 1.0 }, Circle { radius: 2.0 }]))
-    println(Vec2 { x: 1.0, y: 2.0 } + Vec2 { x: 3.0, y: 4.0 })
-    println(first_display([1, 2, 3]))
-}
+    print(total_area([Circle(radius=1.0), Circle(radius=2.0)]))
+    print(Vec2(x=1.0, y=2.0) + Vec2(x=3.0, y=4.0))
+    print(first_display([1, 2, 3]))

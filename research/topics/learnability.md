@@ -80,7 +80,7 @@ removing features: no lifetimes, no null, no exceptions, no `async`, no
 inheritance, no macros; one way to write each thing; Elm-grade diagnostics
 with codes and fix-its tested as a product; a small consensus syntax; a
 total standard library; a documented "first week" path (`int`, `str`,
-`List`, `?`, `!`, `scope`) that does not meet `ref`, `view`, `Shared` or
+`list`, `?`, `!`, `scope`) that does not meet `ref`, `view`, `Shared` or
 `comptime` until needed. See [proposal/00](../../proposal/00-vision-and-principles.md)
 and [proposal/10](../../proposal/10-tooling.md); principles P1, P8.
 

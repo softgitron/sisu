@@ -1,72 +1,62 @@
-// Capabilities: no ambient authority, attenuation, testing with fakes.
+# Capabilities: no ambient authority, attenuation, testing with fakes.
 
-use std.cap.{System, Fs, Net, Clock, Rand}
+from std.cap import System, Fs, Net, Clock, Rand
 
-struct Cache {
-    fs: Fs                 // a capability stored at construction, already narrowed
+struct Cache:
+    fs: Fs                   # a capability stored at construction, already narrowed
     clock: Clock
     ttl: Duration
-}
 
-impl Cache {
-    fn new(fs: Fs, clock: Clock, ttl: Duration) -> Cache { Cache { fs, clock, ttl } }
+    def get(self, key: str) -> Bytes?:
+        let meta = self.fs.metadata(key) else: return None
+        if self.clock.now() - meta.modified > self.ttl:
+            return None
+        return self.fs.read(key).ok()
 
-    fn get(self, key: str) -> Bytes? {
-        let meta = self.fs.metadata(key) else { return None }
-        if self.clock.now() - meta.modified > self.ttl { return None }
-        self.fs.read(key).ok()
-    }
+    def put(self, key: str, value: Bytes) -> ! IoError:
+        return self.fs.write(key, value)
 
-    fn put(self, key: str, value: Bytes) -> ! IoError {
-        self.fs.write(key, value)
-    }
-}
-
-fn fetch_cached(net: Net, cache: Cache, url: Url) -> Bytes ! HttpError {
-    if let Some(hit) = cache.get(url.as_key()) { return Ok(hit) }
+def fetch_cached(net: Net, cache: Cache, url: Url) -> Bytes ! HttpError:
+    if let Some(hit) = cache.get(url.as_key()):
+        return Ok(hit)
     let body = net.get(url)?
-    _ = cache.put(url.as_key(), body)       // cache write failure is not a fetch failure
-    Ok(body)
-}
+    _ = cache.put(url.as_key(), body)        # cache write failure is not a fetch failure
+    return Ok(body)
 
-fn main(sys: System) -> ! AppError {
-    // Narrow before passing on. The cache can only touch ./cache; the fetcher
-    // can only reach one host. Neither can read the environment or spawn processes.
+def main(sys: System) -> ! AppError:
+    # Narrow before passing on. The cache can only touch ./cache; the fetcher
+    # can only reach one host. Neither can read the environment or spawn processes.
     let cache_fs = sys.fs.restrict_to("./cache")
     let api = sys.net.only_hosts(["api.example.com"]).https_only()
-    let cache = Cache.new(cache_fs, sys.clock, 10.minutes)
+    let cache = Cache(fs=cache_fs, clock=sys.clock, ttl=Duration.minutes(10))
 
     let data = fetch_cached(api, cache, Url.parse("https://api.example.com/v1/data")?)?
-    println("{data.len()} bytes")
-    Ok(())
-}
+    print("{len(data)} bytes")
+    return Ok(())
 
-// Tests: no mocking framework, no global hooks. Fakes are standard.
-test "cache expires entries" {
+# Tests: no mocking framework, no global hooks. Fakes are standard.
+test "cache expires entries":
     let fs = Fs.in_memory()
     let clock = Clock.frozen_at(DateTime.parse("2026-10-11T12:00:00Z"))
-    let cache = Cache.new(fs, clock, 1.hour)
+    let cache = Cache(fs=fs, clock=clock, ttl=Duration.hours(1))
 
     cache.put("k", b"value").expect("in-memory write")
-    assert_eq(cache.get("k"), Some(b"value"))
+    assert cache.get("k") == Some(b"value")
 
-    clock.advance(2.hours)
-    assert_eq(cache.get("k"), None)
-}
+    clock.advance(Duration.hours(2))
+    assert cache.get("k") == None
 
-test "fetch uses the cache before the network" {
+test "fetch uses the cache before the network":
     let net = Net.fake().respond_to("https://api.example.com/v1/data", b"from net")
-    let cache = Cache.new(Fs.in_memory(), Clock.frozen_at(DateTime.epoch()), 1.hour)
+    let cache = Cache(fs=Fs.in_memory(), clock=Clock.frozen_at(DateTime.epoch()), ttl=Duration.hours(1))
     let url = Url.parse("https://api.example.com/v1/data").expect("valid")
 
-    assert_eq(fetch_cached(net, cache, url), Ok(b"from net"))
-    assert_eq(net.request_count(), 1)
-    assert_eq(fetch_cached(net, cache, url), Ok(b"from net"))
-    assert_eq(net.request_count(), 1)        // second call served from cache
-}
+    assert fetch_cached(net, cache, url) == Ok(b"from net")
+    assert net.request_count() == 1
+    assert fetch_cached(net, cache, url) == Ok(b"from net")
+    assert net.request_count() == 1          # second call served from cache
 
-// What a dependency cannot do. This function has no capability parameters,
-// so it provably performs no I/O; the compiler can evaluate it at compile time.
-pure fn checksum(data: Slice[u8]) -> u32 {
-    data.iter().fold(0u32) { acc, b -> acc *% 31 +% b.into() }
-}
+# What a dependency cannot do. This function has no capability parameters,
+# so it provably performs no I/O; the compiler can evaluate it at compile time.
+pure def checksum(data: Slice[u8]) -> u32:
+    return data.iter().fold(0u32, (acc, b) -> acc *% 31 +% b.into())

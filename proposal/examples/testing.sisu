@@ -1,0 +1,70 @@
+# Tests: discovery, assertions, fixtures via capabilities, parametrised,
+# property-based, snapshot and benchmark. See proposal/17-testing.md.
+
+from std.test import check, any, assert_snapshot, bench
+from std.cap import Fs, Clock
+
+# A test block is a declaration compiled only by `sisu test`.
+test "parse_int accepts digits":
+    assert parse_int("42") == Ok(42)
+
+# A failing assert shows every sub-expression:
+#   assert parse_int(text).ok() == Some(expected)
+#          │         │     │        │
+#          │         "4x"  None     Some(42)
+#          Err(BadDigit(at=1, found='x'))
+
+# Grouping is one level deep; tags select and skip.
+suite "parse_int":
+    @tag("slow")
+    test "rejects empty input":
+        assert parse_int("") == Err(UnexpectedEnd)
+
+    # Parametrised: each case is reported, filtered and run separately.
+    test "rejects bad digits" for text, at in [("4x", 1), ("x4", 0), ("12.5", 2)]:
+        assert parse_int(text) == Err(BadDigit(at=at, found=text.chars().nth(at).unwrap()))
+
+# Fixtures are values. A capability fake is a fixture; its Drop is the teardown.
+test "config loads from a file":
+    let fs = Fs.in_memory({"app.toml": "port = 8080"})
+    let cfg = load_config(fs, "app.toml").expect("valid file")
+    assert cfg.port == 8080
+
+# Each test gets its own clock that advances only when every task is blocked,
+# so time-dependent code is deterministic (Go's synctest).
+test "cache entry expires after ttl":
+    let clock = Clock.frozen_at(DateTime.epoch())
+    let cache = Cache(fs=Fs.in_memory(), clock=clock, ttl=Duration.seconds(30))
+    cache.put("k", b"v").expect("")
+    clock.advance(Duration.seconds(31))
+    assert cache.get("k") == None
+
+# Property tests: derived generators, shrinking, a replayed failure database.
+test "sort is idempotent":
+    check(any[list[int]]) do xs:
+        var once = xs.copy()
+        once.sort()
+        var twice = once.copy()
+        twice.sort()
+        return once == twice
+
+# Under `sisu test --fuzz` the same check is coverage-guided and saves failing
+# inputs under tests/corpus/.
+test "parser never panics":
+    check(any[String], text -> parse_int(text).is_ok() or parse_int(text).is_err())
+
+# Snapshot: the rendered value is stored in a .snap file next to the test;
+# a change fails with a diff; `sisu test --update` accepts it.
+test "help text is stable":
+    assert_snapshot(cli.help_text[Options]())
+
+# A test that needs the real System is serial and says so.
+@serial
+test "reads the real home directory"(sys: System):
+    assert sys.env.get("HOME").is_some()
+
+# Benchmarks are not run by `sisu test`; `sisu bench` runs them with a
+# harness-controlled loop and reports confidence intervals.
+bench "parse_int on a 9-digit number":
+    for _ in b.loop():
+        black_box(parse_int("123456789"))

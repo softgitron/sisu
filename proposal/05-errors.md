@@ -61,18 +61,16 @@ everything below it. Zig's error sets solve this and Sisu takes the design,
 adding payloads (Zig's lack of them is its most-cited limitation):
 
 ```sisu
-error IoError {
-    NotFound { path: Path }
-    PermissionDenied { path: Path }
+error IoError:
+    NotFound(path: Path)
+    PermissionDenied(path: Path)
     Interrupted
-}
 
-error ParseError {
+error ParseError:
     UnexpectedEnd
-    BadDigit { at: int, found: char }
-}
+    BadDigit(at: int, found: char)
 
-fn load(fs: Fs, p: Path) -> Config ! { IoError, ParseError } { ... }
+def load(fs: Fs, p: Path) -> Config ! {IoError, ParseError}: ...
 ```
 
 Rules:
@@ -94,11 +92,14 @@ Rules:
   and propagating the rest is the common pattern:
 
 ```sisu
-match load(fs, path) {
-    Ok(cfg) -> cfg
-    Err(NotFound { path }) -> Config.default_at(path)
-    Err(e) -> return Err(e)        // e still has the full set type
-}
+let cfg: Config                        # definitely assigned below, or the function returns
+match load(fs, path):
+    case Ok(c):
+        cfg = c
+    case Err(NotFound(path)):
+        cfg = Config.default_at(path)
+    case Err(e):
+        return Err(e)                  # e still has the full set type
 ```
 
 - An error set may be *open* (`error AppError { ..., .. }`) to allow other
@@ -118,19 +119,24 @@ chains that can fail use `try_map`/`try_collect`, as in Rust.
 ## Handling
 
 ```sisu
-let x = fallible() else { e -> fallback(e) }   // handle with the error
-let x = fallible() else { fallback }            // handle without it
+let x = fallible() else as e: fallback(e)     # handle with the error in scope
+let x = fallible() else: fallback              # handle without it
+let x = fallible() else:                       # a block after else must diverge
+    return Err(Unavailable)
 let x = fallible().or(default)
-let x = fallible().or_else { e -> recover(e) }
-let x = fallible().expect("invariant: config always loads")   // panics with message
-let x = fallible()?                              // propagate
-match fallible() { Ok(v) -> ..., Err(e) -> ... }
+let x = fallible().or_else(e -> recover(e))
+let x = fallible().expect("invariant: config always loads")   # panics with message
+let x = fallible()?                            # propagate
+match fallible():
+    case Ok(v): ...
+    case Err(e): ...
 ```
 
-`else` is the universal fallback form for both `T?` and `T ! E`: the block
-after `else` either diverges or produces a `T`. This is Rust's `let-else`
-generalised to expressions and given the error as an optional closure
-parameter.
+`else` is the universal fallback form for both `T?` and `T ! E`. An
+expression on the same line as `else:` is the fallback value; an indented
+block after `else:` must diverge (`return`, `break`, `continue`, `panic`),
+because blocks have no value (D-056); `else as e:` binds the error. This is
+Rust's `let-else` with the error made available.
 
 A `Result` or `Option` that is neither used nor explicitly discarded
 (`_ = fallible()`) is a compile error, not a warning. Go's unchecked

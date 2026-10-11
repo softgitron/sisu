@@ -34,8 +34,8 @@ have evidence behind them.
    decision.** gofmt, rustfmt, Black, Prettier, Elixir's formatter, Zig's:
    every language that shipped one is praised for it and no language has
    removed one ([go.md](../languages/go.md)).
-5. **Braces vs indentation is unresolved and the tooling argument
-   decides it.** Python, Nim, F# and Haskell users love indentation and
+5. **Braces vs indentation is unresolved on the evidence; tooling decided
+   the first draft, the owner decided the language.** Python, Nim, F# and Haskell users love indentation and
    it is readable; braces survive copy-paste, code generation, multi-line
    closures and trailing-closure syntax, and every formatter-first
    language chose them. F#'s designer judged that OCaml's `in`/`;;` cost
@@ -82,13 +82,21 @@ have evidence behind them.
 
 ## Recommendation for Sisu
 
-Braces, no semicolons, newline-terminated statements; `and`/`or`/`not`;
-one closure syntax `{ x -> }` inline and trailing; `[T]` generics; `[k: v]`
-maps; `@` attributes; named arguments; `if`/`match` as expressions; a
-fixed overloadable operator set with no custom precedence and an error on
-mixed operator classes; ASCII identifiers with enforced casing; a formatter
-with no options. See [proposal/02](../../proposal/02-syntax.md); decisions
-D-020 through D-027, D-044 through D-046, D-048.
+The first draft recommended braces on the tooling argument (item 5); the
+project owner chose indentation with Python idioms (Q-8), and the research
+in [indentation-syntax.md](indentation-syntax.md),
+[python-idioms.md](python-idioms.md) and
+[function-results.md](function-results.md) says how to do that without the
+documented failures. The result: indentation blocks opened by `:`, layout
+decided in the lexer, spaces only, no brace dialect; `def`, `let`/`var`,
+`elif`, `pass`, `and`/`or`/`not`, `in`, same-direction chained comparisons;
+one closure form `x -> e` with `it` and `do` trailing blocks; explicit
+`return`; `[T]` generics; Python's literal forms (`[]`, `{k: v}`, `{a}`,
+comprehensions); `@` attributes; keyword arguments; a fixed overloadable
+operator set with no custom precedence and an error on mixed operator
+classes; PEP 8 naming with lowercase builtin types; a formatter with no
+options. See [proposal/02](../../proposal/02-syntax.md); decisions D-020
+through D-027, D-044 through D-046, D-055, D-056.
 
 ## Open questions
 

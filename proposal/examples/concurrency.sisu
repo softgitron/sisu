@@ -1,95 +1,82 @@
-// Structured, colourless concurrency.
+# Structured, colourless concurrency.
 
-use std.task.{scope, channel, select, Mutex}
-use std.cap.{Net, Clock}
+from std.task import scope, channel, select, Mutex
+from std.cap import Net, Clock
 
-// Fan out, join all, first error cancels the rest.
-fn fetch_all(net: Net, urls: List[Url]) -> List[Bytes] ! HttpError {
-    scope { s ->
-        let handles = urls.iter().map { url -> s.spawn { net.get(url) } }.collect[List]()
-        var out = List.with_capacity(handles.len())
-        for h in handles { out.push(h.join()?) }        // ? on a task failure cancels siblings
-        Ok(out)
-    }
-}
+# Fan out, join all, first error cancels the rest.
+def fetch_all(net: Net, urls: list[Url]) -> list[Bytes] ! HttpError:
+    return scope do s:
+        let handles = [s.spawn(() -> net.get(url)) for url in urls]
+        var out = list.with_capacity(len(handles))
+        for h in handles:
+            out.push(h.join()?)              # ? on a task failure cancels siblings
+        return Ok(out)
 
-// A worker pool over a bounded channel. No goroutine leaks: the scope joins.
-fn process_jobs(jobs: List[Job], workers: int) -> List[Outcome] {
-    let (tx, rx) = channel[Job](capacity: 32)
-    let results = Mutex.new(List.new())
-    scope { s ->
-        for _ in 0..workers {
-            s.spawn {
-                for job in rx {                           // ends when tx is closed and drained
+# A worker pool over a bounded channel. No goroutine leaks: the scope joins.
+def process_jobs(jobs: list[Job], workers: int) -> list[Outcome]:
+    let tx, rx = channel[Job](capacity=32)
+    let results = Mutex(list())
+    scope do s:
+        for _ in range(workers):
+            s.spawn do:
+                for job in rx:               # ends when tx is closed and drained
                     let outcome = handle(job)
                     results.lock().push(outcome)
-                }
-            }
-        }
-        for j in jobs { tx.send(j).expect("workers outlive the sender") }
+        for j in jobs:
+            tx.send(j).expect("workers outlive the sender")
         tx.close()
-    }
-    results.into_inner()
-}
+    return results.into_inner()
 
-// Timeouts and cancellation are structural.
-fn fetch_with_timeout(net: Net, clock: Clock, url: Url) -> Bytes ! { HttpError, Timeout } {
-    scope { s ->
-        let h = s.spawn { net.get(url) }
-        select {
-            r = h.join() -> r?
-            _ = clock.after(5.s) -> { s.cancel(); Err(Timeout) }
-        }
-    }
-}
+# Timeouts and cancellation are structural.
+def fetch_with_timeout(net: Net, clock: Clock, url: Url) -> Bytes ! {HttpError, Timeout}:
+    return scope do s:
+        let h = s.spawn(() -> net.get(url))
+        select:
+            case r = h.join():
+                return r
+            case _ = clock.after(Duration.seconds(5)):
+                s.cancel()
+                return Err(Timeout)
 
-// Supervision: restart a worker that panics, stop on cancellation.
-fn supervise(net: Net, port: int) {
-    scope { s ->
-        loop {
-            let worker = s.spawn { serve(net, port) }
-            match worker.join() {
-                Err(TaskPanicked { message, trace }) -> {
+# Supervision: restart a worker that panics, stop on cancellation.
+def supervise(net: Net, port: int):
+    scope do s:
+        while True:
+            let worker = s.spawn(() -> serve(net, port))
+            match worker.join():
+                case Err(TaskPanicked(message, trace)):
                     log.error("server crashed: {message}\n{trace}; restarting")
-                }
-                Err(Cancelled) -> break
-                Ok(()) -> break
-            }
-        }
-    }
-}
+                case Err(Cancelled):
+                    break
+                case Ok(()):
+                    break
 
-// What the type system refuses.
-fn refused() {
+# What the type system refuses.
+def refused():
     var counter = 0
-    scope { s ->
-        // s.spawn { counter += 1 }
-        // error[E0412]: `counter` is modified by a task while borrowed by another
-        //   help: wrap it: `let counter = Mutex.new(0)` or `Atomic.new(0)`
-        s.spawn { println(counter) }                      // reading a shared borrow is fine
-    }
+    scope do s:
+        # s.spawn(() -> counter += 1)
+        # error[E0412]: `counter` is modified by a task while borrowed by another
+        #   help: wrap it: `let counter = Mutex(0)` or `Atomic(0)`
+        s.spawn(() -> print(counter))        # reading a shared borrow is fine
 
-    let cell = Cell.new(0)
-    scope { s ->
-        // s.spawn { cell.set(1) }
-        // error[E0413]: `Cell[int]` is not Sync and cannot be shared between tasks
-        //   help: use `Mutex[int]` for shared mutation, or move the value with `own { }`
-    }
-}
+    let cell = Cell(0)
+    scope do s:
+        pass
+        # s.spawn(() -> cell.set(1))
+        # error[E0413]: `Cell[int]` is not Sync and cannot be shared between tasks
+        #   help: use `Mutex[int]` for shared mutation, or move the value with `own`
 
-// Generators are lazy iterators compiled to state machines; no runtime needed.
-gen fn primes() -> Iter[int] {
-    var found = List.new()
+# Generators are lazy iterators compiled to state machines; no runtime needed.
+def primes() -> Iter[int]:
+    var found = list()
     var n = 2
-    loop {
-        if found.iter().all { p -> n % p != 0 } {
+    while True:
+        if found.iter().all(n % it != 0):
             found.push(n)
             yield n
-        }
         n += 1
-    }
-}
 
-fn gen_demo() {
-    for p in primes().take(10) { println(p) }
-}
+def gen_demo():
+    for p in primes().take(10):
+        print(p)

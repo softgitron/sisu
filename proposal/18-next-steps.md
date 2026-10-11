@@ -131,7 +131,7 @@ error-tolerant, panic-free or incremental.
   explicit per-task frame stack, no host recursion for Sisu calls. Integers,
   floats, booleans, strings, `let`/`var`, arithmetic with overflow and
   divide-by-zero traps, `if`/`while`, functions, explicit `return`, ambient
-  `println`/`eprintln`.
+  `print`/`print_err`.
 - Conformance runner for `.sisu` files with expected-diagnostic
   annotations and expected output; CI runs it plus a front-end-time and an
   interpreter-time benchmark on every commit.
@@ -231,12 +231,12 @@ destruction and panic unwinding working exactly as
 **Deliverables.**
 
 - Structs; enums with payloads; exhaustive `match`; tuples; `T?` with
-  `?.`, `??`, `if let`, `let ... else`; `List`, `Map`, `Set`,
+  `?.`, `??`, `if let`, `let ... else`; `list`, `dict`, `set`,
   `String`/`str`, `Array` as host-backed builtins behind the std API; `for`
   over ranges and collections; non-escaping closures with `it`; explicit
   `return` only (blocks have no value).
 - Error sets with payloads, union subtyping, inferred `T !`, postfix `?`,
-  `else { e -> }`, must-use as an error, error return traces recorded at
+  `else as e:`, must-use as an error, error return traces recorded at
   each `?`.
 - Panics (bounds, overflow, divide by zero, shifts, `assert`, `expect`,
   `unreachable`, `panic`); `Never`.
@@ -244,7 +244,7 @@ destruction and panic unwinding working exactly as
   declaration order, fields after the value, drop flags for conditionally
   moved locals, unwind edges per block; user `impl Drop`; unwinding runs
   Drops frame by frame; a panic inside a Drop during unwinding aborts.
-- Modules (file and directory), `use`, `pub`/`pub(package)`, a package with
+- Modules (file and directory), `import`, `pub`/`pub(package)`, a package with
   `sisu.toml` and path dependencies only; `sisu run` on a file or a
   package.
 - The driver constructs `System` only when `main(sys: System)` is
@@ -291,7 +291,7 @@ checker whose own soundness is being tested at the same time.
   a collection of non-view element type, in an escaping closure, or in a
   return not covered by `from`; `view struct` with one implicit lifetime
   and upward infection.
-- Closures with capture modes and `own { }`; `for x in xs` / `in mut xs` /
+- Closures with capture modes and `own` closures; `for x in xs` / `in mut xs` /
   `in own xs`; methods returning `ref` into `self`.
 - `Shared[T]` (host reference count for now), `Weak`, `Cell`, `Mutex`
   (single-task until Phase 6), `Box`, `Arena[T]` with generational handles
@@ -842,7 +842,7 @@ a slab so frame indices are stable; the dispatch loop is trampolined, so a
 Sisu call pushes a frame and never recurses on the host stack. `Value` is a
 tagged enum (integers, floats, booleans, characters, unit, string views,
 strings, structs, enums, references as `{task, frame, local, projection}`,
-`Shared`, host objects, closures, `Moved`). Heap objects (`List`, `Map`,
+`Shared`, host objects, closures, `Moved`). Heap objects (`list`, `dict`,
 `String`, `Box`, `Shared`) are host objects whose Rust ownership mirrors
 Sisu's. Generic bodies run polymorphically with type arguments as runtime
 values; there is no monomorphisation, so the instantiation budget and

@@ -28,8 +28,8 @@ have major versions.
 
 | Module | Contents |
 |---|---|
-| `std.core` (prelude) | `Option`, `Result`, error sets, `Copy`/`Drop`/`Eq`/`Ord`/`Hash`/`Display`/`Debug`/`Default`/`Into`/`From`, `Iterator`, `Range`, `Never`, `Box`, `Shared`, `Weak`, `Cell`, `panic`, `assert` |
-| `std.collections` | `List`, `Array`, `Slice`, `Map` (hash), `OrderedMap` (B-tree), `Set`, `OrderedSet`, `Deque`, `Heap`, `Arena` with generational handles, `BitSet`; `persistent.{Vec, Map, Set}` (HAMT/RRB structural-sharing collections for data shared through `Shared` or sent between tasks without copying, from Clojure via Scala and Elm; [`clojure.md`](../research/languages/clojure.md)) |
+| `std.core` (prelude) | `Option`, `Result`, error sets, `Copy`/`Drop`/`Eq`/`Ord`/`Hash`/`Len`/`Contains`/`Display`/`Debug`/`Default`/`Into`/`From`, `Iterator`, `Range`, `Never`, `Box`, `Shared`, `Weak`, `Cell`, `panic`, `assert`, and the prelude functions `print`, `len`, `range`, `enumerate`, `zip`, `sorted`, `reversed`, `min`, `max`, `sum`, `any`, `all`, `abs` |
+| `std.collections` | `list`, `Array`, `Slice`, `dict` (hash), `SortedDict` (B-tree), `set`, `SortedSet`, `Deque`, `Heap`, `Arena` with generational handles, `BitSet`; `persistent.{Vec, Map, Set}` (HAMT/RRB structural-sharing collections for data shared through `Shared` or sent between tasks without copying, from Clojure via Scala and Elm; [`clojure.md`](../research/languages/clojure.md)) |
 | `std.string` | `String`, `str`, `char`, Unicode scalar and grapheme iteration, case mapping, normalisation forms, `Builder` |
 | `std.fmt` | Formatting traits and the interpolation machinery |
 | `std.num` | Integer and float traits, checked/wrapping/saturating ops, `BigInt`, `Decimal`, `Ratio` |
@@ -55,12 +55,12 @@ have major versions.
 Design points:
 
 - **`Map` iteration order is randomised** (Go, Rust): programs that depend
-  on hash order break in production. `OrderedMap` exists for when order
+  on hash order break in production. `SortedDict` exists for when order
   matters.
 - **Hashing is SipHash with a per-process random key** (Rust, Python):
   hash-flooding DoS has been exploited in every language that used a fast
   predictable hash.
-- **`List` growth is geometric, `with_capacity` exists, and `shrink_to_fit`
+- **`list` growth is geometric, `with_capacity` exists, and `shrink_to_fit`
   is explicit.** No hidden reallocation beyond the documented amortised
   growth.
 - **One logging facade, in core.** Rust's `log` crate and Go's `slog`
@@ -94,8 +94,10 @@ it exists).
    obvious rendering.
 5. Iterators over views, not callbacks, for traversal (Rust's experience
    with external iterators versus Ruby's internal ones: external compose).
-6. Names follow the Go/Rust conventions already familiar: `len`, `push`,
-   `insert`, `get`, `contains`, `iter`, `map`, `filter`, `fold`, `collect`.
+6. Names follow PEP 8 and Python's vocabulary where it exists (`len`,
+   `append` is `push`, `get`, `items`, `keys`, `sorted`, `enumerate`), and
+   the Rust/Go iterator vocabulary where Python has none (`iter`, `map`,
+   `filter`, `fold`, `collect`).
    PHP's `str_replace` versus `strpos` argument-order inconsistency is the
    cautionary tale; the linter enforces a naming table on `std` itself.
 

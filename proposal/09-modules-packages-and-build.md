@@ -19,18 +19,20 @@ Sisu ships one tool and designs the module system for it.
 - Items are private to their module by default. `pub` exports to the
   parent and, transitively, to the package's public API; `pub(package)`
   exports within the package only.
-- `use` imports items into scope: `use std.collections.HashMap`,
-  `use http.{Client, Request as Req}`, `use crate.parser`,
-  `use super.util`. Paths are dot-separated. Glob imports (`use x.*`) are
-  allowed only for enum variants and prelude-style modules that opt in with
-  `@glob_importable`, because the research on Rust and Python shows that
-  unrestricted glob imports make name resolution unreadable.
+- `import` and `from ... import` bring items into scope with Python's
+  spelling: `import std.json` (binds `json`, the last component),
+  `from http import Client, Request as Req`, `from weather.parser import
+  parse_int` (package-absolute paths; a package names its own modules by
+  its own name, with no `crate` or `super`). Paths are dot-separated.
+  There is no `from x import *`: the research on Rust and Python shows
+  that unrestricted glob imports make name resolution unreadable; enum
+  variants are usable unqualified where the type is known instead.
 - **Package dependency cycles are errors.** Modules within a package may
   reference each other freely. This is Go's rule and the reason Go builds
   are parallel at package granularity; it also forces layered designs.
 - There is no `prelude` magic beyond a fixed, documented list of names
-  (`Option`, `Result`, `Some`, `None`, `Ok`, `Err`, `List`, `Map`, `String`,
-  `println`, ...), the same in every module.
+  (`Option`, `Result`, `Some`, `None`, `Ok`, `Err`, `list`, `dict`, `String`,
+  `print`, `len`, ...), the same in every module.
 
 ## Package manifest
 

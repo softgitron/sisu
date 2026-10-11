@@ -145,17 +145,20 @@ types and parameter conventions (`mut`/`own` at call sites), and a
 ## Testing
 
 ```sisu
-test "parses negative numbers" {
-    assert_eq(parse_int("-5"), Ok(-5))
-}
+test "parses negative numbers":
+    assert parse_int("-5") == Ok(-5)
 
-test "any list round-trips through JSON" {
-    check(any[List[int]]) { xs -> json.decode(json.encode(xs)) == Ok(xs) }
-}
+test "any list round-trips through JSON":
+    check(any[list[int]], xs -> json.decode(json.encode(xs)) == Ok(xs))
 
-@bench
-fn bench_parse(b: Bench) { b.iter { parse_int("123456789") } }
+bench "parse a 9-digit number":
+    for _ in b.loop():
+        black_box(parse_int("123456789"))
 ```
+
+The full design (discovery, the `assert` intrinsic, fixtures, parametrised
+tests, fuzzing, snapshots, coverage, mutation, caching) is in
+[17-testing.md](17-testing.md).
 
 - Test blocks live next to the code (Zig, D, Rust) and are compiled only by
   `sisu test`.

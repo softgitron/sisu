@@ -1,88 +1,77 @@
-// Compile-time evaluation, reflection, derive, checked string DSLs.
+# Compile-time evaluation, reflection, derive, checked string DSLs.
 
-// An ordinary function, evaluated at compile time because `const` demands it.
-fn crc32_table() -> Array[u32, 256] {
+# An ordinary function, evaluated at compile time because `const` demands it.
+def crc32_table() -> Array[u32, 256]:
     var t = Array.filled(0u32)
-    for i in 0..256 {
+    for i in range(256):
         var c = i.to[u32]()
-        for _ in 0..8 { c = if c & 1 == 1 { 0xEDB88320 ^ (c >> 1) } else { c >> 1 } }
+        for _ in range(8):
+            c = if c & 1 == 1: 0xEDB88320 ^ (c >> 1) else: c >> 1
         t[i] = c
-    }
-    t
-}
+    return t
+
 const CRC_TABLE: Array[u32, 256] = comptime crc32_table()
 
-// A comptime-only check inside a generic type.
-struct RingBuffer[T, const N: int] {
+# A comptime-only check inside a generic type.
+struct RingBuffer[T, const N: int]:
     items: Array[T?, N]
     head: int
     len: int
-}
 
-impl[T, const N: int] RingBuffer[T, N] {
-    fn new() -> Self {
-        comptime assert(N > 0 and N & (N - 1) == 0, "capacity {N} must be a power of two")
-        Self { items: Array.filled(None), head: 0, len: 0 }
-    }
-}
+    def new() -> Self:
+        comptime assert N > 0 and N & (N - 1) == 0, "capacity {N} must be a power of two"
+        return Self(items=Array.filled(None), head=0, len=0)
 
-// Reflection: a generic JSON encoder with no macro.
-fn to_json[T](value: T) -> String {
-    comptime if reflect.is_int(T) or reflect.is_float(T) {
-        "{value}"
-    } else if reflect.is_str(T) {
-        json.quote(value)
-    } else if reflect.is_list(T) {
-        "[" + value.iter().map { x -> to_json(x) }.join(",") + "]"
-    } else if reflect.is_struct(T) {
-        var out = String.from("{")
-        comptime for (i, f) in reflect.fields_of(T).enumerate() {
-            if i > 0 { out.push(",") }
+# Reflection: a generic JSON encoder with no macro.
+def to_json[T](value: T) -> String:
+    if comptime reflect.is_int(T) or reflect.is_float(T):
+        return "{value}"
+    elif comptime reflect.is_str(T):
+        return json.quote(value)
+    elif comptime reflect.is_list(T):
+        return "[" + value.iter().map(to_json(it)).join(",") + "]"
+    elif comptime reflect.is_struct(T):
+        var out = String("{")
+        comptime for i, f in enumerate(reflect.fields_of(T)):
+            if i > 0:
+                out.push(",")
             out.push("{json.quote(f.name)}:{to_json(value.[f])}")
-        }
         out.push("}")
-        out
-    } else {
+        return out
+    else:
         comptime error("to_json: unsupported type {reflect.name_of(T)}")
-    }
-}
 
-// A user-defined derive: any trait can provide one.
-trait Describe {
-    fn describe(self) -> String
+# A user-defined derive: any trait can provide one.
+trait Describe:
+    def describe(self) -> String
 
-    comptime fn derive(T: type) -> impl Describe for T {
-        impl Describe for T {
-            fn describe(self) -> String {
-                var parts = List.new()
-                comptime for f in reflect.fields_of(T) {
+    comptime def derive(T: type) -> impl Describe for T:
+        impl Describe for T:
+            def describe(self) -> String:
+                var parts = list()
+                comptime for f in reflect.fields_of(T):
                     parts.push("{f.name}={self.[f]:?}")
-                }
-                "{reflect.name_of(T)}({parts.join(", ")})"
-            }
-        }
-    }
-}
+                return "{reflect.name_of(T)}({parts.join(", ")})"
 
 @derive(Describe, Debug)
-struct Point { x: int, y: int }
+struct Point:
+    x: int
+    y: int
 
-// A checked string DSL: the SQL is parsed at compile time, errors point into
-// the literal, and the result is a typed query object. No new syntax needed.
+# A checked string DSL: the SQL is parsed at compile time, errors point into
+# the literal, and the result is a typed query object. No new syntax needed.
 const FIND_USER = sql.query("SELECT id, name FROM users WHERE age > {min_age:int}")
 
-fn find(db: Db) -> List[(int, String)] ! DbError {
-    db.run(FIND_USER, min_age: 18)        // parameter names and types come from the literal
-}
+def find(db: Db) -> list[(int, String)] ! DbError:
+    return db.run(FIND_USER, min_age=18)     # parameter names and types come from the literal
 
-// Conditional compilation: both branches must type-check.
-fn page_size() -> int {
-    if comptime target.os == .windows { 65536 } else { 4096 }
-}
+# Conditional compilation: both branches must type-check.
+def page_size() -> int:
+    return if comptime target.os == "windows": 65536 else: 4096
 
 @cfg(test)
-fn test_helper() -> Point { Point { x: 1, y: 2 } }
+def test_helper() -> Point:
+    return Point(x=1, y=2)
 
-test "derive describes fields" {
-    assert_eq(test_helper().describe(), "Point(x=1, y=2)")
-}
+test "derive describes fields":
+    assert test_helper().describe() == "Point(x=1, y=2)"

@@ -23,22 +23,18 @@ capabilities, no `unsafe`, and no `Shared` can be evaluated at compile time.
 `comptime` is the keyword that *requests* it:
 
 ```sisu
-fn crc_table() -> Array[u32, 256] { ... }          // an ordinary function
-const CRC: Array[u32, 256] = comptime crc_table()   // evaluated by the compiler
+def crc_table() -> Array[u32, 256]: ...            # an ordinary function
+const CRC: Array[u32, 256] = comptime crc_table()   # evaluated by the compiler
 
-comptime fn assert_power_of_two(n: int) {           // may only be called at compile time
-    assert(n > 0 and n & (n - 1) == 0, "{n} is not a power of two")
-}
+comptime def assert_power_of_two(n: int):           # may only be called at compile time
+    assert n > 0 and n & (n - 1) == 0, "{n} is not a power of two"
 
-struct RingBuffer[T, const N: int] {
+struct RingBuffer[T, const N: int]:
     items: Array[T, N]
-}
-impl[T, const N: int] RingBuffer[T, N] {
-    fn new() -> Self {
+
+    def new() -> Self:
         comptime assert_power_of_two(N)
         ...
-    }
-}
 ```
 
 Rules:
@@ -63,22 +59,16 @@ Rules:
 ## Reflection
 
 ```sisu
-comptime fn field_names[T](_: type T) -> List[str] {
-    reflect.fields_of(T).map { f -> f.name }
-}
+comptime def field_names[T](_: type T) -> list[str]:
+    return [f.name for f in reflect.fields_of(T)]
 
-fn to_json[T](value: T) -> String
-    where comptime reflect.is_struct(T)
-{
-    var out = String.new()
-    out.push("{")
-    comptime for f in reflect.fields_of(T) {         // unrolled at compile time
+def to_json[T](value: T) -> String where comptime reflect.is_struct(T):
+    var out = String("{")
+    comptime for f in reflect.fields_of(T):          # unrolled at compile time
         out.push("\"{f.name}\":")
-        out.push(to_json(value.[f]))                  // field access by compile-time name
-    }
+        out.push(to_json(value.[f]))                 # field access by compile-time name
     out.push("}")
-    out
-}
+    return out
 ```
 
 `reflect` is a compile-time-only module. It exposes types, fields, variants,
@@ -94,17 +84,14 @@ inject a new `struct` into your module.
 comptime function, which uses reflection to build the implementation:
 
 ```sisu
-trait Hash {
-    fn hash(self, mut h: Hasher)
+trait Hash:
+    def hash(self, mut h: Hasher)
 
-    comptime fn derive(T: type) -> impl Hash for T {
-        impl Hash for T {
-            fn hash(self, mut h: Hasher) {
-                comptime for f in reflect.fields_of(T) { self.[f].hash(mut h) }
-            }
-        }
-    }
-}
+    comptime def derive(T: type) -> impl Hash for T:
+        impl Hash for T:
+            def hash(self, mut h: Hasher):
+                comptime for f in reflect.fields_of(T):
+                    self.[f].hash(mut h)
 ```
 
 The `impl ... for T` inside a comptime function is the one place where
@@ -116,9 +103,16 @@ there is no privileged set.
 ## Conditional compilation
 
 ```sisu
-if comptime target.os == .linux { ... } else { ... }
-@cfg(test) fn helper() { }
-@cfg(feature = "tls") use tls
+if comptime target.os == "linux":
+    ...
+else:
+    ...
+
+@cfg(test)
+def helper(): ...
+
+@cfg(feature="tls")
+import tls
 ```
 
 `@cfg` on items and `if comptime` in bodies. Both branches of `if comptime`
@@ -130,7 +124,7 @@ Zig experience is that this is enough and that `#ifdef` soup is avoidable.
 | Want | Workaround |
 |---|---|
 | A new syntax (`sql!("...")`, `html! { }`) | A `comptime` function that parses a string literal and returns a typed value; the string is checked at compile time, errors point into it. Covers SQL, regex, format strings, routes. Not covered: new *statement* forms. |
-| A new control structure | Closures with trailing syntax: `retry(3) { ... }`, `with_lock(m) { ... }` read like control structures. |
+| A new control structure | Closures with trailing blocks: `retry(3) do:` and `with_lock(m) do:` read like control structures. |
 | Generating N similar functions | `comptime for` over a table, or generics. |
 | Attributes with behaviour (`@test`, `@route("/x")`) | Attributes are data that `comptime` code and tooling can read via `reflect.attributes_of`; a framework collects routed functions by scanning its own package at compile time. |
 | Serialisation for all types | `derive` via reflection; the Zig standard library's JSON encoder is the existence proof that this covers what `serde` covers, without macros. |

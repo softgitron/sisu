@@ -71,7 +71,7 @@ explicit shared ownership**. Concretely:
    `Drop` impl is unused after a point and holding it is expensive (a lock
    guard held across a long computation).
 7. **Allocation is explicit at the type level, not the call site.**
-   `List`, `Map`, `String`, `Box`, `Shared` allocate; a struct, an array, an
+   `list`, `dict`, `String`, `Box`, `Shared` allocate; a struct, an array, an
    enum, a tuple do not. There are no hidden heap allocations for closures,
    generics or trait objects: a closure that captures by reference is a
    stack value; `dyn` requires a visible `Box` or `ref`.
@@ -93,7 +93,7 @@ explicit shared ownership**. Concretely:
   return until they finish. Rust needs `thread::scope` plus `'static`
   bounds for everything else; Sisu has only the scoped form (see
   [06-concurrency-and-capabilities.md](06-concurrency-and-capabilities.md)).
-- **Value semantics by default.** Two variables never alias. A `List[T]`
+- **Value semantics by default.** Two variables never alias. A `list[T]`
   passed to a function cannot be changed behind the caller's back unless the
   parameter says `mut`. This is the property Dave Abrahams argues is the
   real source of Swift's and Hylo's safety, and the one that makes local
@@ -136,15 +136,17 @@ explicit shared ownership**. Concretely:
 ## Borrowing rules in detail
 
 ```sisu
-var xs = List.of(1, 2, 3)
-let first = ref xs[0]       // immutable borrow of part of xs
-xs.push(4)                  // error: xs is borrowed by `first` (would need `mut xs`)
-println(first)              // borrow ends after last use (non-lexical)
-xs.push(4)                  // fine
+var xs = [1, 2, 3]
+let first = ref xs[0]       # immutable borrow of part of xs
+xs.push(4)                  # error: xs is borrowed by `first` (would need `mut xs`)
+print(first)                # borrow ends after last use (non-lexical)
+xs.push(4)                  # fine
 
-fn longest(a: str, b: str) -> ref str from a, b { if a.len() > b.len() { a } else { b } }
-fn head(xs: List[int]) -> ref int { xs[0] }          // single borrowed param: no `from` needed
-fn get(self, i: int) -> ref mut Item { ... }         // `self` wins when present
+def longest(a: str, b: str) -> ref str from a, b:
+    return if len(a) > len(b): a else: b
+def head(xs: list[int]) -> ref int:          # single borrowed param: no `from` needed
+    return xs[0]
+def get(self, i: int) -> ref mut Item: ...   # `self` wins when present
 ```
 
 Elision rules, in order: one borrowed parameter; otherwise `self`; otherwise
@@ -154,16 +156,15 @@ replacing lifetime names.
 ### Views
 
 ```sisu
-view struct Token {
+view struct Token:
     kind: TokenKind
-    text: str           // borrows from the source buffer
+    text: str           # borrows from the source buffer
     line: int
-}
 
-fn tokenize(src: str) -> List[Token] { ... }   // the List is also a view: it holds views
+def tokenize(src: str) -> list[Token]: ...   # the list is also a view: it holds views
 ```
 
-A view's lifetime is the minimum of its borrowed parts. A `List[Token]`
+A view's lifetime is the minimum of its borrowed parts. A `list[Token]`
 where `Token` is a view is itself view-like and cannot escape the frame that
 owns `src`. There is no way to express "this token borrows from one buffer
 and that field from another"; if that is needed, split the struct. Rust's
@@ -173,7 +174,8 @@ error.
 ### Closures
 
 A closure borrows its captures. A closure stored or sent somewhere must be
-`own { }`, which moves or copies the captures in. The compiler reports
+an `own` closure (`own x -> ...`, `do own x:`), which moves or copies the
+captures in. The compiler reports
 which capture prevented a closure from escaping.
 
 ### Iterators and projections
@@ -198,7 +200,7 @@ a dependency may contain `unsafe` only if the root manifest lists it under
 ## Allocators
 
 The global allocator is replaceable at link time. Collections take an
-optional allocator at construction (`List.with_allocator(arena)`), and
+optional allocator at construction (`list.with_allocator(arena)`), and
 `Arena` is in the standard library. Zig's explicit-allocator-everywhere
 design was studied closely: it is the right default for systems code and a
 constant tax for application code. Sisu's default is Rust's (implicit
@@ -206,7 +208,7 @@ global), with Zig's available by choice, and with the `freestanding` runtime
 profile requiring an explicit allocator because there is no global one
 ([12-interop-and-targets.md](12-interop-and-targets.md)).
 
-Allocation failure panics by default; `List.try_push` and friends return
+Allocation failure panics by default; `list.try_push` and friends return
 `! OutOfMemory` for code that needs to handle it (kernels, embedded). Open
 question Q-4.
 

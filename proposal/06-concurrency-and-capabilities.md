@@ -20,22 +20,21 @@ mechanism seen from two sides: the way a program reaches the outside world
 ## Tasks and scopes
 
 ```sisu
-fn crawl(net: Net, roots: List[Url]) -> Map[Url, Page] ! CrawlError {
-    var pages = Mutex.new(Map.new())
-    task.scope { s ->
-        for url in roots {
-            s.spawn {
-                let page = net.get(url)?           // ? returns from the task; the scope collects it
+def crawl(net: Net, roots: list[Url]) -> dict[Url, Page] ! CrawlError:
+    var pages = Mutex(dict())
+    let outcome = task.scope do s:
+        for url in roots:
+            s.spawn do:
+                let page = net.get(url)?           # ? returns from the task; the scope collects it
                 pages.lock().insert(url, page)
-            }
-        }
-    }?                                            // scope returns the first error, after joining all
-    Ok(pages.into_inner())
-}
+                return Ok(())
+        return Ok(())
+    outcome?                                       # the scope returns the first error, after joining all
+    return Ok(pages.into_inner())
 ```
 
-- `task.scope { s -> ... }` creates a scope bound to the current stack frame.
-  `s.spawn { ... }` starts a task. The closure may borrow anything the frame
+- `task.scope do s:` creates a scope bound to the current stack frame.
+  `s.spawn(() -> ...)` or `s.spawn do:` starts a task. The closure may borrow anything the frame
   owns because the scope cannot end before the task does. The type system
   enforces that captured references are `Sync` (shared across tasks) and
   that moved values are `Send`.
@@ -61,7 +60,7 @@ Every blocking operation (`net.get`, `channel.recv`, `clock.sleep`,
 `handle.join`) checks the flag and returns `Err(Cancelled)` promptly;
 `Cancelled` is a variant of the standard `TaskError` set and propagates via
 `?` like any error. Code that must finish (flush a file) uses
-`task.shield { }`. Timeouts are `s.spawn_with(deadline: clock.after(5.s))`.
+`task.shield do:`. Timeouts are `s.spawn_with(deadline=clock.after(Duration.seconds(5)))`.
 There is no cancellation token to pass and no `ctx` parameter: the scope is
 ambient to the task, which is the one piece of implicit context the design
 accepts, and only because the alternative (Go) is universally regretted.
@@ -72,16 +71,16 @@ A panicking task unwinds to its scope, which cancels siblings and reports
 `TaskPanicked` to the joiner. Supervisors are ordinary code:
 
 ```sisu
-task.scope { s ->
-    loop {
-        let worker = s.spawn { serve(net, port) }
-        match worker.join() {
-            Err(TaskPanicked { message, .. }) -> log.error("worker died: {message}, restarting")
-            Err(Cancelled) -> break
-            Ok(()) -> break
-        }
-    }
-}
+task.scope do s:
+    while True:
+        let worker = s.spawn(() -> serve(net, port))
+        match worker.join():
+            case Err(TaskPanicked(message, ..)):
+                log.error("worker died: {message}, restarting")
+            case Err(Cancelled):
+                break
+            case Ok(()):
+                break
 ```
 
 ## Colourless I/O
@@ -163,14 +162,18 @@ novelty for its own sake.
 ## Channels and select
 
 ```sisu
-let (tx, rx) = channel[Event](capacity: 128)      // bounded; unbounded is a separate constructor
-s.spawn { for e in rx { handle(e) } }              // rx is an iterator; ends when tx is closed and drained
-tx.send(Event.Start)?                               // ? because the receiver may be gone
-select {
-    e = rx.recv() -> handle(e)
-    _ = clock.after(1.s) -> timeout()
-    _ = s.cancelled() -> return
-}
+let tx, rx = channel[Event](capacity=128)       # bounded; unbounded is a separate constructor
+s.spawn do:
+    for e in rx:                                # rx is an iterator; ends when tx is closed and drained
+        handle(e)
+tx.send(Event.Start)?                           # ? because the receiver may be gone
+select:
+    case e = rx.recv():
+        handle(e)
+    case _ = clock.after(Duration.seconds(1)):
+        timeout()
+    case _ = s.cancelled():
+        return
 ```
 
 Channels are typed, bounded by default (Go's unbounded-by-accident and
@@ -188,13 +191,12 @@ sockets, reading the clock, generating random numbers, reading environment
 variables, or spawning processes.
 
 ```sisu
-fn main(sys: System) -> ! AppError {
+def main(sys: System) -> ! AppError:
     let fs = sys.fs.restrict_to("./data")
     let net = sys.net.only_hosts(["api.example.com"])
-    serve(fs, net, sys.clock)
-}
+    return serve(fs, net, sys.clock)
 
-fn serve(fs: Fs, net: Net, clock: Clock) -> ! AppError { ... }
+def serve(fs: Fs, net: Net, clock: Clock) -> ! AppError: ...
 ```
 
 `System` is constructed by the runtime and passed to `main`. It cannot be
@@ -242,8 +244,8 @@ answers:
   same visibility argument as for errors.
 - Capability parameters are ordinary values and compose: a struct that
   needs `Fs` and `Clock` stores them in fields at construction.
-- A small amount of ambient authority is kept deliberately: `println`,
-  `eprintln` and `debug.print` write to the process's standard streams
+- A small amount of ambient authority is kept deliberately: `print`,
+  `print_err` and `debug.print` write to the process's standard streams
   without a capability (open question Q-5 records the dissent), and
   `task.scope` is ambient (open question Q-6). Everything else is gated.
 - Implicit context passing (Odin's `context`, Scala's `using`, Kotlin's

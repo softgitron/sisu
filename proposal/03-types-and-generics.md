@@ -22,7 +22,7 @@ Function signatures, struct fields, trait members, constants and anything
 parameters and generic arguments are inferred bidirectionally: information
 flows both from the expression to the binding and from the expected type
 to the expression. This is what lets `let xs: Array[int, 3] = [1, 2, 3]`
-pick the array type and `[1, 2, 3]` alone pick `List[int]`.
+pick the array type and `[1, 2, 3]` alone pick `list[int]`.
 
 Inference never crosses a function boundary. The evidence:
 
@@ -52,14 +52,13 @@ the expected type is known, which removes Rust's `use Enum::*` dance without
 Swift's leading-dot syntax.
 
 ```sisu
-enum Json {
+enum Json:
     Null
     Bool(bool)
     Number(f64)
     String(String)
-    Array(List[Json])
-    Object(Map[String, Json])
-}
+    Array(list[Json])
+    Object(dict[String, Json])
 ```
 
 Recursive enums are allowed without an explicit box: the compiler inserts
@@ -99,13 +98,12 @@ A trait declares required and provided methods, associated types, and
 associated constants.
 
 ```sisu
-trait Iterator {
+trait Iterator:
     type Item
-    fn next(mut self) -> Item?
+    def next(mut self) -> Item?                                   # required
 
-    fn map[U](own self, f: fn(Item) -> U) -> Map[Self, U] { ... }   // provided
-    fn count(own self) -> int { ... }
-}
+    def map[U](own self, f: (Item) -> U) -> MapIter[Self, U]: ...  # provided
+    def count(own self) -> int: ...
 ```
 
 Implementation is explicit: `impl Trait for Type`. Go's implicit
@@ -120,13 +118,14 @@ methods of a trait but no `impl`.
 There is at most one implementation of a trait for a type, globally. An
 `impl` must live in the package that defines the trait or the package that
 defines the type (the orphan rule). This is Haskell's and Rust's rule and it
-is what makes `HashMap[K, V]` behave the same everywhere. The cost, that you
+is what makes `dict[K, V]` behave the same everywhere. The cost, that you
 cannot implement a foreign trait for a foreign type, is paid for with cheap
 newtypes and delegation:
 
 ```sisu
-struct Celsius(f64)
-    @delegate(Add, Sub, Ord) to self.0      // forward these traits to the wrapped field
+@delegate(Add, Sub, Ord, to="value")    # forward these traits to the wrapped field
+struct Celsius:
+    value: f64
 ```
 
 Scoped instances (Scala `given`, OCaml's proposed modular implicits) are the
@@ -134,7 +133,7 @@ alternative; they are listed as open question Q-11.
 
 ### Dispatch
 
-Generic functions are monomorphised: `fn f[T: Show](x: T)` is compiled once
+Generic functions are monomorphised: `def f[T: Show](x: T)` is compiled once
 per `T` used. Dynamic dispatch is opt-in and visible: `dyn Show` is a type,
 unsized, used behind `ref` or `Box`. A trait is object-safe (usable as
 `dyn`) under the same rules as Rust; the compiler says why when it is not.
@@ -169,10 +168,11 @@ recorded as open question Q-3.
 ### Generic syntax
 
 ```sisu
-fn max[T: Ord](a: T, b: T) -> T
-fn show_all[T](xs: List[T]) where T: Display + Hash
-struct Grid[T, const W: int, const H: int] { cells: Array[T, W * H] }
-impl[T: Display] Display for List[T] { ... }
+def max[T: Ord](a: T, b: T) -> T: ...
+def show_all[T](xs: list[T]) where T: Display + Hash: ...
+struct Grid[T, const W: int, const H: int]:
+    cells: Array[T, W * H]
+impl[T: Display] Display for list[T]: ...
 ```
 
 Square brackets avoid the `<` ambiguity and are already used by Go, Scala,
@@ -221,7 +221,7 @@ Decisions:
 - **Division by zero and `int.MIN / -1` trap.** Shifts by more than the
   width trap.
 - **Floats** are never implicitly converted to or from integers. `f64`
-  implements `PartialOrd` not `Ord`, so a `Map[f64, _]` needs an explicit
+  implements `PartialOrd` not `Ord`, so a `dict[f64, _]` needs an explicit
   total-order wrapper (`f64.total_order()`); NaN handling is documented
   rather than surprising.
 
@@ -240,7 +240,7 @@ Decisions:
 - Interpolation `"{x}"` uses `Display`; `"{x:?}"` uses `Debug`. Format
   specs follow Python/Rust: `{x:>10.2}`.
 - Byte strings `b"..."` are `Slice[u8]`.
-- `String` is not `Send`-restricted or special in any way; it is a `List[u8]`
+- `String` is not `Send`-restricted or special in any way; it is a `list[u8]`
   with a validity invariant.
 
 ## Tuples, unit, never
@@ -262,8 +262,8 @@ From)`.
 ## Refinement subtypes
 
 ```sisu
-type Port = int where self in 1..=65535
-type NonEmpty[T] = List[T] where not self.is_empty()
+type Port = int where 1 <= self <= 65535
+type NonEmpty[T] = list[T] where not self.is_empty()
 ```
 
 A refined type is a subtype of its base; constructing one checks the

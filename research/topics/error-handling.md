@@ -70,7 +70,7 @@ the program is in a state its author did not anticipate.
 
 `T ! E` where `E` is an error set: variants with payloads, structurally
 subtyped so sets union without conversion code, inferred when the set is
-omitted; postfix `?` propagation; `else { e -> ... }` handling; `Result`
+omitted; postfix `?` propagation; `else as e:` handling; `Result`
 and `Option` must be used; error return traces in debug builds and a
 standard `context` wrapper; panics unwind the task to its structured scope
 and cannot be caught inside the task. No exceptions, no checked exceptions,

@@ -134,16 +134,16 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 *Evidence:* Go's directory-is-package and acyclic rule as the enabler of parallel builds ([go.md](../research/languages/go.md)); Rust `mod` confusion; C++ modules' decade-long road ([cpp.md](../research/languages/cpp.md)).
 *Status:* decided.
 
-### D-020 No semicolons; newline terminates statements
+### D-020 No semicolons; one statement per logical line; continuation inside brackets or on an operator-led line
 
-*Alternatives:* mandatory semicolons (C, Rust, Java); ASI (JavaScript).
-*Evidence:* Go's and Swift's rules work without JavaScript's ASI pitfalls because the grammar is designed for it ([go.md](../research/languages/go.md), [javascript.md](../research/languages/javascript.md)).
+*Alternatives:* mandatory semicolons (C, Rust, Java); ASI (JavaScript); backslash continuation (Python).
+*Evidence:* Go's and Swift's rules work without JavaScript's ASI pitfalls because the grammar is designed for it ([go.md](../research/languages/go.md), [javascript.md](../research/languages/javascript.md)); Guido lists the backslash among his regrets and PEP 8 and Black break before binary operators ([indentation-syntax.md](../research/topics/indentation-syntax.md)).
 *Status:* decided.
 
-### D-021 No `++`/`--`, no ternary, no `goto`, no `switch` fallthrough, no `do-while`, no C-style `for`
+### D-021 No `++`/`--`, no ternary operator, no `goto`, no `switch` fallthrough, no `do-while`, no C-style `for`, no loop labels, no `else` on loops
 
-*Evidence:* Go removed `++` as an expression and the ternary; Swift and Rust have no `++`; fallthrough is a known bug source (Duff aside); `if` as expression covers the ternary. Each removal is one fewer way to write a thing (P1).
-*Status:* decided.
+*Evidence:* Go removed `++` as an expression and the ternary; Swift and Rust have no `++`; fallthrough is a known bug source (Duff aside); `if` as an expression covers the ternary; Python's loop `else` is its own tutorial's "look closely" case ([python-idioms.md](../research/topics/python-idioms.md)). Each removal is one fewer way to write a thing (P1). Same-direction chained comparisons (`a < b <= c`) are kept from Python; mixed-direction chains are an error.
+*Status:* decided; revised with Q-8.
 
 ### D-022 Fixed operator set overloadable via traits; no user-defined operators or precedence
 
@@ -163,23 +163,24 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 *Evidence:* Rust's shadowing is widely liked for `let x = parse(x)?` chains; Zig's ban is cited as friction; cross-scope shadowing bugs appear in the Go vet rationale.
 *Status:* decided (Q-35).
 
-### D-025 `and`, `or`, `not` as words; `!` reserved for error types
+### D-025 `and`, `or`, `not` as words on `bool` only; `!` reserved for error types; no truthiness
 
-*Alternatives:* `&& || !` (C family).
-*Evidence:* Stefik & Siebert 2013 (word operators measurably help novices; [studies.md](../research/evidence/studies.md)); Python, Carbon, Ada; frees `!` for `T ! E`.
+*Alternatives:* `&& || !` (C family); Python's operand-returning `and`/`or` and truthiness of empty containers.
+*Evidence:* Stefik & Siebert 2013 (word operators measurably help novices; [studies.md](../research/evidence/studies.md)); Python, Carbon, Ada; frees `!` for `T ! E`. Truthiness was refused by every typed descendant of Python (Nim, Mojo warns, Codon) and by Swift, Rust and Go; Python's own `datetime.time` midnight bug ([python-idioms.md](../research/topics/python-idioms.md)).
 *Status:* decided.
 
-### D-026 Closures are `{ params -> body }`, inline and trailing; `own { }` to capture by move; no implicit `it`
+### D-026 Closures: `params -> expr` inline, implicit `it` for one parameter, `do params:` trailing blocks for bodies with statements; `own` to capture by move
 
-*Alternatives:* `|x| body` (Rust, Ruby inline); `{ x in }` (Swift); `x => body` (JS, C#, Scala); `lambda` (Python).
-*Evidence:* Trailing-closure ergonomics (Kotlin, Swift, Ruby; [kotlin.md](../research/languages/kotlin.md), [ruby.md](../research/languages/ruby.md)); single form for inline and trailing; `->` consistency with `match` and return types.
-*Status:* decided; implicit `it` Q-25.
+*Alternatives:* `{ params -> body }` braces (Kotlin; the first draft); `|x| body` (Rust, Ruby inline); `{ x in }` (Swift); `lambda x: e` (Python, one expression only); nested `def` only (Python's answer to multi-line closures).
+*Evidence:* Guido's rule that no indented block may sit inside an expression, and Python's twenty-year refusal of multi-line lambdas ([indentation-syntax.md](../research/topics/indentation-syntax.md)); Nim's `do` and Scala 3's trailing-lambda colon as the two shipped indentation-friendly trailing-block forms; Kotlin's `it` and Scala's `_` for the one-parameter case; `->` consistency with function types. A trailing block ends a logical line, so the rule holds; `return` inside a closure returns from the closure ([function-results.md](../research/topics/function-results.md)).
+*Status:* decided (Q-8, Q-25).
 
-### D-027 Braces, not significant indentation
+### D-027 Indentation-based blocks: `:` opens a block, INDENT/DEDENT decided in the lexer, spaces only, no brace dialect
 
-*Alternatives:* indentation (Python, Haskell, F#, Nim).
-*Evidence:* Mixed. Indentation is loved in Python and measurably readable; braces are robust to copy-paste, code generation, and multi-line lambdas, and are the majority in compiled languages. Tooling robustness (formatter, generation, trailing closures) decided it.
-*Status:* leaning; Q-8.
+*Alternatives:* braces (the first draft's lean; Go, Rust, Kotlin, Swift, Carbon's P0623); layout rule inserting braces with a brace fallback (Haskell, Koka, F# verbose syntax); optional braces on a brace language (Scala 3).
+*Evidence:* The project owner's decision (Q-8), and the research on how to do it well ([indentation-syntax.md](../research/topics/indentation-syntax.md)): decide layout in the lexer with no parser feedback (Python, Nim, Koka; Haskell's `parse-error(t)` rule as the counter-example); spaces only (every layout language that allowed tabs later restricted them); mandatory call parentheses, explicit `return` and no truthiness remove the CoffeeScript and Nim command-syntax ambiguities; no second dialect (Scala 3's split). Empirical comparisons of indentation and braces for working programmers do not exist; the tooling objections (paste, generation, multi-line closures) are answered by the reindent-on-paste LSP action, AST-based code generation, and `do` blocks.
+*Consequences:* The formatter never changes block membership; the parser is error-tolerant with Python 3.10-style messages; comments are `#`; the tour, examples and every snippet in the proposal are in this form.
+*Status:* decided (Q-8 reversed the lean).
 
 ### D-028 Contracts (`requires`, `ensures`, `invariant`, refinement types) in the language
 
@@ -267,10 +268,11 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 *Evidence:* ML lineage; Rust's "recursive type has infinite size" as a top beginner error.
 *Status:* decided.
 
-### D-044 Literals: `[a, b]` list (array when expected), `[k: v]` map, `(a, b)` tuple
+### D-044 Literals: `[a, b]` list (array when expected), `{k: v}` map, `{a, b}` set, `(a, b)` tuple, comprehensions
 
-*Evidence:* Swift's dictionary literal syntax avoids the `{}` block/closure ambiguity; Go's composite literals and Rust's `vec!` as counter-examples.
-*Status:* decided.
+*Alternatives:* `[k: v]` maps (Swift; the first draft, chosen to avoid the brace ambiguity that no longer exists without brace blocks).
+*Evidence:* Python's literal forms are the ones the largest programmer population knows; comprehensions were judged clearer than `map`/`filter` by Python's designer and copied by Julia, Nim and Mojo ([python-idioms.md](../research/topics/python-idioms.md)). The overlap between comprehensions and iterator adaptors is an accepted violation of P1: comprehensions for the eager shape, adaptors for lazy pipelines and library composition.
+*Status:* decided (Q-8).
 
 ### D-045 `pub` / `pub(package)` visibility; private by default
 
@@ -278,9 +280,9 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 *Evidence:* Go's coupling of names to visibility ([go.md](../research/languages/go.md)); Rust's `pub(crate)` usefulness.
 *Status:* decided; Q-29 on package-wide default.
 
-### D-046 Attributes are `@name(args)`
+### D-046 Attributes are `@name(args)` and are compile-time data, not calls
 
-*Evidence:* Kotlin/Swift/Python/Java majority; Rust `#[]` noise.
+*Evidence:* Kotlin/Swift/Python/Java majority; Rust `#[]` noise; Python decorators are run-time calls wearing declaration syntax, which type checkers needed `dataclass_transform` to see through, and Mojo made them compiler built-ins ([python-idioms.md](../research/topics/python-idioms.md)).
 *Status:* decided.
 
 ### D-047 Block-scoped `defer`, kept alongside `Drop`
@@ -330,3 +332,22 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 *Alternatives:* zero-is-initialisation (Go, Odin, Jai); uninitialised memory (C); `late` (Dart).
 *Evidence:* Go's typed-nil and zero-value-connection-handle bugs ([go.md](../research/languages/go.md)); the Odin/Jai argument that types should be designed so the zero value is valid ([odin-jai-c3.md](../research/languages/odin-jai-c3.md)) is accepted as *library guidance* (`Default` impls) but not as a language rule, because a zero `Mutex` is fine and a zero file handle is not; Dart's `late` as an invisible runtime check ([dart.md](../research/languages/dart.md)).
 *Status:* decided.
+
+### D-055 Python idioms adopted, adapted and dropped
+
+*Decision:* Sisu follows Python's surface idioms wherever the idiom is not a documented mistake. Adopted: `def` with `name: Type` and `->`, indentation and `:`, `elif`, `pass`, `and`/`or`/`not`, `in`, same-direction chained comparisons, keyword arguments with `*` and `/` separators, half-open slicing, `range`, `enumerate`/`zip` (strict), interpolation with Python's format specs, `with` as a scoped binding, `yield`, `match`/`case` with guards, or-patterns and struct patterns, `//` and `**`, `def f[T]` and `type` statements, explicit `self`, tuple and star unpacking, comprehensions, `True`/`False`. Adapted: `None` to `T?`; `lambda` to `x -> e`/`it`/`do`; decorators to compile-time attributes; docstrings to `##` comments; `import` binding the last path component; `assert` always on. Dropped: `class` and inheritance, truthiness, `is`, mutable defaults and late-binding closures, declaration by assignment with `global`/`nonlocal`, `**kwargs`, negative indices, `a if c else b`, `try`/`except`/`finally`, `:=`, loop `else`, underscore privacy, dunder protocols, single-quoted strings, tabs.
+*Evidence:* Each item's PEP, style-guide position, measured bug class or the choice made by typed Python-syntax languages (Mojo, Nim, Codon, Cython) is recorded in [python-idioms.md](../research/topics/python-idioms.md); the departures table in [02-syntax.md](02-syntax.md) states the reason for each.
+*Status:* decided (Q-8).
+
+### D-056 Functions return only with `return`; `if`/`match` are expressions when every branch is one expression; labelled tuple results instead of result variables
+
+*Alternatives:* implicit last-expression value (Rust, Ruby, Scala, Kotlin expression bodies, Gleam, Roc); named result variables (MATLAB output arguments, Go named results with naked `return`, Nim `result`, Pascal `Result`, Mojo `out`, Carbon `returned var`); Java-style `yield` for block-valued arms.
+*Evidence:* [function-results.md](../research/topics/function-results.md). The cost of last-expression values is the statement/expression boundary (Rust's "expected `i32`, found `()`" and the clippy lint for each side of the style war); every explicit-return language later added single-expression sugar and `if`/`switch` expressions in the "single expression per branch" form (Swift SE-0255 and SE-0380, Java JEP 361, C# 8), which is the form adopted. Named result variables carry a documented footgun (default-initialised results: Nim RFC 378 and Nim 2's `strictDefs`, Go's zero values and shadowing restriction, Eiffel 16.05) and every Go style guide restricts naked returns; the documentation and contract benefits are kept as labels on tuple results (Swift, Dafny, Whiley) and the contextual `result` name inside `ensures` (SPARK, D, C++26). In-place construction is the compiler's job (Zig result locations), not syntax.
+*Consequences:* A non-unit function whose end is reachable without `return` is a compile error; `return` in a closure returns from the closure; `?` targets the innermost function; generators are marked by their `Iter[T]` return type and forbid a valued `return`.
+*Status:* decided (Q-9).
+
+### D-057 Testing: `test`/`suite`/`bench` blocks, compiler-intrinsic `assert` with sub-expression capture, fixtures as values, parametrised tests, property tests and fuzzing in `std.test`, snapshots, per-test capability fakes with a virtual clock, parallel and random by default, no mocking framework
+
+*Alternatives:* xUnit classes (JUnit, XCTest, unittest); naming-convention discovery (pytest `def test_*`, Go `TestXxx`); assertion libraries; mocking frameworks; coverage gates.
+*Evidence:* [testing.md](../research/topics/testing.md): built-in beats third party (D's and Zig's inline tests, Go's `go test` needing no documentation, pytest displacing `unittest`); assertion capture copied by every modern design and always needing the compiler; fixtures by injection beating inheritance; flakiness causes (Luo et al. 2014: async wait 45%, concurrency 20%, order dependency 12%) each removed by per-test capability fakes and a virtual clock (Go `synctest`); property testing used an order of magnitude more when zero-dependency; Go's unification of fuzzing with tests; Jest's own snapshot misuse guidance; coverage not correlated with effectiveness (Inozemtseva & Holmes 2014); Google's incremental mutation testing; fakes over mocks (Google, Fowler, `gomock` archived).
+*Status:* decided. See [17-testing.md](17-testing.md).

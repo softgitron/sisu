@@ -19,20 +19,24 @@ part of the language, not a library. They are:
   language. The verifier itself is not part of version 1.
 
 ```sisu
-fn binary_search[T: Ord](items: Slice[T], target: T) -> int?
+def binary_search[T: Ord](items: Slice[T], target: T) -> int?:
     requires items.is_sorted()
-    ensures result.map { i -> items[i] == target } ?? not items.contains(target)
-{ ... }
+    ensures result.map(items[it] == target) ?? not items.contains(target)
+    ...
 
-struct Account {
+struct Account:
     balance: Money
     limit: Money
-}
     invariant self.balance >= -self.limit
 
-type Port = int where self in 1..=65535
+type Port = int where 1 <= self <= 65535
 type Email = String where self.contains('@')
 ```
+
+Contract clauses are the first lines of a body, before any statement, in
+the position Python reserves for a docstring; `invariant` lines sit among a
+struct's fields. A labelled result (`-> (q: int, r: int)`) is named by its
+labels in `ensures`; an unlabelled one is `result`.
 
 - `requires` is checked on entry; `ensures` on every exit, with `result`
   bound to the return value and `old(expr)` available for the entry value.

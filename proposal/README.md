@@ -15,14 +15,15 @@ language. In one sentence per area:
 | Capabilities | No ambient authority: `Fs`, `Net`, `Clock`, ... are values handed down from `main`; dependencies can only do what they are given | Austral, Zig `Io`, Roc |
 | Contracts | `requires`, `ensures`, `invariant`, refinement types; checked, documented, verifiable later | Ada/SPARK, D, Dafny |
 | Metaprogramming | `comptime` evaluation and typed reflection; `derive` is a function; no macros | Zig |
-| Syntax | Braces, no semicolons, `and`/`or`/`not`, `{ x -> }` closures with trailing form, one formatter | Go, Rust, Kotlin, Swift |
+| Syntax | Indentation blocks, Python idioms where they are not mistakes, `x -> e` and `do` closures, explicit `return`, one formatter | Python, Nim, Scala 3 |
 | Packages | One tool; lockfile; owner-namespaced, content-addressed registry with transparency log; API-diff-enforced semver; no build scripts; `[trust]` gates unsafe | Cargo, Go modules, Elm |
 | Tooling | Build, test, fmt, doc, LSP, REPL, migrate in one binary; compile-speed targets; diagnostics with fix-its | Go, Cargo, Elm |
 | Evolution | Specification, compatibility promise, editions, six-month releases, preview features | Go, Rust, Java |
 
 What it does not have: `null`, exceptions, class inheritance, `async`/`await`,
-macros, header files, implicit lossy conversions, undefined behaviour in
-safe code, a garbage collector, build scripts, formatter options.
+macros, header files, truthiness, implicit lossy conversions, undefined
+behaviour in safe code, a garbage collector, build scripts, formatter
+options.
 
 ## Documents
 
@@ -43,7 +44,8 @@ safe code, a garbage collector, build scripts, formatter options.
 | 12 | [Interop and targets](12-interop-and-targets.md) | Targets, runtime profiles, C interop, ABI |
 | 13 | [Evolution and governance](13-evolution-and-governance.md) | Compatibility, editions, specification, governance phases |
 | 14 | [Non-goals](14-non-goals.md) | What Sisu will not try to be |
-| 15 | [Decision log](15-decision-log.md) | Fifty-one decisions with alternatives, evidence and status |
+| 15 | [Decision log](15-decision-log.md) | Fifty-seven decisions with alternatives, evidence and status |
+| 17 | [Testing](17-testing.md) | Tests, assertions, fixtures, property tests, fuzzing, snapshots, benchmarks |
 | 16 | [Validation plan](16-validation-plan.md) | What the prototype must test first, and what would change the design |
 | 18 | [Next steps](18-next-steps.md) | The experiment: phases, corpus, measurements, team, decision points |
 | | [Examples](examples/) | Sisu source files |

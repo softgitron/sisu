@@ -1,70 +1,63 @@
-// Contracts and refinement types.
+# Contracts and refinement types.
 
-fn binary_search[T: Ord](items: Slice[T], target: T) -> int?
+def binary_search[T: Ord](items: Slice[T], target: T) -> int?:
     requires items.is_sorted()
-    ensures match result {
-        Some(i) -> items[i] == target
-        None -> not items.contains(target)
-    }
-{
+    ensures match result:
+        case Some(i): items[i] == target
+        case None: not items.contains(target)
     var lo = 0
-    var hi = items.len()
-    while lo < hi {
-        let mid = lo + (hi - lo) / 2            // no overflow: int is 64-bit and traps anyway
-        match items[mid].cmp(target) {
-            Less -> lo = mid + 1
-            Greater -> hi = mid
-            Equal -> return Some(mid)
-        }
-    }
-    None
-}
+    var hi = len(items)
+    while lo < hi:
+        let mid = lo + (hi - lo) // 2         # no overflow: int is 64-bit and traps anyway
+        match items[mid].cmp(target):
+            case Less:
+                lo = mid + 1
+            case Greater:
+                hi = mid
+            case Equal:
+                return Some(mid)
+    return None
 
-fn withdraw(mut acct: Account, amount: Money)
+def withdraw(mut acct: Account, amount: Money):
     requires amount > Money.zero
     ensures acct.balance == old(acct.balance) - amount
-{
     acct.balance -= amount
-}
 
-struct Account {
+struct Account:
     balance: Money
     limit: Money
-}
-    invariant self.balance >= -self.limit     // checked after construction and every `mut self` method
+    invariant self.balance >= -self.limit    # checked after construction and every `mut self` method
 
-impl Account {
-    fn try_withdraw(mut self, amount: Money) -> ! Overdrawn {
-        if self.balance - amount < -self.limit { return Err(Overdrawn) }
-        self.balance -= amount                 // invariant re-checked when this method returns
-        Ok(())
-    }
-}
+    def try_withdraw(mut self, amount: Money) -> ! Overdrawn:
+        if self.balance - amount < -self.limit:
+            return Err(Overdrawn)
+        self.balance -= amount                # invariant re-checked when this method returns
+        return Ok(())
 
-error Overdrawn { Overdrawn }
+error Overdrawn:
+    Overdrawn
 
-// Refinement types: subtypes of a base type with a predicate.
-type Port = int where self in 1..=65535
-type Percent = int where self in 0..=100
-type NonEmpty[T] = List[T] where not self.is_empty()
+# Refinement types: subtypes of a base type with a predicate.
+type Port = int where 1 <= self <= 65535
+type Percent = int where 0 <= self <= 100
+type NonEmpty[T] = list[T] where not self.is_empty()
 
-fn listen(net: Net, port: Port) -> Listener ! NetError { net.listen(port) }
+def listen(net: Net, port: Port) -> Listener ! NetError:
+    return net.listen(port)
 
-fn demo(net: Net) {
-    let p: Port = 8080                         // constant: checked at compile time
-    let q = Port.try_from(user_input) else { e -> return }   // runtime: checked at construction
+def demo(net: Net, user_input: int):
+    let p: Port = 8080                         # constant: checked at compile time
+    let q = Port.try_from(user_input) else:    # runtime: checked at construction
+        return
     listen(net, p)
-    // listen(net, 70000)                     // compile error: 70000 is not a Port
+    # listen(net, 70000)                       # compile error: 70000 is not a Port
 
     let xs: NonEmpty[int] = NonEmpty.try_from([1, 2, 3]).expect("literal is non-empty")
-    let first = xs.first()                     // NonEmpty.first returns T, not T?
-}
+    let first = xs.first()                     # NonEmpty.first returns T, not T?
 
-test "binary search finds every element" {
-    check(any[List[int]]) { xs ->
+test "binary search finds every element":
+    check(any[list[int]]) do xs:
         var sorted = xs.copy()
         sorted.sort()
-        sorted.iter().all { x -> binary_search(sorted, x).is_some() }
-    }
-    // Every call inside a test checks `requires` and `ensures` too.
-}
+        return sorted.iter().all(binary_search(sorted, it).is_some())
+    # Every call inside a test checks `requires` and `ensures` too.

@@ -1,110 +1,103 @@
-// Values, borrowing, views, shared ownership.
+# Values, borrowing, views, shared ownership.
 
-struct User {
+struct User:
     name: String
     age: int
-}
 
-// Default convention: borrowed, read-only. The caller keeps ownership.
-fn describe(u: User) -> String {
-    "{u.name} ({u.age})"
-}
+# Default convention: borrowed, read-only. The caller keeps ownership.
+def describe(u: User) -> String:
+    return "{u.name} ({u.age})"
 
-// `mut`: borrowed for in-place modification. The call site shows it.
-fn birthday(mut u: User) {
+# `mut`: borrowed for in-place modification. The call site shows it.
+def birthday(mut u: User):
     u.age += 1
-}
 
-// `own`: the function takes the value. The caller cannot use it afterwards.
-fn archive(own u: User, mut archive: List[User]) {
+# `own`: the function takes the value. The caller cannot use it afterwards.
+def archive(own u: User, mut archive: list[User]):
     archive.push(u)
-}
 
-// Returning a borrow of a parameter. One borrowed parameter: no `from` needed.
-fn oldest(users: List[User]) -> ref User? {
-    users.iter().max_by { u -> u.age }
-}
+# Returning a borrow of a parameter. One borrowed parameter: no `from` needed.
+def oldest(users: list[User]) -> ref User?:
+    return users.iter().max_by(it.age)
 
-// Two candidates: say which one the result comes from.
-fn longer_name(a: User, b: User) -> ref str from a, b {
-    if a.name.len() >= b.name.len() { a.name } else { b.name }
-}
+# Two candidates: say which one the result comes from.
+def longer_name(a: User, b: User) -> ref str from a, b:
+    return if len(a.name) >= len(b.name): a.name else: b.name
 
-// A view struct holds references. It has one implicit lifetime and cannot
-// be stored on the heap or sent out of the frame that owns `source`.
-view struct Token {
+# A view struct holds references. It has one implicit lifetime and cannot
+# be stored on the heap or sent out of the frame that owns `source`.
+view struct Token:
     kind: TokenKind
     text: str
-}
 
-enum TokenKind { Word, Number, Punct }
+enum TokenKind:
+    Word
+    Number
+    Punct
 
-fn tokenize(source: str) -> List[Token] {
-    var out = List.new()
-    for piece in source.split_whitespace() {
-        let kind = if piece.chars().all { c -> c.is_digit() } { Number } else { Word }
-        out.push(Token { kind, text: piece })
-    }
-    out                                     // a List of views: itself view-like
-}
+def tokenize(source: str) -> list[Token]:
+    var out = list()
+    for piece in source.split_whitespace():
+        let kind = if piece.chars().all(it.is_digit()): Number else: Word
+        out.push(Token(kind=kind, text=piece))
+    return out                               # a list of views: itself view-like
 
-fn demo() {
-    var roni = User { name: "Roni", age: 30 }
-    println(describe(roni))                 // borrowed
-    birthday(mut roni)                      // modified in place, visibly
-    let copy = roni.copy()                  // explicit deep copy
-    var archive = List.new()
-    archive(roni, mut archive)              // moved
-    // println(roni.name)                   // error: roni was moved on the previous line
-    println(copy.name)                      // the copy is still ours
+def demo():
+    var roni = User(name="Roni", age=30)
+    print(describe(roni))                    # borrowed
+    birthday(mut roni)                       # modified in place, visibly
+    let copy = roni.copy()                   # explicit deep copy
+    var archive = list()
+    archive(roni, mut archive)               # moved
+    # print(roni.name)                       # error: roni was moved on the previous line
+    print(copy.name)                         # the copy is still ours
 
-    var team = List.of(User { name: "Aino", age: 27 }, copy)
-    let eldest = oldest(team)               // borrows team
-    // team.push(...)                       // error while `eldest` is alive
-    println(eldest?.name ?? "nobody")       // last use of `eldest`: borrow ends here
-    team.push(User { name: "Eero", age: 45 })  // fine now
+    var team = [User(name="Aino", age=27), copy]
+    let eldest = oldest(team)                # borrows team
+    # team.push(...)                         # error while `eldest` is alive
+    print(eldest?.name ?? "nobody")          # last use of `eldest`: borrow ends here
+    team.push(User(name="Eero", age=45))     # fine now
 
-    let src = String.from("let x = 42")
-    let tokens = tokenize(src)              // tokens borrow from src
-    // return tokens                        // error: cannot escape the frame owning `src`
-    for t in tokens { println("{t.kind:?}: {t.text}") }
-}
+    let src = String("let x = 42")
+    let tokens = tokenize(src)               # tokens borrow from src
+    # return tokens                          # error: cannot escape the frame owning `src`
+    for t in tokens:
+        print("{t.kind:?}: {t.text}")
 
-// Shared ownership is a type you choose. Immutable by default.
-struct Config { verbose: bool, retries: int }
+# Shared ownership is a type you choose. Immutable by default.
+struct Config:
+    verbose: bool
+    retries: int
 
-fn shared_demo(cfg: own Config) {
-    let shared = Shared.new(cfg)
-    let a = shared                          // bumps the count; `shared` still usable
+def shared_demo(own cfg: Config):
+    let shared = Shared(cfg)
+    let a = shared                           # bumps the count; `shared` still usable
     let b = shared
-    task.scope { s ->
-        s.spawn { use_config(a) }           // Shared[Config] is Send because Config is
-        s.spawn { use_config(b) }
-    }
-}
+    task.scope do s:
+        s.spawn(() -> use_config(a))         # Shared[Config] is Send because Config is
+        s.spawn(() -> use_config(b))
 
-fn use_config(cfg: Shared[Config]) { println(cfg.retries) }
+def use_config(cfg: Shared[Config]):
+    print(cfg.retries)
 
-// Shared and mutable requires a lock; the type system will not let you forget.
-fn counter_demo() {
-    let hits = Shared.new(Mutex.new(0))
-    task.scope { s ->
-        for _ in 0..4 {
-            s.spawn { hits.lock().value += 1 }
-        }
-    }
-    assert_eq(hits.lock().value, 4)
-}
+# Shared and mutable requires a lock; the type system will not let you forget.
+def counter_demo():
+    let hits = Shared(Mutex(0))
+    task.scope do s:
+        for _ in range(4):
+            s.spawn(() -> hits.lock().value += 1)
+    assert hits.lock().value == 4
 
-// Graphs: an arena with generational handles, not pointers.
-struct Node { label: String, edges: List[Handle[Node]] }
+# Graphs: an arena with generational handles, not pointers.
+struct Node:
+    label: String
+    edges: list[Handle[Node]]
 
-fn graph_demo() {
-    var nodes = Arena[Node].new()
-    let a = nodes.insert(Node { label: "a", edges: [] })
-    let b = nodes.insert(Node { label: "b", edges: [] })
+def graph_demo():
+    var nodes = Arena[Node]()
+    let a = nodes.insert(Node(label="a", edges=[]))
+    let b = nodes.insert(Node(label="b", edges=[]))
     nodes[a].edges.push(b)
-    nodes[b].edges.push(a)                  // a cycle, with no ownership problem
+    nodes[b].edges.push(a)                   # a cycle, with no ownership problem
     nodes.remove(a)
-    assert(nodes.get(a).is_none())          // stale handles are detected, not dangling
-}
+    assert nodes.get(a).is_none()            # stale handles are detected, not dangling

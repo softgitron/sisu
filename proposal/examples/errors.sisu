@@ -1,80 +1,68 @@
-// Error sets, inference, propagation and handling.
+# Error sets, inference, propagation and handling.
 
-error ParseError {
+error ParseError:
     UnexpectedEnd
-    BadDigit { at: int, found: char }
-}
+    BadDigit(at: int, found: char)
 
-error ConfigError {
-    MissingKey { key: String }
-    InvalidValue { key: String, reason: String }
-}
+error ConfigError:
+    MissingKey(key: String)
+    InvalidValue(key: String, reason: String)
 
-// An explicit error set.
-fn parse_int(text: str) -> int ! ParseError {
-    if text.is_empty() { return Err(UnexpectedEnd) }
+# An explicit error set.
+def parse_int(text: str) -> int ! ParseError:
+    if text.is_empty():
+        return Err(UnexpectedEnd)
     var n = 0
-    for (i, c) in text.chars().enumerate() {
-        let d = c.to_digit() else { return Err(BadDigit { at: i, found: c }) }
-        n = n * 10 + d                       // traps on overflow; use *% to wrap
-    }
-    Ok(n)
-}
+    for i, c in enumerate(text.chars()):
+        let d = c.to_digit() else:
+            return Err(BadDigit(at=i, found=c))
+        n = n * 10 + d                       # traps on overflow; use *% to wrap
+    return Ok(n)
 
-// A union of sets, written out.
-fn read_port(fs: Fs, path: Path) -> int ! { IoError, ParseError, ConfigError } {
-    let text = fs.read_to_string(path)?                     // IoError, coerced into the union
-    let line = text.lines().find { l -> l.starts_with("port=") }
-        else { return Err(MissingKey { key: "port" }) }
-    let port = parse_int(line.strip_prefix("port="))?       // ParseError, coerced
-    if port > 65535 {
-        return Err(InvalidValue { key: "port", reason: "{port} is out of range" })
-    }
-    Ok(port)
-}
+# A union of sets, written out.
+def read_port(fs: Fs, path: Path) -> int ! {IoError, ParseError, ConfigError}:
+    let text = fs.read_to_string(path)?                      # IoError, coerced into the union
+    let line = text.lines().find(it.starts_with("port=")) else:
+        return Err(MissingKey(key="port"))
+    let port = parse_int(line.strip_prefix("port="))?        # ParseError, coerced
+    if port > 65535:
+        return Err(InvalidValue(key="port", reason="{port} is out of range"))
+    return Ok(port)
 
-// An inferred set: the compiler computes { IoError, ParseError, ConfigError }
-// from the body, and `sisu doc` prints it. The public-API linter would ask
-// for it to be explicit if this were `pub`.
-fn read_port_inferred(fs: Fs, path: Path) -> int ! {
-    read_port(fs, path)
-}
+# An inferred set: the compiler computes {IoError, ParseError, ConfigError}
+# from the body, and `sisu doc` prints it. The public-API linter would ask
+# for it to be explicit if this were `pub`.
+def read_port_inferred(fs: Fs, path: Path) -> int !:
+    return read_port(fs, path)
 
-fn demo(fs: Fs) {
-    // Handle with a fallback that sees the error.
-    let port = read_port(fs, "server.conf") else { e ->
-        log.warn("no port configured ({e}); using 8080")
-        8080
-    }
+def demo(fs: Fs):
+    # Fallback expression, with or without the error in scope.
+    let port = read_port(fs, "server.conf") else: 8080
+    let port2 = read_port(fs, "server.conf") else as e: default_port_for(e)
 
-    // Match on specific variants and propagate the rest.
-    let result = match read_port(fs, "server.conf") {
-        Ok(p) -> p
-        Err(MissingKey { key }) -> { log.info("{key} missing, defaulting"); 8080 }
-        Err(NotFound { .. }) -> 8080                   // an IoError variant, matched directly
-        Err(e) -> panic("unrecoverable configuration error: {e}")
-    }
+    # Match on specific variants and propagate or handle the rest.
+    let result = match read_port(fs, "server.conf"):
+        case Ok(p): p
+        case Err(MissingKey(key)): 8080
+        case Err(NotFound(..)): 8080                  # an IoError variant, matched directly
+        case Err(e): panic("unrecoverable configuration error: {e}")
 
-    // Context wrapping is a std convention, not syntax.
-    let text = fs.read_to_string("x").context("loading x") else { e ->
-        eprintln(e)                 // "loading x: NotFound { path: x }"
-        eprintln(e.trace())         // in debug builds: each `?` the error passed through
+    # Context wrapping is a std convention, not syntax.
+    let text = fs.read_to_string("x").context("loading x") else as e:
+        print_err(e)                 # "loading x: NotFound(path=x)"
+        print_err(e.trace())         # in debug builds: each `?` the error passed through
         return
-    }
 
-    // Results must be used. This line is a compile error:
-    // read_port(fs, "server.conf")
-    // Discard explicitly if you mean it:
+    # Results must be used. This line is a compile error:
+    # read_port(fs, "server.conf")
+    # Discard explicitly if you mean it:
     _ = read_port(fs, "server.conf")
-}
 
-// Panics are for bugs. They are not caught by `match` or `else`.
-fn checked_index(xs: List[int], i: int) -> int {
-    xs[i]                           // panics with a message and location if out of bounds
-}
+# Panics are for bugs. They are not caught by `match` or `else`.
+def checked_index(xs: list[int], i: int) -> int:
+    return xs[i]                      # panics with a message and location if out of bounds
 
-fn invariant_violated() {
-    let xs = List.of(1, 2, 3)
-    let x = xs.get(10).expect("index 10 should exist")   // panic with the message
+def invariant_violated():
+    let xs = [1, 2, 3]
+    let x = xs.get(10).expect("index 10 should exist")   # panic with the message
     unreachable("x is {x}")
-}
