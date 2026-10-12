@@ -35,9 +35,11 @@ properties:
 
 1. **`pure` that is deterministic across runs, processes, thread counts
    and targets**, checked by the compiler (N-01, with N-02 for floating
-   point). Haskell, the `Par` monad and Deterministic Parallel Java give
-   deterministic parallelism; none covers hash order or float code
-   generation.
+   point). Haskell's purity, the `Par` monad and LVish give deterministic
+   parallelism without covering hash order or float code generation;
+   Deterministic Parallel Java stayed a research language; Starlark and
+   Joe-E are hermetic within one evaluation but say nothing about threads
+   or targets.
 2. **A simulation the program provably cannot escape** (N-03). FoundationDB
    and TigerBeetle hold theirs by discipline; a `sim` build of Sisu fails to
    compile if reachable code could reach the world through an unmodelled
@@ -49,33 +51,43 @@ properties:
 4. **Programs the borrow checker rejected still run**, under the dynamic
    ownership monitor, so the rejection comes back as a concrete conflict
    with values or as "no conflict on this input" (N-26). GHC defers type
-   errors; nothing defers borrow errors with a check.
+   errors, and Rust's 2018 migration mode downgraded some borrow errors to
+   warnings with no check at all; nothing defers borrow errors with a check.
 5. **Evaluation that is always on because it provably cannot touch the
    world**, for an imperative language (N-25). Unison has the gate through
-   purity.
-6. **Views, scopes and suspended frames that are never leaked**, as a
-   specification rule that lets completion-based I/O and DMA borrow the
-   caller's buffer (N-07). Rust cannot offer it because `mem::forget` is
-   safe; Swift's noncopyable types and Rust's scoped threads each ship half.
-7. **A reactive worksheet or notebook whose dependency graph includes
-   in-place mutation**, tracked statically (N-34). marimo's documentation
+   purity; Power Fx confines effects to behaviour formulas and Python in
+   Excel runs without network access, which are the same discipline by
+   convention rather than by type.
+6. **An I/O API that borrows the caller's buffer for completion-based I/O
+   and DMA**, built on a rule that views, scopes and suspended frames are
+   never leaked (N-07). The rule itself has shipped, in Rust's scoped
+   threads and Swift's noncopyable types; no safe language builds its I/O
+   API on it, because in Rust `mem::forget` is safe.
+7. **A reactive notebook whose dependency graph includes in-place
+   mutation**, tracked statically (N-34). marimo's documentation
    says tracking mutation "reliably is impossible in Python".
 8. **Memory and CPU budgets on structured tasks in a shared heap without a
    garbage collector** (N-11). Erlang has per-process limits because it has
    per-process heaps.
 9. **A review tool that classifies weakened promises** (removed `ensures`,
-   deleted tests, narrowed generators) and **an authority delta** at review
-   and dependency admission (N-41, N-42). Capslock computes capabilities for
-   Go; nothing classifies weakened specifications in a diff.
+   deleted tests, narrowed generators; N-41). Nothing classifies weakened
+   specifications in a diff. The authority delta beside it (N-42) has a Go
+   precedent, capcheck's CI gate on capability drift; Sisu's addition is
+   that reach follows from types, so the report is exact up to `unsafe`.
 10. **Behavioural semver**: the previous version's black-box tests run at
     publish (N-44). NoRegrets and Dependabot work on the consumer side.
 11. **A review ledger keyed by content hashes of the capability slice**
-    (N-43). cargo-vet and crev record audits per version.
+    (N-43). cargo-vet records audits per version and deltas between
+    versions; crev's proofs can cover parts of code; neither is keyed by
+    function-level content hashes.
 12. **One `why` query over every inferred fact** (N-47). rustc, Argus, the
     Whyline and Scala's `-explain` each cover one.
 13. **A hole-filling loop whose judge the filler cannot touch** (N-27):
     fills edit only the hole's span, contracts become properties, tests are
-    read-only, and "unfillable" is a legal answer.
+    read-only, and "unfillable" is a legal answer. Read-only tests and a
+    flag-and-exit option are ImpossibleBench's measured mitigations; no
+    shipped toolchain filters fills by the tests and contracts that reach
+    the hole.
 14. **Loudness relative to the training-data majority** as a design rule
     (N-49): where Sisu spells something as Python does, it means the same
     or fails to compile.
@@ -85,8 +97,9 @@ well, a library shape, or a rejection.
 
 ## Gaps in the decided design found on the way
 
-Three files found the same contradiction independently, and the
-determinism candidates cannot be assessed until it is closed. These are
+Three files flagged the first gap independently, from different angles
+and with different fixes, and the determinism candidates cannot be
+assessed until it is closed. These are
 recorded as open questions for the owner because they touch decisions in
 the log.
 
@@ -103,24 +116,24 @@ the log.
 
 | ID | Candidate | New? | Verdict | Confidence | Source |
 |---|---|---|---|---|---|
-| N-01 | Bit-deterministic `pure` | new as a checked guarantee | adopt (Q-42, Q-43) | medium-high | systems 1, synchronous 4 |
+| N-01 | Bit-deterministic `pure` | new as a checked guarantee | adopt (Q-42, Q-43) | medium-high | systems 1 (synchronous 4 is the alternative) |
 | N-02 | Reproducible floating point by default | new across thread counts | adopt the strict default (Q-44); rest with Q-23 | medium | systems 4 |
 | N-03 | `sim` profile: deterministic simulation, typed fault injection, model-checking explorer | new as a compiler guarantee | prototype in the experiment | high | systems 2, live 1, synchronous 1, logic 1 |
-| N-04 | Record and replay at the capability boundary; replay tokens; checked cut; reverse debugging | new as a checked cut | log and tokens: prototype in the experiment; rest: tooling | medium-high | end-user 4, systems 3, AI-era A8, live 2, 3, 7, incremental 1 |
+| N-04 | Record and replay at the capability boundary; replay tokens; checked cut; reverse debugging | new as a checked cut | log and tokens: prototype in the experiment; rest: tooling | medium-high | end-user 4, systems 3, AI-era A8, live 2, 3, 7, incremental 3 |
 | N-05 | `Exhaustive[T]` small-scope generators for `check` | no | std.test | medium-high | logic 2 |
-| N-06 | Capability interceptors; trace context inherited through scopes | no | std | medium-high | incremental 3 |
+| N-06 | Capability interceptors; trace context inherited through scopes | no | std | medium-high | incremental 2; the trace context is this document's addition |
 | N-07 | Guaranteed-drop views, scopes and suspended frames | new as an I/O guarantee | rule, adopt | high | systems 7 |
 | N-08 | `@no_alloc`, `@no_block`, `@stack(max=N)` | no | adopt; `@stack` with the native backend | medium-high | systems 5, capabilities 5 |
 | N-09 | `@no_panic` | no | tooling now; attribute after 0.1 | medium | systems 6 |
-| N-10 | Regions as allocator-typed views | no (Rust 1.100) | adopt as a `std.collections` rule | medium | systems 8 |
+| N-10 | Regions as allocator-typed views | no (Rust 1.100, stabilisation merged) | adopt as a `std.collections` rule | medium | systems 8 |
 | N-11 | Memory and CPU budgets on tasks | new for shared heaps without GC | prototype after 0.1 | low-medium | systems 9 |
 | N-12 | Static lock ordering | no | tooling (lockdep), then std.x | medium | systems 10 |
 | N-13 | Priority tasks with compile-time ceilings for `freestanding` | no | std.x | medium | systems 11 |
-| N-14 | `Mutex` unwinding: re-check the invariant, poison only on failure | new as a rule | Q-45 | medium | systems F4 |
+| N-14 | `Mutex` unwinding: re-check the invariant, poison only on failure | no (Rust poisons; non-poisoning locks on nightly) | Q-45 | medium | systems F4 |
 | N-15 | `@must_consume` propagates through containers | no (Move) | adopt; settles Q-37's open half | high | capabilities 1 |
 | N-16 | Revocable and lent capabilities | no | std.cap (Q-51) | medium | capabilities 3 |
 | N-17 | Pure-package label; capability-gated plugin loading | no | label: tooling; loader: reject for now | medium / low | capabilities 4 |
-| N-18 | `std.par`: `par_iter`, `par.join`, reducers with a fixed merge order; `par` keyword | no | std; keyword to Q-47 | medium-high | parallel 1, 2, 4, systems 12 |
+| N-18 | `std.par`: `par_iter`, `par.join`, reducers with a fixed merge order; `par` keyword | no | std; keyword to Q-47 | medium-high | parallel 1, 2, 4, 5, systems 12 |
 | N-19 | A non-blocking pool for `pure` bodies, apart from tasks | no | rule | high | parallel 3 |
 | N-20 | `SoaList[T]`: layout-polymorphic collections | no | std.collections, with Q-27 | medium-high | schedule 1, systems 13 |
 | N-21 | `@refines(reference)`: generated equivalence tests | no | std.test | medium | schedule 2 |
@@ -144,7 +157,7 @@ the log.
 | N-39 | Deterministic cost metrics for exercises | no | tooling | medium-low | game 5 |
 | N-40 | A checker that produces types for broken code | no (Luau) | adopt as checker architecture | high | game 1 |
 | N-41 | Specification-weakening report and gate | new | tooling for v1 | medium-high | AI-era A2 |
-| N-42 | Authority delta at review and admission; cooldowns | new (delta); no (cooldown) | tooling for v1 | high | AI-era A3, capabilities 4 |
+| N-42 | Authority delta at review and admission; cooldowns | no (capcheck, pnpm); exactness from types is new | tooling for v1 | high | AI-era A3, capabilities 4 |
 | N-43 | Review ledger keyed by capability-slice hashes | new | prototype with the registry | medium-low | AI-era A4 |
 | N-44 | Behavioural semver at publish | new | tooling with the registry | medium | AI-era A5 |
 | N-45 | `@fix_inline` library migrations | no (Go) | tooling for v1 | high | AI-era A6 |
@@ -165,7 +178,7 @@ the log.
 | N-60 | `task.race`, search combinators, lockdep traces | no | std | medium-high / medium | synchronous 2, logic 5 |
 | N-61 | Eventual references and promise pipelining | no (E, Cap'n Proto) | std.x later | medium / low | capabilities 2, systems |
 | N-62 | Logical-time reactors (`std.x.reactor`) | no (Lingua Franca) | std.x | medium | synchronous 3 |
-| N-63 | Incremental computation (`std.x.incr`) | no (Salsa) | std.x | medium | incremental 2 |
+| N-63 | Incremental computation (`std.x.incr`) | no (Salsa) | std.x | medium | incremental 1 |
 | N-64 | Differentiation and probabilistic programming as libraries | no | library; reject in the language | low-medium | incremental 4 |
 | N-65 | One definitional interpreter for the runner, explorer and symbolic evaluator | no (K) | rule | medium-low | logic 6 |
 | N-66 | Read-only diagrams generated from code | no | tooling | low | visual 7 |
@@ -179,7 +192,8 @@ process, thread count and target". Three rules: `dict` and `set` iterate in
 insertion order while the SipHash key stays per process (F1); inside `pure`
 code the operations that observe the schedule are errors (`select`,
 `Mutex`, `Atomic`, channels with more than one sender, `try_lock`,
-`try_recv`, `try_send`, address-derived values), while `task.scope`,
+`try_recv`, `try_send`, `Weak.upgrade` across tasks, address-derived
+values), while `task.scope`,
 `spawn` and `join` stay legal; a scope inside `pure` code reports the
 lowest-index failure rather than the first in time (F3). Higher-order
 `pure` code demands `pure` callbacks, so `pure` enters function types (F5).
@@ -194,11 +208,14 @@ pure def apply(state: Ledger, batch: Slice[Transfer]) -> Ledger ! TaskError:
     return Ok(state.posted(fees, risk))           # same bits on 1 or 64 workers, x86 or ARM
 ```
 
-*Precedents.* Each rule has shipped: insertion order in Python 3.7, Ruby
-and JavaScript's `Map`; Rayon's `join` propagates the first closure's panic
-by index; Haskell's purity and the `Par` monad. The combined guarantee is
-checked nowhere; Temporal and Durable Functions police it with linters
-that "will not catch all cases".
+*Precedents.* Each rule has shipped: insertion order in Python 3.7, Ruby,
+JavaScript's `Map` and Starlark; Rayon's `join` propagates the first
+closure's panic by index; Haskell's purity, the `Par` monad and LVish;
+Joe-E's exclusion of ambient nondeterminism, which Waterken relies on for
+its ETags. The combined guarantee across thread counts and targets is
+checked nowhere; Temporal polices it with a linter that "will not catch all
+cases" and Durable Functions with a run-time detector that "won't catch all
+violations".
 
 *Why Sisu can.* Capabilities already mark every external effect, so the
 purity checker that Phase 8 builds only needs the schedule-observing
@@ -238,13 +255,14 @@ WebAssembly's scalar floats are deterministic except for NaN bits; CORE-MATH's
 correctly rounded functions ship in glibc 2.42 and 2.43; ReproBLAS;
 Box2D v3 reached cross-platform, cross-thread-count determinism by
 disabling FMA, avoiding fast-math and fixing merge order. Clang contracts
-within a statement by default, which is what makes x86 and ARM disagree.
+within a statement by default, the kind of default that makes x86 and ARM
+disagree.
 
 *Costs.* Dense kernels lose peak throughput until they use `mul_add` or
 `std.simd` explicitly; correctly rounded functions are slower on some
 inputs; a fixed reduction shape constrains chunking. Deciding now costs
-nothing because no code depends on the alternative; Java needed twenty
-years and the end of x87.
+nothing because no code depends on the alternative; Java needed more than
+twenty years and the end of x87.
 
 *Verdict.* Adopt the strict default and the explicit-only FMA rule (D-074,
 Q-44); reproducible reductions and `std.math` go with Q-23. Confidence
@@ -330,8 +348,9 @@ a recorded failure into a regression test with preloaded fakes; reverse
 execution in the debugger from checkpoints; REPL undo; and "why" queries
 that answer with the dynamic slice that produced a value.
 
-*Precedents.* rr, Pernosco and WinDbg's TTD at the instruction level
-(10-20x in the worst case); R2's interface-level recording (SQLite's log
+*Precedents.* rr and Pernosco at the system-call boundary (rr: at most
+1.2x on Firefox tests, under 2x on important workloads); WinDbg's TTD at
+the instruction level (about 10-20x); R2's interface-level recording (SQLite's log
 from 890 MB to 3 MB, slowdown from 126 % to 9.6 %), with completeness the
 developer's job; Elm 0.18's importable message histories; Durable Functions
 and Temporal; the Whyline (debugging time cut by nearly a factor of eight
@@ -370,7 +389,8 @@ reflection behind `Fake[T]`, intercepts every call to the outside world,
 visibly in `main` and typed, with no pointcuts; tests, tracing, auditing and
 N-04's recording share the one interception point. A `task.scope` inherits
 a context (trace and span identifiers) that `log` attaches automatically,
-as Kotlin's coroutine context and Erlang's logger metadata do.
+as Kotlin's coroutine context and Erlang's logger metadata do; this half is
+the assessment's own addition and comes from no family file.
 *Verdict.* std (D-075 records the shape). Confidence medium-high.
 
 ## B. Resource guarantees and systems code
@@ -479,8 +499,9 @@ def handle(req: Request) -> Response ! HttpError:
         return Ok(render(headers))                     # the Response is built in the global heap
 ```
 
-*Precedents.* Rust merged `Vec<T, A>`, `Box<T, A>` and `impl Allocator for
-&A` for 1.100 in September 2026, ten years after RFC 1398; Cyclone, MLKit,
+*Precedents.* Rust merged the stabilisation of `Vec<T, A>`, `Box<T, A>` and
+`impl Allocator for &A` in September 2026, for Rust 1.100, ten years after
+RFC 1398; Cyclone, MLKit,
 RTSJ scoped memory; Go's arena experiment is on hold because explicit
 arenas are infectious to APIs. *Costs.* An allocator parameter on every
 collection, hidden by the default; std naming must separate a bump `Region`
@@ -678,8 +699,8 @@ and no evidence exists elsewhere. Confidence low-medium.
 
 ### N-24 `schedule` blocks
 
-Rejected. Halide and Exo work over pure functions on integer domains, where
-every dependence is visible and a schedule provably cannot change the
+Rejected. Halide works over pure functions on integer domains and Exo over
+affine loops, where every dependence is visible and a schedule provably cannot change the
 result; outside such a sublanguage equivalence is undecidable, and
 floating-point reassociation changes results even inside it. There is no
 measured success in application code, and a schedule language is a second
@@ -843,8 +864,8 @@ since model output is not reproducible even at temperature 0.
 *Precedents.* GHC's typed holes and valid fits (on for twelve years), Idris
 and Agda holes, Lean's `sorry` and `exact?`, Hazel's hole closures and its
 measured ChatLSP context (type definitions had the largest effect, and the
-gains were largest in the low-resource language), PropR (63-85 % of
-test-passing repairs overfitted), ImpossibleBench, S*'s distinguishing
+gains were largest in the low-resource language), PropR (roughly two thirds to four
+fifths of test-passing repairs overfitted in a manual sample), ImpossibleBench, S*'s distinguishing
 inputs, FlashFill's disambiguation studies. rust-analyzer's term search was
 little used, which argues for the report over enumeration. No shipped
 toolchain filters fills by the tests and contracts reaching the hole.
@@ -875,9 +896,8 @@ labels. A permissions overlay shows on each line the read, write and own
 permissions each binding gains and loses, from the checker's loan sets, and
 marks the permission an erroneous operation needed and lacked.
 *Precedents.* Python Tutor, Thonny, DrRacket's stepper, UUhistle, and
-Aquascope, whose permission diagrams with a rewritten chapter raised
-Ownership Inventory scores by 9 % (N=342, d=0.56), the best evidence any aid
-in this round has. *Verdict.* Tooling: the overlay after the bet-1 verdict
+Aquascope, whose permission diagrams with a rewritten chapter raised Ownership Inventory scores by 9 % (N=342, d=0.56), the best evidence of
+any learning aid in the end-user file. *Verdict.* Tooling: the overlay after the bet-1 verdict
 (giving Sisu's bet-1 authors an overlay while the Rust controls have none
 confounds the comparison), the stepper with the playground after 0.1.
 Confidence medium-high / medium.
@@ -930,8 +950,9 @@ takes the capability parameters the selection uses. A palette request
 returns the vocabulary callable at the cursor grouped by module and trait,
 each entry a snippet with holes, and shows what is *not* available and why
 ("Network: needs a `Net`; `save()` was not given one"). *Evidence.*
-Paredit's 81 % among experienced Clojure users; 65.4 % of novices' switches
-to blocks were to find vocabulary. *Verdict.* Tooling. Confidence
+Paredit's 81 % among experienced Clojure users; 65.4 % of 217 text-to-block
+switches by novices were made to add a command, two thirds of them a block
+type not yet used in the program. *Verdict.* Tooling. Confidence
 medium-high / medium.
 
 ### N-32 Concrete-first authoring and approve-to-test
@@ -976,8 +997,8 @@ and unlike Pluto and marimo the dependency graph includes in-place
 mutation, which the type checker resolves statically from `mut` passing and
 `mut self` calls; each binding has one defining cell, writers run after it
 and readers after every writer, a cell may borrow another's bindings but
-not move out of them. *Evidence.* About a quarter of 1.4 million GitHub
-notebooks ran without error and 4 % reproduced their results; reactive
+not move out of them. *Evidence.* Of 863,878 attempted executions of GitHub
+notebooks, 24 % ran without error and 4 % reproduced their stored results; reactive
 notebooks fix the ordering half and Sisu could fix the mutation half.
 *Conflict.* [00](00-vision-and-principles.md) says Sisu is not for notebook
 exploration "yet", on an AOT premise that D-052 weakened; worksheets need
@@ -991,9 +1012,11 @@ low-medium (high that the mechanism is sound and new, low on demand).
 
 *What.* D-053 swaps a body at its next call and lets frames in flight finish
 on the old one, so one loop iteration can mix an old `bar` with a new
-helper. Four live-coding systems and the game engines converged on the
-refinement: a successful `--watch` check publishes all changed bodies as
-one *epoch*; a task adopts the newest epoch at task start and at
+helper. Sonic Pi, Extempore, TidalCycles and Erlang converged on swapping
+at a loop boundary; the epoch design below is this proposal's refinement
+of that, with Flutter's `const` rule and Papyrus's persistence rule from
+the game engines: a successful `--watch` check publishes all changed
+bodies as one *epoch*; a task adopts the newest epoch at task start and at
 `live.boundary()` (which a `Ticker.wait` calls), and resolves every call in
 between in its adopted epoch; a save that fails to check publishes nothing;
 a function used as a value holds its slot, not its body, in debug builds; a
@@ -1252,9 +1275,9 @@ symbolic values in the SIR interpreter and hand path conditions to a solver
 --suggest` proposing `ensures` from doc prose for property tests to vet and
 a person to accept; `ensures ?post` holes later. *Evidence.* Off-the-shelf
 models solved 82 % of vericoding's Dafny specifications and pure Dafny
-verification rose from 68 % to 96 % in a year, while writing sound and
-complete specifications stays at about 52 % and end-to-end verified
-generation at 1 of 161 CLEVER problems; proof burden, which kept SPARK and
+verification rose from 68 % to 96 % in a year, while the best model wrote sound and
+complete specifications for 52.3 % of VERINA's Lean tasks and end-to-end
+verified generation reached 1 of 161 CLEVER problems; proof burden, which kept SPARK and
 Dafny niche, is the cost models cut fastest, and the checker stays the
 trusted base. *Verdict.* Post-1.0 tooling as decided, study moved earlier.
 Confidence medium / medium-low.
@@ -1374,8 +1397,9 @@ robotics and simulation is unproven. Confidence medium.
 
 *What.* `std.x.incr`, Salsa-shaped: an explicit `Db` handle, inputs and
 memoised `pure` queries with early cutoff; plain memoisation is a generic
-function over `Hash` and `Eq`. Skip built this into a language and is now a
-TypeScript framework; Salsa, Incremental and Bonsai succeed as libraries.
+function over `Hash` and `Eq`. Skip built this into a language and now ships as a framework with
+TypeScript interfaces over a runtime written in Skiplang; Salsa,
+Incremental and Bonsai succeed as libraries.
 *Cost.* `Db`'s caches mutate, so `Db.read` and `Db.get` need a trusted
 "observationally pure" declaration in a `[trust]` package, an audited hole
 in `pure` to be recorded in [06](06-concurrency-and-capabilities.md);
