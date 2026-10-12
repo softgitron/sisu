@@ -9,12 +9,18 @@ stacks, Q-6) is measured in a standalone harness from week 1; the ownership
 checker, with a dynamic monitor that re-checks it on every run, is the first
 Sisu artefact, so that paid outsiders are writing the bet-1 corpus against
 it by week 16; tasks and capabilities follow on the same interpreter so that
-bet 2's port study and bet 3's semantics run in Sisu code; and the verdicts,
-the decision tree and a 0.1 release on the interpreter land at about week 48
-with three engineers. Everything built runs over the typed IR that the
-native backend will later consume, so nothing in the experiment is thrown
-away. The syntax rewrite, the testing design, governance (Q-21) and numerics
-(Q-23) are owned elsewhere and are not on this plan's path.
+bet 2's port study and bet 3's semantics run in Sisu code, the semantics
+under simulated faults and crashes as well as random schedules; and the
+verdicts, the decision tree and a 0.1 release on the interpreter land at
+about week 52 with three engineers. Six additions the owner accepted from
+the unconventional-languages round
+([19-novel-features.md](19-novel-features.md), Q-49) are built into the
+phases they belong to: most sharpen a bet's measurement, and one, a model
+arm, measures the new-language penalty for model-written code from the
+start. Everything built runs over the typed IR that the native backend
+will later consume, so nothing in the experiment is thrown away. The
+syntax rewrite, the testing design, governance (Q-21) and numerics (Q-23)
+are owned elsewhere and are not on this plan's path.
 
 ## Principles for the experiment
 
@@ -46,13 +52,24 @@ away. The syntax rewrite, the testing design, governance (Q-21) and numerics
    soundness hole would accept programs it should reject and silently
    understate friction, so the interpreter carries a Miri-style dynamic
    ownership monitor (Miri: [`rust.md`](../research/languages/rust.md))
-   and every corpus run is double-entry bookkeeping between the two.
+   and every corpus run is double-entry bookkeeping between the two. The
+   books run both ways: the team also runs every rejected program under
+   the monitor, and a rejection that never reaches a conflict is logged as
+   a candidate false positive (N-26).
 6. **Nothing beyond the bets before the verdict.** No syntax work (the
    owner's rewrite is adopted as it lands), no native backend, no registry,
    no governance apparatus, no formatter, no specification prose; the
    interpreter-era features the owner has decided (hot replacement, REPL,
    scripts) are built because they are cheap on this architecture, not
-   because they are polish.
+   because they are polish, and the six additions of Q-49 because each
+   sharpens a bet's measurement or measures a question of its own (Q-50,
+   the model arm). Everything else in
+   [19-novel-features.md](19-novel-features.md) that is adopt or tooling
+   waits for the verdict, with one exception that costs design discipline
+   rather than weeks: message identifiers with parameters, the lossless
+   syntax tree and a checker that produces types for broken code (D-065,
+   N-30, N-40) are in Phase 0's diagnostics infrastructure and the Phase 2
+   checker from the start, because none of the three can be retrofitted.
 
 ## Phases
 
@@ -72,10 +89,12 @@ error-tolerant, panic-free or incremental.
 
 **Deliverables, evidence (PI and one Rust contractor).**
 
-- `experiments/PREREGISTRATION.md`: the corpus programs, the Go service to
+- [20-pre-registration.md](20-pre-registration.md), frozen by a git tag whose hash it records: the corpus programs, the Go service to
   port, participant criteria, every metric and threshold in
-  [Measurements and thresholds](#measurements-and-thresholds), the analysis
-  procedure, and the decision for each outcome in
+  [Measurements and thresholds](#measurements-and-thresholds), the twenty
+  known bugs from the ALICE and Jepsen catalogues that the `sim` study
+  plants (Phase 8), the model arm's conditions and API budget (Phase 9),
+  the analysis procedure, and the decision for each outcome in
   [Decision points](#decision-points). Signed off by the owner and by one
   external Rust sceptic (the referee). Its commit hash is cited in the
   final report; later changes are amendments and are listed.
@@ -114,18 +133,23 @@ error-tolerant, panic-free or incremental.
   brackets, spaces only, no parser feedback) and the proposal's keyword set.
   No other syntax decision is made in this plan.
 - Hand-written recursive-descent parser that never fails: every production
-  can yield an Error node, recovery synchronises at NEWLINE and DEDENT,
-  comments stay in the token stream for the future formatter.
-- Diagnostics infrastructure: stable codes, multi-span labels, a fix-it
-  slot, poisoned types so only the first error in a dependency chain is
-  reported.
+  can yield an Error node, recovery synchronises at NEWLINE and DEDENT, and
+  the result is a lossless syntax tree, a library whose node identities
+  survive edits and which keeps comments and layout for the future
+  formatter (N-30).
+- Diagnostics infrastructure: stable codes; message identifiers with
+  parameters in a catalog, never English concatenated in code (D-065,
+  N-30); multi-span labels; a fix-it slot; poisoned types so only the
+  first error in a dependency chain is reported.
 - Panic policy: deny-level lints on `unwrap`, `expect` and `panic` in every
   front-end crate; an internal error becomes an ICE diagnostic that dumps
   the IR; a fuzz target for the parser whose invariant is "never panics,
-  always returns an AST, never emits a diagnostic storm".
-- Query skeleton (`source -> tokens -> ast -> resolved module -> typed body
-  -> SIR body`) so `sisu check` is incremental from the first commit and
-  the LSP can share it, as [10-tooling.md](10-tooling.md) requires.
+  always returns a tree that reprints its input byte for byte, never emits
+  a diagnostic storm".
+- Query skeleton (`source -> tokens -> syntax tree -> resolved module ->
+  typed body -> SIR body`) so `sisu check` is incremental from the first
+  commit and the LSP can share it, as [10-tooling.md](10-tooling.md)
+  requires.
 - SIR v0 (a typed control-flow graph: typed locals, basic blocks,
   Assign/Call/Goto/Switch/Return) and the trampolined interpreter loop: an
   explicit per-task frame stack, no host recursion for Sisu calls. Integers,
@@ -150,15 +174,18 @@ error-tolerant, panic-free or incremental.
 - `hello.sisu` and a collatz program run through the full pipeline; an
   overflow traps with a message and a location.
 - A file with three syntax errors reports all three with sensible spans;
-  the parser fuzz target has run 24 hours without a panic (a CI job from
-  here on, not a gate).
+  the parser fuzz target has run 24 hours without a panic or a lossy tree
+  (a CI job from here on, not a gate).
+- Every diagnostic is a catalog identifier with parameters; CI rejects a
+  diagnostic built from an English string.
 - CI publishes front-end milliseconds per kLOC and interpreter nanoseconds
   per SIR statement.
 
 **Effort.** About 12 pw engineering (two engineers for four weeks, plus the
-feasibility note), 3 pw PI, 2 pw Rust contractor. Assumes engineers who have
-built a compiler or interpreter in Rust before, and that the owner's syntax
-rewrite is not waited for.
+feasibility note), 3 pw PI, 2 pw Rust contractor; the catalog and the
+lossless tree cost design discipline rather than weeks. Assumes engineers
+who have built a compiler or interpreter in Rust before, and that the
+owner's syntax rewrite is not waited for.
 
 **Bets tested.** 1 and 2 as priors only; 3 as feasibility only. The rest is
 the Roc checklist that every later phase depends on.
@@ -167,7 +194,8 @@ the Roc checklist that every later phase depends on.
 
 **Goal.** Decide Q-6 and the runtime half of bet 3 with native code before
 the language exists: can stackful, colourless tasks on stacks that cannot
-move match Go and Java virtual threads within the pre-registered factors?
+move match Go and Java virtual threads within the pre-registered factors,
+and can a cancelled task lend a buffer on its stack to the kernel safely?
 
 **Deliverables** (the runtime engineer, alone, from a one-page brief).
 
@@ -196,16 +224,27 @@ move match Go and Java virtual threads within the pre-registered factors?
   starvation test with N compute-bound tasks that yield every K iterations
   plus one latency-probe task; the overhead of software stack probes on
   compute loops.
+- An io_uring cancellation test of the guaranteed-drop rule (D-058, N-07):
+  a million in-flight reads into buffers on task stacks are cancelled, on
+  each stackful strategy, and every cancelled call must return only after
+  the kernel has let go of its buffer (a cancellation that comes back
+  `-EALREADY` waits for the original completion). A canary written into
+  each buffer after its call returns exposes any later write; the
+  cancel-to-return latency is recorded.
 - A written cost estimate of the stackless alternative (C#-style state
-  machines over SIR), including what it does to `ref`-into-frame semantics
-  and to hot replacement, so the fallback is costed before it is needed.
+  machines over SIR), including what it does to `ref`-into-frame semantics,
+  to hot replacement and to D-058's rule that a suspended frame is never
+  leaked, so the fallback is costed before it is needed.
 - A report with every configuration, not the best one, reproduced on a
   second machine by the reviewer; raw CSVs committed.
 
 **Exit criteria.**
 
-- Every bet-3 metric in the table measured for strategies A-E and all
-  controls on two machines.
+- Every harness-era bet-3 metric in the table measured for strategies A-E
+  and all controls on two machines, apart from the io_uring test.
+- The io_uring test has cancelled a million in-flight reads on each
+  stackful strategy and both machines, and reports how many buffers were
+  written after their cancelled call returned (the threshold is zero).
 - A verdict against the thresholds and a Q-6 recommendation (strategy,
   default reservation, probes versus guard pages, and whether `spawn` needs
   a capability; the research found no supply-chain attack that
@@ -213,12 +252,14 @@ move match Go and Java virtual threads within the pre-registered factors?
   its interaction with bet 1 (suspended frames that hold `ref`s into
   themselves) flagged to Phase 3 before the checker's design is frozen.
 
-**Effort.** 8 pw runtime engineer, 1 pw reviewer, 1 pw reproduction.
-Assumes Linux x86-64 only, an existing context-switch library, and no
+**Effort.** 8 pw runtime engineer plus about three days for the io_uring
+test, 1 pw reviewer, 1 pw reproduction. Assumes Linux x86-64 only with a
+kernel that has io_uring, an existing context-switch library, and no
 attempt at a production scheduler.
 
 **Bets tested.** 3 (stacks, memory, creation cost, latency, exhaustion,
-starvation). The semantics half of bet 3 runs in Sisu in Phase 6.
+starvation, cancellation with a lent buffer). The semantics half of bet 3
+runs in Sisu in Phase 6.
 
 ### Phase 2: core language, errors, Drop (weeks 5-10)
 
@@ -240,6 +281,12 @@ destruction and panic unwinding working exactly as
   each `?`.
 - Panics (bounds, overflow, divide by zero, shifts, `assert`, `expect`,
   `unreachable`, `panic`); `Never`.
+- The core's type checker returns a typed tree for every input, flagging
+  ill-typed subterms instead of failing (D-065, N-40), so that the
+  language server can later hover and go to definition in broken code and
+  nothing downstream of the first error in a chain is reported. Error
+  recovery is hard to retrofit, so it is the checker's architecture from
+  its first commit.
 - Drop elaboration in SIR: Drop statements at scope exits in reverse
   declaration order, fields after the value, drop flags for conditionally
   moved locals, unwind edges per block; user `impl Drop`; unwinding runs
@@ -261,12 +308,14 @@ destruction and panic unwinding working exactly as
   inside a loop, conditional moves, each value with a logging Drop) prints
   exactly the order 04 specifies, on the normal and the unwinding path.
 - The wrong-program corpus produces the expected codes with no cascaded
-  errors.
+  errors, and the checker returns a typed tree for every file in it and
+  for every parser-fuzz input.
 - Parse-to-SIR under 50 ms per kLOC.
 
 **Effort.** About 14 pw (two engineers for six weeks; the runtime engineer
-joins from week 9 to write the host builtins). Assumes the Phase 0 skeleton
-held.
+joins from week 9 to write the host builtins); typing broken code
+constrains the checker's design rather than adding weeks. Assumes the
+Phase 0 skeleton held.
 
 **Bets tested.** None directly; a prerequisite for all three.
 
@@ -306,6 +355,15 @@ checker whose own soundness is being tested at the same time.
   use-after-move, aliasing violations, drop-while-borrowed and a view
   escaping its frame are internal soundness errors that fail the run with
   the program, the seed and the SIR dump.
+- The monitor as a counterexample generator (N-26), a team instrument: a
+  program the checker rejected runs anyway across its tests, with its
+  ownership errors deferred to the monitor, and each rejection either
+  stops at the concrete conflict with its values or ends with a report
+  that this input reached no conflict and why the checker still rejects
+  the program. Every rejected corpus program is rerun this way, and
+  rejections that never reach a conflict are candidate false positives.
+  Corpus authors never see it, because it would change the friction they
+  report.
 - `sisu audit --ownership` counts `Shared`, `Weak`, arena handles,
   `.copy()` and `unsafe` per file; `sisu check --diary` appends every
   diagnostic with a timestamp and code to a per-author JSONL log for the
@@ -327,13 +385,17 @@ checker whose own soundness is being tested at the same time.
 - Zero monitor violations across every program so far and across 24 hours
   of mutation fuzzing (random statement reorderings that the checker
   accepts must not trip the monitor).
+- Every program in the wrong-ownership corpus has been run through the
+  counterexample mode, and each one whose run reaches no conflict is
+  explained as an untested path or logged as a candidate false positive.
 - The six dry-run drafts type-check and run their tests.
 - The first outside authors can start (Phase 5).
 
-**Effort.** About 16 pw (the lead for eight weeks, the type-system engineer
-for six, the runtime engineer for two), 1 pw referee. The view and escape
-checker is the one piece with no reference implementation to copy: Hylo and
-Mojo both report iterators and stored references as the unsolved residue
+**Effort.** About 17 pw (the lead for eight weeks, the type-system engineer
+for six, the runtime engineer for three, one of them on the counterexample
+mode), 1 pw referee. The view and escape checker is the one piece with no
+reference implementation to copy: Hylo and Mojo both report iterators and
+stored references as the unsolved residue
 ([`hylo.md`](../research/languages/hylo.md),
 [`memory-management.md`](../research/topics/memory-management.md)). Budget a
 50% slip here before anywhere else.
@@ -418,18 +480,23 @@ friction than Rust.
 - Instrumentation: per-author `sisu check --diary` logs, timed sessions,
   weekly diaries in which the author tags each checker error, a help-desk
   transcript (designers may answer questions; every answer is logged and
-  counted), and an exit questionnaire reusing the Rust survey wording
-  verbatim ("borrow checker rejecting valid code": big problem / could be
-  improved / not a problem), so the numbers compare with the 10.6%
-  big-problem baseline in [`surveys.md`](../research/evidence/surveys.md).
+  counted), a checker count of the bindings whose type is fixed by a later
+  statement (N-48, for Q-50), and an exit questionnaire reusing the Rust
+  survey wording verbatim ("borrow checker rejecting valid code": big
+  problem / could be improved / not a problem), so the numbers compare
+  with the 10.6% big-problem baseline in
+  [`surveys.md`](../research/evidence/surveys.md).
 - Friction coding: two raters, not on the team, classify every diary and
   log event as (a) diagnostic unclear, (b) a rule rejected a sound design
   and the author restructured, (c) checker bug (triaged within 24 hours,
   excluded from friction, published), or (d) missing library; language
-  tokens masked where feasible; Cohen's kappa reported.
+  tokens masked where feasible; Cohen's kappa reported. Only after rating
+  are the candidate false positives from Phase 3's counterexample mode set
+  beside categories (b) and (c).
 - Hot function replacement exercised during the study (a handler body
-  swapped in the running P3 server) with the monitor on, because
-  replacement interacts with drop behaviour.
+  swapped in the running P3 server through the interpreter's function
+  table, before Phase 8 wraps it in `--watch`) with the monitor on,
+  because replacement interacts with drop behaviour.
 - Analysis against the pre-registered thresholds, a written verdict, and
   every program, log and rating published.
 
@@ -438,9 +505,9 @@ friction than Rust.
 - All twelve implementations and the red-team report either pass their
   test suites or are documented as blocked, with the blocking construct
   named.
-- T1.1-T1.5 and the descriptive flags in the measurement table have
-  measured values; kappa of at least 0.6, or the rating is redone with a
-  refined codebook.
+- T1.1-T1.5, the descriptive flags in the measurement table and the Q-50
+  binding count have measured values; kappa of at least 0.6, or the rating
+  is redone with a refined codebook.
 - An interim verdict from P1, P2, P5 and P6 at week 24 (a hard fail on P2
   pauses the bet-2 spend before the porters start); the full verdict
   recorded (holds / fails / not shown) and the matching branch of
@@ -448,19 +515,20 @@ friction than Rust.
 
 **Effort.** 24 contractor-weeks (six authors at about four weeks each), 3
 contractor-weeks red team, 2 pw raters, 10 pw PI, 5 pw lead (bug triage
-only). Assumes programs of 300-1500 lines and that checker bugs are fixed
-within 24 hours.
+only; the binding count is a few hours of checker instrumentation).
+Assumes programs of 300-1500 lines and that checker bugs are fixed within
+24 hours.
 
 **Bets tested.** 1 (the definitive expressiveness and friction test); the
-Q-1 fallback, Q-3, Q-11 and Q-28 counts.
+Q-1 fallback, Q-3, Q-11, Q-28 and Q-50 counts.
 
-### Phase 6: tasks, capabilities, an HTTP server in Sisu (weeks 19-30)
+### Phase 6: tasks, capabilities, an HTTP server in Sisu (weeks 19-32)
 
 **Goal.** Structured colourless concurrency and the capability model
 running in the interpreter on a deterministic scheduler, so that bet 2's
 corpus can be written and bet 3's semantics (scopes, cancellation, panics
 to scope, `Send`/`Sync`) are tested in Sisu code under thousands of
-schedules.
+schedules and, in the `sim` profile, under injected faults.
 
 **Deliverables.**
 
@@ -495,6 +563,16 @@ schedules.
   `Clock.frozen_at`, `Net.fake` with an in-process stream pair and request
   counts) written in Sisu where the language allows, so the fakes are
   themselves corpus.
+- The first half of the `sim` profile (N-03, D-070): fakes that inject
+  faults, a `Net` with latency, loss and partitions and an `Fs` with a
+  pessimistic durability model (unsynced writes vanish at a crash, `fsync`
+  can fail, a rename is durable only once its directory is synced), with
+  every fault drawn from the called method's declared error set and
+  nothing else; and PCT and bounded exhaustive scheduling, with state
+  hashing and partial-order reduction, in the explorer beside random
+  seeds. Nothing can escape the simulation in the interpreter, which has
+  no `extern` and no I/O outside `System` except the standard streams,
+  and the profile captures those.
 - `std.x.http`: a minimal HTTP/1.1 server and client written in Sisu over
   `Net`, not host-provided, so the server is itself a bet-2 program.
 - `sisu audit --caps`: per I/O-doing function, the number of capability
@@ -511,17 +589,22 @@ schedules.
 - 1000 random schedules of the structured-concurrency suite: zero orphan
   tasks, zero unobserved panics, every cancelled subtree joined before its
   scope returns, lock guards dropped on every unwinding path.
+- On top of those 1000, the same suite under PCT and bounded exhaustive
+  schedules with injected faults, with the same four results.
 - `--stats` reports the p99 scheduling latency of an I/O task under a
   compute-bound sibling (the Q-34 number).
 - P3 is running on `std.x.http` with its diary and `audit --caps` output
   recorded.
 
-**Effort.** About 20 pw (the runtime engineer for twelve weeks owns the
+**Effort.** About 22 pw (the runtime engineer for twelve weeks owns the
 scheduler and `std.cap`; the type-system engineer joins from week 23 for
-`std.x.http` and the schedule explorer). `Net.fake` is easy to
-underestimate and is budgeted here.
+`std.x.http` and the schedule explorer, and spends weeks 31-32 on the
+`sim` profile's fakes and scheduler modes, about half of the profile's
+four person-weeks). `Net.fake` is easy to underestimate, its
+fault-injecting form more so, and both are budgeted here.
 
-**Bets tested.** 2 (the instrument) and 3 (semantics; stacks were Phase 1).
+**Bets tested.** 2 (the instrument) and 3 (semantics under random
+schedules and injected faults; stacks were Phase 1).
 
 ### Phase 7: the bet-2 port study (weeks 30-40)
 
@@ -569,11 +652,11 @@ test load.
 
 **Bets tested.** 2 (the definitive test); Q-5.
 
-### Phase 8: the rest of the interpreter-era surface (weeks 31-42)
+### Phase 8: the rest of the interpreter-era surface (weeks 33-46)
 
 **Goal.** The pieces the owner has decided that an interpreter makes almost
-free, and the test surface the corpus needs, without anything that is
-ahead of the verdict.
+free, the test surface the corpus needs, and the rest of the `sim` profile
+with record and replay, without anything that is ahead of the verdict.
 
 **Deliverables.**
 
@@ -581,7 +664,23 @@ ahead of the verdict.
   blocks, doctests, `check` property tests with shrinking,
   `assert_snapshot`, `@bench`; each test gets fresh capability fakes; tests
   run in parallel on the task scheduler.
-- `const` and `comptime` with fuel and memory limits named in the manifest;
+- `sisu test --sim`, the rest of the `sim` profile: a clock that advances
+  only when every task is blocked, several nodes in one process with their
+  own `System` and module statics, and simulated crash and restart. Its
+  measure is the seeded-bug study: the twenty pre-registered concurrency
+  and crash-consistency bugs planted in copies of P3 and in a small
+  replicated log the team writes, hunted by `--sim` and by random
+  `--explore` schedules alone under the same fixed CPU budget.
+- The capability log, `sisu replay` and replay tokens (N-04): `sisu run
+  --record` wraps each root capability in a logger at the interception
+  point the fakes use and writes the seeds, the per-process hash key,
+  standard input, every capability result in order and every
+  hot-replacement swap; `sisu replay` re-executes with the log standing in
+  for the world; every failing test prints a token (content hash,
+  toolchain version, `Rand` and scheduler seeds, shrunk case) that `sisu
+  test --replay` reproduces anywhere. The log redacts per capability from
+  its first version, because it holds whatever the program read.
+- `const` and `comptime` with fuel counted in SIR steps and a memory limit, budgets owned by the package that spends them (D-063, leaning);
   `if comptime`; `std.reflect` sufficient for user-defined `derive`; the
   checked string DSL example from `comptime.sisu`.
 - Contracts checked at run time in the interpreter (`requires`, `ensures`
@@ -591,14 +690,18 @@ ahead of the verdict.
 - `sisu repl` on the comptime interpreter with a loaded package.
 - `sisu run --watch` with hot function replacement: the function table of
   reference-counted bodies is the per-definition indirection point of
-  D-053; on a file change the queries re-run and every function whose
-  signature hash is unchanged has its body swapped; frames in flight keep
-  the old body until they return; a changed signature or layout restarts
-  with a message. Fix-and-resume from a chosen frame is demonstrated, not
+  D-053; on a file change the queries re-run, and a successful check
+  publishes every function whose signature hash is unchanged as one epoch,
+  which a task adopts at task start and at `live.boundary()`, so no
+  iteration mixes versions (D-068, leaning); frames in flight keep the old
+  body until they return; a failed check publishes nothing; a function used
+  as a value holds its slot; a changed signature or layout restarts with a
+  message. Fix-and-resume from a chosen frame is demonstrated, not
   shipped.
 - `sisu lsp` with diagnostics, hover (inferred error set, capability
   parameters, parameter conventions at call sites) and go-to-definition,
-  on the same queries as `sisu check`.
+  on the same queries as `sisu check`, working in broken code because the
+  checker types it.
 - Every conformance file cites the proposal chapter it tests, so the suite
   is the skeleton of the specification draft; the prose comes after the
   verdict.
@@ -612,39 +715,53 @@ ahead of the verdict.
 - A seeded bug in `binary_search` is found by `check` and shrunk to a list
   of at most three elements.
 - The LSP answers hover and diagnostics in under 100 ms on the corpus tree.
+- The seeded-bug study has run and its count is recorded against the
+  pre-registered threshold: at least fifteen of the twenty bugs found by
+  `--sim` within the CPU budget, and more than random schedules alone
+  find.
+- Every corpus failure that does not hold the real `System` reproduces
+  from its token on a second machine; 100 recorded `--explore` runs replay
+  with zero divergences; recording overhead and log bytes per request on
+  P3 are published.
 
-**Effort.** About 22 pw (the lead and the type-system engineer for twelve
-weeks, less triage time). Assumes the testing design exists by week 30.
+**Effort.** About 25 pw (the lead and the type-system engineer for
+fourteen weeks, less triage time), of which the rest of the `sim` profile
+and its study take about 2 and the capability log and replay about 1.
+Assumes the testing design exists by week 32.
 
-**Bets tested.** 2 (test-writing time with fakes); supports 1 and 3
-through the corpus's tests.
+**Bets tested.** 2 (test-writing time with fakes) and 3 (the seeded-bug
+study); supports 1 and 3 through the corpus's tests, and triage in every
+study through failures that replay from a token.
 
-### Phase 9: synthesis, decisions, 0.1-interp release (weeks 40-48)
+### Phase 9: synthesis, decisions, 0.1-interp release (weeks 44-52)
 
 **Goal.** Turn the three verdicts into design decisions through the
-pre-registered decision tree, publish everything a sceptic needs to check
-the work, and release the interpreter so that it gets used rather than
-demonstrated (the Zig, Gleam and Elixir pattern in
+pre-registered decision tree, run the model arm, publish everything a
+sceptic needs to check the work, and release the interpreter so that it
+gets used rather than demonstrated (the Zig, Gleam and Elixir pattern in
 [16-validation-plan.md](16-validation-plan.md)).
 
 **Deliverables.**
 
 - The final report: per-bet verdict, every threshold with its measured
-  value and its era label (harness, interpreter, native), all raw data,
-  the corpus programs and diaries, the referee's written review including
-  disagreements, and every amendment to the pre-registration listed.
+  value and its era label (harness, interpreter, native), the model arm's
+  results, all raw data, the corpus programs and diaries, the referee's
+  written review including disagreements, and every amendment to the
+  pre-registration listed.
 - Every number in the report regenerated by a CI script from public data;
   negative results published under the same template as positive ones.
 - Updates to [04](04-memory-and-ownership.md),
   [06](06-concurrency-and-capabilities.md), [16](16-validation-plan.md),
+  [17](17-testing.md), [19](19-novel-features.md),
   [15-decision-log.md](15-decision-log.md) and
   [`open-questions.md`](../open-questions.md) (Q-2, Q-3, Q-5, Q-6, Q-9,
-  Q-11, Q-28, Q-34) with the data.
+  Q-11, Q-28, Q-34, Q-50) with the data.
 - The 0.1-interp release: Linux and macOS tarballs; `sisu
-  new/run/check/test/repl/lsp/explain`; the tour rewritten in the
-  indentation syntax; a public list of what is not in it (no native code,
-  no registry, no C interop). Stability tiers (stable / preview /
-  experimental) with the rule that every pre-1.0 break ships with
+  new/run/check/test/repl/lsp/explain/replay`, with `test --sim` and
+  `replay` experimental; the tour rewritten in the indentation syntax, and
+  the model arm's pocket reference; a public list of what is not in it (no
+  native code, no registry, no C interop). Stability tiers (stable /
+  preview / experimental) with the rule that every pre-1.0 break ships with
   migration text and, where mechanical, a `sisu fix` rewrite, so that the
   syntax rewrite can keep landing without the keyword churn of Mojo's 0.x
   line ([`mojo.md`](../research/languages/mojo.md)); the syntax is
@@ -656,6 +773,18 @@ demonstrated (the Zig, Gleam and Elixir pattern in
   "submit as evidence" button that files a program and its diagnostics
   publicly. This is the cheapest channel for unsolicited outsider programs
   and the first public demonstration of capability sandboxing.
+- The model arm (N-50), in the playground's sandbox, so that model-written
+  code cannot touch the world: several frontier models solve P1-P6's tasks
+  with no context, with a pocket language reference (about 25k tokens; std
+  about 50k), or with the reference and the API digest that `sisu doc
+  --digest` writes (each `pub` signature with its inferred error set,
+  capability parameters, contracts and first doc example, from the queries
+  hover uses), each with and without compiler feedback. The shared
+  behavioural suites are the hidden tests and the same tasks in Python are
+  the baseline; the arm measures compile and hidden-test pass rates,
+  false-friend bugs per row of D-062's table and tokens to a pass. It runs
+  after the human studies and has no outsiders, so it cannot confound
+  them, and it stays within the pre-registered API budget.
 
 **Exit criteria.**
 
@@ -666,18 +795,25 @@ demonstrated (the Zig, Gleam and Elixir pattern in
   the stop condition.
 - 0.1-interp tagged and downloadable; the conformance suite passes on both
   platforms.
+- The model arm's measures are published with the report, under the same
+  template as the bets' results.
 
 **Effort.** About 18 pw (three engineers for six weeks, including release
-engineering and the reproduction scripts), 3 pw PI, 1 pw referee.
+engineering, the reproduction scripts, the digest and the pocket
+reference), 3 pw PI and about 2 pw more for the model arm, 1 pw referee;
+model-API money within the pre-registered budget.
 
 **Bets tested.** 1, 2 and 3, as the final verdict against the
-pre-registered thresholds.
+pre-registered thresholds; the model arm answers its own question, the
+new-language penalty for model-written code (section 11 of
+[`studies.md`](../research/evidence/studies.md)).
 
 ## The corpus
 
-Programs are of two kinds. Team-written programs exist to find bugs and to
-calibrate instruments; they are never counted as evidence. Outsider-written
-programs are the evidence.
+Programs are of three kinds. Team-written programs exist to find bugs and
+to calibrate instruments; they are never counted as evidence.
+Outsider-written programs are the evidence. Model-written programs answer
+the model arm's own question and are never counted for a bet.
 
 | ID | Program | Bets | Written by | Starts |
 |---|---|---|---|---|
@@ -694,11 +830,13 @@ programs are the evidence.
 | R | Red-team program: the ten patterns for which Rust needs lifetimes, with the cost of each workaround | 1 | a Rust expert briefed to break the model | week 20 |
 | C1 | grep/du-style command-line tool with `Fs`, `Env`, `Proc` | 2 | an outside author, a student or junior developer | week 28 |
 | S1, S2 | Two independent ports of one pre-registered 3-8 kLOC Go service with its tests | 2, Q-5 | one Go-background porter, one Rust-background porter | week 30 |
-| B | `taskbench` with strategies A-E and controls in Go, JDK 21+, tokio and a C or Rust coroutine library | 3, Q-6, Q-34 | the runtime engineer; reviewed by the runtime reviewer | week 1 |
-| T | Structured-concurrency semantics suite (supervisor tree restarting a panicking worker, deep recursion in a task, mixed compute and I/O starvation) under schedule exploration, plus the frame-depth histogram over everything | 3 | team | Phase 6 |
+| B | `taskbench` with strategies A-E and controls in Go, JDK 21+, tokio and a C or Rust coroutine library; the io_uring cancellation test | 3, Q-6, Q-34, D-058 | the runtime engineer; reviewed by the runtime reviewer | week 1 |
+| T | Structured-concurrency semantics suite (supervisor tree restarting a panicking worker, deep recursion in a task, mixed compute and I/O starvation) under schedule exploration and the `sim` profile's faults, plus the frame-depth histogram over everything | 3 | team | Phase 6 |
+| L | A small replicated log and copies of P3, with the twenty pre-registered seeded bugs, for the `sim` study | 3 | team | Phase 8 |
+| M | P1-P6's tasks solved by frontier models in six conditions, and in Python as the baseline | the model arm, D-062 | several frontier models, run by the PI | Phase 9 |
 | U | Unsolicited playground submissions after 0.1 | 1 | anyone | Phase 9 |
 
-**Who writes, and how they are found.** Twelve paid contractors: six corpus
+**Who writes, and how they are found.** Fourteen paid contractors: six corpus
 authors (three with two or more years of production Rust, three Go, Kotlin
 or Swift application developers with no Rust) at about four weeks each; one
 red-team Rust expert at three weeks; two porters at five weeks; one C1
@@ -737,6 +875,7 @@ where it names one; the others are pre-registered here.
 | View-struct splits per program; designer interventions that changed program structure | diaries, help-desk log | none | flag at more than 2 and more than 3 respectively; reported |
 | Missing-feature entries ("could not be written without X") | diaries | none | named lifetimes or first-class references named independently by two authors: design review |
 | Checker soundness: monitor violations on programs the static checker accepted | the corpus plus 24 hours of mutation fuzzing | 0 | any violation blocks 0.1; one involving views reopens the view and escape rules |
+| Candidate false positives: rejections that reach no conflict under the monitor | every rejected corpus program rerun across its tests in the counterexample mode, by the team only | none | reported beside T1.3; they are the false-positive log the friction branch's rule refinements draw on |
 
 ### Bet 2: capability parameters at scale
 
@@ -759,7 +898,9 @@ where it names one; the others are pre-registered here.
 | 10k-connection echo p99; 100k-connection idle RSS | harness | Go | p99 above 2x Go: runtime design review, not a language change |
 | Stack exhaustion | deep-recursion tests; `--stats stack-depth` histogram over the whole corpus (interpreter era) | none | any segfault is a bug; any ordinary (bet-1 or bet-2) program whose depth exceeds the default reservation: a larger default or the stackless fallback; a default above 8 MiB re-evaluates memory at that size |
 | Starvation (Q-34) | p99 latency of a probe task under N compute-bound tasks with yield points | Go's asynchronous preemption (harness); 10 ms (interpreter) | worse than Go, or p99 above 10 ms: revisit asynchronous preemption |
-| Semantics: schedules explored per test, orphan tasks, unobserved failures, lock guards not dropped on unwind | interpreter, `--explore 1000` | 0 | any non-zero count is a bug; a class that needs a language change reopens D-014 |
+| Cancellation with a lent buffer (D-058) | harness: a million in-flight io_uring reads into stack buffers cancelled on each stackful strategy; buffers written after their cancelled call returned; cancel-to-return latency | 0 | any is a runtime bug; one that waiting for the original completion cannot remove reopens D-058 |
+| Semantics: schedules explored per test, orphan tasks, unobserved failures, lock guards not dropped on unwind | interpreter, `--explore 1000`, then PCT and bounded exhaustive schedules, injected faults and simulated crash and restart under `--sim` | 0 | any non-zero count is a bug; a class that needs a language change reopens D-014 |
+| `sim` seeded-bug study | interpreter: the twenty pre-registered ALICE and Jepsen bugs planted in copies of P3 and a small replicated log; bugs found within a fixed CPU budget | random `--explore` schedules alone, same budget | fewer than fifteen, or no more than random alone: the `sim` profile stays a prototype and is not carried into v1 (D-070) |
 
 ### Parallel questions and health
 
@@ -770,10 +911,13 @@ where it names one; the others are pre-registered here.
 | Q-9, adapted to explicit `return` | the top-ten diagnostics list from all diaries | none | any top-ten diagnostic caused by a design rule rather than a bug gets a design review ("expected (), found T" is moot) |
 | Q-11 newtype wrappers per 200 lines | audit | 16 | more than one reopens scoped instances |
 | Q-28 | P4's diaries: `dyn` plus `@delegate` reported natural, or inheritance emulated with boilerplate | none | boilerplate reopens the question |
-| Parser fuzzing panics and diagnostic storms | CI | 0 | any is a bug |
+| Q-50 bindings whose type is fixed by a later statement | checker count over every corpus implementation | none | under about 3% with no friction reported adopts the left-to-right rule; otherwise D-003's local inference stays |
+| Model arm (N-50): compile and hidden-test pass rates, false-friend bugs, tokens to a pass | frontier models on P1-P6's tasks with no context, the pocket reference, or reference plus digest, each with and without compiler feedback | the same tasks in Python | reference and digest far from Python's rates: the MultiPL-T corpus of [10-tooling.md](10-tooling.md) becomes necessary; a false friend that compiles is a design bug under D-062; nothing else in the design follows the models |
+| Parser fuzzing: panics, diagnostic storms, trees that do not reprint their input, inputs the checker leaves untyped | CI | 0 | any is a bug |
 | `sisu check` after a one-body edit on the std-plus-corpus tree; LSP response | CI | 300 ms; 100 ms | missing by 2x is a design review per [10-tooling.md](10-tooling.md) |
 | Incremental rebuild of the Rust prototype | CI | 10 s | Roc's complaint; above it, the crate layout is revisited |
 | Interpreter adequacy | the whole corpus's test suites and the port's integration tests on a laptop | 10 minutes each | missing schedules a compact bytecode encoding and cached impl lookup as optimisation work, not a redesign |
+| Replay (N-04) | corpus failures reproduced from their token alone on a second machine; 100 recorded `--explore` runs replayed; recording overhead and log bytes per request on P3 | every failure that does not hold the real `System`; zero divergences; 10% overhead (R2's bar for Apache) | a token that does not reproduce, or a divergence, is a bug; overhead above 10% keeps the log a prototype (D-070) |
 | Diagnostics quality | share of borrow and `Send`/`Sync` errors in W that name a fix; author ratings per message | 100% | a message rated unhelpful by two authors is rewritten before 0.1 |
 | Process | pre-registration hash cited; amendments listed; eligibility verified; raw logs published; benchmarks reproduced on a second machine by an outsider; the referee's review published unedited | all | a report that fails any of these is not published as a Sisu evidence report |
 
@@ -806,15 +950,17 @@ Sisu stays a post-0.1 goal.
 **Pipeline**, in the order data flows:
 
 1. The lexer with Python's indentation algorithm.
-2. An error-tolerant recursive-descent parser producing an AST with Error
-   nodes, synchronising at NEWLINE and DEDENT.
+2. An error-tolerant recursive-descent parser producing a lossless syntax
+   tree with Error nodes, synchronising at NEWLINE and DEDENT; the AST is a
+   typed view over it.
 3. Name resolution and desugaring to HIR (`T?`, `T ! E`, `?`, `else`,
    `for`, `it`, interpolation, method calls resolved to trait or inherent
    functions).
 4. A bidirectional local type checker per body with explicit signatures,
    error-set subtyping, trait resolution under coherence and structural
-   auto traits, producing a fully typed tree where every call is a function
-   id or a (trait, method, type arguments) triple.
+   auto traits, producing a fully typed tree for every input, broken or
+   not, with ill-typed subterms flagged, where every call is a function id
+   or a (trait, method, type arguments) triple.
 5. Lowering to SIR: a per-function typed control-flow graph with locals,
    basic blocks, statements (Assign, Move, Copy, Borrow{shared|mut}, Call,
    Drop, StorageDead, Yield, ContractCheck, Panic) and terminators (Goto,
@@ -867,18 +1013,22 @@ fresh frame stack that may hold references into the scope's frame, which
 is legal because the scope joins before that frame is popped. Every
 blocking intrinsic parks the task and checks the cancellation flag; yield
 points decrement a reduction budget and requeue at zero. Scheduling is
-deterministic and seedable, so tests replay under many interleavings. An
-M:N parallel interpreter is not built; parallel throughput is a
-native-runtime question. The harness in Phase 1 is a separate crate
-because stack strategy is a property of the runtime, not of the language,
-and must be settled before a backend is designed.
+deterministic and seedable, so tests replay under many interleavings; the
+`sim` profile drives the same loop with PCT or bounded exhaustive
+schedules, injected faults and simulated crashes. An M:N parallel
+interpreter is not built; parallel throughput is a native-runtime
+question. The harness in Phase 1 is a separate crate because stack
+strategy is a property of the runtime, not of the language, and must be
+settled before a backend is designed.
 
 **Capabilities.** `System` is built by the driver only when `main(sys:
 System)` is declared; `Fs`, `Net`, `Clock`, `Rand`, `Env` and `Proc` are
 opaque host objects whose methods are intrinsics; attenuations are wrapper
 host objects enforcing the restriction on every call; fakes are written in
 Sisu over the `std.cap` traits; the interpreter exposes no I/O intrinsic
-outside these objects except the standard streams.
+outside these objects except the standard streams, which is why a `sim`
+run cannot escape its simulation and why the capability log sees every
+effect.
 
 **Comptime** is the same interpreter with a fuel counter, a memory limit
 and a host with no `System` (only `embed`), invoked by the type checker for
@@ -887,11 +1037,13 @@ and a host with no `System` (only `embed`), invoked by the type checker for
 
 **Hot replacement.** Calls go through a function table of reference-counted
 bodies, the per-definition indirection point of D-053; `--watch` re-runs
-the queries and swaps bodies whose signature hash is unchanged, while frames
-in flight keep their old body. Replacement is restricted to unchanged
-signatures and takes effect at the next call, because a swapped body with
-different drop behaviour under a live frame would be unsound; frame-level
-fix-and-resume is demonstrated, not shipped.
+the queries and publishes the bodies whose signature hash is unchanged as
+one epoch, adopted by each task at its start and at `live.boundary()`
+(D-068, leaning), while frames in flight keep their old body. Replacement
+is restricted to unchanged signatures and takes effect only at those
+boundaries, because a swapped body with different drop behaviour under a
+live frame would be unsound; frame-level fix-and-resume is demonstrated,
+not shipped.
 
 **Incrementality.** Queries at file, module and body granularity are shared
 by `sisu check`, `sisu run` and `sisu lsp`, so the three never disagree.
@@ -905,37 +1057,41 @@ scripts, the playground and the `single` profile.
 
 **Roles.** A lead who owns SIR, drop elaboration, the ownership checker and
 the monitor; a type-system engineer who owns the type checker, traits,
-comptime, the test surface and the LSP; a runtime engineer who owns the
-harness, the interpreter loop, the scheduler, `std.cap`, std in Sisu and
-`std.x.http`; the owner or a delegate as PI at half time, who writes the
-pre-registration, recruits, runs the studies, rates nothing and analyses.
-The syntax rewrite and the testing design stay with the owner on their own
-timelines.
+comptime, the test surface with the `sim` profile and replay, and the LSP;
+a runtime engineer who owns the harness, the interpreter loop, the
+scheduler, `std.cap`, std in Sisu and `std.x.http`; the owner or a
+delegate as PI at half time, who writes the pre-registration, recruits,
+runs the studies and the model arm, rates nothing and analyses. The syntax
+rewrite and the testing design stay with the owner on their own timelines.
 
 | Weeks | Phase | Who | Gate |
 |---|---|---|---|
 | 1-4 | 0 skeleton, pre-registration, desk audits | lead, type-system engineer, PI, audit contractor | pre-registration signed |
-| 1-8 | 1 stack harness | runtime engineer, reviewer | week 8: bet 3 stacks, Q-6 provisional |
+| 1-8 | 1 stack harness, io_uring cancellation | runtime engineer, reviewer | week 8: bet 3 stacks and cancellation, Q-6 provisional |
 | 5-10 | 2 core language, errors, Drop | lead, type-system engineer; runtime engineer from week 9 | |
-| 9-16 | 3 ownership checker and monitor | lead; type-system engineer from week 11; referee | outsiders may start |
+| 9-16 | 3 ownership checker and monitor | lead; type-system engineer from week 11; runtime engineer for three weeks; referee | outsiders may start |
 | 15-22 | 4 traits, generics, std | lead, type-system engineer | |
 | 16-32 | 5 bet-1 corpus study | PI, six authors, red team, raters; lead on triage | week 24 interim; week 32: bet 1 |
-| 19-30 | 6 tasks, capabilities, HTTP in Sisu | runtime engineer; type-system engineer from week 23 | |
+| 19-32 | 6 tasks, capabilities, HTTP in Sisu, `sim` faults and schedulers | runtime engineer; type-system engineer from week 23 | |
 | 30-40 | 7 bet-2 port study | PI, two porters, C1 author; runtime engineer on support | week 40: bet 2 |
-| 31-42 | 8 test surface, comptime, hot replacement, REPL, LSP | lead, type-system engineer | |
-| 40-48 | 9 report, decisions, 0.1-interp | everyone, referee | week 48: release |
+| 33-46 | 8 test surface with `sim` and replay, comptime, hot replacement, REPL, LSP | lead, type-system engineer | week 46: `sim` seeded-bug study |
+| 44-52 | 9 report, decisions, model arm, 0.1-interp | everyone, referee | week 52: release |
 
 Never more than three phases run at once, and no week needs more than
-three engineers. Core engineering is about 133 pw against 144 available,
-which leaves about 8% slack; the 50% slip budgeted on Phase 3 consumes it
-and a little more, so the honest calendar is 48 weeks nominal and 52 with
-the slip spent. PI effort is about 26 pw at half time. Contractors total
-about 48 weeks.
+three engineers. Core engineering is about 140 pw against 156 available,
+which leaves about 10% slack; the 50% slip budgeted on Phase 3 would
+consume most of it and lies on the critical path, so the honest calendar
+is 52 weeks nominal and 56 with the slip spent. The six additions of Q-49
+cost about six of those person-weeks and four weeks of the calendar,
+because most of their work (the `sim` profile and replay) falls on the
+type-system engineer's path through Phases 6 and 8; the plan takes the
+four weeks rather than trimming Phase 8's polish. PI effort is about
+28 pw at half time. Contractors total about 48 contractor-weeks.
 
 **Scenario A: one or two people, part-time.** Two people at half time are
 one FTE. The cheap and decisive pieces come first: Phase 1's harness and
-Phase 0's desk audits (about 11 pw) settle Q-6 and give a bet-1 prior in
-the first quarter. Then Phases 0, 2 and 3 at one FTE (about 42 pw) put the
+Phase 0's desk audits (about 12 pw) settle Q-6 and give a bet-1 prior in
+the first quarter. Then Phases 0, 2 and 3 at one FTE (about 43 pw) put the
 ownership checker and the monitor in a public repository at about month
 13, and a reduced bet-1 study (three outside authors on P1, P2 and P4, the
 two stop-condition programs plus the parser, with the red team and the
@@ -953,14 +1109,15 @@ evaluate).
 
 **Scenario B: a funded team of three to five.** Three engineers plus the
 half-time PI is the table above: a bet-3 answer at week 8, bet 1 at week
-32, bet 2 at week 40, the report and 0.1-interp at week 48. A fourth
-engineer takes std, the host builtins, the test surface and the playground,
-which removes the Phase 6/8 overlap and buys about four weeks of calendar
-and real slack. A fifth starts the Cranelift debug backend from SIR at week
-30 so that bet 3's numbers on real Sisu frames follow within a quarter of
-0.1. The calendar does not drop below about 40 weeks with any team size,
-because the studies are serial: outsiders need the instrument, the port
-needs the tasks, and the verdict needs the raters.
+32, bet 2 at week 40, the report and 0.1-interp at week 52. A fourth
+engineer takes std, the host builtins, the test surface with the `sim`
+profile, and the playground, which removes the Phase 6/8 overlap and buys
+about four weeks of calendar and real slack. A fifth starts the Cranelift
+debug backend from SIR at week 30 so that bet 3's numbers on real Sisu
+frames follow within a quarter of 0.1. The calendar does not drop below
+about 40 weeks with any team size, because the studies are serial:
+outsiders need the instrument, the port needs the tasks, and the verdict
+needs the raters.
 
 **Calibration from the research.** Elixir had a public release in 2012 and
 1.0 in 2014 by borrowing the BEAM
@@ -970,7 +1127,7 @@ tagged release, 0.1.1, came about two years in
 release in 2019 to 1.0 in 2024 on one person's time
 ([`gleam.md`](../research/languages/gleam.md)); Roc has had no 0.1 in seven
 years and rewrote its compiler ([`roc.md`](../research/languages/roc.md)).
-With two full-time engineers the plan stretches to about 14 months; with
+With two full-time engineers the plan stretches to about 15 months; with
 one, do not start the compiler.
 
 ## What is deliberately not built
@@ -981,8 +1138,8 @@ one, do not start the compiler.
   interpreter. The one native artefact is the Phase 1 harness, which
   contains no Sisu.
 - An M:N parallel scheduler inside the interpreter. The interpreter runs
-  the `single` profile deterministically; parallel throughput is a
-  native-runtime question.
+  the `single` profile, and the `sim` profile for tests, deterministically;
+  parallel throughput is a native-runtime question.
 - The package registry, lockfile resolution, `sisu add/update/publish`,
   API-diff semver, the transparency log; `[trust]` beyond parsing and the
   one supply-chain demonstration. Path dependencies only.
@@ -994,9 +1151,10 @@ one, do not start the compiler.
   rewrite changes block structure materially after Phase 2, the parser
   (about two weeks of work) is redone and the corpus is mechanically
   reformatted.
-- `sisu fmt`, `sisu lint`, `sisu doc`, `sisu fix` beyond the pre-1.0
-  migration rule, editions, the teaching profile (Q-41 waits for a
-  classroom trial after the verdict), the Unicode confusable lints.
+- `sisu fmt`, `sisu lint`, `sisu doc` beyond the digest the model arm
+  reads, `sisu fix` beyond the pre-1.0 migration rule, editions, the
+  teaching profile (Q-41 waits for a classroom trial after the verdict),
+  the Unicode confusable lints.
 - A full LSP: diagnostics, hover and go-to-definition only; no rename, no
   fix-it application, no inlay hints.
 - WebAssembly as a compile target for Sisu programs, `freestanding`,
@@ -1008,8 +1166,8 @@ one, do not start the compiler.
 - std beyond what the corpus needs: no TLS, DNS, UDP, Unix sockets, regex,
   JSON encoder (corpus authors may write one), time zones, `BigInt`,
   `Decimal`, persistent collections, structured logging.
-- Fix-and-resume from a chosen frame; hot replacement is body swap at the
-  next call only.
+- Fix-and-resume from a chosen frame; hot replacement is body swap at
+  epoch boundaries only.
 - The contract verifier, loop invariants, `decreases`, ghost code, SMT-backed
   refinement types (reserved words only).
 - A mechanised semantics (Q-38); the conformance suite with chapter
@@ -1023,6 +1181,13 @@ one, do not start the compiler.
   unless their thresholds trip.
 - Numerics and SIMD (Q-23 needs research first); a numerics-heavy corpus
   program would be meaningless without it and is not included.
+- The parts of the candidates in
+  [19-novel-features.md](19-novel-features.md) that are not prototyped
+  here: a recording cut below `System`, native recording, a flight
+  recorder and reverse execution (N-04); deferred runs for authors,
+  classrooms or the live view (N-26); the completion-engine API (N-48);
+  and every other adopt or tooling verdict in 19 beyond principle 6's
+  exception.
 
 ## Decision points
 
@@ -1100,23 +1265,37 @@ rerunning the corpus on the native backend.
   (two weeks).
 - **Starvation** (p99 worse than Go in the harness, or above 10 ms in the
   interpreter): asynchronous preemption is revisited (Q-34).
-- **Semantics**: a class of orphan, unobserved failure or cancellation bug
+- **Cancellation with a lent buffer** (any buffer written after its
+  cancelled call returned, at week 8): a runtime bug, fixed and the test
+  rerun; if waiting for the original completion cannot prevent it, D-058
+  is reopened and completion I/O takes owned buffers, as tokio-uring does.
+- **Semantics**: a class of orphan, unobserved failure or cancellation bug,
+  under random schedules or under the `sim` profile's faults and crashes,
   that needs a language change rather than an interpreter fix reopens
   D-014.
+- **Simulation** (at week 46): if `--sim` finds at least fifteen of the
+  twenty seeded bugs within the budget and more than random schedules
+  alone, the profile and its compile-time escape check go into the v1
+  design ([17-testing.md](17-testing.md), D-070); otherwise it stays a
+  prototype and the 1000 random schedules remain the semantics test of
+  record.
 
 ### Parallel questions
 
-Q-2, Q-3, Q-9 (adapted), Q-11, Q-28 and Q-34 follow the thresholds in the
-table; each gets an entry in [`open-questions.md`](../open-questions.md)
-with the data at Phase 9. D-038's compile-speed targets are measured on the
-interpreter-era front end only; the native targets wait for the backend.
+Q-2, Q-3, Q-9 (adapted), Q-11, Q-28, Q-34 and Q-50 follow the thresholds
+in the table; each gets an entry in [`open-questions.md`](../open-questions.md)
+with the data at Phase 9. The capability log and replay tokens go into v1
+if they meet their row (D-070). The model arm changes the language only
+where D-062 already counts a silent false friend as a design bug. D-038's
+compile-speed targets are measured on the interpreter-era front end only;
+the native targets wait for the backend.
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
 | The view and escape checker is novel and Phase 3 slips by 50% or more | The conservative lexical rule ships first; liveness-based borrow ends are added after the first outsider program hits a false positive, with every false positive logged as data. The slip is budgeted and the slack is spent here first. |
-| Checker bugs and weak diagnostics read as friction and confound bet 1 | 24-hour triage, bugs excluded from friction but published, diagnostics in the name-the-fix form before any outsider starts, raters separating "diagnostic unclear" from "rule rejected a sound design", dry-run drafts that find bugs before outsiders do. |
+| Checker bugs and weak diagnostics read as friction and confound bet 1 | 24-hour triage, bugs excluded from friction but published, diagnostics in the name-the-fix form before any outsider starts, raters separating "diagnostic unclear" from "rule rejected a sound design", dry-run drafts that find bugs before outsiders do, and the monitor's counterexample mode separating rejections that reach a conflict from candidate false positives. |
 | Small n: six authors and two porters cannot show small effects, and individual variance dominates (Prechelt, [`studies.md`](../research/evidence/studies.md)) | Within-subject controls, counterbalanced order, thresholds that demand large effects, and "not shown" as a legal verdict. |
 | Recruiting genuine outsiders who are competent and not fans; a corpus written by sympathisers convinces nobody | Paid contracts, published eligibility criteria, an external sceptic as referee, a public help-desk log; recruitment starts week 1 with contracts by week 8, because three weeks is not enough. |
 | The interpreter cannot answer the stack half of bet 3; interpreter-era bet-3 numbers are the stackless design in disguise | The harness answers it in Phase 1 with native code; every bet-3 number carries an era label; the frame-depth histogram supplies what the harness cannot; Q-6 closes finally on the native backend. |
@@ -1127,42 +1306,16 @@ interpreter-era front end only; the native targets wait for the backend.
 | The indentation grammar is still being rewritten and the parser keeps moving | Python's tokenizer rules and the proposal's keywords are adopted verbatim and frozen for the experiment; the corpus is written against them and mechanically migrated; stability tiers and `sisu fix` rewrites cover later changes. |
 | Rust prototype compile times slow the team (Roc's central complaint) | Crate-per-stage layout from Phase 0 and a 10 s incremental target tracked in CI. |
 | The interpreter is too slow for P3, the echo server or the port at test load | Adequacy thresholds are tied to the corpus's test suites, not to a CPython comparison; a miss schedules the bytecode encoding and cached impl lookup as optimisation work after the semantics are right. |
-| Only a single-threaded interpreter runs Sisu code, so `Send`/`Sync` and the Q-2 tagging never meet real parallelism | The monitor validates both at task boundaries under schedule exploration; a class of concurrency unsoundness that only parallel execution reveals is accepted as an interpreter-era gap and is the first test on the native `full` runtime. |
+| Only a single-threaded interpreter runs Sisu code, so `Send`/`Sync`, the Q-2 tagging and `Atomic`'s weak-memory behaviour never meet real parallelism, in the `sim` profile or out of it | The monitor validates the first two at task boundaries under schedule exploration; a class of concurrency unsoundness that only parallel execution reveals is accepted as an interpreter-era gap and is the first test on the native `full` runtime, where `Atomic` needs a loom-style mode of its own. |
+| The `sim` profile flatters: an `Fs` model kinder than Linux gives false confidence, and simulated time hides real-time performance bugs | The `Fs` model is the pessimistic one (unsynced writes vanish at a crash, `fsync` can fail, a rename is durable only once its directory is synced), and ALICE's crash-consistency bugs are among the seeded twenty, so a kind model shows up as missed bugs; no latency or memory number comes from `--sim`. |
+| The seeded bugs are chosen to suit the simulator | The twenty are pre-registered in Phase 0 from the ALICE and Jepsen catalogues, before the profile exists, and random schedules under the same CPU budget are the control. |
 | The dynamic monitor finds unsoundness only on programs that exist | Mutation fuzzing of accepted programs and the referee's adversarial programs reduce, but do not remove, this; the mechanised core stays a later research collaboration (Q-38). |
+| A counterexample run that completes is read as "the rejected program is fine", or reaches the authors and changes the friction they report | Its report says one run proves nothing about other inputs; the mode stays with the team, and its results are compared with the ratings only after rating. |
 | Hot replacement interacts with ownership: a swapped body with different drop behaviour under a live frame is unsound | Replacement is restricted to unchanged signatures and swaps at the next call; it is exercised under the monitor during the corpus study. |
+| The capability log holds every file content and environment value a run read, and corpus logs are published | Per-capability redaction is in the log format from its first version; tests run against fakes, so most tokens carry no real data. |
 | Interpreter-era authors feel no performance pressure, so Q-3's copy count and the friction numbers are flattered | Diaries record performance intent; the corpus is rerun on the native backend after the experiment and the counts compared. |
-| Scope creep from the interpreter being a language feature and from the testing design | The not-built list is part of the pre-registration; additions need an amendment. |
+| Scope creep from the interpreter being a language feature, from the testing design and from the candidates in 19 | The not-built list is part of the pre-registration; additions need an amendment. The six additions of Q-49 are in the pre-registration from the start, and nothing else from 19 is beyond principle 6's exception. |
+| The model arm tunes the language to this year's models | The arm measures and the design does not chase it: only D-062's false-friend rule turns a result into a language change. It runs after the human studies, with no outsiders, so it cannot confound them. |
 | The implementation becomes the specification | Every conformance file cites a proposal chapter from Phase 0; anything only the interpreter decides (evaluation order, overflow in comptime) is listed for the specification draft. |
-| `Net.fake` with an in-process stream pair is easy to underestimate | Budgeted inside Phase 6 as a named deliverable. |
+| `Net.fake` with an in-process stream pair, and its fault-injecting `sim` form, are easy to underestimate | Budgeted inside Phase 6 as named deliverables. |
 | Q-21 (governance) and Q-23 (numerics) are untouched | On purpose; a one-page phase-1 note saying who decides is all the release needs, and the owner decides that. |
-
-## Proposed amendments (October 2026)
-
-The unconventional-languages round ([19-novel-features.md](19-novel-features.md))
-proposes six amendments to this plan, most argued to strengthen a bet's
-measurement rather than add polish (the binding count and the model arm
-measure questions of their own), and each needing the pre-registration
-amended before any participant writes a line. The owner accepted all six
-in October 2026 (Q-49); they are part of the plan from Phase 0's
-pre-registration onward, and the about six person-weeks they cost extend
-the plan by a month unless Phase 8's polish can be trimmed, which the
-Phase 0 review fixes.
-
-| Amendment | Phase | Cost | Strengthens |
-|---|---|---|---|
-| One io_uring cancellation test into stack buffers: cancel a million in-flight reads and check that no buffer is written after its cancelled call has returned (D-058) | 1 | days | bet 3's cancellation semantics |
-| The dynamic ownership monitor as a counterexample generator: rerun every rejected corpus program under the monitor across its tests; rejections that never reach a conflict are candidate false positives (N-26), team-only | 3 | about 1 week | bet 1's false-positive accounting |
-| Count the bindings whose type is fixed by a later statement (N-48) | 5 | hours | Q-50 |
-| The `sim` profile: fault-injecting `Net` and crash-consistent `Fs` fakes, PCT and bounded exhaustive scheduling, simulated crash and restart, on top of the 1000-schedule run Phase 6 already requires (N-03) | 6, 8 | about 4 weeks | bet 3's cancellation and panic semantics under faults |
-| The capability log, `sisu replay` and a replay token on every failing test (N-04) | 8 | about 1 week | corpus triage; schedule exploration |
-| A model arm: frontier models solve the corpus tasks with nothing, a pocket reference, or reference plus API digest, with and without compiler feedback, in the playground sandbox (N-50) | 9 | model-API money; a PI's time | the AI-assistance penalty measured on day one |
-
-About six person-weeks in total, to be found by trimming Phase 8's polish
-or extending the plan by a month. Principle 6 ("nothing beyond the bets
-before the verdict") is kept: everything else in 19 that is adopt or
-tooling waits for the verdict, with one exception that costs design
-discipline rather than weeks: message identifiers with parameters, the
-lossless syntax tree and a checker that produces types for broken code
-(D-065, N-30, N-40) belong in Phase 0's diagnostics infrastructure and the
-Phase 2 checker from the start, because none of the three can be
-retrofitted.

@@ -1266,7 +1266,8 @@ tasks with nothing, the reference, or reference plus digest, each with and
 without compiler feedback, measuring compile and hidden-test pass rates,
 false-friend bugs and tokens to a pass. It runs in the playground's sandbox
 with no outsiders and no confound with the human results, and it carries
-N-27's and N-49's measurements. *Risk.* Tuning the language to this year's
+N-49's false-friend rows; N-27's fill measurements wait for the fill
+engine after 0.1. *Risk.* Tuning the language to this year's
 models; the arm measures and the design does not chase it. *Verdict.*
 Prototype in the experiment as one amendment (Q-49); the digest is v1
 tooling. Confidence medium. *Settled by* whether reference and digest bring
@@ -1496,9 +1497,10 @@ separate `std.num` types with symbolic mathematics where achievable
   io_uring cancellation test in Phase 1; the monitor as counterexample
   generator in Phase 3; the `sim` profile across Phases 6 and 8; the
   capability log and replay tokens in Phase 8; the binding-type count in
-  Phase 5; the model arm in Phase 9. About six person-weeks in total, to be
-  found by trimming Phase 8's polish or extending the plan by a month; the
-  pre-registration must be amended before any participant writes a line.
+  Phase 5; the model arm in Phase 9. The owner accepted all six (Q-49);
+  they cost about six person-weeks, the plan takes four more weeks rather
+  than trimming Phase 8's polish, and [18](18-next-steps.md) now runs 52
+  weeks with them in place.
 - **Design documents** were first given a short "additions proposed in 19"
   paragraph each; Draft 3 (October 2026) folded those into the body text,
   marking leaning decisions where a document first relies on one. The

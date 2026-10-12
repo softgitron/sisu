@@ -810,7 +810,7 @@ count and the model arm) measure questions of their own:
 | The count of bindings typed by later statements (N-48) | 5 | hours | Q-50 |
 | The `sim` profile with typed fault injection and PCT scheduling (N-03) | 6, 8 | about 4 weeks | bet 3's cancellation and panic semantics under faults and crashes |
 | The capability log, `sisu replay` and replay tokens (N-04) | 8 | about 1 week | corpus triage; bet 3's schedule exploration |
-| A model arm with a pocket reference and an API digest (N-50) | 9 | model-API money and a PI's time | the AI-assistance penalty measured on day one; carries N-27's and D-062's rows |
+| A model arm with a pocket reference and an API digest (N-50) | 9 | model-API money and a PI's time | the AI-assistance penalty measured on day one; carries D-062's false-friend rows |
 
 **Options.** All six, found by trimming Phase 8's polish or extending the
 plan by a month (lean); the cheap four without the `sim` profile and the
