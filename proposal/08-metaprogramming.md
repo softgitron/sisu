@@ -156,3 +156,17 @@ Zig experience is that this is enough and that `#ifdef` soup is avoidable.
 - Dart ([`dart.md`](../research/languages/dart.md)): cancelled its macro
   system in 2025 after three years of work because of compile-time and
   tooling cost; a data point that macros are harder to ship than to design.
+
+## Additions proposed in October 2026
+
+[19-novel-features.md](19-novel-features.md) replaces the manifest-wide
+fuel knob above with budgets owned by the package that spends them
+(D-063): fuel is counted in SIR steps, exhaustion raises a deny-by-default
+diagnostic naming the expression and the package, long evaluations print
+progress, and `@comptime_budget(steps=N)` on the spending item raises its
+own limit so that dependents never edit their manifest for a dependency's
+internals (Rust 1.72 removed its const-evaluation cap for exactly that
+reason). The promise that `comptime` runs "exactly what would run at run
+time" is what D-074 repairs for `dict` order and floating point. `sisu
+eval` renders a module of `const` items and `pure` functions as JSON, TOML
+or YAML, making Sisu its own configuration language without a dialect.

@@ -1,10 +1,13 @@
 # Open questions
 
-**Status (October 2026):** the project owner has answered every question
-below; 38 are decided and 3 (Q-6, Q-21, Q-23) remain open. Each question
-keeps its original options and evidence, followed by the decision, so the
-reasoning stays auditable. The proposal documents and the decision log
-have been updated to match.
+**Status (October 2026):** the project owner has answered the first 41
+questions; 38 are decided and 3 (Q-6, Q-21, Q-23) remain open. Each
+question keeps its original options and evidence, followed by the
+decision, so the reasoning stays auditable. The proposal documents and the
+decision log have been updated to match. The unconventional-languages
+round ([`research/unconventional/`](research/unconventional/),
+[`proposal/19-novel-features.md`](proposal/19-novel-features.md)) added
+Q-42 to Q-51, which await the owner.
 
 What the research could not settle. Each question states the options, the
 evidence for each, the proposal's current lean (what the design documents
@@ -588,3 +591,252 @@ which ones.
 
 **Decision (October 2026).** Accepted as a framing: "only upsides" means the best available assumptions under the priority order in D-001, revisited as evidence arrives.
 
+---
+
+## Questions from the unconventional-languages round (October 2026)
+
+Each question below comes from [`proposal/19-novel-features.md`](proposal/19-novel-features.md)
+and names the candidate (N-xx) and the leaning decision (D-xx) it belongs
+to. Unlike the first 41, these have not yet been answered by the owner.
+
+### Q-42. Should `dict` iterate in insertion order?
+
+**Question.** D-049 randomises `dict` iteration per process so that code
+cannot depend on it silently. Three independent analyses found that this
+contradicts two other decided documents: a `pure` function that lists a
+`dict`'s keys returns different lists in different processes, which breaks
+the comptime promise in [`proposal/08-metaprogramming.md`](proposal/08-metaprogramming.md)
+("exactly what would run at run time"), makes memoisation across processes
+unsound, and breaks replay and simulation
+([config](research/unconventional/config-and-total-languages.md) idea 1,
+[systems](research/ideation/systems-and-determinism.md) F1,
+[AI-era](research/ideation/ai-era-and-evolution.md) A11).
+
+**Options.**
+- *Insertion order, per-process SipHash key kept* (lean). Python 3.7's
+  split: flooding resistance comes from the key, iteration from insertion
+  order. Costs an index array and tombstones (Python's compact dict was
+  still 20-25 % smaller than its predecessor); D-049's reason ("lets code
+  depend on it silently") becomes the point, since a specified order is
+  safe to depend on; it also closes the silent false-friend row for
+  Python-trained readers (D-062).
+- *Keep randomisation, exempt `comptime`* (the config file's minimal fix).
+  `comptime` uses insertion order and a fixed key; run time stays random;
+  `sisu build --check` builds twice with different keys. Keeps the comptime
+  promise but not `pure` determinism, replay or memoisation.
+- *Keep randomisation everywhere.* Rust's and Go's position; `pure` stays
+  "no capabilities" rather than "deterministic".
+
+**Current lean.** Insertion order (D-074, N-01).
+
+**What would settle it.** The insertion-ordered `dict` within 10 % of a
+plain SipHash map on the corpus; the count of corpus programs that read
+`dict` order.
+
+### Q-43. How far does deterministic `pure` go?
+
+**Question.** D-074 makes `pure` mean "the same bits on every run,
+process, thread count and target". Which operations are errors inside
+`pure` code, and does `pure` enter function types?
+
+**Options.**
+- *The proposed list*: `select`, `Mutex`, `Atomic`, channels with more than
+  one sender, `try_lock`, `try_recv`, `try_send`, `Weak.upgrade` across
+  tasks and address-derived values are errors; `task.scope`, `spawn` and
+  `join` stay legal; a `pure` scope runs earlier siblings to completion,
+  cancels later ones and reports the lowest-index failure (F3). Higher-order
+  `pure` code demands `pure` callbacks, so `pure` is part of function types
+  (F5), as mutating-versus-non-mutating capture kinds must be for `par`
+  bodies.
+- *A smaller guarantee*: `pure` forbids only capabilities and shared
+  mutation (today's text); determinism is a convention with a lint, as in
+  Temporal.
+- *A separate `@deterministic` property* beside `pure`
+  ([synchronous](research/unconventional/synchronous-and-dataflow.md) idea
+  4), which Q-17's one-tracked-property rule argues against.
+
+**Current lean.** The proposed list, with `pure` in function types.
+
+**What would settle it.** The corpus's `pure` functions run under
+`--explore 1000` and later natively with 1 and 16 workers with outputs
+diffed; more than one rejected `pure` function per 500 lines of pure code
+reopens the list.
+
+### Q-44. Strict floating point by default?
+
+**Question.** Floating point is specified only as "IEEE 754". D-074
+proposes no implicit fused multiply-add (`a.mul_add(b, c)` for one
+rounding), no reassociation or fast-math, canonical NaNs where observable,
+fixed-shape reductions, and `@float(fast)` to opt out per function; a
+correctly rounded `std.math` goes with Q-23.
+
+**Options.** Strict by default with explicit opt-out (Java 17, lean);
+contraction within a statement by default (Clang's `-ffp-contract=on`,
+which makes x86 and ARM disagree); per-target behaviour documented and
+accepted.
+
+**Current lean.** Strict by default; deciding now costs nothing because no
+code depends on the alternative, and Java needed twenty years and the end
+of x87 to make the same move.
+
+**What would settle it.** A numerical corpus (a physics step, an n-body
+integrator, a dot-product kernel) built for x86-64 and AArch64 at both
+optimisation levels: bit equality everywhere, and a strict-versus-fast
+throughput gap above 25 % on the kernels that matter reopens the default.
+This is an input to Q-23's research, not a substitute for it.
+
+### Q-45. What does a `Mutex` do when unwinding drops its guard?
+
+**Question.** A task that panics while holding a guard unwinds to its
+scope (D-040), the guard drops, and a sibling or a restarted worker can see
+half-updated state even when the protected type declares an `invariant`.
+The proposal does not say what happens ([systems](research/ideation/systems-and-determinism.md) F4).
+
+**Options.**
+- *Re-check the invariant, poison only on failure* (lean). When unwinding
+  drops a guard, the protected type's `invariant`, if any, is re-checked;
+  if it fails the mutex is poisoned and later `lock()` calls panic; types
+  without invariants unlock normally. `lock()` stays infallible in its
+  signature.
+- *Always poison* (Rust's `std::sync::Mutex`), which makes `lock()`
+  fallible or panicking for everyone.
+- *Never poison* (Rust's nightly `nonpoison` locks), which leaves the
+  half-updated state visible.
+- *Crash-isolated scope types* (`UnwindSafe`), which Rust's documentation
+  calls "a speed bump" and [19](proposal/19-novel-features.md) rejects.
+
+**Current lean.** Re-check the invariant.
+
+**What would settle it.** The corpus's `Mutex` uses: how many protected
+types carry an invariant, and whether any panic-while-locked case in the
+structured-concurrency suite is misreported under the lean.
+
+### Q-46. Is the typed hole spelled `todo("name")` or `?name`?
+
+**Question.** D-061 makes the prelude's `todo` a typed hole with a report
+and a release gate. [holes](research/unconventional/holes-synthesis-and-ai-era.md)
+proposes `?name` in operand position instead (Idris, Agda, Lean) and
+retiring `todo`; [AI-era](research/ideation/ai-era-and-evolution.md) A1
+keeps `todo` because `?` already means propagation, `T?`, `?.` and `??`,
+and P1 wants one hole.
+
+**Options.** `todo("name")` as an intrinsic, no new lexical form, nothing
+to migrate (lean); `?name`, terser and visually distinct, with `todo`
+removed by `sisu fix`; both (rejected by P1).
+
+**Current lean.** `todo("name")`.
+
+**What would settle it.** The model arm's fill acceptance with each
+spelling is unlikely to differ; this is a taste call for the owner.
+
+### Q-47. Is `par` a contextual keyword or only a library?
+
+**Question.** D-069 ships `par_iter`, `par_iter_mut`, `par.join` and
+reducers in `std.par` with checked independence and serial-elision
+semantics. [parallel](research/unconventional/parallel-languages.md) idea
+1 argues for `for x in par mut xs:` and `[f(x) for x in par xs]` as a
+contextual keyword after `in`, on occam's symmetry between sequential and
+parallel forms and Chapel's `forall`, with the compiler naming the crossing
+variable when an iteration assigns a shared binding;
+[systems](research/ideation/systems-and-determinism.md) 12 argues the
+library form is enough and a keyword tempts a task per statement.
+
+**Options.** Library only (Rayon; lean for v1); the contextual keyword
+desugaring to `std.par` with the same checks (Chapel); a `par:` statement
+block (rejected: `task.scope` already is one).
+
+**Current lean.** Library first; the keyword if the corpus shows more than
+one `par_iter` in a plain loop per 300 lines.
+
+**What would settle it.** That count, and whether comprehension bodies
+want it.
+
+### Q-48. Worksheets, and the notebook non-goal
+
+**Question.** [`proposal/00-vision-and-principles.md`](proposal/00-vision-and-principles.md)
+says Sisu is not for notebook exploration "yet", on an AOT premise that
+D-052 weakened. Two candidates touch it: a worksheet (a script-mode file
+the language server re-runs top to bottom with values shown inline and
+never saved; no cells, no hidden state) and a reactive notebook whose
+dependency graph includes in-place mutation tracked statically, which no
+notebook has ([end-user](research/ideation/end-user-and-live.md) 5,
+[spreadsheets](research/unconventional/spreadsheets-and-end-user.md) 1).
+
+**Options.** Worksheets yes, notebooks still a non-goal (lean: the
+non-goal gains a sentence separating the two); amend the non-goal and
+prototype the reactive notebook after Q-23 and typed tables exist; keep the
+non-goal as written.
+
+**Current lean.** Worksheets as tooling after 0.1; the notebook only with
+Q-23's outcome and an amended non-goal.
+
+**What would settle it.** Notebooks written by outsiders, rerun top to
+bottom, against marimo on the same tasks; fix-it churn from the
+borrow-only rule between cells in a pilot.
+
+### Q-49. Which amendments to the experiment's pre-registration are accepted?
+
+**Question.** Six candidates ask for a place in the experiment of
+[`proposal/18-next-steps.md`](proposal/18-next-steps.md), whose principle 6
+is "nothing beyond the bets before the verdict". Each is argued to
+strengthen a bet's measurement rather than add polish:
+
+| Amendment | Phase | Cost | Strengthens |
+|---|---|---|---|
+| One io_uring cancellation test into stack buffers (N-07) | 1 | days | bet 3's cancellation semantics; the guaranteed-drop rule |
+| The dynamic ownership monitor as a counterexample generator for rejected programs, team-only (N-26) | 3 | about 1 week | bet 1's false-positive accounting |
+| The count of bindings typed by later statements (N-48) | 5 | hours | Q-50 |
+| The `sim` profile with typed fault injection and PCT scheduling (N-03) | 6, 8 | about 4 weeks | bet 3's cancellation and panic semantics under faults and crashes |
+| The capability log, `sisu replay` and replay tokens (N-04) | 8 | about 1 week | corpus triage; bet 3's schedule exploration |
+| A model arm with a pocket reference and an API digest (N-50) | 9 | model-API money and a PI's time | the AI-assistance penalty measured on day one; carries N-27's and D-062's rows |
+
+**Options.** All six, found by trimming Phase 8's polish or extending the
+plan by a month (lean); the cheap four without the `sim` profile and the
+model arm; none, keeping principle 6 strict.
+
+**Current lean.** All six; the pre-registration is amended before any
+participant writes a line, and the `sim` profile is justified by Phase 6's
+existing 1000-schedule exit criterion.
+
+**What would settle it.** The owner's budget; the Phase 0 pre-registration
+review.
+
+### Q-50. Should a binding's type be fixed by the end of its declaring statement?
+
+**Question.** Mündler et al. had to enforce initialised-or-annotated
+variables and no use before declaration to constrain TypeScript decoding,
+and MoonBit counts its top-level signature rule as model-friendly
+([AI-era](research/ideation/ai-era-and-evolution.md) A10). Sisu's local
+inference lets a later `push` fix an empty collection's element type.
+
+**Options.** Keep D-003's local inference as is (lean until measured); a
+left-to-right rule with annotations on empty collections, which also puts a
+binding's type where it is declared for readers; the rule only for `pub`
+items (already the case).
+
+**Current lean.** Measure first (Q-49): adopt the rule if fewer than about
+3 % of corpus bindings are typed by later statements and authors report no
+friction.
+
+**What would settle it.** That count, and a constrained-decoding pilot
+with and without the rule.
+
+### Q-51. Should capabilities stay `Copy`?
+
+**Question.** Capabilities are `Copy` ([`proposal/06-concurrency-and-capabilities.md`](proposal/06-concurrency-and-capabilities.md)),
+so authority can be narrowed by attenuation but never taken back, and a
+callee can keep what it was handed. [capabilities](research/unconventional/capabilities-distribution-and-resources.md)
+idea 3 proposes `std.cap` with caretakers (dynamic revocation, `Revoked`
+joining every I/O error set) and lent capabilities typed as views (zero
+cost, the callee cannot store them).
+
+**Options.** Keep `Copy`; add `Lent[T]` views and caretakers in `std.cap`
+and let APIs accept both (lean); make capabilities non-`Copy` so every
+hand-off is a move or an explicit `.copy()` (Austral's linear
+capabilities; costs every call site); capabilities as views by default with
+an explicit `.retain()` (the lending rule inverted).
+
+**Current lean.** Keep `Copy` with `std.cap`.
+
+**What would settle it.** The bet-2 port study: how often a callee stores
+a capability it should not have kept, and whether `Lent[T]` is asked for.

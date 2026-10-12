@@ -27,3 +27,4 @@ the open questions it leaves (with the open-question IDs).
 | [indentation-syntax.md](indentation-syntax.md) | [02](../../proposal/02-syntax.md) |
 | [python-idioms.md](python-idioms.md) | [02](../../proposal/02-syntax.md) |
 | [function-results.md](function-results.md) | [02](../../proposal/02-syntax.md), decision D-056 |
+| [unconventional-ideas.md](unconventional-ideas.md) | [19](../../proposal/19-novel-features.md), decisions D-058 to D-075, questions Q-42 to Q-51 |

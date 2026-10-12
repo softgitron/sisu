@@ -297,3 +297,27 @@ capability parameters and no `unsafe` is provably pure modulo
 non-termination and panics, and the compiler knows it (used for `comptime`
 eligibility and for memoisation hints). A `pure` annotation to *require*
 that property is cheap and is included.
+
+## Additions proposed in October 2026
+
+[19-novel-features.md](19-novel-features.md) found that a `pure` function
+listing a `dict`'s keys is not reproducible under D-049, and proposes
+(D-074, pending Q-42 to Q-44) that `pure` mean "the same bits for the same
+arguments on every run, process, thread count and target": `dict` and
+`set` iterate in insertion order with a per-process SipHash key;
+schedule-observing operations (`select`, `Mutex`, `Atomic`, multi-sender
+channels, `try_*`) are errors in `pure` code while `task.scope`, `spawn`
+and `join` stay legal; a `pure` scope reports the lowest-index failure
+rather than the first in time; and `pure` enters function types. Three
+library shapes follow (D-069, D-075): `std.par` with `par_iter`,
+`par.join` and reducers that merge in a fixed order, running `pure` bodies
+to completion on a non-blocking pool outside the task scheduler's stack
+budget; `task.race`; and capability interceptors (`Wrap[T]` over any
+capability trait) that give fakes, tracing, auditing and recording one
+interception point, with a scope's trace context inherited by its
+children and attached by `log`. Two questions are recorded for the owner:
+what a `Mutex` does when unwinding drops its guard (Q-45; the lean is to
+re-check the protected type's `invariant` and poison only on failure), and
+whether capabilities stay `Copy` or gain lent and revocable forms in
+`std.cap` (Q-51). An audited exception to `pure` for observationally pure
+caches (`std.x.incr`) is noted in N-63.

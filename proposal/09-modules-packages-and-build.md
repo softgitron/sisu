@@ -177,3 +177,21 @@ coverage.
 | Multiple competing build tools | The C++/Java/Python outcome. |
 | `postinstall`/`build.rs` | Supply-chain vector; replaced by comptime. |
 | Unused import/variable as a hard error (Go) | The Go survey's most-cited daily annoyance. Sisu warns, `sisu fmt` removes unused imports, and CI runs `sisu check --deny-warnings`. |
+
+## Additions proposed in October 2026
+
+From [19-novel-features.md](19-novel-features.md): the manifest stays
+data, with structured target conditions (`winapi = { version = "0.3",
+when = { os = "windows" } }`) rather than `cfg()` strings, and anything
+computed lives in `comptime` Sisu (D-063). `sisu add` and `sisu update`
+report an authority delta (newly reachable capabilities, `unsafe`,
+`extern`, `[trust]` changes, new dependencies and panic sites), apply a
+seven-day cooldown before resolution with advisory fixes exempt, refuse
+packages younger than that or without dependents unless told otherwise,
+and in CI or agent runs never add a package or widen `[trust]` against
+policy; packages whose API takes no capability types are labelled pure in
+the registry (D-066). Libraries ship migrations as `@fix_inline`
+functions applied by `sisu fix --deps` (D-067). With the registry, two
+prototypes are planned: a review ledger keyed by content hashes of the
+capability slice (N-43) and behavioural semver, where `sisu publish` runs
+the previous version's black-box tests (N-44).

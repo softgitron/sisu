@@ -123,3 +123,11 @@ for them:
 5. The standard library accretes (Python) or starves (Rust). Mitigation:
    the `std`/`std.x` split, with the explicit rule that promotion from
    `std.x` to `std` requires two years without a major version.
+
+## Additions proposed in October 2026
+
+[19-novel-features.md](19-novel-features.md) adds a maximum to the
+preview rule above: a `@preview` feature is stabilised or removed within
+four releases, two years (D-072), after Nix flakes' five years as an
+experimental feature. The false-friend table of D-062 is part of the
+specification, and post-1.0 rows go through editions.

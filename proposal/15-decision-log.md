@@ -351,3 +351,138 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 *Alternatives:* xUnit classes (JUnit, XCTest, unittest); naming-convention discovery (pytest `def test_*`, Go `TestXxx`); assertion libraries; mocking frameworks; coverage gates.
 *Evidence:* [testing.md](../research/topics/testing.md): built-in beats third party (D's and Zig's inline tests, Go's `go test` needing no documentation, pytest displacing `unittest`); assertion capture copied by every modern design and always needing the compiler; fixtures by injection beating inheritance; flakiness causes (Luo et al. 2014: async wait 45%, concurrency 20%, order dependency 12%) each removed by per-test capability fakes and a virtual clock (Go `synctest`); property testing used an order of magnitude more when zero-dependency; Go's unification of fuzzing with tests; Jest's own snapshot misuse guidance; coverage not correlated with effectiveness (Inozemtseva & Holmes 2014); Google's incremental mutation testing; fakes over mocks (Google, Fowler, `gomock` archived).
 *Status:* decided. See [17-testing.md](17-testing.md).
+
+---
+
+## Decisions from the unconventional-languages round (October 2026)
+
+The round in [`../research/unconventional/`](../research/unconventional/)
+and [`../research/ideation/`](../research/ideation/), assessed in
+[19-novel-features.md](19-novel-features.md), produced the decisions below.
+All have status **leaning**: the project owner has not reviewed them, and
+each that touches an earlier decision is paired with an open question.
+
+### D-058 Views, scopes and suspended task frames are never leaked; completion I/O and DMA borrow the caller's buffer
+
+*Alternatives:* a safe `forget`/`leak` as in Rust (so owned buffers must be handed to the kernel and returned); `'static` buffers for DMA; buffer pools in `unsafe`.
+*Evidence:* Rust's own account that "any object can be leaked in Rust, trivially and safely" is why tokio-uring takes buffers by value and `embedded-dma` requires `'static` ([systems-and-determinism.md](../research/ideation/systems-and-determinism.md), candidate 7); the enabling rule has shipped twice, in Rust's closure-based `std::thread::scope` and in Swift's noncopyable types (SE-0390 rejects a general `forget`); the io_uring cancellation contract (`-EALREADY` waits for the original completion).
+*Consequences:* No safe `forget` or `leak` for views, scopes or suspended frames, ever; a cancelled I/O call returns only after the device has released the buffer; a stackless fallback for bet 3 must never expose droppable future values; one io_uring cancellation test joins the Phase 1 harness (Q-49). See N-07 in [19](19-novel-features.md).
+*Status:* leaning.
+
+### D-059 `@no_alloc` and `@no_block` in v1, `@stack(max=N)` with the native backend, `@no_panic` after 0.1 with a specified interval analysis
+
+*Alternatives:* lints (Rust's `no_std`, clippy); run-time sanitisers only (RealtimeSanitizer); program-wide restrictions (Ada); nothing.
+*Evidence:* Clang 20 checks `nonblocking` and `nonallocating` on function types; Swift's experimental `@_noAllocation` met friction with generic metadata; Ada's `pragma Restrictions` and GNATstack; SPARK's Silver level and Wuffs (every check discharged at compile time, in Chrome since 2021). Cheap in Sisu because allocation is visible in types (rule 7 of [04](04-memory-and-ownership.md)) and every blocking point is a capability call or a synchronisation primitive ([systems-and-determinism.md](../research/ideation/systems-and-determinism.md), candidates 5 and 6).
+*Consequences:* The attributes are part of function types; checking happens after monomorphisation, an exception to D-017 with errors at the instantiation; drop glue for auto-boxed recursive types must be iterative; `sisu audit --panics` precedes the `@no_panic` attribute; the interval analysis must be written into the specification (D-036). See N-08 and N-09.
+*Status:* leaning.
+
+### D-060 Collections take an allocator type parameter with a default; a borrowed region makes the collection a view
+
+*Alternatives:* a global allocator only; allocators as values passed to every call (Zig); arenas as a separate collection family; regions with named lifetimes (Rust's `Vec<T, &'a Bump>`).
+*Evidence:* Rust stabilised `Vec<T, A>` and `impl Allocator for &A` for 1.100 in September 2026, ten years after RFC 1398; Cyclone, MLKit and RTSJ scoped memory; Go's arena experiment on hold because explicit arenas infect APIs ([systems-and-determinism.md](../research/ideation/systems-and-determinism.md), candidate 8).
+*Consequences:* `list[T, A: Allocator = Global]`; `list[T, ref Region]` cannot escape the region's frame, enter `Shared` or cross `spawn`; resetting a region needs `mut region`; std must separate a bump `Region` from the generational `Arena[T]`; the corpus counts how many functions must become allocator-generic. See N-10.
+*Status:* leaning.
+
+### D-061 `todo("name")` is a typed hole: `sisu check` reports it, the interpreter stops at it, release builds and `publish` reject it; a fill engine is later tooling
+
+*Alternatives:* `?name` in operand position, replacing `todo` (Idris, Agda, Lean; proposed in [holes-synthesis-and-ai-era.md](../research/unconventional/holes-synthesis-and-ai-era.md)); an untyped `todo` that panics (Rust `todo!()`, today's prelude); `_` (GHC; taken by patterns).
+*Evidence:* Holes are the interaction model of every dependently typed language and have been on in GHC for twelve years; Hazel's measured ChatLSP context (type definitions first) lifts a model furthest in a low-resource language; rust-analyzer's term search was little used, which favours the report over enumeration; fills judged by tests alone overfit (PropR 63-85 %) and models edit tests when they can (ImpossibleBench), so the judge stays out of the filler's reach ([holes-synthesis-and-ai-era.md](../research/unconventional/holes-synthesis-and-ai-era.md), [ai-era-and-evolution.md](../research/ideation/ai-era-and-evolution.md) A1).
+*Consequences:* `todo[T](name: str = "") -> T` is a compiler intrinsic like `assert`; a third test outcome, "blocked by a hole" (D-057); `panic("...")` for placeholders meant to ship; no new lexical form; `sisu fill` edits only the hole's span with tests, contracts, generators and snapshots read-only, and `unfillable` is a legal answer. The spelling is Q-46. See N-27.
+*Status:* leaning.
+
+### D-062 Loud divergence: where Sisu spells something as Python or Rust does, it means the same or fails to compile; the specification keeps a false-friend table
+
+*Alternatives:* silent semantic differences documented in a migration guide (Python 3's `/`); run-time traps only.
+*Evidence:* PEP 238's silent change is the cautionary tale; models default to Python's meaning for Python's spelling and drift between similar languages, and agents in unfamiliar languages prototype in Python first ([ai-era-and-evolution.md](../research/ideation/ai-era-and-evolution.md) A11); Rust's editions ship migration lints for changed meaning.
+*Consequences:* `xs[-1]` with a constant negative index is a compile error with the fix-it `xs[^1]`; the table is checked per row in the experiment's model arm; the `dict` row is Q-42; post-1.0 rows go through editions. See N-49.
+*Status:* leaning.
+
+### D-063 The manifest stays data with structured target conditions; comptime budgets are owned by the package that spends them; `sisu eval` renders `pure` modules as configuration
+
+*Alternatives:* Cargo-style `cfg()` strings; an executable manifest (`build.zig`, `Package.swift`, Gradle scripts); a manifest-wide fuel knob (the current text of [08](08-metaprogramming.md)); a separate configuration dialect (Starlark).
+*Evidence:* The Borg retrospective, the configuration complexity clock, Declarative Gradle and CDKTF's archiving; Rust 1.72 removed its const-evaluation cap because hitting it depended on library internals; Dhall's and Starlark's designers concede totality does not bound running time; Pkl's model ([config-and-total-languages.md](../research/unconventional/config-and-total-languages.md), ideas 2 to 4).
+*Consequences:* `winapi = { version = "0.3", when = { os = "windows" } }`; `@comptime_budget(steps=N)` on the item that spends it, deny-by-default diagnostics naming the expression and package; `sisu eval deploy/prod.sisu --to yaml` with types, refinements and invariants as the schema. See N-54 to N-56.
+*Status:* leaning.
+
+### D-064 `@must_consume` propagates through containers; `?` out of a loop over must-consume values is an error unless the remainder is returned
+
+*Alternatives:* containers exempt (today's text); full linearity (Austral); a lint.
+*Evidence:* Move's conditional abilities (`Cup<T>` has `drop` only if `T` does) ship the propagation rule; Move's transactions roll back on error where Sisu's `?` returns normally, so the early-return case needs its own rule ([capabilities-distribution-and-resources.md](../research/unconventional/capabilities-distribution-and-resources.md), idea 1).
+*Consequences:* Settles the half of Q-37 the owner left to practice; consuming iteration discharges a container; std gains consuming container APIs. See N-15.
+*Status:* leaning.
+
+### D-065 Diagnostics and explanations: a message catalog, consequence lines on multi-fix diagnostics, a signature gloss in the teaching profile, `@diagnostic_name`, the lossless syntax tree as a library, a checker that produces types for broken code, `sisu why`, and doc examples rendered with their values
+
+*Alternatives:* English concatenated in code; one fix-it per diagnostic without consequences; a prose "explain this program" generator; error dialogues; a checker that stops at the first error; per-feature explanation flags.
+*Evidence:* Marceau, Fisler and Krishnamurthi's novices misread carefully designed messages, largely over vocabulary; Guo's non-native speakers; Scratch's and Excel's language-neutral storage; Luau's infallible checker as its first design goal; Argus (2.2 times as many faults localised, 3.3 times faster) and the Whyline (debugging time cut by nearly a factor of eight); Lean's delaborators and Rust's `#[diagnostic::on_unimplemented]`; Unison's and Go's rendered examples ([end-user-and-live.md](../research/ideation/end-user-and-live.md) 7, 8, 13; [game-and-narrative-scripting.md](../research/unconventional/game-and-narrative-scripting.md) 1; [ai-era-and-evolution.md](../research/ideation/ai-era-and-evolution.md) A9).
+*Consequences:* Message identifiers with parameters from the first diagnostic; `sisu why` in human and JSON form over error sets, `Send`/`Sync`, `pure`, capability reach, impl selection and comptime fuel, tracing only in explain mode; `@diagnostic_name` once Q-27's type construction ships. See N-25, N-30, N-37, N-38, N-40, N-47.
+*Status:* leaning.
+
+### D-066 `sisu review` reports weakened specifications and authority deltas; dependency admission has a cooldown and refuses new packages in agent runs; packages are labelled pure or resource-holding
+
+*Alternatives:* CODEOWNERS on test directories; Capslock-style capability baselines as a separate tool; no cooldown (npm's default); crowd compatibility scores.
+*Evidence:* ImpossibleBench and METR's reward-hacking measurements; Capslock and deps.dev (fewer than 2 % of updates add a capability, so the signal is read); invented package names in 4.6-21.7 % of model suggestions; eight of ten recent attacks with windows under a week; pnpm's `minimumReleaseAge` and uv's `exclude-newer` ([ai-era-and-evolution.md](../research/ideation/ai-era-and-evolution.md) A2, A3; [capabilities-distribution-and-resources.md](../research/unconventional/capabilities-distribution-and-resources.md) idea 4).
+*Consequences:* `[review] spec-weakening = "require-trailer"` fails CI without a human-written trailer; the authority delta reuses the reach computation the registry's capability summary already needs; a seven-day cooldown applied before resolution, advisory fixes exempt. See N-17, N-41, N-42.
+*Status:* leaning.
+
+### D-067 Libraries ship migrations as `@fix_inline` functions applied by `sisu fix --deps`
+
+*Alternatives:* template-based rewrites (OpenRewrite); macros; deprecation messages only.
+*Evidence:* Go's `//go:fix inline` applied by `go fix -inline`; Dart's data-driven fixes verified against goldens; Kotlin's `ReplaceWith` ([ai-era-and-evolution.md](../research/ideation/ai-era-and-evolution.md) A6).
+*Consequences:* An ownership-aware inliner (borrows, `own` moves and `defer` move into the caller's scope); a major release's API diff marks migratable removals. See N-45.
+*Status:* leaning.
+
+### D-068 Hot replacement publishes epochs adopted at task start and at `live.boundary()`; a failed check publishes nothing; function values hold slots; a changed `const` re-swaps its dependents
+
+*Alternatives:* D-053's next-call rule alone (one iteration can mix versions); image persistence.
+*Evidence:* Sonic Pi, Extempore, TidalCycles and Erlang converged on version-consistent replacement at loop boundaries; Flutter's `const` rule; Papyrus's lesson that saved state must hold no frames or code identity ([esoteric-and-live-coding.md](../research/unconventional/esoteric-and-live-coding.md) idea 1; [game-and-narrative-scripting.md](../research/unconventional/game-and-narrative-scripting.md) idea 2).
+*Consequences:* An epoch word per task and a versioned function table in debug builds, nothing in release builds; refines D-053. See N-35.
+*Status:* leaning.
+
+### D-069 `std.par`: `par_iter`, `par_iter_mut`, `par.join` and reducers with a fixed merge order on a non-blocking pool for `pure` bodies; `SoaList[T]` in `std.collections`; no `par:` block; the `par` keyword deferred
+
+*Alternatives:* a `par:` statement block (occam `PAR`, DPJ `cobegin`); `for x in par xs` as a contextual keyword (Chapel `forall`); a `@layout(soa)` attribute on structs; parallel-by-default loops (Fortress).
+*Evidence:* occam's compile-time usage rules and Rust's closure rules are what Sisu's exclusivity and `Send`/`Sync` already give; OpenMP's and `do concurrent`'s trust-based annotations produce silent wrong answers; Fortress was cancelled; Rayon's index-ordered panic rule and adaptive splitting; Cilk hyperobjects; Odin `#soa` and Zig `MultiArrayList` ([parallel-languages.md](../research/unconventional/parallel-languages.md), [algorithm-schedule-separation.md](../research/unconventional/algorithm-schedule-separation.md), [systems-and-determinism.md](../research/ideation/systems-and-determinism.md) 12 and 13).
+*Consequences:* Serial elision made exact (removing the parallelism gives the same result; a failing loop reports the lowest-index error); `pure` bodies run to completion on a worker's stack, outside bet 3's budget; reductions follow D-074's fixed shape; the keyword is Q-47. See N-18 to N-20.
+*Status:* leaning.
+
+### D-070 `std.test` gains `exhaustive[T]` generators, transcript tests and `@refines`; the `sim` profile and replay tokens are prototyped in the experiment
+
+*Alternatives:* property tests only; snapshot files only; equivalence by hand; simulation and replay as third-party libraries (madsim, turmoil, Shuttle).
+*Evidence:* Alloy's small-scope hypothesis and SmallCheck; Inform's "Test me with" and doctest sessions; Exo's reference-equivalence; FoundationDB, TigerBeetle, Shuttle, Coyote, Go's `synctest`; S3's ShardStore; PCT's probabilistic guarantee; R2's interface-level recording; Elm's importable histories ([logic-constraint-and-rewriting.md](../research/unconventional/logic-constraint-and-rewriting.md) 1 and 2, [natural-language-and-literate.md](../research/unconventional/natural-language-and-literate.md) 2, [algorithm-schedule-separation.md](../research/unconventional/algorithm-schedule-separation.md) 2, [systems-and-determinism.md](../research/ideation/systems-and-determinism.md) 2 and 3, [end-user-and-live.md](../research/ideation/end-user-and-live.md) 4).
+*Consequences:* A `sim` build fails to compile if reachable code could escape the simulation; faults come only from declared error sets; every failing test prints a replay token; the amendments are Q-49. See N-03 to N-05, N-21, N-36.
+*Status:* leaning.
+
+### D-071 Syntax additions: `{expr=}` in interpolation and chained fallible conditions; `View` as a `pure` trait in `std.x`
+
+*Alternatives:* `{"expr"} {expr}` by hand; nested `if let`; a walrus operator; a fourth rendering trait in core.
+*Evidence:* Python 3.8's `=` specifier; Swift's condition lists and Rust 1.88's let chains; Tratt's Converge retrospective on keeping failure in `if` without goal-directed evaluation; IPython's display protocol and the moldable inspector ([logic-constraint-and-rewriting.md](../research/unconventional/logic-constraint-and-rewriting.md) 3, [end-user-and-live.md](../research/ideation/end-user-and-live.md) 12, [live-and-exploratory-environments.md](../research/unconventional/live-and-exploratory-environments.md) 5).
+*Consequences:* `if let Some(u) = users.get(id), let Some(t) = u.team, t.active:`; a comma, not `and` (D-025); `Display` for users, `Debug` for programmers, `View` for tools, with `View` derived from `Debug` unless written. See N-33, N-53.
+*Status:* leaning.
+
+### D-072 A `@preview` feature is stabilised or removed within four releases
+
+*Alternatives:* a minimum only (today's [13](13-evolution-and-governance.md)); indefinite previews.
+*Evidence:* Nix flakes, experimental since November 2021 and central to the ecosystem's split ([config-and-total-languages.md](../research/unconventional/config-and-total-languages.md) idea 6); Java's preview features, which have expired on schedule.
+*Status:* leaning.
+
+### D-073 The teaching profile is a monotone ladder of levels, each a strict subset of the next, with teacher-defined ladders as data
+
+*Alternatives:* one profile (Q-41 as decided); Hedy-style levels that change syntax; no profile.
+*Evidence:* HtDP's student languages and Pyret; Ada's restriction identifiers; Hedy, where "code ran at the wrong level" was 18.4 % of errors; Scratch's concurrency used freely by children ([end-user-and-live.md](../research/ideation/end-user-and-live.md) 9, [spreadsheets-and-end-user.md](../research/unconventional/spreadsheets-and-end-user.md) 2).
+*Consequences:* `profile = "teaching-3"`; level-up diagnostics naming the construct and the level; script mode's top-level statements confined to scripts and teaching levels; the levels themselves are settled by the Q-41 trial. See N-29.
+*Status:* leaning.
+
+### D-074 `pure` is deterministic across runs, processes, thread counts and targets; floating point is strict by default
+
+*Alternatives:* `pure` as "no capabilities" only (today's [06](06-concurrency-and-capabilities.md)); determinism by convention with a linter (Temporal, Durable Functions); implicit contraction and fast-math as compiler defaults (Clang).
+*Evidence:* Three files found that D-049's per-process `dict` order contradicts [08](08-metaprogramming.md)'s comptime promise and [06](06-concurrency-and-capabilities.md)'s "provably pure"; Python 3.7 separated flooding resistance from iteration order; Rayon's index-ordered failure rule; Java 17's strict floating point (JEP 306), WebAssembly's deterministic scalars, CORE-MATH in glibc, Box2D v3's cross-platform determinism ([systems-and-determinism.md](../research/ideation/systems-and-determinism.md) 1 and 4, [config-and-total-languages.md](../research/unconventional/config-and-total-languages.md) 1, [ai-era-and-evolution.md](../research/ideation/ai-era-and-evolution.md) A11).
+*Consequences:* `dict` and `set` iterate in insertion order with a per-process SipHash key (reversing the iteration half of D-049, Q-42); schedule-observing operations are errors in `pure` code and a `pure` scope reports the lowest-index failure (Q-43); `pure` enters function types; no implicit FMA, `a.mul_add(b, c)` for one rounding, `@float(fast)` opts out per function, reductions in a fixed shape (Q-44); correctly rounded `std.math` goes with Q-23. See N-01, N-02.
+*Status:* leaning, pending Q-42 to Q-44.
+
+### D-075 Library shapes: capability interceptors and inherited trace context, `task.race`, drift-free `Ticker` and `Timeline` over `Clock`, `std.search`
+
+*Alternatives:* aspect-oriented pointcuts; manual context propagation (Go `context`); `sleep`-based timing; ad-hoc search loops.
+*Evidence:* The AOP critique (obliviousness, fragile pointcuts); Kotlin's coroutine context and Erlang's logger metadata; Céu's `par/or` with `finalize`; tokio's missed-tick policies and Sonic Pi's virtual-time semantics; LogicT ([incremental-reversible-and-exotic-paradigms.md](../research/unconventional/incremental-reversible-and-exotic-paradigms.md) 3, [synchronous-and-dataflow.md](../research/unconventional/synchronous-and-dataflow.md) 2, [esoteric-and-live-coding.md](../research/unconventional/esoteric-and-live-coding.md) 2, [logic-constraint-and-rewriting.md](../research/unconventional/logic-constraint-and-rewriting.md) 5).
+*Consequences:* One interception point shared by fakes, tracing, auditing and recording; `log` attaches the scope's span automatically; the same timing code is real-time in production and deterministic under the test clock. See N-06, N-35, N-60.
+*Status:* leaning.

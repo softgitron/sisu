@@ -459,3 +459,24 @@ would recreate Scala 3's two-dialect split.
 | `print(x, y)` concatenation | `print("{x} {y}")` | one way to format |
 | Tabs allowed | spaces only | Python 3 itself made mixing an error; every later layout language banned tabs |
 | Chained comparisons in any direction | same direction only | `a < b > c` is "perfectly legal (though perhaps not pretty)" by Python's own admission |
+
+## Additions proposed in October 2026
+
+Three leaning decisions from [19-novel-features.md](19-novel-features.md)
+touch the syntax; none adds a keyword. `todo("name")` becomes a typed hole
+(D-061): it checks against its expected type, `sisu check` reports its
+context, the interpreter stops at it, and release builds reject it, with
+`panic("...")` for placeholders meant to ship. Interpolation accepts
+Python 3.8's `{expr=}`, so `"{total=}"` renders as `total=42` (D-071). A
+condition in `if`, `elif` and `while` may be a comma-separated chain of
+`let` bindings and boolean tests, left to right, each binding in scope for
+the rest of the chain and the branch (D-071); the separator is a comma
+because `and` is `bool`-only:
+
+```sisu
+if let Some(user) = users.get(id), let Some(team) = user.team, team.active:
+    notify(team)
+```
+
+The false-friend table of D-062 also makes `xs[-1]` with a constant
+negative index a compile error with the fix-it `xs[^1]`.

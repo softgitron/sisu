@@ -16,6 +16,8 @@ language analyses and topic syntheses that justify it.
 | `languages/` | One analysis per language (or small family). Primary research. |
 | `topics/` | Cross-cutting syntheses: one per design dimension (type system, memory, errors, ...). Compares the approaches found in `languages/` and ends with a recommendation and open questions. |
 | `evidence/` | Empirical material: developer surveys, academic studies, industry memory-safety data, designer retrospectives. Shared by all other documents. |
+| `unconventional/` | Second round (October 2026): one file per family of unconventional languages and environments (block and projectional editors, live environments, spreadsheets, natural-language and literate programming, synchronous and dataflow, parallel, Halide-style schedules, logic and constraint, configuration, capability and resource, incremental and exotic paradigms, esoteric and live coding, game scripting, holes and synthesis). Each ends with ranked transferable ideas and dead ends; see its [README](unconventional/README.md). |
+| `ideation/` | Three candidate-feature studies (learners and live work, systems and determinism, the AI era and evolution) that ask what Sisu could offer that no language does, each candidate with precedents, costs, a verdict and what would settle it. Assessed in [`../proposal/19-novel-features.md`](../proposal/19-novel-features.md). |
 
 ## Which languages and why
 

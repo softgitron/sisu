@@ -22,6 +22,8 @@ evidence runs out.
 | Check the evidence | [`research/evidence/`](research/evidence/) |
 | Read what we learned from a specific language | [`research/languages/`](research/languages/) |
 | Compare approaches to one problem (memory, errors, concurrency, ...) | [`research/topics/`](research/topics/) |
+| See what block languages, spreadsheets, live coding, logic languages and the rest have to teach | [`research/topics/unconventional-ideas.md`](research/topics/unconventional-ideas.md), then [`research/unconventional/`](research/unconventional/) |
+| Judge the features no language has | [`proposal/19-novel-features.md`](proposal/19-novel-features.md) |
 
 ## How the material is organised
 
@@ -31,6 +33,9 @@ research/
   languages/           one analysis per language, same template for all
   topics/              cross-cutting syntheses, each ending in a recommendation
   evidence/            surveys, studies, memory-safety data, designer retrospectives
+  unconventional/      second round: block, live, spreadsheet, synchronous, logic, config,
+                       capability, esoteric, game and holes families, with transferable ideas
+  ideation/            candidate features that exist in no language, through three lenses
 proposal/
   README.md            one-page summary and index
   00-...14-*.md        the design, one document per area
@@ -38,6 +43,7 @@ proposal/
   16-validation-plan   what a prototype must test first
   17-testing.md        the testing design
   18-next-steps.md     the experiment plan
+  19-novel-features.md the unconventional round's verdicts: 66 candidates, decisions, questions
   examples/            Sisu source files illustrating the design
 open-questions.md      what the research could not settle, with options and a current lean
 ```
@@ -51,9 +57,9 @@ should be filed as an issue.
 
 | Phase | Status |
 |---|---|
-| Research | Done (October 2026). 46 language analyses (~14,000 lines), 19 topic syntheses, 4 evidence dossiers. |
-| Proposal | Draft 2 (October 2026). Indentation-based, Python-flavoured syntax; a testing design; an experiment plan with phases, corpus, measurements and decision points. |
-| Open questions | 41 recorded; 38 decided by the project owner (October 2026), 3 open (runtime stacks, governance details, numerics). |
+| Research | Done (October 2026). 46 language analyses (~14,000 lines), 20 topic syntheses, 4 evidence dossiers; a second round of 14 studies of unconventional languages and environments and 3 ideation studies (~6,500 lines). |
+| Proposal | Draft 2 (October 2026). Indentation-based, Python-flavoured syntax; a testing design; an experiment plan with phases, corpus, measurements and decision points; an assessment of 66 candidate features that exist in no language or only in unconventional ones ([`proposal/19-novel-features.md`](proposal/19-novel-features.md)). |
+| Open questions | 51 recorded; 38 decided by the project owner (October 2026), 3 open from the first round (runtime stacks, governance details, numerics), 10 from the unconventional round awaiting the owner. |
 | Prototype | Not started. |
 
 ## Contributing to the design

@@ -195,3 +195,16 @@ largest risk in [`../open-questions.md`](../open-questions.md).
 - Code that must interoperate with C++ templates and classes directly. Carbon
   exists for that.
 - Anyone who needs it today. There is no compiler.
+
+## Additions proposed in October 2026
+
+The unconventional-languages round ([19-novel-features.md](19-novel-features.md))
+asks two things of this document. The notebook non-goal above should
+distinguish a *worksheet* (a script-mode file the language server re-runs
+top to bottom with values shown inline and never saved; no cells, no
+hidden state), which Sisu can offer as tooling after 0.1, from a
+*notebook*, which stays a non-goal unless Q-48 amends it. And one
+principle is added as a design rule under P1 and P10: where Sisu spells
+something as Python or Rust does, it means the same or fails to compile
+(D-062), because the people and models who read Sisu will read it with
+those languages' meanings first.

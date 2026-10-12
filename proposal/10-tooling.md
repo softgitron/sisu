@@ -216,3 +216,25 @@ compiler's own understanding of the code, the same way `go fix`, `cargo
 fix`, Dart's null-safety migrator and the 2to3 tool did, with the Dart
 migrator's measured outcome (the whole ecosystem migrated in about a year)
 as the target and Python's (twelve years) as the thing to avoid.
+
+## Additions proposed in October 2026
+
+[19-novel-features.md](19-novel-features.md) adds to the one binary, as
+leaning decisions: diagnostics through a message catalog with a one-line
+consequence on every fix-it, a checker that produces a typed tree for
+broken code so the language server works in it, the formatter's lossless
+syntax tree as a library, `@diagnostic_name` for library-rendered types,
+doc examples rendered with their values, and `sisu why` in human and JSON
+form over error sets, `Send`/`Sync`, `pure`, capability reach, impl
+selection and comptime fuel (D-065); `sisu check --holes` and the hole
+report for `todo` (D-061); `sisu review` with specification-weakening and
+authority deltas (D-066); `sisu fix --deps` (D-067); `sisu eval` (D-063);
+`sisu doc --digest` and a pocket reference on a token budget for the AI
+section above (N-50); and, as prototypes in the experiment, `sisu run
+--record`, `sisu replay` and replay tokens on every failing test, and
+`sisu test --sim` (D-070). Hot replacement is refined to epochs adopted at
+task start and `live.boundary()` (D-068). The language-server features
+that follow 0.1 are, in order: always-on evaluation of capability-free
+examples and tests with probes and contract counterexamples, worksheets,
+structural editing commands and a typed palette, and the notional-machine
+stepper and permissions overlay (N-25, N-28, N-31, N-34).

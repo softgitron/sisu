@@ -1135,3 +1135,25 @@ interpreter-era front end only; the native targets wait for the backend.
 | The implementation becomes the specification | Every conformance file cites a proposal chapter from Phase 0; anything only the interpreter decides (evaluation order, overflow in comptime) is listed for the specification draft. |
 | `Net.fake` with an in-process stream pair is easy to underestimate | Budgeted inside Phase 6 as a named deliverable. |
 | Q-21 (governance) and Q-23 (numerics) are untouched | On purpose; a one-page phase-1 note saying who decides is all the release needs, and the owner decides that. |
+
+## Proposed amendments (October 2026)
+
+The unconventional-languages round ([19-novel-features.md](19-novel-features.md))
+proposes six amendments to this plan, each argued to strengthen a bet's
+measurement rather than add polish, and each needing the pre-registration
+amended before any participant writes a line. They are the owner's call
+(Q-49); none is adopted here.
+
+| Amendment | Phase | Cost | Strengthens |
+|---|---|---|---|
+| One io_uring cancellation test into stack buffers: cancel a million in-flight reads and check that no buffer is written after its cancelled call has returned (D-058) | 1 | days | bet 3's cancellation semantics |
+| The dynamic ownership monitor as a counterexample generator: rerun every rejected corpus program under the monitor across its tests; rejections that never reach a conflict are candidate false positives (N-26), team-only | 3 | about 1 week | bet 1's false-positive accounting |
+| Count the bindings whose type is fixed by a later statement (N-48) | 5 | hours | Q-50 |
+| The `sim` profile: fault-injecting `Net` and crash-consistent `Fs` fakes, PCT and bounded exhaustive scheduling, simulated crash and restart, on top of the 1000-schedule run Phase 6 already requires (N-03) | 6, 8 | about 4 weeks | bet 3's cancellation and panic semantics under faults |
+| The capability log, `sisu replay` and a replay token on every failing test (N-04) | 8 | about 1 week | corpus triage; schedule exploration |
+| A model arm: frontier models solve the corpus tasks with nothing, a pocket reference, or reference plus API digest, with and without compiler feedback, in the playground sandbox (N-50) | 9 | model-API money; a PI's time | the AI-assistance penalty measured on day one |
+
+About six person-weeks in total, to be found by trimming Phase 8's polish
+or extending the plan by a month. Principle 6 ("nothing beyond the bets
+before the verdict") is kept: everything else in 19 that is adopt or
+tooling waits for the verdict.

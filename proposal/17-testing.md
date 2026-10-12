@@ -211,3 +211,22 @@ coverage a gate.
   (`test "name"(sys: System)` is the current spelling).
 - Whether derived generators should respect preconditions as filters by
   default, which can make generation slow, or only on request.
+
+## Additions proposed in October 2026
+
+[19-novel-features.md](19-novel-features.md) extends `std.test` (D-070):
+`exhaustive[T](max_len=n)` beside `arbitrary[T]`, so `check` can run every
+history up to a small size against a reference model; transcript tests
+(`tests/*.transcript`, a `$` line runs `main` against a fake `System`,
+`>` lines are standard input, other lines are expected output, `--update`
+re-blesses after showing the diff); `@refines(reference, tolerance=...)`,
+which generates property tests that an optimised function matches its
+reference. Two prototypes are proposed for the experiment (Q-49): `sisu
+test --sim`, a runtime profile in which `System` is entirely simulated,
+faults are drawn only from each method's declared error set, the scheduler
+is seeded and pluggable (random, PCT, bounded exhaustive) and a build fails
+to compile if reachable code could escape the simulation; and a replay
+token on every failing test (`sisu test --replay <token>`) holding the
+content hash, toolchain version, seeds and shrunk case. A hole reached by a
+test is a third outcome, "blocked" (D-061). Tests that take `System`
+cannot be simulated or replayed, and the token says so.
