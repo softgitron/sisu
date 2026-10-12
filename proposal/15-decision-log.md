@@ -463,7 +463,7 @@ each that touches an earlier decision is paired with an open question.
 ### D-072 A `@preview` feature is stabilised or removed within four releases
 
 *Alternatives:* a minimum only (today's [13](13-evolution-and-governance.md)); indefinite previews.
-*Evidence:* Nix flakes, experimental since November 2021 and central to the ecosystem's split ([config-and-total-languages.md](../research/unconventional/config-and-total-languages.md) idea 6); Java's preview features, which have expired on schedule.
+*Evidence:* Nix flakes, experimental since November 2021 and central to the ecosystem's split ([config-and-total-languages.md](../research/unconventional/config-and-total-languages.md) idea 6); Java's preview features (JEP 12), which are expected to be finalised or dropped within a release or two.
 *Status:* leaning.
 
 ### D-073 The teaching profile is a monotone ladder of levels, each a strict subset of the next, with teacher-defined ladders as data
