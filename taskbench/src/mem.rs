@@ -80,6 +80,34 @@ pub fn vma_count() -> u64 {
         .unwrap_or(0)
 }
 
+/// Number of resident pages in `[addr, addr+len)` according to `mincore(2)`.
+/// Precise per range, unlike process RSS, so the strategy tests use it.
+pub fn resident_pages(addr: usize, len: usize) -> usize {
+    let page = crate::stack::os::page_size();
+    let start = addr & !(page - 1);
+    let end = (addr + len + page - 1) & !(page - 1);
+    let n = (end - start) / page;
+    let mut vec = vec![0u8; n];
+    // SAFETY: `vec` has one byte per page of the (page-aligned) range; mincore
+    // only reads the page tables of our own mappings.
+    let r = unsafe { libc::mincore(start as *mut libc::c_void, end - start, vec.as_mut_ptr()) };
+    if r != 0 {
+        return 0;
+    }
+    vec.iter().filter(|&&b| b & 1 != 0).count()
+}
+
+/// The `[start, end)` of the mapping in `/proc/self/maps` that contains `addr`.
+pub fn mapping_containing(addr: usize) -> Option<(usize, usize)> {
+    let maps = fs::read_to_string("/proc/self/maps").ok()?;
+    maps.lines().find_map(|l| {
+        let range = l.split_whitespace().next()?;
+        let (a, b) = range.split_once('-')?;
+        let (a, b) = (usize::from_str_radix(a, 16).ok()?, usize::from_str_radix(b, 16).ok()?);
+        (a <= addr && addr < b).then_some((a, b))
+    })
+}
+
 /// Reads an integer sysctl, e.g. `read_sysctl("vm/max_map_count")`.
 pub fn read_sysctl(path: &str) -> Option<u64> {
     fs::read_to_string(format!("/proc/sys/{path}"))

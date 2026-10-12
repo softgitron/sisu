@@ -43,10 +43,12 @@ impl<T> Slab<T> {
         self.entries.get(i)?.as_ref()
     }
 
+    #[allow(dead_code)] // used by tests and kept for debugging
     pub fn len(&self) -> usize {
         self.len
     }
 
+    #[allow(dead_code)] // as `len`
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }

@@ -372,7 +372,7 @@ impl<'scope, 'env> Scope<'scope, 'env> {
         // alive while the scope is. `scope()` does not return before every child
         // has finished, so data borrowed for 'scope outlives the task.
         let (task, slot) = unsafe { (*self.shared).spawn_stackful(&self.inner, f) }
-            .map_err(|e| TaskError::SpawnFailed(e.to_string()))?;
+            .map_err(TaskError::SpawnFailed)?;
         Ok(JoinHandle { slot, task, joined: false, _scope: PhantomData })
     }
 

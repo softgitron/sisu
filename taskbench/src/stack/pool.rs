@@ -174,13 +174,16 @@ mod tests {
     #[test]
     fn pooled_slots_share_one_mapping() {
         let p = SlotPool::pooled(64 * 1024, 16 * 1024, 4 << 20, false);
-        let vmas0 = mem::vma_count();
         let regions: Vec<_> = (0..32).map(|_| p.allocate().unwrap()).collect();
-        // One chunk is enough for 32 slots of 80 KiB: at most one new VMA.
-        assert!(mem::vma_count() <= vmas0 + 1);
+        // One chunk holds all 32 slots of 80 KiB: one mapping covers them all.
+        let first = mem::mapping_containing(regions[0].limit).expect("mapped");
+        let last = mem::mapping_containing(regions[31].base - 1).expect("mapped");
+        assert_eq!(first, last, "slots span several mappings");
         for w in regions.windows(2) {
             assert_eq!(w[1].limit - w[0].limit, p.slot_bytes(), "slots are contiguous");
         }
+        // Lazily committed: carving slots touches nothing.
+        assert_eq!(mem::resident_pages(regions[0].limit, 32 * p.slot_bytes()), 0);
         for r in &regions {
             assert!(!r.has_guard());
             assert_eq!(r.probe_limit, r.limit + 16 * 1024);

@@ -131,13 +131,11 @@ mod tests {
         assert_eq!(r.base % 16, 0);
         // Two new VMAs: the guard and the stack.
         assert!(mem::vma_count() >= vmas_before + 2);
-        // Lazy commit: touching the top page only makes the RSS grow by about a page.
-        let rss0 = mem::snapshot(false).vm_rss;
+        // Lazy commit: nothing is resident until touched, then only the touched page.
+        assert_eq!(mem::resident_pages(r.usable_low, r.usable_bytes()), 0);
         // SAFETY: the top word of the usable range belongs to this test.
         unsafe { std::ptr::write_volatile((r.base - 8) as *mut u64, 42) };
-        let rss1 = mem::snapshot(false).vm_rss;
-        assert!(rss1 >= rss0, "rss shrank");
-        assert!(rss1 - rss0 < 64 * 1024, "whole stack committed eagerly");
+        assert_eq!(mem::resident_pages(r.usable_low, r.usable_bytes()), 1);
         // SAFETY: allocated above, released once, nothing runs on it.
         unsafe { s.release(r) };
         assert_eq!(s.counters().reserved_bytes, 0);

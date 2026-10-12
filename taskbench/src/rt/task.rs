@@ -33,7 +33,7 @@ use corosensei::{Coroutine, Yielder};
 use super::scope::ScopeInner;
 use super::worker::{Hint, Shared};
 use crate::stack::probe::StackExhausted;
-use crate::stack::{Exhaustion, StackRegion, TaskStack};
+use crate::stack::{Exhaustion, StackError, StackRegion, TaskStack};
 
 pub(crate) const SCHEDULED: u8 = 0;
 pub(crate) const RUNNING: u8 = 1;
@@ -50,7 +50,7 @@ pub(crate) enum Suspend {
 }
 
 /// How a stackful task's coroutine returned.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TaskExit {
     /// The body ran to completion (or its panic was caught) and it has already
     /// reported its result to its join slot.
@@ -70,7 +70,7 @@ pub enum TaskError {
     /// The task ran out of stack and was failed cleanly.
     StackExhausted { how: Exhaustion, detail: String },
     /// No stack could be obtained for the task.
-    SpawnFailed(String),
+    SpawnFailed(StackError),
     /// An I/O operation failed.
     Io(String),
 }
@@ -132,8 +132,8 @@ pub(crate) enum Body {
     Stackful(Co),
     Stackless(BoxFuture),
     /// A trapped task whose open scopes still have running children, which may
-    /// borrow from its stack: the stack is kept until they finish.
-    Quarantined(TaskStack),
+    /// borrow from its stack: the stack is kept (held, never read) until they finish.
+    Quarantined(#[allow(dead_code)] TaskStack),
 }
 
 /// Fields used only by the thread that owns the task's RUNNING state.
@@ -161,7 +161,10 @@ pub struct Task {
     pub(crate) scope: Arc<ScopeInner>,
     /// This task's index in `scope`'s registry.
     pub(crate) reg_index: AtomicUsize,
-    pub(crate) fail: Arc<dyn FailSink>,
+    /// Where a failure the body could not report goes; taken when the task
+    /// completes, so that the slot (whose type may borrow from the spawning
+    /// frame) never outlives the scope. Owned by the RUNNING-state owner.
+    pub(crate) fail: UnsafeCell<Option<Arc<dyn FailSink>>>,
     pub(crate) body: UnsafeCell<Body>,
     pub(crate) local: UnsafeCell<TaskLocal>,
 }
@@ -194,7 +197,7 @@ impl Task {
             rt,
             scope,
             reg_index: AtomicUsize::new(usize::MAX),
-            fail,
+            fail: UnsafeCell::new(Some(fail)),
             body: UnsafeCell::new(Body::Empty),
             local: UnsafeCell::new(TaskLocal { yielder: std::ptr::null(), park_sp: 0, open_scope: None, region }),
         }
@@ -212,6 +215,26 @@ impl Task {
         if self.state.compare_exchange(PARKED, SCHEDULED, SeqCst, SeqCst).is_ok() {
             self.shared().schedule(self.clone(), Hint::Wake);
         }
+    }
+
+    /// Reports a failure to the task's join slot.
+    ///
+    /// # Safety
+    /// The caller must own the task's RUNNING state.
+    pub(crate) unsafe fn fail(&self, err: TaskError) {
+        // SAFETY: exclusive by the caller's contract.
+        if let Some(f) = unsafe { &*self.fail.get() } {
+            f.fail(err);
+        }
+    }
+
+    /// Drops the failure sink once the task has completed.
+    ///
+    /// # Safety
+    /// The caller must own the task's RUNNING state.
+    pub(crate) unsafe fn drop_fail_sink(&self) {
+        // SAFETY: exclusive by the caller's contract.
+        drop(unsafe { (*self.fail.get()).take() });
     }
 
     /// Whether this task or any scope above it has been cancelled.

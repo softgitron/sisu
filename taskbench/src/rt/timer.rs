@@ -7,7 +7,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
-use std::sync::{Condvar, Mutex, OnceLock};
+use std::sync::{Condvar, Mutex};
 use std::task::Waker;
 use std::thread;
 use std::time::Instant;
@@ -45,7 +45,8 @@ struct Inner {
 pub(crate) struct Timer {
     inner: Mutex<Inner>,
     cv: Condvar,
-    thread: OnceLock<thread::JoinHandle<()>>,
+    started: AtomicBool,
+    thread: Mutex<Option<thread::JoinHandle<()>>>,
     shutdown: AtomicBool,
 }
 
@@ -59,24 +60,36 @@ impl Timer {
         Timer {
             inner: Mutex::new(Inner { heap: BinaryHeap::new(), seq: 0 }),
             cv: Condvar::new(),
-            thread: OnceLock::new(),
+            started: AtomicBool::new(false),
+            thread: Mutex::new(None),
             shutdown: AtomicBool::new(false),
+        }
+    }
+
+    fn ensure_started(&self) {
+        if self.started.load(SeqCst) {
+            return;
+        }
+        let mut t = self.thread.lock().expect("timer thread lock");
+        if t.is_none() && !self.shutdown.load(SeqCst) {
+            let p = TimerPtr(self);
+            *t = Some(
+                thread::Builder::new()
+                    .name("taskbench-timer".into())
+                    .spawn(move || {
+                        let p = p;
+                        // SAFETY: see TimerPtr.
+                        unsafe { (*p.0).run() }
+                    })
+                    .expect("spawn timer thread"),
+            );
+            self.started.store(true, SeqCst);
         }
     }
 
     /// Calls `waker` at or after `deadline`.
     pub(crate) fn register(&self, deadline: Instant, waker: Waker) {
-        self.thread.get_or_init(|| {
-            let p = TimerPtr(self);
-            thread::Builder::new()
-                .name("taskbench-timer".into())
-                .spawn(move || {
-                    let p = p;
-                    // SAFETY: see TimerPtr.
-                    unsafe { (*p.0).run() }
-                })
-                .expect("spawn timer thread")
-        });
+        self.ensure_started();
         let mut g = self.inner.lock().expect("timer lock");
         let seq = g.seq;
         g.seq += 1;
@@ -125,28 +138,19 @@ impl Timer {
         }
     }
 
-    /// Stops and joins the timer thread, dropping pending entries.
+    /// Asks the timer thread to stop.
     pub(crate) fn shutdown(&self) {
         self.shutdown.store(true, SeqCst);
-        {
-            let _g = self.inner.lock().expect("timer lock");
-            self.cv.notify_all();
-        }
+        let _g = self.inner.lock().expect("timer lock");
+        self.cv.notify_all();
     }
 
+    /// Joins the timer thread (after `shutdown`) and drops pending entries.
     pub(crate) fn join(&self) {
-        // OnceLock cannot give the JoinHandle back by value; the thread exits on
-        // its own after `shutdown`, so wait for the heap lock to show it is gone.
-        if self.thread.get().is_some() {
-            let deadline = Instant::now() + std::time::Duration::from_secs(1);
-            while Instant::now() < deadline {
-                if self.thread.get().map(|h| h.is_finished()).unwrap_or(true) {
-                    break;
-                }
-                thread::sleep(std::time::Duration::from_millis(1));
-            }
+        let h = self.thread.lock().expect("timer thread lock").take();
+        if let Some(h) = h {
+            let _ = h.join();
         }
-        let mut g = self.inner.lock().expect("timer lock");
-        g.heap.clear();
+        self.inner.lock().expect("timer lock").heap.clear();
     }
 }

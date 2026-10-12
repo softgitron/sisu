@@ -117,11 +117,12 @@ mod tests {
         let r = d.allocate().unwrap();
         // A 512 KiB excursion below the "shallow" frame.
         touch(r.base - 512 * 1024, r.base);
-        let before = mem::snapshot(false).vm_rss;
+        assert_eq!(mem::resident_pages(r.base - 512 * 1024, 512 * 1024), 128);
         // The task parks with its stack pointer 8 KiB below the base.
         d.on_park(&r, r.base - 8 * 1024);
-        let after = mem::snapshot(false).vm_rss;
-        assert!(before - after >= 400 * 1024, "only {} bytes returned", before - after);
+        // Kept: the two pages above the stack pointer, the page holding it and the
+        // margin page below it.
+        assert_eq!(mem::resident_pages(r.base - 512 * 1024, 512 * 1024), 3);
         let c = d.counters();
         assert_eq!(c.decommits, 1);
         assert!(c.decommitted_bytes >= 500 * 1024);
@@ -138,9 +139,11 @@ mod tests {
         let d = Decommit::new(Arc::new(SlotPool::pooled(256 * 1024, 16 * 1024, 4 << 20, false)));
         let r = d.allocate().unwrap();
         touch(r.base - 200 * 1024, r.base);
+        assert_eq!(mem::resident_pages(r.base - 200 * 1024, 200 * 1024), 50);
         // SAFETY: allocated above, released once.
         unsafe { d.release(r) };
         assert!(d.counters().decommitted_bytes >= 190 * 1024);
+        assert_eq!(mem::resident_pages(r.base - 200 * 1024, 200 * 1024), 1, "top page kept");
         assert_eq!(d.label(), "D(B)");
     }
 }

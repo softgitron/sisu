@@ -32,7 +32,7 @@ use crossbeam_deque::{Injector, Steal, Stealer, Worker};
 
 use super::net::Poller;
 use super::scope::{JoinSlot, ScopeInner};
-use super::task::{Body, BoxFuture, DONE, PARKED, RUNNING, SCHEDULED, Suspend, Task, TaskError, TaskExit, TaskRef};
+use super::task::{Body, BoxFuture, DONE, FailSink, PARKED, RUNNING, SCHEDULED, Suspend, Task, TaskError, TaskExit, TaskRef};
 use super::timer::Timer;
 use crate::stack::fault::{self, ArmedTrap};
 use crate::stack::{Exhaustion, StackError, StackStrategy, TaskStack, probe};
@@ -344,14 +344,12 @@ impl Shared {
         // task (the runtime is only freed once no task is alive).
         let stack = unsafe { TaskStack::new(region, owner) };
         let slot = Arc::new(JoinSlot::<T>::new(scope.clone()));
-        let task = Arc::new(Task::new(
-            self.next_task_id(),
-            self,
-            scope.clone(),
-            slot.clone(),
-            Some(region),
-            false,
-        ));
+        let sink: Arc<dyn FailSink + '_> = slot.clone();
+        // SAFETY: erases the lifetime of `T` from the trait object. The task drops
+        // its sink when it completes (`complete`), before the spawning scope can
+        // end, so the sink is never used or dropped after borrowed data dies.
+        let sink: Arc<dyn FailSink> = unsafe { std::mem::transmute::<Arc<dyn FailSink + '_>, Arc<dyn FailSink>>(sink) };
+        let task = Arc::new(Task::new(self.next_task_id(), self, scope.clone(), sink, Some(region), false));
         let slot2 = slot.clone();
         let body = move |y: &corosensei::Yielder<(), Suspend>, ()| -> TaskExit {
             let me = current_task_ptr();
@@ -425,11 +423,12 @@ fn worker_main(shared: *const Shared, index: usize, local: Worker<TaskRef>) {
         None
     };
     probe::init_worker_limit(WORKER_PROBE_RESERVE);
-    let mut spinning = false;
+    // Whether this worker is counted in `num_spinning`.
+    let mut counted = false;
     loop {
         if let Some(t) = ctx.find_task() {
-            if spinning {
-                spinning = false;
+            if counted {
+                counted = false;
                 sh.stop_spinning_with_work();
             }
             ctx.run(t);
@@ -438,34 +437,23 @@ fn worker_main(shared: *const Shared, index: usize, local: Worker<TaskRef>) {
         if sh.shutdown.load(SeqCst) {
             break;
         }
-        if !spinning {
-            spinning = true;
+        if !counted {
             sh.num_spinning.fetch_add(1, SeqCst);
         }
-        let mut found = None;
-        for _ in 0..SPIN_ROUNDS {
-            for _ in 0..SPIN_PAUSES {
-                std::hint::spin_loop();
-            }
-            if let Some(t) = ctx.find_task() {
-                found = Some(t);
-                break;
-            }
-        }
-        if let Some(t) = found {
-            spinning = false;
+        if let Some(t) = ctx.spin_for_work() {
+            counted = false;
             sh.stop_spinning_with_work();
             ctx.run(t);
             continue;
         }
-        spinning = false;
         sh.num_spinning.fetch_sub(1, SeqCst);
+        counted = false;
         if sh.shutdown.load(SeqCst) {
             break;
         }
-        spinning = sh.sleep_worker(index);
+        counted = sh.sleep_worker(index);
     }
-    if spinning {
+    if counted {
         sh.num_spinning.fetch_sub(1, SeqCst);
     }
     WORKER.with(|w| w.set(ptr::null()));
@@ -495,6 +483,19 @@ impl WorkerCtx {
         x ^= x << 17;
         self.rng.set(x);
         x as usize
+    }
+
+    /// Searches for work for a few microseconds before the worker sleeps.
+    fn spin_for_work(&self) -> Option<TaskRef> {
+        for _ in 0..SPIN_ROUNDS {
+            for _ in 0..SPIN_PAUSES {
+                std::hint::spin_loop();
+            }
+            if let Some(t) = self.find_task() {
+                return Some(t);
+            }
+        }
+        None
     }
 
     fn find_task(&self) -> Option<TaskRef> {
@@ -576,7 +577,8 @@ impl WorkerCtx {
                     Err(payload) => {
                         // The body catches its own panics; this is a panic in the
                         // runtime's code on the task stack. The coroutine has ended.
-                        task.fail.fail(TaskError::from_panic(payload));
+                        // SAFETY: we own the RUNNING state.
+                        unsafe { task.fail(TaskError::from_panic(payload)) };
                         self.finish_stackful(task, TaskExit::Finished);
                     }
                 }
@@ -596,7 +598,8 @@ impl WorkerCtx {
                     }
                     Err(payload) => {
                         *body = Body::Empty;
-                        task.fail.fail(TaskError::from_panic(payload));
+                        // SAFETY: we own the RUNNING state.
+                        unsafe { task.fail(TaskError::from_panic(payload)) };
                         self.complete(task);
                     }
                 }
@@ -646,10 +649,13 @@ impl WorkerCtx {
         let stack = co.into_stack();
         if let TaskExit::GuardTrap { fault_addr } = exit {
             sh.counters.guard_traps.fetch_add(1, Relaxed);
-            task.fail.fail(TaskError::StackExhausted {
-                how: Exhaustion::GuardPage,
-                detail: format!("guard page hit at {fault_addr:#x}"),
-            });
+            // SAFETY: we own the RUNNING state.
+            unsafe {
+                task.fail(TaskError::StackExhausted {
+                    how: Exhaustion::GuardPage,
+                    detail: format!("guard page hit at {fault_addr:#x}"),
+                })
+            };
             // Scopes opened by the discarded frames are still open, and their
             // children may borrow from this stack: cancel them and keep the stack
             // until they have finished.
@@ -694,10 +700,14 @@ impl WorkerCtx {
         let sh = self.shared();
         task.state.store(DONE, SeqCst);
         // SAFETY: the task has ended; we own its RUNNING state.
-        unsafe { task.local_mut() }.open_scope = None;
+        unsafe {
+            task.local_mut().open_scope = None;
+            task.drop_fail_sink();
+        }
         task.scope.unregister(task.reg_index.load(SeqCst));
-        task.scope.child_finished();
         sh.live_tasks.fetch_sub(1, SeqCst);
         sh.counters.completed.fetch_add(1, Relaxed);
+        // Last: once the scope sees the child finished, its owner may return.
+        task.scope.child_finished();
     }
 }
