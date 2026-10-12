@@ -85,7 +85,7 @@ Not a goal. Carbon exists because C++ interop at the level of templates,
 classes and exceptions requires designing the language around C++
 ([`carbon.md`](../research/languages/carbon.md)), and Swift's C++ interop
 took five years for a partial result. Sisu interoperates with C++ through
-`extern "C"` wrappers, as Rust, Go and Zig do. Open question Q-24.
+`extern "C"` wrappers, as Rust, Go and Zig do (Q-24, decided: no direct C++ interop).
 
 ## Other languages
 
@@ -103,7 +103,7 @@ for Rust's reasons: an unstable ABI leaves layout, calling conventions and
 monomorphisation free to improve. Swift's stable ABI ("library evolution")
 cost years and a resilience model that affects every generic call, and
 exists because Apple ships system frameworks in Swift; Sisu has no such
-constraint. A stable ABI for dynamic libraries is open question Q-31; the
+constraint. A stable ABI for dynamic libraries is Q-31 (decided: unstable for now); the
 C ABI is the stable interface in the meantime, and `@repr(c)` plus
 `@export` make it easy to use.
 

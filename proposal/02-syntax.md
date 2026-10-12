@@ -105,7 +105,7 @@ const NAME: T = expr             # compile-time constant, type required
 
 def name[T: Bound](p: T, mut q: U, own r: V, d: W = default) -> R ! E:
     body
-pure def f(x: int) -> int: ...   # pure: no capabilities, no unsafe, no shared mutation; usable at compile time
+pure def f(x: int) -> int: ...   # pure: no capabilities, no unsafe, no shared mutation, nothing that observes the schedule; deterministic (D-074); usable at compile time
 comptime def g(T: type) -> type: ...   # compile-time only; `type` is the type of types
 
 struct Name[T]:

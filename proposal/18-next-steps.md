@@ -392,8 +392,8 @@ checker whose own soundness is being tested at the same time.
 - The first outside authors can start (Phase 5).
 
 **Effort.** About 17 pw (the lead for eight weeks, the type-system engineer
-for six, the runtime engineer for three, one of them on the counterexample
-mode), 1 pw referee. The view and escape checker is the one piece with no
+for six, the runtime engineer for three, one of those weeks on the
+counterexample mode), 1 pw referee. The view and escape checker is the one piece with no
 reference implementation to copy: Hylo and Mojo both report iterators and
 stored references as the unsolved residue
 ([`hylo.md`](../research/languages/hylo.md),
@@ -460,8 +460,9 @@ friction than Rust.
   (P1 tokenizer and parser with a borrowing AST, P2 graph with parent
   pointers, P3 HTTP server with a shared cache, P4 widget tree with event
   callbacks, P5 iterator adapter library) plus P6, an application-shaped
-  program chosen by the non-Rust authors in Phase 0 to counter the
-  Rust-shaped bias of the other five. P1, P2, P5 and P6 start at week 16;
+  program that the non-Rust authors choose, once contracted, from a
+  shortlist of three fixed by the PI at the freeze ([20](20-pre-registration.md),
+  section 4.1.2), to counter the Rust-shaped bias of the other five. P1, P2, P5 and P6 start at week 16;
   P4 at week 22 (it needs `dyn` and `@delegate`); P3 at week 26 (it needs
   Phase 6).
 - A shared, language-neutral behavioural test suite per program, written
@@ -553,7 +554,7 @@ schedules and, in the `sim` profile, under injected faults.
   works as written.
 - Yield points at loop back-edges and calls with a reduction budget;
   `--stats` reports scheduling latency so Q-34 has a number.
-- The `Shared` escape analysis that tags each `Shared.new` site task-local
+- The `Shared` escape analysis that tags each `Shared(...)` construction site task-local
   or may-cross (Q-2); the monitor treats a task-local-tagged `Shared`
   crossing a task, a non-`Send` value crossing a task and a task outliving
   its scope as soundness errors; `--stats shared` counts tagged sites.
@@ -662,7 +663,7 @@ with record and replay, without anything that is ahead of the verdict.
 
 - The test surface following the separately written testing design: `test`
   blocks, doctests, `check` property tests with shrinking,
-  `assert_snapshot`, `@bench`; each test gets fresh capability fakes; tests
+  `assert_snapshot`, `bench` blocks; each test gets fresh capability fakes; tests
   run in parallel on the task scheduler.
 - `sisu test --sim`, the rest of the `sim` profile: a clock that advances
   only when every task is blocked, several nodes in one process with their
@@ -817,7 +818,7 @@ the model arm's own question and are never counted for a bet.
 
 | ID | Program | Bets | Written by | Starts |
 |---|---|---|---|---|
-| E | The ten files in [examples](examples/) converted to the indentation syntax, a drop-order torture program, a 10k-connection echo server | tooling | team | Phases 0-8 |
+| E | The ten files in [examples](examples/) other than `ffi.sisu`, kept in step with the syntax, a drop-order torture program, a 10k-connection echo server | tooling | team | Phases 0-8 |
 | W | Wrong-program corpora (40 core, 60 ownership) with expected codes and named fixes; a translated slice of rustc's borrow-checker UI tests | checker | team | Phases 2-3 |
 | A | 20 adversarial programs that try to alias or dangle in safe code | checker soundness | the referee | Phase 3 |
 | D | Dry-run drafts of P1-P6, used to debug the toolchain and then discarded | checker bugs | team | Phase 3 |
@@ -826,7 +827,7 @@ the model arm's own question and are never counted for a bet.
 | P3 | HTTP/1.1 server with a shared LRU cache and a background eviction task on `std.x.http` | 1, 2, 3 | one Go backend engineer, one Rust-experienced author | week 26 |
 | P4 | Widget tree with parent navigation, focus and event callbacks stored in widgets (escaping closures, `dyn`, `@delegate`) | 1, Q-28 | one Swift or Kotlin application developer, one Rust-experienced author | week 22 |
 | P5 | Iterator adapter library (map, filter, zip, chunks, windows, peekable, by-ref and by-value variants, one lending-style case) | 1, Q-10 | one Rust library author, one non-Rust author | week 16 |
-| P6 | Application-shaped program chosen by the PI in Phase 0 from a shortlist of three, since the authors are not yet contracted (for example a CLI that streams JSON lines through a trait-based plugin registry) | 1 | one Rust-arm and one non-Rust author, like every other program; Go control | week 16 |
+| P6 | Application-shaped program: the PI fixes a shortlist of three at the freeze, the non-Rust authors rank it once contracted, and the top-ranked one is P6 ([20](20-pre-registration.md), section 4.1.2) (for example a CLI that streams JSON lines through a trait-based plugin registry) | 1 | one Rust-arm and one non-Rust author, like every other program; Go control | week 16 |
 | R | Red-team program: the ten patterns for which Rust needs lifetimes, with the cost of each workaround | 1 | a Rust expert briefed to break the model | week 20 |
 | C1 | grep/du-style command-line tool with `Fs`, `Env`, `Proc` | 2 | an outside author, a student or junior developer | week 28 |
 | S1, S2 | Two independent ports of one pre-registered 3-8 kLOC Go service with its tests | 2, Q-5 | one Go-background porter, one Rust-background porter | week 30 |
@@ -836,7 +837,11 @@ the model arm's own question and are never counted for a bet.
 | M | P1-P6's tasks solved by frontier models in six conditions, and in Python as the baseline | the model arm, D-062 | several frontier models, run by the PI | Phase 9 |
 | U | Unsolicited playground submissions after 0.1 | 1 | anyone | Phase 9 |
 
-**Who writes, and how they are found.** Fourteen paid contractors: six corpus
+**Who writes, and how they are found.** Fifteen paid contractors (fourteen
+if the desk-audit contractor is also the red-team expert, which
+[20](20-pre-registration.md), section 3.4, allows), plus two reserve
+authors on retainer (20, section 3.2): one desk-audit Rust expert at two
+weeks (weeks 1-4); six corpus
 authors (three with two or more years of production Rust, three Go, Kotlin
 or Swift application developers with no Rust) at about four weeks each; one
 red-team Rust expert at three weeks; two porters at five weeks; one C1
@@ -911,7 +916,7 @@ record once frozen.
 
 | What | How measured | Baseline | Threshold that changes the design |
 |---|---|---|---|
-| Q-2 atomic elision | fraction of `Shared.new` sites proven task-local, validated by the monitor | none | below 80% flags the single-`Shared` design for a native benchmark; the "within 10%" benchmark in 16 needs native code and is deferred |
+| Q-2 atomic elision | fraction of `Shared(...)` construction sites proven task-local, validated by the monitor | none | below 80% flags the single-`Shared` design for a native benchmark; the "within 10%" benchmark in 16 needs native code and is deferred |
 | Q-3 `.copy()` per 30 lines of application code | audit | 16 | more than one reopens implicit copying |
 | Q-9, adapted to explicit `return` | the top-ten diagnostics list from all diaries | none | any top-ten diagnostic caused by a design rule rather than a bug gets a design review ("expected (), found T" is moot) |
 | Q-11 newtype wrappers per 200 lines | audit | 16 | more than one reopens scoped instances |
@@ -978,7 +983,7 @@ Sisu stays a post-0.1 goal.
    against conflicting accesses; no named lifetimes because every loan's
    origin is a local, a parameter or a view field); the escape and view
    check; `Send`/`Sync` at spawn boundaries; purity for `pure`, contracts
-   and comptime; the `Shared` escape analysis that tags each `Shared.new`
+   and comptime; the `Shared` escape analysis that tags each `Shared(...)` construction site
    site task-local or may-cross (Q-2).
 7. The interpreter.
 
@@ -1170,7 +1175,7 @@ one, do not start the compiler.
   validation are built.
 - std beyond what the corpus needs: no TLS, DNS, UDP, Unix sockets, regex,
   JSON encoder (corpus authors may write one), time zones, `BigInt`,
-  `Decimal`, persistent collections, structured logging.
+  `Ratio`, `Decimal`, persistent collections, structured logging.
 - Fix-and-resume from a chosen frame; hot replacement is body swap at
   epoch boundaries only.
 - The contract verifier, loop invariants, `decreases`, ghost code, SMT-backed
@@ -1243,7 +1248,8 @@ rerunning the corpus on the native backend.
   demonstration and the attenuation counts go into
   [06-concurrency-and-capabilities.md](06-concurrency-and-capabilities.md).
 - **Fails** (median above two capability parameters on I/O-doing
-  functions, or a god struct outside the composition root): implement the
+  functions, any I/O-doing function with more than four, or a god struct
+  outside the composition root): implement the
   reserved `with` clause as 16 says, re-port the worst module (two weeks),
   recount; if bundling persists, downgrade the supply-chain claim to
   coarse-grained capabilities and document the composition-root pattern as
@@ -1264,7 +1270,9 @@ rerunning the corpus on the native backend.
   stackless frame is heap state that can hold `ref`s into itself, Phase 3
   designs the escape rule to treat yield points as frame boundaries before
   the corpus study, and the hot-replacement design is re-costed from Phase
-  1's written estimate. This is why bet 3 runs first.
+  1's written estimate. This is why bet 3 runs first. Under D-058 the
+  state machines stay owned by their scope and never become droppable
+  future values (N-07).
 - **Fails on creation cost or VMA limits only**: pooled stacks with
   software probes become the design; the harness is rerun on that strategy
   (two weeks).

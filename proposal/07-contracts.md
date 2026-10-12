@@ -65,7 +65,7 @@ labels in `ensures`; an unlabelled one is `result`.
 - **Dafny, Liquid Haskell, F\***: show that refinement types over a decidable
   fragment handle most array-bounds and arithmetic properties with little
   annotation ([`idris-agda-lean.md`](../research/languages/idris-agda-lean.md)).
-  Full dependent types are rejected for Sisu (open question Q-16) because of
+  Full dependent types are rejected for Sisu (Q-16, decided) because of
   proof burden and compile-time cost; refinement types are the proven
   subset.
 - **Rust's `debug_assert!` and Zig's `std.debug.assert`** are contracts
@@ -102,4 +102,4 @@ labels in `ensures`; an unlabelled one is `result`.
   changes to add it.
 - Loop invariants and termination measures (`decreases`) are contextual
   keywords without semantics in version 1.
-- Ghost code (specification-only variables) is open question Q-16.
+- Ghost code (specification-only variables) waits for the verifier (Q-16, decided).

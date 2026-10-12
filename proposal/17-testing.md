@@ -140,7 +140,7 @@ hashing and partial-order reduction.
 test "replicas converge under partitions, torn writes and crashes":
     var sim = Sim(scheduler=Pct(depth=3), faults=Faults.storage() + Faults.network(drop=0.02))
     for i in range(3):
-        sim.node("r{i}", sys -> replica.main(sys))                        # the production main
+        sim.node("r{i}", own sys -> replica.main(sys))                        # the production main
     sim.every(Duration.minutes(5), own s -> s.crash(s.pick(s.nodes())))   # unsynced writes are lost
     sim.always(own s -> len(lease_holders(s.nodes())) <= 1)               # checked after every step
     sim.run_for(Duration.hours(6))                                        # seconds of real time

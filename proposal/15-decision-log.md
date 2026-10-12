@@ -296,10 +296,10 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 *Evidence:* Python, Go, Rust, Swift and Julia allow them; Rust's experience is that the risk (CVE-2021-42574 "Trojan Source" and homoglyph identifiers) is handled by NFC normalisation plus `uncommon_codepoints`, `confusable_idents` and `mixed_script_confusables` lints; the teaching and non-English-ecosystem argument decided it.
 *Status:* decided (Q-33 reversed the lean).
 
-### D-049 `Map` iteration randomised; SipHash keyed per process
+### D-049 `dict` and `set` hash with a per-process SipHash key; iteration order reversed by D-074 to insertion order
 
 *Evidence:* Hash-flooding DoS history (Python, Java, PHP, Ruby all patched); Go's deliberate randomisation.
-*Status:* decided.
+*Status:* decided for the keyed hash; the randomised-iteration half is reversed by D-074 (Q-42, October 2026).
 
 ### D-050 No function overloading by type; named and default arguments instead
 
@@ -360,7 +360,7 @@ The round in [`../research/unconventional/`](../research/unconventional/)
 and [`../research/ideation/`](../research/ideation/), assessed in
 [19-novel-features.md](19-novel-features.md), produced the decisions below.
 The owner answered Q-42 to Q-51 in October 2026, which decides D-061,
-D-069, D-070 and D-074 and adds D-076 and D-077; the other decisions here
+D-069 and D-074 and the amendments half of D-070, and adds D-076 and D-077; the other decisions here
 stay **leaning** until the owner reviews the log itself. The one reversal
 of a decided point (D-049, in D-074) was paired with a question (Q-42);
 D-059, D-063, D-066, D-068 and D-072 amend decided text without one and say
@@ -438,7 +438,7 @@ so in their consequences; D-059 also waits on Q-52.
 
 ### D-068 Hot replacement publishes epochs adopted at task start and at `live.boundary()`; a failed check publishes nothing; function values hold slots; a changed `const` re-swaps its dependents
 
-*Alternatives:* the next-call rule of [18](18-next-steps.md) alone (one iteration can mix versions); image persistence.
+*Alternatives:* the next-call rule that Draft 2 of [18](18-next-steps.md) stated alone (one iteration can mix versions); image persistence.
 *Evidence:* Sonic Pi, Extempore, TidalCycles and Erlang converged on version-consistent replacement at loop boundaries; Flutter's `const` rule; Papyrus's lesson that saved state must hold no frames or code identity ([esoteric-and-live-coding.md](../research/unconventional/esoteric-and-live-coding.md) idea 1; [game-and-narrative-scripting.md](../research/unconventional/game-and-narrative-scripting.md) idea 2).
 *Consequences:* An epoch word per task and a versioned function table in debug builds, nothing in release builds; refines D-053. See N-35.
 *Status:* leaning.

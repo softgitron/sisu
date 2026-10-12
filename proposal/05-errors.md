@@ -188,7 +188,7 @@ builds, and `panic("msg")`.
 | Checked exceptions (Java) | Right goal, wrong mechanism: no propagation operator, no union types, no inference, broke with lambdas. Error sets are checked exceptions done with types. |
 | Untyped `throws` (Swift until 6, Go's `error` interface) | Callers cannot match on what can go wrong; Swift added typed throws in SE-0413 for exactly this reason. |
 | Plain `Result[T, E]` with `From` conversions (Rust) | Composing error types is boilerplate; the ecosystem had to invent `thiserror`/`anyhow`. Error-set subtyping removes the need. |
-| Condition system with restarts (Common Lisp) | Genuinely more powerful; see [`lisp-scheme-racket.md`](../research/languages/lisp-scheme-racket.md). Rejected because it requires dynamic scope and makes control flow non-local in ways that interact badly with ownership. Recorded as open question Q-36 for the application tier. |
+| Condition system with restarts (Common Lisp) | Genuinely more powerful; see [`lisp-scheme-racket.md`](../research/languages/lisp-scheme-racket.md). Rejected because it requires dynamic scope and makes control flow non-local in ways that interact badly with ownership. Recorded as Q-36 (decided) for the application tier. |
 | Multiple return values (Go) | A tuple `(T, error)` does not force the check; `Result` does. |
 | Catchable panics (`catch_unwind`, Go `recover`) | Encourages using panics as exceptions. Only scopes observe panics. |
 

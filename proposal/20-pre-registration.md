@@ -35,7 +35,7 @@ needs are recruited with [21-recruitment.md](21-recruitment.md).
 | Early-protocol commit hash | `[to be filled at freeze]` (section 1.3, rule 3) |
 | Freeze tag | `prereg-v1.0` [default proposed; owner to confirm] |
 | Status | Draft. Not frozen. No participant has started. |
-| Data location | `experiments/` in this repository; `experiments/PREREGISTRATION.md`, the file Phase 0 of 18 names, holds only the freeze hash and a link to this document [default proposed; owner to confirm] |
+| Data location | `experiments/` in this repository; `experiments/PREREGISTRATION.md` holds only the freeze hash and a link to this document [default proposed; owner to confirm] |
 | Funding | `[owner: funder or own funds, and the total budget]` |
 | Institution and ethics review | `[owner: institution, review body and approval reference, or the reason none is required]` |
 
@@ -291,7 +291,7 @@ decided once the corpus's frame-depth histogram exists, at week 40.
 
 | What | How measured | Baseline | Threshold that changes the design |
 |---|---|---|---|
-| Q-2 atomic elision | fraction of `Shared.new` sites proven task-local, validated by the monitor | none | below 80% flags the single-`Shared` design for a native benchmark; the "within 10%" benchmark in 16 needs native code and is deferred |
+| Q-2 atomic elision | fraction of `Shared(...)` construction sites proven task-local, validated by the monitor | none | below 80% flags the single-`Shared` design for a native benchmark; the "within 10%" benchmark in 16 needs native code and is deferred |
 | Q-3 `.copy()` per 30 lines of application code | audit | 16 | more than one reopens implicit copying |
 | Q-9, adapted to explicit `return` | the top-ten diagnostics list from all diaries | none | any top-ten diagnostic caused by a design rule rather than a bug gets a design review ("expected (), found T" is moot) |
 | Q-11 newtype wrappers per 200 lines | audit | 16 | more than one reopens scoped instances |
@@ -526,7 +526,7 @@ programs; 3-8 kLOC for the Go service) and proposed here otherwise.
 
 | ID | Program | Size band | Written by | Language controls | Bets and questions | Counts as evidence | Starts |
 |---|---|---|---|---|---|---|---|
-| E | The ten files in [examples](examples/) converted to the indentation syntax, a drop-order torture program, a 10k-connection echo server | as the examples | team | none | tooling | no | Phases 0-8 |
+| E | The ten files in [examples](examples/) other than `ffi.sisu`, kept in step with the syntax, a drop-order torture program, a 10k-connection echo server | as the examples | team | none | tooling | no | Phases 0-8 |
 | W | Wrong-program corpora (40 core, 60 ownership) with expected codes and named fixes; a translated slice of rustc's borrow-checker UI tests | 100 files plus the slice | team | rustc's own expected errors for the slice | checker; the diagnostics-quality row | no (instrument) | Phases 2-3 |
 | A | 20 adversarial programs that try to alias or dangle in safe code | 20 programs | the referee | none | checker soundness | gate only (all must be rejected) | Phase 3 |
 | D | Dry-run drafts of P1-P6, used to debug the toolchain and then discarded | as P1-P6 | team | none | checker bugs | no; never shown to participants | Phase 3 |
@@ -569,8 +569,7 @@ the lines added relative to the Rust version and its run-time mechanism
 
 #### 4.1.2 Choosing P6
 
-18 has the non-Rust authors choose P6 "in Phase 0", but their contracts
-are signed by week 8. This document resolves the conflict: at freeze the PI
+At freeze the PI
 fixes a shortlist of three application-shaped candidates, each specified
 to the same level as P1-P5 and each in the 300-1500-line band; once the
 non-Rust authors are contracted they rank the three without seeing any
@@ -1134,7 +1133,7 @@ Porters and the C1 author answer items 2, 3 and 5.
 
 | Row | Operational definition |
 |---|---|
-| Q-2 | the share of static `Shared.new` sites in participant programs that `--stats shared` tags task-local; validated by the monitor, for which a tagged site crossing a task is a soundness error |
+| Q-2 | the share of static `Shared(...)` construction sites in participant programs that `--stats shared` tags task-local; validated by the monitor, for which a tagged site crossing a task is a soundness error |
 | Q-3 | `.copy()` call sites in the non-test code of P1-P4, P6, C1, S1 and S2, per 30 final lines, pooled; P5 and R are excluded as library and adversarial code [default proposed; owner to confirm] |
 | Q-9 | the ten diagnostic codes with the most events across all participant Sisu programs; for each, the share of its events coded (b); a code is "caused by a design rule rather than a bug" when most of its events are coded (b) [default proposed; owner to confirm] |
 | Q-10 | lines of P5 duplicated between a by-ref adapter and its by-value variant, found by a token-level clone detector registered with the tools; reported only |
@@ -1386,7 +1385,8 @@ deviation that touches it.
 ## 8. Decision rules
 
 The actions below are 18's
-[Decision points](18-next-steps.md#decision-points), copied faithfully. 18
+[Decision points](18-next-steps.md#decision-points), copied with
+cross-references added. 18
 asks that each branch be recorded with an owner and a time box before the
 data arrive; where 18 gives a time box it is used, and otherwise one is
 proposed. Words a branch leaves open are fixed after each table.
@@ -1427,7 +1427,7 @@ Words fixed here [all default proposed; owner to confirm]:
 | Outcome | Action (18) | Owner | Time box |
 |---|---|---|---|
 | **Holds** | The `with Fs, Clock` clause stays reserved; the supply-chain demonstration and the attenuation counts go into [06-concurrency-and-capabilities.md](06-concurrency-and-capabilities.md). | runtime engineer; PI | by week 42 [default proposed; owner to confirm] |
-| **Fails** (median above two capability parameters on I/O-doing functions, or a god struct outside the composition root; T2.1's row adds a maximum above four) | Implement the reserved `with` clause as 16 says, re-port the worst module (two weeks), recount; if bundling persists, downgrade the supply-chain claim to coarse-grained capabilities and document the composition-root pattern as the idiom. | language engineer (the clause); the porter of the worst module, on a contract extension (21) | two weeks for the re-port (18), weeks 41-44 |
+| **Fails** (median above two capability parameters on I/O-doing functions, any I/O-doing function with more than four, or a god struct outside the composition root) | Implement the reserved `with` clause as 16 says, re-port the worst module (two weeks), recount; if bundling persists, downgrade the supply-chain claim to coarse-grained capabilities and document the composition-root pattern as the idiom. | language engineer (the clause); the porter of the worst module, on a contract extension (21) | two weeks for the re-port (18), weeks 41-44 |
 | **Fakes slower than mocks by more than 25%** | Redesign the `std.cap` fakes (recording fakes derived by reflection) before 0.1; the testability claim is reported with the ratio either way. | runtime engineer | before 0.1 |
 | **Not shown** (section 2.3) | `with` stays reserved and nothing is built; Q-5 records the numbers. | PI | week 40 |
 
@@ -1553,7 +1553,7 @@ risk table).
   validation are built.
 - std beyond what the corpus needs: no TLS, DNS, UDP, Unix sockets, regex,
   JSON encoder (corpus authors may write one), time zones, `BigInt`,
-  `Decimal`, persistent collections, structured logging.
+  `Ratio`, `Decimal`, persistent collections, structured logging.
 - Fix-and-resume from a chosen frame; hot replacement is body swap at
   epoch boundaries only.
 - The contract verifier, loop invariants, `decreases`, ghost code, SMT-backed
@@ -1591,8 +1591,8 @@ about them:
   which checks Q-3's copy count and the friction numbers under performance
   pressure;
 - Q-7 and Q-13, which 16's parallel table lists and 18 does not measure;
-  both were decided in October 2026 to be settled while the standard
-  library and the type checker are written;
+  Q-7 was decided in October 2026 to be settled while the standard library
+  is written, and Q-13 was decided: implicit lossless widening stays;
 - Q-3's Swift-style implicit-copy variant and its "why is this slow"
   reports, from 16, which 18 does not build;
 - the compile-time escape check of the `sim` profile, which has nothing to
@@ -1601,8 +1601,9 @@ about them:
 - any latency or memory number from `--sim` (18's risk table);
 - N-26's classroom measure (time to fix borrow errors with and without a
   counterexample), which needs the teaching profile;
-- N-27's fill-acceptance measure, which Q-49's table lists among the rows
-  the model arm carries: it needs the fill engine, which is tooling after
+- N-27's fill-acceptance measure, which N-50 defers ("N-27's fill
+  measurements wait for the fill engine after 0.1", 19) and which Q-49's
+  table does not list: it needs the fill engine, which is tooling after
   0.1, and a hole report that 18 does not build [default proposed; owner
   to confirm];
 - Q-50's constrained-decoding pilot, which needs the completion-engine API

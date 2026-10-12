@@ -327,6 +327,8 @@ lifetime names. Element `Drop` still runs, so destruction stays
 deterministic and only the release of memory is batched.
 
 ```sisu
+from std.mem import Region
+
 def handle(req: Request) -> Response ! HttpError:
     with Region.bump(capacity=65536) as region:       # one region per request, freed at the dedent
         var headers = list.with_allocator(ref region)  # list[Header, ref Region]: a view

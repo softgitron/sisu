@@ -11,7 +11,7 @@
 | Null | `Option[T]` with `T?` sugar | Hoare; Kotlin and Swift ergonomics; Java `Optional` retrofit failure |
 | Polymorphism | Traits (bounded parametric), monomorphised, with explicit `dyn` | Haskell typeclasses, Rust traits, Swift protocols; C++ template error messages; Zig's instantiation-time errors |
 | Inheritance | None | "composition over inheritance" consensus, Go, Rust, Kotlin final-by-default |
-| Higher-kinded types | Not in version 1; syntax reserved | Rust gets by; Scala/Haskell show the cost; open question Q-10 |
+| Higher-kinded types | Not in version 1; syntax reserved | Rust gets by; Scala/Haskell show the cost; Q-10 (decided: syntax reserved) |
 | Integers | `int` is 64-bit and the default; sized types for layout; overflow traps | Swift's `Int`; Rust `usize` casting friction; overflow CVE data |
 | Floating point | IEEE 754, evaluated strictly: no implicit fused multiply-add, no reassociation, fixed-shape reductions; `@float(fast)` opts out per function | Java 17's strict floating point (JEP 306); WebAssembly's deterministic scalars; Box2D v3's cross-platform determinism |
 | Exact arithmetic | `BigInt`, `Ratio` and `Decimal` in `std.num`, with ordinary literals; `int` stays fixed-width | Python's `int`, `fractions` and `decimal`; Java's `BigDecimal`; Julia's `BigInt` and `Rational` |
@@ -121,7 +121,9 @@ methods of a trait but no `impl`.
 
 There is at most one implementation of a trait for a type, globally. An
 `impl` must live in the package that defines the trait or the package that
-defines the type (the orphan rule). This is Haskell's and Rust's rule and it
+defines the type (the orphan rule). The one exception is the root package
+of a build, which may implement any trait for any type, because nothing
+depends on it (D-013, Q-11). This is Haskell's and Rust's rule and it
 is what makes `dict[K, V]` behave the same everywhere. The cost, that you
 cannot implement a foreign trait for a foreign type, is paid for with cheap
 newtypes and delegation:
@@ -133,7 +135,7 @@ struct Celsius:
 ```
 
 Scoped instances (Scala `given`, OCaml's proposed modular implicits) are the
-alternative; they are listed as open question Q-11.
+alternative; Q-11 decided against them.
 
 ### Dispatch
 
@@ -169,7 +171,7 @@ precisely because the inference was not there from the start.
 `Copy`; the compiler suggests it for small plain structs. The alternative,
 Swift's implicit copying of everything with copy-on-write under the hood,
 was rejected because it hides allocation (priority 3). The trade-off is
-recorded as open question Q-3.
+recorded as Q-3 (decided).
 
 ### Generic syntax
 
@@ -245,7 +247,7 @@ Decisions:
   `int`, signed to unsigned require a method call. Rust's refusal of even
   lossless widening is a known paper-cut; C's silent lossy conversions are
   a known bug source; Zig and Swift sit in the middle and Sisu follows them.
-  Whether implicit widening complicates inference is open question Q-13.
+  Q-13 decided that implicit lossless widening stays.
 - **Division by zero and `int.MIN / -1` trap.** Shifts by more than the
   width trap.
 - **Floats** are never implicitly converted to or from integers. `f64`
@@ -394,7 +396,7 @@ dependent typing and is discussed in [07-contracts.md](07-contracts.md).
   part of function types ([above](#function-types)).
 - No higher-kinded types in version 1; the syntax `F[_]` is reserved.
 - No dependent types; refinement types and contracts cover the common
-  cases, and open question Q-16 covers the rest.
+  cases, and Q-16 (decided: the verifier comes after 1.0) covers the rest.
 - No type-level computation beyond `const` generics and `comptime` functions
   producing types (see [08-metaprogramming.md](08-metaprogramming.md)).
   The TypeScript and C++ experience is that Turing-complete type-level

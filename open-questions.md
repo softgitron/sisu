@@ -741,8 +741,9 @@ removed by `sisu fix`; both (rejected by P1).
 
 **Current lean.** `todo("name")`.
 
-**What would settle it.** The model arm's fill acceptance with each
-spelling is unlikely to differ; this is a taste call for the owner.
+**What would settle it.** Fill acceptance with each spelling, measurable
+once `sisu fill` exists, is unlikely to differ; this is a taste call for
+the owner.
 
 **Decision (October 2026).** `todo("name")`; no `?name` form.
 

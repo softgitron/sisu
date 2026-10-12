@@ -242,6 +242,15 @@ principle 6 admits nothing beyond the bets before the verdict
    backwards through the interpreter's replay and shows each frame's named
    values.
 
+The teaching profile is a monotone ladder of levels, `profile =
+"teaching-3"` in the manifest, each level a strict subset of the next and
+of full Sisu, so a valid program stays valid as the learner climbs; using a
+construct from a later level gives a level-up diagnostic naming the
+construct and the level; diagnostics in the profile carry a deterministic
+gloss of dense signatures; top-level statements are confined to scripts and
+teaching levels; and teachers define course ladders as data. The levels
+themselves are settled by the Q-41 trial (leaning, D-073).
+
 The permissions overlay, which shows on each line the read, write and own
 permissions each binding gains and loses, waits for the bet-1 verdict: giving
 the bet-1 authors an overlay while the Rust controls have none would confound
@@ -328,7 +337,9 @@ Hot function replacement is committed for debug builds (D-053, decided with
 Q-22): the calling convention keeps stack frames reifiable and every top-level
 definition has an indirection point that release builds remove. `sisu run
 --watch` swaps in the bodies that change on each save, in epochs. A successful
-check publishes all changed bodies as one epoch. A task adopts the newest
+check publishes every changed body whose signature is unchanged as one
+epoch, and a changed signature or layout restarts the program with a
+message. A task adopts the newest
 epoch when it starts and at `live.boundary()`, which `Ticker.wait` calls, and
 resolves every call in between in the epoch it adopted, so one loop iteration
 never mixes an old body with a new helper (leaning, D-068). A save that fails
@@ -432,8 +443,10 @@ literal from a test is flagged as special-casing. `sisu test --mutate` reports
 mutants of the fill that the tests do not kill, and `unfillable: <reason>` is
 a legal answer. Fills judged by tests alone overfit (roughly two thirds to
 four fifths of PropR's test-passing repairs in a manual sample), and models
-edit tests when they can (ImpossibleBench). The model arm measures fill
-acceptance and later defects with and without this filtering.
+edit tests when they can (ImpossibleBench). Fill acceptance and later
+defects, with and without this filtering, are measured once `sisu fill`
+exists, after 0.1; the experiment's model arm does not measure them
+([20](20-pre-registration.md), section 9.2).
 
 **Review.** The same protection applies to a whole change. `sisu review
 base..head` lists, beside the code diff, each change that weakens a promise: a

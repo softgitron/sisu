@@ -46,7 +46,7 @@ proposal/
   17-testing.md        the testing design
   18-next-steps.md     the experiment plan
   19-novel-features.md the unconventional round's verdicts: 66 candidates, decisions, questions
-  20-pre-registration  the experiment's frozen rules of evidence
+  20-pre-registration  the experiment's rules of evidence (a draft until the Phase 0 freeze)
   21-recruitment.md    roles, eligibility and the call for participants
   examples/            Sisu source files illustrating the design
 taskbench/             Phase 1 of the experiment: the bet-3 stack harness (Rust)

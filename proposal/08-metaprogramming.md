@@ -10,7 +10,7 @@ reflection**, and no macro system in version 1.
 | Textual macros (C preprocessor) | No | Universally regretted; C23 and C++ both keep trying to replace it |
 | Pattern macros (Rust `macro_rules!`) | No | A second language with its own syntax, hygiene rules and error messages |
 | Procedural/token macros (Rust proc macros, Swift macros) | No | Opaque to tooling, slow to compile (separate crate, separate compilation, often a syn/quote parse per invocation), and the main contributor to Rust compile-time complaints; Swift's macros reproduced the compile-time cost |
-| AST macros (Lisp, Elixir, Nim, Julia) | Not in v1 | The most powerful form; also the one with the strongest evidence that it fragments ecosystems into DSLs ("the Lisp curse"). Open question Q-15 |
+| AST macros (Lisp, Elixir, Nim, Julia) | Not in v1 | The most powerful form; also the one with the strongest evidence that it fragments ecosystems into DSLs ("the Lisp curse"). Q-15 (decided: never) |
 | Compile-time function evaluation | **Yes** (`comptime`) | Zig, D (CTFE), C++ `constexpr`/`consteval`, Jai; the Zig experience shows it covers generics, lookup tables, derive and conditional compilation without a second language |
 | Reflection at compile time | **Yes** | Zig's `@typeInfo`; what makes `derive` a library function |
 | Reflection at runtime | Minimal (`type_name`, enum variant names) | Java/C# style runtime reflection breaks dead-code elimination and the capability model |

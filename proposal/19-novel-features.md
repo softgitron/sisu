@@ -292,7 +292,7 @@ make it the P-style model checker of
 ```sisu
 test "replicas converge under partitions, torn writes and crashes":
     let sim = Sim(scheduler=Pct(depth=3), faults=Faults.storage() + Faults.network(drop=0.02))
-    let nodes = [sim.node("r{i}", sys -> replica.main(sys)) for i in range(3)]   # production main
+    let nodes = [sim.node("r{i}", own sys -> replica.main(sys)) for i in range(3)]   # production main
     sim.every(Duration.minutes(5), own s -> s.crash(s.pick(s.nodes())))  # unsynced writes are lost
     sim.always(own s -> len(lease_holders(s.nodes())) <= 1)               # checked after every step
     sim.run_for(Duration.hours(6))                                     # seconds of real time
@@ -889,8 +889,8 @@ migrate. Q-46 records the alternative.
 
 *Verdict.* The typed `todo`, its report and the release gate: adopt for v1
 (D-061; the hover report fits Phase 8's language server). The fill engine:
-tooling after 0.1. Confidence high / medium. *Settled by* the model arm
-(N-50): fill acceptance and later defects with and without filtering.
+tooling after 0.1. Confidence high / medium. *Settled by* a
+fill-acceptance study once `sisu fill` exists, after 0.1.
 
 ### N-28 The visible notional machine
 
@@ -1021,13 +1021,14 @@ low-medium (high that the mechanism is sound and new, low on demand).
 
 ### N-35 Live work: epochs, time, the sketch kit and the tick model
 
-*What.* The hot-replacement design of [18](18-next-steps.md) swaps a body
-at its next call and lets frames in flight finish on the old one, so one
-loop iteration can mix an old `bar` with a new helper. Sonic Pi, Extempore, TidalCycles and Erlang converged on swapping
+*What.* Draft 2 of [18](18-next-steps.md) swapped a body at its next call
+and let frames in flight finish on the old one, so one loop iteration could
+mix an old `bar` with a new helper. Sonic Pi, Extempore, TidalCycles and Erlang converged on swapping
 at a loop boundary; the epoch design below is this proposal's refinement
 of that, with Flutter's `const` rule and Papyrus's persistence rule from
-the game engines: a successful `--watch` check publishes all changed
-bodies as one *epoch*; a task adopts the newest epoch at task start and at
+the game engines: a successful `--watch` check publishes every changed
+body whose signature is unchanged as one *epoch*, and a changed signature
+or layout restarts the program with a message; a task adopts the newest epoch at task start and at
 `live.boundary()` (which a `Ticker.wait` calls), and resolves every call in
 between in its adopted epoch; a save that fails to check publishes nothing;
 a function used as a value holds its slot, not its body, in debug builds; a
@@ -1483,7 +1484,9 @@ separate `std.num` types with symbolic mathematics where achievable
 (D-076, Q-53). Q-52 remains open.
 
 - **Decisions D-058 to D-077** in the [decision log](15-decision-log.md),
-  all with status *leaning*: the owner has not seen them. The one reversal
+  with status *leaning* except D-061, D-069, D-074, D-076 and D-077 and the
+  amendments half of D-070, which the owner's answers to Q-42 to Q-51
+  decided. The one reversal
   of a decided point (D-049, in D-074) is paired with Q-42; D-059, D-063,
   D-066, D-068 and D-072 amend decided text and say so.
 - **Open questions Q-42 to Q-53** in [open-questions.md](../open-questions.md):

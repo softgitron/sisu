@@ -45,7 +45,7 @@ ML's formal definition, C's and Go's specifications, and Ferrocene's
 retroactive Rust specification (needed for safety certification) are the
 evidence; Rust's decade without one is the counter-evidence. The
 specification is prose plus a reference test suite, not a formal semantics
-in version 1 (open question Q-38 asks whether a mechanised core semantics,
+in version 1 (Q-38, decided, leaves a mechanised core semantics,
 as Austral and WebAssembly have, should be a goal).
 
 The specification also holds the false-friend table: for each place where Sisu
