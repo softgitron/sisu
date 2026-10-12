@@ -290,7 +290,8 @@ caching) is in [17-testing.md](17-testing.md).
   `sim` build fails to compile if reachable code could escape the simulation.
   Every failing test also prints a replay token (content hash, toolchain
   version, seeds and the shrunk case), and `sisu test --replay <token>`
-  reproduces the failure anywhere.
+  reproduces the failure anywhere. A test that takes the real `System` can be
+  neither simulated nor replayed, and its token says so.
 
 ## Debugging and profiling
 

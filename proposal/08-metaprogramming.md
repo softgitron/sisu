@@ -48,8 +48,9 @@ Rules:
   flooding, but it no longer decides the order), and floating point is
   strict, with no implicit fused multiply-add and no reassociation, so a
   `comptime` result has the same bits as the run-time result on every
-  target. The correctly rounded `std.math` that carries this to `sin` and
-  `exp` waits for Q-23, which is open.
+  target, except inside a function that opts out with `@float(fast)`. The
+  correctly rounded `std.math` that carries this to `sin` and `exp` waits
+  for Q-23, which is open.
 - There is no I/O at compile time. No file reads, no environment, no
   network, no clock. A build that evaluates the same source produces the
   same output. Zig allows `@embedFile`; Sisu provides `embed("path")` as a
