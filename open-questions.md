@@ -7,7 +7,7 @@ decision, so the reasoning stays auditable. The proposal documents and the
 decision log have been updated to match. The unconventional-languages
 round ([`research/unconventional/`](research/unconventional/),
 [`proposal/19-novel-features.md`](proposal/19-novel-features.md)) added
-Q-42 to Q-51, which await the owner.
+Q-42 to Q-52, which await the owner.
 
 What the research could not settle. Each question states the options, the
 evidence for each, the proposal's current lean (what the design documents
@@ -599,25 +599,28 @@ Each question below comes from [`proposal/19-novel-features.md`](proposal/19-nov
 and names the candidate (N-xx) and the leaning decision (D-xx) it belongs
 to. Unlike the first 41, these have not yet been answered by the owner.
 
-### Q-42. Should `dict` iterate in insertion order?
+### Q-42. Should `dict` and `set` iterate in insertion order?
 
-**Question.** D-049 randomises `dict` iteration per process so that code
-cannot depend on it silently. Three independent analyses found that this
-contradicts two other decided documents: a `pure` function that lists a
-`dict`'s keys returns different lists in different processes, which breaks
-the comptime promise in [`proposal/08-metaprogramming.md`](proposal/08-metaprogramming.md)
+**Question.** D-049 randomises `dict` iteration per process so that, as
+[`proposal/11-stdlib.md`](proposal/11-stdlib.md) puts it, code cannot
+depend on it silently. The systems analysis found that this contradicts
+two other decided documents: a `pure` function that lists a `dict`'s keys
+returns different lists in different processes, which breaks the comptime
+promise in [`proposal/08-metaprogramming.md`](proposal/08-metaprogramming.md)
 ("exactly what would run at run time"), makes memoisation across processes
 unsound, and breaks replay and simulation
-([config](research/unconventional/config-and-total-languages.md) idea 1,
-[systems](research/ideation/systems-and-determinism.md) F1,
-[AI-era](research/ideation/ai-era-and-evolution.md) A11).
+([systems](research/ideation/systems-and-determinism.md) F1). The config
+analysis reached D-049 from the comptime promise alone and proposed a
+comptime-only exception ([config](research/unconventional/config-and-total-languages.md)
+idea 1); the AI-era analysis reached it as a silent false friend for
+Python-trained readers ([AI-era](research/ideation/ai-era-and-evolution.md) A11).
 
 **Options.**
 - *Insertion order, per-process SipHash key kept* (lean). Python 3.7's
   split: flooding resistance comes from the key, iteration from insertion
   order. Costs an index array and tombstones (Python's compact dict was
-  still 20-25 % smaller than its predecessor); D-049's reason ("lets code
-  depend on it silently") becomes the point, since a specified order is
+  still 20-25 % smaller than its predecessor); the reason [`proposal/11-stdlib.md`](proposal/11-stdlib.md)
+  gives ("lets code depend on it silently") becomes the point, since a specified order is
   safe to depend on; it also closes the silent false-friend row for
   Python-trained readers (D-062).
 - *Keep randomisation, exempt `comptime`* (the config file's minimal fix).
@@ -653,7 +656,8 @@ process, thread count and target". Which operations are errors inside
   Temporal.
 - *A separate `@deterministic` property* beside `pure`
   ([synchronous](research/unconventional/synchronous-and-dataflow.md) idea
-  4), which Q-17's one-tracked-property rule argues against.
+  4), which Q-17's one-tracked-property rule argues against, as it does
+  D-059's attributes (Q-52).
 
 **Current lean.** The proposed list, with `pure` in function types.
 
@@ -778,8 +782,9 @@ borrow-only rule between cells in a pilot.
 
 **Question.** Six candidates ask for a place in the experiment of
 [`proposal/18-next-steps.md`](proposal/18-next-steps.md), whose principle 6
-is "nothing beyond the bets before the verdict". Each is argued to
-strengthen a bet's measurement rather than add polish:
+is "nothing beyond the bets before the verdict". Most are argued to
+strengthen a bet's measurement rather than add polish; two (the binding
+count and the model arm) measure questions of their own:
 
 | Amendment | Phase | Cost | Strengthens |
 |---|---|---|---|
@@ -840,3 +845,32 @@ an explicit `.retain()` (the lending rule inverted).
 
 **What would settle it.** The bet-2 port study: how often a callee stores
 a capability it should not have kept, and whether `Lent[T]` is asked for.
+
+### Q-52. May resource attributes and closure capture kinds enter function types?
+
+**Question.** Q-17 decided "no effect system; `pure` is the one tracked
+property". D-059 makes `@no_alloc`, `@no_block` and `@stack(max=N)` part
+of function types so that `dyn` methods and closure parameters can require
+them, and `par` bodies (D-069) and bit-deterministic `pure` (Q-43) need
+function types to say whether a closure mutates its captures. Each is a
+tracked property in all but name.
+
+**Options.**
+- *Yes, as attributes on function types* (D-059's lean): `(x: int) -> int
+  @no_alloc`; a closure parameter declared `@no_block` accepts only
+  closures the checker proved non-blocking; capture kinds (`own`, `mut`,
+  borrowing) shown in the type. Costs the signature noise Q-17 refused,
+  limited to the functions that opt in.
+- *Checked per function over the call graph, never in function types*:
+  `dyn` calls and closure parameters are assumed to allocate and block, so
+  an `@no_alloc` function cannot take a closure or call through `dyn`. No
+  type-level change; realtime code gives up higher-order style, as Wuffs
+  does.
+- *Neither*: drop D-059's attributes, keep `sisu audit` reports only.
+
+**Current lean.** The first, limited to the three attributes and capture
+kinds, with the signature cost measured on the realtime ports of N-08.
+
+**What would settle it.** The three realtime ports of N-08: how many
+closure parameters and `dyn` calls their code needs, and whether the
+call-graph-only option would have rejected them.

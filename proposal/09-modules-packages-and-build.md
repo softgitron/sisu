@@ -189,9 +189,9 @@ report an authority delta (newly reachable capabilities, `unsafe`,
 seven-day cooldown before resolution with advisory fixes exempt, refuse
 packages younger than that or without dependents unless told otherwise,
 and in CI or agent runs never add a package or widen `[trust]` against
-policy; packages whose API takes no capability types are labelled pure in
-the registry (D-066). Libraries ship migrations as `@fix_inline`
-functions applied by `sisu fix --deps` (D-067). With the registry, two
-prototypes are planned: a review ledger keyed by content hashes of the
-capability slice (N-43) and behavioural semver, where `sisu publish` runs
+policy; packages whose API takes no capability types and that are not in
+`[trust]` are labelled pure in the registry (D-066). Libraries ship migrations as `@fix_inline`
+functions applied by `sisu fix --deps` (D-067). With the registry come
+one prototype, a review ledger keyed by content hashes of the capability
+slice (N-43), and one tool, behavioural semver, where `sisu publish` runs
 the previous version's black-box tests (N-44).

@@ -462,8 +462,10 @@ would recreate Scala 3's two-dialect split.
 
 ## Additions proposed in October 2026
 
-Three leaning decisions from [19-novel-features.md](19-novel-features.md)
-touch the syntax; none adds a keyword. `todo("name")` becomes a typed hole
+Four leaning decisions from [19-novel-features.md](19-novel-features.md)
+touch the syntax; none adds a keyword. D-060 adds defaulted type
+parameters, `list[T, A: Allocator = Global]`, so that a type parameter may
+be omitted at a use site when its default applies. `todo("name")` becomes a typed hole
 (D-061): it checks against its expected type, `sisu check` reports its
 context, the interpreter stops at it, and release builds reject it, with
 `panic("...")` for placeholders meant to ship. Interpolation accepts

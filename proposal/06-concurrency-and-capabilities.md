@@ -310,12 +310,14 @@ channels, `try_*`) are errors in `pure` code while `task.scope`, `spawn`
 and `join` stay legal; a `pure` scope reports the lowest-index failure
 rather than the first in time; and `pure` enters function types. Three
 library shapes follow (D-069, D-075): `std.par` with `par_iter`,
-`par.join` and reducers that merge in a fixed order, running `pure` bodies
-to completion on a non-blocking pool outside the task scheduler's stack
-budget; `task.race`; and capability interceptors (`Wrap[T]` over any
+`par.join` and reducers that merge in a fixed order, running bodies that
+are `pure` and `@no_block` to completion on a pool outside the task
+scheduler's stack budget; `task.race`; and capability interceptors (`Wrap[T]` over any
 capability trait) that give fakes, tracing, auditing and recording one
 interception point, with a scope's trace context inherited by its
-children and attached by `log`. Two questions are recorded for the owner:
+children and attached by `log`; that context is a second piece of implicit
+context beside the scope itself, which this document calls the one it
+accepts, and it carries observation only, never authority. Two questions are recorded for the owner:
 what a `Mutex` does when unwinding drops its guard (Q-45; the lean is to
 re-check the protected type's `invariant` and poison only on failure), and
 whether capabilities stay `Copy` or gain lent and revocable forms in

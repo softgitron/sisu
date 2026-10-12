@@ -114,18 +114,21 @@ the API-diff enforcement everyone else has.
 
 [19-novel-features.md](19-novel-features.md) asks the owner to reverse the
 first design point above (Q-42): `dict` and `set` would iterate in
-insertion order while keeping the per-process SipHash key, because three
-analyses found that per-process order makes `pure` functions
-non-reproducible and breaks the comptime promise, replay and memoisation.
+insertion order while keeping the per-process SipHash key, because the
+systems analysis found that per-process order makes `pure` functions
+non-reproducible and breaks the comptime promise, replay and memoisation,
+and the config and AI-era analyses reached the same decision from other
+angles.
 Library shapes decided provisionally: `std.par` (`par_iter`,
 `par_iter_mut`, `par.join`, reducers with a fixed merge order) and
 `SoaList[T]` in `std.collections` (D-069); `list[T, A: Allocator =
 Global]` with a bump `Region` distinct from `Arena[T]` (D-060); `task.race`,
 a drift-free `Ticker` with an explicit missed-tick policy and a `Timeline`
-with virtual-time sleep in `std.time`, `std.search`, and capability
-interceptors (D-075); `exhaustive[T]`, transcript tests and `@refines` in
-`std.test` (D-070); `View` in `std.x` (D-071); and, later in `std.x`,
-revocable and lent capabilities, typed tables, units of measure with
+with virtual-time sleep in `std.time`, search combinators added to
+`std.search`, and capability interceptors (D-075); `exhaustive[T]`, transcript tests and `@refines` in
+`std.test` (D-070); `View` in `std.x` (D-071); revocable and lent
+capabilities in `std.cap` if Q-51 accepts them; and, later in `std.x`,
+typed tables, units of measure with
 `@diagnostic_name`, `std.x.peg`, `std.x.incr`, `std.x.reactor`, schema
 locks with migrations, a `Model` capability with `derive(Schema)`, and a
 first-party `sketch` package.

@@ -119,8 +119,8 @@ the log.
 | N-01 | Bit-deterministic `pure` | new as a checked guarantee | adopt (Q-42, Q-43) | medium-high | systems 1 (synchronous 4 is the alternative) |
 | N-02 | Reproducible floating point by default | new across thread counts | adopt the strict default (Q-44); rest with Q-23 | medium | systems 4 |
 | N-03 | `sim` profile: deterministic simulation, typed fault injection, model-checking explorer | new as a compiler guarantee | prototype in the experiment | high | systems 2, live 1, synchronous 1, logic 1 |
-| N-04 | Record and replay at the capability boundary; replay tokens; checked cut; reverse debugging | new as a checked cut | log and tokens: prototype in the experiment; rest: tooling | medium-high | end-user 4, systems 3, AI-era A8, live 2, 3, 7, incremental 3 |
-| N-05 | `Exhaustive[T]` small-scope generators for `check` | no | std.test | medium-high | logic 2 |
+| N-04 | Record and replay at the capability boundary; replay tokens; checked cut; reverse debugging | new as a checked cut | log and tokens: prototype in the experiment; rest: tooling | medium-high / medium | end-user 4, systems 3, AI-era A8, live 2, 3, 7, incremental 3 |
+| N-05 | `exhaustive[T]` small-scope generators for `check` | no | std.test | medium-high | logic 2 |
 | N-06 | Capability interceptors; trace context inherited through scopes | no | std | medium-high | incremental 2; the trace context is this document's addition |
 | N-07 | Guaranteed-drop views, scopes and suspended frames | new as an I/O guarantee | rule, adopt | high | systems 7 |
 | N-08 | `@no_alloc`, `@no_block`, `@stack(max=N)` | no | adopt; `@stack` with the native backend | medium-high | systems 5, capabilities 5 |
@@ -130,20 +130,20 @@ the log.
 | N-12 | Static lock ordering | no | tooling (lockdep), then std.x | medium | systems 10 |
 | N-13 | Priority tasks with compile-time ceilings for `freestanding` | no | std.x | medium | systems 11 |
 | N-14 | `Mutex` unwinding: re-check the invariant, poison only on failure | no (Rust poisons; non-poisoning locks on nightly) | Q-45 | medium | systems F4 |
-| N-15 | `@must_consume` propagates through containers | no (Move) | adopt; settles Q-37's open half | high | capabilities 1 |
-| N-16 | Revocable and lent capabilities | no | std.cap (Q-51) | medium | capabilities 3 |
+| N-15 | `@must_consume` propagates through containers | no (Move) | adopt; settles Q-37's open half | high / medium | capabilities 1 |
+| N-16 | Revocable and lent capabilities | no | std.cap (Q-51) | medium / low-medium | capabilities 3 |
 | N-17 | Pure-package label; capability-gated plugin loading | no | label: tooling; loader: reject for now | medium / low | capabilities 4 |
 | N-18 | `std.par`: `par_iter`, `par.join`, reducers with a fixed merge order; `par` keyword | no | std; keyword to Q-47 | medium-high | parallel 1, 2, 4, 5, systems 12 |
-| N-19 | A non-blocking pool for `pure` bodies, apart from tasks | no | rule | high | parallel 3 |
+| N-19 | A non-blocking pool for `pure` bodies, apart from tasks | no | rule | high / medium | parallel 3 |
 | N-20 | `SoaList[T]`: layout-polymorphic collections | no | std.collections, with Q-27 | medium-high | schedule 1, systems 13 |
 | N-21 | `@refines(reference)`: generated equivalence tests | no | std.test | medium | schedule 2 |
 | N-22 | Checked no-op directives (`@vectorize`, `@unroll`, `@tile`) | no (ISPC) | later, with the native backend and Q-23 | medium | schedule 3 |
 | N-23 | Access-set scheduling library | no (Bluespec, Bevy) | std.x later | low-medium | schedule 4 |
 | N-24 | `schedule` blocks | no (Halide) | reject | medium-high | schedule, systems 13 |
-| N-25 | Always-on evaluation gated by static authority: examples, probes, counterexamples, worksheets, doc values | new for imperative languages | tooling after 0.1; `sisu doc` values: adopt | medium-high | end-user 1, live 4, spreadsheets 1, 4, natural 1 |
+| N-25 | Always-on evaluation gated by static authority: examples, probes, counterexamples, worksheets, doc values | new for imperative languages | tooling after 0.1; `sisu doc` values: adopt | medium-high / medium | end-user 1, live 4, spreadsheets 1, 4, natural 1 |
 | N-26 | Run anyway: deferred errors, holes, the monitor as counterexample | new for ownership errors | prototype in the experiment (team instrument); teaching after | medium | end-user 2, game 1 |
 | N-27 | Typed hole `todo("name")`: report, release gate, `sisu fill`, judge isolation | new as a combination | adopt the hole (Q-46); fill engine: tooling | high / medium | AI-era A1, holes 1-5, visual 4 |
-| N-28 | Notional-machine stepper and permissions overlay | no (Aquascope) | tooling after the bet-1 verdict | medium-high | end-user 3 |
+| N-28 | Notional-machine stepper and permissions overlay | no (Aquascope) | tooling: overlay after the bet-1 verdict, stepper after 0.1 | medium-high / medium | end-user 3 |
 | N-29 | Monotone teaching ladder, teacher-defined ladders as data | no (HtDP) | adopt as the shape of Q-41 | medium | end-user 9, spreadsheets 2 |
 | N-30 | Message catalog and lossless syntax tree now; block, frame and keyword projections later | no | adopt / tooling later | medium-high / low | end-user 8, visual 1, 5, 6 |
 | N-31 | Structural editing commands; a palette that knows types and capabilities | no | tooling | medium-high / medium | visual 2, 3 |
@@ -161,7 +161,7 @@ the log.
 | N-43 | Review ledger keyed by capability-slice hashes | new | prototype with the registry | medium-low | AI-era A4 |
 | N-44 | Behavioural semver at publish | new | tooling with the registry | medium | AI-era A5 |
 | N-45 | `@fix_inline` library migrations | no (Go) | tooling for v1 | high | AI-era A6 |
-| N-46 | Schema lock and required migrations for persisted types | new in a language | std.x and tooling after the experiment | medium | AI-era A7 |
+| N-46 | Schema lock and required migrations for persisted types | no outside languages (Buf, schema registries, OTP `code_change`); none inside one | std.x and tooling after the experiment | medium | AI-era A7 |
 | N-47 | `sisu why` over every inferred fact | new as one query | tooling for v1 | medium-high | AI-era A9, holes 8, end-user 4 |
 | N-48 | Left-to-right binding types; a completion-engine API | no | measure in the experiment (Q-50) | medium-low | AI-era A10 |
 | N-49 | Loud divergence from Python's and Rust's meanings | new as a principle | rule, adopt | medium-high | AI-era A11 |
@@ -229,9 +229,9 @@ simulation and replay candidates below, which all assume it.
 tombstones (Python 3.6's compact layout was still 20-25 % smaller than its
 predecessor); a second failure policy for `pure` scopes, whose failures
 propagate more slowly because earlier siblings run to completion;
-reversing the iteration half of D-049, whose stated reason ("lets code
-depend on it silently") becomes the point: a specified order is safe to
-depend on.
+reversing the iteration half of D-049, whose stated reason in
+[11](11-stdlib.md) ("lets code depend on it silently") becomes the point: a
+specified order is safe to depend on.
 
 *Verdict.* Adopt (D-074 pending Q-42 and Q-43). Confidence medium-high;
 the `dict` change is the contestable part. *Settled by* the corpus's
@@ -284,7 +284,8 @@ types: at each capability call the simulator may return any error in that
 method's declared error set and nothing else. The language-level part is a
 guarantee: a `sim` build fails to compile if reachable code could escape
 the simulation, which is possible only through `extern` or `unsafe` in a
-`[trust]`ed package that supplies no model. Explicit `choose` and `always`
+`[trust]`ed package that supplies no model (the ambient standard streams
+are captured per node). Explicit `choose` and `always`
 make it the P-style model checker of
 [logic 1](../research/unconventional/logic-constraint-and-rewriting.md).
 
@@ -292,8 +293,8 @@ make it the P-style model checker of
 test "replicas converge under partitions, torn writes and crashes":
     let sim = Sim(scheduler=Pct(depth=3), faults=Faults.storage() + Faults.network(drop=0.02))
     let nodes = [sim.node("r{i}", sys -> replica.main(sys)) for i in range(3)]   # production main
-    sim.every(Duration.minutes(5), () -> sim.crash(sim.pick(nodes)))   # unsynced writes are lost
-    sim.always(() -> len(lease_holders(nodes)) <= 1)                   # checked after every step
+    sim.every(Duration.minutes(5), own s -> s.crash(s.pick(s.nodes())))  # unsynced writes are lost
+    sim.always(own s -> len(lease_holders(s.nodes())) <= 1)               # checked after every step
     sim.run_for(Duration.hours(6))                                     # seconds of real time
     assert linearizable(sim.history())
 # error[E0971]: this `sim` build reaches `sqlite.exec`, an `extern` call with no simulation model
@@ -373,7 +374,7 @@ verdict. Confidence medium-high for the log, medium for the rest.
 corpus HTTP server (R2's 10 % for Apache is the bar) and log bytes per
 request.
 
-### N-05 `Exhaustive[T]` small-scope generators
+### N-05 `exhaustive[T]` small-scope generators
 
 *What.* Beside `arbitrary[T]`, a derived `exhaustive[T](max_len=4)` that
 enumerates every value up to a small size, so `check` can run every history
@@ -399,8 +400,8 @@ the assessment's own addition and comes from no family file.
 
 *What.* State as a rule what the design nearly gives: a suspended task
 frame, a `task.scope` and any `view` value are never leaked; each ends only
-by running its `Drop`, on scope exit or during unwinding, and std offers no
-safe `forget` or `leak` for them. The runtime can then promise that a
+by running its `Drop`, on scope exit or during unwinding (process abort
+aside), and std offers no safe `forget` or `leak` for them. The runtime can then promise that a
 blocking operation that lent a buffer to the kernel or a DMA engine
 returns, even when cancelled, only after the device has released the
 buffer (an io_uring cancellation that returns `-EALREADY` waits for the
@@ -422,7 +423,10 @@ noncopyable types, whose `deinit` always runs because SE-0390 rejected a
 general `forget`.
 
 *Costs and risks.* Next to nothing in the language; cancellation latency
-becomes "until the device lets go"; the rule constrains std forever. It
+becomes "until the device lets go"; the rule constrains std forever. Under
+`panic = abort` ([05](05-errors.md)) and on a double panic no `Drop` runs,
+so a DMA-lending API must be unavailable with `panic = abort` or the abort
+hook must reset the device. It
 also keeps bet 3's fallback honest: if Phase 1 sends Sisu to stackless task
 bodies, the state machines must stay owned by their scope and never become
 droppable future values, or Sisu inherits Rust's problem.
@@ -439,7 +443,9 @@ monomorphisation: no heap allocation (no construction or growth of `list`,
 `dict`, `String`, `Box` or `Shared`, no allocating callee); no blocking (no
 capability call, lock, channel operation, `join`, `select`, `@blocking`
 extern or compiler-inserted yield point); a stack bound with recursion only
-through a `decreases` measure. They are part of function types, so `dyn`
+through a `decreases` measure, which gives that contextual keyword its
+first semantics when `@stack` arrives with the native backend (Q-16 reserves
+it in v1). They are part of function types, so `dyn`
 methods and closure parameters can require them, and `sisu build --report
 resources` prints the bound per task entry point and per `freestanding`
 image.
@@ -527,8 +533,8 @@ WebAssembly fuel, Cloudflare Workers; Sisu's own comptime limits. No
 shared-heap language without a GC attaches budgets to structured tasks.
 *Costs.* Per-allocation accounting (a budget pointer in the header or
 per-task size-class pages); the cost must be zero when no budget is set.
-*Verdict.* Prototype after 0.1, or late in the experiment if Phase 8 has
-slack (one person-week in the interpreter). Confidence low-medium.
+*Verdict.* Prototype after 0.1 (about one person-week in the interpreter,
+whose host allocator sees every allocation). Confidence low-medium.
 *Settled by* a native allocator benchmark (under 5 % on allocation-heavy
 code) and the corpus server with one runaway request leaving the others'
 p99 unchanged.
@@ -576,8 +582,8 @@ re-check. Confidence medium.
 *What.* A container of must-consume values is must-consume (Move's
 conditional abilities: `Cup<T>` has `drop` only if `T` does), discharged by
 consuming iteration; `?` out of such a loop is an error unless the
-remainder is returned. This settles the half of Q-37 the owner left to
-practice ("whether generic containers need special handling"). *Verdict.*
+remainder is returned. This settles the half of Q-37 that its "what would settle it"
+defers to practice, whether generic containers need special handling. *Verdict.*
 Adopt (D-064). Confidence high for propagation (Move ships it), medium for
 the `?` rule. *Settled by* `list[File]` and transaction batches in the
 standard library.
@@ -641,11 +647,13 @@ statement. Both agree on the check. *Verdict.* The library ships in v1
 
 ### N-19 A non-blocking pool for `pure` bodies
 
-*What.* A `pure` body cannot do I/O, take a lock or wait on a channel, so it
-runs to completion on a worker's stack: no task stack and no parking, which
-keeps fine-grained parallelism out of bet 3's stack budget. `par` bodies
-and `par.join` closures are therefore `pure` (or mutate only their own
-element), and the runtime either shares OS threads between the scheduler
+*What.* A `pure` body cannot do I/O, take a lock or wait on a channel, but
+it may still spawn and join tasks (N-01), so the pool's rule is stricter:
+`par` bodies and `par.join` closures are `pure` and `@no_block` (no
+`task.scope`, `spawn` or `join`; nested fork-join goes through `par.join`),
+or mutate only their own element, and they run to completion on a worker's
+stack with no task stack and no parking, which keeps fine-grained
+parallelism out of bet 3's stack budget. The runtime either shares OS threads between the scheduler
 and the pool or keeps two pools (Q-6).
 
 ```sisu
@@ -685,7 +693,7 @@ does. *Verdict.* std.test (D-070). Confidence medium.
 whose independence is proven either hold or fail to compile (ISPC's lesson:
 vectorisation is a guarantee, not a hope), with the loop-carried dependence
 named in the error. *Conflict.* Attributes sit on the line before an item
-(D-046), not on statements. *Verdict.* Later, with the native backend and
+([02](02-syntax.md)), not on statements. *Verdict.* Later, with the native backend and
 Q-23's SIMD design. Confidence medium.
 
 ### N-23 Access-set scheduling
@@ -723,10 +731,10 @@ functions with contracts a background `check` with a small budget whose
 shrunk counterexample appears on the `ensures` line. The gate is static:
 code runs without being asked only when every capability it can reach is a
 fake, so tests that take `System`, calls into trusted `unsafe` packages and
-doc examples that need real capabilities run on request only. Two forms
-need no language server: `sisu doc` renders each doc example's expression
-statements with their values (Unison and Go do this), and a worksheet
-(N-34) re-runs a script top to bottom.
+doc examples that need real capabilities run on request only. One form
+needs no language server: `sisu doc` renders each doc example's expression
+statements with their values (Unison and Go do this); a worksheet (N-34) is
+the language-server form that re-runs a script after each edit.
 
 ```sisu
 ## ```
@@ -844,7 +852,8 @@ warning[W0901]: hole "middle": int                                  stats.sisu:6
 ```
 
 `sisu fill` asks proposers (a built-in enumerator; any external process
-speaking a JSON protocol; no model or vendor is built in, by D-029) for
+speaking a JSON protocol; no model or vendor is built in, which keeps
+D-029's one binary vendor-neutral) for
 candidates, formats and deduplicates them by AST, type- and
 ownership-checks them, then runs them in the interpreter against the tests
 that reach the hole, the function's contracts as properties over
@@ -896,7 +905,8 @@ labels. A permissions overlay shows on each line the read, write and own
 permissions each binding gains and loses, from the checker's loan sets, and
 marks the permission an erroneous operation needed and lacked.
 *Precedents.* Python Tutor, Thonny, DrRacket's stepper, UUhistle, and
-Aquascope, whose permission diagrams with a rewritten chapter raised Ownership Inventory scores by 9 % (N=342, d=0.56), the best evidence of
+Aquascope, whose permission diagrams with a rewritten chapter raised
+Ownership Inventory scores by 9 % (N=342, d=0.56), the best evidence of
 any learning aid in the end-user file. *Verdict.* Tooling: the overlay after the bet-1 verdict
 (giving Sisu's bet-1 authors an overlay while the Rust controls have none
 confounds the comparison), the stepper with the playground after 0.1.
@@ -971,18 +981,19 @@ are wrong. *Verdict.* Tooling, with the teaching profile. Confidence medium
 
 ### N-33 `View` as a `pure` trait, and `{expr=}`
 
-*What.* `View` in `std.x.view` has one method, `pure def view(self) ->
+*What.* `View` in `std.x.view` has one method, `pure def to_node(self) ->
 ViewNode`, where `ViewNode` is a small document tree (text, record, table,
 list, tree, image bytes, plot specification) that every tool showing a
 value renders: REPL, hover, probes, notebook cells, doc examples, assertion
 and snapshot diffs. `@derive(View)` renders a struct as a record and a list
 of structs as a table; types without `View` fall back to `Debug`. Because
-`view` is `pure`, any tool may call it at any time, which keeps N-25's gate
+`to_node` is `pure`, any tool may call it at any time, which keeps N-25's gate
 sound and turns IPython's convention into a checked guarantee. The rule
 against a fourth rendering trait: `Display` for a program's users, `Debug`
 for programmers as text, `View` for tools as structure. Python 3.8's
 `{expr=}` makes `print("{total=}")` print `total=42`. *Verdict.* `View` in
-std.x at 0.1, a candidate for core at 1.0; `{expr=}` adopt (D-071).
+std.x after 0.1 ([16](16-validation-plan.md) keeps `std.x` out of 0.1), a
+candidate for core at 1.0; `{expr=}` adopt (D-071).
 Confidence medium-high.
 
 ### N-34 Worksheets and the reactive notebook
@@ -1010,9 +1021,9 @@ low-medium (high that the mechanism is sound and new, low on demand).
 
 ### N-35 Live work: epochs, time, the sketch kit and the tick model
 
-*What.* D-053 swaps a body at its next call and lets frames in flight finish
-on the old one, so one loop iteration can mix an old `bar` with a new
-helper. Sonic Pi, Extempore, TidalCycles and Erlang converged on swapping
+*What.* The hot-replacement design of [18](18-next-steps.md) swaps a body
+at its next call and lets frames in flight finish on the old one, so one
+loop iteration can mix an old `bar` with a new helper. Sonic Pi, Extempore, TidalCycles and Erlang converged on swapping
 at a loop boundary; the epoch design below is this proposal's refinement
 of that, with Flutter's `const` rule and Papyrus's persistence rule from
 the game engines: a successful `--watch` check publishes all changed
@@ -1255,7 +1266,7 @@ tasks with nothing, the reference, or reference plus digest, each with and
 without compiler feedback, measuring compile and hidden-test pass rates,
 false-friend bugs and tokens to a pass. It runs in the playground's sandbox
 with no outsiders and no confound with the human results, and it carries
-N-27's and N-48's measurements. *Risk.* Tuning the language to this year's
+N-27's and N-49's measurements. *Risk.* Tuning the language to this year's
 models; the arm measures and the design does not chase it. *Verdict.*
 Prototype in the experiment as one amendment (Q-49); the digest is v1
 tooling. Confidence medium. *Settled by* whether reference and digest bring
@@ -1273,7 +1284,7 @@ symbolic values in the SIR interpreter and hand path conditions to a solver
 (Rosette's architecture; `verify` finds inputs that break `ensures` or trap,
 `solve` finds inputs reaching a branch to seed `check`), and `sisu verify
 --suggest` proposing `ensures` from doc prose for property tests to vet and
-a person to accept; `ensures ?post` holes later. *Evidence.* Off-the-shelf
+a person to accept; `ensures todo("post")` holes later. *Evidence.* Off-the-shelf
 models solved 82 % of vericoding's Dafny specifications and pure Dafny
 verification rose from 68 % to 96 % in a year, while the best model wrote sound and
 complete specifications for 52.3 % of VERINA's Lean tasks and end-to-end
@@ -1366,9 +1377,9 @@ produce values and cannot extend Sisu's syntax, so "no macros" holds.
 ### N-60 Small library additions
 
 `task.race` (Céu's `par/or`: the first branch to finish wins, the others get
-`Cancelled` at their next blocking point and run their `Drop`), a
-`std.search` of fair interleaving, iterative deepening and bounded search
-over `Iter[T]`, and lockdep traces from the interpreter (N-12). *Verdict.*
+`Cancelled` at their next blocking point and run their `Drop`), fair
+interleaving, iterative deepening and bounded search over `Iter[T]` added
+to the existing `std.search` (binary search and selection), and lockdep traces from the interpreter (N-12). *Verdict.*
 std (D-075). Confidence medium-high for `task.race`, medium for the rest.
 
 ### N-61 Eventual references and promise pipelining
@@ -1460,13 +1471,15 @@ budgets as effects, production hot upgrade, crash-isolated scope types,
 ## What changes in the proposal
 
 - **Decisions D-058 to D-075** in the [decision log](15-decision-log.md),
-  all with status *leaning*: the owner has not seen them, and the ones that
-  touch decided points are paired with an open question.
-- **Open questions Q-42 to Q-51** in [open-questions.md](../open-questions.md):
-  `dict` order, the deterministic-`pure` primitive list, strict floats,
-  `Mutex` unwinding, the hole's spelling, the `par` keyword, worksheets and
-  the notebook non-goal, the experiment amendments, left-to-right binding
-  types, and whether capabilities stay `Copy`.
+  all with status *leaning*: the owner has not seen them. The one reversal
+  of a decided point (D-049, in D-074) is paired with Q-42; D-059, D-063,
+  D-066, D-068 and D-072 amend decided text and say so.
+- **Open questions Q-42 to Q-52** in [open-questions.md](../open-questions.md):
+  `dict` and `set` order, the deterministic-`pure` primitive list, strict
+  floats, `Mutex` unwinding, the hole's spelling, the `par` keyword,
+  worksheets and the notebook non-goal, the experiment amendments,
+  left-to-right binding types, whether capabilities stay `Copy`, and
+  whether resource attributes and capture kinds may enter function types.
 - **Experiment amendments proposed** ([18](18-next-steps.md), Q-49): the
   io_uring cancellation test in Phase 1; the monitor as counterexample
   generator in Phase 3; the `sim` profile across Phases 6 and 8; the
@@ -1484,5 +1497,5 @@ budgets as effects, production hot upgrade, crash-isolated scope types,
   review and admission), [10](10-tooling.md) (catalog, `why`, `review`,
   `eval`, `fix --deps`, holes), [11](11-stdlib.md) (`dict` order, `std.par`,
   `SoaList`, time), [13](13-evolution-and-governance.md) (preview lifetime),
-  [17](17-testing.md) (`Exhaustive`, transcripts, `@refines`, simulation,
+  [17](17-testing.md) (`exhaustive[T]`, transcripts, `@refines`, simulation,
   replay tokens) and [00](00-vision-and-principles.md) (worksheets).

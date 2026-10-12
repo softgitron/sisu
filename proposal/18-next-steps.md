@@ -1139,8 +1139,9 @@ interpreter-era front end only; the native targets wait for the backend.
 ## Proposed amendments (October 2026)
 
 The unconventional-languages round ([19-novel-features.md](19-novel-features.md))
-proposes six amendments to this plan, each argued to strengthen a bet's
-measurement rather than add polish, and each needing the pre-registration
+proposes six amendments to this plan, most argued to strengthen a bet's
+measurement rather than add polish (the binding count and the model arm
+measure questions of their own), and each needing the pre-registration
 amended before any participant writes a line. They are the owner's call
 (Q-49); none is adopted here.
 
@@ -1156,4 +1157,9 @@ amended before any participant writes a line. They are the owner's call
 About six person-weeks in total, to be found by trimming Phase 8's polish
 or extending the plan by a month. Principle 6 ("nothing beyond the bets
 before the verdict") is kept: everything else in 19 that is adopt or
-tooling waits for the verdict.
+tooling waits for the verdict, with one exception that costs design
+discipline rather than weeks: message identifiers with parameters, the
+lossless syntax tree and a checker that produces types for broken code
+(D-065, N-30, N-40) belong in Phase 0's diagnostics infrastructure and the
+Phase 2 checker from the start, because none of the three can be
+retrofitted.

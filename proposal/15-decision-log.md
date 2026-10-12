@@ -359,28 +359,30 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 The round in [`../research/unconventional/`](../research/unconventional/)
 and [`../research/ideation/`](../research/ideation/), assessed in
 [19-novel-features.md](19-novel-features.md), produced the decisions below.
-All have status **leaning**: the project owner has not reviewed them, and
-each that touches an earlier decision is paired with an open question.
+All have status **leaning**: the project owner has not reviewed them. The
+one reversal of a decided point (D-049, in D-074) is paired with a question
+(Q-42); D-059, D-063, D-066, D-068 and D-072 amend decided text without one
+and say so in their consequences.
 
 ### D-058 Views, scopes and suspended task frames are never leaked; completion I/O and DMA borrow the caller's buffer
 
 *Alternatives:* a safe `forget`/`leak` as in Rust (so owned buffers must be handed to the kernel and returned); `'static` buffers for DMA; buffer pools in `unsafe`.
 *Evidence:* Rust's own account that "any object can be leaked in Rust, trivially and safely" is why tokio-uring takes buffers by value and `embedded-dma` requires `'static` ([systems-and-determinism.md](../research/ideation/systems-and-determinism.md), candidate 7); the enabling rule has shipped twice, in Rust's closure-based `std::thread::scope` and in Swift's noncopyable types (SE-0390 rejects a general `forget`); the io_uring cancellation contract (`-EALREADY` waits for the original completion).
-*Consequences:* No safe `forget` or `leak` for views, scopes or suspended frames, ever; a cancelled I/O call returns only after the device has released the buffer; a stackless fallback for bet 3 must never expose droppable future values; one io_uring cancellation test joins the Phase 1 harness (Q-49). See N-07 in [19](19-novel-features.md).
+*Consequences:* No safe `forget` or `leak` for views, scopes or suspended frames, ever (process abort aside: under `panic = abort` a DMA-lending API is unavailable or the abort hook resets the device); a cancelled I/O call returns only after the device has released the buffer; a stackless fallback for bet 3 must never expose droppable future values; one io_uring cancellation test joins the Phase 1 harness (Q-49). See N-07 in [19](19-novel-features.md).
 *Status:* leaning.
 
 ### D-059 `@no_alloc` and `@no_block` in v1, `@stack(max=N)` with the native backend, `@no_panic` after 0.1 with a specified interval analysis
 
 *Alternatives:* lints (Rust's `no_std`, clippy); run-time sanitisers only (RealtimeSanitizer); program-wide restrictions (Ada); nothing.
 *Evidence:* Clang 20 checks `nonblocking` and `nonallocating` on function types; Swift's experimental `@_noAllocation` met friction with generic metadata; Ada's `pragma Restrictions` and GNATstack; SPARK's Silver level and Wuffs (every check discharged at compile time, in Chrome since 2021). Cheap in Sisu because allocation is visible in types (rule 7 of [04](04-memory-and-ownership.md)) and every blocking point is a capability call or a synchronisation primitive ([systems-and-determinism.md](../research/ideation/systems-and-determinism.md), candidates 5 and 6).
-*Consequences:* The attributes are part of function types; checking happens after monomorphisation, an exception to D-017 with errors at the instantiation; drop glue for auto-boxed recursive types must be iterative; `sisu audit --panics` precedes the `@no_panic` attribute; the interval analysis must be written into the specification (D-036). See N-08 and N-09.
+*Consequences:* The attributes are part of function types; checking happens after monomorphisation, an exception to D-017 with errors at the instantiation; drop glue for auto-boxed recursive types must be iterative; `sisu audit --panics` precedes the `@no_panic` attribute; the interval analysis must be written into the specification (D-036). Putting three more tracked properties into function types reopens Q-17's "`pure` is the one tracked property" (Q-52). See N-08 and N-09.
 *Status:* leaning.
 
 ### D-060 Collections take an allocator type parameter with a default; a borrowed region makes the collection a view
 
 *Alternatives:* a global allocator only; allocators as values passed to every call (Zig); arenas as a separate collection family; regions with named lifetimes (Rust's `Vec<T, &'a Bump>`).
 *Evidence:* Rust merged the stabilisation of `Vec<T, A>` and `impl Allocator for &A` in September 2026, for Rust 1.100, ten years after RFC 1398; Cyclone, MLKit and RTSJ scoped memory; Go's arena experiment on hold because explicit arenas infect APIs ([systems-and-determinism.md](../research/ideation/systems-and-determinism.md), candidate 8).
-*Consequences:* `list[T, A: Allocator = Global]`; `list[T, ref Region]` cannot escape the region's frame, enter `Shared` or cross `spawn`; resetting a region needs `mut region`; std must separate a bump `Region` from the generational `Arena[T]`; the corpus counts how many functions must become allocator-generic. See N-10.
+*Consequences:* `list[T, A: Allocator = Global]`, which adds defaulted type parameters to the generics syntax of [02](02-syntax.md); `list[T, ref Region]` cannot escape the region's frame, enter `Shared` or cross `spawn`; resetting a region needs `mut region`; std must separate a bump `Region` from the generational `Arena[T]`; the corpus counts how many functions must become allocator-generic. See N-10.
 *Status:* leaning.
 
 ### D-061 `todo("name")` is a typed hole: `sisu check` reports it, the interpreter stops at it, release builds and `publish` reject it; a fill engine is later tooling
@@ -418,11 +420,11 @@ each that touches an earlier decision is paired with an open question.
 *Consequences:* Message identifiers with parameters from the first diagnostic; `sisu why` in human and JSON form over error sets, `Send`/`Sync`, `pure`, capability reach, impl selection and comptime fuel, tracing only in explain mode; `@diagnostic_name` once Q-27's type construction ships. See N-25, N-30, N-37, N-38, N-40, N-47.
 *Status:* leaning.
 
-### D-066 `sisu review` reports weakened specifications and authority deltas; dependency admission has a cooldown and refuses new packages in agent runs; packages are labelled pure or resource-holding
+### D-066 `sisu review` reports weakened specifications and authority deltas; dependency admission has a cooldown and refuses new packages in agent runs; packages whose API takes no capability types and that are not in `[trust]` are labelled pure
 
 *Alternatives:* CODEOWNERS on test directories; Capslock-style capability baselines as a separate tool; no cooldown (npm's default); crowd compatibility scores.
 *Evidence:* ImpossibleBench and METR's reward-hacking measurements; Capslock and deps.dev (fewer than 2 % of updates add a capability, so the signal is read); invented package names in 4.6-21.7 % of model suggestions; eight of ten recent attacks with windows under a week; pnpm's `minimumReleaseAge` and uv's `exclude-newer` ([ai-era-and-evolution.md](../research/ideation/ai-era-and-evolution.md) A2, A3; [capabilities-distribution-and-resources.md](../research/unconventional/capabilities-distribution-and-resources.md) idea 4).
-*Consequences:* `[review] spec-weakening = "require-trailer"` fails CI without a human-written trailer; the authority delta reuses the reach computation the registry's capability summary already needs; a seven-day cooldown applied before resolution, advisory fixes exempt. See N-17, N-41, N-42.
+*Consequences:* `[review] spec-weakening = "require-trailer"` fails CI without a human-written trailer; the authority delta reuses the reach computation the registry's capability summary already needs; a seven-day cooldown applied before resolution, advisory fixes exempt, which refines Q-20's newest-satisfying resolution by excluding versions younger than the cooldown. See N-17, N-41, N-42.
 *Status:* leaning.
 
 ### D-067 Libraries ship migrations as `@fix_inline` functions applied by `sisu fix --deps`
@@ -434,7 +436,7 @@ each that touches an earlier decision is paired with an open question.
 
 ### D-068 Hot replacement publishes epochs adopted at task start and at `live.boundary()`; a failed check publishes nothing; function values hold slots; a changed `const` re-swaps its dependents
 
-*Alternatives:* D-053's next-call rule alone (one iteration can mix versions); image persistence.
+*Alternatives:* the next-call rule of [18](18-next-steps.md) alone (one iteration can mix versions); image persistence.
 *Evidence:* Sonic Pi, Extempore, TidalCycles and Erlang converged on version-consistent replacement at loop boundaries; Flutter's `const` rule; Papyrus's lesson that saved state must hold no frames or code identity ([esoteric-and-live-coding.md](../research/unconventional/esoteric-and-live-coding.md) idea 1; [game-and-narrative-scripting.md](../research/unconventional/game-and-narrative-scripting.md) idea 2).
 *Consequences:* An epoch word per task and a versioned function table in debug builds, nothing in release builds; refines D-053. See N-35.
 *Status:* leaning.
@@ -443,7 +445,7 @@ each that touches an earlier decision is paired with an open question.
 
 *Alternatives:* a `par:` statement block (occam `PAR`, DPJ `cobegin`); `for x in par xs` as a contextual keyword (Chapel `forall`); a `@layout(soa)` attribute on structs; parallel-by-default loops (Fortress).
 *Evidence:* occam's compile-time usage rules and Rust's closure rules are what Sisu's exclusivity and `Send`/`Sync` already give; OpenMP's and `do concurrent`'s trust-based annotations produce silent wrong answers; Fortress was cancelled; Rayon's index-ordered panic rule and adaptive splitting; Cilk hyperobjects; Odin `#soa` and Zig `MultiArrayList` ([parallel-languages.md](../research/unconventional/parallel-languages.md), [algorithm-schedule-separation.md](../research/unconventional/algorithm-schedule-separation.md), [systems-and-determinism.md](../research/ideation/systems-and-determinism.md) 12 and 13).
-*Consequences:* Serial elision made exact (removing the parallelism gives the same result; a failing loop reports the lowest-index error); `pure` bodies run to completion on a worker's stack, outside bet 3's budget; reductions follow D-074's fixed shape; the keyword is Q-47. See N-18 to N-20.
+*Consequences:* Serial elision made exact (removing the parallelism gives the same result; a failing loop reports the lowest-index error); `par` bodies are `pure` and `@no_block` (nested fork-join goes through `par.join`) and run to completion on a worker's stack, outside bet 3's budget; reductions follow D-074's fixed shape; the keyword is Q-47. See N-18 to N-20.
 *Status:* leaning.
 
 ### D-070 `std.test` gains `exhaustive[T]` generators, transcript tests and `@refines`; the `sim` profile and replay tokens are prototyped in the experiment
@@ -476,13 +478,13 @@ each that touches an earlier decision is paired with an open question.
 ### D-074 `pure` is deterministic across runs, processes, thread counts and targets; floating point is strict by default
 
 *Alternatives:* `pure` as "no capabilities" only (today's [06](06-concurrency-and-capabilities.md)); determinism by convention with a linter (Temporal, Durable Functions); implicit contraction and fast-math as compiler defaults (Clang).
-*Evidence:* Three files found that D-049's per-process `dict` order contradicts [08](08-metaprogramming.md)'s comptime promise and [06](06-concurrency-and-capabilities.md)'s "provably pure"; Python 3.7 separated flooding resistance from iteration order; Rayon's index-ordered failure rule; Java 17's strict floating point (JEP 306), WebAssembly's deterministic scalars, CORE-MATH in glibc, Box2D v3's cross-platform determinism ([systems-and-determinism.md](../research/ideation/systems-and-determinism.md) 1 and 4, [config-and-total-languages.md](../research/unconventional/config-and-total-languages.md) 1, [ai-era-and-evolution.md](../research/ideation/ai-era-and-evolution.md) A11).
+*Evidence:* The systems analysis found that D-049's per-process `dict` order contradicts [08](08-metaprogramming.md)'s comptime promise and [06](06-concurrency-and-capabilities.md)'s "provably pure", and the config and AI-era analyses reached the same decision from the comptime promise and from Python false friends; Python 3.7 separated flooding resistance from iteration order; Rayon's index-ordered failure rule; Java 17's strict floating point (JEP 306), WebAssembly's deterministic scalars, CORE-MATH in glibc, Box2D v3's cross-platform determinism ([systems-and-determinism.md](../research/ideation/systems-and-determinism.md) 1 and 4, [config-and-total-languages.md](../research/unconventional/config-and-total-languages.md) 1, [ai-era-and-evolution.md](../research/ideation/ai-era-and-evolution.md) A11).
 *Consequences:* `dict` and `set` iterate in insertion order with a per-process SipHash key (reversing the iteration half of D-049, Q-42); schedule-observing operations are errors in `pure` code and a `pure` scope reports the lowest-index failure (Q-43); `pure` enters function types; no implicit FMA, `a.mul_add(b, c)` for one rounding, `@float(fast)` opts out per function, reductions in a fixed shape (Q-44); correctly rounded `std.math` goes with Q-23. See N-01, N-02.
 *Status:* leaning, pending Q-42 to Q-44.
 
-### D-075 Library shapes: capability interceptors and inherited trace context, `task.race`, drift-free `Ticker` and `Timeline` over `Clock`, `std.search`
+### D-075 Library shapes: capability interceptors and inherited trace context, `task.race`, drift-free `Ticker` and `Timeline` over `Clock`, search combinators in `std.search`
 
 *Alternatives:* aspect-oriented pointcuts; manual context propagation (Go `context`); `sleep`-based timing; ad-hoc search loops.
 *Evidence:* The AOP critique (obliviousness, fragile pointcuts); Kotlin's coroutine context and Erlang's logger metadata; Céu's `par/or` with `finalize`; tokio's missed-tick policies and Sonic Pi's virtual-time semantics; LogicT ([incremental-reversible-and-exotic-paradigms.md](../research/unconventional/incremental-reversible-and-exotic-paradigms.md) 2; the inherited trace context is the assessment's own addition from Kotlin's coroutine context and Erlang's logger metadata, [synchronous-and-dataflow.md](../research/unconventional/synchronous-and-dataflow.md) 2, [esoteric-and-live-coding.md](../research/unconventional/esoteric-and-live-coding.md) 2, [logic-constraint-and-rewriting.md](../research/unconventional/logic-constraint-and-rewriting.md) 5).
-*Consequences:* One interception point shared by fakes, tracing, auditing and recording; `log` attaches the scope's span automatically; the same timing code is real-time in production and deterministic under the test clock. See N-06, N-35, N-60.
+*Consequences:* One interception point shared by fakes, tracing, auditing and recording; `log` attaches the scope's span automatically, which adds a second piece of implicit context to the scope that [06](06-concurrency-and-capabilities.md) accepts, carrying observation only and never authority; the same timing code is real-time in production and deterministic under the test clock. See N-06, N-35, N-60.
 *Status:* leaning.

@@ -246,11 +246,11 @@ that bet on real programs is the first thing a prototype must do.
 
 ## Additions proposed in October 2026
 
-Three leaning decisions from [19-novel-features.md](19-novel-features.md)
+Four leaning decisions from [19-novel-features.md](19-novel-features.md)
 extend this document. D-058 states a rule the design nearly has: a
 suspended task frame, a `task.scope` and any `view` value are never
-leaked, each ends only by running its `Drop`, and std offers no safe
-`forget` or `leak` for them; the runtime can then promise that an I/O call
+leaked, each ends only by running its `Drop` (process abort aside), and
+std offers no safe `forget` or `leak` for them; the runtime can then promise that an I/O call
 that lent a buffer to the kernel or a DMA engine returns, even when
 cancelled, only after the device has released it, so completion-based I/O
 borrows `mut buf` from the caller's frame. D-060 gives collections an

@@ -27,7 +27,7 @@ assessment of each candidate with its verdict.
 | Synchronous reactive and dataflow languages | [synchronous-and-dataflow.md](../unconventional/synchronous-and-dataflow.md) | Determinism became a certified language guarantee by making time logical and communication explicit; the causality problem and clock calculi did not transplant | Deterministic simulation, `task.race`, a reactor library, a checked deterministic scope; no language mode |
 | Structured parallelism, PGAS and data-parallel languages | [parallel-languages.md](../unconventional/parallel-languages.md) | Checked independence (occam) beats asserted independence (OpenMP) and parallel-by-default (Fortress); `task.scope` already is `PAR`, `finish` and `cobegin` | `par` iteration with serial-elision semantics, `par.join`, reducers with a fixed merge order; a non-blocking pool for `pure` bodies |
 | Halide-style algorithm and schedule separation | [algorithm-schedule-separation.md](../unconventional/algorithm-schedule-separation.md) | Schedules pay only over a sublanguage whose dependences the compiler sees, and only where a few kernels dominate; layout polymorphism has broader evidence | `SoaList[T]`, `@refines` equivalence tests, checked no-op directives; no `schedule` block |
-| Logic, constraint, functional-logic and rewriting | [logic-constraint-and-rewriting.md](../unconventional/logic-constraint-and-rewriting.md) | Model checking of the code itself (P, ShardStore) and small-scope search pay off; choice as an expression form, logic variables and in-language solvers do not | The schedule explorer as a model checker, `Exhaustive` inputs, chained fallible conditions |
+| Logic, constraint, functional-logic and rewriting | [logic-constraint-and-rewriting.md](../unconventional/logic-constraint-and-rewriting.md) | Model checking of the code itself (P, ShardStore) and small-scope search pay off; choice as an expression form, logic variables and in-language solvers do not | The schedule explorer as a model checker, `exhaustive[T]` inputs, chained fallible conditions |
 | Total, hermetic and lattice-typed configuration | [config-and-total-languages.md](../unconventional/config-and-total-languages.md) | Totality by syntax does not bound running time (its designers concede it); executable manifests are retreated from; two decided documents contradict each other on `dict` order | Fuel budgets owned by the spending package, manifest as data, Sisu as its own configuration language |
 | Object-capability, distributed and resource languages | [capabilities-distribution-and-resources.md](../unconventional/capabilities-distribution-and-resources.md) | Capability-safe subsets of other languages died of taming; the near/eventual split and revocation by caretaker are the parts that survived | Conditional must-consume, revocable and lent capabilities, pure-package labels; pipelining as a library |
 | Self-adjusting, reversible, probabilistic, differentiable, quantum | [incremental-reversible-and-exotic-paradigms.md](../unconventional/incremental-reversible-and-exotic-paradigms.md) | Every paradigm that went into a language (Skip, Swift for TensorFlow) lost to the same idea as a library over a checked `pure`; reversible languages lost to record and replay | Record and replay, `std.x.incr`, capability interceptors instead of aspects |
@@ -221,7 +221,7 @@ assessment of each candidate with its verdict.
     boundary, so one iteration runs one code version; Extempore's callbacks
     point at a function's slot rather than its body; Flutter re-swaps
     dependents of a changed constant; Papyrus's lesson is that saved state
-    must hold no frames or code identity. D-053's next-call rule lets one
+    must hold no frames or code identity. The next-call rule of the experiment plan lets one
     iteration mix versions; the refinement proposed from these is an epoch
     word per task, with a failed check publishing nothing ([esoteric 1](../unconventional/esoteric-and-live-coding.md),
     [game 2](../unconventional/game-and-narrative-scripting.md)). Time should
@@ -235,7 +235,8 @@ assessment of each candidate with its verdict.
     bugs; approving model-proposed tests raised pass@1 by 46 points);
     tokeniser-tuned vocabularies, canonical forms beyond the formatter,
     intent annotations and machine syntaxes have no measured accuracy gain
-    behind them (SimPy cut tokens by 10-13 % at readability's cost)    ([holes](../unconventional/holes-synthesis-and-ai-era.md), ideas 9 and
+    behind them (SimPy cut tokens by 10-13 % at readability's cost)
+    ([holes](../unconventional/holes-synthesis-and-ai-era.md), ideas 9 and
     12; [AI-era R1-R7](../ideation/ai-era-and-evolution.md)). Where models fail
     is predictable and Sisu's design answers it: they invent package names
     (4.6-21.7 %, so dependency admission needs a cooldown and an authority
@@ -255,9 +256,8 @@ assessment of each candidate with its verdict.
     notebooks as source reproduce 4 % of the time
     ([natural](../unconventional/natural-language-and-literate.md),
     [live](../unconventional/live-and-exploratory-environments.md)). What
-    survives is small: doc examples rendered with their values, transcript
-    tests of whole programs against a fake `System`, and a lint for
-    comprehensions that read in data-flow order.
+    survives is small: doc examples rendered with their values and
+    transcript tests of whole programs against a fake `System`.
 
 ## Recommendation
 
@@ -265,7 +265,7 @@ The proposal takes the following from this round; the per-candidate
 assessment, costs and what would settle each are in
 [19-novel-features.md](../../proposal/19-novel-features.md), the new
 decisions are D-058 to D-075 in the [decision log](../../proposal/15-decision-log.md),
-and the questions that need the owner are Q-42 to Q-51 in
+and the questions that need the owner are Q-42 to Q-52 in
 [open-questions.md](../../open-questions.md).
 
 1. **Close the determinism gaps first** (finding 2): insertion-ordered
@@ -286,8 +286,9 @@ and the questions that need the owner are Q-42 to Q-51 in
    injection and PCT scheduling, the interpreter's capability log with
    replay tokens for every failure, the dynamic ownership monitor as a
    counterexample generator for rejected programs (a team instrument for
-   bet 1), one io_uring cancellation test in the Phase 1 harness, and a
-   model arm with a pocket reference and an API digest.
+   bet 1), one io_uring cancellation test in the Phase 1 harness, the Phase
+   5 count of bindings typed by later statements, and a model arm with a
+   pocket reference and an API digest.
 4. **Holes and their report in the language** (D-061): `todo("name")` is a
    typed hole whose expected type, in-scope bindings, contracts and reaching
    tests `sisu check` reports; release builds and `publish` reject holes;
@@ -297,15 +298,18 @@ and the questions that need the owner are Q-42 to Q-51 in
    (D-065 to D-067): diagnostics through a message catalog with consequence
    lines on every multi-fix diagnostic, the lossless syntax tree as a
    library, `sisu why` over every inferred fact, `sisu review` with
-   specification-weakening and authority deltas, dependency admission with a   cooldown, `@fix_inline` migrations, `sisu eval` for configuration
-   (D-063), and the loud-divergence rule with a false-friend table in the
-   specification (D-062).
+   specification-weakening and authority deltas, dependency admission with a
+   cooldown, `@fix_inline` migrations, `sisu eval` for configuration, the
+   manifest kept as data with structured target conditions and comptime
+   budgets owned by the spending package (D-063), a two-year maximum for
+   preview features (D-072), and the loud-divergence rule with a
+   false-friend table in the specification (D-062).
 6. **Standard-library shapes decided now because they are slow to add
    later**: `std.par` with `par_iter`, `par.join` and fixed-order reducers
-   on a non-blocking pool and `SoaList[T]` (D-069); `Exhaustive` generators,
-   transcript tests and `@refines` in `std.test` (D-070); `View` in `std.x`
-   and `{expr=}` interpolation (D-071); capability interceptors,
-   `task.race` and drift-free time (D-075).
+   on a non-blocking pool and `SoaList[T]` (D-069); `exhaustive[T]` generators,
+   transcript tests and `@refines` in `std.test` (D-070); `View` in `std.x`,
+   `{expr=}` interpolation and chained fallible conditions (D-071);
+   capability interceptors, `task.race` and drift-free time (D-075).
 7. **Hot replacement refined to epochs at boundaries** (D-068) and the
    teaching profile shaped as a monotone ladder with teacher-defined ladders
    as data (D-073), with the worksheet mode and the always-on evaluation

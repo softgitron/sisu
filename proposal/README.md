@@ -48,7 +48,7 @@ options.
 | 17 | [Testing](17-testing.md) | Tests, assertions, fixtures, property tests, fuzzing, snapshots, benchmarks |
 | 16 | [Validation plan](16-validation-plan.md) | What the prototype must test first, and what would change the design |
 | 18 | [Next steps](18-next-steps.md) | The experiment: phases, corpus, measurements, team, decision points |
-| 19 | [Novel features](19-novel-features.md) | What unconventional languages teach and what exists in no language: 66 candidates assessed, 18 leaning decisions, 10 new questions |
+| 19 | [Novel features](19-novel-features.md) | What unconventional languages teach and what exists in no language: 66 candidates assessed, 18 leaning decisions, 11 new questions |
 | | [Examples](examples/) | Sisu source files |
 | | [Open questions](../open-questions.md) | What is not settled, and what would settle it |
 
@@ -63,7 +63,7 @@ answers only the runtime's stack strategy (Q-6), governance details (Q-21)
 and numerics (Q-23) remained open. The unconventional-languages round
 ([19-novel-features.md](19-novel-features.md)) then added decisions D-058
 to D-075, all leaning because the owner has not reviewed them, and
-questions Q-42 to Q-51, which include one reversal of an earlier decision
+questions Q-42 to Q-52, which include one reversal of an earlier decision
 (`dict` iteration order, Q-42) and a set of amendments to the experiment
 (Q-49).
 

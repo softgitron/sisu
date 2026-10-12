@@ -221,7 +221,7 @@ as the target and Python's (twelve years) as the thing to avoid.
 
 [19-novel-features.md](19-novel-features.md) adds to the one binary, as
 leaning decisions: diagnostics through a message catalog with a one-line
-consequence on every fix-it, a checker that produces a typed tree for
+consequence on every fix of a diagnostic that offers several, a checker that produces a typed tree for
 broken code so the language server works in it, the formatter's lossless
 syntax tree as a library, `@diagnostic_name` for library-rendered types,
 doc examples rendered with their values, and `sisu why` in human and JSON
@@ -237,4 +237,5 @@ task start and `live.boundary()` (D-068). The language-server features
 that follow 0.1 are, in order: always-on evaluation of capability-free
 examples and tests with probes and contract counterexamples, worksheets,
 structural editing commands and a typed palette, and the notional-machine
-stepper and permissions overlay (N-25, N-28, N-31, N-34).
+stepper (N-25, N-31, N-34, N-28); the permissions overlay waits for the
+bet-1 verdict so that it cannot confound the study.
