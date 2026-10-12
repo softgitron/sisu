@@ -59,7 +59,7 @@ should be filed as an issue.
 |---|---|
 | Research | Done (October 2026). 47 language analyses (~14,000 lines), 20 topic syntheses, 4 evidence dossiers; a second round of 14 studies of unconventional languages and environments and 3 ideation studies (~6,500 lines). |
 | Proposal | Draft 2 (October 2026). Indentation-based, Python-flavoured syntax; a testing design; an experiment plan with phases, corpus, measurements and decision points; an assessment of 66 candidate features from the unconventional round, 14 of them found in no language ([`proposal/19-novel-features.md`](proposal/19-novel-features.md)). |
-| Open questions | 52 recorded; 38 decided by the project owner (October 2026), 3 open from the first round (runtime stacks, governance details, numerics), 11 from the unconventional round awaiting the owner. |
+| Open questions | 53 recorded; 48 decided by the project owner (October 2026), 5 open: runtime stacks (Q-6), governance details (Q-21), numerics (Q-23), resource attributes in function types (Q-52), exact arithmetic (Q-53). |
 | Prototype | Not started. |
 
 ## Contributing to the design

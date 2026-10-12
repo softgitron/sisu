@@ -264,8 +264,8 @@ assessment of each candidate with its verdict.
 The proposal takes the following from this round; the per-candidate
 assessment, costs and what would settle each are in
 [19-novel-features.md](../../proposal/19-novel-features.md), the new
-decisions are D-058 to D-075 in the [decision log](../../proposal/15-decision-log.md),
-and the questions that need the owner are Q-42 to Q-52 in
+decisions are D-058 to D-077 in the [decision log](../../proposal/15-decision-log.md),
+and the questions raised are Q-42 to Q-53 in
 [open-questions.md](../../open-questions.md).
 
 1. **Close the determinism gaps first** (finding 2): insertion-ordered

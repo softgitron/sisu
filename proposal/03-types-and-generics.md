@@ -297,7 +297,7 @@ dependent typing and is discussed in [07-contracts.md](07-contracts.md).
 
 [19-novel-features.md](19-novel-features.md) found that "IEEE 754" alone
 leaves the comptime promise of [08](08-metaprogramming.md) unmet for
-floating point. The leaning decision D-074 (pending Q-44) specifies strict
+floating point. D-074 (decided with Q-44, October 2026) specifies strict
 evaluation: no implicit fused multiply-add (`a.mul_add(b, c)` for one
 rounding), no reassociation or fast-math, NaN payloads canonicalised where
 observable, `sum`, `product` and `dot` as fixed-shape pairwise reductions,
@@ -305,4 +305,8 @@ and `@float(fast)` to opt a function out visibly. A correctly rounded
 `std.math` goes with Q-23. The same decision makes `pure` deterministic
 across runs, processes, thread counts and targets, which puts `pure` into
 function types so that higher-order `pure` code can demand `pure`
-callbacks (Q-43).
+callbacks (Q-43, decided). With the same answer the owner asked for exact
+arithmetic as separate types: `BigInt`, `Ratio` and `Decimal` in `std.num`
+with suffix-free literals through `FromLiteral`, and symbolic mathematics
+in `std.x` after 1.0 (D-076; the semantics of `Decimal` and the scope of
+"symbolic" are Q-53). `int` stays fixed-width and trapping.

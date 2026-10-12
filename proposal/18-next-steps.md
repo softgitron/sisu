@@ -1142,8 +1142,11 @@ The unconventional-languages round ([19-novel-features.md](19-novel-features.md)
 proposes six amendments to this plan, most argued to strengthen a bet's
 measurement rather than add polish (the binding count and the model arm
 measure questions of their own), and each needing the pre-registration
-amended before any participant writes a line. They are the owner's call
-(Q-49); none is adopted here.
+amended before any participant writes a line. The owner accepted all six
+in October 2026 (Q-49); they are part of the plan from Phase 0's
+pre-registration onward, and the about six person-weeks they cost extend
+the plan by a month unless Phase 8's polish can be trimmed, which the
+Phase 0 review fixes.
 
 | Amendment | Phase | Cost | Strengthens |
 |---|---|---|---|

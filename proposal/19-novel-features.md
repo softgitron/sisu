@@ -1470,16 +1470,28 @@ budgets as effects, production hot upgrade, crash-isolated scope types,
 
 ## What changes in the proposal
 
-- **Decisions D-058 to D-075** in the [decision log](15-decision-log.md),
+**The owner's answers (October 2026).** Q-42 to Q-51 were answered as
+leaned: insertion order for `dict` and `set`, the proposed deterministic
+`pure` list, strict floating point, the invariant re-check for `Mutex`,
+`todo("name")`, the library form of `par`, worksheets without notebooks,
+all six experiment amendments, measuring binding types first, and
+capabilities kept `Copy` with `std.cap`. Two things were added: a general
+rule that the language core stays small and features go to the standard
+library wherever reasonable, and a request for exact arithmetic as
+separate `std.num` types with symbolic mathematics where achievable
+(D-076, Q-53). Q-52 remains open.
+
+- **Decisions D-058 to D-077** in the [decision log](15-decision-log.md),
   all with status *leaning*: the owner has not seen them. The one reversal
   of a decided point (D-049, in D-074) is paired with Q-42; D-059, D-063,
   D-066, D-068 and D-072 amend decided text and say so.
-- **Open questions Q-42 to Q-52** in [open-questions.md](../open-questions.md):
+- **Open questions Q-42 to Q-53** in [open-questions.md](../open-questions.md):
   `dict` and `set` order, the deterministic-`pure` primitive list, strict
   floats, `Mutex` unwinding, the hole's spelling, the `par` keyword,
   worksheets and the notebook non-goal, the experiment amendments,
-  left-to-right binding types, whether capabilities stay `Copy`, and
-  whether resource attributes and capture kinds may enter function types.
+  left-to-right binding types, whether capabilities stay `Copy`, whether
+  resource attributes and capture kinds may enter function types, and the
+  scope and semantics of exact arithmetic.
 - **Experiment amendments proposed** ([18](18-next-steps.md), Q-49): the
   io_uring cancellation test in Phase 1; the monitor as counterexample
   generator in Phase 3; the `sim` profile across Phases 6 and 8; the

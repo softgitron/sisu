@@ -44,11 +44,11 @@ options.
 | 12 | [Interop and targets](12-interop-and-targets.md) | Targets, runtime profiles, C interop, ABI |
 | 13 | [Evolution and governance](13-evolution-and-governance.md) | Compatibility, editions, specification, governance phases |
 | 14 | [Non-goals](14-non-goals.md) | What Sisu will not try to be |
-| 15 | [Decision log](15-decision-log.md) | Seventy-five decisions with alternatives, evidence and status |
+| 15 | [Decision log](15-decision-log.md) | Seventy-seven decisions with alternatives, evidence and status |
 | 17 | [Testing](17-testing.md) | Tests, assertions, fixtures, property tests, fuzzing, snapshots, benchmarks |
 | 16 | [Validation plan](16-validation-plan.md) | What the prototype must test first, and what would change the design |
 | 18 | [Next steps](18-next-steps.md) | The experiment: phases, corpus, measurements, team, decision points |
-| 19 | [Novel features](19-novel-features.md) | What unconventional languages teach and what exists in no language: 66 candidates assessed, 18 leaning decisions, 11 new questions |
+| 19 | [Novel features](19-novel-features.md) | What unconventional languages teach and what exists in no language: 66 candidates assessed, 20 new decisions, 12 new questions |
 | | [Examples](examples/) | Sisu source files |
 | | [Open questions](../open-questions.md) | What is not settled, and what would settle it |
 
@@ -62,10 +62,11 @@ and an open question names what could change it; after the owner's
 answers only the runtime's stack strategy (Q-6), governance details (Q-21)
 and numerics (Q-23) remained open. The unconventional-languages round
 ([19-novel-features.md](19-novel-features.md)) then added decisions D-058
-to D-075, all leaning because the owner has not reviewed them, and
-questions Q-42 to Q-52, which include one reversal of an earlier decision
-(`dict` iteration order, Q-42) and a set of amendments to the experiment
-(Q-49).
+to D-077 and questions Q-42 to Q-53; the owner answered Q-42 to Q-51 in
+October 2026 (reversing the randomised `dict` order and accepting six
+amendments to the experiment), which decides D-061, D-069, D-070, D-074,
+D-076 and D-077, while the rest stay leaning until the log is reviewed and
+Q-52 and Q-53 are open.
 
 ## The three bets
 

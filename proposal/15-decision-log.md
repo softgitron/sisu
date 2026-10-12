@@ -359,10 +359,12 @@ Format: *Decision* / *Alternatives* / *Evidence* / *Consequences* / *Status*.
 The round in [`../research/unconventional/`](../research/unconventional/)
 and [`../research/ideation/`](../research/ideation/), assessed in
 [19-novel-features.md](19-novel-features.md), produced the decisions below.
-All have status **leaning**: the project owner has not reviewed them. The
-one reversal of a decided point (D-049, in D-074) is paired with a question
-(Q-42); D-059, D-063, D-066, D-068 and D-072 amend decided text without one
-and say so in their consequences.
+The owner answered Q-42 to Q-51 in October 2026, which decides D-061,
+D-069, D-070 and D-074 and adds D-076 and D-077; the other decisions here
+stay **leaning** until the owner reviews the log itself. The one reversal
+of a decided point (D-049, in D-074) was paired with a question (Q-42);
+D-059, D-063, D-066, D-068 and D-072 amend decided text without one and say
+so in their consequences; D-059 also waits on Q-52.
 
 ### D-058 Views, scopes and suspended task frames are never leaked; completion I/O and DMA borrow the caller's buffer
 
@@ -389,8 +391,8 @@ and say so in their consequences.
 
 *Alternatives:* `?name` in operand position, replacing `todo` (Idris, Agda, Lean; proposed in [holes-synthesis-and-ai-era.md](../research/unconventional/holes-synthesis-and-ai-era.md)); an untyped `todo` that panics (Rust `todo!()`, today's prelude); `_` (GHC; taken by patterns).
 *Evidence:* Holes are the interaction model of every dependently typed language and have been on in GHC for twelve years; Hazel's measured ChatLSP context (type definitions first) lifts a model furthest in a low-resource language; rust-analyzer's term search was little used, which favours the report over enumeration; fills judged by tests alone overfit (roughly two thirds to four fifths of PropR's test-passing repairs) and models edit tests when they can (ImpossibleBench), so the judge stays out of the filler's reach ([holes-synthesis-and-ai-era.md](../research/unconventional/holes-synthesis-and-ai-era.md), [ai-era-and-evolution.md](../research/ideation/ai-era-and-evolution.md) A1).
-*Consequences:* `todo[T](name: str = "") -> T` is a compiler intrinsic like `assert`; a third test outcome, "blocked by a hole" (D-057); `panic("...")` for placeholders meant to ship; no new lexical form; `sisu fill` edits only the hole's span with tests, contracts, generators and snapshots read-only, and `unfillable` is a legal answer. The spelling is Q-46. See N-27.
-*Status:* leaning.
+*Consequences:* `todo[T](name: str = "") -> T` is a compiler intrinsic like `assert`; a third test outcome, "blocked by a hole" (D-057); `panic("...")` for placeholders meant to ship; no new lexical form; `sisu fill` edits only the hole's span with tests, contracts, generators and snapshots read-only, and `unfillable` is a legal answer. See N-27.
+*Status:* decided (Q-46, October 2026).
 
 ### D-062 Loud divergence: where Sisu spells something as Python or Rust does, it means the same or fails to compile; the specification keeps a false-friend table
 
@@ -445,15 +447,15 @@ and say so in their consequences.
 
 *Alternatives:* a `par:` statement block (occam `PAR`, DPJ `cobegin`); `for x in par xs` as a contextual keyword (Chapel `forall`); a `@layout(soa)` attribute on structs; parallel-by-default loops (Fortress).
 *Evidence:* occam's compile-time usage rules and Rust's closure rules are what Sisu's exclusivity and `Send`/`Sync` already give; OpenMP's and `do concurrent`'s trust-based annotations produce silent wrong answers; Fortress was cancelled; Rayon's index-ordered panic rule and adaptive splitting; Cilk hyperobjects; Odin `#soa` and Zig `MultiArrayList` ([parallel-languages.md](../research/unconventional/parallel-languages.md), [algorithm-schedule-separation.md](../research/unconventional/algorithm-schedule-separation.md), [systems-and-determinism.md](../research/ideation/systems-and-determinism.md) 12 and 13).
-*Consequences:* Serial elision made exact (removing the parallelism gives the same result; a failing loop reports the lowest-index error); `par` bodies are `pure` and `@no_block` (nested fork-join goes through `par.join`) and run to completion on a worker's stack, outside bet 3's budget; reductions follow D-074's fixed shape; the keyword is Q-47. See N-18 to N-20.
-*Status:* leaning.
+*Consequences:* Serial elision made exact (removing the parallelism gives the same result; a failing loop reports the lowest-index error); `par` bodies are `pure` and `@no_block` (nested fork-join goes through `par.join`) and run to completion on a worker's stack, outside bet 3's budget; reductions follow D-074's fixed shape; the keyword waits for the corpus count of Q-47. The owner's rule, given with that answer, applies to every later choice of this kind: keep the language core small and put features in the standard library wherever that is reasonable. See N-18 to N-20.
+*Status:* decided (Q-47, October 2026).
 
 ### D-070 `std.test` gains `exhaustive[T]` generators, transcript tests and `@refines`; the `sim` profile and replay tokens are prototyped in the experiment
 
 *Alternatives:* property tests only; snapshot files only; equivalence by hand; simulation and replay as third-party libraries (madsim, turmoil, Shuttle).
 *Evidence:* Alloy's small-scope hypothesis and SmallCheck; Inform's "Test me with" and doctest sessions; Exo's reference-equivalence; FoundationDB, TigerBeetle, Shuttle, Coyote, Go's `synctest`; S3's ShardStore; PCT's probabilistic guarantee; R2's interface-level recording; Elm's importable histories ([logic-constraint-and-rewriting.md](../research/unconventional/logic-constraint-and-rewriting.md) 1 and 2, [natural-language-and-literate.md](../research/unconventional/natural-language-and-literate.md) 2, [algorithm-schedule-separation.md](../research/unconventional/algorithm-schedule-separation.md) 2, [systems-and-determinism.md](../research/ideation/systems-and-determinism.md) 2 and 3, [end-user-and-live.md](../research/ideation/end-user-and-live.md) 4).
-*Consequences:* A `sim` build fails to compile if reachable code could escape the simulation; faults come only from declared error sets; every failing test prints a replay token; the amendments are Q-49. See N-03 to N-05, N-21, N-36.
-*Status:* leaning.
+*Consequences:* A `sim` build fails to compile if reachable code could escape the simulation; faults come only from declared error sets; every failing test prints a replay token; the six experiment amendments of Q-49 are accepted and go into the pre-registration. See N-03 to N-05, N-21, N-36.
+*Status:* decided (Q-49, October 2026) for the amendments; the library shapes remain leaning.
 
 ### D-071 Syntax additions: `{expr=}` in interpolation and chained fallible conditions; `View` as a `pure` trait in `std.x`
 
@@ -480,7 +482,7 @@ and say so in their consequences.
 *Alternatives:* `pure` as "no capabilities" only (today's [06](06-concurrency-and-capabilities.md)); determinism by convention with a linter (Temporal, Durable Functions); implicit contraction and fast-math as compiler defaults (Clang).
 *Evidence:* The systems analysis found that D-049's per-process `dict` order contradicts [08](08-metaprogramming.md)'s comptime promise and [06](06-concurrency-and-capabilities.md)'s "provably pure", and the config and AI-era analyses reached the same decision from the comptime promise and from Python false friends; Python 3.7 separated flooding resistance from iteration order; Rayon's index-ordered failure rule; Java 17's strict floating point (JEP 306), WebAssembly's deterministic scalars, CORE-MATH in glibc, Box2D v3's cross-platform determinism ([systems-and-determinism.md](../research/ideation/systems-and-determinism.md) 1 and 4, [config-and-total-languages.md](../research/unconventional/config-and-total-languages.md) 1, [ai-era-and-evolution.md](../research/ideation/ai-era-and-evolution.md) A11).
 *Consequences:* `dict` and `set` iterate in insertion order with a per-process SipHash key (reversing the iteration half of D-049, Q-42); schedule-observing operations are errors in `pure` code and a `pure` scope reports the lowest-index failure (Q-43); `pure` enters function types; no implicit FMA, `a.mul_add(b, c)` for one rounding, `@float(fast)` opts out per function, reductions in a fixed shape (Q-44); correctly rounded `std.math` goes with Q-23. See N-01, N-02.
-*Status:* leaning, pending Q-42 to Q-44.
+*Status:* decided (Q-42 to Q-44, October 2026).
 
 ### D-075 Library shapes: capability interceptors and inherited trace context, `task.race`, drift-free `Ticker` and `Timeline` over `Clock`, search combinators in `std.search`
 
@@ -488,3 +490,17 @@ and say so in their consequences.
 *Evidence:* The AOP critique (obliviousness, fragile pointcuts); Kotlin's coroutine context and Erlang's logger metadata; Céu's `par/or` with `finalize`; tokio's missed-tick policies and Sonic Pi's virtual-time semantics; LogicT ([incremental-reversible-and-exotic-paradigms.md](../research/unconventional/incremental-reversible-and-exotic-paradigms.md) 2; the inherited trace context is the assessment's own addition from Kotlin's coroutine context and Erlang's logger metadata, [synchronous-and-dataflow.md](../research/unconventional/synchronous-and-dataflow.md) 2, [esoteric-and-live-coding.md](../research/unconventional/esoteric-and-live-coding.md) 2, [logic-constraint-and-rewriting.md](../research/unconventional/logic-constraint-and-rewriting.md) 5).
 *Consequences:* One interception point shared by fakes, tracing, auditing and recording; `log` attaches the scope's span automatically, which adds a second piece of implicit context to the scope that [06](06-concurrency-and-capabilities.md) accepts, carrying observation only and never authority; the same timing code is real-time in production and deterministic under the test clock. See N-06, N-35, N-60.
 *Status:* leaning.
+
+### D-076 Exact arithmetic as separate standard-library types: `BigInt`, `Ratio` and `Decimal` in `std.num` with literal support; symbolic mathematics in `std.x` after 1.0
+
+*Alternatives:* arbitrary-precision `int` by default (Python, Ruby); exact rationals by default (Pyret, rejected for the teaching profile in [19](19-novel-features.md)); binary floating point only; a computer algebra system in the core.
+*Evidence:* The owner's request (Q-44, October 2026) for "perfect math" as separate types; Python's `int` and `decimal` (PEP 327) and `fractions`, Java's `BigDecimal`, Julia's `BigInt` and `Rational`, and the fact that every language in the research that lacks them grows a library for them; [`11-stdlib.md`](11-stdlib.md) already lists the three types; `FromLiteral` ([`03-types-and-generics.md`](03-types-and-generics.md)) gives suffix-free literals; a CAS is a project the size of SymPy, so it is scoped separately.
+*Consequences:* `int` stays fixed-width and trapping (D-009); the fixed operator set gives the exact types ordinary operators; the types are written in Sisu with `comptime`-eligible `pure` code and host kernels in the interpreter; `Decimal`'s semantics and the scope of "symbolic" are Q-53; the numeric traits come from Q-23.
+*Status:* decided (owner, October 2026); semantics and scope open (Q-53).
+
+### D-077 A `Mutex` whose guard is dropped by unwinding re-checks the protected type's `invariant` and is poisoned only if the check fails
+
+*Alternatives:* always poison (Rust's `std::sync::Mutex`); never poison (Rust's nightly `nonpoison` locks); crash-isolated scope types (`UnwindSafe`, "a speed bump" by Rust's own account).
+*Evidence:* [systems-and-determinism.md](../research/ideation/systems-and-determinism.md) F4; D-040's unwinding to the scope leaves half-updated state visible to siblings and restarted workers; contracts ([07](07-contracts.md)) supply the check that decides whether the state is usable.
+*Consequences:* `lock()` stays infallible in its signature; later `lock()` calls on a poisoned mutex panic; types without an invariant unlock normally; the structured-concurrency suite gains a panic-while-locked case. See N-14.
+*Status:* decided (Q-45, October 2026).

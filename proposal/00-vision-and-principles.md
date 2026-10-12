@@ -203,8 +203,12 @@ asks two things of this document. The notebook non-goal above should
 distinguish a *worksheet* (a script-mode file the language server re-runs
 top to bottom with values shown inline and never saved; no cells, no
 hidden state), which Sisu can offer as tooling after 0.1, from a
-*notebook*, which stays a non-goal unless Q-48 amends it. And one
-principle is added as a design rule under P1 and P10: where Sisu spells
-something as Python or Rust does, it means the same or fails to compile
-(D-062), because the people and models who read Sisu will read it with
-those languages' meanings first.
+*notebook*, which stays a non-goal (Q-48, decided October 2026). Two
+rules are added under P1 and P10. Where Sisu spells something as Python or
+Rust does, it means the same or fails to compile (D-062), because the
+people and models who read Sisu will read it with those languages'
+meanings first. And the language core stays small: a feature goes into the
+standard library wherever that is reasonable, and into the language only
+when the library cannot express it or cannot check it (the owner's rule
+given with Q-47, October 2026; `std.par` before a `par` keyword, exact
+arithmetic as `std.num` types, lent capabilities in `std.cap`).

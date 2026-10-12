@@ -112,10 +112,10 @@ the API-diff enforcement everyone else has.
 
 ## Additions proposed in October 2026
 
-[19-novel-features.md](19-novel-features.md) asks the owner to reverse the
-first design point above (Q-42): `dict` and `set` would iterate in
-insertion order while keeping the per-process SipHash key, because the
-systems analysis found that per-process order makes `pure` functions
+[19-novel-features.md](19-novel-features.md) asked the owner to reverse the
+first design point above, and the owner did (Q-42, October 2026): `dict`
+and `set` iterate in insertion order while keeping the per-process SipHash
+key, because the systems analysis found that per-process order makes `pure` functions
 non-reproducible and breaks the comptime promise, replay and memoisation,
 and the config and AI-era analyses reached the same decision from other
 angles.
@@ -127,7 +127,9 @@ a drift-free `Ticker` with an explicit missed-tick policy and a `Timeline`
 with virtual-time sleep in `std.time`, search combinators added to
 `std.search`, and capability interceptors (D-075); `exhaustive[T]`, transcript tests and `@refines` in
 `std.test` (D-070); `View` in `std.x` (D-071); revocable and lent
-capabilities in `std.cap` if Q-51 accepts them; and, later in `std.x`,
+capabilities in `std.cap` (Q-51, decided); `BigInt`, `Ratio` and `Decimal`
+in `std.num` with suffix-free literals, the owner's "perfect math" (D-076,
+semantics in Q-53); and, later in `std.x`, symbolic mathematics,
 typed tables, units of measure with
 `@diagnostic_name`, `std.x.peg`, `std.x.incr`, `std.x.reactor`, schema
 locks with migrations, a `Model` capability with `derive(Schema)`, and a

@@ -7,7 +7,8 @@ decision, so the reasoning stays auditable. The proposal documents and the
 decision log have been updated to match. The unconventional-languages
 round ([`research/unconventional/`](research/unconventional/),
 [`proposal/19-novel-features.md`](proposal/19-novel-features.md)) added
-Q-42 to Q-52, which await the owner.
+Q-42 to Q-53; the owner answered Q-42 to Q-51 in October 2026, and Q-52
+and Q-53 remain open.
 
 What the research could not settle. Each question states the options, the
 evidence for each, the proposal's current lean (what the design documents
@@ -597,7 +598,9 @@ which ones.
 
 Each question below comes from [`proposal/19-novel-features.md`](proposal/19-novel-features.md)
 and names the candidate (N-xx) and the leaning decision (D-xx) it belongs
-to. Unlike the first 41, these have not yet been answered by the owner.
+to. The owner answered Q-42 to Q-51 in October 2026; Q-52 (added by the
+consistency review) and Q-53 (raised by the owner's answer to Q-44) are
+open.
 
 ### Q-42. Should `dict` and `set` iterate in insertion order?
 
@@ -636,6 +639,8 @@ Python-trained readers ([AI-era](research/ideation/ai-era-and-evolution.md) A11)
 plain SipHash map on the corpus; the count of corpus programs that read
 `dict` order.
 
+**Decision (October 2026).** Insertion order for `dict` and `set`, with the per-process SipHash key kept. The iteration half of D-049 is reversed; D-074 is decided.
+
 ### Q-43. How far does deterministic `pure` go?
 
 **Question.** D-074 makes `pure` mean "the same bits on every run,
@@ -666,6 +671,8 @@ process, thread count and target". Which operations are errors inside
 diffed; more than one rejected `pure` function per 500 lines of pure code
 reopens the list.
 
+**Decision (October 2026).** The proposed list: schedule-observing operations are errors in `pure` code, a `pure` scope reports the lowest-index failure, and `pure` is part of function types.
+
 ### Q-44. Strict floating point by default?
 
 **Question.** Floating point is specified only as "IEEE 754". D-074
@@ -688,6 +695,8 @@ integrator, a dot-product kernel) built for x86-64 and AArch64 at both
 optimisation levels: bit equality everywhere, and a strict-versus-fast
 throughput gap above 25 % on the kernels that matter reopens the default.
 This is an input to Q-23's research, not a substitute for it.
+
+**Decision (October 2026).** Strict floating point by default, with `mul_add` for a fused operation and `@float(fast)` to opt out. The owner also asks for exact arithmetic as separate standard-library types: arbitrary-precision integers, decimals that represent base-10 values exactly, and exact symbolic mathematics where that is achievable (D-076; the scope is Q-53).
 
 ### Q-45. What does a `Mutex` do when unwinding drops its guard?
 
@@ -715,6 +724,8 @@ The proposal does not say what happens ([systems](research/ideation/systems-and-
 types carry an invariant, and whether any panic-while-locked case in the
 structured-concurrency suite is misreported under the lean.
 
+**Decision (October 2026).** Re-check the protected type's invariant when unwinding drops a guard, and poison the mutex only if the check fails (D-077).
+
 ### Q-46. Is the typed hole spelled `todo("name")` or `?name`?
 
 **Question.** D-061 makes the prelude's `todo` a typed hole with a report
@@ -732,6 +743,8 @@ removed by `sisu fix`; both (rejected by P1).
 
 **What would settle it.** The model arm's fill acceptance with each
 spelling is unlikely to differ; this is a taste call for the owner.
+
+**Decision (October 2026).** `todo("name")`; no `?name` form.
 
 ### Q-47. Is `par` a contextual keyword or only a library?
 
@@ -755,6 +768,8 @@ one `par_iter` in a plain loop per 300 lines.
 **What would settle it.** That count, and whether comprehension bodies
 want it.
 
+**Decision (October 2026).** Library first. The owner adds a general rule for every later choice of this kind: keep the language core small and put features in the standard library wherever that is reasonable (recorded in [`proposal/00-vision-and-principles.md`](proposal/00-vision-and-principles.md)).
+
 ### Q-48. Worksheets, and the notebook non-goal
 
 **Question.** [`proposal/00-vision-and-principles.md`](proposal/00-vision-and-principles.md)
@@ -777,6 +792,8 @@ Q-23's outcome and an amended non-goal.
 **What would settle it.** Notebooks written by outsiders, rerun top to
 bottom, against marimo on the same tasks; fix-it churn from the
 borrow-only rule between cells in a pilot.
+
+**Decision (October 2026).** As leaned: worksheets as tooling after 0.1; notebooks stay a non-goal, with the sentence separating the two added to [`proposal/00-vision-and-principles.md`](proposal/00-vision-and-principles.md); the reactive notebook waits for Q-23 and an amended non-goal.
 
 ### Q-49. Which amendments to the experiment's pre-registration are accepted?
 
@@ -806,6 +823,8 @@ existing 1000-schedule exit criterion.
 **What would settle it.** The owner's budget; the Phase 0 pre-registration
 review.
 
+**Decision (October 2026).** All six amendments are accepted into the pre-registration.
+
 ### Q-50. Should a binding's type be fixed by the end of its declaring statement?
 
 **Question.** Mündler et al. had to enforce initialised-or-annotated
@@ -826,6 +845,8 @@ friction.
 **What would settle it.** That count, and a constrained-decoding pilot
 with and without the rule.
 
+**Decision (October 2026).** Measure first; adopt the left-to-right rule if fewer than about 3 % of corpus bindings are typed by later statements and the authors report no friction.
+
 ### Q-51. Should capabilities stay `Copy`?
 
 **Question.** Capabilities are `Copy` ([`proposal/06-concurrency-and-capabilities.md`](proposal/06-concurrency-and-capabilities.md)),
@@ -845,6 +866,8 @@ an explicit `.retain()` (the lending rule inverted).
 
 **What would settle it.** The bet-2 port study: how often a callee stores
 a capability it should not have kept, and whether `Lent[T]` is asked for.
+
+**Decision (October 2026).** Capabilities stay `Copy`; `std.cap` ships the lent and revocable forms.
 
 ### Q-52. May resource attributes and closure capture kinds enter function types?
 
@@ -874,3 +897,42 @@ kinds, with the signature cost measured on the realtime ports of N-08.
 **What would settle it.** The three realtime ports of N-08: how many
 closure parameters and `dyn` calls their code needs, and whether the
 call-graph-only option would have rejected them.
+
+### Q-53. How far does exact arithmetic go, and what are its semantics?
+
+**Question.** Answering Q-44, the owner asked for "perfect math" as
+separate standard-library types: integers of unbounded size, decimals that
+represent base-10 values exactly, and exact symbolic mathematics where
+achievable. [`proposal/11-stdlib.md`](proposal/11-stdlib.md) already lists
+`BigInt`, `Decimal` and `Ratio` in `std.num`; D-076 commits to them with
+literal support. Two things are not settled: the semantics of `Decimal`,
+and what "symbolic" should cover.
+
+**Options.**
+- *`Decimal` semantics.* Unbounded precision under a context that sets
+  precision and rounding (Python's `decimal`, IEEE 754-2008's general
+  decimal arithmetic; exact for addition and multiplication, rounded for
+  division); or a fixed decimal128 (exact to 34 digits, a `Copy` value,
+  SIMD-friendly); or a scaled integer (`BigInt` plus an exponent, exact
+  for everything but division, which returns `Ratio`). Lean: the scaled
+  `BigInt` form as `Decimal`, with division producing `Ratio` unless a
+  rounding context is given, because it is exact by construction and needs
+  no hidden context.
+- *Symbolic mathematics.* Exact rationals and algebraic numbers only, in
+  `std.num` (lean for v1); a computer algebra system (expression trees,
+  simplification, differentiation, equation solving) in `std.x.symbolic`
+  after 1.0, which is a project the size of SymPy; or a community package
+  from the start.
+- *Literals.* `FromLiteral` lets `let n: BigInt = 123456789012345678901234567890`
+  and `let d: Decimal = 0.1` check at compile time with no suffix (lean);
+  or suffixed literals (`0.1d`, Java's `123n`).
+
+**Current lean.** `BigInt`, `Ratio` and a scaled `Decimal` in `std.num` for
+v1, implemented in Sisu with `comptime`-eligible `pure` code and host
+kernels in the interpreter; algebraic simplification and a CAS in `std.x`
+after 1.0, scoped by Q-23's numerics research.
+
+**What would settle it.** The numerics research of Q-23 (which decides
+the numeric traits every exact type must implement), a port of a
+bookkeeping program and of an exact-geometry kernel under each `Decimal`
+option, and whether a CAS maintainer wants to build on Sisu.
