@@ -604,9 +604,9 @@ open.
 
 ### Q-42. Should `dict` and `set` iterate in insertion order?
 
-**Question.** D-049 randomises `dict` iteration per process so that, as
-[`proposal/11-stdlib.md`](proposal/11-stdlib.md) puts it, code cannot
-depend on it silently. The systems analysis found that this contradicts
+**Question.** D-049 randomised `dict` iteration per process so that, as
+the Draft 2 text of [`proposal/11-stdlib.md`](proposal/11-stdlib.md) put
+it, code could not depend on it silently. The systems analysis found that this contradicts
 two other decided documents: a `pure` function that lists a `dict`'s keys
 returns different lists in different processes, which breaks the comptime
 promise in [`proposal/08-metaprogramming.md`](proposal/08-metaprogramming.md)
@@ -622,8 +622,8 @@ Python-trained readers ([AI-era](research/ideation/ai-era-and-evolution.md) A11)
 - *Insertion order, per-process SipHash key kept* (lean). Python 3.7's
   split: flooding resistance comes from the key, iteration from insertion
   order. Costs an index array and tombstones (Python's compact dict was
-  still 20-25 % smaller than its predecessor); the reason [`proposal/11-stdlib.md`](proposal/11-stdlib.md)
-  gives ("lets code depend on it silently") becomes the point, since a specified order is
+  still 20-25 % smaller than its predecessor); the reason Draft 2 of [`proposal/11-stdlib.md`](proposal/11-stdlib.md)
+  gave ("lets code depend on it silently") becomes the point, since a specified order is
   safe to depend on; it also closes the silent false-friend row for
   Python-trained readers (D-062).
 - *Keep randomisation, exempt `comptime`* (the config file's minimal fix).

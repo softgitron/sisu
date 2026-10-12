@@ -41,6 +41,7 @@ that reason.
 | `std.string` | `String`, `str`, `char`, Unicode scalar and grapheme iteration, case mapping, normalisation forms, `Builder` |
 | `std.fmt` | Formatting traits and the interpolation machinery |
 | `std.num` | Integer and float traits, checked/wrapping/saturating ops, and the exact types `BigInt`, `Ratio` and `Decimal` with suffix-free literals |
+| `std.math` | Elementary functions on `f32` and `f64`; correctly rounded, so results do not depend on the platform's `libm` (D-074; the implementation plan is part of Q-23) |
 | `std.mem` | The `Allocator` trait, the `Global` allocator, the bump allocator `Region`, layout; raw pointer types live in `std.ffi` |
 | `std.task` | `scope`, `spawn`, `Handle`, `race` (the first task to finish wins; leaning, D-075), `channel`, `Mutex`, `RwLock`, `Atomic`, `Condvar`, `Once`, cancellation, `shield` |
 | `std.par` | `par_iter` and `par_iter_mut` over work-stealing chunks, `par.join`, reducers (`par.Sum`, `par.Collect`, the `par.Reducer` trait) with a fixed merge order |

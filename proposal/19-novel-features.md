@@ -229,9 +229,9 @@ simulation and replay candidates below, which all assume it.
 tombstones (Python 3.6's compact layout was still 20-25 % smaller than its
 predecessor); a second failure policy for `pure` scopes, whose failures
 propagate more slowly because earlier siblings run to completion;
-reversing the iteration half of D-049, whose stated reason in
-[11](11-stdlib.md) ("lets code depend on it silently") becomes the point: a
-specified order is safe to depend on.
+reversing the iteration half of D-049, whose stated reason in Draft 2 of
+[11](11-stdlib.md) ("lets code depend on it silently") becomes the point:
+a specified order is safe to depend on.
 
 *Verdict.* Adopt (D-074 pending Q-42 and Q-43). Confidence medium-high;
 the `dict` change is the contestable part. *Settled by* the corpus's

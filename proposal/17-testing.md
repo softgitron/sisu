@@ -277,8 +277,10 @@ A transcript test (D-070) snapshots a whole program. `sisu test` runs
 every `tests/*.transcript` file: a `$` line runs the package's `main` with
 those arguments against a fake `System` (an in-memory `Fs` loaded from a
 fixture directory, a frozen `Clock`, a seeded `Rand` and no `Net`), `>`
-lines are its standard input, and every other line is expected output. A
-mismatch fails with a diff.
+lines are its standard input, and every other line is expected output. The
+fake `System` persists from one `$` line to the next within a file, so a
+transcript is one session and each file starts fresh. A mismatch fails
+with a diff.
 
 ```
 $ shop price
