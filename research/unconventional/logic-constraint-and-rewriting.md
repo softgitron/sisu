@@ -25,9 +25,9 @@ miniKanren are in [`../languages/prolog.md`](../languages/prolog.md).
 | MiniZinc | 2007- | 2.9.7 (Apr 2026); annual MiniZinc Challenge | Solver-independent models compiled to FlatZinc |
 | clingo (ASP) | Stable models 1988 | clingo 5.8 (2025); Spack's dependency solver | Generate, define, test; answer sets are solutions |
 | Z3, Rosette | 2008; 2013 | Active; AWS makes about a billion SMT calls a day | SMT as a back end; an interpreter that emits solver queries |
-| Cedar | 2023- | Open source; Amazon Verified Permissions | A policy language with a sound and complete SMT encoding |
+| Cedar | 2023- | Open source; Amazon Verified Permissions | A policy language designed to be analysable, with machine-checked models |
 | Alloy | 1997- | Alloy 6.2.0 (Jan 2025) | Relational logic checked in small scopes by SAT |
-| TLA+, PlusCal, Quint | 1999; 2009; 2022- | TLA+ Foundation (AWS, Oracle, NVIDIA); Quint at quint.sh | Systems as state machines checked by TLC or Apalache |
+| TLA+, PlusCal, Quint | 1999; 2009; 2022- [unverified] | TLA+ Foundation (AWS, Oracle, NVIDIA); Quint at quint.sh | Systems as state machines checked by TLC or Apalache |
 | P | 2013- | Used across AWS (S3, EBS, DynamoDB, Aurora, EC2) | Communicating state machines as a program, systematically tested |
 | Promela / SPIN | 1980- | SPIN 6.5.x | Explicit-state model checking with partial-order reduction |
 | Maude, K | 1992-; 2000s- | Maintained; K by Runtime Verification | Semantics as rewrite rules; executable C, Java, EVM |
@@ -79,10 +79,10 @@ compiler that registers an undo handler for every store so that Fortnite's
 C++ servers can join Verse transactions, single-threaded only [5].
 
 **Transplants.** Generators spread everywhere (PEP 255 cites Icon, "a
-novel language where every expression _is a generator_" [17]). The failure
-half survives as typed conditions of fallible bindings: Swift's
-`if let a = f(), let b = g(a), cond` and Rust's let chains (Rust 1.88, June
-2025) [39]. Choice as a library is Haskell's list monad and LogicT [38].
+novel language where every expression _is a generator_" [17]). Failure
+survives as typed conditions of fallible bindings (Swift's `if let a = f(),
+let b = g(a), cond`; Rust's let chains, 1.88, June 2025 [39]); choice as a
+library is Haskell's list monad and LogicT [38].
 Verse alone transplants choice itself; I could not confirm whether the UEFN
 dialect exposes general `|` choice or only failure and `for`.
 
@@ -97,12 +97,13 @@ thread Y = X + 1 end   % suspends until X is bound
 X = 41                 % the thread resumes and binds Y to 42
 ```
 
-*Computation spaces* make search programmable: `NewSpace`, `Choose`, `Ask`,
+Records (`person(name:"Ada" age:36)`) are the universal data structure, and
+*computation spaces* make search programmable: `NewSpace`, `Choose`, `Ask`,
 `Commit`, `Clone` and `Merge` let a parent run a problem in a child space and
 choose which alternative to commit, so search engines are ordinary programs
 separate from the problem [8, §5.1.6]. Curry adds free variables and
-narrowing to Haskell [10, 12], so functions run backwards
-(`last xs | ys ++ [x] =:= xs = x  where x, ys free`) [11].
+narrowing to Haskell [10, 12], so functions run backwards by needed
+narrowing [11]: `last xs | ys ++ [x] =:= xs = x  where x, ys free`.
 
 **Evidence.** The Oz history (HOPL 2020) says the multiparadigm goal "was
 largely achieved", and UCL "used Mozart to teach programming to all
@@ -177,10 +178,9 @@ RETURN c.name
 ```
 
 Patterns as values compose, rewriting makes semantics executable (K's
-definitions double as test oracles), and graph patterns standardised after
-a decade of dialects. SNOBOL's gotos did not survive into Icon [15],
-Wolfram's rules make evaluation depend on every rule in scope (my reading),
-and no general-purpose language puts graph patterns in `match`.
+definitions double as test oracles), and graph patterns are standard now;
+but SNOBOL's gotos did not survive into Icon [15], Wolfram's rules make
+evaluation depend on every rule in scope, and no language has them in `match`.
 
 ### Separating the model from the solver
 
@@ -209,10 +209,11 @@ Spack's concretizer became "a complete, optimizing solver, written in
 around 800 lines of declarative ASP", most solves under 10 seconds over
 nearly 64,000 packages [21]. AWS's Zelkova went "from a thousand SMT
 invocations daily to an unprecedented billion SMT calls" in five years
-[22]. Cedar restricts a policy language so that "its design
-enables a sound and complete logical encoding"; it is formalised in Lean
-(earlier Dafny), and proofs found 4 bugs and testing against the model 21
-more [24]. All of it runs behind APIs or in restricted languages. Python
+[22]. Cedar is "designed to be ergonomic, fast, safe, and analyzable"; its
+design supports precise analysis, such as proving that refactored policies
+keep the same permissions; its models and proofs are in Dafny and Lean, and
+proofs found 4 bugs and differential and property-based testing 21 more
+[24]. All of it runs behind APIs or in restricted languages. Python
 libraries (z3py, OR-Tools) get natural syntax because `__eq__` may return a
 constraint, but `and`/`or` cannot be overloaded, so z3py writes `And(a, b)`;
 Sisu has the same wall, as `==` comes from `Eq` and `and`/`or` are
@@ -246,8 +247,8 @@ began with Windows 8's USB 3.0 drivers, has been developed at AWS since
 2019, backed the claim that S3's strong consistency (December 2020) is
 "provably correct", not "probably correct", found 3 bugs in the FreeRTOS
 over-the-air protocol, and is used for S3, EBS, DynamoDB, MemoryDB, Aurora,
-EC2 and IoT; PObserve checks production logs against P specifications
-[31]. Brooker and Desai's 2025 CACM account sets TLA+ and P beside
+EC2 and IoT; PObserve checks that production systems conform to their P
+specifications [31]. Brooker and Desai's 2025 CACM account sets TLA+ and P beside
 property-based testing, fault injection and simulation [27]. S3's
 ShardStore team wrote "executable reference models as specifications" in
 Rust, which "prevented 16 issues from reaching production" [32]. From
@@ -313,9 +314,8 @@ residue of failure contexts; graph patterns and relations stay libraries.
    ```
    *Cost*: high; it is the post-1.0 `std.x.verify` of Q-16, with
    counterexamples as a first deliverable before proofs. *Conflicts*: none;
-   Cedar is the evidence that a restricted specification sublanguage, as
-   `pure` contracts are, is what keeps the encoding sound [24].
-   *Confidence*: medium.
+   Cedar shows that a language restricted for analysis, as `pure` contracts
+   are, can be analysed precisely in production [24]. *Confidence*: medium.
 5. **Search combinators over generators.** Choice is `Iter[T]`, `one{}`
    `first`, `all{}` `collect`; `std.search` adds fair interleaving, iterative
    deepening and bounded search (LogicT [38]). *Cost*: low. *Conflicts*:
@@ -355,7 +355,7 @@ residue of failure contexts; graph patterns and relations stay libraries.
 
 ## Sources
 
-The web-search limit was reached during this research; unchecked claims are flagged.
+The web-search limit was reached during this research: unchecked claims are flagged in the text, and entries without a URL are cited from memory.
 
 1. L. Augustsson, J. Breitner, K. Claessen, R. Jhala, S. Peyton Jones, O. Shivers, G. L. Steele Jr., T. Sweeney, "The Verse Calculus: A Core Calculus for Deterministic Functional Logic Programming", PACMPL 7 (ICFP), art. 203, Aug 2023 (extended version). https://doi.org/10.1145/3607845 ; https://www.cs.tufts.edu/~nr/cs257/archive/simon-peyton-jones/verse-icfp23.pdf
 2. Epic Games, "Failure in Verse", UEFN documentation (2023-2026). https://dev.epicgames.com/documentation/en-us/uefn/failure-in-verse
