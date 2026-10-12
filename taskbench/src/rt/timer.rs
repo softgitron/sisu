@@ -1,16 +1,21 @@
-//! A timer thread: a binary heap of deadlines and the wakers to call.
+//! Timers, fired by the workers themselves (as Go fires timers on its Ps).
 //!
-//! The thread asks for 1 ns timer slack so that wake-ups are as precise as the
-//! kernel allows; the starvation benchmark reports the idle-system lateness of a
-//! sleeping task as its baseline, so timer precision is measured, not assumed.
+//! A binary heap of deadlines and wakers, plus the earliest deadline in an
+//! atomic so that a worker can check "is anything due?" with one load and one
+//! clock read at every scheduling decision. Due timers are fired by whichever
+//! worker notices; the tasks they wake take that worker's `next` slot. When the
+//! workers sleep, one of them, the timer owner, sleeps only until the earliest
+//! deadline; registering an earlier deadline nudges it. An earlier design used a
+//! dedicated timer thread, which on a machine whose CPUs are all busy with
+//! workers waits for the kernel to schedule it: that alone put the starvation
+//! probe's p99 at about 0.5 ms.
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
-use std::sync::{Condvar, Mutex};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
 use std::task::Waker;
-use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 struct Entry {
     deadline: Instant,
@@ -41,119 +46,118 @@ struct Inner {
     seq: u64,
 }
 
-/// The runtime's timer.
+const NONE: u64 = u64::MAX;
+
+/// The runtime's timer heap.
 pub(crate) struct Timer {
     inner: Mutex<Inner>,
-    cv: Condvar,
-    started: AtomicBool,
-    thread: Mutex<Option<thread::JoinHandle<()>>>,
-    shutdown: AtomicBool,
+    /// Earliest deadline as nanoseconds since `epoch`; `NONE` when empty.
+    earliest: AtomicU64,
+    epoch: Instant,
 }
-
-struct TimerPtr(*const Timer);
-// SAFETY: the Timer lives inside the runtime's shared state, which outlives the
-// timer thread (joined in `shutdown`).
-unsafe impl Send for TimerPtr {}
 
 impl Timer {
     pub(crate) fn new() -> Timer {
         Timer {
             inner: Mutex::new(Inner { heap: BinaryHeap::new(), seq: 0 }),
-            cv: Condvar::new(),
-            started: AtomicBool::new(false),
-            thread: Mutex::new(None),
-            shutdown: AtomicBool::new(false),
+            earliest: AtomicU64::new(NONE),
+            epoch: Instant::now(),
         }
     }
 
-    /// Starts the timer thread. Done when the runtime starts, because a thread
-    /// cannot be created later once the process is out of VMAs or memory, which is
-    /// exactly the state `max-tasks` drives it into.
-    pub(crate) fn start(&self) -> std::io::Result<()> {
-        let mut t = self.thread.lock().expect("timer thread lock");
-        if t.is_none() {
-            let p = TimerPtr(self);
-            *t = Some(thread::Builder::new().name("taskbench-timer".into()).spawn(move || {
-                let p = p;
-                // SAFETY: see TimerPtr.
-                unsafe { (*p.0).run() }
-            })?);
-            self.started.store(true, SeqCst);
-        }
-        Ok(())
+    fn encode(&self, t: Instant) -> u64 {
+        t.saturating_duration_since(self.epoch).as_nanos().min((NONE - 1) as u128) as u64
     }
 
-    fn ensure_started(&self) {
-        if !self.started.load(SeqCst)
-            && let Err(e) = self.start() {
-                eprintln!("taskbench: cannot start the timer thread: {e}");
-            }
+    fn publish(&self, g: &Inner) {
+        let v = g.heap.peek().map(|e| self.encode(e.deadline)).unwrap_or(NONE);
+        self.earliest.store(v, SeqCst);
     }
 
-    /// Calls `waker` at or after `deadline`.
-    pub(crate) fn register(&self, deadline: Instant, waker: Waker) {
-        self.ensure_started();
+    /// Calls `waker` at or after `deadline`. Returns true when this became the
+    /// earliest deadline (the caller then nudges the timer owner).
+    pub(crate) fn register(&self, deadline: Instant, waker: Waker) -> bool {
         let mut g = self.inner.lock().expect("timer lock");
         let seq = g.seq;
         g.seq += 1;
         let earliest = g.heap.peek().map(|e| deadline < e.deadline).unwrap_or(true);
         g.heap.push(Entry { deadline, seq, waker });
+        self.publish(&g);
+        earliest
+    }
+
+    /// The earliest deadline, if any.
+    pub(crate) fn next_deadline(&self) -> Option<Instant> {
+        match self.earliest.load(SeqCst) {
+            NONE => None,
+            ns => Some(self.epoch + Duration::from_nanos(ns)),
+        }
+    }
+
+    /// Whether a timer is due (one atomic load and one clock read).
+    pub(crate) fn is_due(&self) -> bool {
+        let e = self.earliest.load(SeqCst);
+        e != NONE && self.encode(Instant::now()) >= e
+    }
+
+    /// Fires every due timer; returns how many. Skips (returns 0) if another
+    /// thread is firing at the same moment.
+    pub(crate) fn fire_due(&self) -> usize {
+        if !self.is_due() {
+            return 0;
+        }
+        let Ok(mut g) = self.inner.try_lock() else { return 0 };
+        let now = Instant::now();
+        let mut due = Vec::new();
+        while g.heap.peek().is_some_and(|top| top.deadline <= now) {
+            due.push(g.heap.pop().expect("peeked").waker);
+        }
+        self.publish(&g);
         drop(g);
-        if earliest {
-            self.cv.notify_one();
+        let n = due.len();
+        for w in due {
+            w.wake();
         }
+        n
     }
 
-    fn run(&self) {
-        // SAFETY: prctl(PR_SET_TIMERSLACK) only changes this thread's timer slack.
-        unsafe {
-            libc::prctl(libc::PR_SET_TIMERSLACK, 1 as libc::c_ulong, 0, 0, 0);
-        }
-        let mut due: Vec<Waker> = Vec::new();
+    /// Drops pending entries (at shutdown).
+    pub(crate) fn clear(&self) {
         let mut g = self.inner.lock().expect("timer lock");
-        loop {
-            if self.shutdown.load(SeqCst) {
-                return;
-            }
-            let now = Instant::now();
-            while let Some(top) = g.heap.peek() {
-                if top.deadline <= now {
-                    due.push(g.heap.pop().expect("peeked").waker);
-                } else {
-                    break;
-                }
-            }
-            if !due.is_empty() {
-                drop(g);
-                for w in due.drain(..) {
-                    w.wake();
-                }
-                g = self.inner.lock().expect("timer lock");
-                continue;
-            }
-            g = match g.heap.peek() {
-                Some(top) => {
-                    let wait = top.deadline.saturating_duration_since(now);
-                    self.cv.wait_timeout(g, wait).expect("timer lock").0
-                }
-                None => self.cv.wait(g).expect("timer lock"),
-            };
+        g.heap.clear();
+        self.publish(&g);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::task::Wake;
+
+    struct Count(AtomicUsize);
+    impl Wake for Count {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, SeqCst);
         }
     }
 
-    /// Asks the timer thread to stop.
-    pub(crate) fn shutdown(&self) {
-        self.shutdown.store(true, SeqCst);
-        let _g = self.inner.lock().expect("timer lock");
-        self.cv.notify_all();
-    }
-
-    /// Joins the timer thread (after `shutdown`) and drops pending entries.
-    pub(crate) fn join(&self) {
-        let h = self.thread.lock().expect("timer thread lock").take();
-        if let Some(h) = h {
-            let _ = h.join();
-        }
-        self.inner.lock().expect("timer lock").heap.clear();
+    #[test]
+    fn fires_in_order_and_publishes_earliest() {
+        let t = Timer::new();
+        let c = Arc::new(Count(AtomicUsize::new(0)));
+        let now = Instant::now();
+        assert!(t.register(now + Duration::from_secs(60), Waker::from(c.clone())));
+        assert!(t.register(now, Waker::from(c.clone())), "earlier deadline becomes earliest");
+        assert!(!t.register(now + Duration::from_secs(30), Waker::from(c.clone())));
+        assert!(t.is_due());
+        assert_eq!(t.fire_due(), 1);
+        assert_eq!(c.0.load(SeqCst), 1);
+        assert!(!t.is_due());
+        let next = t.next_deadline().unwrap();
+        assert!(next > now + Duration::from_secs(29) && next < now + Duration::from_secs(31));
+        t.clear();
+        assert!(t.next_deadline().is_none());
     }
 }

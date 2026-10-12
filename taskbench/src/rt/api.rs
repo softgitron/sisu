@@ -115,7 +115,9 @@ pub fn check_cancelled() -> Result<(), TaskError> {
 pub fn sleep(d: Duration) -> Result<(), TaskError> {
     let t = current_task().expect("sleep called outside a task");
     let deadline = Instant::now() + d;
-    t.shared().timer.register(deadline, current_waker());
+    if t.shared().timer.register(deadline, current_waker()) {
+        t.shared().timer_changed();
+    }
     loop {
         check_cancelled()?;
         if Instant::now() >= deadline {
@@ -170,7 +172,9 @@ pub fn sleep_async(d: Duration) -> impl Future<Output = Result<(), TaskError>> {
         if !registered {
             registered = true;
             let t = current_task().expect("sleep_async outside a task");
-            t.shared().timer.register(deadline, cx.waker().clone());
+            if t.shared().timer.register(deadline, cx.waker().clone()) {
+                t.shared().timer_changed();
+            }
         }
         Poll::Pending
     })

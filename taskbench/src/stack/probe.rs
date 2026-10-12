@@ -154,16 +154,57 @@ pub fn split_stack_limit() -> usize {
     {
         let v: usize;
         // SAFETY: reads the reserved slot described in `set_split_stack_limit`.
-        unsafe { std::arch::asm!("mov {}, qword ptr fs:[0x70]", out(reg) v, options(nostack, readonly, preserves_flags)) };
+        unsafe {
+            std::arch::asm!("mov {}, qword ptr fs:[0x70]", out(reg) v, options(nostack, readonly, preserves_flags))
+        };
         v
     }
     #[cfg(not(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu")))]
     TASK_LIMIT.with(|l| l.get())
 }
 
+thread_local! {
+    /// The running task's real (exhaustion) limit when the split-stack slot holds a
+    /// higher decommit watermark (strategy D(B)); zero otherwise.
+    static REAL_LIMIT: Cell<usize> = const { Cell::new(0) };
+    /// Set when the probe fired above the real limit: the task's stack grew below
+    /// its decommit watermark.
+    static TRIPPED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Sets the probe slot to `probe_limit` and the exhaustion limit to `real_limit`
+/// for the task about to run on this thread. With `probe_limit > real_limit` the
+/// difference is a decommit watermark.
+pub fn set_task_limits(probe_limit: usize, real_limit: usize) {
+    set_split_stack_limit(probe_limit);
+    REAL_LIMIT.with(|r| r.set(if probe_limit > real_limit { real_limit } else { 0 }));
+}
+
+/// Whether the running task crossed its watermark since the last call.
+pub fn take_tripped() -> bool {
+    TRIPPED.with(|t| t.replace(false))
+}
+
+/// Slow path of [`SplitStackProbe`]: a watermark crossing (record it, drop the
+/// slot to the real limit, carry on) or exhaustion.
+#[cold]
+#[inline(never)]
+fn probe_slow() {
+    let sp = current_sp();
+    let real = REAL_LIMIT.with(|r| r.get());
+    if real != 0 && sp >= real {
+        TRIPPED.with(|t| t.set(true));
+        REAL_LIMIT.with(|r| r.set(0));
+        set_split_stack_limit(real);
+        return;
+    }
+    exhausted(sp, split_stack_limit().max(real));
+}
+
 /// The probe task bodies use: one compare of the stack pointer against the
 /// split-stack slot that the scheduler keeps equal to the running task's limit
-/// (zero, never firing, for guard-page strategies).
+/// (zero, never firing, for guard-page strategies; a decommit watermark above
+/// the real limit for D(B), see [`set_task_limits`]).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SplitStackProbe;
 
@@ -178,12 +219,14 @@ impl StackProbe for SplitStackProbe {
             std::arch::asm!(
                 "cmp rsp, qword ptr fs:[0x70]",
                 "jb {fail}",
-                fail = label { exhausted(current_sp(), split_stack_limit()) },
+                fail = label { probe_slow() },
                 options(readonly, nostack),
             );
         }
         #[cfg(not(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu")))]
-        check_against(split_stack_limit());
+        if current_sp() < split_stack_limit() {
+            probe_slow();
+        }
     }
 }
 
@@ -282,6 +325,19 @@ mod tests {
         set_split_stack_limit(old);
         assert!(r.expect_err("must fire").downcast_ref::<StackExhausted>().is_some());
         assert_eq!(split_stack_limit(), old);
+    }
+
+    #[test]
+    fn watermark_trips_without_failing() {
+        let sp = current_sp();
+        // Watermark above us, real limit far below: the probe reports, not fails.
+        set_task_limits(sp + 4096, sp - 64 * 1024);
+        SplitStackProbe.check();
+        assert!(take_tripped());
+        assert_eq!(split_stack_limit(), sp - 64 * 1024, "slot dropped to the real limit");
+        SplitStackProbe.check();
+        assert!(!take_tripped());
+        set_task_limits(0, 0);
     }
 
     #[test]

@@ -80,7 +80,12 @@ fn nested_scopes() {
         scope(|s| {
             let hs: Vec<_> = (0..8)
                 .map(|i| {
-                    s.spawn(move || scope(|inner| (0..8).map(|j| inner.spawn(move || i * 8 + j)).map(|h| h.join().unwrap()).sum::<usize>()).unwrap())
+                    s.spawn(move || {
+                        scope(|inner| {
+                            (0..8).map(|j| inner.spawn(move || i * 8 + j)).map(|h| h.join().unwrap()).sum::<usize>()
+                        })
+                        .unwrap()
+                    })
                 })
                 .collect();
             hs.into_iter().map(|h| h.join().unwrap()).sum::<usize>()
@@ -340,7 +345,9 @@ fn exhaustion_is_a_clean_task_failure_on_every_strategy() {
             .unwrap();
             (r.unwrap_err(), counter.0.load(SeqCst), counter.1.load(SeqCst))
         });
-        let TaskError::StackExhausted { how, .. } = &err else { panic!("{}: expected exhaustion, got {err:?}", c.label()) };
+        let TaskError::StackExhausted { how, .. } = &err else {
+            panic!("{}: expected exhaustion, got {err:?}", c.label())
+        };
         match c.id {
             StrategyId::A => assert_eq!(*how, Exhaustion::GuardPage),
             StrategyId::D if c.decommit_base == StrategyId::A => assert_eq!(*how, Exhaustion::GuardPage),
@@ -471,4 +478,16 @@ fn park_switch_frame_is_shallow() {
     });
     eprintln!("park writes {depth} bytes below the caller's stack pointer");
     assert!(depth < crate::stack::decommit::SWITCH_MARGIN, "switch frame deeper than D's margin: {depth}");
+}
+
+/// A panic on a 2 KiB exact stack is reported without overflowing it: the hook
+/// runs on the worker's stack.
+#[test]
+fn panic_on_small_stack_is_reported() {
+    let mut c = cfg(StrategyId::C);
+    c.exact = 2048;
+    let rt = Runtime::new(2, &c).unwrap();
+    let r = rt.block_on(|| scope(|s| s.spawn(|| -> u8 { panic!("small stack {}", 42) }).join()).unwrap());
+    assert_eq!(r, Err(TaskError::Panicked("small stack 42".into())));
+    assert_eq!(rt.stack_counters().canary_failures, 0);
 }

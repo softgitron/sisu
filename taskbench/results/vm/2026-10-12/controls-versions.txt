@@ -1,0 +1,9 @@
+date_utc: 2026-10-12T22:48:47Z
+machine_id: vm
+scale: smoke
+threads: 4 (GOMAXPROCS and jdk.virtualThreadScheduler.parallelism)
+go: go version go1.24.7 linux/amd64
+java: openjdk version "21.0.12.1" 2026-08-18 OpenJDK Runtime Environment (build 21.0.12.1+1-1-24.04.4-Ubuntu) OpenJDK 64-Bit Server VM (build 21.0.12.1+1-1-24.04.4-Ubuntu, mixed mode, sharing) 
+javac: javac 21.0.12.1
+java_flags: -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC
+java_tool_options: flags: none; system properties set (values not recorded): javax.net.ssl.trustStore javax.net.ssl.trustStoreType https.proxyHost https.proxyPort http.nonProxyHosts jdk.http.auth.tunneling.disabledSchemes jdk.http.auth.proxying.disabledSchemes

@@ -100,7 +100,8 @@ unsafe extern "C" fn handle_fault(sig: libc::c_int, info: *mut libc::siginfo_t, 
             // for, which is the one running on this thread, and its stack pointer is
             // inside its stack. The closure is 'static and only builds a value.
             // The stack is reset and its frames discarded (see the module docs).
-            let regs: TrapHandlerRegs = unsafe { trap.handler.setup_trap_handler(move || TaskExit::GuardTrap { fault_addr: addr }) };
+            let regs: TrapHandlerRegs =
+                unsafe { trap.handler.setup_trap_handler(move || TaskExit::GuardTrap { fault_addr: addr }) };
             let TrapHandlerRegs { rip, rsp, rbp, rdi, rsi } = regs;
             // SAFETY: editing the saved registers of the interrupted context is how a
             // handler redirects execution; corosensei specifies these five.

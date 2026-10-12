@@ -26,13 +26,16 @@ use std::future::Future;
 use std::hint::black_box;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering::{Relaxed, SeqCst}};
+use std::sync::atomic::{
+    AtomicI64, AtomicU64,
+    Ordering::{Relaxed, SeqCst},
+};
 use std::time::{Duration, Instant};
 
 use super::{BenchCtx, Impl, params};
 use crate::csv::Status;
 use crate::rt::{self, AsyncScope, Runtime, TaskError};
-use crate::stack::probe::{StackProbe, SplitStackProbe};
+use crate::stack::probe::{SplitStackProbe, StackProbe};
 
 /// Live AST nodes; zero after a case means every destructor ran.
 pub static LIVE_NODES: AtomicI64 = AtomicI64::new(0);
@@ -206,7 +209,13 @@ pub fn eval(root: &Node) -> i64 {
                     b'+' => l.wrapping_add(r),
                     b'-' => l.wrapping_sub(r),
                     b'*' => l.wrapping_mul(r),
-                    _ => if r == 0 { 0 } else { l / r },
+                    _ => {
+                        if r == 0 {
+                            0
+                        } else {
+                            l / r
+                        }
+                    }
                 }
             }
         };
@@ -307,9 +316,17 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
     let p = params(&[("parse_depth", parse_depth.to_string()), ("naive_depth", naive_depth.to_string())]);
     ctx.banner(&p);
     let (cases, healthy) = match ctx.args.imp.clone() {
-        Impl::Tokio => crate::tokio_ref::deep_recursion(ctx.args.threads, ctx.args.worker_stack, parse_depth, naive_depth)?,
+        Impl::Tokio => {
+            crate::tokio_ref::deep_recursion(ctx.args.threads, ctx.args.worker_stack, parse_depth, naive_depth)?
+        }
         Impl::OsThreads => {
-            ctx.outcome(&p, None, "deep_recursion", Status::Skipped, "not implemented for os-threads (Rust aborts on thread stack overflow)");
+            ctx.outcome(
+                &p,
+                None,
+                "deep_recursion",
+                Status::Skipped,
+                "not implemented for os-threads (Rust aborts on thread stack overflow)",
+            );
             return Ok(());
         }
         Impl::Taskbench(cfg) => {
@@ -328,7 +345,9 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
     for c in &cases {
         let (status, outcome, note) = match &c.outcome {
             Ok(v) => (Status::Ok, "completed", format!("value={v}")),
-            Err(TaskError::StackExhausted { how, detail }) => (Status::Ok, "stack_exhausted", format!("how={} {detail}", how.as_str())),
+            Err(TaskError::StackExhausted { how, detail }) => {
+                (Status::Ok, "stack_exhausted", format!("how={} {detail}", how.as_str()))
+            }
             Err(e) => (Status::Failed, "error", e.to_string()),
         };
         let mut r = ctx.row(&format!("{}_outcome", c.name), Some(if outcome == "error" { 0.0 } else { 1.0 }), "clean");

@@ -52,11 +52,7 @@ pub fn median_f64(values: &mut [f64]) -> f64 {
     }
     values.sort_by(|a, b| a.total_cmp(b));
     let mid = values.len() / 2;
-    if values.len() % 2 == 1 {
-        values[mid]
-    } else {
-        (values[mid - 1] + values[mid]) / 2.0
-    }
+    if values.len() % 2 == 1 { values[mid] } else { (values[mid - 1] + values[mid]) / 2.0 }
 }
 
 #[cfg(test)]

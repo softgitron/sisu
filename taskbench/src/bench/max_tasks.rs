@@ -2,9 +2,10 @@
 //! which limit it was.
 //!
 //! Tasks are spawned one at a time (each does shallow work and parks on a gate)
-//! until a spawn fails, `--tasks` (the cap) is reached, or `MemAvailable` drops
-//! below `--mem-guard` (so a development machine is not driven into the OOM
-//! killer; on the full-scale machine set the guard low). The limit is reported as
+//! until a spawn fails, `--tasks` (the cap) is reached, or the memory headroom
+//! (`MemAvailable`, or the memory cgroup's limit minus its usage when that is
+//! smaller) drops below `--mem-guard` (so a development machine is not driven
+//! into the OOM killer; on the full-scale machine set the guard low). The limit is reported as
 //! `vma_count` (`vm.max_map_count`, which a guard page per task hits at about
 //! 32k), `memory`, `threads` (OS-thread reference: `kernel.threads-max`,
 //! `kernel.pid_max`, `RLIMIT_NPROC` or the cgroup's `pids.max`), `mem_guard` or
@@ -77,7 +78,7 @@ pub fn emit(ctx: &mut BenchCtx, p: &str, res: &MaxResult) {
 }
 
 fn below_guard(guard: u64) -> bool {
-    mem::mem_available().map(|a| a < guard).unwrap_or(false)
+    mem::mem_headroom().map(|a| a < guard).unwrap_or(false)
 }
 
 fn stackful(rt: &Runtime, cap: u64, guard: u64) -> MaxResult {
@@ -90,7 +91,7 @@ fn stackful(rt: &Runtime, cap: u64, guard: u64) -> MaxResult {
                 if res.created.is_multiple_of(4096) {
                     if below_guard(guard) {
                         res.limit = "mem_guard".into();
-                        res.detail = format!("MemAvailable below {guard} bytes");
+                        res.detail = format!("memory headroom below {guard} bytes");
                         break;
                     }
                     let _ = rt::yield_now();
@@ -138,7 +139,7 @@ fn stackless(rt: &Runtime, cap: u64, guard: u64) -> MaxResult {
             if res.created.is_multiple_of(4096) {
                 if below_guard(guard) {
                     res.limit = "mem_guard".into();
-                    res.detail = format!("MemAvailable below {guard} bytes");
+                    res.detail = format!("memory headroom below {guard} bytes");
                     break;
                 }
                 let _ = rt::yield_now_async().await;
@@ -163,16 +164,33 @@ fn stackless(rt: &Runtime, cap: u64, guard: u64) -> MaxResult {
 }
 
 /// Reference: OS threads with small stacks, parked on a condition variable.
+/// Mappings per Rust thread: its stack and guard, plus the signal stack and guard
+/// that std maps for its stack-overflow handler.
+const VMAS_PER_THREAD: u64 = 4;
+/// Threads between two checks of the VMA count.
+const THREAD_BATCH: u64 = 256;
+
 fn os_threads(cap: u64, guard: u64, stack: usize) -> MaxResult {
     use std::sync::{Condvar, Mutex};
     let gate = Arc::new((Mutex::new(false), Condvar::new()));
     let mut res = MaxResult { cap, base: mem::snapshot(false), limit: "cap".into(), ..Default::default() };
+    let max_vmas = mem::read_sysctl("vm/max_map_count").unwrap_or(65530);
     let t0 = Instant::now();
     let mut hs = Vec::new();
     while res.created < cap {
         if res.created.is_multiple_of(1024) && below_guard(guard) {
             res.limit = "mem_guard".into();
             break;
+        }
+        // A new thread whose signal stack cannot be mapped aborts the process
+        // (std treats it as fatal), so stop one batch before the VMA limit.
+        if res.created.is_multiple_of(THREAD_BATCH) {
+            let vmas = mem::vma_count();
+            if vmas + (THREAD_BATCH + 16) * VMAS_PER_THREAD > max_vmas {
+                res.limit = "vma_count".into();
+                res.detail = format!("{vmas} of {max_vmas} mappings: another {THREAD_BATCH} threads would not fit");
+                break;
+            }
         }
         let g = gate.clone();
         match std::thread::Builder::new().stack_size(stack).spawn(move || {

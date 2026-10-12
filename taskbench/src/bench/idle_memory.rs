@@ -10,10 +10,17 @@
 //!
 //! Strategy C sizes its exact stacks for the whole task body (shallow part plus the
 //! excursion), as a compiler computing the bound would.
+//!
+//! Without decommit, every task keeps its excursion's pages: 1M tasks need about
+//! 35 GiB after a 32 KiB excursion. So that a run at that scale on a 16 GiB
+//! machine fails cleanly instead of meeting the OOM killer, the excursion phase
+//! watches the memory headroom; once it is below `--mem-guard` (default 1 GiB)
+//! the tasks that have not made their excursion yet skip it, and the phase is
+//! reported as `failed` with the count. Spawning stops at the same guard.
 
 use std::hint::black_box;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering::SeqCst};
 use std::time::{Duration, Instant};
 
 use super::{BenchCtx, Impl, params, work};
@@ -33,6 +40,8 @@ pub struct IdleResult {
     pub shallow: Option<MemSnapshot>,
     pub excursion: Option<MemSnapshot>,
     pub excursion_span: usize,
+    /// Why the excursion phase has no valid figure (tasks skipped it), if so.
+    pub excursion_failure: Option<String>,
     pub note: String,
 }
 
@@ -40,7 +49,12 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
     let n = ctx.args.tasks.unwrap_or(10_000);
     let excursion = ctx.args.size("excursion", 32 * 1024)?;
     let settle = Duration::from_millis(ctx.args.count("settle-ms", 200)?);
-    let mut p = params(&[("excursion", excursion.to_string()), ("settle_ms", settle.as_millis().to_string())]);
+    let guard = ctx.args.size("mem-guard", 1 << 30)? as u64;
+    let mut p = params(&[
+        ("excursion", excursion.to_string()),
+        ("settle_ms", settle.as_millis().to_string()),
+        ("mem_guard", guard.to_string()),
+    ]);
     let res = match ctx.args.imp.clone() {
         Impl::Tokio => {
             ctx.banner(&p);
@@ -58,7 +72,11 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
             ctx.args.imp = Impl::Taskbench(cfg.clone());
             ctx.banner(&p);
             let rt = Runtime::with_worker_stack(ctx.args.threads, &cfg, ctx.args.worker_stack)?;
-            if cfg.id == StrategyId::E { stackless(&rt, n, excursion, settle) } else { stackful(&rt, n, excursion, settle) }
+            if cfg.id == StrategyId::E {
+                stackless(&rt, n, excursion, settle, guard)
+            } else {
+                stackful(&rt, n, excursion, settle, guard)
+            }
         }
     };
     emit(ctx, &p, &res);
@@ -84,6 +102,12 @@ pub fn emit(ctx: &mut BenchCtx, p: &str, res: &IdleResult) {
     };
     put(ctx, "tasks_created", n as f64, "count");
     for (phase, snap) in [("shallow", res.shallow), ("excursion", res.excursion)] {
+        if phase == "excursion"
+            && let Some(why) = &res.excursion_failure
+        {
+            ctx.outcome(p, tasks, "total_per_task_excursion", Status::Failed, why);
+            continue;
+        }
         let Some(s) = snap else { continue };
         let b = &res.base;
         put(ctx, &format!("rss_per_task_{phase}"), per_item(b.vm_rss, s.vm_rss, n).round(), "bytes");
@@ -102,33 +126,49 @@ pub fn emit(ctx: &mut BenchCtx, p: &str, res: &IdleResult) {
 }
 
 /// Waits (from a stackful task) until `gate` has `n` waiters, or a deadline.
-fn wait_waiting(gate: &Gate, n: u64, deadline: Instant) -> bool {
+/// With `guard`, also sets the stop flag once the memory headroom is below the
+/// guard's bytes. The waiting task can do this while a million tasks are queued
+/// because its sleep timer wakes it into a worker's `next` slot; Go's scheduler
+/// queues the equivalent goroutine behind them, so the Go control checks the
+/// guard in the goroutines instead.
+fn wait_waiting(gate: &Gate, n: u64, deadline: Instant, guard: Option<(u64, &AtomicBool)>) -> bool {
     while (gate.waiting() as u64) < n {
         if Instant::now() > deadline {
             return false;
+        }
+        if let Some((bytes, stop)) = guard
+            && !stop.load(SeqCst)
+            && mem::mem_headroom().is_some_and(|h| h < bytes)
+        {
+            stop.store(true, SeqCst);
         }
         let _ = rt::sleep(Duration::from_millis(2));
     }
     true
 }
 
+const NOT_PARKED_AGAIN: &str = "tasks did not all park again after the excursion before the deadline";
+
 fn deadline_for(n: u64) -> Instant {
     Instant::now() + Duration::from_secs(60) + Duration::from_micros(50 * n)
 }
 
-fn stackful(rt: &Runtime, n: u64, excursion: usize, settle: Duration) -> IdleResult {
+fn stackful(rt: &Runtime, n: u64, excursion: usize, settle: Duration, guard: u64) -> IdleResult {
     let gate = Gate::new();
     let span = AtomicUsize::new(0);
+    let (stop, skipped) = (AtomicBool::new(false), AtomicU64::new(0));
     rt.block_on(|| {
         let mut res = IdleResult { requested: n, base: mem::snapshot(true), ..Default::default() };
         let r = rt::scope(|s| {
             for i in 0..n {
-                let (g, sp) = (&gate, &span);
+                let (g, sp, stop, skipped) = (&gate, &span, &stop, &skipped);
                 let spawned = s.try_spawn(move || {
                     let p = SplitStackProbe;
                     black_box(work::shallow_work(p, i));
                     let _ = g.wait(0);
-                    if excursion > 0 {
+                    if excursion > 0 && stop.load(SeqCst) {
+                        skipped.fetch_add(1, SeqCst);
+                    } else if excursion > 0 {
                         let top = current_sp();
                         let low = work::excursion(p, excursion);
                         sp.fetch_max(top - low, SeqCst);
@@ -148,16 +188,29 @@ fn stackful(rt: &Runtime, n: u64, excursion: usize, settle: Duration) -> IdleRes
                 if i % 1024 == 1023 {
                     let _ = rt::yield_now();
                 }
+                if i % 4096 == 4095 && mem::mem_headroom().is_some_and(|h| h < guard) {
+                    res.failure = Some(format!("memory headroom below {guard} bytes"));
+                    break;
+                }
             }
             let deadline = deadline_for(n);
-            if wait_waiting(&gate, res.created, deadline) {
+            if wait_waiting(&gate, res.created, deadline, None) {
                 let _ = rt::sleep(settle);
                 res.shallow = Some(mem::snapshot(true));
                 if excursion > 0 {
                     gate.open();
-                    if wait_waiting(&gate, res.created, deadline) {
+                    if wait_waiting(&gate, res.created, deadline, Some((guard, &stop))) {
                         let _ = rt::sleep(settle);
                         res.excursion = Some(mem::snapshot(true));
+                    } else {
+                        res.excursion_failure = Some(NOT_PARKED_AGAIN.into());
+                    }
+                    let skipped = skipped.load(SeqCst);
+                    if skipped > 0 {
+                        res.excursion_failure = Some(format!(
+                            "{skipped} of {} tasks skipped the excursion: memory headroom below {guard} bytes",
+                            res.created
+                        ));
                     }
                 } else {
                     gate.open();
@@ -181,7 +234,7 @@ fn stackful(rt: &Runtime, n: u64, excursion: usize, settle: Duration) -> IdleRes
     })
 }
 
-fn stackless(rt: &Runtime, n: u64, excursion: usize, settle: Duration) -> IdleResult {
+fn stackless(rt: &Runtime, n: u64, excursion: usize, settle: Duration, guard: u64) -> IdleResult {
     let gate = Arc::new(Gate::new());
     let span = Arc::new(AtomicUsize::new(0));
     rt.block_on_async(async move {
@@ -204,10 +257,14 @@ fn stackless(rt: &Runtime, n: u64, excursion: usize, settle: Duration) -> IdleRe
             if i % 1024 == 1023 {
                 let _ = rt::yield_now_async().await;
             }
+            if i % 4096 == 4095 && mem::mem_headroom().is_some_and(|h| h < guard) {
+                res.failure = Some(format!("memory headroom below {guard} bytes"));
+                break;
+            }
         }
         let deadline = deadline_for(n);
         let mut ok = true;
-        while (gate.waiting() as u64) < n {
+        while (gate.waiting() as u64) < res.created {
             if Instant::now() > deadline {
                 ok = false;
                 break;
@@ -219,14 +276,18 @@ fn stackless(rt: &Runtime, n: u64, excursion: usize, settle: Duration) -> IdleRe
             res.shallow = Some(mem::snapshot(true));
             gate.open();
             if excursion > 0 {
-                while (gate.waiting() as u64) < n && Instant::now() < deadline {
+                while (gate.waiting() as u64) < res.created && Instant::now() < deadline {
                     let _ = rt::sleep_async(Duration::from_millis(2)).await;
                 }
-                let _ = rt::sleep_async(settle).await;
-                res.excursion = Some(mem::snapshot(true));
+                if (gate.waiting() as u64) < res.created {
+                    res.excursion_failure = Some(NOT_PARKED_AGAIN.into());
+                } else {
+                    let _ = rt::sleep_async(settle).await;
+                    res.excursion = Some(mem::snapshot(true));
+                }
             }
         } else {
-            res.failure = Some("tasks did not all park before the deadline".into());
+            res.failure.get_or_insert_with(|| "tasks did not all park before the deadline".into());
         }
         gate.open();
         gate.open();

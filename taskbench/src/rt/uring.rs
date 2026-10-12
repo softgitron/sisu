@@ -22,7 +22,10 @@ use std::collections::VecDeque;
 use std::io;
 use std::marker::PhantomData;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::{Relaxed, SeqCst}};
+use std::sync::atomic::{
+    AtomicBool, AtomicU64,
+    Ordering::{Relaxed, SeqCst},
+};
 use std::sync::{Arc, Mutex};
 use std::task::Waker;
 use std::thread;
@@ -152,7 +155,14 @@ impl UringDriver {
     /// point: if the task is cancelled meanwhile, the read is cancelled, but this
     /// returns only once the kernel has let go of `buf`. `on_submitted` runs right
     /// after the request is queued.
-    pub fn read(&self, fd: RawFd, buf: &mut [u8], offset: u64, force_async: bool, on_submitted: impl FnOnce()) -> ReadOutcome {
+    pub fn read(
+        &self,
+        fd: RawFd,
+        buf: &mut [u8],
+        offset: u64,
+        force_async: bool,
+        on_submitted: impl FnOnce(),
+    ) -> ReadOutcome {
         // SAFETY: the handle is consumed by `wait` below, never leaked.
         let op = unsafe { self.start_read(fd, buf, offset, force_async) };
         on_submitted();
@@ -166,7 +176,13 @@ impl UringDriver {
     /// flight the kernel may write into `buf`, and the handle's methods and drop
     /// are what wait for it to stop. Rust cannot express "must not be leaked";
     /// Sisu's rule D-058 makes it the language's guarantee.
-    pub unsafe fn start_read<'b>(&'b self, fd: RawFd, buf: &'b mut [u8], offset: u64, force_async: bool) -> InFlight<'b> {
+    pub unsafe fn start_read<'b>(
+        &'b self,
+        fd: RawFd,
+        buf: &'b mut [u8],
+        offset: u64,
+        force_async: bool,
+    ) -> InFlight<'b> {
         let waker = api::current_waker();
         let op = self.shared.ops.lock().expect("uring ops lock").insert(OpState {
             waker: Some(waker),
@@ -302,7 +318,8 @@ impl Drop for InFlight<'_> {
 fn ring_thread(mut ring: IoUring, sh: Arc<Shared>) {
     let mut efd_buf = [0u8; 8];
     let arm_eventfd = |ring: &mut IoUring, buf: &mut [u8; 8]| {
-        let e = opcode::Read::new(types::Fd(sh.event_fd.as_raw_fd()), buf.as_mut_ptr(), 8).build().user_data(EVENTFD_TOKEN);
+        let e =
+            opcode::Read::new(types::Fd(sh.event_fd.as_raw_fd()), buf.as_mut_ptr(), 8).build().user_data(EVENTFD_TOKEN);
         push_sqe(ring, &e);
     };
     arm_eventfd(&mut ring, &mut efd_buf);
@@ -322,7 +339,8 @@ fn ring_thread(mut ring: IoUring, sh: Arc<Shared>) {
                 rearm = true;
                 continue;
             }
-            let (op, is_cancel) = if ud & CANCEL_BIT != 0 { ((ud & !CANCEL_BIT) as usize, true) } else { (ud as usize, false) };
+            let (op, is_cancel) =
+                if ud & CANCEL_BIT != 0 { ((ud & !CANCEL_BIT) as usize, true) } else { (ud as usize, false) };
             let waker = {
                 let mut ops = sh.ops.lock().expect("uring ops lock");
                 let Some(st) = ops.get_mut(op) else { continue };
@@ -354,10 +372,15 @@ fn ring_thread(mut ring: IoUring, sh: Arc<Shared>) {
             for r in reqs {
                 let e = match r {
                     Request::Read { op, fd, buf, len, offset, force_async } => {
-                        let e = opcode::Read::new(types::Fd(fd), buf as *mut u8, len).offset(offset).build().user_data(op as u64);
+                        let e = opcode::Read::new(types::Fd(fd), buf as *mut u8, len)
+                            .offset(offset)
+                            .build()
+                            .user_data(op as u64);
                         if force_async { e.flags(squeue::Flags::ASYNC) } else { e }
                     }
-                    Request::Cancel { op } => opcode::AsyncCancel::new(op as u64).build().user_data(op as u64 | CANCEL_BIT),
+                    Request::Cancel { op } => {
+                        opcode::AsyncCancel::new(op as u64).build().user_data(op as u64 | CANCEL_BIT)
+                    }
                 };
                 push_sqe(&mut ring, &e);
             }

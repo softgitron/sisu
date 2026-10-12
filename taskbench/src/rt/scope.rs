@@ -99,13 +99,8 @@ impl ScopeInner {
         for t in tasks {
             t.unpark();
         }
-        let kids: Vec<Arc<ScopeInner>> = self
-            .children
-            .lock()
-            .expect("scope children lock")
-            .iter()
-            .filter_map(Weak::upgrade)
-            .collect();
+        let kids: Vec<Arc<ScopeInner>> =
+            self.children.lock().expect("scope children lock").iter().filter_map(Weak::upgrade).collect();
         for k in kids {
             k.wake_subtree();
         }
@@ -371,8 +366,7 @@ impl<'scope, 'env> Scope<'scope, 'env> {
         // SAFETY: `self.shared` is the runtime of the task that opened the scope,
         // alive while the scope is. `scope()` does not return before every child
         // has finished, so data borrowed for 'scope outlives the task.
-        let (task, slot) = unsafe { (*self.shared).spawn_stackful(&self.inner, f) }
-            .map_err(TaskError::SpawnFailed)?;
+        let (task, slot) = unsafe { (*self.shared).spawn_stackful(&self.inner, f) }.map_err(TaskError::SpawnFailed)?;
         Ok(JoinHandle { slot, task, joined: false, _scope: PhantomData })
     }
 

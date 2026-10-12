@@ -18,7 +18,10 @@
 
 use std::net::{SocketAddr, TcpStream as StdStream};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering::{Relaxed, SeqCst}};
+use std::sync::atomic::{
+    AtomicBool, AtomicU64, AtomicUsize,
+    Ordering::{Relaxed, SeqCst},
+};
 use std::time::{Duration, Instant};
 
 use super::{BenchCtx, Impl, emit_summary, params};
@@ -91,7 +94,13 @@ pub fn run(ctx: &mut BenchCtx, idle: bool) -> Result<(), String> {
     let nofile = crate::machine::raise_nofile_limit() as usize;
     if 2 * n + 64 > nofile {
         let metric = if idle { "idle_connections" } else { "echo" };
-        ctx.outcome(&p, tasks, metric, Status::Failed, &format!("RLIMIT_NOFILE={nofile} is too low for {n} connections in one process (needs {})", 2 * n + 64));
+        ctx.outcome(
+            &p,
+            tasks,
+            metric,
+            Status::Failed,
+            &format!("RLIMIT_NOFILE={nofile} is too low for {n} connections in one process (needs {})", 2 * n + 64),
+        );
         return Ok(());
     }
     let res = match ctx.args.imp.clone() {
@@ -120,7 +129,13 @@ pub fn run(ctx: &mut BenchCtx, idle: bool) -> Result<(), String> {
             let k = res.connections as u64;
             ctx.metric(&p, tasks, "rss_per_connection", per_item(b.vm_rss, s.vm_rss, k).round(), "bytes");
             ctx.metric(&p, tasks, "pte_per_connection", per_item(b.vm_pte, s.vm_pte, k).round(), "bytes");
-            ctx.metric(&p, tasks, "total_per_connection", per_item(b.rss_plus_pte(), s.rss_plus_pte(), k).round(), "bytes");
+            ctx.metric(
+                &p,
+                tasks,
+                "total_per_connection",
+                per_item(b.rss_plus_pte(), s.rss_plus_pte(), k).round(),
+                "bytes",
+            );
             ctx.metric(&p, tasks, "rss_total", s.vm_rss as f64, "bytes");
         }
     } else {
@@ -144,7 +159,15 @@ fn drive_window(recording: &AtomicBool, stop: &AtomicBool, warmup: Duration, dur
     secs
 }
 
-fn stackful(rt: &Runtime, n: usize, msg: usize, duration: Duration, warmup: Duration, idle: bool, settle: Duration) -> EchoResult {
+fn stackful(
+    rt: &Runtime,
+    n: usize,
+    msg: usize,
+    duration: Duration,
+    warmup: Duration,
+    idle: bool,
+    settle: Duration,
+) -> EchoResult {
     rt.block_on(|| {
         let mut res = EchoResult { connections: n, ..Default::default() };
         let ports = ports_for(n);
@@ -256,7 +279,15 @@ fn stackful(rt: &Runtime, n: usize, msg: usize, duration: Duration, warmup: Dura
     })
 }
 
-fn stackless(rt: &Runtime, n: usize, msg: usize, duration: Duration, warmup: Duration, idle: bool, settle: Duration) -> EchoResult {
+fn stackless(
+    rt: &Runtime,
+    n: usize,
+    msg: usize,
+    duration: Duration,
+    warmup: Duration,
+    idle: bool,
+    settle: Duration,
+) -> EchoResult {
     rt.block_on_async(async move {
         let mut res = EchoResult { connections: n, ..Default::default() };
         let ports = ports_for(n);

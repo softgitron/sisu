@@ -11,8 +11,22 @@ use crate::stack::{StrategyConfig, StrategyId};
 use crate::units;
 
 const COMMON: &[&str] = &[
-    "strategy", "tasks", "threads", "csv", "machine-spec", "machine-id", "reservation", "stack-size",
-    "probe-reserve", "guard", "chunk", "base", "stack-cache", "canary", "worker-stack", "quiet",
+    "strategy",
+    "tasks",
+    "threads",
+    "csv",
+    "machine-spec",
+    "machine-id",
+    "reservation",
+    "stack-size",
+    "probe-reserve",
+    "guard",
+    "chunk",
+    "base",
+    "stack-cache",
+    "canary",
+    "worker-stack",
+    "quiet",
 ];
 
 const FLAGS: &[&str] = &["machine-spec", "canary", "quiet", "break-contract", "scope-per-round", "help"];
@@ -20,14 +34,16 @@ const FLAGS: &[&str] = &["machine-spec", "canary", "quiet", "break-contract", "s
 fn command_options(cmd: &str) -> Option<&'static [&'static str]> {
     Some(match cmd {
         "spawn-join" => &["rounds", "warmup", "batch", "scope-per-round"],
-        "idle-memory" => &["excursion", "settle-ms"],
+        "idle-memory" => &["excursion", "settle-ms", "mem-guard"],
         "max-tasks" => &["mem-guard", "os-stack"],
         "echo" => &["connections", "msg-bytes", "duration", "warmup-secs"],
         "idle-connections" => &["connections", "settle-ms"],
         "deep-recursion" => &["parse-depth", "naive-depth"],
         "starvation" => &["yield-every", "duration", "probe-interval-us", "baseline-secs"],
         "probe-overhead" => &["reps", "workload", "fib-n", "calls", "tree-depth"],
-        "cancel-uring" => &["concurrency", "async-percent", "break-contract", "buf-bytes", "source", "file-bytes", "file-dir"],
+        "cancel-uring" => {
+            &["concurrency", "async-percent", "break-contract", "buf-bytes", "source", "file-bytes", "file-dir"]
+        }
         "machine-spec" => &[],
         _ => return None,
     })
@@ -40,7 +56,8 @@ USAGE: taskbench <command> [options]
 
 Commands:
   spawn-join        median and p99 of spawn-plus-join        (--rounds 20000 --warmup 2000 --batch 1)
-  idle-memory       resident memory per parked task          (--tasks 10000 --excursion 32K --settle-ms 200)
+  idle-memory       resident memory per parked task          (--tasks 10000 --excursion 32K --settle-ms 200
+                    --mem-guard 1G)
   max-tasks         tasks creatable before a limit stops it  (--tasks CAP=100000 --mem-guard 1G)
   echo              TCP echo, N connections, in-process client (--connections 1000 --msg-bytes 64
                     --duration 3 --warmup-secs 1)
@@ -48,11 +65,12 @@ Commands:
   deep-recursion    10k-deep parse and 1M-deep recursion in a task (--parse-depth 10000 --naive-depth 1000000)
   starvation        latency probe under N compute-bound tasks (--tasks 2*threads --yield-every 10000
                     --duration 2 --probe-interval-us 1000 --baseline-secs 1)
-  probe-overhead    compute loops with and without stack probes (--reps 7 --workload all|fib|calls|tree)
+  probe-overhead    compute loops with and without stack probes (--reps 11 --workload all|fib|calls|tree)
   cancel-uring      io_uring reads into stack buffers, cancelled in flight (--tasks 4096 --concurrency 512
                     --async-percent 25 [--break-contract])
   machine-spec      print (and with --csv record) the machine specification
   strategies        list the stack strategies
+  csv-header        print the CSV header line
   help              this text
 
 Common options:
@@ -103,6 +121,10 @@ pub fn run(argv: Vec<String>) -> Result<i32, String> {
     match cmd.as_str() {
         "help" | "--help" | "-h" => {
             print!("{HELP}");
+            return Ok(0);
+        }
+        "csv-header" => {
+            println!("{}", crate::csv::HEADER);
             return Ok(0);
         }
         "strategies" => {
@@ -206,7 +228,11 @@ mod tests {
 
     #[test]
     fn parses_common_and_specific_options() {
-        let a = parse("spawn-join", &v("--strategy A --reservation 128K --threads 2 --rounds=500 --csv out.csv --machine-spec")).unwrap();
+        let a = parse(
+            "spawn-join",
+            &v("--strategy A --reservation 128K --threads 2 --rounds=500 --csv out.csv --machine-spec"),
+        )
+        .unwrap();
         let Impl::Taskbench(c) = &a.imp else { panic!() };
         assert_eq!(c.id, StrategyId::A);
         assert_eq!(c.reservation, 128 * 1024);
@@ -233,6 +259,20 @@ mod tests {
         assert!(parse("spawn-join", &v("--threads")).is_err());
         assert!(parse("nonsense", &[]).is_err());
         assert!(parse("deep-recursion", &v("--strategy C --stack-size 1K")).is_err(), "C below 2K");
+    }
+
+    #[test]
+    fn non_default_strategy_settings_reach_params() {
+        let tuning = |args: &str| {
+            let a = parse("spawn-join", &v(args)).unwrap();
+            let Impl::Taskbench(c) = &a.imp else { panic!() };
+            crate::bench::params(&c.tuning_params())
+        };
+        assert_eq!(tuning("--strategy A"), "");
+        assert_eq!(tuning("--strategy A --stack-cache 1024"), "stack_cache=1024");
+        assert_eq!(tuning("--strategy D --stack-cache 64"), "stack_cache=64");
+        assert_eq!(tuning("--strategy B --probe-reserve 8K"), "probe_reserve=8192");
+        assert_eq!(tuning("--strategy B --stack-cache 64"), "", "B has no stack cache");
     }
 
     #[test]

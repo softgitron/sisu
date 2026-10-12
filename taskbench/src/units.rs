@@ -15,14 +15,9 @@ pub const GIB: usize = 1024 * 1024 * 1024;
 /// Parses a size such as `4096`, `16K`, `1M`, `8MiB` or `1G`.
 pub fn parse_size(text: &str) -> Result<usize, String> {
     let t = text.trim();
-    let split = t
-        .find(|c: char| !c.is_ascii_digit() && c != '_')
-        .unwrap_or(t.len());
+    let split = t.find(|c: char| !c.is_ascii_digit() && c != '_').unwrap_or(t.len());
     let (num, suffix) = t.split_at(split);
-    let num: usize = num
-        .replace('_', "")
-        .parse()
-        .map_err(|_| format!("not a size: {text:?}"))?;
+    let num: usize = num.replace('_', "").parse().map_err(|_| format!("not a size: {text:?}"))?;
     let mult = match suffix.trim().to_ascii_lowercase().as_str() {
         "" | "b" => 1,
         "k" | "kb" | "kib" => KIB,
@@ -30,8 +25,7 @@ pub fn parse_size(text: &str) -> Result<usize, String> {
         "g" | "gb" | "gib" => GIB,
         other => return Err(format!("unknown size suffix {other:?} in {text:?}")),
     };
-    num.checked_mul(mult)
-        .ok_or_else(|| format!("size overflows: {text:?}"))
+    num.checked_mul(mult).ok_or_else(|| format!("size overflows: {text:?}"))
 }
 
 /// Parses a count such as `100000`, `100_000`, `100k` or `1M` (decimal multipliers).
@@ -43,16 +37,12 @@ pub fn parse_count(text: &str) -> Result<u64, String> {
         _ => (&t[..], 1),
     };
     let n: u64 = num.parse().map_err(|_| format!("not a count: {text:?}"))?;
-    n.checked_mul(mult)
-        .ok_or_else(|| format!("count overflows: {text:?}"))
+    n.checked_mul(mult).ok_or_else(|| format!("count overflows: {text:?}"))
 }
 
 /// Parses seconds, fractional allowed: `3`, `0.5`.
 pub fn parse_secs(text: &str) -> Result<Duration, String> {
-    let s: f64 = text
-        .trim()
-        .parse()
-        .map_err(|_| format!("not a number of seconds: {text:?}"))?;
+    let s: f64 = text.trim().parse().map_err(|_| format!("not a number of seconds: {text:?}"))?;
     if !(0.0..=86_400.0).contains(&s) {
         return Err(format!("seconds out of range: {text:?}"));
     }

@@ -92,9 +92,10 @@ fn probe_loop(stop: &AtomicBool, interval: Duration, spawned: Instant) -> Vec<u6
     let mut deadline = spawned + interval;
     loop {
         if let Some(rest) = deadline.checked_duration_since(Instant::now())
-            && rt::sleep(rest).is_err() {
-                break;
-            }
+            && rt::sleep(rest).is_err()
+        {
+            break;
+        }
         let now = Instant::now();
         v.push(now.saturating_duration_since(deadline).as_nanos() as u64);
         if stop.load(Relaxed) {
@@ -155,9 +156,10 @@ fn stackless(rt: &Runtime, n: u64, k: u64, duration: Duration, baseline: Duratio
         let mut deadline = spawned + interval;
         loop {
             if let Some(rest) = deadline.checked_duration_since(Instant::now())
-                && rt::sleep_async(rest).await.is_err() {
-                    break;
-                }
+                && rt::sleep_async(rest).await.is_err()
+            {
+                break;
+            }
             let now = Instant::now();
             v.push(now.saturating_duration_since(deadline).as_nanos() as u64);
             if stop.load(Relaxed) {

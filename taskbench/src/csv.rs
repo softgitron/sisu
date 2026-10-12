@@ -124,9 +124,10 @@ impl CsvWriter {
     /// header if the file is empty.
     pub fn open_append(path: &Path) -> io::Result<CsvWriter> {
         if let Some(dir) = path.parent()
-            && !dir.as_os_str().is_empty() {
-                std::fs::create_dir_all(dir)?;
-            }
+            && !dir.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(dir)?;
+        }
         let mut file = OpenOptions::new().create(true).append(true).open(path)?;
         if file.metadata()?.len() == 0 {
             writeln!(file, "{HEADER}")?;
@@ -143,10 +144,7 @@ impl CsvWriter {
 
 /// Current UTC time as `YYYY-MM-DDTHH:MM:SSZ`.
 pub fn utc_timestamp() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     format_utc(secs)
 }
 
@@ -155,12 +153,7 @@ pub fn format_utc(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
     let (y, m, d) = civil_from_days(days);
-    format!(
-        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
-        rem / 3600,
-        (rem % 3600) / 60,
-        rem % 60
-    )
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, (rem % 3600) / 60, rem % 60)
 }
 
 /// Days since 1970-01-01 to (year, month, day); Howard Hinnant's algorithm.

@@ -155,6 +155,8 @@ fn snapshot(ptr: *const u8, len: usize) -> Vec<u8> {
     (0..len).map(|k| unsafe { std::ptr::read_volatile(ptr.add(k)) }).collect()
 }
 
+// The arguments are the experiment's parameters and its shared counters; a
+// struct would only rename them.
 #[allow(clippy::too_many_arguments)]
 fn reader(
     driver: &UringDriver,
@@ -195,7 +197,8 @@ fn reader(
     // Check 1: on return, bytes past the result are untouched, bytes before it are data.
     let first = snapshot(ptr, len);
     let n = outcome.map(|o| o.result.max(0) as usize).unwrap_or(0).min(len);
-    rep.bad_after_return = first[..n].iter().filter(|&&b| b != t.expect).count() + first[n..].iter().filter(|&&b| b != s).count();
+    rep.bad_after_return =
+        first[..n].iter().filter(|&&b| b != t.expect).count() + first[n..].iter().filter(|&&b| b != s).count();
     // Stay alive, frame intact, while anything still in flight lands.
     gate.wait_shielded(0);
     // Check 2: nothing changed after the read returned.
@@ -246,7 +249,9 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
         Impl::Taskbench(c) if !ctx.args.imp.is_stackless() => c,
         other => {
             let why = match other {
-                Impl::Tokio => "tokio has no completion I/O into borrowed buffers (tokio-uring takes owned buffers because Rust values can be leaked; N-07)",
+                Impl::Tokio => {
+                    "tokio has no completion I/O into borrowed buffers (tokio-uring takes owned buffers because Rust values can be leaked; N-07)"
+                }
                 _ => "the test lends buffers on task stacks; run it with a stackful strategy (A-D)",
             };
             ctx.outcome(&p, tasks, "cancel_uring", Status::Skipped, why);
@@ -267,7 +272,13 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
         match data_file(&dir, file_blocks, direct) {
             Ok(fd) => data_fd = Some(fd),
             Err(e) => {
-                ctx.outcome(&p, tasks, "cancel_uring", Status::Skipped, &format!("skipped: no O_DIRECT file in {}: {e}", dir.display()));
+                ctx.outcome(
+                    &p,
+                    tasks,
+                    "cancel_uring",
+                    Status::Skipped,
+                    &format!("skipped: no O_DIRECT file in {}: {e}", dir.display()),
+                );
                 return Ok(());
             }
         }
@@ -296,9 +307,10 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
                 None => Target { fd: pipes[i].0.as_raw_fd(), offset: 0, expect: data_byte(round, i) },
             };
             if let Some(fd) = &data_fd
-                && !direct {
-                    evict(fd.as_raw_fd());
-                }
+                && !direct
+            {
+                evict(fd.as_raw_fd());
+            }
             let reps = rt::scope(|s| {
                 let hs: Vec<_> = (0..k)
                     .map(|i| {
@@ -371,12 +383,24 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
     ctx.metric(&p, tasks, "completed_with_data", count(&|r| r.result > 0), "count");
     ctx.metric(&p, tasks, "ended_ecanceled", count(&|r| r.result == -libc::ECANCELED), "count");
     ctx.metric(&p, tasks, "ended_eintr", count(&|r| r.result == -libc::EINTR), "count");
-    ctx.metric(&p, tasks, "ended_other", count(&|r| r.result <= 0 && r.result != -libc::ECANCELED && r.result != -libc::EINTR), "count");
+    ctx.metric(
+        &p,
+        tasks,
+        "ended_other",
+        count(&|r| r.result <= 0 && r.result != -libc::ECANCELED && r.result != -libc::EINTR),
+        "count",
+    );
     ctx.metric(&p, tasks, "cancels_submitted", st.cancels_submitted as f64, "count");
     ctx.metric(&p, tasks, "cancel_ok", st.cancel_ok as f64, "count");
     ctx.metric(&p, tasks, "cancel_enoent", st.cancel_enoent as f64, "count");
     ctx.metric(&p, tasks, "cancel_ealready", st.cancel_ealready as f64, "count");
-    ctx.metric(&p, tasks, "completed_after_failed_cancel", count(&|r| r.result > 0 && matches!(r.cancel, Some(c) if c < 0)), "count");
+    ctx.metric(
+        &p,
+        tasks,
+        "completed_after_failed_cancel",
+        count(&|r| r.result > 0 && matches!(r.cancel, Some(c) if c < 0)),
+        "count",
+    );
     ctx.metric(&p, tasks, "abandoned_reads", count(&|r| r.abandoned), "count");
     ctx.metric(&p, tasks, "elapsed", elapsed.as_secs_f64() * 1e3, "ms");
     let mut r = ctx.row("buffer_writes_after_return", Some((after + late) as f64), "bytes");

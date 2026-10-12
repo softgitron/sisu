@@ -33,7 +33,7 @@ use corosensei::{Coroutine, Yielder};
 use super::scope::ScopeInner;
 use super::worker::{Hint, Shared};
 use crate::stack::probe::StackExhausted;
-use crate::stack::{Exhaustion, StackError, StackRegion, TaskStack};
+use crate::stack::{DecommitMark, Exhaustion, StackError, StackRegion, TaskStack};
 
 pub(crate) const SCHEDULED: u8 = 0;
 pub(crate) const RUNNING: u8 = 1;
@@ -80,7 +80,11 @@ impl TaskError {
     pub fn from_panic(payload: Box<dyn Any + Send>) -> TaskError {
         if let Some(se) = payload.downcast_ref::<StackExhausted>() {
             return TaskError::StackExhausted {
-                how: if super::api::current_is_stackless() { Exhaustion::WorkerStackProbe } else { Exhaustion::SoftwareProbe },
+                how: if super::api::current_is_stackless() {
+                    Exhaustion::WorkerStackProbe
+                } else {
+                    Exhaustion::SoftwareProbe
+                },
                 detail: format!("probe fired at sp {:#x} (limit {:#x})", se.sp, se.limit),
             };
         }
@@ -145,6 +149,8 @@ pub(crate) struct TaskLocal {
     pub open_scope: Option<Arc<ScopeInner>>,
     /// Copy of the stack region (absent for stackless tasks).
     pub region: Option<StackRegion>,
+    /// Strategy D's knowledge of what is committed on this stack.
+    pub mark: DecommitMark,
 }
 
 pub struct Task {
@@ -199,7 +205,13 @@ impl Task {
             reg_index: AtomicUsize::new(usize::MAX),
             fail: UnsafeCell::new(Some(fail)),
             body: UnsafeCell::new(Body::Empty),
-            local: UnsafeCell::new(TaskLocal { yielder: std::ptr::null(), park_sp: 0, open_scope: None, region }),
+            local: UnsafeCell::new(TaskLocal {
+                yielder: std::ptr::null(),
+                park_sp: 0,
+                open_scope: None,
+                region,
+                mark: DecommitMark::default(),
+            }),
         }
     }
 
@@ -245,6 +257,8 @@ impl Task {
     /// # Safety
     /// The caller must own the task's RUNNING state (be the task, or its worker
     /// while it is suspended in the worker's hands).
+    // `&self -> &mut` is the point: the fields live in an `UnsafeCell` whose
+    // exclusivity comes from the task state machine, not from the borrow.
     #[allow(clippy::mut_from_ref)]
     pub(crate) unsafe fn local_mut(&self) -> &mut TaskLocal {
         // SAFETY: exclusive by the caller's contract.

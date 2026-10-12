@@ -91,7 +91,10 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
             let mut row = ctx.row("stack_reuse_ratio", Some(c.reused as f64 / c.allocated.max(1) as f64), "ratio");
             row.params = p.clone();
             row.tasks = tasks;
-            row.note = format!("allocated={} reused={} steals={} worker_wakeups={}", c.allocated, c.reused, st.steals, st.worker_wakeups);
+            row.note = format!(
+                "allocated={} reused={} steals={} worker_wakeups={}",
+                c.allocated, c.reused, st.steals, st.worker_wakeups
+            );
             ctx.emit(row);
             samples
         }

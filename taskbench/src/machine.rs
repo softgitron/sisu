@@ -17,9 +17,7 @@ pub fn default_machine_id() -> String {
 }
 
 fn read_trim(path: &str) -> String {
-    fs::read_to_string(path)
-        .map(|s| s.trim().replace('\n', " "))
-        .unwrap_or_else(|e| format!("unreadable: {e}"))
+    fs::read_to_string(path).map(|s| s.trim().replace('\n', " ")).unwrap_or_else(|e| format!("unreadable: {e}"))
 }
 
 fn uname() -> (String, String, String) {
@@ -43,11 +41,7 @@ fn rlimit(res: libc::__rlimit_resource_t) -> String {
         return "?".into();
     }
     let f = |v: libc::rlim_t| {
-        if v == libc::RLIM_INFINITY {
-            "unlimited".to_string()
-        } else {
-            v.to_string()
-        }
+        if v == libc::RLIM_INFINITY { "unlimited".to_string() } else { v.to_string() }
     };
     format!("{}/{}", f(r.rlim_cur), f(r.rlim_max))
 }
@@ -60,10 +54,7 @@ pub fn collect() -> Vec<(String, String)> {
     out.push(("hostname".into(), default_machine_id()));
     let os = fs::read_to_string("/etc/os-release")
         .ok()
-        .and_then(|t| {
-            t.lines()
-                .find_map(|l| l.strip_prefix("PRETTY_NAME=").map(|v| v.trim_matches('"').to_string()))
-        })
+        .and_then(|t| t.lines().find_map(|l| l.strip_prefix("PRETTY_NAME=").map(|v| v.trim_matches('"').to_string())))
         .unwrap_or_else(|| "?".into());
     out.push(("os".into(), os));
     let cpuinfo = fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
@@ -75,14 +66,8 @@ pub fn collect() -> Vec<(String, String)> {
     let online = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0);
     out.push(("cpus_available".into(), online.to_string()));
     out.push(("cpus_online".into(), read_trim("/sys/devices/system/cpu/online")));
-    out.push((
-        "cpu_governor".into(),
-        read_trim("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
-    ));
-    out.push((
-        "mem_total_bytes".into(),
-        crate::mem::mem_total().map(|v| v.to_string()).unwrap_or_else(|| "?".into()),
-    ));
+    out.push(("cpu_governor".into(), read_trim("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")));
+    out.push(("mem_total_bytes".into(), crate::mem::mem_total().map(|v| v.to_string()).unwrap_or_else(|| "?".into())));
     let swap = fs::read_to_string("/proc/meminfo")
         .ok()
         .and_then(|t| t.lines().find(|l| l.starts_with("SwapTotal")).map(|l| l.to_string()))
@@ -106,30 +91,24 @@ pub fn collect() -> Vec<(String, String)> {
     ] {
         out.push((format!("sysctl.{}", key.replace('/', ".")), read_trim(&format!("/proc/sys/{key}"))));
     }
-    out.push((
-        "thp_enabled".into(),
-        read_trim("/sys/kernel/mm/transparent_hugepage/enabled"),
-    ));
-    out.push((
-        "thp_defrag".into(),
-        read_trim("/sys/kernel/mm/transparent_hugepage/defrag"),
-    ));
-    out.push((
-        "cpu_mitigations".into(),
-        read_trim("/sys/devices/system/cpu/vulnerabilities/spectre_v2"),
-    ));
+    out.push(("thp_enabled".into(), read_trim("/sys/kernel/mm/transparent_hugepage/enabled")));
+    out.push(("thp_defrag".into(), read_trim("/sys/kernel/mm/transparent_hugepage/defrag")));
+    out.push(("cpu_mitigations".into(), read_trim("/sys/devices/system/cpu/vulnerabilities/spectre_v2")));
     out.push(("rlimit_nofile".into(), rlimit(libc::RLIMIT_NOFILE)));
     out.push(("rlimit_nproc".into(), rlimit(libc::RLIMIT_NPROC)));
     out.push(("rlimit_stack".into(), rlimit(libc::RLIMIT_STACK)));
     out.push(("rlimit_as".into(), rlimit(libc::RLIMIT_AS)));
     out.push(("rlimit_memlock".into(), rlimit(libc::RLIMIT_MEMLOCK)));
-    let cgroup_max = read_trim("/sys/fs/cgroup/memory.max");
-    out.push(("cgroup_memory_max".into(), cgroup_max));
-    out.push(("cgroup_pids_max".into(), read_trim("/sys/fs/cgroup/pids.max")));
-    out.push((
-        "harness_version".into(),
-        env!("CARGO_PKG_VERSION").to_string(),
-    ));
+    let cgroup = |controller: &str, v1: &str, v2: &str| {
+        crate::mem::cgroup_file(controller, v1, v2).unwrap_or_else(|| "unreadable".into())
+    };
+    let memory_max = match crate::mem::cgroup_memory_limit() {
+        Some(limit) => limit.to_string(),
+        None => cgroup("memory", "memory.limit_in_bytes", "memory.max"),
+    };
+    out.push(("cgroup_memory_max".into(), memory_max));
+    out.push(("cgroup_pids_max".into(), cgroup("pids", "pids.max", "pids.max")));
+    out.push(("harness_version".into(), env!("CARGO_PKG_VERSION").to_string()));
     out
 }
 

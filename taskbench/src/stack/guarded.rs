@@ -55,11 +55,12 @@ impl StackStrategy for GuardedMmap {
 
     fn allocate(&self) -> Result<StackRegion, StackError> {
         if self.cache_cap > 0
-            && let Some(r) = self.cache.lock().expect("stack cache lock").pop() {
-                self.counters.allocated.fetch_add(1, Relaxed);
-                self.counters.reused.fetch_add(1, Relaxed);
-                return Ok(r);
-            }
+            && let Some(r) = self.cache.lock().expect("stack cache lock").pop()
+        {
+            self.counters.allocated.fetch_add(1, Relaxed);
+            self.counters.reused.fetch_add(1, Relaxed);
+            return Ok(r);
+        }
         let total = self.total();
         let addr = os::reserve(total).map_err(|e| StackError::classify("mmap", e))?;
         // SAFETY: [addr, addr+guard) is the low end of the mapping just created
@@ -122,14 +123,16 @@ mod tests {
     #[test]
     fn allocates_guarded_lazy_stacks() {
         let s = GuardedMmap::new(64 * 1024, 4096, 0);
-        let vmas_before = mem::vma_count();
         let r = s.allocate().unwrap();
         assert_eq!(r.usable_bytes(), 64 * 1024);
         assert!(r.has_guard());
         assert_eq!(r.guard_hi - r.guard_lo, 4096);
         assert_eq!(r.base % 16, 0);
-        // Two new VMAs: the guard and the stack.
-        assert!(mem::vma_count() >= vmas_before + 2);
+        // Two VMAs: the guard and, adjacent above it, the stack.
+        let guard = mem::mapping_containing(r.guard_lo).expect("guard mapped");
+        let stack = mem::mapping_containing(r.usable_low).expect("stack mapped");
+        assert_ne!(guard, stack, "guard and stack must be separate mappings");
+        assert_eq!(guard.1, r.usable_low);
         // Lazy commit: nothing is resident until touched, then only the touched page.
         assert_eq!(mem::resident_pages(r.usable_low, r.usable_bytes()), 0);
         // SAFETY: the top word of the usable range belongs to this test.
@@ -145,10 +148,8 @@ mod tests {
         let s = GuardedMmap::new(64 * 1024, 4096, 0);
         let r = s.allocate().unwrap();
         let maps = std::fs::read_to_string("/proc/self/maps").unwrap();
-        let guard_line = maps
-            .lines()
-            .find(|l| l.starts_with(&format!("{:x}-", r.guard_lo)))
-            .expect("guard mapping listed");
+        let guard_line =
+            maps.lines().find(|l| l.starts_with(&format!("{:x}-", r.guard_lo))).expect("guard mapping listed");
         assert!(guard_line.contains("---p"), "guard not PROT_NONE: {guard_line}");
         // SAFETY: allocated above, released once.
         unsafe { s.release(r) };

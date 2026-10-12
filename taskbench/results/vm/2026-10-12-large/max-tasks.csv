@@ -1,0 +1,77 @@
+schema,run_id,timestamp_utc,machine_id,implementation,benchmark,strategy,reservation_bytes,stack_bytes,threads,tasks,params,metric,value,unit,status,note
+1,20261012T225306Z-27859,2026-10-12T22:53:08Z,vm,taskbench,max-tasks,A,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,max_tasks,32730,count,ok,"limit=vma_count VMA limit reached (65532 mappings, vm.max_map_count=65530): mprotect(guard): Cannot allocate memory (os error 12)"
+1,20261012T225306Z-27859,2026-10-12T22:53:08Z,vm,taskbench,max-tasks,A,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,limit,,,failed,vma_count
+1,20261012T225306Z-27859,2026-10-12T22:53:08Z,vm,taskbench,max-tasks,A,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,vmas_at_stop,65531,count,ok,
+1,20261012T225306Z-27859,2026-10-12T22:53:08Z,vm,taskbench,max-tasks,A,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,max_map_count,65530,count,ok,
+1,20261012T225306Z-27859,2026-10-12T22:53:08Z,vm,taskbench,max-tasks,A,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,rss_at_stop,151904256,bytes,ok,
+1,20261012T225306Z-27859,2026-10-12T22:53:08Z,vm,taskbench,max-tasks,A,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,pte_at_stop,67547136,bytes,ok,
+1,20261012T225306Z-27859,2026-10-12T22:53:08Z,vm,taskbench,max-tasks,A,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,total_per_task_at_stop,6589,bytes,ok,
+1,20261012T225306Z-27859,2026-10-12T22:53:08Z,vm,taskbench,max-tasks,A,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,spawn_rate,121109.997,1/s,ok,
+1,20261012T225308Z-27866,2026-10-12T22:53:22Z,vm,taskbench,max-tasks,B,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,max_tasks,1000000,count,ok,limit=cap 
+1,20261012T225308Z-27866,2026-10-12T22:53:22Z,vm,taskbench,max-tasks,B,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,limit,,,ok,cap
+1,20261012T225308Z-27866,2026-10-12T22:53:22Z,vm,taskbench,max-tasks,B,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,vmas_at_stop,66,count,ok,
+1,20261012T225308Z-27866,2026-10-12T22:53:22Z,vm,taskbench,max-tasks,B,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,max_map_count,65530,count,ok,
+1,20261012T225308Z-27866,2026-10-12T22:53:22Z,vm,taskbench,max-tasks,B,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,rss_at_stop,4523909120,bytes,ok,
+1,20261012T225308Z-27866,2026-10-12T22:53:22Z,vm,taskbench,max-tasks,B,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,pte_at_stop,2085507072,bytes,ok,
+1,20261012T225308Z-27866,2026-10-12T22:53:22Z,vm,taskbench,max-tasks,B,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,total_per_task_at_stop,6606,bytes,ok,
+1,20261012T225308Z-27866,2026-10-12T22:53:22Z,vm,taskbench,max-tasks,B,1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,spawn_rate,78773.866,1/s,ok,
+1,20261012T225322Z-27918,2026-10-12T22:53:27Z,vm,taskbench,max-tasks,C,,8192,4,1000000,cap=1000000;mem_guard=536870912,max_tasks,1000000,count,ok,limit=cap 
+1,20261012T225322Z-27918,2026-10-12T22:53:27Z,vm,taskbench,max-tasks,C,,8192,4,1000000,cap=1000000;mem_guard=536870912,limit,,,ok,cap
+1,20261012T225322Z-27918,2026-10-12T22:53:27Z,vm,taskbench,max-tasks,C,,8192,4,1000000,cap=1000000;mem_guard=536870912,vmas_at_stop,67,count,ok,
+1,20261012T225322Z-27918,2026-10-12T22:53:27Z,vm,taskbench,max-tasks,C,,8192,4,1000000,cap=1000000;mem_guard=536870912,max_map_count,65530,count,ok,
+1,20261012T225322Z-27918,2026-10-12T22:53:27Z,vm,taskbench,max-tasks,C,,8192,4,1000000,cap=1000000;mem_guard=536870912,rss_at_stop,4523925504,bytes,ok,
+1,20261012T225322Z-27918,2026-10-12T22:53:27Z,vm,taskbench,max-tasks,C,,8192,4,1000000,cap=1000000;mem_guard=536870912,pte_at_stop,32985088,bytes,ok,
+1,20261012T225322Z-27918,2026-10-12T22:53:27Z,vm,taskbench,max-tasks,C,,8192,4,1000000,cap=1000000;mem_guard=536870912,total_per_task_at_stop,4553,bytes,ok,
+1,20261012T225322Z-27918,2026-10-12T22:53:27Z,vm,taskbench,max-tasks,C,,8192,4,1000000,cap=1000000;mem_guard=536870912,spawn_rate,330287.309,1/s,ok,
+1,20261012T225327Z-27927,2026-10-12T22:53:29Z,vm,taskbench,max-tasks,D(A),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,max_tasks,32730,count,ok,"limit=vma_count VMA limit reached (65532 mappings, vm.max_map_count=65530): mprotect(guard): Cannot allocate memory (os error 12)"
+1,20261012T225327Z-27927,2026-10-12T22:53:29Z,vm,taskbench,max-tasks,D(A),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,limit,,,failed,vma_count
+1,20261012T225327Z-27927,2026-10-12T22:53:29Z,vm,taskbench,max-tasks,D(A),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,vmas_at_stop,65531,count,ok,
+1,20261012T225327Z-27927,2026-10-12T22:53:29Z,vm,taskbench,max-tasks,D(A),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,max_map_count,65530,count,ok,
+1,20261012T225327Z-27927,2026-10-12T22:53:29Z,vm,taskbench,max-tasks,D(A),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,rss_at_stop,151879680,bytes,ok,
+1,20261012T225327Z-27927,2026-10-12T22:53:29Z,vm,taskbench,max-tasks,D(A),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,pte_at_stop,67538944,bytes,ok,
+1,20261012T225327Z-27927,2026-10-12T22:53:29Z,vm,taskbench,max-tasks,D(A),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,total_per_task_at_stop,6589,bytes,ok,
+1,20261012T225327Z-27927,2026-10-12T22:53:29Z,vm,taskbench,max-tasks,D(A),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,spawn_rate,42836.826,1/s,ok,
+1,20261012T225329Z-27942,2026-10-12T22:53:41Z,vm,taskbench,max-tasks,D(B),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,max_tasks,1000000,count,ok,limit=cap 
+1,20261012T225329Z-27942,2026-10-12T22:53:41Z,vm,taskbench,max-tasks,D(B),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,limit,,,ok,cap
+1,20261012T225329Z-27942,2026-10-12T22:53:41Z,vm,taskbench,max-tasks,D(B),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,vmas_at_stop,69,count,ok,
+1,20261012T225329Z-27942,2026-10-12T22:53:41Z,vm,taskbench,max-tasks,D(B),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,max_map_count,65530,count,ok,
+1,20261012T225329Z-27942,2026-10-12T22:53:41Z,vm,taskbench,max-tasks,D(B),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,rss_at_stop,4523945984,bytes,ok,
+1,20261012T225329Z-27942,2026-10-12T22:53:41Z,vm,taskbench,max-tasks,D(B),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,pte_at_stop,2085498880,bytes,ok,
+1,20261012T225329Z-27942,2026-10-12T22:53:41Z,vm,taskbench,max-tasks,D(B),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,total_per_task_at_stop,6606,bytes,ok,
+1,20261012T225329Z-27942,2026-10-12T22:53:41Z,vm,taskbench,max-tasks,D(B),1048576,1048576,4,1000000,cap=1000000;mem_guard=536870912,spawn_rate,98280.324,1/s,ok,
+1,20261012T225341Z-27987,2026-10-12T22:53:44Z,vm,taskbench,max-tasks,E,,,4,1000000,cap=1000000;mem_guard=536870912,max_tasks,1000000,count,ok,limit=cap 
+1,20261012T225341Z-27987,2026-10-12T22:53:44Z,vm,taskbench,max-tasks,E,,,4,1000000,cap=1000000;mem_guard=536870912,limit,,,ok,cap
+1,20261012T225341Z-27987,2026-10-12T22:53:44Z,vm,taskbench,max-tasks,E,,,4,1000000,cap=1000000;mem_guard=536870912,vmas_at_stop,65,count,ok,
+1,20261012T225341Z-27987,2026-10-12T22:53:44Z,vm,taskbench,max-tasks,E,,,4,1000000,cap=1000000;mem_guard=536870912,max_map_count,65530,count,ok,
+1,20261012T225341Z-27987,2026-10-12T22:53:44Z,vm,taskbench,max-tasks,E,,,4,1000000,cap=1000000;mem_guard=536870912,rss_at_stop,603795456,bytes,ok,
+1,20261012T225341Z-27987,2026-10-12T22:53:44Z,vm,taskbench,max-tasks,E,,,4,1000000,cap=1000000;mem_guard=536870912,pte_at_stop,1265664,bytes,ok,
+1,20261012T225341Z-27987,2026-10-12T22:53:44Z,vm,taskbench,max-tasks,E,,,4,1000000,cap=1000000;mem_guard=536870912,total_per_task_at_stop,601,bytes,ok,
+1,20261012T225341Z-27987,2026-10-12T22:53:44Z,vm,taskbench,max-tasks,E,,,4,1000000,cap=1000000;mem_guard=536870912,spawn_rate,811776.575,1/s,ok,
+1,20261012T225344Z-28004,2026-10-12T22:53:45Z,vm,tokio,max-tasks,tokio,,,4,1000000,cap=1000000;mem_guard=536870912,max_tasks,1000000,count,ok,limit=cap 
+1,20261012T225344Z-28004,2026-10-12T22:53:45Z,vm,tokio,max-tasks,tokio,,,4,1000000,cap=1000000;mem_guard=536870912,limit,,,ok,cap
+1,20261012T225344Z-28004,2026-10-12T22:53:45Z,vm,tokio,max-tasks,tokio,,,4,1000000,cap=1000000;mem_guard=536870912,vmas_at_stop,64,count,ok,
+1,20261012T225344Z-28004,2026-10-12T22:53:45Z,vm,tokio,max-tasks,tokio,,,4,1000000,cap=1000000;mem_guard=536870912,max_map_count,65530,count,ok,
+1,20261012T225344Z-28004,2026-10-12T22:53:45Z,vm,tokio,max-tasks,tokio,,,4,1000000,cap=1000000;mem_guard=536870912,rss_at_stop,404054016,bytes,ok,
+1,20261012T225344Z-28004,2026-10-12T22:53:45Z,vm,tokio,max-tasks,tokio,,,4,1000000,cap=1000000;mem_guard=536870912,pte_at_stop,876544,bytes,ok,
+1,20261012T225344Z-28004,2026-10-12T22:53:45Z,vm,tokio,max-tasks,tokio,,,4,1000000,cap=1000000;mem_guard=536870912,total_per_task_at_stop,401,bytes,ok,
+1,20261012T225344Z-28004,2026-10-12T22:53:45Z,vm,tokio,max-tasks,tokio,,,4,1000000,cap=1000000;mem_guard=536870912,spawn_rate,1655108.183,1/s,ok,
+1,20261012T225345Z-28009,2026-10-12T22:53:48Z,vm,os-threads,max-tasks,os-threads,,,4,30000,cap=30000;mem_guard=536870912,max_tasks,16128,count,ok,limit=vma_count 64609 of 65530 mappings: another 256 threads would not fit
+1,20261012T225345Z-28009,2026-10-12T22:53:48Z,vm,os-threads,max-tasks,os-threads,,,4,30000,cap=30000;mem_guard=536870912,limit,,,failed,vma_count
+1,20261012T225345Z-28009,2026-10-12T22:53:48Z,vm,os-threads,max-tasks,os-threads,,,4,30000,cap=30000;mem_guard=536870912,vmas_at_stop,64609,count,ok,
+1,20261012T225345Z-28009,2026-10-12T22:53:48Z,vm,os-threads,max-tasks,os-threads,,,4,30000,cap=30000;mem_guard=536870912,max_map_count,65530,count,ok,
+1,20261012T225345Z-28009,2026-10-12T22:53:48Z,vm,os-threads,max-tasks,os-threads,,,4,30000,cap=30000;mem_guard=536870912,rss_at_stop,165208064,bytes,ok,
+1,20261012T225345Z-28009,2026-10-12T22:53:48Z,vm,os-threads,max-tasks,os-threads,,,4,30000,cap=30000;mem_guard=536870912,pte_at_stop,2801664,bytes,ok,
+1,20261012T225345Z-28009,2026-10-12T22:53:48Z,vm,os-threads,max-tasks,os-threads,,,4,30000,cap=30000;mem_guard=536870912,total_per_task_at_stop,10207,bytes,ok,
+1,20261012T225345Z-28009,2026-10-12T22:53:48Z,vm,os-threads,max-tasks,os-threads,,,4,30000,cap=30000;mem_guard=536870912,spawn_rate,14322.497,1/s,ok,
+1,20261012T225405Z-11920,2026-10-12T22:54:08Z,vm,go,max-tasks,go,,,4,1000000,cap=1000000;mem_guard=1073741824;go=go1.24.7,max_tasks,1000000,count,ok,limit=cap
+1,20261012T225405Z-11920,2026-10-12T22:54:08Z,vm,go,max-tasks,go,,,4,1000000,cap=1000000;mem_guard=1073741824;go=go1.24.7,limit,,,ok,cap
+1,20261012T225405Z-11920,2026-10-12T22:54:08Z,vm,go,max-tasks,go,,,4,1000000,cap=1000000;mem_guard=1073741824;go=go1.24.7,rss_at_stop,2672369664,bytes,ok,
+1,20261012T225405Z-11920,2026-10-12T22:54:08Z,vm,go,max-tasks,go,,,4,1000000,cap=1000000;mem_guard=1073741824;go=go1.24.7,pte_at_stop,5373952,bytes,ok,
+1,20261012T225405Z-11920,2026-10-12T22:54:08Z,vm,go,max-tasks,go,,,4,1000000,cap=1000000;mem_guard=1073741824;go=go1.24.7,total_per_task_at_stop,2673,bytes,ok,
+1,20261012T225405Z-11920,2026-10-12T22:54:08Z,vm,go,max-tasks,go,,,4,1000000,cap=1000000;mem_guard=1073741824;go=go1.24.7,spawn_rate,479616.747,1/s,ok,
+1,20261012T225509Z-12185,2026-10-12T22:55:46Z,vm,java,max-tasks,java,,,4,1000000,cap=1000000;mem_guard=1073741824;jvm=21.0.12.1+1-1-24.04.4-Ubuntu -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC,max_tasks,1000000,count,ok,limit=cap
+1,20261012T225509Z-12185,2026-10-12T22:55:46Z,vm,java,max-tasks,java,,,4,1000000,cap=1000000;mem_guard=1073741824;jvm=21.0.12.1+1-1-24.04.4-Ubuntu -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC,limit,,,ok,cap
+1,20261012T225509Z-12185,2026-10-12T22:55:46Z,vm,java,max-tasks,java,,,4,1000000,cap=1000000;mem_guard=1073741824;jvm=21.0.12.1+1-1-24.04.4-Ubuntu -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC,rss_at_stop,1104769024,bytes,ok,
+1,20261012T225509Z-12185,2026-10-12T22:55:46Z,vm,java,max-tasks,java,,,4,1000000,cap=1000000;mem_guard=1073741824;jvm=21.0.12.1+1-1-24.04.4-Ubuntu -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC,pte_at_stop,2498560,bytes,ok,
+1,20261012T225509Z-12185,2026-10-12T22:55:46Z,vm,java,max-tasks,java,,,4,1000000,cap=1000000;mem_guard=1073741824;jvm=21.0.12.1+1-1-24.04.4-Ubuntu -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC,total_per_task_at_stop,1059,bytes,ok,
+1,20261012T225509Z-12185,2026-10-12T22:55:46Z,vm,java,max-tasks,java,,,4,1000000,cap=1000000;mem_guard=1073741824;jvm=21.0.12.1+1-1-24.04.4-Ubuntu -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC,spawn_rate,763491.166,1/s,ok,

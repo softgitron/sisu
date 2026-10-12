@@ -26,7 +26,7 @@ use std::fmt;
 use std::io;
 use std::sync::Arc;
 
-use crate::units::{KIB, MIB, GIB, fmt_size};
+use crate::units::{GIB, KIB, MIB, fmt_size};
 
 /// The five strategies under test.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -154,10 +154,9 @@ impl StackError {
 impl fmt::Display for StackError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            StackError::VmaLimit { vmas, max_map_count, detail } => write!(
-                f,
-                "VMA limit reached ({vmas} mappings, vm.max_map_count={max_map_count}): {detail}"
-            ),
+            StackError::VmaLimit { vmas, max_map_count, detail } => {
+                write!(f, "VMA limit reached ({vmas} mappings, vm.max_map_count={max_map_count}): {detail}")
+            }
             StackError::Memory { detail } => write!(f, "out of memory or address space: {detail}"),
             StackError::NotApplicable(why) => write!(f, "not applicable: {why}"),
         }
@@ -173,11 +172,24 @@ pub struct StackCounters {
     pub reserved_bytes: u64,
     /// Allocations served from a free list or cache rather than a fresh mapping.
     pub reused: u64,
-    /// `madvise(MADV_DONTNEED)` calls made on park (D).
+    /// `madvise(MADV_DONTNEED)` calls made on park and release (D).
     pub decommits: u64,
     pub decommitted_bytes: u64,
+    /// Parks and releases where the watermark showed nothing to decommit (D(B)).
+    pub decommits_skipped: u64,
     /// B and C with `canary`: slots whose bottom canary was overwritten (a missed probe).
     pub canary_failures: u64,
+}
+
+/// What strategy D knows about a stack between decommits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DecommitMark {
+    /// Everything below this address is known not to be committed (decommitted,
+    /// or never touched since). Zero: unknown.
+    pub clean_below: usize,
+    /// The task's stack has grown below `clean_below` since the mark was set
+    /// (reported by the watermark probe).
+    pub dirty: bool,
 }
 
 /// The interface the scheduler uses to obtain and return stacks.
@@ -205,8 +217,25 @@ pub trait StackStrategy: Send + Sync + 'static {
     }
     /// Called by the worker after the task owning `region` has suspended itself to
     /// park, with `sp` the stack pointer the task recorded just before suspending.
-    /// Everything below `sp` minus a safety margin is dead.
-    fn on_park(&self, _region: &StackRegion, _sp: usize) {}
+    /// Everything below `sp` minus a safety margin is dead. `mark` carries what is
+    /// known about the stack since the last decommit.
+    fn on_park(&self, _region: &StackRegion, _sp: usize, _mark: &mut DecommitMark) {}
+    /// Whether the strategy uses the software probe as a decommit watermark (D over
+    /// a probed base): the scheduler then raises each task's probe limit to its
+    /// mark's `clean_below`, and a probe that fires above the real limit only
+    /// reports the task dirty.
+    fn watermark_probes(&self) -> bool {
+        false
+    }
+    /// As [`StackStrategy::release`], for a stack known not to be committed below
+    /// its top page. Strategies that decommit on release may skip it.
+    ///
+    /// # Safety
+    /// As for `release`.
+    unsafe fn release_clean(&self, region: StackRegion) {
+        // SAFETY: forwarded under the caller's guarantee.
+        unsafe { self.release(region) }
+    }
     fn counters(&self) -> StackCounters;
 }
 
@@ -260,6 +289,33 @@ impl StrategyConfig {
             StrategyId::D => format!("D({:?})", self.decommit_base),
             StrategyId::E => "E".into(),
         }
+    }
+
+    /// Settings that differ from their defaults and have no CSV column of their
+    /// own, as `key=value` pairs for the `params` column, so that two runs of one
+    /// strategy (say, with and without a stack cache) stay apart in the results.
+    pub fn tuning_params(&self) -> Vec<(&'static str, String)> {
+        let defaults = StrategyConfig::new(self.id);
+        let base = if self.id == StrategyId::D { self.decommit_base } else { self.id };
+        let mmap = base == StrategyId::A;
+        let pooled = matches!(base, StrategyId::B | StrategyId::C);
+        let mut out = Vec::new();
+        if mmap && self.cache != defaults.cache {
+            out.push(("stack_cache", self.cache.to_string()));
+        }
+        if mmap && self.guard != defaults.guard {
+            out.push(("guard_bytes", self.guard.to_string()));
+        }
+        if pooled && let Some(reserve) = self.probe_reserve {
+            out.push(("probe_reserve", reserve.to_string()));
+        }
+        if pooled && self.chunk != defaults.chunk {
+            out.push(("chunk_bytes", self.chunk.to_string()));
+        }
+        if pooled && self.canary {
+            out.push(("canary", "true".into()));
+        }
+        out
     }
 
     /// The probe reserve in effect.
@@ -354,6 +410,7 @@ pub fn build(cfg: &StrategyConfig) -> Result<Arc<dyn StackStrategy>, String> {
 pub struct TaskStack {
     region: StackRegion,
     owner: *const dyn StackStrategy,
+    clean: std::sync::atomic::AtomicBool,
 }
 
 // SAFETY: a TaskStack is an exclusive handle to memory owned by its strategy,
@@ -371,11 +428,17 @@ impl TaskStack {
     /// valid until this `TaskStack` is dropped (the runtime keeps its strategy alive
     /// until every task has finished; see `rt::Runtime`).
     pub unsafe fn new(region: StackRegion, owner: *const dyn StackStrategy) -> TaskStack {
-        TaskStack { region, owner }
+        TaskStack { region, owner, clean: std::sync::atomic::AtomicBool::new(false) }
     }
 
     pub fn region(&self) -> &StackRegion {
         &self.region
+    }
+
+    /// Records that nothing below the top page is committed, so that release can
+    /// skip decommitting it.
+    pub fn mark_clean(&self) {
+        self.clean.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -384,7 +447,13 @@ impl Drop for TaskStack {
         // SAFETY: `owner` is valid (constructor contract); the stack is dropped only
         // after the coroutine on it has finished or been unwound, so nothing runs on
         // the region any more.
-        unsafe { (*self.owner).release(self.region) }
+        unsafe {
+            if self.clean.load(std::sync::atomic::Ordering::Relaxed) {
+                (*self.owner).release_clean(self.region)
+            } else {
+                (*self.owner).release(self.region)
+            }
+        }
     }
 }
 
@@ -415,6 +484,7 @@ pub(crate) struct AtomicCounters {
     pub reused: std::sync::atomic::AtomicU64,
     pub decommits: std::sync::atomic::AtomicU64,
     pub decommitted_bytes: std::sync::atomic::AtomicU64,
+    pub decommits_skipped: std::sync::atomic::AtomicU64,
     pub canary_failures: std::sync::atomic::AtomicU64,
 }
 
@@ -428,6 +498,7 @@ impl AtomicCounters {
             reused: self.reused.load(Relaxed),
             decommits: self.decommits.load(Relaxed),
             decommitted_bytes: self.decommitted_bytes.load(Relaxed),
+            decommits_skipped: self.decommits_skipped.load(Relaxed),
             canary_failures: self.canary_failures.load(Relaxed),
         }
     }

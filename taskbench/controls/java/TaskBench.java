@@ -150,12 +150,28 @@ public final class TaskBench {
     }
 
     static void waitFor(AtomicLong c, long target) throws InterruptedException {
-        long deadline = System.nanoTime() + 60_000_000_000L;
-        while (c.get() < target && System.nanoTime() < deadline) Thread.sleep(2);
+        waitFor(c, target, () -> { });
     }
 
-    static void idleMemory(int n, int excursionLevels, long settleMs) throws Exception {
-        AtomicLong ready = new AtomicLong();
+    /** Waits until c reaches target (or 60 s plus 50 us per item), running check every 2 ms; true if reached. */
+    static boolean waitFor(AtomicLong c, long target, Runnable check) throws InterruptedException {
+        long deadline = System.nanoTime() + 60_000_000_000L + 50_000L * target;
+        while (c.get() < target && System.nanoTime() < deadline) {
+            check.run();
+            Thread.sleep(2);
+        }
+        return c.get() >= target;
+    }
+
+    /**
+     * Mirrors taskbench's idle-memory, including its memory guard: once the
+     * headroom (system, cgroup or Java heap) is below guard during the excursion
+     * phase, virtual threads that have not made their excursion yet skip it and
+     * the phase is reported as failed.
+     */
+    static void idleMemory(int n, int excursionLevels, long settleMs, long guard) throws Exception {
+        AtomicLong ready = new AtomicLong(), skipped = new AtomicLong();
+        AtomicBoolean stop = new AtomicBoolean();
         CountDownLatch gate0 = new CountDownLatch(1), gate1 = new CountDownLatch(1);
         gc();
         Mem base = snapshot();
@@ -168,19 +184,33 @@ public final class TaskBench {
                     sink += shallowWork(seed);
                     ready.incrementAndGet();
                     gate0.await();
-                    if (excursionLevels > 0) sink += excursion(excursionLevels, seed, 1, 2, 3);
+                    if (excursionLevels > 0 && stop.get()) skipped.incrementAndGet();
+                    else if (excursionLevels > 0) {
+                        try {
+                            sink += excursion(excursionLevels, seed, 1, 2, 3);
+                        } catch (OutOfMemoryError e) {
+                            stop.set(true);
+                            skipped.incrementAndGet();
+                        }
+                    }
                     ready.incrementAndGet();
                     gate1.await();
                 } catch (InterruptedException e) { }
             });
         }
-        waitFor(ready, n);
+        Map<String, String> failed = new HashMap<>();
+        if (!waitFor(ready, n, () -> { })) failed.put("shallow", "virtual threads did not all park before the deadline");
         Thread.sleep(settleMs);
         Mem shallow = snapshot();
         gc();
         long heapShallow = heapUsed();
         gate0.countDown();
-        waitFor(ready, 2L * n);
+        if (!waitFor(ready, 2L * n, () -> { if (!stop.get() && memHeadroom() < guard) stop.set(true); }))
+            failed.put("excursion", "virtual threads did not all park again after the excursion before the deadline");
+        if (skipped.get() > 0)
+            failed.put("excursion", skipped.get() + " of " + n + " tasks skipped the excursion: memory headroom below "
+                + guard + " bytes");
+        if (failed.containsKey("excursion")) failed.put("excursion_after_gc", failed.get("excursion"));
         Thread.sleep(settleMs);
         Mem exc = snapshot();
         gc();
@@ -193,6 +223,10 @@ public final class TaskBench {
         for (Object[] ph : phases) {
             String name = (String) ph[0];
             Mem s = (Mem) ph[1];
+            if (failed.containsKey(name)) {
+                row("total_per_task_" + name, null, "", "failed", failed.get(name));
+                continue;
+            }
             metric("rss_per_task_" + name, perItem(base.rss(), s.rss(), n), "bytes");
             metric("pte_per_task_" + name, perItem(base.pte(), s.pte(), n), "bytes");
             metric("total_per_task_" + name, perItem(base.rss() + base.pte(), s.rss() + s.pte(), n), "bytes");
@@ -209,6 +243,53 @@ public final class TaskBench {
         return Long.MAX_VALUE;
     }
 
+    /** A file of this process's cgroup (v1 in the controller's hierarchy, or v2), as taskbench reads it. */
+    static String cgroupFile(String controller, String v1, String v2) {
+        List<String> candidates = new ArrayList<>();
+        try {
+            for (String l : Files.readAllLines(Path.of("/proc/self/cgroup"))) {
+                String[] parts = l.split(":", 3);
+                if (parts.length != 3) continue;
+                if (Arrays.asList(parts[1].split(",")).contains(controller)) {
+                    candidates.add("/sys/fs/cgroup/" + controller + parts[2] + "/" + v1);
+                    candidates.add("/sys/fs/cgroup/" + controller + "/" + v1);
+                } else if (parts[1].isEmpty()) {
+                    candidates.add("/sys/fs/cgroup" + parts[2] + "/" + v2);
+                    candidates.add("/sys/fs/cgroup/" + v2);
+                }
+            }
+        } catch (IOException e) { return null; }
+        for (String f : candidates) {
+            try { return Files.readString(Path.of(f)).trim(); } catch (IOException e) { }
+        }
+        return null;
+    }
+
+    /**
+     * Bytes that can still be allocated: MemAvailable, lowered to the memory
+     * cgroup's headroom and to the Java heap's headroom when those are smaller.
+     */
+    static long memHeadroom() {
+        long h = memAvailable();
+        try {
+            long limit = Long.parseLong(cgroupFile("memory", "memory.limit_in_bytes", "memory.max"));
+            if (limit < (1L << 60)) {
+                long usage = Long.parseLong(cgroupFile("memory", "memory.usage_in_bytes", "memory.current"));
+                String stat = cgroupFile("memory", "memory.stat", "memory.stat");
+                for (String l : stat == null ? new String[0] : stat.split("\n")) {
+                    String[] f = l.trim().split("\\s+");
+                    if (f.length == 2 && (f[0].equals("total_inactive_file") || f[0].equals("inactive_file"))) {
+                        usage -= Long.parseLong(f[1]);
+                        break;
+                    }
+                }
+                h = Math.min(h, limit - usage);
+            }
+        } catch (RuntimeException e) { }
+        Runtime rt = Runtime.getRuntime();
+        return Math.min(h, rt.maxMemory() - (rt.totalMemory() - rt.freeMemory()));
+    }
+
     static void maxTasks(int cap, long guard) throws Exception {
         CountDownLatch gate = new CountDownLatch(1);
         AtomicLong ready = new AtomicLong();
@@ -219,7 +300,7 @@ public final class TaskBench {
         List<Thread> ts = new ArrayList<>();
         try {
             while (created < cap) {
-                if (created % 4096 == 0 && memAvailable() < guard) { reason = "mem_guard"; break; }
+                if (created % 4096 == 0 && memHeadroom() < guard) { reason = "mem_guard"; break; }
                 ts.add(Thread.ofVirtual().start(() -> {
                     sink += shallowWork(1);
                     ready.incrementAndGet();
@@ -434,7 +515,13 @@ public final class TaskBench {
             csv = new PrintStream(new FileOutputStream(f, true));
             if (empty) csv.println(HEADER);
         }
-        String jvm = System.getProperty("java.vm.version") + " " + String.join(" ", java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments()).replace(';', ' ');
+        // The flags this run set; arguments injected through JAVA_TOOL_OPTIONS (proxy
+        // settings and the like) are recorded once in controls-versions.txt instead.
+        Set<String> injected = new HashSet<>(Arrays.asList(System.getenv().getOrDefault("JAVA_TOOL_OPTIONS", "").trim().split("\\s+")));
+        List<String> flags = new ArrayList<>();
+        for (String a : java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments())
+            if (!injected.contains(a)) flags.add(a.replace(';', ' '));
+        String jvm = System.getProperty("java.vm.version") + " " + String.join(" ", flags);
         long t = Long.parseLong(o.getOrDefault("tasks", "0"));
         long settle = Long.parseLong(o.getOrDefault("settle-ms", "200"));
         System.out.printf("javacontrol %s | %s | parallelism=%s%n", bench, System.getProperty("java.version"), par);
@@ -456,8 +543,10 @@ public final class TaskBench {
                 int exc = Integer.parseInt(o.getOrDefault("excursion", "32768"));
                 int levels = exc / 64;
                 tasks = n;
-                params = "excursion=" + exc + ";excursion_levels=" + levels + ";settle_ms=" + settle + ";jvm=" + jvm;
-                idleMemory(n, levels, settle);
+                long guard = Long.parseLong(o.getOrDefault("mem-guard", Long.toString(1L << 30)));
+                params = "excursion=" + exc + ";excursion_levels=" + levels + ";settle_ms=" + settle + ";mem_guard=" + guard
+                    + ";jvm=" + jvm;
+                idleMemory(n, levels, settle, guard);
             }
             case "max-tasks" -> {
                 int n = t > 0 ? (int) t : 100000;

@@ -40,11 +40,7 @@ pub fn excursion<P: StackProbe>(p: P, bytes: usize) -> usize {
     }
     black_box(&mut page);
     let here = current_sp();
-    if bytes > 4096 {
-        excursion(p, bytes - 4096).min(here)
-    } else {
-        here
-    }
+    if bytes > 4096 { excursion(p, bytes - 4096).min(here) } else { here }
 }
 
 /// Recursive Fibonacci: the call-dominated worst case for probes.

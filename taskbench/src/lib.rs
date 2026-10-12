@@ -20,6 +20,7 @@ pub mod cli;
 pub mod csv;
 pub mod machine;
 pub mod mem;
+pub mod perf;
 pub mod rt;
 pub mod stack;
 pub mod stats;

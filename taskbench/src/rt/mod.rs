@@ -30,6 +30,7 @@
 pub mod api;
 pub mod gate;
 pub mod net;
+pub(crate) mod panic_hook;
 pub mod scope;
 pub(crate) mod slab;
 pub mod task;
@@ -145,8 +146,7 @@ impl Runtime {
         // SAFETY: `f` may borrow from our caller's frame; this function does not
         // return until the root scope's active count is zero, i.e. until the task
         // has finished and its stack has been released.
-        let (task, slot) = unsafe { self.shared().spawn_stackful(&root, f) }
-            .map_err(TaskError::SpawnFailed)?;
+        let (task, slot) = unsafe { self.shared().spawn_stackful(&root, f) }.map_err(TaskError::SpawnFailed)?;
         let r = slot.wait_blocking();
         root.wait_children_blocking();
         drop(task);
@@ -180,7 +180,7 @@ impl Drop for Runtime {
         for h in self.threads.drain(..) {
             let _ = h.join();
         }
-        sh.timer.join();
+        sh.timer.clear();
         let live = sh.live_tasks.load(SeqCst);
         if live == 0 {
             // Drain anything still queued (nothing should be) before freeing.

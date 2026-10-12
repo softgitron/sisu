@@ -1,14 +1,19 @@
-//! Colourless TCP for tasks: non-blocking sockets plus an epoll poller thread.
+//! Colourless TCP for tasks: non-blocking sockets plus one epoll instance that
+//! the workers poll.
 //!
 //! A read that would block registers the task's waker on the socket and parks;
-//! the poller wakes it on readiness. Edge-triggered readiness is tracked as a
-//! per-direction event counter: a task snapshots it before trying the system call
-//! and, after registering, re-checks it, so an event that lands between the
-//! attempt and the registration is never lost.
+//! whichever worker polls epoll next wakes it on readiness. Edge-triggered
+//! readiness is tracked as a per-direction event counter: a task snapshots it
+//! before trying the system call and, after registering, re-checks it, so an
+//! event that lands between the attempt and the registration is never lost.
 //!
-//! This is the simplest correct design (one dedicated poller thread), not Go's
-//! (idle workers poll the network themselves). The echo benchmark's latency
-//! includes the poller-to-worker hand-off; the report must say so.
+//! There is no poller thread. As in Go and tokio, the workers poll: a busy
+//! worker checks epoll without blocking every [`super::worker`] `POLL_INTERVAL`
+//! scheduling decisions and hands the tasks it wakes to the global queue; a
+//! worker that runs out of work polls before it spins and keeps the woken tasks
+//! in its own FIFO; and one sleeping worker blocks in `epoll_pwait2` instead of
+//! on its futex, woken by an eventfd when other work arrives. Only one thread
+//! polls at a time (a try-lock), so readiness is never processed twice.
 
 use std::io;
 use std::net::{SocketAddr, TcpListener as StdListener, TcpStream as StdStream};
@@ -16,7 +21,7 @@ use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::SeqCst};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
-use std::thread;
+use std::time::Duration;
 
 use super::api;
 use super::slab::Slab;
@@ -72,19 +77,14 @@ impl IoSource {
     }
 }
 
-/// The epoll poller of one runtime.
+/// The epoll instance of one runtime, polled by its workers.
 pub(crate) struct Poller {
     epfd: OwnedFd,
     wake_fd: OwnedFd,
     sources: Mutex<Slab<Arc<IoSource>>>,
-    thread: Mutex<Option<thread::JoinHandle<()>>>,
-    shutdown: AtomicBool,
+    /// Held by the one thread currently in `epoll_wait`.
+    polling: AtomicBool,
 }
-
-struct PollerPtr(*const Poller);
-// SAFETY: the poller lives in the runtime's shared state, which outlives the
-// poller thread (joined at shutdown).
-unsafe impl Send for PollerPtr {}
 
 fn cvt(r: libc::c_int) -> io::Result<libc::c_int> {
     if r < 0 { Err(io::Error::last_os_error()) } else { Ok(r) }
@@ -96,65 +96,90 @@ impl Poller {
         let epfd = unsafe { OwnedFd::from_raw_fd(cvt(libc::epoll_create1(libc::EPOLL_CLOEXEC))?) };
         // SAFETY: as above.
         let wake_fd = unsafe { OwnedFd::from_raw_fd(cvt(libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC))?) };
-        let mut ev = libc::epoll_event { events: libc::EPOLLIN as u32, u64: WAKE_TOKEN };
+        let mut ev = libc::epoll_event { events: (libc::EPOLLIN | libc::EPOLLET) as u32, u64: WAKE_TOKEN };
         // SAFETY: both descriptors are valid; `ev` is a valid event.
         cvt(unsafe { libc::epoll_ctl(epfd.as_raw_fd(), libc::EPOLL_CTL_ADD, wake_fd.as_raw_fd(), &mut ev) })?;
-        Ok(Poller {
-            epfd,
-            wake_fd,
-            sources: Mutex::new(Slab::new()),
-            thread: Mutex::new(None),
-            shutdown: AtomicBool::new(false),
-        })
+        Ok(Poller { epfd, wake_fd, sources: Mutex::new(Slab::new()), polling: AtomicBool::new(false) })
     }
 
-    fn start(&self) {
-        let p = PollerPtr(self);
-        let h = thread::Builder::new()
-            .name("taskbench-poller".into())
-            .spawn(move || {
-                let p = p;
-                // SAFETY: see PollerPtr.
-                unsafe { (*p.0).run() }
-            })
-            .expect("spawn poller thread");
-        *self.thread.lock().expect("poller thread lock") = Some(h);
+    /// Polls once without blocking and fires the wakers of ready sources. Returns
+    /// `None` if another thread is polling, else the number of I/O events handled.
+    pub(crate) fn try_poll(&self) -> Option<usize> {
+        self.poll_inner(Some(Duration::ZERO), &|| true)
     }
 
-    fn run(&self) {
-        let mut events = vec![libc::epoll_event { events: 0, u64: 0 }; 1024];
-        let mut ready: Vec<(Arc<IoSource>, u32)> = Vec::with_capacity(1024);
-        loop {
-            // SAFETY: `events` is a valid buffer of the length passed.
-            let n = unsafe { libc::epoll_wait(self.epfd.as_raw_fd(), events.as_mut_ptr(), events.len() as i32, -1) };
-            if self.shutdown.load(SeqCst) {
-                return;
-            }
-            if n < 0 {
-                continue; // EINTR
-            }
-            {
-                let sources = self.sources.lock().expect("poller sources lock");
-                for ev in &events[..n as usize] {
-                    let token = ev.u64;
-                    if token == WAKE_TOKEN {
-                        continue;
-                    }
-                    if let Some(src) = sources.get(token as usize) {
-                        ready.push((src.clone(), ev.events));
-                    }
-                }
-            }
-            for (src, bits) in ready.drain(..) {
-                let err = (libc::EPOLLERR | libc::EPOLLHUP) as u32;
-                if bits & (libc::EPOLLIN as u32 | libc::EPOLLRDHUP as u32 | err) != 0 {
-                    src.fire(Dir::Read);
-                }
-                if bits & (libc::EPOLLOUT as u32 | err) != 0 {
-                    src.fire(Dir::Write);
+    /// Polls, blocking until an event, `notify`, or `timeout` (`None`: no limit),
+    /// but checks `block` *after* taking the poll lock and does not block if it
+    /// returns false. A waker sets the sleeping worker's token before writing the
+    /// eventfd, and a busy worker's non-blocking poll may drain that write before
+    /// the sleeper takes the lock; checking the token under the lock closes that
+    /// window.
+    pub(crate) fn poll_blocking(&self, block: &dyn Fn() -> bool, timeout: Option<Duration>) -> Option<usize> {
+        self.poll_inner(timeout, block)
+    }
+
+    fn poll_inner(&self, timeout: Option<Duration>, block: &dyn Fn() -> bool) -> Option<usize> {
+        if self.polling.swap(true, SeqCst) {
+            return None;
+        }
+        let timeout = if timeout != Some(Duration::ZERO) && !block() { Some(Duration::ZERO) } else { timeout };
+        let ts = timeout
+            .map(|d| libc::timespec { tv_sec: d.as_secs() as libc::time_t, tv_nsec: d.subsec_nanos() as libc::c_long });
+        let ts_ptr = ts.as_ref().map(|t| t as *const libc::timespec).unwrap_or(std::ptr::null());
+        let mut events = [libc::epoll_event { events: 0, u64: 0 }; 256];
+        // SAFETY: epoll_pwait2(2) (Linux 5.11) with a valid event buffer of the
+        // length passed, a valid or null timespec (null: wait without limit) and no
+        // signal mask; it takes a nanosecond timeout, unlike epoll_wait.
+        let n = unsafe {
+            libc::syscall(
+                libc::SYS_epoll_pwait2,
+                self.epfd.as_raw_fd(),
+                events.as_mut_ptr(),
+                events.len() as libc::c_int,
+                ts_ptr,
+                std::ptr::null::<libc::sigset_t>(),
+                0usize,
+            )
+        } as i32;
+        let mut ready: Vec<(Arc<IoSource>, u32)> = Vec::new();
+        let mut woken = false;
+        if n > 0 {
+            let sources = self.sources.lock().expect("poller sources lock");
+            for ev in &events[..n as usize] {
+                let token = ev.u64;
+                if token == WAKE_TOKEN {
+                    woken = true;
+                } else if let Some(src) = sources.get(token as usize) {
+                    ready.push((src.clone(), ev.events));
                 }
             }
         }
+        // Release the poll lock before waking tasks, so another idle worker can
+        // poll while this one runs them.
+        self.polling.store(false, SeqCst);
+        if woken {
+            let mut buf = [0u8; 8];
+            // SAFETY: drains our non-blocking eventfd into a valid buffer.
+            unsafe { libc::read(self.wake_fd.as_raw_fd(), buf.as_mut_ptr() as *mut libc::c_void, 8) };
+        }
+        let handled = ready.len();
+        for (src, bits) in ready {
+            let err = (libc::EPOLLERR | libc::EPOLLHUP) as u32;
+            if bits & (libc::EPOLLIN as u32 | libc::EPOLLRDHUP as u32 | err) != 0 {
+                src.fire(Dir::Read);
+            }
+            if bits & (libc::EPOLLOUT as u32 | err) != 0 {
+                src.fire(Dir::Write);
+            }
+        }
+        Some(handled)
+    }
+
+    /// Wakes a thread blocked in `try_poll(-1)`.
+    pub(crate) fn notify(&self) {
+        let one: u64 = 1;
+        // SAFETY: writing 8 bytes from a valid u64 to our eventfd.
+        unsafe { libc::write(self.wake_fd.as_raw_fd(), &one as *const u64 as *const libc::c_void, 8) };
     }
 
     fn register(&self, fd: RawFd) -> io::Result<(usize, Arc<IoSource>)> {
@@ -182,38 +207,22 @@ impl Poller {
         unsafe { libc::epoll_ctl(self.epfd.as_raw_fd(), libc::EPOLL_CTL_DEL, fd, std::ptr::null_mut()) };
         self.sources.lock().expect("poller sources lock").remove(idx);
     }
-
-    /// Stops the poller thread and joins it.
-    pub(crate) fn shutdown(&self) {
-        self.shutdown.store(true, SeqCst);
-        let one: u64 = 1;
-        // SAFETY: writing 8 bytes from a valid u64 to our eventfd.
-        unsafe { libc::write(self.wake_fd.as_raw_fd(), &one as *const u64 as *const libc::c_void, 8) };
-        let h = self.thread.lock().expect("poller thread lock").take();
-        if let Some(h) = h {
-            let _ = h.join();
-        }
-    }
 }
 
 impl Shared {
-    /// The runtime's poller, started on first use.
+    /// The runtime's poller, created on first use.
     pub(crate) fn poller(&self) -> io::Result<&Poller> {
         if let Some(p) = self.poller.get() {
             return Ok(p);
         }
         let p = Poller::new()?;
-        if self.poller.set(p).is_ok() {
-            self.poller.get().expect("just set").start();
-        }
+        let _ = self.poller.set(p);
         Ok(self.poller.get().expect("set"))
     }
 }
 
 fn current_shared<'a>() -> io::Result<&'a Shared> {
-    api::current_task()
-        .map(|t| t.shared())
-        .ok_or_else(|| io::Error::other("network calls must run inside a task"))
+    api::current_task().map(|t| t.shared()).ok_or_else(|| io::Error::other("network calls must run inside a task"))
 }
 
 fn io_err(e: io::Error) -> TaskError {
@@ -242,7 +251,12 @@ impl Registered {
     }
 
     /// Runs `op` until it stops returning EAGAIN, parking the task in between.
-    fn blocking<T>(&self, d: Dir, mut op: impl FnMut(RawFd) -> isize, done: impl Fn(isize) -> T) -> Result<T, TaskError> {
+    fn blocking<T>(
+        &self,
+        d: Dir,
+        mut op: impl FnMut(RawFd) -> isize,
+        done: impl Fn(isize) -> T,
+    ) -> Result<T, TaskError> {
         loop {
             let g = self.src.generation(d);
             let r = op(self.fd.as_raw_fd());
@@ -263,7 +277,13 @@ impl Registered {
         }
     }
 
-    fn poll_op<T>(&self, cx: &mut Context<'_>, d: Dir, mut op: impl FnMut(RawFd) -> isize, done: impl Fn(isize) -> T) -> Poll<Result<T, TaskError>> {
+    fn poll_op<T>(
+        &self,
+        cx: &mut Context<'_>,
+        d: Dir,
+        mut op: impl FnMut(RawFd) -> isize,
+        done: impl Fn(isize) -> T,
+    ) -> Poll<Result<T, TaskError>> {
         loop {
             let g = self.src.generation(d);
             let r = op(self.fd.as_raw_fd());
@@ -309,7 +329,9 @@ fn write_op(buf: &[u8]) -> impl FnMut(RawFd) -> isize + '_ {
 
 fn accept_op(fd: RawFd) -> isize {
     // SAFETY: accept4 with null address out-parameters is valid.
-    unsafe { libc::accept4(fd, std::ptr::null_mut(), std::ptr::null_mut(), libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC) as isize }
+    unsafe {
+        libc::accept4(fd, std::ptr::null_mut(), std::ptr::null_mut(), libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC) as isize
+    }
 }
 
 /// Sets TCP_NODELAY (echo latency would otherwise measure Nagle's algorithm).

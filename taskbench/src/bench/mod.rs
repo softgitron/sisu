@@ -125,10 +125,7 @@ impl Args {
     }
 
     pub fn secs(&self, key: &str, default: f64) -> Result<Duration, String> {
-        self.opt(key)
-            .map(units::parse_secs)
-            .transpose()
-            .map(|v| v.unwrap_or(Duration::from_secs_f64(default)))
+        self.opt(key).map(units::parse_secs).transpose().map(|v| v.unwrap_or(Duration::from_secs_f64(default)))
     }
 
     /// `--tasks`, else the benchmark's own option, else its default.
@@ -192,8 +189,18 @@ impl BenchCtx {
         }
     }
 
-    /// Writes a row to the CSV (if any) and prints it.
-    pub fn emit(&mut self, row: Row) {
+    /// Writes a row to the CSV (if any) and prints it. Strategy settings that
+    /// differ from their defaults are appended to the row's `params`.
+    pub fn emit(&mut self, mut row: Row) {
+        if let Impl::Taskbench(c) = &self.args.imp
+            && row.implementation != "machine"
+        {
+            let tuning = c.tuning_params();
+            if !tuning.is_empty() {
+                let sep = if row.params.is_empty() { "" } else { ";" };
+                row.params = format!("{}{sep}{}", row.params, params(&tuning));
+            }
+        }
         if !self.args.quiet {
             let v = row.value.map(crate::csv::fmt_value).unwrap_or_default();
             let status = if row.status == Status::Ok { String::new() } else { format!(" [{}]", row.status.as_str()) };
@@ -201,9 +208,10 @@ impl BenchCtx {
             println!("  {:<34} {:>14} {:<6}{status}{note}", row.metric, v, row.unit);
         }
         if let Some(w) = &mut self.csv
-            && let Err(e) = w.write(&row) {
-                eprintln!("taskbench: cannot write CSV row: {e}");
-            }
+            && let Err(e) = w.write(&row)
+        {
+            eprintln!("taskbench: cannot write CSV row: {e}");
+        }
         self.rows.push(row);
     }
 
@@ -304,7 +312,13 @@ pub fn params(pairs: &[(&str, String)]) -> String {
 }
 
 /// Emits the order statistics of `samples` (nanoseconds) as `<prefix>_p50` etc.
-pub fn emit_summary(ctx: &mut BenchCtx, params: &str, tasks: Option<u64>, prefix: &str, samples: &mut [u64]) -> crate::stats::Summary {
+pub fn emit_summary(
+    ctx: &mut BenchCtx,
+    params: &str,
+    tasks: Option<u64>,
+    prefix: &str,
+    samples: &mut [u64],
+) -> crate::stats::Summary {
     let s = crate::stats::summarize(samples);
     for (name, v) in [
         ("p50", s.p50 as f64),

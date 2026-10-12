@@ -10,7 +10,12 @@
 //!   hand-off. The `next` slot is not stealable.
 //! * A yielding task goes to the back of the global queue, which every worker
 //!   checks first once every 61 scheduling decisions, so yields are fair.
-//! * An idle worker spins for a few microseconds looking for work, then sleeps.
+//! * The workers poll the network themselves (every 31 decisions, and when out
+//!   of work), and a task woken by readiness is queued FIFO, never into `next`
+//!   (Go does the same with netpoll results; it halved the echo p99 here).
+//! * Due timers are checked at every scheduling decision and fire into `next`.
+//! * An idle worker spins for a few microseconds looking for work, then sleeps:
+//!   one sleeper blocks in `epoll_pwait2`, one owns the earliest timer deadline.
 //!   Pushing stealable work wakes a sleeper only when no worker is spinning, so a
 //!   burst of pushes costs one wake-up, not one per push.
 //!
@@ -26,13 +31,16 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, fence};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context, Poll, Waker};
 use std::thread::{self, Thread};
+use std::time::Instant;
 
 use corosensei::CoroutineResult;
 use crossbeam_deque::{Injector, Steal, Stealer, Worker};
 
 use super::net::Poller;
 use super::scope::{JoinSlot, ScopeInner};
-use super::task::{Body, BoxFuture, DONE, FailSink, PARKED, RUNNING, SCHEDULED, Suspend, Task, TaskError, TaskExit, TaskRef};
+use super::task::{
+    Body, BoxFuture, DONE, FailSink, PARKED, RUNNING, SCHEDULED, Suspend, Task, TaskError, TaskExit, TaskRef,
+};
 use super::timer::Timer;
 use crate::stack::fault::{self, ArmedTrap};
 use crate::stack::{Exhaustion, StackError, StackStrategy, TaskStack, probe};
@@ -43,9 +51,39 @@ const SPIN_ROUNDS: u32 = 64;
 const SPIN_PAUSES: u32 = 64;
 /// Every this many scheduling decisions, the global queue is checked first.
 const GLOBAL_QUEUE_INTERVAL: u32 = 61;
+/// Every this many scheduling decisions, a worker polls the network (without
+/// blocking) even when it has work, so that I/O readiness is not starved by a
+/// busy run queue.
+const POLL_INTERVAL: u32 = 31;
+/// `poll_blocker` and `timer_owner` value when no worker holds the role.
+const NOBODY: usize = usize::MAX;
 /// Stack kept free at the bottom of a worker thread for unwinding out of a
 /// stackless task whose `poll` recursion hit the worker-stack probe.
 const WORKER_PROBE_RESERVE: usize = 64 * 1024;
+
+/// Spin budget, overridable for experiments with `TASKBENCH_SPIN=rounds,pauses`.
+fn spin_params() -> (u32, u32) {
+    static P: OnceLock<(u32, u32)> = OnceLock::new();
+    *P.get_or_init(|| {
+        std::env::var("TASKBENCH_SPIN")
+            .ok()
+            .and_then(|v| {
+                let (a, b) = v.split_once(',')?;
+                Some((a.parse().ok()?, b.parse().ok()?))
+            })
+            .unwrap_or((SPIN_ROUNDS, SPIN_PAUSES))
+    })
+}
+
+/// What the worker is doing when it wakes a task (see `WorkerCtx::poll_mode`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PollMode {
+    None,
+    /// Polling because it ran out of work: woken tasks go to its local queue.
+    Idle,
+    /// Polling between tasks: woken tasks go to the global queue.
+    Busy,
+}
 
 /// Where a newly runnable task should go.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,6 +135,11 @@ pub(crate) struct Shared {
     idle: Mutex<Vec<usize>>,
     num_idle: AtomicUsize,
     num_spinning: AtomicUsize,
+    /// The idle worker blocked in `epoll_wait`, woken by the poller's eventfd
+    /// instead of its thread parker.
+    poll_blocker: AtomicUsize,
+    /// The sleeping worker that wakes at the earliest timer deadline.
+    timer_owner: AtomicUsize,
     pub(crate) shutdown: AtomicBool,
     pub(crate) live_tasks: AtomicUsize,
     pub(crate) strategy: Arc<dyn StackStrategy>,
@@ -104,6 +147,8 @@ pub(crate) struct Shared {
     guard_pages: bool,
     /// Call `on_park` when a stackful task parks (D).
     decommit: bool,
+    /// D(B): probe limits double as decommit watermarks.
+    watermark: bool,
     pub(crate) timer: Timer,
     pub(crate) poller: OnceLock<Poller>,
     pub(crate) counters: RtCounters,
@@ -118,6 +163,11 @@ struct WorkerCtx {
     next: Cell<Option<TaskRef>>,
     tick: Cell<u32>,
     rng: Cell<u64>,
+    /// Set while this worker processes network readiness: woken tasks are queued
+    /// FIFO (Go does the same with netpoll results) instead of taking the `next`
+    /// slot, which is for tasks woken by the running task. During a periodic poll
+    /// by a busy worker they go to the global queue, where idle workers find them.
+    poll_mode: Cell<PollMode>,
 }
 
 thread_local! {
@@ -161,9 +211,11 @@ impl Shared {
         let threads = threads.max(1);
         let guard_pages = strategy.exhaustion() == Exhaustion::GuardPage;
         let decommit = strategy.decommits_on_park();
+        let watermark = strategy.watermark_probes();
         if guard_pages {
             fault::install_handler();
         }
+        super::panic_hook::install();
         let workers: Vec<Worker<TaskRef>> = (0..threads).map(|_| Worker::new_fifo()).collect();
         let stealers = workers.iter().map(|w| w.stealer()).collect();
         let shared = Box::new(Shared {
@@ -173,28 +225,29 @@ impl Shared {
             idle: Mutex::new(Vec::with_capacity(threads)),
             num_idle: AtomicUsize::new(0),
             num_spinning: AtomicUsize::new(0),
+            poll_blocker: AtomicUsize::new(NOBODY),
+            timer_owner: AtomicUsize::new(NOBODY),
             shutdown: AtomicBool::new(false),
             live_tasks: AtomicUsize::new(0),
             strategy,
             guard_pages,
             decommit,
+            watermark,
             timer: Timer::new(),
             poller: OnceLock::new(),
             counters: RtCounters::default(),
             next_id: AtomicU64::new(1),
         });
-        shared.timer.start()?;
         let ptr: *const Shared = Box::into_raw(shared);
         let mut handles = Vec::with_capacity(threads);
         for (index, local) in workers.into_iter().enumerate() {
             let sp = SendPtr(ptr);
-            let h = thread::Builder::new()
-                .name(format!("taskbench-w{index}"))
-                .stack_size(worker_stack)
-                .spawn(move || {
+            let h = thread::Builder::new().name(format!("taskbench-w{index}")).stack_size(worker_stack).spawn(
+                move || {
                     let sp = sp;
                     worker_main(sp.0, index, local)
-                })?;
+                },
+            )?;
             handles.push(h);
         }
         Ok((ptr, handles))
@@ -223,23 +276,31 @@ impl Shared {
     }
 
     /// Makes `task` (in state SCHEDULED) runnable.
+    ///
+    /// From a worker of this runtime: a spawned task, or one woken by the running
+    /// task, takes the worker's `next` slot (displacing the previous occupant into
+    /// the local queue); a task woken by network readiness is queued FIFO (local
+    /// queue when the worker was idle, global queue when it polled between tasks);
+    /// a yielding task goes to the back of the global queue. From any other thread
+    /// the task goes to the global queue.
     pub(crate) fn schedule(&self, task: TaskRef, hint: Hint) {
         let w = current_worker_ptr();
         // SAFETY: a non-null WORKER pointer refers to the WorkerCtx on this thread's
         // stack, which lives as long as the worker loop that set it.
-        if let Some(w) = unsafe { w.as_ref() }
-            && ptr::eq(w.shared, self) {
-                match hint {
-                    Hint::Yield => self.injector.push(task),
-                    Hint::Spawn | Hint::Wake => match w.next.replace(Some(task)) {
-                        None => return,
-                        Some(prev) => w.local.push(prev),
-                    },
-                }
-                self.notify_work();
-                return;
-            }
-        self.injector.push(task);
+        let local = unsafe { w.as_ref() }.filter(|w| ptr::eq(w.shared, self));
+        let Some(w) = local else {
+            self.injector.push(task);
+            self.notify_work();
+            return;
+        };
+        match (hint, w.poll_mode.get()) {
+            (Hint::Yield, _) | (Hint::Wake, PollMode::Busy) => self.injector.push(task),
+            (Hint::Wake, PollMode::Idle) => w.local.push(task),
+            (Hint::Spawn | Hint::Wake, _) => match w.next.replace(Some(task)) {
+                None => return,
+                Some(prev) => w.local.push(prev),
+            },
+        }
         self.notify_work();
     }
 
@@ -261,10 +322,7 @@ impl Shared {
         match popped {
             Some(i) => {
                 self.num_idle.fetch_sub(1, SeqCst);
-                self.slots[i].wake.store(true, SeqCst);
-                if let Some(t) = self.slots[i].thread.get() {
-                    t.unpark();
-                }
+                self.wake_worker(i);
                 self.counters.worker_wakeups.fetch_add(1, Relaxed);
             }
             None => {
@@ -273,37 +331,121 @@ impl Shared {
         }
     }
 
+    /// Gives worker `i` its wake token and wakes it wherever it sleeps. The
+    /// SeqCst store of the token before the load of `poll_blocker` pairs with the
+    /// worker's store of `poll_blocker` before its load of the token, so one of
+    /// the two always sees the other.
+    fn wake_worker(&self, i: usize) {
+        self.slots[i].wake.store(true, SeqCst);
+        if self.poll_blocker.load(SeqCst) == i
+            && let Some(p) = self.poller.get()
+        {
+            p.notify();
+        }
+        if let Some(t) = self.slots[i].thread.get() {
+            t.unpark();
+        }
+    }
+
     fn has_work(&self) -> bool {
         !self.injector.is_empty() || self.stealers.iter().any(|s| !s.is_empty())
     }
 
-    /// Parks the worker thread until woken. Returns true when woken by
-    /// `wake_one` (the caller is then counted as spinning).
-    fn sleep_worker(&self, index: usize) -> bool {
+    /// Takes worker `index` off the idle list. Returns true if a waker already
+    /// did (then the worker is counted as spinning and its token is consumed).
+    fn leave_idle(&self, index: usize) -> bool {
+        let mut idle = self.idle.lock().expect("idle list lock");
+        if let Some(pos) = idle.iter().position(|&i| i == index) {
+            idle.swap_remove(pos);
+            self.num_idle.fetch_sub(1, SeqCst);
+            return false;
+        }
+        drop(idle);
+        // Popped by a waker, which counted us as spinning: its token is on the way.
+        while !self.slots[index].wake.swap(false, SeqCst) {
+            std::hint::spin_loop();
+        }
+        true
+    }
+
+    /// Sleeps until woken, until work or a due timer appears, or until network
+    /// events were handled. Returns true when woken by `wake_one` (the caller is
+    /// then counted as spinning).
+    ///
+    /// One sleeping worker blocks in `epoll_wait` (when there is a poller), so that
+    /// readiness wakes it directly; one owns the timer and sleeps only until the
+    /// earliest deadline. A waker sets the token before checking `poll_blocker`,
+    /// and the sleeper sets `poll_blocker` before checking the token (and checks it
+    /// again under the poll lock), so a wake-up is never lost.
+    fn sleep_worker(&self, ctx: &WorkerCtx) -> bool {
+        let index = ctx.index;
         {
             let mut idle = self.idle.lock().expect("idle list lock");
             idle.push(index);
             self.num_idle.fetch_add(1, SeqCst);
         }
         fence(SeqCst);
-        if self.has_work() || self.shutdown.load(SeqCst) {
-            let mut idle = self.idle.lock().expect("idle list lock");
-            if let Some(pos) = idle.iter().position(|&i| i == index) {
-                idle.swap_remove(pos);
-                self.num_idle.fetch_sub(1, SeqCst);
-                return false;
-            }
-            // Already popped by a waker, which counted us as spinning: take its token.
-        }
         let slot = &self.slots[index];
+        let keep_sleeping = || !slot.wake.load(SeqCst) && !self.shutdown.load(SeqCst);
         loop {
             if slot.wake.swap(false, SeqCst) {
                 return true;
             }
-            if self.shutdown.load(SeqCst) {
-                return false;
+            if self.has_work() || self.shutdown.load(SeqCst) || self.timer.is_due() {
+                return self.leave_idle(index);
             }
-            thread::park();
+            let deadline = self.timer.next_deadline();
+            let owns_timer =
+                deadline.is_some() && self.timer_owner.compare_exchange(NOBODY, index, SeqCst, SeqCst).is_ok();
+            let timeout = if owns_timer { deadline.map(|d| d.saturating_duration_since(Instant::now())) } else { None };
+            let mut events = 0;
+            let poller = self.poller.get();
+            let blocker = poller.is_some() && self.poll_blocker.compare_exchange(NOBODY, index, SeqCst, SeqCst).is_ok();
+            if let (true, Some(p)) = (blocker, poller) {
+                ctx.poll_mode.set(PollMode::Idle);
+                let polled = p.poll_blocking(&keep_sleeping, timeout);
+                ctx.poll_mode.set(PollMode::None);
+                self.poll_blocker.store(NOBODY, SeqCst);
+                match polled {
+                    Some(n) => events = n,
+                    // A busy worker holds the poll lock for a non-blocking poll;
+                    // let it finish rather than spin on the lock.
+                    None => thread::yield_now(),
+                }
+            } else if keep_sleeping() {
+                match timeout {
+                    Some(t) => thread::park_timeout(t),
+                    None => thread::park(),
+                }
+            }
+            if owns_timer {
+                self.timer_owner.store(NOBODY, SeqCst);
+            }
+            if slot.wake.swap(false, SeqCst) {
+                return true;
+            }
+            if events > 0 {
+                return self.leave_idle(index);
+            }
+        }
+    }
+
+    /// After registering a timer that became the earliest: makes the timer owner
+    /// (or, if there is none, some sleeping worker) re-read the deadline. A nudge
+    /// is a wake-up without a token, so the worker only loops in `sleep_worker`.
+    pub(crate) fn timer_changed(&self) {
+        let owner = self.timer_owner.load(SeqCst);
+        let target =
+            if owner != NOBODY { Some(owner) } else { self.idle.lock().expect("idle list lock").last().copied() };
+        if let Some(i) = target {
+            if self.poll_blocker.load(SeqCst) == i
+                && let Some(p) = self.poller.get()
+            {
+                p.notify();
+            }
+            if let Some(t) = self.slots[i].thread.get() {
+                t.unpark();
+            }
         }
     }
 
@@ -316,9 +458,8 @@ impl Shared {
                 t.unpark();
             }
         }
-        self.timer.shutdown();
         if let Some(p) = self.poller.get() {
-            p.shutdown();
+            p.notify();
         }
     }
 
@@ -350,6 +491,13 @@ impl Shared {
         // end, so the sink is never used or dropped after borrowed data dies.
         let sink: Arc<dyn FailSink> = unsafe { std::mem::transmute::<Arc<dyn FailSink + '_>, Arc<dyn FailSink>>(sink) };
         let task = Arc::new(Task::new(self.next_task_id(), self, scope.clone(), sink, Some(region), false));
+        if self.watermark {
+            // A slot is handed out clean below its top page (fresh, or decommitted
+            // when released), so the first watermark is the top page.
+            let page = crate::stack::os::page_size();
+            // SAFETY: the task is not yet published; we are its only user.
+            unsafe { task.local_mut() }.mark.clean_below = crate::units::round_down(region.base - 1, page);
+        }
         let slot2 = slot.clone();
         let body = move |y: &corosensei::Yielder<(), Suspend>, ()| -> TaskExit {
             let me = current_task_ptr();
@@ -408,6 +556,7 @@ fn worker_main(shared: *const Shared, index: usize, local: Worker<TaskRef>) {
         next: Cell::new(None),
         tick: Cell::new(0),
         rng: Cell::new(0x9e37_79b9_7f4a_7c15 ^ ((index as u64 + 1) << 17)),
+        poll_mode: Cell::new(PollMode::None),
     };
     let _ = sh.slots[index].thread.set(thread::current());
     WORKER.with(|w| w.set(&ctx));
@@ -437,6 +586,17 @@ fn worker_main(shared: *const Shared, index: usize, local: Worker<TaskRef>) {
         if sh.shutdown.load(SeqCst) {
             break;
         }
+        if sh.timer.fire_due() > 0 {
+            continue;
+        }
+        if let Some(p) = sh.poller.get() {
+            ctx.poll_mode.set(PollMode::Idle);
+            let n = p.try_poll();
+            ctx.poll_mode.set(PollMode::None);
+            if matches!(n, Some(n) if n > 0) {
+                continue;
+            }
+        }
         if !counted {
             sh.num_spinning.fetch_add(1, SeqCst);
         }
@@ -451,7 +611,7 @@ fn worker_main(shared: *const Shared, index: usize, local: Worker<TaskRef>) {
         if sh.shutdown.load(SeqCst) {
             break;
         }
-        counted = sh.sleep_worker(index);
+        counted = sh.sleep_worker(&ctx);
     }
     if counted {
         sh.num_spinning.fetch_sub(1, SeqCst);
@@ -487,8 +647,9 @@ impl WorkerCtx {
 
     /// Searches for work for a few microseconds before the worker sleeps.
     fn spin_for_work(&self) -> Option<TaskRef> {
-        for _ in 0..SPIN_ROUNDS {
-            for _ in 0..SPIN_PAUSES {
+        let (rounds, pauses) = spin_params();
+        for _ in 0..rounds {
+            for _ in 0..pauses {
                 std::hint::spin_loop();
             }
             if let Some(t) = self.find_task() {
@@ -502,6 +663,18 @@ impl WorkerCtx {
         let sh = self.shared();
         let tick = self.tick.get().wrapping_add(1);
         self.tick.set(tick);
+        // Due timers are checked at every scheduling decision (one atomic load and
+        // a clock read); the tasks they wake take the `next` slot.
+        if sh.timer.is_due() {
+            sh.timer.fire_due();
+        }
+        if tick.is_multiple_of(POLL_INTERVAL)
+            && let Some(p) = sh.poller.get()
+        {
+            self.poll_mode.set(PollMode::Busy);
+            p.try_poll();
+            self.poll_mode.set(PollMode::None);
+        }
         if tick.is_multiple_of(GLOBAL_QUEUE_INTERVAL) {
             loop {
                 match sh.injector.steal() {
@@ -556,17 +729,30 @@ impl WorkerCtx {
         match body {
             Body::Stackful(co) => {
                 // SAFETY: we own the RUNNING state, hence `local`.
-                let limit = unsafe { task.local_mut() }.region.map(|r| r.probe_limit).unwrap_or(0);
-                probe::set_split_stack_limit(limit);
+                let local = unsafe { task.local_mut() };
+                let limit = local.region.map(|r| r.probe_limit).unwrap_or(0);
+                if sh.watermark && !local.mark.dirty {
+                    probe::set_task_limits(local.mark.clean_below.max(limit), limit);
+                } else {
+                    probe::set_task_limits(limit, limit);
+                }
                 if sh.guard_pages {
                     // SAFETY: we own the RUNNING state, hence `local`.
                     if let Some(r) = unsafe { task.local_mut() }.region {
-                        fault::arm(ArmedTrap { handler: co.trap_handler(), guard_lo: r.guard_lo, guard_hi: r.guard_hi });
+                        fault::arm(ArmedTrap {
+                            handler: co.trap_handler(),
+                            guard_lo: r.guard_lo,
+                            guard_hi: r.guard_hi,
+                        });
                     }
                 }
                 let res = panic::catch_unwind(AssertUnwindSafe(|| co.resume(())));
                 if sh.guard_pages {
                     fault::disarm();
+                }
+                if probe::take_tripped() {
+                    // SAFETY: the task has suspended; we still own its RUNNING state.
+                    unsafe { task.local_mut() }.mark.dirty = true;
                 }
                 CURRENT.with(|c| c.set(ptr::null()));
                 match res {
@@ -633,7 +819,7 @@ impl WorkerCtx {
             // SAFETY: the task is suspended and we still own its RUNNING state.
             let local = unsafe { task.local_mut() };
             if let Some(r) = local.region {
-                sh.strategy.on_park(&r, local.park_sp);
+                sh.strategy.on_park(&r, local.park_sp, &mut local.mark);
             }
         }
         task.state.store(PARKED, SeqCst);
@@ -676,6 +862,16 @@ impl WorkerCtx {
                 sh.counters.quarantined.fetch_add(1, Relaxed);
                 self.park_task(task, false);
                 return;
+            }
+        }
+        if sh.watermark {
+            // SAFETY: the coroutine has returned; we own the RUNNING state.
+            let local = unsafe { task.local_mut() };
+            let page = crate::stack::os::page_size();
+            if !local.mark.dirty
+                && local.region.is_some_and(|r| local.mark.clean_below >= crate::units::round_down(r.base - 1, page))
+            {
+                stack.mark_clean();
             }
         }
         drop(stack);

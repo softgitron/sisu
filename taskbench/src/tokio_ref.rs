@@ -10,7 +10,10 @@
 use std::hint::black_box;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering::{Relaxed, SeqCst}};
+use std::sync::atomic::{
+    AtomicBool, AtomicU64, AtomicUsize,
+    Ordering::{Relaxed, SeqCst},
+};
 use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -23,7 +26,7 @@ use crate::bench::starvation::{StarveResult, stop_after};
 use crate::bench::work;
 use crate::mem;
 use crate::rt::{Gate, TaskError};
-use crate::stack::probe::{self, StackExhausted, SplitStackProbe, current_sp};
+use crate::stack::probe::{self, SplitStackProbe, StackExhausted, current_sp};
 
 fn runtime(threads: usize, stack: Option<usize>) -> Result<tokio::runtime::Runtime, String> {
     let mut b = tokio::runtime::Builder::new_multi_thread();
@@ -146,9 +149,9 @@ pub fn max_tasks(threads: usize, cap: u64, guard: u64) -> Result<MaxResult, Stri
             let t0 = Instant::now();
             while res.created < cap {
                 if res.created.is_multiple_of(4096) {
-                    if mem::mem_available().map(|a| a < guard).unwrap_or(false) {
+                    if mem::mem_headroom().map(|a| a < guard).unwrap_or(false) {
                         res.limit = "mem_guard".into();
-                        res.detail = format!("MemAvailable below {guard} bytes");
+                        res.detail = format!("memory headroom below {guard} bytes");
                         break;
                     }
                     tokio::task::yield_now().await;
@@ -173,7 +176,14 @@ pub fn max_tasks(threads: usize, cap: u64, guard: u64) -> Result<MaxResult, Stri
 }
 
 /// `starvation` on tokio: compute tasks yield with `tokio::task::yield_now`.
-pub fn starvation(threads: usize, n: u64, k: u64, duration: Duration, baseline: Duration, interval: Duration) -> Result<StarveResult, String> {
+pub fn starvation(
+    threads: usize,
+    n: u64,
+    k: u64,
+    duration: Duration,
+    baseline: Duration,
+    interval: Duration,
+) -> Result<StarveResult, String> {
     async fn probe(stop: Arc<AtomicBool>, interval: Duration, spawned: Instant) -> Vec<u64> {
         let mut v = Vec::new();
         let mut deadline = spawned + interval;
@@ -235,7 +245,12 @@ pub fn starvation(threads: usize, n: u64, k: u64, duration: Duration, baseline: 
 
 /// `deep-recursion` on tokio: synchronous recursion on the worker stack, and a
 /// recursion of boxed futures.
-pub fn deep_recursion(threads: usize, worker_stack: usize, parse_depth: usize, naive_depth: u64) -> Result<(Vec<CaseResult>, bool), String> {
+pub fn deep_recursion(
+    threads: usize,
+    worker_stack: usize,
+    parse_depth: usize,
+    naive_depth: u64,
+) -> Result<(Vec<CaseResult>, bool), String> {
     let rt = runtime(threads, Some(worker_stack))?;
     let out = rt.block_on(async move {
         let mut cases = Vec::new();
@@ -255,7 +270,16 @@ pub fn deep_recursion(threads: usize, worker_stack: usize, parse_depth: usize, n
                 Ok(Err(msg)) => Err(TaskError::Panicked(format!("parse error: {msg}"))),
                 Err(e) => Err(join_err(e)),
             };
-            cases.push(CaseResult { name, target, outcome, reached: reached.load(SeqCst), elapsed: t0.elapsed(), leaked_nodes: LIVE_NODES.load(SeqCst) - live0, leaked_guards: LIVE_GUARDS.load(SeqCst) - guards0, reserve_used: None });
+            cases.push(CaseResult {
+                name,
+                target,
+                outcome,
+                reached: reached.load(SeqCst),
+                elapsed: t0.elapsed(),
+                leaked_nodes: LIVE_NODES.load(SeqCst) - live0,
+                leaked_guards: LIVE_GUARDS.load(SeqCst) - guards0,
+                reserve_used: None,
+            });
         }
         let healthy = tokio::spawn(async { 7 }).await.map(|v| v == 7).unwrap_or(false);
         (cases, healthy)
@@ -264,7 +288,15 @@ pub fn deep_recursion(threads: usize, worker_stack: usize, parse_depth: usize, n
 }
 
 /// `echo` and `idle-connections` on tokio.
-pub fn echo(threads: usize, n: usize, msg: usize, duration: Duration, warmup: Duration, idle: bool, settle: Duration) -> Result<EchoResult, String> {
+pub fn echo(
+    threads: usize,
+    n: usize,
+    msg: usize,
+    duration: Duration,
+    warmup: Duration,
+    idle: bool,
+    settle: Duration,
+) -> Result<EchoResult, String> {
     let rt = runtime(threads, None)?;
     rt.block_on(async move {
         tokio::spawn(async move {

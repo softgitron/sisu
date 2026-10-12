@@ -225,8 +225,18 @@ func spawnJoin(c *ctx, rounds, warmup, batch int) {
 	c.summary("spawn_join", samples)
 }
 
-func idleMemory(c *ctx, n int, exc int, settle time.Duration) {
-	var ready atomic.Int64
+// idleMemory mirrors taskbench's idle-memory, including its memory guard: once
+// the headroom is below guard during the excursion phase, goroutines that have
+// not made their excursion yet skip it and the phase is reported as failed.
+//
+// The goroutines check the headroom themselves (every 256th, before its
+// excursion). A watcher goroutine does not work: closing gate0 readies all n
+// goroutines, the closing goroutine is preempted while it does so and requeued
+// behind them in the global run queue, and at 1M tasks it next ran only after
+// every excursion had been made (or the OOM killer had struck).
+func idleMemory(c *ctx, n int, exc int, settle time.Duration, guard int64) {
+	var ready, skipped, arrived atomic.Int64
+	var stop atomic.Bool
 	gate0 := make(chan struct{})
 	gate1 := make(chan struct{})
 	var wg sync.WaitGroup
@@ -240,41 +250,65 @@ func idleMemory(c *ctx, n int, exc int, settle time.Duration) {
 			sink.Add(shallowWork(int64(i)))
 			ready.Add(1)
 			<-gate0
-			if exc > 0 {
+			if exc > 0 && arrived.Add(1)%256 == 0 && !stop.Load() {
+				if h := memHeadroom(); h < guard && stop.CompareAndSwap(false, true) {
+					fmt.Fprintf(os.Stderr, "idle-memory: headroom %d below the guard %d; the remaining goroutines skip the excursion\n", h, guard)
+				}
+			}
+			if exc > 0 && stop.Load() {
+				skipped.Add(1)
+			} else if exc > 0 {
 				sink.Add(int64(excursion(exc)))
 			}
 			ready.Add(1)
 			<-gate1
 		}(i)
 	}
-	waitFor := func(target int64) {
-		deadline := time.Now().Add(60 * time.Second)
+	// waitFor reports whether target was reached before the deadline.
+	waitFor := func(target int64) bool {
+		deadline := time.Now().Add(60*time.Second + time.Duration(n)*50*time.Microsecond)
 		for ready.Load() < target && time.Now().Before(deadline) {
 			time.Sleep(2 * time.Millisecond)
 		}
+		return ready.Load() >= target
 	}
-	waitFor(int64(n))
+	failed := map[string]string{}
+	if !waitFor(int64(n)) {
+		failed["shallow"] = "goroutines did not all park before the deadline"
+	}
 	time.Sleep(settle)
 	shallow := snapshot()
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	stackShallow := ms.StackInuse
 	close(gate0)
-	waitFor(2 * int64(n))
+	if !waitFor(2 * int64(n)) {
+		failed["excursion"] = "goroutines did not all park again after the excursion before the deadline"
+	}
+	if skipped.Load() > 0 {
+		failed["excursion"] = fmt.Sprintf("%d of %d tasks skipped the excursion: memory headroom below %d bytes",
+			skipped.Load(), n, guard)
+	}
+	failed["excursion_after_gc"] = failed["excursion"]
 	time.Sleep(settle)
 	exSnap := snapshot()
 	runtime.ReadMemStats(&ms)
 	stackExc := ms.StackInuse
 	// Stacks shrink during garbage collection (to half when less than a quarter
-	// is in use); a running Go program collects periodically.
-	for i := 0; i < 4; i++ {
-		runtime.GC()
+	// is in use); a running Go program collects periodically. Not after the
+	// guard stopped the excursions: shrinking allocates the smaller stacks
+	// before the large ones are freed, and there is no headroom left for that.
+	gcSnap, stackGC := exSnap, stackExc
+	if !stop.Load() {
+		for i := 0; i < 4; i++ {
+			runtime.GC()
+		}
+		debug.FreeOSMemory()
+		time.Sleep(settle)
+		gcSnap = snapshot()
+		runtime.ReadMemStats(&ms)
+		stackGC = ms.StackInuse
 	}
-	debug.FreeOSMemory()
-	time.Sleep(settle)
-	gcSnap := snapshot()
-	runtime.ReadMemStats(&ms)
-	stackGC := ms.StackInuse
 	close(gate1)
 	wg.Wait()
 	nn := int64(n)
@@ -284,6 +318,10 @@ func idleMemory(c *ctx, n int, exc int, settle time.Duration) {
 		s     memSnapshot
 		stack uint64
 	}{{"shallow", shallow, stackShallow}, {"excursion", exSnap, stackExc}, {"excursion_after_gc", gcSnap, stackGC}} {
+		if why := failed[ph.name]; why != "" {
+			c.row("total_per_task_"+ph.name, nil, "", "failed", why)
+			continue
+		}
 		c.metric("rss_per_task_"+ph.name, perItem(base.rss, ph.s.rss, nn), "bytes")
 		c.metric("pte_per_task_"+ph.name, perItem(base.pte, ph.s.pte, nn), "bytes")
 		c.metric("total_per_task_"+ph.name, perItem(base.rss+base.pte, ph.s.rss+ph.s.pte, nn), "bytes")
@@ -300,7 +338,7 @@ func maxTasks(c *ctx, limit int, guard int64) {
 	created := 0
 	reason := "cap"
 	for created < limit {
-		if created%4096 == 0 && memAvailable() < guard {
+		if created%4096 == 0 && memHeadroom() < guard {
 			reason = "mem_guard"
 			break
 		}
@@ -340,6 +378,64 @@ func memAvailable() int64 {
 		}
 	}
 	return math.MaxInt64
+}
+
+// cgroupFile reads a file of this process's cgroup (v1 file in the controller's
+// hierarchy, or v2 file), falling back to the hierarchy's root, as taskbench's
+// mem::cgroup_file does.
+func cgroupFile(controller, v1, v2 string) (string, bool) {
+	own, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return "", false
+	}
+	var candidates []string
+	for _, l := range strings.Split(strings.TrimSpace(string(own)), "\n") {
+		parts := strings.SplitN(l, ":", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		isV1 := false
+		for _, ctl := range strings.Split(parts[1], ",") {
+			isV1 = isV1 || ctl == controller
+		}
+		if isV1 {
+			candidates = append(candidates, "/sys/fs/cgroup/"+controller+parts[2]+"/"+v1, "/sys/fs/cgroup/"+controller+"/"+v1)
+		} else if parts[1] == "" {
+			candidates = append(candidates, "/sys/fs/cgroup"+parts[2]+"/"+v2, "/sys/fs/cgroup/"+v2)
+		}
+	}
+	for _, f := range candidates {
+		if b, err := os.ReadFile(f); err == nil {
+			return strings.TrimSpace(string(b)), true
+		}
+	}
+	return "", false
+}
+
+// memHeadroom is MemAvailable, lowered to the memory cgroup's limit minus its
+// usage (without inactive file pages) when that is smaller.
+func memHeadroom() int64 {
+	h := memAvailable()
+	limitText, ok := cgroupFile("memory", "memory.limit_in_bytes", "memory.max")
+	limit, err := strconv.ParseInt(limitText, 10, 64)
+	if !ok || err != nil || limit >= 1<<60 {
+		return h
+	}
+	usageText, _ := cgroupFile("memory", "memory.usage_in_bytes", "memory.current")
+	usage, _ := strconv.ParseInt(usageText, 10, 64)
+	stat, _ := cgroupFile("memory", "memory.stat", "memory.stat")
+	for _, l := range strings.Split(stat, "\n") {
+		f := strings.Fields(l)
+		if len(f) == 2 && (f[0] == "total_inactive_file" || f[0] == "inactive_file") {
+			inactive, _ := strconv.ParseInt(f[1], 10, 64)
+			usage -= inactive
+			break
+		}
+	}
+	if limit-usage < h {
+		return limit - usage
+	}
+	return h
 }
 
 const perPort = 20000
@@ -554,7 +650,7 @@ func main() {
 	batch := fs.Int("batch", 1, "spawn-join tasks per round")
 	exc := fs.Int("excursion", 32768, "idle-memory stack excursion (bytes)")
 	settleMs := fs.Int("settle-ms", 200, "settle time before memory readings")
-	guard := fs.Int64("mem-guard", 1<<30, "max-tasks: stop when MemAvailable drops below (bytes)")
+	guard := fs.Int64("mem-guard", 1<<30, "max-tasks and idle-memory: stop when the memory headroom drops below (bytes)")
 	connections := fs.Int("connections", 0, "echo connections")
 	msg := fs.Int("msg-bytes", 64, "echo message size")
 	duration := fs.Float64("duration", 0, "recorded seconds (echo 3, starvation 2)")
@@ -606,8 +702,8 @@ func main() {
 			n = int(*tasks)
 		}
 		c.tasks = int64(n)
-		c.params = fmt.Sprintf("excursion=%d;settle_ms=%d;go=%s", *exc, *settleMs, runtime.Version())
-		idleMemory(c, n, *exc, settle)
+		c.params = fmt.Sprintf("excursion=%d;settle_ms=%d;mem_guard=%d;go=%s", *exc, *settleMs, *guard, runtime.Version())
+		idleMemory(c, n, *exc, settle, *guard)
 	case "max-tasks":
 		n := 100000
 		if *tasks > 0 {

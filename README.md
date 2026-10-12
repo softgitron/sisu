@@ -65,7 +65,7 @@ should be filed as an issue.
 | Research | Done (October 2026). 47 language analyses (~14,000 lines), 20 topic syntheses, 4 evidence dossiers; a second round of 14 studies of unconventional languages and environments and 3 ideation studies (~6,500 lines). |
 | Proposal | Draft 3 (October 2026). Indentation-based, Python-flavoured syntax; a testing design; a 52-week experiment plan with phases, corpus, measurements and decision points; the unconventional round's assessment of 66 candidate features, 14 of them found in no language ([`proposal/19-novel-features.md`](proposal/19-novel-features.md)), folded into the design; a pre-registration and a recruitment brief for the experiment. |
 | Open questions | 53 recorded; 48 decided by the project owner (October 2026), 5 open: runtime stacks (Q-6), governance details (Q-21), numerics (Q-23), resource attributes in function types (Q-52), exact arithmetic (Q-53). |
-| Prototype | Phase 1 started: the bet-3 stack harness in [`taskbench/`](taskbench/) (Rust, no Sisu involved). No Sisu compiler yet. |
+| Prototype | Phase 1 started: the bet-3 stack harness in [`taskbench/`](taskbench/) (Rust, about 10,000 lines, no Sisu involved) builds, passes its 65 tests, and has smoke results against Go, Java and tokio on one 4-core virtual machine; the full-scale runs on two bare-metal machines are still to do. No Sisu compiler yet. |
 
 ## Contributing to the design
 

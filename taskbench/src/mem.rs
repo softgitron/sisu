@@ -61,9 +61,7 @@ pub fn parse_status(text: &str) -> MemSnapshot {
 /// Reads the current process's counters. `with_vmas` also counts VMAs, which
 /// reads all of `/proc/self/maps` and is slow with hundreds of thousands of them.
 pub fn snapshot(with_vmas: bool) -> MemSnapshot {
-    let mut s = fs::read_to_string("/proc/self/status")
-        .map(|t| parse_status(&t))
-        .unwrap_or_default();
+    let mut s = fs::read_to_string("/proc/self/status").map(|t| parse_status(&t)).unwrap_or_default();
     if let Ok(t) = fs::read_to_string("/proc/self/smaps_rollup") {
         s.pss = kb_field(&t, "Pss").unwrap_or(0);
     }
@@ -75,9 +73,7 @@ pub fn snapshot(with_vmas: bool) -> MemSnapshot {
 
 /// Number of memory mappings of this process (compare with `vm.max_map_count`).
 pub fn vma_count() -> u64 {
-    fs::read("/proc/self/maps")
-        .map(|b| b.iter().filter(|&&c| c == b'\n').count() as u64)
-        .unwrap_or(0)
+    fs::read("/proc/self/maps").map(|b| b.iter().filter(|&&c| c == b'\n').count() as u64).unwrap_or(0)
 }
 
 /// Number of resident pages in `[addr, addr+len)` according to `mincore(2)`.
@@ -110,18 +106,64 @@ pub fn mapping_containing(addr: usize) -> Option<(usize, usize)> {
 
 /// Reads an integer sysctl, e.g. `read_sysctl("vm/max_map_count")`.
 pub fn read_sysctl(path: &str) -> Option<u64> {
-    fs::read_to_string(format!("/proc/sys/{path}"))
-        .ok()?
-        .split_whitespace()
-        .next()?
-        .parse()
-        .ok()
+    fs::read_to_string(format!("/proc/sys/{path}")).ok()?.split_whitespace().next()?.parse().ok()
 }
 
 /// `MemAvailable` from `/proc/meminfo`, in bytes.
 pub fn mem_available() -> Option<u64> {
     let t = fs::read_to_string("/proc/meminfo").ok()?;
     kb_field(&t, "MemAvailable")
+}
+
+/// Reads file `v1_name` (cgroup v1, in the `controller` hierarchy) or `v2_name`
+/// (cgroup v2) of the cgroup this process is in, falling back to the hierarchy's
+/// root when the process's path is not visible (a cgroup namespace).
+pub fn cgroup_file(controller: &str, v1_name: &str, v2_name: &str) -> Option<String> {
+    let own = fs::read_to_string("/proc/self/cgroup").ok()?;
+    let mut candidates = Vec::new();
+    for line in own.lines() {
+        // "hierarchy-id:controllers:path"; v2 has an empty controller list.
+        let mut parts = line.splitn(3, ':');
+        let (_, controllers, path) = (parts.next()?, parts.next()?, parts.next()?);
+        if controllers.split(',').any(|c| c == controller) {
+            candidates.push(format!("/sys/fs/cgroup/{controller}{path}/{v1_name}"));
+            candidates.push(format!("/sys/fs/cgroup/{controller}/{v1_name}"));
+        } else if controllers.is_empty() {
+            candidates.push(format!("/sys/fs/cgroup{path}/{v2_name}"));
+            candidates.push(format!("/sys/fs/cgroup/{v2_name}"));
+        }
+    }
+    candidates.iter().find_map(|f| fs::read_to_string(f).ok()).map(|t| t.trim().to_string())
+}
+
+/// The memory cgroup's limit in bytes, `None` when unlimited or unreadable.
+/// cgroup v1 reports "unlimited" as a huge number, v2 as `max`.
+pub fn cgroup_memory_limit() -> Option<u64> {
+    let v: u64 = cgroup_file("memory", "memory.limit_in_bytes", "memory.max")?.parse().ok()?;
+    (v < 1 << 60).then_some(v)
+}
+
+/// The memory cgroup's usage in bytes, without inactive file pages (which the
+/// kernel reclaims before the cgroup runs out).
+pub fn cgroup_memory_usage() -> Option<u64> {
+    let usage: u64 = cgroup_file("memory", "memory.usage_in_bytes", "memory.current")?.parse().ok()?;
+    let stat = cgroup_file("memory", "memory.stat", "memory.stat").unwrap_or_default();
+    let inactive = stat
+        .lines()
+        .find_map(|l| l.strip_prefix("total_inactive_file ").or_else(|| l.strip_prefix("inactive_file ")))
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    Some(usage.saturating_sub(inactive))
+}
+
+/// Bytes that can still be allocated before memory runs out: `MemAvailable`,
+/// lowered to the memory cgroup's headroom when the cgroup is the tighter limit.
+pub fn mem_headroom() -> Option<u64> {
+    let cgroup = cgroup_memory_limit().map(|limit| limit.saturating_sub(cgroup_memory_usage().unwrap_or(0)));
+    match (mem_available(), cgroup) {
+        (Some(a), Some(c)) => Some(a.min(c)),
+        (a, c) => a.or(c),
+    }
 }
 
 /// `MemTotal` from `/proc/meminfo`, in bytes.
@@ -160,6 +202,11 @@ mod tests {
         assert!(s.vm_rss > 0);
         assert!(s.vmas > 0);
         assert!(read_sysctl("vm/max_map_count").is_some());
+        let headroom = mem_headroom().expect("MemAvailable is always readable");
+        assert!(headroom <= mem_available().unwrap());
+        if let Some(limit) = cgroup_memory_limit() {
+            assert!(headroom <= limit);
+        }
         assert_eq!(per_item(100, 300, 4), 50.0);
     }
 }
