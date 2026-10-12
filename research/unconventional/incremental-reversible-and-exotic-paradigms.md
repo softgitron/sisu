@@ -258,8 +258,8 @@ method call" [32]) was both the feature and the defect; Steimann (OOPSLA
 2006) questioned the claimed benefits [34]. Weaving survives where
 obliviousness is wanted: OpenTelemetry's Java agent "dynamically injects
 bytecode to capture telemetry from many popular libraries and frameworks"
-[35]; elsewhere decorators, middleware and framework proxies won. Sisu has no runtime
-reflection and its attributes are data
+[35]; elsewhere decorators, middleware and framework proxies won. Sisu
+has no runtime reflection and its attributes are data
 ([proposal/08](../../proposal/08-metaprogramming.md)), so AOP's concerns
 (logging, tracing, auditing, retries) attach at the capability boundary.
 

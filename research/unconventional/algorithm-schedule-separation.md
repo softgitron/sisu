@@ -54,10 +54,11 @@ in 52 lines" and ran 1.7x faster, its schedule mixing "different fusion, tiling,
 multithreading strategies throughout the expansive 99 stage graph". Across five pipelines Halide was 1.2x
 to 4.4x faster than expert x86 code in 2x to 18x fewer lines; with a GPU schedule the bilateral grid beat
 the hand-tuned CUDA of the algorithm's own authors by 2.3x, and interpolation ran 5.9x faster than the
-expert CPU code. Several of those schedules came from the paper's autotuner, not a person [2]. Google
-programmed the Pixel 2's Pixel Visual Core with "Halide for image processing and TensorFlow for machine
-learning" [4]; Halide also targets Qualcomm's Hexagon (QuRT) [1], and its release numbers follow LLVM's
-[5].
+expert CPU code. Several of those schedules came from the paper's autotuner, not a person [2]. Adobe
+researchers co-wrote the papers; production use at Adobe is widely reported but was not confirmed for this
+file [unverified]. Google programmed the Pixel 2's Pixel Visual Core with "Halide for image processing and
+TensorFlow for machine learning" [4]; Halide also targets Qualcomm's Hexagon (QuRT) [1], and its release
+numbers follow LLVM's [5].
 
 **Where it stayed niche.** Schedules are expert work: "writing schedules that achieve high performance is
 hard: it requires expertise in hardware architecture and optimization, and even then, the space of possible
@@ -198,7 +199,7 @@ access-set half have broader evidence. So: no `schedule` block in Sisu, and four
    var ps = SoaList[Particle]()          # three arrays, one per field
    ps.push(Particle(pos=p, vel=v, mass=1.0))
    for q in par mut ps:                  # q: a view struct of three `ref mut` fields
-       q.pos += q.vel * dt                 # same source as for list[Particle]
+       q.pos += q.vel * dt                # same source as for list[Particle]
    ```
 
    Cost: library code, provided comptime can construct a type from a struct's fields; element access returns
@@ -240,9 +241,18 @@ access-set half have broader evidence. So: no `schedule` block in Sisu, and four
 4. **Access-set scheduling as a library (Bluespec, Bevy).** Sisu's parameter conventions already declare
    access: a borrowed parameter is a read, `mut` an exclusive write. A comptime planner can build the
    conflict graph of a set of functions over shared state and run non-conflicting ones in parallel with the
-   sequential order's result, without Bevy's access-declaring query types. Cost: a library over comptime
-   reflection and the `par` pool. Conflicts: none. Confidence: low-medium (games and simulation have the
-   demand; no evidence elsewhere).
+   sequential order's result, without Bevy's access-declaring query types.
+
+   ```sisu
+   def integrate(mut pos: Column[Vec3], vel: Column[Vec3], dt: f32): ...
+   def collide(mut vel: Column[Vec3], pos: Column[Vec3]): ...
+   def draw_list(pos: Column[Vec3], mut sprites: Column[Sprite]): ...
+   let plan = systems.plan([integrate, collide, draw_list])   # integrate first; then collide and
+                                                              #   draw_list together (both only read pos)
+   ```
+
+   Cost: a library over comptime reflection and the `par` pool. Conflicts: none. Confidence: low-medium
+   (games and simulation have the demand; no evidence elsewhere).
 
 Kernel DSLs in the Halide or TVM mould stay libraries: Sisu's part is comptime staging, `std.simd` (Q-23)
 and C interop strong enough to host or call one.

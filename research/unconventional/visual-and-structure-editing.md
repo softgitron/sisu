@@ -59,11 +59,11 @@ that "Programs are not text; they are hierarchical compositions of computational
 (Teitelbaum and Reps 1981, quoted in [8]), and a paper on the Synthesizer Generator conceded that
 "Program editing will be considerably slower than normal keyboard entry" (quoted in [24]).
 
-Transplants into text that worked keep text editing for expressions. Stride "maintains the look of
-a program as essentially a textual, if coloured, document" [15]. Hazel's tylr does keyboard-driven
+Transplants into text that worked keep text editing for expressions. Stride "maintains the look of a
+program as essentially a textual, if coloured, document" [15]. Hazel's tylr does keyboard-driven
 structure editing in which missing pieces become tracked "obligations" rather than forbidden states
-(TyDe 2022, VL/HCC 2023) [28]. Paredit-style editing of ordinary text by s-expression is used by
-81% of experienced Clojure developers (2025 survey, [`clojure.md`](../languages/clojure.md)). Dark
+(TyDe 2022, VL/HCC 2023) [28]. Paredit-style editing of ordinary text by s-expression is used by 81%
+of experienced Clojure developers (2025 survey, [`clojure.md`](../languages/clojure.md)) [35]. Dark
 launched in 2019 with a structured editor in which syntax errors cannot be entered; its 2025
 successor is being built as a CLI with a VS Code extension and a language server [30].
 

@@ -23,8 +23,7 @@ Sisu, and which have the evidence to be worth building.
 | Swift Playgrounds, Xcode | 2014-, iPad 2016 | `#Playground` macro in Xcode 26 [4] | Results shown beside the code |
 | Python Tutor | 2010- | "Over 25 million users since 2010" [5] | Step-by-step visualisation of program state |
 | Quokka.js | 2010s- | "over 1 million" users claimed [7] | Runtime values inline as you type |
-| Dark | 2019-2025 | Out of money Jun 2025; Classic wound down from Jul 2025 [25] | Deployless; trace-driven development |
-| Val Town, Replit | 2020s, 2016- | Active, marketed for AI agents [27] | Deployless hosting |
+| Dark; Val Town, Replit | 2019-2025; 2020s, 2016- | Dark out of money Jun 2025, Classic wound down from Jul 2025 [25]; Val Town and Replit active, marketed for AI agents [27] | Deployless hosting; trace-driven development (Dark) |
 | Eve | 2014-c. 2018 [unverified end] | "no longer under active development" [39] | Records, relational logic, literate documents |
 | Subtext | 2004-2020 | Retrospective published 2025 [38] | No syntax; schematic tables |
 | Unison watch expressions | 2010s- | Active [8] | Evaluate on save, cache by hash, no I/O |
@@ -58,9 +57,8 @@ unlabelled numbers [1].
 | Create by reacting | Hot reload (Flutter, [`dart.md`](../languages/dart.md)), SwiftUI previews, `#Playground` | Strong adoption |
 | Create by abstracting | Extract-variable and extract-function refactorings; nothing keeps the concrete case live while generalising | None |
 
-Lattner says Xcode Playgrounds were "heavily influenced by Bret Victor's ideas", and by Light Table
-[3]; Xcode 26 extends them to any file: "The #Playground macro enables interactive debugging and
-code exploration in the preview panel" [4].
+Lattner: Playgrounds were "heavily influenced by Bret Victor's ideas" and Light Table [3]; Xcode 26's
+"#Playground macro enables interactive debugging and code exploration in the preview panel" [4].
 
 ### 2. Inline values and always-on evaluation
 
@@ -109,8 +107,8 @@ The claims are the designers' own; there are no outcome studies, and GT's users 
 IPython's methods should "have no side effects", by convention [14], and Microsoft notes that
 "Evaluating an expression can change the state of the application" [15]. Boxer pushed the idea to
 its limit: in diSessa and Abelson's "naive realism" the screen is the whole computational world,
-every value a visible, editable box (CACM 1986; paraphrased, primary text not retrieved); it
-survives as Boxer Sunrise [17].
+every value a visible, editable box (CACM 1986; paraphrased, not retrieved); it survives as Boxer
+Sunrise [17].
 
 ### 4. Notebooks and the hidden-state problem
 
@@ -204,14 +202,14 @@ planned.
 
 ### 8. Live images, new paradigms and the editor as product
 
-Smalltalk's fix-and-resume debugger is covered in [`smalltalk.md`](../languages/smalltalk.md) and
-is the model for D-053. The more radical systems failed for reasons their authors give. Edwards
+Smalltalk's fix-and-resume debugger is covered in [`smalltalk.md`](../languages/smalltalk.md) and is
+the model for D-053 [41]. The more radical systems failed for reasons their authors give. Edwards
 calls Subtext (2004-2020) "a series of overambitious failed experiments": he was "trying to invent
 too many things at the same time" [38]. Eve went through more than 30 versions in two years;
-"generalized tools tend to end up with developers as their first customers", and "we need
-developers to like it before end users will" [6]; its repository says it "is no longer under active
-development" [39]. Light Table, Eve, Dark and Lamdu each made a new editor the product, and none
-survived as one.
+"generalized tools tend to end up with developers as their first customers", and "we need developers
+to like it before end users will" [6]; its repository says it "is no longer under active
+development" [39]. Light Table, Eve and Dark each made a new editor the product and none survived as
+one; Lamdu is a technology preview after fifteen years.
 
 ## Transferable ideas for Sisu
 

@@ -83,23 +83,24 @@ X10 stayed a research language; its last release is 2.6.2 (January 2019) [3]. Ch
 2024) promised that "the core language and library features are designed to be backwards-compatible from
 here on", 2.10 shipped in September 2026, the project is hosted by the High Performance Software
 Foundation, and its showcase applications are Arkouda (interactive data science at scale), CHAMPS
-(multiphysics simulation) and coral-reef image analysis [5]. Chapel's domain maps, which choose how an index
-set is distributed without changing the loops over it, are a cousin of Halide's schedules
+(multiphysics simulation) and coral-reef image analysis [5]. Locales name the machine's nodes
+(`coforall loc in Locales do on loc { ... }`), and domain maps choose how an index set is distributed
+without changing the loops over it, a cousin of Halide's schedules
 ([`algorithm-schedule-separation.md`](algorithm-schedule-separation.md)).
 
 ### "May run in parallel" versus "must run concurrently" (Chapel, Rayon)
 
 Chapel's specification draws a line that mainstream languages blur. A `forall` body "may be executed
-concurrently with the others, but this is not guaranteed", so the loop must be correct when serialised; in a
-`coforall` "each iteration is guaranteed to run using a distinct task", which is "essential when concurrency
-is needed for correctness" [4]. Outer scalars are captured by value in a `forall`, and reductions are
+concurrently with the others, but this is not guaranteed", so the loop must be correct when serialised; in
+a `coforall` "each iteration is guaranteed to run using a distinct task", the form to use when concurrency
+is needed for correctness [4]. Outer scalars are captured by value in a `forall`, and reductions are
 declared on the loop (`with (+ reduce sum)`); but a mutable outer array defaults to `ref`, and the
 specification warns that some forms "may introduce undesirable race conditions" [4]. Rayon made the same
-"may" choice: `join(a, b)` only permits parallelism ("the decision ... is made dynamically, based on whether
-idle cores are available"), and messages between the two closures "will likely deadlock", because `join` is
-a hint on a sequential algorithm [16]. Doug Lea's guidance for Java says the same from the failure side:
-when subtasks wait, "CPU resources may sit idle" [19]. Sisu's `spawn` is the `coforall` side; Sisu has no
-`forall` side.
+"may" choice: `join(a, b)` only permits parallelism ("the decision ... is made dynamically, based on
+whether idle cores are available"), and passing messages between the two closures is likely to deadlock,
+because `join` is a hint on a sequential algorithm [16]. Doug Lea's guidance for Java says the same from
+the failure side: when subtasks wait, "CPU resources may sit idle" [19]. Sisu's `spawn` is the `coforall`
+side; Sisu has no `forall` side.
 
 ### Serial elision: annotations that leave the program intact (Cilk, OpenMP, `do concurrent`)
 
@@ -165,8 +166,8 @@ Rayon (2015) is the library form at its best. `v.par_iter().map(f).sum()` is rac
 guarantees you that using Rayon APIs will not introduce data races": closures that share data must be
 `Sync`, and two closures cannot both hold `&mut` [16]. What it cannot check: a `Mutex` inside the closure
 is race-free but makes the result order-dependent; a parallel floating-point `sum` reassociates; channels
-between `join` closures deadlock; and granularity is the user's problem (Matsakis's 1,000-element quicksort
-ran at 0.41x before a sequential cutoff) [16].
+between `join` closures can deadlock; and granularity is the user's problem (Matsakis's 1,000-element
+quicksort ran at 0.41x before a sequential cutoff) [16].
 
 Java's parallel streams (Java 8, 2014) check nothing. The package documentation shows
 `forEach(s -> results.add(s))` into an `ArrayList` and warns that in parallel "the non-thread-safety of
@@ -245,8 +246,16 @@ loop; Cilk says keep serial elision and make the fork cost about a call.
 
 4. **Reducers with a fixed merge order (Cilk hyperobjects, Chapel `reduce`, OpenMP `reduction`).**
    `par.Sum`, `par.Collect` and user types implementing `par.Reducer` may be updated from a `par` body: each
-   worker updates its own view, and views merge in a fixed tree shape, so results are identical across runs
-   and core counts. For floats that differs from the sequential left fold, which the documentation must say.
+   worker updates its own view, and views merge in a tree fixed by the input length (not by which worker
+   stole what), so results are identical across runs and core counts. For floats that differs from the
+   sequential left fold, which the documentation must say.
+
+   ```sisu
+   var total = par.Sum[f64]()            # one view per worker, merged in a tree fixed by len(readings)
+   for r in par readings:
+       total += r.value                  # allowed: Sum implements par.Reducer
+   ```
+
    Cost: a trait and the checker's exception for it. Conflicts: the numerics design (Q-23). Confidence:
    medium.
 
