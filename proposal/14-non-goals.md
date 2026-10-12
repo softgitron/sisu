@@ -53,7 +53,11 @@ streams, GPU kernels (Mojo), or GUI description. These are libraries, and
 the language is designed so that libraries can express them well (traits,
 operator overloading on the fixed set, comptime-checked string DSLs,
 trailing closures). Where a library cannot express something well, that is
-an open question for the language, recorded when found.
+an open question for the language, recorded when found. Nor is Sisu a
+notebook environment: a worksheet (a script re-run top to bottom with its
+values shown inline and never saved) is tooling after 0.1, but a notebook
+with cells and stored outputs stays outside the project unless Q-48's
+conditions are met ([00](00-vision-and-principles.md)).
 
 ## Not fastest at all costs
 

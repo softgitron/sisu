@@ -444,9 +444,10 @@ functions. `assert` shows the value of every sub-expression when it fails
 strip. `todo("name")` is a typed hole (D-061, decided with Q-46; N-27 has
 the design). Its signature is `todo[T](name: str = "") -> T`, and it
 checks against whatever type its position expects, so the code around
-it type-checks. `sisu check` reports each hole with its expected type, the
-bindings in scope, the contracts that constrain it and the tests that
-reach it ([10](10-tooling.md)); the interpreter runs until it reaches a
+it type-checks. `sisu check` warns about each hole, and `sisu check
+--holes` reports it in full: its expected type, the bindings in scope, the
+contracts that constrain it and the tests that reach it
+([10](10-tooling.md)); the interpreter runs until it reaches a
 hole and stops there, and a test that reaches one is reported as blocked
 rather than failed ([17](17-testing.md)); `sisu build --release` and
 `sisu publish` reject a program that contains one. A placeholder meant to
