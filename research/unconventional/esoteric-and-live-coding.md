@@ -180,9 +180,8 @@ encourage small but expressive designs" [21]. What is free matters:
 counted", so the budget measures size without punishing comments or
 structure [21]. itch.io lists 10,147 games made with PICO-8 (12 Oct
 2026); *Celeste Classic*, made in four days for a jam, became the 2018
-*Celeste*; "fantasy console" now names a genre (TIC-80, Picotron) [21].
-A small fixed machine is learnable completely, so effort moves to
-composition.
+*Celeste*; "fantasy console" names a genre (TIC-80, Picotron) [21]. A
+small fixed machine is learnable completely; effort moves to composition.
 
 ### Space as program
 
@@ -262,9 +261,9 @@ the program does.
 
 ## Transferable ideas for Sisu
 
-The answer to the central question: yes to a live loop, as boundary-
-aligned replacement on top of D-053 plus drift-free time as a library;
-notation only as comptime-checked string DSLs; no 2D source.
+The answer to the central question: yes to live loops, as
+boundary-aligned replacement on top of D-053, and to drift-free time as
+a library; notation only as comptime-checked string DSLs; no 2D source.
 
 **1. Version-consistent hot replacement at loop boundaries ("live loops
 for free").** D-053 swaps a body at its next call and lets frames in
@@ -358,8 +357,7 @@ library is not. *Confidence:* medium-low.
 - **2D, image or self-modifying source** (Befunge, Piet, Hexagony,
   Funciton, Orca, Malbolge): defeats compilation, tooling and replacement
   by signature hash; the 2D medium that works is the spreadsheet.
-- **Natural-language skins** (Shakespeare, Chef, Rockstar, LOLCODE): the
-  semantics underneath is ordinary ([natural-language-and-literate.md](natural-language-and-literate.md)).
+- **Natural-language skins** (Shakespeare, Chef, Rockstar, LOLCODE): ordinary semantics underneath ([natural-language-and-literate.md](natural-language-and-literate.md)).
 - **`COME FROM`, advice or pointcuts in the language**: the AOP critique.
 - **Cyclic time or patterns as core types**: a library (14-non-goals).
 - **Killing a late thread** (Sonic Pi's time exception): report lateness

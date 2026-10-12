@@ -3,11 +3,12 @@
 ## Why this family matters for Sisu
 
 Sisu already has this family's core: capabilities handed down from `main`,
-`unsafe` gated by `[trust]`, `@must_consume` types and `Shared[T]` ([06](../../proposal/06-concurrency-and-capabilities.md),
-[04](../../proposal/04-memory-and-ownership.md)). These systems answer the
-next questions: how authority is narrowed, revoked and loaded; whether the
-discipline survives a process boundary; and what resource types look like
-where adversaries attack them for money. Austral, Pony, Unison,
+`unsafe` gated by `[trust]`, `@must_consume` types and `Shared[T]`
+([proposal/06](../../proposal/06-concurrency-and-capabilities.md),
+[proposal/04](../../proposal/04-memory-and-ownership.md)). These systems
+answer the next questions: how authority is narrowed, revoked and loaded;
+whether the discipline survives a process boundary; and what resource types
+look like where adversaries attack them for money. Austral, Pony, Unison,
 Koka/Effekt and Idris are in [`../languages/`](../languages/).
 
 ## Systems covered
@@ -117,9 +118,9 @@ authority safety, and pure modules avoid Newspeak's
 every-dependency-is-a-parameter boilerplate [11]. *Limits:* a trusted
 module can re-export a resource through a wrapper (`logger.write(fileName,
 text)` calling `io.write`), and "this would not be exposed in the logger's
-type or interface" [11]. *Sisu today* draws the
-pure/resource line per function, not per package, and has no
-capability-safe way to run code that arrives after compilation (Q-31).
+type or interface" [11]. *Sisu today* draws the pure/resource line per
+function, not per package, and cannot safely run code that arrives after
+compilation (Q-31).
 
 ### Vats, turns and reentrancy
 
@@ -140,18 +141,17 @@ Ether (a third of the 11.5 million committed, about $50 million) from The
 DAO; Ethereum hard-forked on 20 July 2016 [24]. Solidity's external call
 "hands over control to that contract (B)", which can "call back into A
 before this interaction is completed" [25]; the fixes are conventions
-(Checks-Effects-Interactions, the 2300-gas stipend) [25]. Agoric presents
-eventual send as its answer to the hazard [17]. *Move* had no dynamic
-dispatch, so reentrancy needed no rule, until Aptos Move 2.2 added function
-values ("Which concrete function is called is not known to the caller") and
-a runtime rule with them: "The Move VM dynamically detects reentrancy of a
+(Checks-Effects-Interactions, the 2300-gas stipend) [25], and Agoric offers
+eventual send as its answer [17]. *Move* had no dynamic dispatch, so
+reentrancy needed no rule, until Aptos Move 2.2 added function values
+("Which concrete function is called is not known to the caller") and a
+runtime rule with them: "The Move VM dynamically detects reentrancy of a
 module and locks all resources declared in that module" [19].
 
 *Sisu today.* Ownership is a static reentrancy guard in-process: while
-`withdraw(mut self, ...)` runs, `self` is exclusively borrowed, so a
-callback cannot reach the vault. The DAO interleaving needs
-`Shared[Mutex[Vault]]`, and then the reentrant call blocks on the lock
-instead of reading a stale balance:
+`withdraw(mut self, ...)` runs, `self` is exclusively borrowed, so no
+callback reaches the vault; the DAO interleaving needs `Shared[Mutex[Vault]]`,
+and then re-entry blocks on the lock instead of reading a stale balance:
 
 ```sisu
 def withdraw[P: Payee](mut self, who: Addr, mut payee: P) -> ! VaultError:
@@ -161,8 +161,9 @@ def withdraw[P: Payee](mut self, who: Addr, mut payee: P) -> ! VaultError:
     return Ok(())
 ```
 
-Between tasks interleaving returns, and E's rule (one message per turn,
-replies as new messages) is what Sisu's actor pattern (06) should copy.
+Between tasks interleaving returns, and there Sisu's actor pattern
+(proposal/06) should copy E's rule: one message per turn, replies as new
+messages.
 
 ### Promise pipelining and capability RPC
 
@@ -212,7 +213,7 @@ before the transaction ends, which is how flash loans force repayment:
 
 ```move
 public struct Receipt { amount: u64 }   // no abilities: no copy, drop or store
-public fun repay(p: &mut Pool, c: Coin<SUI>, r: Receipt) { let Receipt { amount } = r; /* c must cover amount */ }
+public fun repay(p: &mut Pool, c: Coin<SUI>, r: Receipt) { let Receipt { amount } = r; ... }
 ```
 
 *Evidence.* Conservation of assets becomes a type rule, where every
@@ -237,7 +238,7 @@ where Austral found linearity hostile ([austral.md](../languages/austral.md)).
 practical form of Wadler's "Linear types can change the world!" (1990)
 [26][27]: a `*World` or `*File` has one reference, so it is updated in
 place and the program stays pure. Haskell chose monads; the idea returned
-as Linear Haskell, Idris 2 multiplicities and Rust ownership.
+as Linear Haskell, Idris 2 and Rust.
 
 ```clean
 Start :: *World -> *World
@@ -283,10 +284,9 @@ of garbage collection [32]; Limbo added a collector and typed run-time
            repay(mut pool, r)?     # error: `?` would drop the receipts not yet visited
        return Ok(())
    ```
-   *Cost:* small in the checker (structural, like `Send`); real in `std`
-   (consuming container APIs). *Conflicts:* D-054 exempts only panics, and
-   Sisu's `?` cannot abort a transaction as Move's errors do.
-   *Confidence:* high for propagation (Move ships it), medium for `?`.
+   *Cost:* small in the checker, real in `std` (consuming container APIs).
+   *Conflicts:* D-054 exempts only panics; `?` cannot abort as Move errors
+   do. *Confidence:* high for propagation (Move ships it); medium for `?`.
 
 2. **Eventual references and promise pipelining as a library (E, Cap'n
    Proto, Workers RPC).** A `.later` view returns `Promise[T]` values that
@@ -300,7 +300,7 @@ of garbage collection [32]; Limbo added a collector and typed run-time
        return n.join()                               # the one blocking point (task only)
    ```
    `Remote[T]` and `.later` come from the reflection that
-   [17-testing](../../proposal/17-testing.md) plans for `Fake[MyTrait]`;
+   [proposal/17](../../proposal/17-testing.md) plans for `Fake[MyTrait]`;
    `Drop` sends the release Workers needs `using` for. *Cost:* a `std.x`
    library and a wire format (Cap'n Proto or OCapN). *Conflicts:* none
    with "no `async`" (`.later` is an ordinary method); `Remote` cannot be
@@ -316,10 +316,10 @@ of garbage collection [32]; Limbo added a collector and typed run-time
    revoker.revoke()                           # retained copies now fail with Err(Revoked)
    render(out.lend(), report)                 # Lent[Fs] is a view: render cannot store it
    ```
-   *Cost:* small; `Lent[T]` reuses the view rules of 04. *Conflicts:*
-   capabilities are `Copy` (06), so APIs must accept both forms, and
-   `Revoked` joins every I/O error set. *Confidence:* medium for
-   revocation (`Proxy.revocable` since ES2015); low-medium for lending.
+   *Cost:* small; `Lent[T]` reuses the view rules of proposal/04.
+   *Conflicts:* capabilities are `Copy` (proposal/06), so APIs must accept
+   both forms; `Revoked` joins every I/O error set. *Confidence:* medium
+   for revocation (`Proxy.revocable`, ES2015); low-medium for lending.
 
 4. **Pure and resource packages; capability-gated plugins (Wyvern, SES,
    Limbo).** `sisu audit --authority` labels a package *pure* when its API
@@ -333,24 +333,24 @@ of garbage collection [32]; Limbo added a collector and typed run-time
    ```
    *Cost:* the interpreter as an embeddable library with comptime's fuel
    and memory limits. *Conflicts:* the "no `eval`" non-goal
-   ([14](../../proposal/14-non-goals.md)); ambient stdio; and Q-6: a
-   plugin could spawn without bound, the first concrete case for a `Tasks`
-   capability. *Confidence:* medium for the label, low for the loader.
+   ([proposal/14](../../proposal/14-non-goals.md)); ambient stdio; Q-6 (a
+   plugin could spawn without bound: the first concrete case for a `Tasks`
+   capability). *Confidence:* medium for the label, low for the loader.
 
 5. **Checked resource bounds for `freestanding` code (Hume).** Expose the
-   stack bounds the compiler already computes for tasks (06):
+   stack bounds the compiler already computes for tasks (proposal/06):
    ```sisu
    @stack_bound(2048) @no_alloc      # checked over the call graph; recursion is an error
    def on_interrupt(mut uart: Uart, byte: u8): ...
    ```
-   *Cost:* low. *Conflicts:* attributes are data ([08](../../proposal/08-metaprogramming.md));
-   these would be checked like `@must_consume`. *Confidence:* low-medium.
+   *Cost:* low. *Conflicts:* attributes are data
+   ([proposal/08](../../proposal/08-metaprogramming.md)); these would be
+   checked like `@must_consume`. *Confidence:* low-medium.
 
 ## Dead ends
 
 - **Capability-safe subsets of existing languages (Joe-E, Caja):** taming
-  is error-prone and tracks every host release; Caja died with known holes
-  [6][7].
+  is error-prone and tracks every host release; Caja died with holes [6][7].
 - **Network transparency (Oz/Mozart, Erlang defaults):** partial failure
   cannot be hidden [34]; copy E's near/eventual split instead.
 - **An eventual-send operator (`<-`, `~.`):** still at TC39 Stage 1 in 2026
@@ -388,8 +388,8 @@ of garbage collection [32]; Limbo added a collector and typed run-time
 22. D. Dill et al., "Fast and Reliable Formal Verification of Smart Contracts with the Move Prover", TACAS 2022, arXiv:2110.08362. https://arxiv.org/abs/2110.08362
 23. Halborn, "Explained: The Cetus Hack (May 2025)", 27 May 2025. https://www.halborn.com/blog/post/explained-the-cetus-hack-may-2025
 24. "The DAO", Wikipedia (2026). https://en.wikipedia.org/wiki/The_DAO
-25. Solidity docs, "Security Considerations"; "Solidity v0.8.0 Breaking Changes" (2026). https://docs.soliditylang.org/en/latest/security-considerations.html ; https://docs.soliditylang.org/en/latest/080-breaking-changes.html
-26. P. Wadler, "Linear types can change the world!", IFIP TC 2 Conference on Programming Concepts and Methods, 1990. https://homepages.inf.ed.ac.uk/wadler/topics/linear-logic.html
+25. Solidity docs, "Security Considerations" (2026). https://docs.soliditylang.org/en/latest/security-considerations.html
+26. P. Wadler, "Linear types can change the world!", IFIP TC 2 Conference on Programming Concepts and Methods, 1990 (not re-fetched). https://homepages.inf.ed.ac.uk/wadler/topics/linear-logic.html
 27. "Uniqueness type"; "Clean (programming language)", Wikipedia (2026). https://en.wikipedia.org/wiki/Uniqueness_type ; https://en.wikipedia.org/wiki/Clean_(programming_language)
 28. T. Jim et al., "Cyclone: A safe dialect of C", USENIX ATC 2002. https://www.usenix.org/legacy/publications/library/proceedings/usenix02/full_papers/jim/jim_html/index.html
 29. The Rust Reference, "Influences" (2026). https://doc.rust-lang.org/reference/influences.html

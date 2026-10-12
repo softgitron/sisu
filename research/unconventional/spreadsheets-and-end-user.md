@@ -103,8 +103,9 @@ No controlled outcome study exists; the lineage is in
 
 **What it is.** Microsoft's own LAMBDA workflow is concrete-first: test the
 formula in a cell, wrap and call it at once (`=LAMBDA(number, number +
-1)(1)` returns 2), then "move it to the Name Manager" [3]. With LAMBDA,
-"Excel has become Turing-complete" [1]:
+1)(1)` returns 2), then "move it to the Name Manager" [3]. Dynamic arrays
+"allow ordinary formulas to compute whole arrays that spill into adjacent
+cells"; then LET, then LAMBDA: "Excel has become Turing-complete" [1]:
 
 ```
 =LET(gross, B2, rate, 0.24, gross - gross * rate)                  (LET, March 2020)
@@ -131,8 +132,7 @@ multi-line formulas with comments, editor type checking, `let`/`lets`,
 lists and `map`/`filter` [29]; Airtable's reference still lists no
 user-defined functions [30]. A program-like textual view beside the grid
 "can significantly improve user performance" in authoring and debugging [6].
-
-**Transplant.** IDEs have "extract function"; none I found turns the
+**Transplant:** IDEs have "extract function"; none I found turns the
 concrete values in scope into the new function's first example.
 
 ### Every intermediate visible, and testable: Forms/3 and WYSIWYT
@@ -165,8 +165,8 @@ lists "readable code generation" [24]. General synthesis: [`holes-synthesis-and-
 ### The gentle slope: levels from user to programmer
 
 MacLean et al. (CHI 1990, not opened) are the usual source of the "gentle
-slope" [19]; Myers et al. ask for low threshold, high ceiling and a smooth
-path [18]; Ko et al. define end-user programming by "the intent" [17].
+slope" [19]; Myers et al. ask for a low threshold and high ceiling [18]; Ko
+et al. define end-user programming by "the intent", not the person [17].
 
 **HyperCard** (11 August 1987, Atkinson's "software erector set"; HyperTalk
 by Dan Winkler) was free with every new Mac [38]. Scripts read like English
@@ -206,14 +206,12 @@ performance" with and without Hedy [36]. Adoption: about 300,000 monthly users i
 Power Fx promises "no-code ... to 'pro-code' ... with no learning or
 rewriting cliffs": Excel consistency, static types with inference, pure
 formulas (`If( Value(TextBox1.Text) >= 0, Color.Black, Color.Red )` needs no
-`OnChange` handler [26]), locale-sensitive decimals (`3,14` in France, so
-lists use `;`), "all data types can take on the value of blank", and a
-version stamp per document so a "back compat converter" rewrites old
-formulas on next edit [25]. The churn: Google App Maker shut down on 19
-January 2021 "due to low usage" [40]; Amazon Honeycode (2020-2024)
-[unverified]; Power Fx, open-sourced in 2021, still says in 2026 "we are in
-the process of extracting the language" [27]. The formula language outlives
-every builder built on it.
+`OnChange` handler [26]), locale-sensitive decimals, "blank" for every type,
+and per-document version stamps so a "back compat converter" rewrites old
+formulas on next edit [25]. The churn: App Maker shut down in January 2021
+"due to low usage" [40]; Amazon Honeycode (2020-2024) [unverified]; Power Fx
+still says in 2026 "we are in the process of extracting the language" [27].
+The formula language outlives every builder built on it.
 
 ### Synthesis: what a compiled language can offer
 
@@ -261,7 +259,10 @@ hosts the interpreter, re-evaluating incrementally and asynchronously within
 the 100 ms budget. *Conflicts:* the notebook non-goal (00, 14) needs a
 sentence separating a worksheet (one file, re-run whole, no saved output)
 from a notebook; script mode must allow top-level statements. *Confidence:*
-medium (feasible, as Swift and Unison show; benefit unmeasured).
+medium (feasible, as Swift and Unison show; benefit unmeasured). It
+complements idea 4 of [`live-and-exploratory-environments.md`](live-and-exploratory-environments.md)
+(always-on evaluation of doc examples): a worksheet is where one computes
+before any function exists.
 
 ### 2. The teaching profile as monotone levels
 
@@ -319,8 +320,9 @@ def parse_price(text: str) -> int ! {PriceError, ParseError}:   ┊ example 1/3:
 It supplies inside an abstraction what Excel loses when a formula becomes a
 LAMBDA. *Cost:* a tracing interpreter mode mapped to spans; loops shown as a
 last value plus a table on demand; capability parameters bound to fakes.
-*Conflicts:* LSP latency (run asynchronously). *Confidence:* medium for
-feasibility [42], low for measured benefit.
+*Conflicts:* LSP latency (run asynchronously). It extends that file's idea 4
+from an assertion's sub-expressions to a function's own bindings.
+*Confidence:* medium for feasibility [42], low for measured benefit.
 
 ### 5. Approve a value, get a test
 
@@ -349,8 +351,7 @@ studies are of spreadsheet end users, and ticks become rubber-stamps when
 - **Example-only programs.** FlashFill's invisible static result was fixed by
   emitting formulas [23]; elastic generalisation [5] has no shipped use yet.
 - **A visual low-code builder.** Builders churn; the language survives [27][40].
-- **Locale-dependent syntax** (Power Fx's `;` and `;;` [25]): one formatter,
-  no options.
+- **Locale-dependent syntax** (Power Fx's `;` and `;;` [25]): one formatter.
 
 ## Sources
 

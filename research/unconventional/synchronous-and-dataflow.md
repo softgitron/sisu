@@ -31,8 +31,8 @@ logical-time subset for embedded, robotics and simulation, or whether the pieces
 ### Logical instants: perfect synchrony (Esterel)
 
 Esterel (Berry, Sophia-Antipolis, begun 1982) runs a program as a sequence of *reactions*: inputs are
-sampled at the start of a logical instant, outputs are computed "in zero time", and parallel branches see
-each other's emitted signals within the instant. Berry's ABRO (emit `O` once `A` and `B` have both
+sampled at the start of a logical instant, outputs are computed in zero logical time, and parallel branches
+see each other's emitted signals within the instant. Berry's ABRO (emit `O` once `A` and `B` have both
 arrived; restart on `R`) grows linearly where the equivalent automaton grows exponentially [1]:
 
 ```esterel
@@ -47,7 +47,7 @@ no-overlap" between reactions [1]. **What it buys:** deterministic parallel comp
 algebra ("`delay 1; delay 2` exactly equals `delay 3`"). The designers' 2003 retrospective says the model
 "has remained valid and was never questioned" and that code needing no operating-system scheduler "was
 particularly attractive to certification authorities"; at Texas Instruments, Esterel models of DSP control
-logic showed existing test suites exercised "only about 30%" of the control state space [2].
+logic showed existing test suites exercised "only about 30%" of the full state space [2].
 
 **Where it failed.** Instantaneous broadcast makes a reaction a fixpoint equation that may have no solution
 or several; the designers call the hunt for a sound causality analysis "like a Mary Higgins Clark novel:
@@ -78,9 +78,9 @@ nuclear plants (SAO at Aerospatiale; SAGA, on Lustre, at Merlin-Gerin); Esterel 
 2001 [2]. Its generator KCG checks, "as a prerequisite to code generation", that every flow is defined
 exactly once, that no undefined data is read, that there is no combinational cycle ("=> deterministic
 scheduling-independent result") and no recursion ("=> static memory allocation, bounded stack"). The C it
-emits has "no recursion, no loop" and "bounded execution time" and is checked with Astrée and AbsInt's
-analysers [1]. KCG was developed under a DO-178B Level A process and qualified as a development tool, so
-there is "no need to unit-test the generated C code" [1]; it is qualifiable as a DO-330 TQL-1 tool under
+emits has "no recursion, no loop" and "bounded execution time", which eases analysis with Astrée and
+AbsInt's tools [1]. KCG was developed under a DO-178B Level A process and qualified as a development tool,
+so there is "no need to unit-test the generated C code" [1]; it is qualifiable as a DO-330 TQL-1 tool under
 DO-178C [7]. Timing is deterministic for a plain reason: the program is one bounded step function per
 period, its worst case is a static-analysis result, and the period is chosen above it.
 
@@ -111,27 +111,27 @@ with
 end
 ```
 
-Each external event is one reaction; trails run in lexical order; every path through a loop must `await`
-an external event (checked), so every reaction terminates. LCTES 2018 proves reactions "memory-bounded,
+Each external event is one reaction; trails run in lexical order; every path through a loop must `await` an
+external event (checked), so every reaction terminates. LCTES 2018 proves reactions "memory-bounded,
 deterministic, and terminating" [10]. SenSys 2013 measured "around 25%" less code complexity than nesC on
-sensor-network protocols, with ROM and RAM "below 10%" higher [11]; a case study rewrote part of the Pingus
-game [12]. "Immediate orthogonal abortion" "cannot be expressed effectively in traditional (asynchronous)
-multi-threaded languages" [10]. It stayed with one research group. Sisu's scope is already `par/and`,
-cancellation is the abort and `defer`/`Drop` are `finalize`; a named `par/or` is missing.
+sensor-network protocols, with ROM and RAM "below 10%" higher [11]; a case study rewrote the Pingus game
+from C++ [12]. "Immediate orthogonal abortion" "cannot be expressed effectively in traditional
+(asynchronous) multi-threaded languages" [10]. It stayed with one research group. Sisu's scope is already
+`par/and`, cancellation is the abort and `defer`/`Drop` are `finalize`; a named `par/or` is missing.
 
 ### Deterministic composition and the delay rule (Kahn, SDF, StreamIt, Faust, Simulink)
 
-Kahn (1974) showed that deterministic sequential processes joined by FIFO channels, where reads block and no
-process may test a channel for emptiness, compute a deterministic function of their inputs under any
-schedule [13]; Berry's gloss: "result-deterministic ... but semantics easily breaks down when language
-extended" [1]. The extension that breaks it is the merge: occam's `ALT` takes one ready input and "the
+Kahn (1974) showed that deterministic sequential processes joined by FIFO channels, where reads block and
+no process may test a channel for emptiness, compute a deterministic function of their inputs under any
+schedule [13]. The extension that breaks it is the merge: occam's `ALT` takes one ready input and "the
 language does not define which one" [14]; Go's and Sisu's `select` are the same construct. Synchronous
-dataflow (Lee and Messerschmitt, 1987 [13]) fixes token rates, so schedules and buffer sizes are computed at
-compile time; StreamIt (MIT, CC 2002 [15]) gave it filters with declared `push`, `pop` and `peek` rates. A
-study of 65 StreamIt programs (33,600 lines, 22 programmers) by its designers measured the cost [16]: single-input single-output streams were "useful and tractable" but "occasionally unnatural";
-a quarter of the programs needed stateful filters; dynamic rates were "absolutely necessary" for the 9 that
-used them (JPEG and MPEG parsing); and programmers "can accidentally introduce unnecessary sequential
-bottlenecks (mutable state)".
+dataflow (Lee and Messerschmitt, 1987 [13]) fixes token rates, so schedules and buffer sizes are computed
+at compile time; StreamIt (MIT, CC 2002 [15]) gave it filters with declared `push`, `pop` and `peek` rates.
+A study of 65 StreamIt programs (33,600 lines, 22 programmers) by its designers measured the cost [16]:
+single-input single-output streams were "useful and tractable" but "occasionally unnatural"; a quarter of
+the programs needed stateful filters; dynamic rates were "absolutely necessary" for the 9 that used them
+(JPEG and MPEG parsing); and programmers "can accidentally introduce unnecessary sequential bottlenecks
+(mutable state)".
 
 Faust (GRAME, 2002) is the static model's success: a block-diagram algebra for audio (`:` sequence, `,`
 parallel, `<:` split, `:>` merge, `~` feedback) compiled to C++, C, LLVM, WebAssembly and Rust, with
@@ -141,8 +141,8 @@ where `~` feeds the output back one sample later.
 These systems share one rule: **every cycle contains a delay**. Lustre "solves this trivially by forbidding
 delay-free loops" [2], Faust's `~` inserts a sample, StreamIt's feedback loops are primed with initial items
 and Lingua Franca needs an `after` or a microstep. The rule buys determinism without Esterel's causality
-analysis. Simulink's discrete-time block diagrams are synchronous dataflow in all but name, and SCADE and
-Sildex exist partly to import them [2][9].
+analysis. Simulink's discrete-time block diagrams are synchronous dataflow in all but name; Sildex imports
+them and SCADE 6 positions itself as the alternative to Simulink plus Stateflow [2][9].
 
 ### Dataflow as the execution model (Id, Sisal)
 
@@ -198,30 +198,30 @@ main reactor {
 }
 ```
 
-Programs are "deterministic by default", and "physical actions provide a means for deliberately
-introducing actor-like nondeterminism" (inputs stamped with physical time) [27]; deadlines bound the lag
-between logical and physical time, and federated programs keep the semantics across machines [26]. On 22
-of the 30 Savina benchmarks the C++ runtime was about 1.85x faster than Akka and 1.42x faster than CAF
-(geometric mean, 20 threads); dynamic actor creation was unsupported (8 benchmarks omitted) [27]. A June 2026 paper runs unmodified ROS 2 applications under LF:
-on the Autoware reference system, default ROS 2 callback order differed between runs and LF's was
-deterministic, with consistent latencies [28]. Version 0.13.0 shipped in August 2026 [26]; Xronos (2023,
-Lohstroh and Menard) is the commercial arm [29, secondary]. Use outside the founding groups is small.
+Programs are "deterministic by default", and "physical actions provide a means for deliberately introducing
+actor-like nondeterminism" (inputs stamped with physical time) [27]; deadlines bound the lag between
+logical and physical time, and federated programs keep the semantics across machines [26]. On 22 of the 30
+Savina benchmarks the C++ runtime was about 1.85x faster than Akka and 1.42x faster than CAF (geometric
+mean, 20 threads); dynamic actor creation was unsupported (8 benchmarks omitted) [27]. A June 2026 paper
+runs unmodified ROS 2 applications under LF: on the Autoware reference system, default ROS 2 callback order
+differed between runs and LF's was deterministic, with consistent latencies [28]. Version 0.13.0 shipped in
+August 2026 [26]; Xronos (2023, Lohstroh and Menard) is the commercial arm [29, secondary]; other use is small.
 
 ### Determinism by construction, or by simulation (Lee, FoundationDB)
 
 Lee's "The Problem with Threads" (2006) argued that threads "discard the most essential and appealing
 properties of sequential computation: understandability, predictability, and determinism", citing reviewed
-and tested Ptolemy II code whose deadlock appeared "on April 26, 2004, four years later" [30].
-Deterministic Parallel Java (2009) made determinism a type-and-effect discipline and LVars (2013) made shared
-state monotonic [32]; the synchronous languages and LF get it by construction. FoundationDB gets it by
-simulation: "All database code is deterministic; accordingly multithreaded concurrency is avoided
-(instead, one database node is deployed per core)", and "all sources of nondeterminism and communication
-are abstracted, including network, disk, time, and pseudo random number generator", so a cluster under
-fault injection runs in one process [31]. It is the strongest measured outcome in this file: CloudKit ran
-it "for more than 0.5M disk years without a single data corruption event", and without it ambitious
-rewrites "would have been deemed too risky or too difficult" [31]. Sisu is halfway there: nondeterminism enters only through capabilities, test clocks advance
-"only when every task in the test is blocked" ([`17-testing.md`](../../proposal/17-testing.md)), and the
-Phase 6 interpreter schedules from a seed.
+and tested Ptolemy II code whose deadlock appeared "on April 26, 2004, four years later" [30]. The
+synchronous languages, LF, Deterministic Parallel Java and LVars [32] get determinism by construction;
+FoundationDB gets it by simulation: "All database code is deterministic; accordingly multithreaded
+concurrency is avoided (instead, one database node is deployed per core)", and "all sources of
+nondeterminism and communication are abstracted, including network, disk, time, and pseudo random number
+generator", so a cluster under fault injection runs in one process [31]. It is the strongest measured
+outcome in this file: CloudKit ran it "for more than 0.5M disk years without a single data corruption
+event", and without it ambitious rewrites "would have been deemed too risky or too difficult" [31]. Sisu is
+halfway there: nondeterminism enters only through capabilities, test clocks advance "only when every task
+in the test is blocked" ([`17-testing.md`](../../proposal/17-testing.md)), and the Phase 6 interpreter
+schedules from a seed.
 
 ## Transferable ideas for Sisu
 
@@ -258,7 +258,8 @@ zero-delay limit) but yes to logical time as a runtime feature and a library, bu
    ```
 
    Cost: a library function over `task.scope` and `s.cancel()`. Conflicts: none; under the deterministic
-   scheduler the winner is a function of the seed. Confidence: medium-high (`Promise.race`, Kotlin `select`).
+   scheduler the winner is a function of the seed. Confidence: medium-high (`Promise.race`, Kotlin
+   `select`).
 
 3. **`std.x.reactor`: Lingua Franca's logical time as a library.** LF's guarantee needs reactions that
    communicate only through ports, an order within a tag, and one source of nondeterminism. A `pure`
@@ -268,7 +269,7 @@ zero-delay limit) but yes to logical time as a runtime feature and a library, bu
 
    ```sisu
    def control(imu: Imu, motor: Motor, clock: Clock) -> ! RobotError:
-       var g = rx.Graph()
+       var g = reactor.Graph()                         # import std.x.reactor
        let accel = g.physical(imu)                     # stamped on arrival: the only nondeterminism
        let smooth = g.add(Smoother(alpha=0.2), accel)
        let cmd = g.add(Pid(kp=0.8, ki=0.1), smooth, after=Duration.millis(1))

@@ -3,11 +3,10 @@
 ## Why this family matters for Sisu
 
 Block, node and projectional editors are the only programming tools whose benefits for novices
-have been measured in classrooms rather than asserted, and the only ones with forty years of
-commercial history as an alternative to text (LabVIEW, Simulink, Max). They answer a concrete
-question: can a textual, indentation-based language get the measured benefits of blocks (no
-syntax errors, a discoverable vocabulary, faster early learning) through tooling built on its
-syntax tree, while text stays the only source of truth?
+were measured in classrooms rather than asserted, and the only alternative to text with forty years
+of commercial history (LabVIEW, Simulink, Max). They answer a concrete question: can a textual,
+indentation-based language get the measured benefits of blocks (no syntax errors, a discoverable
+vocabulary, faster early learning) through tooling, with text as the only source of truth?
 
 ## Systems covered
 
@@ -18,7 +17,7 @@ syntax tree, while text stays the only source of truth?
 | Blockly | 2011- | Moved from Google to the Raspberry Pi Foundation on 10 Nov 2025 [4] | A library: a definition and one code generator per target language for each block |
 | App Inventor | 2010 (Google), 2012- (MIT) | "over 24 million learners", "over 100 million apps" (MIT's claim) [5] | Blocks for Android apps; the palette grows with the components used |
 | Microsoft MakeCode | 2016- | micro:bit, Arcade and other editors [6] | Blocks, Static TypeScript and Python round-trip through one hub language |
-| Pencil Code / Droplet | 2013- | Live [8] | Dual-mode editor: text is primary, blocks are a projection |
+| Pencil Code / Droplet | 2013- | Site returned HTTP 503 when checked (Oct 2026) | Dual-mode editor: text is primary, blocks are a projection |
 | Stride (Greenfoot, BlueJ) | 2015-, 2017- | Shipped in both IDEs [15] | Frames for statements, typing for expressions |
 | LabVIEW (G) | 1986- | LabVIEW 2026 Q1; NI part of Emerson since Oct 2023; NXG ended 2021 [17] | Dataflow wires behind an instrument "front panel" |
 | Prograph | 1982-late 1990s | Withdrawn; the Marten IDE keeps the language [21] | Object-oriented dataflow |
@@ -32,7 +31,7 @@ syntax tree, while text stays the only source of truth?
 | JetBrains MPS, mbeddr | 2003-, 2012- | MPS 2026.1; mbeddr's README targets MPS 2024.1 [24] | Projectional editing and language composition |
 | Enso (formerly Luna) | mid-2010s- | Sold as "Enso Analytics", a data-prep product; nightlies in 2026 [25] | One program shown as a node graph and as text |
 | Lamdu | 2011- | 0.8.1 "technology preview" [26] | Projectional, typed and live; no text files |
-| Isomorf | late 2010s [unverified] | Site is a title page only | Structure editor over a code graph [unverified] |
+| Isomorf | late 2010s [unverified] | Site is a title page only [32] | Structure editor over a code graph [unverified] |
 | Hazel | 2016- | Research and teaching (POPL 2017-2025) [27][28] | Every edit state is well-typed and runs |
 | Sketch-n-Sketch | 2015-2020 | Research prototype [29] | Edit the program by dragging its SVG output |
 
@@ -49,12 +48,11 @@ valid way" [10]. Scratch also reports no errors at run time [unverified wording]
 notes that block environments for children "often provide no support for debugging at all" [34].
 
 What it buys, measured: in Price et al.'s ICER 2016 study, middle-school students using Stride's
-frame editor "progressed through the activity more quickly and completed more objectives" and
-spent significantly less time on purely syntactic edits and with non-compilable code than students
-using Greenfoot's Java editor, with similarly low frustration [15].
+frame editor "progressed through the activity more quickly and completed more objectives", and
+spent less time on purely syntactic edits and with non-compilable code, than Java-editor users [15].
 
 Where it fails: viscosity. Bau et al.'s example is rewriting `(a/2 + b/2)` as `(a+b)/2`, which in
-blocks "requires more gestures and more forethought than making the edits in text"; blocks are
+blocks needs "more gestures and more forethought than making the edits in text"; blocks are
 also low-density, hard to search and navigate, and hard to version-control [8]. The 1980s
 syntax-directed editors failed on the same point. The Cornell Program Synthesizer's authors held
 that "Programs are not text; they are hierarchical compositions of computational structures"
@@ -64,7 +62,7 @@ that "Programs are not text; they are hierarchical compositions of computational
 Transplants into text that worked keep text editing for expressions. Stride "maintains the look of
 a program as essentially a textual, if coloured, document" [15]. Hazel's tylr does keyboard-driven
 structure editing in which missing pieces become tracked "obligations" rather than forbidden states
-(TyDe 2022, VL/HCC 2023) [28]. Lisp's paredit edits ordinary text by s-expression and is used by
+(TyDe 2022, VL/HCC 2023) [28]. Paredit-style editing of ordinary text by s-expression is used by
 81% of experienced Clojure developers (2025 survey, [`clojure.md`](../languages/clojure.md)). Dark
 launched in 2019 with a structured editor in which syntax errors cannot be entered; its 2025
 successor is being built as a CLI with a VS Code extension and a language server [30].
@@ -98,8 +96,7 @@ namespace basic {
 }
 ```
 
-The block shows one parameter where the function has two, and the return type picks the shape
-(a statement block for `void`, an expression block otherwise) [6].
+The block shows one of the two parameters; the return type picks its shape (`void`: a statement) [6].
 
 ### 3. What the classroom studies measure
 
@@ -124,8 +121,8 @@ off task and completed more goals in less time, with no difference in attitude [
 report a CMU Java course that began with Alice, which generated Java from blocks, scoring 10% or
 more higher on every section of the same Java exam, and note "potential challenges" when courses
 switch to text without a mediated transfer [8]. MakeCode's designers, with several million
-micro:bits in classrooms, write: "More research is required to evaluate if such a multi-mode
-editor approach is useful" [6]. The defensible summary: blocks buy novices an early, measurable
+micro:bits distributed, write: "More research is required to evaluate if such a multi-mode editor
+approach is useful" [6]. The defensible summary: blocks buy novices an early, measurable
 gain, concentrated in control structure and vocabulary, that fades within a term after the move to
 text, at a cost in perceived authenticity.
 
@@ -146,14 +143,14 @@ back into the original JavaScript" [7]. The documented cases are ordinary code:
 
 ```ts
 for (let x = 2; x <= 5; x++) { }    // grey: the loop variable must start at 0
-for (let x = 0; x > -1; x++) { }    // grey: the condition must be < or <= with the variable on the left
+for (let x = 0; x > -1; x++) { }    // grey: the condition must use < or <=
 ```
 
-Block identity is part of the saved program, since `blockId` "is serialized in block code", so
-renaming a function or namespace breaks existing projects [7]; and some STS constructs (classes)
-are not editable as blocks at all [6]. The lesson for a language: round-tripping is a property of
-a canonical pretty-printer plus a decompiler that recognises its output, and everything outside
-that subset needs a lossless fallback view.
+Block identity is part of the saved program: `blockId` "is serialized in block code", so changing
+it, or renaming the function it defaults to, breaks existing projects [7]; and some STS constructs
+(classes) are not editable as blocks at all [6]. The lesson for a language: round-tripping is a
+property of a canonical pretty-printer plus a decompiler that recognises its output, and everything
+outside that subset needs a lossless fallback view.
 
 ### 5. Wires as the program: forty years of dataflow notations
 
@@ -186,17 +183,18 @@ hold typed text because "once you have more than ten or twenty distinct icons it
 to remember which icon corresponds to which functionality" and text conveys "more information per
 square inch" [18], and Gen "lets you combine procedural commands with visual patching" [19].
 Node-RED's Function node "allows JavaScript code to be run against the messages" [20];
-TouchDesigner's DATs hold Python, Grasshopper has Python and C# Script components, and vvvv nodes
-can be written "in pure C# or F#" [21].
+TouchDesigner's DATs hold Python, Grasshopper has Python and C# Script components, and vvvv's
+custom nodes can be written in C# or F# [21].
 
-NI's own retreat is the commercial evidence. LabVIEW NXG, a new IDE first released in 2017, ended
-after users "shared with us some of your concerns around migrating to an entirely new LabVIEW
-product": "We will not release new versions of LabVIEW NXG starting in 2022", and its strengths were
-folded back into classic LabVIEW [17]. Godot removed VisualScript in 4.0 (1 March 2023) because it
-"never gained traction": 0.5% of more than 5,000 poll respondents used it as their main language,
-GDScript was easy enough, Godot lacked the high-level game components that make visual scripting
-useful in other engines, its examples could not go into the documentation, and the team concluded
-that the approach itself was wrong [22]. Prograph's company went into receivership in 1995 [21].
+NI's own retreat shows the cost of a notation only one tool can read. LabVIEW NXG, a new IDE first
+released in 2017, ended after users "shared with us some of your concerns around migrating to an
+entirely new LabVIEW product": "We will not release new versions of LabVIEW NXG starting in 2022",
+and its strengths were folded back into classic LabVIEW [17]. Godot removed VisualScript in Godot
+4.0 (March 2023) because it "never gained traction": 0.5% of more than 5,000 poll respondents used
+it as their main language, GDScript was easy enough, Godot lacked the high-level game components
+that make visual scripting useful in other engines, its examples could not go into the
+documentation, and the team concluded that the approach itself was wrong [22]. Prograph's company
+went into receivership in 1995 [21].
 
 ### 6. Projectional editing and its adoption problem
 
@@ -229,8 +227,8 @@ main =
 [[{"index": {"value": 98}, "size": {"value": 5}}, "5fc0c11d-bd83-4ca3-..."], ...]
 ```
 
-Its documentation warns that an "extra newline in the beginning of the `Main.enso` file ... is
-important for the precalculated metadata indexes" [25], and the language now ships as a data-prep
+Its documentation warns: "Notice extra newline in the beginning of the `Main.enso` file, it is
+important for the precalculated metadata indexes" [25]. The language now ships as a data-prep
 product with "No-code or full-code ... two equally first-class interfaces" [25]. Lamdu stores no
 text and is a 0.8.1 "technology preview" fifteen years after it began [26].
 
@@ -244,26 +242,24 @@ incomplete programs run: "evaluation proceeds around holes", with "a fill-and-re
 avoids the need to restart evaluation" [28]. Later work adds keyboard-driven gradual structure
 editing (tylr), total type error localisation (POPL 2024), collaborative editing (Grove, POPL 2025)
 and hole types as context for language models (OOPSLA 2024) [28]. Hazel has no production users,
-but its core idea is the most transferable in this file: it gives a textual language the blocks
-guarantee in the checker and the interpreter, without constraining how text is typed. Holes as a
-synthesis tool are covered in `holes-synthesis-and-ai-era.md`.
+but half of its idea transfers to a textual language: holes give every edit state a type in the
+checker, without constraining how text is typed. Evaluating past a hole does not transfer to code
+with effects; stopping at it does (`holes-synthesis-and-ai-era.md`, which also covers synthesis).
 
 ### 8. Editing the output
 
 Sketch-n-Sketch "infers a program update in order to match the changes to the output" by
 "trace-based program synthesis that takes program execution history into account" ("live
-synchronization") [29]. It works for SVG drawings, where output maps closely onto literals. Its
-sibling Deuce (ICSE 2018) is the transferable part: structural selection and refactoring menus on
-top of an ordinary text editor [29]. Nobody has shipped output-directed editing for a
-general-purpose language; the narrow form that ships is scrubbing a literal and watching the result,
-covered in `live-and-exploratory-environments.md`.
+synchronization"); it works for SVG, where output maps closely onto literals [29]. Its sibling
+Deuce (ICSE 2018), structural selection and refactoring menus on an ordinary text editor, is the
+transferable part [29]. Nobody has shipped output-directed editing for a general-purpose language.
 
 ## Transferable ideas for Sisu
 
 The answer to the central question is yes for two of the three measured benefits and partly for
 the third. Vocabulary discoverability transfers fully, because it is a property of the palette, not
 of blocks. Freedom from syntax errors transfers to whoever uses a structure mode, and its semantic
-form (every edit state type-checks and runs) transfers to everyone through holes. The early learning
+form (every edit state type-checks) transfers to everyone through holes. The early learning
 gain is real but short-lived and has only been obtained with block or frame editors; a teaching
 tool can reproduce it, a text editor cannot. None of this needs a source format other than
 formatted text. What MakeCode and Enso show is required is a canonical printer plus stable node
@@ -303,14 +299,15 @@ identity, which Sisu's formatter and parser decisions nearly provide already.
    extension; the data is in the checker). Conflicts: none. Confidence: medium; the evidence is
    from novices, and professionals already have completion.
 
-4. **Holes as legal edit states.** An expression `todo` (or `todo("name")`) has whatever type its
-   context requires; `sisu check` reports each hole's expected type and the bindings in scope; the
-   interpreter evaluates around holes and panics only when one is demanded; with hot function
-   replacement (D-053), filling a hole resumes the paused frame instead of restarting (Hazel's
-   fill-and-resume). An ill-typed subexpression can be reported as a non-empty hole, which fits the
-   existing rule that nothing downstream of the first error in a chain is reported (10-tooling).
-   Cost: medium (checker and interpreter). Conflicts: `_` is taken by patterns, hence a keyword.
-   Confidence: medium. The synthesis side is in `holes-synthesis-and-ai-era.md`.
+4. **Holes as legal edit states.** The error-tolerant parser turns each gap in unfinished text (an
+   empty block after `:`, a missing operand) into an anonymous hole, and the checker gives every
+   hole its expected type, so a half-written function still type-checks, completion and the palette
+   can use the expected type, and nothing downstream of the gap is reported (the existing rule in
+   10-tooling). Under the debugger, reaching a hole pauses the task instead of unwinding it, so
+   after the hole is filled, hot replacement (D-053) restarts the frame: Hazel's fill-and-resume
+   without evaluating past the hole, which code with effects must not do. The hole syntax (`?name`),
+   its semantics and its reports are designed in `holes-synthesis-and-ai-era.md`. Cost: medium
+   (parser recovery and checker). Conflicts: none beyond that file's. Confidence: medium.
 
 5. **A frame mode for the teaching profile.** Sisu's syntax is frame-shaped already: a logical line
    is a frame and a line ending in `:` opens a container, so a Stride-style editor (typing `for`
@@ -351,15 +348,14 @@ identity, which Sisu's formatter and parser decisions nearly provide already.
   Enso's metadata block, Unison's database. Each forfeits diff, merge, grep, review and blame, and
   Sisu's plan for AI assistance depends on a text corpus (10-tooling).
 - **Visual dataflow as a general-purpose notation.** The 8:1 viscosity measurement, the Deutsch
-  limit, Puckette's verdict on control flow, NI's NXG retreat and Godot's 0.5% point the same way;
-  the node tools that survive are coordination layers over text.
+  limit, Puckette's verdict on control flow and Godot's 0.5% point the same way; the node tools
+  that survive are coordination layers over text.
 - **Editors that forbid invalid intermediate text.** The 1980s syntax-directed editors and the
   mbeddr lessons show programmers reject them; Hazel itself moved to gradual structure editing.
 - **Layout that carries meaning beyond indentation.** Max's fan-out ordering by screen position is
   the cautionary case. Sisu's indentation is decided in the lexer and never changed by the
   formatter (D-027); no other layout should be semantic.
-- **Output-directed editing of general programs.** Sketch-n-Sketch's synthesis depends on a small,
-  literal-heavy domain.
+- **Output-directed editing of general programs.** Sketch-n-Sketch needs a literal-heavy domain.
 - **Blocks as the default first experience for Sisu's audience.** The gains fade within a term and
   text students judge text more authentic [10][11]; blocks are a teaching tool, not a mode of the
   language.
@@ -399,5 +395,5 @@ identity, which Sisu's formatter and parser decisions nearly provide already.
 31. Wikipedia, "Deutsch limit". https://en.wikipedia.org/wiki/Deutsch_limit
 32. Isomorf, https://isomorf.io/ (title page only, Oct 2026).
 33. Language Server Protocol 3.17 specification (Selection Range, since 3.15). https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/
-34. A. Deiner et al., "NuzzleBug: Debugging Block-Based Programs in Scratch", 2023 (ICSE 2024). arXiv:2309.14465
+34. A. Deiner, G. Fraser, "NuzzleBug: Debugging Block-Based Programs in Scratch", ICSE 2024. arXiv:2309.14465
 35. In this repository: [`clojure.md`](../languages/clojure.md) (2025 State of Clojure survey on structural editing), [`learnability.md`](../topics/learnability.md), [`unison.md`](../languages/unison.md).
