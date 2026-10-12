@@ -1,0 +1,43 @@
+[package]
+name = "taskbench"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+description = "Bet-3 stack harness: stackful colourless tasks on stacks that cannot move, measured against Go and Java virtual threads"
+publish = false
+default-run = "taskbench"
+
+[lib]
+name = "taskbench"
+path = "src/lib.rs"
+
+[[bin]]
+name = "taskbench"
+path = "src/main.rs"
+
+[dependencies]
+# Context switch: an existing, audited assembly implementation (no hand-written switch code here).
+corosensei = "0.3.4"
+libc = "0.2"
+# Work-stealing deques (Chase-Lev) for the M:N scheduler.
+crossbeam-deque = "0.8"
+# io_uring cancellation test (amendment A1, D-058).
+io-uring = "0.7"
+# Stackless reference control (`--strategy tokio`).
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "io-util", "macros"] }
+
+[profile.release]
+codegen-units = 1
+debug = "line-tables-only"
+panic = "unwind"
+
+[profile.dev]
+# The integration smoke tests run the binary; keep it reasonably fast in debug builds.
+opt-level = 1
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "allow"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
