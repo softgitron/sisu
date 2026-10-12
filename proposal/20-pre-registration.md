@@ -15,8 +15,9 @@ are collected.
 Where 18 is silent on a detail that a pre-registration needs, this draft
 proposes a concrete default and marks it **[default proposed; owner to
 confirm]**. Things only the owner can supply are written `[owner: ...]`.
-The document cannot be frozen while either kind of mark remains
-(section 1.3). Section 13 lists every placeholder. The people the study
+The document cannot be frozen while either kind of mark remains, except
+the few that the materials register fills later (sections 1.3 and 4.7).
+Section 13 lists every placeholder. The people the study
 needs are recruited with [21-recruitment.md](21-recruitment.md).
 
 ## 1. Registration
@@ -77,8 +78,9 @@ section 3.
 4. **Hash.** A commit cannot contain its own hash, so the hash field in
    section 1.1 is filled by the commit that immediately follows the freeze
    commit, and that commit changes nothing else. The hash is also published
-   outside the repository, in the call for participants (21) and at
-   `[owner: one external location]` [default proposed; owner to confirm].
+   outside the repository at `[owner: one external location]`, and added to
+   the posted call for participants (21), which goes out in week 1, before
+   the hash exists [default proposed; owner to confirm].
 5. **Amendments.** After freeze, any change to this document is a
    numbered, dated amendment recorded in section 12 before the affected
    data are collected. An amendment needs the owner's and the referee's
@@ -305,10 +307,11 @@ decided once the corpus's frame-depth histogram exists, at week 40.
 | Process | pre-registration hash cited; amendments listed; eligibility verified; raw logs published; benchmarks reproduced on a second machine by an outsider; the referee's review published unedited | all | a report that fails any of these is not published as a Sisu evidence report |
 
 **Rows from the amendments.** Seven rows in the four tables come from the
-amendments of section 12 or were changed by them: cancellation with a lent buffer (A1); candidate
-false positives (A2); Q-50 (A3); the semantics row's `--sim` schedules and
-the seeded-bug study (A4); replay (A5); and the model arm (A6). Where a row
-uses a word rather than a number, this document fixes the number:
+amendments of section 12 or were changed by them: cancellation with a lent
+buffer (A1); candidate false positives (A2); Q-50 (A3); the semantics
+row's `--sim` schedules and the seeded-bug study (A4); replay (A5); and the
+model arm (A6). Where a row uses a word rather than a number, this document
+fixes the number:
 
 - Q-50, "under about 3%": strictly below 3.0% of the bindings counted in
   section 6.8; "no friction reported": no author answers "big problem" to
@@ -484,7 +487,9 @@ its syntax; the PI and the team know the hypotheses.
    version, harness CSV and model-arm transcript is committed under
    `experiments/data/` and published with the report.
 2. **Personal data are minimised.** Participants appear in the data only by
-   pseudonym (R1-R3, N1-N3, RT, PG, PR, C1, RA, RB). Session times are
+   pseudonym: R1-R3 and N1-N3 for corpus authors, RT for the red team, S1
+   and S2 for the porters (after their ports), C1 for its author, RA and RB
+   for the raters, X1 and X2 for reserve authors. Session times are
    stored as offsets from each participant's first session, not clock
    times. The entry questionnaire keeps experience bands and languages,
    not employers, ages or locations. Contact and payment details are kept
@@ -508,8 +513,8 @@ its syntax; the PI and the team know the hypotheses.
 6. **Payment does not depend on results.** Fees are fixed per role; a
    program delivered as blocked is paid as delivered (21).
 7. **Licence and law.** Programs and diaries are published under `[owner:
-   licence]`. `[owner: data controller and applicable data-protection
-   law]`.
+   licence]`. The data controller and the applicable data-protection law
+   are `[owner: data controller and law]`.
 
 ## 4. Materials
 
@@ -536,7 +541,7 @@ programs; 3-8 kLOC for the Go service) and proposed here otherwise.
 | S1, S2 | Two independent ports of one pre-registered 3-8 kLOC Go service with its tests (section 4.1.3) | the original's 3-8 kLOC | one Go-background porter (S1), one Rust-background porter (S2) | the Go original: its parameter counts, and the ten tests with mocks written by S1 | 2, Q-5 | yes | week 30 |
 | B | `taskbench` with strategies A-E and controls in Go, JDK 21+, tokio and a C or Rust coroutine library; the io_uring cancellation test | n/a | the runtime engineer; reviewed by the runtime reviewer | Go, JDK 21+ virtual threads, tokio, a C or Rust stackful coroutine library | 3, Q-6, Q-34, D-058 | yes, harness era | week 1 |
 | T | Structured-concurrency semantics suite (supervisor tree restarting a panicking worker, deep recursion in a task, mixed compute and I/O starvation) under schedule exploration and the `sim` profile's faults, plus the frame-depth histogram over everything | n/a | team | none | 3 | yes for zero-count rows: a team suite can show a bug, not its absence elsewhere | Phase 6 |
-| L | A small replicated log and copies of P3, with the twenty pre-registered seeded bugs, for the `sim` study (section 4.9) | the log about 500-1500 lines [default proposed; owner to confirm] | team | random `--explore` schedules under the same budget | 3; whether `sim` enters v1 | for the seeded-bug study only | Phase 8 |
+| L | A small replicated log and copies of P3, with the twenty pre-registered seeded bugs, for the `sim` study (section 4.9) | the log about 500-1500 lines [default proposed; owner to confirm] | team | none (random `--explore` schedules under the same budget are the study's control) | 3; whether `sim` enters v1 | for the seeded-bug study only | Phase 8 |
 | M | P1-P6's tasks solved by frontier models in six conditions, and in Python as the baseline (section 4.8) | as the tasks | several frontier models, run by the PI | the same tasks in Python | the model arm, D-062 | for the model arm only, never for a bet | Phase 9 |
 | U | Unsolicited playground submissions after 0.1 | any | anyone | none | 1 | not analysed in this report [default proposed; owner to confirm] | Phase 9 |
 
@@ -798,11 +803,12 @@ profile exists, so that they cannot be chosen to suit it.
   results and must hash to the recorded value [default proposed; owner to
   confirm; the alternative is to list the twenty here in the open].
 - **Planting.** The compiler engineer, who does not build the profile,
-  plants the bugs in weeks 44-45 into copies of L and of one P3
-  implementation, drawn at random among those that pass their suite. The
-  planted copies are registered by hash (section 4.7). The language
-  engineer runs the hunt without knowing which bugs are planted or where
-  [default proposed; owner to confirm].
+  plants each bug alone in its own copy of L or of one P3 implementation
+  (drawn at random among those that pass their suite) in weeks 44-45, so
+  that every failure belongs to one bug. The planted copies are registered
+  by hash (section 4.7). The language engineer runs the hunt without
+  knowing which bug is in which copy [default proposed; owner to
+  confirm].
 - **Hunt and count.** Each planted copy is hunted by `sisu test --sim` and,
   separately, by random `--explore` schedules alone, each under the budget
   of section 2.5. A bug counts as found when a run fails and the planter,
@@ -844,8 +850,8 @@ branch reruns the harness.
 
 **Referee (weeks 1-52).** Weeks 2-4: reviews this document and the early
 protocols, classifies the desk-audit sample, co-signs the freeze. Weeks
-9-14: writes the 20 adversarial programs. Weeks 8, 24, 32, 40 and 46: runs
-the registered comparisons from the raw logs and commits the outputs; at
+9-14: writes the 20 adversarial programs. Weeks 8, 24, 32, 40, 46 and 50:
+runs the registered comparisons from the raw logs and commits the outputs; at
 weeks 32 and 40 also audits the triage labels and classifies god-struct
 candidates. Whenever asked: co-signs or refuses amendments. Weeks 48-51:
 writes the review. Week 52: confirms that the report cites the hash and
@@ -1071,9 +1077,10 @@ ownership family.
 
 ### 6.5 Bet 3
 
-**Harness protocol (early-frozen).** Each measurement cell (runtime or
-strategy, task count, condition, machine) runs five times in fresh
-processes; the cell's value is the median, and the range is reported
+**Harness protocol.** The harness rows of the table below, with section
+4.4, are the protocol frozen early under section 1.3. Each measurement cell
+(runtime or strategy, task count, condition, machine) runs five times in
+fresh processes; the cell's value is the median, and the range is reported
 [default proposed; owner to confirm]. The runtime engineer runs M1, the
 reviewer runs M2, and the referee applies the thresholds to the committed
 CSVs. Interpreter-era rows are run by the team and judged by the referee.
@@ -1088,7 +1095,7 @@ CSVs. Interpreter-era rows are run by the team and judged by the referee.
 | Idle RSS at 100k connections | 100k connections opened and left idle for 30 s; resident set minus baseline, over 100k |
 | Stack exhaustion, harness | a 10k-deep recursive-descent input and a 1M-deep naive recursion in a task; pass if the task fails with a clean "stack exhausted" error and the process survives; any segfault is a bug |
 | Starvation, harness | four compute-bound tasks per worker that yield every K iterations, K being the yield-point budget the design will use (recorded in the early protocol), and also 10K and 100K; one probe task that sleeps 1 ms in a loop and records how late it wakes; p99 lateness over 10k wake-ups, compared with Go running the same loops [default proposed; owner to confirm] |
-| Cancellation with a lent buffer (A1) | On each stackful strategy and machine, 1M tasks each submit an io_uring read into a 4 KiB buffer on its own stack, from a pipe with no data, so the read stays in flight; each is then cancelled through its scope. The cancelled call submits an asynchronous cancel and, when that returns `-EALREADY`, waits for the original completion before it returns. The task then writes a canary over the buffer, whose memory is quarantined (kept mapped, never reused) until the end of the test. Data are then written into every pipe, so that any read the kernel still holds completes, and every canary is checked. Value: the buffers whose canary changed, plus the calls whose original completion arrived after the call returned; the threshold is zero. The cancel-to-return latency (median, p99) is reported [procedure: default proposed; owner to confirm] |
+| Cancellation with a lent buffer (A1) | On each stackful strategy and machine, 1M cancelled reads in total, in batches of at most 10k in flight at once. In a batch, each task submits an io_uring read into a 4 KiB buffer on its own stack from one of a pool of pipes that hold no data, so the read stays in flight, and is then cancelled through its scope. The cancelled call submits an asynchronous cancel and, when that returns `-EALREADY`, waits for the original completion before it returns. The task then writes a canary over the buffer, whose memory stays quarantined (mapped, never reused) until its batch ends. Enough data are then written into every pipe that any read the kernel still holds completes, and every canary of the batch is checked. Value: the buffers whose canary changed, plus the calls whose original completion arrived after the call returned; the threshold is zero. The cancel-to-return latency (median, p99) is reported [procedure: default proposed; owner to confirm] |
 | Stack exhaustion, interpreter | `--stats stack-depth` over every participant program's suite and every team suite; per program, the maximum frame depth and an estimate of native stack use: the sum, over the frames of the deepest stack, of 16 bytes per SIR local plus 64 bytes [default proposed; owner to confirm]; compared with the default reservation chosen at week 8 |
 | Starvation, interpreter | `--stats`' p99 scheduling latency of an I/O task under a compute-bound sibling (Phase 6's Q-34 number), against 10 ms |
 | Semantics | the suite T under `--explore 1000`, then under PCT and bounded exhaustive schedules with injected faults (Phase 6), then with simulated crash and restart (Phase 8): counts of orphan tasks, unobserved failures (a panic no join reports), cancelled subtrees not joined before their scope returns, and lock guards not dropped on an unwinding path, from the interpreter's own accounting under the monitor |
@@ -1135,7 +1142,7 @@ Porters and the C1 author answer items 2, 3 and 5.
 | Q-28 | P4's exit item and the raters' coding of P4 diary events about inheritance; "boilerplate" means any P4 author answering "I emulated inheritance", or any P4 event the raters code as emulating inheritance [default proposed; owner to confirm] |
 | Q-50 | section 6.8 |
 | Model arm | section 6.9 |
-| Parser fuzzing | panics, and diagnostic storms (more than ten diagnostics for an input with one injected syntax error), counted by CI [storm definition: default proposed; owner to confirm] |
+| Parser fuzzing | counted by CI over the fuzz corpus: panics; diagnostic storms (more than ten diagnostics for an input with one injected syntax error); trees that do not reprint their input byte for byte; inputs the checker leaves untyped [storm definition: default proposed; owner to confirm] |
 | `sisu check` and LSP | CI: the median over 20 edits of one randomly chosen body in the std-plus-corpus tree; the LSP's median hover and diagnostics latency on the corpus tree |
 | Incremental rebuild | CI: the median of five rebuilds after touching one file in the type-checker crate |
 | Interpreter adequacy | wall time of each program's full suite and of the port's integration tests on the reference laptop |
@@ -1168,7 +1175,8 @@ declared name; `for` variables and pattern bindings are not counted,
 because their types come from what they bind [default proposed; owner to
 confirm]. The value is the pooled share, computed at week 40. **The
 friction item** (exit item 2): the author is shown up to three of their own
-bindings that the rule would require annotating, drawn at random, and asked
+bindings that the rule would require annotating, drawn at random from the
+count run on their final versions at exit, and asked
 "Would writing a type annotation on these have been a problem? big problem
 / could be improved but does not limit me / not an issue." The item is
 skipped for an author with none. "No friction reported" means no author
@@ -1177,7 +1185,8 @@ answers "big problem" [default proposed; owner to confirm].
 **Replay (A5).** From the day the capability log ships (registered under
 section 4.7) to week 46, every failing test in a participant program,
 rerun by the team under the recording toolchain, yields a token, and each
-token is replayed on M2 alone. Participants keep their frozen tags, which
+token is replayed alone on a second machine, not the one that recorded it
+(18). Participants keep their frozen tags, which
 do not have the log. Reported: the share of tokens that reproduce their
 failure, out of failures that do not hold the real `System`; divergences
 in 100 recorded `--explore` runs replayed; and, for P3 serving 10,000
@@ -1233,9 +1242,9 @@ the side the threshold's wording names ("at or below 0.5" passes).
 ### 7.2 Effect sizes and intervals
 
 Every ratio, rate and share is reported with a 95% percentile bootstrap
-interval from 10,000 resamples of its unit of independence: the
-author-program pair for human measures, the run for harness cells, the
-task for the model arm [default proposed; owner to confirm]. Intervals are
+interval from 10,000 resamples of its unit of independence: the author,
+with all of that author's pairs, for human measures; the run for harness
+cells; the task for the model arm [default proposed; owner to confirm]. Intervals are
 reported, never used for a decision. With six pairs they are wide, and the
 report says so in the same sentence as the value.
 
@@ -1374,3 +1383,412 @@ the row and its threshold; the measured value with its interval and n;
 the verdict or flag; the action taken, with its owner and date; and every
 deviation that touches it.
 
+## 8. Decision rules
+
+The actions below are 18's
+[Decision points](18-next-steps.md#decision-points), copied faithfully. 18
+asks that each branch be recorded with an owner and a time box before the
+data arrive; where 18 gives a time box it is used, and otherwise one is
+proposed. Words a branch leaves open are fixed after each table.
+
+### 8.1 Bet 1 (D-004, Q-1), against section 1 of [16-validation-plan.md](16-validation-plan.md)
+
+| Outcome | Action (18) | Owner | Time box |
+|---|---|---|---|
+| **Holds** (T1.1-T1.3 pass) | D-004 stands; the generation-checked reference flag is removed; the proposal's claim that the model removes most of Rust's learning curve is kept, with the measured numbers attached. | compiler engineer (the flag); PI (the text) | by week 34 [default proposed; owner to confirm] |
+| **Hard fail** (more than one program needs `unsafe` for an ordinary pattern, or P2 or P4 cannot be written) | Run the pre-designed generation-checked reference tier on the failing programs with two new authors (four weeks); if still failing, opt-in named lifetimes on `view struct` only, which is 16's second fallback; if that fails, the remaining no-GC option is Swift-style implicit reference types (compiler-counted `Shared` for class-like types). Beyond that is 16's stop clause, the rewrite as "Go with sum types, capabilities and contracts" on a tracing GC. That clause contradicts the owner's no-GC decision (Q-1), so the pre-registration says what happens at that branch: the team escalates the data to the owner as evidence and does not act on it. Agreeing this in Phase 0 is what makes the study able to change the design (section 8.6). | compiler engineer; PI for the re-runs; owner at the stop clause | four weeks for the first step (18); four weeks for each later step [default proposed; owner to confirm] |
+| **Friction fail only** (T1.3 or T1.5 fails with expressiveness holding) | If the raters attribute most events to diagnostics (category a), fix the diagnostics and re-run two programs with two new authors (four weeks); if to rules (category b), adopt the specific Rust refinements that fixed the same complaints (two-phase borrows, disjoint closure captures, field-level partial borrows) and re-run; if friction is still not materially below Rust's, the "removes most of the learning curve" claim in [04-memory-and-ownership.md](04-memory-and-ownership.md) is withdrawn, the design continues on the expressiveness result, and the stop clause's second condition is reported to the owner as above. | compiler engineer (diagnostics or rules); PI (the re-run) | four weeks per re-run (18) |
+| **Soundness** (any monitor violation on an accepted program) | 0.1 is blocked until fixed; a violation involving views reopens the view and escape rules before any friction number is interpreted, because an unsound checker understates friction. | compiler engineer | before 0.1; for views, before the friction verdict |
+| **Not shown** (section 2.2) | Reported as not shown; no fallback is built on it. A generation-checked flag already built stays in the code, switched off, until the native-era rerun [default proposed; owner to confirm]. The friction branch still runs when its trigger is met. | PI | week 32 |
+
+Words fixed here [all default proposed; owner to confirm]:
+
+- **"T1.3 fails"** as the branch trigger means a T1.3 ratio above 0.5, 18's
+  table's "not at or below 0.5x Rust: friction branch". The verdict label
+  comes from section 2.2; the branch runs whatever the label. **"T1.5
+  fails"** means either of its clauses fails. **"Expressiveness holding"**
+  means T1.1 passes.
+- **"Most events"**: of the ownership-family events coded (a) or (b) in
+  the Sisu implementations, whichever category has more; on a tie, both
+  actions.
+- **The friction re-run**: the two programs whose Sisu implementations had
+  the most events of the attributed category; two new Rust-arm authors (the
+  reserve, or new recruits meeting section 3.3), each writing one of the
+  two programs in Sisu and in Rust in counterbalanced order; the re-run's
+  T1.3 is the mean of its two pair ratios, judged on the same thresholds
+  and labelled as a re-run with n = 2. "Materially below" is section 2.2's
+  0.8.
+- **The hard-fail re-run**: two new authors, one per arm, write the failing
+  programs with the generation-checked flag on; "still failing" means any
+  re-run program still needs `unsafe` or still cannot be written.
+
+### 8.2 Bet 2 (D-015, Q-5), against section 2 of [16-validation-plan.md](16-validation-plan.md)
+
+| Outcome | Action (18) | Owner | Time box |
+|---|---|---|---|
+| **Holds** | The `with Fs, Clock` clause stays reserved; the supply-chain demonstration and the attenuation counts go into [06-concurrency-and-capabilities.md](06-concurrency-and-capabilities.md). | runtime engineer; PI | by week 42 [default proposed; owner to confirm] |
+| **Fails** (median above two capability parameters on I/O-doing functions, or a god struct outside the composition root; T2.1's row adds a maximum above four) | Implement the reserved `with` clause as 16 says, re-port the worst module (two weeks), recount; if bundling persists, downgrade the supply-chain claim to coarse-grained capabilities and document the composition-root pattern as the idiom. | language engineer (the clause); the porter of the worst module, on a contract extension (21) | two weeks for the re-port (18), weeks 41-44 |
+| **Fakes slower than mocks by more than 25%** | Redesign the `std.cap` fakes (recording fakes derived by reflection) before 0.1; the testability claim is reported with the ratio either way. | runtime engineer | before 0.1 |
+| **Not shown** (section 2.3) | `with` stays reserved and nothing is built; Q-5 records the numbers. | PI | week 40 |
+
+Words fixed here [default proposed; owner to confirm]: the **worst
+module** is the module of either port with the highest median capability
+parameters per I/O-doing function; **recount** means the referee reruns
+T2.1 and T2.3 on the re-ported module; **bundling persists** means that a
+god struct remains after the re-port, or the module's median is still
+above two. The `with` decision (Q-5) is taken by week 40 (18).
+
+### 8.3 Bet 3 (D-014, Q-6), against section 3 of [16-validation-plan.md](16-validation-plan.md)
+
+| Outcome | Action (18) | Owner | Time box |
+|---|---|---|---|
+| **Holds at week 8** | Q-6 is closed provisionally with the harness era label (strategy, default reservation, probes versus guard pages, `spawn` ambient), and finally when the native backend reruns the harness on Sisu frames. | runtime engineer | week 8 |
+| **Fails on memory or exhaustion** (above 4x Go's per-task memory, or exhaustion in ordinary corpus code) | Stackless compilation of task bodies behind the same `scope`/`spawn` API, as 16 says. Because a suspended stackless frame is heap state that can hold `ref`s into itself, Phase 3 designs the escape rule to treat yield points as frame boundaries before the corpus study, and the hot-replacement design is re-costed from Phase 1's written estimate. This is why bet 3 runs first. Under D-058 the state machines stay owned by their scope and never become droppable future values (N-07). | runtime engineer; compiler engineer (the escape rule) | weeks 9-16, when decided at week 8 |
+| **Fails on creation cost or VMA limits only** | Pooled stacks with software probes become the design; the harness is rerun on that strategy (two weeks). | runtime engineer; reviewer | weeks 9-10 |
+| **Starvation** (p99 worse than Go in the harness, or above 10 ms in the interpreter) | Asynchronous preemption is revisited (Q-34). | runtime engineer | by the Phase 9 synthesis [default proposed; owner to confirm] |
+| **Cancellation with a lent buffer** (any buffer written after its cancelled call returned, at week 8) | A runtime bug, fixed and the test rerun; if waiting for the original completion cannot prevent it, D-058 is reopened and completion I/O takes owned buffers, as tokio-uring does. | runtime engineer | the rerun by week 10 [default proposed; owner to confirm] |
+| **Semantics** (a class of orphan, unobserved failure or cancellation bug, under random schedules or under the `sim` profile's faults and crashes, that needs a language change rather than an interpreter fix) | Reopens D-014. | runtime engineer; owner | recorded within two weeks of the finding [default proposed; owner to confirm] |
+| **Simulation** (at week 46) | If `--sim` finds at least fifteen of the twenty seeded bugs within the budget and more than random schedules alone, the profile and its compile-time escape check go into the v1 design ([17-testing.md](17-testing.md), D-070); otherwise it stays a prototype and the 1000 random schedules remain the semantics test of record. | language engineer | week 46 |
+| **Not shown** (section 2.4: the machines disagree) | No fallback is built; Q-6 stays open with both machines' numbers; Phase 3 checks on paper, without building anything, that the escape rule would survive yield points as frame boundaries; Q-6 closes on the native backend [default proposed; owner to confirm]. | runtime engineer; compiler engineer | Phase 3 |
+
+**The exhaustion guard after Phase 3.** 18's memory-or-exhaustion branch
+assumes the decision comes at week 8, before Phase 3 designs the escape
+rule, but the exhaustion guard can trip only at week 40. If it does, the
+first remedy is the larger default reservation that 18's exhaustion row
+allows; if the guard still trips under section 2.4, the stackless fallback
+and its escape-rule redesign are scheduled after the experiment, and 0.1
+ships with the finding in its public list of what is not in it [default
+proposed; owner to confirm].
+
+### 8.4 Parallel questions and the amendments' own questions
+
+18: Q-2, Q-3, Q-9 (adapted), Q-11, Q-28, Q-34 and Q-50 follow the
+thresholds in the table; each gets an entry in
+[`open-questions.md`](../open-questions.md) with the data at Phase 9. The
+capability log and replay tokens go into v1 if they meet their row
+(D-070). The model arm changes the language only where D-062 already counts
+a silent false friend as a design bug. D-038's compile-speed targets are
+measured on the interpreter-era front end only; the native targets wait for
+the backend.
+
+| Row | Action when its threshold is met (from the table in section 2.5) | Owner | Time box |
+|---|---|---|---|
+| Q-2 | below 80%: the single-`Shared` design is flagged for a native benchmark | runtime engineer | Phase 9 |
+| Q-3 | more than one `.copy()` per 30 lines: implicit copying is reopened | PI (the entry) | Phase 9 |
+| Q-9 | a top-ten diagnostic caused by a design rule: a design review | compiler engineer | Phase 9 |
+| Q-11 | more than one newtype per 200 lines: scoped instances are reopened | PI (the entry) | Phase 9 |
+| Q-28 | boilerplate: the question is reopened | PI (the entry) | Phase 9 |
+| Q-50 | under 3% and no friction: the left-to-right rule is adopted; otherwise D-003's local inference stays | language engineer | Phase 9 |
+| Model arm | far from Python's rates: the MultiPL-T corpus of [10-tooling.md](10-tooling.md) becomes necessary; a compiling false friend: that row is a design bug under D-062 and gets a check before 0.1 or a dated entry in the decision log; nothing else in the design follows the models | PI; language engineer (the checks) | week 52 |
+| Replay | a token that does not reproduce, or a divergence: a bug; overhead above 10%: the log stays a prototype; otherwise the log and tokens go into v1 (D-070) | language engineer | week 46 |
+| Candidate false positives (A2) | reported beside T1.3; they are the log the friction branch's rule refinements draw on | compiler engineer | week 32 |
+| Diagnostics quality | a message rated unhelpful by two authors is rewritten before 0.1 | compiler engineer | before 0.1 |
+| Parser fuzzing; `sisu check` and LSP; incremental rebuild; interpreter adequacy | a bug; a design review per [10-tooling.md](10-tooling.md); the crate layout revisited; optimisation work scheduled, as each row says | the owning engineer | when found |
+| Process | a report that fails any item is not published as a Sisu evidence report | PI; referee | week 52 |
+
+### 8.5 Recording a branch
+
+When a branch is taken, the PI records in the report and in
+[15-decision-log.md](15-decision-log.md) the branch, the values that
+triggered it, its owner and its date, and later its outcome. No branch is
+taken that is not in this section. A result that matches no branch is
+reported and sent to the owner as evidence, as the stop clause is
+[default proposed; owner to confirm].
+
+### 8.6 Escalation: the stop clause
+
+16's stop clause says the project should be abandoned, or its memory model
+replaced with a tracing GC and the proposal rewritten as "Go with sum
+types, capabilities and contracts", if the widget tree or the graph cannot
+be written without `unsafe` and no second-tier reference design fixes it
+without named lifetimes, or if friction is not materially below Rust's.
+That contradicts the owner's no-GC decision (Q-1). This document therefore
+registers what happens at that branch, as 18 requires: the team escalates
+the data to the owner as evidence and does not act on it. The owner's
+response is recorded in the report and is not part of any verdict. The
+owner's sign-off on this document is the agreement in Phase 0 that 18 says
+makes the study able to change the design.
+
+## 9. What is not built or measured
+
+### 9.1 Not built
+
+18's list, copied verbatim. 18 has already removed from it what the
+amendments build: the `sim` profile for tests, the capability log and
+replay, the counterexample mode as a team instrument, the binding count,
+the io_uring test, and `sisu doc --digest` for the model arm. The list is
+part of this pre-registration, so an addition needs an amendment (18's
+risk table).
+
+- Any native backend (LLVM, Cranelift, the self-hosted debug backend), and
+  therefore monomorphisation, instantiation sharing, the instantiation
+  budget, DWARF and the debug ABI beyond what hot replacement needs in the
+  interpreter. The one native artefact is the Phase 1 harness, which
+  contains no Sisu.
+- An M:N parallel scheduler inside the interpreter. The interpreter runs
+  the `single` profile, and the `sim` profile for tests, deterministically;
+  parallel throughput is a native-runtime question.
+- The package registry, lockfile resolution, `sisu add/update/publish`,
+  API-diff semver, the transparency log; `[trust]` beyond parsing and the
+  one supply-chain demonstration. Path dependencies only.
+- C interop: header import, `extern`, `@export`, raw pointers; `unsafe`
+  parses and is counted so that the bet-1 measure exists, but there are no
+  unsafe operations to perform in the interpreter.
+- Syntax work of any kind beyond adopting Python's indentation rules: no
+  sugar decisions, no formatter, no bikeshedding in review. If the owner's
+  rewrite changes block structure materially after Phase 2, the parser
+  (about two weeks of work) is redone and the corpus is mechanically
+  reformatted.
+- `sisu fmt`, `sisu lint`, `sisu doc` beyond the digest the model arm
+  reads, `sisu fix` beyond the pre-1.0 migration rule, editions, the
+  teaching profile (Q-41 waits for a classroom trial after the verdict),
+  the Unicode confusable lints.
+- A full LSP: diagnostics, hover and go-to-definition only; no rename, no
+  fix-it application, no inlay hints.
+- WebAssembly as a compile target for Sisu programs, `freestanding`,
+  explicit allocators, `release-size`, cross-compilation, Windows as a
+  measured tier.
+- Perceus-style in-place reuse for `Shared` and the atomic-elision
+  performance benchmark; only the escape analysis and its runtime
+  validation are built.
+- std beyond what the corpus needs: no TLS, DNS, UDP, Unix sockets, regex,
+  JSON encoder (corpus authors may write one), time zones, `BigInt`,
+  `Decimal`, persistent collections, structured logging.
+- Fix-and-resume from a chosen frame; hot replacement is body swap at
+  epoch boundaries only.
+- The contract verifier, loop invariants, `decreases`, ghost code, SMT-backed
+  refinement types (reserved words only).
+- A mechanised semantics (Q-38); the conformance suite with chapter
+  citations is the specification for this phase, and the prose comes after
+  the verdict.
+- Interpreter optimisation beyond the adequacy thresholds (bytecode
+  encoding, NaN-boxing, inline caches) until a measurement demands it.
+- Governance apparatus (Q-21 is open and the owner's to decide), a legal
+  entity, a conference, a foundation; the `with Fs, Clock` clause,
+  generation-checked references outside arenas and stackless task bodies
+  unless their thresholds trip.
+- Numerics and SIMD (Q-23 needs research first); a numerics-heavy corpus
+  program would be meaningless without it and is not included.
+- The parts of the candidates in
+  [19-novel-features.md](19-novel-features.md) that are not prototyped
+  here: a recording cut below `System`, native recording, a flight
+  recorder and reverse execution (N-04); deferred runs for authors,
+  classrooms or the live view (N-26); the completion-engine API (N-48);
+  and every other adopt or tooling verdict in 19 beyond principle 6's
+  exception.
+
+### 9.2 Not measured
+
+These are not measured in this experiment, so the report makes no claim
+about them:
+
+- the "within 10%" benchmark for Q-2 in 16, the native compile-speed
+  targets of D-038, the instantiation budget and monomorphisation cost,
+  parallel throughput, and `Atomic`'s weak-memory behaviour: all need the
+  native backend;
+- the final close of Q-6, which needs the harness rerun on real Sisu
+  frames after the experiment, and the corpus rerun on the native backend,
+  which checks Q-3's copy count and the friction numbers under performance
+  pressure;
+- Q-7 and Q-13, which 16's parallel table lists and 18 does not measure;
+  both were decided in October 2026 to be settled while the standard
+  library and the type checker are written;
+- Q-3's Swift-style implicit-copy variant and its "why is this slow"
+  reports, from 16, which 18 does not build;
+- the compile-time escape check of the `sim` profile, which has nothing to
+  reject in the interpreter because it has no `extern` (18, Phase 6); it
+  enters v1 with the profile or not at all, on the seeded-bug study;
+- any latency or memory number from `--sim` (18's risk table);
+- N-26's classroom measure (time to fix borrow errors with and without a
+  counterexample), which needs the teaching profile;
+- N-27's fill-acceptance measure, which Q-49's table lists among the rows
+  the model arm carries: it needs the fill engine, which is tooling after
+  0.1, and a hole report that 18 does not build [default proposed; owner
+  to confirm];
+- Q-50's constrained-decoding pilot, which needs the completion-engine API
+  of N-48;
+- the unsolicited playground corpus U, which is collected from Phase 9 and
+  is the next data for any "not shown" verdict, but is not analysed in this
+  report;
+- the harness on any platform but Linux x86-64.
+
+## 10. Timeline
+
+18's 52-week calendar, with the amendments and the participants' weeks.
+
+| Weeks | Phase | Amendment | Team | Participants | Gate |
+|---|---|---|---|---|---|
+| 1-4 | 0 skeleton, pre-registration, desk audits | | compiler engineer, language engineer, PI | desk-audit contractor; reviewer (week 1); referee (weeks 2-4) | end of week 1: early protocols frozen; end of week 4: pre-registration frozen and signed |
+| 1-8 | 1 stack harness, io_uring cancellation | A1 | runtime engineer | reviewer (to week 10) | week 8: bet 3 stacks and cancellation, Q-6 provisional |
+| 5-10 | 2 core language, errors, Drop | | compiler engineer, language engineer; runtime engineer from week 9 | | |
+| 9-16 | 3 ownership checker and monitor | A2 built | compiler engineer; language engineer from week 11; runtime engineer for three weeks | referee (adversarial programs, weeks 9-14) | week 16: Phase 3 exit; outsiders may start |
+| 15-22 | 4 traits, generics, std | | compiler engineer, language engineer | | |
+| 16-32 | 5 bet-1 corpus study | A2 in use; A3 | PI; compiler engineer on triage | six corpus authors (onboarding from week 14); red team (weeks 20-25); raters (weeks 23-32) | week 24: interim; week 32: bet 1 |
+| 19-32 | 6 tasks, capabilities, HTTP in Sisu, `sim` faults and schedulers | A4, first half (weeks 31-32) | runtime engineer; language engineer from week 23 | | week 32: T under random and `sim` schedules; Q-34's interpreter number |
+| 30-40 | 7 bet-2 port study | | PI; runtime engineer on support | porters (weeks 29-40); C1 author (weeks 28-34) | week 40: bet 2 and Q-5; the exhaustion guard; the Q-50 count |
+| 33-46 | 8 test surface with `sim` and replay, comptime, hot replacement, REPL, LSP | A4, second half; A5 | compiler engineer, language engineer | raters (one day, week 41) | week 46: the seeded-bug study; the replay row |
+| 44-52 | 9 report, decisions, model arm, 0.1-interp | A6 (weeks 46-50) | everyone | referee (review, weeks 48-51) | week 52: report and release |
+
+The calendar is 52 weeks nominal and 56 with Phase 3's budgeted slip spent
+(18); section 5.3 says what a slip may and may not move. Contractors total
+about 48 contractor-weeks (18); the reserve authors are on top of that.
+
+## 11. Publication commitments
+
+18's process row is the checklist. A report that fails any item is not
+published as a Sisu evidence report (18).
+
+1. **Raw data committed.** Every harness CSV, diagnostic log, session log,
+   diary (after its author's review), help-desk transcript, coding sheet
+   with both raters' independent codes and the consensus, questionnaire
+   answer, program version, model-arm transcript, triage record and the
+   deviations log, under `experiments/data/`.
+2. **The referee's review published unedited**, including disagreements.
+3. **Benchmarks reproduced on a second machine by an outsider**: the
+   reviewer reproduces every harness configuration on M2.
+4. **The pre-registration hash cited** in the report, with every amendment
+   listed and dated.
+5. **Eligibility verified**: the referee checks the eligibility record,
+   which is published.
+6. **Raw logs published**, as in item 1.
+
+This document adds four commitments that are not on 18's checklist
+[default proposed; owner to confirm]:
+
+7. Every number in the report is regenerated by a CI script from the
+   public data, and negative results use the same template as positive
+   ones (18's Phase 9 deliverables).
+8. The report is published whatever the outcome: by week 52, or, after a
+   slip, within four weeks of the last decision point.
+9. The reviewer's review of the controls is published unedited too.
+10. Participants who accept are named as authors of the report. The
+    referee's review is published under the referee's own name as a
+    separate document, and the referee may decline authorship of the report
+    to stay independent.
+
+## 12. Amendments
+
+A1-A6 were proposed in [19-novel-features.md](19-novel-features.md) (N-07,
+N-26, N-48, N-03, N-04, N-50), accepted by the owner in October 2026
+(Q-49, recorded in D-070) and integrated into 18. They are numbered here so
+that the report can list them. Because they precede freeze, they are part
+of the frozen rules, not changes to them. Together they cost about six
+person-weeks and four weeks of calendar; 18 takes the four weeks rather
+than trimming Phase 8's polish.
+
+### A1: the io_uring cancellation test
+
+| Field | Value |
+|---|---|
+| Number and date | A1, October 2026 |
+| Status | accepted by the owner before freeze (Q-49) |
+| Phase | 1 |
+| What it adds | the test of the guaranteed-drop rule (D-058, N-07): a million in-flight io_uring reads into buffers on task stacks are cancelled on each stackful strategy and both machines; every cancelled call must return only after the kernel has let go of its buffer; a canary exposes any later write; the cancel-to-return latency is recorded |
+| Sections | 2.4, 4.4, 6.5, 8.3 |
+| Rationale | D-058 lets completion I/O and DMA borrow the caller's buffer because views, scopes and suspended frames are never leaked; the test checks the runtime half of that promise before Q-6 closes, and strengthens bet 3's cancellation semantics |
+| Cost | days: about three days of the runtime engineer (18) |
+
+### A2: the monitor as a counterexample generator
+
+| Field | Value |
+|---|---|
+| Number and date | A2, October 2026 |
+| Status | accepted by the owner before freeze (Q-49) |
+| Phase | 3 (built); 5 (used) |
+| What it adds | a team-only mode in which a program the checker rejected runs anyway across its tests with its ownership errors deferred to the monitor (N-26); every rejected corpus program is rerun this way, and rejections that never reach a conflict are candidate false positives |
+| Sections | 2.2 (its row), 3.6, 6.2 (step 7), 6.8, 8.4 |
+| Rationale | bet 1's false-positive accounting, which 18's risk table already requires; kept from the authors because it would change the friction they report |
+| Cost | about one week (18: one of the runtime engineer's three weeks in Phase 3) |
+
+### A3: the count of bindings typed by a later statement
+
+| Field | Value |
+|---|---|
+| Number and date | A3, October 2026 |
+| Status | accepted by the owner before freeze (Q-49) |
+| Phase | 5 |
+| What it adds | a type-checker count of the bindings whose type is fixed by a later statement (N-48), with the exit-questionnaire friction item |
+| Sections | 2.5, 6.6, 6.8, 8.4 |
+| Rationale | Q-50's decision (October 2026): measure first, and adopt the left-to-right rule if fewer than about 3% of corpus bindings are typed by later statements and the authors report no friction |
+| Cost | hours of checker instrumentation (18) |
+
+### A4: the `sim` profile and the seeded-bug study
+
+| Field | Value |
+|---|---|
+| Number and date | A4, October 2026 |
+| Status | accepted by the owner before freeze (Q-49) |
+| Phase | 6 (weeks 31-32) and 8 |
+| What it adds | Phase 6: fault-injecting `Net` and `Fs` fakes with every fault drawn from the called method's declared error set, a pessimistic durability model, PCT and bounded exhaustive scheduling. Phase 8: a clock that advances only when every task is blocked, several nodes in one process, simulated crash and restart, and the seeded-bug study on P3 and L (N-03, D-070) |
+| Sections | 2.4, 4.1 (row L), 4.9, 5.1, 6.5, 8.3 |
+| Rationale | adds faults and crashes to the 1000-schedule run that Phase 6's exit criteria already require, so it strengthens the test of bet 3's cancellation and panic semantics; the seeded-bug study decides whether the profile enters v1 |
+| Cost | about four person-weeks, about half in each phase (18) |
+
+### A5: the capability log, `sisu replay` and replay tokens
+
+| Field | Value |
+|---|---|
+| Number and date | A5, October 2026 |
+| Status | accepted by the owner before freeze (Q-49) |
+| Phase | 8 |
+| What it adds | `sisu run --record`, `sisu replay`, and a replay token on every failing test (N-04), with per-capability redaction from the first version |
+| Sections | 2.5 (its row), 6.8, 8.4 |
+| Rationale | corpus triage and schedule exploration need failures that reproduce anywhere; the replay row decides whether the log enters v1 (D-070) |
+| Cost | about one person-week (18) |
+
+### A6: the model arm
+
+| Field | Value |
+|---|---|
+| Number and date | A6, October 2026 |
+| Status | accepted by the owner before freeze (Q-49) |
+| Phase | 9 |
+| What it adds | frontier models solve P1-P6's tasks with no context, the pocket reference, or the reference plus the API digest, each with and without compiler feedback, in the playground's sandbox, with the same tasks in Python as the baseline; it measures compile and hidden-test pass rates, false-friend bugs per row of D-062's table, and tokens to a pass (N-50) |
+| Sections | 2.5, 3.1, 4.1 (row M), 4.3, 4.8, 6.9, 8.4 |
+| Rationale | measures the new-language penalty for model-written code ([`studies.md`](../research/evidence/studies.md), section 11) from the start; it runs after the human studies with no outsiders, so it cannot confound them, and the design does not chase it |
+| Cost | about two person-weeks of the PI's time and model-API money within the pre-registered budget (18) |
+
+### Template for later amendments
+
+| Field | Value |
+|---|---|
+| Number and date | A*n*, the date |
+| Proposed by | |
+| Status | proposed, accepted or refused, with the owner's and the referee's sign-off |
+| Sections changed | the old text and the new text, in full |
+| Rationale | |
+| Data affected | the data the change applies to, and a statement that none of them exist yet |
+| Cost and calendar | |
+
+## 13. Open items for the owner
+
+Placeholders, one line each:
+
+1. The commit hash at freeze and the early-protocol commit hash (1.1).
+2. Funding source and total budget (1.1).
+3. Institution, ethics review body and approval, or the reason none is
+   needed (1.1).
+4. The external location where the freeze hash is published (1.3).
+5. Names: owner, PI, runtime engineer, compiler engineer, language
+   engineer, Go/Java runtime reviewer, referee (1.2).
+6. The contracting entity (3.3).
+7. The retention period for contact and payment details (3.7).
+8. The licence for programs and diaries (3.7).
+9. The data controller and the applicable data-protection law (3.7).
+10. Three P6 candidates (4.1.2).
+11. The Go service: name, repository and commit (4.1.3).
+12. The per-program allowlist of libraries for controls (4.2).
+13. Control toolchain versions: Rust, Go, Kotlin, Swift, Python (4.3).
+14. Control runtime versions and flags, and the coroutine library, from the
+    reviewer (4.4).
+15. Machines M1 and M2: CPU, cores, RAM, kernel, distribution (4.4).
+16. The reference laptop for interpreter adequacy (4.4).
+17. The desk-audit crate list with versions (4.6).
+18. The three models for the model arm (4.8).
+19. The model-API budget (4.8).
+20. The hash of the sealed seeded-bug list (4.9).
+21. Compensation per role, the application channel, the closing date and
+    the contact address ([21-recruitment.md](21-recruitment.md)).
+
+Every "[default proposed; owner to confirm]" mark in sections 1-12 is also
+an open item: each is kept, changed or deleted before freeze (section 1.3).

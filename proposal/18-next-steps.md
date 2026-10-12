@@ -826,7 +826,7 @@ the model arm's own question and are never counted for a bet.
 | P3 | HTTP/1.1 server with a shared LRU cache and a background eviction task on `std.x.http` | 1, 2, 3 | one Go backend engineer, one Rust-experienced author | week 26 |
 | P4 | Widget tree with parent navigation, focus and event callbacks stored in widgets (escaping closures, `dyn`, `@delegate`) | 1, Q-28 | one Swift or Kotlin application developer, one Rust-experienced author | week 22 |
 | P5 | Iterator adapter library (map, filter, zip, chunks, windows, peekable, by-ref and by-value variants, one lending-style case) | 1, Q-10 | one Rust library author, one non-Rust author | week 16 |
-| P6 | Application-shaped program chosen by the non-Rust authors in Phase 0 (for example a CLI that streams JSON lines through a trait-based plugin registry) | 1 | both non-Rust authors; Go control | week 16 |
+| P6 | Application-shaped program chosen by the PI in Phase 0 from a shortlist of three, since the authors are not yet contracted (for example a CLI that streams JSON lines through a trait-based plugin registry) | 1 | one Rust-arm and one non-Rust author, like every other program; Go control | week 16 |
 | R | Red-team program: the ten patterns for which Rust needs lifetimes, with the cost of each workaround | 1 | a Rust expert briefed to break the model | week 20 |
 | C1 | grep/du-style command-line tool with `Fs`, `Env`, `Proc` | 2 | an outside author, a student or junior developer | week 28 |
 | S1, S2 | Two independent ports of one pre-registered 3-8 kLOC Go service with its tests | 2, Q-5 | one Go-background porter, one Rust-background porter | week 30 |
@@ -860,7 +860,12 @@ weekly, and the raters code it afterwards.
 Every bet-3 number carries an era label: harness (Phase 1, Rust code on
 native stacks), interpreter (Phases 6-9, heap frames) or native (after the
 experiment). Thresholds come from [16-validation-plan.md](16-validation-plan.md)
-where it names one; the others are pre-registered here.
+where it names one; the others are pre-registered here, and the
+operational definitions behind the words this section leaves as words
+("materially below", "about 3 %", "far from Python's rates", the
+"second-written language") are fixed with numbers in
+[20-pre-registration.md](20-pre-registration.md), which is the text of
+record once frozen.
 
 ### Bet 1: ownership without named lifetimes
 
