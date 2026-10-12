@@ -76,6 +76,7 @@ def divmod(a: int, b: int) -> (q: int, r: int):   # labelled results
 let res = divmod(17, 5)
 print(res.q)                    # 3
 let q, r = divmod(17, 5)        # or unpack
+print("{q=} {r=}")              # q=3 r=2: the expression, then its value
 ```
 
 ## Structs, enums, pattern matching
@@ -133,6 +134,8 @@ let u = find_user(users, "roni")
 let age = u?.age ?? 0                        # optional chaining and default
 if let Some(user) = u:                       # pattern binding
     print(user.name)
+if let Some(user) = users.get(id), let Some(team) = user.team, team.active:
+    notify(team)                             # chained: each binding is usable to its right
 let Some(user) = u else:                     # bind or bail out
     return
 ```

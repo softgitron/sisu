@@ -10,7 +10,9 @@ part of the language, not a library. They are:
   unless disabled per package (`[profile.release] contracts = "off" |
   "preconditions" | "all"`). The default for release is `preconditions`,
   because a violated precondition is a caller bug that is cheap to detect
-  and expensive to miss.
+  and expensive to miss. One check ignores the level: the `invariant` of a
+  type protected by a `Mutex` is re-checked when unwinding drops the guard
+  (D-077, [06](06-concurrency-and-capabilities.md)), in every build.
 - **Used by the optimiser**: a proven contract removes bounds checks and
   overflow checks.
 - **Available to a static checker**: the grammar of contract expressions is

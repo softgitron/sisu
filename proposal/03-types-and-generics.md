@@ -13,6 +13,8 @@
 | Inheritance | None | "composition over inheritance" consensus, Go, Rust, Kotlin final-by-default |
 | Higher-kinded types | Not in version 1; syntax reserved | Rust gets by; Scala/Haskell show the cost; open question Q-10 |
 | Integers | `int` is 64-bit and the default; sized types for layout; overflow traps | Swift's `Int`; Rust `usize` casting friction; overflow CVE data |
+| Floating point | IEEE 754, evaluated strictly: no implicit fused multiply-add, no reassociation, fixed-shape reductions; `@float(fast)` opts out per function | Java 17's strict floating point (JEP 306); WebAssembly's deterministic scalars; Box2D v3's cross-platform determinism |
+| Exact arithmetic | `BigInt`, `Ratio` and `Decimal` in `std.num`, with ordinary literals; `int` stays fixed-width | Python's `int`, `fractions` and `decimal`; Java's `BigDecimal`; Julia's `BigInt` and `Rational` |
 | Strings | UTF-8; `str` view / `String` owned; no integer indexing | Go, Rust, Zig convergence; Swift's correctness vs. ergonomics lesson |
 
 ## Type inference
@@ -41,7 +43,9 @@ Inference never crosses a function boundary. The evidence:
   polynomial in expression size (a design constraint on the trait system).
 
 Integer literals without context are `int`. Float literals are `f64`. A
-literal takes another numeric type only when the expected type says so.
+literal takes another numeric type only when the expected type says so,
+which is also how `BigInt`, `Ratio` and `Decimal` take literals with no
+suffix (see [Numbers](#numbers)).
 
 ## Algebraic data types
 
@@ -174,6 +178,8 @@ def max[T: Ord](a: T, b: T) -> T: ...
 def show_all[T](xs: list[T]) where T: Display + Hash: ...
 struct Grid[T, const W: int, const H: int]:
     cells: Array[T, W * H]
+struct Stack[T, A: Allocator = Global]:   # a defaulted type parameter (leaning, D-060)
+    items: list[T, A]
 impl[T: Display] Display for list[T]: ...
 ```
 
@@ -182,6 +188,24 @@ Nim, Python and Carbon. Const generics are supported from the start because
 arrays need them and Rust's late addition left a decade of `[T; N]`
 workarounds.
 
+A generic type's parameter may have a default, written after its bound.
+Defaulted parameters come after the others, and a use site that omits one
+gets the default, so `Stack[int]` is `Stack[int, Global]`. The standard
+collections are declared this way, as `list[T, A: Allocator = Global]`:
+everyday code never names an allocator, and a list in a borrowed bump
+region is `list[Header, ref Region]`, which holds a `ref` and is therefore
+a view under the rules of [04](04-memory-and-ownership.md). An omitted
+parameter means the default everywhere, signatures and `impl` headers
+included, so code meant to work on region-backed collections is generic
+over the allocator as well:
+`impl[T: Display, A: Allocator] Display for list[T, A]`.
+The number of corpus functions that have to become allocator-generic is
+the cost that settles D-060, since Go shelved its arena experiment because
+explicit arenas spread through APIs; the parameter goes in before 1.0
+because Rust needed ten years, from RFC 1398 to Rust 1.100, to add it to
+`Vec` ([`systems-and-determinism.md`](../research/ideation/systems-and-determinism.md),
+candidate 8).
+
 ### Trait objects vs. enums
 
 The guidance, enforced by nothing but documented: closed sets of variants
@@ -189,7 +213,7 @@ are enums; open sets of behaviours are traits. The research on Java
 (`instanceof` chains) and on Go (type switches on interfaces) shows what
 happens when a language has only one of the two.
 
-## Integers and floats
+## Numbers
 
 | Type | Width | Use |
 |---|---|---|
@@ -204,8 +228,10 @@ Decisions:
   indices causes a steady stream of casts (`as usize`) and is the single
   most common `as` in Rust code; Swift uses `Int` for everything and nobody
   complains. On 32-bit targets `int` is still 64-bit; `isize`/`usize`
-  equivalents exist as `ptrsize`/`uptrsize` for FFI only. Negative indices
-  trap, which doubles as the bounds check.
+  equivalents exist as `ptrsize`/`uptrsize` for FFI only. A negative index
+  computed at run time traps, which doubles as the bounds check; a
+  constant one is a compile error with the fix-it `xs[^1]`, as
+  [02](02-syntax.md) describes (leaning, D-062).
 - **Overflow traps in all build modes.** Rust wraps in release, which is a
   documented footgun and the subject of ongoing RFC debate; Zig makes it
   undefined behaviour in `ReleaseFast`; Swift traps always and the measured
@@ -228,6 +254,55 @@ Decisions:
   `sort_by` and `max_by` accept `PartialOrd` keys and panic on an
   unordered comparison, so NaN handling is documented rather than
   surprising.
+- **Floating point is strict** (D-074, decided with Q-44). One source gives
+  the same bits on every target, at every optimisation level and with any
+  number of workers, which is what lets `comptime` run float code exactly
+  as run time would ([08](08-metaprogramming.md)) and keeps `pure`
+  deterministic ([06](06-concurrency-and-capabilities.md)). Each operation
+  rounds once: there is no implicit fused multiply-add, and
+  `a.mul_add(b, c)` is the one-rounding form, written where it is wanted.
+  There is no reassociation and no fast-math mode, and NaN payloads are
+  canonical wherever a program can observe them. `sum`, `product` and
+  `dot` are fixed-shape pairwise reductions, the same tree sequentially
+  and in `std.par`, whose chunks are fixed by index rather than by worker
+  count; pairwise summation is also more accurate than a left fold.
+  `@float(fast)` on a function allows contraction and reassociation inside
+  it and visibly gives up the guarantee there. Java made all floating
+  point strict in Java 17 (JEP 306), after more than twenty years of a
+  non-strict default that existed for x87; Clang contracts within a
+  statement by default, the kind of default that makes x86 and ARM
+  disagree; Box2D v3 reached cross-platform determinism with these rules
+  ([`systems-and-determinism.md`](../research/ideation/systems-and-determinism.md),
+  candidate 4). A correctly rounded `std.math`, in which `sin(x)` depends
+  only on `x` and not on the platform's maths library, waits for the
+  numerics research of Q-23, which is open.
+- **Exact arithmetic is a library, not a mode** (D-076). `BigInt`
+  (integers of any size), `Ratio` (exact fractions) and `Decimal` (base-10
+  values held exactly) are `std.num` types ([11](11-stdlib.md)), written
+  in Sisu as `pure` code, so they also work at compile time. They take
+  ordinary literals with no suffix through `FromLiteral`, and a literal
+  reaches them as written: `0.1` as a `Decimal` is exactly one tenth, not
+  the nearest binary fraction, and a `BigInt` literal too large for `int`
+  is checked at compile time. The fixed operator set (D-022) gives them
+  the ordinary operators. `int` stays fixed-width and trapping (D-009): an
+  unbounded `int` by default, as in Python and Ruby, would hide allocation
+  inside arithmetic, which priority 3 rules out. The semantics of
+  `Decimal` (unbounded under a precision context, a fixed decimal128, or a
+  scaled `BigInt` whose division yields a `Ratio`) and how far "symbolic"
+  goes are open (Q-53); symbolic mathematics is a `std.x` package after
+  1.0, and the numeric traits the exact types implement come from Q-23.
+
+```sisu
+let e = a * b + c                     # two roundings, on every target and at every optimisation level
+let f = a.mul_add(b, c)               # one rounding, only when asked for
+let t = xs.par_iter().map(it * w).sum()   # a fixed pairwise tree: the same bits on 1 or 64 workers
+
+@float(fast)                          # contraction and reassociation allowed; outside the guarantee
+def blend(mut out: Slice[f32], a: Slice[f32], b: Slice[f32]): ...
+
+let n: BigInt = 123456789012345678901234567890   # no suffix; checked at compile time
+let tenth: Decimal = 0.1                          # exactly one tenth
+```
 
 ## Strings and text
 
@@ -255,6 +330,36 @@ type and the return type of functions with no `->`. `Never` is the type of
 `panic(...)`, `return`, `break`, `continue`, and `while True` without `break`; it
 coerces to any type.
 
+## Function types
+
+`(A, B) -> C` is the type of a function or closure that takes an `A` and a
+`B` and returns a `C`; a fallible one returns `C ! E`. `pure` is part of
+the type (D-074, decided with Q-43): `(A) -> B` admits any function, and
+`pure (A) -> B` only one the checker has proved pure. A `pure` function
+that takes a function parameter must type it `pure`, so `fold`'s callback
+in `pure def fold(self, init: B, f: pure (B, T) -> B)` keeps `fold` pure;
+a plain function type in a parameter makes the function impure, since the
+checker cannot see what it will call. Higher-order `pure`
+code needs the distinction, because a function that calls a callback is
+only as pure as the callback, and a closure can carry a capability it
+captured.
+
+```sisu
+pure def apply_twice(f: pure (int) -> int, x: int) -> int:
+    return f(f(x))
+
+let y = apply_twice(n -> n * 3, 2)          # 18: the closure is pure
+```
+
+A closure is pure when its body uses no capability, no `unsafe`, no
+shared mutation and nothing that observes the schedule
+([06](06-concurrency-and-capabilities.md) lists what `pure` excludes); that
+is inferred, like everything else inside a body. Passing an impure
+function where a `pure` one is required is an error that names the
+operation responsible. Whether the resource
+attributes `@no_alloc`, `@no_block` and `@stack(max=N)` (leaning, D-059)
+and closure capture kinds also enter function types is open (Q-52).
+
 ## Type aliases and newtypes
 
 `type Id = int` is a transparent alias. A one-field `struct Id:` with
@@ -280,10 +385,13 @@ dependent typing and is discussed in [07-contracts.md](07-contracts.md).
 
 - No implicit conversions except lossless numeric widening and owned-to-view;
   *literals* take their expected type (`"x"` as a `Path`, `[1, 2]` as an
-  `Array`), which is typing, not conversion.
+  `Array`, `0.1` as a `Decimal` through `FromLiteral`), which is typing,
+  not conversion.
 - No subtyping between structs; no inheritance; no variance annotations
-  needed by users (the only variance is in `ref`, error sets, and refined
-  types, all handled by the compiler).
+  needed by users (the only variance is in `ref`, error sets, refined
+  types and `pure` function types, all handled by the compiler).
+- No effect system: `pure` is the one tracked property (Q-17), and it is
+  part of function types ([above](#function-types)).
 - No higher-kinded types in version 1; the syntax `F[_]` is reserved.
 - No dependent types; refinement types and contracts cover the common
   cases, and open question Q-16 covers the rest.
@@ -292,21 +400,3 @@ dependent typing and is discussed in [07-contracts.md](07-contracts.md).
   The TypeScript and C++ experience is that Turing-complete type-level
   programming becomes a language of its own, with its own debugging
   problems.
-
-## Additions proposed in October 2026
-
-[19-novel-features.md](19-novel-features.md) found that "IEEE 754" alone
-leaves the comptime promise of [08](08-metaprogramming.md) unmet for
-floating point. D-074 (decided with Q-44, October 2026) specifies strict
-evaluation: no implicit fused multiply-add (`a.mul_add(b, c)` for one
-rounding), no reassociation or fast-math, NaN payloads canonicalised where
-observable, `sum`, `product` and `dot` as fixed-shape pairwise reductions,
-and `@float(fast)` to opt a function out visibly. A correctly rounded
-`std.math` goes with Q-23. The same decision makes `pure` deterministic
-across runs, processes, thread counts and targets, which puts `pure` into
-function types so that higher-order `pure` code can demand `pure`
-callbacks (Q-43, decided). With the same answer the owner asked for exact
-arithmetic as separate types: `BigInt`, `Ratio` and `Decimal` in `std.num`
-with suffix-free literals through `FromLiteral`, and symbolic mathematics
-in `std.x` after 1.0 (D-076; the semantics of `Decimal` and the scope of
-"symbolic" are Q-53). `int` stays fixed-width and trapping.

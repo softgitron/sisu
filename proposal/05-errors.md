@@ -197,10 +197,11 @@ builds, and `panic("msg")`.
 - Contracts ([07-contracts.md](07-contracts.md)) panic when violated; they
   are bugs, not errors.
 - A `Drop` cannot return an error; a type whose cleanup can fail (a file
-  needing flush) provides an explicit `close(own self) -> ! IoError`, and
-  the linter warns if a value of such a type is dropped without being
-  closed (linear-type discipline, from Austral, applied as a lint rather
-  than a type rule; see open question Q-37).
+  needing flush) provides an explicit `close(own self) -> ! IoError` and
+  is marked `@must_consume`, so dropping a value of that type without
+  closing it is a compile error, panics excepted (Q-37, D-054; the rule
+  and its propagation through containers are in
+  [04](04-memory-and-ownership.md)).
 - Capabilities ([06](06-concurrency-and-capabilities.md)) return `IoError`
   families defined in `std`; third-party code extends them with its own
   sets, which union freely.
