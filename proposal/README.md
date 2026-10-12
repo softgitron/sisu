@@ -49,8 +49,13 @@ options.
 | 16 | [Validation plan](16-validation-plan.md) | What the prototype must test first, and what would change the design |
 | 18 | [Next steps](18-next-steps.md) | The experiment: phases, corpus, measurements, team, decision points |
 | 19 | [Novel features](19-novel-features.md) | What unconventional languages teach and what exists in no language: 66 candidates assessed, 20 new decisions, 12 new questions |
+| 20 | [Pre-registration](20-pre-registration.md) | The frozen rules of evidence for the experiment: hypotheses, thresholds, procedure, analysis plan, decision rules, amendments |
+| 21 | [Recruitment brief](21-recruitment.md) | The outsiders the experiment needs: roles, eligibility, screening, consent, the call for participants |
 | | [Examples](examples/) | Sisu source files |
 | | [Open questions](../open-questions.md) | What is not settled, and what would settle it |
+
+The Phase 1 harness that tests the third bet before the language exists
+is in [`../taskbench/`](../taskbench/).
 
 ## How to read the decisions
 
@@ -66,7 +71,9 @@ to D-077 and questions Q-42 to Q-53; the owner answered Q-42 to Q-51 in
 October 2026 (reversing the randomised `dict` order and accepting six
 amendments to the experiment), which decides D-061, D-069, D-070, D-074,
 D-076 and D-077, while the rest stay leaning until the log is reviewed and
-Q-52 and Q-53 are open.
+Q-52 and Q-53 are open. Draft 3 (October 2026) folds all of these into the
+design documents 00 to 18, so each document reads as one text and marks a
+leaning decision where it first relies on one.
 
 ## The three bets
 

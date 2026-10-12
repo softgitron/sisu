@@ -1499,8 +1499,10 @@ separate `std.num` types with symbolic mathematics where achievable
   Phase 5; the model arm in Phase 9. About six person-weeks in total, to be
   found by trimming Phase 8's polish or extending the plan by a month; the
   pre-registration must be amended before any participant writes a line.
-- **Design documents** gain a short "additions proposed in 19" paragraph
-  each where a leaning decision touches them: [02](02-syntax.md) (typed
+- **Design documents** were first given a short "additions proposed in 19"
+  paragraph each; Draft 3 (October 2026) folded those into the body text,
+  marking leaning decisions where a document first relies on one. The
+  documents touched: [02](02-syntax.md) (typed
   `todo`, `{expr=}`, chained conditions), [03](03-types-and-generics.md)
   (floating point), [04](04-memory-and-ownership.md) (guaranteed drop,
   regions, must-consume containers), [06](06-concurrency-and-capabilities.md)

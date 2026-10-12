@@ -6,9 +6,11 @@ the languages that came before it. This repository currently contains the
 **research** behind the proposal, the **proposal** itself, and the list of
 **open questions** that the research could not settle.
 
-There is no compiler yet. The point of this phase is to make the design
-decisions on evidence rather than taste, and to be honest about where the
-evidence runs out.
+There is no compiler yet; the first code is the stack harness in
+`taskbench/`, which tests the riskiest runtime bet before the language
+exists. The point of this phase is to make the design decisions on
+evidence rather than taste, and to be honest about where the evidence runs
+out.
 
 ## Where to start
 
@@ -16,7 +18,7 @@ evidence runs out.
 |---|---|
 | Understand what Sisu is in 10 minutes | [`proposal/README.md`](proposal/README.md) |
 | See code | [`proposal/01-tour.md`](proposal/01-tour.md) and [`proposal/examples/`](proposal/examples/) |
-| Know what happens next | [`proposal/18-next-steps.md`](proposal/18-next-steps.md) |
+| Know what happens next | [`proposal/18-next-steps.md`](proposal/18-next-steps.md), then [`proposal/20-pre-registration.md`](proposal/20-pre-registration.md) |
 | Know *why* a decision was made | [`proposal/15-decision-log.md`](proposal/15-decision-log.md), then the linked research |
 | Argue about something | [`open-questions.md`](open-questions.md) |
 | Check the evidence | [`research/evidence/`](research/evidence/) |
@@ -44,7 +46,10 @@ proposal/
   17-testing.md        the testing design
   18-next-steps.md     the experiment plan
   19-novel-features.md the unconventional round's verdicts: 66 candidates, decisions, questions
+  20-pre-registration  the experiment's frozen rules of evidence
+  21-recruitment.md    roles, eligibility and the call for participants
   examples/            Sisu source files illustrating the design
+taskbench/             Phase 1 of the experiment: the bet-3 stack harness (Rust)
 open-questions.md      what the research could not settle, with options and a current lean
 ```
 
@@ -58,9 +63,9 @@ should be filed as an issue.
 | Phase | Status |
 |---|---|
 | Research | Done (October 2026). 47 language analyses (~14,000 lines), 20 topic syntheses, 4 evidence dossiers; a second round of 14 studies of unconventional languages and environments and 3 ideation studies (~6,500 lines). |
-| Proposal | Draft 2 (October 2026). Indentation-based, Python-flavoured syntax; a testing design; an experiment plan with phases, corpus, measurements and decision points; an assessment of 66 candidate features from the unconventional round, 14 of them found in no language ([`proposal/19-novel-features.md`](proposal/19-novel-features.md)). |
+| Proposal | Draft 3 (October 2026). Indentation-based, Python-flavoured syntax; a testing design; a 52-week experiment plan with phases, corpus, measurements and decision points; the unconventional round's assessment of 66 candidate features, 14 of them found in no language ([`proposal/19-novel-features.md`](proposal/19-novel-features.md)), folded into the design; a pre-registration and a recruitment brief for the experiment. |
 | Open questions | 53 recorded; 48 decided by the project owner (October 2026), 5 open: runtime stacks (Q-6), governance details (Q-21), numerics (Q-23), resource attributes in function types (Q-52), exact arithmetic (Q-53). |
-| Prototype | Not started. |
+| Prototype | Phase 1 started: the bet-3 stack harness in [`taskbench/`](taskbench/) (Rust, no Sisu involved). No Sisu compiler yet. |
 
 ## Contributing to the design
 
