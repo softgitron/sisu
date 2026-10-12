@@ -42,19 +42,41 @@ Rules:
 - The evaluator is an interpreter over the compiler's typed IR, not a
   separate language. What runs at compile time is exactly what would run at
   run time, with the same semantics (same integer widths, same overflow
-  traps, same `Drop` order).
+  traps, same `Drop` order, same `dict` and `set` iteration order, same
+  floating-point results). The last two hold because of D-074: `dict` and
+  `set` iterate in insertion order (the per-process hash key still resists
+  flooding, but it no longer decides the order), and floating point is
+  strict, with no implicit fused multiply-add and no reassociation, so a
+  `comptime` result has the same bits as the run-time result on every
+  target. The correctly rounded `std.math` that carries this to `sin` and
+  `exp` waits for Q-23, which is open.
 - There is no I/O at compile time. No file reads, no environment, no
   network, no clock. A build that evaluates the same source produces the
   same output. Zig allows `@embedFile`; Sisu provides `embed("path")` as a
   compiler intrinsic with the path resolved relative to the package root and
   recorded in the build's input set, which keeps builds reproducible.
-- Evaluation has a fuel limit per expression (configurable in the manifest)
-  and a memory limit. Hitting the limit is a compile error naming the
-  expression. C++'s and Zig's experience is that unlimited compile-time
-  computation becomes the build-time problem.
+- Evaluation has a fuel limit per expression and a memory limit. Fuel is
+  counted in steps of the typed IR (SIR steps). Exhausting it raises a
+  deny-by-default diagnostic that names the expression and the package that
+  spent the fuel (leaning, D-063), and a long evaluation prints its progress
+  instead of looking like a hang. The budget belongs to the package that
+  spends it: `@comptime_budget(steps=N)` on the item raises that item's own
+  limit, so a dependent never edits its manifest for a dependency's internals.
+  Rust 1.72 removed its const-evaluation cap for exactly that reason, because
+  whether code hit the limit depended on the libraries it invoked. C++'s and
+  Zig's experience is that unlimited compile-time computation becomes the
+  build-time problem, and the designers of Dhall and Starlark concede that
+  totality does not bound running time.
 - `const` items and array-length expressions require compile-time
   evaluation; everything else is opportunistic (the optimiser may
   constant-fold, but the semantics do not depend on it).
+
+A package that needs more fuel says so on the item that spends it:
+
+```sisu
+@comptime_budget(steps=50_000_000)       # this package's tables are expensive
+const TABLES: CaseTables = comptime build_tables(embed("data/UnicodeData.txt"))
+```
 
 ## Reflection
 
@@ -125,6 +147,39 @@ import tls
 must type-check (unlike C `#if`), which keeps dead platforms compiling. The
 Zig experience is that this is enough and that `#ifdef` soup is avoidable.
 
+## Configuration files
+
+`sisu eval` makes Sisu its own configuration language. It takes a module of
+`const` items and `pure` functions, evaluates it with the comptime interpreter
+and renders the result as JSON, TOML or YAML through `Encode` (leaning,
+D-063). The types, refinements and invariants the module declares are the
+schema: a port outside its range or a replica count of zero fails evaluation
+with a located diagnostic instead of reaching a deployment.
+
+```sisu
+## deploy/prod.sisu, rendered by `sisu eval deploy/prod.sisu --to yaml`
+type Port = int where 1 <= self <= 65535
+
+@derive(Encode, Decode)
+struct Service:
+    name: String
+    port: Port
+    replicas: int = 1
+    invariant self.replicas >= 1
+
+pub const SERVICES: list[Service] = [Service(name="web", port=8080, replicas=3)]
+```
+
+This is the Borg retrospective's recommendation (a data-only format, produced
+by a real programming language) and Pkl's model (typed configuration with
+constraints), without a second language or a Starlark-style dialect. It works
+because `comptime` is already hermetic and deterministic: it has no I/O, and
+`pure` means the same bits on every run (D-074). The budget above still
+applies, because a configuration module is ordinary code and can run long. The
+package manifest, by contrast, stays data
+([09](09-modules-packages-and-build.md)); anything that has to be computed
+lives in a module like this one.
+
 ## What you cannot do, and the intended workaround
 
 | Want | Workaround |
@@ -134,6 +189,7 @@ Zig experience is that this is enough and that `#ifdef` soup is avoidable.
 | Generating N similar functions | `comptime for` over a table, or generics. |
 | Attributes with behaviour (`@test`, `@route("/x")`) | Attributes are data that `comptime` code and tooling can read via `reflect.attributes_of`; a framework collects routed functions by scanning its own package at compile time. |
 | Serialisation for all types | `derive` via reflection; the Zig standard library's JSON encoder is the existence proof that this covers what `serde` covers, without macros. |
+| A configuration language (Starlark, Dhall, Pkl) | A module of `const` items and `pure` functions, rendered by `sisu eval`; see Configuration files above. |
 
 ## Evidence summary
 
@@ -156,17 +212,9 @@ Zig experience is that this is enough and that `#ifdef` soup is avoidable.
 - Dart ([`dart.md`](../research/languages/dart.md)): cancelled its macro
   system in 2025 after three years of work because of compile-time and
   tooling cost; a data point that macros are harder to ship than to design.
-
-## Additions proposed in October 2026
-
-[19-novel-features.md](19-novel-features.md) replaces the manifest-wide
-fuel knob above with budgets owned by the package that spends them
-(D-063): fuel is counted in SIR steps, exhaustion raises a deny-by-default
-diagnostic naming the expression and the package, long evaluations print
-progress, and `@comptime_budget(steps=N)` on the spending item raises its
-own limit so that dependents never edit their manifest for a dependency's
-internals (Rust 1.72 removed its const-evaluation cap for exactly that
-reason). The promise that `comptime` runs "exactly what would run at run
-time" is what D-074 repairs for `dict` order and floating point. `sisu
-eval` renders a module of `const` items and `pure` functions as JSON, TOML
-or YAML, making Sisu its own configuration language without a dialect.
+- Configuration languages
+  ([`config-and-total-languages.md`](../research/unconventional/config-and-total-languages.md)):
+  Pkl's typed model and the Borg retrospective's advice are what `sisu eval`
+  is built from, and Rust 1.72's removal of its const-evaluation cap, with
+  Dhall's and Starlark's admissions that totality does not bound running time,
+  is why budgets belong to the package that spends them.

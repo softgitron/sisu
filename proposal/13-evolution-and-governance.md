@@ -48,6 +48,14 @@ specification is prose plus a reference test suite, not a formal semantics
 in version 1 (open question Q-38 asks whether a mechanised core semantics,
 as Austral and WebAssembly have, should be a goal).
 
+The specification also holds the false-friend table: for each place where Sisu
+spells something as Python or Rust does and the meaning could differ, the row
+names the difference and the check that makes it loud (leaning, D-062;
+principle P10 in [00-vision-and-principles.md](00-vision-and-principles.md)).
+`xs[-1]` with a constant negative index, for example, is a compile error with
+the fix-it `xs[^1]`. Rows added after 1.0 go through editions, because a new
+row can turn code that compiled into a compile error.
+
 ## Governance
 
 ### Phase 1 (now until 1.0): a small design team with a lead
@@ -99,11 +107,16 @@ helps velocity and hurts trust; the trade is made for trust.
   years. Java's cadence since 2017, which its research identifies as the
   change that revived the language.
 - Features ship behind `@preview` gates for at least one release before
-  stabilisation; previews may change or be removed. Java's preview
-  features, Rust's nightly features and Python's `__future__` are the
-  models; shipping a feature straight to stable and discovering it is
-  wrong (Go's `defer` scoping, Swift's early concurrency) is the
-  counter-evidence.
+  stabilisation, and every preview is stabilised or removed within four
+  releases, two years (leaning, D-072); in between, previews may change or be
+  removed. Java's preview features, Rust's nightly features and Python's
+  `__future__` are the models for the minimum; shipping a feature straight to
+  stable and discovering it is wrong (Go's `defer` scoping, Swift's early
+  concurrency) is the counter-evidence. The maximum comes from Nix flakes,
+  experimental since November 2021 and central to the ecosystem's split
+  ([`config-and-total-languages.md`](../research/unconventional/config-and-total-languages.md)),
+  and from Java, whose previews (JEP 12) are expected to be finalised or
+  dropped within a release or two.
 
 ## Naming the risks
 
@@ -123,11 +136,3 @@ for them:
 5. The standard library accretes (Python) or starves (Rust). Mitigation:
    the `std`/`std.x` split, with the explicit rule that promotion from
    `std.x` to `std` requires two years without a major version.
-
-## Additions proposed in October 2026
-
-[19-novel-features.md](19-novel-features.md) adds a maximum to the
-preview rule above: a `@preview` feature is stabilised or removed within
-four releases, two years (D-072), after Nix flakes' five years as an
-experimental feature. The false-friend table of D-062 is part of the
-specification, and post-1.0 rows go through editions.

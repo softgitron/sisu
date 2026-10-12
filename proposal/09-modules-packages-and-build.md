@@ -51,6 +51,7 @@ license = "MIT"
 http = "1.2"                                     # semver: >=1.2.0, <2.0.0
 json = "2"
 tz = { version = "0.9", features = ["embedded-db"] }
+winapi = { version = "0.3", when = { os = "windows" } }   # structured, not a cfg() string
 mylib = { path = "../mylib" }
 other = { git = "https://...", rev = "abc123" }
 
@@ -72,13 +73,25 @@ Design points, each with its source:
 
 - **Semver ranges with a lockfile** (Cargo, Bundler, npm). `sisu.lock` is
   committed by applications and ignored by libraries. Resolution is
-  deterministic given the lockfile. Go's minimal version selection was
-  considered (open question Q-20): it avoids a lockfile and a SAT solver,
+  deterministic given the lockfile and picks the newest version that
+  satisfies every range (Q-20). Go's minimal version selection was
+  considered and not adopted: it avoids a lockfile and a SAT solver,
   but it also means a library author's declared minimum is what everyone
   gets unless they upgrade, which has made Go module upgrades a manual
   chore in large graphs.
 - **Features** are additive booleans (Cargo). A feature can never remove
   an API; the tool checks this at publish time.
+- **The manifest stays data** (leaning, D-063). `sisu.toml` has no
+  conditionals, templating or expressions. A dependency that applies only on
+  some targets says so with a structured condition over the build target's
+  facts, `winapi = { version = "0.3", when = { os = "windows" } }`, not with a
+  Cargo-style `cfg(...)` string, which is an expression language growing
+  inside a TOML key. Anything that has to be computed lives in `comptime`
+  Sisu, not in the manifest. `sisu add` can edit data reliably and expressions
+  not at all, and the field has moved the same way: Gradle is building
+  Declarative Gradle, a tiny subset of Kotlin, and HashiCorp archived CDK for
+  Terraform
+  ([`config-and-total-languages.md`](../research/unconventional/config-and-total-languages.md)).
 - **One version of a package per build**, unless two major versions are
   needed, in which case both are linked with mangled names (Cargo's
   behaviour). Node's one-version-per-dependent nesting is the reason
@@ -86,7 +99,8 @@ Design points, each with its source:
 - **`[trust]` is where capabilities become real.** A package not listed
   there compiles with `unsafe` and `extern` disabled, and therefore can only
   do what the capabilities it is handed allow. `sisu add` prints the
-  trust requirement of a new dependency and refuses silently extending it.
+  trust requirement of a new dependency and refuses silently extending it;
+  Admission below lists what else it reports.
 - **No build scripts.** Rust's `build.rs` and npm's `postinstall` are the
   two most exploited supply-chain vectors. Anything a build script would do
   (code generation, embedding files, platform detection) is done by
@@ -113,16 +127,89 @@ Design points, each with its source:
   version bump is rejected. Elm's package manager has done this since 2014
   and its ecosystem has never had an accidental breaking patch release
   ([`elm-purescript.md`](../research/languages/elm-purescript.md)). It
-  cannot catch semantic changes behind an unchanged signature; those remain
-  the author's responsibility, and `sisu publish --breaking` records the
-  reason in the changelog.
+  cannot see a semantic change behind an unchanged signature. The next
+  bullet covers part of that gap, and what remains is the author's
+  responsibility, with `sisu publish --breaking` recording the reason in
+  the changelog.
+- **Behavioural semver** (tooling with the registry, N-44; see
+  [19](19-novel-features.md)). `sisu publish` also runs the previous version's
+  black-box tests and doc examples against the candidate. A failure needs a
+  major version or a recorded, public `--supersede "<test>" --reason "..."`
+  that appears in the changelog; the record exists for Hyrum's law, since a
+  fix can break a test that encoded the bug. NoRegrets classified at least 90%
+  of npm updates correctly from clients' tests and found 26 breaking minor or
+  patch releases; Dependabot's compatibility score is missing for 83% of
+  updates; no package manager replays a package's own previous tests at
+  publish
+  ([`ai-era-and-evolution.md`](../research/ideation/ai-era-and-evolution.md),
+  A5).
+- **Migrations travel with the library.** A library deprecates an item by
+  rewriting its body in terms of the new API and marking it `@fix_inline`;
+  `sisu fix --deps` replaces dependents' calls with that body, so behaviour is
+  preserved by construction, with no template language and no macros (leaning,
+  D-067). The inliner is ownership-aware: borrows, `own` moves and `defer`
+  move into the caller's scope. A major release's API diff marks the removals
+  that had such a form as migratable. Go's `//go:fix inline`, Dart's
+  data-driven fixes and Kotlin's `ReplaceWith` are the precedents.
 - **Provenance.** Publishing is tied to a signed build attestation (the
   npm/Sigstore model), so a package can be traced to the source commit and
   the publishing identity.
 - **Capability summary.** The registry displays, for each version, which
   capabilities its public API takes and whether it is `unsafe`-trusted by
   default. A library that suddenly starts asking for `Net` in a patch
-  release is visible before it is installed.
+  release is visible before it is installed. A package whose API takes no
+  capability types and that is not in `[trust]` (so it has no `unsafe` or
+  `extern`) is labelled *pure*: it can only compute, and it needs no
+  capability review (leaning, D-066). `sisu audit --authority` computes the
+  same label.
+- **Review ledger** (a prototype with the registry, N-43). An audit record in
+  `supply-chain/reviews.toml` holds a Merkle root over the normalised-AST
+  hashes of its scope, which by default is the *capability slice*: the
+  functions that can reach a capability, `unsafe` or `extern`. If the root is
+  unchanged in the next version, the review carries over; otherwise only the
+  functions whose hashes changed are listed. A pure parser has an empty slice.
+  cargo-vet records audits per version and as deltas between versions, and
+  crev's proofs can cover parts of code, but neither is keyed by
+  function-level content hashes. The hash would become a specified artefact
+  versioned with editions, and slice size and churn are unmeasured.
+
+### Admission
+
+Adding or updating a dependency is the moment a package gains authority, so
+`sisu add` and `sisu update` say what changes before they touch the lockfile.
+The *authority delta* lists, per package and per public function, the
+capabilities that become reachable (through parameters, fields, closures and
+`dyn` values), new `unsafe` and `extern`, changes to `[trust]`, new
+dependencies and new panic sites. With no ambient authority beyond the
+standard streams, reach follows from types, so the report is exact up to
+`unsafe` in trusted packages, and it reuses the computation behind the
+capability summary. `sisu review --authority` ([10](10-tooling.md)) gives the
+same report between any two revisions. The signal is worth reading: Capslock
+computes capabilities for Go, and deps.dev found that fewer than 2% of version
+updates add one
+([`capabilities-distribution-and-resources.md`](../research/unconventional/capabilities-distribution-and-resources.md),
+idea 4).
+
+Three rules apply before a version is admitted:
+
+- **Cooldown.** A seven-day cooldown is applied before resolution: a version
+  younger than seven days is not a candidate, and advisory fixes are exempt.
+  This refines the newest-satisfying resolution of Q-20, which still picks the
+  newest version that satisfies every range, among the versions that have
+  passed the cooldown. Eight of ten recent supply-chain attacks had windows
+  shorter than a week, and pnpm's `minimumReleaseAge` and uv's `exclude-newer`
+  ship the same idea.
+- **New packages.** A package younger than the cooldown, or one that no other
+  package depends on, is refused unless `--accept-new-package` is given.
+  Language models invent package names in 4.6 to 21.7% of suggestions across
+  studies, and 53 of the names that five models all invented were still
+  registrable
+  ([`ai-era-and-evolution.md`](../research/ideation/ai-era-and-evolution.md),
+  A2 and A3).
+- **Unattended runs.** In CI or in an agent run, nothing adds a package or
+  widens `[trust]` against the project's policy. The Nx compromise used
+  `postinstall` to drive the victim's AI tools; the rule against install
+  scripts and capability confinement each block that route.
 
 ## Build
 
@@ -175,23 +262,6 @@ coverage.
 | Global namespace / flat registry | Squatting; see above. |
 | Vendoring as the primary distribution (Go pre-modules, C) | Replaced by the content-addressed cache, which gives reproducibility without copying. |
 | Multiple competing build tools | The C++/Java/Python outcome. |
+| `cfg()` strings, executable manifests (`build.zig`, `Package.swift`, Gradle scripts) | A manifest that computes grows into a weaker programming language, and `sisu add` can edit data reliably and expressions not at all. Target conditions are structured keys and anything computed is `comptime` Sisu (D-063). |
 | `postinstall`/`build.rs` | Supply-chain vector; replaced by comptime. |
 | Unused import/variable as a hard error (Go) | The Go survey's most-cited daily annoyance. Sisu warns, `sisu fmt` removes unused imports, and CI runs `sisu check --deny-warnings`. |
-
-## Additions proposed in October 2026
-
-From [19-novel-features.md](19-novel-features.md): the manifest stays
-data, with structured target conditions (`winapi = { version = "0.3",
-when = { os = "windows" } }`) rather than `cfg()` strings, and anything
-computed lives in `comptime` Sisu (D-063). `sisu add` and `sisu update`
-report an authority delta (newly reachable capabilities, `unsafe`,
-`extern`, `[trust]` changes, new dependencies and panic sites), apply a
-seven-day cooldown before resolution with advisory fixes exempt, refuse
-packages younger than that or without dependents unless told otherwise,
-and in CI or agent runs never add a package or widen `[trust]` against
-policy; packages whose API takes no capability types and that are not in
-`[trust]` are labelled pure in the registry (D-066). Libraries ship migrations as `@fix_inline`
-functions applied by `sisu fix --deps` (D-067). With the registry come
-one prototype, a review ledger keyed by content hashes of the capability
-slice (N-43), and one tool, behavioural semver, where `sisu publish` runs
-the previous version's black-box tests (N-44).

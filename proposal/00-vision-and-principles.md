@@ -96,6 +96,15 @@ compounds: every pair of overlapping features is a style debate, a learning
 cost, and an interaction to specify. Python's "one obvious way" and Go's
 deliberate minimalism are the counter-evidence.
 
+The core stays small. A feature goes into the standard library
+([`11-stdlib.md`](11-stdlib.md)) wherever that is reasonable, and into the
+language only when the library cannot express it or cannot check it. This is
+the owner's rule, given with the decision on `par` (Q-47), and it applies to
+every later choice of the same kind. `std.par` comes before a `par` keyword
+(D-069). Exact arithmetic is `BigInt`, `Ratio` and `Decimal` in `std.num`, and
+`int` stays fixed-width (D-076). Lent and revocable capabilities are `std.cap`
+types, and capabilities stay `Copy` (Q-51).
+
 ### P2. Explicit at boundaries, inferred inside
 
 Function signatures, public types and module interfaces are written out in
@@ -177,6 +186,16 @@ way no shipped language has (ownership with second-class references plus
 capabilities plus structured colourless concurrency) is flagged as the
 largest risk in [`../open-questions.md`](../open-questions.md).
 
+Borrowed spelling carries borrowed meaning. Where Sisu spells something as
+Python or Rust does, it means the same or fails to compile (leaning, D-062). A
+silent difference is a design bug, and a run-time failure is acceptable only
+where no static check exists. The people and the models that read Sisu will
+read it with those languages' meanings first, and Python 3's silent change to
+`/` is the cautionary tale. So `xs[-1]` with a constant negative index is a
+compile error with the fix-it `xs[^1]`, and the specification keeps a table of
+such false friends with a check for each row
+([`13-evolution-and-governance.md`](13-evolution-and-governance.md)).
+
 ## Who Sisu is for
 
 - Teams writing long-lived services and tools who want Rust's guarantees with
@@ -189,26 +208,16 @@ largest risk in [`../open-questions.md`](../open-questions.md).
 
 ## Who Sisu is not for (yet)
 
-- Interactive numerical exploration in a notebook. Julia and Python own this
-  and Sisu's static, AOT design does not compete; see
-  [`14-non-goals.md`](14-non-goals.md).
+- Notebooks: interactive numerical exploration in cells that rerun in any
+  order over hidden state. Julia and Python own this, and it stays a non-goal
+  (Q-48); see [`14-non-goals.md`](14-non-goals.md). The interpreter (D-052)
+  weakened the old reason, that an ahead-of-time design cannot compete, but a
+  reactive notebook would still wait for the numerics decision (Q-23, open)
+  and an amended non-goal. What Sisu does offer, as tooling after 0.1, is a
+  *worksheet*: a script-mode file that the language server re-runs top to
+  bottom after each edit, with each value shown inline and never saved. A
+  worksheet has no cells and no hidden state, and that is what separates it
+  from a notebook.
 - Code that must interoperate with C++ templates and classes directly. Carbon
   exists for that.
 - Anyone who needs it today. There is no compiler.
-
-## Additions proposed in October 2026
-
-The unconventional-languages round ([19-novel-features.md](19-novel-features.md))
-asks two things of this document. The notebook non-goal above should
-distinguish a *worksheet* (a script-mode file the language server re-runs
-top to bottom with values shown inline and never saved; no cells, no
-hidden state), which Sisu can offer as tooling after 0.1, from a
-*notebook*, which stays a non-goal (Q-48, decided October 2026). Two
-rules are added under P1 and P10. Where Sisu spells something as Python or
-Rust does, it means the same or fails to compile (D-062), because the
-people and models who read Sisu will read it with those languages'
-meanings first. And the language core stays small: a feature goes into the
-standard library wherever that is reasonable, and into the language only
-when the library cannot express it or cannot check it (the owner's rule
-given with Q-47, October 2026; `std.par` before a `par` keyword, exact
-arithmetic as `std.num` types, lent capabilities in `std.cap`).
