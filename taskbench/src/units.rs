@@ -61,11 +61,11 @@ pub fn parse_secs(text: &str) -> Result<Duration, String> {
 
 /// Formats a byte count compactly: `4K`, `1M`, `1.5M`, `123B`.
 pub fn fmt_size(bytes: usize) -> String {
-    if bytes >= GIB && bytes % GIB == 0 {
+    if bytes >= GIB && bytes.is_multiple_of(GIB) {
         format!("{}G", bytes / GIB)
-    } else if bytes >= MIB && bytes % MIB == 0 {
+    } else if bytes >= MIB && bytes.is_multiple_of(MIB) {
         format!("{}M", bytes / MIB)
-    } else if bytes >= KIB && bytes % KIB == 0 {
+    } else if bytes >= KIB && bytes.is_multiple_of(KIB) {
         format!("{}K", bytes / KIB)
     } else if bytes >= MIB {
         format!("{:.1}M", bytes as f64 / MIB as f64)

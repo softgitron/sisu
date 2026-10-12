@@ -65,6 +65,20 @@ impl Gate {
         }
     }
 
+    /// As [`Gate::wait`] but not a cancellation point (Sisu's `task.shield`).
+    pub fn wait_shielded(&self, seen: u64) {
+        let mut registered = false;
+        while self.phase.load(SeqCst) <= seen {
+            if !registered {
+                if !self.register(seen, api::current_waker()) {
+                    return;
+                }
+                registered = true;
+            }
+            api::park();
+        }
+    }
+
     /// Stackless version of [`Gate::wait`].
     pub async fn wait_async(&self, seen: u64) -> Result<(), TaskError> {
         let mut registered = false;

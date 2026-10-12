@@ -431,3 +431,44 @@ fn excursion(bytes: usize) {
         excursion(bytes - buf.len());
     }
 }
+
+/// How far below the stack pointer recorded by `park` the context switch writes.
+/// Strategy D keeps this much (plus a safety factor) when it decommits on park.
+#[test]
+fn park_switch_frame_is_shallow() {
+    let rt = Runtime::new(1, &cfg(StrategyId::B)).unwrap();
+    let depth = rt.block_on(|| {
+        let gate = Gate::new();
+        let depth = AtomicUsize::new(0);
+        scope(|s| {
+            s.spawn(|| {
+                // Paint 8 KiB below the current stack pointer, then park.
+                let sp = crate::stack::probe::current_sp();
+                let low = sp - 8192;
+                for a in low..sp - 64 {
+                    // SAFETY: below the stack pointer of this task's own stack, which
+                    // the strategy (B, 256 KiB slots) guarantees is mapped and unused.
+                    unsafe { std::ptr::write_volatile(a as *mut u8, 0xA5) };
+                }
+                let _ = gate.wait(0);
+                // The highest painted byte that was overwritten bounds the switch frame.
+                let mut lowest_touched = sp - 64;
+                for a in low..sp - 64 {
+                    // SAFETY: as above.
+                    if unsafe { std::ptr::read_volatile(a as *const u8) } != 0xA5 {
+                        lowest_touched = lowest_touched.min(a);
+                    }
+                }
+                depth.store(sp - lowest_touched, SeqCst);
+            });
+            while gate.waiting() == 0 {
+                yield_now().unwrap();
+            }
+            gate.open();
+        })
+        .unwrap();
+        depth.load(SeqCst)
+    });
+    eprintln!("park writes {depth} bytes below the caller's stack pointer");
+    assert!(depth < crate::stack::decommit::SWITCH_MARGIN, "switch frame deeper than D's margin: {depth}");
+}

@@ -219,7 +219,9 @@ pub struct StrategyConfig {
     /// C: exact stack bytes (2-16 KiB; default 8 KiB).
     pub exact: usize,
     /// B and C: bytes below the probe limit kept for the unwinder and for callees
-    /// without probes (library code). `None` picks the default (16 KiB for B, 4 KiB for C).
+    /// without probes (library code). `None` picks the default (16 KiB for B, 8 KiB
+    /// for C). `deep-recursion` measures what unwinding uses: about 1.8 KiB from a
+    /// frame without destructors and about 5 KiB when landing pads run drop code.
     pub probe_reserve: Option<usize>,
     /// A: guard bytes below each stack (default one page).
     pub guard: usize,
@@ -263,7 +265,7 @@ impl StrategyConfig {
     /// The probe reserve in effect.
     pub fn effective_probe_reserve(&self) -> usize {
         self.probe_reserve.unwrap_or(match self.id {
-            StrategyId::C => 4 * KIB,
+            StrategyId::C => 8 * KIB,
             _ => 16 * KIB,
         })
     }
@@ -316,7 +318,7 @@ impl StrategyConfig {
         if self.id == StrategyId::C && !(2 * KIB..=64 * KIB).contains(&self.exact) {
             return Err(format!("exact stack size {} outside 2K..64K", fmt_size(self.exact)));
         }
-        if self.guard % page != 0 || self.guard == 0 {
+        if !self.guard.is_multiple_of(page) || self.guard == 0 {
             return Err(format!("guard {} must be a non-zero multiple of the page size", self.guard));
         }
         if self.id == StrategyId::D && !matches!(self.decommit_base, StrategyId::A | StrategyId::B) {

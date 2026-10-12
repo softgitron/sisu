@@ -20,7 +20,7 @@ use super::{BenchCtx, Impl, params, work};
 use crate::csv::Status;
 use crate::mem::{self, MemSnapshot, per_item};
 use crate::rt::{self, AsyncScope, Gate, Runtime};
-use crate::stack::probe::{WorkerProbe, current_sp};
+use crate::stack::probe::{SplitStackProbe, current_sp};
 use crate::stack::{StrategyId, probe as sprobe};
 
 /// What an idle-memory run measured.
@@ -125,7 +125,7 @@ fn stackful(rt: &Runtime, n: u64, excursion: usize, settle: Duration) -> IdleRes
             for i in 0..n {
                 let (g, sp) = (&gate, &span);
                 let spawned = s.try_spawn(move || {
-                    let p = rt::probe();
+                    let p = SplitStackProbe;
                     black_box(work::shallow_work(p, i));
                     let _ = g.wait(0);
                     if excursion > 0 {
@@ -190,12 +190,12 @@ fn stackless(rt: &Runtime, n: u64, excursion: usize, settle: Duration) -> IdleRe
         for i in 0..n {
             let (g, sp) = (gate.clone(), span.clone());
             drop(s.spawn(async move {
-                black_box(work::shallow_work(WorkerProbe, i));
+                black_box(work::shallow_work(SplitStackProbe, i));
                 let _ = g.wait_async(0).await;
                 if excursion > 0 {
                     // Stackless: the excursion runs on the worker's stack inside one poll.
                     let top = current_sp();
-                    let low = work::excursion(WorkerProbe, excursion);
+                    let low = work::excursion(SplitStackProbe, excursion);
                     sp.fetch_max(top - low, SeqCst);
                 }
                 let _ = g.wait_async(1).await;

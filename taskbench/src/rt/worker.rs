@@ -183,6 +183,7 @@ impl Shared {
             counters: RtCounters::default(),
             next_id: AtomicU64::new(1),
         });
+        shared.timer.start()?;
         let ptr: *const Shared = Box::into_raw(shared);
         let mut handles = Vec::with_capacity(threads);
         for (index, local) in workers.into_iter().enumerate() {
@@ -226,8 +227,8 @@ impl Shared {
         let w = current_worker_ptr();
         // SAFETY: a non-null WORKER pointer refers to the WorkerCtx on this thread's
         // stack, which lives as long as the worker loop that set it.
-        if let Some(w) = unsafe { w.as_ref() } {
-            if ptr::eq(w.shared, self) {
+        if let Some(w) = unsafe { w.as_ref() }
+            && ptr::eq(w.shared, self) {
                 match hint {
                     Hint::Yield => self.injector.push(task),
                     Hint::Spawn | Hint::Wake => match w.next.replace(Some(task)) {
@@ -238,7 +239,6 @@ impl Shared {
                 self.notify_work();
                 return;
             }
-        }
         self.injector.push(task);
         self.notify_work();
     }
@@ -502,7 +502,7 @@ impl WorkerCtx {
         let sh = self.shared();
         let tick = self.tick.get().wrapping_add(1);
         self.tick.set(tick);
-        if tick % GLOBAL_QUEUE_INTERVAL == 0 {
+        if tick.is_multiple_of(GLOBAL_QUEUE_INTERVAL) {
             loop {
                 match sh.injector.steal() {
                     Steal::Success(t) => return Some(t),
@@ -555,6 +555,9 @@ impl WorkerCtx {
         let body = unsafe { &mut *task.body.get() };
         match body {
             Body::Stackful(co) => {
+                // SAFETY: we own the RUNNING state, hence `local`.
+                let limit = unsafe { task.local_mut() }.region.map(|r| r.probe_limit).unwrap_or(0);
+                probe::set_split_stack_limit(limit);
                 if sh.guard_pages {
                     // SAFETY: we own the RUNNING state, hence `local`.
                     if let Some(r) = unsafe { task.local_mut() }.region {
@@ -584,6 +587,8 @@ impl WorkerCtx {
                 }
             }
             Body::Stackless(fut) => {
+                // Stackless polls recurse on this thread's own stack.
+                probe::set_split_stack_limit(probe::worker_limit());
                 task.notified.store(false, SeqCst);
                 let waker = Waker::from(task.clone());
                 let mut cx = Context::from_waker(&waker);

@@ -66,25 +66,28 @@ impl Timer {
         }
     }
 
-    fn ensure_started(&self) {
-        if self.started.load(SeqCst) {
-            return;
-        }
+    /// Starts the timer thread. Done when the runtime starts, because a thread
+    /// cannot be created later once the process is out of VMAs or memory, which is
+    /// exactly the state `max-tasks` drives it into.
+    pub(crate) fn start(&self) -> std::io::Result<()> {
         let mut t = self.thread.lock().expect("timer thread lock");
-        if t.is_none() && !self.shutdown.load(SeqCst) {
+        if t.is_none() {
             let p = TimerPtr(self);
-            *t = Some(
-                thread::Builder::new()
-                    .name("taskbench-timer".into())
-                    .spawn(move || {
-                        let p = p;
-                        // SAFETY: see TimerPtr.
-                        unsafe { (*p.0).run() }
-                    })
-                    .expect("spawn timer thread"),
-            );
+            *t = Some(thread::Builder::new().name("taskbench-timer".into()).spawn(move || {
+                let p = p;
+                // SAFETY: see TimerPtr.
+                unsafe { (*p.0).run() }
+            })?);
             self.started.store(true, SeqCst);
         }
+        Ok(())
+    }
+
+    fn ensure_started(&self) {
+        if !self.started.load(SeqCst)
+            && let Err(e) = self.start() {
+                eprintln!("taskbench: cannot start the timer thread: {e}");
+            }
     }
 
     /// Calls `waker` at or after `deadline`.

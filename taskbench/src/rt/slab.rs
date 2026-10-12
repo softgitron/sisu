@@ -43,6 +43,10 @@ impl<T> Slab<T> {
         self.entries.get(i)?.as_ref()
     }
 
+    pub fn get_mut(&mut self, i: usize) -> Option<&mut T> {
+        self.entries.get_mut(i)?.as_mut()
+    }
+
     #[allow(dead_code)] // used by tests and kept for debugging
     pub fn len(&self) -> usize {
         self.len

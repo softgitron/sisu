@@ -54,13 +54,12 @@ impl StackStrategy for GuardedMmap {
     }
 
     fn allocate(&self) -> Result<StackRegion, StackError> {
-        if self.cache_cap > 0 {
-            if let Some(r) = self.cache.lock().expect("stack cache lock").pop() {
+        if self.cache_cap > 0
+            && let Some(r) = self.cache.lock().expect("stack cache lock").pop() {
                 self.counters.allocated.fetch_add(1, Relaxed);
                 self.counters.reused.fetch_add(1, Relaxed);
                 return Ok(r);
             }
-        }
         let total = self.total();
         let addr = os::reserve(total).map_err(|e| StackError::classify("mmap", e))?;
         // SAFETY: [addr, addr+guard) is the low end of the mapping just created

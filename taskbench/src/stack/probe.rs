@@ -1,16 +1,26 @@
 //! Software stack-limit probes, simulating the check a compiler would insert at
 //! function entry for strategies B and C (and the worker-stack check for E).
 //!
-//! A probe compares the stack pointer with a per-task limit held in a register-
-//! sized value that the task body passes down (as a compiler would keep the task
-//! pointer in a register). It is not read from a thread-local on every call:
-//! a stackful task can migrate between worker threads at any yield, and a
-//! thread-local address cached across a yield would read another thread's value.
+//! The probe task bodies use is [`SplitStackProbe`]: `cmp rsp, fs:[0x70]; jb`,
+//! the prologue GCC's `-fsplit-stack` emits. On Linux x86-64 with glibc, the
+//! thread control block reserves `tcbhead_t.__private_ss` at `%fs:0x70` for exactly
+//! this; nothing in this process uses split stacks, so the slot is the harness's.
+//! The scheduler writes the running task's limit into the slot every time it
+//! resumes a task on a thread, so the check is correct however often a task
+//! migrates: the instruction addresses the slot through the `fs` segment each
+//! time, and no thread-local address is ever held in a register.
+//!
+//! Two other models are kept for `probe-overhead`: [`LimitProbe`] passes the limit
+//! down as an argument, and [`TlsProbe`] reads a Rust `thread_local!`. The latter
+//! is *not* migration-safe: LLVM materialises the thread-local's address and keeps
+//! it in a register across calls.
 //!
 //! On failure the probe raises a [`StackExhausted`] panic with
-//! `resume_unwind`, which skips the panic hook and needs about 2 KiB of stack
-//! (measured on x86-64 Linux with Rust 1.97), so the unwinder runs inside the
-//! probe reserve and every destructor on the task's stack runs.
+//! `resume_unwind`, which skips the panic hook. The unwinder then runs inside the
+//! probe reserve and every destructor on the task's stack runs. How much reserve
+//! that takes is measured by `deep-recursion` (`*_probe_reserve_used`): about
+//! 1.8 KiB from frames without destructors and about 5 KiB when landing pads in
+//! the deepest frames run drop code (x86-64 Linux, Rust 1.97).
 //!
 //! Benchmark bodies are generic over [`StackProbe`], so the "with probes" and
 //! "without probes" variants of `probe-overhead` are the same code monomorphised
@@ -52,8 +62,7 @@ pub trait StackProbe: Copy + Send + Sync + 'static {
     fn check(self);
 }
 
-/// No probe: strategies with a guard page (A, D(A)), and the baseline of
-/// `probe-overhead`.
+/// No probe: the baseline of `probe-overhead`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoProbe;
 
@@ -89,9 +98,30 @@ impl StackProbe for LimitProbe {
     const ENABLED: bool = true;
     #[inline(always)]
     fn check(self) {
+        check_against(self.limit);
+    }
+}
+
+/// `cmp rsp, limit; jb fail`: the two instructions a compiler emits.
+#[inline(always)]
+fn check_against(limit: usize) {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: compares the stack pointer with a register and branches to a cold
+    // Rust block; touches no memory and does not change the stack.
+    unsafe {
+        std::arch::asm!(
+            "cmp rsp, {limit}",
+            "jb {fail}",
+            limit = in(reg) limit,
+            fail = label { exhausted(current_sp(), limit) },
+            options(nomem, nostack),
+        );
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
         let sp = current_sp();
-        if sp < self.limit {
-            exhausted(sp, self.limit);
+        if sp < limit {
+            exhausted(sp, limit);
         }
     }
 }
@@ -100,6 +130,93 @@ impl StackProbe for LimitProbe {
 #[inline(never)]
 fn exhausted(sp: usize, limit: usize) -> ! {
     std::panic::resume_unwind(Box::new(StackExhausted { sp, limit }))
+}
+
+/// Writes this thread's split-stack limit slot (`%fs:0x70`). Zero disables
+/// [`SplitStackProbe`] on this thread.
+#[inline]
+pub fn set_split_stack_limit(limit: usize) {
+    #[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
+    // SAFETY: glibc reserves `tcbhead_t.__private_ss` at %fs:0x70 for split-stack
+    // support; no code in this process uses split stacks, so writing it affects
+    // only `SplitStackProbe`. The slot is per thread.
+    unsafe {
+        std::arch::asm!("mov qword ptr fs:[0x70], {}", in(reg) limit, options(nostack, preserves_flags));
+    }
+    #[cfg(not(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu")))]
+    TASK_LIMIT.with(|l| l.set(limit));
+}
+
+/// Reads this thread's split-stack limit slot.
+#[inline]
+pub fn split_stack_limit() -> usize {
+    #[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
+    {
+        let v: usize;
+        // SAFETY: reads the reserved slot described in `set_split_stack_limit`.
+        unsafe { std::arch::asm!("mov {}, qword ptr fs:[0x70]", out(reg) v, options(nostack, readonly, preserves_flags)) };
+        v
+    }
+    #[cfg(not(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu")))]
+    TASK_LIMIT.with(|l| l.get())
+}
+
+/// The probe task bodies use: one compare of the stack pointer against the
+/// split-stack slot that the scheduler keeps equal to the running task's limit
+/// (zero, never firing, for guard-page strategies).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SplitStackProbe;
+
+impl StackProbe for SplitStackProbe {
+    const ENABLED: bool = true;
+    #[inline(always)]
+    fn check(self) {
+        #[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
+        // SAFETY: compares rsp with the reserved TCB slot and branches to a cold
+        // Rust block; does not write memory or touch the stack.
+        unsafe {
+            std::arch::asm!(
+                "cmp rsp, qword ptr fs:[0x70]",
+                "jb {fail}",
+                fail = label { exhausted(current_sp(), split_stack_limit()) },
+                options(readonly, nostack),
+            );
+        }
+        #[cfg(not(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu")))]
+        check_against(split_stack_limit());
+    }
+}
+
+thread_local! {
+    /// The running task's probe limit for [`TlsProbe`].
+    static TASK_LIMIT: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Sets the limit [`TlsProbe`] compares against on this thread.
+pub fn set_tls_limit(limit: usize) {
+    TASK_LIMIT.with(|l| l.set(limit));
+}
+
+/// The cost model of a compiler-inserted prologue check: one compare of the stack
+/// pointer against a thread-local slot (GCC's `-fsplit-stack` emits
+/// `cmp %fs:0x70,%rsp; jb __morestack`; Go compares against `g.stackguard0` through
+/// a pinned register). No extra argument is threaded through calls.
+///
+/// Only valid where the task cannot move to another thread between setting the
+/// slot and the check: LLVM materialises the thread-local's address and keeps it
+/// in a callee-saved register across calls (visible in the disassembly of
+/// `work::fib::<TlsProbe>`), so after a migration the check would read the old
+/// thread's slot. `probe-overhead` uses it inside one task that never yields. A
+/// real compiler would treat every suspension point as invalidating the slot.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TlsProbe;
+
+impl StackProbe for TlsProbe {
+    const ENABLED: bool = true;
+    #[inline(always)]
+    fn check(self) {
+        check_against(TASK_LIMIT.with(|l| l.get()));
+    }
 }
 
 thread_local! {
@@ -113,33 +230,12 @@ thread_local! {
 pub fn init_worker_limit(reserve: usize) {
     if let Some((low, _high)) = thread_stack_bounds() {
         WORKER_LIMIT.with(|l| l.set(low + reserve));
+        set_split_stack_limit(low + reserve);
     }
 }
 
 /// The limit recorded by [`init_worker_limit`] for this thread, if any.
 pub fn worker_limit() -> usize {
-    WORKER_LIMIT.with(|l| l.get())
-}
-
-/// Probe for stackless (E) bodies: reads the current worker thread's limit at each
-/// check. Safe for futures, which never move between threads during one `poll`.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct WorkerProbe;
-
-impl StackProbe for WorkerProbe {
-    const ENABLED: bool = true;
-    #[inline(always)]
-    fn check(self) {
-        let limit = worker_limit_slow();
-        let sp = current_sp();
-        if sp < limit {
-            exhausted(sp, limit);
-        }
-    }
-}
-
-#[inline(never)]
-fn worker_limit_slow() -> usize {
     WORKER_LIMIT.with(|l| l.get())
 }
 
@@ -177,12 +273,27 @@ mod tests {
     }
 
     #[test]
+    fn split_stack_slot_probe() {
+        let old = split_stack_limit();
+        set_split_stack_limit(current_sp() - 64 * 1024);
+        SplitStackProbe.check();
+        set_split_stack_limit(usize::MAX);
+        let r = std::panic::catch_unwind(|| SplitStackProbe.check());
+        set_split_stack_limit(old);
+        assert!(r.expect_err("must fire").downcast_ref::<StackExhausted>().is_some());
+        assert_eq!(split_stack_limit(), old);
+    }
+
+    #[test]
     fn worker_bounds_known() {
         let (lo, hi) = thread_stack_bounds().expect("bounds");
         let sp = current_sp();
         assert!(lo < sp && sp < hi, "sp {sp:#x} outside {lo:#x}..{hi:#x}");
+        let old = split_stack_limit();
         init_worker_limit(64 * 1024);
         assert_eq!(worker_limit(), lo + 64 * 1024);
-        WorkerProbe.check();
+        assert_eq!(split_stack_limit(), lo + 64 * 1024);
+        SplitStackProbe.check();
+        set_split_stack_limit(old);
     }
 }

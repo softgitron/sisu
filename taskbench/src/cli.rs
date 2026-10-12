@@ -27,7 +27,7 @@ fn command_options(cmd: &str) -> Option<&'static [&'static str]> {
         "deep-recursion" => &["parse-depth", "naive-depth"],
         "starvation" => &["yield-every", "duration", "probe-interval-us", "baseline-secs"],
         "probe-overhead" => &["reps", "workload", "fib-n", "calls", "tree-depth"],
-        "cancel-uring" => &["concurrency", "async-percent", "break-contract", "buf-bytes"],
+        "cancel-uring" => &["concurrency", "async-percent", "break-contract", "buf-bytes", "source", "file-bytes", "file-dir"],
         "machine-spec" => &[],
         _ => return None,
     })
@@ -71,7 +71,7 @@ Common options:
   --machine-id ID        machine column (default: host name)
   --reservation SIZE     A/B/D stack reservation per task (default 1M; also 128K, 8M)
   --stack-size SIZE      C exact stack size (default 8K)
-  --probe-reserve SIZE   B/C bytes below the probe limit (default B 16K, C 4K)
+  --probe-reserve SIZE   B/C bytes below the probe limit (default B 16K, C 8K)
   --guard SIZE           A guard size (default 4K)
   --chunk SIZE           B/C reservation chunk (default 1G)
   --base A|B             D's base strategy (default A)

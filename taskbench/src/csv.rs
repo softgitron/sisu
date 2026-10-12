@@ -123,11 +123,10 @@ impl CsvWriter {
     /// Opens `path` for appending, creating it and its parent directory; writes the
     /// header if the file is empty.
     pub fn open_append(path: &Path) -> io::Result<CsvWriter> {
-        if let Some(dir) = path.parent() {
-            if !dir.as_os_str().is_empty() {
+        if let Some(dir) = path.parent()
+            && !dir.as_os_str().is_empty() {
                 std::fs::create_dir_all(dir)?;
             }
-        }
         let mut file = OpenOptions::new().create(true).append(true).open(path)?;
         if file.metadata()?.len() == 0 {
             writeln!(file, "{HEADER}")?;

@@ -18,7 +18,7 @@ use super::{BenchCtx, Impl, params, work};
 use crate::csv::Status;
 use crate::mem::{self, MemSnapshot};
 use crate::rt::{self, AsyncScope, Gate, Runtime, TaskError};
-use crate::stack::probe::WorkerProbe;
+use crate::stack::probe::SplitStackProbe;
 
 /// What a max-tasks run found.
 #[derive(Clone, Debug, Default)]
@@ -87,7 +87,7 @@ fn stackful(rt: &Runtime, cap: u64, guard: u64) -> MaxResult {
         let t0 = Instant::now();
         let _ = rt::scope(|s| {
             while res.created < cap {
-                if res.created % 4096 == 0 {
+                if res.created.is_multiple_of(4096) {
                     if below_guard(guard) {
                         res.limit = "mem_guard".into();
                         res.detail = format!("MemAvailable below {guard} bytes");
@@ -97,7 +97,7 @@ fn stackful(rt: &Runtime, cap: u64, guard: u64) -> MaxResult {
                 }
                 let g = &gate;
                 match s.try_spawn(move || {
-                    black_box(work::shallow_work(rt::probe(), 1));
+                    black_box(work::shallow_work(SplitStackProbe, 1));
                     let _ = g.wait(0);
                 }) {
                     Ok(h) => {
@@ -135,7 +135,7 @@ fn stackless(rt: &Runtime, cap: u64, guard: u64) -> MaxResult {
         let t0 = Instant::now();
         let s = AsyncScope::new();
         while res.created < cap {
-            if res.created % 4096 == 0 {
+            if res.created.is_multiple_of(4096) {
                 if below_guard(guard) {
                     res.limit = "mem_guard".into();
                     res.detail = format!("MemAvailable below {guard} bytes");
@@ -145,7 +145,7 @@ fn stackless(rt: &Runtime, cap: u64, guard: u64) -> MaxResult {
             }
             let g = gate.clone();
             drop(s.spawn(async move {
-                black_box(work::shallow_work(WorkerProbe, 1));
+                black_box(work::shallow_work(SplitStackProbe, 1));
                 let _ = g.wait_async(0).await;
             }));
             res.created += 1;
@@ -170,7 +170,7 @@ fn os_threads(cap: u64, guard: u64, stack: usize) -> MaxResult {
     let t0 = Instant::now();
     let mut hs = Vec::new();
     while res.created < cap {
-        if res.created % 1024 == 0 && below_guard(guard) {
+        if res.created.is_multiple_of(1024) && below_guard(guard) {
             res.limit = "mem_guard".into();
             break;
         }

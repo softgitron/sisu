@@ -14,6 +14,9 @@ use std::sync::atomic::Ordering::Relaxed;
 use super::{AtomicCounters, Exhaustion, StackCounters, StackError, StackRegion, StackStrategy, os};
 use crate::units::{round_down, round_up};
 
+/// Bytes below a parked task's recorded stack pointer that are never decommitted.
+pub const SWITCH_MARGIN: usize = 2048;
+
 /// Decommit-on-park wrapper.
 pub struct Decommit {
     base: Arc<dyn StackStrategy>,
@@ -79,11 +82,12 @@ impl StackStrategy for Decommit {
         if sp <= region.usable_low || sp > region.base {
             return;
         }
-        // Keep the page holding `sp` and the one below it: the context switch
-        // stores the task's callee-saved registers just below the recorded stack
-        // pointer (well under a page).
+        // The context switch stores the task's callee-saved registers and its
+        // suspend frames just below the recorded stack pointer: 488 bytes for the
+        // whole wait-park-suspend chain, measured by
+        // `rt::tests::park_switch_frame_is_shallow`. Keep 4x that.
         let page = os::page_size();
-        let top = round_down(sp, page).saturating_sub(page);
+        let top = round_down(sp.saturating_sub(SWITCH_MARGIN), page);
         self.decommit_range(region.usable_low, top);
     }
 
@@ -120,8 +124,8 @@ mod tests {
         assert_eq!(mem::resident_pages(r.base - 512 * 1024, 512 * 1024), 128);
         // The task parks with its stack pointer 8 KiB below the base.
         d.on_park(&r, r.base - 8 * 1024);
-        // Kept: the two pages above the stack pointer, the page holding it and the
-        // margin page below it.
+        // Kept: everything from the stack pointer minus the switch margin, rounded
+        // down to a page: base-8K-2K rounds to base-12K, three pages.
         assert_eq!(mem::resident_pages(r.base - 512 * 1024, 512 * 1024), 3);
         let c = d.counters();
         assert_eq!(c.decommits, 1);

@@ -200,11 +200,10 @@ impl BenchCtx {
             let note = if row.note.is_empty() { String::new() } else { format!("  ({})", row.note) };
             println!("  {:<34} {:>14} {:<6}{status}{note}", row.metric, v, row.unit);
         }
-        if let Some(w) = &mut self.csv {
-            if let Err(e) = w.write(&row) {
+        if let Some(w) = &mut self.csv
+            && let Err(e) = w.write(&row) {
                 eprintln!("taskbench: cannot write CSV row: {e}");
             }
-        }
         self.rows.push(row);
     }
 
