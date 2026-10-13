@@ -407,43 +407,44 @@ paints stack reserves (`deep_recursion.rs`), and `perf.rs`.
 Each block carries a `SAFETY:` comment with its invariant (`clippy::undocumented_unsafe_blocks`
 is on). Edition 2024's `unsafe_op_in_unsafe_fn` is denied.
 
-## Questions the future owner must answer
+## Policy decisions (owner, October 2026)
 
-1. **Hardware for the full runs**: two bare-metal x86-64 machines with 16 GiB (the
-   scale row's figure), a pinned CPU frequency, hardware performance counters,
-   `RLIMIT_NOFILE` hard limit at least 200064, and default sysctls; who provides
-   them, and which counts as machine 1.
-2. **Which context-switch crate to standardise on**: corosensei 0.3.4 here (stable,
-   trap-handler support, `on_parent_stack`). Alternatives (`context`, Boost.Context
-   via FFI, the native backend's own switch) change nothing in the strategies but
-   must keep a trap-return path for guard pages and a parent-stack escape for
-   runtime code.
-3. **Sysctl policy**: the bet says "default sysctls". Is raising `vm.max_map_count`
-   (which rescues A up to its memory cost) an acceptable deployment requirement, or
-   is A out once `max-tasks` shows the VMA limit? The same question for
-   `RLIMIT_NOFILE` and THP (`MAP_STACK` and `MADV_NOHUGEPAGE` are set regardless).
-4. **Which Go figure is the memory baseline after the excursion**: immediately
-   after (stacks still grown) or after GC (shrunk). The pre-registration must fix it.
-5. **Decommit policy**: D(B)'s watermark makes decommit free for tasks that park at
-   a steady depth. Is D(B) the default, and should runtime code called from tasks
-   run on the worker's stack, as Go's `systemstack` does and the panic hook here
-   does, so that unprobed code can never cross the watermark or the reserve?
-6. **Probe reserve policy**: a reserve below each probe limit costs address space
-   only. Its size must cover the unwinder and every unprobed callee (measured: 5 KiB
-   with drop code), and it sets the floor for C's slot size.
-7. **The 1M-task cell after the excursion**: 1M tasks that each keep a 32 KiB
-   excursion need about 32 GiB, twice the scale row's 16 GiB machine. On such a
-   machine B and C fail that cell by arithmetic (A fails earlier, at the VMA
-   limit), and so does Go, which shrinks stacks only at GC: here the memory guard
-   stopped all three after 21-30 % of the excursions. Either the pre-registration accepts "only a
-   decommitting design completes the cell at 1M" (D, which does, at 6.5 KiB per
-   task), or that cell runs on a larger machine.
-8. **Yield points**: the starvation row passes here only because the workloads
-   yield every 10k iterations (about 19 us). With no yield points a compute loop
-   starves the probe for its whole run (2 s), as it does Java virtual threads; Go
-   bounds the wait by asynchronous preemption, at 27-39 ms here (above the 10 ms
-   bar, with 8 compute goroutines on 4 Ps). Does the Sisu compiler insert yield
-   checks at loop back-edges (whose cost belongs in the probe-overhead budget and
-   is not measured here), or does the runtime need signal-based preemption, which
-   must then be safe on B and C stacks? And which Go figure is the baseline, with
-   or without `Gosched`?
+The questions the first version of this harness raised were answered by
+the project owner. They bind every later run and the Phase 1 report.
+
+1. **Machines.** Virtual machines and GitHub-hosted runners are enough in
+   the harness era; bare metal with hardware performance counters and a
+   pinned frequency waits for the native era. The second machine of the
+   plan may be a runner. Continuous integration runs the smoke suite on
+   every push ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml));
+   no scheduled runs are configured.
+2. **Context-switch crate.** corosensei 0.3.x is the standard; a
+   replacement must keep a trap-return path for guard pages and a
+   parent-stack escape for runtime code.
+3. **Sysctls and limits.** Default sysctls only. A deployment requirement
+   to raise `vm.max_map_count` is not acceptable, so strategy A (one
+   reservation per task) is out as a default once `max-tasks` shows the
+   VMA limit; the same holds for `RLIMIT_NOFILE`, so the 10k-connection
+   echo and the 100k idle-connection cells run only where the default hard
+   limit allows and are otherwise reported as not run.
+4. **Go baseline after the excursion.** The tighter figure: Go measured
+   after its garbage collection has shrunk the stacks. On this machine
+   only decommit-on-park (D) holds the 4x bar against it.
+5. **Decommit policy.** Pooled stacks with software probes and decommit on
+   park, D(B), is the default strategy; runtime code called from tasks runs
+   on the worker's stack, as Go's `systemstack` does, so unprobed code never
+   crosses the watermark or the reserve.
+6. **Probe reserve.** 5 KiB, the measured need with drop code; it is also
+   the floor for strategy C's slot size.
+7. **The 1M-task cell after the excursion.** The cell is required only of
+   strategies that release pages on park; for the others it is reported at
+   100k and marked infeasible at 1M on a 16 GiB machine, together with Go,
+   which shrinks stacks only at garbage collection.
+8. **Yield points.** The compiler inserts yield checks (Q-34, decided), and
+   their cost counts in the probe-overhead budget; the starvation baseline
+   is Go with its default asynchronous preemption and no manual `Gosched`.
+   A Sisu task without yield points is expected to starve the probe, and
+   that case is reported, not counted.
+
+The pre-registration ([`../proposal/20-pre-registration.md`](../proposal/20-pre-registration.md),
+section 4.4 and section 6.5) carries the same decisions.

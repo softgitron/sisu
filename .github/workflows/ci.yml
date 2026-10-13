@@ -1,0 +1,58 @@
+# Continuous integration for the Sisu repository.
+# Runs on every push and pull request only; no scheduled runs are configured
+# (owner's decision, October 2026).
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    name: documentation links and IDs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check relative links and Q/D references
+        run: python3 tools/check_docs.py
+
+  harness:
+    name: taskbench build, tests and smoke run
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: taskbench
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain versions
+        run: |
+          rustc --version
+          cargo --version
+          go version || true
+          java -version 2>&1 || true
+          ulimit -a
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets
+      - name: Build (release)
+        run: cargo build --release
+      - name: Tests
+        run: cargo test
+      - name: Smoke run (harness and controls)
+        run: |
+          ./run_all.sh --scale smoke --machine-id github-runner \
+            --out "results/github-runner/${GITHUB_SHA::12}"
+      - name: Summarise
+        run: python3 summarize.py "results/github-runner/${GITHUB_SHA::12}" || true
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taskbench-smoke-${{ github.sha }}
+          path: taskbench/results/github-runner/
+          if-no-files-found: warn

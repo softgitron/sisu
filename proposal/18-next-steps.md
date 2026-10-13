@@ -236,7 +236,11 @@ and can a cancelled task lend a buffer on its stack to the kernel safely?
   to hot replacement and to D-058's rule that a suspended frame is never
   leaked, so the fallback is costed before it is needed.
 - A report with every configuration, not the best one, reproduced on a
-  second machine by the reviewer; raw CSVs committed.
+  second machine by the reviewer; raw CSVs committed. In the harness era
+  the machines may be virtual machines or GitHub-hosted runners under
+  default sysctls (owner, October 2026); bare metal with a performance
+  monitoring unit waits for the native era, so the 3 % probe-overhead bar
+  is reported as measured, with its noise, rather than decided here.
 
 **Exit criteria.**
 
@@ -902,12 +906,12 @@ record once frozen.
 
 | What | How measured | Baseline | Threshold that changes the design |
 |---|---|---|---|
-| Memory per idle task at 100k and at 1M, after shallow use and after a 32 KiB excursion | harness, two machines | Go and JDK 21+ on the same machine | above 4x Go: stackless compilation of task bodies behind the same `scope`/`spawn` API (16) |
+| Memory per idle task at 100k and at 1M, after shallow use and after a 32 KiB excursion | harness, two machines (virtual machines or GitHub-hosted runners are enough in the harness era) | Go measured after its garbage collection, and JDK 21+, on the same machine; the 1M-after-excursion cell is required only of strategies that release pages on park | above 4x Go: stackless compilation of task bodies behind the same `scope`/`spawn` API (16) |
 | Spawn-plus-join median and p99 | harness | Go | median above 3x Go with pooled stacks: runtime design review |
 | Scale: 1M idle tasks on a 16 GiB machine with default sysctls | harness | none | fail: guard-page-per-task is out; pooled stacks with software probes become the design, with probe overhead on compute loops at most 3% |
 | 10k-connection echo p99; 100k-connection idle RSS | harness | Go | p99 above 2x Go: runtime design review, not a language change |
 | Stack exhaustion | deep-recursion tests; `--stats stack-depth` histogram over the whole corpus (interpreter era) | none | any segfault is a bug; any ordinary (bet-1 or bet-2) program whose depth exceeds the default reservation: a larger default or the stackless fallback; a default above 8 MiB re-evaluates memory at that size |
-| Starvation (Q-34) | p99 latency of a probe task under N compute-bound tasks with yield points | Go's asynchronous preemption (harness); 10 ms (interpreter) | worse than Go, or p99 above 10 ms: revisit asynchronous preemption |
+| Starvation (Q-34) | p99 latency of a probe task under N compute-bound tasks with compiler-inserted yield points, whose cost counts in the probe-overhead budget | Go with its default asynchronous preemption and no manual yields (harness); 10 ms (interpreter) | worse than Go, or p99 above 10 ms: revisit asynchronous preemption |
 | Cancellation with a lent buffer (D-058) | harness: a million in-flight io_uring reads into stack buffers cancelled on each stackful strategy; buffers written after their cancelled call returned; cancel-to-return latency | 0 | any is a runtime bug; one that waiting for the original completion cannot remove reopens D-058 |
 | Semantics: schedules explored per test, orphan tasks, unobserved failures, lock guards not dropped on unwind | interpreter, `--explore 1000`, then PCT and bounded exhaustive schedules, injected faults and simulated crash and restart under `--sim` | 0 | any non-zero count is a bug; a class that needs a language change reopens D-014 |
 | `sim` seeded-bug study | interpreter: the twenty pre-registered ALICE and Jepsen bugs planted in copies of P3 and a small replicated log; bugs found within a fixed CPU budget | random `--explore` schedules alone, same budget | fewer than fifteen, or no more than random alone: the `sim` profile stays a prototype and is not carried into v1 (D-070) |
@@ -1140,8 +1144,66 @@ years and rewrote its compiler ([`roc.md`](../research/languages/roc.md)).
 With two full-time engineers the plan stretches to about 15 months; with
 one, do not start the compiler.
 
-## What is deliberately not built
+## Bootstrapping: the road to a self-hosted compiler
 
+The owner's goal (October 2026) is a self-hosting Sisu as early as
+possible. The rule that follows from it: write in Sisu whatever Sisu can
+already run, and write in Rust only what must exist before Sisu can run
+it. The experiment keeps the three bets first (principle 6), but it is
+built so that the bootstrap starts the week after the verdict rather than
+a year later (D-078).
+
+| Stage | What | Runs on | Who, when | Done when |
+|---|---|---|---|---|
+| 0 | The Rust interpreter over SIR of this plan; `std` written in Sisu from Phase 4 on; host intrinsics listed and specified | the host | this plan, weeks 1-52 | 0.1-interp released and the bets decided |
+| 1 | The front end in Sisu: lexer, parser, name resolution, type checker, ownership checker, emitting serialised SIR; the formatter and `sisu doc` as `pure` functions over the syntax tree | the stage-0 interpreter | the language and compiler engineers, about six months after the verdict | identical SIR and diagnostics to the Rust front end on the whole conformance suite: the Sisu front end becomes the oracle |
+| 2 | The native backend in Rust, the non-LLVM debug backend of [10-tooling.md](10-tooling.md) first, LLVM for release later, compiling SIR; the runtime (tasks on the stacks Phase 1 chose, capabilities, allocators) in Rust, later partly in Sisu under `unsafe` | the host | the runtime engineer and the lead, in parallel with stage 1, about nine to twelve months | the stage-1 front end compiled natively meets the compile-speed targets of [10-tooling.md](10-tooling.md) |
+| 3 | The self-hosted compiler: stage 1 compiled by stage 2, then by itself | itself | the whole team, about three months | the fixed point: the compiler compiled by itself produces byte-identical output to the compiler compiled by stage 2, on itself and on the corpus; the Rust front end is retired |
+
+**What this plan must preserve for the bootstrap.** Each item is already
+in a phase; this list makes the reason explicit so that nobody trades it
+away under schedule pressure.
+
+- SIR has a serialised, documented form from Phase 2 (the plan already
+  keeps a SIR dump per corpus failure); stage 1 emits that form, and the
+  conformance suite compares it.
+- The conformance suite (Q-38) is language-agnostic: input files, expected
+  SIR, expected diagnostics by catalog identifier. A front end in any
+  language can be checked against it.
+- No Rust-only semantics: every host intrinsic the interpreter offers has
+  Sisu-specified behaviour, and the query layer (salsa) is an implementation
+  detail that the semantics never depend on.
+- The front end is designed as data plus rules (tables for the lexer,
+  a grammar the parser follows directly, a checker whose judgements are
+  written down), so that the port is a transcription, and its phases are
+  documented as a port guide in Phase 9.
+- Diagnostics go through the message catalog (D-065), which stage 1 reuses
+  unchanged.
+- Nothing in the standard library written in Sisu uses an interpreter-only
+  escape hatch; what needs the host is an intrinsic with a documented
+  contract.
+
+**Costs and risks.** A front end on the stage-0 interpreter is slow; that
+is acceptable for an oracle and for development, not for users, which is
+why stage 2 runs in parallel and the compile-speed targets apply to stage
+3. Two front ends exist for about a year; the Rust one is retired only at
+the fixed point, never before, so a bug in stage 1 cannot freeze into the
+compiler unobserved. A self-hosted compiler also ossifies early design
+mistakes into the one program every change must keep compiling; editions
+(D-036) and the retained conformance suite are the mitigation. The
+precedents: Go bootstrapped in Go 1.5 by translating its C compiler
+mechanically and keeping the old one until the new one matched; Rust
+replaced its OCaml compiler in 2011 once the Rust one compiled itself;
+Zig's self-hosted compiler took four years beside its C++ stage and the
+project treats that as its hardest period
+([`go.md`](../research/languages/go.md), [`rust.md`](../research/languages/rust.md),
+[`zig.md`](../research/languages/zig.md)).
+
+**Not in this plan.** Stages 1 to 3 start after the verdict; no effort in
+the 52 weeks goes to them beyond the preservation list above, and the
+decision points do not depend on them.
+
+## What is deliberately not built
 - Any native backend (LLVM, Cranelift, the self-hosted debug backend), and
   therefore monomorphisation, instantiation sharing, the instantiation
   budget, DWARF and the debug ABI beyond what hot replacement needs in the

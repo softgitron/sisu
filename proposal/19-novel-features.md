@@ -1494,8 +1494,9 @@ separate `std.num` types with symbolic mathematics where achievable
   floats, `Mutex` unwinding, the hole's spelling, the `par` keyword,
   worksheets and the notebook non-goal, the experiment amendments,
   left-to-right binding types, whether capabilities stay `Copy`, whether
-  resource attributes and capture kinds may enter function types, and the
-  scope and semantics of exact arithmetic.
+  resource attributes and capture kinds may enter function types (answered:
+  no), and the scope and semantics of exact arithmetic (answered: an
+  unboundedly exact `Decimal` whose division yields a `Ratio`).
 - **Experiment amendments proposed** ([18](18-next-steps.md), Q-49): the
   io_uring cancellation test in Phase 1; the monitor as counterexample
   generator in Phase 3; the `sim` profile across Phases 6 and 8; the

@@ -377,8 +377,8 @@ so in their consequences; D-059 also waits on Q-52.
 
 *Alternatives:* lints (Rust's `no_std`, clippy); run-time sanitisers only (RealtimeSanitizer); program-wide restrictions (Ada); nothing.
 *Evidence:* Clang 20 checks `nonblocking` and `nonallocating` on function types; Swift's experimental `@_noAllocation` met friction with generic metadata; Ada's `pragma Restrictions` and GNATstack; SPARK's Silver level and Wuffs (every check discharged at compile time, in Chrome since 2021). Cheap in Sisu because allocation is visible in types (rule 7 of [04](04-memory-and-ownership.md)) and every blocking point is a capability call or a synchronisation primitive ([systems-and-determinism.md](../research/ideation/systems-and-determinism.md), candidates 5 and 6).
-*Consequences:* The attributes are part of function types; checking happens after monomorphisation, an exception to D-017 with errors at the instantiation; drop glue for auto-boxed recursive types must be iterative; `sisu audit --panics` precedes the `@no_panic` attribute; the interval analysis must be written into the specification (D-036). Putting three more tracked properties into function types reopens Q-17's "`pure` is the one tracked property" (Q-52). See N-08 and N-09.
-*Status:* leaning.
+*Consequences:* The attributes never enter function types (Q-52, decided October 2026): they are checked per function over the monomorphised call graph, an exception to D-017 with errors at the instantiation, and inside an attributed function a `dyn` call or a call through a non-generic closure parameter is an error because it must be assumed to allocate and block; drop glue for auto-boxed recursive types must be iterative; `sisu audit --panics` precedes the `@no_panic` attribute; the interval analysis must be written into the specification (D-036). `pure` stays the one property in function types (Q-17). See N-08 and N-09.
+*Status:* leaning for the attribute set; decided for their place outside function types (Q-52).
 
 ### D-060 Collections take an allocator type parameter with a default; a borrowed region makes the collection a view
 
@@ -491,12 +491,12 @@ so in their consequences; D-059 also waits on Q-52.
 *Consequences:* One interception point shared by fakes, tracing, auditing and recording; `log` attaches the scope's span automatically, which adds a second piece of implicit context to the scope that [06](06-concurrency-and-capabilities.md) accepts, carrying observation only and never authority; the same timing code is real-time in production and deterministic under the test clock. See N-06, N-35, N-60.
 *Status:* leaning.
 
-### D-076 Exact arithmetic as separate standard-library types: `BigInt`, `Ratio` and `Decimal` in `std.num` with literal support; symbolic mathematics in `std.x` after 1.0
+### D-076 Exact arithmetic as separate standard-library types: `BigInt`, `Ratio` and an unboundedly exact `Decimal` in `std.num` with literal support; symbolic mathematics in the standard library after 1.0
 
 *Alternatives:* arbitrary-precision `int` by default (Python, Ruby); exact rationals by default (Pyret, rejected for the teaching profile in [19](19-novel-features.md)); binary floating point only; a computer algebra system in the core.
 *Evidence:* The owner's request (Q-44, October 2026) for "perfect math" as separate types; Python's `int` and `decimal` (PEP 327) and `fractions`, Java's `BigDecimal`, Julia's `BigInt` and `Rational`, and the fact that every language in the research that lacks them grows a library for them; [`11-stdlib.md`](11-stdlib.md) already lists the three types; `FromLiteral` ([`03-types-and-generics.md`](03-types-and-generics.md)) gives suffix-free literals; a CAS is a project the size of SymPy, so it is scoped separately.
-*Consequences:* `int` stays fixed-width and trapping (D-009); the fixed operator set gives the exact types ordinary operators; the types are written in Sisu with `comptime`-eligible `pure` code and host kernels in the interpreter; `Decimal`'s semantics and the scope of "symbolic" are Q-53; the numeric traits come from Q-23.
-*Status:* decided (owner, October 2026); semantics and scope open (Q-53).
+*Consequences:* `int` stays fixed-width and trapping (D-009); the fixed operator set gives the exact types ordinary operators; the types are written in Sisu with `comptime`-eligible `pure` code and host kernels in the interpreter; `Decimal` is a scaled `BigInt`, exact without bound for addition, subtraction and multiplication, with division yielding a `Ratio` and rounding an explicit conversion with a named mode, and no hidden precision context (Q-53); symbolic mathematics comes to the standard library after 1.0; the numeric traits come from Q-23.
+*Status:* decided (owner, October 2026, Q-44 and Q-53).
 
 ### D-077 A `Mutex` whose guard is dropped by unwinding re-checks the protected type's `invariant` and is poisoned only if the check fails
 
@@ -504,3 +504,10 @@ so in their consequences; D-059 also waits on Q-52.
 *Evidence:* [systems-and-determinism.md](../research/ideation/systems-and-determinism.md) F4; D-040's unwinding to the scope leaves half-updated state visible to siblings and restarted workers; contracts ([07](07-contracts.md)) supply the check that decides whether the state is usable.
 *Consequences:* `lock()` stays infallible in its signature; later `lock()` calls on a poisoned mutex panic; types without an invariant unlock normally; the structured-concurrency suite gains a panic-while-locked case. See N-14.
 *Status:* decided (Q-45, October 2026).
+
+### D-078 Bootstrap in four stages: the Rust interpreter, a Sisu front end on it as the oracle, a native backend in Rust, then self-hosting at the fixed point
+
+*Alternatives:* a compiler kept in Rust indefinitely (rustc's own history until it self-hosted; Roc's position); a compiler written in Sisu from the first day (no interpreter to run it on); a stackless port of the Rust front end to the native backend without a Sisu front end (fast, but Sisu never compiles Sisu).
+*Evidence:* The owner's goal (October 2026) of a self-hosting language as early as possible; D-052's interpreter-first architecture, which gives stage 1 something to run on; Go's 1.5 bootstrap by mechanical translation with the old compiler kept until the new one matched, Rust's 2011 switch from OCaml at the point of self-compilation, and Zig's four years of a self-hosted compiler beside its C++ stage ([`go.md`](../research/languages/go.md), [`rust.md`](../research/languages/rust.md), [`zig.md`](../research/languages/zig.md)); the classic three-stage fixed-point check.
+*Consequences:* The rule "write in Sisu whatever Sisu can already run, in Rust only what must exist first"; the experiment preserves a serialised SIR, a language-agnostic conformance suite, no Rust-only semantics, a data-plus-rules front end with a port guide, and the message catalog; stages 1 and 2 run in parallel after the verdict and stage 3 retires the Rust front end only at the fixed point. See [18-next-steps.md](18-next-steps.md), "Bootstrapping".
+*Status:* decided for the goal and the rule (owner, October 2026); leaning for the stage estimates.

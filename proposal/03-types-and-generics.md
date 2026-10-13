@@ -288,11 +288,12 @@ Decisions:
   is checked at compile time. The fixed operator set (D-022) gives them
   the ordinary operators. `int` stays fixed-width and trapping (D-009): an
   unbounded `int` by default, as in Python and Ruby, would hide allocation
-  inside arithmetic, which priority 3 rules out. The semantics of
-  `Decimal` (unbounded under a precision context, a fixed decimal128, or a
-  scaled `BigInt` whose division yields a `Ratio`) and how far "symbolic"
-  goes are open (Q-53); symbolic mathematics is a `std.x` package after
-  1.0, and the numeric traits the exact types implement come from Q-23.
+  inside arithmetic, which priority 3 rules out. `Decimal` is a scaled `BigInt`
+  (an integer mantissa and a decimal exponent): addition, subtraction and
+  multiplication never round, division yields a `Ratio`, and rounding is an
+  explicit conversion with a named mode, with no hidden precision context
+  (Q-53). Symbolic mathematics comes to the standard library after 1.0, and
+  the numeric traits the exact types implement come from Q-23.
 
 ```sisu
 let e = a * b + c                     # two roundings, on every target and at every optimisation level
@@ -358,9 +359,11 @@ shared mutation and nothing that observes the schedule
 ([06](06-concurrency-and-capabilities.md) lists what `pure` excludes); that
 is inferred, like everything else inside a body. Passing an impure
 function where a `pure` one is required is an error that names the
-operation responsible. Whether the resource
-attributes `@no_alloc`, `@no_block` and `@stack(max=N)` (leaning, D-059)
-and closure capture kinds also enter function types is open (Q-52).
+operation responsible. The resource attributes `@no_alloc`, `@no_block`
+and `@stack(max=N)` (leaning, D-059) never enter function types, and
+neither do closure capture kinds: both are checked per function over the
+monomorphised call graph, so `pure` stays the one property a function type
+carries (Q-52, Q-17).
 
 ## Type aliases and newtypes
 

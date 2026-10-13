@@ -9,7 +9,9 @@ language are not a plan (18). Selection is by background diversity under
 published criteria. Choices that 18 and 20 do not make are marked
 **[default proposed; owner to confirm]**, and things only the owner can
 supply are written `[owner: ...]`. Week numbers are weeks of the plan;
-week 1 begins on `[owner: date of week 1]`.
+week 1 begins on `[owner: date of week 1]`. The owner deferred every fee,
+contracting and compensation item in October 2026; the brief is complete
+apart from them and nothing is posted until they are filled.
 
 ## 1. The roles at a glance
 

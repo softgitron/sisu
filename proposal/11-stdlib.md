@@ -123,11 +123,10 @@ Design points:
   code, with host kernels in the interpreter. Python's `int`, `decimal`
   and `fractions`, Java's `BigDecimal` and Julia's `BigInt` and `Rational`
   are the precedents, and every language in the research that lacks such
-  types grows a library for them. Two questions are open (Q-53): what
-  `Decimal` means (a scaled `BigInt` whose division returns a `Ratio`
-  unless a rounding context is given, an unbounded decimal under a
-  precision-and-rounding context, or a fixed decimal128), and how far
-  symbolic mathematics goes beyond exact rationals. The numeric traits
+  types grows a library for them. `Decimal` is a scaled `BigInt`: exact without
+  bound for addition, subtraction and multiplication, with division
+  returning a `Ratio` and rounding an explicit conversion with a named
+  mode; there is no hidden precision context (Q-53, decided). The numeric traits
   that every exact type implements come from Q-23, which is also open.
 - **Parallel loops are a library, `std.par`** (D-069, decided with Q-47).
   `par_iter`, `par_iter_mut` and `par.join` split work into work-stealing
@@ -218,11 +217,10 @@ protocol and the moldable inspector are the precedents
 candidate 12). `View` ships after 0.1, which has no `std.x`
 ([16](16-validation-plan.md)), and is a candidate for `std` at 1.0.
 
-Symbolic mathematics comes to `std.x` after 1.0 (D-076). Its scope is
-open (Q-53): exact algebraic numbers could join `Ratio` in `std.num` for
-v1, while a computer algebra system with expression trees,
-simplification, differentiation and equation solving is a project the
-size of SymPy.
+Symbolic mathematics comes to the standard library after 1.0 (D-076,
+Q-53): a computer algebra system with expression trees, simplification,
+differentiation and equation solving is a project the size of SymPy, and
+the first phase keeps to `BigInt`, `Ratio` and `Decimal`.
 
 Later candidates, each assessed in [19](19-novel-features.md) and none in
 0.1:

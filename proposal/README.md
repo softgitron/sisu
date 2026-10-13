@@ -44,10 +44,10 @@ options.
 | 12 | [Interop and targets](12-interop-and-targets.md) | Targets, runtime profiles, C interop, ABI |
 | 13 | [Evolution and governance](13-evolution-and-governance.md) | Compatibility, editions, specification, governance phases |
 | 14 | [Non-goals](14-non-goals.md) | What Sisu will not try to be |
-| 15 | [Decision log](15-decision-log.md) | Seventy-seven decisions with alternatives, evidence and status |
+| 15 | [Decision log](15-decision-log.md) | Seventy-eight decisions with alternatives, evidence and status |
 | 17 | [Testing](17-testing.md) | Tests, assertions, fixtures, property tests, fuzzing, snapshots, benchmarks |
 | 16 | [Validation plan](16-validation-plan.md) | What the prototype must test first, and what would change the design |
-| 18 | [Next steps](18-next-steps.md) | The experiment: phases, corpus, measurements, team, decision points |
+| 18 | [Next steps](18-next-steps.md) | The experiment: phases, corpus, measurements, team, decision points, and the bootstrap plan towards a self-hosted compiler |
 | 19 | [Novel features](19-novel-features.md) | What unconventional languages teach and what exists in no language: 66 candidates assessed, 20 new decisions, 12 new questions |
 | 20 | [Pre-registration](20-pre-registration.md) | The rules of evidence for the experiment, to be frozen at the end of Phase 0: hypotheses, thresholds, procedure, analysis plan, decision rules, amendments |
 | 21 | [Recruitment brief](21-recruitment.md) | The outsiders the experiment needs: roles, eligibility, screening, consent, the call for participants |
@@ -71,7 +71,7 @@ to D-077 and questions Q-42 to Q-53; the owner answered Q-42 to Q-51 in
 October 2026 (reversing the randomised `dict` order and accepting six
 amendments to the experiment), which decides D-061, D-069, D-074, D-076
 and D-077 and the amendments half of D-070, while the rest stay leaning until the log is reviewed and
-Q-52 and Q-53 are open. Draft 3 (October 2026) folds all of these into the
+Q-52 and Q-53 were answered a day later (resource attributes stay out of function types; `Decimal` is unboundedly exact and division yields `Ratio`). Draft 3 (October 2026) folds all of these into the
 design documents 00 to 18, so each document reads as one text and marks a
 leaning decision where it first relies on one.
 
