@@ -73,3 +73,7 @@ Disagree with a decision? The useful contribution is **evidence**, not
 preference: a retrospective from a language designer, a survey figure, a
 study, or a concrete program that the proposed design handles badly.
 Add it to `research/`, then argue from it in `open-questions.md`.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has the conventions; every push runs
+the documentation checker and the harness's build, tests and smoke run
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The repository
+is licensed under [Apache-2.0](LICENSE).
