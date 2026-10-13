@@ -249,12 +249,12 @@ no admissible default reservation covers.
 
 | What | How measured | Baseline | Threshold that changes the design |
 |---|---|---|---|
-| Memory per idle task at 100k and at 1M, after shallow use and after a 32 KiB excursion | harness, two machines | Go and JDK 21+ on the same machine | above 4x Go: stackless compilation of task bodies behind the same `scope`/`spawn` API (16) |
+| Memory per idle task at 100k and at 1M, after shallow use and after a 32 KiB excursion | harness, two machines (virtual machines or GitHub-hosted runners are enough in the harness era) | Go measured after its garbage collection, and JDK 21+, on the same machine; the 1M-after-excursion cell is required only of strategies that release pages on park | above 4x Go: stackless compilation of task bodies behind the same `scope`/`spawn` API (16) |
 | Spawn-plus-join median and p99 | harness | Go | median above 3x Go with pooled stacks: runtime design review |
 | Scale: 1M idle tasks on a 16 GiB machine with default sysctls | harness | none | fail: guard-page-per-task is out; pooled stacks with software probes become the design, with probe overhead on compute loops at most 3% |
 | 10k-connection echo p99; 100k-connection idle RSS | harness | Go | p99 above 2x Go: runtime design review, not a language change |
 | Stack exhaustion | deep-recursion tests; `--stats stack-depth` histogram over the whole corpus (interpreter era) | none | any segfault is a bug; any ordinary (bet-1 or bet-2) program whose depth exceeds the default reservation: a larger default or the stackless fallback; a default above 8 MiB re-evaluates memory at that size |
-| Starvation (Q-34) | p99 latency of a probe task under N compute-bound tasks with yield points | Go's asynchronous preemption (harness); 10 ms (interpreter) | worse than Go, or p99 above 10 ms: revisit asynchronous preemption |
+| Starvation (Q-34) | p99 latency of a probe task under N compute-bound tasks with compiler-inserted yield points, whose cost counts in the probe-overhead budget | Go with its default asynchronous preemption and no manual yields (harness); 10 ms (interpreter) | worse than Go, or p99 above 10 ms: revisit asynchronous preemption |
 | Cancellation with a lent buffer (D-058) | harness: a million in-flight io_uring reads into stack buffers cancelled on each stackful strategy; buffers written after their cancelled call returned; cancel-to-return latency | 0 | any is a runtime bug; one that waiting for the original completion cannot remove reopens D-058 |
 | Semantics: schedules explored per test, orphan tasks, unobserved failures, lock guards not dropped on unwind | interpreter, `--explore 1000`, then PCT and bounded exhaustive schedules, injected faults and simulated crash and restart under `--sim` | 0 | any non-zero count is a bug; a class that needs a language change reopens D-014 |
 | `sim` seeded-bug study | interpreter: the twenty pre-registered ALICE and Jepsen bugs planted in copies of P3 and a small replicated log; bugs found within a fixed CPU budget | random `--explore` schedules alone, same budget | fewer than fifteen, or no more than random alone: the `sim` profile stays a prototype and is not carried into v1 (D-070) |
@@ -661,16 +661,19 @@ with an async runtime, as they would normally; the choice is recorded.
   Every runtime uses as many worker threads as the machine has physical
   cores [default proposed; owner to confirm].
 - **Machines.** Two: M1, the runtime engineer's, and M2, the reviewer's,
-  on which the reviewer reproduces every configuration. Requirements:
-  Linux x86-64 (18's assumption); at least 16 GiB of RAM, with the scale
-  test run in a 16 GiB memory cgroup so that both machines meet 18's "16
-  GiB machine"; a kernel with io_uring asynchronous cancellation, 6.1 or
-  later, for A1; default sysctls for the scale test (`vm.max_map_count` of
-  65530); a fixed CPU frequency governor and a recorded SMT state; nothing
-  else running. The two machines differ in CPU vendor or generation
-  [requirements beyond 18's: default proposed; owner to confirm].
-  Specifications: M1 `[owner: CPU, cores, RAM, kernel, distribution]`; M2
-  `[owner: CPU, cores, RAM, kernel, distribution]`.
+  on which the reviewer reproduces every configuration. The owner decided
+  (October 2026) that virtual machines and GitHub-hosted runners are enough
+  in the harness era and that default sysctls apply; bare metal with a
+  performance monitoring unit and a fixed frequency waits for the native
+  era, and the 3 % probe-overhead bar is reported as measured with its
+  noise. Requirements: Linux x86-64 (18's assumption); at least 16 GiB of
+  RAM, with the scale test run in a 16 GiB memory cgroup so that both
+  machines meet 18's "16 GiB machine"; a kernel with io_uring asynchronous
+  cancellation, 6.1 or later, for A1; default sysctls (`vm.max_map_count`
+  of 65530); the SMT state and the virtualisation host recorded; nothing
+  else running. Specifications are recorded by `taskbench --machine-spec`
+  at run time, and M1 and M2 differ in CPU vendor or generation when the
+  available runners allow it [default proposed; owner to confirm].
 - **Interpreter-era measurements** run on M1, except interpreter adequacy,
   which runs on a reference laptop `[owner: laptop specification]`.
 
@@ -1763,33 +1766,40 @@ than trimming Phase 8's polish.
 
 ## 13. Open items for the owner
 
-Placeholders, one line each:
+Placeholders, one line each. The owner deferred every budget, personnel,
+institution and compensation item in October 2026 ("no need to worry
+about those at this point"); they stay listed so the freeze checklist is
+complete, marked (deferred).
 
 1. The commit hash at freeze and the early-protocol commit hash (1.1).
-2. Funding source and total budget (1.1).
+2. Funding source and total budget (1.1) (deferred).
 3. Institution, ethics review body and approval, or the reason none is
-   needed (1.1).
+   needed (1.1) (deferred).
 4. The external location where the freeze hash is published (1.3).
 5. Names: owner, PI, runtime engineer, compiler engineer, language
-   engineer, Go/Java runtime reviewer, referee (1.2).
-6. The contracting entity (3.3).
-7. The retention period for contact and payment details (3.7).
-8. The licence for programs and diaries (3.7).
-9. The data controller and the applicable data-protection law (3.7).
+   engineer, Go/Java runtime reviewer, referee (1.2) (deferred).
+6. The contracting entity (3.3) (deferred).
+7. The retention period for contact and payment details (3.7) (deferred).
+8. The licence for programs and diaries (3.7) (deferred; the repository's
+   own licence is Apache-2.0).
+9. The data controller and the applicable data-protection law (3.7)
+   (deferred).
 10. Three P6 candidates (4.1.2).
 11. The Go service: name, repository and commit (4.1.3).
 12. The per-program allowlist of libraries for controls (4.2).
 13. Control toolchain versions: Rust, Go, Kotlin, Swift, Python (4.3).
 14. Control runtime versions and flags, and the coroutine library, from the
     reviewer (4.4).
-15. Machines M1 and M2: CPU, cores, RAM, kernel, distribution (4.4).
+15. Machines M1 and M2: virtual machines or GitHub-hosted runners, their
+    specifications recorded at run time (4.4) (decided).
 16. The reference laptop for interpreter adequacy (4.4).
 17. The desk-audit crate list with versions (4.6).
 18. The three models for the model arm (4.8).
 19. The model-API budget (4.8).
 20. The hash of the sealed seeded-bug list (4.9).
 21. Compensation per role, the application channel, the closing date and
-    the contact address ([21-recruitment.md](21-recruitment.md)).
+    the contact address ([21-recruitment.md](21-recruitment.md))
+    (deferred).
 
 Every "[default proposed; owner to confirm]" mark in sections 1-12 is also
 an open item: each is kept, changed or deleted before freeze (section 1.3).

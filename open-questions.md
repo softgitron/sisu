@@ -7,8 +7,8 @@ decision, so the reasoning stays auditable. The proposal documents and the
 decision log have been updated to match. The unconventional-languages
 round ([`research/unconventional/`](research/unconventional/),
 [`proposal/19-novel-features.md`](proposal/19-novel-features.md)) added
-Q-42 to Q-53; the owner answered Q-42 to Q-51 in October 2026, and Q-52
-and Q-53 remain open.
+Q-42 to Q-53, all answered by the owner in October 2026; Q-6, Q-21 and
+Q-23 are the only open questions.
 
 What the research could not settle. Each question states the options, the
 evidence for each, the proposal's current lean (what the design documents
@@ -598,9 +598,9 @@ which ones.
 
 Each question below comes from [`proposal/19-novel-features.md`](proposal/19-novel-features.md)
 and names the candidate (N-xx) and the leaning decision (D-xx) it belongs
-to. The owner answered Q-42 to Q-51 in October 2026; Q-52 (added by the
-consistency review) and Q-53 (raised by the owner's answer to Q-44) are
-open.
+to. The owner answered Q-42 to Q-51 in October 2026 and Q-52 (added by the
+consistency review) and Q-53 (raised by the owner's answer to Q-44) the
+day after.
 
 ### Q-42. Should `dict` and `set` iterate in insertion order?
 
@@ -899,6 +899,8 @@ kinds, with the signature cost measured on the realtime ports of N-08.
 closure parameters and `dyn` calls their code needs, and whether the
 call-graph-only option would have rejected them.
 
+**Decision (October 2026).** Option two. The attributes are checked per function over the monomorphised call graph and never appear in function types; inside an attributed function a `dyn` call or a call through a non-generic closure parameter is an error, because the checker must assume it allocates and blocks, while a generic closure parameter is checked once its concrete closure is known. Closure capture kinds are likewise inferred per closure and checked at the use site, never written in a type. The owner's rule: avoid clutter and let the compiler deal with the details.
+
 ### Q-53. How far does exact arithmetic go, and what are its semantics?
 
 **Question.** Answering Q-44, the owner asked for "perfect math" as
@@ -937,3 +939,6 @@ after 1.0, scoped by Q-23's numerics research.
 the numeric traits every exact type must implement), a port of a
 bookkeeping program and of an exact-geometry kernel under each `Decimal`
 option, and whether a CAS maintainer wants to build on Sisu.
+
+**Decision (October 2026).** `Decimal` is exact without bound: a scaled `BigInt` (an integer mantissa and a decimal exponent), so addition, subtraction and multiplication never round, and division yields a `Ratio`; rounding is an explicit conversion with a named mode, and there is no hidden precision context. `BigInt`, `Ratio` and `Decimal` ship in `std.num` with suffix-free literals, kept simple in the first phase. Symbolic mathematics comes later, in the standard library, after 1.0.
+

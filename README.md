@@ -64,7 +64,7 @@ should be filed as an issue.
 |---|---|
 | Research | Done (October 2026). 47 language analyses (~14,000 lines), 20 topic syntheses, 4 evidence dossiers; a second round of 14 studies of unconventional languages and environments and 3 ideation studies (~6,500 lines). |
 | Proposal | Draft 3 (October 2026). Indentation-based, Python-flavoured syntax; a testing design; a 52-week experiment plan with phases, corpus, measurements and decision points; the unconventional round's assessment of 66 candidate features, 14 of them found in no language ([`proposal/19-novel-features.md`](proposal/19-novel-features.md)), folded into the design; a pre-registration and a recruitment brief for the experiment. |
-| Open questions | 53 recorded; 48 decided by the project owner (October 2026), 5 open: runtime stacks (Q-6), governance details (Q-21), numerics (Q-23), resource attributes in function types (Q-52), exact arithmetic (Q-53). |
+| Open questions | 53 recorded; 50 decided by the project owner (October 2026), 3 open: runtime stacks (Q-6), governance details (Q-21), numerics (Q-23). |
 | Prototype | Phase 1 started: the bet-3 stack harness in [`taskbench/`](taskbench/) (Rust, about 10,000 lines, no Sisu involved) builds, passes its 65 tests, and has smoke results against Go, Java and tokio on one 4-core virtual machine; the full-scale runs on two bare-metal machines are still to do. No Sisu compiler yet. |
 
 ## Contributing to the design
@@ -73,3 +73,7 @@ Disagree with a decision? The useful contribution is **evidence**, not
 preference: a retrospective from a language designer, a survey figure, a
 study, or a concrete program that the proposed design handles badly.
 Add it to `research/`, then argue from it in `open-questions.md`.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has the conventions; every push runs
+the documentation checker and the harness's build, tests and smoke run
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The repository
+is licensed under [Apache-2.0](LICENSE).

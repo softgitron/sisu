@@ -7,6 +7,13 @@ omission. Era label for every number: **harness** (Rust code on native stacks).*
 
 ## 0. Provenance
 
+Policy of record: the owner's answers in the README's "Policy decisions"
+section (machines may be virtual or GitHub-hosted runners; default
+sysctls; Go after its garbage collection as the memory baseline; D(B) as
+the default strategy; a 5 KiB probe reserve; the 1M-after-excursion cell
+required only of page-releasing strategies; compiler-inserted yield
+points with their cost in the probe budget).
+
 | | Machine 1 (owner) | Machine 2 (reviewer's reproduction) |
 |---|---|---|
 | machine_id | | |

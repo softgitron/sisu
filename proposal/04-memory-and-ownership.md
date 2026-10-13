@@ -196,9 +196,11 @@ borrowed region, `list[T, ref Region]`, holds a reference and is a view
 A closure borrows its captures. A closure stored or sent somewhere must be
 an `own` closure (`own x -> ...`, `do own x:`), which moves or copies the
 captures in. The compiler reports
-which capture prevented a closure from escaping. Whether a function type
-also records how a closure captures (borrowing, mutating or owning),
-which `std.par` bodies and `pure` callbacks need, is open (Q-52).
+which capture prevented a closure from escaping. A function type never
+records how a closure captures (borrowing, mutating or owning): the
+checker infers it per closure and checks it where the closure is used,
+which is enough for `std.par` bodies and `pure` callbacks because their
+concrete closures are known after monomorphisation (Q-52).
 
 ### Iterators and projections
 
@@ -418,12 +420,14 @@ compile time and has decoded GIFs in Chrome since 2021, are the precedents
 ([`systems-and-determinism.md`](../research/ideation/systems-and-determinism.md),
 candidate 6).
 
-Whether these attributes enter function types, so that `dyn` methods and
-closure parameters can require them, is open (Q-52): that would put three
-tracked properties beside `pure`, the one Q-17 allows. The alternative
-checks the attributes per function over the call graph and treats every
-`dyn` call and closure parameter as allocating and blocking, so realtime
-code gives up higher-order style, as Wuffs code does. The three ports
+These attributes never enter function types (Q-52, decided): the checker
+verifies them per function over the monomorphised call graph, a generic
+closure parameter is checked once its concrete closure is known, and a
+`dyn` call or a call through a non-generic closure parameter inside an
+attributed function is an error, because it must be assumed to allocate
+and block. Realtime code therefore gives up `dyn` and stored closures, as
+Wuffs code does, and `pure` stays the one property a function type
+carries (Q-17). The three ports
 above settle it.
 
 ## Comparison to the neighbours

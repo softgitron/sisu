@@ -150,9 +150,10 @@ task stack and no parking, on a pool apart from the task scheduler, which
 keeps fine-grained parallelism out of the stack budget that bet 3
 measures ([16-validation-plan.md](16-validation-plan.md)).
 Whether the pool shares OS threads with the scheduler belongs to Q-6,
-which is open. Function types carry `pure`; whether they also carry
-`@no_block` and closure capture kinds, which `std.par`'s signatures need,
-is open (Q-52).
+which is open. Function types carry `pure` and nothing else: `std.par`'s
+signatures take generic closures, and the `@no_block` check and the
+capture kinds are verified on the concrete closure after monomorphisation
+(Q-52).
 
 ```sisu
 for url in urls.par_iter():
@@ -501,9 +502,10 @@ pure def apply(state: Ledger, batch: Slice[Transfer]) -> Ledger ! TaskError:
 Floating point is strict by default
 ([03-types-and-generics.md](03-types-and-generics.md)), which carries the
 guarantee across targets. `pure` is part of function types, so
-higher-order `pure` code demands `pure` callbacks; whether the resource
+higher-order `pure` code demands `pure` callbacks; the resource
 attributes of [04-memory-and-ownership.md](04-memory-and-ownership.md) and
-closure capture kinds join it there is open (Q-52). Each rule has shipped:
+closure capture kinds stay out of function types and are checked on the
+concrete call graph instead (Q-52). Each rule has shipped:
 insertion order in Python, Ruby, JavaScript's `Map` and Starlark; Rayon's
 `join` reports the first closure's panic by index; Haskell's purity, the
 `Par` monad and LVish give deterministic parallelism without covering hash
