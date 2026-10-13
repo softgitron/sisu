@@ -1781,7 +1781,7 @@ complete, marked (deferred).
 6. The contracting entity (3.3) (deferred).
 7. The retention period for contact and payment details (3.7) (deferred).
 8. The licence for programs and diaries (3.7) (deferred; the repository's
-   own licence is Apache-2.0).
+   own licence is Apache-2.0 or the Unlicense, at the user's option).
 9. The data controller and the applicable data-protection law (3.7)
    (deferred).
 10. Three P6 candidates (4.1.2).
