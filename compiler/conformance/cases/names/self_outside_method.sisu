@@ -1,0 +1,5 @@
+def free() -> int:
+    return self.x
+
+def main():
+    pass

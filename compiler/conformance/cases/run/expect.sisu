@@ -1,0 +1,13 @@
+error Fetch:
+    Timeout(seconds: int)
+
+def fetch() -> String ! Fetch:
+    return Err(Timeout(seconds=30))
+
+def relay() -> String !:
+    let body = fetch()?
+    return Ok(body)
+
+def main():
+    let v = relay().expect("the relay must answer")
+    print(v)

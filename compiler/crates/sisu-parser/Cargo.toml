@@ -1,0 +1,16 @@
+[package]
+name = "sisu-parser"
+description = "The error-tolerant recursive-descent parser: every input yields a lossless tree"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sisu-diag.workspace = true
+sisu-syntax.workspace = true
+sisu-lexer.workspace = true
+
+[lints]
+workspace = true

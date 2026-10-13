@@ -1,0 +1,18 @@
+def add(a: int, b: int) -> int:
+    return a + b
+
+def area(r: f64) -> f64:
+    return todo("area")
+
+test "addition works":
+    assert add(2, 2) == 4
+
+test "a failing test reports both sides":
+    assert add(2, 2) == 5
+
+test "a test blocked by a hole":
+    assert area(1.0) > 3.0
+
+test "a panic fails the test":
+    let xs: list[int] = []
+    assert xs[0] == 1

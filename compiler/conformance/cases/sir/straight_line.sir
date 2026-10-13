@@ -1,0 +1,24 @@
+sir 0
+source 0 "straight_line.sisu"
+source 1 "<std>/prelude.sisu"
+entry main
+
+fn add(2) source 0 {
+    let _0: int
+    let _1: int "a"
+    let _2: int "b"
+  bb0:
+    _0 = add copy _1, copy _2 @2:12
+    return @2:5
+}
+
+fn main(0) source 0 {
+    let _0: ()
+    let _1: int "x"
+    let _2: ()
+  bb0:
+    _1 = call fn add(const 1, const 2) @5:13
+    _2 = call intrinsic print(copy _1) @6:5
+    _0 = const ()
+    return
+}

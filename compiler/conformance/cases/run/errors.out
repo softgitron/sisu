@@ -1,0 +1,13 @@
+ok: 42
+empty input
+bad digit 'x' at 1
+1000 is over 100
+(17, -1)
+-2
+BadDigit(at=2, found='z')
+at errors.sisu:20:13
+True
+True
+8
+9
+10

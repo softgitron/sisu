@@ -1,0 +1,526 @@
+##! The stage-0 prelude: the builtin types and the prelude functions of
+##! proposal/02-syntax.md ("Prelude functions and intrinsics") and the parts
+##! of std.core that Phase 2 needs.
+##!
+##! Every function without a body names a host intrinsic with
+##! `@intrinsic("name")`. The `##` comment above it is the intrinsic's
+##! contract, stated in Sisu terms: a Sisu-written std (Phase 4) or another
+##! interpreter must behave exactly so. `@builtin("name")` marks a type whose
+##! values the host represents; such a type has no fields unless it lists
+##! them, and code constructs it only through its associated functions.
+##!
+##! Generic parameters and the bounds `Display`, `Debug`, `Eq`, `Ord`,
+##! `Hash`, `Len` and `Num` appear only here, until traits arrive in Phase 4;
+##! the checker knows which builtin types satisfy each bound (see
+##! docs/architecture.md). `Iterable[T]` in a parameter accepts a `list`,
+##! `set`, `dict` or `Iter` whose items are `T`.
+
+# ------------------------------------------------------------------ host-backed types
+
+## An owned, growable UTF-8 string. Views as `str` wherever a `str` is expected.
+@builtin("String")
+struct String:
+    pass
+
+## A growable sequence, the type of `[a, b]`.
+@builtin("list")
+struct list[T]:
+    pass
+
+## A hash map iterating in insertion order (D-074), the type of `{k: v}`.
+@builtin("dict")
+struct dict[K, V]:
+    pass
+
+## A hash set iterating in insertion order, the type of `{a, b}`.
+@builtin("set")
+struct set[T]:
+    pass
+
+## A lazy iterator. Adapters run their functions only as items are taken.
+@builtin("Iter")
+struct Iter[T]:
+    pass
+
+## A slot of a dict, from `dict.entry`.
+@builtin("Entry")
+struct Entry[K, V]:
+    pass
+
+## Anything a `for` loop can iterate whose items are `T` (a parameter type only).
+@builtin("Iterable")
+struct Iterable[T]:
+    pass
+
+## A file system path. A string literal becomes a `Path` where one is expected.
+@builtin("Path")
+struct Path:
+    pass
+
+## A point in civil time, in UTC.
+@builtin("DateTime")
+struct DateTime:
+    pass
+
+## The file system capability (06). A `Copy` handle.
+@builtin("Fs")
+struct Fs:
+    pass
+
+## The environment capability: arguments and variables.
+@builtin("Env")
+struct Env:
+    pass
+
+## The clock capability.
+@builtin("Clock")
+struct Clock:
+    pass
+
+## The root of all capabilities, constructed by the runtime only when
+## `main(sys: System)` declares it, and passed to `main` alone.
+@builtin("System")
+struct System:
+    fs: Fs
+    env: Env
+    clock: Clock
+
+# ------------------------------------------------------------------ core enums and error sets
+
+## `T?` is `Option[T]`.
+enum Option[T]:
+    Some(T)
+    None
+
+## `T ! E` is `Result[T, E]`.
+enum Result[T, E]:
+    Ok(T)
+    Err(E)
+
+@derive(Copy)
+enum Ordering:
+    Less
+    Equal
+    Greater
+
+## The errors of the file system capability.
+error IoError:
+    NotFound(path: Path)
+    PermissionDenied(path: Path)
+    AlreadyExists(path: Path)
+    InvalidData(path: Path)
+    Interrupted
+    Other(message: String)
+
+# ------------------------------------------------------------------ prelude functions
+
+## Writes the `Display` rendering of `x` and a line break to standard output.
+@intrinsic("print")
+def print[T: Display](x: T)
+
+## Writes the `Display` rendering of `x` and a line break to standard error.
+@intrinsic("print_err")
+def print_err[T: Display](x: T)
+
+## The number of items: Unicode scalar values for `str` and `String`,
+## elements for `list` and `set`, entries for `dict`.
+@intrinsic("len")
+pure def len[T: Len](x: T) -> int
+
+## `range(stop)` is `0, 1, ..., stop - 1`; `range(start, stop)` and
+## `range(start, stop, step)` count by `step`, which must not be zero, and stop
+## before reaching `stop`. With one argument the checker supplies `start = 0`.
+@intrinsic("range")
+pure def range(start: int, stop: int, step: int = 1) -> Iter[int]
+
+## Pairs each item with its index, from 0.
+@intrinsic("enumerate")
+pure def enumerate[T](xs: Iterable[T]) -> Iter[(int, T)]
+
+## Pairs the items of `a` and `b`; panics if they have different lengths (PEP 618).
+@intrinsic("zip")
+pure def zip[A, B](a: Iterable[A], b: Iterable[B]) -> Iter[(A, B)]
+
+## Pairs the items of `a` and `b` until the shorter one ends.
+@intrinsic("zip_shortest")
+pure def zip_shortest[A, B](a: Iterable[A], b: Iterable[B]) -> Iter[(A, B)]
+
+## The items in reverse order.
+@intrinsic("reversed")
+pure def reversed[T](xs: Iterable[T]) -> Iter[T]
+
+## A new list of the items in ascending order; the sort is stable.
+@intrinsic("sorted")
+pure def sorted[T: Ord](xs: Iterable[T]) -> list[T]
+
+## The smaller of `a` and `b`; `a` when they are equal.
+@intrinsic("min")
+pure def min[T: Ord](a: T, b: T) -> T
+
+## The larger of `a` and `b`; `a` when they are equal.
+@intrinsic("max")
+pure def max[T: Ord](a: T, b: T) -> T
+
+## The sum of the items, 0 for none; integer overflow panics. Floats are summed
+## pairwise in a fixed shape (D-074).
+@intrinsic("sum")
+pure def sum[T: Num](xs: Iterable[T]) -> T
+
+## Whether any item is `True`; stops at the first.
+@intrinsic("any")
+pure def any(xs: Iterable[bool]) -> bool
+
+## Whether every item is `True`; stops at the first `False`.
+@intrinsic("all")
+pure def all(xs: Iterable[bool]) -> bool
+
+## The absolute value; `abs` of the smallest `int` panics with an overflow.
+@intrinsic("abs")
+pure def abs[T: Num](x: T) -> T
+
+## Panics with `message`, unwinding the task (05, "Panics").
+@intrinsic("panic")
+pure def panic(message: str) -> Never
+
+## Panics with "entered unreachable code".
+@intrinsic("unreachable")
+pure def unreachable(message: str = "") -> Never
+
+## A typed hole (D-061): checks as the type its position expects; running it
+## stops the program there.
+@intrinsic("todo")
+pure def todo[T](name: str = "") -> T
+
+# ------------------------------------------------------------------ int, f64, bool, char
+
+impl int:
+    ## `Less`, `Equal` or `Greater`.
+    @intrinsic("int.cmp")
+    pure def cmp(self, other: int) -> Ordering
+    ## The nearest `f64`; exact up to 2**53.
+    @intrinsic("int.to_f64")
+    pure def to_f64(self) -> f64
+    ## `self` raised to `exp`, which must not be negative; overflow panics.
+    @intrinsic("int.pow")
+    pure def pow(self, exp: int) -> int
+
+impl f64:
+    ## `Less`, `Equal` or `Greater`; panics if either is NaN.
+    @intrinsic("f64.cmp")
+    pure def cmp(self, other: f64) -> Ordering
+    @intrinsic("f64.sqrt")
+    pure def sqrt(self) -> f64
+    @intrinsic("f64.floor")
+    pure def floor(self) -> f64
+    @intrinsic("f64.ceil")
+    pure def ceil(self) -> f64
+    ## Rounds half away from zero.
+    @intrinsic("f64.round")
+    pure def round(self) -> f64
+    @intrinsic("f64.abs")
+    pure def abs(self) -> f64
+    ## The integer part; panics if the value is NaN or out of range for `int`.
+    @intrinsic("f64.truncate_to_int")
+    pure def truncate_to_int(self) -> int
+    @intrinsic("f64.is_nan")
+    pure def is_nan(self) -> bool
+
+impl bool:
+    @intrinsic("bool.cmp")
+    pure def cmp(self, other: bool) -> Ordering
+
+impl char:
+    @intrinsic("char.cmp")
+    pure def cmp(self, other: char) -> Ordering
+    ## Whether the character is an ASCII digit `0`..`9`.
+    @intrinsic("char.is_digit")
+    pure def is_digit(self) -> bool
+    ## The value of an ASCII digit, or `None`.
+    @intrinsic("char.to_digit")
+    pure def to_digit(self) -> int?
+    @intrinsic("char.is_alphabetic")
+    pure def is_alphabetic(self) -> bool
+    @intrinsic("char.is_whitespace")
+    pure def is_whitespace(self) -> bool
+    @intrinsic("char.is_uppercase")
+    pure def is_uppercase(self) -> bool
+    @intrinsic("char.is_lowercase")
+    pure def is_lowercase(self) -> bool
+
+# ------------------------------------------------------------------ str and String
+
+impl str:
+    @intrinsic("str.cmp")
+    pure def cmp(self, other: str) -> Ordering
+    @intrinsic("str.is_empty")
+    pure def is_empty(self) -> bool
+    ## The Unicode scalar values.
+    @intrinsic("str.chars")
+    pure def chars(self) -> Iter[char]
+    ## The lines, split at `\n` with a trailing `\r` removed; no final empty line.
+    @intrinsic("str.lines")
+    pure def lines(self) -> Iter[str]
+    ## The runs of non-whitespace characters.
+    @intrinsic("str.split_whitespace")
+    pure def split_whitespace(self) -> Iter[str]
+    ## The pieces between occurrences of `sep`, which must not be empty.
+    @intrinsic("str.split")
+    pure def split(self, sep: str) -> Iter[str]
+    ## The text before and after the first `sep`, or `None`.
+    @intrinsic("str.split_once")
+    pure def split_once(self, sep: str) -> (str, str)?
+    @intrinsic("str.trim")
+    pure def trim(self) -> str
+    @intrinsic("str.trim_start")
+    pure def trim_start(self) -> str
+    @intrinsic("str.trim_end")
+    pure def trim_end(self) -> str
+    @intrinsic("str.starts_with")
+    pure def starts_with(self, prefix: str) -> bool
+    @intrinsic("str.ends_with")
+    pure def ends_with(self, suffix: str) -> bool
+    @intrinsic("str.contains")
+    pure def contains(self, part: str) -> bool
+    ## The text without `prefix`, or the whole text if it does not start with it.
+    @intrinsic("str.strip_prefix")
+    pure def strip_prefix(self, prefix: str) -> str
+    ## The text without `suffix`, or the whole text if it does not end with it.
+    @intrinsic("str.strip_suffix")
+    pure def strip_suffix(self, suffix: str) -> str
+    ## The index in characters of the first occurrence of `part`, or `None`.
+    @intrinsic("str.find")
+    pure def find(self, part: str) -> int?
+    @intrinsic("str.replace")
+    pure def replace(self, old: str, new: str) -> String
+    ## Unicode lower-case mapping.
+    @intrinsic("str.to_lowercase")
+    pure def to_lowercase(self) -> String
+    @intrinsic("str.to_uppercase")
+    pure def to_uppercase(self) -> String
+    @intrinsic("str.to_string")
+    pure def to_string(self) -> String
+    ## The decimal integer the whole text spells, with an optional sign, or `None`.
+    @intrinsic("str.parse_int")
+    pure def parse_int(self) -> int?
+    ## `self` repeated `n` times.
+    @intrinsic("str.repeat")
+    pure def repeat(self, n: int) -> String
+
+impl String:
+    ## A new string: empty, or a copy of `text`.
+    @intrinsic("String.new")
+    pure def new(text: str = "") -> String
+    ## Appends `text`.
+    @intrinsic("String.push")
+    pure def push(mut self, text: str)
+    @intrinsic("String.push_char")
+    pure def push_char(mut self, c: char)
+    @intrinsic("String.clear")
+    pure def clear(mut self)
+
+impl Path:
+    @intrinsic("Path.new")
+    pure def new(text: str) -> Path
+    ## The path as text.
+    @intrinsic("Path.as_str")
+    pure def as_str(self) -> str
+
+# ------------------------------------------------------------------ collections
+
+impl[T] list[T]:
+    @intrinsic("list.new")
+    pure def new() -> list[T]
+    @intrinsic("list.with_capacity")
+    pure def with_capacity(n: int) -> list[T]
+    ## Appends `x` at the end.
+    @intrinsic("list.push")
+    pure def push(mut self, own x: T)
+    ## Removes and returns the last element, or `None`.
+    @intrinsic("list.pop")
+    pure def pop(mut self) -> T?
+    ## Inserts `x` before index `i`, which may equal the length.
+    @intrinsic("list.insert")
+    pure def insert(mut self, i: int, own x: T)
+    ## Removes and returns the element at `i`; panics if out of bounds.
+    @intrinsic("list.remove")
+    pure def remove(mut self, i: int) -> T
+    @intrinsic("list.is_empty")
+    pure def is_empty(self) -> bool
+    @intrinsic("list.contains")
+    pure def contains(self, x: T) -> bool
+    ## The element at `i`, or `None` when out of bounds.
+    @intrinsic("list.get")
+    pure def get(self, i: int) -> ref T?
+    @intrinsic("list.first")
+    pure def first(self) -> ref T?
+    @intrinsic("list.last")
+    pure def last(self) -> ref T?
+    ## Borrows each element in order.
+    @intrinsic("list.iter")
+    pure def iter(self) -> Iter[ref T]
+    ## Sorts in ascending order; stable.
+    @intrinsic("list.sort")
+    pure def sort(mut self)
+    ## Sorts by `cmp`; stable.
+    @intrinsic("list.sort_by")
+    pure def sort_by(mut self, cmp: (ref T, ref T) -> Ordering)
+    @intrinsic("list.reverse")
+    pure def reverse(mut self)
+    @intrinsic("list.clear")
+    pure def clear(mut self)
+    ## Moves the elements of `other` to the end.
+    @intrinsic("list.extend")
+    pure def extend(mut self, own other: list[T])
+    ## The `Display` renderings of the elements, separated by `sep`.
+    @intrinsic("list.join")
+    pure def join(self, sep: str) -> String
+
+impl[K, V] dict[K, V]:
+    @intrinsic("dict.new")
+    pure def new() -> dict[K, V]
+    @intrinsic("dict.get")
+    pure def get(self, key: K) -> ref V?
+    ## Inserts or replaces; returns the previous value.
+    @intrinsic("dict.insert")
+    pure def insert(mut self, own key: K, own value: V) -> V?
+    @intrinsic("dict.remove")
+    pure def remove(mut self, key: K) -> V?
+    @intrinsic("dict.contains")
+    pure def contains(self, key: K) -> bool
+    @intrinsic("dict.is_empty")
+    pure def is_empty(self) -> bool
+    ## The slot for `key`, filled or not.
+    @intrinsic("dict.entry")
+    pure def entry(mut self, own key: K) -> Entry[K, V]
+    @intrinsic("dict.keys")
+    pure def keys(self) -> Iter[ref K]
+    @intrinsic("dict.values")
+    pure def values(self) -> Iter[ref V]
+    ## The entries in insertion order.
+    @intrinsic("dict.items")
+    pure def items(self) -> Iter[(ref K, ref V)]
+
+impl[K, V] Entry[K, V]:
+    ## The value in the slot, after storing `value` there if it was empty.
+    @intrinsic("Entry.or_insert")
+    pure def or_insert(own self, own value: V) -> ref mut V
+
+impl[T] set[T]:
+    @intrinsic("set.new")
+    pure def new() -> set[T]
+    ## Adds `x`; returns whether it was new.
+    @intrinsic("set.add")
+    pure def add(mut self, own x: T) -> bool
+    @intrinsic("set.remove")
+    pure def remove(mut self, x: T) -> bool
+    @intrinsic("set.contains")
+    pure def contains(self, x: T) -> bool
+    @intrinsic("set.is_empty")
+    pure def is_empty(self) -> bool
+    @intrinsic("set.iter")
+    pure def iter(self) -> Iter[ref T]
+
+impl[T] Iter[T]:
+    ## The next item, or `None` at the end.
+    @intrinsic("Iter.next")
+    pure def next(mut self) -> T?
+    ## At most `n` items.
+    @intrinsic("Iter.take")
+    pure def take(own self, n: int) -> Iter[T]
+    ## All but the first `n` items.
+    @intrinsic("Iter.skip")
+    pure def skip(own self, n: int) -> Iter[T]
+    @intrinsic("Iter.map")
+    pure def map[U](own self, f: (T) -> U) -> Iter[U]
+    @intrinsic("Iter.filter")
+    pure def filter(own self, keep: (ref T) -> bool) -> Iter[T]
+    ## The first item for which `pred` is `True`.
+    @intrinsic("Iter.find")
+    pure def find(own self, pred: (ref T) -> bool) -> T?
+    @intrinsic("Iter.all")
+    pure def all(own self, pred: (T) -> bool) -> bool
+    @intrinsic("Iter.any")
+    pure def any(own self, pred: (T) -> bool) -> bool
+    @intrinsic("Iter.count")
+    pure def count(own self) -> int
+    @intrinsic("Iter.enumerate")
+    pure def enumerate(own self) -> Iter[(int, T)]
+    @intrinsic("Iter.fold")
+    pure def fold[B](own self, init: B, f: (B, T) -> B) -> B
+    ## The items in a new list.
+    @intrinsic("Iter.collect")
+    pure def collect(own self) -> list[T]
+    ## The item with the largest `key`; the first of equal ones.
+    @intrinsic("Iter.max_by")
+    pure def max_by[K: Ord](own self, key: (ref T) -> K) -> T?
+    ## The item with the smallest `key`; the first of equal ones.
+    @intrinsic("Iter.min_by")
+    pure def min_by[K: Ord](own self, key: (ref T) -> K) -> T?
+
+# ------------------------------------------------------------------ Option and Result
+
+impl[T] Option[T]:
+    @intrinsic("Option.is_some")
+    pure def is_some(self) -> bool
+    @intrinsic("Option.is_none")
+    pure def is_none(self) -> bool
+    ## The value; panics with `message` if there is none.
+    @intrinsic("Option.expect")
+    pure def expect(own self, message: str) -> T
+    ## The value, or `default`.
+    @intrinsic("Option.or")
+    pure def or(own self, own default: T) -> T
+    @intrinsic("Option.map")
+    pure def map[U](own self, f: (T) -> U) -> U?
+
+impl[T, E] Result[T, E]:
+    @intrinsic("Result.is_ok")
+    pure def is_ok(self) -> bool
+    @intrinsic("Result.is_err")
+    pure def is_err(self) -> bool
+    ## The value; panics with `message` and the error if there is an error.
+    @intrinsic("Result.expect")
+    pure def expect(own self, message: str) -> T
+    ## The value, or `default`.
+    @intrinsic("Result.or")
+    pure def or(own self, own default: T) -> T
+    @intrinsic("Result.ok")
+    pure def ok(own self) -> T?
+    @intrinsic("Result.err")
+    pure def err(own self) -> E?
+
+# ------------------------------------------------------------------ capabilities
+
+impl Fs:
+    ## The whole file as text; `NotFound`, `PermissionDenied` or `InvalidData`
+    ## (not UTF-8) on failure.
+    @intrinsic("Fs.read_to_string")
+    def read_to_string(self, path: Path) -> String ! IoError
+    ## Creates or replaces the file with `text`.
+    @intrinsic("Fs.write_text")
+    def write_text(self, path: Path, text: str) -> ! IoError
+    @intrinsic("Fs.exists")
+    def exists(self, path: Path) -> bool
+    ## The same file system with every write refused as `PermissionDenied`.
+    @intrinsic("Fs.read_only")
+    pure def read_only(self) -> Fs
+    ## The same file system limited to `dir`; paths are relative to it and
+    ## may not leave it.
+    @intrinsic("Fs.restrict_to")
+    pure def restrict_to(self, dir: Path) -> Fs
+    ## A fake file system in memory, holding `files` (17, "Fixtures").
+    @intrinsic("Fs.in_memory")
+    pure def in_memory(files: dict[str, str] = {}) -> Fs
+
+impl Env:
+    ## The command-line arguments after the program's own name.
+    @intrinsic("Env.args")
+    def args(self) -> list[str]
+    ## The variable `name`, or `None`.
+    @intrinsic("Env.get")
+    def get(self, name: str) -> String?
+
+impl Clock:
+    ## The current time.
+    @intrinsic("Clock.now")
+    def now(self) -> DateTime

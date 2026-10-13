@@ -1,0 +1,16 @@
+struct Res:
+    id: int
+
+impl Drop for Res:
+    def drop(mut self):
+        print("drop {self.id}")
+
+def consume(own r: Res):
+    pass
+
+def main():
+    let a = Res(id=1)
+    let b = Res(id=2)
+    if a.id > 0:
+        consume(a)
+    print("end")

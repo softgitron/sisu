@@ -1,0 +1,46 @@
+struct Noisy:
+    name: str
+
+impl Drop for Noisy:
+    def drop(mut self):
+        print("drop {self.name}")
+
+struct Pair:
+    first: Noisy
+    second: Noisy
+
+def make(name: str) -> Noisy:
+    return Noisy(name=name)
+
+def take(own n: Noisy):
+    print("took {n.name}")
+
+def early(flag: bool) -> int:
+    let a = make("early.a")
+    defer:
+        print("defer in early")
+    if flag:
+        return 1
+    let b = make("early.b")
+    return 2
+
+def main():
+    let a = make("a")
+    let b = make("b")
+    if True:
+        let inner = make("inner")
+        print("leaving the block")
+    let moved = make("moved")
+    take(moved)
+    let maybe = make("maybe")
+    if False:
+        take(maybe)
+    let p = Pair(first=make("pair.first"), second=make("pair.second"))
+    for i in range(2):
+        let loop_value = make("loop")
+        print("iteration {i}")
+    print(early(True))
+    print(early(False))
+    var xs = [make("x0"), make("x1")]
+    xs.push(make("x2"))
+    print("end of main")

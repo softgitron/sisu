@@ -1,0 +1,4 @@
+# The colon after the signature is missing; the body still parses, so the
+# only diagnostic is the missing colon.
+def main()
+    print("still parsed")

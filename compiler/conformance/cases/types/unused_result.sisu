@@ -1,0 +1,9 @@
+error E:
+    Bad
+
+def risky() -> int ! E:
+    return Err(Bad)
+
+def main():
+    risky()
+    _ = risky()

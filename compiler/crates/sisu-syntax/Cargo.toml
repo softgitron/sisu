@@ -1,0 +1,14 @@
+[package]
+name = "sisu-syntax"
+description = "The lossless syntax tree: token and node kinds, the tree, node identities and the AST built from it"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sisu-diag.workspace = true
+
+[lints]
+workspace = true

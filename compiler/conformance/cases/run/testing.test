@@ -1,0 +1,16 @@
+test "addition works" ... ok
+test "a failing test reports both sides" ... FAILED
+test "a test blocked by a hole" ... blocked by todo("area")
+test "a panic fails the test" ... FAILED
+
+test "a failing test reports both sides" ... FAILED
+panic: assertion failed: add(2, 2) == 5
+  left:  4
+  right: 5
+  at test "a failing test reports both sides" (testing.sisu:11:5)
+
+test "a panic fails the test" ... FAILED
+panic: index out of bounds: the length is 0 but the index is 0
+  at test "a panic fails the test" (testing.sisu:18:5)
+
+1 passed, 2 failed, 1 blocked

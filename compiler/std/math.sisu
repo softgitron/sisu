@@ -1,0 +1,5 @@
+##! std.math for stage 0: the constants the examples use.
+
+const PI: f64 = 3.141592653589793
+const E: f64 = 2.718281828459045
+const TAU: f64 = 6.283185307179586

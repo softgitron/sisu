@@ -50,6 +50,7 @@ proposal/
   21-recruitment.md    roles, eligibility and the call for participants
   examples/            Sisu source files illustrating the design
 taskbench/             Phase 1 of the experiment: the bet-3 stack harness (Rust)
+compiler/              stage 0: the Sisu interpreter, message catalog, SIR, conformance suite (Rust)
 open-questions.md      what the research could not settle, with options and a current lean
 ```
 
@@ -65,7 +66,7 @@ should be filed as an issue.
 | Research | Done (October 2026). 47 language analyses (~14,000 lines), 20 topic syntheses, 4 evidence dossiers; a second round of 14 studies of unconventional languages and environments and 3 ideation studies (~6,500 lines). |
 | Proposal | Draft 3 (October 2026). Indentation-based, Python-flavoured syntax; a testing design; a 52-week experiment plan with phases, corpus, measurements and decision points; the unconventional round's assessment of 66 candidate features, 14 of them found in no language ([`proposal/19-novel-features.md`](proposal/19-novel-features.md)), folded into the design; a pre-registration and a recruitment brief for the experiment. |
 | Open questions | 53 recorded; 50 decided by the project owner (October 2026), 3 open: runtime stacks (Q-6), governance details (Q-21), numerics (Q-23). |
-| Prototype | Phase 1 started: the bet-3 stack harness in [`taskbench/`](taskbench/) (Rust, about 10,000 lines, no Sisu involved) builds, passes its 65 tests, and has smoke results against Go, Java and tokio on one 4-core virtual machine; the full-scale runs on two bare-metal machines are still to do. No Sisu compiler yet. |
+| Prototype | Phase 1: the bet-3 stack harness in [`taskbench/`](taskbench/) (Rust, about 10,000 lines) builds, passes its tests and has results against Go, Java and tokio on virtual machines. Stage 0: the interpreter in [`compiler/`](compiler/) (Rust, about 26,000 lines, eleven crates) runs `hello.sisu` and `wordcount.sisu` unmodified, with a message catalog, a lossless syntax tree, a serialised SIR and a conformance suite of 79 cases; the ownership checker (Phase 3) and traits (Phase 4) are next. |
 
 ## Contributing to the design
 

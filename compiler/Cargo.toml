@@ -1,0 +1,57 @@
+# The stage-0 Sisu implementation: a Rust interpreter over SIR
+# (proposal/18-next-steps.md, "Implementation language and architecture").
+# One crate per pipeline stage; see docs/architecture.md for the map.
+[workspace]
+resolver = "3"
+members = [
+    "crates/sisu-diag",
+    "crates/sisu-syntax",
+    "crates/sisu-lexer",
+    "crates/sisu-parser",
+    "crates/sisu-resolve",
+    "crates/sisu-typeck",
+    "crates/sisu-sir",
+    "crates/sisu-lower",
+    "crates/sisu-interp",
+    "crates/sisu-driver",
+    "crates/sisu-conformance",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.97"
+license = "Apache-2.0 OR Unlicense"
+publish = false
+
+[workspace.dependencies]
+sisu-diag = { path = "crates/sisu-diag" }
+sisu-syntax = { path = "crates/sisu-syntax" }
+sisu-lexer = { path = "crates/sisu-lexer" }
+sisu-parser = { path = "crates/sisu-parser" }
+sisu-resolve = { path = "crates/sisu-resolve" }
+sisu-typeck = { path = "crates/sisu-typeck" }
+sisu-sir = { path = "crates/sisu-sir" }
+sisu-lower = { path = "crates/sisu-lower" }
+sisu-interp = { path = "crates/sisu-interp" }
+sisu-driver = { path = "crates/sisu-driver" }
+sisu-conformance = { path = "crates/sisu-conformance" }
+
+# Panic policy (18, Phase 0): no unwrap, expect or panic in any crate outside
+# tests; an internal error is an ICE diagnostic, never a host panic.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+
+[profile.dev]
+opt-level = 1
+
+[profile.test]
+opt-level = 1

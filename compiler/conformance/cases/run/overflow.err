@@ -1,0 +1,3 @@
+panic: integer overflow: 2432902008176640000 * 21
+  at factorial (overflow.sisu:4:15)
+  at main (overflow.sisu:9:11)

@@ -1,0 +1,20 @@
+5.0
+Point(x=6.0, y=8.0)
+Point(x=0.0, y=0.0)
+Config(name="svc", retries=3, verbose=False)
+db 3 True
+True
+a point-sized circle
+a circle of radius 1.5
+a square of side 2.0
+a 1.0 by 3.0 rectangle
+a triangle with perimeter 12.0
+a dot
+zero
+small
+negative
+large
+empty
+just 7
+1 then 2 and 2 more
+one with x

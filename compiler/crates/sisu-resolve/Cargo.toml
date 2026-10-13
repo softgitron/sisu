@@ -1,0 +1,16 @@
+[package]
+name = "sisu-resolve"
+description = "Name resolution: module item tables, the prelude, imports and resolved signatures"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sisu-diag.workspace = true
+sisu-syntax.workspace = true
+sisu-parser.workspace = true
+
+[lints]
+workspace = true

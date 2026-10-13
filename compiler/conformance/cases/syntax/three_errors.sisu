@@ -1,0 +1,9 @@
+# Three independent mistakes: each is reported once, on its own line.
+def first()
+    pass
+
+def second(x: int) -> int:
+    return x +
+
+def third():
+    let = 3

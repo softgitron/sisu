@@ -1,0 +1,6 @@
+# One undefined name is reported once, not at every use of what depends on it.
+def main():
+    let x = undefined_thing
+    let y = x + 1
+    let z = y * 2
+    print(z)

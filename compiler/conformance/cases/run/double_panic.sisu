@@ -1,0 +1,11 @@
+struct Bomb:
+    id: int
+
+impl Drop for Bomb:
+    def drop(mut self):
+        print("bomb {self.id} goes off")
+        panic("explosion in drop")
+
+def main():
+    let b = Bomb(id=1)
+    panic("first failure")

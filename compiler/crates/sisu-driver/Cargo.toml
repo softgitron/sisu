@@ -1,0 +1,29 @@
+[package]
+name = "sisu-driver"
+description = "The sisu command line and the query layer shared by check, run and (later) the language server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sisu-diag.workspace = true
+sisu-syntax.workspace = true
+sisu-lexer.workspace = true
+sisu-parser.workspace = true
+sisu-resolve.workspace = true
+sisu-typeck.workspace = true
+sisu-sir.workspace = true
+sisu-lower.workspace = true
+sisu-interp.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "sisu"
+path = "src/main.rs"
+
+[dev-dependencies]
+sisu-conformance.workspace = true

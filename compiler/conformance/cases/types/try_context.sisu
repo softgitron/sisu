@@ -1,0 +1,9 @@
+error E:
+    Bad
+
+def risky() -> int ! E:
+    return Ok(1)
+
+def main():
+    let x = risky()?
+    print(x)

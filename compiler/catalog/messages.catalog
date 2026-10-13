@@ -1,0 +1,266 @@
+# Sisu message catalog (English).
+#
+# Every diagnostic, label, fix, note, runtime message and command-line
+# message is an entry here; code only names identifiers (D-065). The format
+# is described in crates/sisu-diag/src/catalog.rs and docs/architecture.md:
+#
+#   CODE  KIND  IDENTIFIER  TEMPLATE
+#
+# Codes are stable and never reused. Ranges: E00xx lexer, E01xx parser,
+# E02xx names and declarations, E03xx types, E05xx lowering, E09xx stage-0
+# limits and internal errors, W0xxx warnings, R0xxx run time, D0xxx driver.
+
+# ---------------------------------------------------------------- lexer
+E0001 error   lex.tab-in-indentation      a tab in indentation; Sisu indents with spaces only
+E0002 error   lex.inconsistent-dedent     this line's indentation matches no enclosing block; the enclosing blocks start at column {columns}
+E0003 error   lex.unterminated-string     this string literal is not closed before the end of the line
+E0004 error   lex.unterminated-block-string  this multi-line string literal is never closed
+E0005 error   lex.unknown-character       `{char}` cannot appear in Sisu source outside a string or comment
+E0006 error   lex.unterminated-char       this character literal is not closed
+E0007 error   lex.invalid-escape          `\{escape}` is not an escape sequence; write `\\` for a backslash
+E0008 error   lex.unmatched-close         `{close}` closes nothing
+E0009 error   lex.unclosed-bracket        `{open}` is never closed
+E0010 error   lex.mismatched-bracket      `{close}` does not close the `{open}` before it
+E0011 error   lex.semicolon               Sisu has no semicolons; put each statement on its own line
+E0012 error   lex.invalid-number          `{text}` is not a valid number literal
+E0013 error   lex.lone-close-brace        a single `}}` in a string closes nothing; write `}}}}` for a literal brace
+E0014 error   lex.bad-indent-char         `{char}` in indentation; Sisu indents with ASCII spaces only
+E0015 error   lex.backslash-continuation  Sisu has no backslash continuation; break the line inside brackets, after a comma or before an operator
+E0016 error   lex.bad-char-literal        a character literal holds exactly one character
+E0018 error   lex.newline-in-interpolation  an interpolation in a one-line string must end on the same line
+-     label   lex.opened-here             opened here
+-     help    lex.use-spaces              replace each tab with spaces
+
+# ---------------------------------------------------------------- parser
+E0100 error   parse.expected              expected {expected}, found {found}
+E0101 error   parse.expected-block        expected an indented block after `{keyword}` on line {line}
+E0102 error   parse.block-on-same-line    a block starts on the next line, indented; nothing may follow `:` on the line that opens it
+E0103 error   parse.expected-expression   expected an expression, found {found}
+E0104 error   parse.expected-type         expected a type, found {found}
+E0105 error   parse.expected-pattern      expected a pattern, found {found}
+E0106 error   parse.expected-declaration  expected a declaration, found {found}
+E0107 error   parse.top-level-statement   statements cannot appear at the top level of a module; put them in a function such as `main`
+E0108 error   parse.mixed-and-or          `and` and `or` cannot be mixed without parentheses
+E0109 error   parse.mixed-bitwise         `{first}` and `{second}` cannot be mixed without parentheses
+E0110 error   parse.bitwise-arithmetic    `{op}` cannot be mixed with arithmetic or shifts without parentheses
+E0111 error   parse.shift-arithmetic      a shift cannot be mixed with arithmetic without parentheses
+E0112 error   parse.negative-power        `-x ** y` is ambiguous; write `-(x ** y)` or `(-x) ** y`
+E0113 error   parse.mixed-chain           a chained comparison must point one way; `{first}` and `{second}` do not
+E0114 error   parse.assignment-in-expression  assignment is a statement and has no value; to compare, write `==`
+E0115 error   parse.python-conditional    `a if c else b` is not Sisu; write `if c: a else: b`
+E0116 error   parse.if-expression-else    an `if` expression needs an `else` branch, because it must have a value
+E0117 error   parse.trailing-tokens       unexpected {found} after the end of the statement
+E0118 error   parse.arm-statement         a `case` arm on one line holds a single expression; put statements in an indented block
+E0119 error   parse.chain-operator        `{op}` cannot be chained; use parentheses or `and`
+E0120 error   parse.keyword-argument-order  a positional argument cannot follow a keyword argument
+E0121 error   parse.empty-interpolation   an interpolation needs an expression between `{{` and `}}`
+E0122 error   parse.closure-parameter     a closure parameter must be a name
+E0123 error   parse.walrus                Sisu has no `:=`; bind with `let` or use `if let`
+E0124 error   parse.keyword-as-name       `{keyword}` is a keyword and cannot be used as a name here
+E0125 error   parse.unexpected-indent     this line is indented more than the line before it, which does not open a block
+E0126 error   parse.expected-member       a struct body holds fields, methods and `pass`; this line is none of them
+-     label   parse.opened-here           this `{keyword}` opens the block
+-     fix     parse.use-if-expression     write it as `if c: a else: b`
+-     fix     parse.parenthesize          add parentheses
+
+# ---------------------------------------------------------------- names and declarations
+E0200 error   resolve.undefined-name      cannot find `{name}` in this scope
+E0201 error   resolve.undefined-type      cannot find a type named `{name}`
+E0202 error   resolve.duplicate-definition  `{name}` is defined more than once in this module
+E0203 error   resolve.unknown-module      there is no module `{name}`
+E0204 error   resolve.not-in-module       module `{module}` has no item `{name}`
+E0205 error   resolve.duplicate-field     `{name}` is declared more than once in `{owner}`
+E0206 error   resolve.duplicate-variant   `{owner}` has more than one variant named `{name}`
+E0207 error   resolve.duplicate-parameter  the parameter `{name}` appears more than once
+E0208 error   resolve.type-argument-count  wrong number of type arguments for `{name}`: expected {expected}, found {found}
+E0209 error   resolve.not-a-type          `{name}` is not a type
+E0210 error   resolve.user-generics       generic parameters on user declarations arrive with traits; stage 0 has only the builtin generic types
+E0211 error   resolve.ambiguous-variant   `{name}` is a variant of more than one type ({candidates}); qualify it, as in `{example}`
+E0212 error   resolve.not-an-error-set    `{name}` is not an error set, so it cannot follow `!`
+E0213 error   resolve.drop-target         `Drop` can be implemented only for a struct or enum declared in this module
+E0214 error   resolve.trait-impl          implementing `{trait}` arrives with traits; stage 0 implements only `Drop`
+E0215 error   resolve.self-outside-method  `self` exists only inside a method
+E0216 error   resolve.drop-signature      `Drop` has one method, `def drop(mut self)`
+E0217 error   resolve.duplicate-method    `{owner}` has more than one method named `{name}`
+E0218 error   resolve.self-not-first      `self` must be the first parameter
+E0219 error   resolve.const-type-required  a `const` needs a type: `const {name}: T = ...`
+E0220 error   resolve.import-unknown      cannot import `{name}`: there is no such module in stage 0
+E0221 error   resolve.field-default-order  a field with a default must not use the value of another field
+E0222 error   resolve.parameter-default-order  a parameter without a default cannot follow one with a default
+E0223 error   resolve.not-a-module        `{name}` is not a module
+E0224 error   resolve.missing-body        `{name}` has no body; only standard-library intrinsics are declared without one
+E0225 error   resolve.std-only-attribute  `@{name}` is reserved for the standard library
+E0226 error   resolve.inferred-set-position  an inferred error set (`T !`) can only be the result type of a function
+E0227 error   resolve.union-outside-result  `{{A, B}}` is a union of error sets and can only follow `!`
+E0228 error   resolve.alias-cycle         the type alias `{name}` refers to itself
+E0229 error   resolve.self-type-outside   `Self` exists only inside a type's declaration or `impl`
+-     label   resolve.first-defined       first defined here
+-     label   resolve.defined-here        `{name}` is defined here
+-     fix     resolve.similar-name        a similar name is in scope
+
+# ---------------------------------------------------------------- types
+E0300 error   type.mismatch               expected `{expected}`, found `{found}`
+E0301 error   type.integer-division       `/` divides floats; for integers use `//`, or convert to `f64` first
+E0302 error   type.not-bool               a condition must be a `bool`, not `{found}`; Sisu has no truthiness
+E0303 error   type.unknown-field          `{ty}` has no field `{name}`
+E0304 error   type.unknown-method         `{ty}` has no method `{name}`
+E0305 error   type.argument-count         wrong number of arguments to `{name}`: expected {expected}, found {found}
+E0306 error   type.unknown-keyword        `{name}` has no parameter named `{arg}`
+E0307 error   type.duplicate-argument     the argument `{arg}` is given more than once
+E0308 error   type.missing-argument       missing the argument `{arg}` of `{name}`
+E0309 error   type.not-callable           a value of type `{ty}` cannot be called
+E0310 error   type.binary-operator        `{op}` cannot be applied to `{lhs}` and `{rhs}`
+E0311 error   type.unary-operator         `{op}` cannot be applied to `{ty}`
+E0312 error   type.assign-immutable       `{name}` is immutable; declare it with `var` to assign to it
+E0313 error   type.not-a-place            this expression cannot be assigned to
+E0314 error   type.non-exhaustive         this `match` does not cover {missing}
+E0315 error   type.missing-return         `{name}` returns `{ty}`, but control can reach the end of its body without a `return`
+E0316 error   type.return-value-in-unit   `{name}` returns nothing, so its `return` takes no value
+E0317 error   type.return-needs-value     this `return` needs a value of type `{ty}`
+E0318 error   type.unused-result          this `{ty}` is not used; handle it, or discard it with `_ = ...`
+E0319 error   type.try-needs-fallible     `?` needs a `T ! E` or a `T?`, found `{ty}`
+E0320 error   type.try-context            `?` on `{ty}` needs a function that returns `{needed}`, but this one returns `{found}`
+E0321 error   type.error-not-in-set       `{from}` errors cannot leave this function, whose error set is `{to}`
+E0322 error   type.break-outside-loop     `break` is only valid inside a loop
+E0323 error   type.continue-outside-loop  `continue` is only valid inside a loop
+E0324 error   type.cannot-infer           the type of `{name}` cannot be inferred here; add a type annotation
+E0325 error   type.not-iterable           a `for` loop cannot iterate over `{ty}`
+E0326 error   type.pattern-mismatch       this pattern cannot match a value of type `{ty}`
+E0327 error   type.unknown-variant        `{ty}` has no variant `{name}`
+E0328 error   type.pattern-field-count    wrong number of fields in the pattern for `{name}`: expected {expected}, found {found}
+E0329 error   type.refutable-let          this pattern might not match; add `else:` with a block that leaves the scope
+E0330 error   type.else-not-fallible      `else` after `let` needs a `T?`, a `T ! E` or a pattern that can fail; this value is `{ty}`
+E0331 error   type.else-must-diverge      the block after `else:` must leave the scope with `return`, `break`, `continue` or a panic
+E0333 error   type.impure-call            `{callee}` is not pure, so the pure function `{name}` cannot call it
+E0334 error   type.impure-capability      the pure function `{name}` cannot use the capability `{ty}`
+E0335 error   type.impure-argument        this function is passed where a pure function is required, but it calls `{callee}`, which is not pure
+E0337 error   type.missing-field          missing the field `{field}` of `{ty}`
+E0338 error   type.move-out-of-borrow     cannot move `{what}` out of a borrowed value; copy it with `.copy()`
+E0339 error   type.mut-argument-missing   `{param}` is a `mut` parameter, so the call must say `mut` before the argument
+E0340 error   type.mut-argument-unexpected  `{param}` is not a `mut` parameter, so the argument takes no `mut`
+E0341 error   type.not-mutable            cannot modify `{what}`; it is not declared with `var`
+E0342 error   type.it-outside-closure     `it` is the parameter of an implicit closure and exists only where a one-parameter function is expected
+E0344 error   type.constant-negative-index  a constant negative index does not compile; count from the end with `^`: `{fix}`
+E0345 error   type.str-not-indexable      `{ty}` cannot be indexed by position; use `.chars()`, `.bytes()` or `.byte_slice(a, b)`
+E0347 error   type.bound-not-satisfied    `{ty}` does not implement `{bound}`
+E0349 error   type.not-generic            `{name}` does not take type arguments
+E0350 error   type.not-a-value            `{name}` is a {kind}, not a value
+E0351 error   type.unknown-associated     `{ty}` has no associated function `{name}`
+E0353 error   type.closure-parameter-count  wrong number of closure parameters: expected {expected}, found {found}
+E0356 error   type.open-set-needs-wildcard  `{ty}` is an open error set; matching it needs a `case _` arm
+E0358 error   type.let-needs-type         `let {name}` without a value needs a type annotation
+E0359 error   type.no-constructor         `{ty}` cannot be constructed in code
+E0360 error   type.not-indexable          a value of type `{ty}` cannot be indexed
+E0361 error   type.method-needs-receiver  `{name}` is a method; call it on a value, as in `x.{name}()`
+E0362 error   type.assoc-not-method       `{name}` has no `self`; call it on the type, as in `{ty}.{name}()`
+E0363 error   type.tuple-index            the tuple `{ty}` has no element {index}
+E0364 error   type.unpack-count           wrong number of names to unpack into: the value has size {found}, the pattern has size {expected}
+E0365 error   type.if-branches            the branches of this `{keyword}` have different types: `{first}` and `{second}`
+E0366 error   type.uninitialized          `{name}` is used before it is assigned
+E0367 error   type.reassign-let           `{name}` is a `let` binding and is already assigned
+E0368 error   type.not-ordered            `{ty}` has no order, so it cannot be compared with `{op}` or sorted
+E0369 error   type.comparison-types       `{lhs}` and `{rhs}` cannot be compared
+E0370 error   type.optional-chain         `?.` needs an optional value, found `{ty}`
+E0371 error   type.coalesce               `??` needs an optional value on its left, found `{ty}`
+E0372 error   type.float-floor-division   `//` divides integers; for floats use `/`
+E0373 error   type.mixed-numbers          `{op}` cannot mix `{lhs}` and `{rhs}`; convert one of them explicitly
+E0374 error   type.literal-out-of-range   `{text}` does not fit in `{ty}`
+E0375 error   type.type-arguments-needed  `{name}` needs a type argument, as in `{name}[T]`
+E0376 error   type.positional-after-keyword  a positional argument cannot follow a keyword argument
+E0377 error   type.default-needs-value    the parameter `{name}` has no default, so it must be given
+E0378 error   type.main-signature         `main` must take nothing or one `System` parameter, and return nothing or `! E`
+E0379 error   type.assert-message         the message of `assert` must be a string
+E0380 error   type.no-display             `{ty}` has no text rendering for `{spec}`
+E0381 error   type.return-in-test         a test returns nothing
+E0382 error   type.self-type-outside      `Self` exists only inside a type's declaration
+E0383 error   type.from-end-outside-index  `^` counts from the end and appears only inside an index, as in `xs[^1]`
+E0384 error   type.arm-needs-expression   an arm of a `match` that has a value holds one expression, not a block
+E0385 error   type.bindings-in-or-pattern  the alternatives of `|` cannot bind names yet
+E0386 error   type.variant-needs-fields   `{name}` has fields; write `{name}(...)`
+E0387 error   type.star-outside-list      `*name` collects the rest of a list and appears only in a list pattern
+E0388 error   type.rest-outside-arguments  `..` skips the remaining fields and appears only inside `Name(...)`
+E0389 error   type.no-self                `self` exists only inside a method
+E0390 error   type.not-a-struct-pattern   `{name}` cannot be matched with fields
+E0391 error   type.const-pattern          a constant cannot be used as a pattern yet; compare with `==` in a guard
+-     label   type.expected-because       expected because of this
+-     label   type.found-here             this is `{ty}`
+-     note    type.missing-patterns       add an arm for {missing}, or a `case _` arm
+-     fix     type.use-floor-division     use `//` for integer division
+-     fix     type.discard                discard it explicitly
+-     fix     type.declare-var            declare `{name}` with `var`
+-     fix     type.from-end-index         count from the end with `^`
+-     fix     type.add-error-set          add `{set}` to the function's error set
+-     fix     type.add-copy               copy it with `.copy()`
+-     fix     type.add-mut                write `mut` before the argument
+-     fix     type.remove-mut             remove `mut`
+-     help    type.truthiness             write the test explicitly, as in `not xs.is_empty()` or `x != 0`
+
+# ---------------------------------------------------------------- lowering and SIR
+E0500 error   sir.parse                   SIR: {detail}
+E0501 error   sir.invalid                 invalid SIR in `{function}`: {detail}
+
+# ---------------------------------------------------------------- stage-0 limits and internal errors
+E0900 error   stage0.unsupported          {construct} is not implemented in stage 0 yet; it arrives with {phase}
+E0901 error   stage0.internal             internal compiler error in {stage}: {detail}
+
+# ---------------------------------------------------------------- warnings
+W0001 warning type.hole                   typed hole `{name}` of type `{ty}`
+W0002 warning resolve.shadow-outer        `{name}` shadows a binding of an enclosing scope
+W0003 warning type.unreachable-arm        this `case` arm is unreachable; the arms above it cover every value it matches
+W0004 warning type.unreachable-code       this code is unreachable
+
+# ---------------------------------------------------------------- run time
+R0001 runtime panic.explicit              {message}
+R0002 runtime panic.index-out-of-bounds   index out of bounds: the length is {len} but the index is {index}
+R0003 runtime panic.overflow              integer overflow: {expr}
+R0004 runtime panic.divide-by-zero        division by zero
+R0005 runtime panic.shift-out-of-range    a shift by {amount} is out of range; shifts take 0 to 63
+R0006 runtime panic.assert                assertion failed: {expr}
+R0007 runtime panic.assert-message        assertion failed: {expr}\n  message: {message}
+R0008 runtime panic.expect                {message}: {value}
+R0009 runtime panic.unreachable           entered unreachable code: {message}
+R0010 runtime panic.missing-key           the key {key} is not in the dict
+R0011 runtime panic.negative-exponent     a negative exponent on an integer: {expr}
+R0012 runtime panic.zip-lengths           zip: the arguments have different lengths
+R0013 runtime panic.hole                  reached the typed hole {hole}
+R0014 runtime panic.during-unwind         panic while unwinding: {message}\n  the first panic: {first}\n  a panic during unwinding aborts the program
+R0015 runtime panic.negative-index        the index {index} is negative; count from the end with `^`
+R0016 runtime panic.slice-bounds          the slice bounds {start}:{end} are negative
+R0017 runtime panic.unordered             NaN has no order
+R0018 runtime run.error-returned          error: {error}
+R0019 runtime run.panic-header            panic: {message}
+R0020 runtime run.frame                   at {function} ({location})
+R0021 runtime panic.range-step            the step of a range must not be zero
+R0023 runtime panic.conversion            cannot convert {value} to `{ty}`
+R0024 runtime run.internal                internal error in the interpreter: {detail}
+R0025 runtime run.assert-left             left:  {value}
+R0026 runtime run.assert-right            right: {value}
+R0029 runtime panic.unreachable-plain     entered unreachable code
+R0030 runtime panic.expect-none           called `expect` on `None`
+R0031 runtime panic.expect-error          called `expect` on an error: {value}
+R0032 runtime panic.stack-overflow        stack overflow: more than {depth} nested calls
+R0033 runtime panic.moved-value           use of a value after it was moved
+R0034 runtime panic.dangling              use of a reference to a value that no longer exists
+R0035 runtime panic.empty-argument        {operation}: the {what} must not be empty
+R0036 runtime panic.negative-count        {operation}: the count {count} is negative
+R0037 runtime panic.insert-out-of-bounds  insert index {index} is out of bounds for a list of length {len}
+R0038 runtime run.step-limit              the program ran past its limit of {steps} statements
+R0039 runtime run.trace-line              at {location}
+R0040 runtime run.no-entry                the program has no `main` function
+R0041 runtime run.trace-header            error return trace:
+
+# ---------------------------------------------------------------- driver
+
+D0001 cli     cli.cannot-read             cannot read `{path}`: {reason}
+D0002 cli     cli.usage                   usage: sisu <command> [options] <file>\n\ncommands:\n  run <file> [args...]   check and run a program (`--sir` runs a SIR file)\n  check <file>           report diagnostics (`--format=ids` for the conformance form)\n  sir <file>             print the serialised SIR\n  test <file>            run the `test` blocks\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--print` reprints the source\n  explain <code>         describe a diagnostic code
+D0003 cli     cli.unknown-command         unknown command `{command}`; run `sisu help`
+D0004 cli     cli.missing-file            `sisu {command}` needs a file
+D0005 cli     cli.no-main                 `{file}` has no `main` function
+D0006 cli     cli.errors-found            the program was not run: errors found ({count})
+D0007 cli     cli.test-result             test {name} ... {outcome}
+D0008 cli     cli.test-summary            {passed} passed, {failed} failed, {blocked} blocked
+D0009 cli     cli.unknown-option          unknown option `{option}` for `sisu {command}`
+D0010 cli     cli.explain-unknown         there is no diagnostic `{code}`
+D0011 cli     cli.explain                 {code} ({kind}) {id}: {template}
+D0012 cli     cli.ice                     internal compiler error in {stage}: {detail}\nthe intermediate form was written to {dump}
+D0013 cli     cli.cannot-write            cannot write `{path}`: {reason}

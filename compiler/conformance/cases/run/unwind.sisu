@@ -1,0 +1,21 @@
+struct Guard:
+    name: str
+
+impl Drop for Guard:
+    def drop(mut self):
+        print("released {self.name}")
+
+def level2(xs: list[int]) -> int:
+    let g = Guard(name="level2")
+    return xs[10]
+
+def level1(xs: list[int]) -> int:
+    let g = Guard(name="level1")
+    defer:
+        print("deferred in level1")
+    return level2(xs) + 1
+
+def main():
+    let g = Guard(name="main")
+    print(level1([1, 2, 3]))
+    print("not reached")

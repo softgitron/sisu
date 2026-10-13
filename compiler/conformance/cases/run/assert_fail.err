@@ -1,0 +1,5 @@
+panic: assertion failed: total == 4
+  message: total is 3
+  left:  3
+  right: 4
+  at main (assert_fail.sisu:6:5)

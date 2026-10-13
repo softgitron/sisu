@@ -1,0 +1,4 @@
+def f(x: int) -> str:
+    if x > 0:
+        return "pos {x:>3}"
+    return "{x=}"

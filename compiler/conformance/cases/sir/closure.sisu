@@ -1,0 +1,4 @@
+def main():
+    let xs = [1, 2, 3]
+    let big = xs.iter().filter(x -> x > 1).count()
+    print(big)

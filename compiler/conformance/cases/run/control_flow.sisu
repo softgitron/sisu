@@ -1,0 +1,43 @@
+def collatz(n: int) -> int:
+    var steps = 0
+    var x = n
+    while x != 1:
+        x = if x % 2 == 0: x // 2 else: 3 * x + 1
+        steps += 1
+    return steps
+
+def main():
+    for i in range(3):
+        print(i)
+    for i in range(10, 0, -3):
+        print(i)
+    for i, c in enumerate(["a", "b"]):
+        print("{i}:{c}")
+    for a, b in zip([1, 2, 3], ["x", "y", "z"]):
+        print("{a}{b}")
+    for x in reversed([1, 2, 3]):
+        print(x)
+    var n = 0
+    while True:
+        n += 1
+        if n % 2 == 0:
+            continue
+        if n > 7:
+            break
+        print("odd {n}")
+    print(collatz(27))
+    let grade = 85
+    if grade >= 90:
+        print("A")
+    elif grade >= 80:
+        print("B")
+    else:
+        print("C")
+    let label = if grade > 50: "pass" else: "fail"
+    print(label)
+    var found = -1
+    for i in range(100):
+        if i * i > 50:
+            found = i
+            break
+    print(found)

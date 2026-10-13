@@ -1,0 +1,51 @@
+error ParseError:
+    Empty
+    BadDigit(at: int, found: char)
+
+error RangeError:
+    TooBig(value: int, limit: int)
+
+def parse_digits(text: str) -> int ! ParseError:
+    if text.is_empty():
+        return Err(Empty)
+    var n = 0
+    for i, c in enumerate(text.chars()):
+        let d = c.to_digit() else:
+            return Err(BadDigit(at=i, found=c))
+        n = n * 10 + d
+    return Ok(n)
+
+# The error set is inferred: the union of what `?` propagates and what is returned.
+def bounded(text: str, limit: int) -> int !:
+    let n = parse_digits(text)?
+    if n > limit:
+        return Err(TooBig(value=n, limit=limit))
+    return Ok(n)
+
+def explain(text: str) -> String:
+    return match bounded(text, 100):
+        case Ok(n): "ok: {n}"
+        case Err(Empty): "empty input"
+        case Err(BadDigit(at, found)): "bad digit {found:?} at {at}"
+        case Err(TooBig(value, limit)): "{value} is over {limit}"
+
+def main():
+    for t in ["42", "", "4x2", "1000"]:
+        print(explain(t))
+    let a = parse_digits("17") else: 0
+    let b = parse_digits("x") else: -1
+    print((a, b))
+    let c = parse_digits("") else as e: if e == Empty: -2 else: -3
+    print(c)
+    let r = bounded("12z", 10)
+    match r:
+        case Err(e):
+            print(e)
+            print(e.trace())
+        case Ok(_):
+            print("unexpected")
+    print(parse_digits("5").is_ok())
+    print(parse_digits("q").is_err())
+    print(parse_digits("8").ok() ?? 0)
+    print(parse_digits("9").or(0))
+    print(bounded("500", 10).or(10))

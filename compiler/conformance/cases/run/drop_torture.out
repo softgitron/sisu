@@ -1,0 +1,37 @@
+nested:
+  drop c
+  drop d
+  drop b
+  drop e
+  drop a
+early(True):
+  drop b
+  drop a
+1
+early(False):
+  drop c
+  drop a
+2
+propagate:
+  drop a
+propagate failed: Early
+moves(True):
+  keep a
+  drop a
+  end of moves
+  drop b
+moves(False):
+  end of moves
+  drop b
+  drop a
+fields:
+  drop outer o (fields next)
+  drop o.b
+  drop o.a
+loop_panic:
+  iteration 0 done
+  drop item
+  panicking at 1
+  drop item
+  drop before
+  drop main

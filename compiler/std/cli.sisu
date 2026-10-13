@@ -1,0 +1,20 @@
+##! std.x.cli for stage 0: command-line parsing derived from a struct's
+##! fields (11, `std.x`). In Sisu this is a comptime derive over reflection
+##! (Phase 4 and 8); stage 0 provides it as one host intrinsic.
+
+## What can go wrong while parsing arguments.
+error Error:
+    UnknownOption(name: String)
+    MissingValue(name: String)
+    InvalidValue(name: String, value: String)
+    MissingArgument(name: String)
+    UnexpectedArgument(value: String)
+
+## Parses `args` into a `T`, which must be a struct. Each field `f` of type
+## `int`, `str`, `String`, `Path` or `bool` is the option `--f` (an
+## underscore may be written `-`), given as `--f value` or `--f=value`; a
+## `bool` field is a flag. One field of type `list[...]` collects the
+## positional arguments in order. A field with a default may be omitted;
+## any other field is required. Errors name the option as written.
+@intrinsic("cli.parse")
+def parse[T](args: list[str]) -> T ! Error

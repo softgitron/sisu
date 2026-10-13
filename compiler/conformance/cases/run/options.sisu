@@ -1,0 +1,38 @@
+struct User:
+    name: String
+    email: String?
+
+def find(users: list[User], name: str) -> int?:
+    for i, u in enumerate(users):
+        if u.name == name:
+            return Some(i)
+    return None
+
+def first_even(xs: list[int]) -> int?:
+    for x in xs:
+        if x % 2 == 0:
+            return Some(x)
+    return None
+
+def double_first_even(xs: list[int]) -> int?:
+    let x = first_even(xs)?
+    return Some(x * 2)
+
+def main():
+    let users = [User(name="ada".to_string(), email=Some("ada@example.org".to_string())), User(name="bob".to_string(), email=None)]
+    print(find(users, "bob") ?? -1)
+    print(find(users, "cy") ?? -1)
+    for u in users:
+        print(u.email?.to_uppercase() ?? "no email")
+    print(double_first_even([1, 3, 4]))
+    print(double_first_even([1, 3]))
+    let maybe: int? = Some(3)
+    print(maybe.is_some())
+    print(maybe.map(x -> x + 1))
+    let x = maybe else:
+        return
+    print(x)
+    if let Some(i) = find(users, "ada"):
+        print("found at {i}")
+    let none: str? = None
+    print(none.is_none())

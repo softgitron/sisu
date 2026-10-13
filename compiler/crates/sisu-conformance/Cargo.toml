@@ -1,0 +1,17 @@
+[package]
+name = "sisu-conformance"
+description = "The language-agnostic conformance runner: drives a sisu executable over the cases and diffs its output with the expected files"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[[bin]]
+name = "sisu-conformance"
+path = "src/main.rs"
+
+[lints]
+workspace = true

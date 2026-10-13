@@ -1,0 +1,51 @@
+##! wordcount: counts words in the files given on the command line and
+##! prints the most common ones. A complete, realistic small tool.
+
+import cli               # the blessed std.x.cli argument parser
+
+error AppError:
+    NoInput
+
+struct Options:
+    top: int = 10
+    min_length: int = 1
+    paths: list[Path]
+
+def parse_args(args: list[str]) -> Options ! cli.Error:
+    return cli.parse[Options](args)          # derive-based parser from the struct's fields
+
+def count_words(fs: Fs, paths: list[Path], min_length: int) -> dict[String, int] ! IoError:
+    var counts = dict()
+    for path in paths:
+        let text = fs.read_to_string(path)?
+        for word in text.split_whitespace():
+            if len(word) < min_length:
+                continue
+            counts.entry(word.to_lowercase()).or_insert(0) += 1
+    return Ok(counts)
+
+def main(sys: System) -> ! {AppError, IoError, cli.Error}:
+    let opts = parse_args(sys.env.args())?
+    if opts.paths.is_empty():
+        return Err(NoInput)
+
+    let fs = sys.fs.read_only()                       # this program never writes
+    let counts = count_words(fs, opts.paths, opts.min_length)?
+
+    var ranked = [(word.copy(), n) for word, n in counts]   # owned copies: references cannot live in a list
+    ranked.sort_by((a, b) -> b.1.cmp(a.1))            # descending by count
+
+    for word, n in ranked.iter().take(opts.top):
+        print("{n:>8}  {word}")
+    return Ok(())
+
+test "counts case-insensitively":
+    let fs = Fs.in_memory({"a.txt": "The the THE cat"})
+    let counts = count_words(fs, ["a.txt"], min_length=1).expect("in-memory fs cannot fail")
+    assert counts["the"] == 3
+    assert counts["cat"] == 1
+
+test "min_length filters short words":
+    let fs = Fs.in_memory({"a.txt": "a bb ccc"})
+    let counts = count_words(fs, ["a.txt"], min_length=2).expect("")
+    assert len(counts) == 2

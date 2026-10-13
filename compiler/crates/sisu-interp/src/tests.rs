@@ -1,0 +1,311 @@
+//! Interpreter tests over hand-written SIR, so they hold for the SIR
+//! semantics alone, whatever front end produced the program.
+
+use super::*;
+use crate::format::{float_repr, strftime};
+
+fn program(text: &str) -> sir::Program {
+    match sir::read(text) {
+        Ok(p) => {
+            let problems = sir::validate(&p);
+            assert!(problems.is_empty(), "{problems:?}");
+            p
+        }
+        Err(e) => panic!("bad SIR at line {}: {}", e.line, e.message),
+    }
+}
+
+/// Runs `main` on the calling thread (not the big-stack thread), so a
+/// test also shows that Sisu calls do not recurse on the host stack.
+fn run(text: &str) -> (i32, String, String) {
+    let p = program(text);
+    let mut host = TestHost::default();
+    let code = Interp::new(&p, &mut host, &Options::default()).run_main();
+    (code, host.out, host.err)
+}
+
+const NOISY: &str = r#"sir 0
+source 0 "t.sisu"
+entry main
+
+struct Noisy drop Noisy.drop { id: int }
+
+fn Noisy.drop(1) drop source 0 {
+    let _0: ()
+    let _1: ref mut Noisy "self"
+    let _2: String
+    let _3: ref mut String
+    let _4: ()
+    let _5: ref String
+  bb0:
+    _2 = call intrinsic fmt.new()
+    _3 = ref mut _2
+    _4 = call intrinsic fmt.text(copy _3, const "drop ")
+    _4 = call intrinsic fmt.display(copy _3, copy _1.*.0, const "")
+    _5 = ref _2
+    _4 = call intrinsic print(copy _5)
+    _0 = const ()
+    return
+}
+"#;
+
+#[test]
+fn drops_run_in_reverse_order_at_scope_exit() {
+    let text = format!(
+        "{NOISY}
+fn main(0) source 0 {{
+    let _0: ()
+    let _1: Noisy \"a\"
+    let _2: Noisy \"b\"
+  bb0:
+    _1 = struct Noisy(const 1)
+    goto bb1
+  bb1:
+    _2 = struct Noisy(const 2)
+    goto bb2
+  bb2:
+    drop _2
+    goto bb3
+  bb3:
+    drop _1
+    goto bb4
+  bb4:
+    _0 = const ()
+    return
+}}
+"
+    );
+    let (code, out, _) = run(&text);
+    assert_eq!(code, exit::OK);
+    assert_eq!(out, "drop 2\ndrop 1\n");
+}
+
+#[test]
+fn a_panic_runs_the_cleanup_blocks_then_reports() {
+    let text = format!(
+        "{NOISY}
+fn main(0) source 0 {{
+    let _0: ()
+    let _1: Noisy \"a\"
+    let _2: Never
+  bb0:
+    _1 = struct Noisy(const 7)
+    goto bb1
+  bb1 (unwind bb2):
+    _2 = call intrinsic panic(const \"stop\") @4:5
+    unreachable
+  bb2 (cleanup):
+    drop _1
+    goto bb3
+  bb3 (cleanup):
+    resume
+}}
+"
+    );
+    let (code, out, err) = run(&text);
+    assert_eq!(code, exit::PANIC);
+    assert_eq!(out, "drop 7\n");
+    assert_eq!(err, "panic: stop\n  at main (t.sisu:4:5)\n");
+}
+
+#[test]
+fn a_drop_flag_skips_a_moved_local() {
+    let text = format!(
+        "{NOISY}
+fn main(0) source 0 {{
+    let _0: ()
+    let _1: Noisy \"a\"
+    let _2: bool \"flag\"
+    let _3: Noisy
+  bb0:
+    _1 = struct Noisy(const 1)
+    _2 = const true
+    goto bb1
+  bb1:
+    _3 = move _1
+    _2 = const false
+    goto bb2
+  bb2:
+    drop _3
+    goto bb3
+  bb3:
+    drop _1 if _2
+    goto bb4
+  bb4:
+    _0 = const ()
+    return
+}}
+"
+    );
+    let (_, out, _) = run(&text);
+    assert_eq!(out, "drop 1\n");
+}
+
+const COUNT_DOWN: &str = r#"sir 0
+source 0 "t.sisu"
+entry main
+
+fn down(1) source 0 {
+    let _0: int
+    let _1: int "n"
+    let _2: bool
+    let _3: int
+    let _4: int
+  bb0:
+    _2 = eq copy _1, const 0
+    switch copy _2 [0: bb2, else: bb1]
+  bb1:
+    _0 = const 0
+    return
+  bb2:
+    _3 = sub copy _1, const 1
+    _4 = call fn down(copy _3)
+    _0 = add copy _4, const 1
+    return
+}
+"#;
+
+#[test]
+fn deep_recursion_does_not_use_the_host_stack() {
+    // 50 000 nested calls on a test thread's small stack: the run loop is
+    // a trampoline.
+    let text = format!(
+        "{COUNT_DOWN}
+fn main(0) source 0 {{
+    let _0: ()
+    let _1: int
+    let _2: ()
+  bb0:
+    _1 = call fn down(const 50000)
+    _2 = call intrinsic print(copy _1)
+    _0 = const ()
+    return
+}}
+"
+    );
+    let (code, out, _) = run(&text);
+    assert_eq!(code, exit::OK);
+    assert_eq!(out, "50000\n");
+}
+
+#[test]
+fn unbounded_recursion_is_a_stack_overflow_panic() {
+    let text = format!(
+        "{COUNT_DOWN}
+fn main(0) source 0 {{
+    let _0: ()
+    let _1: int
+  bb0:
+    _1 = call fn down(const -1)
+    _0 = const ()
+    return
+}}
+"
+    );
+    let (code, _, err) = run(&text);
+    assert_eq!(code, exit::PANIC);
+    assert!(
+        err.starts_with(&format!("panic: stack overflow: more than {MAX_DEPTH} nested calls\n")),
+        "{err}"
+    );
+}
+
+#[test]
+fn the_step_limit_aborts() {
+    let p = program(
+        r#"sir 0
+source 0 "t.sisu"
+entry main
+
+fn main(0) source 0 {
+    let _0: ()
+    let _1: int
+  bb0:
+    _1 = const 1
+    goto bb0
+}
+"#,
+    );
+    let mut host = TestHost::default();
+    let code = Interp::new(&p, &mut host, &Options { fuel: Some(1000) }).run_main();
+    assert_eq!(code, exit::ABORT);
+    assert!(host.err.contains("1000 statements"), "{}", host.err);
+}
+
+#[test]
+fn integer_arithmetic_traps_and_floors() {
+    use sisu_sir::BinOp::*;
+    assert_eq!(ops::int_op(FloorDiv, 7, 2).ok(), Some(3));
+    assert_eq!(ops::int_op(FloorDiv, -7, 2).ok(), Some(-4));
+    assert_eq!(ops::int_op(Mod, -7, 2).ok(), Some(1));
+    assert_eq!(ops::int_op(Mod, 7, -2).ok(), Some(-1));
+    assert_eq!(ops::int_op(Pow, 2, 10).ok(), Some(1024));
+    assert_eq!(ops::int_op(WrapAdd, i64::MAX, 1).ok(), Some(i64::MIN));
+    assert_eq!(ops::int_op(SatAdd, i64::MAX, 1).ok(), Some(i64::MAX));
+    for (op, a, b) in [
+        (Add, i64::MAX, 1),
+        (Mul, i64::MIN, -1),
+        (FloorDiv, 1, 0),
+        (Mod, 1, 0),
+        (Pow, 2, 64),
+        (Pow, 2, -1),
+        (Shl, 1, 64),
+    ] {
+        assert!(matches!(ops::int_op(op, a, b), Err(Unwind::Panic(_))), "{op:?} {a} {b}");
+    }
+    assert_eq!(ops::float_op(Mod, -7.0, 2.0), 1.0);
+}
+
+#[test]
+fn floats_print_shortest_with_a_point() {
+    assert_eq!(float_repr(3.0), "3.0");
+    assert_eq!(float_repr(0.1), "0.1");
+    assert_eq!(float_repr(1e100), "1e100");
+    assert_eq!(float_repr(f64::NAN), "NaN");
+}
+
+#[test]
+fn civil_time_formats() {
+    // 2026-10-13T12:34:56Z.
+    let t = 1_791_894_896;
+    assert_eq!(strftime(t, "%Y-%m-%dT%H:%M:%SZ"), "2026-10-13T12:34:56Z");
+    assert_eq!(strftime(t, "%H:%M"), "12:34");
+    assert_eq!(strftime(0, "%F %T"), "1970-01-01 00:00:00");
+}
+
+#[test]
+fn format_specs_follow_python() {
+    let p = program("sir 0\nsource 0 \"t.sisu\"\n");
+    let mut host = TestHost::default();
+    let i = Interp::new(&p, &mut host, &Options::default());
+    let f = |v: Value, spec: &str| i.format(&v, spec, false).unwrap_or_default();
+    assert_eq!(f(Value::Int(42), ">6"), "    42");
+    assert_eq!(f(Value::Int(42), "<6"), "42    ");
+    assert_eq!(f(Value::Int(42), "^6"), "  42  ");
+    assert_eq!(f(Value::Int(-7), "05"), "-0007");
+    assert_eq!(f(Value::Int(255), "#x"), "0xff");
+    assert_eq!(f(Value::Int(1234567), ","), "1,234,567");
+    assert_eq!(f(Value::Int(5), "+"), "+5");
+    assert_eq!(f(Value::Float(1.23456), ".2"), "1.23");
+    assert_eq!(f(Value::Float(1.23456), ".2f"), "1.23");
+    assert_eq!(f(Value::Float(1500.0), ".2e"), "1.50e+03");
+    assert_eq!(f(Value::Float(0.25), ".0%"), "25%");
+    assert_eq!(f(Value::str("abc"), ".2"), "ab");
+    assert_eq!(f(Value::str("abc"), "*>5"), "**abc");
+    assert_eq!(i.format(&Value::str("a\"b"), "", true).unwrap_or_default(), "\"a\\\"b\"");
+}
+
+#[test]
+fn dicts_keep_insertion_order() {
+    use crate::value::{Dict, Key};
+    let mut d = Dict::default();
+    for (k, v) in [("b", 1), ("a", 2), ("c", 3)] {
+        d.insert(Key::Text(k.into()), Value::str(k), Value::Int(v));
+    }
+    d.insert(Key::Text("a".into()), Value::str("a"), Value::Int(20));
+    d.remove(&Key::Text("b".into()));
+    let keys: Vec<String> = d.entries.iter().map(|(k, _)| format!("{k:?}")).collect();
+    assert_eq!(keys.len(), 2);
+    assert_eq!(d.position(&Key::Text("c".into())), Some(1));
+    assert!(matches!(d.entries[0].1, Value::Int(20)));
+}

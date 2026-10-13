@@ -1,0 +1,7 @@
+##! A module doc comment.
+
+## A doc comment on a function.
+def main():   # a trailing comment
+    # a comment on its own line
+
+    print("comments are trivia")   # kept by the lossless tree

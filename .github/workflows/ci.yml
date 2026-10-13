@@ -56,3 +56,27 @@ jobs:
           name: taskbench-smoke-${{ github.sha }}
           path: taskbench/results/github-runner/
           if-no-files-found: warn
+
+  compiler:
+    name: stage-0 compiler format, lints, build, tests and conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: compiler
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal --component rustfmt,clippy
+          rustup override set 1.97.0
+          rustc --version
+          cargo --version
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets
+      - name: Build
+        run: cargo build
+      - name: Tests (unit tests and the conformance suite)
+        run: cargo test

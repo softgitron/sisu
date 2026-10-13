@@ -1,0 +1,2 @@
+4:5-4:11 E0202 resolve.duplicate-definition name="helper"
+  label 1:5-1:11 resolve.first-defined

@@ -1,0 +1,26 @@
+SOURCE_FILE 0..190
+  FN_DEF 59..190
+    DEF_KW 59..62 "def"
+    IDENT 63..67 "main"
+    PARAM_LIST 67..69
+      L_PAREN 67..68 "("
+      R_PAREN 68..69 ")"
+    COLON 69..70 ":"
+    BLOCK 93..190
+      NEWLINE 93..94 "\n"
+      INDENT 131..131 ""
+      EXPR_STMT 131..190
+        CALL_EXPR 131..159
+          NAME_REF 131..136
+            IDENT 131..136 "print"
+          ARG_LIST 136..159
+            L_PAREN 136..137 "("
+            ARG 137..158
+              STRING_EXPR 137..158
+                STRING_START 137..138 "\""
+                STRING_TEXT 138..157 "comments are trivia"
+                STRING_END 157..158 "\""
+            R_PAREN 158..159 ")"
+        NEWLINE 189..190 "\n"
+      DEDENT 190..190 ""
+  EOF 190..190 ""

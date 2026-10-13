@@ -1,0 +1,32 @@
+12
+3
+hello, world
+HELLO, WORLD
+True
+False
+True
+7
+Hello, Sisu
+padded|
+["a", "b", "c"]
+3
+["line1", "line2", "line3"]
+("key", "value")
+ababab
+name
+42
+-17
+0
+['a', 'b', 'c']
+concat!
+x, y, z
+Ada has 42 items
+n=42 f=3.14159
+[    42] [42    ] [  42  ] [000042] [+42]
+[3.14] [   3.142] [3.141590e+00] [25.0%]
+[ff] [FF] [0o377] [101] [1,234,567]
+[  Ada] [Ada***] [Ad]
+"Ada" 'c' [1, 2]
+braces: {literal}
+tab:	end, quote: ", backslash: \
+É

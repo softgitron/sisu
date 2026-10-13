@@ -1,0 +1,35 @@
+# Capabilities are values (06): `main` receives `System`, and a function
+# can only touch what it is passed. These run against in-memory fakes.
+
+def summarize(fs: Fs, path: Path) -> String ! IoError:
+    let text = fs.read_to_string(path)?
+    return Ok("{len(text.lines().collect())} lines")
+
+def save(fs: Fs, path: Path, text: str) -> ! IoError:
+    fs.write_text(path, text)?
+    return Ok(())
+
+def main(sys: System):
+    let fs = Fs.in_memory({"notes.txt": "one\ntwo\nthree\n"})
+    for name in ["notes.txt", "missing.txt"]:
+        let summary = summarize(fs, Path.new(name)) else as e: "failed: {e}".to_string()
+        print(summary)
+    let ro = fs.read_only()
+    match save(ro, "out.txt", "data"):
+        case Ok(()):
+            print("saved")
+        case Err(e):
+            print("refused: {e}")
+    match save(fs, "out.txt", "data"):
+        case Ok(()):
+            print("saved")
+        case Err(e):
+            print("refused: {e}")
+    print(fs.exists("out.txt"))
+    let back = fs.read_to_string("out.txt") else: String.new()
+    print(back)
+    let jail = fs.restrict_to("sub")
+    print(jail.exists("../notes.txt"))
+    let args = sys.env.args()
+    print(args)
+    print(sys.env.get("SISU_SURELY_UNSET") ?? "unset")
