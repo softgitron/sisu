@@ -19,7 +19,11 @@
 //!
 //! Workloads: `fib` (recursive Fibonacci, the call-dominated worst case),
 //! `calls` (a loop calling a small function per iteration), `tree` (a recursive
-//! walk of a 64k-node binary tree with arithmetic per node).
+//! walk of a 64k-node binary tree with arithmetic per node), and `loop` (the
+//! call-free LCG loop of `starvation` with the check on every back-edge: the
+//! cost model of a compiler-inserted yield check, which the owner's policy counts
+//! in the same budget; in the other three workloads the entry check doubles as
+//! the yield point).
 //!
 //! `fib` is an upper bound, not an estimate. LLVM turns its second recursive call
 //! into a loop, and the probe, written at the top of the source function, stays in
@@ -45,6 +49,7 @@ enum Workload {
     Fib(u32),
     Calls(u64),
     Tree(u32),
+    Loop(u64),
 }
 
 impl Workload {
@@ -53,6 +58,7 @@ impl Workload {
             Workload::Fib(_) => "fib",
             Workload::Calls(_) => "calls",
             Workload::Tree(_) => "tree",
+            Workload::Loop(_) => "loop",
         }
     }
 }
@@ -63,6 +69,7 @@ fn run_once<P: StackProbe>(p: P, w: Workload, tree: &work::Tree) -> (f64, u64) {
         Workload::Fib(n) => work::fib(p, black_box(n)),
         Workload::Calls(n) => work::call_loop(p, black_box(n)),
         Workload::Tree(_) => (0..64).fold(0u64, |a, _| a.wrapping_add(work::tree_sum(p, black_box(tree)))),
+        Workload::Loop(n) => work::checked_loop(p, black_box(n)),
     };
     (t0.elapsed().as_nanos() as f64, black_box(v))
 }
@@ -107,16 +114,18 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
     let fib_n = ctx.args.count("fib-n", 32)? as u32;
     let calls = ctx.args.count("calls", 20_000_000)?;
     let tree_depth = ctx.args.count("tree-depth", 15)? as u32;
-    let all = [Workload::Fib(fib_n), Workload::Calls(calls), Workload::Tree(tree_depth)];
+    let loop_iters = ctx.args.count("loop-iters", 20_000_000)?;
+    let all = [Workload::Fib(fib_n), Workload::Calls(calls), Workload::Tree(tree_depth), Workload::Loop(loop_iters)];
     let selected: Vec<Workload> = all.into_iter().filter(|w| which == "all" || which == w.name()).collect();
     if selected.is_empty() {
-        return Err(format!("unknown --workload {which:?} (fib, calls, tree, all)"));
+        return Err(format!("unknown --workload {which:?} (fib, calls, tree, loop, all)"));
     }
     let p = params(&[
         ("reps", reps.to_string()),
         ("fib_n", fib_n.to_string()),
         ("calls", calls.to_string()),
         ("tree_depth", tree_depth.to_string()),
+        ("loop_iters", loop_iters.to_string()),
     ]);
     ctx.banner(&p);
     type Measured = (Workload, [f64; 4], Result<[u64; 4], String>);

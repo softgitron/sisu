@@ -169,7 +169,10 @@ public final class TaskBench {
      * phase, virtual threads that have not made their excursion yet skip it and
      * the phase is reported as failed.
      */
-    static void idleMemory(int n, int excursionLevels, long settleMs, long guard) throws Exception {
+    static void idleMemory(int n, int requestedLevels, long settleMs, long guard, boolean skip) throws Exception {
+        // With skip (the harness's --skip-excursion) the excursion phase is not run
+        // and its cells are reported as skipped.
+        final int excursionLevels = skip ? 0 : requestedLevels;
         AtomicLong ready = new AtomicLong(), skipped = new AtomicLong();
         AtomicBoolean stop = new AtomicBoolean();
         CountDownLatch gate0 = new CountDownLatch(1), gate1 = new CountDownLatch(1);
@@ -199,6 +202,12 @@ public final class TaskBench {
             });
         }
         Map<String, String> failed = new HashMap<>();
+        Map<String, String> notRun = new HashMap<>();
+        if (skip && requestedLevels > 0) {
+            String why = "not run (--skip-excursion): the excursion phase is required only of strategies that release pages on park (owner's policy 7)";
+            notRun.put("excursion", why);
+            notRun.put("excursion_after_gc", why);
+        }
         if (!waitFor(ready, n, () -> { })) failed.put("shallow", "virtual threads did not all park before the deadline");
         Thread.sleep(settleMs);
         Mem shallow = snapshot();
@@ -223,6 +232,10 @@ public final class TaskBench {
         for (Object[] ph : phases) {
             String name = (String) ph[0];
             Mem s = (Mem) ph[1];
+            if (notRun.containsKey(name)) {
+                row("total_per_task_" + name, null, "", "skipped", notRun.get(name));
+                continue;
+            }
             if (failed.containsKey(name)) {
                 row("total_per_task_" + name, null, "", "failed", failed.get(name));
                 continue;
@@ -290,7 +303,12 @@ public final class TaskBench {
         return Math.min(h, rt.maxMemory() - (rt.totalMemory() - rt.freeMemory()));
     }
 
-    static void maxTasks(int cap, long guard) throws Exception {
+    /**
+     * Spawns parked virtual threads up to cap (or the memory guard). With holdMs, a
+     * run that reached the cap keeps them parked that long and checks again: the
+     * pre-registered scale row passes when all park and the process survives 60 s.
+     */
+    static void maxTasks(int cap, long guard, long holdMs) throws Exception {
         CountDownLatch gate = new CountDownLatch(1);
         AtomicLong ready = new AtomicLong();
         Mem base = snapshot();
@@ -314,6 +332,17 @@ public final class TaskBench {
         double spawnSecs = (System.nanoTime() - t0) / 1e9;
         waitFor(ready, created);
         Mem s = snapshot();
+        boolean held = holdMs > 0 && created == cap;
+        Mem after = s;
+        double heldSecs = 0;
+        long parked = 0;
+        if (held) {
+            long h0 = System.nanoTime();
+            Thread.sleep(holdMs);
+            heldSecs = (System.nanoTime() - h0) / 1e9;
+            parked = ready.get();
+            after = snapshot();
+        }
         gate.countDown();
         for (Thread t : ts) t.join();
         row("max_tasks", (double) created, "count", "ok", "limit=" + reason);
@@ -322,6 +351,12 @@ public final class TaskBench {
         metric("pte_at_stop", s.pte(), "bytes");
         metric("total_per_task_at_stop", perItem(base.rss() + base.pte(), s.rss() + s.pte(), created), "bytes");
         metric("spawn_rate", created / spawnSecs, "1/s");
+        if (held) {
+            metric("hold_secs", Math.rint(heldSecs * 1e3) / 1e3, "s");
+            row("parked_after_hold", (double) parked, "count", parked == created ? "ok" : "failed",
+                parked + " of " + created + " tasks still parked after the hold");
+            metric("total_per_task_after_hold", perItem(base.rss() + base.pte(), after.rss() + after.pte(), created), "bytes");
+        }
     }
 
     static final int PER_PORT = 20000;
@@ -499,7 +534,7 @@ public final class TaskBench {
             if (!a.startsWith("--")) throw new IllegalArgumentException("unexpected " + a);
             String k = a.substring(2);
             if (k.contains("=")) { o.put(k.substring(0, k.indexOf('=')), k.substring(k.indexOf('=') + 1)); continue; }
-            if (k.equals("quiet")) { o.put(k, "true"); continue; }
+            if (k.equals("quiet") || k.equals("skip-excursion")) { o.put(k, "true"); continue; }
             o.put(k, argv[++i]);
         }
         threads = Integer.parseInt(o.getOrDefault("threads", Integer.toString(Runtime.getRuntime().availableProcessors())));
@@ -544,16 +579,18 @@ public final class TaskBench {
                 int levels = exc / 64;
                 tasks = n;
                 long guard = Long.parseLong(o.getOrDefault("mem-guard", Long.toString(1L << 30)));
+                boolean skip = o.containsKey("skip-excursion");
                 params = "excursion=" + exc + ";excursion_levels=" + levels + ";settle_ms=" + settle + ";mem_guard=" + guard
-                    + ";jvm=" + jvm;
-                idleMemory(n, levels, settle, guard);
+                    + (skip ? ";skip_excursion=true" : "") + ";jvm=" + jvm;
+                idleMemory(n, levels, settle, guard, skip);
             }
             case "max-tasks" -> {
                 int n = t > 0 ? (int) t : 100000;
                 long guard = Long.parseLong(o.getOrDefault("mem-guard", Long.toString(1L << 30)));
                 tasks = n;
-                params = "cap=" + n + ";mem_guard=" + guard + ";jvm=" + jvm;
-                maxTasks(n, guard);
+                double hold = Double.parseDouble(o.getOrDefault("hold-secs", "0"));
+                params = "cap=" + n + ";mem_guard=" + guard + (hold > 0 ? ";hold_s=" + fmt(hold) : "") + ";jvm=" + jvm;
+                maxTasks(n, guard, (long) (hold * 1000));
             }
             case "echo", "idle-connections" -> {
                 boolean idle = bench.equals("idle-connections");

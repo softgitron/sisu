@@ -17,6 +17,12 @@
 //! watches the memory headroom; once it is below `--mem-guard` (default 1 GiB)
 //! the tasks that have not made their excursion yet skip it, and the phase is
 //! reported as `failed` with the count. Spawning stops at the same guard.
+//!
+//! `--skip-excursion` keeps the configuration (strategy C still sized for the
+//! excursion) but measures the shallow phase only and reports the excursion cell
+//! as `skipped`: the owner's policy requires the 1M-task cell after the excursion
+//! only of strategies that release pages on park (README, "Policy decisions",
+//! item 7); for the others it cannot fit a 16 GiB machine.
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -42,6 +48,8 @@ pub struct IdleResult {
     pub excursion_span: usize,
     /// Why the excursion phase has no valid figure (tasks skipped it), if so.
     pub excursion_failure: Option<String>,
+    /// Why the excursion phase was not run at all (`--skip-excursion`), if so.
+    pub excursion_skipped: Option<String>,
     pub note: String,
 }
 
@@ -50,19 +58,25 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
     let excursion = ctx.args.size("excursion", 32 * 1024)?;
     let settle = Duration::from_millis(ctx.args.count("settle-ms", 200)?);
     let guard = ctx.args.size("mem-guard", 1 << 30)? as u64;
+    let skip = ctx.args.flag("skip-excursion") && excursion > 0;
     let mut p = params(&[
         ("excursion", excursion.to_string()),
         ("settle_ms", settle.as_millis().to_string()),
         ("mem_guard", guard.to_string()),
     ]);
-    let res = match ctx.args.imp.clone() {
+    if skip {
+        p.push_str(";skip_excursion=true");
+    }
+    // The excursion the tasks make: none when the phase is skipped.
+    let made = if skip { 0 } else { excursion };
+    let mut res = match ctx.args.imp.clone() {
         Impl::Tokio => {
             ctx.banner(&p);
-            crate::tokio_ref::idle_memory(ctx.args.threads, n, excursion, settle)?
+            crate::tokio_ref::idle_memory(ctx.args.threads, n, made, settle)?
         }
         Impl::OsThreads => {
             ctx.banner(&p);
-            os_threads(n, excursion, settle, ctx.args.size("os-stack", 64 * 1024).unwrap_or(64 * 1024))
+            os_threads(n, made, settle, ctx.args.size("os-stack", 64 * 1024).unwrap_or(64 * 1024))
         }
         Impl::Taskbench(mut cfg) => {
             if cfg.id == StrategyId::C && excursion > 0 {
@@ -73,12 +87,19 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
             ctx.banner(&p);
             let rt = Runtime::with_worker_stack(ctx.args.threads, &cfg, ctx.args.worker_stack)?;
             if cfg.id == StrategyId::E {
-                stackless(&rt, n, excursion, settle, guard)
+                stackless(&rt, n, made, settle, guard)
             } else {
-                stackful(&rt, n, excursion, settle, guard)
+                stackful(&rt, n, made, settle, guard)
             }
         }
     };
+    if skip {
+        res.excursion_skipped = Some(format!(
+            "not run (--skip-excursion): the {}-byte excursion phase is required only of strategies that \
+             release pages on park (owner's policy 7); the shallow phase used the same configuration",
+            excursion
+        ));
+    }
     emit(ctx, &p, &res);
     Ok(())
 }
@@ -102,6 +123,12 @@ pub fn emit(ctx: &mut BenchCtx, p: &str, res: &IdleResult) {
     };
     put(ctx, "tasks_created", n as f64, "count");
     for (phase, snap) in [("shallow", res.shallow), ("excursion", res.excursion)] {
+        if phase == "excursion"
+            && let Some(why) = &res.excursion_skipped
+        {
+            ctx.outcome(p, tasks, "total_per_task_excursion", Status::Skipped, why);
+            continue;
+        }
         if phase == "excursion"
             && let Some(why) = &res.excursion_failure
         {

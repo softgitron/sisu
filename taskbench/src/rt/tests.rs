@@ -329,6 +329,10 @@ impl Drop for Token<'_> {
 
 #[test]
 fn exhaustion_is_a_clean_task_failure_on_every_strategy() {
+    // At the default probe reserve (the owner's 5 KiB). The recursion has a
+    // 256-byte local and a destructor in every frame; the canary checks that the
+    // unwind stays inside the reserve. It did not before `warm_unwinder`: the
+    // first unwind of the process also ran the dynamic linker's resolver there.
     for c in stackful() {
         let rt = Runtime::new(2, &c).unwrap();
         let probes = rt.stack_counters();

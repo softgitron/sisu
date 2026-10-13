@@ -112,6 +112,31 @@ fn idle_memory_and_decommit() {
 }
 
 #[test]
+fn idle_memory_skip_excursion_keeps_the_configuration() {
+    let rows = run(
+        "im-skip",
+        &[
+            "idle-memory",
+            "--strategy",
+            "C",
+            "--stack-size",
+            "4K",
+            "--tasks",
+            "300",
+            "--settle-ms",
+            "20",
+            "--skip-excursion",
+        ],
+    );
+    assert!(value(&rows, "total_per_task_shallow") > 0.0);
+    let exc = metric(&rows, "total_per_task_excursion");
+    assert_eq!(exc["status"], "skipped", "{exc:?}");
+    // C is still sized for the excursion it did not make.
+    assert_eq!(exc["stack_bytes"], (36 * 1024).to_string());
+    assert!(exc["params"].contains("skip_excursion=true"));
+}
+
+#[test]
 fn idle_memory_guard_turns_exhaustion_into_a_result() {
     // A guard no machine can satisfy: spawning stops at the first check (every
     // 4096 tasks) and the run is a failed result rather than an OOM kill.
@@ -132,6 +157,13 @@ fn max_tasks() {
     }
     let rows = run("mt-os", &["max-tasks", "--strategy", "os-threads", "--tasks", "200"]);
     assert_eq!(value(&rows, "max_tasks"), 200.0);
+    for s in ["B", "E", "tokio", "os-threads"] {
+        let rows =
+            run(&format!("mt-hold-{s}"), &["max-tasks", "--strategy", s, "--tasks", "300", "--hold-secs", "0.2"]);
+        assert_eq!(value(&rows, "parked_after_hold"), 300.0, "{s}");
+        assert_eq!(metric(&rows, "parked_after_hold")["status"], "ok", "{s}");
+        assert!(value(&rows, "hold_secs") >= 0.2, "{s}");
+    }
 }
 
 #[test]
@@ -165,6 +197,13 @@ fn deep_recursion_is_clean_everywhere() {
         }
         assert!(metric(&rows, "naive_outcome")["note"].starts_with("stack_exhausted"), "{s}: 1M deep must exhaust");
         assert_eq!(value(&rows, "runtime_healthy_after"), 1.0);
+        if matches!(s, "B" | "C") {
+            // At the default 5 KiB reserve the unwind must stay inside it (painted
+            // reserve: a value equal to the reserve would mean it was overrun).
+            for case in ["parse_probe_reserve_used", "naive_probe_reserve_used"] {
+                assert!(value(&rows, case) < 5120.0, "{s} {case}: {rows:?}");
+            }
+        }
         let leaked = value(&rows, "naive_leaked_drop_guards");
         match s {
             // Guard-page traps discard frames; probes unwind them.
@@ -188,6 +227,15 @@ fn deep_recursion_is_clean_everywhere() {
     );
     assert!(metric(&rows, "parse_outcome")["note"].starts_with("stack_exhausted"));
     assert!(metric(&rows, "naive_outcome")["note"].starts_with("completed"));
+    // The framed case, measured with a reserve larger than its need.
+    let rows = run(
+        "dr-framed",
+        &["deep-recursion", "--strategy", "B", "--parse-depth", "100", "--framed", "--probe-reserve", "16K"],
+    );
+    let r = metric(&rows, "framed_outcome");
+    assert!(r["note"].starts_with("stack_exhausted"), "{r:?}");
+    assert_eq!(value(&rows, "framed_leaked_drop_guards"), 0.0);
+    assert!(value(&rows, "framed_probe_reserve_used") < 16384.0);
 }
 
 #[test]
@@ -237,9 +285,11 @@ fn probe_overhead() {
                 "20000",
                 "--tree-depth",
                 "6",
+                "--loop-iters",
+                "20000",
             ],
         );
-        for w in ["fib", "calls", "tree"] {
+        for w in ["fib", "calls", "tree", "loop"] {
             for v in ["split", "arg", "tls"] {
                 assert!(value(&rows, &format!("{w}_{v}_probe_overhead")).is_finite(), "{s} {w} {v}");
             }
@@ -270,6 +320,29 @@ fn cancel_uring() {
     for (name, s) in [("cu-a", "A"), ("cu-c", "C"), ("cu-d", "D")] {
         let rows = run(name, &["cancel-uring", "--strategy", s, "--tasks", "128", "--concurrency", "64"]);
         assert_eq!(metric(&rows, "buffer_writes_after_return")["value"], "0", "{s}");
+    }
+    // The pre-registered A1 procedure: every read cancelled in flight, 4 KiB buffers.
+    for s in ["B", "C"] {
+        let rows = run(
+            &format!("cu-a1-{s}"),
+            &[
+                "cancel-uring",
+                "--strategy",
+                s,
+                "--tasks",
+                "256",
+                "--concurrency",
+                "64",
+                "--pipe-mix",
+                "cancel",
+                "--buf-bytes",
+                "4096",
+            ],
+        );
+        assert_eq!(metric(&rows, "buffer_writes_after_return")["value"], "0", "{s}");
+        assert_eq!(value(&rows, "cancels_submitted"), 256.0, "{s}");
+        assert_eq!(value(&rows, "cancel_to_return_samples"), 256.0, "{s}");
+        assert!(metric(&rows, "reads")["params"].contains("pipe_mix=cancel"));
     }
     let rows = run(
         "cu-file",

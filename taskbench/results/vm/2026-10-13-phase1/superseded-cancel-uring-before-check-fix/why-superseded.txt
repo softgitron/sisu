@@ -1,0 +1,17 @@
+The first full-scale cancel-uring group of Phase 1 (five repetitions, 2026-10-13
+20:18-20:49 UTC), kept as evidence and moved out of the results directory so that
+summarize.py does not mix it with the rerun.
+
+Its at-return check counted as "bad" the bytes of a read that delivered the
+round's late data. That happens when a cancel finds an IOSQE_ASYNC read already
+executing in an io-wq worker (-EALREADY) and cannot stop it: the read stays in
+flight until the harness writes late data into every pipe at the round's 30-second
+deadline, and the call returns only after that completion, as D-058 requires.
+Every flagged run has bad_late=0 (no byte changed after any return) and a
+cancel_to_return_max of about 30 s. The rows with status "failed" are these four
+runs: C with --pipe-mix cancel three times (5, 1 and 1 such reads) and B with the
+race mix once (1 read), 8 reads in all.
+
+The check was fixed in src/bench/cancel_uring.rs (late data within the length the
+read itself returned are data it delivered; such reads are counted as
+completed_with_late_data), and the group was rerun into ../cancel-uring.csv.

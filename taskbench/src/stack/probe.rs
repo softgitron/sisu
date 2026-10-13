@@ -19,14 +19,40 @@
 //! `resume_unwind`, which skips the panic hook. The unwinder then runs inside the
 //! probe reserve and every destructor on the task's stack runs. How much reserve
 //! that takes is measured by `deep-recursion` (`*_probe_reserve_used`): about
-//! 1.8 KiB from frames without destructors and about 5 KiB when landing pads in
-//! the deepest frames run drop code (x86-64 Linux, Rust 1.97).
+//! 1.8-2.1 KiB, with or without drop code in the deepest frames (x86-64 Linux,
+//! Rust 1.97), once [`warm_unwinder`] has run. Before it, the first unwind of a
+//! process needed about 5 KiB on an AVX-512 machine: `libgcc_s` binds its calls
+//! into the C library lazily, and the dynamic linker's resolver saves the full
+//! extended register state on the stack it runs on, here a task's reserve. The
+//! harness's earlier "5 KiB with drop code" was that one-time cost.
 //!
 //! Benchmark bodies are generic over [`StackProbe`], so the "with probes" and
 //! "without probes" variants of `probe-overhead` are the same code monomorphised
 //! twice.
 
 use std::cell::Cell;
+
+/// Resolves the unwinder's lazily bound symbols, once per process, on the calling
+/// thread's ordinary stack: one throwaway unwind through a frame with a
+/// destructor. Without it, the first stack exhaustion of a process runs the
+/// dynamic linker's resolver inside the task's probe reserve (see the module
+/// documentation); the runtime calls this before starting its workers.
+pub fn warm_unwinder() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    struct Cleanup;
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            std::hint::black_box(self);
+        }
+    }
+    ONCE.call_once(|| {
+        let r = std::panic::catch_unwind(|| {
+            let _cleanup = Cleanup;
+            std::panic::resume_unwind(Box::new(StackExhausted { sp: 0, limit: 0 }))
+        });
+        debug_assert!(r.is_err());
+    });
+}
 
 /// Payload of the panic a failing probe raises.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

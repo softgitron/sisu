@@ -1,0 +1,6 @@
+date_utc: 2026-10-13T14:48:35Z
+scale: smoke threads: 2 machine_id: github-runner
+rustc: rustc 1.99.0 (b940084d7 2026-09-28)
+cargo: cargo 1.99.0 (5f94df478 2026-08-27)
+uname: Linux runnervmmprz5 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+taskbench: taskbench: the bet-3 stack harness (stackful tasks on stacks that cannot move)

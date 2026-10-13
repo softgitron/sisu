@@ -227,14 +227,18 @@ func spawnJoin(c *ctx, rounds, warmup, batch int) {
 
 // idleMemory mirrors taskbench's idle-memory, including its memory guard: once
 // the headroom is below guard during the excursion phase, goroutines that have
-// not made their excursion yet skip it and the phase is reported as failed.
+// not made their excursion yet skip it and the phase is reported as failed. With
+// skip (the harness's --skip-excursion), the excursion phase is not run and its
+// cells are reported as skipped: at 1M goroutines it needs about 32 GiB before a
+// garbage collection could shrink the stacks (the owner's policy 7).
 //
 // The goroutines check the headroom themselves (every 256th, before its
 // excursion). A watcher goroutine does not work: closing gate0 readies all n
 // goroutines, the closing goroutine is preempted while it does so and requeued
 // behind them in the global run queue, and at 1M tasks it next ran only after
 // every excursion had been made (or the OOM killer had struck).
-func idleMemory(c *ctx, n int, exc int, settle time.Duration, guard int64) {
+func idleMemory(c *ctx, n int, exc int, settle time.Duration, guard int64, skip bool) {
+	doExc := exc > 0 && !skip
 	var ready, skipped, arrived atomic.Int64
 	var stop atomic.Bool
 	gate0 := make(chan struct{})
@@ -250,14 +254,14 @@ func idleMemory(c *ctx, n int, exc int, settle time.Duration, guard int64) {
 			sink.Add(shallowWork(int64(i)))
 			ready.Add(1)
 			<-gate0
-			if exc > 0 && arrived.Add(1)%256 == 0 && !stop.Load() {
+			if doExc && arrived.Add(1)%256 == 0 && !stop.Load() {
 				if h := memHeadroom(); h < guard && stop.CompareAndSwap(false, true) {
 					fmt.Fprintf(os.Stderr, "idle-memory: headroom %d below the guard %d; the remaining goroutines skip the excursion\n", h, guard)
 				}
 			}
-			if exc > 0 && stop.Load() {
+			if doExc && stop.Load() {
 				skipped.Add(1)
-			} else if exc > 0 {
+			} else if doExc {
 				sink.Add(int64(excursion(exc)))
 			}
 			ready.Add(1)
@@ -273,6 +277,11 @@ func idleMemory(c *ctx, n int, exc int, settle time.Duration, guard int64) {
 		return ready.Load() >= target
 	}
 	failed := map[string]string{}
+	notRun := map[string]string{}
+	if skip && exc > 0 {
+		why := fmt.Sprintf("not run (--skip-excursion): the %d-byte excursion phase is required only of strategies that release pages on park (owner's policy 7)", exc)
+		notRun["excursion"], notRun["excursion_after_gc"] = why, why
+	}
 	if !waitFor(int64(n)) {
 		failed["shallow"] = "goroutines did not all park before the deadline"
 	}
@@ -299,7 +308,7 @@ func idleMemory(c *ctx, n int, exc int, settle time.Duration, guard int64) {
 	// guard stopped the excursions: shrinking allocates the smaller stacks
 	// before the large ones are freed, and there is no headroom left for that.
 	gcSnap, stackGC := exSnap, stackExc
-	if !stop.Load() {
+	if !stop.Load() && doExc {
 		for i := 0; i < 4; i++ {
 			runtime.GC()
 		}
@@ -318,6 +327,10 @@ func idleMemory(c *ctx, n int, exc int, settle time.Duration, guard int64) {
 		s     memSnapshot
 		stack uint64
 	}{{"shallow", shallow, stackShallow}, {"excursion", exSnap, stackExc}, {"excursion_after_gc", gcSnap, stackGC}} {
+		if why := notRun[ph.name]; why != "" {
+			c.row("total_per_task_"+ph.name, nil, "", "skipped", why)
+			continue
+		}
 		if why := failed[ph.name]; why != "" {
 			c.row("total_per_task_"+ph.name, nil, "", "failed", why)
 			continue
@@ -330,7 +343,10 @@ func idleMemory(c *ctx, n int, exc int, settle time.Duration, guard int64) {
 	}
 }
 
-func maxTasks(c *ctx, limit int, guard int64) {
+// maxTasks spawns parked goroutines up to limit (or the memory guard). With hold,
+// a run that reached the cap keeps them parked that long and checks again: the
+// pre-registered scale row passes when all park and the process survives 60 s.
+func maxTasks(c *ctx, limit int, guard int64, hold time.Duration) {
 	gate := make(chan struct{})
 	var ready atomic.Int64
 	base := snapshot()
@@ -354,6 +370,17 @@ func maxTasks(c *ctx, limit int, guard int64) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	s := snapshot()
+	held := hold > 0 && created == limit
+	var after memSnapshot
+	var heldSecs float64
+	var parked int64
+	if held {
+		t := time.Now()
+		time.Sleep(hold)
+		heldSecs = time.Since(t).Seconds()
+		parked = ready.Load()
+		after = snapshot()
+	}
 	close(gate)
 	c.row("max_tasks", ptr(float64(created)), "count", "ok", "limit="+reason)
 	c.row("limit", nil, "", "ok", reason)
@@ -361,6 +388,16 @@ func maxTasks(c *ctx, limit int, guard int64) {
 	c.metric("pte_at_stop", float64(s.pte), "bytes")
 	c.metric("total_per_task_at_stop", perItem(base.rss+base.pte, s.rss+s.pte, int64(created)), "bytes")
 	c.metric("spawn_rate", float64(created)/spawnSecs, "1/s")
+	if held {
+		c.metric("hold_secs", math.Round(heldSecs*1e3)/1e3, "s")
+		status := "ok"
+		if parked != int64(created) {
+			status = "failed"
+		}
+		c.row("parked_after_hold", ptr(float64(parked)), "count", status,
+			fmt.Sprintf("%d of %d tasks still parked after the hold", parked, created))
+		c.metric("total_per_task_after_hold", perItem(base.rss+base.pte, after.rss+after.pte, int64(created)), "bytes")
+	}
 }
 
 func ptr(v float64) *float64 { return &v }
@@ -659,6 +696,8 @@ func main() {
 	probeUs := fs.Int("probe-interval-us", 1000, "starvation probe sleep")
 	baselineSecs := fs.Float64("baseline-secs", 1, "starvation probe-alone seconds")
 	quiet := fs.Bool("quiet", false, "no per-metric output")
+	skipExc := fs.Bool("skip-excursion", false, "idle-memory: measure the shallow phase only; report the excursion cells as skipped")
+	holdSecs := fs.Float64("hold-secs", 0, "max-tasks: keep a run that reached the cap parked this long, then check again")
 	fs.Parse(os.Args[2:])
 	runtime.GOMAXPROCS(*threads)
 	if *machine == "" {
@@ -703,7 +742,10 @@ func main() {
 		}
 		c.tasks = int64(n)
 		c.params = fmt.Sprintf("excursion=%d;settle_ms=%d;mem_guard=%d;go=%s", *exc, *settleMs, *guard, runtime.Version())
-		idleMemory(c, n, *exc, settle, *guard)
+		if *skipExc {
+			c.params += ";skip_excursion=true"
+		}
+		idleMemory(c, n, *exc, settle, *guard, *skipExc)
 	case "max-tasks":
 		n := 100000
 		if *tasks > 0 {
@@ -711,7 +753,10 @@ func main() {
 		}
 		c.tasks = int64(n)
 		c.params = fmt.Sprintf("cap=%d;mem_guard=%d;go=%s", n, *guard, runtime.Version())
-		maxTasks(c, n, *guard)
+		if *holdSecs > 0 {
+			c.params += fmt.Sprintf(";hold_s=%g", *holdSecs)
+		}
+		maxTasks(c, n, *guard, time.Duration(*holdSecs*float64(time.Second)))
 	case "echo", "idle-connections":
 		n := *connections
 		if *tasks > 0 {

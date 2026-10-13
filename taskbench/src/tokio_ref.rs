@@ -140,7 +140,7 @@ pub fn idle_memory(threads: usize, n: u64, excursion: usize, settle: Duration) -
 }
 
 /// `max-tasks` on tokio (memory is the only limit; the guard stops first).
-pub fn max_tasks(threads: usize, cap: u64, guard: u64) -> Result<MaxResult, String> {
+pub fn max_tasks(threads: usize, cap: u64, guard: u64, hold: Duration) -> Result<MaxResult, String> {
     let rt = runtime(threads, None)?;
     let gate = Arc::new(Gate::new());
     rt.block_on(async move {
@@ -167,6 +167,15 @@ pub fn max_tasks(threads: usize, cap: u64, guard: u64) -> Result<MaxResult, Stri
             let deadline = Instant::now() + Duration::from_secs(60);
             wait_waiting(&gate, res.created, deadline).await;
             res.at_stop = mem::snapshot(true);
+            if !hold.is_zero() && res.created == cap {
+                let t = Instant::now();
+                tokio::time::sleep(hold).await;
+                res.held = Some(crate::bench::max_tasks::Held {
+                    secs: t.elapsed().as_secs_f64(),
+                    parked: gate.waiting() as u64,
+                    mem: mem::snapshot(false),
+                });
+            }
             gate.open();
             res
         })

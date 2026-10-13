@@ -82,6 +82,9 @@ impl Runtime {
     /// As [`Runtime::new`], choosing the worker threads' own stack size (which
     /// bounds the `poll` recursion of stackless tasks).
     pub fn with_worker_stack(threads: usize, cfg: &StrategyConfig, worker_stack: usize) -> Result<Runtime, String> {
+        // Before any task can exhaust its stack: the unwinder's first use must not
+        // run the dynamic linker inside a task's probe reserve.
+        crate::stack::probe::warm_unwinder();
         let strategy = crate::stack::build(cfg)?;
         let label = strategy.label();
         let (shared, threads) =

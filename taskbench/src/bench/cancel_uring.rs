@@ -12,12 +12,15 @@
 //! recycled by the kernel), so a write that landed after its task finished would
 //! corrupt, and be caught in, a later task's buffer.
 //!
-//! Two sources (`--source`):
+//! Three sources (`--source`):
 //!
-//! * `pipe` (default): each task reads its own empty pipe; for a quarter of the
-//!   tasks the harness writes data, for a quarter it cancels, for half it does
-//!   both in either order, racing completion against cancellation; afterwards it
-//!   writes "late" data into every pipe, which only a read still in flight could
+//! * `pipe` (default): each task reads its own empty pipe. With `--pipe-mix race`
+//!   (the default), for a quarter of the tasks the harness writes data, for a
+//!   quarter it cancels, for half it does both in either order, racing
+//!   completion against cancellation. With `--pipe-mix cancel`, the procedure of
+//!   amendment A1 as pre-registered (proposal/20, section 6.5): no data, every
+//!   read is cancelled while it is in flight. Afterwards the harness writes
+//!   "late" data into every pipe, which only a read still in flight could
 //!   deliver. `--async-percent` of reads carry `IOSQE_ASYNC`.
 //! * `file`: each task reads one 512-byte block of a generated file opened with
 //!   `O_DIRECT`, so the read is in flight in the block device; half the tasks are
@@ -30,7 +33,8 @@
 //!   waiting for the page, and a cancel finds it executing (`-EALREADY`).
 //!
 //! The rule under test: a cancelled read returns only on its original
-//! completion. `--break-contract` is the negative control: a cancelled task stops
+//! completion. The time from the harness's cancel to the read's return is
+//! reported as `cancel_to_return_*` (A1 asks for its median and p99). `--break-contract` is the negative control: a cancelled task stops
 //! waiting as soon as it is cancelled, so late completions reach its buffer after
 //! "return", and the run must report violations (the task still cancels and waits
 //! before its frame dies, so the control corrupts nothing).
@@ -38,15 +42,17 @@
 use std::io::Write;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
-use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::SeqCst};
 use std::time::{Duration, Instant};
 
-use super::{BenchCtx, Impl, params};
+use super::{BenchCtx, Impl, emit_summary, params};
 use crate::csv::Status;
 use crate::rt::uring::{ReadOutcome, UringDriver};
 use crate::rt::{self, Gate, Runtime};
+use crate::stack::probe::{SplitStackProbe, StackProbe};
 
-const MAX_BUF: usize = 2048;
+/// The largest buffer a reader lends to the kernel: A1's 4 KiB (`--buf-bytes 4096`).
+const MAX_BUF: usize = 4096;
 const RACE_DATA: usize = 64;
 const BLOCK: usize = 512;
 
@@ -75,6 +81,11 @@ pub struct Report {
     /// Bytes that changed after the read had returned.
     pub bad_late: usize,
     pub abandoned: bool,
+    /// When the read returned to the task, in nanoseconds since the round's origin.
+    pub returned_ns: u64,
+    /// The read delivered the round's late data: it was still in flight when the
+    /// harness wrote it (its cancel had not stopped it), and returned after.
+    pub late_data: bool,
 }
 
 /// What a reader reads.
@@ -169,7 +180,10 @@ fn reader(
     gate: &Gate,
     submitted: &AtomicUsize,
     returned: &AtomicUsize,
+    origin: Instant,
 ) -> Report {
+    // The frame holds a 4 KiB buffer: probe it like any task body function.
+    SplitStackProbe.check();
     let mut storage = AlignedBuf([0u8; MAX_BUF]); // in this task's stack frame
     let s = sentinel(round, i);
     storage.0[..len].fill(s);
@@ -193,12 +207,21 @@ fn reader(
             }
         }
     };
+    rep.returned_ns = origin.elapsed().as_nanos() as u64;
     returned.fetch_add(1, SeqCst);
-    // Check 1: on return, bytes past the result are untouched, bytes before it are data.
+    // Check 1: on return, bytes past the result are untouched, bytes before it are
+    // data the read delivered: the expected data, or the round's late data when
+    // the read was still in flight as the harness wrote it. That happens when a
+    // cancel finds the read executing in an io-wq worker (`-EALREADY`) and cannot
+    // stop it: the call then waits for the original completion, which the late
+    // data provide, and returns after it, as D-058 requires.
     let first = snapshot(ptr, len);
     let n = outcome.map(|o| o.result.max(0) as usize).unwrap_or(0).min(len);
+    let late = late_byte(round, i);
+    rep.late_data = n > 0 && late != t.expect && first[..n].iter().all(|&b| b == late);
+    let delivered = if rep.late_data { late } else { t.expect };
     rep.bad_after_return =
-        first[..n].iter().filter(|&&b| b != t.expect).count() + first[n..].iter().filter(|&&b| b != s).count();
+        first[..n].iter().filter(|&&b| b != delivered).count() + first[n..].iter().filter(|&&b| b != s).count();
     // Stay alive, frame intact, while anything still in flight lands.
     gate.wait_shielded(0);
     // Check 2: nothing changed after the read returned.
@@ -224,6 +247,12 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
     let async_pct = ctx.args.count("async-percent", 25)?.min(100) as usize;
     let break_contract = ctx.args.flag("break-contract");
     let source = ctx.args.opt("source").unwrap_or("pipe").to_string();
+    let mix = ctx.args.opt("pipe-mix").unwrap_or("race").to_string();
+    let cancel_all = match mix.as_str() {
+        "race" => false,
+        "cancel" => true,
+        other => return Err(format!("unknown --pipe-mix {other:?} (race, cancel)")),
+    };
     let (file, direct) = match source.as_str() {
         "pipe" => (false, false),
         "file" => (true, true),
@@ -236,13 +265,17 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
     if !file && 2 * conc + 64 > nofile {
         conc = (nofile.saturating_sub(64) / 2).max(1);
     }
-    let p = params(&[
+    let mut pairs = vec![
         ("source", source.clone()),
         ("concurrency", conc.to_string()),
         ("async_percent", async_pct.to_string()),
         ("buf_bytes", len.to_string()),
         ("break_contract", break_contract.to_string()),
-    ]);
+    ];
+    if !file && cancel_all {
+        pairs.push(("pipe_mix", mix.clone()));
+    }
+    let p = params(&pairs);
     ctx.banner(&p);
     let tasks = Some(total as u64);
     let cfg = match ctx.args.imp.clone() {
@@ -289,6 +322,7 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
     }
     let rt = Runtime::with_worker_stack(ctx.args.threads, &cfg, ctx.args.worker_stack)?;
     let t0 = Instant::now();
+    let mut cancel_latencies: Vec<u64> = Vec::new();
     let reports: Vec<Report> = rt.block_on(|| {
         let mut all = Vec::with_capacity(total);
         let mut done = 0;
@@ -298,6 +332,13 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
             let gate = Gate::new();
             let submitted = AtomicUsize::new(0);
             let returned = AtomicUsize::new(0);
+            // When the harness cancelled each reader (ns since `origin`, plus one; 0: never).
+            let cancelled_at: Vec<AtomicU64> = (0..k).map(|_| AtomicU64::new(0)).collect();
+            let origin = Instant::now();
+            let cancel = |i: usize, h: &rt::JoinHandle<'_, Report>| {
+                cancelled_at[i].store(origin.elapsed().as_nanos() as u64 + 1, SeqCst);
+                h.cancel();
+            };
             let (driver, gate_r, sub, ret) = (&driver, &gate, &submitted, &returned);
             let target = |i: usize| match &data_fd {
                 Some(fd) => {
@@ -316,7 +357,9 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
                     .map(|i| {
                         let t = target(i);
                         let force_async = (i * 100 / k.max(1)) < async_pct;
-                        s.spawn(move || reader(driver, t, round, i, len, force_async, break_contract, gate_r, sub, ret))
+                        s.spawn(move || {
+                            reader(driver, t, round, i, len, force_async, break_contract, gate_r, sub, ret, origin)
+                        })
                     })
                     .collect();
                 let deadline = Instant::now() + Duration::from_secs(30);
@@ -327,7 +370,7 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
                     // Cancel half of the reads while they are in the device.
                     for (i, h) in hs.iter().enumerate() {
                         if (i + round) % 2 == 0 {
-                            h.cancel();
+                            cancel(i, h);
                         }
                     }
                 } else {
@@ -335,15 +378,15 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
                     let _ = rt::sleep(Duration::from_millis(5));
                     for (i, h) in hs.iter().enumerate() {
                         let w = pipes[i].1.as_raw_fd();
-                        match (i + round) % 4 {
+                        match if cancel_all { 1 } else { (i + round) % 4 } {
                             0 => write_bytes(w, data_byte(round, i), RACE_DATA),
-                            1 => h.cancel(),
+                            1 => cancel(i, h),
                             2 => {
                                 write_bytes(w, data_byte(round, i), RACE_DATA);
-                                h.cancel();
+                                cancel(i, h);
                             }
                             _ => {
-                                h.cancel();
+                                cancel(i, h);
                                 write_bytes(w, data_byte(round, i), RACE_DATA);
                             }
                         }
@@ -364,6 +407,13 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
                 hs.into_iter().map(|h| h.join().unwrap_or_default()).collect::<Vec<Report>>()
             })
             .unwrap_or_default();
+            // Cancel-to-return latency of every read that was still out when it was cancelled.
+            for (i, r) in reps.iter().enumerate() {
+                let at = cancelled_at[i].load(SeqCst);
+                if at > 0 && r.returned_ns + 1 >= at {
+                    cancel_latencies.push(r.returned_ns + 1 - at);
+                }
+            }
             for (r, _) in pipes.iter().take(k) {
                 drain(r.as_raw_fd());
             }
@@ -402,14 +452,19 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
         "count",
     );
     ctx.metric(&p, tasks, "abandoned_reads", count(&|r| r.abandoned), "count");
+    ctx.metric(&p, tasks, "completed_with_late_data", count(&|r| r.late_data), "count");
     ctx.metric(&p, tasks, "elapsed", elapsed.as_secs_f64() * 1e3, "ms");
+    if !cancel_latencies.is_empty() {
+        emit_summary(ctx, &p, tasks, "cancel_to_return", &mut cancel_latencies);
+    }
     let mut r = ctx.row("buffer_writes_after_return", Some((after + late) as f64), "bytes");
     r.params = p.clone();
     r.tasks = tasks;
     let pass = if break_contract { tasks_with_violation > 0.0 } else { tasks_with_violation == 0.0 };
     r.status = if pass { Status::Ok } else { Status::Failed };
     r.note = format!(
-        "tasks_with_violations={tasks_with_violation} bad_at_return={after} bad_late={late}{}",
+        "tasks_with_violations={tasks_with_violation} bad_at_return={after} bad_late={late} late_data_reads={}{}",
+        count(&|r| r.late_data),
         if break_contract { "; negative control: violations expected" } else { "" }
     );
     ctx.emit(r);
