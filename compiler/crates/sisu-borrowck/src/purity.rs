@@ -22,7 +22,7 @@ pub fn check(p: &Program) -> Vec<Finding> {
         if !f.pure
             || matches!(
                 f.kind,
-                sisu_sir::FnKind::Closure | sisu_sir::FnKind::Value | sisu_sir::FnKind::Comptime(_)
+                sisu_sir::FnKind::Closure(_) | sisu_sir::FnKind::Value | sisu_sir::FnKind::Comptime(_)
             )
         {
             continue;

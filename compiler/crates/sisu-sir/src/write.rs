@@ -237,7 +237,9 @@ fn write_decl(out: &mut String, word: &str, i: &IntrinsicDecl) {
 fn kind_name(k: FnKind) -> String {
     match k {
         FnKind::Normal => "".into(),
-        FnKind::Closure => " closure".into(),
+        FnKind::Closure(crate::ClosureRole::Plain) => " closure".into(),
+        FnKind::Closure(crate::ClosureRole::ScopeBody) => " closure scope".into(),
+        FnKind::Closure(crate::ClosureRole::Task) => " closure task".into(),
         FnKind::Drop => " drop".into(),
         FnKind::Glue => " glue".into(),
         FnKind::Value => " value".into(),

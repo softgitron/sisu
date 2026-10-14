@@ -147,7 +147,7 @@ pub(crate) fn lower_body(ctx: &mut Ctx, body: &thir::Body) -> Vec<sir::Function>
         let mut fl = FnLower::new(ctx, body, Some(id), &cname);
         fl.type_params = type_params.clone();
         fl.bounds = env.clone();
-        out.push(fl.run(sir::FnKind::Closure, source, pure, (from, Vec::new()), Vec::new()));
+        out.push(fl.run(sir::FnKind::Closure(sir::ClosureRole::Plain), source, pure, (from, Vec::new()), Vec::new()));
     }
     out
 }

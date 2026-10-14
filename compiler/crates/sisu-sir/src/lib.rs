@@ -246,11 +246,28 @@ impl LocalDecl {
     }
 }
 
+/// What a closure is for, which the ownership checker's task rules need
+/// (06, "Tasks and scopes").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClosureRole {
+    /// Any other closure.
+    Plain,
+    /// The body of `task.scope` or `task.race`: parameter 2 is the scope,
+    /// and the scope ends when the body has returned and its tasks are
+    /// joined, so what the environment borrows outlives every task.
+    ScopeBody,
+    /// A task, written at its `spawn`: called once, it owns its
+    /// environment (captured values are moved or copied into it) and drops
+    /// it when it returns.
+    Task,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FnKind {
     Normal,
-    /// A closure: parameter 1 is the tuple of captured references.
-    Closure,
+    /// A closure: parameter 1 is the tuple of captured references (or,
+    /// for a task, of the captured values and references).
+    Closure(ClosureRole),
     /// The `drop` method of a type with `impl Drop`.
     Drop,
     /// The drop glue of a declared type, `T#drop` (see [`types::glue_name`]):

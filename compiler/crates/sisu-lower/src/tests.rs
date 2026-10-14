@@ -109,7 +109,7 @@ fn closures_become_functions_with_an_environment() {
     let p = lower_src("def f() -> int:\n    let n = 2\n    let g = x -> x * n\n    return g(3)\n");
     valid(&p);
     let c = function(&p, "f#closure0");
-    assert_eq!(c.kind, sir::FnKind::Closure);
+    assert_eq!(c.kind, sir::FnKind::Closure(sir::ClosureRole::Plain));
     assert!(matches!(&c.locals[1].ty, sir::Type::Tuple(es) if es.len() == 1));
 }
 

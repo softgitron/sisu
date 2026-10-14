@@ -716,7 +716,13 @@ fn read_function(lines: &[&str], start: usize) -> Result<(Function, usize), (usi
         let n = c.uint()?;
         c.expect(")")?;
         let kind = if c.eat("closure") {
-            FnKind::Closure
+            if c.eat("scope") {
+                FnKind::Closure(crate::ClosureRole::ScopeBody)
+            } else if c.eat("task") {
+                FnKind::Closure(crate::ClosureRole::Task)
+            } else {
+                FnKind::Closure(crate::ClosureRole::Plain)
+            }
         } else if c.eat("drop") {
             FnKind::Drop
         } else if c.eat("glue") {
