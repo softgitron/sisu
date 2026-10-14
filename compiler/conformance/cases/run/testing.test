@@ -8,9 +8,11 @@ panic: assertion failed: add(2, 2) == 5
   left:  4
   right: 5
   at test "a failing test reports both sides" (testing.sisu:11:5)
+replay: sisu test --replay 1-002c2c1c3f3dbe9e-0.0.1-t1-s0-r0 testing.sisu
 
 test "a panic fails the test" ... FAILED
 panic: index out of bounds: the length is 0 but the index is 0
   at test "a panic fails the test" (testing.sisu:18:12)
+replay: sisu test --replay 1-002c2c1c3f3dbe9e-0.0.1-t3-s0-r0 testing.sisu
 
 1 passed, 2 failed, 1 blocked

@@ -1,0 +1,3 @@
+n = 7
+first = Inner { n: 1 }; second = Inner { n: 1 }
+Outer { name: "o", inner: Inner { n: 2 }, all: [Inner { n: 3 }, Inner { n: 4 }] }

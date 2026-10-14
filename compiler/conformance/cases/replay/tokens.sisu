@@ -1,0 +1,28 @@
+# Every failing test prints a replay token (17, "Simulation and replay"):
+# the content hash of the code, the toolchain, which test, the scheduler
+# seed, the case seed and, for a property, the shrunk case. The runner
+# runs each failure again from its token. A test that takes the real
+# `System` has none, and says so.
+
+def mean(xs: Slice[int]) -> int:
+    var total = 0
+    for x in xs:
+        total += x
+    return total // len(xs)
+
+test "an assertion":
+    assert mean([1, 2, 3]) == 3
+
+test "a property shrinks, and its token holds the shrunk case":
+    check(arbitrary[list[int]]) do xs:
+        return len(xs) == 0 or mean(xs) <= xs[0] or mean(xs) <= xs[len(xs) - 1]
+
+test "tasks under the seeded scheduler":
+    let results = task.scope do s:
+        let a = s.spawn(() -> mean([4, 6]))
+        let b = s.spawn(() -> mean([]))
+        return Ok((a.join()?, b.join()?))
+    assert results.is_ok()
+
+test "the real system"(sys: System):
+    assert sys.env.get("SISU_SURELY_UNSET").is_some()

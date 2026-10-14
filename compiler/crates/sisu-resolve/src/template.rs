@@ -1,23 +1,37 @@
-//! A derive evaluated at compile time (08, "Derive"; 18, Phase 4).
+//! Code evaluated at compile time by unfolding (08, "Derive" and
+//! "Reflection"; 18, Phase 4 and 8): a derive, and a generic function that
+//! reflects on its type parameters.
 //!
 //! A trait's `comptime def derive(T: type) -> impl Trait for T` returns the
 //! impl the trait derives for `T`, written `return impl Trait for T:` with
-//! methods. Stage 0 evaluates such a function by unfolding it: the code
-//! that runs at compile time (`comptime for`, `comptime if`, `if comptime`,
-//! the same two among a `match`'s arms, and every expression made only of
-//! compile-time values) is evaluated, and the rest is the impl's code,
-//! written out as source text with the compile-time values in it as
-//! literals. The text is declared beside the type and checked like any
-//! impl, so an error in the derived code is reported as in any other.
+//! methods. A generic function whose body asks about its type parameters
+//! (`if comptime reflect.is_struct(T):`, `comptime for f in
+//! reflect.fields_of(T):`, `value.[f]`) is made once for each list of type
+//! arguments it is called with (an instance). Stage 0 evaluates both by
+//! unfolding: the code that runs at compile time (`comptime for`, `comptime
+//! if`, `if comptime`, the same two among a `match`'s arms, `comptime
+//! panic`, and every expression made only of compile-time values) is
+//! evaluated, and the rest is the impl's or the instance's code, written
+//! out as source text with the compile-time values in it as literals and
+//! each type parameter replaced by its argument. The text is declared
+//! beside the type (or the function) and checked like any other code, so
+//! an error in it is reported as in any other.
 //!
-//! The compile-time values are the type `T`, descriptors of its fields and
-//! variants, lists and pairs of them, integers, text and booleans.
-//! Reflection is the compile-time module `reflect`: `name_of(T)` (the
-//! type's name), `is_struct(T)`, `is_enum(T)`, `fields_of(T)` (a struct's
-//! fields) and `variants_of(T)` (an enum's variants). A field has `name`
-//! (for a positional variant field, its position), `index` and `named`; a
-//! variant has `name`, `index` and `fields`. `x.[field]` is that field of
-//! `x`; a variant's field is reachable only inside an arm `case V(..)` that
+//! The compile-time values are types, descriptors of their fields,
+//! variants and attributes, lists and pairs of them, integers, text and
+//! booleans. Reflection is the compile-time module `reflect`: `name_of(T)`
+//! (the type's name), `is_struct`, `is_enum`, `is_int`, `is_float`,
+//! `is_bool`, `is_char`, `is_str` (`str` or `String`), `is_list`,
+//! `is_option` and `is_tuple` of a type, `elem_of(T)` (a list's or an
+//! option's element type), `fields_of(T)` (a struct's fields),
+//! `variants_of(T)` (an enum's variants), `attributes_of(T)` (the
+//! attributes written on its declaration, as data) and `implements(T,
+//! "Trait")` (whether it has an impl of the trait). A field has `name` (for
+//! a positional variant field, its position), `index`, `named`, `ty` (its
+//! type, when known) and `default` (whether it has a default); a variant
+//! has `name`, `index` and `fields`; an attribute has `name` and `args`
+//! (the text of each argument). `x.[field]` is that field of `x`; a
+//! variant's field is reachable only inside an arm `case V(..)` that
 //! `comptime for V in reflect.variants_of(T)` made for a `match x`, where
 //! it is the arm's binding. Compile-time code may also use `enumerate`,
 //! `len`, integer arithmetic, comparisons, `and`, `or` and `not`.
@@ -36,16 +50,115 @@ pub(crate) enum Body {
     Enum(Vec<(String, Vec<Option<String>>)>),
 }
 
+/// What kind of type a type is, for `reflect.is_...`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Kind {
+    Int,
+    Float,
+    Bool,
+    Char,
+    Str,
+    List,
+    Option,
+    Tuple,
+    Struct,
+    Enum,
+    Other,
+}
+
+/// What reflection sees of a type: an instance's type argument, the type a
+/// derive is for, or a field's type (whose own fields are not looked into).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TypeShape {
+    /// `reflect.name_of`: `Point`, `int`, `list[int]`.
+    pub name: String,
+    /// How the unfolded code writes the type.
+    pub written: String,
+    pub kind: Kind,
+    pub fields: Vec<FieldShape>,
+    pub variants: Vec<VariantShape>,
+    /// The attributes on the declaration: each name and its arguments' text.
+    pub attrs: Vec<Attribute>,
+    /// The traits it implements, by name.
+    pub impls: Vec<String>,
+    /// A list's or an option's element type.
+    pub elem: Option<Box<TypeShape>>,
+}
+
+/// An attribute as data: its name and the text of each argument.
+pub(crate) type Attribute = (String, Vec<String>);
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FieldShape {
+    pub name: String,
+    pub ty: Option<Box<TypeShape>>,
+    pub default: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct VariantShape {
+    pub name: String,
+    pub fields: Vec<(Option<String>, Option<Box<TypeShape>>)>,
+}
+
+impl TypeShape {
+    /// A shape that knows only the type's name.
+    pub fn named(name: &str, written: &str, kind: Kind) -> TypeShape {
+        TypeShape {
+            name: name.to_string(),
+            written: written.to_string(),
+            kind,
+            fields: Vec::new(),
+            variants: Vec::new(),
+            attrs: Vec::new(),
+            impls: Vec::new(),
+            elem: None,
+        }
+    }
+
+    /// The shape of a derive's target, from its declaration's names.
+    fn of_target(t: &Target) -> TypeShape {
+        let mut s = TypeShape::named(t.name, t.written, Kind::Other);
+        match t.body {
+            Body::Struct(fields) => {
+                s.kind = Kind::Struct;
+                s.fields =
+                    fields.iter().map(|n| FieldShape { name: n.clone(), ty: None, default: false }).collect();
+            }
+            Body::Enum(vs) => {
+                s.kind = Kind::Enum;
+                s.variants = vs
+                    .iter()
+                    .map(|(n, fs)| VariantShape {
+                        name: n.clone(),
+                        fields: fs.iter().map(|f| (f.clone(), None)).collect(),
+                    })
+                    .collect();
+            }
+        }
+        s
+    }
+}
+
 /// A compile-time value.
 #[derive(Clone, Debug, PartialEq)]
 enum Value {
-    /// The type the derive is for.
-    Type,
+    /// A type: a type parameter's argument, or a field's type.
+    Type(Box<TypeShape>),
     Field {
         name: String,
         index: usize,
         variant: Option<usize>,
         named: bool,
+        ty: Option<Box<TypeShape>>,
+        default: bool,
+        /// How the unfolded code writes the struct the field is in.
+        owner: Option<String>,
+    },
+    /// An attribute on a declaration: its name and its arguments' text.
+    Attr {
+        name: String,
+        args: Vec<String>,
     },
     Variant {
         name: String,
@@ -65,6 +178,7 @@ pub(crate) type Failure = (TextRange, String);
 type R<T> = Result<T, Failure>;
 
 /// The bindings of an arm `case V(..)` made for a `match` on `key`.
+#[derive(Clone)]
 struct ArmScope {
     key: String,
     variant: usize,
@@ -81,9 +195,8 @@ pub(crate) struct Target<'a> {
 
 struct Unfold<'a> {
     source: &'a str,
-    target: &'a Target<'a>,
-    /// The template's type parameter (`T`).
-    param: String,
+    /// The type parameters (`T`) and their arguments.
+    params: Vec<(String, TypeShape)>,
     env: Vec<(String, Value)>,
     arms: Vec<ArmScope>,
 }
@@ -120,8 +233,10 @@ pub(crate) fn unfold(
 ) -> Result<String, Failure> {
     let (param, imp) =
         template_parts(template).ok_or((template.name.range, "it is not a derive template".to_string()))?;
-    let mut u = Unfold { source, target, param, env: Vec::new(), arms: Vec::new() };
-    u.env.push((u.param.clone(), Value::Type));
+    let shape = TypeShape::of_target(target);
+    let mut u =
+        Unfold { source, params: vec![(param.clone(), shape.clone())], env: Vec::new(), arms: Vec::new() };
+    u.env.push((param, Value::Type(Box::new(shape))));
     let mut out = format!("\n{head}");
     if !imp.assoc_types.is_empty() {
         let r = imp.assoc_types[0].range;
@@ -144,6 +259,59 @@ pub(crate) fn unfold(
     Ok(out)
 }
 
+/// The source of the instance of the generic function `f` (from the file
+/// whose text is `source`) for these type arguments, named `name`: its
+/// signature with each type parameter replaced, and its body unfolded.
+pub(crate) fn unfold_fn(
+    f: &ast::FnDef,
+    source: &str,
+    params: Vec<(String, TypeShape)>,
+    name: &str,
+) -> Result<String, Failure> {
+    let Some(body) = &f.body else {
+        return Err((f.name.range, "a function without a body has no instance".into()));
+    };
+    let mut u = Unfold { source, params: params.clone(), env: Vec::new(), arms: Vec::new() };
+    for (p, shape) in params {
+        u.env.push((p, Value::Type(Box::new(shape))));
+    }
+    // `def name[T: B](params) -> R:` becomes `def NAME(params) -> R:`.
+    let header = slice(source, TextRange::new(f.name.range.end, body.range.start)).trim_end();
+    let rest = match header.strip_prefix('[') {
+        Some(after) => {
+            let mut depth = 1;
+            let mut cut = after.len();
+            for (i, c) in after.char_indices() {
+                match c {
+                    '[' => depth += 1,
+                    ']' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            cut = i + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            &after[cut..]
+        }
+        None => header,
+    };
+    // A `where` clause names the parameters, which an instance has not.
+    let rest = match rest.find(" where ") {
+        Some(i) => format!("{}:", rest[..i].trim_end()),
+        None => rest.to_string(),
+    };
+    let pure = if f.is_pure { "pure " } else { "" };
+    let mut out = String::new();
+    line(&mut out, 0, &format!("{pure}def {name}{}", u.substitute_param(&rest)));
+    if u.stmts(&body.stmts, 1, &mut out)? == 0 {
+        line(&mut out, 1, "pass");
+    }
+    Ok(out)
+}
+
 fn slice(source: &str, r: TextRange) -> &str {
     source.get(r.start as usize..r.end as usize).unwrap_or("")
 }
@@ -156,12 +324,59 @@ fn line(out: &mut String, depth: usize, text: &str) {
     out.push('\n');
 }
 
-/// A value as a Sisu literal.
+/// A value as a Sisu literal; a type as its name in the unfolded code.
 fn literal(v: &Value) -> Option<String> {
     match v {
         Value::Str(s) => Some(format!("\"{}\"", escape(s))),
         Value::Int(i) => Some(i.to_string()),
         Value::Bool(b) => Some(if *b { "True" } else { "False" }.into()),
+        Value::Type(t) => Some(t.written.clone()),
+        Value::List(xs) => {
+            let parts: Option<Vec<String>> = xs.iter().map(literal).collect();
+            Some(format!("[{}]", parts?.join(", ")))
+        }
+        Value::Tuple(xs) => {
+            let parts: Option<Vec<String>> = xs.iter().map(literal).collect();
+            let parts = parts?;
+            Some(if parts.len() == 1 {
+                format!("({},)", parts[0])
+            } else {
+                format!("({})", parts.join(", "))
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Whether `e` is marked to be decided at compile time: `comptime c`, or
+/// an operator chain that starts with it (`comptime a or b`).
+fn marked_comptime(e: &Expr) -> bool {
+    let mut x = e;
+    loop {
+        x = match &x.kind {
+            ExprKind::Comptime(_) => return true,
+            ExprKind::Binary { lhs, .. } => lhs,
+            ExprKind::Compare { first, .. } => first,
+            _ => return false,
+        };
+    }
+}
+
+/// The `reflect` functions that make run-time code instead of a
+/// compile-time value.
+const CODE_MAKERS: [&str; 2] = ["construct", "default_of"];
+
+/// A value as interpolated text shows it: a list as `[a, b]`.
+fn written(v: &Value) -> Option<String> {
+    match v {
+        Value::Str(s) => Some(s.clone()),
+        Value::Int(i) => Some(i.to_string()),
+        Value::Bool(b) => Some(if *b { "True" } else { "False" }.into()),
+        Value::Type(t) => Some(t.name.clone()),
+        Value::List(xs) => {
+            let parts: Option<Vec<String>> = xs.iter().map(written).collect();
+            Some(format!("[{}]", parts?.join(", ")))
+        }
         _ => None,
     }
 }
@@ -184,7 +399,8 @@ fn escape(s: &str) -> String {
 
 fn describe(v: &Value) -> &'static str {
     match v {
-        Value::Type => "a type",
+        Value::Type(_) => "a type",
+        Value::Attr { .. } => "an attribute",
         Value::Field { .. } => "a field",
         Value::Variant { .. } => "a variant",
         Value::Str(_) => "text",
@@ -195,30 +411,49 @@ fn describe(v: &Value) -> &'static str {
     }
 }
 
-impl Unfold<'_> {
+impl<'a> Unfold<'a> {
     fn lookup(&self, n: &str) -> Option<&Value> {
         self.env.iter().rev().find(|(k, _)| k == n).map(|(_, v)| v)
     }
 
-    /// Replaces the template's type parameter by the type, as a word.
+    /// Replaces each type parameter by its argument, as a word, outside
+    /// string literals.
     fn substitute_param(&self, text: &str) -> String {
         let mut out = String::new();
         let mut word = String::new();
         let flush = |word: &mut String, out: &mut String| {
-            if *word == self.param {
-                out.push_str(self.target.written);
-            } else {
-                out.push_str(word);
+            match self.params.iter().find(|(p, _)| p == word) {
+                Some((_, shape)) => out.push_str(&shape.written),
+                None => out.push_str(word),
             }
             word.clear();
         };
+        let mut in_str = false;
+        let mut escaped = false;
+        let mut prev = ' ';
         for c in text.chars() {
-            if c.is_alphanumeric() || c == '_' {
+            if in_str {
+                out.push(c);
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' {
+                    escaped = true;
+                } else if c == '"' {
+                    in_str = false;
+                }
+                continue;
+            }
+            if c == '"' && !(word.is_empty() && prev.is_alphanumeric()) {
+                flush(&mut word, &mut out);
+                in_str = true;
+                out.push(c);
+            } else if c.is_alphanumeric() || c == '_' {
                 word.push(c);
             } else {
                 flush(&mut word, &mut out);
                 out.push(c);
             }
+            prev = c;
         }
         flush(&mut word, &mut out);
         out
@@ -251,11 +486,17 @@ impl Unfold<'_> {
             // The attributes of descriptors; anything else (a method) runs
             // at run time on the value.
             ExprKind::Field { base, name } => {
-                matches!(name.text.as_str(), "name" | "index" | "named" | "fields") && self.is_static(base)
+                matches!(
+                    name.text.as_str(),
+                    "name" | "index" | "named" | "fields" | "ty" | "default" | "args"
+                ) && self.is_static(base)
             }
             ExprKind::Call { callee, args, trailing: None } => {
                 let known = match &callee.kind {
-                    ExprKind::Field { base, .. } => matches!(&base.kind, ExprKind::Name(n) if n == "reflect"),
+                    ExprKind::Field { base, name } => {
+                        matches!(&base.kind, ExprKind::Name(n) if n == "reflect")
+                            && !CODE_MAKERS.contains(&name.text.as_str())
+                    }
                     ExprKind::Name(n) => {
                         matches!(n.as_str(), "enumerate" | "len") && self.lookup(n).is_none()
                     }
@@ -271,7 +512,56 @@ impl Unfold<'_> {
                 self.is_static(expr)
             }
             ExprKind::Tuple(xs) | ExprKind::List(xs) => xs.iter().all(|x| self.is_static(x)),
+            ExprKind::If { branches, else_ } => {
+                branches.iter().all(|(c, v)| self.is_static(c) && self.is_static(v))
+                    && else_.as_ref().is_some_and(|x| self.is_static(x))
+            }
+            // A comprehension over compile-time lists whose element is
+            // known: its bindings are compile-time values too.
+            ExprKind::Comprehension { kind: ast::CompKind::List, elem, value: None, clauses } => {
+                self.envs(clauses).is_ok_and(|es| es.iter().all(|u| u.is_static(elem)))
+            }
             _ => false,
+        }
+    }
+
+    /// The environments a comprehension over compile-time lists makes,
+    /// one for each element, in order.
+    fn envs(&self, clauses: &[ast::CompClause]) -> R<Vec<Unfold<'a>>> {
+        let mut envs = vec![self.fork()];
+        for c in clauses {
+            let mut next = Vec::new();
+            for u in envs {
+                match c {
+                    ast::CompClause::For { pat, iter } => {
+                        if !u.is_static(iter) {
+                            return Err((iter.range, "this is not a compile-time list".into()));
+                        }
+                        for v in u.items(iter)? {
+                            let mut w = u.fork();
+                            w.bind(pat, v)?;
+                            next.push(w);
+                        }
+                    }
+                    ast::CompClause::If(cond) => {
+                        if u.truth(cond)? {
+                            next.push(u);
+                        }
+                    }
+                }
+            }
+            envs = next;
+        }
+        Ok(envs)
+    }
+
+    /// A copy of the unfolding's scope, to bind more names in.
+    fn fork(&self) -> Unfold<'a> {
+        Unfold {
+            source: self.source,
+            params: self.params.clone(),
+            env: self.env.clone(),
+            arms: self.arms.clone(),
         }
     }
 
@@ -293,12 +583,11 @@ impl Unfold<'_> {
                 for p in parts {
                     match p {
                         StrPart::Text(t) => s.push_str(t),
-                        StrPart::Interp { expr, .. } => match self.eval(expr)? {
-                            Value::Str(t) => s.push_str(&t),
-                            Value::Int(i) => s.push_str(&i.to_string()),
-                            Value::Bool(b) => s.push_str(if b { "True" } else { "False" }),
-                            other => {
-                                return fail(format!("{} cannot be written into text", describe(&other)));
+                        StrPart::Interp { expr, .. } => match written(&self.eval(expr)?) {
+                            Some(t) => s.push_str(&t),
+                            None => {
+                                let v = self.eval(expr)?;
+                                return fail(format!("{} cannot be written into text", describe(&v)));
                             }
                         },
                     }
@@ -312,9 +601,15 @@ impl Unfold<'_> {
                     (Value::Field { name, .. }, "name") => Some(Value::Str(name.clone())),
                     (Value::Field { index, .. }, "index") => Some(Value::Int(*index as i64)),
                     (Value::Field { named, .. }, "named") => Some(Value::Bool(*named)),
+                    (Value::Field { ty: Some(t), .. }, "ty") => Some(Value::Type(t.clone())),
+                    (Value::Field { default, .. }, "default") => Some(Value::Bool(*default)),
                     (Value::Variant { name, .. }, "name") => Some(Value::Str(name.clone())),
                     (Value::Variant { index, .. }, "index") => Some(Value::Int(*index as i64)),
                     (Value::Variant { fields, .. }, "fields") => Some(Value::List(fields.clone())),
+                    (Value::Attr { name, .. }, "name") => Some(Value::Str(name.clone())),
+                    (Value::Attr { args, .. }, "args") => {
+                        Some(Value::List(args.iter().map(|a| Value::Str(a.clone())).collect()))
+                    }
                     _ => None,
                 };
                 got.map_or_else(|| fail(format!("{} has no `{}`", describe(&b), name.text)), Ok)
@@ -327,10 +622,20 @@ impl Unfold<'_> {
                 };
                 match &callee.kind {
                     ExprKind::Field { name, .. } => {
-                        if one()? != Value::Type {
-                            return fail(format!("`reflect.{}` takes the type `{}`", name.text, self.param));
+                        let Some(Value::Type(t)) = vals.first() else {
+                            return fail(format!("`reflect.{}` takes a type", name.text));
+                        };
+                        if name.text == "implements" {
+                            let Some(Value::Str(tr)) = vals.get(1) else {
+                                return fail("`reflect.implements` takes a type and a trait's name".into());
+                            };
+                            return Ok(Value::Bool(t.impls.iter().any(|i| i == tr)));
                         }
-                        self.reflect(&name.text).ok_or((e.range, format!("`reflect` has no `{}`", name.text)))
+                        if vals.len() != 1 {
+                            return fail(format!("`reflect.{}` takes one type", name.text));
+                        }
+                        self.reflect(&name.text, t)
+                            .ok_or((e.range, format!("`reflect` has no `{}`", name.text)))
                     }
                     ExprKind::Name(n) if n == "enumerate" => match one()? {
                         Value::List(xs) => Ok(Value::List(
@@ -400,45 +705,86 @@ impl Unfold<'_> {
             }
             ExprKind::Tuple(xs) => Ok(Value::Tuple(xs.iter().map(|x| self.eval(x)).collect::<R<_>>()?)),
             ExprKind::List(xs) => Ok(Value::List(xs.iter().map(|x| self.eval(x)).collect::<R<_>>()?)),
+            ExprKind::If { branches, else_ } => {
+                for (c, v) in branches {
+                    if self.truth(c)? {
+                        return self.eval(v);
+                    }
+                }
+                match else_ {
+                    Some(x) => self.eval(x),
+                    None => fail("an `if` expression needs an `else`".into()),
+                }
+            }
+            ExprKind::Comprehension { kind: ast::CompKind::List, elem, value: None, clauses } => {
+                let envs = self.envs(clauses)?;
+                Ok(Value::List(envs.iter().map(|u| u.eval(elem)).collect::<R<_>>()?))
+            }
             _ => fail("this cannot be evaluated at compile time".into()),
         }
     }
 
-    /// `reflect.f(T)`.
-    fn reflect(&self, f: &str) -> Option<Value> {
-        let t = self.target;
-        Some(match (f, t.body) {
-            ("name_of", _) => Value::Str(t.name.to_string()),
-            ("is_struct", b) => Value::Bool(matches!(b, Body::Struct(_))),
-            ("is_enum", b) => Value::Bool(matches!(b, Body::Enum(_))),
-            ("fields_of", Body::Struct(fields)) => Value::List(
-                fields
+    /// `reflect.f(t)`.
+    fn reflect(&self, f: &str, t: &TypeShape) -> Option<Value> {
+        let is = |k: Kind| Value::Bool(t.kind == k);
+        Some(match f {
+            "name_of" => Value::Str(t.name.clone()),
+            "is_struct" => is(Kind::Struct),
+            "is_enum" => is(Kind::Enum),
+            "is_int" => is(Kind::Int),
+            "is_float" => is(Kind::Float),
+            "is_bool" => is(Kind::Bool),
+            "is_char" => is(Kind::Char),
+            "is_str" => is(Kind::Str),
+            "is_list" => is(Kind::List),
+            "is_option" => is(Kind::Option),
+            "is_tuple" => is(Kind::Tuple),
+            "elem_of" => Value::Type(t.elem.clone()?),
+            "fields_of" => Value::List(
+                t.fields
                     .iter()
                     .enumerate()
-                    .map(|(index, n)| Value::Field { name: n.clone(), index, variant: None, named: true })
+                    .map(|(index, f)| Value::Field {
+                        name: f.name.clone(),
+                        index,
+                        variant: None,
+                        named: true,
+                        ty: f.ty.clone(),
+                        default: f.default,
+                        owner: Some(t.written.clone()),
+                    })
                     .collect(),
             ),
-            ("fields_of", Body::Enum(_)) => Value::List(Vec::new()),
-            ("variants_of", Body::Enum(vs)) => Value::List(
-                vs.iter()
+            "variants_of" => Value::List(
+                t.variants
+                    .iter()
                     .enumerate()
-                    .map(|(vi, (name, fields))| Value::Variant {
-                        name: name.clone(),
+                    .map(|(vi, v)| Value::Variant {
+                        name: v.name.clone(),
                         index: vi,
-                        fields: fields
+                        fields: v
+                            .fields
                             .iter()
                             .enumerate()
-                            .map(|(index, n)| Value::Field {
+                            .map(|(index, (n, ty))| Value::Field {
                                 name: n.clone().unwrap_or_else(|| index.to_string()),
                                 index,
                                 variant: Some(vi),
                                 named: n.is_some(),
+                                ty: ty.clone(),
+                                default: false,
+                                owner: None,
                             })
                             .collect(),
                     })
                     .collect(),
             ),
-            ("variants_of", Body::Struct(_)) => Value::List(Vec::new()),
+            "attributes_of" => Value::List(
+                t.attrs
+                    .iter()
+                    .map(|(name, args)| Value::Attr { name: name.clone(), args: args.clone() })
+                    .collect(),
+            ),
             _ => return None,
         })
     }
@@ -488,6 +834,8 @@ impl Unfold<'_> {
         Ok(self.apply(e.range, reps))
     }
 
+    /// The source of `range` with `reps` in it and, in what is copied
+    /// from the source, each type parameter replaced by its argument.
     fn apply(&self, range: TextRange, mut reps: Vec<(TextRange, String)>) -> String {
         reps.sort_by_key(|(r, _)| r.start);
         let mut out = String::new();
@@ -496,11 +844,11 @@ impl Unfold<'_> {
             if r.start < at {
                 continue;
             }
-            out.push_str(slice(self.source, TextRange::new(at, r.start)));
+            out.push_str(&self.substitute_param(slice(self.source, TextRange::new(at, r.start))));
             out.push_str(&t);
             at = r.end;
         }
-        out.push_str(slice(self.source, TextRange::new(at, range.end)));
+        out.push_str(&self.substitute_param(slice(self.source, TextRange::new(at, range.end))));
         out
     }
 
@@ -548,16 +896,11 @@ impl Unfold<'_> {
                     {
                         if spec.is_none() && debug.is_none() && self.is_static(expr) {
                             let v = self.eval(expr)?;
-                            let t = match v {
-                                Value::Str(s) => s,
-                                Value::Int(i) => i.to_string(),
-                                Value::Bool(b) => if b { "True" } else { "False" }.to_string(),
-                                other => {
-                                    return Err((
-                                        expr.range,
-                                        format!("{} cannot be written into text", describe(&other)),
-                                    ));
-                                }
+                            let Some(t) = written(&v) else {
+                                return Err((
+                                    expr.range,
+                                    format!("{} cannot be written into text", describe(&v)),
+                                ));
                             };
                             out.push((*range, escape(&t)));
                         } else {
@@ -566,7 +909,102 @@ impl Unfold<'_> {
                     }
                 }
             }
-            ExprKind::Closure(_) | ExprKind::Match { .. } | ExprKind::Comprehension { .. } => {
+            // `if comptime c: a else: b` as an expression: the branch the
+            // condition picks.
+            ExprKind::If { branches, else_ } if branches.first().is_some_and(|(c, _)| marked_comptime(c)) => {
+                let mut chosen = None;
+                for (c, v) in branches {
+                    if !marked_comptime(c) {
+                        return Err((
+                            c.range,
+                            "an `if comptime` chain needs `comptime` in each `elif`".into(),
+                        ));
+                    }
+                    if self.truth(c)? {
+                        chosen = Some(v);
+                        break;
+                    }
+                }
+                let chosen = match chosen.or(else_.as_deref()) {
+                    Some(x) => x,
+                    None => return Err((e.range, "an `if` expression needs an `else`".into())),
+                };
+                out.push((e.range, format!("({})", self.text(chosen)?)));
+            }
+            // A comprehension over compile-time lists is unrolled into the
+            // list, set or dict it makes.
+            ExprKind::Comprehension { kind, elem, value, clauses } if self.envs(clauses).is_ok() => {
+                let mut parts = Vec::new();
+                for u in self.envs(clauses)? {
+                    let item = u.text(elem)?;
+                    parts.push(match value {
+                        Some(v) => format!("{item}: {}", u.text(v)?),
+                        None => item,
+                    });
+                }
+                let text = match kind {
+                    ast::CompKind::List => format!("[{}]", parts.join(", ")),
+                    ast::CompKind::Dict if parts.is_empty() => "dict()".to_string(),
+                    ast::CompKind::Set if parts.is_empty() => "set()".to_string(),
+                    ast::CompKind::Dict | ast::CompKind::Set => format!("{{{}}}", parts.join(", ")),
+                    ast::CompKind::Gen => {
+                        return Err((
+                            e.range,
+                            "a generator over compile-time values is not unrolled; use a list".into(),
+                        ));
+                    }
+                };
+                out.push((e.range, text));
+            }
+            ExprKind::Call { callee, args, trailing: None } if matches!(&callee.kind, ExprKind::Field { base, name } if matches!(&base.kind, ExprKind::Name(n) if n == "reflect") && CODE_MAKERS.contains(&name.text.as_str())) =>
+            {
+                let ExprKind::Field { name, .. } = &callee.kind else { return Ok(()) };
+                let text = match name.text.as_str() {
+                    "default_of" => self.default_of(e, args)?,
+                    _ => self.construct(e, args)?,
+                };
+                out.push((e.range, text));
+            }
+            // In a `match` or a closure, compile-time values are written in
+            // where they are used; their statements are copied as they are.
+            ExprKind::Match { scrutinee, arms } if arms.iter().all(|a| a.generated.is_none()) => {
+                self.replacements(scrutinee, out)?;
+                for a in arms {
+                    if let Some(g) = &a.guard {
+                        self.replacements(g, out)?;
+                    }
+                    match &a.body {
+                        ArmBody::Expr(x) => self.replacements(x, out)?,
+                        ArmBody::Block(b) => self.block_replacements(b, out)?,
+                    }
+                }
+            }
+            ExprKind::Closure(c) => match &c.body {
+                ast::ClosureBody::Expr(x) => self.replacements(x, out)?,
+                ast::ClosureBody::Block(b) => self.block_replacements(b, out)?,
+            },
+            // A comprehension over run-time values with compile-time values
+            // in it: they are written in, unless a name it binds hides one.
+            ExprKind::Comprehension { elem, value, clauses, .. } => {
+                for c in clauses {
+                    if let ast::CompClause::For { pat, .. } = c
+                        && let Some(n) = bound_names(pat).into_iter().find(|n| self.lookup(n).is_some())
+                    {
+                        return Err((pat.range, format!("`{n}` here hides the compile-time `{n}`")));
+                    }
+                }
+                self.replacements(elem, out)?;
+                if let Some(v) = value {
+                    self.replacements(v, out)?;
+                }
+                for c in clauses {
+                    match c {
+                        ast::CompClause::For { iter, .. } => self.replacements(iter, out)?,
+                        ast::CompClause::If(x) => self.replacements(x, out)?,
+                    }
+                }
+            }
+            ExprKind::Match { .. } => {
                 return Err((e.range, "compile-time values cannot be used inside this expression".into()));
             }
             _ => {
@@ -578,6 +1016,129 @@ impl Unfold<'_> {
             }
         }
         Ok(())
+    }
+
+    /// The replacements in a block inside an expression, whose statements
+    /// are copied as they are written (none of them runs at compile time).
+    fn block_replacements(&self, b: &ast::Block, out: &mut Vec<(TextRange, String)>) -> R<()> {
+        for s in &b.stmts {
+            match &s.kind {
+                StmtKind::Comptime(_) => {
+                    return Err((s.range, "a compile-time statement cannot be inside an expression".into()));
+                }
+                StmtKind::If { branches, else_block } => {
+                    if branches.first().is_some_and(|(c, _)| comptime_cond(c).is_some()) {
+                        return Err((s.range, "an `if comptime` cannot be inside an expression".into()));
+                    }
+                    for (c, body) in branches {
+                        for p in &c.parts {
+                            match p {
+                                CondPart::Expr(e) => self.replacements(e, out)?,
+                                CondPart::Let { value, .. } => self.replacements(value, out)?,
+                            }
+                        }
+                        self.block_replacements(body, out)?;
+                    }
+                    if let Some(body) = else_block {
+                        self.block_replacements(body, out)?;
+                    }
+                }
+                StmtKind::While { cond, body } => {
+                    for p in &cond.parts {
+                        match p {
+                            CondPart::Expr(e) => self.replacements(e, out)?,
+                            CondPart::Let { value, .. } => self.replacements(value, out)?,
+                        }
+                    }
+                    self.block_replacements(body, out)?;
+                }
+                StmtKind::For { iter, body, .. } => {
+                    self.replacements(iter, out)?;
+                    self.block_replacements(body, out)?;
+                }
+                _ => {
+                    for e in stmt_exprs(s) {
+                        self.replacements(e, out)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `reflect.default_of(f)`: the default of the struct field `f`,
+    /// evaluated where the call is (as an omitted argument's would be).
+    fn default_of(&self, e: &Expr, args: &[ast::Arg]) -> R<String> {
+        let [a] = args else { return Err((e.range, "`reflect.default_of` takes a field".into())) };
+        match self.eval(&a.value)? {
+            Value::Field { name, default: true, owner: Some(owner), .. } => {
+                Ok(format!("{owner}.__default_{name}()"))
+            }
+            Value::Field { name, owner: Some(_), .. } => {
+                Err((a.value.range, format!("the field `{name}` has no default")))
+            }
+            Value::Field { name, .. } => {
+                Err((a.value.range, format!("`{name}` is a variant's field, which has no default")))
+            }
+            other => {
+                Err((a.value.range, format!("`reflect.default_of` takes a field, not {}", describe(&other))))
+            }
+        }
+    }
+
+    /// `reflect.construct(T, {name: value, ...})`: the struct `T` with
+    /// each field named by a key set to its value, the keys known at
+    /// compile time (a dict, or a comprehension over compile-time values);
+    /// a field that is not named takes its default.
+    fn construct(&self, e: &Expr, args: &[ast::Arg]) -> R<String> {
+        let [t, d] = args else {
+            return Err((e.range, "`reflect.construct` takes a struct type and a dict of its fields".into()));
+        };
+        let Value::Type(shape) = self.eval(&t.value)? else {
+            return Err((t.value.range, "`reflect.construct` takes a type first".into()));
+        };
+        if shape.kind != Kind::Struct {
+            return Err((t.value.range, format!("`{}` is not a struct", shape.name)));
+        }
+        let mut pairs: Vec<(Value, String, TextRange)> = Vec::new();
+        match &d.value.kind {
+            ExprKind::Dict(kvs) => {
+                for (k, v) in kvs {
+                    pairs.push((self.eval(k)?, self.text(v)?, k.range));
+                }
+            }
+            ExprKind::Comprehension { kind: ast::CompKind::Dict, elem, value: Some(v), clauses } => {
+                for u in self.envs(clauses)? {
+                    pairs.push((u.eval(elem)?, u.text(v)?, elem.range));
+                }
+            }
+            _ => {
+                return Err((
+                    d.value.range,
+                    "`reflect.construct` takes the fields as a dict whose keys are known at compile time"
+                        .into(),
+                ));
+            }
+        }
+        let mut given: Vec<String> = Vec::new();
+        let mut parts = Vec::new();
+        for (k, v, at) in pairs {
+            let Value::Str(k) = k else {
+                return Err((at, format!("a field is named by text, not by {}", describe(&k))));
+            };
+            if !shape.fields.iter().any(|f| f.name == k) {
+                return Err((at, format!("`{}` has no field `{k}`", shape.name)));
+            }
+            if given.contains(&k) {
+                return Err((at, format!("the field `{k}` is given twice")));
+            }
+            parts.push(format!("{k}={v}"));
+            given.push(k);
+        }
+        if let Some(f) = shape.fields.iter().find(|f| !f.default && !given.contains(&f.name)) {
+            return Err((d.value.range, format!("the field `{}` of `{}` is not given", f.name, shape.name)));
+        }
+        Ok(format!("{}({})", shape.written, parts.join(", ")))
     }
 
     /// A statement's own text, re-indented to `depth`.
@@ -744,7 +1305,19 @@ impl Unfold<'_> {
                     Some(Ok(Value::Str(s))) => s,
                     _ => "a compile-time assertion failed".to_string(),
                 };
-                Err((inner.range, why))
+                Err((cond.range, why))
+            }
+            // `comptime panic("...")`: a compile error where the code is
+            // unfolded (for this type).
+            StmtKind::Expr(e) if matches!(&e.kind, ExprKind::Call { callee, .. } if matches!(&callee.kind, ExprKind::Name(n) if n == "panic")) =>
+            {
+                let ExprKind::Call { args, .. } = &e.kind else { return Ok(0) };
+                let why = match args.first().map(|a| self.eval(&a.value)) {
+                    Some(Ok(Value::Str(s))) => s,
+                    Some(Err(f)) => return Err(f),
+                    _ => "`comptime panic`".to_string(),
+                };
+                Err((e.range, why))
             }
             StmtKind::Expr(e) => {
                 self.eval(e)?;
@@ -890,6 +1463,21 @@ fn comptime_cond(c: &ast::Cond) -> Option<&Expr> {
     }
 }
 
+/// The names a pattern binds.
+fn bound_names(p: &ast::Pattern) -> Vec<String> {
+    let mut out = Vec::new();
+    match &p.kind {
+        PatKind::Bind(n) => out.push(n.text.clone()),
+        PatKind::Tuple(ps) => {
+            for q in ps {
+                out.extend(bound_names(q));
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
 /// The expressions a simple statement holds.
 fn stmt_exprs(s: &Stmt) -> Vec<&Expr> {
     match &s.kind {
@@ -954,6 +1542,16 @@ fn children<'e>(e: &'e Expr, out: &mut Vec<&'e Expr>) {
             for p in parts {
                 if let StrPart::Interp { expr, .. } = p {
                     out.push(expr);
+                }
+            }
+        }
+        ExprKind::Comprehension { elem, value, clauses, .. } => {
+            out.push(elem);
+            out.extend(value.iter().map(|x| &**x));
+            for c in clauses {
+                match c {
+                    ast::CompClause::For { iter, .. } => out.push(iter),
+                    ast::CompClause::If(x) => out.push(x),
                 }
             }
         }

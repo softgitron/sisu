@@ -744,15 +744,21 @@ impl FnLower<'_, '_> {
                         );
                         let r = self.temp_sir(sir::Type::Ref(Box::new(self.ctx.ty(&err_ty)), true));
                         self.assign(Place::local(r), Rvalue::Ref(Place::local(t), true), loc);
-                        let at = self.location_text(e.span);
-                        let u = self.unit();
-                        self.intrinsic_call(
-                            u,
-                            "error.trace_push",
-                            Vec::new(),
-                            vec![Operand::Copy(Place::local(r)), Operand::Const(Const::Str(at))],
-                            loc,
-                        );
+                        // An error's trace names the program's `?`s: the
+                        // standard library's (and its templates') are left
+                        // out, as a panic's trace leaves out its frames.
+                        let module = self.ctx.prog.def(self.body.def).module;
+                        if !self.ctx.prog.modules[module.0 as usize].is_std {
+                            let at = self.location_text(e.span);
+                            let u = self.unit();
+                            self.intrinsic_call(
+                                u,
+                                "error.trace_push",
+                                Vec::new(),
+                                vec![Operand::Copy(Place::local(r)), Operand::Const(Const::Str(at))],
+                                loc,
+                            );
+                        }
                         self.assign(
                             Place::local(sir::LocalId(0)),
                             Rvalue::Aggregate(
@@ -969,6 +975,13 @@ impl FnLower<'_, '_> {
                     );
                 }
             },
+            ExprKind::FieldDefault { def, field } => {
+                let name = self.ctx.field_default_name(*def, *field);
+                self.emit(
+                    StatementKind::Call { dest, callee: Callee::Fn(name, Vec::new()), args: Vec::new() },
+                    loc,
+                );
+            }
             ExprKind::DefaultArg { def, param } => {
                 let name = self.ctx.param_default_name(*def, *param);
                 self.emit(
@@ -1007,6 +1020,13 @@ impl FnLower<'_, '_> {
         let Some(f) = prog.fn_info(def) else {
             return (Callee::Fn(self.ctx.fn_name(def), Vec::new()), Vec::new());
         };
+        // A template's call is a call of its instance for these arguments
+        // (08, "Reflection"), which takes by value what is `Copy`.
+        if f.template
+            && let Some(inst) = prog.instances.get(&(def, type_args.to_vec()))
+        {
+            return self.direct_callee(*inst, &[]);
+        }
         // A refinement is its base here: it has its base's impls (07).
         let type_args: Vec<Ty> =
             type_args.iter().map(|t| prog.normalize(&prog.erase_refinements(t), &self.bounds)).collect();

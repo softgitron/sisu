@@ -58,6 +58,8 @@ impl[T: FsOps] FsOps for ReadOnly[T]:
         return self.inner.list_dir(path)
     def create_dir(self, path: Path) -> ! IoError:
         return Err(PermissionDenied(path=path.copy()))
+    def sync(self, path: Path) -> ! IoError:
+        return self.inner.sync(path)
 
 ## `Fs.restrict_to`: paths relative to `root`; an absolute path, or one
 ## with a `..` part, is refused. The paths it lists are relative to `root`.
@@ -125,6 +127,10 @@ impl[T: FsOps] FsOps for Restricted[T]:
         let full = self.below(path) else:
             return Err(PermissionDenied(path=path.copy()))
         return self.inner.create_dir(full).map_err((e) -> relabel(e, path))
+    def sync(self, path: Path) -> ! IoError:
+        let full = self.below(path) else:
+            return Err(PermissionDenied(path=path.copy()))
+        return self.inner.sync(full).map_err((e) -> relabel(e, path))
 
 ## `Fs.revocable`: forwards until its revoker revokes it, then fails with
 ## `Revoked` (and nothing exists).
@@ -169,6 +175,10 @@ impl[T: FsOps] FsOps for Caretaker[T]:
         if self.revoker.is_revoked():
             return Err(Revoked)
         return self.inner.create_dir(path)
+    def sync(self, path: Path) -> ! IoError:
+        if self.revoker.is_revoked():
+            return Err(Revoked)
+        return self.inner.sync(path)
 
 ## A file of an in-memory file system.
 struct MemFile:
@@ -286,6 +296,189 @@ impl FsOps for MemFs:
                 dir.push("/")
             dir.push(part)
             dirs.value.add(dir.copy())
+        return Ok(())
+    ## Every write is durable at once: nothing to do.
+    def sync(self, path: Path) -> ! IoError:
+        if not self.exists(path):
+            return Err(NotFound(path=path.copy()))
+        return Ok(())
+
+## The `sim` profile's file system (17, "Simulation and replay"): in
+## memory, with a pessimistic durability model. A write changes the file
+## at once for every reader, but only `sync` of the file makes its
+## contents durable, and only `sync` of its directory (`"."` at the top)
+## makes its name durable, as POSIX asks of `fsync`; `crash` puts back what
+## was durable, so a file whose name was never synced vanishes whole. A
+## `Copy` handle on the state every copy shares.
+@derive(Copy)
+struct SimFs:
+    state: Cap[Mutex[SimFsState]]
+
+struct SimFsState:
+    files: dict[String, MemFile]
+    dirs: set[String]
+    ## Each file's synced contents.
+    durable: dict[String, bytes]
+    ## The names, of files and directories, whose directory entry was
+    ## synced.
+    entries: set[String]
+    crashes: int
+
+impl SimFs:
+    def new() -> SimFs:
+        let st = SimFsState(files={}, dirs=set(), durable={}, entries=set(), crashes=0)
+        return SimFs(state=Cap.new(Mutex(st)))
+
+    ## A crash: every file and directory goes back to what was durable.
+    def crash(self):
+        var g = self.state.get().lock()
+        g.value.crashes += 1
+        var files: dict[String, MemFile] = {}
+        for name, data in g.value.durable.items():
+            if kept(g.value.entries, name):
+                _ = files.insert(name.copy(), MemFile(data=data.copy(), modified=DateTime.epoch()))
+        var dirs: set[String] = set()
+        for d in g.value.entries.iter():
+            if not g.value.durable.contains(d.copy()) and kept(g.value.entries, d):
+                dirs.add(d.copy())
+        g.value.files = files
+        g.value.dirs = dirs
+
+    ## How many crashes it went through.
+    def crashes(self) -> int:
+        return self.state.get().lock().value.crashes
+
+    ## Whether `dir` (a normal path) is a directory: one made, or the
+    ## parent of a file.
+    def is_dir(self, dir: str) -> bool:
+        if dir == ".":
+            return True
+        let g = self.state.get().lock()
+        if g.value.dirs.contains(dir.to_string()):
+            return True
+        let prefix = "{dir}/"
+        for name in g.value.files.keys():
+            if name.starts_with(prefix):
+                return True
+        return False
+
+## Whether every name on the way to `name` has a durable entry.
+pure def kept(entries: set[String], name: str) -> bool:
+    var at = String.new()
+    for part in name.split("/"):
+        if not at.is_empty():
+            at.push("/")
+        at.push(part)
+        if not entries.contains(at.copy()):
+            return False
+    return True
+
+## The names directly inside the directory `dir` (a normal path).
+pure def children(files: dict[String, MemFile], dirs: set[String], dir: str) -> set[String]:
+    let prefix: String = if dir == ".": String.new() else: "{dir}/"
+    var out: set[String] = set()
+    for name in files.keys():
+        if name.starts_with(prefix):
+            let rest = name.strip_prefix(prefix)
+            let first = match rest.split_once("/"):
+                case Some((head, _)): head
+                case None: rest
+            out.add("{prefix}{first}")
+    for d in dirs.iter():
+        if d.starts_with(prefix) and not d.strip_prefix(prefix).contains("/") and d != dir:
+            out.add(d.copy())
+    return out
+
+impl FsOps for SimFs:
+    def read(self, path: Path) -> bytes ! IoError:
+        let name = normal(path.as_str())
+        let g = self.state.get().lock()
+        match g.value.files.get(name):
+            case Some(f):
+                return Ok(f.data.copy())
+            case None:
+                return Err(NotFound(path=path.copy()))
+    def write(self, path: Path, data: bytes) -> ! IoError:
+        let name = normal(path.as_str())
+        if self.is_dir(name):
+            return Err(AlreadyExists(path=path.copy()))
+        let now = Clock.fake().now()
+        var g = self.state.get().lock()
+        _ = g.value.files.insert(name, MemFile(data=data.copy(), modified=now))
+        return Ok(())
+    def exists(self, path: Path) -> bool:
+        let name = normal(path.as_str())
+        if self.state.get().lock().value.files.contains(name.copy()):
+            return True
+        return self.is_dir(name)
+    def metadata(self, path: Path) -> Metadata ! IoError:
+        let name = normal(path.as_str())
+        let found = match self.state.get().lock().value.files.get(name.copy()):
+            case Some(f): Some(Metadata(len=len(f.data), modified=f.modified, is_dir=False))
+            case None: None
+        if let Some(m) = found:
+            return Ok(m)
+        if self.is_dir(name):
+            return Ok(Metadata(len=0, modified=DateTime.epoch(), is_dir=True))
+        return Err(NotFound(path=path.copy()))
+    def remove(self, path: Path) -> ! IoError:
+        let name = normal(path.as_str())
+        var g = self.state.get().lock()
+        match g.value.files.remove(name):
+            case Some(_):
+                return Ok(())
+            case None:
+                return Err(NotFound(path=path.copy()))
+    def list_dir(self, path: Path) -> list[Path] ! IoError:
+        let dir = normal(path.as_str())
+        if not self.is_dir(dir.copy()):
+            return Err(NotFound(path=path.copy()))
+        let g = self.state.get().lock()
+        let names = children(g.value.files, g.value.dirs, dir)
+        var out: list[String] = []
+        for n in names.iter():
+            out.push(n.copy())
+        out.sort()
+        var paths: list[Path] = []
+        for n in out:
+            paths.push(Path.new(n))
+        return Ok(paths)
+    def create_dir(self, path: Path) -> ! IoError:
+        let name = normal(path.as_str())
+        var g = self.state.get().lock()
+        if g.value.files.contains(name.copy()):
+            return Err(AlreadyExists(path=path.copy()))
+        var dir = String.new()
+        for part in name.split("/"):
+            if not dir.is_empty():
+                dir.push("/")
+            dir.push(part)
+            g.value.dirs.add(dir.copy())
+        return Ok(())
+    ## A file: its contents become durable. A directory: the names in it
+    ## now, and only those, become its durable entries.
+    def sync(self, path: Path) -> ! IoError:
+        let name = normal(path.as_str())
+        let is_dir = self.is_dir(name.copy())
+        var g = self.state.get().lock()
+        let data = match g.value.files.get(name.copy()):
+            case Some(f): Some(f.data.copy())
+            case None: None
+        if let Some(d) = data:
+            _ = g.value.durable.insert(name, d.copy())
+            return Ok(())
+        if not is_dir:
+            return Err(NotFound(path=path.copy()))
+        let now_in = children(g.value.files, g.value.dirs, name.copy())
+        let prefix: String = if name == ".": String.new() else: "{name}/"
+        var entries: set[String] = set()
+        for e in g.value.entries.iter():
+            let direct = e.starts_with(prefix) and not e.strip_prefix(prefix).contains("/")
+            if not direct:
+                entries.add(e.copy())
+        for c in now_in.iter():
+            entries.add(c.copy())
+        g.value.entries = entries
         return Ok(())
 
 # ------------------------------------------------------------------ the network
@@ -425,6 +618,22 @@ struct FakeNetState:
     connections: dict[String, int]
     next_port: int
 
+## The network of `System.sim`: `Net.fake` under another name, so the
+## `sim` profile knows its calls are its own to fail (17).
+@derive(Copy)
+struct SimNetwork:
+    inner: Net
+
+impl SimNetwork:
+    def new() -> SimNetwork:
+        return SimNetwork(inner=Net.fake())
+
+impl NetOps for SimNetwork:
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}:
+        return self.inner.connect(host, port)
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
+        return self.inner.listen(port, host)
+
 ## `Net.fake`: an in-process network (17). Addresses are `host:port` as
 ## written; nothing outside the process is reached.
 @derive(Copy)
@@ -530,6 +739,30 @@ impl EnvOps for FakeEnv:
             case Some(v): Some(v.copy())
             case None: None
 
+## `Stdin.fake`: its lines, in order, then the end of the input.
+struct FakeStdin:
+    state: Cap[Mutex[FakeLines]]
+
+struct FakeLines:
+    lines: list[String]
+    next: int
+
+impl FakeStdin:
+    def new(lines: list[str]) -> Stdin:
+        var ls: list[String] = []
+        for x in lines:
+            ls.push(x.to_string())
+        return FakeStdin(state=Cap.new(Mutex(FakeLines(lines=ls, next=0))))
+
+impl StdinOps for FakeStdin:
+    def read_line(self) -> String?:
+        var g = self.state.get().lock()
+        if g.value.next >= len(g.value.lines):
+            return None
+        let line = g.value.lines[g.value.next].copy()
+        g.value.next += 1
+        return Some(line)
+
 ## `Proc.fake`: each program named prints its text and exits with 0.
 struct FakeProc:
     outputs: dict[String, String]
@@ -569,11 +802,23 @@ trait Interceptor:
 ## through its operations trait is shown to `hook` before it runs and
 ## after it returns, and then forwarded. Where a capability is expected, a
 ## `Wrap` of it becomes one (when the interceptor is `Send` and `Sync`).
-## The trait impls are written for each standard capability; a `Wrap` of
-## any trait waits for reflection (Phase 8).
+## The impls for the standard capabilities are below; a `Wrap` of a value
+## of one of the program's traits implements that trait too, by an impl
+## the compiler writes from the trait's methods (stage 0's stand-in for
+## reflection over methods, `shims.rs`).
 struct Wrap[T, I]:
     inner: T
     hook: I
+
+## `Fake[Trait]`, for one of the program's traits, is a recording fake of
+## it (17): `Fake[Mailer].new()` logs each call, `calls()` gives the log
+## (each call written `method(arguments)`), and `on_METHOD(result)`
+## queues what a method returns, the last result queued returned again
+## once the others are used; a method called with nothing queued panics.
+## Copies of a fake share what it recorded. The compiler writes the fake
+## from the trait's methods; this declaration only gives it its name.
+struct Fake[T]:
+    pass
 
 impl[T: FsOps, I: Interceptor] FsOps for Wrap[T, I]:
     def read(self, path: Path) -> bytes ! IoError:
@@ -628,6 +873,12 @@ impl[T: FsOps, I: Interceptor] FsOps for Wrap[T, I]:
         let c = Call(capability="Fs".to_string(), method="create_dir".to_string(), args="{path:?}")
         self.hook.before(c.copy())
         let r = self.inner.create_dir(path)
+        self.hook.after(c, "{r:?}")
+        return r
+    def sync(self, path: Path) -> ! IoError:
+        let c = Call(capability="Fs".to_string(), method="sync".to_string(), args="{path:?}")
+        self.hook.before(c.copy())
+        let r = self.inner.sync(path)
         self.hook.after(c, "{r:?}")
         return r
 

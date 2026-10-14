@@ -1,0 +1,17 @@
+Err(Refused(reason="no such address"))
+smtp: 1
+reset: done
+0
+5
+> Mailer.send("ann@example.com", "welcome")
+< send = Ok(())
+> Mailer.send("nobody", "welcome")
+< send = Err(Refused(reason="no such address"))
+> Mailer.summary()
+< summary = "smtp: 1"
+> Mailer.reset("done")
+< reset = ()
+> Mailer.sent()
+< sent = 0
+> Mailer.sent()
+< sent = 5

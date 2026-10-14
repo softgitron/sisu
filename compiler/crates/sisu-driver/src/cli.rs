@@ -81,6 +81,9 @@ impl Host for WithArgs<'_> {
     fn create_dir(&mut self, path: &str) -> Result<(), sisu_interp::IoErrorKind> {
         self.inner.create_dir(path)
     }
+    fn sync_path(&mut self, path: &str) -> Result<(), sisu_interp::IoErrorKind> {
+        self.inner.sync_path(path)
+    }
     fn random_bits(&mut self) -> u64 {
         self.inner.random_bits()
     }
@@ -102,6 +105,9 @@ impl Host for WithArgs<'_> {
     fn tcp_close(&mut self, h: u64) {
         self.inner.tcp_close(h)
     }
+    fn read_line(&mut self) -> Option<String> {
+        self.inner.read_line()
+    }
     fn run_process(
         &mut self,
         program: &str,
@@ -121,7 +127,83 @@ struct Parsed<'a> {
 }
 
 /// The flags that take a value.
-const VALUE_FLAGS: &[&str] = &["--schedule-seed", "--explore"];
+const VALUE_FLAGS: &[&str] = &[
+    "--schedule-seed",
+    "--explore",
+    "--contracts",
+    "--record",
+    "--redact",
+    "--replay",
+    "--scheduler",
+    "--depth",
+    "--faults",
+    "--jobs",
+    "--filter",
+    "--tag",
+    "--skip-tag",
+    "--iterations",
+];
+
+/// The most schedules a bounded exhaustive search runs of one test (or of
+/// `main`) unless `--explore N` says otherwise.
+const EXHAUSTIVE_CAP: u64 = 10_000;
+
+/// The fault rate of `--sim` unless `--faults` says otherwise, in parts per
+/// million.
+const SIM_FAULTS: u32 = 10_000;
+
+/// The capabilities `--redact` names.
+const CAPABILITIES: &[&str] = &["fs", "net", "clock", "rand", "env", "proc", "stdin"];
+
+/// What a command was asked besides its flags.
+struct Opts {
+    seeds: Seeds,
+    /// `--contracts` (07).
+    level: sisu_lower::ContractLevel,
+    /// `sisu run --record FILE`, and the capabilities left out of the log.
+    record: Option<String>,
+    redact: Vec<String>,
+    /// `sisu test --replay TOKEN`.
+    token: Option<crate::replay::Token>,
+    /// `sisu replay LOG`: the log that stands in for the world.
+    log: Option<sisu_interp::record::Log>,
+    /// `--scheduler` and `--depth`: PCT's depth, or the preemption bound
+    /// of a bounded exhaustive search.
+    strategy: sisu_interp::Strategy,
+    bound: u32,
+    /// `sisu test --sim`, with its fault rate in parts per million.
+    sim: Option<u32>,
+    /// `sisu test --jobs N`: the threads that run the tests (0: the
+    /// default).
+    jobs: usize,
+    /// `sisu test --filter TEXT --tag T --skip-tag T`: which tests run.
+    select: Select,
+    /// `sisu bench --iterations N`: how often each benchmark's loop runs.
+    iterations: u64,
+}
+
+/// Which tests a `sisu test` runs: those whose name holds one of
+/// `filters`, that have one of `tags`, and that have none of `skip`
+/// (17, "Grouping is one level deep; tags select and skip"). Empty lists
+/// select everything.
+#[derive(Clone, Debug, Default)]
+struct Select {
+    filters: Vec<String>,
+    tags: Vec<String>,
+    skip: Vec<String>,
+}
+
+impl Select {
+    fn is_all(&self) -> bool {
+        self.filters.is_empty() && self.tags.is_empty() && self.skip.is_empty()
+    }
+
+    fn picks(&self, name: &str, tags: &[String]) -> bool {
+        (self.filters.is_empty() || self.filters.iter().any(|f| name.contains(f.as_str())))
+            && (self.tags.is_empty() || self.tags.iter().any(|t| tags.contains(t)))
+            && !self.skip.iter().any(|t| tags.contains(t))
+    }
+}
 
 fn split_args(args: &[String]) -> Parsed<'_> {
     let mut flags = Vec::new();
@@ -214,6 +296,9 @@ impl Host for Captured<'_> {
     fn create_dir(&mut self, path: &str) -> Result<(), sisu_interp::IoErrorKind> {
         self.inner.create_dir(path)
     }
+    fn sync_path(&mut self, path: &str) -> Result<(), sisu_interp::IoErrorKind> {
+        self.inner.sync_path(path)
+    }
     fn random_bits(&mut self) -> u64 {
         self.inner.random_bits()
     }
@@ -234,6 +319,9 @@ impl Host for Captured<'_> {
     }
     fn tcp_close(&mut self, h: u64) {
         self.inner.tcp_close(h)
+    }
+    fn read_line(&mut self) -> Option<String> {
+        self.inner.read_line()
     }
     fn run_process(
         &mut self,
@@ -259,13 +347,14 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
         }
         "explain" => explain(rest, host),
         "explain-borrow" => explain_borrow(rest, host),
+        "replay" => replay(rest, host),
         "audit" => audit(rest, host),
-        "run" | "check" | "sir" | "test" | "tokens" | "parse" => {
+        "run" | "check" | "sir" | "test" | "bench" | "tokens" | "parse" => {
             let p = split_args(rest);
             let allowed: &[&str] = match cmd.as_str() {
                 "run" => &["--sir", "--monitor", "--defer-borrow", "--stats"],
-                "test" => &["--no-monitor", "--defer-borrow"],
-                "check" => &["--format=ids", "--format=human"],
+                "test" => &["--no-monitor", "--defer-borrow", "--sim", "--update"],
+                "check" => &["--format=ids", "--format=human", "--explain"],
                 "tokens" => &["--trivia"],
                 "parse" => &["--tree", "--print", "--trivia"],
                 _ => &[],
@@ -277,7 +366,9 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 ));
                 return EXIT_USAGE;
             }
-            if let Some((bad, _)) = p.values.iter().find(|_| !matches!(cmd.as_str(), "run" | "test")) {
+            if let Some((bad, _)) = p.values.iter().find(|(k, _)| {
+                !matches!(cmd.as_str(), "run" | "test" | "bench") && !(*k == "--contracts" && cmd == "sir")
+            }) {
                 host.stderr(&plain_error(
                     msg::CLI_UNKNOWN_OPTION,
                     &[("option", bad.to_string()), ("command", cmd.clone())],
@@ -285,7 +376,112 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 return EXIT_USAGE;
             }
             let mut seeds = Seeds { first: 0, explore: None };
+            // `--contracts=off|preconditions|all` (07): what a run checks;
+            // a test checks everything.
+            let mut level = sisu_lower::ContractLevel::All;
+            let (mut record, mut redact, mut token) = (None, Vec::new(), None);
+            let (mut scheduler, mut depth, mut faults) = ("random", None, None);
+            let mut jobs = 0;
+            let mut iterations = 100;
+            let mut select = Select::default();
             for (k, v) in &p.values {
+                let only = match *k {
+                    "--record" | "--redact" => Some("run"),
+                    "--replay" | "--faults" | "--jobs" | "--filter" | "--tag" | "--skip-tag" => Some("test"),
+                    "--iterations" => Some("bench"),
+                    _ => None,
+                };
+                if let Some(c) = only
+                    && c != cmd
+                {
+                    host.stderr(&plain_error(
+                        msg::CLI_UNKNOWN_OPTION,
+                        &[("option", k.to_string()), ("command", cmd.clone())],
+                    ));
+                    return EXIT_USAGE;
+                }
+                match *k {
+                    "--record" => {
+                        record = Some(v.to_string());
+                        continue;
+                    }
+                    "--redact" => {
+                        for c in v.split(',').filter(|c| !c.is_empty()) {
+                            if !CAPABILITIES.contains(&c) {
+                                host.stderr(&plain_error(msg::CLI_BAD_REDACT, &[("value", c.to_string())]));
+                                return EXIT_USAGE;
+                            }
+                            redact.push(c.to_string());
+                        }
+                        continue;
+                    }
+                    "--scheduler" => {
+                        if !matches!(*v, "random" | "pct" | "exhaustive") {
+                            host.stderr(&plain_error(msg::CLI_BAD_SCHEDULER, &[("value", v.to_string())]));
+                            return EXIT_USAGE;
+                        }
+                        scheduler = v;
+                        continue;
+                    }
+                    "--filter" => {
+                        select.filters.push(v.to_string());
+                        continue;
+                    }
+                    "--tag" => {
+                        select.tags.push(v.to_string());
+                        continue;
+                    }
+                    "--skip-tag" => {
+                        select.skip.push(v.to_string());
+                        continue;
+                    }
+                    "--faults" => {
+                        match v.parse::<f64>() {
+                            Ok(r) if (0.0..=1.0).contains(&r) => {
+                                faults = Some((r * 1_000_000.0).round() as u32)
+                            }
+                            _ => {
+                                host.stderr(&plain_error(
+                                    msg::CLI_BAD_FAULT_RATE,
+                                    &[("value", v.to_string())],
+                                ));
+                                return EXIT_USAGE;
+                            }
+                        }
+                        continue;
+                    }
+                    "--replay" => {
+                        match crate::replay::Token::parse(v) {
+                            Some(t) => token = Some(t),
+                            None => {
+                                host.stderr(&plain_error(
+                                    msg::CLI_BAD_REPLAY_TOKEN,
+                                    &[("token", v.to_string())],
+                                ));
+                                return EXIT_USAGE;
+                            }
+                        }
+                        continue;
+                    }
+                    _ => {}
+                }
+                if *k == "--contracts" {
+                    if cmd == "test" {
+                        host.stderr(&plain_error(msg::CLI_TEST_CHECKS_CONTRACTS, &[]));
+                        return EXIT_USAGE;
+                    }
+                    match sisu_lower::ContractLevel::parse(v) {
+                        Some(l) => level = l,
+                        None => {
+                            host.stderr(&plain_error(
+                                msg::CLI_BAD_CONTRACT_LEVEL,
+                                &[("value", v.to_string())],
+                            ));
+                            return EXIT_USAGE;
+                        }
+                    }
+                    continue;
+                }
                 let Ok(n) = v.parse::<u64>() else {
                     host.stderr(&plain_error(
                         msg::CLI_BAD_OPTION_VALUE,
@@ -295,6 +491,9 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 };
                 match *k {
                     "--schedule-seed" => seeds.first = n,
+                    "--depth" => depth = Some(n.min(u64::from(u32::MAX)) as u32),
+                    "--jobs" => jobs = n.clamp(1, 256) as usize,
+                    "--iterations" => iterations = n.clamp(1, 1_000_000_000),
                     _ => seeds.explore = Some(n.max(1)),
                 }
             }
@@ -319,9 +518,44 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 ));
                 return EXIT_USAGE;
             }
+            if record.is_some()
+                && let Some(other) = ["--explore", "--defer-borrow", "--sir"]
+                    .iter()
+                    .find(|o| p.flags.contains(o) || p.values.iter().any(|(k, _)| k == *o))
+            {
+                host.stderr(&plain_error(msg::CLI_RECORD_ONCE, &[("option", other.to_string())]));
+                return EXIT_USAGE;
+            }
+            let sim = p.flags.contains(&"--sim");
+            if faults.is_some() && !sim {
+                host.stderr(&plain_error(msg::CLI_FAULTS_WITHOUT_SIM, &[]));
+                return EXIT_USAGE;
+            }
+            let (strategy, bound) = match scheduler {
+                "pct" => (sisu_interp::Strategy::Pct { depth: depth.unwrap_or(3).max(1) }, 0),
+                "exhaustive" => {
+                    (sisu_interp::Strategy::Exhaustive { prefix: Vec::new() }, depth.unwrap_or(2))
+                }
+                _ => (sisu_interp::Strategy::Random, 0),
+            };
+            let sim = sim.then(|| faults.unwrap_or(SIM_FAULTS));
+            let opts = Opts {
+                seeds,
+                level,
+                record,
+                redact,
+                token,
+                log: None,
+                strategy,
+                bound,
+                sim,
+                jobs,
+                select,
+                iterations,
+            };
             let stage = std::cell::Cell::new("the front end");
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                command(cmd, &p.flags, seeds, file, &source, p.rest.clone(), host, &stage)
+                command(cmd, &p.flags, &opts, file, &source, p.rest.clone(), host, &stage)
             }));
             match r {
                 Ok(code) => code,
@@ -356,7 +590,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
 fn command(
     cmd: &str,
     flags: &[&str],
-    seeds: Seeds,
+    opts: &Opts,
     file: &str,
     source: &str,
     args: Vec<String>,
@@ -364,6 +598,8 @@ fn command(
     stage: &std::cell::Cell<&'static str>,
 ) -> i32 {
     let has = |f: &str| flags.contains(&f);
+    let seeds = opts.seeds;
+    let level = opts.level;
     if cmd == "run" && has("--sir") {
         stage.set("the SIR reader");
         let prog = match sisu_sir::read(source) {
@@ -384,10 +620,16 @@ fn command(
         }
         stage.set("the interpreter");
         let mut h = WithArgs { inner: host, args };
-        let options = Options { seed: seeds.first, stats: has("--stats"), ..Options::default() };
-        return run_main_seeds(&prog, &mut h, &options, seeds);
+        let options = Options {
+            seed: seeds.first,
+            stats: has("--stats"),
+            strategy: opts.strategy.clone(),
+            ..Options::default()
+        };
+        return run_main_seeds(&prog, &mut h, &options, seeds, opts.bound);
     }
     let mut db = Db::new();
+    db.contracts = level;
     db.set_file(file, source);
     match cmd {
         "tokens" => {
@@ -432,6 +674,12 @@ fn command(
                 stage.set("the ownership checker");
                 let all = db.diagnostics(file);
                 let errors = all.iter().filter(|d| d.is_error()).count();
+                if has("--explain") {
+                    // The signatures, as `sisu doc` renders them (09).
+                    let Some(p) = db.parsed(file) else { return exit::ERROR };
+                    let lexed = sisu_lexer::lex(p.file, source);
+                    host.stdout(&crate::doc::explain(source, &lexed.tokens, &p.module, &c.program, &c.typed));
+                }
                 if has("--format=ids") {
                     host.stdout(&sisu_diag::render::render_ids(&c.map, &all));
                 } else {
@@ -517,18 +765,191 @@ fn command(
                     host.stdout(&sisu_sir::write(&prog));
                     exit::OK
                 }
+                "bench" => {
+                    stage.set("the interpreter");
+                    let options = Options { seed: seeds.first, ..Options::default() };
+                    let mut failed = 0;
+                    for (i, d) in c.program.benches.iter().enumerate() {
+                        let name = sisu_diag::render::quote(&c.program.def(*d).name);
+                        let function = format!("bench#{i}");
+                        let start = host.now_nanos();
+                        let r = sisu_interp::run_bench(&prog, host, &options, &function, opts.iterations);
+                        let took = host.now_nanos() - start;
+                        let line = match r {
+                            sisu_interp::TestResult::Passed => {
+                                let each = took / i128::from(opts.iterations.max(1));
+                                text(
+                                    msg::CLI_BENCH_RESULT,
+                                    &[
+                                        ("name", name),
+                                        ("iterations", opts.iterations.to_string()),
+                                        ("each", nanos(each)),
+                                    ],
+                                )
+                            }
+                            sisu_interp::TestResult::Failed(m) | sisu_interp::TestResult::Blocked(m) => {
+                                failed += 1;
+                                text(msg::CLI_BENCH_FAILED, &[("name", name), ("message", m)])
+                            }
+                        };
+                        host.stdout(&format!("{line}\n"));
+                    }
+                    host.stdout(&format!(
+                        "{}\n",
+                        text(
+                            msg::CLI_BENCH_SUMMARY,
+                            &[("count", c.program.benches.len().to_string()), ("failed", failed.to_string())]
+                        )
+                    ));
+                    if failed > 0 { exit::ERROR } else { exit::OK }
+                }
                 "test" => {
                     stage.set("the interpreter");
                     let options = Options {
                         monitor: defer || !has("--no-monitor"),
                         coverage: deferring,
                         seed: seeds.first,
+                        strategy: opts.strategy.clone(),
+                        sim: opts.sim,
+                        jobs: opts.jobs,
+                        // The snapshots beside the program (17).
+                        snapshots: std::sync::Arc::new(
+                            std::fs::read_to_string(snap_path(file))
+                                .map(|t| crate::snap::parse(&t))
+                                .unwrap_or_default(),
+                        ),
+                        update: has("--update"),
                         ..Options::default()
                     };
                     if deferring {
                         host.stderr(&format!("{}\n", text(msg::DEFER_HEADER, &[])));
                     }
-                    let (code, reports) = run_tests(&prog, host, &options, seeds);
+                    // A `sim` build reaches nothing the simulation does not
+                    // model (17).
+                    if opts.sim.is_some() {
+                        let escapes = crate::sim::escapes(&prog, &std::collections::HashSet::new());
+                        if !escapes.is_empty() {
+                            let mut out = String::new();
+                            for e in &escapes {
+                                let at = match e.loc {
+                                    Some(l) => format!("{file}:{}:{}", l.line, l.col),
+                                    None => file.to_string(),
+                                };
+                                out.push_str(&plain_error(
+                                    msg::SIM_UNMODELLED_EXTERN,
+                                    &[
+                                        ("callee", e.callee.clone()),
+                                        ("function", e.function.clone()),
+                                        ("at", at),
+                                    ],
+                                ));
+                            }
+                            host.stderr(&out);
+                            return exit::ERROR;
+                        }
+                    }
+                    let hash = sisu_interp::record::content_hash(source.as_bytes());
+                    // `--replay TOKEN`: the one test, with the token's seeds
+                    // and case.
+                    if let Some(t) = &opts.token {
+                        if t.toolchain != crate::replay::TOOLCHAIN {
+                            host.stderr(&plain_error(
+                                msg::CLI_OTHER_TOOLCHAIN,
+                                &[
+                                    ("what", "the token".into()),
+                                    ("expected", t.toolchain.clone()),
+                                    ("found", crate::replay::TOOLCHAIN.into()),
+                                ],
+                            ));
+                            return exit::ERROR;
+                        }
+                        if t.hash != hash {
+                            host.stderr(&plain_error(
+                                msg::CLI_TOKEN_OTHER_CODE,
+                                &[
+                                    ("expected", format!("{:016x}", t.hash)),
+                                    ("file", file.to_string()),
+                                    ("found", format!("{hash:016x}")),
+                                ],
+                            ));
+                            return exit::ERROR;
+                        }
+                        if prog.tests.get(t.test).is_none() {
+                            let count = match prog.tests.len() {
+                                1 => "1 test".to_string(),
+                                n => format!("{n} tests"),
+                            };
+                            host.stderr(&plain_error(
+                                msg::CLI_TOKEN_NO_TEST,
+                                &[
+                                    ("index", t.test.to_string()),
+                                    ("file", file.to_string()),
+                                    ("count", count),
+                                ],
+                            ));
+                            return exit::ERROR;
+                        }
+                        let options = Options {
+                            seed: t.seed,
+                            case_seed: t.case_seed,
+                            replay_case: t.choices.clone(),
+                            strategy: t.strategy.clone(),
+                            sim: t.sim,
+                            ..options
+                        };
+                        let seeds = Seeds { first: t.seed, explore: None };
+                        let run = TestRun {
+                            file,
+                            hash,
+                            only: Some(vec![t.test]),
+                            bound: opts.bound,
+                            search: false,
+                            transcripts: Vec::new(),
+                        };
+                        let (code, _) = run_tests(&prog, host, &options, seeds, &run);
+                        return code;
+                    }
+                    // The tests the filters select, by their names and tags.
+                    let only = (!opts.select.is_all()).then(|| {
+                        (0..prog.tests.len())
+                            .filter(|&k| {
+                                let tags = c
+                                    .program
+                                    .tests
+                                    .get(k)
+                                    .and_then(|d| c.program.test_tags.get(d))
+                                    .cloned()
+                                    .unwrap_or_default();
+                                opts.select.picks(&prog.tests[k].0, &tags)
+                            })
+                            .collect::<Vec<usize>>()
+                    });
+                    let which = only.clone().unwrap_or_else(|| (0..prog.tests.len()).collect());
+                    // The transcripts beside the program, when every test runs.
+                    let mut transcripts = Vec::new();
+                    let found = if opts.select.is_all() { crate::transcript::find(file) } else { Vec::new() };
+                    if !found.is_empty() {
+                        let sir = db.sir_with(file, &["transcript_world", "transcript_system"]);
+                        for path in found {
+                            let shown = path.display().to_string();
+                            let outcome = match (&sir, &prog.entry) {
+                                (Some(sir), Some(_)) => run_transcript(sir, host, &options, &path),
+                                _ => Err(text(msg::CLI_TRANSCRIPT_NO_MAIN, &[("file", file.to_string())])),
+                            };
+                            transcripts.push((shown, outcome.err()));
+                        }
+                    }
+                    let run = TestRun { file, hash, only, bound: opts.bound, search: true, transcripts };
+                    let (code, reports) = run_tests(&prog, host, &options, seeds, &run);
+                    if options.update {
+                        let ran: Vec<&str> =
+                            which.iter().filter_map(|&k| prog.tests.get(k)).map(|t| t.0.as_str()).collect();
+                        if let Err(code) =
+                            update_snapshots(file, &options.snapshots, &ran, &reports, &prog, host)
+                        {
+                            return code;
+                        }
+                    }
                     if deferring {
                         let violation = reports.iter().any(|r| r.violation);
                         let coverage = merge_coverage(&reports);
@@ -547,14 +968,61 @@ fn command(
                         coverage: deferring,
                         seed: seeds.first,
                         stats: has("--stats"),
+                        strategy: opts.strategy.clone(),
                         ..Options::default()
                     };
                     if deferring {
                         host.stderr(&format!("{}\n", text(msg::DEFER_HEADER, &[])));
                     }
+                    // `sisu replay LOG`: the log stands in for the world.
+                    if let Some(log) = &opts.log {
+                        let mut rep = sisu_interp::record::Replayer::new(log, host);
+                        let report = sisu_interp::run_main_report(&prog, &mut rep, &options);
+                        let diverged = rep.divergence();
+                        drop(rep);
+                        if let Some(detail) = diverged {
+                            host.stderr(&plain_error(msg::CLI_REPLAY_DIVERGED, &[("detail", detail)]));
+                            return exit::ERROR;
+                        }
+                        if let Some(expected) = log.status()
+                            && expected != report.status
+                        {
+                            host.stderr(&plain_error(
+                                msg::CLI_REPLAY_STATUS,
+                                &[("found", report.status.to_string()), ("expected", expected.to_string())],
+                            ));
+                            return exit::ERROR;
+                        }
+                        return report.status;
+                    }
                     let mut h = WithArgs { inner: host, args };
-                    if seeds.explore.is_some() && !deferring {
-                        return run_main_seeds(&prog, &mut h, &options, seeds);
+                    let searching = matches!(opts.strategy, sisu_interp::Strategy::Exhaustive { .. });
+                    if (seeds.explore.is_some() || searching) && !deferring {
+                        return run_main_seeds(&prog, &mut h, &options, seeds, opts.bound);
+                    }
+                    // `--record FILE`: the run, with every host call logged.
+                    if let Some(path) = &opts.record {
+                        let header = sisu_interp::record::Header {
+                            toolchain: crate::replay::TOOLCHAIN.into(),
+                            file: file.to_string(),
+                            hash: sisu_interp::record::content_hash(source.as_bytes()),
+                            source: source.to_string(),
+                            seed: seeds.first,
+                            hash_key: 0,
+                            contracts: level.name().into(),
+                        };
+                        let mut rec = sisu_interp::record::Recorder::new(&mut h, opts.redact.clone());
+                        let report = sisu_interp::run_main_report(&prog, &mut rec, &options);
+                        let text = rec.finish(&header, report.status);
+                        drop(rec);
+                        if let Err(e) = std::fs::write(path, text) {
+                            h.stderr(&plain_error(
+                                msg::CLI_CANNOT_WRITE,
+                                &[("path", path.clone()), ("reason", e.to_string())],
+                            ));
+                            return exit::ERROR;
+                        }
+                        return report.status;
                     }
                     let report = sisu_interp::run_main_report(&prog, &mut h, &options);
                     if let Some(st) = &report.stats {
@@ -653,7 +1121,16 @@ fn defer_report(
 /// Runs `main` once, or under each seed of `--explore N` with its output
 /// captured: the first run that fails is reported with its output, and
 /// when none fails the first run's output is printed with a summary.
-fn run_main_seeds(prog: &sisu_sir::Program, host: &mut dyn Host, options: &Options, seeds: Seeds) -> i32 {
+fn run_main_seeds(
+    prog: &sisu_sir::Program,
+    host: &mut dyn Host,
+    options: &Options,
+    seeds: Seeds,
+    bound: u32,
+) -> i32 {
+    if matches!(options.strategy, sisu_interp::Strategy::Exhaustive { .. }) {
+        return run_main_search(prog, host, options, seeds, bound);
+    }
     let Some(n) = seeds.explore else {
         let report = sisu_interp::run_main_report(prog, host, options);
         if let Some(st) = &report.stats {
@@ -670,13 +1147,17 @@ fn run_main_seeds(prog: &sisu_sir::Program, host: &mut dyn Host, options: &Optio
         if status != exit::OK {
             host.stdout(&out);
             host.stderr(&err);
-            host.stderr(&format!(
-                "{}\n",
-                text(
-                    msg::CLI_EXPLORE_FAILED,
-                    &[("seed", seed.to_string()), ("count", n.to_string()), ("status", status.to_string())]
-                )
-            ));
+            let params =
+                [("seed", seed.to_string()), ("count", n.to_string()), ("status", status.to_string())];
+            let line = match &options.strategy {
+                sisu_interp::Strategy::Pct { depth } => {
+                    let mut p = params.to_vec();
+                    p.push(("depth", depth.to_string()));
+                    text(msg::CLI_PCT_FAILED, &p)
+                }
+                _ => text(msg::CLI_EXPLORE_FAILED, &params),
+            };
+            host.stderr(&format!("{line}\n"));
             return status;
         }
         if first.is_none() {
@@ -688,14 +1169,237 @@ fn run_main_seeds(prog: &sisu_sir::Program, host: &mut dyn Host, options: &Optio
         host.stderr(&err);
     }
     let last = seeds.first.wrapping_add(n - 1);
+    let range = [("count", n.to_string()), ("first", seeds.first.to_string()), ("last", last.to_string())];
+    let line = match &options.strategy {
+        sisu_interp::Strategy::Pct { depth } => {
+            let mut p = range.to_vec();
+            p.push(("depth", depth.to_string()));
+            text(msg::CLI_PCT_OK, &p)
+        }
+        _ => text(msg::CLI_EXPLORE_OK, &range),
+    };
+    host.stderr(&format!("{line}\n"));
+    exit::OK
+}
+
+/// `sisu run --scheduler exhaustive`: `main` under every schedule with at
+/// most `bound` preemptions, depth first, up to `--explore N` of them; the
+/// first that fails is reported with its output, and when none fails the
+/// first run's output is printed with a summary.
+fn run_main_search(
+    prog: &sisu_sir::Program,
+    host: &mut dyn Host,
+    options: &Options,
+    seeds: Seeds,
+    bound: u32,
+) -> i32 {
+    let cap = seeds.explore.unwrap_or(EXHAUSTIVE_CAP);
+    let mut first: Option<(String, String)> = None;
+    let mut prefix = Vec::new();
+    let mut count = 0u64;
+    let mut stopped = false;
+    loop {
+        count += 1;
+        let mut captured = Captured { inner: &mut *host, out: String::new(), err: String::new() };
+        let o = Options {
+            strategy: sisu_interp::Strategy::Exhaustive { prefix: prefix.clone() },
+            ..options.clone()
+        };
+        let report = sisu_interp::run_main_report(prog, &mut captured, &o);
+        let (out, err) = (std::mem::take(&mut captured.out), std::mem::take(&mut captured.err));
+        if report.status != exit::OK {
+            host.stdout(&out);
+            host.stderr(&err);
+            let schedule: Vec<u32> = report.trail.iter().map(|c| c.taken).collect();
+            host.stderr(&format!(
+                "{}\n",
+                text(
+                    msg::CLI_EXHAUSTIVE_FAILED,
+                    &[
+                        ("schedule", dotted(&schedule)),
+                        ("status", report.status.to_string()),
+                        ("count", count.to_string()),
+                        ("bound", bound.to_string()),
+                    ]
+                )
+            ));
+            return report.status;
+        }
+        if first.is_none() {
+            first = Some((out, err));
+        }
+        match sisu_interp::next_schedule(&report.trail, bound) {
+            Some(p) if count < cap => prefix = p,
+            Some(_) => {
+                stopped = true;
+                break;
+            }
+            None => break,
+        }
+    }
+    if let Some((out, err)) = first {
+        host.stdout(&out);
+        host.stderr(&err);
+    }
+    let stop =
+        if stopped { text(msg::CLI_EXHAUSTIVE_STOPPED, &[("cap", cap.to_string())]) } else { String::new() };
     host.stderr(&format!(
         "{}\n",
         text(
-            msg::CLI_EXPLORE_OK,
-            &[("count", n.to_string()), ("first", seeds.first.to_string()), ("last", last.to_string())]
+            msg::CLI_EXHAUSTIVE_OK,
+            &[("count", count.to_string()), ("bound", bound.to_string()), ("stopped", stop)]
         )
     ));
     exit::OK
+}
+
+/// Numbers joined by `.`, as a schedule is shown.
+fn dotted(xs: &[u32]) -> String {
+    xs.iter().map(u32::to_string).collect::<Vec<_>>().join(".")
+}
+
+/// What a failing test's replay token is made from besides its run.
+struct TestRun<'a> {
+    file: &'a str,
+    hash: u64,
+    /// The tests to run (`--replay`, `--filter`, `--tag`), by index; else
+    /// every test.
+    only: Option<Vec<usize>>,
+    /// The preemption bound of a bounded exhaustive search, and whether
+    /// to search (a replayed schedule runs alone).
+    bound: u32,
+    search: bool,
+    /// The transcripts that ran, by path, each with why it failed (17).
+    transcripts: Vec<(String, Option<String>)>,
+}
+
+/// A time in nanoseconds as a person reads it: `850 ns`, `12.4 µs`, `3.1 ms`.
+fn nanos(n: i128) -> String {
+    let n = n.max(0) as f64;
+    if n < 1_000.0 {
+        format!("{n} ns")
+    } else if n < 1_000_000.0 {
+        format!("{:.1} µs", n / 1_000.0)
+    } else if n < 1_000_000_000.0 {
+        format!("{:.1} ms", n / 1_000_000.0)
+    } else {
+        format!("{:.2} s", n / 1_000_000_000.0)
+    }
+}
+
+/// Runs the transcript at `path` (17): `Err` with what differs, unless
+/// `--update` takes what the program printed instead.
+fn run_transcript(
+    sir: &sisu_sir::Program,
+    host: &mut dyn Host,
+    options: &Options,
+    path: &std::path::Path,
+) -> Result<(), String> {
+    let source = std::fs::read_to_string(path).unwrap_or_default();
+    let t = crate::transcript::parse(&source);
+    let runs: Vec<(Vec<String>, Vec<String>)> =
+        t.runs.iter().map(|r| (r.args.clone(), r.stdin.clone())).collect();
+    let o = Options { monitor: false, ..options.clone() };
+    let results = sisu_interp::run_transcript(sir, host, &o, &crate::transcript::fixtures(path), &runs);
+    let outputs: Vec<Vec<String>> =
+        results.iter().map(|(out, status)| crate::transcript::shown(out, *status)).collect();
+    let expected = crate::transcript::write(&t, &[]);
+    let actual = crate::transcript::write(&t, &outputs);
+    if actual == expected {
+        return Ok(());
+    }
+    let diff = sisu_interp::diff::lines(&expected, &actual);
+    if options.update {
+        host.stdout(&text_line(
+            msg::CLI_TRANSCRIPT_UPDATED,
+            &[("name", sisu_diag::render::quote(&path.display().to_string())), ("diff", diff)],
+        ));
+        return std::fs::write(path, actual).map_err(|e| e.to_string());
+    }
+    Err(text(msg::CLI_TRANSCRIPT_DIFFERS, &[("diff", diff)]))
+}
+
+/// `PROGRAM.snap`, beside `PROGRAM.sisu`.
+fn snap_path(file: &str) -> std::path::PathBuf {
+    std::path::Path::new(file).with_extension("snap")
+}
+
+/// `sisu test --update`: the snapshots the tests that ran took replace
+/// the ones they had, each change shown; the others stay. The file is
+/// written only when something changed.
+fn update_snapshots(
+    file: &str,
+    old: &std::collections::BTreeMap<String, String>,
+    ran: &[&str],
+    reports: &[sisu_interp::RunReport],
+    prog: &sisu_sir::Program,
+    host: &mut dyn Host,
+) -> Result<(), i32> {
+    let took: Vec<(String, String)> = reports.iter().flat_map(|r| r.snapshots.iter().cloned()).collect();
+    let owner = |key: &str| -> Option<String> {
+        prog.tests
+            .iter()
+            .map(|t| t.0.clone())
+            .filter(|n| key == n || key.strip_prefix(n.as_str()).is_some_and(|r| r.starts_with(" #")))
+            .max_by_key(|n| n.len())
+    };
+    let mut changed = false;
+    let mut notes = String::new();
+    for (key, text) in &took {
+        match old.get(key) {
+            Some(t) if t == text => {}
+            Some(t) => {
+                changed = true;
+                notes.push_str(&text_line(
+                    msg::CLI_SNAPSHOT_UPDATED,
+                    &[("name", key.clone()), ("diff", sisu_interp::diff::lines(t, text))],
+                ));
+            }
+            None => {
+                changed = true;
+                notes.push_str(&text_line(
+                    msg::CLI_SNAPSHOT_NEW,
+                    &[("name", key.clone()), ("text", text.clone())],
+                ));
+            }
+        }
+    }
+    // A snapshot of a test that ran and no longer takes it goes; those of
+    // tests that did not run stay.
+    let kept: Vec<(String, String)> = old
+        .iter()
+        .filter(|(k, _)| !took.iter().any(|(t, _)| t == *k))
+        .filter(|(k, _)| owner(k).is_none_or(|n| !ran.contains(&n.as_str())))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    if kept.len() + took.len() != old.len() {
+        changed = true;
+    }
+    if !changed {
+        return Ok(());
+    }
+    // In the order of the tests, then of the snapshots within a test.
+    let mut all: Vec<(String, String)> = kept.into_iter().chain(took).collect();
+    let order =
+        |k: &str| owner(k).and_then(|n| prog.tests.iter().position(|t| t.0 == n)).unwrap_or(usize::MAX);
+    all.sort_by_key(|(k, _)| order(k));
+    host.stdout(&notes);
+    let path = snap_path(file);
+    let name =
+        std::path::Path::new(file).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    if let Err(e) = std::fs::write(&path, crate::snap::write(&name, &all)) {
+        host.stderr(&plain_error(
+            msg::CLI_SNAPSHOT_UNWRITABLE,
+            &[("path", path.display().to_string()), ("reason", e.to_string())],
+        ));
+        return Err(exit::ERROR);
+    }
+    Ok(())
+}
+
+/// A catalog message as a line of output.
+fn text_line(id: sisu_diag::MsgId, params: &[(&str, String)]) -> String {
+    format!("{}\n", text(id, params))
 }
 
 fn run_tests(
@@ -703,16 +1407,59 @@ fn run_tests(
     host: &mut dyn Host,
     options: &Options,
     seeds: Seeds,
+    run: &TestRun,
 ) -> (i32, Vec<sisu_interp::RunReport>) {
-    let mut results = sisu_interp::run_tests_report(prog, host, options);
+    let which: Vec<usize> = match &run.only {
+        Some(only) => only.clone(),
+        None => (0..prog.tests.len()).collect(),
+    };
+    let mut results = sisu_interp::run_tests_report_at(prog, host, options, &which);
     // `--explore N`: every test again under the other seeds, quietly; a
-    // test fails with the first seed it fails under.
+    // test fails with the first seed it fails under. Under the exhaustive
+    // scheduler, every schedule within the bound instead, depth first.
     let mut failed_seed: Vec<Option<u64>> = vec![None; results.len()];
-    if let Some(n) = seeds.explore {
+    let mut schedules: Vec<Vec<u32>> =
+        results.iter().map(|(_, _, rep)| rep.trail.iter().map(|c| c.taken).collect()).collect();
+    let mut searched = 0u64;
+    let mut stopped = false;
+    let exhaustive = matches!(options.strategy, sisu_interp::Strategy::Exhaustive { .. });
+    if exhaustive && run.search {
+        let cap = seeds.explore.unwrap_or(EXHAUSTIVE_CAP);
+        for (i, &index) in which.iter().enumerate() {
+            searched += 1;
+            let mut count = 1;
+            let mut trail = results[i].2.trail.clone();
+            while !matches!(results[i].1, TestResult::Failed(_)) {
+                let Some(prefix) = sisu_interp::next_schedule(&trail, run.bound) else { break };
+                if count >= cap {
+                    stopped = true;
+                    break;
+                }
+                count += 1;
+                searched += 1;
+                let mut quiet = Captured { inner: &mut *host, out: String::new(), err: String::new() };
+                let o = Options { strategy: sisu_interp::Strategy::Exhaustive { prefix }, ..options.clone() };
+                let mut again = sisu_interp::run_tests_report_at(prog, &mut quiet, &o, &[index]);
+                let Some((name, r, rep)) = again.pop() else { break };
+                trail = rep.trail.clone();
+                if matches!(r, TestResult::Failed(_)) {
+                    schedules[i] = rep.trail.iter().map(|c| c.taken).collect();
+                    results[i] = (name, r, rep);
+                }
+            }
+        }
+    } else if let Some(n) = seeds.explore
+        && run.search
+    {
         for k in 1..n {
             let seed = seeds.first.wrapping_add(k);
             let mut quiet = Captured { inner: &mut *host, out: String::new(), err: String::new() };
-            let again = sisu_interp::run_tests_report(prog, &mut quiet, &Options { seed, ..options.clone() });
+            let again = sisu_interp::run_tests_report_at(
+                prog,
+                &mut quiet,
+                &Options { seed, ..options.clone() },
+                &which,
+            );
             for (i, (_, r, rep)) in again.into_iter().enumerate() {
                 if failed_seed[i].is_some() || matches!(results[i].1, TestResult::Failed(_)) {
                     continue;
@@ -733,7 +1480,7 @@ fn run_tests(
     let (mut passed, mut failed, mut blocked) = (0, 0, 0);
     let mut out = String::new();
     let mut failures = String::new();
-    for (i, (name, r, _)) in results.iter().enumerate() {
+    for (i, (name, r, report)) in results.iter().enumerate() {
         let outcome = match r {
             TestResult::Passed => {
                 passed += 1;
@@ -741,14 +1488,57 @@ fn run_tests(
             }
             TestResult::Failed(m) => {
                 failed += 1;
-                let seed = match failed_seed.get(i).copied().flatten() {
-                    Some(s) => {
+                let seed = match (&options.strategy, failed_seed.get(i).copied().flatten()) {
+                    (sisu_interp::Strategy::Exhaustive { .. }, _) if run.search => format!(
+                        "{}\n",
+                        text(
+                            msg::CLI_EXHAUSTIVE_TEST_FAILED,
+                            &[("schedule", dotted(&schedules[i])), ("bound", run.bound.to_string())]
+                        )
+                    ),
+                    (sisu_interp::Strategy::Pct { depth }, Some(s)) => format!(
+                        "{}\n",
+                        text(
+                            msg::CLI_PCT_TEST_FAILED,
+                            &[("seed", s.to_string()), ("depth", depth.to_string())]
+                        )
+                    ),
+                    (_, Some(s)) => {
                         format!("{}\n", text(msg::CLI_EXPLORE_TEST_FAILED, &[("seed", s.to_string())]))
                     }
-                    None => String::new(),
+                    (_, None) => String::new(),
                 };
+                // The token that runs this failure again (17).
+                let index = which.get(i).copied().unwrap_or(i);
+                let takes_system = prog
+                    .tests
+                    .get(index)
+                    .and_then(|(_, f)| prog.functions.iter().find(|x| x.name == *f))
+                    .is_some_and(|f| f.param_count == 1);
+                // In the `sim` profile its `System` is simulated: it replays.
+                let replay = if takes_system && options.sim.is_none() {
+                    text(msg::CLI_REPLAY_NO_TOKEN, &[])
+                } else {
+                    let token = crate::replay::Token {
+                        hash: run.hash,
+                        toolchain: crate::replay::TOOLCHAIN.into(),
+                        test: index,
+                        seed: failed_seed.get(i).copied().flatten().unwrap_or(seeds.first),
+                        case_seed: options.case_seed,
+                        choices: report.case.clone(),
+                        strategy: match &options.strategy {
+                            sisu_interp::Strategy::Exhaustive { .. } => {
+                                sisu_interp::Strategy::Exhaustive { prefix: schedules[i].clone() }
+                            }
+                            other => other.clone(),
+                        },
+                        sim: options.sim,
+                    };
+                    text(msg::CLI_REPLAY_TOKEN, &[("token", token.write()), ("file", run.file.to_string())])
+                };
+                let nl = if m.ends_with('\n') { "" } else { "\n" };
                 failures.push_str(&format!(
-                    "\n{}\n{seed}{m}",
+                    "\n{}\n{seed}{m}{nl}{replay}\n",
                     text(
                         msg::CLI_TEST_RESULT,
                         &[("name", sisu_diag::render::quote(name)), ("outcome", "FAILED".into())]
@@ -767,6 +1557,23 @@ fn run_tests(
         ));
         out.push('\n');
     }
+    for (name, failure) in &run.transcripts {
+        let name = sisu_diag::render::quote(name);
+        let outcome = match failure {
+            None => {
+                passed += 1;
+                "ok"
+            }
+            Some(why) => {
+                failed += 1;
+                let head =
+                    text(msg::CLI_TRANSCRIPT_RESULT, &[("name", name.clone()), ("outcome", "FAILED".into())]);
+                failures.push_str(&format!("\n{head}\n{why}\n"));
+                "FAILED"
+            }
+        };
+        out.push_str(&text_line(msg::CLI_TRANSCRIPT_RESULT, &[("name", name), ("outcome", outcome.into())]));
+    }
     out.push_str(&failures);
     if !failures.is_empty() {
         out.push('\n');
@@ -776,12 +1583,37 @@ fn run_tests(
         &[("passed", passed.to_string()), ("failed", failed.to_string()), ("blocked", blocked.to_string())],
     ));
     out.push('\n');
-    if let Some(n) = seeds.explore {
-        let last = seeds.first.wrapping_add(n - 1);
+    // A replay runs its one test; the filters say how many they left out.
+    if run.search && which.len() < prog.tests.len() {
+        let count = prog.tests.len() - which.len();
+        out.push_str(&text(msg::CLI_TESTS_UNSELECTED, &[("count", count.to_string())]));
+        out.push('\n');
+    }
+    if exhaustive && run.search {
+        let stop = if stopped {
+            text(msg::CLI_EXHAUSTIVE_STOPPED, &[("cap", seeds.explore.unwrap_or(EXHAUSTIVE_CAP).to_string())])
+        } else {
+            String::new()
+        };
         out.push_str(&text(
-            msg::CLI_EXPLORE_SUMMARY,
-            &[("count", n.to_string()), ("first", seeds.first.to_string()), ("last", last.to_string())],
+            msg::CLI_EXHAUSTIVE_SUMMARY,
+            &[("count", searched.to_string()), ("bound", run.bound.to_string()), ("stopped", stop)],
         ));
+        out.push('\n');
+    } else if let Some(n) = seeds.explore
+        && run.search
+    {
+        let last = seeds.first.wrapping_add(n - 1);
+        let range =
+            [("count", n.to_string()), ("first", seeds.first.to_string()), ("last", last.to_string())];
+        match &options.strategy {
+            sisu_interp::Strategy::Pct { depth } => {
+                let mut params = range.to_vec();
+                params.push(("depth", depth.to_string()));
+                out.push_str(&text(msg::CLI_PCT_SUMMARY, &params));
+            }
+            _ => out.push_str(&text(msg::CLI_EXPLORE_SUMMARY, &range)),
+        }
         out.push('\n');
     }
     host.stdout(&out);
@@ -921,6 +1753,86 @@ fn audit(args: &[String], host: &mut dyn Host) -> i32 {
     }
     host.stdout(&out);
     exit::OK
+}
+
+/// `sisu replay LOG`: the run a capability log recorded, again, with the
+/// log standing in for the world (10, "Debugging and profiling"). The
+/// program is the log's own copy of the source, checked at the level it
+/// was recorded at; `--monitor` runs it under the ownership monitor.
+fn replay(args: &[String], host: &mut dyn Host) -> i32 {
+    let p = split_args(args);
+    if let Some(bad) = p.flags.iter().find(|f| **f != "--monitor") {
+        host.stderr(&plain_error(
+            msg::CLI_UNKNOWN_OPTION,
+            &[("option", bad.to_string()), ("command", "replay".into())],
+        ));
+        return EXIT_USAGE;
+    }
+    if let Some((bad, _)) = p.values.first() {
+        host.stderr(&plain_error(
+            msg::CLI_UNKNOWN_OPTION,
+            &[("option", bad.to_string()), ("command", "replay".into())],
+        ));
+        return EXIT_USAGE;
+    }
+    let Some(path) = p.file else {
+        host.stderr(&plain_error(msg::CLI_MISSING_FILE, &[("command", "replay".into())]));
+        return EXIT_USAGE;
+    };
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            host.stderr(&plain_error(
+                msg::CLI_CANNOT_READ,
+                &[("path", path.to_string()), ("reason", e.to_string())],
+            ));
+            return exit::ERROR;
+        }
+    };
+    let bad_log = |host: &mut dyn Host, reason: String| {
+        host.stderr(&plain_error(msg::CLI_BAD_LOG, &[("path", path.to_string()), ("reason", reason)]));
+        exit::ERROR
+    };
+    let log = match sisu_interp::record::Log::parse(&text) {
+        Ok(l) => l,
+        Err(e) => return bad_log(host, e),
+    };
+    if log.header.toolchain != crate::replay::TOOLCHAIN {
+        host.stderr(&plain_error(
+            msg::CLI_OTHER_TOOLCHAIN,
+            &[
+                ("what", format!("`{path}`")),
+                ("expected", log.header.toolchain.clone()),
+                ("found", crate::replay::TOOLCHAIN.into()),
+            ],
+        ));
+        return exit::ERROR;
+    }
+    if sisu_interp::record::content_hash(log.header.source.as_bytes()) != log.header.hash {
+        return bad_log(host, "its source does not match its content hash".into());
+    }
+    let Some(level) = sisu_lower::ContractLevel::parse(&log.header.contracts) else {
+        return bad_log(host, format!("`{}` is not a level of contract checking", log.header.contracts));
+    };
+    let file = log.header.file.clone();
+    let source = log.header.source.clone();
+    let opts = Opts {
+        seeds: Seeds { first: log.header.seed, explore: None },
+        level,
+        record: None,
+        redact: Vec::new(),
+        token: None,
+        log: Some(log),
+        strategy: sisu_interp::Strategy::Random,
+        bound: 0,
+        sim: None,
+        jobs: 0,
+        select: Select::default(),
+        iterations: 0,
+    };
+    let stage = std::cell::Cell::new("the front end");
+    let flags: Vec<&str> = p.flags.clone();
+    command("run", &flags, &opts, &file, &source, Vec::new(), host, &stage)
 }
 
 fn explain(args: &[String], host: &mut dyn Host) -> i32 {

@@ -81,7 +81,10 @@ impl Interp<'_, '_> {
                 }
                 Type::Named(n, a)
                     if a.is_empty()
-                        && matches!(n.as_str(), "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc") =>
+                        && matches!(
+                            n.as_str(),
+                            "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin"
+                        ) =>
                 {
                     let id = match self
                         .target(args.first().ok_or_else(|| ice("a handle call without `self`"))?)?

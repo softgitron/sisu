@@ -1,0 +1,9 @@
+test "money is never made or lost" ... FAILED
+test "not even with the lock" ... ok
+test "every choice is a schedule of its own" ... ok
+
+test "money is never made or lost" ... FAILED
+`sim.always` does not hold: the total is 100
+replay: sisu test --replay 1-e62dd7809ef2940e-0.0.1-t0-s0-r0 choose_always.sisu
+
+2 passed, 1 failed, 0 blocked

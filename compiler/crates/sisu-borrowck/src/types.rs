@@ -30,6 +30,7 @@ const PLAIN_BUILTINS: &[&str] = &[
     "Rand",
     "Env",
     "Proc",
+    "Stdin",
     "System",
     "HostFs",
     "HostNet",
@@ -37,6 +38,7 @@ const PLAIN_BUILTINS: &[&str] = &[
     "HostRand",
     "HostEnv",
     "HostProc",
+    "HostStdin",
     "TestClock",
     // What a `Cap` holds is neither a view nor must-consume (checked where
     // one is made).

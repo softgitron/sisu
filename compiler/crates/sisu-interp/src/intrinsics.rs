@@ -156,7 +156,6 @@ impl<'p> Interp<'p, '_> {
                 "contract" if method == "fail" => self.contract_fail(&a),
                 "test" => self.test_intrinsic(method, &a),
                 "error" => self.error_method(method, tys, &a),
-                "cli" if method == "parse" => self.cli_parse(tys.first(), a.get(0)?),
                 _ => Err(ice(format!("unknown intrinsic `{name}`"))),
             };
         }
@@ -283,6 +282,7 @@ impl<'p> Interp<'p, '_> {
                     stack: Vec::new(),
                     hole: Some(n),
                     refinement: None,
+                    too_long: None,
                 })))
             }
             _ => Err(ice(format!("unknown intrinsic `{name}`"))),
@@ -312,6 +312,12 @@ impl<'p> Interp<'p, '_> {
                     "round" => Value::Float(f.round()),
                     "abs" => Value::Float(f.abs()),
                     "is_nan" => Value::Bool(f.is_nan()),
+                    // How many `f64`s lie between the two, at most `n`.
+                    "within_ulps" => {
+                        let g = self.float(y()?)?;
+                        let n = self.int(a.get(2)?)?;
+                        Value::Bool(n >= 0 && ulps_between(f, g).is_some_and(|d| d <= n as u64))
+                    }
                     "truncate_to_int" => {
                         let t = f.trunc();
                         if t.is_nan() || !(-9.223_372_036_854_776e18..9.223_372_036_854_776e18).contains(&t) {
@@ -334,6 +340,7 @@ impl<'p> Interp<'p, '_> {
                     "is_whitespace" => Value::Bool(c.is_whitespace()),
                     "is_uppercase" => Value::Bool(c.is_uppercase()),
                     "is_lowercase" => Value::Bool(c.is_lowercase()),
+                    "code" => Value::Int(i64::from(u32::from(c))),
                     other => return Err(ice(format!("no char method `{other}`"))),
                 }
             }
@@ -404,6 +411,9 @@ impl<'p> Interp<'p, '_> {
                     ));
                 }
                 Value::String(s.replace(old.as_str(), &new))
+            }
+            "parse_float" => {
+                Value::option(decimal(&s).then(|| s.parse::<f64>().ok()).flatten().map(Value::Float))
             }
             "to_lowercase" => Value::String(s.to_lowercase()),
             "to_uppercase" => Value::String(s.to_uppercase()),
@@ -973,6 +983,26 @@ impl<'p> Interp<'p, '_> {
                 self.recorded_case = Some(out);
                 Ok(Value::Unit)
             }
+            // `assert_snapshot`: the value's rendering against the stored
+            // one (17, "Snapshots and transcripts").
+            "snapshot" => {
+                let text = self.text(a.get(0)?)?.to_string();
+                // One interpreter runs one test: these are its snapshots.
+                let k = 1 + self.snapshots_taken.len();
+                let key = crate::snapshot_key(&self.test_name, k);
+                self.snapshots_taken.push((key.clone(), text.clone()));
+                if self.update {
+                    return Ok(Value::Unit);
+                }
+                match self.snapshots.get(&key) {
+                    Some(old) if *old == text => Ok(Value::Unit),
+                    Some(old) => Err(panic(
+                        msg::TEST_SNAPSHOT_CHANGED,
+                        &[("name", key), ("diff", crate::diff::lines(old, &text))],
+                    )),
+                    None => Err(panic(msg::TEST_SNAPSHOT_MISSING, &[("name", key), ("value", text)])),
+                }
+            }
             _ => Err(ice(format!("unknown intrinsic `test.{method}`"))),
         }
     }
@@ -995,6 +1025,7 @@ impl<'p> Interp<'p, '_> {
                 stack: Vec::new(),
                 hole: None,
                 refinement: Some((owner, value, clause)),
+                too_long: None,
             })));
         }
         let (id, key) = match kind {
@@ -1287,4 +1318,60 @@ impl Interp<'_, '_> {
             other => Err(ice(format!("unknown intrinsic `Arena.{other}`"))),
         }
     }
+}
+
+/// Whether `s` is a decimal number as `str.parse_float` reads it: an
+/// optional sign, digits with an optional fraction (or a fraction alone),
+/// and an optional exponent; not `inf` or `nan`.
+fn decimal(s: &str) -> bool {
+    let b = s.as_bytes();
+    let mut i = 0;
+    if matches!(b.first(), Some(b'+' | b'-')) {
+        i += 1;
+    }
+    let int_start = i;
+    while b.get(i).is_some_and(u8::is_ascii_digit) {
+        i += 1;
+    }
+    let mut digits = i - int_start;
+    if b.get(i) == Some(&b'.') {
+        i += 1;
+        let frac_start = i;
+        while b.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+        digits += i - frac_start;
+    }
+    if digits == 0 {
+        return false;
+    }
+    if matches!(b.get(i), Some(b'e' | b'E')) {
+        i += 1;
+        if matches!(b.get(i), Some(b'+' | b'-')) {
+            i += 1;
+        }
+        let exp_start = i;
+        while b.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+        if i == exp_start {
+            return false;
+        }
+    }
+    i == b.len()
+}
+
+/// The number of representable `f64`s from `a` to `b`, counting `b`
+/// (0 for equal values, `0.0` and `-0.0` included); `None` with a NaN.
+fn ulps_between(a: f64, b: f64) -> Option<u64> {
+    if a.is_nan() || b.is_nan() {
+        return None;
+    }
+    // The bits in an order that follows the values': negatives below
+    // positives, both counting away from zero.
+    let key = |x: f64| {
+        let bits = x.to_bits() as i64;
+        if bits < 0 { i64::MIN - bits } else { bits }
+    };
+    Some(key(a).abs_diff(key(b)))
 }

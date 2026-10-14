@@ -209,10 +209,24 @@ impl Resolver<'_> {
     /// Declares generated impls in a module of their own, with the
     /// generated text as its source file and `module` as its scope.
     fn declare_generated(&mut self, module: ModuleId, dir: &str, text: &str) {
+        let _ = self.declare_generated_in(module, dir, text);
+    }
+
+    /// [`Resolver::declare_generated`], giving the new module.
+    pub(crate) fn declare_generated_in(
+        &mut self,
+        module: ModuleId,
+        dir: &str,
+        text: &str,
+    ) -> Option<ModuleId> {
         let parent = &self.prog.modules[module.0 as usize];
         let name = format!("{dir}/{}.sisu", parent.name);
         let is_std = parent.is_std;
-        let file = self.sources.add(name.clone(), text);
+        // Code made from the standard library's templates is the standard
+        // library's: its file is under `<std>/`, which a run's traces leave
+        // out.
+        let file_name = if is_std { format!("<std>/{name}") } else { name.clone() };
+        let file = self.sources.add(file_name, text);
         let parse = sisu_parser::parse(file, text);
         self.diags.extend(parse.diagnostics);
         let ast = ast::build::module(&parse.tree);
@@ -226,6 +240,7 @@ impl Resolver<'_> {
             parent: Some(module),
         });
         self.declare_items(id, &ast.items, "");
+        Some(id)
     }
 
     /// The traits a struct's `@delegate` forwards, with the field, after

@@ -1,0 +1,15 @@
+port 8080, then 8081
+port 443, then 444
+Err(Unsatisfied(ty="Port", predicate="1 <= self <= 65535"))
+Err(Unsatisfied(ty="Port", predicate="1 <= self <= 65535"))
+port 22, then 23
+Err(Unsatisfied(ty="Small", predicate="self < 1024"))
+5
+not Even: self % 2 == 0
+Ok("sisu")
+Err(Unsatisfied(ty="Word", predicate="len(self) > 0 and not self.contains(\" \")"))
+4
+15
+3
+Err(Unsatisfied(ty="NonEmpty[int]", predicate="not self.is_empty()"))
+6000

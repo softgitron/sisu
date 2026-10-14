@@ -1,0 +1,4 @@
+test "a client reaches the server by its node's name" ... ok
+test "a partition refuses, and healing lets it through" ... ok
+test "a crashed node is off the network until it restarts" ... ok
+3 passed, 0 failed, 0 blocked

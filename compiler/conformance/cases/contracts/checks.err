@@ -1,0 +1,6 @@
+panic: postcondition of `wrong_abs` failed: result >= 0
+    result >= 0
+    │
+    -30
+  at wrong_abs (checks.sisu:39:13)
+  at main (checks.sisu:54:11)

@@ -1,0 +1,4 @@
+7:10-7:11 E0821 test.refines-mismatch reference="missing" name="a" why="there is no function `missing` in this module"
+11:10-11:11 E0821 test.refines-mismatch reference="a_ref" name="b" why="`b` takes (str) and gives `int`, `a_ref` takes (int) and gives `int`"
+15:10-15:11 E0821 test.refines-mismatch reference="a_ref" name="c" why="a tolerance in ULPs compares `f64` results, not `int`"
+19:10-19:11 E0821 test.refines-mismatch reference="a_ref" name="d" why="the tolerance is written `tolerance=Ulps(n)`, with a whole number"

@@ -45,7 +45,8 @@ impl Interp<'_, '_> {
         let rand = self.host_handle("HostRand", "Rand", Value::Unit);
         let env = self.host_handle("HostEnv", "Env", Value::Unit);
         let proc = self.host_handle("HostProc", "Proc", Value::Unit);
-        Value::Struct(Value::adt("System", 0, vec![fs, net, clock, rand, env, proc]))
+        let stdin = self.host_handle("HostStdin", "Stdin", Value::Unit);
+        Value::Struct(Value::adt("System", 0, vec![fs, net, clock, rand, env, proc, stdin]))
     }
 
     fn cap_id(&self, v: &Value) -> Result<u32, Unwind> {
@@ -233,12 +234,18 @@ impl Interp<'_, '_> {
                 let r = self.host.create_dir(&path);
                 Ok(self.unit_result(r, &path))
             }
+            "fs.sync" => {
+                let path = arg_text(self, 1)?;
+                let r = self.host.sync_path(&path);
+                Ok(self.unit_result(r, &path))
+            }
             "env.args" => Ok(Value::List(self.host.args().iter().map(|a| Value::str(a)).collect())),
             "env.get" => {
                 let name = arg_text(self, 1)?;
                 Ok(Value::option(self.host.env_var(&name).map(Value::String)))
             }
             "rand.bits" => Ok(Value::Int(self.host.random_bits() as i64)),
+            "stdin.read_line" => Ok(Value::option(self.host.read_line().map(Value::String))),
             "proc.run" => {
                 let program = arg_text(self, 1)?;
                 let list = match self.target(args.get(2).ok_or_else(|| ice("missing arguments"))?)? {

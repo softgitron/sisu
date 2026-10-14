@@ -3,9 +3,8 @@
 //! backend exists.
 //!
 //! The run loop is a trampoline over an explicit frame stack: a Sisu call
-//! pushes a frame and never recurses on the host stack (only `cli.parse`,
-//! calling a field's default, nests a run loop). References are places: a
-//! frame, a local and a path.
+//! pushes a frame and never recurses on the host stack. References are
+//! places: a frame, a local and a path.
 //!
 //! Values have value semantics: a move takes the value out of its place,
 //! a copy clones it, and every `drop` statement of the SIR runs the
@@ -23,8 +22,8 @@
 //! through [`Host`], so a run is deterministic under a deterministic host.
 
 mod caps;
-mod cli;
 pub mod comptime;
+pub mod diff;
 mod dispatch;
 mod drops;
 mod exec;
@@ -34,13 +33,15 @@ mod intrinsics;
 mod iter;
 mod monitor;
 mod ops;
+pub mod parallel;
 mod place;
+pub mod record;
 mod sched;
 mod sized;
 pub mod value;
 
 pub use host::{Host, IoErrorKind, NetFail, Poll, StdHost, TestHost};
-pub use sched::Stats;
+pub use sched::{Choice, PCT_STEPS, Stats, Strategy, next_schedule};
 
 use sisu_diag::{Catalog, MsgId, msg};
 use sisu_sir as sir;
@@ -96,6 +97,27 @@ pub struct Options {
     pub case_seed: u64,
     /// The choices of the case a replay token names: `check` runs it first.
     pub replay_case: Option<Vec<i64>>,
+    /// How the scheduler chooses (`--scheduler`).
+    pub strategy: sched::Strategy,
+    /// The `sim` profile (`sisu test --sim`): a test that declares a
+    /// `System` gets a simulated one, and capability calls fail with an
+    /// error of their declared set at this rate, in parts per million.
+    pub sim: Option<u32>,
+    /// How many threads run the tests that take no `System` (`--jobs`);
+    /// 0 is the default, [`parallel::DEFAULT_JOBS`]. A run reads the same
+    /// at any number.
+    pub jobs: usize,
+    /// The stored snapshots (17, "Snapshots and transcripts"), by
+    /// [`snapshot_key`], and whether a changed or missing one is taken
+    /// as the new one (`sisu test --update`).
+    pub snapshots: std::sync::Arc<std::collections::BTreeMap<String, String>>,
+    pub update: bool,
+}
+
+/// The key of a test's `k`-th snapshot (from 1): the test's name, then
+/// ` #k` from the second on.
+pub fn snapshot_key(test: &str, k: usize) -> String {
+    if k <= 1 { test.to_string() } else { format!("{test} #{k}") }
 }
 
 /// How a monitored run went, beyond its exit status.
@@ -112,6 +134,11 @@ pub struct RunReport {
     /// The choices of the failing case a property recorded, for the
     /// test's replay token.
     pub case: Option<Vec<i64>>,
+    /// The scheduling choices of a run under a bounded exhaustive search.
+    pub trail: Vec<sched::Choice>,
+    /// Each snapshot the test took, by [`snapshot_key`], with what it
+    /// rendered.
+    pub snapshots: Vec<(String, String)>,
 }
 
 /// Why execution left a frame other than by returning.
@@ -138,6 +165,9 @@ pub(crate) struct PanicInfo {
     /// constant: the type, the value and the predicate, which compile-time
     /// evaluation reports as a diagnostic of its own.
     pub refinement: Option<(String, String, String)>,
+    /// Set when the panic is a property's case running past its budget of
+    /// steps (`test.catch`): the budget.
+    pub too_long: Option<u64>,
 }
 
 /// A catalog message (D-065): run-time messages are catalog entries too.
@@ -151,6 +181,7 @@ pub(crate) fn panic(id: MsgId, params: &[(&str, String)]) -> Unwind {
         stack: Vec::new(),
         hole: None,
         refinement: None,
+        too_long: None,
     }))
 }
 
@@ -213,9 +244,22 @@ pub struct Interp<'p, 'h> {
     /// The seed of a property's random cases, and the case a replay token
     /// names (17).
     pub(crate) case_seed: u64,
+    /// The stored snapshots, and whether a run takes new ones (17).
+    pub(crate) snapshots: std::sync::Arc<std::collections::BTreeMap<String, String>>,
+    pub(crate) update: bool,
     pub(crate) replay_case: Option<Vec<i64>>,
     /// The failing case a property recorded.
     pub(crate) recorded_case: Option<Vec<i64>>,
+    /// The name of the test running, and the snapshots it took (17).
+    pub(crate) test_name: String,
+    pub(crate) snapshots_taken: Vec<(String, String)>,
+    /// For each open `test.catch`, innermost last: the step count at which
+    /// its call has run out of steps, and the budget.
+    pub(crate) case_ends: Vec<(u64, u64)>,
+    /// The `sim` profile (`Options::sim`), its fault rate in parts per
+    /// million, and the seeded stream that decides each fault.
+    pub(crate) sim: Option<u32>,
+    pub(crate) fault_rng: sched::Rng,
 }
 
 impl<'p, 'h> Interp<'p, 'h> {
@@ -273,16 +317,29 @@ impl<'p, 'h> Interp<'p, 'h> {
                 ..Default::default()
             }),
             heap: Vec::new(),
-            sched: sched::Sched::new(options.seed, options.stats, host_clock),
+            sched: sched::Sched::new(options.seed, options.stats, host_clock, options.strategy.clone()),
             case_seed: options.case_seed,
+            snapshots: options.snapshots.clone(),
+            update: options.update,
             replay_case: options.replay_case.clone(),
             recorded_case: None,
+            test_name: String::new(),
+            snapshots_taken: Vec::new(),
+            case_ends: Vec::new(),
+            sim: options.sim,
+            fault_rng: sched::Rng::new(options.seed ^ 0x5157_FA17),
         }
     }
 
     /// What the monitor saw: whether it stopped the run, and the coverage.
     pub fn report(&self, status: i32) -> RunReport {
-        let mut r = RunReport { status, case: self.recorded_case.clone(), ..Default::default() };
+        let mut r = RunReport {
+            status,
+            case: self.recorded_case.clone(),
+            trail: self.sched.trail.clone(),
+            snapshots: self.snapshots_taken.clone(),
+            ..Default::default()
+        };
         if self.sched.keep_stats {
             r.stats = Some(self.stats_report());
         }
@@ -302,6 +359,12 @@ impl<'p, 'h> Interp<'p, 'h> {
     /// Runs the program's entry function and reports how it ended on the
     /// host's standard error.
     pub fn run_main(&mut self) -> i32 {
+        self.run_main_with(None)
+    }
+
+    /// Runs `main`, with `sys` as its `System` if it takes one (else the
+    /// real one).
+    pub fn run_main_with(&mut self, sys: Option<Value>) -> i32 {
         let Some(entry) = self.prog.entry.clone() else {
             let m = render(msg::RUN_NO_ENTRY, &[]);
             self.host.stderr(&format!("{m}\n"));
@@ -312,7 +375,11 @@ impl<'p, 'h> Interp<'p, 'h> {
             self.host.stderr(&format!("{m}\n"));
             return exit::ABORT;
         };
-        let args = if entry.takes_system { vec![self.system()] } else { Vec::new() };
+        let args = match (entry.takes_system, sys) {
+            (true, Some(s)) => vec![s],
+            (true, None) => vec![self.system()],
+            (false, _) => Vec::new(),
+        };
         match self.call_fn(fi, args) {
             Ok(v) => {
                 if !entry.returns_result {
@@ -352,17 +419,50 @@ impl<'p, 'h> Interp<'p, 'h> {
     }
 
     /// Runs one test function.
+    pub fn run_bench(&mut self, function: &str, iterations: u64) -> TestResult {
+        let Some(&fi) = self.fns.get(function) else {
+            return TestResult::Failed(format!(
+                "internal error in the interpreter: no function `{function}`"
+            ));
+        };
+        let bench = Value::Struct(Value::adt(
+            "test.Bench",
+            0,
+            vec![Value::Int(iterations.min(i64::MAX as u64) as i64)],
+        ));
+        match self.call_fn(fi, vec![bench]) {
+            Ok(_) => TestResult::Passed,
+            Err(Unwind::Panic(p)) => TestResult::Failed(panic_report(&p)),
+            Err(Unwind::Abort(m)) => TestResult::Failed(m),
+            Err(_) => TestResult::Failed("a task switch escaped the run loop".into()),
+        }
+    }
+
     pub fn run_test(&mut self, function: &str) -> TestResult {
         let Some(&fi) = self.fns.get(function) else {
             return TestResult::Failed(format!(
                 "internal error in the interpreter: no function `{function}`"
             ));
         };
+        self.test_name =
+            self.prog.tests.iter().find(|(_, f)| f == function).map(|(n, _)| n.clone()).unwrap_or_default();
         // A test that declares a `System` receives the real one, as `main`
         // does (17, "Isolation and parallelism"); the others make the
         // fakes they need.
         let takes_system = self.prog.functions.get(fi).is_some_and(|f| f.param_count == 1);
-        let args = if takes_system { vec![self.system()] } else { Vec::new() };
+        // In the `sim` profile it receives a simulated one instead (17).
+        let args = if !takes_system {
+            Vec::new()
+        } else if self.sim.is_some() {
+            match self.call_by_name("System.sim", vec![Value::Int(self.case_seed as i64)]) {
+                Ok(sys) => vec![sys],
+                Err(Unwind::Panic(p)) => return TestResult::Failed(panic_report(&p)),
+                Err(Unwind::Abort(m)) => return TestResult::Failed(m),
+                Err(_) => return TestResult::Failed("the simulated system could not be made".into()),
+            }
+        } else {
+            vec![self.system()]
+        };
         match self.call_fn(fi, args) {
             Ok(_) => TestResult::Passed,
             Err(Unwind::Panic(p)) => match &p.hole {
@@ -423,10 +523,69 @@ pub fn run_main_report(prog: &sir::Program, host: &mut dyn Host, options: &Optio
     .unwrap_or(RunReport { status: exit::ABORT, ..Default::default() })
 }
 
+/// A transcript's runs of `main` (17, "Snapshots and transcripts"), in
+/// one interpreter: each with its arguments and standard input, against
+/// a fake `System` whose file system (holding `files`), clock and random
+/// numbers persist from one run to the next. Returns what each run wrote
+/// (standard output and error, in the order written) and its status.
+pub fn run_transcript(
+    prog: &sir::Program,
+    host: &mut dyn Host,
+    options: &Options,
+    files: &[(String, String)],
+    runs: &[(Vec<String>, Vec<String>)],
+) -> Vec<(String, i32)> {
+    on_big_stack(host, |host| {
+        let written = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let mut held = parallel::Merged { inner: host, out: written.clone() };
+        let mut i = Interp::new(prog, &mut held, options);
+        let texts = |xs: &[String]| Value::List(xs.iter().map(|x| Value::str(x)).collect());
+        let pairs: Vec<Value> =
+            files.iter().map(|(p, t)| Value::Tuple(vec![Value::str(p), Value::str(t)])).collect();
+        let world = match i.call_by_name("transcript_world", vec![Value::List(pairs)]) {
+            Ok(w) => w,
+            Err(Unwind::Panic(p)) => return vec![(panic_report(&p), exit::PANIC)],
+            Err(Unwind::Abort(m)) => return vec![(m, exit::ABORT)],
+            Err(_) => return vec![("the transcript's world could not be made".to_string(), exit::ABORT)],
+        };
+        let mut out = Vec::new();
+        for (args, stdin) in runs {
+            let status =
+                match i.call_by_name("transcript_system", vec![world.clone(), texts(args), texts(stdin)]) {
+                    Ok(sys) => i.run_main_with(Some(sys)),
+                    Err(_) => exit::ABORT,
+                };
+            let text = match written.lock() {
+                Ok(mut w) => std::mem::take(&mut *w),
+                Err(p) => std::mem::take(&mut *p.into_inner()),
+            };
+            out.push((text, status));
+        }
+        out
+    })
+    .unwrap_or_default()
+}
+
 /// Runs every test of the program, in order, each with a fresh
 /// interpreter. Returns each test's name and result.
 pub fn run_tests(prog: &sir::Program, host: &mut dyn Host, options: &Options) -> Vec<(String, TestResult)> {
     run_tests_report(prog, host, options).into_iter().map(|(n, r, _)| (n, r)).collect()
+}
+
+/// Runs the benchmark `function` (`bench#N`) once, with a `Bench` whose
+/// loop runs `iterations` times (17, "Benchmarks").
+pub fn run_bench(
+    prog: &sir::Program,
+    host: &mut dyn Host,
+    options: &Options,
+    function: &str,
+    iterations: u64,
+) -> TestResult {
+    on_big_stack(host, |host| {
+        let mut i = Interp::new(prog, host, options);
+        i.run_bench(function, iterations)
+    })
+    .unwrap_or_else(|| TestResult::Failed("the benchmark's thread could not start".into()))
 }
 
 /// Runs every test, returning with each result what the monitor saw.
@@ -435,19 +594,20 @@ pub fn run_tests_report(
     host: &mut dyn Host,
     options: &Options,
 ) -> Vec<(String, TestResult, RunReport)> {
-    let tests = prog.tests.clone();
-    on_big_stack(host, |host| {
-        tests
-            .iter()
-            .map(|(name, f)| {
-                let mut i = Interp::new(prog, host, options);
-                let r = i.run_test(f);
-                let status = if matches!(r, TestResult::Passed) { exit::OK } else { exit::ERROR };
-                (name.clone(), r, i.report(status))
-            })
-            .collect()
-    })
-    .unwrap_or_default()
+    let all: Vec<usize> = (0..prog.tests.len()).collect();
+    run_tests_report_at(prog, host, options, &all)
+}
+
+/// Runs the tests at these indices (in declaration order), each with a
+/// fresh interpreter, those that take no `System` in parallel
+/// (`parallel.rs`).
+pub fn run_tests_report_at(
+    prog: &sir::Program,
+    host: &mut dyn Host,
+    options: &Options,
+    which: &[usize],
+) -> Vec<(String, TestResult, RunReport)> {
+    parallel::run(prog, host, options, which)
 }
 
 pub(crate) fn on_big_stack<R: Send>(

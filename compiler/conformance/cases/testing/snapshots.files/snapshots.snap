@@ -1,0 +1,14 @@
+# The snapshots of `snapshots.sisu` (17): `sisu test --update` rewrites this file.
+
+--- a point
+  Point(x=1, y=2)
+
+--- several snapshots in one test
+  [1, 2, 3]
+
+--- several snapshots in one test #2
+  plain
+  text
+
+--- a changed rendering
+  Point(x=3, y=5)

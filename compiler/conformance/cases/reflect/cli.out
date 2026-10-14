@@ -1,0 +1,7 @@
+name=x verbose=False quiet=True ratio=0.5 out=out.txt count=3 files=[]
+name=y verbose=True quiet=False ratio=1.25 out=o.txt count=3 files=["a", "b", "--c"]
+error: MissingArgument(name="--name")
+error: InvalidValue(name="--ratio", value="inf")
+error: InvalidValue(name="--verbose", value="maybe")
+error: UnknownOption(name="--colour")
+error: MissingValue(name="--name")

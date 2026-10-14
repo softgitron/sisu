@@ -1,0 +1,52 @@
+# Nodes of a `Sim` on one in-process network (17): a node listens at its
+# own name; a connection is refused while either end is down or the two
+# are partitioned, and goes through again once they are healed or
+# restarted.
+
+from std.sim import Sim
+
+def serve_once(listener: Listener) -> ! {NetError, TaskError}:
+    var conn = listener.accept()?
+    let got = conn.read_to_end()?
+    conn.write(got)?
+    conn.close()
+    return Ok(())
+
+def ping(net: Net, host: str) -> bytes ! {NetError, TaskError}:
+    var c = net.connect(host, 7)?
+    c.write(b"ping")?
+    c.close()
+    return c.read_to_end()
+
+test "a client reaches the server by its node's name":
+    let sim = Sim.new()
+    let server = sim.node("server")
+    let client = sim.node("client")
+    let listener = sim.system(server).net.listen(7).expect("listening")
+    let back = task.scope do s:
+        s.spawn(() -> serve_once(listener))
+        return ping(sim.system(client).net, "server")
+    assert back == Ok(b"ping")
+
+test "a partition refuses, and healing lets it through":
+    let sim = Sim.new()
+    let server = sim.node("server")
+    let client = sim.node("client")
+    let listener = sim.system(server).net.listen(7).expect("listening")
+    sim.partition(server, client)
+    assert ping(sim.system(client).net, "server").is_err()
+    sim.heal(server, client)
+    let back = task.scope do s:
+        s.spawn(() -> serve_once(listener))
+        return ping(sim.system(client).net, "server")
+    assert back == Ok(b"ping")
+
+test "a crashed node is off the network until it restarts":
+    let sim = Sim.new()
+    let server = sim.node("server")
+    let client = sim.node("client")
+    sim.crash(server)
+    assert sim.system(server).net.listen(7).is_err()
+    assert ping(sim.system(client).net, "server").is_err()
+    sim.restart(server)
+    assert sim.system(server).net.listen(7).is_ok()

@@ -46,6 +46,45 @@ pub struct InstSig {
 impl Checker<'_> {
     // ---------------------------------------------------------------- static paths
 
+    /// Whether `d` is `cap.Fake`, whose argument is a trait.
+    pub fn is_fake_marker(&self, d: DefId) -> bool {
+        if self.prog.modules[self.module.0 as usize].is_std {
+            return false;
+        }
+        let def = self.prog.def(d);
+        let m = &self.prog.modules[def.module.0 as usize];
+        def.name == "Fake" && m.is_std && m.name == "cap"
+    }
+
+    /// The fake of the trait `args` names (`cap.Fake[Mailer]`).
+    fn fake_of(&mut self, args: &[ast::IndexArg], range: TextRange) -> Ty {
+        match args {
+            [ast::IndexArg::Expr(x)] => {
+                let name = match &x.kind {
+                    ast::ExprKind::Name(n) => Some(n.clone()),
+                    _ => None,
+                };
+                self.fake_named(name, x.range)
+            }
+            _ => self.fake_named(None, range),
+        }
+    }
+
+    /// The fake of the trait named `name`, written at `range`.
+    pub fn fake_named(&mut self, name: Option<String>, range: TextRange) -> Ty {
+        let prog = self.prog;
+        let fake = name.as_ref().and_then(|n| prog.lookup(self.module, n)).and_then(|d| prog.fakes.get(&d));
+        match fake {
+            Some(f) => Ty::Adt(*f, Vec::new()),
+            None => {
+                let name = name.unwrap_or_else(|| self.source_text(range));
+                let d = self.error(msg::COMPTIME_NO_FAKE, range).with("name", name);
+                self.report(d);
+                Ty::Error
+            }
+        }
+    }
+
     pub fn static_path(&mut self, e: &ast::Expr) -> Option<StaticPath> {
         let prog = self.prog;
         match &e.kind {
@@ -90,6 +129,12 @@ impl Checker<'_> {
             },
             ast::ExprKind::Index { base, args } => {
                 let path = self.static_path(base)?;
+                // `cap.Fake[Trait]`: the fake the compiler wrote (17).
+                if let StaticPath::Type(Ty::Adt(d, _)) = &path
+                    && self.is_fake_marker(*d)
+                {
+                    return Some(StaticPath::Type(self.fake_of(args, e.range)));
+                }
                 let tys: Vec<Ty> = args
                     .iter()
                     .map(|a| match a {
@@ -207,6 +252,22 @@ impl Checker<'_> {
                     && let Some((args, trailing, _)) = call
                 {
                     return self.refine_try(&ty, args, trailing, range);
+                }
+                // `X.__default_f()`: the default of the field `f` of the
+                // struct `X`, which code unfolded from a template calls for
+                // `reflect.default_of(f)` (08).
+                if let Some(field) = name.text.strip_prefix("__default_")
+                    && let Ty::Adt(d, targs) = &ty
+                    && let Some(si) = prog.struct_info(*d)
+                    && let Some((fi, f)) = si.fields.iter().enumerate().find(|(_, f)| f.name == field)
+                    && f.default.is_some()
+                    && let Some((args, trailing, _)) = call
+                {
+                    if !args.is_empty() || trailing.is_some() {
+                        self.check_args_loosely(args);
+                    }
+                    let fty = f.ty.subst(targs);
+                    return Expr::new(ExprKind::FieldDefault { def: *d, field: fi as u32 }, fty, span);
                 }
                 // An associated constant (`Money.ZERO`).
                 if let Some(k) = ty.key()
@@ -389,6 +450,45 @@ impl Checker<'_> {
 
     // ---------------------------------------------------------------- calls
 
+    /// `embed("path")` (08): the text of the file, read by the driver at
+    /// compile time and recorded with the build's inputs, as a literal.
+    fn embed_call(&mut self, args: &[ast::Arg], trailing: Option<&ast::Closure>, range: TextRange) -> Expr {
+        let span = self.span(range);
+        let path = match (args, trailing) {
+            ([a], None) if a.name.is_none() => match &a.value.kind {
+                ast::ExprKind::Str(parts) if parts.iter().all(|p| matches!(p, ast::StrPart::Text(_))) => {
+                    Some(sisu_syntax::ast::build::plain_text(parts))
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        let Some(path) = path else {
+            let d = self.error(msg::COMPTIME_EMBED_PATH, range);
+            self.report(d);
+            return Expr::error(span);
+        };
+        match self.prog.embedded.get(&path) {
+            Some(Ok(text)) => Expr::new(ExprKind::Str(text.clone()), Ty::Str, span),
+            Some(Err(why)) => {
+                let d = self
+                    .error(msg::COMPTIME_EMBED_FAILED, range)
+                    .with("path", path)
+                    .with("reason", why.clone());
+                self.report(d);
+                Expr::error(span)
+            }
+            None => {
+                let d = self
+                    .error(msg::COMPTIME_EMBED_FAILED, range)
+                    .with("path", path)
+                    .with("reason", "only the program's own file may embed, in stage 0".to_string());
+                self.report(d);
+                Expr::error(span)
+            }
+        }
+    }
+
     pub fn call_expr(
         &mut self,
         callee: &ast::Expr,
@@ -410,6 +510,11 @@ impl Checker<'_> {
             ast::ExprKind::OptField { base, name } => {
                 return self.opt_chain(base, name, Some((args, trailing)), range);
             }
+            ast::ExprKind::Index { base, args: targs } if self.generator_kind(base).is_some() => {
+                return self
+                    .generator_site(callee, base, targs, Some(args), expected)
+                    .unwrap_or(Expr::error(span));
+            }
             ast::ExprKind::Index { .. } => match self.static_path(callee) {
                 Some(StaticPath::Fn(d, tys)) => {
                     return self.call_fn(d, tys, None, None, args, trailing, range, expected);
@@ -422,7 +527,9 @@ impl Checker<'_> {
                     return self.construct(t, args, trailing, range, expected);
                 }
             }
-            ast::ExprKind::Name(n) if n == "old" && self.lookup_local(n).is_none() && prog.lookup(self.module, n).is_none() => {
+            ast::ExprKind::Name(n)
+                if n == "old" && self.lookup_local(n).is_none() && prog.lookup(self.module, n).is_none() =>
+            {
                 return self.old_expr(args, trailing, range);
             }
             ast::ExprKind::Name(n) if self.lookup_local(n).is_none() && n != "it" => {
@@ -432,6 +539,9 @@ impl Checker<'_> {
                     return self.variant_call(def, vi, args, trailing, range, Some(exp));
                 }
                 if let Some(d) = prog.lookup(self.module, n) {
+                    if prog.fn_info(d).and_then(|f| f.intrinsic.as_deref()) == Some("compiler.embed") {
+                        return self.embed_call(args, trailing, range);
+                    }
                     return self.call_def(d, None, args, trailing, range, expected);
                 }
                 if let Some((def, vi)) = self.global_variant(n, callee.range) {
@@ -1243,7 +1353,7 @@ impl Checker<'_> {
             // the receiver; one that changes it is checked where the
             // receiver is borrowed `mut` (E0812).
             if self.refinement_of(&base).is_some() {
-                recv = self.unrefined(recv);
+                recv = self.unrefined_once(recv);
                 continue;
             }
             // A `Box` and a `Shared` lend their methods' receiver to what

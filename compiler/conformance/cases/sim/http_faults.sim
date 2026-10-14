@@ -1,0 +1,15 @@
+test "a client that retries gets its answer" ... ok
+test "a client that does not retry" ... FAILED
+
+test "a client that does not retry" ... FAILED
+with schedule seed 5; `--schedule-seed 5` runs it again
+panic: assertion failed: body == Ok(b"/one\n")
+    body == Ok(b"/one\n")
+    │       │
+    │       Ok(b"/one\n")
+    Err(Network(message="NotAllowed(address=\"a fault the simulation made\")"))
+  at test "a client that does not retry" (http_faults.sisu:65:5)
+replay: sisu test --replay 1-66da16fbfe5b5010-0.0.1-t1-s5-r0-m300000 http_faults.sisu
+
+1 passed, 1 failed, 0 blocked
+explored 12 schedules per test (seeds 0 to 11)

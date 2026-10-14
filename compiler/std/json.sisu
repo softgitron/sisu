@@ -1,0 +1,67 @@
+##! std.json for stage 0 (11): the text of JSON values. `encode[T]` is a
+##! generic function over reflection (08, "Reflection"), made for each type
+##! it encodes; `quote` is the part every encoder shares. Decoding waits for
+##! `Decode` (11).
+
+## `s` as a JSON string: in double quotes, with `"`, `\` and the control
+## characters escaped.
+pure def quote(s: str) -> String:
+    var out = "\"".to_string()
+    for c in s.chars():
+        if c == '"':
+            out.push("\\\"")
+        elif c == '\\':
+            out.push("\\\\")
+        elif c == '\n':
+            out.push("\\n")
+        elif c == '\r':
+            out.push("\\r")
+        elif c == '\t':
+            out.push("\\t")
+        elif c.code() < 32:
+            out.push("\\u{c.code():04x}")
+        else:
+            out.push_char(c)
+    out.push("\"")
+    return out
+
+## `value` as JSON text, for any type reflection can take apart (08):
+## numbers and booleans as they display (`true`, `false`), text quoted, a
+## list as an array, an option as its value or `null`, a struct as an
+## object of its fields in order, and an enum's variant as its name when
+## it has no fields, else an object of the name and its fields. A type it
+## cannot encode is a compile error where it is encoded.
+def encode[T](value: T) -> String:
+    if comptime reflect.is_bool(T):
+        return if value: "true".to_string() else: "false".to_string()
+    elif comptime reflect.is_int(T) or reflect.is_float(T):
+        return "{value}"
+    elif comptime reflect.is_str(T):
+        return quote(value)
+    elif comptime reflect.is_list(T):
+        var parts: list[String] = []
+        for x in value.iter():
+            parts.push(encode(x))
+        return "[{parts.join(",")}]"
+    elif comptime reflect.is_option(T):
+        return match value:
+            case Some(x): encode(x)
+            case None: "null".to_string()
+    elif comptime reflect.is_struct(T):
+        var parts: list[String] = []
+        comptime for f in reflect.fields_of(T):
+            parts.push("{quote(f.name)}:{encode(value.[f])}")
+        return "{{{parts.join(",")}}}"
+    elif comptime reflect.is_enum(T):
+        match value:
+            comptime for V in reflect.variants_of(T):
+                case V(..):
+                    comptime if len(V.fields) == 0:
+                        return quote(V.name)
+                    else:
+                        var parts: list[String] = []
+                        comptime for f in V.fields:
+                            parts.push("{quote(f.name)}:{encode(value.[f])}")
+                        return "{{{quote(V.name)}:{{{parts.join(",")}}}}}"
+    else:
+        comptime panic("json.encode: no JSON form for `{reflect.name_of(T)}`")

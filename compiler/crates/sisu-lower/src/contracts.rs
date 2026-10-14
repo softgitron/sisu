@@ -36,6 +36,15 @@ impl ContractLevel {
             _ => None,
         }
     }
+
+    /// The level as `--contracts` spells it.
+    pub fn name(self) -> &'static str {
+        match self {
+            ContractLevel::Off => "off",
+            ContractLevel::Preconditions => "preconditions",
+            ContractLevel::All => "all",
+        }
+    }
 }
 
 /// The most parts of a condition a failure shows.
@@ -122,7 +131,13 @@ impl FnLower<'_, '_> {
     }
 
     /// The invariant check of a struct, on the value at `target`.
-    fn call_invariant(&mut self, check: sisu_resolve::DefId, args: &[Ty], target: Place, loc: Option<sir::Loc>) {
+    fn call_invariant(
+        &mut self,
+        check: sisu_resolve::DefId,
+        args: &[Ty],
+        target: Place,
+        loc: Option<sir::Loc>,
+    ) {
         let prog = self.ctx.prog;
         let Some(f) = prog.fn_info(check) else { return };
         let owner = f.owner.clone().unwrap_or(Ty::Error).subst(args);
@@ -137,7 +152,14 @@ impl FnLower<'_, '_> {
         };
         let tys = args.iter().map(|t| self.ctx.ty(t)).collect();
         let u = self.unit();
-        self.emit(StatementKind::Call { dest: u, callee: Callee::Fn(self.ctx.fn_name(check), tys), args: vec![arg] }, loc);
+        self.emit(
+            StatementKind::Call {
+                dest: u,
+                callee: Callee::Fn(self.ctx.fn_name(check), tys),
+                args: vec![arg],
+            },
+            loc,
+        );
     }
 
     /// After a struct is built at `dest`: its invariant, if it has one.
@@ -149,6 +171,12 @@ impl FnLower<'_, '_> {
         loc: Option<sir::Loc>,
     ) {
         if self.ctx.level < ContractLevel::All {
+            return;
+        }
+        // A generator the compiler wrote refuses a case that breaks the
+        // invariant instead (17).
+        let prog = self.ctx.prog;
+        if prog.modules[prog.def(self.body.def).module.0 as usize].name.starts_with("<arbitrary>/") {
             return;
         }
         let Some(check) = self.ctx.prog.invariant_check(def) else { return };
@@ -258,7 +286,12 @@ impl FnLower<'_, '_> {
     }
 
     /// `assert cond` whose failure shows every part of `cond`.
-    pub fn assert_showing_parts(&mut self, cond: &thir::Expr, message: Option<&thir::Expr>, span: sisu_diag::Span) {
+    pub fn assert_showing_parts(
+        &mut self,
+        cond: &thir::Expr,
+        message: Option<&thir::Expr>,
+        span: sisu_diag::Span,
+    ) {
         let loc = self.ctx.loc(span);
         let v = self.operand(cond);
         let ok = self.new_block();
@@ -322,7 +355,7 @@ impl FnLower<'_, '_> {
             if out.len() >= MAX_PARTS {
                 return;
             }
-            let mut push = |at: usize, x: &'e thir::Expr, out: &mut Vec<(u32, &'e thir::Expr)>| {
+            let push = |at: usize, x: &'e thir::Expr, out: &mut Vec<(u32, &'e thir::Expr)>| {
                 if top || matches!(x.ty, Ty::Fn(_) | Ty::Never | Ty::Unit | Ty::Error) {
                     return;
                 }
@@ -398,9 +431,9 @@ impl FnLower<'_, '_> {
                 }
                 ExprKind::Logic { lhs, .. } => walk(me, lhs, false, text, col, out),
                 ExprKind::Coalesce { opt, .. } => walk(me, opt, false, text, col, out),
-                ExprKind::Coerce { expr, .. } | ExprKind::Deref(expr) | ExprKind::Borrow { place: expr, .. } => {
-                    walk(me, expr, top, text, col, out)
-                }
+                ExprKind::Coerce { expr, .. }
+                | ExprKind::Deref(expr)
+                | ExprKind::Borrow { place: expr, .. } => walk(me, expr, top, text, col, out),
                 ExprKind::CopyOf(inner) => {
                     push(start, e, out);
                     walk(me, inner, false, text, col, out);
@@ -426,7 +459,11 @@ impl FnLower<'_, '_> {
         let mut items = Vec::new();
         for (c, e) in parts {
             let shown = thir::Expr::new(
-                ExprKind::Interp(vec![InterpPart::Value { expr: (*e).clone(), debug: None, spec: "?".into() }]),
+                ExprKind::Interp(vec![InterpPart::Value {
+                    expr: (*e).clone(),
+                    debug: None,
+                    spec: "?".into(),
+                }]),
                 string_ty.clone(),
                 e.span,
             );
@@ -456,7 +493,9 @@ impl FnLower<'_, '_> {
     }
 
     /// `X.try_from(v)`: `Ok(v)` when the predicate holds for `v`, else
-    /// `Err(Unsatisfied(ty=..., predicate=...))`.
+    /// `Err(Unsatisfied(ty=..., predicate=...))`. For a refinement of a
+    /// refinement, each predicate in turn, the outermost base's first, and
+    /// the error names the first that does not hold.
     pub fn refine_try(
         &mut self,
         dest: Place,
@@ -466,70 +505,113 @@ impl FnLower<'_, '_> {
         loc: Option<sir::Loc>,
     ) {
         let prog = self.ctx.prog;
-        let Some(r) = prog.refinement(refinement) else { return };
-        let Some(pred) = r.predicate else { return };
-        let base = r.base.subst(type_args);
+        let mut chain: Vec<(sisu_resolve::DefId, Vec<Ty>)> = Vec::new();
+        let mut at = Ty::Adt(refinement, type_args.to_vec());
+        while let Ty::Adt(d, args) = &at {
+            let Some(base) = prog.refinement_base(*d, args) else { break };
+            chain.push((*d, args.clone()));
+            if chain.len() > 64 {
+                break;
+            }
+            at = base;
+        }
+        chain.reverse();
         let t = self.temp(&value.ty);
         self.into(Place::local(t), value);
         if self.needs_drop(&value.ty) {
             self.register(DropEntry::Local(t));
             self.split();
         }
-        let arg = if self.needs_drop(&base) || !prog.is_copy(&base) {
-            let r = self.temp_sir(sir::Type::Ref(Box::new(self.ctx.ty(&base)), false));
-            self.assign(Place::local(r), Rvalue::Ref(Place::local(t), false), loc);
-            Operand::Copy(Place::local(r))
-        } else {
-            Operand::Copy(Place::local(t))
-        };
-        let ok = self.temp_sir(sir::Type::Bool);
-        let tys = type_args.iter().map(|x| self.ctx.ty(x)).collect();
-        self.emit(
-            StatementKind::Call { dest: Place::local(ok), callee: Callee::Fn(self.ctx.fn_name(pred), tys), args: vec![arg] },
-            loc,
-        );
-        let yes = self.new_block();
-        let no = self.new_block();
         let join = self.new_block();
-        self.terminate(
-            Terminator::Switch { value: Operand::Copy(Place::local(ok)), cases: vec![(0, no)], default: yes },
-            loc,
-        );
-        self.switch_to(yes);
+        for (rd, rargs) in &chain {
+            let Some(r) = prog.refinement(*rd) else { continue };
+            let Some(pred) = r.predicate else { continue };
+            let base = r.base.subst(rargs);
+            let arg = if self.needs_drop(&base) || !prog.is_copy(&base) {
+                let r = self.temp_sir(sir::Type::Ref(Box::new(self.ctx.ty(&base)), false));
+                self.assign(Place::local(r), Rvalue::Ref(Place::local(t), false), loc);
+                Operand::Copy(Place::local(r))
+            } else {
+                Operand::Copy(Place::local(t))
+            };
+            let ok = self.temp_sir(sir::Type::Bool);
+            let tys = rargs.iter().map(|x| self.ctx.ty(x)).collect();
+            self.emit(
+                StatementKind::Call {
+                    dest: Place::local(ok),
+                    callee: Callee::Fn(self.ctx.fn_name(pred), tys),
+                    args: vec![arg],
+                },
+                loc,
+            );
+            let yes = self.new_block();
+            let no = self.new_block();
+            self.terminate(
+                Terminator::Switch {
+                    value: Operand::Copy(Place::local(ok)),
+                    cases: vec![(0, no)],
+                    default: yes,
+                },
+                loc,
+            );
+            self.switch_to(no);
+            let shown: Vec<String> = rargs.iter().map(|x| prog.display(x)).collect();
+            let name = if shown.is_empty() {
+                prog.qualified_name(*rd)
+            } else {
+                format!("{}[{}]", prog.qualified_name(*rd), shown.join(", "))
+            };
+            let string_ty = prog.wk.string.map(|s| Ty::Adt(s, Vec::new())).unwrap_or(Ty::Error);
+            let a = self.temp(&string_ty);
+            self.intrinsic_call(
+                Place::local(a),
+                "String.new",
+                Vec::new(),
+                vec![Operand::Const(Const::Str(name))],
+                loc,
+            );
+            self.register(DropEntry::Local(a));
+            self.split();
+            let b = self.temp(&string_ty);
+            self.intrinsic_call(
+                Place::local(b),
+                "String.new",
+                Vec::new(),
+                vec![Operand::Const(Const::Str(r.text.clone()))],
+                loc,
+            );
+            self.register(DropEntry::Local(b));
+            self.split();
+            let err = prog
+                .lookup_in(prog.prelude, "RefinementError")
+                .map(|d| Ty::ErrSet(vec![d]))
+                .unwrap_or(Ty::Error);
+            let e = self.temp(&err);
+            self.assign(
+                Place::local(e),
+                Rvalue::Aggregate(
+                    sir::Aggregate::Variant("RefinementError".into(), "Unsatisfied".into()),
+                    vec![Operand::Move(Place::local(a)), Operand::Move(Place::local(b))],
+                ),
+                loc,
+            );
+            self.register(DropEntry::Local(e));
+            self.split();
+            self.assign(
+                dest.clone(),
+                Rvalue::Aggregate(
+                    sir::Aggregate::Variant("Result".into(), "Err".into()),
+                    vec![Operand::Move(Place::local(e))],
+                ),
+                loc,
+            );
+            self.goto(join);
+            self.switch_to(yes);
+        }
         let v = self.copy_or_move(Place::local(t), &value.ty);
-        self.assign(dest.clone(), Rvalue::Aggregate(sir::Aggregate::Variant("Result".into(), "Ok".into()), vec![v]), loc);
-        self.goto(join);
-        self.switch_to(no);
-        let shown: Vec<String> = type_args.iter().map(|x| prog.display(x)).collect();
-        let name = if shown.is_empty() {
-            prog.qualified_name(refinement)
-        } else {
-            format!("{}[{}]", prog.qualified_name(refinement), shown.join(", "))
-        };
-        let string_ty = prog.wk.string.map(|s| Ty::Adt(s, Vec::new())).unwrap_or(Ty::Error);
-        let a = self.temp(&string_ty);
-        self.intrinsic_call(Place::local(a), "String.new", Vec::new(), vec![Operand::Const(Const::Str(name))], loc);
-        self.register(DropEntry::Local(a));
-        self.split();
-        let b = self.temp(&string_ty);
-        self.intrinsic_call(Place::local(b), "String.new", Vec::new(), vec![Operand::Const(Const::Str(r.text.clone()))], loc);
-        self.register(DropEntry::Local(b));
-        self.split();
-        let err = prog.lookup_in(prog.prelude, "RefinementError").map(|d| Ty::ErrSet(vec![d])).unwrap_or(Ty::Error);
-        let e = self.temp(&err);
-        self.assign(
-            Place::local(e),
-            Rvalue::Aggregate(
-                sir::Aggregate::Variant("RefinementError".into(), "Unsatisfied".into()),
-                vec![Operand::Move(Place::local(a)), Operand::Move(Place::local(b))],
-            ),
-            loc,
-        );
-        self.register(DropEntry::Local(e));
-        self.split();
         self.assign(
             dest,
-            Rvalue::Aggregate(sir::Aggregate::Variant("Result".into(), "Err".into()), vec![Operand::Move(Place::local(e))]),
+            Rvalue::Aggregate(sir::Aggregate::Variant("Result".into(), "Ok".into()), vec![v]),
             loc,
         );
         self.goto(join);

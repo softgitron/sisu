@@ -48,6 +48,23 @@ fn examples_with_a_main_start_with_the_proposal() {
     }
 }
 
+/// proposal/examples/contracts.sisu runs as the case
+/// `contracts/proposal_contracts.sisu`: the example unchanged, then what it
+/// leaves undeclared (`Money`, `TcpListener`) and a `main`.
+#[test]
+fn contracts_example_starts_with_the_proposal() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let original =
+        std::fs::read_to_string(root.join("../proposal/examples/contracts.sisu")).unwrap_or_default();
+    assert!(!original.is_empty(), "missing proposal/examples/contracts.sisu");
+    let case = std::fs::read_to_string(root.join("conformance/cases/contracts/proposal_contracts.sisu"))
+        .unwrap_or_default();
+    assert!(
+        case.starts_with(&original),
+        "contracts/proposal_contracts.sisu no longer starts with proposal/examples/contracts.sisu"
+    );
+}
+
 /// The part of proposal/examples/ownership.sisu that stage 0 can run
 /// (everything before `Shared`, which needs `Mutex`, `Arena` and tasks) is
 /// the conformance case `ownership/proposal_core.sisu`, kept identical.
@@ -136,4 +153,51 @@ fn http_tests_pass_under_a_thousand_schedules() {
     assert!(out.status.success(), "sisu test --explore 1000 failed:\n{stdout}");
     assert!(stdout.contains("0 failed"), "{stdout}");
     assert!(stdout.contains("explored 1000 schedules per test"), "{stdout}");
+}
+
+/// The sections of proposal/examples/comptime.sisu that stage 0 runs (the
+/// JSON encoder over reflection, the user-defined derive, and conditional
+/// compilation with its test) are in the case
+/// `reflect/proposal_comptime.sisu`, each kept identical.
+#[test]
+fn comptime_sections_match_the_proposal() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let original =
+        std::fs::read_to_string(root.join("../proposal/examples/comptime.sisu")).unwrap_or_default();
+    let case = std::fs::read_to_string(root.join("conformance/cases/reflect/proposal_comptime.sisu"))
+        .unwrap_or_default();
+    let sections = [
+        ("# Reflection: a generic JSON encoder with no macro.", Some("# A user-defined derive")),
+        ("# A user-defined derive: any trait can provide one.", Some("# A checked string DSL")),
+        ("# Conditional compilation: both branches must type-check.", None),
+    ];
+    for (start, end) in sections {
+        let from = original.find(start);
+        assert!(from.is_some(), "proposal/examples/comptime.sisu has no section `{start}`");
+        let from = from.unwrap_or(0);
+        let to = end.and_then(|e| original.find(e)).unwrap_or(original.len());
+        let section = original[from..to].trim_end();
+        assert!(
+            case.contains(section),
+            "reflect/proposal_comptime.sisu no longer holds the section `{start}`"
+        );
+    }
+}
+
+/// proposal/examples/testing.sisu runs as the case
+/// `testing/proposal_testing.sisu`: the example unchanged, then the
+/// functions and types it tests (`parse_int`, `load_config`, `Cache`,
+/// `Options`), which it leaves to the program.
+#[test]
+fn testing_example_starts_with_the_proposal() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let original =
+        std::fs::read_to_string(root.join("../proposal/examples/testing.sisu")).unwrap_or_default();
+    assert!(!original.is_empty(), "missing proposal/examples/testing.sisu");
+    let case = std::fs::read_to_string(root.join("conformance/cases/testing/proposal_testing.sisu"))
+        .unwrap_or_default();
+    assert!(
+        case.starts_with(&original),
+        "testing/proposal_testing.sisu no longer starts with proposal/examples/testing.sisu"
+    );
 }

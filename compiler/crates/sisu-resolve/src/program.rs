@@ -242,6 +242,16 @@ pub struct FnInfo {
     pub body: Option<ast::Block>,
     pub kind: FnKind,
     pub file: FileId,
+    /// Written by the compiler from code that is checked elsewhere too (a
+    /// struct's invariant as a `bool`): its diagnostics are not reported
+    /// again.
+    pub quiet: bool,
+    /// A generic function that reflects on its type parameters (08,
+    /// "Reflection"), or calls one with them: a template, checked and
+    /// lowered once per list of type arguments (`Program::instances`).
+    pub template: bool,
+    /// The template and type arguments an instance was made for.
+    pub instance_of: Option<(DefId, Vec<Ty>)>,
     /// The header has a syntax error: the result type is `Error`, calls are
     /// not checked against the parameters, and names the body cannot find
     /// (most likely parameters lost in the error) are not reported.
@@ -336,6 +346,7 @@ pub struct WellKnown {
     pub clock_ops: Option<DefId>,
     pub rand_ops: Option<DefId>,
     pub env_ops: Option<DefId>,
+    pub stdin_ops: Option<DefId>,
     pub proc_ops: Option<DefId>,
 }
 
@@ -350,10 +361,18 @@ pub struct Program {
     pub methods: HashMap<(TyKey, String), DefId>,
     /// Associated constants (`Money.ZERO`) by type and name.
     pub assoc_consts: HashMap<(TyKey, String), DefId>,
+    /// The generator the compiler wrote for each type written in
+    /// `arbitrary[T]` or `exhaustive[T](...)`, by its spelling without
+    /// spaces, or why it has none (17).
+    pub arbitrary_sites: HashMap<String, Result<String, String>>,
     /// Every variant by its unqualified name: (enum or error set, index).
     pub variants: HashMap<String, Vec<(DefId, u32)>>,
     /// Tests in declaration order.
     pub tests: Vec<DefId>,
+    /// The `@tag("...")`s of each test that has some (17).
+    pub test_tags: HashMap<DefId, Vec<String>>,
+    /// Benchmarks in declaration order (`bench "name"(b: Bench):`, 17).
+    pub benches: Vec<DefId>,
     /// Every trait impl, in declaration order.
     pub impls: Vec<DefId>,
     /// Names in top-level code of the root module that failed to parse; an
@@ -362,6 +381,44 @@ pub struct Program {
     /// `@comptime_budget(steps=N)` on a function or constant: the steps its
     /// `comptime` expressions may take (08), instead of the default.
     pub comptime_budgets: HashMap<DefId, u64>,
+    /// The instance of each template for each list of type arguments it is
+    /// called with (08, "Reflection").
+    pub instances: HashMap<(DefId, Vec<Ty>), DefId>,
+    /// Where each instance was first needed, in the program's own code.
+    pub instance_sites: HashMap<DefId, Span>,
+    /// The fake the compiler wrote for each of the program's traits that
+    /// `cap.Fake[Trait]` can name (17).
+    pub fakes: HashMap<DefId, DefId>,
+    /// The files `embed("path")` names, read by the driver: the text, or
+    /// why it could not be read (08).
+    pub embedded: HashMap<String, Result<String, String>>,
+}
+
+/// What the type checker asks of the next resolution (08, "Reflection"):
+/// an instance of a template for concrete type arguments, or that a
+/// generic function become a template itself, since it calls one with its
+/// own type parameters.
+///
+/// An instance request carries the call that first needed it: in the
+/// program's own code, which an instance needed by another instance
+/// inherits, so that an instance that cannot be made is reported there.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Request {
+    Instance { def: DefId, args: Vec<Ty>, site: Span },
+    Promote(DefId),
+}
+
+impl Request {
+    /// Whether the two ask for the same thing (wherever it was needed).
+    pub fn same(&self, other: &Request) -> bool {
+        match (self, other) {
+            (Request::Instance { def: a, args: x, .. }, Request::Instance { def: b, args: y, .. }) => {
+                a == b && x == y
+            }
+            (Request::Promote(a), Request::Promote(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 impl Program {
@@ -509,6 +566,7 @@ impl Program {
             "Rand" => wk.rand_ops,
             "Env" => wk.env_ops,
             "Proc" => wk.proc_ops,
+            "Stdin" => wk.stdin_ops,
             _ => None,
         }
     }
@@ -531,6 +589,7 @@ impl Program {
                                 | "HostRand"
                                 | "HostEnv"
                                 | "HostProc"
+                                | "HostStdin"
                         )
                     )
                     || (self.builtin(*d) == Some("Lent") && args.iter().any(|a| self.is_capability(a)))

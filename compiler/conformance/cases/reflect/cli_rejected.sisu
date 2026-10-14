@@ -1,0 +1,11 @@
+# A template that cannot be made for a type is a compile error at the call
+# that needs it, with the template's reason.
+
+import cli
+
+struct Timing:
+    every: Duration
+
+def main():
+    _ = cli.parse[Timing](["--every", "1"])
+    _ = cli.parse[int](["x"])

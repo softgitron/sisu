@@ -1,0 +1,127 @@
+# The compile-time module `reflect` (08, "Reflection"): a generic function
+# that asks about its type parameters is made once for each list of type
+# arguments it is called with, its compile-time code evaluated and the
+# rest checked as ordinary code.
+
+## A type's kind, decided at compile time.
+def kind[T]() -> String:
+    if comptime reflect.is_int(T):
+        return "int".to_string()
+    elif comptime reflect.is_float(T):
+        return "float".to_string()
+    elif comptime reflect.is_bool(T):
+        return "bool".to_string()
+    elif comptime reflect.is_char(T):
+        return "char".to_string()
+    elif comptime reflect.is_str(T):
+        return "text".to_string()
+    elif comptime reflect.is_list(T):
+        return "a list of {kind[reflect.elem_of(T)]()}"
+    elif comptime reflect.is_option(T):
+        return "an option of {kind[reflect.elem_of(T)]()}"
+    elif comptime reflect.is_tuple(T):
+        return "a tuple".to_string()
+    elif comptime reflect.is_struct(T):
+        return "a struct with {len(reflect.fields_of(T))} fields"
+    elif comptime reflect.is_enum(T):
+        return "an enum with {len(reflect.variants_of(T))} variants"
+    else:
+        return "something else".to_string()
+
+## The field names, as the proposal's `field_names` (08) computes them: a
+## comprehension over compile-time values is a compile-time list.
+def field_names[T]() -> list[str]:
+    return [f.name for f in reflect.fields_of(T)]
+
+## Each field with its type, and whether it has a default.
+def fields[T]() -> list[String]:
+    var out: list[String] = []
+    comptime for i, f in enumerate(reflect.fields_of(T)):
+        let default = if comptime f.default: " = ..." else: ""
+        out.push("{i} {f.name}: {reflect.name_of(f.ty)}{default}")
+    return out
+
+## Each variant with the names (or positions) of its fields.
+def variants[T]() -> list[String]:
+    var out: list[String] = []
+    comptime for v in reflect.variants_of(T):
+        out.push("{v.index} {v.name}({len(v.fields)}): {[f.name for f in v.fields]}")
+    return out
+
+## A variant's fields are reachable in an arm made for the variant.
+def describe[T](value: T) -> String:
+    match value:
+        comptime for V in reflect.variants_of(T):
+            case V(..):
+                var parts: list[String] = []
+                comptime for f in V.fields:
+                    parts.push("{f.name}={value.[f]:?}")
+                return "{V.name}[{parts.join(", ")}]"
+
+## The attributes written on a declaration are data.
+def attributes[T]() -> list[String]:
+    return ["{a.name}{a.args}" for a in reflect.attributes_of(T)]
+
+## Whether the type has an impl of a trait, by the trait's name.
+def area_or_none[T](x: T) -> String:
+    if comptime reflect.implements(T, "Area"):
+        return "{reflect.name_of(T)} has area {x.area()}"
+    else:
+        return "{reflect.name_of(T)} has no area"
+
+## A struct built from its fields: `reflect.construct` takes a dict whose
+## keys are known at compile time; a field it leaves out takes its
+## default, which `reflect.default_of` also gives.
+def doubled[T](value: T) -> T:
+    return reflect.construct(T, {f.name: value.[f] * 2 for f in reflect.fields_of(T) if not f.default})
+
+def defaults[T]() -> list[String]:
+    var out: list[String] = []
+    comptime for f in reflect.fields_of(T):
+        comptime if f.default:
+            out.push("{f.name} defaults to {reflect.default_of(f)}")
+    return out
+
+trait Area:
+    def area(self) -> int
+
+@derive(Debug)
+@route("/boxes", method="GET")
+struct Box:
+    width: int
+    height: int
+    label: String = "box"
+    invariant self.width >= 0
+
+impl Area for Box:
+    def area(self) -> int:
+        return self.width * self.height
+
+struct Dot:
+    pass
+
+enum Shape:
+    Circle(radius: int)
+    Rect(int, int)
+    Empty
+
+def main():
+    print(kind[int]())
+    print(kind[list[f64]]())
+    print(kind[Option[String]]())
+    print(kind[(int, bool)]())
+    print(kind[Box]())
+    print(kind[Shape]())
+    print(field_names[Box]())
+    for line in fields[Box]():
+        print(line)
+    for line in variants[Shape]():
+        print(line)
+    print(describe(Rect(2, 3)))
+    print(describe(Shape.Circle(radius=4)))
+    print(describe[Shape](Empty))
+    print(attributes[Box]())
+    print(area_or_none(Box(width=2, height=5)))
+    print(area_or_none(Dot()))
+    print("{doubled(Box(width=2, height=5, label="small")):?}")
+    print(defaults[Box]())

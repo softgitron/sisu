@@ -1,0 +1,19 @@
+# A constant where a refinement is expected is checked at compile time
+# (07: "statically when the value is a constant"); for a refinement of a
+# refinement, the base's predicate first.
+
+type Port = int where 1 <= self <= 65535
+type Small = Port where self < 1024
+type Name = String where len(self) > 0
+
+def demo():
+    let a: Port = 0
+    let b: Small = 4096
+    let c: Small = -1
+    let d: Port = 65535
+    let e: Name = ""
+    let f: Name = "ok"
+    _ = (a, b, c, d, e, f)
+
+def main():
+    demo()

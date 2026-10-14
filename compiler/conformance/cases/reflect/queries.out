@@ -1,0 +1,21 @@
+int
+a list of float
+an option of text
+a tuple
+a struct with 3 fields
+an enum with 3 variants
+["width", "height", "label"]
+0 width: int
+1 height: int
+2 label: String = ...
+0 Circle(1): [radius]
+1 Rect(2): [0, 1]
+2 Empty(0): []
+Rect[0=2, 1=3]
+Circle[radius=4]
+Empty[]
+["derive[Debug]", "route[\"/boxes\", method=\"GET\"]"]
+main.Box has area 10
+Dot has no area
+Box(width=4, height=10, label="box")
+["label defaults to box"]

@@ -53,6 +53,45 @@ impl Checked {
     }
 }
 
+/// The most times the query checks a program for the instances it needs.
+const MAX_ROUNDS: usize = 32;
+
+/// The files the program's `embed("path")` calls name, read relative to
+/// the program's own file (08): each text, or why it could not be read.
+fn embedded_files(
+    name: &str,
+    module: &ast::Module,
+) -> std::collections::HashMap<String, Result<String, String>> {
+    let mut out = std::collections::HashMap::new();
+    let dir = std::path::Path::new(name).parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    ast::visit::exprs_in_items(&module.items, &mut |e| {
+        if let ast::ExprKind::Call { callee, args, .. } = &e.kind
+            && matches!(&callee.kind, ast::ExprKind::Name(n) if n == "embed")
+            && let [a] = args.as_slice()
+            && let ast::ExprKind::Str(parts) = &a.value.kind
+            && parts.iter().all(|p| matches!(p, ast::StrPart::Text(_)))
+        {
+            let path = ast::build::plain_text(parts);
+            if out.contains_key(&path) {
+                return;
+            }
+            let read = if std::path::Path::new(&path).is_absolute() || path.split('/').any(|p| p == "..") {
+                Err("the path must stay inside the program's directory".to_string())
+            } else {
+                // The reason in words of its own, the same on every machine.
+                std::fs::read_to_string(dir.join(&path)).map_err(|e| match e.kind() {
+                    std::io::ErrorKind::NotFound => "there is no such file".to_string(),
+                    std::io::ErrorKind::PermissionDenied => "it may not be read".to_string(),
+                    std::io::ErrorKind::InvalidData => "it is not UTF-8 text".to_string(),
+                    _ => "it cannot be read".to_string(),
+                })
+            };
+            out.insert(path, read);
+        }
+    });
+    out
+}
+
 /// A diagnostic of the ownership family (`E04xx`).
 pub fn is_ownership_rule(d: &Diagnostic) -> bool {
     d.code().starts_with("E04")
@@ -95,6 +134,9 @@ pub struct Db {
     checked: HashMap<String, (u64, Rc<Checked>)>,
     lowered: HashMap<String, (u64, Rc<Lowered>)>,
     pub counters: Counters,
+    /// Which contracts the lowered program checks (07); part of the
+    /// lowered query's key.
+    pub contracts: sisu_lower::ContractLevel,
 }
 
 fn hash(text: &str) -> u64 {
@@ -150,9 +192,34 @@ impl Db {
         }
         let parsed = self.parsed(name)?;
         self.counters.check += 1;
-        let mut map = parsed.map.clone();
-        let r = sisu_resolve::resolve(&mut map, parsed.file, &parsed.module);
-        let (typed, type_diags) = sisu_typeck::check(&r.program, &map);
+        // The files `embed` names, read once, relative to the program.
+        let embedded = embedded_files(name, &parsed.module);
+        // The instances of templates the program needs (08, "Reflection"):
+        // check, declare what the check asked for, and check again, until
+        // it asks for nothing new.
+        let mut requests: Vec<sisu_resolve::Request> = Vec::new();
+        let mut rounds = 0;
+        let (map, r, typed, mut type_diags) = loop {
+            let mut map = parsed.map.clone();
+            let r = sisu_resolve::resolve_with(&mut map, parsed.file, &parsed.module, &requests, &embedded);
+            let (typed, type_diags) = sisu_typeck::check(&r.program, &map);
+            let fresh: Vec<sisu_resolve::Request> =
+                typed.requests.iter().filter(|q| !requests.iter().any(|r| r.same(q))).cloned().collect();
+            rounds += 1;
+            if fresh.is_empty() || rounds > MAX_ROUNDS {
+                break (map, r, typed, type_diags);
+            }
+            requests.extend(fresh);
+        };
+        if let Some(sisu_resolve::Request::Instance { def, .. } | sisu_resolve::Request::Promote(def)) =
+            typed.requests.iter().find(|q| !requests.iter().any(|r| r.same(q)))
+        {
+            type_diags.push(
+                Diagnostic::new(sisu_diag::msg::COMPTIME_INSTANCES_UNBOUNDED, r.program.def(*def).span)
+                    .with("name", r.program.def(*def).name.clone())
+                    .with("count", requests.len().to_string()),
+            );
+        }
         let mut diagnostics = parsed.parse.diagnostics.clone();
         // A line with a syntax error has no reliable meaning, so name and
         // type diagnostics on it would only repeat the syntax error.
@@ -162,6 +229,13 @@ impl Db {
         };
         diagnostics.extend(r.diagnostics.into_iter().filter(|d| !on_broken_line(d)));
         diagnostics.extend(type_diags.into_iter().filter(|d| !on_broken_line(d)));
+        // The generators and contract tests the compiler writes repeat the
+        // program's own contracts and types: when the program has an error,
+        // one in them is that error again.
+        let generated = |d: &Diagnostic| map.name(d.span.file).starts_with("<arbitrary>/");
+        if diagnostics.iter().any(|d| d.is_error() && !generated(d)) {
+            diagnostics.retain(|d| !generated(d));
+        }
         sisu_diag::diagnostic::sort(&mut diagnostics);
         let c = Rc::new(Checked { map, file: parsed.file, program: r.program, typed, diagnostics });
         self.checked.insert(name.to_string(), (h, c.clone()));
@@ -173,6 +247,7 @@ impl Db {
     /// declarations.
     pub fn lowered(&mut self, name: &str) -> Option<Rc<Lowered>> {
         let (_, h) = self.key(name)?;
+        let h = h ^ (self.contracts as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
         if let Some((k, s)) = self.lowered.get(name)
             && *k == h
         {
@@ -183,7 +258,7 @@ impl Db {
             return None;
         }
         self.counters.lower += 1;
-        let lowered = sisu_lower::lower(&c.program, &c.typed, &c.map);
+        let lowered = sisu_lower::lower_with(&c.program, &c.typed, &c.map, self.contracts);
         let mut checked = sisu_borrowck::check(&lowered, &sisu_borrowck::Options::default());
         let files = source_files(&c.map, &checked.program);
         let by_finding: Vec<Diagnostic> =
@@ -208,6 +283,22 @@ impl Db {
         });
         self.lowered.insert(name.to_string(), (h, l.clone()));
         Some(l)
+    }
+
+    /// The SIR of a program the ownership checker accepted, keeping the
+    /// functions `extra` names as well (the ones a transcript test's run
+    /// time calls, 17); not kept, since only `sisu test` asks.
+    pub fn sir_with(&mut self, name: &str, extra: &[&str]) -> Option<sir::Program> {
+        let c = self.checked(name)?;
+        if c.blocks_lowering() {
+            return None;
+        }
+        let lowered = sisu_lower::lower_for(&c.program, &c.typed, &c.map, self.contracts, extra);
+        let mut checked = sisu_borrowck::check(&lowered, &sisu_borrowck::Options::default());
+        if !checked.findings.is_empty() || !sisu_interp::comptime::evaluate(&mut checked.program).is_empty() {
+            return None;
+        }
+        Some(checked.program)
     }
 
     /// The SIR of a program without front-end errors, drops placed.

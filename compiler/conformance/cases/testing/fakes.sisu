@@ -1,0 +1,54 @@
+# `cap.Fake[Trait]` is a recording fake of one of the program's traits
+# (17): it logs each call, returns the results queued for each method
+# (the last one again once the others are used), and panics for a method
+# called with nothing queued. Copies of a fake share what it recorded.
+
+error MailError:
+    Refused(reason: String)
+
+trait Mailer:
+    def send(self, to: str, body: str) -> ! MailError
+    def outbox(self) -> int
+    def flush(mut self)
+
+def welcome[M: Mailer](m: M, to: str) -> ! MailError:
+    m.send(to, "welcome")?
+    return Ok(())
+
+def notify_all(own m: Box[dyn Mailer], people: list[str]) -> int:
+    var failed = 0
+    for p in people:
+        if m.send(p, "news").is_err():
+            failed += 1
+    return failed
+
+test "signup sends one welcome":
+    let fake = cap.Fake[Mailer].new()
+    fake.on_send(Ok(()))
+    welcome(fake, "bob@example.com").expect("queued Ok")
+    assert fake.calls() == ["send(\"bob@example.com\", \"welcome\")"]
+
+test "results are used in order, the last one repeats":
+    let fake = cap.Fake[Mailer].new()
+    fake.on_send(Err(Refused(reason="full".to_string())))
+    fake.on_send(Ok(()))
+    assert welcome(fake, "a").is_err()
+    assert welcome(fake, "b").is_ok()
+    assert welcome(fake, "c").is_ok()
+    assert len(fake.calls()) == 3
+
+test "a copy given away records into the same log":
+    let fake = cap.Fake[Mailer].new()
+    fake.on_send(Ok(()))
+    let failed = notify_all(Box(fake), ["x", "y"])
+    assert failed == 0
+    assert fake.calls() == ["send(\"x\", \"news\")", "send(\"y\", \"news\")"]
+
+test "a method with no result needs nothing queued":
+    var fake = cap.Fake[Mailer].new()
+    fake.flush()
+    assert fake.calls() == ["flush()"]
+
+test "nothing queued panics":
+    let fake = cap.Fake[Mailer].new()
+    _ = fake.outbox()

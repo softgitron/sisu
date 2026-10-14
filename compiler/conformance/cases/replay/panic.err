@@ -1,0 +1,6 @@
+panic: assertion failed: len(line) > 0
+  message: line 3 is empty
+    len(line) > 0
+    │   │
+    0   ""
+  at main (panic.sisu:9:9)

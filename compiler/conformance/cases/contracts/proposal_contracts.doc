@@ -1,0 +1,49 @@
+def binary_search[T: Ord](items: Slice[T], target: T) -> int?
+    requires items.is_sorted()
+    ensures match result:
+        case Some(i): items[i] == target
+        case None: not items.contains(target)
+
+struct Account
+    balance: Money
+    limit: Money
+    invariant self.balance >= -self.limit
+
+    def withdraw(mut self, amount: Money)
+        requires amount > Money.ZERO
+        ensures self.balance == old(self.balance) - amount
+        # re-checks the invariant of `Account` on return
+
+    def try_withdraw(mut self, amount: Money) -> ! Overdrawn
+        # re-checks the invariant of `Account` on return
+
+error Overdrawn
+    Overdrawn
+
+type Port = int where 1 <= self <= 65535
+    def try_from(value: int) -> Port ! RefinementError
+
+type Percent = int where 0 <= self <= 100
+    def try_from(value: int) -> Percent ! RefinementError
+
+type NonEmpty[T] = list[T] where not self.is_empty()
+    def try_from(value: list[T]) -> NonEmpty[T] ! RefinementError
+
+def listen(net: Net, port: Port) -> TcpListener ! NetError
+
+def demo(net: Net, user_input: int)
+
+@derive(Copy, Eq, Ord)
+@delegate(Add, Sub, Neg, Display, to="cents")
+struct Money
+    cents: int
+
+impl Money
+    const ZERO: Money
+
+type TcpListener = Listener
+
+impl[T: Copy] NonEmpty[T]
+    def first(self) -> T
+
+def main()

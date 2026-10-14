@@ -1,0 +1,2 @@
+10:9-10:44 E0609 comptime.instance-failed name="convert[Duration]" reason="`cli.parse` cannot read an option of type `Duration`"
+11:9-11:30 E0609 comptime.instance-failed name="parse[int]" reason="`cli.parse` parses into a struct, not `int`"

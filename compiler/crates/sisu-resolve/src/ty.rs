@@ -224,6 +224,10 @@ impl Program {
                     }
                     return format!("{} ! {err}", display(&ok));
                 }
+                // The fake the compiler wrote for a trait, as it is written.
+                if let Some((t, _)) = self.fakes.iter().find(|(_, f)| **f == *d) {
+                    return format!("cap.Fake[{}]", self.def(*t).name);
+                }
                 let name = self.qualified_name(*d);
                 if args.is_empty() {
                     name
@@ -260,10 +264,22 @@ impl Program {
     }
 
     /// A definition's name, qualified by its module unless it is in the
-    /// root module or the prelude.
+    /// root module or the prelude. A type or trait of the root module that
+    /// the prelude also names (`struct Box`) is `main.Box`, so that the two
+    /// stay apart in the SIR, where the run time knows the prelude's by
+    /// name.
     pub fn qualified_name(&self, d: DefId) -> String {
         let def = self.def(d);
-        if def.module == self.root || def.module == self.prelude {
+        let module = &self.modules[def.module.0 as usize];
+        if def.module == self.root
+            && !matches!(def.kind, crate::program::DefKind::Fn(_))
+            && self.modules.get(self.prelude.0 as usize).is_some_and(|m| m.items.contains_key(&def.name))
+        {
+            format!("{}.{}", module.name, def.name)
+        } else if def.module == self.root || def.module == self.prelude || module.name.starts_with("<shims>/")
+        {
+            // What the compiler writes for the program's traits is named
+            // `__Fake_Trait`, a name the program does not use.
             def.name.clone()
         } else {
             format!("{}.{}", self.modules[def.module.0 as usize].name, def.name)
@@ -357,6 +373,7 @@ impl Program {
                             | "Rand"
                             | "Env"
                             | "Proc"
+                            | "Stdin"
                             | "System"
                             | "HostFs"
                             | "HostNet"
@@ -364,6 +381,7 @@ impl Program {
                             | "HostRand"
                             | "HostEnv"
                             | "HostProc"
+                            | "HostStdin"
                             | "TestClock"
                             | "Cap"
                             | "Lent"

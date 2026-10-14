@@ -1,0 +1,67 @@
+# `sisu check --explain`: each declaration's signature with its contracts,
+# the way `sisu doc` renders them (09): a header over several lines is
+# joined, an inferred error set is filled in, a refinement shows the
+# conversion that checks it, and a `mut self` method of a type with an
+# invariant says that it keeps it.
+
+## A percentage.
+type Percent = int where 0 <= self <= 100
+
+error ParseError:
+    Empty
+    NotANumber(text: String)
+
+error RangeError:
+    OutOfRange(n: int)
+
+## Reads a percentage from text.
+def parse_percent(
+    text: str,
+    clamp: bool = False,
+) -> Percent !:
+    if text.is_empty():
+        return Err(Empty)
+    let n = text.parse_int() else:
+        return Err(NotANumber(text=text.to_string()))
+    if clamp:
+        return Ok(Percent.try_from(max(0, min(100, n))).expect("clamped"))
+    let p = Percent.try_from(n) else:
+        return Err(OutOfRange(n=n))
+    return Ok(p)
+
+## A tank that never holds more than its capacity.
+struct Tank:
+    level: int
+    capacity: int
+    invariant 0 <= self.level <= self.capacity
+
+    ## Adds water up to the capacity.
+    def fill(mut self, amount: int) -> int:
+        requires amount >= 0
+        ensures self.level == min(old(self.level) + amount, self.capacity)
+        ensures result == self.level - old(self.level)
+        let room = self.capacity - self.level
+        let added = min(room, amount)
+        self.level += added
+        return added
+
+    pure def is_full(self) -> bool:
+        return self.level == self.capacity
+
+trait Gauge:
+    def reading(self) -> int
+
+impl Gauge for Tank:
+    def reading(self) -> int:
+        return self.level
+
+def total[T: Gauge](gauges: Slice[T]) -> int:
+    ensures result >= 0
+    var t = 0
+    for g in gauges:
+        t += max(0, g.reading())
+    return t
+
+test "filling":
+    var t = Tank(level=0, capacity=10)
+    assert t.fill(4) == 4

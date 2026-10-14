@@ -321,6 +321,13 @@ E0606 error   comptime.budget-attribute   `@comptime_budget` takes `steps=N`, a 
 E0607 error   comptime.derive-template    a trait's derive is `comptime def derive(T: type) -> impl {trait} for T`, whose body is `return impl {trait} for T:` with the impl's methods
 E0608 error   comptime.derive-failed      deriving `{trait}` for `{ty}` stopped at compile time: {reason}
 -     label   comptime.derive-here        the derive's template, where it stopped
+E0609 error   comptime.instance-failed    making `{name}` stopped at compile time: {reason}
+-     label   comptime.instance-here      the template, where it stopped
+E0610 error   comptime.instances-unbounded  `{name}` needs more than {count} instances: its instances call it with ever more types
+E0611 error   comptime.template-value     `{name}` reflects on its type parameters, so it is made for each call's types and cannot be used as a value
+E0612 error   comptime.embed-failed       cannot embed `{path}`: {reason}
+E0613 error   comptime.embed-path         `embed` takes the path of a file as a string literal
+E0614 error   comptime.no-fake            `cap.Fake[{name}]` needs a trait of the program whose methods can all be forwarded: a `self` or `mut self` receiver, no type parameters, and no borrow or `Self` in a signature
 
 # ---------------------------------------------------------------- capabilities
 E0700 error   cap.not-shareable          `{ty}` cannot become `{cap}`: a capability may reach every task, and `{ty}` is not `{auto}`{path}
@@ -337,14 +344,17 @@ E0806 error   contract.invariant-field    `{what}` is part of a `{ty}`, whose in
 E0807 error   contract.not-in-test        a test has no contract; check what it needs with `assert`
 E0810 error   refine.not-satisfied        `{value}` is not a `{ty}`: `{predicate}` is false for it
 E0811 error   refine.needs-try-from       expected `{expected}`, found `{found}`; a value becomes a `{expected}` where its predicate is checked, with `{name}.try_from(...)`
-E0812 error   refine.change-through-base  `{method}` could change a `{ty}` so that `{predicate}` no longer holds; change a copy of its base instead
+E0812 error   refine.change-through-base  `{what}` is a `{ty}`, which a change through its base could take outside `{predicate}`; change a copy of the base and check it again with `try_from`
 E0813 error   refine.own-impl             `{ty}` refines `{base}` and has its reading impls; it cannot have an impl of `{trait}` of its own
 E0814 error   refine.predicate-type       the predicate of `{ty}` must be a `bool`, found `{found}`
 -     help    refine.use-try-from         check it where it runs: `{name}.try_from(...)`
+E0820 error   test.no-generator           `{ty}` has no generator for property tests: {why}
+E0821 error   test.refines-mismatch       `@refines({reference})` on `{name}` cannot be checked: {why}
 
 # ---------------------------------------------------------------- stage-0 limits and internal errors
 E0900 error   stage0.unsupported          {construct} is not implemented in stage 0 yet; it arrives with {phase}
 E0901 error   stage0.internal             internal compiler error in {stage}: {detail}
+E0971 error   sim.unmodelled-extern       this `sim` build reaches `{callee}`, an `extern` call with no simulation model, in `{function}` at {at}
 
 # ---------------------------------------------------------------- warnings
 W0001 warning type.hole                   typed hole `{name}` of type `{ty}`
@@ -451,11 +461,16 @@ R0100 runtime contract.requires-failed    precondition of `{function}` failed: {
 R0101 runtime contract.ensures-failed     postcondition of `{function}` failed: {clause}
 R0102 runtime contract.invariant-failed   invariant of `{ty}` failed: {clause}
 R0103 runtime contract.refinement-failed  `{value}` is not a `{ty}`: `{clause}` is false for it
+R0104 runtime run.case-too-long           the case ran past its budget of {steps} statements
+R0105 runtime sim.always-failed           `sim.always` does not hold: {what}
+R0106 runtime sim.choose-none             `sim.choose` needs at least one option
+R0107 runtime test.snapshot-changed       the snapshot `{name}` changed (`sisu test --update` accepts the new one):\n{diff}
+R0108 runtime test.snapshot-missing       there is no snapshot `{name}` yet (`sisu test --update` stores this one):\n{value}
 
 # ---------------------------------------------------------------- driver
 
 D0001 cli     cli.cannot-read             cannot read `{path}`: {reason}
-D0002 cli     cli.usage                   usage: sisu <command> [options] <file>\n\ncommands:\n  run <file> [args...]   check and run a program (`--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor, `--schedule-seed N` seeds the task scheduler, `--explore N` runs under N seeds and reports the first that fails, `--stats` reports the scheduler's numbers)\n  check <file>           report diagnostics (`--format=ids` for the conformance form)\n  sir <file>             print the serialised SIR\n  test <file>            run the `test` blocks under the ownership monitor (`--no-monitor` without it, `--defer-borrow`, `--schedule-seed N` and `--explore N` as for `run`)\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--print` reprints the source\n  explain <code>         describe a diagnostic code\n  explain-borrow <file>:<line>  show every borrow live on a line\n  audit --ownership <file>...  count the uses of `Shared`, `Weak`, `Cell`, `Arena`, `Key`, `.copy()` and `unsafe` in each file
+D0002 cli     cli.usage                   usage: sisu <command> [options] <file>\n\ncommands:\n  run <file> [args...]   check and run a program (`--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor, `--contracts=off|preconditions|all` sets what it checks, `--record LOG` writes its capability log, `--stats` reports the scheduler's numbers)\n  replay <log>           run a recorded program again against its capability log\n  check <file>           report diagnostics (`--format=ids` for the conformance form, `--explain` for the signatures with their contracts)\n  sir <file>             print the serialised SIR\n  test <file>            run the tests and transcripts under the ownership monitor (`--no-monitor` without it, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`, `--update` for snapshots and transcripts, `--replay TOKEN`, `--sim` with `--faults P`)\n  bench <file>           run the benchmarks (`--iterations N`)\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--print` reprints the source\n  explain <code>         describe a diagnostic code\n  explain-borrow <file>:<line>  show every borrow live on a line\n  audit --ownership <file>...  count the uses of `Shared`, `Weak`, `Cell`, `Arena`, `Key`, `.copy()` and `unsafe` in each file\n\n`run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
 D0003 cli     cli.unknown-command         unknown command `{command}`; run `sisu help`
 D0004 cli     cli.missing-file            `sisu {command}` needs a file
 D0005 cli     cli.no-main                 `{file}` has no `main` function
@@ -481,3 +496,39 @@ D0024 cli     cli.explore-ok              explored {count} schedules (seeds {fir
 D0025 cli     cli.explore-failed          schedule seed {seed} of {count} failed with exit status {status}; `--schedule-seed {seed}` runs it again
 D0026 cli     cli.explore-test-failed     with schedule seed {seed}; `--schedule-seed {seed}` runs it again
 D0027 cli     cli.explore-summary         explored {count} schedules per test (seeds {first} to {last})
+D0028 cli     cli.bad-contract-level      `--contracts` takes `off`, `preconditions` or `all`, not `{value}`
+D0029 cli     cli.test-checks-contracts   `sisu test` checks every contract; `--contracts` sets what `sisu run` and `sisu sir` check
+D0030 cli     cli.replay-token            replay: sisu test --replay {token} {file}
+D0031 cli     cli.replay-no-token         no replay token: the test takes the real `System`, which a replay cannot stand in for
+D0032 cli     cli.bad-replay-token        `{token}` is not a replay token
+D0033 cli     cli.token-other-code        the token is for other code (content hash {expected}); `{file}` has content hash {found}
+D0034 cli     cli.other-toolchain         {what} was made by toolchain {expected}, and this is {found}
+D0035 cli     cli.token-no-test           the token names test {index}, and `{file}` has {count}
+D0036 cli     cli.bad-log                 `{path}` is not a capability log: {reason}
+D0037 cli     cli.replay-diverged         the replay diverged from the log: {detail}
+D0038 cli     cli.record-once             `--record` records one run; it does not combine with `{option}`
+D0039 cli     cli.bad-redact              `--redact` takes capability names (fs, net, clock, rand, env, proc, stdin), not `{value}`
+D0040 cli     cli.replay-status           the replay exited with status {found}, and the recorded run with {expected}
+D0041 cli     cli.bad-scheduler           `--scheduler` takes `random`, `pct` or `exhaustive`, not `{value}`
+D0042 cli     cli.pct-failed              schedule seed {seed} of {count} failed with exit status {status} under a PCT scheduler of depth {depth}; `--scheduler pct --depth {depth} --schedule-seed {seed}` runs it again
+D0043 cli     cli.pct-test-failed         with schedule seed {seed} of a PCT scheduler of depth {depth}; `--scheduler pct --depth {depth} --schedule-seed {seed}` runs it again
+D0044 cli     cli.pct-summary             explored {count} schedules of a PCT scheduler of depth {depth} per test (seeds {first} to {last})
+D0045 cli     cli.pct-ok                  explored {count} schedules of a PCT scheduler of depth {depth} (seeds {first} to {last}): every run exited with status 0
+D0046 cli     cli.exhaustive-failed       schedule {schedule} failed with exit status {status}: run {count} of a bounded exhaustive search (preemption bound {bound})
+D0047 cli     cli.exhaustive-ok           searched {count} schedules (preemption bound {bound}): every run exited with status 0{stopped}
+D0048 cli     cli.exhaustive-test-failed  with schedule {schedule} of a bounded exhaustive search (preemption bound {bound})
+D0049 cli     cli.exhaustive-summary      searched {count} schedules (preemption bound {bound}){stopped}
+D0050 cli     cli.exhaustive-stopped      , stopping at {cap} schedules
+D0051 cli     cli.bad-fault-rate          `--faults` takes a probability from 0 to 1, as in `--faults 0.02`, not `{value}`
+D0052 cli     cli.faults-without-sim      `--faults` sets the fault rate of the `sim` profile; add `--sim`
+D0053 cli     cli.tests-unselected        {count} not selected
+D0054 cli     cli.snapshot-updated        updated the snapshot `{name}`:\n{diff}
+D0055 cli     cli.snapshot-new            stored the new snapshot `{name}`:\n{text}
+D0056 cli     cli.snapshot-unwritable     cannot write the snapshots to `{path}`: {reason}
+D0057 cli     cli.bench-result            bench {name} ... {iterations} iterations, {each} each
+D0058 cli     cli.bench-failed            bench {name} ... FAILED\n{message}
+D0059 cli     cli.bench-summary           {count} benchmarks, {failed} failed (stage 0 times the interpreter: compare benchmarks with each other, not with compiled code)
+D0060 cli     cli.transcript-result       transcript {name} ... {outcome}
+D0061 cli     cli.transcript-differs      what the program printed differs from the transcript (`sisu test --update` accepts it):\n{diff}
+D0062 cli     cli.transcript-no-main      a transcript runs the program's `main`, and `{file}` has none
+D0063 cli     cli.transcript-updated      updated the transcript {name}:\n{diff}

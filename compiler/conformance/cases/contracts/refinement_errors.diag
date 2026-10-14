@@ -1,0 +1,6 @@
+10:22-10:30 E0814 refine.predicate-type ty="Odd" found="int"
+12:6-12:11 E0228 resolve.alias-cycle name="Again"
+18:16-18:17 E0811 refine.needs-try-from expected="Port" found="int" name="Port"
+19:19-19:20 E0811 refine.needs-try-from expected="Port" found="int" name="Port"
+21:5-21:9 E0812 refine.change-through-base what="tags" ty="Tags" predicate="len(self) <= 3"
+24:1-24:22 E0813 refine.own-impl ty="Port" base="int" trait="Display"

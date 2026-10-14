@@ -316,7 +316,9 @@ impl<'p> Interp<'p, '_> {
                     &[("first", first), ("message", p.message.clone())],
                 )));
             }
-            if !self.in_glue() {
+            // A trace names the program's frames: the standard library's
+            // (`check`'s loop around a property) are left out.
+            if !self.in_glue() && !self.in_std() {
                 p.stack.push(self.frame_line());
             }
             match unwind {
@@ -368,6 +370,18 @@ impl<'p> Interp<'p, '_> {
         prog.functions.get(fr.func?)?.blocks.get(fr.bb)
     }
 
+    /// Whether the top frame runs a function of the standard library.
+    fn in_std(&self) -> bool {
+        let Some(fr) = self.frames.last() else { return false };
+        let Some(f) = fr.func.and_then(|i| self.prog.functions.get(i)) else { return false };
+        // The interceptors and fakes the compiler writes for the program's
+        // traits are left out with the standard library.
+        self.prog
+            .sources
+            .get(f.source as usize)
+            .is_some_and(|s| s.starts_with("<std>/") || s.starts_with("<shims>/"))
+    }
+
     /// `name (file:line:col)` for the top frame, as a catalog line.
     fn frame_line(&self) -> String {
         let Some(fr) = self.frames.last() else { return String::new() };
@@ -381,6 +395,20 @@ impl<'p> Interp<'p, '_> {
     }
 
     fn tick(&mut self) -> Result<(), Unwind> {
+        // A property's case past its budget (`test.catch`) panics; the
+        // budget is spent, so the unwinding's drops run without one.
+        if let Some((end, steps)) = self.case_ends.last_mut()
+            && self.sched.steps >= *end
+        {
+            *end = u64::MAX;
+            return Err(Unwind::Panic(Box::new(crate::PanicInfo {
+                message: render(msg::RUN_CASE_TOO_LONG, &[("steps", steps.to_string())]),
+                stack: Vec::new(),
+                hole: None,
+                refinement: None,
+                too_long: Some(*steps),
+            })));
+        }
         if let Some(f) = &mut self.fuel {
             if *f == 0 {
                 return Err(Unwind::Abort(render(
@@ -507,6 +535,11 @@ impl<'p> Interp<'p, '_> {
                     let vals = self.operands(args)?;
                     vals.iter().try_for_each(|v| self.mon_passed(v))?;
                     let tys: Vec<sir::Type> = tys.iter().map(|t| self.concrete(t)).collect();
+                    // The `sim` profile may fail the call with an error of
+                    // its declared set instead (17).
+                    if let Some(e) = self.sim_fault(name, &tys, &vals, dest) {
+                        return self.store(dest, Value::err(e));
+                    }
                     match self.dispatch(name, tys, vals)? {
                         crate::dispatch::Target::Fn(fi, vals, tys) => {
                             self.push_frame(fi, vals, Some(dest), tys)
@@ -548,6 +581,9 @@ impl<'p> Interp<'p, '_> {
                     }
                     if name == "test.catch" {
                         return self.open_catch(vals, dest);
+                    }
+                    if name == "sim.always" {
+                        return self.open_always(vals, dest);
                     }
                     let r = self.intrinsic(name, tys, vals, ret.as_ref());
                     self.finish_call(name, tys, dest, ret, r)
@@ -605,6 +641,80 @@ impl<'p> Interp<'p, '_> {
     /// The declared type of a call's destination, when it is a whole local.
     /// The type of a call's destination, with the running function's type
     /// arguments filled in.
+    /// A fault of the `sim` profile for a capability call (17, "Faults come
+    /// from types"): at the run's fault rate, a call through the operations
+    /// trait of a handle on one of the simulation's own objects (the file
+    /// system and network of `System.sim` and of a `Sim`'s nodes) gives an
+    /// error of the method's declared error set, never another; `TaskError`
+    /// is the scheduler's, and is left out. The fakes a test makes itself
+    /// are left alone. A field of the error is the call's path if it takes
+    /// one, else a value that says the simulation made it.
+    fn sim_fault(&mut self, name: &str, tys: &[sir::Type], args: &[Value], dest: &Place) -> Option<Value> {
+        let rate = self.sim.filter(|r| *r > 0)?;
+        let (tr, _) = name.rsplit_once('.')?;
+        if !matches!(tr, "FsOps" | "NetOps") {
+            return None;
+        }
+        let handle = match tys.first()? {
+            sir::Type::Named(n, a) if a.is_empty() && matches!(n.as_str(), "Fs" | "Net") => args.first()?,
+            _ => return None,
+        };
+        let object = match self.target(handle).ok()? {
+            Value::Cap(id) => match &self.heap.get(*id as usize)?.value {
+                Value::Dyn(d) => match &d.ty {
+                    sir::Type::Named(n, _) => n.clone(),
+                    _ => return None,
+                },
+                _ => return None,
+            },
+            _ => return None,
+        };
+        if !matches!(object.as_str(), "cap.SimFs" | "cap.SimNetwork" | "sim.SimNet") {
+            return None;
+        }
+        let errs: Vec<String> = match self.dest_type(dest)? {
+            sir::Type::Named(n, a) if n == "Result" => match a.get(1)? {
+                sir::Type::ErrSet(names) => names.clone(),
+                sir::Type::Named(e, _) => vec![e.clone()],
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let errs: Vec<String> = errs.into_iter().filter(|e| e != "TaskError").collect();
+        if errs.is_empty() || self.fault_rng.next() % 1_000_000 >= u64::from(rate) {
+            return None;
+        }
+        let decl = &errs[self.fault_rng.below(errs.len())];
+        let prog = self.prog;
+        let Some(sir::TypeDecl::Enum { variants, .. }) = prog.types.iter().find(|t| t.name() == decl) else {
+            return None;
+        };
+        if variants.is_empty() {
+            return None;
+        }
+        let k = self.fault_rng.below(variants.len());
+        let path = args.iter().find_map(|a| match self.target(a).ok()? {
+            Value::Path(p) => Some(p.clone()),
+            _ => None,
+        });
+        let fields = variants[k]
+            .fields
+            .iter()
+            .map(|(_, t)| match t {
+                sir::Type::Named(n, _) if n == "Path" => {
+                    Value::Path(path.clone().unwrap_or_else(|| std::rc::Rc::from("(simulated)")))
+                }
+                sir::Type::Named(n, _) if n == "String" => {
+                    Value::String("a fault the simulation made".into())
+                }
+                sir::Type::Int => Value::Int(0),
+                sir::Type::Bool => Value::Bool(false),
+                _ => Value::Unit,
+            })
+            .collect();
+        Some(Value::variant(decl, k as u32, fields))
+    }
+
     fn dest_type(&self, dest: &Place) -> Option<sir::Type> {
         let prog = self.prog;
         if !dest.proj.is_empty() {
@@ -856,6 +966,9 @@ fn display_fn_name(name: &str, prog: &sir::Program) -> String {
         && let Some((t, _)) = prog.tests.get(i)
     {
         return format!("test {}", sisu_sir::write::quote(t));
+    }
+    if let Some(owner) = name.strip_suffix(".__check_invariant") {
+        return format!("the invariant of {owner}");
     }
     match name.split_once("#closure") {
         Some((owner, _)) => format!("closure in {}", display_fn_name(owner, prog)),

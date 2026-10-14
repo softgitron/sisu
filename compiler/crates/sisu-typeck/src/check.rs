@@ -144,7 +144,9 @@ impl<'p> Checker<'p> {
     pub fn check_internal(&mut self, d: DefId, range: TextRange) {
         let prog = self.prog;
         let Some(f) = prog.fn_info(d) else { return };
-        if f.internal && !prog.modules[self.module.0 as usize].is_std {
+        // Code the compiler writes (`<arbitrary>/...`) may call them too.
+        let m = &prog.modules[self.module.0 as usize];
+        if f.internal && !m.is_std && !m.name.starts_with('<') {
             let name = match &f.owner {
                 Some(o) => format!("{}.{}", prog.display(o), prog.def(d).name),
                 None => prog.qualified_name(d),
@@ -264,8 +266,21 @@ impl<'p> Checker<'p> {
         match &te.kind {
             TypeKind::Error => Ty::Error,
             TypeKind::Path { segments, args } => {
-                let args: Vec<Ty> = args.iter().map(|a| self.resolve_ty(a)).collect();
                 let names: Vec<&str> = segments.iter().map(|s| s.text.as_str()).collect();
+                // `cap.Fake[Trait]`: the fake the compiler wrote (17).
+                if let [arg] = args.as_slice()
+                    && let Some(d) = self.lookup_type_path(&names)
+                    && self.is_fake_marker(d)
+                {
+                    let as_expr = match &arg.kind {
+                        TypeKind::Path { segments, args } if segments.len() == 1 && args.is_empty() => {
+                            Some(segments[0].text.clone())
+                        }
+                        _ => None,
+                    };
+                    return self.fake_named(as_expr, arg.range);
+                }
+                let args: Vec<Ty> = args.iter().map(|a| self.resolve_ty(a)).collect();
                 if let [n] = names.as_slice()
                     && let Some(i) = self.generic_names.iter().position(|g| g == n)
                 {
@@ -713,8 +728,8 @@ impl<'p> Checker<'p> {
                 _ => {
                     self.unsupported(
                         s.range,
-                        "`comptime for` and `comptime if` outside a derive",
-                        "reflection beyond derive (Phase 8)",
+                        "`comptime for` and `comptime if` outside a derive or a generic function",
+                        "compile-time code in methods and non-generic functions (Phase 8)",
                     );
                     out.push(Stmt::Error(span));
                 }
@@ -1108,6 +1123,25 @@ impl<'p> Checker<'p> {
                     let d = self.error(msg::TYPE_RETURN_VALUE_IN_UNIT, e.range).with("name", fn_name);
                     self.report(d);
                     let x = self.infer_expr(e, None);
+                    return Stmt::Return { value: Some(x), span };
+                }
+                // A refinement's predicate: a `bool` over `self` (E0814).
+                if let Some(sisu_resolve::FnKind::Predicate(r)) =
+                    self.prog.fn_info(self.def).map(|f| f.kind.clone())
+                    && self.current_closure().is_none()
+                {
+                    let x = self.infer_expr(e, Some(&Ty::Bool));
+                    let found = self.resolved(&x.ty);
+                    if !matches!(found, Ty::Bool | Ty::Error | Ty::Never | Ty::Var(_)) {
+                        let shown = self.show(&found);
+                        let d = self
+                            .error(msg::REFINE_PREDICATE_TYPE, e.range)
+                            .with("ty", self.prog.def(r).name.clone())
+                            .with("found", shown);
+                        self.report(d);
+                        return Stmt::Return { value: Some(Expr::error(x.span)), span };
+                    }
+                    let x = self.coerce(x, &Ty::Bool);
                     return Stmt::Return { value: Some(x), span };
                 }
                 let x = self.check_expr(e, &ret);

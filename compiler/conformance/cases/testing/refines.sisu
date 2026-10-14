@@ -1,0 +1,41 @@
+# `@refines(reference)` (17, D-070): `sisu test` checks that a function
+# gives what its clear reference gives on `arbitrary` inputs, within a
+# tolerance of units in the last place for floats. A case that runs past
+# its budget is refused, not failed (the reference may be slow); the
+# closed form below overflows where the loop does not, and the test finds
+# it.
+
+## The sum of the squares of 1 to n, as the definition says.
+pure def squares_ref(n: int) -> int:
+    var total = 0
+    for i in range(1, n + 1):
+        total += i * i
+    return total
+
+## The closed form.
+@refines(squares_ref)
+pure def squares(n: int) -> int:
+    if n < 1:
+        return 0
+    return n * (n + 1) * (2 * n + 1) // 6
+
+pure def mean_ref(a: f64, b: f64) -> f64:
+    return (a + b) / 2.0
+
+## Halves first, so that it does not overflow: equal within 2 ULPs.
+@refines(mean_ref, tolerance=Ulps(2))
+pure def mean(a: f64, b: f64) -> f64:
+    return a / 2.0 + b / 2.0
+
+pure def count_ref(xs: list[int]) -> int:
+    return len(xs)
+
+## A fast path with a bug past three elements.
+@refines(count_ref)
+pure def count(xs: list[int]) -> int:
+    if len(xs) > 3:
+        return 3
+    return len(xs)
+
+test "an ordinary test beside them":
+    assert squares(3) == 14

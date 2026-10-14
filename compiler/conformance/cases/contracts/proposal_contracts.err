@@ -1,0 +1,9 @@
+panic: invariant of `Account` failed: self.balance >= -self.limit
+    self.balance >= -self.limit
+    │               ││
+    │               │Money(cents=50)
+    │               Money(cents=-50)
+    Money(cents=-150)
+  at the invariant of Account (proposal_contracts.sisu:24:15)
+  at Account.withdraw (proposal_contracts.sisu:29:31)
+  at main (proposal_contracts.sisu:98:5)

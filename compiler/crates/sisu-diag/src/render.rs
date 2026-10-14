@@ -109,7 +109,14 @@ pub fn render_human(map: &SourceMap, diags: &[Diagnostic]) -> String {
             .max()
             .unwrap_or(1);
         excerpt(&mut out, map, d.span, '^', "", gutter);
+        let mut file = d.span.file;
         for l in &d.labels {
+            // A label in another file says which, as rustc does.
+            if l.span.file != file {
+                file = l.span.file;
+                let (b, _) = map.line_col(l.span);
+                out.push_str(&format!("  ::: {}:{}:{}\n", map.name(file), b.line, b.col));
+            }
             excerpt(&mut out, map, l.span, '-', &catalog.render(l.msg.id(), &l.params), gutter);
         }
         for n in &d.notes {

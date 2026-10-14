@@ -1,0 +1,13 @@
+# `comptime panic` in a template is a compile error for the types that
+# reach it, reported where the program needs that instance.
+
+def encode[T](value: T) -> String:
+    if comptime reflect.is_int(T):
+        return "{value}"
+    else:
+        comptime panic("encode: no encoding for {reflect.name_of(T)}")
+
+def main():
+    print(encode(1))
+    print(encode(1.5))
+    print(encode("x"))

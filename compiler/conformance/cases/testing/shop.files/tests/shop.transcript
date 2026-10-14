@@ -1,0 +1,13 @@
+$ shop price
+> apples
+> pears
+apples: 0.40
+pears: 0.40
+$ shop buy apples
+ok: 1 left
+$ shop buy apples
+ok: 0 left
+$ shop buy apples
+error: OutOfStock(item="apples") (exit 1)
+$ shop
+error: Usage (exit 1)

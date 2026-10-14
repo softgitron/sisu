@@ -1,0 +1,4 @@
+$ shop buy apples
+error: NotFound(path="stock.txt")
+  at shop.sisu:12:16
+  at shop.sisu:29:13 (exit 1)

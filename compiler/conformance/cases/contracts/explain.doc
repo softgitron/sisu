@@ -1,0 +1,37 @@
+## A percentage.
+type Percent = int where 0 <= self <= 100
+    def try_from(value: int) -> Percent ! RefinementError
+
+error ParseError
+    Empty
+    NotANumber(text: String)
+
+error RangeError
+    OutOfRange(n: int)
+
+## Reads a percentage from text.
+def parse_percent(text: str, clamp: bool = False) -> Percent ! {ParseError, RangeError}  # inferred
+
+## A tank that never holds more than its capacity.
+struct Tank
+    level: int
+    capacity: int
+    invariant 0 <= self.level <= self.capacity
+
+    ## Adds water up to the capacity.
+    def fill(mut self, amount: int) -> int
+        requires amount >= 0
+        ensures self.level == min(old(self.level) + amount, self.capacity)
+        ensures result == self.level - old(self.level)
+        # re-checks the invariant of `Tank` on return
+
+    pure def is_full(self) -> bool
+
+trait Gauge
+    def reading(self) -> int
+
+impl Gauge for Tank
+    def reading(self) -> int
+
+def total[T: Gauge](gauges: Slice[T]) -> int
+    ensures result >= 0

@@ -1,0 +1,12 @@
+test "an ordinary test runs too" ... ok
+transcript "tests/fresh.transcript" ... ok
+transcript "tests/shop.transcript" ... ok
+transcript "tests/stale.transcript" ... FAILED
+
+transcript "tests/stale.transcript" ... FAILED
+what the program printed differs from the transcript (`sisu test --update` accepts it):
+  $ shop buy apples
+- ok: 5 left
++ ok: 4 left
+
+3 passed, 1 failed, 0 blocked

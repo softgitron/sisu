@@ -21,13 +21,22 @@ Phase 6's tasks on a seeded cooperative scheduler (scopes, cancellation,
 shields, deadlines, races, channels, `select`, generators), `Send` and
 `Sync` checked at spawns, the `Shared` escape analysis, the capabilities
 of `std.cap` with their fakes and interceptors, and `std.x.http`, a
-minimal HTTP/1.1 client and server written in Sisu. Not here: from
-Phase 4, `Array` and const generics, `f32` and the 128-bit integers;
-from Phase 6, the `sim` profile, `RwLock`, `Atomic`, `Condvar`, TLS and
-`sisu audit --caps`; reflection beyond derive and the checked string
-DSLs, contracts and the rest of the interpreter-era surface (Phase 8).
-Their syntax parses, and using them is a diagnostic (`E0900
-stage0.unsupported`).
+minimal HTTP/1.1 client and server written in Sisu. From Phase 8:
+contracts (`requires`, `ensures` with `result` and `old`, invariants,
+refinement types) checked at run time at a chosen level and run as
+properties by `sisu test`; property tests with shrinking, `exhaustive[T]`,
+`@refines`, parametrised tests, suites and tags, snapshots, transcript
+tests, benchmarks, fakes and interceptors of the program's own traits,
+and tests in parallel; the capability log (`sisu run --record`, `sisu
+replay`) and replay tokens; PCT and bounded exhaustive scheduling and the
+`sim` profile; compile-time reflection in generic functions
+(instantiated per type), `embed` and `target`, with `std.x.cli`'s parser
+written over it. Not here: from Phase 4, `Array` and const generics,
+`f32` and the 128-bit integers; from Phase 6, `RwLock`, `Atomic`,
+`Condvar`, TLS and `sisu audit --caps`; the checked string DSLs, `@cfg`,
+foreign functions, the REPL, the language server and `sisu fmt` (Phase
+8), and a native backend. Their syntax parses, and using them is a
+diagnostic (`E0900 stage0.unsupported`).
 
 ## Crate map
 
@@ -36,30 +45,34 @@ architecture"); data flows down the table.
 
 | Crate | Lines | Role |
 |---|---:|---|
-| `sisu-diag` | 852 | Spans, the source map (1-based lines, columns in characters), the message catalog, diagnostics with labels, notes and fixes, the human and `--format=ids` renderers |
-| `sisu-syntax` | 3698 | Token and node kinds, the lossless arena tree with stable node identities, and the AST built from the tree as a total function |
+| `sisu-diag` | 821 | Spans, the source map (1-based lines, columns in characters), the message catalog, diagnostics with labels, notes and fixes, the human and `--format=ids` renderers |
+| `sisu-syntax` | 4076 | Token and node kinds, the lossless arena tree with stable node identities, and the AST built from the tree as a total function |
 | `sisu-lexer` | 1188 | Scanning (every byte a token, interpolation split into tokens) and layout (Python's INDENT/DEDENT algorithm) |
 | `sisu-parser` | 3304 | Error-tolerant recursive descent that always returns a tree |
-| `sisu-resolve` | 6602 | Loads the Sisu-written std (`compiler/std/`), declares every item, resolves signatures to types, registers methods; traits, impls, coherence and the trait solver; derives (unfolding each trait's `comptime def derive`) and delegation; the borrow rules about declarations |
-| `sisu-typeck` | 8551 | The bidirectional checker, with method resolution through traits and `comptime` expressions; produces the typed tree (THIR) for every body, broken or not |
+| `sisu-resolve` | 9570 | Loads the Sisu-written std (`compiler/std/`), declares every item, resolves signatures to types, registers methods; traits, impls, coherence and the trait solver; derives (unfolding each trait's `comptime def derive`), delegation and the instances of templates; the generators and generated tests of property testing, the interceptors and fakes of the program's traits; the borrow rules about declarations |
+| `sisu-typeck` | 9625 | The bidirectional checker, with method resolution through traits and `comptime` expressions; produces the typed tree (THIR) for every body, broken or not |
 | `sisu-sir` | 2647 | SIR: the data model, the text writer and reader, the validator, the types of places |
-| `sisu-lower` | 4206 | THIR to SIR: control flow, scopes and their drops, unwind edges, closure conversion, trait calls and their static resolution, drop glue, `comptime` functions, the borrow facts of signatures |
-| `sisu-borrowck` | 4936 | The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, the task rules, escapes, must-consume, purity, `explain-borrow`, and the `Shared` escape analysis |
-| `sisu-interp` | 9280 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the task scheduler, capabilities and the host's objects, the dynamic ownership monitor, and the compile-time evaluator |
-| `sisu-driver` | 1998 | The query layer and the `sisu` command line, the counterexample mode, `audit --ownership`, and the soundness tests (fault injection, mutation fuzzing) |
-| `sisu-conformance` | 505 | The language-agnostic conformance runner |
+| `sisu-lower` | 4987 | THIR to SIR: control flow, scopes and their drops, unwind edges, closure conversion, trait calls and their static resolution, drop glue, `comptime` functions, the borrow facts of signatures |
+| `sisu-borrowck` | 4938 | The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, the task rules, escapes, must-consume, purity, `explain-borrow`, and the `Shared` escape analysis |
+| `sisu-interp` | 11320 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the task scheduler (random, PCT, bounded exhaustive) and the `sim` profile's faults, capabilities and the host's objects, the capability log, the parallel test runner, the dynamic ownership monitor, and the compile-time evaluator |
+| `sisu-driver` | 3968 | The query layer and the `sisu` command line, the counterexample mode, `audit --ownership`, `check --explain`, replay tokens, snapshot files and transcripts, the `sim` build check, and the soundness tests (fault injection, mutation fuzzing) |
+| `sisu-conformance` | 653 | The language-agnostic conformance runner |
 
 Line counts include each crate's unit tests. Besides the crates:
 `catalog/messages.catalog` (every message); the standard library, in
-Sisu: `std/prelude.sisu` (2713 lines: the builtin types, the core traits
+Sisu: `std/prelude.sisu` (3291 lines: the builtin types, the core traits
 and their derives, iterators, formatting, collections, `Shared` and the
 other library types, tasks and channels, time, the sized integers and
-`bytes`, the capabilities and their operations traits), `std/cap.sisu`
-(696: std.cap's attenuations, caretakers, fakes and interceptor),
-`std/task.sisu`, `std/log.sisu`, `std/net.sisu` (`Url`),
-`std/http.sisu` (282: std.x.http), `std/time.sisu`, `std/cli.sisu` and
-`std/math.sisu`; and `conformance/` (the suite, described in its own
-[README](../conformance/README.md)).
+`bytes`, the capabilities and their operations traits, property testing),
+`std/cap.sisu` (947: std.cap's attenuations, caretakers, fakes,
+interceptor and the `sim` profile's file system and network),
+`std/sim.sisu` (147: nodes, partitions, `choose`, `always`),
+`std/cli.sisu` (166: std.x.cli over reflection), `std/test.sisu`
+(snapshots, benchmarks), `std/json.sisu` (`encode` over reflection),
+`std/task.sisu`,
+`std/log.sisu`, `std/net.sisu` (`Url`), `std/http.sisu` (282:
+std.x.http), `std/time.sisu` and `std/math.sisu`; and `conformance/` (the
+suite, described in its own [README](../conformance/README.md)).
 
 The workspace forbids `unsafe` and denies `unwrap`, `expect`, `panic`,
 `todo`, `unimplemented` and `unreachable` outside tests (18, Phase 0,
@@ -546,8 +559,91 @@ the field `f` of `x`; a variant's field is reached inside an arm `case
 V(..)` that `comptime for V in reflect.variants_of(T)` made for a `match
 x`, where it is the arm's binding (`__x_0`, ...). A template that cannot
 unfold for a type is reported at the `@derive`, with a label where it
-stopped (`E0608`). Outside templates, `reflect`, `x.[f]`, `comptime for`
-and `return impl` are `E0900` (reflection beyond derive is Phase 8).
+stopped (`E0608`).
+
+### Templates and instances
+
+A generic free function whose body reflects on its type parameters (a
+`reflect` query, `x.[f]`, or a `comptime` expression naming one) is a
+**template**: it is not checked as written but made once for each list
+of type arguments it is called with, an **instance**, by the same
+unfolding (`instances.rs`, `template.rs`). Which instances a program
+needs is known only once its calls are typed, so the driver resolves and
+checks the program, collects the checker's requests (`Request::Instance`
+for a call of a template with concrete type arguments) and resolves it
+again with them, until no new one comes: a fixpoint of at most 32
+rounds, each resolving the whole program (`E0610` past it, or past 256
+instances in one round, for a template whose instances call it with ever
+larger types). A generic function that calls a template with its own type
+parameters cannot have that call's instance until it is itself called,
+so it becomes a template too (`Request::Promote`): monomorphisation by
+need, of the part of the call graph that reflects.
+
+An instance is declared in a module of its own, `<NAME[ARGS]>/MODULE.sisu`
+(under `<std>/` for a std template, so traces leave it out), whose scope
+is the template's module; each type it may name (an argument, a field's
+type, an element type) is bound to an alias there (`__T0`, `__T0_f1`,
+`__T0_e`), so the unfolded code names it whatever module it comes from.
+Its SIR name is the template's with the arguments (`to_json#Point`), and
+lowering redirects every call of the template to its instance. An
+instance that cannot be made is reported at the call that first needed it
+in the program's own code (an instance needed by another inherits its
+site), with a label where a program's template stopped (`E0609`); a
+template used as a value is `E0611` (generic functions are not values in
+stage 0 anyway, `E0350`).
+
+Reflection in templates adds to a derive's: `is_int`, `is_float`,
+`is_bool`, `is_char`, `is_str` (`str` or `String`), `is_list`,
+`is_option`, `is_tuple`, `elem_of(T)` (a list's or option's element
+type), `attributes_of(T)` (each attribute on the declaration, with `name`
+and `args`, the text of each argument), `implements(T, "Trait")`; a
+field's `ty` and `default` (whether it has one); `comptime panic(msg)`
+(a compile error for the types that reach it). Two queries make code
+rather than values: `reflect.default_of(f)` is the field's default,
+evaluated where it is written (a call `X.__default_f()`, which the
+checker types as the field's default, `ExprKind::FieldDefault`), and
+`reflect.construct(T, {name: value, ...})` is the struct built from a
+dict whose keys are known at compile time, every field without a default
+given (so the struct is built once and its invariant checked on what was
+given). A comprehension over compile-time lists is unrolled into the
+list, set or dict it makes (`[f.name for f in reflect.fields_of(T)]`), an
+`if comptime c: a else: b` expression picks its branch, and compile-time
+values may appear inside a `match` expression and a closure.
+`std.x.cli`'s `parse[T]` and `help_text[T]` are templates written this
+way (`std/cli.sisu`), as are `json.encode[T]` (`std/json.sisu`) and
+`std.test`'s `assert_snapshot`.
+
+**`embed("path")`** is the text of a file beside the program, read by the
+driver when it checks the program (`Db::checked`): a path inside the
+program's directory, as a string literal (`E0613`); one that cannot be
+read is `E0612`, with a reason that is the same on every machine.
+**`target`** is an ambient module of constants (`os`, `arch` and
+`runtime`, which is `interpreter`), so `if comptime target.os ==
+"windows":` is decided when the program is compiled and both branches are
+checked.
+
+Outside derives and templates (a method, a non-generic function),
+`reflect`, `x.[f]`, `comptime for` and `return impl` are `E0900`.
+
+### The interceptors and fakes of a program's traits
+
+For a trait the program declares whose methods can all be forwarded (a
+`self` or `mut self` receiver, no type parameters of their own, no
+borrow or `Self` in a signature; the trait without type parameters,
+associated types or supertraits), the resolver writes, as source in a
+module whose scope is the trait's (`shims.rs`, `<shims>/main.sisu`):
+`impl[__T: Trait, __I: cap.Interceptor] Trait for cap.Wrap[__T, __I]`,
+whose methods show each call to the interceptor (arguments and outcome
+rendered with `Debug`) and forward it, so `cap.Wrap(inner=x, hook=h)`
+implements the trait (D-075); and a fake, `struct __Fake_Trait`, which
+`cap.Fake[Trait]` names (in a type or as `cap.Fake[Trait].new()`;
+`E0614` for anything else): each method logs its call (`calls()` gives
+the log, each call written `method(arguments)`) and returns what
+`on_METHOD(result)` queued for it, the last result again once the others
+are used, or panics with nothing queued; copies share what it recorded.
+A module gets them only when its text names `Wrap` or `Fake`. In Sisu
+both are compile-time code over the trait's methods (`reflect.methods_of`,
+which waits for Q-27 to say how compile-time code writes a signature).
 
 ## Type checking
 
@@ -1762,6 +1858,190 @@ after `import http`. `std.net` has `Url`.
 lent capability or a `System` (`E0334`); the capabilities' operations
 are not pure, so it could not use one either.
 
+## Contracts and refinements
+
+[07](../../proposal/07-contracts.md). A function's contract is its
+`requires` and `ensures` clauses, at the start of its body (`E0800`
+elsewhere, `E0807` in a test); a struct's is its `invariant` lines; a
+refinement type is `type X = T where pred`, with `self` the base value.
+
+**Checking** (`sisu-typeck/src/contracts.rs`). A clause is a `bool`
+expression that only reads: it calls `pure` functions (`E0801`) and
+changes nothing (`E0802`), so a build may leave it out and a failed one
+can be evaluated again, part by part. `result` in an `ensures` is the
+returned value; `old(e)` is `e` as it was on entry (`E0803` outside an
+`ensures`, `E0804` for a malformed one; a generator has no `ensures`,
+`E0805`). A field of a struct with an invariant may be changed only by
+the struct's own methods (`E0806`), which check it again.
+
+**Where checks run** (`sisu-lower/src/contracts.rs`). `requires` on entry;
+the values `old` names saved then; on every exit (`return`, `?`, the end
+of the body) the `ensures` clauses with `result` bound, and the invariant
+of a `mut self` method's type; a struct's invariant once it is built
+(the method the compiler writes for its lines, `X.__check_invariant`, and
+`X.__invariant`, its `bool` form, for D-077's `Mutex` check). The level of
+a build decides which run: `sisu run --contracts=off|preconditions|all`
+(`all` by default; `D0028`); `sisu test` checks every one (`D0029`). A
+failed check panics with the clause and, for each part of a clause that
+only reads, its value (`R0100` precondition, `R0101` postcondition,
+`R0102` invariant), as a failed `assert` shows every sub-expression
+(`assert.fail_parts`).
+
+**Refinements.** `X` is a subtype of its base: an `X` is used wherever the
+base is (it has the base's reading impls, through `unrefine`; an impl of
+another trait of its own is `E0813`), and a base value becomes an `X`
+only where its predicate is checked: `X.try_from(v)`, which gives
+`Err(Unsatisfied(...))` of `RefinementError`, or a constant, checked at
+compile time (`E0810`). A base where an `X` is expected is `E0811`, with
+the fix. A refinement of a refinement keeps its chain: a value of the
+outer one satisfies every predicate down to the root, and `try_from`
+checks them all. A change through the base (`x.push(...)` on a refined
+list) is `E0812`: change a copy and check it again. The predicate is a
+`pure` function the compiler writes (`X#where`, `E0814` unless it is a
+`bool`); a run-time refinement check that fails is `R0103`.
+
+**`sisu check --explain FILE`** (`sisu-driver/src/doc.rs`) prints the
+file's declarations as `sisu doc` renders them: each signature joined
+onto one line, with its contracts under it, a type's invariants, a
+refinement's predicate and the `try_from` that checks it, and the error
+set the compiler inferred for a `T !` function (`... ! {A, B}  #
+inferred`). The conformance suite compares it (`NAME.doc`).
+
+## Property tests
+
+[17](../../proposal/17-testing.md), "Property-based testing"; D-070.
+`check(gen, prop)` (or `check(gen) do x:`) runs a property on the cases a
+generator makes, in Sisu (`std/prelude.sisu`), on Hypothesis's model: a
+case is made from a sequence of choices (`Draws`), so every generator
+shrinks the same way. `arbitrary[T]` draws 100 random cases;
+`exhaustive[T](max_len=n)` lists every case whose collections hold at
+most `n` items and whose integers are within `n` of zero (or in their
+refinement's range), depth first. A failing case is shrunk by deleting
+and lowering choices (each lowered by binary search; at most 1000
+attempts) and reported with its value; each case has a budget of
+statements (`Gen.steps`; past it is a failure, `R0104`, unless the
+generator is quiet), so a property that loops forever fails instead of
+hanging, deterministically.
+
+**Generators** are written by the compiler as Sisu source
+(`sisu-resolve/src/arbitrary.rs`, `<arbitrary>/main.sisu`), only for the
+types a program generates: `__arbitrary_T` for a struct (its fields, then
+its invariant: a case that breaks it is refused), an enum (a variant,
+then its fields) and a refinement (its base, then its predicate; an
+integer refinement whose predicate bounds `self` draws in that range);
+`E0820` for a type with none. The `<arbitrary>` module's diagnostics are
+dropped when the program has an error of its own, since they repeat it.
+
+**Contracts as properties** (07): for each function with a contract
+whose parameters all have generators, `sisu test` adds `contract of
+NAME`, which calls it on cases its `requires` accepts; `ensures` and the
+invariants are checked by the call. Such a generator is quiet: a case it
+cannot make, or one past its budget, is refused rather than failed.
+
+**`@refines(reference, tolerance=Ulps(n))`** (N-21) on a function adds
+`NAME refines REFERENCE`: on quiet `arbitrary` cases of the parameters,
+the function gives what its reference gives, exactly, or for an `f64`
+within `n` units in the last place (`within_ulps`). Both must be free
+functions of the module with the same parameters and result (`E0821`
+otherwise, with the reason).
+
+## Testing
+
+`sisu test FILE` (17) runs the `test` blocks, under the monitor unless
+`--no-monitor`. Each test runs in an interpreter of its own; those that
+take no `System` run at the same time on up to `--jobs N` threads (8 by
+default, `sisu-interp/src/parallel.rs`), and those that take the real
+`System` one at a time after them. Each is seeded as when they ran one
+after another, nothing but the host's clock and output is shared, and
+each test's output is held and written in declaration order, so a run
+prints the same at any number of threads (the conformance runner checks
+`--jobs 1` against every `.test`).
+
+- **Parametrised tests**: `test "name" for x, y in [(1, 2), (3, 4)]:` over
+  a list written out is a test per element, named `name (1, 2)`, whose
+  body starts by binding the pattern; over a list computed otherwise, one
+  test that runs each case in turn (`sisu-resolve/src/tests_of.rs`).
+- **Suites and tags**: a test in `suite "s":` is named `s/name`;
+  `@tag("slow")` marks it. `--filter TEXT` (a part of the name),
+  `--tag T` and `--skip-tag T` select (`D0053` counts the others).
+- **Snapshots**: `std.test.assert_snapshot(value)` compares the value's
+  `Debug` rendering (text as it is) with the snapshot stored under the
+  test's name (` #2` and on for later ones) in `PROGRAM.snap` beside the
+  program (`sisu-driver/src/snap.rs`): a change fails with a line diff
+  (`R0107`), a missing one shows what would be stored (`R0108`); `sisu
+  test --update` shows each change and writes the file.
+- **Transcripts**: every `tests/*.transcript` beside the program
+  (`sisu-driver/src/transcript.rs`): a `$` line runs `main` with the
+  words after the program's name, the `>` lines after it are its
+  standard input, the other lines what it prints (output and errors as
+  written, ` (exit N)` on the last line of a run that fails), against a
+  fake `System` that persists between the runs of one file: an in-memory
+  `Fs` with the files of `tests/NAME/`, a clock frozen at the epoch,
+  `Rand.seeded(0)` and no network (`transcript_world` and
+  `transcript_system` in the prelude, which lowering keeps for this run
+  only). A difference fails with a diff (`D0061`); `--update` rewrites
+  the file.
+- **Benchmarks**: `bench "name"(b: Bench):` is checked like a test and
+  run by `sisu bench FILE [--iterations N]`, which reports the time of an
+  iteration of `b.loop()` (the interpreter's: compare benchmarks with
+  each other); `black_box(x)` consumes a value the optimiser must not see
+  through.
+- **Fakes and interceptors** of the program's traits: `cap.Fake[Trait]`
+  and `cap.Wrap`, above ("The interceptors and fakes of a program's
+  traits").
+- **Replay tokens**: every failing test prints `replay: sisu test
+  --replay TOKEN FILE` (below), or says it has none when it takes the
+  real `System` (`D0031`).
+
+## Simulation, schedulers and replay
+
+**The capability log** (N-04; `sisu-interp/src/record.rs`). `sisu run
+--record FILE` runs a program on a host wrapper that passes every call of
+the host contract through and writes it and its result to a versioned
+text log: a header (`sisu-log 1`, the toolchain, the program's name and
+content hash, its source, the scheduler's seed, the hash key, the
+contract level), then one record per call (`call NAME FIELDS -> RESULT`;
+written data by its hash), `out`, `err`, `redacted CAP` (for `--redact
+fs,net,...`), the reserved `swap` (hot replacement) and `exit STATUS`.
+`sisu replay FILE` runs the logged source again on a host that answers
+each call from the log; the first call or output that differs is a
+divergence (`D0037`), reported with both, and a different exit status is
+`D0040`. In the interpreter every source of nondeterminism is a host call
+or the seeded scheduler, so a replay is exact; the conformance runner
+records and replays every case that runs.
+
+**Replay tokens** (`sisu-driver/src/replay.rs`) are one word,
+`1-HASH-TOOLCHAIN-tT-sS-rR[-cCHOICES][-pDEPTH|-xSCHEDULE][-mPPM]`: the
+content hash of the file, the toolchain, the test's index, the scheduler's
+seed, the case seed, the shrunk case's choices, the scheduler and the
+`sim` profile's fault rate. `sisu test --replay TOKEN FILE` runs that test
+that way; a token for other code (`D0033`), another toolchain (`D0034`)
+or a missing test (`D0035`) is refused.
+
+**Schedulers** (`sisu-interp/src/sched.rs`, `--scheduler`). `random` (the
+default): budgets of yield points and the next task drawn from the seeded
+generator. `pct --depth N`: PCT, random priorities with N-1 change points
+over the first 1000 steps, the highest-priority ready task runs, a task
+that yields lowers its priority. `exhaustive --depth N`: depth-first
+enumeration of every schedule with at most N preemptions, each schedule a
+list of choices (`next_schedule`), capped at 10 000 runs or `--explore N`
+(`D0046` to `D0050`). `--explore N` runs a program or each test under N
+seeds of the random or PCT scheduler.
+
+**The `sim` profile** (17, "Simulation and replay"; `sisu test --sim
+[--faults P]`). A test that declares a `System` gets `System.sim(seed)`: a
+crash-consistent file system (`cap.SimFs`: writes are pending until
+`sync`, a crash keeps what was synced), an in-process network
+(`cap.SimNetwork`), the run's test clock, `Rand.seeded`, and fakes of the
+rest. `std.sim` has `Sim` (nodes, each with its own `SimFs`, on one
+network: `crash`, `restart`, `partition`, `heal`), `choose(n)` (a choice
+the exhaustive scheduler enumerates) and `always(what, holds, body)` (an
+invariant checked at every switch between tasks, `R0105`). With
+`--faults P` (0.01 by default) a call of a simulation object's operations
+fails at that rate with an error from its declared set, never one it
+cannot return. A `sim` build fails to compile if reachable code calls an
+`extern` with no simulation model (`E0971`; `sisu-driver/src/sim.rs`).
+
 ## Numbers, bytes and slices
 
 **The sized integers** `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`
@@ -1872,12 +2152,22 @@ server.
 ```text
 sisu run FILE [ARGS...]      check, lower and run; `--sir` runs a SIR text file,
                              `--monitor` runs under the ownership monitor,
-                             `--defer-borrow` runs a rejected program in the counterexample mode
-sisu check FILE              diagnostics; `--format=ids` for the conformance form
+                             `--defer-borrow` runs a rejected program in the counterexample mode,
+                             `--contracts=off|preconditions|all` what it checks (07),
+                             `--record LOG [--redact fs,net,...]` writes the capability log
+sisu replay LOG              run a recorded program again against its log (`--monitor`)
+sisu check FILE              diagnostics; `--format=ids` for the conformance form,
+                             `--explain` the signatures with their contracts
 sisu sir FILE                the serialised SIR, drops placed and `comptime` values baked
                              (also for a program the ownership checker rejects)
-sisu test FILE               run the `test` blocks under the monitor: ok, FAILED, or
-                             blocked by a hole; `--no-monitor`, `--defer-borrow`
+sisu test FILE               run the tests (and `tests/*.transcript`) under the monitor: ok,
+                             FAILED, or blocked by a hole; `--no-monitor`, `--defer-borrow`,
+                             `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`,
+                             `--update` (snapshots and transcripts), `--replay TOKEN`,
+                             `--sim [--faults P]`
+sisu bench FILE              run the benchmarks; `--iterations N`
+                             (`run` and `test` also take `--schedule-seed N`, `--explore N`,
+                             `--scheduler random|pct|exhaustive` and `--depth N`)
 sisu tokens FILE             the token stream; `--trivia` includes trivia
 sisu parse FILE              `--tree` the syntax tree, `--print` the source again
 sisu explain CODE            the catalog entry for a code or identifier
@@ -1983,14 +2273,18 @@ open to revision; the conformance cases pin the current choice.
 11. The `IoError` variants are `NotFound(path)`, `PermissionDenied(path)`,
     `AlreadyExists(path)`, `InvalidData(path)` (not UTF-8),
     `Interrupted`, `Revoked` and `Other(message: String)`.
-12. `cli.parse[T]` (the stand-in for `std.x.cli`'s derive): each field
-    `f` of type `int`, `f64`, `str`, `String`, `Path` or `bool` is the
-    option `--f`, with `-` for `_`, given as `--f value` or `--f=value`; a
-    `bool` is a flag; the one `list` field collects the positional
-    arguments; `--` ends the options; a field with a default may be
-    omitted. Its errors are `UnknownOption`, `MissingValue`,
+12. `cli.parse[T]` (`std.x.cli`, a template over reflection): each field
+    `f` of type `int`, `f64`, `String`, `Path` or `bool` is the option
+    `--f`, with `-` for `_`, given as `--f value` or `--f=value`; a `bool`
+    is a flag (or `--f=true`); the one `list` field collects the
+    positional arguments; `--` ends the options; a field with a default
+    may be omitted. Its errors are `UnknownOption`, `MissingValue`,
     `InvalidValue`, `MissingArgument` and `UnexpectedArgument`, naming the
-    option as written.
+    option as written: unknown options and missing values first, as the
+    arguments are read, then invalid values and missing options in field
+    order. A `str` field is a compile error (use `String`), since the
+    parsed struct owns its text. The struct is built once with every
+    field, so its invariant is checked on what was parsed.
 13. `()` is a pattern matching the unit value.
 14. Inferred error sets are found by iterating every `T !` function to a
     fixpoint, at most 32 rounds.
@@ -2285,12 +2579,15 @@ open to revision; the conformance cases pin the current choice.
 100. `Cap[T]` is a `Copy` handle on a shared value, the building block of
      fakes and caretakers written in Sisu; its value is never dropped.
 101. `System`'s fields are `fs`, `net`, `clock`, `rand`, `env`, `proc`,
-     in the proposal's order; the standard streams stay ambient (Q-5),
-     so it has no `stdin`, `stdout` or `stderr`.
+     in the proposal's order, then `stdin`: reading standard input is a
+     capability (`Stdin`, `read_line`), so that a capability log records
+     and a replay answers it; standard output and error stay ambient
+     (Q-5).
 102. A test takes nothing or one `System` (`E0702`), and one that takes
-     a `System` receives the host's, as the proposal's text says; a test
+     a `System` receives the host's, as the proposal's text says, except
+     in the `sim` profile, which gives it `System.sim(seed)`; a test
      that wants a whole fake set makes it with `System.fake(seed)`, so no
-     test is handed fakes implicitly.
+     test is handed fakes implicitly outside `--sim`.
 103. A run has one test clock (`Clock.fake`), which `Clock.frozen_at(t)`
      sets to `t` and every `TestClock` reads, and which stamps the writes
      of in-memory file systems; it starts at the epoch and is virtual.
@@ -2333,3 +2630,110 @@ open to revision; the conformance cases pin the current choice.
      2261), parses RFC 3339 in Sisu, and displays with the fraction of a
      second only when there is one.
 
+**Contracts** (07)
+
+117. A clause only reads, so a build may leave it out and a failed one can
+     be evaluated again part by part to show each part's value; `old(e)`
+     is a copy of `e` made on entry, of every `old` of the function,
+     whether or not the exit that checks it is reached.
+118. A struct's invariant is checked after each construction and when
+     each `mut self` method of the type returns (by any exit); a field of
+     such a struct is changed only in the type's own methods (`E0806`),
+     and in one the invariant may be broken until it returns.
+119. The levels are `off`, `preconditions` and `all`; `sisu run` checks
+     `all` unless told otherwise, and `sisu test` always does.
+120. A refinement of a refinement keeps the chain: `try_from` and a
+     constant check every predicate from the root's up, and the error
+     names the first that fails; a coercion or a method looks through one
+     level at a time.
+121. A refinement has its base's reading impls (`Display`, `Debug`, `Eq`,
+     `Ord`, `Hash`, `Len`), not the ones that make or change values
+     (`Add`, `Iterator`), and no impl of its own (`E0813`).
+
+**Property tests and testing** (17)
+
+122. A case is a sequence of choices; an integer is one choice; shrinking
+     deletes runs of choices and lowers each one by binary search, at
+     most 1000 attempts; the reported case is the smallest found.
+123. A case has a budget of statements (`Gen.steps`: 1 000 000, or
+     100 000 for the tests the compiler writes), not a deadline, so a
+     run is deterministic; past it the case fails, or, for a quiet
+     generator (contract and `@refines` tests), is refused.
+124. Generators exist only for the types a program generates; a
+     generic function's type parameter is `int` in its contract test,
+     when `int` meets every bound, else the function has none.
+125. `@refines` compares with `==`, or with `within_ulps` for an `f64`
+     result given `tolerance=Ulps(n)`; both functions are free
+     functions of the module with the same signature.
+126. The tests that take no `System` run on threads, those that take the
+     real one after them, one at a time; every test's output is printed,
+     held per test and written in declaration order before the results
+     (17's "shown on failure" is not adopted yet: stage 0 prints it all).
+127. A case of a parametrised test is named by its element's source text
+     (`name ("4x", 1)`); over a list not written out, the test is one.
+128. A missing snapshot fails like a changed one; only `--update`
+     writes `PROGRAM.snap`, keeping the snapshots of tests that did not
+     run and dropping those a test that ran no longer takes.
+129. A transcript's `$` line drops the program's name; its `>` lines
+     are input only before the run's first output line; ` (exit N)`
+     ends the last line of a run that fails, or is a line of its own;
+     transcripts run only when no test is filtered out.
+130. `sisu bench` runs each benchmark once with `--iterations N` (100)
+     and reports the mean time of an iteration on the host's clock, with
+     no statistics yet.
+131. A fake's methods return their queued results in order and the last
+     one again; one with nothing queued panics; a method that returns
+     nothing needs nothing queued. Its log writes each argument with
+     `Debug`.
+132. `--filter` (a part of the name), `--tag` and `--skip-tag` may each
+     be given more than once: a test runs when one filter and one tag
+     match and no skipped tag does.
+
+**Replay and simulation** (17; N-04)
+
+133. The capability log is text, version 1, with the data the program
+     wrote logged by its hash; a replay checks the program's output
+     against the log too, and stops at the first difference.
+134. A token is one word of `-`-separated fields read from the end, so a
+     toolchain version may hold a `-`; a test that takes the real
+     `System` has none.
+135. PCT draws `depth - 1` change points among the first 1000 yield
+     points; the exhaustive scheduler's choice 0 continues the running
+     task, and its search stops at 10 000 schedules.
+136. Faults go only to the simulation's own objects (`cap.SimFs`,
+     `cap.SimNetwork`, `sim.SimNet`), never to a program's fakes, and are
+     always errors of the operation's declared set other than
+     `TaskError`; a fault's `path` is the call's path argument, else
+     `(simulated)`.
+137. `cap.SimFs` keeps a write pending until `sync(path)`; a crash keeps
+     only what was synced, so a file whose name was never synced
+     vanishes whole.
+
+**Reflection** (08)
+
+138. A template is a generic free function that reflects; it is made per
+     list of type arguments by resolving the program again with the
+     checker's requests, to a fixpoint (32 rounds, 256 instances a round);
+     a generic function that calls one with its own parameters becomes
+     one.
+139. `reflect.construct(T, {...})` and `reflect.default_of(f)` build a
+     struct from its fields and give a field's default: the proposal
+     says reflection produces values for expressions, not how a value is
+     built from fields; this is the smallest form that builds each struct
+     once (invariant checked) and evaluates a default only when used.
+140. A comprehension over compile-time lists is unrolled, and `if
+     comptime c: a else: b` picks its branch, in templates.
+141. A type of the program with the name of a prelude type is `main.NAME`
+     in SIR, since the run time knows the prelude's types by name.
+142. `embed` reads a file in the program's directory only, as text, when
+     the program is checked; `target.runtime` is `interpreter`.
+143. The `?`s in the standard library and in instances of its templates
+     are not part of an error's return trace, as its frames are not part
+     of a panic's.
+144. The interceptor and the fake of a program's trait are written only
+     for a module whose text names `Wrap` or `Fake`; the interceptor
+     forwards every method, provided ones too, so the inner value's own
+     runs.
+145. `Option.unwrap`, `Result.unwrap`, `Iterator.nth`, `str.parse_float`
+     (decimal syntax only: no `inf` or `nan`) and `within_ulps` join the
+     prelude, for the examples that use them.

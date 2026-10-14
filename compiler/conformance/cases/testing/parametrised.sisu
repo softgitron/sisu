@@ -1,0 +1,32 @@
+# A parametrised test is a test for each case of a list written out,
+# named after the case and reported, selected and run on its own; over a
+# list computed otherwise it is one test that runs each case in turn.
+# A suite groups tests one level deep, and `@tag` marks tests to select
+# or skip.
+# select --tag slow --filter double
+
+def double(x: int) -> int:
+    return x * 2
+
+test "doubles" for x, y in [(1, 2), (2, 4), (-3, -6)]:
+    assert double(x) == y
+
+test "a wrong case fails on its own" for x, y in [(1, 2), (3, 7)]:
+    assert double(x) == y
+
+const SMALL: list[int] = [1, 2, 3]
+
+test "positive" for n in SMALL:
+    assert n > 0
+
+suite "double":
+    @tag("slow")
+    test "of a large number":
+        assert double(1 << 40) == 1 << 41
+
+    test "of zero":
+        assert double(0) == 0
+
+@tag("slow")
+test "slow, outside the suite":
+    assert True

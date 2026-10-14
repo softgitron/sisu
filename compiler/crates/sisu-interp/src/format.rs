@@ -427,7 +427,7 @@ pub fn parts_diagram(text: &str, parts: &[(usize, String)]) -> String {
         return String::new();
     }
     let mut parts: Vec<(usize, String)> = parts.to_vec();
-    parts.sort_by(|a, b| b.0.cmp(&a.0));
+    parts.sort_by_key(|p| std::cmp::Reverse(p.0));
     parts.dedup_by_key(|p| p.0);
     // rows[r] holds the values on row r + 1 (row 0 is the bars), as
     // (column, text); depth[i] the row of part i.
@@ -435,9 +435,8 @@ pub fn parts_diagram(text: &str, parts: &[(usize, String)]) -> String {
     let mut depth = Vec::new();
     for (c, v) in &parts {
         let len = v.chars().count();
-        let fits = |row: &Vec<(usize, String)>| {
-            row.iter().all(|(k, w)| c + len < *k || *k + w.chars().count() < *c)
-        };
+        let fits =
+            |row: &Vec<(usize, String)>| row.iter().all(|(k, w)| c + len < *k || *k + w.chars().count() < *c);
         let r = match rows.iter().position(fits) {
             Some(r) => r,
             None => {
@@ -455,10 +454,10 @@ pub fn parts_diagram(text: &str, parts: &[(usize, String)]) -> String {
         let mut line: Vec<char> = vec![' '; width];
         for (i, (c, _)) in parts.iter().enumerate() {
             // A part's bar runs down through the rows above its value.
-            if r == 0 || depth[i] >= r {
-                if let Some(slot) = line.get_mut(*c) {
-                    *slot = '│';
-                }
+            if (r == 0 || depth[i] >= r)
+                && let Some(slot) = line.get_mut(*c)
+            {
+                *slot = '│';
             }
         }
         if r > 0 {

@@ -1,0 +1,38 @@
+test "a precondition names its clause and values" ... FAILED
+test "a postcondition names the result" ... FAILED
+test "labelled results" ... ok
+test "every exit checks the postcondition" ... ok
+test "contract of isqrt" ... ok
+test "contract of divmod" ... ok
+test "contract of first_positive" ... ok
+test "contract of push_twice" ... ok
+test "contract of wrong_abs" ... FAILED
+
+test "a precondition names its clause and values" ... FAILED
+panic: precondition of `isqrt` failed: n >= 0
+    n >= 0
+    │
+    -4
+  at isqrt (checks.sisu:6:14)
+  at test "a precondition names its clause and values" (checks.sisu:57:9)
+replay: sisu test --replay 1-4ed82ed8f4be04b0-0.0.1-t0-s0-r0 checks.sisu
+
+test "a postcondition names the result" ... FAILED
+panic: postcondition of `wrong_abs` failed: result >= 0
+    result >= 0
+    │
+    -20
+  at wrong_abs (checks.sisu:39:13)
+  at test "a postcondition names the result" (checks.sisu:60:9)
+replay: sisu test --replay 1-4ed82ed8f4be04b0-0.0.1-t1-s0-r0 checks.sisu
+
+test "contract of wrong_abs" ... FAILED
+panic: the property failed for (-11,) (case 1, shrunk 8 times)
+  it panicked: postcondition of `wrong_abs` failed: result >= 0
+    result >= 0
+    │
+    -11
+  at test "contract of wrong_abs" (<arbitrary>/main.sisu:61:5)
+replay: sisu test --replay 1-4ed82ed8f4be04b0-0.0.1-t8-s0-r0-c6.22 checks.sisu
+
+6 passed, 3 failed, 0 blocked

@@ -1,0 +1,24 @@
+# `assert_snapshot(value)` compares the value's `Debug` rendering (text
+# as it is) with the snapshot stored for it in `snapshots.snap` beside
+# the program (17): a match passes, a change fails with a diff, and a
+# missing snapshot fails showing what `sisu test --update` would store.
+
+from std.test import assert_snapshot
+
+@derive(Debug)
+struct Point:
+    x: int
+    y: int
+
+test "a point":
+    assert_snapshot(Point(x=1, y=2))
+
+test "several snapshots in one test":
+    assert_snapshot([1, 2, 3])
+    assert_snapshot("plain\ntext")
+
+test "a changed rendering":
+    assert_snapshot(Point(x=3, y=4))
+
+test "no snapshot yet":
+    assert_snapshot((True, 'c'))

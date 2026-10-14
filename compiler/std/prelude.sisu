@@ -167,6 +167,12 @@ struct Env:
 struct Proc:
     pass
 
+## The standard input capability: the lines the program is given
+## (`StdinOps`).
+@builtin("Stdin")
+struct Stdin:
+    pass
+
 ## The root of all capabilities, constructed by the runtime only when
 ## `main(sys: System)` declares it, and passed to `main` alone, or to a test
 ## that declares one (`test "name"(sys: System):`, which then runs alone;
@@ -180,6 +186,7 @@ struct System:
     rand: Rand
     env: Env
     proc: Proc
+    stdin: Stdin
 
 ## The host's objects behind the root capabilities of a `System`: nothing
 ## constructs one, so every effect on the world passes through a `System`.
@@ -205,6 +212,10 @@ struct HostEnv:
 
 @builtin("HostProc")
 struct HostProc:
+    pass
+
+@builtin("HostStdin")
+struct HostStdin:
     pass
 
 ## The run's test clock, from `Clock.fake` and `Clock.frozen_at` (17): one
@@ -838,6 +849,15 @@ trait Iterator:
             n += 1
         return n
 
+    ## The item at index `n` (from 0), or `None` when there are fewer.
+    def nth(own self, n: int) -> Item?:
+        var i = 0
+        for x in self:
+            if i == n:
+                return Some(x)
+            i += 1
+        return None
+
     ## `f` applied to the running value, from `init`, and each item in turn.
     def fold[B](own self, own init: B, f: (B, Item) -> B) -> B:
         var acc = init
@@ -1127,6 +1147,9 @@ impl char:
     pure def is_uppercase(self) -> bool
     @intrinsic("char.is_lowercase")
     pure def is_lowercase(self) -> bool
+    ## The character's Unicode scalar value.
+    @intrinsic("char.code")
+    pure def code(self) -> int
 
 # ------------------------------------------------------------------ str and String
 
@@ -1212,6 +1235,11 @@ impl str:
         if negated == -9223372036854775807 - 1:
             return None
         return Some(-negated)
+    ## The decimal number the whole text spells (an optional sign, digits
+    ## with an optional fraction, an optional exponent: `-1.5`, `2e10`), as
+    ## the nearest `f64`, or `None`; `inf` and `nan` are not numbers here.
+    @intrinsic("str.parse_float")
+    pure def parse_float(self) -> f64?
     ## `self` repeated `n` times.
     @intrinsic("str.repeat")
     pure def repeat(self, n: int) -> String
@@ -2025,6 +2053,13 @@ impl Timer:
 
 # ------------------------------------------------------------------ Option and Result
 
+## Whether `a` and `b` are at most `n` units in the last place apart:
+## at most `n` representable `f64`s lie between them, past the first
+## (equal values, and `0.0` and `-0.0`, are 0 apart; a NaN is apart from
+## everything). What `@refines(reference, tolerance=Ulps(n))` compares (17).
+@intrinsic("f64.within_ulps")
+pure def within_ulps(a: f64, b: f64, n: int) -> bool
+
 impl[T] Option[T]:
     @intrinsic("Option.is_some")
     pure def is_some(self) -> bool
@@ -2033,6 +2068,9 @@ impl[T] Option[T]:
     ## The value; panics with `message` if there is none.
     @intrinsic("Option.expect")
     pure def expect(own self, message: str) -> T
+    ## The value; panics if there is none.
+    pure def unwrap(own self) -> T:
+        return self.expect("")
     ## The value, or `default`.
     @intrinsic("Option.or")
     pure def or(own self, own default: T) -> T
@@ -2050,6 +2088,9 @@ impl[T, E] Result[T, E]:
     ## The value; panics with `message` and the error if there is an error.
     @intrinsic("Result.expect")
     pure def expect(own self, message: str) -> T
+    ## The value; panics with the error if there is an error.
+    pure def unwrap(own self) -> T:
+        return self.expect("")
     ## The value, or `default`.
     @intrinsic("Result.or")
     pure def or(own self, own default: T) -> T
@@ -2085,9 +2126,10 @@ impl[T, E] Result[T, E]:
 
 ## What stopped a case or a call `test.catch` made: a panic, with its
 ## message (a refused choice is one too, which `check` tells by the
-## draws' `rejected`).
+## draws' `rejected`), or running past its budget of statements.
 error Panicked:
     Panicked(message: String)
+    TooLong(steps: int)
 
 ## The state of a case's choices (`Draws`).
 struct DrawState:
@@ -2134,7 +2176,7 @@ impl Draws:
             var z = g.value.state
             z = (z ^ ((z >> 30) & 17179869183)) *% -4658895280553007687
             z = (z ^ ((z >> 27) & 137438953471)) *% -7723592293110705685
-            c = ((z ^ ((z >> 31) & 8589934591)) & 4611686018427387903) % n
+            c = ((z ^ ((z >> 31) & 8589934591)) & 9223372036854775807) % n
         g.value.choices.push(c)
         g.value.bounds.push(n)
         return c
@@ -2171,8 +2213,9 @@ impl Draws:
             return -(c // 2)
         return (c + 1) // 2
     ## An integer: most often within `size` of zero, sometimes within a
-    ## thousand, sometimes any; in an exhaustive search, every one within
-    ## `size` of zero.
+    ## thousand, sometimes within 2^62; in an exhaustive search, every one
+    ## within `size` of zero. Each is one choice after the one that picks
+    ## the range, so a shrunk range keeps the value as near as it fits.
     def gen_int(d: Draws) -> int:
         if d.exhaustive():
             return Draws.zigzag(d.draw(2 * d.size() + 1))
@@ -2181,8 +2224,7 @@ impl Draws:
             return Draws.zigzag(d.draw(2 * d.size() + 1))
         if k < 7:
             return Draws.zigzag(d.draw(2001))
-        let hi = Draws.zigzag(d.draw(4294967295))
-        return hi * 4294967296 + d.draw(4294967296)
+        return Draws.zigzag(d.draw(9223372036854775807))
     ## An integer in `range(lo, hi)`, nearer `lo` for smaller choices.
     def gen_in(d: Draws, lo: int, hi: int) -> int:
         return lo + d.draw(hi - lo)
@@ -2257,14 +2299,27 @@ view struct Gen[T]:
     exhaustive: bool
     max_len: int
     cases: int
+    ## Every case refused is no failure, and a case past its budget is
+    ## refused, not failed (the cases of a contract, which its `requires`
+    ## may refuse, and whose cost is not what the contract says).
+    quiet: bool
+    ## The statements a case may run, generating its value and checking the
+    ## property, before it fails (deterministic, unlike a deadline).
+    steps: int
 
 impl[T] Gen[T]:
     ## `cases` random cases of `make`.
-    pure def of(make: (Draws) -> T, cases: int = 100) -> Gen[T]:
-        return Gen(make=make, exhaustive=False, max_len=0, cases=cases)
+    pure def of(make: (Draws) -> T, cases: int = 100, quiet: bool = False, steps: int = 1000000) -> Gen[T]:
+        return Gen(make=make, exhaustive=False, max_len=0, cases=cases, quiet=quiet, steps=steps)
     ## Every case of `make` up to `max_len`.
-    pure def every(make: (Draws) -> T, max_len: int) -> Gen[T]:
-        return Gen(make=make, exhaustive=True, max_len=max_len, cases=0)
+    pure def every(make: (Draws) -> T, max_len: int, steps: int = 1000000) -> Gen[T]:
+        return Gen(make=make, exhaustive=True, max_len=max_len, cases=0, quiet=False, steps=steps)
+
+## The text of the file at `path`, relative to the program's file, read
+## when the program is compiled (08): the one input a build reads besides
+## its source, recorded with it, so the same inputs give the same program.
+@intrinsic("compiler.embed")
+def embed(path: str) -> str
 
 ## The cases of `T` drawn at random, written `arbitrary[T]`: the compiler
 ## writes the generator of `T` (a refinement's values satisfy its
@@ -2288,11 +2343,12 @@ enum Outcome:
     Refused
     Failed(reason: String)
 
-## Runs `f(x)`, giving its result, or `Panicked(message)` when it panics
-## (a typed hole is not caught); only `check` uses it.
+## Runs `f(x)`, giving its result, `Panicked(message)` when it panics (a
+## typed hole is not caught) or `TooLong(steps)` when it runs more than
+## `steps` statements; only `check` uses it.
 @internal
 @intrinsic("test.catch")
-def catch[A, R](f: (A) -> R, own x: A) -> R ! Panicked
+def catch[A, R](f: (A) -> R, own x: A, steps: int) -> R ! Panicked
 
 ## The seed of the property's random cases in this run of the test.
 @internal
@@ -2312,19 +2368,27 @@ def record_case(choices: list[int])
 ## Runs one case from `prefix`.
 def run_case[T](gen: Gen[T], prop: (T) -> bool, own prefix: list[int], random: bool, state: int, size: int) -> (Outcome, Draws):
     let d = Draws.new(prefix, random, gen.exhaustive, state, size)
-    match catch(gen.make, d):
+    match catch(gen.make, d, gen.steps):
         case Err(Panicked(message)):
-            if d.rejected():
+            # A generator the compiler wrote for a contract refuses what it
+            # cannot make (an invariant that traps on a drawn value).
+            if d.rejected() or gen.quiet:
                 return (Refused, d)
             return (Failed("the generator panicked: {message}"), d)
+        case Err(TooLong(steps)):
+            return (Failed("the generator ran past its budget of {steps} statements"), d)
         case Ok(value):
-            match catch(prop, value):
+            match catch(prop, value, gen.steps):
                 case Ok(True):
                     return (Passed, d)
                 case Ok(False):
                     return (Failed("the property returned False"), d)
                 case Err(Panicked(message)):
                     return (Failed("it panicked: {message}"), d)
+                case Err(TooLong(steps)):
+                    if gen.quiet:
+                        return (Refused, d)
+                    return (Failed("it ran past its budget of {steps} statements"), d)
 
 ## The case `prefix` names, replayed, if it fails.
 def failing[T](gen: Gen[T], prop: (T) -> bool, own prefix: list[int], size: int) -> Failure?:
@@ -2351,12 +2415,24 @@ pure def replaced(xs: list[int], i: int, v: int) -> list[int]:
     out[i] = v
     return out
 
+## Whether the choices `a` are simpler than `b`: fewer, or as many and
+## smaller at the first that differs (shortlex), so shrinking ends.
+pure def simpler(a: list[int], b: list[int]) -> bool:
+    if len(a) != len(b):
+        return len(a) < len(b)
+    var i = 0
+    while i < len(a):
+        if a[i] != b[i]:
+            return a[i] < b[i]
+        i += 1
+    return False
+
 ## The smallest failing case found from `start` within a budget of runs:
 ## spans of choices deleted, then each choice made smaller.
 def shrink[T](gen: Gen[T], prop: (T) -> bool, own start: Failure, size: int) -> (Failure, int):
     var best = start
     var shrinks = 0
-    var budget = 400
+    var budget = 1000
     var improved = True
     while improved and budget > 0:
         improved = False
@@ -2365,25 +2441,42 @@ def shrink[T](gen: Gen[T], prop: (T) -> bool, own start: Failure, size: int) -> 
             while i + k <= len(best.choices) and budget > 0:
                 budget -= 1
                 match failing(gen, prop, without(best.choices, i, k), size):
-                    case Some(f):
-                        best = f
+                    case Some(f) if simpler(f.choices, best.choices):
+                        best = f.copy()
                         shrinks += 1
                         improved = True
-                    case None:
+                    case _:
                         i += 1
         var i = 0
         while i < len(best.choices) and budget > 0:
-            let v = best.choices[i]
-            for c in [0, v // 2, v - 1]:
-                if c >= 0 and c < best.choices[i] and budget > 0:
-                    budget -= 1
-                    match failing(gen, prop, replaced(best.choices, i, c), size):
-                        case Some(f):
-                            best = f
-                            shrinks += 1
-                            improved = True
-                        case None:
-                            pass
+            # Zero first; then the smallest choice that still fails, by a
+            # binary search over the smaller ones in steps of two (which
+            # keep the sign of a zigzagged integer), then of one.
+            if best.choices[i] > 0:
+                budget -= 1
+                match failing(gen, prop, replaced(best.choices, i, 0), size):
+                    case Some(f) if simpler(f.choices, best.choices):
+                        best = f.copy()
+                        shrinks += 1
+                        improved = True
+                    case _:
+                        pass
+            for step in [2, 1]:
+                if i < len(best.choices):
+                    let v = best.choices[i]
+                    var lo = 0
+                    var hi = v // step + 1
+                    while hi - lo > 1 and budget > 0 and i < len(best.choices):
+                        let mid = lo + (hi - lo) // 2
+                        budget -= 1
+                        match failing(gen, prop, replaced(best.choices, i, v - step * mid), size):
+                            case Some(f) if simpler(f.choices, best.choices):
+                                best = f.copy()
+                                shrinks += 1
+                                improved = True
+                                lo = mid
+                            case _:
+                                hi = mid
             i += 1
     return (best, shrinks)
 
@@ -2452,7 +2545,7 @@ def check[T: Debug](gen: Gen[T], prop: (T) -> bool):
                     refused += 1
                 case Passed:
                     cases += 1
-        if cases == 0 and found.is_none():
+        if cases == 0 and found.is_none() and not gen.quiet:
             panic("no case could be made: all {refused} were refused")
     if found.is_none():
         return
@@ -2460,8 +2553,18 @@ def check[T: Debug](gen: Gen[T], prop: (T) -> bool):
     let (best, shrinks) = if gen.exhaustive: (first, 0) else: shrink(gen, prop, first, size)
     record_case(best.choices)
     let d = Draws.new(best.choices.copy(), False, gen.exhaustive, 0, size)
-    let value = (gen.make)(d)
-    panic("the property failed for {value:?}\n  {best.reason} (case {cases + refused + 1}, shrunk {shrinks} times)")
+    let times = if shrinks == 1: "once".to_string() else: "{shrinks} times"
+    panic("the property failed for {shown(gen.make, d, gen.steps)} (case {cases + refused + 1}, shrunk {times})\n  {best.reason}")
+
+## The case `d` makes, as `{:?}` shows it.
+def shown[T: Debug](make: (Draws) -> T, d: Draws, steps: int) -> String:
+    match catch(make, d, steps):
+        case Ok(value):
+            return "{value:?}"
+        case Err(Panicked(_)):
+            return "a case its generator could not make"
+        case Err(TooLong(_)):
+            return "a case its generator could not make in {steps} statements"
 
 # ------------------------------------------------------------------ capabilities (06, "Capabilities")
 # Each capability is a handle (`Fs`, ...) on an object that implements its
@@ -2506,6 +2609,10 @@ trait FsOps:
     ## Creates or replaces the file with `text` in UTF-8.
     def write_text(self, path: Path, text: str) -> ! IoError:
         return self.write(path, text.encode())
+    ## Makes the file's contents, or the directory's entries, durable: what
+    ## was written since the last sync is what a crash loses (the `sim`
+    ## profile's file system, 17).
+    def sync(self, path: Path) -> ! IoError
 
 impl FsOps for Fs:
     @intrinsic("cap.forward")
@@ -2526,6 +2633,8 @@ impl FsOps for Fs:
     def list_dir(self, path: Path) -> list[Path] ! IoError
     @intrinsic("cap.forward")
     def create_dir(self, path: Path) -> ! IoError
+    @intrinsic("cap.forward")
+    def sync(self, path: Path) -> ! IoError
 
 impl Fs:
     ## The same file system with every change refused as `PermissionDenied`.
@@ -2570,6 +2679,8 @@ impl FsOps for HostFs:
     def list_dir(self, path: Path) -> list[Path] ! IoError
     @intrinsic("host.fs.create_dir")
     def create_dir(self, path: Path) -> ! IoError
+    @intrinsic("host.fs.sync")
+    def sync(self, path: Path) -> ! IoError
 
 impl[T: FsOps + Copy] FsOps for Lent[T]:
     @intrinsic("cap.forward")
@@ -2590,6 +2701,8 @@ impl[T: FsOps + Copy] FsOps for Lent[T]:
     def list_dir(self, path: Path) -> list[Path] ! IoError
     @intrinsic("cap.forward")
     def create_dir(self, path: Path) -> ! IoError
+    @intrinsic("cap.forward")
+    def sync(self, path: Path) -> ! IoError
 
 ## A byte stream to another program, both ways: a TCP connection, or one
 ## end of a fake network's in-process pipe. A read waits for data and gives
@@ -2888,21 +3001,80 @@ impl[T: ProcOps + Copy] ProcOps for Lent[T]:
     @intrinsic("cap.forward")
     def run(self, program: str, args: list[str]) -> ProcOutput ! ProcError
 
+## The operations of the standard input capability.
+trait StdinOps:
+    ## The next line, without its line break; `None` at the end of the
+    ## input. A blocking point.
+    def read_line(self) -> String?
+
+impl StdinOps for Stdin:
+    @intrinsic("cap.forward")
+    def read_line(self) -> String?
+
+impl Stdin:
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[Stdin]
+    ## A fake that gives these lines, then the end of the input (17).
+    def fake(lines: list[str] = []) -> Stdin:
+        return cap.FakeStdin.new(lines)
+
+impl StdinOps for HostStdin:
+    @intrinsic("host.stdin.read_line")
+    def read_line(self) -> String?
+
+impl[T: StdinOps + Copy] StdinOps for Lent[T]:
+    @intrinsic("cap.forward")
+    def read_line(self) -> String?
+
 impl System:
     ## A test's capability set in one value (17, "Isolation and
     ## parallelism"): an empty in-memory `Fs`, a `Net` that reaches
     ## nothing, the run's test clock, `Rand.seeded(seed)`, an `Env` without
-    ## arguments or variables and a `Proc` that runs nothing. Each call
-    ## makes a fresh set; a test that declares a `System` receives the
-    ## real one instead.
+    ## arguments or variables, a `Proc` that runs nothing and an empty
+    ## standard input. Each call makes a fresh set; a test that declares a
+    ## `System` receives the real one instead.
     def fake(seed: int) -> System:
         return System.assemble(
             fs=Fs.in_memory(), net=cap.NoNet(), clock=Clock.fake(), rand=Rand.seeded(seed),
-            env=Env.fake(), proc=Proc.fake(),
+            env=Env.fake(), proc=Proc.fake(), stdin=Stdin.fake(),
+        )
+    ## The `sim` profile's system (17, "Simulation and replay"), which
+    ## `sisu test --sim` gives a test that declares a `System`: a
+    ## crash-consistent file system (`cap.SimFs`), an in-process network
+    ## (`cap.SimNetwork`),
+    ## the run's test clock, `Rand.seeded(seed)`, and fakes of the
+    ## environment, processes and standard input.
+    def sim(seed: int) -> System:
+        return System.assemble(
+            fs=cap.SimFs.new(), net=cap.SimNetwork.new(), clock=Clock.fake(), rand=Rand.seeded(seed),
+            env=Env.fake(), proc=Proc.fake(), stdin=Stdin.fake(),
         )
     @internal
     @intrinsic("System.assemble")
-    def assemble(fs: Fs, net: Net, clock: Clock, rand: Rand, env: Env, proc: Proc) -> System
+    def assemble(fs: Fs, net: Net, clock: Clock, rand: Rand, env: Env, proc: Proc, stdin: Stdin) -> System
+
+## What a transcript test's runs of `main` share (17, "Snapshots and
+## transcripts"): an in-memory `Fs` holding the transcript's fixture
+## files, a clock frozen at the epoch, and `Rand.seeded(0)`; each `$` line
+## runs with these and its own arguments and standard input.
+struct TranscriptWorld:
+    fs: Fs
+    clock: Clock
+    rand: Rand
+
+@internal
+def transcript_world(own files: list[(str, str)]) -> TranscriptWorld:
+    var d: dict[str, str] = dict()
+    for path, text in files:
+        _ = d.insert(path, text)
+    return TranscriptWorld(fs=Fs.in_memory(d), clock=Clock.frozen_at(DateTime.epoch()), rand=Rand.seeded(0))
+
+@internal
+def transcript_system(own world: TranscriptWorld, own args: list[str], own stdin: list[str]) -> System:
+    return System.assemble(
+        fs=world.fs, net=cap.NoNet(), clock=world.clock, rand=world.rand,
+        env=Env.fake(args), proc=Proc.fake(), stdin=Stdin.fake(stdin),
+    )
 
 ## The revoker of a caretaker (`Fs.revocable`): a `Copy` handle on the
 ## flag every copy of the caretaker checks.

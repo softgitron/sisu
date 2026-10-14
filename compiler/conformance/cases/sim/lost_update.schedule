@@ -1,0 +1,13 @@
+test "two bumps make two" ... FAILED
+test "with the lock held across the update" ... ok
+
+test "two bumps make two" ... FAILED
+with schedule 0.0.1.0.0.0 of a bounded exhaustive search (preemption bound 1)
+panic: assertion failed: bumped_twice() == 2
+  left:  1
+  right: 2
+  at test "two bumps make two" (lost_update.sisu:32:5)
+replay: sisu test --replay 1-f262d0e5f1b21338-0.0.1-t0-s0-r0-x0.0.1.0.0.0 lost_update.sisu
+
+1 passed, 1 failed, 0 blocked
+searched 307 schedules (preemption bound 1)

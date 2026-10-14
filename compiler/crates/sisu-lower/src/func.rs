@@ -122,19 +122,7 @@ pub(crate) fn lower_body(ctx: &mut Ctx, body: &thir::Body) -> Vec<sir::Function>
     let mut main = FnLower::new(ctx, body, None, &name);
     main.type_params = type_params.clone();
     main.bounds = env.clone();
-    out.push(main.run(kind, source, pure, (from.clone(), inner.clone()), own.clone()));
-    // A struct's invariant check also becomes `T.__invariant`, which says
-    // whether the invariant holds: the check D-077 runs when unwinding
-    // drops a mutex guard, in every build.
-    if let Some(sisu_resolve::FnKind::Invariant(_)) = fn_info.map(|f| &f.kind)
-        && let Some(base) = name.strip_suffix(".__check_invariant")
-    {
-        let mut b = FnLower::new(ctx, body, None, &format!("{base}.__invariant"));
-        b.type_params = type_params.clone();
-        b.bounds = env.clone();
-        b.bool_invariant = true;
-        out.push(b.run(kind, source, pure, (from, inner), own));
-    }
+    out.push(main.run(kind, source, pure, (from, inner), own));
     for (i, cl) in body.closures.iter().enumerate() {
         let id = thir::ClosureId(i as u32);
         if cl.comptime {

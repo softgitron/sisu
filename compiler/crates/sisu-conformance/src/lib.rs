@@ -56,6 +56,13 @@ pub struct Report {
     /// schedules that makes.
     pub explored: usize,
     pub schedules: u64,
+    /// Cases whose run was recorded and replayed (N-04).
+    pub replayed: usize,
+    /// Failing tests run again from their replay tokens.
+    pub tokens: usize,
+    /// Test runs repeated on one thread (`--jobs 1`), which must print
+    /// what the parallel run printed.
+    pub serial: usize,
     pub failures: Vec<Failure>,
     pub blessed: Vec<String>,
 }
@@ -67,10 +74,13 @@ impl Report {
             out.push_str(&format!("FAIL {} [{}]\n{}\n", f.case, f.check, f.detail));
         }
         out.push_str(&format!(
-            "{} cases, {} checks, {} runs also under the monitor, {} counterexample runs, {} explored ({} schedules), {} failed\n",
+            "{} cases, {} checks, {} runs also under the monitor, {} recorded and replayed, {} failing tests replayed from their tokens, {} test runs repeated on one thread, {} counterexample runs, {} explored ({} schedules), {} failed\n",
             self.cases,
             self.checks,
             self.monitored,
+            self.replayed,
+            self.tokens,
+            self.serial,
             self.deferred,
             self.explored,
             self.schedules,
@@ -126,11 +136,16 @@ pub const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Runs `sisu args...` in `cwd` with an empty environment.
 pub fn invoke(sisu: &Path, cwd: &Path, args: &[String]) -> Output {
+    invoke_with_input(sisu, cwd, args, None)
+}
+
+/// [`invoke`], with `input` as the standard input (else none).
+pub fn invoke_with_input(sisu: &Path, cwd: &Path, args: &[String], input: Option<&str>) -> Output {
     let spawned = Command::new(sisu)
         .args(args)
         .current_dir(cwd)
         .env_clear()
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn();
@@ -144,6 +159,15 @@ pub fn invoke(sisu: &Path, cwd: &Path, args: &[String]) -> Output {
             };
         }
     };
+    // The input is written on a thread of its own and the pipe closed, so
+    // the program sees its end.
+    if let (Some(text), Some(mut stdin)) = (input, child.stdin.take()) {
+        let text = text.to_string();
+        std::thread::spawn(move || {
+            use std::io::Write as _;
+            let _ = stdin.write_all(text.as_bytes());
+        });
+    }
     // Drain the pipes on their own threads so a chatty program cannot block.
     let out = drain(child.stdout.take());
     let err = drain(child.stderr.take());
@@ -224,7 +248,64 @@ struct Runner<'a> {
     counter: usize,
 }
 
+/// Each failing test's block of `sisu test` output, by the token that
+/// replays it: from its `test ... FAILED` line to its `replay:` line, with
+/// the property's case number and shrink count left out (a replay starts
+/// from the shrunk case), and so is the line naming the schedule a search
+/// found it under (the token holds the schedule).
+fn failure_blocks(out: &str) -> Vec<(String, String)> {
+    let mut blocks = Vec::new();
+    let mut current: Option<String> = None;
+    for line in out.lines() {
+        if line.starts_with("test ") && line.ends_with(" ... FAILED") {
+            current = Some(String::new());
+        }
+        if let Some(text) = current.as_mut() {
+            if line.starts_with("with schedule ") {
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("replay: sisu test --replay ") {
+                let token = rest.split(' ').next().unwrap_or("").to_string();
+                blocks.push((token, std::mem::take(text)));
+                current = None;
+                continue;
+            }
+            // `(case N, shrunk K times)` and `(case N, shrunk once)`.
+            let shown = match line.find(" (case ") {
+                Some(a) if line[a..].contains(", shrunk ") => match line[a..].find(')') {
+                    Some(b) => format!("{}{}", &line[..a], &line[a + b + 1..]),
+                    None => line.to_string(),
+                },
+                _ => line.to_string(),
+            };
+            text.push_str(&shown);
+            text.push('\n');
+        }
+    }
+    blocks
+}
+
 impl Runner<'_> {
+    /// Every failing test of the `sisu test` output `out`, again from its
+    /// replay token: it must fail the same way (17, "Simulation and
+    /// replay").
+    fn replay_tokens(&mut self, case: &Case, sandbox: &Sandbox, out: &str) {
+        let file = format!("{}.sisu", case.stem);
+        let first_test = |o: &str| failure_blocks(o).into_iter().next().map(|(_, b)| b).unwrap_or_default();
+        for (token, block) in failure_blocks(out) {
+            self.report.tokens += 1;
+            let args = vec!["test".to_string(), "--replay".to_string(), token.clone(), file.clone()];
+            let again = invoke(self.sisu, &sandbox.dir, &args);
+            self.compare(
+                case,
+                &format!("sisu test --replay {token}"),
+                None,
+                &block,
+                &first_test(&again.stdout),
+            );
+        }
+    }
+
     fn compare(&mut self, case: &Case, check: &str, ext: Option<&str>, expected: &str, actual: &str) {
         self.report.checks += 1;
         if expected == actual {
@@ -278,16 +359,34 @@ impl Runner<'_> {
             ("tree", vec!["parse", "--tree"]),
             ("sir", vec!["sir"]),
             ("test", vec!["test"]),
+            ("doc", vec!["check", "--explain"]),
         ] {
             let Some(expected) = case.expected(ext) else { continue };
             let mut a = s(&args);
             a.push(file.clone());
             let out = invoke(self.sisu, &sandbox.dir, &a);
             self.compare(case, &format!("sisu {}", args.join(" ")), Some(ext), &expected, &out.stdout);
+            if ext == "test" {
+                self.replay_tokens(case, &sandbox, &out.stdout);
+                // Tests run in parallel by default; on one thread they
+                // must print the same (17, "Isolation and parallelism").
+                self.report.serial += 1;
+                let one = invoke(self.sisu, &sandbox.dir, &s(&["test", "--jobs", "1", &file]));
+                self.compare(
+                    case,
+                    "sisu test --jobs 1 prints what the parallel run printed",
+                    None,
+                    &out.stdout,
+                    &one.stdout,
+                );
+            }
         }
 
         let args: Vec<String> =
             case.expected("args").map(|a| a.lines().map(str::to_string).collect()).unwrap_or_default();
+        // `NAME.stdin`: what every run of the program reads.
+        let input = case.expected("stdin");
+        let input = input.as_deref();
         // The counterexample mode (A2) on a program the checker rejects:
         // the monitor's verdict for this input.
         if let Some(expected) = case.expected("defer") {
@@ -297,6 +396,29 @@ impl Runner<'_> {
             let out = invoke(self.sisu, &sandbox.dir, &a);
             let actual = format!("{}--- stderr\n{}--- status {}\n", out.stdout, out.stderr, out.status);
             self.compare(case, "sisu run --defer-borrow", Some("defer"), &expected, &actual);
+        }
+        // `# sim ARGS` and `# schedule ARGS`: the tests again in the `sim`
+        // profile, or under another scheduler, and each failure again from
+        // its replay token.
+        // `# select ARGS`: the tests the selection flags pick.
+        for (marker, ext, sim) in
+            [("# sim", "sim", true), ("# schedule", "schedule", false), ("# select", "select", false)]
+        {
+            let Some(line) =
+                source.lines().find(|l| l.trim() == marker || l.trim().starts_with(&format!("{marker} ")))
+            else {
+                continue;
+            };
+            let mut a = s(&["test"]);
+            if sim {
+                a.push("--sim".into());
+            }
+            a.extend(line.trim()[marker.len()..].split_whitespace().map(str::to_string));
+            a.push(file.clone());
+            let out = invoke(self.sisu, &sandbox.dir, &a);
+            let expected = case.expected(ext).unwrap_or_default();
+            self.compare(case, &format!("sisu {}", a.join(" ")), Some(ext), &expected, &out.stdout);
+            self.replay_tokens(case, &sandbox, &out.stdout);
         }
         // `sisu explain-borrow` at the line a `# explain-borrow N` comment names.
         if let Some(expected) = case.expected("explain") {
@@ -323,7 +445,7 @@ impl Runner<'_> {
             if wants_run {
                 let mut a = s(&["run", "--explore", &n.to_string(), &file]);
                 a.extend(args.iter().cloned());
-                let out = invoke(self.sisu, &sandbox.dir, &a);
+                let out = invoke_with_input(self.sisu, &sandbox.dir, &a, input);
                 let status =
                     case.expected("status").map(|s| s.trim().to_string()).unwrap_or_else(|| "0".into());
                 self.compare(
@@ -340,7 +462,7 @@ impl Runner<'_> {
         }
         let mut run_args = s(&["run", &file]);
         run_args.extend(args.iter().cloned());
-        let run = invoke(self.sisu, &sandbox.dir, &run_args);
+        let run = invoke_with_input(self.sisu, &sandbox.dir, &run_args, input);
         self.compare(case, "stdout", Some("out"), &case.expected("out").unwrap_or_default(), &run.stdout);
         // Principle 5 of 18: the checker checks itself. A program the
         // checker accepted runs the same under the dynamic ownership
@@ -348,7 +470,7 @@ impl Runner<'_> {
         // the static checker has a soundness hole.
         let mut monitored_args = s(&["run", "--monitor", &file]);
         monitored_args.extend(args.iter().cloned());
-        let monitored = invoke(self.sisu, &sandbox.dir, &monitored_args);
+        let monitored = invoke_with_input(self.sisu, &sandbox.dir, &monitored_args, input);
         self.report.monitored += 1;
         self.compare(
             case,
@@ -359,6 +481,32 @@ impl Runner<'_> {
                 "{}\n--- stderr\n{}\n--- status {}\n",
                 monitored.stdout, monitored.stderr, monitored.status
             ),
+        );
+        // Record and replay (N-04): the run again with every capability
+        // result logged, then the log replayed with nothing of the world;
+        // both print what the run printed and exit the same way. (The run
+        // writes its files again, into the same directory, as the plain
+        // run did.)
+        let log = format!("{}.log", case.stem);
+        let mut recorded_args = s(&["run", "--record", &log, &file]);
+        recorded_args.extend(args.iter().cloned());
+        let recorded = invoke_with_input(self.sisu, &sandbox.dir, &recorded_args, input);
+        let shown = |o: &Output| format!("{}\n--- stderr\n{}\n--- status {}\n", o.stdout, o.stderr, o.status);
+        self.report.replayed += 1;
+        self.compare(
+            case,
+            "sisu run --record prints what the run printed",
+            None,
+            &shown(&run),
+            &shown(&recorded),
+        );
+        let replayed = invoke(self.sisu, &sandbox.dir, &s(&["replay", &log]));
+        self.compare(
+            case,
+            "sisu replay prints what the recorded run printed",
+            None,
+            &shown(&recorded),
+            &shown(&replayed),
         );
         self.compare(case, "stderr", Some("err"), &case.expected("err").unwrap_or_default(), &run.stderr);
         let status = case.expected("status").map(|s| s.trim().to_string()).unwrap_or_else(|| "0".into());
@@ -385,7 +533,7 @@ impl Runner<'_> {
             if std::fs::write(sandbox.dir.join(&sir_file), &sir.stdout).is_ok() {
                 let mut a = s(&["run", "--sir", &sir_file]);
                 a.extend(args);
-                let again = invoke(self.sisu, &sandbox.dir, &a);
+                let again = invoke_with_input(self.sisu, &sandbox.dir, &a, input);
                 self.compare(case, "run --sir: stdout", None, &run.stdout, &again.stdout);
                 // Warnings precede the program's own output when running
                 // the source; the SIR has none to print.

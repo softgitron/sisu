@@ -51,7 +51,7 @@ impl Checker<'_> {
         if let Some((d, _, _)) = self.refinement_of(&actual)
             && !matches!(&exp, Ty::Adt(e, _) if *e == d)
         {
-            let x = self.unrefined(x);
+            let x = self.unrefined_once(x);
             return self.coerce(x, &exp);
         }
         // A value of the base where a refinement is expected: only a
@@ -60,12 +60,21 @@ impl Checker<'_> {
         if let Some((d, _, base)) = self.refinement_of(&exp)
             && !matches!(&actual, Ty::Adt(a, _) if *a == d)
         {
-            let base_ok = {
+            // Of its base, or of anything under it (an `int` where a
+            // `Small = Port where ...` is expected).
+            let mut under = vec![base];
+            while let Some(Ty::Adt(b, args)) = under.last() {
+                match self.prog.refinement_base(*b, args) {
+                    Some(t) if under.len() < 64 => under.push(t),
+                    _ => break,
+                }
+            }
+            let base_ok = under.iter().any(|base| {
                 let snap = self.infer.snapshot();
-                let ok = self.infer.unify(&actual, &base);
+                let ok = self.infer.unify(&actual, base);
                 self.infer.rollback(snap);
                 ok
-            };
+            });
             if base_ok || actual == Ty::Never {
                 let name = prog.def(d).name.clone();
                 let diag = self
@@ -299,6 +308,7 @@ impl Checker<'_> {
                 Some("Clock") => "Clock",
                 Some("Rand") => "Rand",
                 Some("Env") => "Env",
+                Some("Stdin") => "Stdin",
                 _ => "Proc",
             },
             _ => "Proc",
@@ -530,7 +540,12 @@ impl Checker<'_> {
             }
             ast::ExprKind::Field { base, name } => self.field_expr(base, name, e.range),
             ast::ExprKind::OptField { base, name } => self.opt_chain(base, name, None, e.range),
-            ast::ExprKind::Index { base, args } => self.index_expr(base, args, e.range),
+            ast::ExprKind::Index { base, args } => {
+                if let Some(x) = self.generator_site(e, base, args, None, expected) {
+                    return x;
+                }
+                self.index_expr(base, args, e.range)
+            }
             ast::ExprKind::Try(inner) => self.try_expr(inner, e.range),
             ast::ExprKind::Closure(c) => {
                 let fn_ty = expected.and_then(|t| match self.resolved(t) {
@@ -547,8 +562,8 @@ impl Checker<'_> {
             ast::ExprKind::FieldOf { .. } => {
                 self.unsupported(
                     e.range,
-                    "a field named by a compile-time value (`x.[f]`) outside a derive",
-                    "reflection beyond derive (Phase 8)",
+                    "a field named by a compile-time value (`x.[f]`) outside a derive or a generic function",
+                    "compile-time code in methods and non-generic functions (Phase 8)",
                 );
                 Expr::error(span)
             }
@@ -847,10 +862,15 @@ impl Checker<'_> {
         if self.quiet_unknown_names || self.prog.poisoned.contains(n) {
             return Expr::error(span);
         }
-        // The compile-time modules of 08 exist only in a derive's template.
+        // The compile-time module `reflect` (08) exists only in a derive's
+        // template and in a generic function, which is made for each call.
         match n {
             "reflect" => {
-                self.unsupported(range, "`reflect` outside a derive", "reflection beyond derive (Phase 8)");
+                self.unsupported(
+                    range,
+                    "`reflect` outside a derive or a generic function",
+                    "compile-time code in methods and non-generic functions (Phase 8)",
+                );
                 return Expr::error(span);
             }
             "target" => {
@@ -1805,8 +1825,8 @@ impl Checker<'_> {
         }
         self.unsupported(
             a.range,
-            "arms made at compile time outside a derive",
-            "reflection beyond derive (Phase 8)",
+            "arms made at compile time outside a derive or a generic function",
+            "compile-time code in methods and non-generic functions (Phase 8)",
         );
         true
     }

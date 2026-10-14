@@ -1,0 +1,61 @@
+# Refinement types (07): `type X = T where pred` is a subtype of `T`. A
+# constant is checked at compile time, any other value by `X.try_from`;
+# an `X` is used wherever a `T` is, and what is computed from one is a `T`.
+
+type Port = int where 1 <= self <= 65535
+type Even = int where self % 2 == 0
+type Small = Port where self < 1024          # a refinement of a refinement
+type Word = String where len(self) > 0 and not self.contains(" ")
+type NonEmpty[T] = list[T] where not self.is_empty()
+
+def describe(p: Port) -> String:
+    let next = p + 1                         # an `int`: arithmetic leaves the refinement
+    return "port {p}, then {next}"
+
+def head[T: Copy](xs: NonEmpty[T]) -> T:
+    return xs[0]
+
+def total(xs: Slice[int]) -> int:            # a `NonEmpty[int]` is a `list[int]`
+    var t = 0
+    for x in xs:
+        t += x
+    return t
+
+def halve(e: Even) -> int:
+    return e // 2
+
+def main():
+    let p: Port = 8080
+    print(describe(p))
+    print(describe(Port.try_from(443).expect("in range")))
+    print(Port.try_from(0))
+    print(Port.try_from(70000))
+    let s: Small = 22
+    print(describe(s))                        # a `Small` is a `Port`
+    print(Small.try_from(8080))
+    print(halve(10))
+    match Even.try_from(7):
+        case Ok(e):
+            print(halve(e))
+        case Err(Unsatisfied(ty, predicate)):
+            print("not {ty}: {predicate}")
+    let w = Word.try_from("sisu".to_string())
+    print(w)
+    print(Word.try_from("two words".to_string()))
+    let xs: NonEmpty[int] = NonEmpty.try_from([4, 5, 6]).expect("not empty")
+    print(head(xs))
+    print(total(xs))
+    print(len(xs))
+    print(NonEmpty[int].try_from([]))
+    let q = Port.try_from(3000) else:
+        return
+    let as_int: int = q
+    print(as_int * 2)
+
+test "a refinement's values satisfy its predicate":
+    check(arbitrary[Port]) do p:
+        return 1 <= p and p <= 65535
+
+test "every small even number halves":
+    check(exhaustive[Even](max_len=6)) do e:
+        return halve(e) * 2 == e

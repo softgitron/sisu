@@ -1,0 +1,8 @@
+# What `embed` cannot read is a compile error: a missing file, a path out
+# of the program's directory, and a path that is not a literal.
+
+def main():
+    let name = "notes.txt"
+    print(embed("missing.txt"))
+    print(embed("../outside.txt"))
+    print(embed(name))

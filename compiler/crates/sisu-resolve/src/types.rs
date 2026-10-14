@@ -12,8 +12,10 @@ impl Resolver<'_> {
     /// defaults, then the bounds of the parameters of structs and enums.
     /// Defaults come after the parameters without one (02, "Declarations").
     pub fn resolve_headers(&mut self) {
-        let mut ids: Vec<DefId> = self.type_params.keys().copied().collect();
+        let mut ids: Vec<DefId> =
+            self.type_params.keys().copied().filter(|d| !self.headers_done.contains(d)).collect();
         ids.sort();
+        self.headers_done.extend(ids.iter().copied());
         for &d in &ids {
             let gps = self.type_params.get(&d).cloned().unwrap_or_default();
             let module = self.prog.def(d).module;
@@ -197,6 +199,49 @@ impl Resolver<'_> {
         None
     }
 
+    /// Whether `segments` name `cap.Fake`, whose argument is a trait, in
+    /// the program's code (the standard library's own code, such as what
+    /// it derives, sees the plain declaration).
+    pub fn is_fake_marker(&self, segments: &[ast::Name], module: ModuleId) -> bool {
+        if self.is_std(module) {
+            return false;
+        }
+        let mut d = None;
+        let mut m = module;
+        for (i, seg) in segments.iter().enumerate() {
+            let found =
+                if i == 0 { self.prog.lookup(m, &seg.text) } else { self.prog.lookup_in(m, &seg.text) };
+            let Some(x) = found else { return false };
+            if let DefKind::Module(next) = self.prog.def(x).kind {
+                m = next;
+            }
+            d = Some(x);
+        }
+        d.is_some_and(|d| {
+            let def = self.prog.def(d);
+            let module = &self.prog.modules[def.module.0 as usize];
+            def.name == "Fake" && module.is_std && module.name == "cap"
+        })
+    }
+
+    /// `cap.Fake[Trait]`: the fake the compiler wrote for the trait (17).
+    pub fn fake_ty(&mut self, arg: &ast::TypeExpr, ctx: &TyCtx, span: Span) -> Ty {
+        let TypeKind::Path { segments, args } = &arg.kind else {
+            let written = self.source_of(self.span(ctx.module, arg.range));
+            self.report(Diagnostic::new(msg::COMPTIME_NO_FAKE, span).with("name", written));
+            return Ty::Error;
+        };
+        let trait_def = if args.is_empty() { self.lookup_path(segments, ctx, span) } else { None };
+        let name = segments.iter().map(|s| s.text.clone()).collect::<Vec<_>>().join(".");
+        match trait_def.and_then(|t| self.prog.fakes.get(&t).copied()) {
+            Some(fake) => Ty::Adt(fake, Vec::new()),
+            None => {
+                self.report(Diagnostic::new(msg::COMPTIME_NO_FAKE, span).with("name", name));
+                Ty::Error
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- types
 
     pub fn resolve_ty(&mut self, te: &ast::TypeExpr, ctx: &TyCtx) -> Ty {
@@ -204,6 +249,11 @@ impl Resolver<'_> {
         match &te.kind {
             TypeKind::Error => Ty::Error,
             TypeKind::Path { segments, args } => {
+                if let [arg] = args.as_slice()
+                    && self.is_fake_marker(segments, ctx.module)
+                {
+                    return self.fake_ty(arg, ctx, span);
+                }
                 let args: Vec<Ty> = args.iter().map(|a| self.resolve_ty(a, ctx)).collect();
                 self.resolve_path_ty(segments, args, ctx, span)
             }

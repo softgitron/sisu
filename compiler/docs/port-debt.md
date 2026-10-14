@@ -55,10 +55,10 @@ be written over its bytes without a copy per call. *Pay*: represent
 `String` as bytes with the invariant, then write the methods in Sisu over
 them, keeping only the Unicode tables (above) on the host.
 
-**Number parsing in `cli.parse`.** An `int` or `f64` option's value is
-read by Rust's `parse` (`str.parse_int` is Sisu, in the prelude). *Pay*:
-with "`cli.parse` is one intrinsic" below, through `str.parse_int` and a
-Sisu `f64` parser (correctly rounded, as for literals).
+**Text to `f64` at run time.** `str.parse_float` (which `cli.parse` uses
+for an `f64` option) is Rust's `parse`, after a check that the text is
+decimal syntax (no `inf` or `nan`); `str.parse_int` is Sisu. *Pay*: a
+Sisu `f64` parser, correctly rounded, as for literals.
 
 **Civil time.** `DateTime` is nanoseconds since the epoch in UTC, in an
 `i64` (the years 1678 to 2261); its RFC 3339 parser is Sisu, its
@@ -67,11 +67,6 @@ Sisu `f64` parser (correctly rounded, as for literals).
 problem.
 
 ## Shortcuts in the interpreter
-
-**`cli.parse` calls back into Sisu.** The run loop is a trampoline and
-no other intrinsic calls Sisu code, but `cli.parse` runs a field's
-default on a nested run loop (`sisu-interp/src/cli.rs`). *Pay*: with
-"`cli.parse` is one intrinsic" below.
 
 **Structural operations recurse.** The host's structural printing,
 comparison, hashing and `.copy()` recurse over a value on the host
@@ -128,9 +123,16 @@ coverage is keyed by function, line and column, so statements that start
 at the same position are counted together. *Pay*: key coverage by SIR
 block and statement (findings already record theirs).
 
-**Error traces are always recorded.** Every `?` appends its location to
-the error value, in every build; 05 says traces cost nothing in release
-builds. *Pay*: a build profile in which lowering omits `error.trace_push`.
+**Error traces are always recorded.** Every `?` of the program appends
+its location to the error value, in every build (those of the standard
+library and of its templates' instances do not); 05 says traces cost
+nothing in release builds. *Pay*: a build profile in which lowering omits
+`error.trace_push`.
+
+**`old` copies on entry.** Every `old(e)` of a function is a copy of `e`
+made on entry, whatever exit is taken and whatever the level, when the
+level checks `ensures`. *Pay*: a backend copies only what a reached
+`ensures` reads, and shares what is `Copy` or unchanged.
 
 **Which error set a value belongs to is a name.** An error value carries
 its declaration's name, and `error.is[D]` compares names. *Pay*: the
@@ -161,12 +163,6 @@ lowering's rule says it needs them (a type parameter only in the result,
 or an `Iterable[T]` parameter). *Pay*: pass every intrinsic its type
 arguments, which the untyped drops above also want.
 
-**`cli.parse` is one intrinsic.** It stands in for a derive over
-reflection (11, `std.x.cli`). *Pay*: a `comptime def derive` for a
-command-line trait, now that derives run at compile time; it needs
-reflection over field types and defaults (Phase 8), and then calls the
-defaults as ordinary Sisu.
-
 **Capability objects are never freed.** A capability handle's object and
 a `Cap`'s value live in a heap cell that every copy reaches and that
 nothing frees, because a `Copy` handle has no last copy; a `Drop` of the
@@ -181,10 +177,16 @@ lowering's `callee_for` and in `dispatch.rs`), since the object's type is
 known only at run time. *Pay*: none for the interpreter; a backend
 compiles a handle as a `dyn` of its trait.
 
-**`Wrap[T]` is written per capability.** 06 builds it from the
-reflection behind `Fake[T]`; std.cap writes its impl for each standard
-capability's trait. *Pay*: with reflection over traits (Phase 8), one
-generic impl, and `Fake[T]` beside it.
+**`Wrap` and `Fake` are written by the compiler.** 06 builds `Wrap[T]`
+from the reflection behind `Fake[T]`. std.cap writes `Wrap`'s impl for
+each standard capability's trait by hand, and for a program's own trait
+the resolver writes the impl and the fake as source text from the
+trait's declaration (`sisu-resolve/src/shims.rs`), only for a module
+whose text names `Wrap` or `Fake`, and only for traits whose methods can
+all be forwarded. *Pay*: reflection over a trait's methods
+(`reflect.methods_of`) and a way for compile-time code to write a method
+with a reflected signature (Q-27); then one generic impl and `Fake[T]` as
+std code, for every trait.
 
 **The host's network is polled.** A host socket that would block makes
 its task wait one millisecond on the host's clock and try again; there is
@@ -238,14 +240,25 @@ share one landing block.
 each time a leaf applies it. *Pay*: lowering can pass the spec already
 read, `comptime Spec.parse(...)` at the interpolation.
 
-**Derive templates unfold as text.** A trait's `comptime def derive` is
-evaluated by unfolding its body into source text (`template.rs`): the
-compile-time parts are evaluated over a small domain of values (the
-type, its fields and variants, integers, text, booleans), and the impl is
-then parsed and checked like written code, so an error in derived code is
-reported in the generated text. *Pay*: the comptime evaluator over typed
-IR producing the impl as a value (08: "`return impl ... for T:` is an
+**Templates unfold as text.** A trait's `comptime def derive`, and a
+generic function that reflects on its type parameters, are evaluated by
+unfolding their bodies into source text (`template.rs`): the
+compile-time parts are evaluated over a small domain of values (types,
+their fields, variants and attributes, integers, text, booleans, lists
+and tuples of them), and the impl or the instance is then parsed and
+checked like written code, so an error in it is reported in the
+generated text. `reflect.construct` and `reflect.default_of` make code
+rather than values. *Pay*: the comptime evaluator over typed IR producing
+the impl or the instance as a value (08: "`return impl ... for T:` is an
 expression form"), with reflection as a module of values.
+
+**Instances are found by resolving again.** Which instances of templates
+a program needs is known once its calls are typed, so the driver
+resolves and checks the whole program again with the checker's requests,
+up to 32 rounds (`Db::checked`); each round repeats all the work of the
+one before. *Pay*: per-item queries, so a round re-checks only the new
+instances and their callers; with monomorphisation in the backend, the
+instances are its own.
 
 **Compile-time evaluation is incomplete.** There is no memory limit (08
 asks for one) and no progress report for a long evaluation; the order of
@@ -266,15 +279,40 @@ raw memory and atomics (stage 1 and the backend), with the tags choosing
 the counting.
 
 **The scheduler is the interpreter's.** Tasks are frame stacks swapped
-into the interpreter, the run is single-threaded, and a schedule is the
-seeded generator's (`sched.rs`): there is no M:N runtime, no PCT or
-exhaustive mode, no `sim` profile and no work stealing. A generator
-dropped before its end is abandoned; a receiver's or generator's
-iterator inside another iterator's adapter cannot wait (`R0091`); in a
-`pure` scope the lowest-index failure is reported, but a body that joins
-a later task first sees it in time order. *Pay*: the runtime of 12's
-profiles; PCT and bounded exhaustive scheduling in the explorer (18,
-Phase 6); the generator's frames dropped with it.
+into the interpreter, a run is single-threaded, and a schedule is the
+seeded random, PCT or bounded exhaustive scheduler's (`sched.rs`): there
+is no M:N runtime and no work stealing, and the exhaustive search has no
+state hashing, so it runs again schedules that reach a state it has
+seen. A generator dropped before its end is abandoned; a receiver's or
+generator's iterator inside another iterator's adapter cannot wait
+(`R0091`); in a `pure` scope the lowest-index failure is reported, but a
+body that joins a later task first sees it in time order. *Pay*: the
+runtime of 12's profiles; state hashing in the explorer (18, Phase 6);
+the generator's frames dropped with it.
+
+**Faults are injected by the interpreter.** In the `sim` profile, the
+interpreter decides a fault at a trait call of `FsOps` or `NetOps` whose
+object is one of the simulation's (`cap.SimFs`, `cap.SimNetwork`,
+`sim.SimNet`, known by name, `exec.rs`), and builds an error of the
+operation's declared set (a path field from the call's path argument).
+*Pay*: the fault model as Sisu in the simulation objects themselves,
+drawing from the run's seeded generator.
+
+**Tests share the host behind a lock.** The parallel test runner
+(`parallel.rs`) gives each test thread a view of the one host whose calls
+take a lock, and each thread a 256 MiB stack reserve, as every
+interpreter thread has. Only the tests that take no `System` run in
+parallel, so only the host's clock is really shared. *Pay*: the M:N
+runtime runs tests as tasks; per-test capability declarations (17) let
+the tests that touch only fakes of the world run in parallel too.
+
+**The capability log is the host's wrapper.** Recording and replay wrap
+the host contract (`record.rs`), so they see the interpreter's host
+calls, not Sisu's capability methods; the data a program writes is logged
+by its FNV-1a hash, `hash-key` is always 0 (hashing is not keyed per
+process in stage 0), and `swap` is reserved for hot replacement. *Pay*:
+the interception point of D-075 (`Wrap` around each root capability)
+records, so the log is of Sisu calls; the REPL's epochs write `swap`.
 
 **Sized integers and bytes are host values.** A `u64` is a value kind of
 its own and the other sized integers are `int` values kept in range by
@@ -282,10 +320,22 @@ typed intrinsics (`sisu-interp/src/sized.rs`); `bytes` is a shared
 immutable host buffer. *Pay*: none for the interpreter; the backend gives
 each its width.
 
-**Invariants are checked only by `Mutex`.** A struct's `invariant` lines
-become a generated `__invariant` method that only D-077's check calls,
-when unwinding drops a guard. *Pay*: contracts (Phase 8) check them at
-the boundaries 07 gives.
+**Property testing is small.** The shrinker deletes runs of choices and
+lowers each by binary search, at most 1000 attempts; there is no
+database of failing cases (17's `tests/corpus/`), no `--fuzz` and no
+coverage guidance, and a case's budget is statements, not time. *Pay*:
+Hypothesis's shrink passes and example database, then the fuzzer.
+
+**Snapshots and transcripts update without a ceremony.** `sisu test
+--update` shows each change and writes the files; it does not warn above
+a size, refuse content the fakes have not pinned (17), or ask. *Pay*:
+the review flow of 17, with the size threshold and the check for
+unpinned content.
+
+**Benchmarks have no statistics.** `sisu bench` reports the mean time of
+an iteration on the host's clock, measured around the whole benchmark,
+with no warm-up, confidence interval or comparison with a baseline (17).
+*Pay*: the harness of 17: repeated samples, intervals, a stored baseline.
 
 **`Contextual` is displayed by a host rule.** `Result.context` wraps an
 error in std's `Contextual`, whose `Display` (`message: cause`) is a case
@@ -311,8 +361,6 @@ have impls that the fast path respects.
 - **Benchmarks in CI** (Phase 0): front-end milliseconds per kLOC and
   interpreter nanoseconds per SIR statement, and Phase 2's "parse to SIR
   under 50 ms per kLOC".
-- **Power assertions.** A failing `assert a == b` shows both sides; 17
-  wants the value of every sub-expression.
 - **The examples.** `hello.sisu` and `wordcount.sisu` run unmodified;
   `traits.sisu` and `errors.sisu` run with a `main` (and, for
   `errors.sisu`, the `default_port_for` it uses) appended, and the
@@ -322,13 +370,17 @@ have impls that the fast path respects.
   by tests, as does the `Shared` section (`shared_demo` and
   `counter_demo`, `ownership/proposal_shared`).
   `comptime.sisu`: the user-defined derive (`Describe` and `Point`) runs
-  as `comptime/proposal_derive`, kept identical by a test; the rest needs
-  `Array`, const generics, reflection in generic code (`if comptime
-  reflect.is_int(T)` narrowing `T`), `target`, `@cfg`, and the `json` and
-  `sql` packages. `capabilities.sisu` (its tests) and `concurrency.sisu`
-  run with their missing declarations and a `main` appended, kept
-  starting with the originals by a test. `contracts.sisu`, `ffi.sisu`
-  and `testing.sisu` use features of Phase 8.
+  as `comptime/proposal_derive`, and its JSON encoder over reflection,
+  the derive and the conditional compilation with its test run as
+  `reflect/proposal_comptime`, each section kept identical by a test; the
+  CRC table and the ring buffer need `Array`, `u32` arithmetic and const
+  generics, the checked SQL needs the `sql` package, and `@cfg` is not
+  there. `capabilities.sisu` (its tests), `concurrency.sisu`,
+  `contracts.sisu` (`contracts/proposal_contracts`) and `testing.sisu`
+  (`testing/proposal_testing`, whose last test reads `HOME` from the
+  real environment and fails in the suite's empty one) run with their
+  missing declarations (and a `main`) appended, kept starting with the
+  originals by a test. `ffi.sisu` needs foreign functions.
 
 From Phase 3 (18, "Phase 3: the ownership checker and the dynamic
 monitor"):
@@ -363,17 +415,17 @@ From Phase 4 (18, "Phase 4: traits, generics, std in Sisu"):
   Its doctests do not run through the conformance runner.
 - **The re-check target** of 300 ms for one edited body is not measured
   (the query layer is per file).
-- **Reflection beyond derive** (Phase 8 in 18): `reflect` in generic
-  code, `comptime for` outside a derive's template, `x.[f]` there, and
-  `comptime def` in a trait other than its derive are `E0900`.
+- **Reflection beyond templates** (Phase 8 in 18): `reflect`, `comptime
+  for` and `x.[f]` in methods and non-generic functions, reflection over
+  a trait's methods, and `comptime def` in a trait other than its derive
+  are `E0900`; `@cfg` is not there.
 
 From Phase 6 (18, "Phase 6: tasks, capabilities, an HTTP server in
 Sisu"):
 
-- **The `sim` profile**: fakes that inject faults from the called
-  method's error set, a `Net` with latency, loss and partitions, an `Fs`
-  with a pessimistic durability model, and PCT and bounded exhaustive
-  scheduling with state hashing. The explorer has random seeds only.
+- **The `sim` profile**'s network has partitions and faults but no
+  latency or loss model, and the bounded exhaustive search has no state
+  hashing (above).
 - **`RwLock`, `Atomic`, `Condvar`, `Once`**, and `task.scope`'s trace
   context beyond the task path `log` prints.
 - **`sisu audit --caps`**: capability parameters per I/O function,
@@ -385,7 +437,6 @@ Sisu"):
 - **`--stats` latency of an I/O task under a compute-bound sibling** (the
   Q-34 number) is reported but not yet measured on a corpus program.
 - **Per-test capability declarations** beyond `sys: System` (which
-  receives the real one), the test cache keyed by the capabilities a test
-  touched, replay tokens, and tests in parallel: stage 0 runs them one
-  after another, each in an interpreter of its own.
+  receives the real one, or the simulated one under `--sim`), and the
+  test cache keyed by the capabilities a test touched.
 

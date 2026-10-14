@@ -1,0 +1,12 @@
+test "signup sends one welcome" ... ok
+test "results are used in order, the last one repeats" ... ok
+test "a copy given away records into the same log" ... ok
+test "a method with no result needs nothing queued" ... ok
+test "nothing queued panics" ... FAILED
+
+test "nothing queued panics" ... FAILED
+panic: `cap.Fake[Mailer]`: `outbox` was called with no result queued (`on_outbox`)
+  at test "nothing queued panics" (fakes.sisu:54:9)
+replay: sisu test --replay 1-6a704a48c849f2fa-0.0.1-t4-s0-r0 fakes.sisu
+
+4 passed, 1 failed, 0 blocked

@@ -1,0 +1,4 @@
+12:11-12:22 E0609 comptime.instance-failed name="encode[f64]" reason="encode: no encoding for f64"
+  label 8:18-8:71 comptime.instance-here
+13:11-13:22 E0609 comptime.instance-failed name="encode[str]" reason="encode: no encoding for str"
+  label 8:18-8:71 comptime.instance-here

@@ -1,0 +1,3 @@
+skipped "five"
+test "a fake input" ... ok
+1 passed, 0 failed, 0 blocked

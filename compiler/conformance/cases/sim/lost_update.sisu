@@ -1,0 +1,40 @@
+# A lost update that the seeded random scheduler's first schedule misses
+# and a bounded exhaustive search finds (17: the scheduler is "seeded and
+# pluggable"): each task reads the counter, gives way, then writes what
+# it read plus one. The search runs every schedule with at most one
+# preemption, depth first, and prints the failing one in the token.
+# schedule --scheduler exhaustive --depth 1
+
+@derive(Copy)
+struct Counter:
+    cell: Cap[Mutex[int]]
+
+def bump(c: Counter):
+    let seen = c.cell.get().lock().value
+    task.yield_now()
+    var g = c.cell.get().lock()
+    g.value = seen + 1
+
+def bumped_twice() -> int:
+    let c = Counter(cell=Cap(Mutex(0)))
+    _ = task.scope do s:
+        s.spawn(() -> bump(c))
+        s.spawn(() -> bump(c))
+        return Ok(())
+    return c.cell.get().lock().value
+
+def bump_locked(c: Counter):
+    task.yield_now()
+    var g = c.cell.get().lock()
+    g.value += 1
+
+test "two bumps make two":
+    assert bumped_twice() == 2
+
+test "with the lock held across the update":
+    let c = Counter(cell=Cap(Mutex(0)))
+    _ = task.scope do s:
+        for _ in range(3):
+            s.spawn(() -> bump_locked(c))
+        return Ok(())
+    assert c.cell.get().lock().value == 3

@@ -1,0 +1,18 @@
+test "parse_int accepts digits" ... ok
+test "parse_int/rejects empty input" ... ok
+test "parse_int/rejects bad digits (\"4x\", 1)" ... ok
+test "parse_int/rejects bad digits (\"x4\", 0)" ... ok
+test "parse_int/rejects bad digits (\"12.5\", 2)" ... ok
+test "config loads from a file" ... ok
+test "cache entry expires after ttl" ... ok
+test "sort is idempotent" ... ok
+test "parser never panics" ... ok
+test "help text is stable" ... ok
+test "reads the real home directory" ... FAILED
+
+test "reads the real home directory" ... FAILED
+panic: assertion failed: sys.env.get("HOME").is_some()
+  at test "reads the real home directory" (proposal_testing.sisu:62:5)
+no replay token: the test takes the real `System`, which a replay cannot stand in for
+
+10 passed, 1 failed, 0 blocked

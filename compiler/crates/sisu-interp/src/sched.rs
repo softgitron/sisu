@@ -46,6 +46,66 @@ pub(crate) static RESULT_SLOT: sir::Place = sir::Place { local: sir::LocalId(0),
 /// The most yield points a task runs before the scheduler may switch.
 const BUDGET_MAX: u64 = 8;
 
+/// The yield points among which PCT draws its priority change points.
+pub const PCT_STEPS: u64 = 1000;
+
+/// How the scheduler chooses (`--scheduler`, 17: "seeded and pluggable").
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Strategy {
+    /// Seeded random budgets of yield points and a seeded random choice of
+    /// the next task.
+    #[default]
+    Random,
+    /// Probabilistic concurrency testing (Burckhardt, Kothari, Musuvathi
+    /// and Nagarakatte, ASPLOS 2010): every task gets a random priority
+    /// and the highest-priority ready task runs; at `depth - 1` yield
+    /// points drawn from the first [`PCT_STEPS`], the running task drops
+    /// below every other. A bug of depth `d` among `n` tasks and `k` steps
+    /// shows with probability at least `1 / (n k^(d-1))` per run.
+    Pct { depth: u32 },
+    /// One schedule of a bounded exhaustive search: the choices of
+    /// `prefix`, then the first option at every later choice point (no
+    /// preemption, the first ready task by creation).
+    Exhaustive { prefix: Vec<u32> },
+}
+
+/// A choice the scheduler made (or `sim.choose`): which option of how
+/// many, and whether its other options preempt a task that could go on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Choice {
+    pub taken: u32,
+    pub options: u32,
+    pub at_yield: bool,
+}
+
+/// The next schedule of a bounded exhaustive search after the one that
+/// made `trail` (depth-first): the last choice that can take its next
+/// option without the schedule preempting more than `bound` times does,
+/// and the choices after it are dropped. `None` once every schedule within
+/// the bound was run.
+pub fn next_schedule(trail: &[Choice], bound: u32) -> Option<Vec<u32>> {
+    let mut before = Vec::with_capacity(trail.len());
+    let mut n = 0;
+    for c in trail {
+        before.push(n);
+        if c.at_yield && c.taken > 0 {
+            n += 1;
+        }
+    }
+    for i in (0..trail.len()).rev() {
+        let c = trail[i];
+        if c.taken + 1 < c.options {
+            let preempts = before[i] + u32::from(c.at_yield);
+            if preempts <= bound {
+                let mut p: Vec<u32> = trail[..i].iter().map(|c| c.taken).collect();
+                p.push(c.taken + 1);
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
 /// A frame the scheduler pushed (module documentation).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Anchor {
@@ -55,6 +115,9 @@ pub(crate) enum Anchor {
     /// `test.catch`: receives what the call returns, or the panic that
     /// unwound it (a typed hole goes on).
     Catch,
+    /// `sim.always`: the body runs above it while its predicate is checked
+    /// at every switch; it gives the body's result.
+    Always,
 }
 
 /// The seeded generator behind every scheduling choice (SplitMix64).
@@ -259,10 +322,28 @@ pub(crate) struct Sched<'p> {
     pub copied_shared: Vec<u32>,
     /// The run's test clock (`Clock.fake`), once made.
     pub fake_clock: Option<u32>,
+    pub strategy: Strategy,
+    /// PCT: each task's priority (by task), the yield points at which the
+    /// running task's priority drops, the next such priority, and the
+    /// yield points so far.
+    pub priorities: Vec<u64>,
+    pub change_points: Vec<u64>,
+    pub next_low: u64,
+    pub yields: u64,
+    /// The choices made, for a bounded exhaustive search.
+    pub trail: Vec<Choice>,
+    /// The task a preemption chose (exhaustive).
+    pub forced: Option<u32>,
+    /// The predicates of the `sim.always` blocks open, innermost last, and
+    /// whether one is being checked (no switch is a choice then).
+    pub always: Vec<(Value, String)>,
+    pub checking: bool,
+    /// A predicate met a lock its own task holds; the check is skipped.
+    pub check_skipped: bool,
 }
 
 impl<'p> Sched<'p> {
-    pub fn new(seed: u64, keep_stats: bool, host_clock: RtClock) -> Sched<'p> {
+    pub fn new(seed: u64, keep_stats: bool, host_clock: RtClock, strategy: Strategy) -> Sched<'p> {
         let root = Task {
             frames: Vec::new(),
             state: TState::Running,
@@ -284,6 +365,14 @@ impl<'p> Sched<'p> {
         };
         let mut rng = Rng::new(seed);
         let budget = 1 + rng.next() % BUDGET_MAX;
+        let mut change_points = Vec::new();
+        let mut next_low = 0;
+        if let Strategy::Pct { depth } = &strategy {
+            for _ in 1..(*depth).max(1) {
+                change_points.push(1 + rng.next() % PCT_STEPS);
+            }
+            next_low = 1 << 39;
+        }
         Sched {
             tasks: vec![root],
             cur: 0,
@@ -302,7 +391,53 @@ impl<'p> Sched<'p> {
             keep_stats,
             copied_shared: Vec::new(),
             fake_clock: None,
+            strategy,
+            priorities: Vec::new(),
+            change_points,
+            next_low,
+            yields: 0,
+            trail: Vec::new(),
+            forced: None,
+            always: Vec::new(),
+            checking: false,
+            check_skipped: false,
         }
+    }
+
+    /// A task's PCT priority, drawn when first asked: above every change
+    /// point's.
+    fn priority(&mut self, t: u32) -> u64 {
+        while self.priorities.len() <= t as usize {
+            let p = (1 << 40) + self.rng.next() % 1_000_000_000;
+            self.priorities.push(p);
+        }
+        self.priorities[t as usize]
+    }
+
+    /// The next choice among `options`: the exhaustive schedule's, or a
+    /// seeded random one; recorded for the exhaustive search.
+    pub fn choose(&mut self, options: u32, at_yield: bool) -> u32 {
+        if options <= 1 {
+            return 0;
+        }
+        let taken = match &self.strategy {
+            Strategy::Exhaustive { prefix } => {
+                prefix.get(self.trail.len()).copied().unwrap_or(0).min(options - 1)
+            }
+            _ => self.rng.below(options as usize) as u32,
+        };
+        if matches!(self.strategy, Strategy::Exhaustive { .. }) {
+            self.trail.push(Choice { taken, options, at_yield });
+        }
+        taken
+    }
+
+    /// The ready tasks in creation order, for a choice that must not
+    /// depend on the order they became ready in.
+    fn ready_sorted(&self) -> Vec<u32> {
+        let mut r = self.ready.clone();
+        r.sort_unstable();
+        r
     }
 }
 
@@ -405,25 +540,33 @@ impl<'p> Interp<'p, '_> {
                 Some(Anchor::Scope(s)) => return Some(Node::Scope(s)),
                 Some(Anchor::Shield) => return None,
                 Some(Anchor::Task) => return Some(Node::Task(self.sched.cur)),
-                Some(Anchor::Catch) | None => {}
+                Some(Anchor::Catch | Anchor::Always) | None => {}
             }
         }
         None
     }
 
-    /// `test.catch(f, x)`: the call `f(x)` above an anchor that gives
-    /// `Ok(result)`, or `Err(Panicked(message))` when a panic unwinds it.
+    /// `test.catch(f, x, steps)`: the call `f(x)` above an anchor that
+    /// gives `Ok(result)`, `Err(Panicked(message))` when a panic unwinds
+    /// it, or `Err(TooLong(steps))` when it runs more than `steps`
+    /// statements (counted over every task, so the same under a seed).
     pub(crate) fn open_catch(&mut self, mut args: Vec<Value>, dest: &'p sir::Place) -> Result<(), Unwind> {
-        if args.len() != 2 {
-            return Err(ice("test.catch takes a function and its argument"));
+        if args.len() != 3 {
+            return Err(ice("test.catch takes a function, its argument and a budget"));
         }
+        let steps = match args.pop() {
+            Some(Value::Int(n)) => n.max(1) as u64,
+            _ => return Err(ice("test.catch's budget is an int")),
+        };
         let x = args.pop().unwrap_or(Value::Unit);
         let f = args.pop().unwrap_or(Value::Unit);
         let (fi, vals, tys) = self.callee_of(&f, vec![x])?;
         let anchor = self.anchor_frame(Anchor::Catch, Some(dest));
         let fr = self.make_frame(fi, vals, Some(&RESULT_SLOT), tys)?;
         self.push_built(anchor)?;
-        self.push_built(fr)
+        self.push_built(fr)?;
+        self.case_ends.push((self.sched.steps.saturating_add(steps), steps));
+        Ok(())
     }
 
     fn deadline_passed(&self, d: Option<(u32, i128)>) -> bool {
@@ -662,16 +805,32 @@ impl<'p> Interp<'p, '_> {
                 Ok(Event::Switch)
             }
             Anchor::Scope(s) => self.step_scope_end(s),
+            Anchor::Always => {
+                let fr = self.pop_frame()?;
+                if let Some(p) = fr.pending {
+                    self.sched.always.pop();
+                    return Err(Unwind::Panic(p));
+                }
+                let checked = self.check_always();
+                self.sched.always.pop();
+                checked?;
+                let v = fr.locals.into_iter().next().unwrap_or(Value::Unit);
+                Ok(Event::Returned(v, fr.ret))
+            }
             Anchor::Catch => {
                 let fr = self.pop_frame()?;
+                self.case_ends.pop();
                 let v = match fr.pending {
                     // A typed hole blocks the test; it is not a failure.
                     Some(p) if p.hole.is_some() => return Err(Unwind::Panic(p)),
-                    Some(p) => Value::err(Value::Variant(Value::adt(
+                    Some(p) if p.too_long.is_some() => Value::err(Value::Variant(Value::adt(
                         "Panicked",
-                        0,
-                        vec![Value::String(p.message)],
+                        1,
+                        vec![Value::Int(p.too_long.unwrap_or(0) as i64)],
                     ))),
+                    Some(p) => {
+                        Value::err(Value::Variant(Value::adt("Panicked", 0, vec![Value::String(p.message)])))
+                    }
                     None => Value::ok(fr.locals.into_iter().next().unwrap_or(Value::Unit)),
                 };
                 Ok(Event::Returned(v, fr.ret))
@@ -932,9 +1091,49 @@ impl<'p> Interp<'p, '_> {
     /// Whether the scheduler should switch at a yield point: the budget is
     /// spent and another task could run.
     pub(crate) fn yield_point(&mut self) -> bool {
-        self.sched.budget = self.sched.budget.saturating_sub(1);
         let asked = std::mem::take(&mut self.sched.yield_asked);
-        (self.sched.budget == 0 || asked) && !self.sched.ready.is_empty()
+        // A predicate of `sim.always` runs to its end.
+        if self.sched.checking {
+            return false;
+        }
+        match self.sched.strategy.clone() {
+            Strategy::Random => {
+                self.sched.budget = self.sched.budget.saturating_sub(1);
+                (self.sched.budget == 0 || asked) && !self.sched.ready.is_empty()
+            }
+            Strategy::Pct { .. } => {
+                self.sched.yields += 1;
+                let cur = self.sched.cur;
+                if self.sched.change_points.contains(&self.sched.yields) {
+                    self.sched.priority(cur);
+                    self.sched.next_low = self.sched.next_low.saturating_sub(1);
+                    self.sched.priorities[cur as usize] = self.sched.next_low;
+                }
+                // A task that gives way (`task.yield_now`) drops below
+                // every other, or a spin loop would never let one run.
+                if asked && !self.sched.ready.is_empty() {
+                    self.sched.priority(cur);
+                    let low = self.sched.priorities.iter().copied().min().unwrap_or(1).saturating_sub(1);
+                    self.sched.priorities[cur as usize] = low;
+                }
+                let mine = self.sched.priority(cur);
+                let ready = self.sched.ready.clone();
+                let best = ready.iter().map(|t| self.sched.priority(*t)).max();
+                best.is_some_and(|b| b > mine)
+            }
+            Strategy::Exhaustive { .. } => {
+                if self.sched.ready.is_empty() {
+                    return false;
+                }
+                let ready = self.sched.ready_sorted();
+                let c = self.sched.choose(1 + ready.len() as u32, true);
+                if c == 0 {
+                    return false;
+                }
+                self.sched.forced = Some(ready[c as usize - 1]);
+                true
+            }
+        }
     }
 
     /// The running task gives way at a yield point.
@@ -950,7 +1149,33 @@ impl<'p> Interp<'p, '_> {
     pub(crate) fn switch(&mut self) -> Result<(), Unwind> {
         let next = loop {
             if !self.sched.ready.is_empty() {
-                let i = self.sched.rng.below(self.sched.ready.len());
+                let i = match self.sched.strategy {
+                    Strategy::Random => self.sched.rng.below(self.sched.ready.len()),
+                    Strategy::Pct { .. } => {
+                        let ready = self.sched.ready.clone();
+                        let mut best = 0;
+                        let mut top = None;
+                        for (k, t) in ready.iter().enumerate() {
+                            let p = self.sched.priority(*t);
+                            if top.is_none_or(|q| p > q) {
+                                top = Some(p);
+                                best = k;
+                            }
+                        }
+                        best
+                    }
+                    Strategy::Exhaustive { .. } => {
+                        let chosen = match self.sched.forced.take() {
+                            Some(t) => t,
+                            None => {
+                                let ready = self.sched.ready_sorted();
+                                let c = self.sched.choose(ready.len() as u32, false);
+                                ready[c as usize]
+                            }
+                        };
+                        self.sched.ready.iter().position(|t| *t == chosen).unwrap_or(0)
+                    }
+                };
                 break self.sched.ready.swap_remove(i);
             }
             if !self.advance_time()? {
@@ -974,7 +1199,62 @@ impl<'p> Interp<'p, '_> {
             }
         }
         self.sched.budget = 1 + self.sched.rng.next() % BUDGET_MAX;
-        Ok(())
+        self.check_always()
+    }
+
+    /// Runs every predicate of the open `sim.always` blocks, on the stack
+    /// of the task about to run (its blocked call, if any, waits until
+    /// they are done); a predicate that does not hold stops the run (17:
+    /// "an invariant checked after every step").
+    pub(crate) fn check_always(&mut self) -> Result<(), Unwind> {
+        if self.sched.always.is_empty() || self.sched.checking {
+            return Ok(());
+        }
+        self.sched.checking = true;
+        let cur = self.sched.cur as usize;
+        let pending = self.sched.tasks.get_mut(cur).and_then(|t| t.pending.take());
+        let preds = self.sched.always.clone();
+        let mut result = Ok(());
+        for (f, what) in preds {
+            let r =
+                self.callee_of(&f, Vec::new()).and_then(|(fi, vals, tys)| self.call_fn_tys(fi, vals, tys));
+            match r {
+                Ok(Value::Bool(true)) => {}
+                Ok(_) => {
+                    result = Err(Unwind::Abort(render(msg::SIM_ALWAYS_FAILED, &[("what", what)])));
+                    break;
+                }
+                Err(_) if std::mem::take(&mut self.sched.check_skipped) => break,
+                Err(e) => {
+                    result = Err(e);
+                    break;
+                }
+            }
+        }
+        if let Some(t) = self.sched.tasks.get_mut(cur) {
+            t.pending = pending;
+        }
+        self.sched.checking = false;
+        result
+    }
+
+    /// `sim.always(what, pred, body)`: `body()` above an anchor, with
+    /// `pred` checked at every switch until it returns, and once more then.
+    pub(crate) fn open_always(&mut self, mut args: Vec<Value>, dest: &'p sir::Place) -> Result<(), Unwind> {
+        if args.len() != 3 {
+            return Err(ice("sim.always takes a description, a predicate and a body"));
+        }
+        let body = args.pop().unwrap_or(Value::Unit);
+        let pred = args.pop().unwrap_or(Value::Unit);
+        let what =
+            self.text(args.first().ok_or_else(|| ice("sim.always without a description"))?)?.to_string();
+        let (fi, vals, tys) = self.callee_of(&body, Vec::new())?;
+        let anchor = self.anchor_frame(Anchor::Always, Some(dest));
+        let fr = self.make_frame(fi, vals, Some(&RESULT_SLOT), tys)?;
+        self.sched.always.push((pred, what));
+        self.check_always()?;
+        self.push_built(anchor)?;
+        self.push_built(fr)
     }
 
     /// Nothing is ready: advance the clocks to the next timer and wake what
@@ -1119,6 +1399,15 @@ impl<'p> Interp<'p, '_> {
                 self.sched.yield_asked = true;
                 Ok(Value::Unit)
             }
+            // A value the simulation chooses (17): one choice point of the
+            // exhaustive search, or a seeded draw.
+            "sim.choose" => match args.first() {
+                Some(Value::Int(n)) if *n >= 1 => {
+                    let n = (*n).min(i64::from(u32::MAX)) as u32;
+                    Ok(Value::Int(i64::from(self.sched.choose(n, false))))
+                }
+                _ => Err(panic(msg::SIM_CHOOSE_NONE, &[])),
+            },
             "task.is_cancelled" => Ok(Value::Bool(self.cancelled_now())),
             "task.checkpoint" => {
                 Ok(if self.cancelled_now() { self.cancelled_err() } else { Value::ok(Value::Unit) })
@@ -1567,7 +1856,15 @@ impl<'p> Interp<'p, '_> {
         let cur = self.sched.cur;
         let wait = match self.write(&p)? {
             Value::Mutex(m) if m.poisoned => return Err(panic(msg::PANIC_MUTEX_POISONED, &[])),
-            Value::Mutex(m) if m.locked && m.holder == cur => return Err(panic(msg::PANIC_MUTEX_HELD, &[])),
+            Value::Mutex(m) if m.locked && m.holder == cur => {
+                // A `sim.always` predicate on the stack of a task inside a
+                // critical section cannot see the state it protects: the
+                // check waits for the next switch.
+                if self.sched.checking {
+                    self.sched.check_skipped = true;
+                }
+                return Err(panic(msg::PANIC_MUTEX_HELD, &[]));
+            }
             Value::Mutex(m) if m.locked => true,
             Value::Mutex(m) => {
                 m.locked = true;

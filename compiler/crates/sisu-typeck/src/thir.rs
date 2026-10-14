@@ -573,6 +573,12 @@ pub enum ExprKind {
         def: DefId,
         param: u32,
     },
+    /// The default of field `field` of the struct `def`, evaluated here
+    /// (`reflect.default_of`, 08).
+    FieldDefault {
+        def: DefId,
+        field: u32,
+    },
     /// `x.copy()`: an explicit deep copy (04, rule 1).
     CopyOf(Box<Expr>),
     /// `e.trace()` on an error: its error return trace as text (05).
@@ -699,6 +705,10 @@ pub struct Typed {
     pub bodies: Vec<Body>,
     /// The inferred error set of each `T !` function.
     pub inferred: std::collections::HashMap<DefId, Vec<DefId>>,
+    /// The instances of templates the checked bodies call without one yet,
+    /// and the generic functions that call one with their own type
+    /// parameters (08, "Reflection"): what the next resolution declares.
+    pub requests: Vec<sisu_resolve::Request>,
 }
 
 impl Typed {

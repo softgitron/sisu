@@ -1,0 +1,36 @@
+##! std.test (11, 17): what tests use besides `assert`. Property tests
+##! (`check`, `arbitrary[T]`, `exhaustive[T]`) are the prelude's, and this
+##! module names them too; it adds snapshots and benchmarks.
+
+## Fails the test when `value`, rendered with `Debug` (text as it is),
+## is not the snapshot stored for it (17, "Snapshots and transcripts"):
+## the test's first snapshot is stored under its name, a second under
+## `NAME #2`, and so on, in `PROGRAM.snap` beside the program. A changed
+## or missing snapshot fails with what changed; `sisu test --update`
+## shows the change and stores the new rendering instead.
+def assert_snapshot[T](value: T):
+    if comptime reflect.is_str(T):
+        snapshot(value)
+    else:
+        snapshot("{value:?}")
+
+@intrinsic("test.snapshot")
+def snapshot(text: str)
+
+## A benchmark's loop (17, "Benchmarks"): `for _ in b.loop():` runs the
+## body as many times as the harness chose. `sisu test` does not run a
+## `bench`; `sisu bench` does.
+@derive(Copy)
+struct Bench:
+    iterations: int
+
+impl Bench:
+    ## The iterations of the benchmark's body.
+    def loop(self) -> Iter[int]:
+        return range(0, self.iterations)
+
+## Uses `x` in a way the optimiser cannot see through, so that a
+## benchmark measures the work that made it (a statement, as in
+## `black_box(parse_int(text))`: the value is consumed).
+pure def black_box[T](own x: T):
+    _ = x

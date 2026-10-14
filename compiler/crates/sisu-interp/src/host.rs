@@ -5,7 +5,7 @@
 //! captured, its clock is fixed, its random bits are a seeded stream, it
 //! runs no program, and its files live in memory over an optional
 //! read-only directory. These are the root objects of a `System`
-//! (`HostFs`, `HostClock`, `HostRand`, `HostEnv`, `HostProc`).
+//! (`HostFs`, `HostClock`, `HostRand`, `HostEnv`, `HostProc`, `HostStdin`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write as _;
@@ -76,6 +76,10 @@ pub trait Host: Send {
     fn create_dir(&mut self, _path: &str) -> Result<(), IoErrorKind> {
         Err(IoErrorKind::PermissionDenied)
     }
+    /// Makes a file's contents, or a directory's entries, durable (fsync).
+    fn sync_path(&mut self, path: &str) -> Result<(), IoErrorKind> {
+        if self.exists(path) { Ok(()) } else { Err(IoErrorKind::NotFound) }
+    }
     /// 64 random bits.
     fn random_bits(&mut self) -> u64 {
         0
@@ -113,6 +117,11 @@ pub trait Host: Send {
     }
     /// Closes the sending side of a connection, or a listener.
     fn tcp_close(&mut self, _handle: u64) {}
+    /// The next line of standard input without its line break; `None` at
+    /// the end.
+    fn read_line(&mut self) -> Option<String> {
+        None
+    }
 }
 
 /// Why a network operation failed: these become the `NetError` variants.
@@ -206,6 +215,22 @@ impl Host for StdHost {
         let _ = std::io::stderr().lock().write_all(text.as_bytes());
     }
 
+    fn read_line(&mut self) -> Option<String> {
+        let mut line = String::new();
+        match std::io::stdin().read_line(&mut line) {
+            Ok(0) | Err(_) => None,
+            Ok(_) => {
+                if line.ends_with('\n') {
+                    line.pop();
+                    if line.ends_with('\r') {
+                        line.pop();
+                    }
+                }
+                Some(line)
+            }
+        }
+    }
+
     fn args(&self) -> Vec<String> {
         self.args.clone()
     }
@@ -276,6 +301,10 @@ impl Host for StdHost {
 
     fn create_dir(&mut self, path: &str) -> Result<(), IoErrorKind> {
         std::fs::create_dir_all(path).map_err(|e| io_kind(&e))
+    }
+
+    fn sync_path(&mut self, path: &str) -> Result<(), IoErrorKind> {
+        std::fs::File::open(path).and_then(|f| f.sync_all()).map_err(|e| io_kind(&e))
     }
 
     fn random_bits(&mut self) -> u64 {
@@ -387,11 +416,17 @@ pub struct TestHost {
     pub dirs: BTreeSet<String>,
     /// The state of the random bits, SplitMix64 from 0.
     pub rand: u64,
+    /// The lines of standard input still to read.
+    pub stdin: std::collections::VecDeque<String>,
 }
 
 impl Host for TestHost {
     fn stdout(&mut self, text: &str) {
         self.out.push_str(text);
+    }
+
+    fn read_line(&mut self) -> Option<String> {
+        self.stdin.pop_front()
     }
 
     fn stderr(&mut self, text: &str) {

@@ -7,6 +7,7 @@
 //! range, so diagnostics and the language server can map back.
 
 pub mod build;
+pub mod visit;
 
 use crate::tree::NodeId;
 use sisu_diag::TextRange;

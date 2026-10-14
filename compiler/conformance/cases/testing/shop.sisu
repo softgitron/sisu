@@ -1,0 +1,51 @@
+# A transcript test (17, D-070): `sisu test` runs `tests/*.transcript`
+# beside the program, each `$` line a run of `main` against a fake
+# `System` that persists between the runs of one file: here the stock
+# file of `tests/shop/` is bought down, then runs out.
+
+error ShopError:
+    OutOfStock(item: String)
+    Usage
+
+def stock(fs: Fs) -> dict[String, int] ! IoError:
+    var out: dict[String, int] = dict()
+    let text = fs.read_to_string("stock.txt")?
+    for line in text.lines():
+        if let Some((item, n)) = line.split_once(" "):
+            _ = out.insert(item.to_string(), n.parse_int().expect("a count"))
+    return Ok(out)
+
+def save(fs: Fs, s: dict[String, int]) -> ! IoError:
+    var text = String.new()
+    for item, n in s.items():
+        text.push("{item} {n}\n")
+    fs.write_text("stock.txt", text)?
+    return Ok(())
+
+def main(sys: System) -> ! {ShopError, IoError}:
+    let args = sys.env.args()
+    if len(args) == 0:
+        return Err(Usage)
+    var s = stock(sys.fs)?
+    match args[0]:
+        case "price":
+            while True:
+                let line = sys.stdin.read_line() else:
+                    break
+                print("{line}: 0.40")
+        case "buy":
+            let item = args[1].to_string()
+            let left = match s.get(item.copy()):
+                case Some(n): n.copy()
+                case None: 0
+            if left == 0:
+                return Err(OutOfStock(item=item))
+            _ = s.insert(item, left - 1)
+            save(sys.fs, s)?
+            print("ok: {left - 1} left")
+        case _:
+            return Err(Usage)
+    return Ok(())
+
+test "an ordinary test runs too":
+    assert True

@@ -223,6 +223,26 @@ impl Checker<'_> {
             Ty::Ref(inner, m) => (self.resolved(&inner), Some(m)),
             t => (t, None),
         };
+        if self.refinement_of(&ty).is_none() {
+            return x;
+        }
+        // Through a refinement of a refinement to the type under both.
+        let base = self.prog.unrefine(&ty);
+        let to = match by_ref {
+            Some(m) => Ty::Ref(Box::new(base), m),
+            None => base,
+        };
+        let span = x.span;
+        Expr::new(ExprKind::Coerce { expr: Box::new(x), kind: Coercion::Unrefine }, to, span)
+    }
+
+    /// A value of a refinement type as its own base, one step: a value of
+    /// `Small = Port where ...` as a `Port` (whose methods it has).
+    pub fn unrefined_once(&mut self, x: Expr) -> Expr {
+        let (ty, by_ref) = match self.resolved(&x.ty) {
+            Ty::Ref(inner, m) => (self.resolved(&inner), Some(m)),
+            t => (t, None),
+        };
         let Some((_, _, base)) = self.refinement_of(&ty) else { return x };
         let to = match by_ref {
             Some(m) => Ty::Ref(Box::new(base), m),
@@ -230,6 +250,23 @@ impl Checker<'_> {
         };
         let span = x.span;
         Expr::new(ExprKind::Coerce { expr: Box::new(x), kind: Coercion::Unrefine }, to, span)
+    }
+
+    /// The refinements a value of `ty` satisfies, the outermost base's
+    /// first: `[Port, Small]` for `Small`, each with its arguments.
+    pub fn refinement_chain(&self, ty: &Ty) -> Vec<(DefId, Vec<Ty>)> {
+        let mut chain = Vec::new();
+        let mut at = self.resolved(ty);
+        while let Ty::Adt(d, args) = &at {
+            let Some(base) = self.prog.refinement_base(*d, args) else { break };
+            chain.push((*d, args.clone()));
+            if chain.len() > 64 {
+                break;
+            }
+            at = base;
+        }
+        chain.reverse();
+        chain
     }
 
     /// Whether `ty` is a refinement type: its definition, arguments and
@@ -251,33 +288,39 @@ impl Checker<'_> {
     pub fn refine_constant(&mut self, value: Expr, d: DefId, args: Vec<Ty>, ty: Ty) -> Expr {
         let prog = self.prog;
         let span = value.span;
-        let Some(r) = prog.refinement(d) else { return value };
-        let Some(pred) = r.predicate else { return value };
+        if prog.refinement(d).and_then(|r| r.predicate).is_none() {
+            return value;
+        }
         if value.ty == Ty::Error {
             return Expr::new(value.kind, ty, span);
         }
-        let base = r.base.subst(&args);
-        let mode = if self.is_copy(&base) { ArgMode::Value } else { ArgMode::Borrow };
-        let call = Expr::new(
-            ExprKind::Call {
-                callee: Callee::Fn { def: pred, type_args: args.clone() },
-                args: vec![Arg { expr: value.clone(), mode }],
-            },
-            Ty::Bool,
-            span,
-        );
-        let check = ContractCheck {
-            kind: ContractKind::Refinement,
-            cond: call,
-            text: r.text.clone(),
-            span,
-            replay: false,
-        };
+        // Each predicate of the chain, the outermost base's first.
+        let mut stmts = Vec::new();
+        for (rd, rargs) in self.refinement_chain(&Ty::Adt(d, args.clone())) {
+            let Some(r) = prog.refinement(rd) else { continue };
+            let Some(pred) = r.predicate else { continue };
+            let base = r.base.subst(&rargs);
+            let mode = if self.is_copy(&base) { ArgMode::Value } else { ArgMode::Borrow };
+            let arg = Expr::new(value.kind.clone(), base, span);
+            let call = Expr::new(
+                ExprKind::Call {
+                    callee: Callee::Fn { def: pred, type_args: rargs },
+                    args: vec![Arg { expr: arg, mode }],
+                },
+                Ty::Bool,
+                span,
+            );
+            stmts.push(Stmt::Contract(ContractCheck {
+                kind: ContractKind::Refinement,
+                cond: call,
+                text: r.text.clone(),
+                span,
+                replay: false,
+            }));
+        }
         let refined = Expr::new(value.kind.clone(), ty.clone(), span);
-        let body = Block {
-            stmts: vec![Stmt::Contract(check), Stmt::Return { value: Some(refined), span }],
-            span,
-        };
+        stmts.push(Stmt::Return { value: Some(refined), span });
+        let body = Block { stmts, span };
         let id = ClosureId(self.closures.len() as u32);
         let fn_ty = Ty::Fn(Box::new(sisu_resolve::FnTy { params: Vec::new(), ret: ty.clone(), pure: true }));
         self.closures.push(Some(Closure {
@@ -305,7 +348,7 @@ impl Checker<'_> {
     ) -> Expr {
         let prog = self.prog;
         let span = self.span(range);
-        let Some((d, targs, base)) = self.refinement_of(ty) else { return Expr::error(span) };
+        let Some((d, targs, _)) = self.refinement_of(ty) else { return Expr::error(span) };
         let [arg] = args else {
             let name = prog.def(d).name.clone();
             let found = (args.len() + trailing.is_some() as usize).to_string();
@@ -318,9 +361,13 @@ impl Checker<'_> {
             self.check_args_loosely(args);
             return Expr::error(span);
         };
-        let x = self.check_expr(&arg.value, &base);
+        // The value is of the type under every refinement of the chain:
+        // `Small.try_from` takes an `int` and checks `Port`'s predicate too.
+        let root = prog.unrefine(ty);
+        let x = self.check_expr(&arg.value, &root);
         let x = self.check_movable(x);
-        let err = prog.lookup_in(prog.prelude, "RefinementError").map(|e| Ty::ErrSet(vec![e])).unwrap_or(Ty::Error);
+        let err =
+            prog.lookup_in(prog.prelude, "RefinementError").map(|e| Ty::ErrSet(vec![e])).unwrap_or(Ty::Error);
         let rty = prog.wk.result.map(|r| Ty::Adt(r, vec![ty.clone(), err])).unwrap_or(Ty::Error);
         Expr::new(ExprKind::RefineTry { value: Box::new(x), refinement: d, type_args: targs }, rty, span)
     }
@@ -355,7 +402,7 @@ impl Checker<'_> {
                     let pred = prog.refinement(d).map(|r| r.text.clone()).unwrap_or_default();
                     let d2 = self
                         .error(msg::REFINE_CHANGE_THROUGH_BASE, range)
-                        .with("method", self.source_text(range))
+                        .with("what", self.source_text(range))
                         .with("ty", self.show(&inner_ty))
                         .with("predicate", pred);
                     self.report(d2);
@@ -365,6 +412,107 @@ impl Checker<'_> {
                 _ => return,
             }
         }
+    }
+}
+
+impl Checker<'_> {
+    /// Whether `base` names std's `arbitrary` or `exhaustive` (17): which.
+    pub fn generator_kind(&self, base: &ast::Expr) -> Option<&'static str> {
+        let ast::ExprKind::Name(n) = &base.kind else { return None };
+        if self.lookup_local(n).is_some() {
+            return None;
+        }
+        let d = self.prog.lookup(self.module, n)?;
+        match self.prog.fn_info(d)?.intrinsic.as_deref() {
+            Some("test.arbitrary") => Some("arbitrary"),
+            Some("test.exhaustive") => Some("exhaustive"),
+            _ => None,
+        }
+    }
+
+    /// `arbitrary[T]` and `exhaustive[T](max_len=n)`: the `Gen` of the
+    /// generator the compiler wrote for `T` (`<arbitrary>/main.sisu`), as
+    /// `Gen.of(g)` or `Gen.every(g, max_len=n)`. `None` when `base` is
+    /// neither.
+    pub fn generator_site(
+        &mut self,
+        whole: &ast::Expr,
+        base: &ast::Expr,
+        targs: &[ast::IndexArg],
+        call: Option<&[ast::Arg]>,
+        expected: Option<&Ty>,
+    ) -> Option<Expr> {
+        let kind = self.generator_kind(base)?;
+        let span = self.span(whole.range);
+        let [ast::IndexArg::Expr(t)] = targs else {
+            let d = self
+                .error(msg::PARSE_EXPECTED_TYPE, whole.range)
+                .with("found", format!("`{}`", self.source_text(whole.range)));
+            self.report(d);
+            return Some(Expr::error(span));
+        };
+        let key: String = self.source_text(t.range).chars().filter(|c| !c.is_whitespace()).collect();
+        let name = match self.prog.arbitrary_sites.get(&key) {
+            Some(Ok(n)) => n.clone(),
+            other => {
+                let why = match other {
+                    Some(Err(w)) => w.clone(),
+                    _ => "the compiler writes generators only for the program's own module".to_string(),
+                };
+                let shown = self.source_text(t.range);
+                let d = self.error(msg::TEST_NO_GENERATOR, t.range).with("ty", shown).with("why", why);
+                self.report(d);
+                if let Some(args) = call {
+                    self.check_args_loosely(args);
+                }
+                // A `Gen` of nothing known, so what uses its cases is not
+                // reported again.
+                let prog = self.prog;
+                let ty = prog
+                    .lookup_in(prog.prelude, "Gen")
+                    .map(|g| Ty::Adt(g, vec![Ty::Error]))
+                    .unwrap_or(Ty::Error);
+                return Some(Expr::new(ExprKind::Error, ty, span));
+            }
+        };
+        let node = whole.node;
+        let range = whole.range;
+        let mk = |kind: ast::ExprKind| ast::Expr { node, range, kind };
+        let nm = |s: &str| ast::Name { text: s.to_string(), range };
+        let arg = |value: ast::Expr, name: Option<&str>| ast::Arg {
+            node,
+            range,
+            name: name.map(|n| ast::Name { text: n.to_string(), range }),
+            mutable: false,
+            value,
+        };
+        let mut args = vec![arg(mk(ast::ExprKind::Name(name)), None)];
+        let method = if kind == "arbitrary" {
+            if let Some(extra) = call
+                && !extra.is_empty()
+            {
+                let d = self
+                    .error(msg::TYPE_ARGUMENT_COUNT, range)
+                    .with("name", "arbitrary")
+                    .with("expected", "0")
+                    .with("found", extra.len().to_string());
+                self.report(d);
+            }
+            "of"
+        } else {
+            let max_len = call
+                .and_then(|a| a.iter().find(|x| x.name.as_ref().is_none_or(|n| n.text == "max_len")))
+                .map(|a| a.value.clone())
+                .unwrap_or(mk(ast::ExprKind::Int { text: "3".into(), value: Some(3), suffix: None }));
+            args.push(arg(max_len, Some("max_len")));
+            "every"
+        };
+        let callee = mk(ast::ExprKind::Field {
+            base: Box::new(mk(ast::ExprKind::Name("Gen".into()))),
+            name: nm(method),
+        });
+        let e = mk(ast::ExprKind::Call { callee: Box::new(callee), args, trailing: None });
+        Some(self.infer_expr(&e, expected))
     }
 }
 
@@ -382,7 +530,9 @@ pub fn is_constant(c: &Checker, e: &ast::Expr) -> bool {
                 return true;
             }
             c.lookup_local(n).is_none()
-                && c.prog.lookup(c.module, n).is_some_and(|d| matches!(c.prog.def(d).kind, sisu_resolve::DefKind::Const(_)))
+                && c.prog
+                    .lookup(c.module, n)
+                    .is_some_and(|d| matches!(c.prog.def(d).kind, sisu_resolve::DefKind::Const(_)))
         }
         K::Unary { op: ast::UnOp::Neg, expr } => matches!(expr.kind, K::Int { .. } | K::Float { .. }),
         K::Paren(inner) => is_constant(c, inner),

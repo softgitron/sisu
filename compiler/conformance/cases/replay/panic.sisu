@@ -1,0 +1,10 @@
+# A run that ends in a panic replays to the same panic and exit status:
+# the file it read is in the log, so the replay needs no file.
+
+def main(sys: System):
+    let text = sys.fs.read_to_string("words.txt").expect("the fixture is there")
+    var n = 0
+    for line in text.lines():
+        n += 1
+        assert len(line) > 0, "line {n} is empty"
+        print(line)

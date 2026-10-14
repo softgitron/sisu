@@ -32,14 +32,19 @@ is compared byte for byte.
 | `NAME.err` | standard error of that run; absent means empty |
 | `NAME.status` | exit status of that run; absent means `0` |
 | `NAME.args` | not compared: the run's arguments, one per line |
-| `NAME.files/` | not compared: copied into the run's working directory |
+| `NAME.stdin` | not compared: what every run of the program reads as standard input |
+| `NAME.files/` | not compared: copied into the run's working directory (fixtures, `NAME.snap` snapshots, `tests/*.transcript` transcripts) |
 | `NAME.sir` | `sisu sir NAME.sisu`, the serialised SIR |
 | `NAME.test` | standard output of `sisu test NAME.sisu` |
+| `NAME.doc` | standard output of `sisu check --explain NAME.sisu`: the signatures with their contracts, as `sisu doc` renders them |
 | `NAME.tokens` | `sisu tokens NAME.sisu` |
 | `NAME.tree` | `sisu parse --tree NAME.sisu` |
 | `NAME.defer` | `sisu run --defer-borrow NAME.sisu ARGS...`: standard output, then `--- stderr`, standard error, and `--- status N` |
 | `NAME.explain` | `sisu explain-borrow NAME.sisu:N`, where `N` is given by a line `# explain-borrow N` in the case |
 | `NAME.explore` | `sisu test --explore N NAME.sisu`, where `N` is given by a line `# explore N` in the case |
+| `NAME.sim` | `sisu test --sim ARGS NAME.sisu`, where `ARGS` (such as `--faults 0.05 --explore 5`) is given by a line `# sim ARGS` |
+| `NAME.schedule` | `sisu test ARGS NAME.sisu`, where `ARGS` (such as `--scheduler pct --depth 2 --explore 20`) is given by a line `# schedule ARGS` |
+| `NAME.select` | `sisu test ARGS NAME.sisu`, where `ARGS` (such as `--tag slow --filter x`) is given by a line `# select ARGS` |
 
 A line `# explore N` also runs a case that runs again as `sisu run
 --explore N NAME.sisu ARGS...`: the program under the schedule seeds 0 to
@@ -52,7 +57,7 @@ Every command runs in a fresh temporary directory holding only
 and names the file by its bare name, so paths in messages are the same on
 every machine. A program that writes files writes them there.
 
-Three checks apply to every case without an expectation file:
+These checks apply to every case without an expectation file:
 
 - `sisu parse --print NAME.sisu` reproduces the file byte for byte (the
   syntax tree is lossless).
@@ -66,10 +71,20 @@ Three checks apply to every case without an expectation file:
   difference is the monitor stopping a program the checker accepted: a
   soundness hole in the checker, which fails the suite (18, principle 5,
   "the checker checks itself").
+- For a case that runs, `sisu run --record LOG` prints and exits as the
+  plain run did, and `sisu replay LOG` reproduces that run from the
+  capability log alone (N-04).
+- Every failing test in `.test`, `.sim`, `.schedule` and `.select` output
+  prints a replay token; `sisu test --replay TOKEN NAME.sisu` must fail
+  that test again with the same report.
+- For a case with `.test`, `sisu test --jobs 1` (the tests on one
+  thread) prints what the default, parallel run printed.
 
 The summary line counts the cases, the checks, the runs repeated under
-the monitor, the counterexample runs (`.defer`), and the cases explored
-under several schedules with the number of schedules.
+the monitor, the runs recorded and replayed, the failing tests replayed
+from their tokens, the test runs repeated on one thread, the
+counterexample runs (`.defer`), and the cases explored under several
+schedules with the number of schedules.
 
 ## The diagnostic form
 
@@ -118,6 +133,32 @@ parameters each identifier takes.
   `comptime def`, budgets, the evaluation errors, and derives written as
   compile-time Sisu, with `proposal_derive`, the user-defined derive of
   `proposal/examples/comptime.sisu`, kept identical by a test.
+- `reflect/` is reflection in generic functions, each made for the types
+  it is called with: the `reflect` queries, attributes as data,
+  `implements`, `reflect.construct` and `default_of`, promotion of generic
+  callers, `comptime panic` and the bound on instances, `embed`,
+  `target`, `std.x.cli`'s parser and `json.encode` written over
+  reflection in the standard library, and
+  `proposal_comptime`, the sections of `proposal/examples/comptime.sisu`
+  that stage 0 runs, each kept identical by a test.
+- `contracts/` is 07: `requires`, `ensures` with `result` and `old`,
+  invariants, refinement types and their chains, the check levels, the
+  failure messages with every part's value, `sisu check --explain`
+  (`.doc`), contracts as properties, and `proposal_contracts`, which
+  starts with `proposal/examples/contracts.sisu`.
+- `replay/` is the capability log and replay tokens: programs reading
+  standard input, files and the network, recorded and replayed, and
+  failing tests run again from their tokens.
+- `sim/` is the `sim` profile and the schedulers (`# sim`, `# schedule`):
+  a lost update found by the bounded exhaustive search, a depth-2 bug
+  found by PCT, crashes of a crash-consistent file system, nodes and
+  partitions, `choose` and `always`, faults from declared error sets, and
+  HTTP over simulated nodes with faults.
+- `testing/` is `sisu test`'s surface (17): parametrised tests, suites
+  and tags (`# select`), snapshots, transcripts, `@refines`, fakes of the
+  program's traits, tests in parallel with their output in declaration
+  order, and `proposal_testing`, which starts with
+  `proposal/examples/testing.sisu`.
 - `sir/` pins the serialised SIR of small programs.
 - `concurrency/` is tasks (18, Phase 6), most cases under several
   schedules: joins and their error sets, failures and the scope's result,
@@ -127,7 +168,9 @@ parameters each identifier takes.
   reports, generators, `log`, and the diagnostics of `Send`, `Sync` and
   what a task may borrow.
 - `capabilities/` is std.cap (06): attenuations, lent capabilities and
-  their diagnostics, caretakers, interceptors, the fakes, the test clock,
+  their diagnostics, caretakers, interceptors (of the standard
+  capabilities and, `wrap_trait`, of a program's own trait), the fakes
+  (`fake_rejected`: what `cap.Fake` cannot fake), the test clock,
   the fresh fakes of each test and the real `System` a test may declare
   (and the signatures it may not), the network over `Net.fake`, the
   host's objects, `DateTime`, and what the capability rules reject.

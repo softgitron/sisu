@@ -1,0 +1,39 @@
+# Faults come from types (17): under `sisu test --sim` a test that declares
+# a `System` gets a simulated one, and each call through a capability's
+# operations fails, at the `--faults` rate, with an error of the method's
+# declared set and of nothing else. Code that handles the errors holds;
+# code that assumes the call works is caught, with a token that replays
+# the same faults.
+# sim --faults 0.2
+
+def store_all(fs: Fs, n: int) -> int ! IoError:
+    var written = 0
+    for i in range(n):
+        fs.write_text(Path.new("f{i}.txt"), "{i}")?
+        written += 1
+    return Ok(written)
+
+## Retries each write: a fault of the simulation is an `IoError` like any.
+def store_retrying(fs: Fs, n: int) -> int:
+    var written = 0
+    for i in range(n):
+        var tries = 0
+        while tries < 8:
+            tries += 1
+            match fs.write_text(Path.new("f{i}.txt"), "{i}"):
+                case Ok(()):
+                    written += 1
+                    break
+                case Err(_):
+                    pass
+    return written
+
+test "assuming every write works"(sys: System):
+    assert store_all(sys.fs, 20) == Ok(20)
+
+test "retrying each write"(sys: System):
+    assert store_retrying(sys.fs, 20) == 20
+
+test "a test without a System is untouched":
+    let fs = Fs.in_memory()
+    assert store_all(fs, 20) == Ok(20)

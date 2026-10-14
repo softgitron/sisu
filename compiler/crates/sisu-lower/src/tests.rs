@@ -7,13 +7,25 @@ fn lower_src(src: &str) -> sir::Program {
     let parse = sisu_parser::parse(file, src);
     assert!(parse.diagnostics.is_empty(), "syntax errors");
     let m = ast::build::module(&parse.tree);
-    let r = sisu_resolve::resolve(&mut map, file, &m);
+    // Resolved again with the instances of templates the check asks for,
+    // until it asks for none, as the driver does.
+    let mut requests: Vec<sisu_resolve::Request> = Vec::new();
+    let (map, r, typed, diags) = loop {
+        let mut map = map.clone();
+        let r = sisu_resolve::resolve_with(&mut map, file, &m, &requests, &Default::default());
+        let (typed, diags) = sisu_typeck::check(&r.program, &map);
+        let fresh: Vec<_> =
+            typed.requests.iter().filter(|q| !requests.iter().any(|x| x.same(q))).cloned().collect();
+        if fresh.is_empty() || requests.len() > 64 {
+            break (map, r, typed, diags);
+        }
+        requests.extend(fresh);
+    };
     assert!(
         r.diagnostics.is_empty(),
         "resolve errors: {}",
         sisu_diag::render::render_ids(&map, &r.diagnostics)
     );
-    let (typed, diags) = sisu_typeck::check(&r.program, &map);
     assert!(diags.is_empty(), "type errors: {}", sisu_diag::render::render_ids(&map, &diags));
     lower(&r.program, &typed, &map)
 }

@@ -13,6 +13,24 @@ pub const CAP: &str = include_str!("../../../std/cap.sisu");
 pub const NET: &str = include_str!("../../../std/net.sisu");
 pub const TIME: &str = include_str!("../../../std/time.sisu");
 pub const HTTP: &str = include_str!("../../../std/http.sisu");
+pub const SIM: &str = include_str!("../../../std/sim.sisu");
+pub const JSON: &str = include_str!("../../../std/json.sisu");
+pub const TEST: &str = include_str!("../../../std/test.sisu");
+
+/// `target` (08, "Conditional compilation"): the build target's facts as
+/// constants. Stage 0's target is the interpreter on the host, so they are
+/// the host's operating system and processor; `if comptime` on them is
+/// decided when the program is compiled, and both branches are checked.
+pub fn target() -> &'static str {
+    static TEXT: OnceLock<String> = OnceLock::new();
+    TEXT.get_or_init(|| {
+        format!(
+            "##! The build target (08, \"Conditional compilation\").\n\n## The operating system: `linux`, `macos`, `windows`, ...\nconst os: str = \"{}\"\n\n## The processor: `x86_64`, `aarch64`, ...\nconst arch: str = \"{}\"\n\n## How the target runs a program: `interpreter` in stage 0.\nconst runtime: str = \"interpreter\"\n",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        )
+    })
+}
 
 /// The std modules every module sees by name without an import, as the
 /// prelude's own items: `task.scope` is ambient (Q-6), and so is the `log`
@@ -31,6 +49,9 @@ pub fn module_for(path: &[&str]) -> Option<(&'static str, &'static str)> {
         ["std", "net"] | ["net"] => Some(("net", NET)),
         ["std", "time"] | ["time"] => Some(("time", TIME)),
         ["std", "x", "http"] | ["http"] => Some(("http", HTTP)),
+        ["std", "sim"] | ["sim"] => Some(("sim", SIM)),
+        ["std", "json"] | ["json"] => Some(("json", JSON)),
+        ["std", "test"] => Some(("test", TEST)),
         _ => None,
     }
 }
@@ -49,18 +70,21 @@ pub fn reexports(module: &str) -> &'static [&'static str] {
             "Rand",
             "Env",
             "Proc",
+            "Stdin",
             "FsOps",
             "NetOps",
             "ClockOps",
             "RandOps",
             "EnvOps",
             "ProcOps",
+            "StdinOps",
             "Lent",
             "Cap",
             "Revoker",
             "TestClock",
         ],
         "task" => &["Scope", "Handle", "TaskError", "Cancellation", "channel", "Sender", "Receiver", "Mutex"],
+        "test" => &["check", "arbitrary", "exhaustive", "Gen", "Draws"],
         _ => &[],
     }
 }
@@ -90,6 +114,7 @@ const LEAVES: &[(&str, &[&str])] = &[
     ("Rand", &["Display", "Debug"]),
     ("Env", &["Display", "Debug"]),
     ("Proc", &["Display", "Debug"]),
+    ("Stdin", &["Display", "Debug"]),
     ("System", &["Display", "Debug"]),
     ("TestClock", &["Display", "Debug"]),
     ("HostFs", &["Debug"]),
@@ -98,6 +123,7 @@ const LEAVES: &[(&str, &[&str])] = &[
     ("HostRand", &["Debug"]),
     ("HostEnv", &["Debug"]),
     ("HostProc", &["Debug"]),
+    ("HostStdin", &["Debug"]),
 ];
 
 /// The largest tuple the generated impls cover.
@@ -278,6 +304,7 @@ fn is_handle(ty: &str) -> bool {
             | "Rand"
             | "Env"
             | "Proc"
+            | "Stdin"
             | "System"
             | "TestClock"
             | "HostFs"
@@ -286,6 +313,7 @@ fn is_handle(ty: &str) -> bool {
             | "HostRand"
             | "HostEnv"
             | "HostProc"
+            | "HostStdin"
     )
 }
 

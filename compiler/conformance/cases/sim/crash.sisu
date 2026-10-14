@@ -1,0 +1,62 @@
+# The `sim` profile's file system (17): a write is seen at once, a `sync`
+# of the file makes its contents durable and a `sync` of its directory its
+# name; a crash puts back what was durable. A replicated log over two
+# nodes of a `Sim` shows why both syncs matter.
+
+from std.sim import Sim
+
+def append(fs: Fs, line: str) -> ! IoError:
+    let old = fs.read_to_string(Path.new("log.txt")) else: String.new()
+    fs.write_text(Path.new("log.txt"), "{old}{line}\n")?
+    return Ok(())
+
+## Appends and makes it durable: the file, then its name.
+def append_durably(fs: Fs, line: str) -> ! IoError:
+    append(fs, line)?
+    fs.sync(Path.new("log.txt"))?
+    fs.sync(Path.new("."))?
+    return Ok(())
+
+test "a crash keeps what was synced and loses the rest":
+    let sim = Sim.new(seed=1)
+    let a = sim.node("a")
+    let fs = sim.system(a).fs
+    append_durably(fs, "one").expect("written")
+    append(fs, "two").expect("written")
+    assert fs.read_to_string(Path.new("log.txt")) == Ok("one\ntwo\n".to_string())
+    sim.crash(a)
+    assert fs.read_to_string(Path.new("log.txt")) == Ok("one\n".to_string())
+    assert not sim.is_up(a)
+    sim.restart(a)
+    assert sim.is_up(a) and sim.boots(a) == 2
+
+test "a file synced without its name is lost whole":
+    let sim = Sim.new()
+    let a = sim.node("a")
+    let fs = sim.system(a).fs
+    fs.write_text(Path.new("data.txt"), "x").expect("written")
+    fs.sync(Path.new("data.txt")).expect("synced")
+    sim.crash(a)
+    assert not fs.exists(Path.new("data.txt"))
+
+test "a directory made but not synced goes with what is in it":
+    let sim = Sim.new()
+    let a = sim.node("a")
+    let fs = sim.system(a).fs
+    fs.create_dir(Path.new("d")).expect("made")
+    fs.write_text(Path.new("d/f.txt"), "x").expect("written")
+    fs.sync(Path.new("d/f.txt")).expect("synced")
+    fs.sync(Path.new("d")).expect("synced")
+    sim.crash(a)
+    assert not fs.exists(Path.new("d/f.txt"))
+    assert fs.list_dir(Path.new(".")) == Ok([])
+
+test "each node has a file system of its own":
+    let sim = Sim.new()
+    let a = sim.node("a")
+    let b = sim.node("b")
+    append_durably(sim.system(a).fs, "on a").expect("written")
+    assert not sim.system(b).fs.exists(Path.new("log.txt"))
+    sim.crash(b)
+    assert sim.system(a).fs.read_to_string(Path.new("log.txt")) == Ok("on a\n".to_string())
+    assert sim.fs(a).crashes() == 0 and sim.fs(b).crashes() == 1

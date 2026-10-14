@@ -109,7 +109,9 @@ impl Program {
         match ty {
             Ty::Adt(d, _) => matches!(
                 self.builtin(*d),
-                Some("Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "TestClock" | "Cap" | "Lent")
+                Some(
+                    "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "TestClock" | "Cap" | "Lent"
+                )
             ),
             _ => false,
         }

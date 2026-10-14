@@ -34,6 +34,10 @@ pub(crate) struct Ctx<'a> {
     pub impl_names: HashMap<DefId, String>,
     /// Which contracts the build checks.
     pub level: ContractLevel,
+    /// The names of the program's own free functions (and the ones the
+    /// compiler writes for it): a prelude function of the same name, which
+    /// the program's hides, is `std.NAME` in SIR.
+    pub root_fns: HashSet<String>,
 }
 
 impl Ctx<'_> {
@@ -43,10 +47,23 @@ impl Ctx<'_> {
         if let Some(i) = prog.tests.iter().position(|t| *t == d) {
             return format!("test#{i}");
         }
+        if let Some(i) = prog.benches.iter().position(|t| *t == d) {
+            return format!("bench#{i}");
+        }
         if let Some(f) = prog.fn_info(d) {
             // A refinement's predicate, which the compiler writes.
             if let sisu_resolve::FnKind::Predicate(r) = f.kind {
                 return format!("{}#where", prog.qualified_name(r));
+            }
+            // An instance of a template: `to_json#Point` (08).
+            if let Some((t, args)) = &f.instance_of {
+                let shown: Vec<String> = args.iter().map(|a| prog.display(a)).collect();
+                let key: String = shown
+                    .join(",")
+                    .chars()
+                    .map(|c| if c.is_alphanumeric() || c == '.' || c == '_' { c } else { '_' })
+                    .collect();
+                return format!("{}#{key}", self.fn_name(*t));
             }
             if let Some(i) = f.impl_ {
                 let prefix = self.impl_names.get(&i).cloned().unwrap_or_else(|| "impl".into());
@@ -59,7 +76,13 @@ impl Ctx<'_> {
         match prog.fn_info(d).and_then(|f| f.owner.as_ref()) {
             Some(owner) => format!("{}.{}", self.owner_name(owner), def.name),
             None => {
-                if def.module == prog.root || def.module == prog.prelude {
+                // The generators the compiler writes (`<arbitrary>/...`)
+                // are bound in the root module, by names a program cannot
+                // declare again.
+                let generated = prog.modules[def.module.0 as usize].name.starts_with("<arbitrary>/");
+                if def.module == prog.prelude && self.root_fns.contains(&def.name) {
+                    format!("std.{}", def.name)
+                } else if def.module == prog.root || def.module == prog.prelude || generated {
                     def.name.clone()
                 } else {
                     format!("{}.{}", prog.modules[def.module.0 as usize].name, def.name)
@@ -243,6 +266,18 @@ pub fn lower(prog: &Program, typed: &Typed, sources: &SourceMap) -> sir::Program
 
 /// [`lower`] at a level of contract checking (07).
 pub fn lower_with(prog: &Program, typed: &Typed, sources: &SourceMap, level: ContractLevel) -> sir::Program {
+    lower_for(prog, typed, sources, level, &[])
+}
+
+/// `lower_with`, keeping the functions `extra` names too (and what they
+/// reach): the ones the run time calls for a transcript test (17).
+pub fn lower_for(
+    prog: &Program,
+    typed: &Typed,
+    sources: &SourceMap,
+    level: ContractLevel,
+    extra: &[&str],
+) -> sir::Program {
     let mut ctx = Ctx {
         prog,
         sources,
@@ -250,7 +285,18 @@ pub fn lower_with(prog: &Program, typed: &Typed, sources: &SourceMap, level: Con
         file_names: Vec::new(),
         impl_names: HashMap::new(),
         level,
+        root_fns: HashSet::new(),
     };
+    ctx.root_fns = prog
+        .defs
+        .iter()
+        .filter(|d| {
+            let m = &prog.modules[d.module.0 as usize];
+            (d.module == prog.root || m.name.starts_with("<arbitrary>/"))
+                && matches!(&d.kind, DefKind::Fn(f) if f.owner.is_none() && f.trait_.is_none() && f.impl_.is_none())
+        })
+        .map(|d| d.name.clone())
+        .collect();
     ctx.name_impls();
     // The root module's file is source 0.
     if let Some(m) = prog.modules.get(prog.root.0 as usize) {
@@ -282,6 +328,12 @@ pub fn lower_with(prog: &Program, typed: &Typed, sources: &SourceMap, level: Con
     // Keep what the entry, the tests and the root module's functions reach.
     let mut roots: Vec<String> = entry.iter().map(|e| e.function.clone()).collect();
     roots.extend(tests.iter().map(|(_, f)| f.clone()));
+    roots.extend(extra.iter().map(|s| s.to_string()));
+    // A test that declares a `System` gets `System.sim` in the `sim`
+    // profile, which the run time calls (17).
+    if prog.tests.iter().any(|d| prog.fn_info(*d).is_some_and(|f| f.params.len() == 1)) {
+        roots.push("System.sim".to_string());
+    }
     // A constant is computed even when nothing uses it: a `comptime` in it
     // that fails is an error of the program (08).
     for b in &typed.bodies {

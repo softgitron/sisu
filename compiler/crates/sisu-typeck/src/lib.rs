@@ -503,7 +503,12 @@ fn check_value(
 
 /// Checks every body of a resolved program.
 pub fn check(prog: &Program, sources: &SourceMap) -> (Typed, Vec<Diagnostic>) {
-    let fns = prog.functions_with_bodies();
+    // A template is checked in its instances (08, "Reflection").
+    let fns: Vec<DefId> = prog
+        .functions_with_bodies()
+        .into_iter()
+        .filter(|d| !prog.fn_info(*d).is_some_and(|f| f.template))
+        .collect();
     // Inferred error sets: iterate to a fixpoint over the functions that
     // declare `T !`, each pass using the previous pass's sets (05).
     let inferred_fns: Vec<DefId> =
@@ -522,12 +527,16 @@ pub fn check(prog: &Program, sources: &SourceMap) -> (Typed, Vec<Diagnostic>) {
             break;
         }
     }
-    let mut typed = Typed { bodies: Vec::new(), inferred: inferred.clone() };
+    let mut typed = Typed { bodies: Vec::new(), inferred: inferred.clone(), requests: Vec::new() };
     let mut diags = Vec::new();
     for d in &fns {
         let (body, mut ds, _) = check_fn(prog, &inferred, *d, sources);
         typed.bodies.push(body);
-        diags.append(&mut ds);
+        // A function the compiler wrote from code checked elsewhere too
+        // reports nothing of its own.
+        if !prog.fn_info(*d).is_some_and(|f| f.quiet) {
+            diags.append(&mut ds);
+        }
     }
     // Defaults of fields and parameters, and constants.
     for (i, def) in prog.defs.iter().enumerate() {
@@ -606,7 +615,61 @@ pub fn check(prog: &Program, sources: &SourceMap) -> (Typed, Vec<Diagnostic>) {
             diags.push(Diagnostic::new(msg::TYPE_TEST_SIGNATURE, span));
         }
     }
+    let (requests, mut ds) = template_requests(prog, &typed.bodies);
+    typed.requests = requests;
+    diags.append(&mut ds);
     (typed, diags)
+}
+
+/// What the bodies ask of the next resolution (08, "Reflection"): an
+/// instance of each template called with concrete type arguments that has
+/// none yet, and the promotion of each generic function that calls one
+/// with its own type parameters. A template used as a value has no
+/// instance to be, and is reported.
+fn template_requests(prog: &Program, bodies: &[Body]) -> (Vec<sisu_resolve::Request>, Vec<Diagnostic>) {
+    let mut out: Vec<sisu_resolve::Request> = Vec::new();
+    let mut diags = Vec::new();
+    let is_template = |d: &DefId| prog.fn_info(*d).is_some_and(|f| f.template);
+    for b in bodies {
+        let mut visit = |e: &thir::Expr| match &e.kind {
+            thir::ExprKind::Call { callee: thir::Callee::Fn { def, type_args }, .. } if is_template(def) => {
+                let mut param = false;
+                let mut unknown = false;
+                for t in type_args {
+                    t.walk(&mut |x| match x {
+                        Ty::Param(_) => param = true,
+                        Ty::Var(_) | Ty::Error => unknown = true,
+                        _ => {}
+                    });
+                }
+                let q = if param {
+                    sisu_resolve::Request::Promote(b.def)
+                } else if unknown || prog.instances.contains_key(&(*def, type_args.clone())) {
+                    return;
+                } else {
+                    // Where the program needs it: this call, or the call
+                    // that needed the instance this call is in.
+                    let site = prog.instance_sites.get(&b.def).copied().unwrap_or(e.span);
+                    sisu_resolve::Request::Instance { def: *def, args: type_args.clone(), site }
+                };
+                if !out.iter().any(|x| x.same(&q)) {
+                    out.push(q);
+                }
+            }
+            thir::ExprKind::FnRef(def) if is_template(def) => {
+                diags.push(
+                    Diagnostic::new(msg::COMPTIME_TEMPLATE_VALUE, e.span)
+                        .with("name", prog.def(*def).name.clone()),
+                );
+            }
+            _ => {}
+        };
+        purity::visit_block(&b.block, &mut visit);
+        for c in &b.closures {
+            purity::visit_block(&c.body, &mut visit);
+        }
+    }
+    (out, diags)
 }
 
 #[cfg(test)]
