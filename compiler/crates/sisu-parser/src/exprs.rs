@@ -759,7 +759,7 @@ impl Parser<'_> {
                     self.bump();
                     while !self.at_any(&[DEDENT, EOF]) {
                         let before = self.pos_marker();
-                        self.match_arm();
+                        self.arm_or_comptime_arms();
                         if self.pos_marker() == before {
                             self.bump_error();
                         }
@@ -774,6 +774,70 @@ impl Parser<'_> {
                 self.report(Diagnostic::new(msg::PARSE_BLOCK_ON_SAME_LINE, span));
             }
             self.finish_node();
+        }
+        self.finish_node();
+    }
+
+    fn arm_or_comptime_arms(&mut self) {
+        if self.at(COMPTIME_KW) && matches!(self.nth(1), FOR_KW | IF_KW) {
+            self.comptime_arms();
+        } else {
+            self.match_arm();
+        }
+    }
+
+    /// `comptime for p in e:` or `comptime if e:` (and `else:`) among the
+    /// arms of a `match`, each with an indented list of arms (08: a
+    /// derive's template makes an arm for each variant).
+    fn comptime_arms(&mut self) {
+        self.start(COMPTIME_STMT);
+        self.bump();
+        let line = self.current_line();
+        if self.at(FOR_KW) {
+            self.start(FOR_STMT);
+            self.bump();
+            self.pattern_list();
+            self.expect(IN_KW);
+            self.expr();
+            self.arm_list("for", line);
+        } else {
+            self.start(IF_STMT);
+            self.bump();
+            self.cond();
+            self.arm_list("if", line);
+            if self.at(ELSE_KW) {
+                self.start(ELSE_CLAUSE);
+                let line = self.current_line();
+                self.bump();
+                self.arm_list("else", line);
+                self.finish_node();
+            }
+        }
+        self.finish_node();
+        self.finish_node();
+    }
+
+    /// `:` and an indented list of arms.
+    fn arm_list(&mut self, keyword: &str, line: u32) {
+        if !self.expect(COLON) {
+            self.recover_line();
+            return;
+        }
+        self.start(MATCH_ARM_LIST);
+        if self.at(NEWLINE) && self.nth(1) == INDENT {
+            self.bump();
+            self.bump();
+            while !self.at_any(&[DEDENT, EOF]) {
+                let before = self.pos_marker();
+                self.arm_or_comptime_arms();
+                if self.pos_marker() == before {
+                    self.bump_error();
+                }
+            }
+            self.eat(DEDENT);
+            self.ended_with_block = true;
+        } else {
+            self.expected_block(keyword, line);
         }
         self.finish_node();
     }

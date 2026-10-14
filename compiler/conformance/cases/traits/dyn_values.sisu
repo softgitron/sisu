@@ -1,0 +1,38 @@
+# Dynamic dispatch (03, "Dispatch"): `dyn Trait` behind `Box` and behind
+# `ref`, provided methods through it, and every `dyn` value's `Debug`.
+
+trait Animal:
+    def sound(self) -> String
+    def speak(self) -> String:
+        return "says {self.sound()}"
+
+@derive(Debug)
+struct Dog:
+    name: String
+
+struct Cat:
+    lives: int
+
+impl Animal for Dog:
+    def sound(self) -> String:
+        return "woof"
+
+impl Animal for Cat:
+    def sound(self) -> String:
+        return "meow"
+    def speak(self) -> String:
+        return "has {self.lives} lives"
+
+def loudest(a: ref dyn Animal) -> String:
+    return a.speak().to_uppercase()
+
+def main():
+    let zoo: list[Box[dyn Animal]] = [Box(Dog(name="rex".to_string())), Box(Cat(lives=9))]
+    for a in zoo:
+        print(a.speak())
+    let d = Dog(name="fido".to_string())
+    print(loudest(ref d))
+    let c = Cat(lives=7)
+    print(loudest(ref c))
+    let b: Box[dyn Animal] = Box(Dog(name="max".to_string()))
+    print("{b:?}")

@@ -1,0 +1,2 @@
+7:12-7:21 E0395 type.unsized-dyn ty="dyn Shape"
+9:13-9:25 E0395 type.unsized-dyn ty="dyn Shape"

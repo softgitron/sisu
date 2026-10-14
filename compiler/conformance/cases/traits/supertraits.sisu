@@ -1,0 +1,29 @@
+# Supertraits: a bound on the subtrait gives the supertrait's methods, a
+# provided method calls them, and `dyn` of the subtrait has them too.
+
+trait Named:
+    def name(self) -> String
+
+trait Greeter(Named):
+    def greeting(self) -> String:
+        return "hello, {self.name()}"
+
+struct Person:
+    first: String
+
+impl Named for Person:
+    def name(self) -> String:
+        return self.first.copy()
+
+impl Greeter for Person:
+    pass
+
+def greet[G: Greeter](g: G) -> String:
+    return "{g.name()}: {g.greeting()}"
+
+def main():
+    let p = Person(first="aino".to_string())
+    print(greet(p))
+    let d: Box[dyn Greeter] = Box(Person(first="eero".to_string()))
+    print(d.name())
+    print(d.greeting())

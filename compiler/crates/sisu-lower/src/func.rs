@@ -94,12 +94,20 @@ pub(crate) fn lower_body(ctx: &mut Ctx, body: &thir::Body) -> Vec<sir::Function>
         Some(_) => sir::FnKind::Normal,
         None => sir::FnKind::Value,
     };
-    let (pure, from, inner) = match fn_info {
+    let (pure, from, inner, own) = match fn_info {
         Some(f) => {
             let b = ctx.prog.result_borrows_of(f);
-            (f.pure, b.deep, b.inner)
+            let own: Vec<u32> = ctx
+                .prog
+                .sig_params(f)
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.mode == sisu_syntax::ast::Mode::Own)
+                .map(|(i, _)| i as u32)
+                .collect();
+            (f.pure, b.deep, b.inner, own)
         }
-        None => (true, Vec::new(), Vec::new()),
+        None => (true, Vec::new(), Vec::new(), Vec::new()),
     };
     let generics_of = match &body.kind {
         thir::BodyKind::Fn => ctx.prog.fn_info(body.def),
@@ -111,7 +119,7 @@ pub(crate) fn lower_body(ctx: &mut Ctx, body: &thir::Body) -> Vec<sir::Function>
     let mut main = FnLower::new(ctx, body, None, &name);
     main.type_params = type_params.clone();
     main.bounds = env.clone();
-    out.push(main.run(kind, source, pure, (from, inner)));
+    out.push(main.run(kind, source, pure, (from, inner), own));
     for (i, cl) in body.closures.iter().enumerate() {
         let id = thir::ClosureId(i as u32);
         let cname = closure_name(&name, id);
@@ -122,7 +130,7 @@ pub(crate) fn lower_body(ctx: &mut Ctx, body: &thir::Body) -> Vec<sir::Function>
         let mut fl = FnLower::new(ctx, body, Some(id), &cname);
         fl.type_params = type_params.clone();
         fl.bounds = env.clone();
-        out.push(fl.run(sir::FnKind::Closure, source, pure, (from, Vec::new())));
+        out.push(fl.run(sir::FnKind::Closure, source, pure, (from, Vec::new()), Vec::new()));
     }
     out
 }
@@ -165,6 +173,7 @@ impl<'c, 'a> FnLower<'c, 'a> {
         source: u32,
         pure: bool,
         borrows: (Vec<u32>, Vec<u32>),
+        own: Vec<u32>,
     ) -> sir::Function {
         let (from, inner) = borrows;
         let body = self.body;
@@ -190,7 +199,8 @@ impl<'c, 'a> FnLower<'c, 'a> {
                 .captures
                 .iter()
                 .map(|cap| {
-                    sir::Type::Ref(Box::new(self.ctx.ty(&body.locals[cap.local.0 as usize].ty)), cap.mutable)
+                    let t = self.ctx.ty(&body.locals[cap.local.0 as usize].ty);
+                    if cl.own { t } else { sir::Type::Ref(Box::new(t), cap.mutable) }
                 })
                 .collect();
             self.add_local(
@@ -244,6 +254,7 @@ impl<'c, 'a> FnLower<'c, 'a> {
             pure,
             from,
             inner,
+            own,
             locals: self.locals,
             blocks,
             source,
@@ -315,7 +326,7 @@ impl<'c, 'a> FnLower<'c, 'a> {
     }
 
     pub fn needs_drop(&self, ty: &Ty) -> bool {
-        !self.ctx.prog.is_copy(ty) && !matches!(ty, Ty::Ref(..))
+        !self.ctx.prog.is_copy_in(ty, &self.bounds) && !matches!(ty, Ty::Ref(..))
     }
 
     // ---------------------------------------------------------------- blocks

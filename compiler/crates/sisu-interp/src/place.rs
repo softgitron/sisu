@@ -1,7 +1,7 @@
 //! Places: resolving a SIR place to a [`Pointer`], and reading and writing
 //! through pointers.
 
-use crate::value::{Pointer, Step, Value};
+use crate::value::{HEAP, Pointer, Step, Value};
 use crate::{Interp, Unwind, ice, msg, panic};
 use sisu_sir::{Place, Proj};
 
@@ -53,6 +53,14 @@ impl Interp<'_, '_> {
                         Value::Ref(q) => ptr = (**q).clone(),
                         other => return Err(ice(format!("a `ref dyn` holding {other:?}"))),
                     },
+                    // A `Shared` leads to its heap cell.
+                    Value::Shared(id) => {
+                        let id = *id;
+                        let serial = self.heap.get(id as usize).map(|c| c.serial).unwrap_or(0);
+                        ptr = Pointer { frame: HEAP, serial, local: id, path: Vec::new(), tag: 0 };
+                    }
+                    // A guard leads to the value its mutex protects.
+                    Value::Guard(q) => ptr = q.join(Step::MutexValue),
                     Value::Moved => return Err(self.moved_at(&ptr)),
                     other => return Err(ice(format!("dereferencing {other:?}"))),
                 },
@@ -93,6 +101,26 @@ impl Interp<'_, '_> {
                     }
                     ptr.path.push(Step::Index(at as usize));
                 }
+                Proj::Key(l) if matches!(self.read(&ptr)?, Value::Arena(_)) => {
+                    // An arena slot, by a key of the right generation.
+                    let (index, generation) = arena_key(self.target(self.local(*l)?)?)?;
+                    let live = match self.read(&ptr)? {
+                        Value::Arena(a) => {
+                            a.slots.get(index).is_some_and(|(g, v)| *g == generation && !v.is_moved())
+                        }
+                        _ => false,
+                    };
+                    if !live {
+                        if mode == Mode::Drop {
+                            return Ok(None);
+                        }
+                        return Err(panic(
+                            msg::PANIC_STALE_KEY,
+                            &[("index", index.to_string()), ("generation", generation.to_string())],
+                        ));
+                    }
+                    ptr.path.push(Step::Slot(index));
+                }
                 Proj::Key(l) => {
                     let key = self.local(*l)?.clone();
                     let k = self.key_of(&key)?;
@@ -127,13 +155,21 @@ impl Interp<'_, '_> {
 
     /// The value at a pointer.
     pub(crate) fn read(&self, p: &Pointer) -> Result<&Value, Unwind> {
-        let frame = self.frames.get(p.frame as usize).filter(|f| f.serial == p.serial);
-        let frame = match frame {
-            Some(f) => f,
-            None if self.monitoring() => return Err(self.mon_dangling(p)),
-            None => return Err(dangling()),
+        let mut v = if p.frame == HEAP {
+            match self.heap.get(p.local as usize).filter(|c| c.serial == p.serial && c.strong > 0) {
+                Some(c) => &c.value,
+                None if self.monitoring() => return Err(self.mon_dangling(p)),
+                None => return Err(dangling()),
+            }
+        } else {
+            let frame = self.frames.get(p.frame as usize).filter(|f| f.serial == p.serial);
+            let frame = match frame {
+                Some(f) => f,
+                None if self.monitoring() => return Err(self.mon_dangling(p)),
+                None => return Err(dangling()),
+            };
+            frame.locals.get(p.local as usize).ok_or_else(|| ice("pointer to a missing local"))?
         };
-        let mut v = frame.locals.get(p.local as usize).ok_or_else(|| ice("pointer to a missing local"))?;
         for s in &p.path {
             if v.is_moved() {
                 return Err(self.moved_at(p));
@@ -150,6 +186,18 @@ impl Interp<'_, '_> {
     }
 
     pub(crate) fn write(&mut self, p: &Pointer) -> Result<&mut Value, Unwind> {
+        if p.frame == HEAP {
+            if !self.heap.get(p.local as usize).is_some_and(|c| c.serial == p.serial && c.strong > 0) {
+                return Err(if self.monitoring() { self.mon_dangling(p) } else { dangling() });
+            }
+            if let Some((_, init)) = p.path.split_last()
+                && self.read(&Pointer { path: init.to_vec(), ..p.clone() })?.is_moved()
+            {
+                return Err(self.moved_at(p));
+            }
+            let cell = self.heap.get_mut(p.local as usize).ok_or_else(dangling)?;
+            return walk_mut(&mut cell.value, &p.path);
+        }
         if !self.frames.get(p.frame as usize).is_some_and(|f| f.serial == p.serial) {
             return Err(if self.monitoring() { self.mon_dangling(p) } else { dangling() });
         }
@@ -257,9 +305,22 @@ fn step(v: &Value, s: Step) -> Result<&Value, Unwind> {
         (Step::DictVal(i), Value::Dict(d)) => d.entries.get(i).map(|e| &e.1),
         (Step::SetItem(i), Value::Set(s)) => s.items.get(i),
         (Step::DynValue, Value::Dyn(d)) => Some(&d.value),
+        (Step::MutexValue, Value::Mutex(m)) => Some(&m.value),
+        (Step::Slot(i), Value::Arena(a)) => a.slots.get(i).map(|(_, v)| v),
         _ => None,
     };
     r.ok_or_else(|| ice(format!("{s:?} does not apply to {v:?}")))
+}
+
+/// The slot and generation of a `Key` value.
+pub(crate) fn arena_key(v: &Value) -> Result<(usize, i64), Unwind> {
+    match v {
+        Value::Struct(a) => match (a.fields.first(), a.fields.get(1)) {
+            (Some(Value::Int(i)), Some(Value::Int(g))) => Ok((*i as usize, *g)),
+            _ => Err(ice(format!("a key without its fields: {v:?}"))),
+        },
+        other => Err(ice(format!("an arena key that is not a `Key`: {other:?}"))),
+    }
 }
 
 fn walk_mut<'v>(mut v: &'v mut Value, path: &[Step]) -> Result<&'v mut Value, Unwind> {
@@ -284,6 +345,8 @@ fn walk_mut<'v>(mut v: &'v mut Value, path: &[Step]) -> Result<&'v mut Value, Un
             (Step::DictVal(i), Value::Dict(d)) => d.entries.get_mut(i).map(|e| &mut e.1),
             (Step::SetItem(i), Value::Set(s)) => s.items.get_mut(i),
             (Step::DynValue, Value::Dyn(d)) => Some(&mut d.value),
+            (Step::MutexValue, Value::Mutex(m)) => Some(&mut m.value),
+            (Step::Slot(i), Value::Arena(a)) => a.slots.get_mut(i).map(|(_, v)| v),
             (s, _) => return Err(ice(format!("{s:?} does not apply to the value"))),
         }
         .ok_or_else(|| ice(format!("{s:?} is out of range")))?;

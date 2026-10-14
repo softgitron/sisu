@@ -1,0 +1,17 @@
+# Implementing a trait needs its supertraits implemented too.
+
+trait Named:
+    def name(self) -> String
+
+trait Greeter(Named):
+    def greet(self) -> String:
+        return "hello"
+
+struct Robot:
+    id: int
+
+impl Greeter for Robot:
+    pass
+
+def main():
+    pass

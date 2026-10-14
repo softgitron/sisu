@@ -68,6 +68,9 @@ pub struct Capture {
 pub struct Closure {
     pub params: Vec<LocalId>,
     pub captures: Vec<Capture>,
+    /// `own x -> ...`: the closure keeps copies of what it captures rather
+    /// than borrowing it.
+    pub own: bool,
     pub ret: Ty,
     /// An inline closure `x -> e` is a block holding `return e`.
     pub body: Block,

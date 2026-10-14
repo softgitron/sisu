@@ -28,7 +28,7 @@ pub enum DefKind {
     Struct(StructInfo),
     Enum(EnumInfo),
     ErrorSet(EnumInfo),
-    Fn(FnInfo),
+    Fn(Box<FnInfo>),
     Const(ConstInfo),
     Module(ModuleId),
     TypeAlias(Ty),
@@ -196,6 +196,13 @@ pub struct FnInfo {
     pub err_inferred: bool,
     pub pure: bool,
     pub intrinsic: Option<String>,
+    /// `@structural("name")` on a std function with a body: the intrinsic
+    /// `name` computes the same result when every bound of the call's type
+    /// arguments is met by a structural impl, and lowering calls it then.
+    pub structural: Option<String>,
+    /// `@keeps(self, x)` on an intrinsic: the `own` and `mut` arguments
+    /// (by position, `self` first) whose every value it keeps or returns.
+    pub keeps: Vec<u32>,
     pub body: Option<ast::Block>,
     pub kind: FnKind,
     pub file: FileId,
@@ -277,6 +284,7 @@ pub struct WellKnown {
     pub rem: Option<DefId>,
     pub neg: Option<DefId>,
     pub num: Option<DefId>,
+    pub from_literal: Option<DefId>,
 }
 
 #[derive(Clone, Debug, Default)]

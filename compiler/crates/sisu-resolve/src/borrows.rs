@@ -56,8 +56,10 @@ impl Program {
             Ty::Ref(..) | Ty::Str => true,
             Ty::Tuple(es, _) => es.iter().any(|t| self.is_view_type(t)),
             Ty::Adt(d, args) => match &self.def(*d).kind {
+                DefKind::Struct(s) if s.builtin.as_deref() == Some("MutexGuard") => true,
                 DefKind::Struct(s) if s.builtin.is_some() => args.iter().any(|t| self.is_view_type(t)),
-                DefKind::Struct(s) => s.view,
+                // A generic type holds what its arguments hold.
+                DefKind::Struct(s) => s.view || args.iter().any(|t| self.is_view_type(t)),
                 DefKind::Enum(_) => args.iter().any(|t| self.is_view_type(t)),
                 _ => false,
             },
@@ -75,9 +77,9 @@ impl Program {
             Ty::Tuple(es, _) => es.iter().any(|t| self.can_borrow(t)),
             Ty::Adt(d, args) => match &self.def(*d).kind {
                 DefKind::Struct(s) => match s.builtin.as_deref() {
-                    Some("Iter" | "Entry" | "Iterable") => true,
+                    Some("Iter" | "Entry" | "Iterable" | "MutexGuard") => true,
                     Some(_) => args.iter().any(|t| self.can_borrow(t)),
-                    None => s.view,
+                    None => s.view || args.iter().any(|t| self.can_borrow(t)),
                 },
                 DefKind::Enum(_) => args.iter().any(|t| self.can_borrow(t)),
                 _ => false,
@@ -94,9 +96,9 @@ impl Program {
                 Ty::Tuple(es, _) => es.iter().any(|t| deep(p, t)),
                 Ty::Adt(d, args) => match &p.def(*d).kind {
                     DefKind::Struct(s) => match s.builtin.as_deref() {
-                        Some("Iter" | "Entry" | "Iterable") => true,
+                        Some("Iter" | "Entry" | "Iterable" | "MutexGuard") => true,
                         Some(_) => args.iter().any(|t| deep(p, t)),
-                        None => s.view,
+                        None => s.view || args.iter().any(|t| deep(p, t)),
                     },
                     DefKind::Enum(_) => args.iter().any(|t| deep(p, t)),
                     _ => false,
@@ -206,6 +208,35 @@ impl Program {
         }
     }
 
+    /// Whether a borrowed parameter can lend anything to a result of type
+    /// `ret`. A function value lends only what its calls return, unless
+    /// the result can hold the function itself (`Filter` holds `keep`):
+    /// `cmp: (ref T, ref T) -> Ordering` lends nothing to a `list[T]`.
+    pub fn can_lend(&self, p: &SigParam, ret: &Ty) -> bool {
+        match &p.ty {
+            Ty::Fn(f) => self.can_borrow(&f.ret) || self.holds_fn_value(ret, 0),
+            _ => true,
+        }
+    }
+
+    /// Whether a value of the type can hold a function value: a function
+    /// type in it, or a `view struct`, whose fields may be anything.
+    fn holds_fn_value(&self, t: &Ty, depth: u32) -> bool {
+        if depth > 16 {
+            return true;
+        }
+        match t {
+            Ty::Fn(_) => true,
+            Ty::Ref(t, _) => self.holds_fn_value(t, depth + 1),
+            Ty::Tuple(es, _) => es.iter().any(|e| self.holds_fn_value(e, depth + 1)),
+            Ty::Adt(d, args) => {
+                matches!(&self.def(*d).kind, DefKind::Struct(s) if s.view)
+                    || args.iter().any(|a| self.holds_fn_value(a, depth + 1))
+            }
+            _ => false,
+        }
+    }
+
     /// The borrowed parameters a result comes from: the `from` clause; or
     /// the only borrowed parameter; or `self`; otherwise every borrowed
     /// parameter, which for a user function is an error reported by the
@@ -223,7 +254,7 @@ impl Program {
         let borrowed: Vec<u32> = params
             .iter()
             .enumerate()
-            .filter(|(_, p)| self.is_borrowed_param(p))
+            .filter(|(_, p)| self.is_borrowed_param(p) && self.can_lend(p, &f.ret))
             .map(|(i, _)| i as u32)
             .collect();
         if borrowed.len() <= 1 {

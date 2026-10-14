@@ -1,0 +1,37 @@
+# A type whose `Eq` and `Ord` are its own (names compared by length): the
+# operators, `in`, `list.contains`, `list.sort`, `list.join` and `==` on
+# lists use its impls, not the values' structure.
+
+struct Name:
+    text: String
+
+impl Eq for Name:
+    def eq(self, other: Name) -> bool:
+        return len(self.text) == len(other.text)
+
+impl PartialOrd for Name:
+    def partial_cmp(self, other: Name) -> Ordering?:
+        return Some(len(self.text).cmp(len(other.text)))
+
+impl Ord for Name:
+    def cmp(self, other: Name) -> Ordering:
+        return len(self.text).cmp(len(other.text))
+
+impl Display for Name:
+    def fmt(self, mut f: Formatter):
+        f.write(self.text)
+
+def n(s: str) -> Name:
+    return Name(text=s.to_string())
+
+def main():
+    var xs = [n("ccc"), n("a"), n("bb")]
+    print(xs.contains(n("zz")))
+    print(n("qq") in xs)
+    print(n("qqqq") not in xs)
+    xs.sort()
+    print(xs.join(" "))
+    print([n("x"), n("yy")] == [n("q"), n("rr")])
+    print(n("abc") == n("xyz"))
+    print(n("ab") < n("xyz"))
+    print("{n("pad"):>5}|")

@@ -47,6 +47,18 @@ fn Noisy.drop(1) drop source 0 {
     _0 = const ()
     return
 }
+
+fn Noisy#drop(1) glue source 0 own 0 {
+    let _0: ()
+    let _1: Noisy "self"
+    let _2: ref mut Noisy
+  bb0:
+    _2 = ref mut _1
+    _0 = call fn Noisy.drop(move _2)
+    goto bb1
+  bb1:
+    return
+}
 "#;
 
 #[test]

@@ -1,0 +1,16 @@
+# What a `Shared`, `Cell` or `Mutex` owns can outlive any frame, so it may
+# not be a view (E0421); and no owner of it is the one the checker sees
+# last, so it may not be must-consume (E0422).
+
+@must_consume
+struct Receipt:
+    amount: int
+
+view struct Word:
+    text: str
+
+def main():
+    let s = "hello".to_string()
+    let w = Shared(Word(text=s))
+    let c = Cell(s.trim())
+    let r = Shared(Receipt(amount=1))

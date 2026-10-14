@@ -647,10 +647,19 @@ impl Analysis {
                     _ => None,
                 };
                 let result = self.call_result(p, callee, &ops, callee_loans.as_ref());
-                // An intrinsic may store an argument it takes with `own`
-                // through a `mut` one.
-                if let Callee::Intrinsic(name, _) = callee {
-                    let kept = kept_args(p, name, ops.len());
+                // A callee may store an argument it takes by value (with
+                // `own`, or a view) through a `mut` one.
+                let kept = match callee {
+                    Callee::Intrinsic(name, _) => Some(kept_args(p, name, ops.len())),
+                    Callee::Fn(name, _) => Some(match p.function(name) {
+                        Some(g) => (0..ops.len()).filter(|&i| lent_by_value(g, i as u32)).collect(),
+                        None => (0..ops.len()).collect(),
+                    }),
+                    // Any impl may run: any argument may be kept.
+                    Callee::Trait(..) => Some((0..ops.len()).collect()),
+                    Callee::Value(_) => None,
+                };
+                if let Some(kept) = kept {
                     for (ai, a) in ops.iter().enumerate() {
                         let mut stored = BitSet::new(self.nloans);
                         for (bi, bo) in ops.iter().enumerate() {
@@ -1288,7 +1297,9 @@ impl Analysis {
         let made = self.made.get(&(b, si));
         // An intrinsic that stores an argument through a `mut` parameter
         // of this function stores it in the caller's memory: only that
-        // parameter's own loans may go there.
+        // parameter's own loans may go there, and those of the arguments
+        // the caller handed over by value, which a caller assumes may be
+        // kept by its `mut` arguments.
         if let StatementKind::Call { callee: Callee::Intrinsic(name, _), args, .. } = &s.kind {
             let ops: Vec<OpLoans> =
                 args.iter().enumerate().map(|(oi, o)| self.op_loans(st, made, oi, o)).collect();
@@ -1303,10 +1314,9 @@ impl Analysis {
                     if bi == ai || !kept.contains(&bi) {
                         continue;
                     }
-                    let foreign = bo
-                        .holds
-                        .iter()
-                        .find(|x| !matches!(self.loans[*x].kind, LoanKind::Param(j) if j == i));
+                    let foreign = bo.holds.iter().find(
+                        |x| !matches!(self.loans[*x].kind, LoanKind::Param(j) if j == i || lent_by_value(f, j)),
+                    );
                     if let Some(x) = foreign {
                         out.push(
                             Finding::new(msg::BORROW_STORE_INTO_CALLER, f, s.loc)
@@ -1324,11 +1334,22 @@ impl Analysis {
         // A plain struct or enum cannot hold a loan.
         if let StatementKind::Assign(
             _,
-            Rvalue::Aggregate(Aggregate::Struct(n) | Aggregate::Variant(n, _), ops),
+            Rvalue::Aggregate(agg @ (Aggregate::Struct(n) | Aggregate::Variant(n, _)), ops),
         ) = &s.kind
             && types.is_plain_aggregate(n)
         {
             for (oi, o) in ops.iter().enumerate() {
+                // A field whose type is a type parameter holds what the
+                // argument holds: the generic type is view-like through
+                // its arguments, as `list[Token]` is (04, "Views").
+                let variant = match agg {
+                    Aggregate::Variant(_, v) => types.variant_index(n, v),
+                    _ => None,
+                };
+                if types.declared_field_ty(n, variant, oi as u32).is_some_and(|t| types.carried_by_params(&t))
+                {
+                    continue;
+                }
                 let ol = self.op_loans(st, made, oi, o);
                 if let Some(l) = ol.holds.iter().next() {
                     out.push(Self::declare_view(
@@ -1399,9 +1420,11 @@ impl Analysis {
                 _ => st.holds[r].iter().collect(),
             };
             let Some(i) = self.caller_param(f, st, targets) else { return false };
-            // Only what the caller lent through this parameter may go back.
-            let foreign =
-                stored.iter().find(|x| !matches!(self.loans[*x].kind, LoanKind::Param(j) if j == i));
+            // Only what the caller lent through this parameter may go back,
+            // and what it handed over by value.
+            let foreign = stored.iter().find(
+                |x| !matches!(self.loans[*x].kind, LoanKind::Param(j) if j == i || lent_by_value(f, j)),
+            );
             let Some(foreign) = foreign else { return false };
             out.push(
                 Finding::new(msg::BORROW_STORE_INTO_CALLER, f, s.loc)
@@ -1627,6 +1650,13 @@ pub fn display_fn(name: &str) -> String {
 
 /// The arguments of an intrinsic call it may keep: those it takes with
 /// `own`, or every argument of an intrinsic SIR does not declare.
+/// Whether a function's parameter `j` is taken with `own`: a caller
+/// assumes what it holds may be kept by the call's `mut` arguments (a
+/// borrowed one, even a view passed by value, is lent for the call only).
+fn lent_by_value(f: &Function, j: u32) -> bool {
+    f.own.contains(&j)
+}
+
 fn kept_args(p: &Program, name: &str, n: usize) -> Vec<usize> {
     match p.intrinsic(name) {
         Some(d) => d.own.iter().map(|i| *i as usize).collect(),

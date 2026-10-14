@@ -1,0 +1,15 @@
+# An impl must give every required method of its trait.
+
+trait Shape:
+    def area(self) -> f64
+    def perimeter(self) -> f64
+
+struct Square:
+    side: f64
+
+impl Shape for Square:
+    def area(self) -> f64:
+        return self.side * self.side
+
+def main():
+    pass

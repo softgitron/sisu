@@ -1,0 +1,21 @@
+# Dropping a long chain of boxes takes constant depth: the drop glue of
+# `Box` and of `Node` drops its last part in its caller's place, so the
+# 60 000 nodes do not need 120 000 frames (the frame limit is 100 000).
+
+struct Node:
+    value: int
+    next: Box[Node]?
+
+struct Counter:
+    n: int
+
+impl Drop for Counter:
+    def drop(mut self):
+        print("counter {self.n} dropped after the chain")
+
+def main():
+    let c = Counter(n=1)
+    var head: Box[Node]? = None
+    for i in range(60000):
+        head = Some(Box(boxed=Node(value=i, next=head)))
+    print("built")

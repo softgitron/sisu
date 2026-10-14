@@ -26,6 +26,7 @@
 //! into drops of the parts that remain.
 
 pub mod read;
+pub mod types;
 pub mod validate;
 pub mod write;
 
@@ -67,6 +68,9 @@ pub struct ImplDecl {
     pub trait_args: Vec<Type>,
     pub self_ty: Type,
     pub methods: Vec<(String, ImplTarget)>,
+    /// What the impl binds the trait's associated types to (`type Item =
+    /// $0`), for `<T as Trait>.Name` at run time.
+    pub assoc: Vec<(String, Type)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -91,6 +95,10 @@ pub struct IntrinsicDecl {
     /// Arguments taken with `own`: the only ones the intrinsic may keep in
     /// what its `mut` arguments point to (`list.push(mut self, own x)`).
     pub own: Vec<u32>,
+    /// Arguments taken with `own` or `mut` whose every value the intrinsic
+    /// keeps or returns (its contract's `@keeps`): only these may take
+    /// must-consume values (D-054); any other may drop what it is given.
+    pub keeps: Vec<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -245,6 +253,10 @@ pub enum FnKind {
     Closure,
     /// The `drop` method of a type with `impl Drop`.
     Drop,
+    /// The drop glue of a declared type, `T#drop` (see [`types::glue_name`]):
+    /// it takes the value and runs the type's `Drop`, then drops the
+    /// fields (of the active variant) in reverse order.
+    Glue,
     /// A default value or a constant.
     Value,
     Test,
@@ -271,6 +283,9 @@ pub struct Function {
     /// argument's own storage (a `str` taken from a `list[str]` views the
     /// text the list's elements view, not the list).
     pub inner: Vec<u32>,
+    /// The arguments taken with `own`: a caller assumes the call may keep
+    /// what they hold in its `mut` arguments.
+    pub own: Vec<u32>,
     pub locals: Vec<LocalDecl>,
     pub blocks: Vec<BasicBlock>,
     /// Where the function is declared (its name), for diagnostics about it

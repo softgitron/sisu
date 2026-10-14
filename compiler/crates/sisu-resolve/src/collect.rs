@@ -37,12 +37,6 @@ pub(crate) const LATER_TYPES: &[(&str, &str)] = &[
     ("bytes", "byte strings (Phase 4)"),
     ("Array", "`Array` and `Slice` (Phase 4)"),
     ("Slice", "`Array` and `Slice` (Phase 4)"),
-    ("Shared", "`Shared` and shared ownership (Phase 3)"),
-    ("Weak", "`Weak` and shared ownership (Phase 3)"),
-    ("Cell", "`Cell` and shared ownership (Phase 3)"),
-    ("Mutex", "`Mutex` (Phase 3)"),
-    ("Arena", "`Arena` and generational keys (Phase 3)"),
-    ("Key", "`Arena` and generational keys (Phase 3)"),
     ("Duration", "`Duration` and the time library (Phase 6)"),
     ("Net", "the `Net` capability (Phase 6)"),
     ("Rand", "the `Rand` capability (Phase 6)"),
@@ -98,6 +92,8 @@ pub(crate) struct Resolver<'a> {
     pub derive_checks: Vec<crate::derive::DeriveCheck>,
     /// The bounds of every struct's and enum's generic parameters.
     pub type_preds: HashMap<DefId, Vec<Predicate>>,
+    /// Each trait's `comptime def derive` (08), by module and trait name.
+    pub derive_templates: HashMap<(ModuleId, String), ast::FnDef>,
 }
 
 /// What a type expression may mention where it is written.
@@ -137,6 +133,7 @@ pub fn resolve(sources: &mut SourceMap, root_file: FileId, root: &ast::Module) -
         dyn_uses: Vec::new(),
         derive_checks: Vec::new(),
         type_preds: HashMap::new(),
+        derive_templates: HashMap::new(),
     };
     let prelude = r.load_std("prelude", std_sources::PRELUDE);
     r.prog.prelude = prelude;
@@ -254,6 +251,7 @@ impl Resolver<'_> {
             rem: get(prog, "Rem"),
             neg: get(prog, "Neg"),
             num: get(prog, "Num"),
+            from_literal: get(prog, "FromLiteral"),
         };
         self.prog.wk = wk;
     }
@@ -312,6 +310,8 @@ impl Resolver<'_> {
             err_inferred: false,
             pure: false,
             intrinsic: None,
+            structural: None,
+            keeps: Vec::new(),
             body: None,
             kind,
             file: self.file(module),
@@ -333,7 +333,7 @@ impl Resolver<'_> {
                         f.name.range,
                         item.vis,
                         item.docs.clone(),
-                        DefKind::Fn(self.placeholder_fn(module, FnKind::Free)),
+                        DefKind::Fn(Box::new(self.placeholder_fn(module, FnKind::Free))),
                     );
                     self.bind(module, &f.name.text, def, f.name.range);
                     self.pending.push(Pending::Fn { def, module, ast: f.clone(), owner: None });
@@ -396,7 +396,7 @@ impl Resolver<'_> {
                     module,
                     ast: i.clone(),
                     range: item.range,
-                    derived: self.prog.modules[module.0 as usize].parent.is_some(),
+                    derived: self.prog.modules[module.0 as usize].name.starts_with("<derive>/"),
                 }),
                 ItemKind::Trait(t) => {
                     let def = self.new_def(
@@ -409,6 +409,18 @@ impl Resolver<'_> {
                     );
                     self.bind(module, &t.name.text, def, t.name.range);
                     self.type_params.insert(def, t.generics.clone());
+                    // The trait's derive, which `@derive` runs at compile time.
+                    for m in t.methods.iter().filter(|m| m.is_comptime && m.name.text == "derive") {
+                        if crate::template::template_parts(m).is_some() {
+                            self.derive_templates.insert((module, t.name.text.clone()), m.clone());
+                        } else {
+                            let span = self.span(module, m.name.range);
+                            self.report(
+                                Diagnostic::new(msg::COMPTIME_DERIVE_TEMPLATE, span)
+                                    .with("trait", t.name.text.clone()),
+                            );
+                        }
+                    }
                     self.pending.push(Pending::Trait {
                         def,
                         module,
@@ -430,7 +442,7 @@ impl Resolver<'_> {
                         t.name_range,
                         ast::Vis::Private,
                         item.docs.clone(),
-                        DefKind::Fn(self.placeholder_fn(module, FnKind::Test(name.clone()))),
+                        DefKind::Fn(Box::new(self.placeholder_fn(module, FnKind::Test(name.clone())))),
                     );
                     self.prog.tests.push(def);
                     self.pending.push(Pending::Test { def, module, ast: t.clone() });
@@ -487,7 +499,10 @@ impl Resolver<'_> {
             return;
         }
         for a in attrs {
-            if a.name == "builtin" || a.name == "intrinsic" || a.name == "sealed" || a.name == "marker" {
+            if matches!(
+                a.name.as_str(),
+                "builtin" | "intrinsic" | "structural" | "keeps" | "sealed" | "marker"
+            ) {
                 let span = self.span(module, a.range);
                 self.report(
                     Diagnostic::new(msg::RESOLVE_STD_ONLY_ATTRIBUTE, span).with("name", a.name.clone()),
@@ -591,7 +606,7 @@ impl Resolver<'_> {
                 m.name.range,
                 ast::Vis::Pub,
                 Vec::new(),
-                DefKind::Fn(self.placeholder_fn(module, FnKind::Method)),
+                DefKind::Fn(Box::new(self.placeholder_fn(module, FnKind::Method))),
             );
             self.pending.push(Pending::Fn { def, module, ast: m.clone(), owner: Some(Owner::Type(owner)) });
         }
@@ -673,6 +688,11 @@ impl Resolver<'_> {
         // signature needs its owner's generics and bounds, and an impl
         // needs its trait.
         let pending = std::mem::take(&mut self.pending);
+        for p in &pending {
+            if let Pending::Trait { def, module, ast: t, attrs } = p {
+                self.resolve_trait_header(*def, *module, t, attrs);
+            }
+        }
         let (types, rest): (Vec<Pending>, Vec<Pending>) =
             pending.into_iter().partition(|p| matches!(p, Pending::Struct { .. } | Pending::Enum { .. }));
         for p in types {
@@ -767,6 +787,8 @@ impl Resolver<'_> {
                         impl_assoc: &[],
                     };
                     let ty = self.resolve_ty(&f.ty, &ctx);
+                    let fspan = self.span(module, f.ty.range);
+                    self.check_sized(&ty, fspan);
                     // Views are infectious upwards (04): only a `view struct`
                     // may hold a reference or a view.
                     if !std && !s.is_view && self.prog.is_view_type(&ty) {
@@ -839,6 +861,8 @@ impl Resolver<'_> {
                     let mut fields = Vec::new();
                     for f in &v.fields {
                         let ty = self.resolve_ty(&f.ty, &ctx);
+                        let fspan = self.span(module, f.ty.range);
+                        self.check_sized(&ty, fspan);
                         // An enum has no `view` form, so it cannot hold a borrow.
                         if !std && self.prog.is_view_type(&ty) {
                             let span = self.span(module, f.ty.range);
@@ -873,7 +897,7 @@ impl Resolver<'_> {
                     info.must_consume = must_consume;
                 }
             }
-            Pending::Trait { def, module, ast: t, attrs } => self.resolve_trait(def, module, &t, &attrs),
+            Pending::Trait { def, module, ast: t, .. } => self.resolve_trait(def, module, &t),
             Pending::Fn { def, module, ast: f, owner } => self.resolve_fn(def, module, &f, owner),
             Pending::Test { def, module, ast: t } => {
                 let mut info = self.placeholder_fn(module, FnKind::Test(self.prog.def(def).name.clone()));
@@ -896,7 +920,7 @@ impl Resolver<'_> {
                     self.unsupported(span, "a parametrised test", "the test runner (Phase 8)");
                 }
                 info.body = t.body.clone();
-                self.prog.defs[def.0 as usize].kind = DefKind::Fn(info);
+                self.prog.defs[def.0 as usize].kind = DefKind::Fn(Box::new(info));
             }
             Pending::Const { def, module, ast: c } => {
                 let ty = match &c.ty {
@@ -972,11 +996,7 @@ impl Resolver<'_> {
             });
             if default.is_some() {
                 let span = self.span(module, g.name.range);
-                self.report(
-                    Diagnostic::new(msg::STAGE0_UNSUPPORTED, span)
-                        .with("construct", "a defaulted parameter of a function")
-                        .with("phase", "a later phase; defaults are for the parameters of types and traits"),
-                );
+                self.report(Diagnostic::new(msg::RESOLVE_IMPL_DEFAULT, span));
             }
             generics.push(Generic { name: g.name.text.clone(), default: None });
         }
@@ -1014,6 +1034,7 @@ impl Resolver<'_> {
         info.pure = f.is_pure;
         info.body = f.body.clone();
         info.intrinsic = Self::builtin_attr(&f.attrs, "intrinsic");
+        info.structural = Self::builtin_attr(&f.attrs, "structural");
         if f.is_comptime {
             let span = self.span(module, f.name.range);
             self.unsupported(span, "`comptime def`", "compile-time evaluation (Phase 4)");
@@ -1056,6 +1077,8 @@ impl Resolver<'_> {
                         self.report(Diagnostic::new(msg::RESOLVE_PARAMETER_DEFAULT_ORDER, span));
                     }
                     let ty = self.resolve_ty(ty, &ctx);
+                    let pspan = self.span(module, p.range);
+                    self.check_sized(&ty, pspan);
                     info.params.push(ParamInfo {
                         name: name.text.clone(),
                         mode: p.mode,
@@ -1100,9 +1123,31 @@ impl Resolver<'_> {
                 } else {
                     info.ret = self.resolve_ty(t, &ctx);
                 }
+                let rspan = self.span(module, t.range);
+                let ret = info.ret.clone();
+                self.check_sized(&ret, rspan);
             }
         }
         info.from = f.from.iter().map(|n| (n.text.clone(), self.span(module, n.range))).collect();
+        // `@keeps(self, x)`: positions among `self` and the parameters.
+        for a in f.attrs.iter().filter(|a| a.name == "keeps") {
+            for arg in &a.args {
+                let name = match &arg.value.kind {
+                    ExprKind::Name(n) => n.clone(),
+                    ExprKind::SelfValue => "self".to_string(),
+                    _ => continue,
+                };
+                let offset = u32::from(info.self_mode.is_some());
+                let pos = if name == "self" && info.self_mode.is_some() {
+                    Some(0)
+                } else {
+                    info.params.iter().position(|p| p.name == name).map(|i| i as u32 + offset)
+                };
+                if let Some(pos) = pos {
+                    info.keeps.push(pos);
+                }
+            }
+        }
         info.body_broken = f.body_broken;
         if f.header_broken {
             info.header_broken = true;
@@ -1154,7 +1199,7 @@ impl Resolver<'_> {
                 }
             }
         }
-        self.prog.defs[def.0 as usize].kind = DefKind::Fn(info);
+        self.prog.defs[def.0 as usize].kind = DefKind::Fn(Box::new(info));
     }
 
     /// Whether an impl is of `Drop`.

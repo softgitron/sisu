@@ -169,7 +169,10 @@ pub struct StructDef {
     pub is_view: bool,
     pub fields: Vec<FieldDef>,
     pub methods: Vec<FnDef>,
-    /// Other members (an `invariant` line, a nested type), by range and kind.
+    /// `invariant e` lines (07): what every value of the type satisfies.
+    pub invariants: Vec<Expr>,
+    /// Other members (a contract other than `invariant`, a nested type),
+    /// by range and kind.
     pub unsupported: Vec<(TextRange, &'static str)>,
 }
 
@@ -333,6 +336,12 @@ pub enum StmtKind {
     },
     /// A nested declaration (`def`, `const`, ...).
     Item(Box<Item>),
+    /// `comptime for`, `comptime if`, `comptime assert` and `comptime e`
+    /// (08): the statement runs at compile time.
+    Comptime(Box<Stmt>),
+    /// `return impl Trait for T:` in a trait's `comptime def derive` (08,
+    /// "Derive"): the impl the derive makes.
+    ReturnImpl(Box<ImplDef>),
     /// A construct this stage parses but does not implement.
     Unsupported(&'static str),
     Error,
@@ -450,6 +459,14 @@ pub enum ExprKind {
         scrutinee: Box<Expr>,
         arms: Vec<Arm>,
     },
+    /// `comptime e` (08): evaluated by the compiler.
+    Comptime(Box<Expr>),
+    /// `x.[f]`: the field that the compile-time value `f` names (08,
+    /// "Reflection").
+    FieldOf {
+        base: Box<Expr>,
+        field: Box<Expr>,
+    },
     Unsupported(&'static str),
     Error,
 }
@@ -512,6 +529,19 @@ pub struct Arm {
     pub pat: Pattern,
     pub guard: Option<Expr>,
     pub body: ArmBody,
+    /// Set for `comptime for` or `comptime if` among the arms: the arms it
+    /// makes stand in for this one (whose pattern and body are empty).
+    pub generated: Option<Box<ArmGen>>,
+}
+
+/// Arms made at compile time (08): in a derive's template, the arms of a
+/// `match` for each variant of the type.
+#[derive(Clone, Debug)]
+pub enum ArmGen {
+    /// `comptime for pat in iter:` and arms.
+    For { pat: Pattern, iter: Expr, arms: Vec<Arm> },
+    /// `comptime if cond:` and arms, and the arms of its `else:`.
+    If { cond: Expr, then: Vec<Arm>, else_: Vec<Arm> },
 }
 
 #[derive(Clone, Debug)]

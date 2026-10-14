@@ -110,35 +110,6 @@ impl Interp<'_, '_> {
                 }
                 Ok(c.map(Value::Char))
             }
-            IterState::Take { inner, left } => {
-                if *left <= 0 {
-                    return Ok(None);
-                }
-                *left -= 1;
-                self.iter_next(inner)
-            }
-            IterState::Skip { inner, n } => {
-                while *n > 0 {
-                    *n -= 1;
-                    match self.iter_next(inner)? {
-                        Some(x) => self.drop_value(x)?,
-                        None => return Ok(None),
-                    }
-                }
-                self.iter_next(inner)
-            }
-            IterState::Map { inner, f } => match self.iter_next(inner)? {
-                Some(x) => Ok(Some(self.call_value(f, vec![x])?)),
-                None => Ok(None),
-            },
-            IterState::Filter { inner, f } => loop {
-                let Some(x) = self.iter_next(inner)? else { return Ok(None) };
-                let (x, keep) = self.call_with_ref(f, x)?;
-                if self.bool(&keep)? {
-                    return Ok(Some(x));
-                }
-                self.drop_value(x)?;
-            },
             IterState::Enumerate { inner, n } => match self.iter_next(inner)? {
                 Some(x) => {
                     let i = *n;
@@ -155,7 +126,7 @@ impl Interp<'_, '_> {
                     (None, None) => Ok(None),
                     (x, y) => {
                         for v in x.into_iter().chain(y) {
-                            self.drop_value(v)?;
+                            self.queue_drop(v, None);
                         }
                         if *strict { Err(panic(msg::PANIC_ZIP_LENGTHS, &[])) } else { Ok(None) }
                     }
@@ -169,24 +140,6 @@ impl Interp<'_, '_> {
         }
     }
 
-    /// Calls `f` with a reference to `x`, which lives in a scratch frame
-    /// for the call; returns `x` and the result. A result that refers into
-    /// the scratch frame (a key function returning its argument) is
-    /// replaced by a copy of what it refers to before the frame goes.
-    pub(crate) fn call_with_ref(&mut self, f: &Value, x: Value) -> Result<(Value, Value), Unwind> {
-        let (vals, r) = self.with_scratch(vec![x], |me, ptrs| {
-            let scratch = ptrs.first().map(|p| (p.frame, p.serial));
-            let args = ptrs.into_iter().map(|p| Value::Ref(Box::new(p))).collect();
-            let r = me.call_value(f, args)?;
-            match &r {
-                Value::Ref(p) if Some((p.frame, p.serial)) == scratch => Ok(me.target(&r)?.clone()),
-                _ => Ok(r),
-            }
-        });
-        let r = r?;
-        Ok((vals.into_iter().next().unwrap_or(Value::Unit), r))
-    }
-
     /// The remaining items.
     pub(crate) fn iter_collect(&mut self, st: &mut IterState) -> Result<Vec<Value>, Unwind> {
         let mut out = Vec::new();
@@ -198,99 +151,8 @@ impl Interp<'_, '_> {
 
     /// Drops what is left in an iterator that is no longer needed.
     pub(crate) fn finish_iter(&mut self, st: IterState) -> Result<(), Unwind> {
-        self.drop_value(Value::Iter(Box::new(st)))
-    }
-
-    /// The `Iter` methods that consume the iterator (`own self`).
-    pub(crate) fn iter_method(
-        &mut self,
-        name: &str,
-        mut st: IterState,
-        args: Vec<Value>,
-    ) -> Result<Value, Unwind> {
-        let mut args = args.into_iter();
-        let mut arg = || args.next().unwrap_or(Value::Unit);
-        Ok(match name {
-            "take" => {
-                let n = self.int(&arg())?;
-                Value::Iter(Box::new(IterState::Take { inner: Box::new(st), left: n }))
-            }
-            "skip" => {
-                let n = self.int(&arg())?;
-                Value::Iter(Box::new(IterState::Skip { inner: Box::new(st), n }))
-            }
-            "map" => Value::Iter(Box::new(IterState::Map { inner: Box::new(st), f: arg() })),
-            "filter" => Value::Iter(Box::new(IterState::Filter { inner: Box::new(st), f: arg() })),
-            "enumerate" => Value::Iter(Box::new(IterState::Enumerate { inner: Box::new(st), n: 0 })),
-            "count" => {
-                let mut n = 0i64;
-                while let Some(x) = self.iter_next(&mut st)? {
-                    n += 1;
-                    self.drop_value(x)?;
-                }
-                Value::Int(n)
-            }
-            "collect" => Value::List(self.iter_collect(&mut st)?),
-            "find" => {
-                let f = arg();
-                while let Some(x) = self.iter_next(&mut st)? {
-                    let (x, hit) = self.call_with_ref(&f, x)?;
-                    if self.bool(&hit)? {
-                        self.finish_iter(st)?;
-                        return Ok(Value::some(x));
-                    }
-                    self.drop_value(x)?;
-                }
-                Value::none()
-            }
-            "all" | "any" => {
-                let f = arg();
-                let want = name == "any";
-                while let Some(x) = self.iter_next(&mut st)? {
-                    let r = self.call_value(&f, vec![x])?;
-                    if self.bool(&r)? == want {
-                        self.finish_iter(st)?;
-                        return Ok(Value::Bool(want));
-                    }
-                }
-                Value::Bool(!want)
-            }
-            "fold" => {
-                let mut acc = arg();
-                let f = arg();
-                while let Some(x) = self.iter_next(&mut st)? {
-                    acc = self.call_value(&f, vec![acc, x])?;
-                }
-                acc
-            }
-            "max_by" | "min_by" => {
-                let f = arg();
-                let mut best: Option<(Value, Value)> = None;
-                while let Some(x) = self.iter_next(&mut st)? {
-                    let (x, k) = self.call_with_ref(&f, x)?;
-                    let better = match &best {
-                        None => true,
-                        Some((_, bk)) => {
-                            let o = self.total_compare(&k, bk)?;
-                            if name == "max_by" {
-                                o == std::cmp::Ordering::Greater
-                            } else {
-                                o == std::cmp::Ordering::Less
-                            }
-                        }
-                    };
-                    if better {
-                        if let Some((old, _)) = best.replace((x, k)) {
-                            self.drop_value(old)?;
-                        }
-                    } else {
-                        self.drop_value(x)?;
-                    }
-                }
-                Value::option(best.map(|(x, _)| x))
-            }
-            other => return Err(ice(format!("no Iter method `{other}`"))),
-        })
+        self.queue_drop(Value::Iter(Box::new(st)), None);
+        Ok(())
     }
 }
 
@@ -298,12 +160,7 @@ impl Interp<'_, '_> {
 pub(crate) fn owned_parts(st: IterState) -> Vec<Value> {
     match st {
         IterState::Items(q) => q.into_iter().collect(),
-        IterState::Take { inner, .. }
-        | IterState::Skip { inner, .. }
-        | IterState::Map { inner, .. }
-        | IterState::Filter { inner, .. }
-        | IterState::Enumerate { inner, .. }
-        | IterState::Decay(inner) => owned_parts(*inner),
+        IterState::Enumerate { inner, .. } | IterState::Decay(inner) => owned_parts(*inner),
         IterState::Zip { a, b, .. } => {
             let mut v = owned_parts(*a);
             v.extend(owned_parts(*b));

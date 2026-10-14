@@ -1,7 +1,8 @@
 //! Structural checks on SIR: every reference resolves, unwind edges lead
 //! to cleanup blocks, `resume` appears only in cleanup, a `drop` outside
 //! cleanup ends its block (the lowering invariant that makes each block's
-//! unwind edge exact), and the `from` arguments of a function exist.
+//! unwind edge exact), the `from` arguments of a function exist, and every
+//! type with a `Drop` has its drop glue.
 
 use crate::*;
 
@@ -157,6 +158,27 @@ pub fn validate(p: &Program) -> Vec<String> {
                     bad(format!("bb{bi}: jumps to missing bb{}", t.0));
                 }
             }
+        }
+    }
+    // Drop glue: one function per declared type that has any, and one for
+    // every type with a `Drop`.
+    for f in p.functions.iter().filter(|f| f.kind == FnKind::Glue) {
+        let declared = f.name.strip_suffix("#drop").and_then(|t| p.type_decl(t));
+        match declared {
+            None => problems.push(format!("{}: drop glue of a type that is not declared", f.name)),
+            Some(t) if f.param_count != 1 || t.params().len() != f.type_params.len() => {
+                problems.push(format!("{}: drop glue takes the value, with the type's parameters", f.name))
+            }
+            Some(_) => {}
+        }
+    }
+    for t in &p.types {
+        let drop = match t {
+            TypeDecl::Struct { drop, .. } | TypeDecl::Enum { drop, .. } => drop,
+        };
+        let glue = types::glue_name(t.name());
+        if drop.is_some() && !p.functions.iter().any(|f| f.kind == FnKind::Glue && f.name == glue) {
+            problems.push(format!("type {} has a `Drop` but no drop glue {glue}", t.name()));
         }
     }
     if let Some(e) = &p.entry

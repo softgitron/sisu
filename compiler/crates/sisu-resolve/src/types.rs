@@ -80,6 +80,10 @@ impl Resolver<'_> {
         let mut out: Vec<Predicate> = Vec::new();
         for (k, g) in gps.iter().enumerate() {
             let subject = Ty::Param((offset + k) as u32);
+            // A `const` parameter's "bound" is its type (reported, E0900).
+            if g.is_const {
+                continue;
+            }
             for b in &g.bounds {
                 let ctx = TyCtx { predicates: &out, in_trait, ..TyCtx::plain(module, names, true) };
                 if let Some(tr) = self.resolve_bound(b, &subject, &ctx) {
@@ -280,6 +284,15 @@ impl Resolver<'_> {
                 self.unsupported(span, what, phase);
                 Ty::Error
             }
+        }
+    }
+
+    /// A `dyn Trait` has no size of its own (03, "Dispatch"): it is held
+    /// only behind `ref` or in a `Box`.
+    pub fn check_sized(&mut self, ty: &Ty, span: Span) {
+        if let Some(d) = crate::ty::unsized_part(&self.prog, ty) {
+            let shown = self.prog.display(&d);
+            self.report(Diagnostic::new(msg::TYPE_UNSIZED_DYN, span).with("ty", shown));
         }
     }
 

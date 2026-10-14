@@ -56,7 +56,10 @@ pub fn builtin_impls() -> &'static str {
              ##! equality of the values (`str` and `String` with the same text are\n\
              ##! equal); `structural.partial_cmp` is the order of numbers, of text by\n\
              ##! code points, `False < True`, and `None` for NaN; `structural.hash`\n\
-             ##! mixes the value into the hasher.\n",
+             ##! mixes the value into the hasher. `op.add`, `op.sub`, `op.mul`,\n\
+             ##! `op.div`, `op.rem` and `op.neg` are the operators `+`, `-`, `*`, `/`,\n\
+             ##! `%` and unary `-` on numbers, with their overflow and division\n\
+             ##! panics.\n",
         );
         for (ty, traits) in LEAVES {
             for t in *traits {
@@ -64,6 +67,17 @@ pub fn builtin_impls() -> &'static str {
                 let (name, sig) = leaf_method(t, ty);
                 let _ = writeln!(s, "    @intrinsic(\"{name}\")\n    pure def {sig}");
             }
+        }
+        // The operators of the numbers, as traits for generic code; `a + b`
+        // on numbers stays the language's own operation.
+        for ty in ["int", "f64"] {
+            for (t, m) in [("Add", "add"), ("Sub", "sub"), ("Mul", "mul"), ("Div", "div"), ("Rem", "rem")] {
+                let _ = writeln!(s, "\nimpl {t} for {ty}:");
+                let _ =
+                    writeln!(s, "    @intrinsic(\"op.{m}\")\n    pure def {m}(self, other: {ty}) -> {ty}");
+            }
+            let _ = writeln!(s, "\nimpl Neg for {ty}:");
+            let _ = writeln!(s, "    @intrinsic(\"op.neg\")\n    pure def neg(self) -> {ty}");
         }
         for n in 1..=TUPLE_ARITY {
             tuple_impls(&mut s, n);

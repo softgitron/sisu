@@ -1,0 +1,102 @@
+# Traits, generics, dynamic dispatch, derive, delegation.
+
+from std.math import PI
+
+trait Shape:
+    def area(self) -> f64
+    def perimeter(self) -> f64
+    def describe(self) -> String:                       # provided method
+        return "area {self.area():.2f}, perimeter {self.perimeter():.2f}"
+
+@derive(Copy, Debug, Eq)
+struct Circle:
+    radius: f64
+
+@derive(Copy, Debug, Eq)
+struct Rect:
+    w: f64
+    h: f64
+
+impl Shape for Circle:
+    def area(self) -> f64:
+        return PI * self.radius ** 2
+    def perimeter(self) -> f64:
+        return 2.0 * PI * self.radius
+
+impl Shape for Rect:
+    def area(self) -> f64:
+        return self.w * self.h
+    def perimeter(self) -> f64:
+        return 2.0 * (self.w + self.h)
+
+# Static dispatch: monomorphised per S. Checked here, not at each use.
+def total_area[S: Shape](shapes: list[S]) -> f64:
+    return shapes.iter().map(it.area()).sum()
+
+# Dynamic dispatch, spelled out. `dyn Shape` is unsized; it lives behind ref or Box.
+def print_all(shapes: list[Box[dyn Shape]]):
+    for s in shapes:
+        print(s.describe())
+
+# Associated types and where clauses.
+trait Container(Len):                      # supertrait: list already implements Len
+    type Item
+    def get(self, i: int) -> ref Item?
+
+impl[T] Container for list[T]:
+    type Item = T
+    def get(self, i: int) -> ref T?:
+        return if i < len(self): Some(ref self[i]) else: None
+
+def first_display[C: Container](c: C) -> String where C.Item: Display:
+    return c.get(0).map("{it}") ?? "<empty>"
+
+# Operator overloading on the fixed set, via traits.
+@derive(Copy, Debug, Eq)
+struct Vec2:
+    x: f64
+    y: f64
+
+impl Add for Vec2:
+    def add(self, other: Vec2) -> Vec2:
+        return Vec2(x=self.x + other.x, y=self.y + other.y)
+
+# Newtypes with delegation: distinct type, zero cost, chosen traits forwarded.
+@delegate(Add, Sub, PartialOrd, Display, to="value")
+struct Meters:
+    value: f64
+
+@delegate(Add, Sub, PartialOrd, Display, to="value")
+struct Seconds:
+    value: f64
+
+def speed(d: Meters, t: Seconds) -> f64:
+    return d.value / t.value
+# speed(Seconds(1.0), Meters(2.0))    # compile error: the newtypes are distinct
+
+# Enum vs trait: closed set of variants -> enum; open set of behaviours -> trait.
+enum Command:
+    Move(dx: int, dy: int)
+    Say(String)
+    Quit
+
+def run(cmd: Command):
+    match cmd:
+        case Move(dx, dy):
+            print("move {dx},{dy}")
+        case Say(text):
+            print(text)
+        case Quit:
+            return
+
+def demo():
+    let shapes: list[Box[dyn Shape]] = [Box(Circle(radius=1.0)), Box(Rect(w=2.0, h=3.0))]
+    print_all(shapes)
+    print(total_area([Circle(radius=1.0), Circle(radius=2.0)]))
+    let v = Vec2(x=1.0, y=2.0) + Vec2(x=3.0, y=4.0)
+    print("{v:?}")                               # Vec2 derives Debug, not Display
+    print(first_display([1, 2, 3]))
+
+# Stage 0 runs the demo from a `main` the proposal's text does not have.
+def main():
+    demo()

@@ -1,0 +1,1 @@
+7:27-7:35 E0241 resolve.not-object-safe trait="Make" method="make" reason="it does not take `self` or `mut self`"

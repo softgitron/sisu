@@ -11,6 +11,7 @@
 
 mod exprs;
 mod func;
+mod glue;
 mod pats;
 mod stmts;
 
@@ -264,6 +265,7 @@ pub fn lower(prog: &Program, typed: &Typed, sources: &SourceMap) -> sir::Program
     let types = collect_types(&ctx, &functions);
     let mut functions = prune(&ctx, functions, &roots, &types);
     let types = collect_types(&ctx, &functions);
+    functions.extend(glue::glue_functions(&types));
     let intrinsics = intrinsic_decls(prog, &functions);
     let (trait_methods, impls) = trait_decls(&ctx, &functions);
     let sources = renumber_sources(&ctx.file_names, &mut functions);
@@ -295,6 +297,7 @@ fn trait_decls(ctx: &Ctx, functions: &[sir::Function]) -> (Vec<sir::IntrinsicDec
             from: b.deep,
             inner: b.inner,
             own,
+            keeps: f.keeps.clone(),
         });
         if let Some(t) = f.trait_
             && !traits.contains(&t)
@@ -302,33 +305,97 @@ fn trait_decls(ctx: &Ctx, functions: &[sir::Function]) -> (Vec<sir::IntrinsicDec
             traits.push(t);
         }
     }
+    let kept: HashSet<&str> = functions.iter().map(|f| f.name.as_str()).collect();
+    // The traits whose associated types the functions name: the interpreter
+    // finds `<T as Trait>.Name` in the impl for `T`.
+    let mut projected: HashSet<String> = HashSet::new();
+    let mut mentioned: HashSet<String> = HashSet::new();
+    for f in functions {
+        for l in &f.locals {
+            assoc_traits(&l.ty, &mut projected);
+            type_names(&l.ty, &mut mentioned);
+        }
+        for b in &f.blocks {
+            for st in &b.stmts {
+                let tys: &[sir::Type] = match &st.kind {
+                    sir::StatementKind::Call {
+                        callee:
+                            sir::Callee::Fn(_, t) | sir::Callee::Trait(_, t) | sir::Callee::Intrinsic(_, t),
+                        ..
+                    } => t,
+                    sir::StatementKind::Assign(_, sir::Rvalue::Closure(_, t, _)) => t,
+                    _ => &[],
+                };
+                tys.iter().for_each(|t| assoc_traits(t, &mut projected));
+            }
+        }
+    }
     let mut impls = Vec::new();
     for &i in &prog.impls {
         let Some(info) = prog.impl_info(i) else { continue };
-        if !traits.contains(&info.trait_ref.def) {
+        let trait_name = prog.qualified_name(info.trait_ref.def);
+        let dispatched = traits.contains(&info.trait_ref.def);
+        let self_ty = ctx.ty(&info.self_ty);
+        let has_assoc = !info.assoc.is_empty()
+            && projected.contains(&trait_name)
+            && match &self_ty {
+                sir::Type::Named(n, _) => mentioned.contains(n),
+                _ => true,
+            };
+        if !dispatched && !has_assoc {
+            continue;
+        }
+        // An impl for a type no kept function makes was pruned with its
+        // methods.
+        let pruned = info.methods.iter().any(|(_, m)| {
+            prog.fn_info(*m).is_some_and(|f| f.body.is_some() && f.intrinsic.is_none())
+                && !kept.contains(ctx.fn_name(*m).as_str())
+        });
+        if pruned && !has_assoc {
             continue;
         }
         let methods = info
             .methods
             .iter()
             .filter(|(_, m)| prog.fn_info(*m).is_some_and(|f| f.body.is_some() || f.intrinsic.is_some()))
-            .map(|(n, m)| {
+            .filter_map(|(n, m)| {
                 let target = match prog.fn_info(*m).and_then(|f| f.intrinsic.clone()) {
                     Some(intr) => sir::ImplTarget::Intrinsic(intr),
-                    None => sir::ImplTarget::Fn(ctx.fn_name(*m)),
+                    None if kept.contains(ctx.fn_name(*m).as_str()) => sir::ImplTarget::Fn(ctx.fn_name(*m)),
+                    None => return None,
                 };
-                (n.clone(), target)
+                Some((n.clone(), target))
             })
             .collect();
         impls.push(sir::ImplDecl {
             params: info.generics.len() as u32,
-            trait_name: prog.qualified_name(info.trait_ref.def),
+            trait_name,
             trait_args: info.trait_ref.args.iter().map(|t| ctx.ty(t)).collect(),
-            self_ty: ctx.ty(&info.self_ty),
+            self_ty,
             methods,
+            assoc: info.assoc.iter().map(|(n, t)| (n.clone(), ctx.ty(t))).collect(),
         });
     }
     (methods, impls)
+}
+
+/// The traits of the associated types a type names.
+fn assoc_traits(t: &sir::Type, out: &mut HashSet<String>) {
+    match t {
+        sir::Type::Assoc(s, tr, args, _) => {
+            out.insert(tr.clone());
+            assoc_traits(s, out);
+            args.iter().for_each(|a| assoc_traits(a, out));
+        }
+        sir::Type::Named(_, args) | sir::Type::Dyn(_, args) => args.iter().for_each(|a| assoc_traits(a, out)),
+        sir::Type::Tuple(es) => es.iter().for_each(|e| assoc_traits(e, out)),
+        sir::Type::Fn(ps, r, _) => {
+            ps.iter().for_each(|p| assoc_traits(p, out));
+            assoc_traits(r, out);
+        }
+        sir::Type::Ref(t, _) => assoc_traits(t, out),
+        _ => {}
+    }
 }
 
 /// The names of the trait methods called through `call trait`.
@@ -383,7 +450,7 @@ fn intrinsic_decls(prog: &Program, functions: &[sir::Function]) -> Vec<sir::Intr
     let mut by_name: HashMap<&str, &sisu_resolve::FnInfo> = HashMap::new();
     for d in &prog.defs {
         if let DefKind::Fn(f) = &d.kind
-            && let Some(n) = &f.intrinsic
+            && let Some(n) = f.intrinsic.as_ref().or(f.structural.as_ref())
         {
             by_name.insert(n.as_str(), f);
         }
@@ -400,7 +467,14 @@ fn intrinsic_decls(prog: &Program, functions: &[sir::Function]) -> Vec<sir::Intr
                     .filter(|(_, p)| p.mode == sisu_syntax::ast::Mode::Own)
                     .map(|(i, _)| i as u32)
                     .collect();
-                sir::IntrinsicDecl { name, pure: f.pure, from: b.deep, inner: b.inner, own }
+                sir::IntrinsicDecl {
+                    name,
+                    pure: f.pure,
+                    from: b.deep,
+                    inner: b.inner,
+                    own,
+                    keeps: f.keeps.clone(),
+                }
             }
             None => {
                 let (from, inner): (Vec<u32>, Vec<u32>) = match name.as_str() {
@@ -408,13 +482,19 @@ fn intrinsic_decls(prog: &Program, functions: &[sir::Function]) -> Vec<sir::Intr
                     "list.slice" | "list.slice_middle" => (vec![], vec![0]),
                     _ => (vec![], vec![]),
                 };
+                // `iter.own` takes the collection and keeps every element.
                 let own = if name == "iter.own" { vec![0] } else { Vec::new() };
-                sir::IntrinsicDecl { name, pure: true, from, inner, own }
+                let keeps = own.clone();
+                sir::IntrinsicDecl { name, pure: true, from, inner, own, keeps }
             }
         })
         .collect()
 }
 
+/// The functions the roots reach. A call through a trait reaches the
+/// trait's provided body and the methods of every impl of the trait for a
+/// type some kept function names: a value of a type that no kept function
+/// mentions is never made, so it is never dispatched to.
 fn prune(
     ctx: &Ctx,
     functions: Vec<sir::Function>,
@@ -424,64 +504,112 @@ fn prune(
     let prog = ctx.prog;
     let by_name: HashMap<&str, &sir::Function> = functions.iter().map(|f| (f.name.as_str(), f)).collect();
     let mut dispatched: HashSet<DefId> = HashSet::new();
+    let mut added_impls: HashSet<DefId> = HashSet::new();
     let mut keep: HashSet<String> = HashSet::new();
+    let mut mentioned: HashSet<String> = HashSet::new();
     let mut work: Vec<String> = roots.to_vec();
-    // Defaults and drops of declared types are reached through the types.
+    // Defaults and drops of declared types are reached through the types,
+    // and so is a type's invariant check, which the run time calls when
+    // unwinding drops a mutex guard (D-077).
     for t in types {
         match t {
-            sir::TypeDecl::Struct { fields, drop, .. } => {
+            sir::TypeDecl::Struct { name, fields, drop, .. } => {
                 work.extend(fields.iter().filter_map(|f| f.default.clone()));
                 work.extend(drop.clone());
+                work.push(format!("{name}.__invariant"));
             }
             sir::TypeDecl::Enum { drop, .. } => work.extend(drop.clone()),
         }
     }
-    while let Some(n) = work.pop() {
-        if !keep.insert(n.clone()) {
-            continue;
-        }
-        let Some(f) = by_name.get(n.as_str()) else { continue };
-        for b in &f.blocks {
-            for s in &b.stmts {
-                match &s.kind {
-                    sir::StatementKind::Call { callee: sir::Callee::Fn(c, _), args, .. } => {
-                        work.push(c.clone());
-                        refs_in_operands(args, &mut work);
-                    }
-                    sir::StatementKind::Call { callee: sir::Callee::Trait(c, _), args, .. } => {
-                        refs_in_operands(args, &mut work);
-                        // A call through a trait reaches the trait's provided
-                        // body and every impl's method.
-                        work.push(c.clone());
-                        if let Some(m) = trait_method_def(ctx, c)
-                            && let Some(t) = prog.fn_info(m).and_then(|f| f.trait_)
-                            && dispatched.insert(t)
-                        {
-                            for &i in &prog.impls {
-                                if let Some(info) = prog.impl_info(i)
-                                    && info.trait_ref.def == t
-                                {
-                                    work.extend(info.methods.iter().map(|(_, m)| ctx.fn_name(*m)));
-                                }
-                            }
-                        }
-                    }
-                    sir::StatementKind::Call { args, .. } => refs_in_operands(args, &mut work),
-                    sir::StatementKind::Assign(_, r) => match r {
-                        sir::Rvalue::Closure(c, _, ops) => {
-                            work.push(c.clone());
-                            refs_in_operands(ops, &mut work);
-                        }
-                        sir::Rvalue::Use(o) => refs_in_operands(std::slice::from_ref(o), &mut work),
-                        sir::Rvalue::Aggregate(_, ops) => refs_in_operands(ops, &mut work),
-                        _ => {}
-                    },
-                    _ => {}
-                }
+    loop {
+        while let Some(n) = work.pop() {
+            if !keep.insert(n.clone()) {
+                continue;
             }
+            let Some(f) = by_name.get(n.as_str()) else { continue };
+            for l in &f.locals {
+                type_names(&l.ty, &mut mentioned);
+            }
+            reach_from(ctx, f, &mut work, &mut dispatched);
+        }
+        for &i in &prog.impls {
+            let Some(info) = prog.impl_info(i) else { continue };
+            if added_impls.contains(&i) || !dispatched.contains(&info.trait_ref.def) {
+                continue;
+            }
+            let needed = match ctx.ty(&info.self_ty) {
+                sir::Type::Named(n, _) => mentioned.contains(&n),
+                _ => true,
+            };
+            if needed {
+                added_impls.insert(i);
+                work.extend(info.methods.iter().map(|(_, m)| ctx.fn_name(*m)));
+            }
+        }
+        if work.is_empty() {
+            break;
         }
     }
     functions.into_iter().filter(|f| keep.contains(&f.name)).collect()
+}
+
+/// The names of the named types in a type.
+fn type_names(t: &sir::Type, out: &mut HashSet<String>) {
+    match t {
+        sir::Type::Named(n, args) => {
+            out.insert(n.clone());
+            args.iter().for_each(|a| type_names(a, out));
+        }
+        sir::Type::Tuple(es) => es.iter().for_each(|e| type_names(e, out)),
+        sir::Type::Fn(ps, r, _) => {
+            ps.iter().for_each(|p| type_names(p, out));
+            type_names(r, out);
+        }
+        sir::Type::Ref(t, _) => type_names(t, out),
+        sir::Type::Dyn(_, args) => args.iter().for_each(|a| type_names(a, out)),
+        sir::Type::Assoc(t, _, args, _) => {
+            type_names(t, out);
+            args.iter().for_each(|a| type_names(a, out));
+        }
+        sir::Type::ErrSet(ms) => out.extend(ms.iter().cloned()),
+        _ => {}
+    }
+}
+
+/// What one function reaches: its callees, the functions it names as
+/// values, and the traits it calls through.
+fn reach_from(ctx: &Ctx, f: &sir::Function, work: &mut Vec<String>, dispatched: &mut HashSet<DefId>) {
+    let prog = ctx.prog;
+    for b in &f.blocks {
+        for s in &b.stmts {
+            match &s.kind {
+                sir::StatementKind::Call { callee: sir::Callee::Fn(c, _), args, .. } => {
+                    work.push(c.clone());
+                    refs_in_operands(args, work);
+                }
+                sir::StatementKind::Call { callee: sir::Callee::Trait(c, _), args, .. } => {
+                    refs_in_operands(args, work);
+                    work.push(c.clone());
+                    if let Some(m) = trait_method_def(ctx, c)
+                        && let Some(t) = prog.fn_info(m).and_then(|f| f.trait_)
+                    {
+                        dispatched.insert(t);
+                    }
+                }
+                sir::StatementKind::Call { args, .. } => refs_in_operands(args, work),
+                sir::StatementKind::Assign(_, r) => match r {
+                    sir::Rvalue::Closure(c, _, ops) => {
+                        work.push(c.clone());
+                        refs_in_operands(ops, work);
+                    }
+                    sir::Rvalue::Use(o) => refs_in_operands(std::slice::from_ref(o), work),
+                    sir::Rvalue::Aggregate(_, ops) => refs_in_operands(ops, work),
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+    }
 }
 
 /// The sources the kept functions come from: the root module's file

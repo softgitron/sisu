@@ -12,6 +12,7 @@
 
 use crate::collect::Resolver;
 use crate::program::*;
+use crate::template::{Body, Target};
 use crate::ty::Ty;
 use sisu_diag::{Diagnostic, Span, TextRange, msg};
 use sisu_syntax::ast::{self, ExprKind, ItemKind};
@@ -19,12 +20,20 @@ use sisu_syntax::ast::{self, ExprKind, ItemKind};
 /// The traits `@derive` knows, besides `Copy`.
 pub const DERIVABLE: &[&str] = &["Debug", "Eq", "PartialOrd", "Ord", "Hash"];
 
+/// The traits `@delegate` forwards (03, "Coherence": "cheap newtypes and
+/// delegation"); the first six return `Self`.
+pub const DELEGABLE: &[&str] =
+    &["Add", "Sub", "Mul", "Div", "Rem", "Neg", "Eq", "PartialOrd", "Ord", "Hash", "Display", "Debug", "Len"];
+
 /// A derived impl to check once every impl is known.
 #[derive(Clone, Debug)]
 pub struct DeriveCheck {
     pub ty: DefId,
     pub trait_name: String,
     pub span: Span,
+    /// The field a delegated impl forwards to; `None` for a derived impl,
+    /// which uses every field.
+    pub field: Option<String>,
 }
 
 /// The shape of a type, as the derive templates need it.
@@ -32,15 +41,12 @@ struct Shape {
     name: String,
     /// Generic parameter names and the source text of their bounds.
     generics: Vec<(String, Vec<String>)>,
+    /// Whether each parameter appears in a field's type: one that does not
+    /// (`Key[T]`'s `T`) needs no bound for the derived impl.
+    used: Vec<bool>,
     body: Body,
 }
 
-enum Body {
-    /// Field names.
-    Struct(Vec<String>),
-    /// Variant names, each with its field names (`None` for positional).
-    Enum(Vec<(String, Vec<Option<String>>)>),
-}
 
 impl Resolver<'_> {
     /// Declares the derived impls of the structs and enums among `items`.
@@ -48,13 +54,15 @@ impl Resolver<'_> {
         let file = self.file(module);
         let source = self.sources.get(file).map(|f| f.text.clone()).unwrap_or_default();
         let mut text = String::new();
-        let mut checks: Vec<(String, String, Span)> = Vec::new();
+        let mut delegate = String::new();
+        let mut checks: Vec<(String, String, Span, Option<String>)> = Vec::new();
         for item in items {
             let (shape, builtin) = match &item.kind {
                 ItemKind::Struct(s) => (
                     Shape {
                         name: s.name.text.clone(),
                         generics: generics_text(&s.generics, &source),
+                        used: used_params(&s.generics, s.fields.iter().map(|f| &f.ty)),
                         body: Body::Struct(s.fields.iter().map(|f| f.name.text.clone()).collect()),
                     },
                     item.attrs.iter().any(|a| a.name == "builtin"),
@@ -63,6 +71,10 @@ impl Resolver<'_> {
                     Shape {
                         name: e.name.text.clone(),
                         generics: generics_text(&e.generics, &source),
+                        used: used_params(
+                            &e.generics,
+                            e.variants.iter().flat_map(|v| v.fields.iter().map(|f| &f.ty)),
+                        ),
                         body: Body::Enum(
                             e.variants
                                 .iter()
@@ -82,7 +94,13 @@ impl Resolver<'_> {
                 ),
                 _ => continue,
             };
-            if shape.name.is_empty() {
+            // A type with a `const` parameter (E0900) gets no impls.
+            let has_const = match &item.kind {
+                ItemKind::Struct(s) => s.generics.iter().any(|g| g.is_const),
+                ItemKind::Enum(e) => e.generics.iter().any(|g| g.is_const),
+                _ => false,
+            };
+            if shape.name.is_empty() || has_const {
                 continue;
             }
             let mut wanted: Vec<(String, Span)> = Vec::new();
@@ -90,8 +108,13 @@ impl Resolver<'_> {
                 for arg in &a.args {
                     let span = self.span(module, arg.range);
                     match &arg.value.kind {
-                        ExprKind::Name(n) if n == "Copy" => {}
-                        ExprKind::Name(n) if DERIVABLE.contains(&n.as_str()) => {
+                        // A flag on the type, checked against its fields.
+                        ExprKind::Name(n) if n == "Copy" => {
+                            checks.push((shape.name.clone(), "Copy".into(), span, None));
+                        }
+                        ExprKind::Name(n)
+                            if DERIVABLE.contains(&n.as_str()) || self.derive_template(module, n).is_some() =>
+                        {
                             if !wanted.iter().any(|(w, _)| w == n) {
                                 wanted.push((n.clone(), span));
                             }
@@ -103,6 +126,20 @@ impl Resolver<'_> {
                     }
                 }
             }
+            // `invariant e` lines: the check D-077 runs when unwinding drops
+            // a guard of a `Mutex` holding the type (the other checks of 07
+            // arrive with contracts, Phase 8).
+            if let ItemKind::Struct(st) = &item.kind
+                && !st.invariants.is_empty()
+            {
+                text.push_str(&invariant_text(&shape, &st.invariants, &source));
+            }
+            // `@delegate(Trait, ..., to="field")`: impls that forward to a field.
+            let delegated = self.delegations(module, item, &shape);
+            for (t, field, span) in &delegated {
+                delegate.push_str(&delegate_text(&shape, t, field));
+                checks.push((shape.name.clone(), t.clone(), *span, Some(field.clone())));
+            }
             // `Ord` brings `PartialOrd`, which it determines.
             if let Some((_, span)) = wanted.iter().find(|(w, _)| w == "Ord").cloned()
                 && !wanted.iter().any(|(w, _)| w == "PartialOrd")
@@ -111,26 +148,72 @@ impl Resolver<'_> {
                 wanted.push(("PartialOrd".into(), span));
             }
             // Every type has `Debug` (11): the derived one unless it has its own.
-            if !builtin && !wanted.iter().any(|(w, _)| w == "Debug") && !has_impl(items, "Debug", &shape.name)
+            if !builtin
+                && !wanted.iter().any(|(w, _)| w == "Debug")
+                && !delegated.iter().any(|(w, _, _)| w == "Debug")
+                && !has_impl(items, "Debug", &shape.name)
             {
                 let span = self.span(module, TextRange::empty(item.range.start));
                 wanted.push(("Debug".into(), span));
             }
             for (t, span) in wanted {
-                text.push_str(&derive_text(&shape, &t));
-                checks.push((shape.name.clone(), t, span));
+                match self.derive_template(module, &t) {
+                    // The trait's own derive, run at compile time.
+                    Some((tm, template)) => {
+                        let (head, written) = header(&shape, &t);
+                        let target = Target { name: &shape.name, written: &written, body: &shape.body };
+                        let source = self.sources.get(self.file(tm)).map(|f| f.text.clone()).unwrap_or_default();
+                        match crate::template::unfold(&template, &source, &head, &target) {
+                            Ok(impl_text) => text.push_str(&impl_text),
+                            Err((range, reason)) => {
+                                let at = self.span(tm, range);
+                                self.report(
+                                    Diagnostic::new(msg::COMPTIME_DERIVE_FAILED, span)
+                                        .with("trait", t.clone())
+                                        .with("ty", shape.name.clone())
+                                        .with("reason", reason)
+                                        .label(at, msg::COMPTIME_DERIVE_HERE, Vec::new()),
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    None => text.push_str(&derive_text(&shape, &t)),
+                }
+                checks.push((shape.name.clone(), t, span, None));
             }
         }
-        if text.is_empty() {
-            return;
+        // Delegated impls are ordinary impls, written by the compiler.
+        if !delegate.is_empty() {
+            self.declare_generated(module, "<delegate>", &delegate);
         }
-        // The impls go in a module of their own, with the generated file as
-        // its source and the type's module as its scope.
+        if !text.is_empty() {
+            self.declare_generated(module, "<derive>", &text);
+        }
+        for (ty, trait_name, span, field) in checks {
+            if let Some(d) = self.prog.lookup_in(module, &ty) {
+                self.derive_checks.push(DeriveCheck { ty: d, trait_name, span, field });
+            }
+        }
+    }
+
+    /// The `comptime def derive` of the trait `name` as `module` sees it:
+    /// its own trait of that name, or the prelude's; with the module the
+    /// template is written in.
+    fn derive_template(&self, module: ModuleId, name: &str) -> Option<(ModuleId, ast::FnDef)> {
+        [module, self.prog.prelude]
+            .into_iter()
+            .find_map(|m| self.derive_templates.get(&(m, name.to_string())).map(|f| (m, f.clone())))
+    }
+
+    /// Declares generated impls in a module of their own, with the
+    /// generated text as its source file and `module` as its scope.
+    fn declare_generated(&mut self, module: ModuleId, dir: &str, text: &str) {
         let parent = &self.prog.modules[module.0 as usize];
-        let name = format!("<derive>/{}.sisu", parent.name);
+        let name = format!("{dir}/{}.sisu", parent.name);
         let is_std = parent.is_std;
-        let file = self.sources.add(name.clone(), &text);
-        let parse = sisu_parser::parse(file, &text);
+        let file = self.sources.add(name.clone(), text);
+        let parse = sisu_parser::parse(file, text);
         self.diags.extend(parse.diagnostics);
         let ast = ast::build::module(&parse.tree);
         let id = ModuleId(self.prog.modules.len() as u32);
@@ -143,21 +226,86 @@ impl Resolver<'_> {
             parent: Some(module),
         });
         self.declare_items(id, &ast.items, "");
-        for (ty, trait_name, span) in checks {
-            if let Some(d) = self.prog.lookup_in(module, &ty) {
-                self.derive_checks.push(DeriveCheck { ty: d, trait_name, span });
+    }
+
+    /// The traits a struct's `@delegate` forwards, with the field, after
+    /// checking the attribute.
+    fn delegations(
+        &mut self,
+        module: ModuleId,
+        item: &ast::Item,
+        shape: &Shape,
+    ) -> Vec<(String, String, Span)> {
+        let mut out = Vec::new();
+        for a in item.attrs.iter().filter(|a| a.name == "delegate") {
+            let attr_span = self.span(module, a.range);
+            let to = a.args.iter().find(|arg| arg.name.as_ref().is_some_and(|n| n.text == "to"));
+            let field = to.and_then(|arg| match &arg.value.kind {
+                ExprKind::Str(parts) => Some(ast::build::plain_text(parts)),
+                _ => None,
+            });
+            let fields = match &shape.body {
+                Body::Struct(fields) => fields.clone(),
+                Body::Enum(_) => Vec::new(),
+            };
+            let Some(field) = field.filter(|f| fields.contains(f)) else {
+                let span = to.map(|arg| self.span(module, arg.range)).unwrap_or(attr_span);
+                self.report(Diagnostic::new(msg::RESOLVE_DELEGATE_TO, span).with("ty", shape.name.clone()));
+                continue;
+            };
+            for arg in a.args.iter().filter(|arg| arg.name.is_none()) {
+                let span = self.span(module, arg.range);
+                match &arg.value.kind {
+                    ExprKind::Name(n) if DELEGABLE.contains(&n.as_str()) => {
+                        let returns_self = DELEGABLE[..6].contains(&n.as_str());
+                        if returns_self && fields.len() != 1 {
+                            self.report(
+                                Diagnostic::new(msg::RESOLVE_DELEGATE_SELF, span)
+                                    .with("trait", n.clone())
+                                    .with("ty", shape.name.clone())
+                                    .with("field", field.clone()),
+                            );
+                            continue;
+                        }
+                        if !out.iter().any(|(t, _, _): &(String, String, Span)| t == n) {
+                            out.push((n.clone(), field.clone(), span));
+                        }
+                    }
+                    _ => {
+                        let name = self.source_of(span);
+                        self.report(Diagnostic::new(msg::RESOLVE_NOT_DELEGABLE, span).with("name", name));
+                    }
+                }
             }
         }
+        out
     }
 
     /// Each derived impl's fields implement its trait.
     pub fn check_derives(&mut self) {
         let checks = std::mem::take(&mut self.derive_checks);
         for c in checks {
-            let Some(trait_def) = self.prog.lookup(self.prog.prelude, &c.trait_name) else { continue };
+            if c.trait_name == "Copy" {
+                self.check_copy_fields(&c);
+                continue;
+            }
+            let home = self.prog.def(c.ty).module;
+            let Some(trait_def) =
+                self.prog.lookup(home, &c.trait_name).or_else(|| self.prog.lookup(self.prog.prelude, &c.trait_name))
+            else {
+                continue;
+            };
+            // A derive of the language's traits needs the trait of every
+            // field; another trait's derive needs what its code uses, which
+            // checking the derived impl finds.
+            let structural = DERIVABLE.contains(&c.trait_name.as_str()) || c.field.is_some();
+            let generated = |prog: &Program, i: DefId| {
+                let m = &prog.modules[prog.def(i).module.0 as usize].name;
+                m.starts_with("<derive>/") || m.starts_with("<delegate>/")
+            };
             let Some(imp) = self.prog.impls.iter().copied().find(|&i| {
                 self.prog.impl_info(i).is_some_and(|ii| {
-                    ii.derived
+                    generated(&self.prog, i)
                         && ii.trait_ref.def == trait_def
                         && matches!(&ii.self_ty, Ty::Adt(d, _) if *d == c.ty)
                 })
@@ -179,15 +327,38 @@ impl Resolver<'_> {
                     .collect(),
                 _ => Vec::new(),
             };
+            let fields: Vec<(String, Ty)> = match &c.field {
+                Some(f) => fields.into_iter().filter(|(n, _)| n == f).collect(),
+                None => fields,
+            };
             let tr = TraitRef { def: trait_def, args: Vec::new() };
+            // The trait's supertraits, which the type implements itself.
+            let self_ty = info.self_ty.clone();
+            let supers = self.prog.trait_info(trait_def).map(|i| i.supertraits.clone()).unwrap_or_default();
+            for st in supers {
+                if matches!(self.prog.implements(&self_ty, &st, &env), crate::solve::Answer::No) {
+                    let names: Vec<String> = info.generics.iter().map(|g| g.name.clone()).collect();
+                    self.report(
+                        Diagnostic::new(msg::RESOLVE_SUPERTRAIT_MISSING, c.span)
+                            .with("ty", self.prog.display_in(&self_ty, &names))
+                            .with("trait", c.trait_name.clone())
+                            .with("super", self.prog.display_trait(&st)),
+                    );
+                }
+            }
             for (fname, fty) in fields {
-                if fty.contains_error() {
+                if fty.contains_error() || !structural {
                     continue;
                 }
                 if matches!(self.prog.implements(&fty, &tr, &env), crate::solve::Answer::No) {
                     let names: Vec<String> = info.generics.iter().map(|g| g.name.clone()).collect();
+                    let id = if c.field.is_some() {
+                        msg::RESOLVE_DELEGATE_FIELD
+                    } else {
+                        msg::RESOLVE_DERIVE_FIELD
+                    };
                     self.report(
-                        Diagnostic::new(msg::RESOLVE_DERIVE_FIELD, c.span)
+                        Diagnostic::new(id, c.span)
                             .with("ty", self.prog.def(c.ty).name.clone())
                             .with("trait", c.trait_name.clone())
                             .with("field", fname)
@@ -207,6 +378,48 @@ impl Resolver<'_> {
     }
 }
 
+impl Resolver<'_> {
+    /// `@derive(Copy)` only for a type whose fields are all `Copy` (03,
+    /// "Auto traits"); a field of a type parameter's type is, since the
+    /// type is `Copy` only for `Copy` arguments.
+    fn check_copy_fields(&mut self, c: &DeriveCheck) {
+        let fields: Vec<(String, Ty)> = match &self.prog.def(c.ty).kind {
+            DefKind::Struct(s) => s.fields.iter().map(|f| (f.name.clone(), f.ty.clone())).collect(),
+            DefKind::Enum(e) => e
+                .variants
+                .iter()
+                .flat_map(|v| {
+                    v.fields.iter().enumerate().map(move |(i, (n, t))| {
+                        (format!("{}.{}", v.name, n.clone().unwrap_or_else(|| i.to_string())), t.clone())
+                    })
+                })
+                .collect(),
+            _ => return,
+        };
+        let generics: Vec<String> = self.prog.type_generics(c.ty).iter().map(|g| g.name.clone()).collect();
+        // Each parameter stands for a `Copy` type here.
+        let as_copy: Vec<Ty> = (0..generics.len()).map(|_| Ty::Int).collect();
+        for (fname, fty) in fields {
+            if fty.contains_error() || self.prog.is_copy(&fty.subst(&as_copy)) {
+                continue;
+            }
+            self.report(
+                Diagnostic::new(msg::RESOLVE_DERIVE_FIELD, c.span)
+                    .with("ty", self.prog.def(c.ty).name.clone())
+                    .with("trait", "Copy")
+                    .with("field", fname)
+                    .with("fty", self.prog.display_in(&fty, &generics)),
+            );
+            if let DefKind::Struct(s) = &mut self.prog.defs[c.ty.0 as usize].kind {
+                s.copy = false;
+            } else if let DefKind::Enum(e) = &mut self.prog.defs[c.ty.0 as usize].kind {
+                e.copy = false;
+            }
+            return;
+        }
+    }
+}
+
 /// Whether the module has its own `impl Trait for Type`.
 fn has_impl(items: &[ast::Item], trait_name: &str, ty: &str) -> bool {
     items.iter().any(|it| match &it.kind {
@@ -220,6 +433,42 @@ fn has_impl(items: &[ast::Item], trait_name: &str, ty: &str) -> bool {
         }
         _ => false,
     })
+}
+
+/// Whether each generic parameter is named in one of the types.
+fn used_params<'a>(gps: &[ast::GenericParam], tys: impl Iterator<Item = &'a ast::TypeExpr>) -> Vec<bool> {
+    fn walk(t: &ast::TypeExpr, names: &mut Vec<String>) {
+        match &t.kind {
+            ast::TypeKind::Path { segments, args } => {
+                if let Some(s) = segments.first() {
+                    names.push(s.text.clone());
+                }
+                args.iter().for_each(|a| walk(a, names));
+            }
+            ast::TypeKind::Option(i) | ast::TypeKind::Dyn(i) => walk(i, names),
+            ast::TypeKind::Ref { inner, .. } => walk(inner, names),
+            ast::TypeKind::Result { ok, err } => {
+                if let Some(o) = ok {
+                    walk(o, names);
+                }
+                if let Some(e) = err {
+                    walk(e, names);
+                }
+            }
+            ast::TypeKind::Tuple(es) => es.iter().for_each(|(_, e)| walk(e, names)),
+            ast::TypeKind::Fn { params, ret, .. } => {
+                params.iter().for_each(|p| walk(p, names));
+                walk(ret, names);
+            }
+            ast::TypeKind::Union(us) => us.iter().for_each(|u| walk(u, names)),
+            _ => {}
+        }
+    }
+    let mut names = Vec::new();
+    for t in tys {
+        walk(t, &mut names);
+    }
+    gps.iter().map(|g| names.contains(&g.name.text)).collect()
 }
 
 fn generics_text(gps: &[ast::GenericParam], source: &str) -> Vec<(String, Vec<String>)> {
@@ -253,10 +502,13 @@ fn header(shape: &Shape, trait_name: &str) -> (String, String) {
         let ps: Vec<String> = shape
             .generics
             .iter()
-            .map(|(n, bounds)| {
+            .enumerate()
+            .map(|(i, (n, bounds))| {
                 let mut all = bounds.clone();
-                all.push(trait_name.to_string());
-                format!("{n}: {}", all.join(" + "))
+                if shape.used.get(i).copied().unwrap_or(true) {
+                    all.push(trait_name.to_string());
+                }
+                if all.is_empty() { n.clone() } else { format!("{n}: {}", all.join(" + ")) }
             })
             .collect();
         format!("[{}]", ps.join(", "))
@@ -506,4 +758,65 @@ fn enum_ordering(out: &mut String, variants: &[(String, Vec<Option<String>>)], m
             out.push_str(&format!("{}return {equal}\n", ind(6)));
         }
     }
+}
+
+/// The source of one delegated impl: the trait's method on the field, the
+/// result wrapped back into the type when the trait returns `Self`.
+fn delegate_text(shape: &Shape, trait_name: &str, field: &str) -> String {
+    let (head, ty) = header(shape, trait_name);
+    let name = &shape.name;
+    let v = field;
+    let op = |sym: &str, method: &str| {
+        format!(
+            "    pure def {method}(self, other: {ty}) -> {ty}:\n        return {name}({v}=self.{v} {sym} other.{v})\n"
+        )
+    };
+    let body = match trait_name {
+        "Add" => op("+", "add"),
+        "Sub" => op("-", "sub"),
+        "Mul" => op("*", "mul"),
+        "Div" => op("/", "div"),
+        "Rem" => op("%", "rem"),
+        "Neg" => format!("    pure def neg(self) -> {ty}:\n        return {name}({v}=-self.{v})\n"),
+        "Eq" => {
+            format!("    pure def eq(self, other: {ty}) -> bool:\n        return self.{v} == other.{v}\n")
+        }
+        "PartialOrd" => format!(
+            "    pure def partial_cmp(self, other: {ty}) -> Ordering?:\n        return self.{v}.partial_cmp(other.{v})\n"
+        ),
+        "Ord" => format!(
+            "    pure def cmp(self, other: {ty}) -> Ordering:\n        return self.{v}.cmp(other.{v})\n"
+        ),
+        "Hash" => format!("    pure def hash(self, mut h: Hasher):\n        self.{v}.hash(mut h)\n"),
+        "Display" => format!("    pure def fmt(self, mut f: Formatter):\n        self.{v}.fmt(mut f)\n"),
+        "Debug" => {
+            format!("    pure def fmt_debug(self, mut f: Formatter):\n        self.{v}.fmt_debug(mut f)\n")
+        }
+        _ => format!("    pure def len(self) -> int:\n        return len(self.{v})\n"),
+    };
+    format!("\n{head}{body}")
+}
+
+/// `impl Type: pure def __invariant(self) -> bool`, the conjunction of the
+/// type's `invariant` lines.
+fn invariant_text(shape: &Shape, invariants: &[ast::Expr], source: &str) -> String {
+    let (ty, params) = if shape.generics.is_empty() {
+        (shape.name.clone(), String::new())
+    } else {
+        let names: Vec<String> = shape.generics.iter().map(|(n, _)| n.clone()).collect();
+        let ps: Vec<String> = shape
+            .generics
+            .iter()
+            .map(|(n, b)| if b.is_empty() { n.clone() } else { format!("{n}: {}", b.join(" + ")) })
+            .collect();
+        (format!("{}[{}]", shape.name, names.join(", ")), format!("[{}]", ps.join(", ")))
+    };
+    let parts: Vec<String> = invariants
+        .iter()
+        .map(|e| format!("({})", source.get(e.range.start as usize..e.range.end as usize).unwrap_or("True")))
+        .collect();
+    format!(
+        "\nimpl{params} {ty}:\n    pure def __invariant(self) -> bool:\n        return {}\n",
+        parts.join(" and ")
+    )
 }

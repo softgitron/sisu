@@ -1,0 +1,13 @@
+# A call's type arguments must implement the bounds of its parameters.
+
+trait Shape:
+    def area(self) -> f64
+
+def total[S: Shape](xs: list[S]) -> f64:
+    var t = 0.0
+    for x in xs:
+        t += x.area()
+    return t
+
+def main():
+    print(total([1, 2]))

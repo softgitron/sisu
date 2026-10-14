@@ -28,13 +28,20 @@ pub use thir::*;
 /// parameter whose type is a generic parameter, or an associated type of
 /// one, is always a `ref`: whether its type argument is `Copy` is not known
 /// in the body, and every caller passes it the same way.
-pub fn param_local_ty(prog: &Program, ty: &Ty, mode: sisu_syntax::ast::Mode) -> Ty {
+pub fn param_local_ty(
+    prog: &Program,
+    ty: &Ty,
+    mode: sisu_syntax::ast::Mode,
+    env: &[sisu_resolve::Predicate],
+) -> Ty {
     use sisu_syntax::ast::Mode;
     match mode {
         Mode::Own => ty.clone(),
         Mode::Mut => Ty::Ref(Box::new(ty.clone()), true),
         Mode::Borrow => {
-            if !is_opaque(ty) && prog.is_copy(ty) {
+            // A generic parameter bounded by `Copy` is passed by value, as
+            // every type it stands for is.
+            if (!is_opaque(ty) && prog.is_copy(ty)) || (is_opaque(ty) && prog.is_copy_in(ty, env)) {
                 ty.clone()
             } else {
                 Ty::Ref(Box::new(ty.clone()), false)
@@ -92,13 +99,13 @@ fn check_fn(
     let mut params = Vec::new();
     if let Some(mode) = f.self_mode {
         let owner = f.owner.clone().unwrap_or(Ty::Error);
-        let ty = param_local_ty(prog, &owner, mode);
+        let ty = param_local_ty(prog, &owner, mode, &c.env);
         let l = c.new_local("self", ty, false, def_span);
         c.declare("self", l, false, def_span.range);
         params.push(l);
     }
     for p in &f.params {
-        let ty = param_local_ty(prog, &p.ty, p.mode);
+        let ty = param_local_ty(prog, &p.ty, p.mode, &c.env);
         if f.pure
             && let Ty::Adt(d, _) = &p.ty
             && matches!(prog.builtin(*d), Some("Fs" | "Env" | "Clock" | "System"))
@@ -131,6 +138,7 @@ fn check_fn(
             x.unwrap_or(Closure {
                 params: Vec::new(),
                 captures: Vec::new(),
+                own: false,
                 ret: Ty::Error,
                 body: Block::empty(def_span),
                 span: def_span,
@@ -160,6 +168,22 @@ fn check_fn(
 /// syntax"; a generic body is checked against its own bounds only).
 fn check_bounds(c: &mut Checker) {
     let prog = c.prog;
+    for (ty, owner, span) in std::mem::take(&mut c.owner_checks) {
+        let t = prog.normalize(&c.infer.zonk(&ty), &c.env);
+        if c.infer.has_vars(&t) || t.contains_error() {
+            continue;
+        }
+        if prog.can_borrow(&t) {
+            let d =
+                Diagnostic::new(msg::BORROW_VIEW_IN_OWNER, span).with("ty", c.show(&t)).with("owner", owner);
+            c.report(d);
+        } else if must_consume_ty(prog, &t, 0) {
+            let d = Diagnostic::new(msg::BORROW_MUST_CONSUME_IN_OWNER, span)
+                .with("ty", c.show(&t))
+                .with("owner", owner);
+            c.report(d);
+        }
+    }
     let mut seen: Vec<(Ty, sisu_resolve::TraitRef)> = Vec::new();
     for (ty, bound, span) in std::mem::take(&mut c.bounds) {
         let t = prog.normalize(&c.infer.zonk(&ty), &c.env);
@@ -180,6 +204,20 @@ fn check_bounds(c: &mut Checker) {
                 .with("bound", prog.display_trait_in(&b, &c.generic_names));
             let d = c.missing_impl_fix(d, &t, &b);
             c.report(d);
+        } else if Some(b.def) == prog.wk.hash && !t.has_params() {
+            // The host's `dict` and `set` hash and compare keys
+            // structurally: a key type with impls of its own would be found
+            // by the wrong rule (port debt; reject when unsure).
+            let own_impl =
+                [prog.wk.hash, prog.wk.eq].into_iter().flatten().find(|tr| !prog.is_structural(&t, *tr));
+            if let Some(tr) = own_impl {
+                seen.push((t.clone(), b.clone()));
+                let d = Diagnostic::new(msg::TYPE_STRUCTURAL_ONLY, span)
+                    .with("callee", "a `dict` or `set` key")
+                    .with("trait", prog.def(tr).name.clone())
+                    .with("ty", c.show(&t));
+                c.report(d);
+            }
         }
     }
 }
@@ -338,3 +376,22 @@ pub fn check(prog: &Program, sources: &SourceMap) -> (Typed, Vec<Diagnostic>) {
 
 #[cfg(test)]
 mod tests;
+
+/// `@must_consume` (D-054), through containers, options and tuples (D-064).
+fn must_consume_ty(prog: &Program, t: &Ty, depth: u32) -> bool {
+    if depth > 16 {
+        return false;
+    }
+    match t {
+        Ty::Tuple(es, _) => es.iter().any(|e| must_consume_ty(prog, e, depth + 1)),
+        Ty::Adt(d, args) => {
+            let flag = match &prog.def(*d).kind {
+                sisu_resolve::DefKind::Struct(s) => s.must_consume,
+                sisu_resolve::DefKind::Enum(e) | sisu_resolve::DefKind::ErrorSet(e) => e.must_consume,
+                _ => false,
+            };
+            flag || args.iter().any(|a| must_consume_ty(prog, a, depth + 1))
+        }
+        _ => false,
+    }
+}

@@ -1,0 +1,39 @@
+# `Drop` for a generic type: the impl covers every instance, and its
+# drop glue gets the type arguments, so a `Drop` can call through a bound
+# the type declares (`T: Display` here) for whatever `T` is.
+
+struct Loud:
+    name: String
+
+impl Drop for Loud:
+    def drop(mut self):
+        print("drop {self.name}")
+
+struct Celsius:
+    degrees: f64
+
+impl Display for Celsius:
+    def fmt(self, mut f: Formatter):
+        f.write("{self.degrees} °C")
+
+struct Labelled[T: Display]:
+    label: T
+    inner: Loud
+
+impl[T: Display] Drop for Labelled[T]:
+    def drop(mut self):
+        print("dropping the one labelled {self.label}")
+
+struct Wrapper[T]:
+    value: T
+
+impl[T] Drop for Wrapper[T]:
+    def drop(mut self):
+        print("unwrapping")
+
+def main():
+    let a = Labelled(label=42, inner=Loud(name="inner"))
+    let b = Wrapper(value=Loud(name="wrapped"))
+    let c = Wrapper(value=[Loud(name="x"), Loud(name="y")])
+    let d = Labelled(label=Celsius(degrees=21.5), inner=Loud(name="second"))
+    print("end of main")

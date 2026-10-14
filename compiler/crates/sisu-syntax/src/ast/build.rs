@@ -539,6 +539,7 @@ impl B<'_> {
     fn struct_def(&self, n: NodeId) -> StructDef {
         let mut fields = Vec::new();
         let mut methods = Vec::new();
+        let mut invariants = Vec::new();
         let mut unsupported = Vec::new();
         if let Some(b) = self.child(n, BLOCK) {
             for c in self.nodes(b) {
@@ -573,7 +574,14 @@ impl B<'_> {
                     }
                     FN_DEF => methods.push(self.fn_def(c)),
                     PASS_STMT | ATTRIBUTE => {}
-                    CONTRACT_STMT => unsupported.push((self.range(c), "an `invariant`")),
+                    CONTRACT_STMT => {
+                        let keyword = self.tokens(c).first().map(|&t| self.text(t).to_string());
+                        if keyword.as_deref() == Some("invariant") {
+                            invariants.push(self.first_expr(c));
+                        } else {
+                            unsupported.push((self.range(c), "a contract"));
+                        }
+                    }
                     // The parser reported any other line already.
                     _ => {}
                 }
@@ -585,6 +593,7 @@ impl B<'_> {
             is_view: self.has(n, VIEW_KW),
             fields,
             methods,
+            invariants,
             unsupported,
         }
     }
@@ -807,8 +816,8 @@ impl B<'_> {
             }
             EXPR_STMT => StmtKind::Expr(self.first_expr(n)),
             RETURN_STMT => {
-                if self.child(n, IMPL_DEF).is_some() {
-                    StmtKind::Unsupported("`return impl`")
+                if let Some(i) = self.child(n, IMPL_DEF) {
+                    StmtKind::ReturnImpl(Box::new(self.impl_def(i)))
                 } else {
                     StmtKind::Return(
                         self.nodes(n)
@@ -919,7 +928,10 @@ impl B<'_> {
             SELECT_STMT => StmtKind::Unsupported("`select`"),
             YIELD_STMT => StmtKind::Unsupported("`yield`"),
             CONTRACT_STMT => StmtKind::Unsupported("contracts (`requires`, `ensures`, `invariant`)"),
-            COMPTIME_STMT => StmtKind::Unsupported("`comptime`"),
+            COMPTIME_STMT => match self.nodes(n).into_iter().next() {
+                Some(c) => StmtKind::Comptime(Box::new(self.stmt(c))),
+                None => StmtKind::Error,
+            },
             k if is_item_node(k) => StmtKind::Item(Box::new(self.item(n))),
             _ => StmtKind::Error,
         };
@@ -1097,7 +1109,7 @@ impl B<'_> {
                     Some(NOT_KW) => ExprKind::Unary { op: UnOp::Not, expr: inner },
                     Some(REF_KW) => ExprKind::Ref { mutable: self.has(n, MUT_KW), expr: inner },
                     Some(CARET) => ExprKind::FromEnd(inner),
-                    Some(COMPTIME_KW) => ExprKind::Unsupported("`comptime`"),
+                    Some(COMPTIME_KW) => ExprKind::Comptime(inner),
                     Some(UNSAFE_KW) => ExprKind::Unsupported("`unsafe`"),
                     _ => ExprKind::Error,
                 }
@@ -1110,7 +1122,10 @@ impl B<'_> {
             }
             FIELD_EXPR => {
                 if self.has(n, L_BRACKET) {
-                    ExprKind::Unsupported("a field named by a compile-time value (`x.[f]`)")
+                    let mut es = self.exprs(n).into_iter();
+                    let base = es.next().unwrap_or(self.error_expr(n));
+                    let field = es.next().unwrap_or(self.error_expr(n));
+                    ExprKind::FieldOf { base: Box::new(base), field: Box::new(field) }
                 } else {
                     let base = self.first_expr(n);
                     let name = self
@@ -1189,16 +1204,7 @@ impl B<'_> {
             }
             MATCH_EXPR => {
                 let scrutinee = self.first_expr(n);
-                let arms = self
-                    .child(n, MATCH_ARM_LIST)
-                    .map(|l| {
-                        self.nodes(l)
-                            .into_iter()
-                            .filter(|&a| self.kind(a) == MATCH_ARM)
-                            .map(|a| self.arm(a))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let arms = self.child(n, MATCH_ARM_LIST).map(|l| self.arms(l)).unwrap_or_default();
                 ExprKind::Match { scrutinee: Box::new(scrutinee), arms }
             }
             _ => ExprKind::Error,
@@ -1325,6 +1331,51 @@ impl B<'_> {
         }
     }
 
+    /// The arms of a `MATCH_ARM_LIST`, with those made at compile time.
+    fn arms(&self, l: NodeId) -> Vec<Arm> {
+        self.nodes(l)
+            .into_iter()
+            .filter_map(|a| match self.kind(a) {
+                MATCH_ARM => Some(self.arm(a)),
+                COMPTIME_STMT => self.arm_gen(a),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// `comptime for p in e:` or `comptime if e:` with arms (08).
+    fn arm_gen(&self, n: NodeId) -> Option<Arm> {
+        let inner = self.nodes(n).into_iter().next()?;
+        let arms_in = |c: NodeId| self.child(c, MATCH_ARM_LIST).map(|l| self.arms(l)).unwrap_or_default();
+        let made = match self.kind(inner) {
+            FOR_STMT => ArmGen::For {
+                pat: self
+                    .nodes(inner)
+                    .into_iter()
+                    .find(|&c| is_pattern_node(self.kind(c)))
+                    .map(|c| self.pattern(c))
+                    .unwrap_or(Pattern { node: inner, range: self.range(inner), kind: PatKind::Error }),
+                iter: self.first_expr(inner),
+                arms: arms_in(inner),
+            },
+            IF_STMT => ArmGen::If {
+                cond: self.child(inner, COND).map(|c| self.first_expr(c)).unwrap_or(self.error_expr(inner)),
+                then: arms_in(inner),
+                else_: self.child(inner, ELSE_CLAUSE).map(arms_in).unwrap_or_default(),
+            },
+            _ => return None,
+        };
+        let range = self.range(n);
+        Some(Arm {
+            node: n,
+            range,
+            pat: Pattern { node: n, range, kind: PatKind::Wildcard },
+            guard: None,
+            body: ArmBody::Block(Block { node: n, range, stmts: Vec::new() }),
+            generated: Some(Box::new(made)),
+        })
+    }
+
     fn arm(&self, n: NodeId) -> Arm {
         let pat = self
             .nodes(n)
@@ -1344,6 +1395,7 @@ impl B<'_> {
             pat: pat.unwrap_or(Pattern { node: n, range: self.range(n), kind: PatKind::Error }),
             guard,
             body,
+            generated: None,
         }
     }
 

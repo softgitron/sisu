@@ -1,0 +1,26 @@
+# A `Drop` that panics still has its value's fields dropped, in reverse
+# declaration order, while the panic unwinds (04, rule 6): the drop glue
+# of a type is a SIR function whose cleanup blocks drop what is left.
+# Then the locals declared before it are dropped, and the panic reaches
+# `main`.
+
+struct Loud:
+    name: String
+
+impl Drop for Loud:
+    def drop(mut self):
+        print("drop {self.name}")
+
+struct Bomb:
+    a: Loud
+    b: Loud
+
+impl Drop for Bomb:
+    def drop(mut self):
+        print("bomb goes off")
+        panic("boom")
+
+def main():
+    let first = Loud(name="first")
+    let x = Bomb(a=Loud(name="a"), b=Loud(name="b"))
+    print("end of main")

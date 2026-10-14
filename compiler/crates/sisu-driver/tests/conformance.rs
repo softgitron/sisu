@@ -30,6 +30,24 @@ fn example_copies_match_the_proposal() {
     }
 }
 
+/// The examples that have no `main` of their own run as the proposal's
+/// text followed by one: each case must start with the whole original.
+#[test]
+fn examples_with_a_main_start_with_the_proposal() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for name in ["traits.sisu", "errors.sisu"] {
+        let original =
+            std::fs::read_to_string(root.join("../proposal/examples").join(name)).unwrap_or_default();
+        let case =
+            std::fs::read_to_string(root.join("conformance/cases/examples").join(name)).unwrap_or_default();
+        assert!(!original.is_empty(), "missing proposal/examples/{name}");
+        assert!(
+            case.starts_with(&original),
+            "conformance/cases/examples/{name} no longer starts with proposal/examples/{name}"
+        );
+    }
+}
+
 /// The part of proposal/examples/ownership.sisu that stage 0 can run
 /// (everything before `Shared`, which needs `Mutex`, `Arena` and tasks) is
 /// the conformance case `ownership/proposal_core.sisu`, kept identical.
@@ -43,4 +61,22 @@ fn ownership_core_matches_the_proposal() {
     let case = std::fs::read_to_string(root.join("conformance/cases/ownership/proposal_core.sisu"))
         .unwrap_or_default();
     assert!(case.starts_with(core), "ownership/proposal_core.sisu no longer starts with the proposal's text");
+}
+
+/// The graph section of proposal/examples/ownership.sisu (`Arena` and
+/// `Key`) is the case `ownership/proposal_graph.sisu`, kept identical.
+#[test]
+fn ownership_graph_matches_the_proposal() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let original =
+        std::fs::read_to_string(root.join("../proposal/examples/ownership.sisu")).unwrap_or_default();
+    let start = original.find("# Graphs: an arena with generational handles, not pointers.");
+    assert!(start.is_some(), "proposal/examples/ownership.sisu has no graph section");
+    let graph = original[start.unwrap_or(0)..].trim_end();
+    let case = std::fs::read_to_string(root.join("conformance/cases/ownership/proposal_graph.sisu"))
+        .unwrap_or_default();
+    assert!(
+        case.contains(graph),
+        "ownership/proposal_graph.sisu no longer holds the proposal's graph section"
+    );
 }

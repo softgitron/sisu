@@ -1,0 +1,3 @@
+panic: overdrawn by 2
+  at withdraw (mutex_unpoisoned.sisu:21:9)
+  at main (mutex_unpoisoned.sisu:26:5)

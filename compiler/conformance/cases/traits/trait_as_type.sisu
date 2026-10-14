@@ -1,0 +1,10 @@
+# A trait is not a type; a value of some type that implements it is `dyn`.
+
+trait Shape:
+    def area(self) -> f64
+
+def total(s: Box[Shape]) -> f64:
+    return 0.0
+
+def main():
+    pass

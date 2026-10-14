@@ -12,10 +12,14 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::rc::Rc;
 
-/// A place reached from a frame's local.
+/// The `frame` of a pointer into the heap: its `local` is a cell of
+/// `Interp::heap` (the value a `Shared` owns), its `serial` the cell's.
+pub const HEAP: u32 = u32::MAX;
+
+/// A place reached from a frame's local, or from a heap cell.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Pointer {
-    /// Index into the frame stack.
+    /// Index into the frame stack, or [`HEAP`].
     pub frame: u32,
     /// The frame's serial number, unique for the run.
     pub serial: u64,
@@ -50,6 +54,39 @@ pub enum Step {
     SetItem(usize),
     /// The value a `dyn` holds.
     DynValue,
+    /// The value a `Mutex` protects.
+    MutexValue,
+    /// The value in an `Arena` slot.
+    Slot(usize),
+}
+
+/// A `Mutex`: the value, and whether a guard holds it or left it poisoned.
+#[derive(Clone, Debug)]
+pub struct MutexVal {
+    pub value: Value,
+    pub locked: bool,
+    pub poisoned: bool,
+}
+
+/// An `Arena`: slots, each with its generation and its value (`Moved`
+/// when the slot is free), and the free slots to reuse.
+#[derive(Clone, Debug, Default)]
+pub struct ArenaVal {
+    pub slots: Vec<(i64, Value)>,
+    pub free: Vec<usize>,
+}
+
+/// A cell of the heap: the value a `Shared` owns, with its owners and weak
+/// handles. The value is dropped when `strong` reaches zero; `serial`
+/// names the cell for pointers and the monitor.
+#[derive(Clone, Debug)]
+pub struct HeapCell {
+    pub value: Value,
+    pub strong: u32,
+    pub weak: u32,
+    pub serial: u64,
+    /// Counted atomically: never in stage 0, which has one task.
+    pub atomic: bool,
 }
 
 /// A struct or enum value; `variant` is 0 for a struct. `trace` is the
@@ -193,22 +230,6 @@ pub enum IterState {
         text: Rc<str>,
         pos: usize,
     },
-    Take {
-        inner: Box<IterState>,
-        left: i64,
-    },
-    Skip {
-        inner: Box<IterState>,
-        n: i64,
-    },
-    Map {
-        inner: Box<IterState>,
-        f: Value,
-    },
-    Filter {
-        inner: Box<IterState>,
-        f: Value,
-    },
     Enumerate {
         inner: Box<IterState>,
         n: i64,
@@ -273,6 +294,18 @@ pub enum Value {
     Fn(Rc<str>),
     Closure(Rc<ClosureVal>),
     Dyn(Box<DynVal>),
+    /// An owner of a heap cell (`Shared[T]`).
+    Shared(u32),
+    /// A handle on a heap cell that does not own it (`Weak[T]`).
+    Weak(u32),
+    /// `Cell[T]`.
+    Cell(Box<Value>),
+    /// `Mutex[T]`.
+    Mutex(Box<MutexVal>),
+    /// `MutexGuard[T]`: the lock on the mutex the pointer leads to.
+    Guard(Box<Pointer>),
+    /// `Arena[T]`.
+    Arena(Box<ArenaVal>),
     Iter(Box<IterState>),
     Entry(Box<EntryVal>),
     Fs(Rc<FsCap>),

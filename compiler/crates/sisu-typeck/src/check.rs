@@ -40,6 +40,9 @@ pub(crate) struct Checker<'p> {
     pub env: Vec<Predicate>,
     /// The names of the function's generic parameters, for diagnostics.
     pub generic_names: Vec<String>,
+    /// Values put in a `Shared`, `Cell` or `Mutex`, with the owner's name:
+    /// none may be a view or must-consume (checked once types are known).
+    pub owner_checks: Vec<(Ty, &'static str, Span)>,
     /// The function's header or body did not parse: a name the body cannot
     /// find is most likely a parameter or binding lost in that error, so it
     /// is not reported.
@@ -72,6 +75,7 @@ impl<'p> Checker<'p> {
             bounds: Vec::new(),
             env: Vec::new(),
             generic_names: Vec::new(),
+            owner_checks: Vec::new(),
             quiet_unknown_names: prog.fn_info(def).is_some_and(|f| f.header_broken || f.body_broken),
         }
     }
@@ -259,6 +263,14 @@ impl<'p> Checker<'p> {
                     },
                     _ => {
                         let found = self.lookup_type_path(&names);
+                        // Inside a trait, its associated types are named bare.
+                        if found.is_none()
+                            && let [n] = names.as_slice()
+                            && self.self_ty == Some(Ty::Param(0))
+                            && let Some(t) = self.assoc_of(&Ty::Param(0), n)
+                        {
+                            return prog.normalize(&t, &self.env);
+                        }
                         match found {
                             Some(d) => self.def_type(d, args, te.range),
                             None => {
@@ -459,7 +471,7 @@ impl<'p> Checker<'p> {
 
     pub fn is_copy(&self, ty: &Ty) -> bool {
         let t = self.infer.zonk(ty);
-        self.prog.is_copy(&t)
+        self.prog.is_copy_in(&t, &self.env)
     }
 
     pub fn option_of(&self, t: Ty) -> Ty {
@@ -638,6 +650,18 @@ impl<'p> Checker<'p> {
                 self.unsupported(item.range, what, "closures with captures by move (Phase 3)");
                 out.push(Stmt::Error(span));
             }
+            ast::StmtKind::Comptime(_) => {
+                self.unsupported(s.range, "`comptime`", "compile-time evaluation (Phase 4)");
+                out.push(Stmt::Error(span));
+            }
+            ast::StmtKind::ReturnImpl(_) => {
+                self.unsupported(
+                    s.range,
+                    "`return impl` outside a trait's `comptime def derive`",
+                    "reflection beyond derive (Phase 8)",
+                );
+                out.push(Stmt::Error(span));
+            }
             ast::StmtKind::Unsupported(what) => {
                 let phase = match *what {
                     "`yield`" => "generators (Phase 8)",
@@ -677,7 +701,15 @@ impl<'p> Checker<'p> {
         out: &mut Vec<Stmt>,
     ) {
         let span = self.span(range);
-        let declared = ty.map(|t| self.resolve_ty(t));
+        let declared = ty.map(|t| {
+            let d = self.resolve_ty(t);
+            // A `dyn Trait` lives behind `ref` or in a `Box`.
+            if let Some(u) = sisu_resolve::unsized_part(self.prog, &d) {
+                let e = self.error(msg::TYPE_UNSIZED_DYN, t.range).with("ty", self.show(&u));
+                self.report(e);
+            }
+            d
+        });
         let Some(init) = init else {
             // `let x: T`: declared now, assigned later.
             let ty = match declared {
@@ -894,7 +926,7 @@ impl<'p> Checker<'p> {
 
     /// `assign` distinguishes `x = v` (E0312) from a `mut` borrow (E0341).
     pub fn require_mutable_as(&mut self, e: &Expr, range: TextRange, assign: bool) {
-        if let Some(root) = mutable_root_problem(e, &self.locals, &self.infer) {
+        if let Some(root) = mutable_root_problem(e, &self.locals, &self.infer, self.prog) {
             match root {
                 Problem::Immutable(l) => {
                     let name = self.locals[l.0 as usize].name.clone();
@@ -1120,7 +1152,12 @@ pub(crate) enum Problem {
 }
 
 /// Why a place cannot be written, if it cannot.
-pub(crate) fn mutable_root_problem(e: &Expr, locals: &[Local], infer: &InferTable) -> Option<Problem> {
+pub(crate) fn mutable_root_problem(
+    e: &Expr,
+    locals: &[Local],
+    infer: &InferTable,
+    prog: &sisu_resolve::Program,
+) -> Option<Problem> {
     match &e.kind {
         ExprKind::Local(l) => {
             let local = locals.get(l.0 as usize)?;
@@ -1131,11 +1168,14 @@ pub(crate) fn mutable_root_problem(e: &Expr, locals: &[Local], infer: &InferTabl
             }
         }
         ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => {
-            mutable_root_problem(base, locals, infer)
+            mutable_root_problem(base, locals, infer, prog)
         }
         ExprKind::Deref(inner) => match infer.resolve(&inner.ty) {
             Ty::Ref(_, true) => None,
             Ty::Ref(_, false) => Some(Problem::BehindSharedRef),
+            // A `Shared` value is changed only through a `Cell` or a
+            // `Mutex` in it; a mutex guard's value is the guard's to change.
+            Ty::Adt(d, _) if prog.builtin(d) == Some("Shared") => Some(Problem::BehindSharedRef),
             _ => None,
         },
         _ => None,

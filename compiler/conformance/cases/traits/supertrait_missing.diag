@@ -1,0 +1,1 @@
+13:1-13:23 E0242 resolve.supertrait-missing ty="Robot" trait="Greeter" super="Named"

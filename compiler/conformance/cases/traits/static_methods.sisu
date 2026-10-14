@@ -1,0 +1,56 @@
+# Methods without `self` in a trait, called on a type, on a type parameter
+# and through the trait (`Trait.method`), which also picks between two
+# traits that name the same method (E0394's fix).
+
+trait Zero:
+    def zero() -> Self
+    def is_zero(self) -> bool
+
+impl Zero for int:
+    def zero() -> int:
+        return 0
+    def is_zero(self) -> bool:
+        return self == 0
+
+struct P:
+    x: int
+
+impl Zero for P:
+    def zero() -> P:
+        return P(x=0)
+    def is_zero(self) -> bool:
+        return self.x == 0
+
+trait Named:
+    def name(self) -> String
+
+trait Titled:
+    def name(self) -> String
+
+impl Named for P:
+    def name(self) -> String:
+        return "named"
+
+impl Titled for P:
+    def name(self) -> String:
+        return "titled"
+
+def zeros[T: Zero](n: int) -> list[T]:
+    var out: list[T] = []
+    for _ in range(n):
+        out.push(T.zero())
+    return out
+
+def main():
+    let z: int = Zero.zero()
+    print(z)
+    print(int.zero())
+    print(P.zero().x)
+    print(len(zeros[P](3)))
+    let zs: list[int] = zeros(2)
+    print(zs)
+    print(Zero.is_zero(5))
+    print(Zero.is_zero(P(x=0)))
+    let p = P(x=1)
+    print(Named.name(p))
+    print(Titled.name(p))

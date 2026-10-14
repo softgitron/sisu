@@ -9,7 +9,7 @@ intrinsic fmt.new pure
 intrinsic fmt.text pure
 intrinsic print
 
-fn consume(1) source 0 @8:5-8:12 {
+fn consume(1) source 0 own 0 @8:5-8:12 {
     let _0: ()
     let _1: Res "r" @8:13-8:23
   bb0:
@@ -105,5 +105,17 @@ fn Res.Drop.drop(1) drop source 0 @5:9-5:13 {
   bb5:
     dead _3 @6:32-6:32
     _0 = const ()
+    return
+}
+
+fn Res#drop(1) glue source 0 own 0 {
+    let _0: ()
+    let _1: Res "self"
+    let _2: ref mut Res
+  bb0:
+    _2 = ref mut _1
+    _0 = call fn Res.Drop.drop(move _2)
+    goto bb1
+  bb1:
     return
 }

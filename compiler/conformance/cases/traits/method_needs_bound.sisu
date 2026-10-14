@@ -1,0 +1,11 @@
+# A generic body is checked against its bounds alone: `T` has no `area`
+# until the signature says `T: Shape`.
+
+trait Shape:
+    def area(self) -> f64
+
+def area_of[T](x: T) -> f64:
+    return x.area()
+
+def main():
+    pass

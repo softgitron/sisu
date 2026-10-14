@@ -1,0 +1,12 @@
+# An impl of a `pure` trait method is pure, written so or not.
+
+struct Loud:
+    x: int
+
+impl Display for Loud:
+    def fmt(self, mut f: Formatter):
+        print("formatting")
+        f.write("loud")
+
+def main():
+    print(Loud(x=1))

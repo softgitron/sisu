@@ -1,0 +1,2 @@
+10:16-10:35 E0423 type.own-closure-capture name="name" ty="String"
+12:13-13:19 E0424 type.own-closure-changes name="total"

@@ -1,0 +1,13 @@
+# A bound names a trait.
+
+struct Point:
+    x: int
+
+def show[T: Point](x: T):
+    pass
+
+impl Point for int:
+    pass
+
+def main():
+    pass

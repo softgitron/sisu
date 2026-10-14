@@ -1,0 +1,10 @@
+# Nothing changes a value through a `Shared`: changes go through a `Cell` or
+# a `Mutex` in it.
+
+struct Config:
+    retries: int
+
+def main():
+    let cfg = Shared(Config(retries=3))
+    cfg.retries = 4
+    print(cfg.retries)

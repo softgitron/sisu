@@ -1,0 +1,10 @@
+3
+retries=3
+3
+Config(verbose=False, retries=3)
+True
+2
+leaving the block
+drop one
+False
+end

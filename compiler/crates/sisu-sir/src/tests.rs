@@ -58,10 +58,38 @@ fn sample() -> Program {
             },
         ],
         intrinsics: vec![
-            IntrinsicDecl { name: "print".into(), pure: false, from: vec![], inner: vec![], own: vec![] },
-            IntrinsicDecl { name: "Iter.next".into(), pure: true, from: vec![], inner: vec![0], own: vec![] },
-            IntrinsicDecl { name: "zip".into(), pure: true, from: vec![0, 1], inner: vec![], own: vec![] },
-            IntrinsicDecl { name: "list.push".into(), pure: true, from: vec![], inner: vec![], own: vec![1] },
+            IntrinsicDecl {
+                name: "print".into(),
+                pure: false,
+                from: vec![],
+                inner: vec![],
+                own: vec![],
+                keeps: vec![],
+            },
+            IntrinsicDecl {
+                name: "Iter.next".into(),
+                pure: true,
+                from: vec![],
+                inner: vec![0],
+                own: vec![],
+                keeps: vec![0],
+            },
+            IntrinsicDecl {
+                name: "zip".into(),
+                pure: true,
+                from: vec![0, 1],
+                inner: vec![],
+                own: vec![],
+                keeps: vec![],
+            },
+            IntrinsicDecl {
+                name: "list.push".into(),
+                pure: true,
+                from: vec![],
+                inner: vec![],
+                own: vec![1],
+                keeps: vec![0, 1],
+            },
         ],
         functions: vec![
             Function {
@@ -72,6 +100,7 @@ fn sample() -> Program {
                 pure: true,
                 from: vec![],
                 inner: vec![],
+                own: vec![],
                 loc: None,
                 locals: vec![LocalDecl::new(Type::Float, None)],
                 blocks: vec![BasicBlock {
@@ -97,6 +126,7 @@ fn sample() -> Program {
                 pure: false,
                 from: vec![],
                 inner: vec![],
+                own: vec![0],
                 loc: None,
                 locals: vec![
                     LocalDecl::new(Type::Unit, None),
@@ -159,6 +189,7 @@ fn sample() -> Program {
                 pure: false,
                 from: vec![],
                 inner: vec![],
+                own: vec![],
                 loc: Some(Loc { line: 1, col: 5, end_line: 1, end_col: 9 }),
                 locals: vec![
                     LocalDecl::new(Type::Unit, None),
@@ -267,6 +298,7 @@ fn sample() -> Program {
             from: vec![],
             inner: vec![],
             own: vec![],
+            keeps: vec![],
         }],
         impls: vec![
             ImplDecl {
@@ -275,6 +307,7 @@ fn sample() -> Program {
                 trait_args: vec![],
                 self_ty: Type::Int,
                 methods: vec![("fmt".into(), ImplTarget::Intrinsic("structural.display".into()))],
+                assoc: vec![],
             },
             ImplDecl {
                 params: 1,
@@ -282,6 +315,7 @@ fn sample() -> Program {
                 trait_args: vec![Type::Param(0)],
                 self_ty: Type::Named("Stack".into(), vec![Type::Param(0)]),
                 methods: vec![("add".into(), ImplTarget::Fn("show".into()))],
+                assoc: vec![("Output".into(), Type::Param(0))],
             },
         ],
     }
@@ -304,9 +338,9 @@ fn text_form_is_readable() {
     assert!(text.contains("struct Point { x: f64 = Point#x, tags: list[str] }"));
     assert!(text.contains("view struct Token must_consume { text: str }"));
     assert!(text.contains("error E open must_consume { A, B(at: int, char) }"));
-    assert!(
-        text.contains("\nintrinsic print\nintrinsic Iter.next pure inner 0\nintrinsic zip pure from 0 1\n")
-    );
+    assert!(text.contains(
+        "\nintrinsic print\nintrinsic Iter.next pure inner 0 keeps 0\nintrinsic zip pure from 0 1\n"
+    ));
     assert!(text.contains("fn Point#x(0) value pure source 0 {"));
     assert!(text.contains("    let _1: str \"s \\\"q\\\"\" once @2:9-2:10\n"));
     assert!(text.contains("    let _3: pure fn(int) -> (bool,)\n"));
@@ -320,8 +354,8 @@ fn text_form_is_readable() {
     assert!(text.contains("struct Stack[T] { items: list[$0] }"));
     assert!(text.contains("\nmethod Display.fmt pure\n"));
     assert!(text.contains("impl Display for int { fmt: intrinsic structural.display }"));
-    assert!(text.contains("impl[1] Add[$0] for Stack[$0] { add: show }"));
-    assert!(text.contains("fn show[T](1) source 0 {"));
+    assert!(text.contains("impl[1] Add[$0] for Stack[$0] { add: show, type Output = $0 }"));
+    assert!(text.contains("fn show[T](1) source 0 own 0 {"));
     assert!(text.contains("    let _2: dyn Display\n"));
     assert!(text.contains("    let _3: <$0 as Container>.Item\n"));
     assert!(text.contains("_0 = call trait Display.fmt[$0](copy _1)"));

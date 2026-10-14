@@ -5,7 +5,7 @@ ownership violation: `_3` was dropped holding a `Receipt`, which must be passed 
   at settle (must_consume_try.sisu:27:9)
   at main (must_consume_try.sisu:32:5)
 SIR of `settle`:
-fn settle(2) source 0 @25:5-25:11 {
+fn settle(2) source 0 own 1 @25:5-25:11 {
     let _0: Result[(), {RepayError}]
     let _1: ref mut Pool "pool" @25:12-25:26
     let _2: list[Receipt] "receipts" @25:28-25:55

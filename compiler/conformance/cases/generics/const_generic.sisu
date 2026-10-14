@@ -1,0 +1,7 @@
+# Const generic parameters are not in stage 0 yet.
+
+struct Grid[T, const W: int]:
+    cells: list[T]
+
+def main():
+    pass

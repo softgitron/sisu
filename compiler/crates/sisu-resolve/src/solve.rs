@@ -128,6 +128,9 @@ impl Program {
             }
             // Functions and closures print as `<fn name>` and `<closure>`.
             Ty::Fn(_) if is(wk.debug) => return Answer::Yes(ImplSource::Builtin),
+            // Every type has `Debug` (11): a `dyn` value prints as the value
+            // it holds, through that value's type.
+            Ty::Dyn(_) if is(wk.debug) => return Answer::Yes(ImplSource::Builtin),
             _ => {}
         }
         let mut unknown = false;
@@ -254,6 +257,10 @@ impl Program {
             Ty::Dyn(tr) => {
                 for t in self.elaborate(ty, tr) {
                     push(self, &t);
+                }
+                // Every `dyn` value has `Debug`.
+                if let Some(d) = self.wk.debug {
+                    push(self, &TraitRef { def: d, args: Vec::new() });
                 }
             }
             _ => {

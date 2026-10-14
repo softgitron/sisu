@@ -1,0 +1,64 @@
+# Associated types (03, "Traits"): a trait that names one, impls that bind
+# it, `C.Item` in a signature with a `where` clause, and `Iterator`
+# implemented by a user type and driven by `for` and the std adapters.
+
+trait Container(Len):
+    type Item
+    def get(self, i: int) -> ref Item?
+
+struct Pair:
+    a: String
+    b: String
+
+impl Len for Pair:
+    def len(self) -> int:
+        return 2
+
+impl Container for Pair:
+    type Item = String
+    def get(self, i: int) -> ref String?:
+        return if i == 0: Some(ref self.a) else: if i == 1: Some(ref self.b) else: None
+
+impl[T] Container for list[T]:
+    type Item = T
+    def get(self, i: int) -> ref T?:
+        return if i < len(self): Some(ref self[i]) else: None
+
+def first_display[C: Container](c: C) -> String where C.Item: Display:
+    return c.get(0).map("{it}") ?? "<empty>"
+
+def last[C: Container](c: C) -> ref C.Item?:
+    return c.get(len(c) - 1)
+
+# A counter that counts up to a limit.
+struct Upto:
+    n: int
+    limit: int
+
+impl Iterator for Upto:
+    type Item = int
+    def next(mut self) -> int?:
+        if self.n >= self.limit:
+            return None
+        self.n += 1
+        return Some(self.n)
+
+def main():
+    print(first_display([1, 2, 3]))
+    print(first_display(Pair(a="x".to_string(), b="y".to_string())))
+    let empty: list[int] = []
+    print(first_display(empty))
+    let pair = Pair(a="x".to_string(), b="y".to_string())
+    match last(pair):
+        case Some(s): print(s)
+        case None: print("none")
+    for i in Upto(n=0, limit=3):
+        print(i)
+    print(Upto(n=0, limit=5).map(it * it).collect())
+    print(Upto(n=0, limit=10).filter(it % 3 == 0).count())
+    print(Upto(n=0, limit=4).fold(0, (acc, x) -> acc + x))
+    print(Upto(n=0, limit=6).skip(2).take(2).collect())
+    print([(i, x) for i, x in Upto(n=10, limit=12).enumerate()])
+    print(Upto(n=0, limit=5).max_by(-it) ?? 0)
+    print(Upto(n=0, limit=4).sum())
+    print(Upto(n=0, limit=3).map("<{it}>").join(", "))

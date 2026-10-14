@@ -23,7 +23,7 @@ impl FnLower<'_, '_> {
                     Lit::Char(c) => Const::Char(*c),
                     Lit::Str(s) => Const::Str(s.clone()),
                 };
-                let lhs = if self.ctx.prog.is_copy(&pat.ty) {
+                let lhs = if self.ctx.prog.is_copy_in(&pat.ty, &self.bounds) {
                     Operand::Copy(place.clone())
                 } else {
                     let t = self.temp_sir(sir::Type::Ref(Box::new(self.ctx.ty(&pat.ty)), false));

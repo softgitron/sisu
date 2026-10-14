@@ -57,26 +57,6 @@ fn loop_iterator(f: &Function, b: usize) -> Option<LocalId> {
     if it.proj.is_empty() { Some(it.local) } else { None }
 }
 
-/// The intrinsics that keep or return every value they are given with
-/// `own` or `mut`, by argument position: these may take must-consume
-/// values. Any other intrinsic may drop what it is given (`list.clear`,
-/// the key of `dict.insert`, an `Entry.or_insert` value when the key is
-/// present), so a must-consume value reaching it is rejected.
-const KEEPS: &[(&str, &[usize])] = &[
-    ("list.push", &[0, 1]),
-    ("list.pop", &[0]),
-    ("list.insert", &[0, 2]),
-    ("list.remove", &[0]),
-    ("list.extend", &[0, 1]),
-    ("list.sort", &[0]),
-    ("list.sort_by", &[0]),
-    ("list.reverse", &[0]),
-    ("dict.insert", &[0, 2]),
-    ("dict.remove", &[0]),
-    ("iter.own", &[0]),
-    ("Iter.next", &[0]),
-];
-
 /// Calls of intrinsics that may drop a must-consume value given to them.
 fn dropping_intrinsics(f: &Function, types: &Types, out: &mut Vec<Finding>) {
     for (b, block) in f.blocks.iter().enumerate() {
@@ -94,7 +74,8 @@ fn dropping_intrinsics(f: &Function, types: &Types, out: &mut Vec<Finding>) {
                     Operand::Const(_) => continue,
                 };
                 let Some(ty) = given.filter(|t| types.must_consume(t)) else { continue };
-                if KEEPS.iter().any(|(n, keep)| n == name && keep.contains(&i)) {
+                // Its contract says it keeps what this argument holds.
+                if types.intrinsic_keeps(name, i as u32) {
                     continue;
                 }
                 let shown = match a {
@@ -151,6 +132,88 @@ fn own_method(f: &Function, ty: &Type) -> bool {
 }
 
 pub fn check(f: &Function, types: &Types) -> Vec<Finding> {
+    // Drop glue drops the parts of a value whose own drop was checked
+    // where it happens.
+    if f.kind == sisu_sir::FnKind::Glue {
+        return Vec::new();
+    }
+    let mut out = check_body(f, types);
+    generic_calls(f, types, &mut out, 0);
+    out
+}
+
+/// A call of a generic function with a must-consume type argument: the
+/// body instantiated with the call's types must consume what it is given
+/// too, or the generic function would drop it unseen (E0397). The check
+/// runs per instantiation, as 18 describes for monomorphised code.
+fn generic_calls(f: &Function, types: &Types, out: &mut Vec<Finding>, depth: u32) {
+    for (b, block) in f.blocks.iter().enumerate() {
+        for (si, s) in block.stmts.iter().enumerate() {
+            let (name, tys) = match &s.kind {
+                StatementKind::Call { callee: Callee::Fn(name, tys), .. } => (name.clone(), tys.clone()),
+                // Through a trait, for types known here: the impl's method.
+                StatementKind::Call { callee: Callee::Trait(name, tys), .. }
+                    if !tys.iter().any(Type::has_params) =>
+                {
+                    match types.trait_target(name, tys) {
+                        Some(t) => t,
+                        None => continue,
+                    }
+                }
+                _ => continue,
+            };
+            let Some((i, ty)) =
+                tys.iter().enumerate().find(|(_, t)| !t.has_params() && types.must_consume(t))
+            else {
+                continue;
+            };
+            let Some(g) = types.function(&name) else { continue };
+            if instance_drops(g, &tys, types, depth) {
+                let param = g.type_params.get(i).cloned().unwrap_or_else(|| format!("${i}"));
+                out.push(
+                    Finding::new(msg::TYPE_MUST_CONSUME_ARGUMENT, f, s.loc)
+                        .with("ty", sisu_sir::write::ty(ty))
+                        .with("param", param)
+                        .at(b, si),
+                );
+            }
+        }
+    }
+}
+
+/// Whether `g` with its type parameters replaced by `tys` drops a
+/// must-consume value (or passes one to a generic function that does).
+fn instance_drops(g: &Function, tys: &[Type], types: &Types, depth: u32) -> bool {
+    // A recursion this deep is not followed; assume the worst.
+    if depth > 8 {
+        return true;
+    }
+    let mut inst = g.clone();
+    for l in &mut inst.locals {
+        l.ty = l.ty.subst(tys);
+    }
+    for block in &mut inst.blocks {
+        for s in &mut block.stmts {
+            if let StatementKind::Call {
+                callee: Callee::Fn(_, ts) | Callee::Trait(_, ts) | Callee::Intrinsic(_, ts),
+                ..
+            } = &mut s.kind
+            {
+                for t in ts.iter_mut() {
+                    *t = t.subst(tys);
+                }
+            }
+        }
+    }
+    // Its drops placed for the instance's types, as for any function.
+    let init = crate::init::Analysis::run(&inst, types);
+    crate::elaborate::elaborate(&mut inst, &init, types);
+    let mut found = check_body(&inst, types);
+    generic_calls(&inst, types, &mut found, depth + 1);
+    !found.is_empty()
+}
+
+fn check_body(f: &Function, types: &Types) -> Vec<Finding> {
     let n = f.blocks.len();
     let nl = f.locals.len();
     if n == 0 {

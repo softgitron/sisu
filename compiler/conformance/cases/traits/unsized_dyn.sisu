@@ -1,0 +1,13 @@
+# `dyn Trait` has no size of its own: it is held behind `ref` or in a `Box`.
+
+trait Shape:
+    def area(self) -> f64
+
+struct Holder:
+    shape: dyn Shape
+
+def area_of(s: dyn Shape) -> f64:
+    return s.area()
+
+def main():
+    pass

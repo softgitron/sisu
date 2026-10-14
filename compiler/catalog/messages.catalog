@@ -8,8 +8,8 @@
 #
 # Codes are stable and never reused. Ranges: E00xx lexer, E01xx parser,
 # E02xx names and declarations, E03xx types, E04xx ownership, E05xx
-# lowering, E09xx stage-0 limits and internal errors, W0xxx warnings, R0xxx
-# run time, D0xxx driver.
+# lowering, E06xx compile-time evaluation, E09xx stage-0 limits and
+# internal errors, W0xxx warnings, R0xxx run time, D0xxx driver.
 
 # ---------------------------------------------------------------- lexer
 E0001 error   lex.tab-in-indentation      a tab in indentation; Sisu indents with spaces only
@@ -110,10 +110,15 @@ E0242 error   resolve.supertrait-missing  `{ty}` implements `{trait}`, which req
 E0243 error   resolve.not-derivable       `{name}` cannot be derived; `@derive` takes `Copy`, `Debug`, `Eq`, `PartialOrd`, `Ord` and `Hash`
 E0244 error   resolve.derive-field        `{ty}` cannot derive `{trait}`: its field `{field}` has type `{fty}`, which does not implement `{trait}`
 E0245 error   resolve.generic-default-order  a type parameter without a default cannot follow one with a default
-E0246 error   resolve.impl-default        the parameters of an `impl` take no defaults
+E0246 error   resolve.impl-default        the type parameters of an `impl` or a function take no defaults; a default belongs to a type's or a trait's parameter
 E0247 error   resolve.trait-cycle         `{name}` cannot be its own supertrait
 E0248 error   resolve.assoc-outside-trait-impl  an associated type belongs in an impl of a trait
 E0249 error   resolve.assoc-needs-type    `type {name}` in an impl needs a type: `type {name} = ...`
+E0250 error   resolve.not-delegable       `{name}` cannot be delegated; `@delegate` takes `Add`, `Sub`, `Mul`, `Div`, `Rem`, `Neg`, `Eq`, `PartialOrd`, `Ord`, `Hash`, `Display`, `Debug` and `Len`
+E0251 error   resolve.delegate-to         `@delegate` needs `to="field"`, naming a field of `{ty}`
+E0252 error   resolve.delegate-self       `{trait}` returns a `{ty}`, so `{ty}` can delegate it only when `{field}` is its one field
+E0253 error   resolve.delegate-field      `{ty}` cannot delegate `{trait}` to `{field}`: its type `{fty}` does not implement `{trait}`
+E0254 error   resolve.drop-generic        a `Drop` for `{ty}` must apply to every `{name}`: write `{expected}`, with the type's parameters in order and only the bounds the type declares
 -     label   resolve.first-impl          the other impl is here
 -     fix     resolve.add-dyn             write `dyn {name}`
 -     label   resolve.first-defined       first defined here
@@ -207,10 +212,10 @@ E0391 error   type.const-pattern          a constant cannot be used as a pattern
 E0392 error   type.impure-value-call      `{name}` is pure, so it cannot call a function value whose type is not `pure`
 E0393 error   type.impure-drop            dropping `{value}` here runs the `Drop` of `{ty}`, which is not pure, so the pure function `{name}` cannot do it
 E0394 error   type.ambiguous-method       `{name}` is a method of more than one trait `{ty}` implements ({traits}); call it on the trait, as in `Trait.{name}(x)`
-E0395 error   type.unsized-dyn            `{ty}` is a `dyn` type and has no size of its own; keep it behind `ref` or in a `Box`
+E0395 error   type.unsized-dyn            `{ty}` has no size of its own; hold it behind `ref` or in a `Box`
 E0396 error   type.view-to-dyn            `{ty}` borrows, so it cannot become `{dyn}`, which owns its value
 E0397 error   type.must-consume-argument  `{ty}` is must-consume, so it cannot be the argument of the generic parameter `{param}`, whose values the body may drop
-E0398 error   type.structural-only        `{callee}` uses the structural `{trait}` of its type, and `{ty}` has an impl of its own; this arrives with the standard library in Sisu (Phase 4)
+E0398 error   type.structural-only        {callee} is hashed and compared structurally in stage 0, and `{ty}` has an impl of `{trait}` of its own; derive `Hash` and `Eq` for it, or key by a field
 -     note    type.method-of-traits       `{name}` is a method of {traits}
 -     label   type.expected-because       expected because of this
 -     label   type.found-here             this is `{ty}`
@@ -250,6 +255,10 @@ E0417 error   borrow.must-consume         `{name}` is never consumed: a `{ty}` m
 E0418 error   borrow.must-consume-exit    this leaves the scope with `{name}` unconsumed: a `{ty}` must be passed to an `own` parameter first
 E0419 error   borrow.move-out-of-place    cannot move out of `{name}` through a reference or an index; copy it with `.copy()`
 E0420 error   borrow.must-consume-intrinsic  `{callee}` may drop values that `{name}` holds, and a `{ty}` is must-consume: its values must be passed to an `own` parameter
+E0421 error   borrow.view-in-owner        `{ty}` borrows, so it cannot be put in `{owner}`, which can outlive what it borrows (04, rule 3)
+E0422 error   borrow.must-consume-in-owner  `{ty}` is must-consume, so it cannot be put in `{owner}`, which can drop it where the checker does not see
+E0423 error   type.own-closure-capture    an `own` closure keeps a copy of `{name}`, and `{ty}` is not `Copy`; stage 0 copies captures (a capture by move arrives with tasks)
+E0424 error   type.own-closure-changes    an `own` closure keeps a copy of `{name}` and cannot change it; borrow it with a plain closure instead
 -     label   borrow.moved-here           `{name}` is moved here
 -     label   borrow.moved-in-loop        `{name}` is moved here, in an earlier iteration of the loop
 -     label   borrow.borrowed-by          borrowed here by `{borrower}`
@@ -281,6 +290,18 @@ E0420 error   borrow.must-consume-intrinsic  `{callee}` may drop values that `{n
 # ---------------------------------------------------------------- lowering and SIR
 E0500 error   sir.parse                   SIR: {detail}
 E0501 error   sir.invalid                 invalid SIR in `{function}`: {detail}
+
+# ---------------------------------------------------------------- compile-time evaluation
+E0600 error   comptime.not-constant       `comptime` evaluates what is known at compile time, and `{name}` is known only at run time
+E0601 error   comptime.impure             `comptime` evaluates pure code, and `{callee}` is not pure
+E0602 error   comptime.panicked           the compile-time evaluation of this expression panicked: {message}
+E0603 error   comptime.budget             the compile-time evaluation in `{item}` used up its budget of {steps} steps; raise it with `@comptime_budget(steps=N)` on `{item}`
+E0604 error   comptime.not-kept           a `{ty}` made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can
+E0605 error   comptime.only               `{name}` is a `comptime def`: it can be called only at compile time, inside `comptime`
+E0606 error   comptime.budget-attribute   `@comptime_budget` takes `steps=N`, a positive number of steps
+E0607 error   comptime.derive-template    a trait's derive is `comptime def derive(T: type) -> impl {trait} for T`, whose body is `return impl {trait} for T:` with the impl's methods
+E0608 error   comptime.derive-failed      deriving `{trait}` for `{ty}` stopped at compile time: {reason}
+-     label   comptime.derive-here        the derive's template, where it stopped
 
 # ---------------------------------------------------------------- stage-0 limits and internal errors
 E0900 error   stage0.unsupported          {construct} is not implemented in stage 0 yet; it arrives with {phase}
@@ -364,6 +385,10 @@ R0068 runtime monitor.no-value            <no value>
 R0069 runtime monitor.unconsumed          `{name}` was dropped holding a `{ty}`, which must be passed to an `own` parameter
 R0070 runtime defer.declarations-only     only rules about declarations reject the program, and the run reached no conflict: a candidate false positive
 R0071 runtime monitor.op-return           the return from the frame
+R0072 runtime panic.stale-key             stale arena key: slot {index}, generation {generation}, no longer holds its value
+R0073 runtime panic.mutex-held            the mutex is already locked by this task, which would wait for itself forever
+R0074 runtime panic.mutex-poisoned        the mutex is poisoned: a task panicked holding it and left its value's invariant broken
+R0075 runtime panic.cell-in-use           a `Cell` was replaced while its value was being replaced
 
 # ---------------------------------------------------------------- driver
 

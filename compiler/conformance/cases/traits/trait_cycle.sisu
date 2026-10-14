@@ -1,0 +1,7 @@
+# A trait cannot be its own supertrait.
+
+trait Loop(Loop):
+    def go(self)
+
+def main():
+    pass

@@ -1,0 +1,31 @@
+# A `Drop` for a generic type must cover all of it: the drop glue runs it
+# for every value, whatever the type arguments.
+
+struct Pair[A, B]:
+    a: A
+    b: B
+
+# Only some instances.
+impl Drop for Pair[int, int]:
+    def drop(mut self):
+        print("ints")
+
+struct Plain[T]:
+    value: T
+
+# A bound the type does not declare.
+impl[T: Display] Drop for Plain[T]:
+    def drop(mut self):
+        print("{self.value}")
+
+struct Swapped[A, B]:
+    a: A
+    b: B
+
+# The parameters in another order (stage 0 asks for the declared order).
+impl[A, B] Drop for Swapped[B, A]:
+    def drop(mut self):
+        print("swapped")
+
+def main():
+    pass

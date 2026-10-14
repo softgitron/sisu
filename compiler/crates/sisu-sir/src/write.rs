@@ -137,7 +137,7 @@ fn params(ps: &[String]) -> String {
 }
 
 fn write_impl(out: &mut String, i: &ImplDecl) {
-    let ms: Vec<String> = i
+    let mut ms: Vec<String> = i
         .methods
         .iter()
         .map(|(m, t)| match t {
@@ -145,6 +145,7 @@ fn write_impl(out: &mut String, i: &ImplDecl) {
             ImplTarget::Intrinsic(f) => format!("{m}: intrinsic {f}"),
         })
         .collect();
+    ms.extend(i.assoc.iter().map(|(n, t)| format!("type {n} = {}", ty(t))));
     let n = if i.params == 0 { String::new() } else { format!("[{}]", i.params) };
     let _ = writeln!(
         out,
@@ -223,12 +224,13 @@ fn write_intrinsic(out: &mut String, i: &IntrinsicDecl) {
 fn write_decl(out: &mut String, word: &str, i: &IntrinsicDecl) {
     let _ = writeln!(
         out,
-        "{word} {}{}{}{}{}",
+        "{word} {}{}{}{}{}{}",
         i.name,
         if i.pure { " pure" } else { "" },
         indices("from", &i.from),
         indices("inner", &i.inner),
-        indices("own", &i.own)
+        indices("own", &i.own),
+        indices("keeps", &i.keeps)
     );
 }
 
@@ -237,6 +239,7 @@ fn kind_name(k: FnKind) -> &'static str {
         FnKind::Normal => "",
         FnKind::Closure => " closure",
         FnKind::Drop => " drop",
+        FnKind::Glue => " glue",
         FnKind::Value => " value",
         FnKind::Test => " test",
     }
@@ -252,7 +255,7 @@ pub fn function(f: &Function) -> String {
 fn write_function(out: &mut String, f: &Function) {
     let _ = writeln!(
         out,
-        "fn {}{}({}){}{} source {}{}{}{} {{",
+        "fn {}{}({}){}{} source {}{}{}{}{} {{",
         f.name,
         params(&f.type_params),
         f.param_count,
@@ -261,6 +264,7 @@ fn write_function(out: &mut String, f: &Function) {
         f.source,
         indices("from", &f.from),
         indices("inner", &f.inner),
+        indices("own", &f.own),
         loc(&f.loc)
     );
     for (i, l) in f.locals.iter().enumerate() {

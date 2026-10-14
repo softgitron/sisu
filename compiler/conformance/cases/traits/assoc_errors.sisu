@@ -1,0 +1,24 @@
+# Associated types belong to traits and their impls: an inherent impl has
+# none, an impl's needs a type, and it must be one the trait declares.
+
+trait Source:
+    type Item
+    def take(mut self) -> Item?
+
+struct Empty:
+    done: bool
+
+impl Empty:
+    type Item = int
+
+impl Source for Empty:
+    type Item = int
+    type Extra = bool
+    def take(mut self) -> int?:
+        return None
+
+def first[S](s: S) -> S.Item:
+    return todo()
+
+def main():
+    pass

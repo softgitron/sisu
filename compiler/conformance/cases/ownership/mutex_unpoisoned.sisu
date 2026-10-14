@@ -1,0 +1,26 @@
+# D-077: an invariant that still holds when unwinding drops the guard
+# leaves the mutex usable.
+
+struct Account:
+    balance: int
+    limit: int
+    invariant self.balance >= -self.limit
+
+struct Auditor:
+    accounts: Shared[Mutex[Account]]
+
+impl Drop for Auditor:
+    def drop(mut self):
+        print("poisoned: {self.accounts.is_poisoned()}")
+        print("balance: {self.accounts.lock().value.balance}")
+
+def withdraw(m: Shared[Mutex[Account]], amount: int):
+    var g = m.lock()
+    g.value.balance -= amount
+    if g.value.balance < 0:
+        panic("overdrawn by {-g.value.balance}")
+
+def main():
+    let m = Shared(Mutex(Account(balance=10, limit=5)))
+    let auditor = Auditor(accounts=m.copy())
+    withdraw(m, 12)

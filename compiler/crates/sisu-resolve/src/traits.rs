@@ -12,12 +12,19 @@ use sisu_diag::{Diagnostic, Span, TextRange, msg};
 use sisu_syntax::ast::{self, Mode, ParamKind};
 
 impl Resolver<'_> {
-    pub fn resolve_trait(&mut self, def: DefId, module: ModuleId, t: &ast::TraitDef, attrs: &[ast::Attr]) {
+    /// A trait's associated type names, attributes and supertraits, before
+    /// any struct or enum: a field may name `I.Item` for a bound `I: Trait`.
+    pub fn resolve_trait_header(
+        &mut self,
+        def: DefId,
+        module: ModuleId,
+        t: &ast::TraitDef,
+        attrs: &[ast::Attr],
+    ) {
         let generics = self.prog.trait_info(def).map(|i| i.generics.clone()).unwrap_or_default();
         let mut names = vec!["Self".to_string()];
         names.extend(generics.iter().map(|g| g.name.clone()));
         let self_ty = Ty::Param(0);
-        // Associated types first: the methods' signatures may name them.
         let mut assoc: Vec<AssocInfo> = Vec::new();
         for a in &t.assoc_types {
             if assoc.iter().any(|x| x.name == a.name.text) {
@@ -39,21 +46,6 @@ impl Resolver<'_> {
             info.sealed = attrs.iter().any(|a| a.name == "sealed");
             info.marker = attrs.iter().any(|a| a.name == "marker");
         }
-        for (i, a) in t.assoc_types.iter().enumerate() {
-            if let Some(te) = &a.ty {
-                let ctx = TyCtx {
-                    self_ty: Some(&self_ty),
-                    in_trait: Some(def),
-                    ..TyCtx::plain(module, &names, true)
-                };
-                let ty = self.resolve_ty(te, &ctx);
-                if let DefKind::Trait(info) = &mut self.prog.defs[def.0 as usize].kind
-                    && let Some(x) = info.assoc.get_mut(i)
-                {
-                    x.default = Some(ty);
-                }
-            }
-        }
         let mut supers = Vec::new();
         for s in &t.supertraits {
             let ctx =
@@ -72,7 +64,40 @@ impl Resolver<'_> {
         if let DefKind::Trait(info) = &mut self.prog.defs[def.0 as usize].kind {
             info.supertraits = supers;
         }
+    }
+
+    /// The rest of a trait, once types are known: its associated types'
+    /// defaults and its methods.
+    pub fn resolve_trait(&mut self, def: DefId, module: ModuleId, t: &ast::TraitDef) {
+        let generics = self.prog.trait_info(def).map(|i| i.generics.clone()).unwrap_or_default();
+        let mut names = vec!["Self".to_string()];
+        names.extend(generics.iter().map(|g| g.name.clone()));
+        let self_ty = Ty::Param(0);
+        for (i, a) in t.assoc_types.iter().enumerate() {
+            if let Some(te) = &a.ty {
+                let ctx = TyCtx {
+                    self_ty: Some(&self_ty),
+                    in_trait: Some(def),
+                    ..TyCtx::plain(module, &names, true)
+                };
+                let ty = self.resolve_ty(te, &ctx);
+                if let DefKind::Trait(info) = &mut self.prog.defs[def.0 as usize].kind
+                    && let Some(x) = info.assoc.get_mut(i)
+                {
+                    x.default = Some(ty);
+                }
+            }
+        }
         for m in &t.methods {
+            // A `comptime def` runs at compile time: the trait's derive
+            // (collected with the trait) is not one of its methods.
+            if m.is_comptime {
+                if m.name.text != "derive" {
+                    let span = self.span(module, m.name.range);
+                    self.unsupported(span, "a `comptime def` in a trait other than `derive`", "reflection beyond derive (Phase 8)");
+                }
+                continue;
+            }
             if t.methods.iter().filter(|x| x.name.text == m.name.text).count() > 1
                 && t.methods.iter().position(|x| x.name.text == m.name.text)
                     != t.methods.iter().position(|x| std::ptr::eq(x, m))
@@ -91,7 +116,7 @@ impl Resolver<'_> {
                 m.name.range,
                 ast::Vis::Pub,
                 Vec::new(),
-                DefKind::Fn(self.placeholder_fn(module, FnKind::Method)),
+                DefKind::Fn(Box::new(self.placeholder_fn(module, FnKind::Method))),
             );
             self.pending.push(Pending::Fn {
                 def: fdef,
@@ -103,6 +128,12 @@ impl Resolver<'_> {
     }
 
     pub fn resolve_impl(&mut self, module: ModuleId, imp: &ast::ImplDef, range: TextRange, derived: bool) {
+        // The impl is named by its header, `impl[...] Trait for Type`.
+        let range = if imp.self_ty.range.end > range.start && imp.self_ty.range.end <= range.end {
+            TextRange::new(range.start, imp.self_ty.range.end)
+        } else {
+            range
+        };
         let span = self.span(module, range);
         let names: Vec<String> = imp.generics.iter().map(|g| g.name.text.clone()).collect();
         for g in &imp.generics {
@@ -128,7 +159,7 @@ impl Resolver<'_> {
                 return;
             }
             for a in &imp.assoc_types {
-                let s = self.span(module, a.range);
+                let s = self.span(module, a.name.range);
                 self.report(Diagnostic::new(msg::RESOLVE_ASSOC_OUTSIDE_TRAIT_IMPL, s));
             }
             for m in &imp.methods {
@@ -138,7 +169,7 @@ impl Resolver<'_> {
                     m.name.range,
                     ast::Vis::Pub,
                     Vec::new(),
-                    DefKind::Fn(self.placeholder_fn(module, FnKind::Method)),
+                    DefKind::Fn(Box::new(self.placeholder_fn(module, FnKind::Method))),
                 );
                 let owner = Owner::Inherent {
                     generics: generics.clone(),
@@ -156,9 +187,10 @@ impl Resolver<'_> {
         if self_ty == Ty::Error {
             return;
         }
-        // `Drop` keeps its stage-0 rules: a struct or enum of this module,
-        // not generic (its drop glue is computed from values, which do not
-        // carry type arguments), with exactly `def drop(mut self)`.
+        // `Drop` is for a struct or enum of this module, with exactly
+        // `def drop(mut self)`, and for all of a generic type: the drop
+        // glue (a SIR function per type) runs it for every value, whatever
+        // the type arguments.
         if Some(trait_ref.def) == self.prog.wk.drop {
             let target = match &self_ty {
                 Ty::Adt(d, _)
@@ -173,13 +205,25 @@ impl Resolver<'_> {
                 self.report(Diagnostic::new(msg::RESOLVE_DROP_TARGET, span));
                 return;
             };
-            if !self.prog.type_generics(target).is_empty() {
-                self.unsupported(
-                    span,
-                    "`Drop` for a generic type",
-                    "drop glue in SIR (Phase 4, std in Sisu)",
-                );
-                return;
+            let params = self.prog.type_generics(target).len();
+            if params > 0 {
+                let own = self.type_preds.get(&target).cloned().unwrap_or_default();
+                let whole = generics.len() == params
+                    && self_ty == Ty::Adt(target, (0..params as u32).map(Ty::Param).collect())
+                    && predicates.iter().all(|p| own.iter().any(|q| q.ty == p.ty && q.bound == p.bound));
+                if !whole {
+                    let own_names: Vec<String> =
+                        self.prog.type_generics(target).iter().map(|g| g.name.clone()).collect();
+                    let list = own_names.join(", ");
+                    let name = self.prog.def(target).name.clone();
+                    self.report(
+                        Diagnostic::new(msg::RESOLVE_DROP_GENERIC, span)
+                            .with("ty", self.prog.display_in(&self_ty, &names))
+                            .with("name", name.clone())
+                            .with("expected", format!("impl[{list}] Drop for {name}[{list}]")),
+                    );
+                    return;
+                }
             }
             let ok = imp.methods.len() == 1
                 && imp.methods[0].name.text == "drop"
@@ -194,7 +238,21 @@ impl Resolver<'_> {
         }
         // What the impl binds its associated types to.
         let mut assoc: Vec<(String, Ty)> = Vec::new();
+        let declared: Vec<String> = self
+            .prog
+            .trait_info(trait_ref.def)
+            .map(|i| i.assoc.iter().map(|a| a.name.clone()).collect())
+            .unwrap_or_default();
         for a in &imp.assoc_types {
+            if !declared.contains(&a.name.text) {
+                let s = self.span(module, a.name.range);
+                self.report(
+                    Diagnostic::new(msg::RESOLVE_UNKNOWN_ASSOC_TYPE, s)
+                        .with("trait", self.prog.display_trait_in(&trait_ref, &names))
+                        .with("name", a.name.text.clone()),
+                );
+                continue;
+            }
             let ty = match &a.ty {
                 Some(te) => self.resolve_ty(te, &ctx),
                 None => {
@@ -230,7 +288,7 @@ impl Resolver<'_> {
                 m.name.range,
                 ast::Vis::Pub,
                 Vec::new(),
-                DefKind::Fn(self.placeholder_fn(module, FnKind::Method)),
+                DefKind::Fn(Box::new(self.placeholder_fn(module, FnKind::Method))),
             );
             if Some(trait_ref.def) == self.prog.wk.drop
                 && let Ty::Adt(d, _) = &self_ty
@@ -299,6 +357,10 @@ impl Resolver<'_> {
                 );
             }
         }
+        // An associated type the impl does not bind is reported below; the
+        // signatures that name it would only repeat that.
+        let assoc_missing =
+            tinfo.assoc.iter().any(|a| a.default.is_none() && !info.assoc.iter().any(|(n, _)| *n == a.name));
         // Methods: each is the trait's, with the trait's signature.
         let mut targs = vec![info.self_ty.clone()];
         targs.extend(tr.args.iter().cloned());
@@ -313,7 +375,9 @@ impl Resolver<'_> {
                 );
                 continue;
             };
-            self.check_method_signature(tm, *mdef, &targs, &info, &env, &trait_name);
+            if !assoc_missing {
+                self.check_method_signature(tm, *mdef, &targs, &info, &env, &trait_name);
+            }
             // An impl's method is as pure as the trait's: `pure` on the
             // trait's method binds every impl, written or not.
             if self.prog.fn_info(tm).is_some_and(|t| t.pure)
@@ -340,16 +404,8 @@ impl Resolver<'_> {
                     .with("methods", missing.join(", ")),
             );
         }
-        // Associated types: each one the trait declares, bound once.
-        for (n, _) in &info.assoc {
-            if !tinfo.assoc.iter().any(|a| a.name == *n) {
-                self.report(
-                    Diagnostic::new(msg::RESOLVE_UNKNOWN_ASSOC_TYPE, span)
-                        .with("trait", trait_name.clone())
-                        .with("name", n.clone()),
-                );
-            }
-        }
+        // Associated types: each one the trait declares, bound (one the
+        // trait does not declare is reported where the impl binds it).
         for a in &tinfo.assoc {
             if a.default.is_none() && !info.assoc.iter().any(|(n, _)| *n == a.name) {
                 self.report(
@@ -360,8 +416,13 @@ impl Resolver<'_> {
                 );
             }
         }
-        // Supertraits: implementing `Container(Len)` needs `Len` too.
-        for s in &tinfo.supertraits {
+        // Supertraits: implementing `Container(Len)` needs `Len` too. A
+        // derived or delegated impl's is reported at its attribute.
+        let generated = {
+            let m = &self.prog.modules[module.0 as usize].name;
+            m.starts_with("<derive>/") || m.starts_with("<delegate>/")
+        };
+        for s in tinfo.supertraits.iter().filter(|_| !generated) {
             let st = s.subst(&targs);
             if !self.prog.implements(&info.self_ty, &st, &env).holds()
                 && !matches!(self.prog.implements(&info.self_ty, &st, &env), crate::solve::Answer::Unknown)

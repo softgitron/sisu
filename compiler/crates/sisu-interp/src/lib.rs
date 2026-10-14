@@ -3,13 +3,14 @@
 //! backend exists.
 //!
 //! The run loop is a trampoline over an explicit frame stack: a Sisu call
-//! pushes a frame and never recurses on the host stack (only intrinsics
-//! that call back into Sisu, and drop glue running a `Drop`, nest a run
-//! loop). References are places: a frame, a local and a path.
+//! pushes a frame and never recurses on the host stack (only `cli.parse`,
+//! calling a field's default, nests a run loop). References are places: a
+//! frame, a local and a path.
 //!
 //! Values have value semantics: a move takes the value out of its place,
 //! a copy clones it, and every `drop` statement of the SIR runs the
-//! value's drop glue (the type's `Drop`, then its parts in reverse order).
+//! value's drop glue (a SIR function for a declared type: its `Drop`, then
+//! its fields in reverse order) on the same loop (`drops.rs`).
 //! A panic unwinds: each block names the cleanup block that runs when
 //! anything in it panics, so every value on the stack is dropped in
 //! reverse order before the panic reaches `main`. A panic while unwinding
@@ -23,6 +24,7 @@
 
 mod cli;
 mod dispatch;
+mod drops;
 mod exec;
 mod format;
 mod host;
@@ -46,9 +48,9 @@ use value::Value;
 pub const MAX_DEPTH: usize = 100_000;
 
 /// The interpreter runs on a thread with this much host stack. Sisu calls
-/// do not use it (the run loop is a trampoline); intrinsics that call back
-/// into Sisu (`sort_by`, `Iter.map`, a type's `Drop`) and drop glue for
-/// deeply nested values do.
+/// and drops do not use it (the run loop is a trampoline); the host's
+/// structural operations on deeply nested values (printing, comparing,
+/// hashing, `.copy()`) and `cli.parse` calling a default do.
 pub const STACK_BYTES: usize = 256 << 20;
 
 /// Exit statuses of a run.
@@ -143,6 +145,14 @@ pub(crate) struct Frame<'p> {
     /// The function's type arguments, `$0` and on in its SIR (type
     /// arguments are run-time values in stage 0).
     pub tys: Vec<sir::Type>,
+    /// Values to drop before the next statement, the next one last.
+    pub drops: Vec<drops::PendingDrop>,
+    /// For a frame the run time pushed (an `invariant` check), what to do
+    /// with its result.
+    pub after: Option<drops::After>,
+    /// The frame is leaving by a panic and has no cleanup block: once its
+    /// pending drops are done, unwinding continues in the caller.
+    pub resume_after_drops: bool,
 }
 
 pub struct Interp<'p, 'h> {
@@ -150,6 +160,8 @@ pub struct Interp<'p, 'h> {
     pub(crate) host: &'h mut dyn Host,
     pub(crate) fns: HashMap<&'p str, usize>,
     pub(crate) types: HashMap<&'p str, &'p sir::TypeDecl>,
+    /// The drop glue of each declared type that has one, by type name.
+    pub(crate) glue: HashMap<&'p str, usize>,
     /// Variant indices by (type, variant) name.
     pub(crate) variants: HashMap<(&'p str, &'p str), u32>,
     pub(crate) frames: Vec<Frame<'p>>,
@@ -160,18 +172,29 @@ pub struct Interp<'p, 'h> {
     pub(crate) fuel: Option<u64>,
     pub(crate) fuel_limit: u64,
     pub(crate) monitor: Option<monitor::Monitor>,
+    /// The values `Shared` owns, by cell (a cell is never reused).
+    pub(crate) heap: Vec<value::HeapCell>,
 }
 
 impl<'p, 'h> Interp<'p, 'h> {
     pub fn new(prog: &'p sir::Program, host: &'h mut dyn Host, options: &Options) -> Interp<'p, 'h> {
         let fns = prog.functions.iter().enumerate().map(|(i, f)| (f.name.as_str(), i)).collect();
+        let glue = prog
+            .functions
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.kind == sir::FnKind::Glue)
+            .filter_map(|(i, f)| Some((f.name.strip_suffix("#drop")?, i)))
+            .collect();
         let mut types = HashMap::new();
         let mut variants = HashMap::new();
         variants.insert(("Option", "Some"), 0);
         variants.insert(("Option", "None"), 1);
         variants.insert(("Result", "Ok"), 0);
         variants.insert(("Result", "Err"), 1);
-        let mut any_drop = false;
+        // Dropping an owner of a `Shared` or a mutex guard is observable
+        // too (a count, a lock), as is any value holding one.
+        let mut any_drop = prog.functions.iter().any(|f| f.locals.iter().any(|l| mentions_counted(&l.ty)));
         for t in &prog.types {
             types.insert(t.name(), t);
             match t {
@@ -189,6 +212,7 @@ impl<'p, 'h> Interp<'p, 'h> {
             host,
             fns,
             types,
+            glue,
             variants,
             frames: Vec::new(),
             serial: 0,
@@ -199,6 +223,7 @@ impl<'p, 'h> Interp<'p, 'h> {
                 coverage: options.coverage.then(HashMap::new),
                 ..Default::default()
             }),
+            heap: Vec::new(),
         }
     }
 
@@ -286,6 +311,23 @@ impl<'p, 'h> Interp<'p, 'h> {
         let fs =
             Value::Fs(Rc::new(value::FsCap { store: value::FsStore::Host, read_only: false, root: None }));
         Value::Struct(Value::adt("System", 0, vec![fs, Value::Env, Value::Clock]))
+    }
+}
+
+/// Whether a type names one whose drop does something besides a `Drop`
+/// impl: `Shared` and `Weak` count, a guard unlocks.
+fn mentions_counted(t: &sir::Type) -> bool {
+    use sir::Type;
+    match t {
+        Type::Named(n, args) => {
+            matches!(n.as_str(), "Shared" | "Weak" | "MutexGuard" | "Mutex" | "Cell" | "Arena")
+                || args.iter().any(mentions_counted)
+        }
+        Type::Tuple(es) | Type::Dyn(_, es) => es.iter().any(mentions_counted),
+        Type::Ref(t, _) => mentions_counted(t),
+        Type::Fn(ps, r, _) => ps.iter().any(mentions_counted) || mentions_counted(r),
+        Type::Param(_) | Type::Assoc(..) => true,
+        _ => false,
     }
 }
 

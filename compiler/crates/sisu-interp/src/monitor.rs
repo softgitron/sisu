@@ -192,13 +192,18 @@ impl Interp<'_, '_> {
         let site = self.site();
         let Some(m) = &mut self.monitor else { return };
         let Some(list) = m.active.get(&(ptr.serial, ptr.local)) else { return };
+        // A mutex's value changes behind shared references to the mutex
+        // (06, "Send, Sync, and shared state"): an access through a guard
+        // ends no shared loan of the mutex or of what holds it.
+        let mutexes = |p: &[Step]| p.iter().filter(|s| matches!(s, Step::MutexValue)).count();
+        let inside = mutexes(&ptr.path);
         let mut ending = Vec::new();
         for &t in list {
             if through.contains(&t) {
                 continue;
             }
             let Some(l) = m.loans.get(t as usize - 1) else { continue };
-            if !overlap(&l.at.path, &ptr.path) {
+            if !overlap(&l.at.path, &ptr.path) || (!l.mutable && mutexes(&l.at.path) < inside) {
                 continue;
             }
             if op.writes() || (l.mutable && !l.reserved) {
@@ -272,6 +277,17 @@ impl Interp<'_, '_> {
         }
         let ptr = Pointer { frame, serial, local, path: Vec::new(), tag: 0 };
         self.end_conflicting(&ptr, op, &[]);
+    }
+
+    /// A heap cell whose last owner was dropped ends every loan of it.
+    pub(crate) fn mon_heap_freed(&mut self, serial: u64, id: u32) {
+        if self.monitor.is_none() {
+            return;
+        }
+        self.mon_end_local(serial, id, crate::value::HEAP, Op::Drop);
+        if let Some(m) = &mut self.monitor {
+            m.active.remove(&(serial, id));
+        }
     }
 
     /// A frame that returns ends every loan of its locals.
@@ -421,7 +437,9 @@ impl Interp<'_, '_> {
         }
         let Some(fr) = self.frames.last() else { return Ok(()) };
         let Some(f) = fr.func.and_then(|i| self.prog.functions.get(i)) else { return Ok(()) };
-        if f.blocks.get(fr.bb).is_some_and(|b| b.cleanup) {
+        // Unwinding may drop anything; glue drops the parts of a value
+        // whose own drop was checked.
+        if f.blocks.get(fr.bb).is_some_and(|b| b.cleanup) || f.kind == sir::FnKind::Glue {
             return Ok(());
         }
         let Some(ty) = self.unconsumed(v, 0) else { return Ok(()) };
@@ -513,14 +531,6 @@ impl Interp<'_, '_> {
         let decl = f.and_then(|i| self.prog.functions.get(i)).and_then(|f| f.locals.get(p.local as usize));
         let mut s = decl.and_then(|l| l.name.clone()).unwrap_or_else(|| format!("_{}", p.local));
         let mut ty = decl.map(|l| l.ty.clone());
-        // A frame of the interpreter's own: drop glue holds the value it
-        // drops there and passes it to `Drop.drop` as `self`.
-        if let Some(fr) = frame.filter(|fr| fr.func.is_none())
-            && let Some(Value::Struct(a) | Value::Variant(a)) = fr.locals.get(p.local as usize)
-        {
-            s = "self".to_string();
-            ty = Some(sir::Type::Named(a.ty.to_string(), Vec::new()));
-        }
         let mut variant: Option<u32> = None;
         let arg = |t: &Option<sir::Type>, k: usize| match t {
             Some(sir::Type::Named(_, args)) => args.get(k).cloned(),
@@ -555,6 +565,14 @@ impl Interp<'_, '_> {
                     ty = arg(&ty, 0);
                 }
                 Step::DynValue => ty = None,
+                Step::MutexValue => {
+                    s.push_str(".value");
+                    ty = arg(&ty, 0);
+                }
+                Step::Slot(i) => {
+                    s.push_str(&format!("[slot {i}]"));
+                    ty = arg(&ty, 0);
+                }
             }
         }
         s
@@ -728,9 +746,12 @@ impl Interp<'_, '_> {
                 )
             ));
         }
-        // The stack, innermost first.
+        // The stack, innermost first, without drop glue.
         for fr in self.frames.iter().rev() {
             let Some(f) = fr.func.and_then(|i| self.prog.functions.get(i)) else { continue };
+            if f.kind == sir::FnKind::Glue {
+                continue;
+            }
             let s = Site { func: fr.func, bb: fr.bb, stmt: None, loc: fr.loc };
             lines.push(format!(
                 "  {}",

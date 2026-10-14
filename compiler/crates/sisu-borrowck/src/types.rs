@@ -2,7 +2,7 @@
 //! which values can hold a loan, which have drop glue that can observe a
 //! loan, which must be consumed, and which implement `Drop`.
 
-use sisu_sir::{Function, Place, Program, Proj, Type, TypeDecl};
+use sisu_sir::{Function, Place, Program, Type, TypeDecl};
 use std::collections::HashMap;
 
 pub struct Types<'p> {
@@ -16,11 +16,56 @@ const PLAIN_BUILTINS: &[&str] = &["String", "Path", "DateTime", "Fs", "Env", "Cl
 
 /// The builtin types whose values may borrow whatever their arguments are:
 /// an iterator walks a collection it may borrow, an entry borrows its dict.
-const BORROWING_BUILTINS: &[&str] = &["Iter", "Entry", "Iterable"];
+const BORROWING_BUILTINS: &[&str] = &["Iter", "Entry", "Iterable", "MutexGuard"];
 
 impl<'p> Types<'p> {
     pub fn new(p: &'p Program) -> Types<'p> {
         Types { decls: p.types.iter().map(|t| (t.name(), t)).collect(), program: p }
+    }
+
+    /// Whether an intrinsic keeps or returns every value its argument `i`
+    /// holds (the `keeps` of its declaration, from its contract).
+    pub fn intrinsic_keeps(&self, name: &str, i: u32) -> bool {
+        self.program.intrinsic(name).is_some_and(|d| d.keeps.contains(&i))
+    }
+
+    /// The program's function of that name.
+    pub fn function(&self, name: &str) -> Option<&'p Function> {
+        self.program.function(name)
+    }
+
+    /// The function a call through a trait runs for concrete type
+    /// arguments, with its own type arguments: the impl whose patterns
+    /// match, or the trait's provided method.
+    pub fn trait_target(&self, name: &str, tys: &[Type]) -> Option<(String, Vec<Type>)> {
+        let (trait_name, method) = name.rsplit_once('.')?;
+        let self_ty = tys.first()?;
+        for imp in &self.program.impls {
+            if imp.trait_name != trait_name {
+                continue;
+            }
+            let mut binds: Vec<Option<Type>> = vec![None; imp.params as usize];
+            if !match_pattern(&imp.self_ty, self_ty, &mut binds)
+                || !imp
+                    .trait_args
+                    .iter()
+                    .zip(tys.iter().skip(1))
+                    .all(|(p, t)| match_pattern(p, t, &mut binds))
+            {
+                continue;
+            }
+            let n = imp.trait_args.len();
+            return match imp.methods.iter().find(|(m, _)| m == method) {
+                Some((_, sisu_sir::ImplTarget::Fn(f))) => {
+                    let mut targs: Vec<Type> = binds.into_iter().map(|b| b.unwrap_or(Type::Unit)).collect();
+                    targs.extend(tys.iter().skip(1 + n).cloned());
+                    Some((f.clone(), targs))
+                }
+                Some((_, sisu_sir::ImplTarget::Intrinsic(_))) => None,
+                None => Some((name.to_string(), tys.to_vec())),
+            };
+        }
+        None
     }
 
     /// Where the type's own `Drop` is written: the `self` of its `drop`.
@@ -39,67 +84,12 @@ impl<'p> Types<'p> {
     /// The type of a place, or `None` when SIR does not say (a payload of
     /// a union of error sets).
     pub fn place_ty(&self, f: &Function, p: &Place) -> Option<Type> {
-        let mut t = f.locals.get(p.local.0 as usize)?.ty.clone();
-        let mut variant: Option<u32> = None;
-        for proj in &p.proj {
-            t = match proj {
-                Proj::Deref => match t {
-                    Type::Ref(inner, _) => *inner,
-                    _ => return None,
-                },
-                Proj::Downcast(v) => {
-                    variant = Some(*v);
-                    continue;
-                }
-                Proj::Field(i) => {
-                    let ft = self.field_ty(&t, variant, *i)?;
-                    variant = None;
-                    ft
-                }
-                Proj::Index(_) | Proj::IndexFromEnd(_) => match t {
-                    Type::Named(n, args) if n == "list" => args.into_iter().next()?,
-                    _ => return None,
-                },
-                Proj::Key(_) => match t {
-                    Type::Named(n, args) if n == "dict" => args.into_iter().nth(1)?,
-                    _ => return None,
-                },
-            };
-        }
-        Some(t)
+        sisu_sir::types::place_ty(&|n| self.decl(n), f, p)
     }
 
     /// Field `i` of a struct or tuple, or of variant `v` of an enum.
     pub fn field_ty(&self, t: &Type, variant: Option<u32>, i: u32) -> Option<Type> {
-        match (t, variant) {
-            (Type::Tuple(es), None) => es.get(i as usize).cloned(),
-            (Type::Named(n, args), Some(v)) if n == "Option" => match v {
-                0 if i == 0 => args.first().cloned(),
-                _ => None,
-            },
-            (Type::Named(n, args), Some(v)) if n == "Result" => match (v, i) {
-                (0, 0) => args.first().cloned(),
-                (1, 0) => args.get(1).cloned(),
-                _ => None,
-            },
-            (Type::Named(n, args), None) => match self.decl(n)? {
-                TypeDecl::Struct { fields, .. } => fields.get(i as usize).map(|f| f.ty.subst(args)),
-                TypeDecl::Enum { .. } => None,
-            },
-            (Type::Named(n, args), Some(v)) => match self.decl(n)? {
-                TypeDecl::Enum { variants, .. } => {
-                    variants.get(v as usize)?.fields.get(i as usize).map(|(_, t)| t.subst(args))
-                }
-                TypeDecl::Struct { .. } => None,
-            },
-            (Type::ErrSet(ms), Some(v)) if ms.len() == 1 => match self.decl(&ms[0])? {
-                TypeDecl::Enum { variants, .. } => {
-                    variants.get(v as usize)?.fields.get(i as usize).map(|(_, t)| t.clone())
-                }
-                TypeDecl::Struct { .. } => None,
-            },
-            _ => None,
-        }
+        sisu_sir::types::field_ty(&|n| self.decl(n), t, variant, i)
     }
 
     /// The number of fields of a struct or tuple, or of variant `v`.
@@ -163,6 +153,45 @@ impl<'p> Types<'p> {
         }
     }
 
+    /// The index of a variant of an enum, by name.
+    pub fn variant_index(&self, name: &str, variant: &str) -> Option<u32> {
+        match self.decl(name)? {
+            TypeDecl::Enum { variants, .. } => {
+                variants.iter().position(|v| v.name == variant).map(|i| i as u32)
+            }
+            TypeDecl::Struct { .. } => None,
+        }
+    }
+
+    /// The type a struct's field (or a variant's) is declared with, its
+    /// type parameters unsubstituted.
+    pub fn declared_field_ty(&self, name: &str, variant: Option<u32>, i: u32) -> Option<Type> {
+        match (self.decl(name)?, variant) {
+            (TypeDecl::Struct { fields, .. }, None) => fields.get(i as usize).map(|f| f.ty.clone()),
+            (TypeDecl::Enum { variants, .. }, Some(v)) => {
+                variants.get(v as usize)?.fields.get(i as usize).map(|(_, t)| t.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether every loan a value of a declared field type can hold is one
+    /// of its type parameters' (`T`, `list[T]`, `I.Item`), so a generic
+    /// type's arguments say what it holds; a function type's captures and
+    /// a reference are not.
+    pub fn carried_by_params(&self, t: &Type) -> bool {
+        match t {
+            Type::Param(_) | Type::Assoc(..) => true,
+            Type::Tuple(es) => es.iter().all(|e| self.carried_by_params(e) || !self.may_hold(e)),
+            Type::Named(n, args) => {
+                !BORROWING_BUILTINS.contains(&n.as_str())
+                    && !matches!(self.decl(n), Some(TypeDecl::Struct { view: true, .. }))
+                    && args.iter().all(|a| self.carried_by_params(a) || !self.may_hold(a))
+            }
+            _ => !self.may_hold(t),
+        }
+    }
+
     /// Whether the type is a `view struct` or holds one.
     pub fn is_plain_aggregate(&self, name: &str) -> bool {
         match self.decl(name) {
@@ -187,18 +216,21 @@ impl<'p> Types<'p> {
             Type::Param(_) | Type::Assoc(..) | Type::Dyn(..) => true,
             Type::Tuple(es) => es.iter().any(|e| self.drop_glue_depth(e, depth + 1)),
             Type::Named(n, args) => {
-                if args.iter().any(|a| self.drop_glue_depth(a, depth + 1)) {
+                // Dropping a guard unlocks its mutex, through its loan.
+                if n == "MutexGuard" || args.iter().any(|a| self.drop_glue_depth(a, depth + 1)) {
                     return true;
                 }
+                // The fields with the type's arguments in them.
                 match self.decl(n) {
                     Some(TypeDecl::Struct { drop, fields, .. }) => {
-                        drop.is_some() || fields.iter().any(|f| self.drop_glue_depth(&f.ty, depth + 1))
+                        drop.is_some()
+                            || fields.iter().any(|f| self.drop_glue_depth(&f.ty.subst(args), depth + 1))
                     }
                     Some(TypeDecl::Enum { drop, variants, .. }) => {
                         drop.is_some()
-                            || variants
-                                .iter()
-                                .any(|v| v.fields.iter().any(|(_, t)| self.drop_glue_depth(t, depth + 1)))
+                            || variants.iter().any(|v| {
+                                v.fields.iter().any(|(_, t)| self.drop_glue_depth(&t.subst(args), depth + 1))
+                            })
                     }
                     None => false,
                 }
@@ -332,5 +364,28 @@ impl<'p> Types<'p> {
             },
             _ => None,
         }
+    }
+}
+
+/// Matches an impl's pattern (parameters `$0` and on) against a type.
+fn match_pattern(pat: &Type, ty: &Type, binds: &mut [Option<Type>]) -> bool {
+    match pat {
+        Type::Param(i) => match binds.get_mut(*i as usize) {
+            Some(slot @ None) => {
+                *slot = Some(ty.clone());
+                true
+            }
+            Some(Some(b)) => b == ty,
+            None => false,
+        },
+        Type::Named(n, a) => {
+            matches!(ty, Type::Named(m, b) if m == n && a.len() == b.len()
+                && a.iter().zip(b).all(|(x, y)| match_pattern(x, y, binds)))
+        }
+        Type::Tuple(a) => {
+            matches!(ty, Type::Tuple(b) if a.len() == b.len() && a.iter().zip(b).all(|(x, y)| match_pattern(x, y, binds)))
+        }
+        Type::Ref(a, m) => matches!(ty, Type::Ref(b, k) if m == k && match_pattern(a, b, binds)),
+        other => other == ty,
     }
 }

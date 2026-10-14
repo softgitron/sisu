@@ -271,30 +271,118 @@ impl Program {
     }
 
     /// Whether values of the type are copied rather than moved (04, rule 1).
+    /// `is_copy` where the bounds `env` are in scope: a type parameter
+    /// bounded by `Copy` is `Copy`.
+    pub fn is_copy_in(&self, ty: &Ty, env: &[crate::program::Predicate]) -> bool {
+        if env.is_empty() || !ty.has_params() {
+            return self.is_copy(ty);
+        }
+        self.is_copy_in_depth(ty, env, 0)
+    }
+
+    fn is_copy_in_depth(&self, ty: &Ty, env: &[crate::program::Predicate], depth: u32) -> bool {
+        let copy = self.wk.copy;
+        if depth > 32 {
+            return false;
+        }
+        match ty {
+            Ty::Param(_) | Ty::Assoc(_) => env.iter().any(|p| p.ty == *ty && Some(p.bound.def) == copy),
+            Ty::Tuple(e, _) => e.iter().all(|t| self.is_copy_in_depth(t, env, depth + 1)),
+            Ty::Adt(d, args) if Some(*d) == self.wk.option => {
+                args.iter().all(|t| self.is_copy_in_depth(t, env, depth + 1))
+            }
+            // A `@derive(Copy)` type: its fields with the arguments in them.
+            Ty::Adt(d, args) if !args.is_empty() => match &self.def(*d).kind {
+                DefKind::Struct(s) if s.builtin.is_none() => {
+                    s.copy
+                        && s.fields.iter().all(|f| self.is_copy_in_depth(&f.ty.subst(args), env, depth + 1))
+                }
+                DefKind::Enum(e) => {
+                    e.copy
+                        && e.variants.iter().all(|v| {
+                            v.fields
+                                .iter()
+                                .all(|(_, t)| self.is_copy_in_depth(&t.subst(args), env, depth + 1))
+                        })
+                }
+                _ => self.is_copy(ty),
+            },
+            _ => self.is_copy(ty),
+        }
+    }
+
     pub fn is_copy(&self, ty: &Ty) -> bool {
+        self.is_copy_depth(ty, 0)
+    }
+
+    fn is_copy_depth(&self, ty: &Ty, depth: u32) -> bool {
+        // A type that contains itself this deep is not `Copy` (it needs a
+        // `Box`, which is not).
+        if depth > 32 {
+            return false;
+        }
         match ty {
             Ty::Int | Ty::Float | Ty::Bool | Ty::Char | Ty::Str | Ty::Unit | Ty::Never | Ty::Error => true,
             Ty::Ref(_, m) => !*m,
             Ty::Fn(_) => true,
-            Ty::Tuple(e, _) => e.iter().all(|t| self.is_copy(t)),
-            Ty::ErrSet(members) => members.iter().all(|d| self.def_is_copy(*d, &[])),
+            Ty::Tuple(e, _) => e.iter().all(|t| self.is_copy_depth(t, depth + 1)),
+            Ty::ErrSet(members) => members.iter().all(|d| self.def_is_copy(*d, &[], depth + 1)),
             Ty::Adt(d, args) => {
                 if Some(*d) == self.wk.option {
-                    return args.iter().all(|t| self.is_copy(t));
+                    return args.iter().all(|t| self.is_copy_depth(t, depth + 1));
                 }
-                self.def_is_copy(*d, args)
+                self.def_is_copy(*d, args, depth + 1)
             }
             Ty::Param(_) | Ty::Var(_) | Ty::Dyn(_) | Ty::Assoc(_) => false,
         }
     }
 
-    fn def_is_copy(&self, d: DefId, _args: &[Ty]) -> bool {
+    /// A `@derive(Copy)` type whose fields, with its arguments in them,
+    /// are all `Copy` (a generic one is `Copy` only for such arguments;
+    /// `Key[T]` is for any `T`, which no field holds).
+    fn def_is_copy(&self, d: DefId, args: &[Ty], depth: u32) -> bool {
         match &self.def(d).kind {
-            DefKind::Struct(s) => {
-                s.copy || matches!(s.builtin.as_deref(), Some("Fs" | "Env" | "Clock" | "System" | "DateTime"))
+            DefKind::Struct(s) if s.builtin.is_some() => {
+                matches!(s.builtin.as_deref(), Some("Fs" | "Env" | "Clock" | "System" | "DateTime"))
             }
-            DefKind::Enum(e) | DefKind::ErrorSet(e) => e.copy,
+            DefKind::Struct(s) => {
+                s.copy
+                    && (args.is_empty()
+                        || s.fields.iter().all(|f| self.is_copy_depth(&f.ty.subst(args), depth)))
+            }
+            DefKind::Enum(e) | DefKind::ErrorSet(e) => {
+                e.copy
+                    && (args.is_empty()
+                        || e.variants
+                            .iter()
+                            .all(|v| v.fields.iter().all(|(_, t)| self.is_copy_depth(&t.subst(args), depth))))
+            }
             _ => false,
         }
     }
+}
+
+/// The first `dyn Trait` a type holds by value rather than behind a `ref`
+/// or in a `Box` (03, "Dispatch": `dyn` is unsized).
+pub fn unsized_part(prog: &crate::program::Program, ty: &Ty) -> Option<Ty> {
+    fn walk(prog: &crate::program::Program, t: &Ty, held: bool) -> Option<Ty> {
+        match t {
+            Ty::Dyn(tr) => {
+                if held {
+                    tr.args.iter().find_map(|a| walk(prog, a, false))
+                } else {
+                    Some(t.clone())
+                }
+            }
+            Ty::Ref(inner, _) => walk(prog, inner, true),
+            Ty::Adt(d, args) => {
+                let boxed = Some(*d) == prog.wk.boxed;
+                args.iter().find_map(|a| walk(prog, a, boxed))
+            }
+            Ty::Tuple(es, _) => es.iter().find_map(|e| walk(prog, e, false)),
+            Ty::Fn(f) => f.params.iter().chain(std::iter::once(&f.ret)).find_map(|p| walk(prog, p, false)),
+            _ => None,
+        }
+    }
+    walk(prog, ty, false)
 }

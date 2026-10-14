@@ -1,0 +1,8 @@
+# A stale key used to index an arena panics: the handle is detected, never
+# dangling.
+
+def main():
+    var names = Arena[String]()
+    let k = names.insert("x".to_string())
+    names.remove(k)
+    print(names[k])

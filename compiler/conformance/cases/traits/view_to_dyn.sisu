@@ -1,0 +1,16 @@
+# A `dyn` owns its value, so a view cannot become one (04, "Views").
+
+trait Show:
+    def show(self) -> String
+
+view struct Word:
+    text: str
+
+impl Show for Word:
+    def show(self) -> String:
+        return self.text.to_string()
+
+def main():
+    let s = "hello".to_string()
+    let b: Box[dyn Show] = Box(Word(text=s))
+    print(b.show())

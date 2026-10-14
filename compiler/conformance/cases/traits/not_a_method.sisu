@@ -1,0 +1,16 @@
+# An impl of a trait has only the trait's methods.
+
+trait Shape:
+    def area(self) -> f64
+
+struct Square:
+    side: f64
+
+impl Shape for Square:
+    def area(self) -> f64:
+        return self.side * self.side
+    def volume(self) -> f64:
+        return 0.0
+
+def main():
+    pass

@@ -1,4 +1,12 @@
+def count_if(xs: list[int], keep: (int) -> bool) -> int:
+    var n = 0
+    for x in xs:
+        if keep(x):
+            n += 1
+    return n
+
 def main():
     let xs = [1, 2, 3]
-    let big = xs.iter().filter(x -> x > 1).count()
+    let limit = 1
+    let big = count_if(xs, x -> x > limit)
     print(big)

@@ -36,6 +36,12 @@ impl Interp<'_, '_> {
                 Err(_) => out.push_str("<dangling>"),
             },
             Value::Dyn(d) => self.display_into(&d.value, out),
+            // std's `Contextual` (prelude): `message: cause`.
+            Value::Variant(a) if &*a.ty == "Contextual" && a.fields.len() == 2 => {
+                self.display_into(&a.fields[0], out);
+                out.push_str(": ");
+                self.display_into(&a.fields[1], out);
+            }
             other => self.debug_into(other, out),
         }
     }
@@ -121,6 +127,40 @@ impl Interp<'_, '_> {
                 out.push_str(if matches!(**it, IterState::Done) { "<iter (done)>" } else { "<iter>" })
             }
             Value::Entry(_) => out.push_str("<entry>"),
+            Value::Shared(id) => match self.heap.get(*id as usize) {
+                Some(c) if c.strong > 0 => self.debug_into(&c.value, out),
+                _ => out.push_str("<dropped>"),
+            },
+            Value::Weak(_) => out.push_str("(Weak)"),
+            Value::Cell(v) => {
+                out.push_str("Cell(");
+                self.debug_into(v, out);
+                out.push(')');
+            }
+            Value::Mutex(m) => {
+                out.push_str("Mutex(");
+                if m.locked {
+                    out.push_str("<locked>");
+                } else {
+                    self.debug_into(&m.value, out);
+                }
+                out.push(')');
+            }
+            Value::Guard(p) => match self.read(&p.join(crate::value::Step::MutexValue)) {
+                Ok(t) => self.debug_into(t, out),
+                Err(_) => out.push_str("<dangling>"),
+            },
+            Value::Arena(a) => {
+                out.push_str("Arena([");
+                let live: Vec<&Value> = a.slots.iter().map(|(_, v)| v).filter(|v| !v.is_moved()).collect();
+                for (i, v) in live.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    self.debug_into(v, out);
+                }
+                out.push_str("])");
+            }
             Value::Fs(_) => out.push_str("Fs"),
             Value::Env => out.push_str("Env"),
             Value::Clock => out.push_str("Clock"),

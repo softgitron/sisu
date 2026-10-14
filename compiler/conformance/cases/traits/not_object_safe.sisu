@@ -1,0 +1,11 @@
+# A trait with a method that has no `self` cannot be used as `dyn`.
+
+trait Make:
+    def make() -> Self
+    def show(self) -> String
+
+def show_all(xs: list[Box[dyn Make]]):
+    pass
+
+def main():
+    pass

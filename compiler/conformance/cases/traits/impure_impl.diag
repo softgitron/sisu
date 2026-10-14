@@ -1,0 +1,2 @@
+8:9-8:28 E0333 type.impure-call callee="print" name="fmt"
+  label 7:9-7:12 type.declared-pure-here name="fmt"

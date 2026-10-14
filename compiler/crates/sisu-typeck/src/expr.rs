@@ -88,6 +88,13 @@ impl Checker<'_> {
         if let Ty::Dyn(tr) = &exp
             && !matches!(actual, Ty::Dyn(_) | Ty::Var(_))
         {
+            // A `dyn` expected by value was reported where it is written
+            // (E0395); a reference to one is no second error.
+            if let Ty::Ref(inner, _) = &actual
+                && matches!(self.resolved(inner), Ty::Dyn(_))
+            {
+                return self.wrap(x, Coercion::Mismatch, exp.clone());
+            }
             return self.coerce_to_dyn(x, &actual, tr, &exp, Coercion::ToDyn);
         }
         if let (Ty::Adt(d1, a1), Ty::Adt(d2, a2)) = (&actual, &exp)
@@ -259,6 +266,29 @@ impl Checker<'_> {
         matches!(self.resolved(ty), Ty::Adt(d, _) if Some(d) == self.prog.wk.boxed)
     }
 
+    /// The builtin name of the type, when it is one of the std's
+    /// pointer-like types (`Shared`, `MutexGuard`).
+    pub fn smart_pointer(&self, ty: &Ty) -> Option<&'static str> {
+        match self.resolved(ty) {
+            Ty::Adt(d, _) => match self.prog.builtin(d) {
+                Some("Shared") => Some("Shared"),
+                Some("MutexGuard") => Some("MutexGuard"),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// The value a `Shared` owns or a mutex guard holds, as a place.
+    pub fn deref_smart(&mut self, x: Expr) -> Expr {
+        let inner = match self.resolved(&x.ty) {
+            Ty::Adt(_, a) => a.first().cloned().unwrap_or(Ty::Error),
+            _ => Ty::Error,
+        };
+        let span = x.span;
+        Expr::new(ExprKind::Deref(Box::new(x)), inner, span)
+    }
+
     /// The value a `Box` holds, as a place inside it.
     pub fn unbox(&mut self, x: Expr) -> Expr {
         let inner = match self.resolved(&x.ty) {
@@ -275,7 +305,8 @@ impl Checker<'_> {
         let span = self.span(e.range);
         match &e.kind {
             ast::ExprKind::Int { value, suffix, text } => {
-                self.int_literal(*value, suffix.as_deref(), text, false, e.range, expected)
+                let x = self.int_literal(*value, suffix.as_deref(), text, false, e.range, expected);
+                if suffix.is_none() { self.literal_via_trait(x, expected) } else { x }
             }
             ast::ExprKind::Float { value, suffix, .. } => {
                 if let Some(s) = suffix
@@ -283,7 +314,8 @@ impl Checker<'_> {
                 {
                     self.unsupported(e.range, &format!("`{s}`"), "the sized numeric types (Phase 4)");
                 }
-                Expr::new(ExprKind::Float(*value), Ty::Float, span)
+                let x = Expr::new(ExprKind::Float(*value), Ty::Float, span);
+                if suffix.is_none() { self.literal_via_trait(x, expected) } else { x }
             }
             ast::ExprKind::Char(c) => Expr::new(ExprKind::Char(*c), Ty::Char, span),
             ast::ExprKind::Str(parts) => self.string_literal(parts, e.range, expected),
@@ -391,6 +423,18 @@ impl Checker<'_> {
                 self.if_expr(branches, else_.as_deref(), e.range, expected)
             }
             ast::ExprKind::Match { scrutinee, arms } => self.match_expr(scrutinee, arms, e.range, expected),
+            ast::ExprKind::Comptime(_) => {
+                self.unsupported(e.range, "`comptime`", "compile-time evaluation (Phase 4)");
+                Expr::error(span)
+            }
+            ast::ExprKind::FieldOf { .. } => {
+                self.unsupported(
+                    e.range,
+                    "a field named by a compile-time value (`x.[f]`) outside a derive",
+                    "reflection beyond derive (Phase 8)",
+                );
+                Expr::error(span)
+            }
             ast::ExprKind::Unsupported(what) => {
                 let phase = if what.contains("comptime") || what.contains("compile-time") {
                     "compile-time evaluation (Phase 4)"
@@ -450,12 +494,41 @@ impl Checker<'_> {
 
     fn plain_string(&mut self, s: String, span: Span, expected: Option<&Ty>) -> Expr {
         // A literal takes the expected type when it is `String` or `Path`
-        // (FromLiteral, 02 "Literals").
+        // (their `FromLiteral[str]`, 02 "Literals", which lowering does
+        // directly), or another type that implements `FromLiteral[str]`.
         let ty = match expected.map(|t| self.resolved(t)) {
             Some(t @ Ty::Adt(d, _)) if matches!(self.prog.builtin(d), Some("String" | "Path")) => t,
             _ => Ty::Str,
         };
-        Expr::new(ExprKind::Str(s), ty, span)
+        let x = Expr::new(ExprKind::Str(s), ty.clone(), span);
+        if ty == Ty::Str { self.literal_via_trait(x, expected) } else { x }
+    }
+
+    /// A literal whose expected type is not the literal's own but
+    /// implements `FromLiteral[L]` for the literal's type `L`: the call
+    /// `FromLiteral.from_literal(x)` (02, "Literals").
+    fn literal_via_trait(&mut self, x: Expr, expected: Option<&Ty>) -> Expr {
+        let prog = self.prog;
+        let (Some(exp), Some(tr_def)) = (expected, prog.wk.from_literal) else { return x };
+        let exp = prog.normalize(&self.infer.zonk(exp), &self.env);
+        if !matches!(exp, Ty::Adt(..) | Ty::Param(_) | Ty::Assoc(_)) || x.ty == Ty::Error {
+            return x;
+        }
+        let tr = sisu_resolve::TraitRef { def: tr_def, args: vec![x.ty.clone()] };
+        if !prog.implements(&exp, &tr, &self.env).holds() {
+            return x;
+        }
+        let Some(m) = prog.trait_method(tr_def, "from_literal") else { return x };
+        let span = x.span;
+        let lit = x.ty.clone();
+        Expr::new(
+            ExprKind::Call {
+                callee: Callee::Fn { def: m, type_args: vec![exp.clone(), lit] },
+                args: vec![Arg { expr: x, mode: ArgMode::Ref }],
+            },
+            exp,
+            span,
+        )
     }
 
     fn string_literal(&mut self, parts: &[ast::StrPart], range: TextRange, expected: Option<&Ty>) -> Expr {
@@ -965,10 +1038,12 @@ impl Checker<'_> {
         let span = self.span(range);
         if op == UnOp::Neg {
             if let ast::ExprKind::Int { value, suffix, text } = &inner.kind {
-                return self.int_literal(*value, suffix.as_deref(), text, true, range, expected);
+                let x = self.int_literal(*value, suffix.as_deref(), text, true, range, expected);
+                return if suffix.is_none() { self.literal_via_trait(x, expected) } else { x };
             }
-            if let ast::ExprKind::Float { value, .. } = &inner.kind {
-                return Expr::new(ExprKind::Float(-*value), Ty::Float, span);
+            if let ast::ExprKind::Float { value, suffix, .. } = &inner.kind {
+                let x = Expr::new(ExprKind::Float(-*value), Ty::Float, span);
+                return if suffix.is_none() { self.literal_via_trait(x, expected) } else { x };
             }
         }
         let x = match op {
@@ -1046,6 +1121,11 @@ impl Checker<'_> {
                         let b = strip(self, &el);
                         let span = self.span(range);
                         self.require(b.clone(), self.prog.wk.eq, span);
+                        // A `set` or `dict` finds the key by its hash.
+                        if matches!(&container, Ty::Adt(d, _) if Some(*d) == self.prog.wk.set || Some(*d) == self.prog.wk.dict)
+                        {
+                            self.require(b.clone(), self.prog.wk.hash, span);
+                        }
                         if !self.infer.try_unify(&a, &b) {
                             let d = self
                                 .error(msg::TYPE_COMPARISON_TYPES, range)
@@ -1113,7 +1193,11 @@ impl Checker<'_> {
         expected: Option<&Ty>,
     ) -> Expr {
         let span = self.span(range);
-        let opt_hint = expected.map(|t| self.option_of(t.clone()));
+        // An open expected type (a generic call's parameter) says nothing
+        // yet, and binding it to the option's payload would forbid the
+        // copy a `ref` payload of a `Copy` type decays to.
+        let opt_hint =
+            expected.filter(|t| !matches!(self.resolved(t), Ty::Var(_))).map(|t| self.option_of(t.clone()));
         let o = self.infer_expr(lhs, opt_hint.as_ref());
         let Some(inner) = self.as_option(&o.ty) else {
             if o.ty != Ty::Error {
@@ -1369,6 +1453,9 @@ impl Checker<'_> {
         let mut target = expected.cloned();
         let mut out = Vec::new();
         for a in arms {
+            if self.arm_made_at_compile_time(a) {
+                continue;
+            }
             self.push_scope();
             let p = self.check_pat(&a.pat, &sty, by_ref);
             let guard = a.guard.as_ref().map(|g| self.check_condition_expr(g));
@@ -1410,6 +1497,16 @@ impl Checker<'_> {
         Expr::new(ExprKind::Match { scrutinee: Box::new(s), arms: out }, ty, span)
     }
 
+    /// Arms made by `comptime for` or `comptime if` exist only in a
+    /// derive's template (08); anywhere else they are reported.
+    fn arm_made_at_compile_time(&mut self, a: &ast::Arm) -> bool {
+        if a.generated.is_none() {
+            return false;
+        }
+        self.unsupported(a.range, "arms made at compile time outside a derive", "reflection beyond derive (Phase 8)");
+        true
+    }
+
     /// A `match` in statement position: arms may hold blocks.
     pub fn check_match_stmt(&mut self, scrutinee: &ast::Expr, arms: &[ast::Arm], range: TextRange) -> Stmt {
         let span = self.span(range);
@@ -1418,6 +1515,9 @@ impl Checker<'_> {
         let sty = s.ty.clone();
         let mut out = Vec::new();
         for a in arms {
+            if self.arm_made_at_compile_time(a) {
+                continue;
+            }
             self.push_scope();
             let p = self.check_pat(&a.pat, &sty, by_ref);
             let guard = a.guard.as_ref().map(|g| self.check_condition_expr(g));
@@ -1455,10 +1555,39 @@ impl Checker<'_> {
             ast::ClosureBody::Expr(e) => ClosureSource::Expr(e.clone()),
             ast::ClosureBody::Block(b) => ClosureSource::Block(b.clone()),
         };
-        if c.own {
-            self.unsupported(c.range, "an `own` closure", "closures with captures by move (Phase 3)");
+        let x = self.closure_from_parts(names, body, expected, c.range);
+        if c.own
+            && let ExprKind::Closure(id) = x.kind
+        {
+            self.own_closure(id, c.range);
         }
-        self.closure_from_parts(names, body, expected, c.range)
+        x
+    }
+
+    /// An `own` closure keeps copies of what it captures (04, "Closures"),
+    /// so it holds no borrow of them and may be stored and returned. Stage
+    /// 0 copies: every capture must be `Copy`, and the closure cannot
+    /// change one (a call works on its own copy). A capture by move arrives
+    /// with tasks, where values cross into spawned closures (Phase 6).
+    fn own_closure(&mut self, id: ClosureId, range: TextRange) {
+        let caps = self.closures.get(id.0 as usize).and_then(|c| c.as_ref()).map(|c| c.captures.clone());
+        for cap in caps.unwrap_or_default() {
+            let local = &self.locals[cap.local.0 as usize];
+            let (name, ty) = (local.name.clone(), local.ty.clone());
+            if cap.mutable {
+                let d = self.error(msg::TYPE_OWN_CLOSURE_CHANGES, range).with("name", name);
+                self.report(d);
+            } else if !self.is_copy(&ty) && self.infer.zonk(&ty) != Ty::Error {
+                let d = self
+                    .error(msg::TYPE_OWN_CLOSURE_CAPTURE, range)
+                    .with("name", name)
+                    .with("ty", self.show(&ty));
+                self.report(d);
+            }
+        }
+        if let Some(Some(c)) = self.closures.get_mut(id.0 as usize) {
+            c.own = true;
+        }
     }
 
     pub fn closure_from_parts(
@@ -1537,7 +1666,7 @@ impl Checker<'_> {
         let pure = crate::purity::first_impure_in_block(self.prog, &block, &self.locals).is_none();
         let fn_ty = Ty::Fn(Box::new(FnTy { params: ptys, ret: ret.clone(), pure }));
         self.closures[id.0 as usize] =
-            Some(Closure { params, captures, ret, body: block, span, fn_ty: fn_ty.clone() });
+            Some(Closure { params, captures, own: false, ret, body: block, span, fn_ty: fn_ty.clone() });
         Expr::new(ExprKind::Closure(id), fn_ty, span)
     }
 
@@ -1691,10 +1820,22 @@ impl Checker<'_> {
         let span = self.span(range);
         let prog = self.prog;
         let mut b = self.auto_deref(b);
-        // A `Box` lends its fields to its value: `boxed` is its own.
-        while self.is_box(&b.ty) && name.text != "boxed" {
-            b = self.unbox(b);
-            b = self.auto_deref(b);
+        // A `Box` lends its fields to its value: `boxed` is its own. So
+        // does a `Shared`, and a mutex guard's `value` is the value.
+        loop {
+            if self.is_box(&b.ty) && name.text != "boxed" {
+                b = self.unbox(b);
+                b = self.auto_deref(b);
+                continue;
+            }
+            match self.smart_pointer(&b.ty) {
+                Some("Shared") => {
+                    b = self.deref_smart(b);
+                    b = self.auto_deref(b);
+                }
+                Some("MutexGuard") if name.text == "value" => return self.deref_smart(b),
+                _ => break,
+            }
         }
         let t = self.resolved(&b.ty);
         match &t {
@@ -1797,9 +1938,24 @@ impl Checker<'_> {
                 let ty = Ty::Adt(*d, a.clone());
                 Expr::new(ExprKind::Slice { base: Box::new(b), lo, hi }, ty, span)
             }
+            // `arena[key]`: the value of a live key; a stale one panics.
+            (Ty::Adt(d, a), ast::IndexArg::Expr(e)) if prog.builtin(*d) == Some("Arena") => {
+                let v = a.first().cloned().unwrap_or(Ty::Error);
+                let key = prog
+                    .lookup_in(prog.prelude, "Key")
+                    .map(|k| Ty::Adt(k, vec![v.clone()]))
+                    .unwrap_or(Ty::Error);
+                let idx = self.check_expr(e, &key);
+                Expr::new(
+                    ExprKind::Index { base: Box::new(b), index: Box::new(idx), kind: IndexKind::Dict },
+                    v,
+                    span,
+                )
+            }
             (Ty::Adt(d, a), ast::IndexArg::Expr(e)) if prog.builtin(*d) == Some("dict") => {
                 let k = a.first().cloned().unwrap_or(Ty::Error);
                 let v = a.get(1).cloned().unwrap_or(Ty::Error);
+                self.require(k.clone(), prog.wk.hash, span);
                 let idx = self.check_expr(e, &k);
                 Expr::new(
                     ExprKind::Index { base: Box::new(b), index: Box::new(idx), kind: IndexKind::Dict },

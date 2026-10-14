@@ -68,7 +68,13 @@ impl FnLower<'_, '_> {
             return p.clone();
         }
         if let Some(&k) = self.env.get(&l) {
-            return Place { local: sir::LocalId(1), proj: vec![Proj::Field(k), Proj::Deref] };
+            // An `own` closure's environment holds the values themselves.
+            let own = self.closure.is_some_and(|c| self.body.closures[c.0 as usize].own);
+            return if own {
+                Place { local: sir::LocalId(1), proj: vec![Proj::Field(k)] }
+            } else {
+                Place { local: sir::LocalId(1), proj: vec![Proj::Field(k), Proj::Deref] }
+            };
         }
         Place::local(self.local_for(l))
     }
@@ -99,6 +105,12 @@ impl FnLower<'_, '_> {
                 } else {
                     let t = self.temp(&inner.ty);
                     self.into(Place::local(t), inner);
+                    // A `Shared` or a mutex guard made for the expression
+                    // is dropped with the statement's temporaries.
+                    if self.needs_drop(&inner.ty) && inner.ty != Ty::Never {
+                        self.register(DropEntry::Local(t));
+                        self.split();
+                    }
                     Place::local(t).project(Proj::Deref)
                 }
             }
@@ -116,7 +128,7 @@ impl FnLower<'_, '_> {
 
     /// Reads a place by value: a copy, or a move of a non-`Copy` value.
     pub fn copy_or_move(&mut self, p: Place, ty: &Ty) -> Operand {
-        if self.ctx.prog.is_copy(ty) || matches!(ty, Ty::Ref(..)) {
+        if self.ctx.prog.is_copy_in(ty, &self.bounds) || matches!(ty, Ty::Ref(..)) {
             return Operand::Copy(p);
         }
         Operand::Move(p)
@@ -146,7 +158,7 @@ impl FnLower<'_, '_> {
         }
         let t = self.temp(&e.ty);
         self.into(Place::local(t), e);
-        if self.ctx.prog.is_copy(&e.ty) || matches!(e.ty, Ty::Ref(..)) {
+        if self.ctx.prog.is_copy_in(&e.ty, &self.bounds) || matches!(e.ty, Ty::Ref(..)) {
             Operand::Copy(Place::local(t))
         } else {
             Operand::Move(Place::local(t))
@@ -165,7 +177,7 @@ impl FnLower<'_, '_> {
     /// An operand for reading without consuming: a copy of a `Copy`
     /// value, a reference otherwise.
     pub fn compare_operand(&mut self, e: &thir::Expr) -> Operand {
-        if self.ctx.prog.is_copy(&e.ty) || matches!(e.ty, Ty::Ref(..)) {
+        if self.ctx.prog.is_copy_in(&e.ty, &self.bounds) || matches!(e.ty, Ty::Ref(..)) {
             self.operand(e)
         } else {
             self.borrow_operand(e, false)
@@ -221,7 +233,7 @@ impl FnLower<'_, '_> {
             ArgMode::Ref => self.ref_operand(&a.expr),
             ArgMode::Value => self.operand(&a.expr),
             ArgMode::Borrow => {
-                if self.ctx.prog.is_copy(&a.expr.ty) || matches!(a.expr.ty, Ty::Ref(..)) {
+                if self.ctx.prog.is_copy_in(&a.expr.ty, &self.bounds) || matches!(a.expr.ty, Ty::Ref(..)) {
                     self.operand(&a.expr)
                 } else {
                     self.borrow_operand(&a.expr, false)
@@ -437,16 +449,58 @@ impl FnLower<'_, '_> {
                 let base = prog.normalize(first.ty.strip_ref(), &self.bounds);
                 let eq_trait = prog.wk.eq.filter(|t| !prog.is_structural(&base, *t));
                 let ord_trait = prog.wk.partial_ord.filter(|t| !prog.is_structural(&base, *t));
-                let any_trait = rest.iter().any(|(op, _)| match op {
+                // `x in xs` for a list whose elements have an `Eq` of their
+                // own: `list.contains`, written in Sisu.
+                let bounds = self.bounds.clone();
+                let contains = |x: &sisu_typeck::Expr| -> Option<sisu_resolve::DefId> {
+                    let container = prog.normalize(x.ty.strip_ref(), &bounds);
+                    let Ty::Adt(d, args) = &container else { return None };
+                    if Some(*d) != prog.wk.list {
+                        return None;
+                    }
+                    let elem = args.first()?;
+                    let eq = prog.wk.eq?;
+                    if prog.is_structural(elem, eq) {
+                        return None;
+                    }
+                    prog.method(container.key()?, "contains")
+                };
+                let any_trait = rest.iter().any(|(op, x)| match op {
                     CmpOp::Eq | CmpOp::Ne => eq_trait.is_some(),
-                    CmpOp::In | CmpOp::NotIn => false,
+                    CmpOp::In | CmpOp::NotIn => contains(x).is_some(),
                     _ => ord_trait.is_some(),
                 });
                 let mut a = if any_trait { self.ref_operand(first) } else { self.compare_operand(first) };
                 let join = self.new_block();
                 for (i, (op, x)) in rest.iter().enumerate() {
                     let b = if any_trait { self.ref_operand(x) } else { self.compare_operand(x) };
+                    let via_contains =
+                        if matches!(op, CmpOp::In | CmpOp::NotIn) { contains(x) } else { None };
                     match op {
+                        CmpOp::In | CmpOp::NotIn if via_contains.is_some() => {
+                            let elem = match prog.normalize(x.ty.strip_ref(), &self.bounds) {
+                                Ty::Adt(_, args) => args.first().cloned().unwrap_or(Ty::Error),
+                                _ => Ty::Error,
+                            };
+                            let m = via_contains.unwrap_or(sisu_resolve::DefId(0));
+                            let (callee, _) = self.callee_for(m, std::slice::from_ref(&elem));
+                            let t = self.temp_sir(sir::Type::Bool);
+                            self.emit(
+                                StatementKind::Call {
+                                    dest: Place::local(t),
+                                    callee,
+                                    args: vec![b.clone(), a.clone()],
+                                },
+                                loc,
+                            );
+                            let r = Rvalue::Use(Operand::Copy(Place::local(t)));
+                            let r = if *op == CmpOp::NotIn {
+                                Rvalue::Unary(sir::UnOp::Not, Operand::Copy(Place::local(t)))
+                            } else {
+                                r
+                            };
+                            self.assign(dest.clone(), r, loc);
+                        }
                         CmpOp::NotIn => {
                             let t = self.temp_sir(sir::Type::Bool);
                             self.assign(
@@ -548,11 +602,17 @@ impl FnLower<'_, '_> {
             ExprKind::Match { scrutinee, arms } => self.match_into(Some(dest), scrutinee, arms, e.span),
             ExprKind::Closure(id) => {
                 let cl = &self.body.closures[id.0 as usize];
+                let own = cl.own;
                 let caps: Vec<(thir::LocalId, bool)> =
                     cl.captures.iter().map(|c| (c.local, c.mutable)).collect();
                 let mut ops = Vec::new();
                 for (l, m) in caps {
                     let p = self.local_place(l);
+                    // An `own` closure keeps a copy (its captures are `Copy`).
+                    if own {
+                        ops.push(Operand::Copy(p));
+                        continue;
+                    }
                     let ty = self.body.locals[l.0 as usize].ty.clone();
                     let t = self.temp_sir(sir::Type::Ref(Box::new(self.ctx.ty(&ty)), m));
                     self.assign(Place::local(t), Rvalue::Ref(p, m), loc);
@@ -854,7 +914,14 @@ impl FnLower<'_, '_> {
         let Some(f) = prog.fn_info(def) else {
             return (Callee::Fn(self.ctx.fn_name(def), Vec::new()), Vec::new());
         };
-        if let Some(n) = &f.intrinsic {
+        let fast = f.structural.as_ref().filter(|_| {
+            // Every bound met by a structural impl: the host computes it.
+            f.predicates.iter().all(|p| {
+                let subject = prog.normalize(&p.ty.subst(type_args), &self.bounds);
+                prog.is_structural(&subject, p.bound.def)
+            })
+        });
+        if let Some(n) = f.intrinsic.as_ref().or(fast) {
             let tys = if self.needs_type_args(def) {
                 type_args.iter().map(|t| self.ctx.ty(t)).collect()
             } else {
@@ -870,8 +937,9 @@ impl FnLower<'_, '_> {
             slots.push((o.clone(), m));
         }
         slots.extend(f.params.iter().map(|p| (p.ty.clone(), p.mode)));
+        let env = prog.elaborate_env(&f.predicates);
         for (ty, mode) in slots {
-            let local = sisu_typeck::param_local_ty(prog, &ty, mode);
+            let local = sisu_typeck::param_local_ty(prog, &ty, mode, &env);
             let concrete = prog.normalize(&local.subst(type_args), &self.bounds);
             by_value.push(mode == sisu_syntax::ast::Mode::Borrow && !matches!(concrete, Ty::Ref(..)));
         }

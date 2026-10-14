@@ -1,13 +1,15 @@
-//! The run loop, statements and drop glue.
+//! The run loop and statements.
 //!
 //! The loop is a trampoline (18, Phase 0: "an explicit per-task frame
 //! stack, no host recursion for Sisu calls"): a call pushes a [`Frame`]
 //! and the loop continues in it; a return pops it and stores the result in
-//! the caller's destination. A panic walks the frame stack: in each frame
-//! it jumps to the current block's cleanup, which ends in `resume`, or, if
-//! the block has none, leaves the frame at once.
+//! the caller's destination. Before a frame's next statement, the loop
+//! runs the drops the frame has pending (`drops.rs`), which may push the
+//! frames of drop glue. A panic walks the frame stack: in each frame it
+//! jumps to the current block's cleanup, which ends in `resume`, or, if the
+//! block has none, leaves the frame once its pending drops are done.
 
-use crate::value::{Pointer, Value};
+use crate::value::Value;
 use crate::{Frame, Interp, MAX_DEPTH, PanicInfo, Unwind, ice, msg, panic, render};
 use sisu_sir as sir;
 use sisu_sir::{Callee, Operand, Place, Rvalue, StatementKind, Terminator};
@@ -51,12 +53,6 @@ impl<'p> Interp<'p, '_> {
         self.call_fn(fi, args)
     }
 
-    /// Calls a function value (a function constant or a closure) to completion.
-    pub(crate) fn call_value(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, Unwind> {
-        let (fi, args, tys) = self.callee_of(f, args)?;
-        self.call_fn_tys(fi, args, tys)
-    }
-
     #[allow(clippy::type_complexity)]
     fn callee_of(
         &self,
@@ -73,15 +69,59 @@ impl<'p> Interp<'p, '_> {
         }
     }
 
-    /// A type of the running function with its type arguments filled in.
+    /// A type of the running function with its type arguments filled in,
+    /// and its associated types (`<T as Trait>.Name`) replaced by what the
+    /// impl for `T` binds them to.
     pub(crate) fn concrete(&self, t: &sir::Type) -> sir::Type {
-        match self.frames.last() {
+        let t = match self.frames.last() {
             Some(f) if !f.tys.is_empty() => t.subst(&f.tys),
             _ => t.clone(),
+        };
+        if has_assoc(&t) { self.normalize_ty(&t) } else { t }
+    }
+
+    /// Replaces each associated type of a concrete type by its binding.
+    pub(crate) fn normalize_ty(&self, t: &sir::Type) -> sir::Type {
+        use sir::Type;
+        match t {
+            Type::Assoc(s, tr, args, name) => {
+                let s = self.normalize_ty(s);
+                let args: Vec<Type> = args.iter().map(|a| self.normalize_ty(a)).collect();
+                for imp in &self.prog.impls {
+                    if imp.trait_name != *tr {
+                        continue;
+                    }
+                    let mut binds: Vec<Option<Type>> = vec![None; imp.params as usize];
+                    if crate::dispatch::match_type(&imp.self_ty, &s, &mut binds)
+                        && imp
+                            .trait_args
+                            .iter()
+                            .zip(&args)
+                            .all(|(p, a)| crate::dispatch::match_type(p, a, &mut binds))
+                        && let Some((_, bound)) = imp.assoc.iter().find(|(n, _)| n == name)
+                    {
+                        let targs: Vec<Type> = binds.into_iter().map(|b| b.unwrap_or(Type::Unit)).collect();
+                        return self.normalize_ty(&bound.subst(&targs));
+                    }
+                }
+                Type::Assoc(Box::new(s), tr.clone(), args, name.clone())
+            }
+            Type::Named(n, args) => {
+                Type::Named(n.clone(), args.iter().map(|a| self.normalize_ty(a)).collect())
+            }
+            Type::Dyn(n, args) => Type::Dyn(n.clone(), args.iter().map(|a| self.normalize_ty(a)).collect()),
+            Type::Tuple(es) => Type::Tuple(es.iter().map(|e| self.normalize_ty(e)).collect()),
+            Type::Ref(t, m) => Type::Ref(Box::new(self.normalize_ty(t)), *m),
+            Type::Fn(ps, r, p) => Type::Fn(
+                ps.iter().map(|x| self.normalize_ty(x)).collect(),
+                Box::new(self.normalize_ty(r)),
+                *p,
+            ),
+            other => other.clone(),
         }
     }
 
-    fn push_frame(
+    pub(crate) fn push_frame(
         &mut self,
         fi: usize,
         args: Vec<Value>,
@@ -109,38 +149,11 @@ impl<'p> Interp<'p, '_> {
             pending: None,
             ret,
             tys,
+            drops: Vec::new(),
+            after: None,
+            resume_after_drops: false,
         });
         Ok(())
-    }
-
-    /// Runs `f` with `vals` in a scratch frame, passing pointers to them;
-    /// returns the values as `f` left them, and its result.
-    pub(crate) fn with_scratch<R>(
-        &mut self,
-        vals: Vec<Value>,
-        f: impl FnOnce(&mut Self, Vec<Pointer>) -> Result<R, Unwind>,
-    ) -> (Vec<Value>, Result<R, Unwind>) {
-        self.serial += 1;
-        let serial = self.serial;
-        let frame = self.frames.len() as u32;
-        let ptrs = (0..vals.len() as u32)
-            .map(|local| Pointer { frame, serial, local, path: Vec::new(), tag: 0 })
-            .collect();
-        self.frames.push(Frame {
-            serial,
-            func: None,
-            locals: vals,
-            loc: None,
-            bb: 0,
-            next: 0,
-            pending: None,
-            ret: None,
-            tys: Vec::new(),
-        });
-        let r = f(self, ptrs);
-        self.frames.truncate(frame as usize + 1);
-        let vals = self.frames.pop().map(|fr| fr.locals).unwrap_or_default();
-        (vals, r)
     }
 
     /// Runs until the frame at index `base` returns.
@@ -188,7 +201,8 @@ impl<'p> Interp<'p, '_> {
                 Some(b) => (b.cleanup, b.unwind),
                 None => (false, None),
             };
-            if cleanup {
+            let draining = self.frames.last().is_some_and(|f| f.resume_after_drops);
+            if cleanup || draining {
                 let first = self
                     .frames
                     .last()
@@ -201,12 +215,22 @@ impl<'p> Interp<'p, '_> {
                     &[("first", first), ("message", p.message.clone())],
                 )));
             }
-            p.stack.push(self.frame_line());
+            if !self.in_glue() {
+                p.stack.push(self.frame_line());
+            }
             match unwind {
                 Some(u) => {
                     if let Some(fr) = self.frames.last_mut() {
                         fr.bb = u.0 as usize;
                         fr.next = 0;
+                        fr.pending = Some(p);
+                    }
+                    return Ok(());
+                }
+                // Values the frame was dropping are still dropped.
+                None if self.frames.last().is_some_and(|f| !f.drops.is_empty()) => {
+                    if let Some(fr) = self.frames.last_mut() {
+                        fr.resume_after_drops = true;
                         fr.pending = Some(p);
                     }
                     return Ok(());
@@ -219,6 +243,22 @@ impl<'p> Interp<'p, '_> {
                 }
             }
         }
+    }
+
+    /// Whether the top frame runs drop glue that returns next, outside
+    /// cleanup.
+    fn glue_returns_next(&self) -> bool {
+        let Some(fr) = self.frames.last() else { return false };
+        let Some(f) = fr.func.and_then(|i| self.prog.functions.get(i)) else { return false };
+        f.kind == sir::FnKind::Glue
+            && fr.pending.is_none()
+            && f.blocks.get(fr.bb).is_some_and(|b| fr.next >= b.stmts.len() && b.term == Terminator::Return)
+    }
+
+    /// Whether the top frame runs drop glue, which a stack trace leaves out.
+    fn in_glue(&self) -> bool {
+        let f = self.frames.last().and_then(|fr| fr.func).and_then(|i| self.prog.functions.get(i));
+        f.is_some_and(|f| f.kind == sir::FnKind::Glue)
     }
 
     fn current_block(&self) -> Option<&'p sir::BasicBlock> {
@@ -254,8 +294,27 @@ impl<'p> Interp<'p, '_> {
 
     /// Executes one statement or terminator of the top frame.
     fn step(&mut self) -> Result<Event<'p>, Unwind> {
-        let block = self.current_block().ok_or_else(|| ice("the top frame has no current block"))?;
         let top = self.frames.len() - 1;
+        if let Some(d) = self.frames[top].drops.pop() {
+            if top > 0 && self.frames[top].drops.is_empty() && self.glue_returns_next() {
+                // The glue's last drop: the glue is done, and its caller
+                // drops the part, so a chain of values takes one frame.
+                if let Some(fr) = self.frames.pop() {
+                    self.mon_frame_gone(fr.serial, top as u32, fr.locals.len());
+                }
+                self.frames[top - 1].drops.push(d);
+                return Ok(Event::Continue);
+            }
+            self.drop_next(d)?;
+            return Ok(Event::Continue);
+        }
+        if self.frames[top].resume_after_drops {
+            let fr = self.frames.pop().ok_or_else(|| ice("resume without a frame"))?;
+            let n = self.frames.len() as u32;
+            self.mon_frame_gone(fr.serial, n, fr.locals.len());
+            return fr.pending.map(Event::Resumed).ok_or_else(|| ice("resume outside unwinding"));
+        }
+        let block = self.current_block().ok_or_else(|| ice("the top frame has no current block"))?;
         let next = self.frames[top].next;
         if let Some(s) = block.stmts.get(next) {
             if self.monitoring() {
@@ -297,7 +356,11 @@ impl<'p> Interp<'p, '_> {
                 self.mon_frame_gone(fr.serial, n, fr.locals.len());
                 let v =
                     fr.locals.first_mut().map(|v| std::mem::replace(v, Value::Moved)).unwrap_or(Value::Unit);
-                Ok(Event::Returned(if v.is_moved() { Value::Unit } else { v }, fr.ret))
+                let v = if v.is_moved() { Value::Unit } else { v };
+                if let Some(a) = fr.after.take() {
+                    self.after(a, &v)?;
+                }
+                Ok(Event::Returned(v, fr.ret))
             }
             Terminator::Resume => {
                 let fr = self.frames.pop().ok_or_else(|| ice("resume without a frame"))?;
@@ -341,7 +404,7 @@ impl<'p> Interp<'p, '_> {
                         }
                         crate::dispatch::Target::Intrinsic(n, vals, tys) => {
                             let ret = self.dest_type(dest);
-                            let v = self.intrinsic(&n, &tys, vals, ret)?;
+                            let v = self.intrinsic(&n, &tys, vals, ret.as_ref())?;
                             self.store(dest, v)
                         }
                     }
@@ -369,7 +432,7 @@ impl<'p> Interp<'p, '_> {
                         self.mon_drop_unconsumed(&at, self.read(&at)?)?;
                     }
                     let ret = self.dest_type(dest);
-                    let v = self.intrinsic(name, tys, vals, ret)?;
+                    let v = self.intrinsic(name, tys, vals, ret.as_ref())?;
                     self.store(dest, v)
                 }
             },
@@ -390,7 +453,9 @@ impl<'p> Interp<'p, '_> {
                 self.mon_access(&ptr, crate::monitor::Op::Drop)?;
                 let v = std::mem::replace(self.write(&ptr)?, Value::Moved);
                 self.mon_drop_unconsumed(&ptr, &v)?;
-                self.drop_value(v)
+                let ty = self.drop_type(place, &v);
+                self.queue_drop(v, ty);
+                Ok(())
             }
             StatementKind::StorageDead(l) => {
                 if let Some(slot) = self.frames.last_mut().and_then(|f| f.locals.get_mut(l.0 as usize)) {
@@ -421,13 +486,15 @@ impl<'p> Interp<'p, '_> {
     }
 
     /// The declared type of a call's destination, when it is a whole local.
-    fn dest_type(&self, dest: &Place) -> Option<&'p sir::Type> {
+    /// The type of a call's destination, with the running function's type
+    /// arguments filled in.
+    fn dest_type(&self, dest: &Place) -> Option<sir::Type> {
         let prog = self.prog;
         if !dest.proj.is_empty() {
             return None;
         }
         let fi = self.frames.last()?.func?;
-        prog.functions.get(fi)?.locals.get(dest.local.0 as usize).map(|l| &l.ty)
+        prog.functions.get(fi)?.locals.get(dest.local.0 as usize).map(|l| self.concrete(&l.ty))
     }
 
     pub(crate) fn local(&self, l: sir::LocalId) -> Result<&Value, Unwind> {
@@ -548,7 +615,8 @@ impl<'p> Interp<'p, '_> {
                 if v.is_moved() {
                     return Err(self.moved_at(&ptr));
                 }
-                Ok(v.clone())
+                let v = v.clone();
+                Ok(self.copy_value(&v))
             }
             Rvalue::StrView(p) => {
                 let ptr = self.resolve(p)?;
@@ -594,7 +662,7 @@ impl<'p> Interp<'p, '_> {
                 while let (Some(k), Some(v)) = (it.next(), it.next()) {
                     let key = self.key_of(&k)?;
                     if let Some(old) = d.insert(key, k, v) {
-                        self.drop_value(old)?;
+                        self.queue_drop(old, None);
                     }
                 }
                 Value::Dict(Box::new(d))
@@ -602,64 +670,54 @@ impl<'p> Interp<'p, '_> {
         })
     }
 
-    // ---------------------------------------------------------------- drop glue
+    // ---------------------------------------------------------------- copies
 
-    /// Runs the drop glue of a value: the type's `Drop` with a reference
-    /// to the value, then its parts: fields and tuple elements in reverse
-    /// order (04, rule 6), collection elements first to last, a dict
-    /// entry's value before its key.
-    pub(crate) fn drop_value(&mut self, v: Value) -> Result<(), Unwind> {
-        if !self.any_drop {
-            return Ok(());
-        }
+    /// A copy made by `.copy()`: a deep copy, except that a `Shared` gets
+    /// another owner (and a `Weak` another handle) rather than a copy of
+    /// its value (04, rule 5).
+    pub(crate) fn copy_value(&mut self, v: &Value) -> Value {
         match v {
-            Value::Struct(a) | Value::Variant(a) if self.drop_fn(&a.ty).is_some() => {
-                let is_struct = matches!(self.types.get(&*a.ty), Some(sir::TypeDecl::Struct { .. }));
-                let name = self.drop_fn(&a.ty).unwrap_or_default();
-                let v = if is_struct { Value::Struct(a) } else { Value::Variant(a) };
-                let (vals, r) = self.with_scratch(vec![v], |me, ptrs| {
-                    let arg = ptrs.into_iter().next().map(|p| Value::Ref(Box::new(p))).unwrap_or(Value::Unit);
-                    me.call_by_name(&name, vec![arg])
-                });
-                r?;
-                for v in vals {
-                    if let Value::Struct(a) | Value::Variant(a) = v {
-                        self.drop_parts(a.fields.into_iter().rev())?;
-                    }
+            Value::Shared(id) => {
+                if let Some(c) = self.heap.get_mut(*id as usize) {
+                    c.strong += 1;
                 }
-                Ok(())
+                Value::Shared(*id)
             }
-            Value::Struct(a) | Value::Variant(a) => self.drop_parts(a.fields.into_iter().rev()),
-            Value::Tuple(xs) => self.drop_parts(xs.into_iter().rev()),
-            Value::List(xs) => self.drop_parts(xs.into_iter()),
-            Value::Set(s) => self.drop_parts(s.items.into_iter()),
+            Value::Weak(id) => {
+                if let Some(c) = self.heap.get_mut(*id as usize) {
+                    c.weak += 1;
+                }
+                Value::Weak(*id)
+            }
+            Value::Struct(a) | Value::Variant(a) => {
+                let fields = a.fields.iter().map(|f| self.copy_value(f)).collect();
+                let b = Box::new(crate::value::Adt { fields, ..(**a).clone() });
+                if matches!(v, Value::Struct(_)) { Value::Struct(b) } else { Value::Variant(b) }
+            }
+            Value::Tuple(xs) => Value::Tuple(xs.iter().map(|x| self.copy_value(x)).collect()),
+            Value::List(xs) => Value::List(xs.iter().map(|x| self.copy_value(x)).collect()),
             Value::Dict(d) => {
-                for (k, v) in d.entries {
-                    self.drop_value(v)?;
-                    self.drop_value(k)?;
+                let mut d2 = (**d).clone();
+                for e in d2.entries.iter_mut() {
+                    e.1 = self.copy_value(&e.1);
                 }
-                Ok(())
+                Value::Dict(Box::new(d2))
             }
-            Value::Iter(it) => {
-                let parts = crate::iter::owned_parts(*it);
-                self.drop_parts(parts.into_iter())
+            Value::Cell(x) => Value::Cell(Box::new(self.copy_value(x))),
+            Value::Mutex(m) => Value::Mutex(Box::new(crate::value::MutexVal {
+                value: self.copy_value(&m.value),
+                locked: false,
+                poisoned: m.poisoned,
+            })),
+            Value::Arena(a) => {
+                let slots = a.slots.iter().map(|(g, x)| (*g, self.copy_value(x))).collect();
+                Value::Arena(Box::new(crate::value::ArenaVal { slots, free: a.free.clone() }))
             }
-            Value::Entry(e) => self.drop_value(e.key),
-            Value::Dyn(d) => self.drop_value(d.value),
-            _ => Ok(()),
-        }
-    }
-
-    fn drop_parts(&mut self, parts: impl Iterator<Item = Value>) -> Result<(), Unwind> {
-        for p in parts {
-            self.drop_value(p)?;
-        }
-        Ok(())
-    }
-
-    fn drop_fn(&self, ty: &str) -> Option<String> {
-        match self.types.get(ty)? {
-            sir::TypeDecl::Struct { drop, .. } | sir::TypeDecl::Enum { drop, .. } => drop.clone(),
+            Value::Dyn(d) => Value::Dyn(Box::new(crate::value::DynVal {
+                ty: d.ty.clone(),
+                value: self.copy_value(&d.value),
+            })),
+            other => other.clone(),
         }
     }
 }
@@ -686,5 +744,18 @@ pub(crate) fn const_value(c: &sir::Const) -> Value {
         sir::Const::Str(s) => Value::str(s),
         sir::Const::Unit => Value::Unit,
         sir::Const::Fn(n) => Value::Fn(Rc::from(n.as_str())),
+    }
+}
+
+/// Whether a type names an associated type.
+fn has_assoc(t: &sir::Type) -> bool {
+    use sir::Type;
+    match t {
+        Type::Assoc(..) => true,
+        Type::Named(_, a) | Type::Dyn(_, a) => a.iter().any(has_assoc),
+        Type::Tuple(es) => es.iter().any(has_assoc),
+        Type::Ref(t, _) => has_assoc(t),
+        Type::Fn(ps, r, _) => ps.iter().any(has_assoc) || has_assoc(r),
+        _ => false,
     }
 }

@@ -4,8 +4,14 @@
 ##!
 ##! Every function without a body names a host intrinsic with
 ##! `@intrinsic("name")`. The `##` comment above it is the intrinsic's
-##! contract, stated in Sisu terms: a Sisu-written std (Phase 4) or another
-##! interpreter must behave exactly so. `@builtin("name")` marks a type whose
+##! contract, stated in Sisu terms: a Sisu-written std or another
+##! interpreter must behave exactly so. `@keeps(self, x)` adds to the
+##! contract that every value the named `own` and `mut` arguments hold is
+##! kept or returned, never dropped, so they may hold must-consume values
+##! (D-054). A function with a body and `@structural("name")` is written in
+##! Sisu; the intrinsic `name` computes the same result when the bounds of
+##! its type arguments are met by structural impls, and lowering calls it
+##! then. `@builtin("name")` marks a type whose
 ##! values the host represents; such a type has no fields unless it lists
 ##! them, and code constructs it only through its associated functions.
 ##!
@@ -39,7 +45,9 @@ struct dict[K, V]:
 struct set[T]:
     pass
 
-## A lazy iterator. Adapters run their functions only as items are taken.
+## An iterator the host drives: over a collection, a range, the pieces of
+## a string. Its adapters (`map`, `filter`, `take`, ...) are `Iterator`'s,
+## written in Sisu below, and run their functions only as items are taken.
 @builtin("Iter")
 struct Iter[T]:
     pass
@@ -93,6 +101,62 @@ struct System:
 struct Box[T]:
     boxed: T
 
+## Shared ownership (04, rule 5): a reference-counted pointer to a value
+## no one may change through it. `.copy()` makes another owner, which costs
+## a count increment, not a copy of the value; the value is dropped with
+## its last owner. Changing it goes through a `Cell` or a `Mutex` inside. A
+## view cannot be shared (it would outlive what it borrows), and neither can
+## a must-consume value (no owner is the last one statically). Whether the
+## count is atomic is a flag the runtime keeps; stage 0 has one task, so it
+## is never set (the escape analysis that sets it comes with tasks, 06).
+@builtin("Shared")
+struct Shared[T]:
+    pass
+
+## A handle on a `Shared` value that does not keep it alive; it breaks the
+## cycles a graph of `Shared` would leak (04, rule 5).
+@builtin("Weak")
+struct Weak[T]:
+    pass
+
+## A value replaced through a shared reference, in one task (04, rule 5):
+## no reference into it is ever given out, so replacing it invalidates none.
+@builtin("Cell")
+struct Cell[T]:
+    pass
+
+## Mutual exclusion over a value the mutex owns (06, "Send, Sync, and shared
+## state"): `lock` gives a guard, `guard.value` is the value, and dropping
+## the guard unlocks. Stage 0 has one task, so `lock` on a mutex its own
+## task holds panics (it would wait forever). When unwinding drops a guard,
+## the value's type's `invariant` is checked again (D-077): if it fails, the
+## mutex is poisoned and every later `lock` panics; if it holds, or the type
+## has none, the mutex unlocks.
+@builtin("Mutex")
+struct Mutex[T]:
+    pass
+
+## The lock on a `Mutex`, from `Mutex.lock`; `guard.value` is the value.
+@builtin("MutexGuard")
+struct MutexGuard[T]:
+    pass
+
+## A collection of `T` addressed by `Key[T]` handles (04, "What this
+## costs, honestly"): `insert` gives a key; `remove` frees the slot, which a
+## later `insert` reuses under a new generation. A key whose value was
+## removed is stale: `get` gives `None` and `arena[key]` panics, so a stale
+## handle is detected at use, never dangling.
+@builtin("Arena")
+struct Arena[T]:
+    pass
+
+## A handle into an `Arena[T]`: the slot and its generation when the value
+## was inserted.
+@derive(Copy, Eq, Hash)
+struct Key[T]:
+    index: int
+    generation: int
+
 ## Where `Display` and `Debug` write: the text being built and the format
 ## spec (`{x:>8.2}`) of the value being rendered. The parts of a value are
 ## written at a greater `depth`, where the spec does not apply to them. A
@@ -130,9 +194,66 @@ trait Display:
 trait Debug:
     pure def fmt_debug(self, mut f: Formatter)
 
+    ## The derived impl (08, "Derive"), which the compiler runs for a type:
+    ## a struct's name and its fields as `name=value`, an enum value's
+    ## variant and its fields, the way they are written.
+    comptime def derive(T: type) -> impl Debug for T:
+        return impl Debug for T:
+            pure def fmt_debug(self, mut f: Formatter):
+                if comptime reflect.is_struct(T):
+                    f.write("{reflect.name_of(T)}(")
+                    f.depth += 1
+                    comptime for i, field in enumerate(reflect.fields_of(T)):
+                        if comptime i > 0:
+                            f.write(", ")
+                        f.write("{field.name}=")
+                        self.[field].fmt_debug(mut f)
+                    f.depth -= 1
+                    f.write(")")
+                elif comptime len(reflect.variants_of(T)) > 0:
+                    match self:
+                        comptime for V in reflect.variants_of(T):
+                            case V(..):
+                                if comptime len(V.fields) == 0:
+                                    f.write(V.name)
+                                else:
+                                    f.write("{V.name}(")
+                                    f.depth += 1
+                                    comptime for i, field in enumerate(V.fields):
+                                        if comptime i > 0:
+                                            f.write(", ")
+                                        if comptime field.named:
+                                            f.write("{field.name}=")
+                                        self.[field].fmt_debug(mut f)
+                                    f.depth -= 1
+                                    f.write(")")
+
 ## Equality: `==` and `!=` (02, "Expressions").
 trait Eq:
     pure def eq(self, other: Self) -> bool
+
+    ## The derived impl: equal when the variants are and the fields are.
+    comptime def derive(T: type) -> impl Eq for T:
+        return impl Eq for T:
+            pure def eq(self, other: Self) -> bool:
+                if comptime reflect.is_struct(T) or len(reflect.variants_of(T)) == 0:
+                    comptime for field in reflect.fields_of(T):
+                        if self.[field] != other.[field]:
+                            return False
+                    return True
+                else:
+                    match self:
+                        comptime for V in reflect.variants_of(T):
+                            case V(..):
+                                match other:
+                                    case V(..):
+                                        comptime for field in V.fields:
+                                            if self.[field] != other.[field]:
+                                                return False
+                                        return True
+                                    comptime if len(reflect.variants_of(T)) > 1:
+                                        case _:
+                                            return False
 
 ## A partial order: `<`, `<=`, `>` and `>=`. `f64` has only this one, since
 ## NaN is unordered (03, "Numbers").
@@ -146,6 +267,22 @@ trait Ord(Eq, PartialOrd):
 ## Hashing, for `dict` keys and `set` elements.
 trait Hash(Eq):
     pure def hash(self, mut h: Hasher)
+
+    ## The derived impl: the fields' hashes in order, after the variant's
+    ## index for an enum.
+    comptime def derive(T: type) -> impl Hash for T:
+        return impl Hash for T:
+            pure def hash(self, mut h: Hasher):
+                if comptime reflect.is_struct(T):
+                    comptime for field in reflect.fields_of(T):
+                        self.[field].hash(mut h)
+                elif comptime len(reflect.variants_of(T)) > 0:
+                    match self:
+                        comptime for V in reflect.variants_of(T):
+                            case V(..):
+                                h.write_int(V.index)
+                                comptime for field in V.fields:
+                                    self.[field].hash(mut h)
 
 ## A number of items, `len(x)`.
 trait Len:
@@ -167,12 +304,110 @@ trait Num:
 trait Drop:
     def drop(mut self)
 
-## The items of a `for` loop (03, "Traits"); `Iter[T]` is the iterator the
-## standard library's methods return.
+## The items of a `for` loop (03, "Traits"). `Iter[T]` is the iterator the
+## standard library's methods return; the adapters below wrap an iterator
+## in another, and the consumers drive it to its end (or to the item they
+## look for). As in 03, `next` and the methods are not `pure`, and their
+## functions may be any (`(Item) -> U`): an impl's `next` may be `pure`
+## (the host iterators' is), and a `pure` function can loop over one.
 trait Iterator:
     type Item
     ## The next item, or `None` at the end.
-    pure def next(mut self) -> Item?
+    def next(mut self) -> Item?
+
+    ## At most `n` items.
+    def take(own self, n: int) -> Take[Self]:
+        return Take(inner=self, left=n)
+
+    ## All but the first `n` items.
+    def skip(own self, n: int) -> Skip[Self]:
+        return Skip(inner=self, left=n)
+
+    ## Each item passed through `f`.
+    def map[U](own self, f: (Item) -> U) -> Map[Self, U]:
+        return Map(inner=self, f=f)
+
+    ## The items for which `keep` is `True`.
+    def filter(own self, keep: (ref Item) -> bool) -> Filter[Self]:
+        return Filter(inner=self, keep=keep)
+
+    ## Each item with its index, from 0.
+    def enumerate(own self) -> Enumerate[Self]:
+        return Enumerate(inner=self, index=0)
+
+    ## The first item for which `pred` is `True`.
+    def find(own self, pred: (ref Item) -> bool) -> Item?:
+        for x in self:
+            if pred(ref x):
+                return Some(x)
+        return None
+
+    ## Whether `pred` is `True` for every item; stops at the first `False`.
+    def all(own self, pred: (Item) -> bool) -> bool:
+        for x in self:
+            if not pred(x):
+                return False
+        return True
+
+    ## Whether `pred` is `True` for any item; stops at the first.
+    def any(own self, pred: (Item) -> bool) -> bool:
+        for x in self:
+            if pred(x):
+                return True
+        return False
+
+    ## The number of items.
+    def count(own self) -> int:
+        var n = 0
+        for _ in self:
+            n += 1
+        return n
+
+    ## `f` applied to the running value, from `init`, and each item in turn.
+    def fold[B](own self, own init: B, f: (B, Item) -> B) -> B:
+        var acc = init
+        for x in self:
+            acc = f(acc, x)
+        return acc
+
+    ## The items in a new list.
+    def collect(own self) -> list[Item]:
+        var out: list[Item] = []
+        for x in self:
+            out.push(x)
+        return out
+
+    ## The item with the largest `key`; the first of equal ones.
+    def max_by[K: Ord](own self, key: (ref Item) -> K) -> Item?:
+        var best: Item? = None
+        for x in self:
+            # The key may borrow from its item, so the best one's is
+            # computed again rather than kept.
+            let better = match best:
+                case Some(b): key(ref x) > key(b)
+                case None: True
+            if better:
+                best = Some(x)
+        return best
+
+    ## The item with the smallest `key`; the first of equal ones.
+    def min_by[K: Ord](own self, key: (ref Item) -> K) -> Item?:
+        var best: Item? = None
+        for x in self:
+            let better = match best:
+                case Some(b): key(ref x) < key(b)
+                case None: True
+            if better:
+                best = Some(x)
+        return best
+
+    ## The sum of the items, as `sum` adds them (floats pairwise, D-074).
+    def sum(own self) -> Item where Item: Num:
+        return self.collect().sum()
+
+    ## The `Display` renderings of the items, separated by `sep`.
+    def join(own self, sep: str) -> String where Item: Display:
+        return self.collect().join(sep)
 
 ## `a + b` (D-022). The other operators are `Sub`, `Mul`, `Div`, `Rem` and
 ## `Neg` (`-a`).
@@ -194,6 +429,15 @@ trait Rem[Rhs = Self]:
 trait Neg:
     pure def neg(self) -> Self
 
+## A type that literals can be written as (02, "Literals"; 03, "Numbers"):
+## a literal whose expected type implements `FromLiteral[L]` is
+## `from_literal` of the literal, where `L` is `int` for an integer literal,
+## `f64` for a float literal and `str` for a string literal without
+## interpolation. It applies to literals only; it is not a conversion of
+## values.
+trait FromLiteral[L]:
+    pure def from_literal(literal: L) -> Self
+
 # ------------------------------------------------------------------ core enums and error sets
 
 ## `T?` is `Option[T]`.
@@ -213,6 +457,12 @@ enum Ordering:
     Less
     Equal
     Greater
+
+## The error `Result.context` wraps another in (05, "Context and traces"):
+## what the program was doing, and the error it met, rendered with
+## `Display`. It displays as `message: cause`.
+error Contextual:
+    Context(message: String, cause: String)
 
 ## The errors of the file system capability.
 error IoError:
@@ -445,20 +695,29 @@ impl[T] list[T]:
     pure def with_capacity(n: int) -> list[T]
     ## Appends `x` at the end.
     @intrinsic("list.push")
+    @keeps(self, x)
     pure def push(mut self, own x: T)
     ## Removes and returns the last element, or `None`.
     @intrinsic("list.pop")
+    @keeps(self)
     pure def pop(mut self) -> T?
     ## Inserts `x` before index `i`, which may equal the length.
     @intrinsic("list.insert")
+    @keeps(self, x)
     pure def insert(mut self, i: int, own x: T)
     ## Removes and returns the element at `i`; panics if out of bounds.
     @intrinsic("list.remove")
+    @keeps(self)
     pure def remove(mut self, i: int) -> T
     @intrinsic("list.is_empty")
     pure def is_empty(self) -> bool
-    @intrinsic("list.contains")
-    pure def contains(self, x: T) -> bool
+    ## Whether an element equals `x`.
+    @structural("list.contains")
+    pure def contains(self, x: T) -> bool where T: Eq:
+        for y in self:
+            if y == x:
+                return True
+        return False
     ## The element at `i`, or `None` when out of bounds.
     @intrinsic("list.get")
     pure def get(self, i: int) -> ref T?
@@ -470,21 +729,54 @@ impl[T] list[T]:
     @intrinsic("list.iter")
     pure def iter(self) -> Iter[ref T]
     ## Sorts in ascending order; stable.
-    @intrinsic("list.sort")
-    pure def sort(mut self)
-    ## Sorts by `cmp`; stable.
-    @intrinsic("list.sort_by")
-    pure def sort_by(mut self, cmp: (ref T, ref T) -> Ordering)
+    @structural("list.sort")
+    @keeps(self)
+    pure def sort(mut self) where T: Ord:
+        self.sort_by((a, b) -> a.cmp(b))
+    ## Sorts by `cmp`; stable. A merge sort: runs of one element, merged
+    ## pairwise until one is left.
+    pure def sort_by(mut self, cmp: pure (ref T, ref T) -> Ordering):
+        if len(self) < 2:
+            return
+        var runs: list[list[T]] = []
+        while not self.is_empty():
+            runs.push([self.pop().expect("an element")])
+        runs.reverse()
+        while len(runs) > 1:
+            var merged: list[list[T]] = []
+            if len(runs) % 2 == 1:
+                merged.push(runs.pop().expect("a run"))
+            while len(runs) >= 2:
+                let later = runs.pop().expect("a run")
+                let earlier = runs.pop().expect("a run")
+                merged.push(merge_runs(earlier, later, cmp))
+            merged.reverse()
+            runs = merged
+        self.extend(runs.pop().expect("a run"))
     @intrinsic("list.reverse")
+    @keeps(self)
     pure def reverse(mut self)
     @intrinsic("list.clear")
     pure def clear(mut self)
     ## Moves the elements of `other` to the end.
     @intrinsic("list.extend")
+    @keeps(self, other)
     pure def extend(mut self, own other: list[T])
     ## The `Display` renderings of the elements, separated by `sep`.
-    @intrinsic("list.join")
-    pure def join(self, sep: str) -> String
+    @structural("list.join")
+    pure def join(self, sep: str) -> String where T: Display:
+        var out = String.new()
+        var first = True
+        for x in self:
+            if not first:
+                out.push(sep)
+            first = False
+            out.push("{x}")
+        return out
+    ## The sum of the elements, 0 for none; integer overflow panics. Floats
+    ## are summed pairwise in a fixed shape (D-074).
+    @intrinsic("sum")
+    pure def sum(self) -> T where T: Num
 
 impl[K, V] dict[K, V]:
     @intrinsic("dict.new")
@@ -493,8 +785,10 @@ impl[K, V] dict[K, V]:
     pure def get(self, key: K) -> ref V?
     ## Inserts or replaces; returns the previous value.
     @intrinsic("dict.insert")
+    @keeps(self, value)
     pure def insert(mut self, own key: K, own value: V) -> V?
     @intrinsic("dict.remove")
+    @keeps(self)
     pure def remove(mut self, key: K) -> V?
     @intrinsic("dict.contains")
     pure def contains(self, key: K) -> bool
@@ -534,39 +828,213 @@ impl[T] set[T]:
 impl[T] Iter[T]:
     ## The next item, or `None` at the end.
     @intrinsic("Iter.next")
+    @keeps(self)
     pure def next(mut self) -> T?
-    ## At most `n` items.
-    @intrinsic("Iter.take")
-    pure def take(own self, n: int) -> Iter[T]
-    ## All but the first `n` items.
-    @intrinsic("Iter.skip")
-    pure def skip(own self, n: int) -> Iter[T]
-    @intrinsic("Iter.map")
-    pure def map[U](own self, f: (T) -> U) -> Iter[U]
-    @intrinsic("Iter.filter")
-    pure def filter(own self, keep: (ref T) -> bool) -> Iter[T]
-    ## The first item for which `pred` is `True`.
-    @intrinsic("Iter.find")
-    pure def find(own self, pred: (ref T) -> bool) -> T?
-    @intrinsic("Iter.all")
-    pure def all(own self, pred: (T) -> bool) -> bool
-    @intrinsic("Iter.any")
-    pure def any(own self, pred: (T) -> bool) -> bool
-    @intrinsic("Iter.count")
-    pure def count(own self) -> int
-    @intrinsic("Iter.enumerate")
-    pure def enumerate(own self) -> Iter[(int, T)]
-    @intrinsic("Iter.fold")
-    pure def fold[B](own self, init: B, f: (B, T) -> B) -> B
-    ## The items in a new list.
-    @intrinsic("Iter.collect")
-    pure def collect(own self) -> list[T]
-    ## The item with the largest `key`; the first of equal ones.
-    @intrinsic("Iter.max_by")
-    pure def max_by[K: Ord](own self, key: (ref T) -> K) -> T?
-    ## The item with the smallest `key`; the first of equal ones.
-    @intrinsic("Iter.min_by")
-    pure def min_by[K: Ord](own self, key: (ref T) -> K) -> T?
+
+## The elements of two sorted runs in one sorted run; of equal elements,
+## `earlier`'s come first (`list.sort_by`).
+pure def merge_runs[T](own earlier: list[T], own later: list[T], cmp: pure (ref T, ref T) -> Ordering) -> list[T]:
+    var a = earlier
+    var b = later
+    var out: list[T] = []
+    # From the back: the larger last element, `later`'s when equal.
+    while not a.is_empty() and not b.is_empty():
+        if cmp(ref b[^1], ref a[^1]) != Less:
+            out.push(b.pop().expect("an element"))
+        else:
+            out.push(a.pop().expect("an element"))
+    while not a.is_empty():
+        out.push(a.pop().expect("an element"))
+    while not b.is_empty():
+        out.push(b.pop().expect("an element"))
+    out.reverse()
+    return out
+
+# ------------------------------------------------------------------ iterator adapters
+
+## `it.take(n)`: at most `left` more items of `inner`.
+struct Take[I]:
+    inner: I
+    left: int
+
+impl[I: Iterator] Iterator for Take[I]:
+    type Item = I.Item
+    def next(mut self) -> I.Item?:
+        if self.left <= 0:
+            return None
+        self.left -= 1
+        return self.inner.next()
+
+## `it.skip(n)`: the items of `inner` after the first `left`.
+struct Skip[I]:
+    inner: I
+    left: int
+
+impl[I: Iterator] Iterator for Skip[I]:
+    type Item = I.Item
+    def next(mut self) -> I.Item?:
+        while self.left > 0:
+            self.left -= 1
+            if self.inner.next().is_none():
+                return None
+        return self.inner.next()
+
+## `it.map(f)`: each item of `inner` passed through `f`. A view, since `f`
+## may borrow what it captures.
+view struct Map[I: Iterator, U]:
+    inner: I
+    f: (I.Item) -> U
+
+impl[I: Iterator, U] Iterator for Map[I, U]:
+    type Item = U
+    def next(mut self) -> U?:
+        match self.inner.next():
+            case Some(x):
+                return Some(self.f(x))
+            case None:
+                return None
+
+## `it.filter(keep)`: the items of `inner` for which `keep` is `True`.
+view struct Filter[I: Iterator]:
+    inner: I
+    keep: (ref I.Item) -> bool
+
+impl[I: Iterator] Iterator for Filter[I]:
+    type Item = I.Item
+    def next(mut self) -> I.Item?:
+        while True:
+            match self.inner.next():
+                case Some(x):
+                    if self.keep(ref x):
+                        return Some(x)
+                case None:
+                    return None
+
+## `it.enumerate()`: each item of `inner` with its index.
+struct Enumerate[I]:
+    inner: I
+    index: int
+
+impl[I: Iterator] Iterator for Enumerate[I]:
+    type Item = (int, I.Item)
+    def next(mut self) -> (int, I.Item)?:
+        match self.inner.next():
+            case Some(x):
+                let i = self.index
+                self.index += 1
+                return Some((i, x))
+            case None:
+                return None
+
+# ------------------------------------------------------------------ shared ownership, cells, mutexes, arenas
+
+# The fields and methods of the value are reached through a `Shared`
+# directly, so its own functions take it as an argument (`Shared.count(s)`)
+# rather than as `self`, and never hide the value's methods.
+impl[T] Shared[T]:
+    ## The first owner of `value`.
+    @intrinsic("Shared.new")
+    pure def new(own value: T) -> Shared[T]
+    ## The value itself.
+    @intrinsic("Shared.get")
+    pure def get(s: Shared[T]) -> ref T
+    ## A `Weak` handle on the value.
+    @intrinsic("Shared.downgrade")
+    pure def downgrade(s: Shared[T]) -> Weak[T]
+    ## The number of owners.
+    @intrinsic("Shared.count")
+    pure def count(s: Shared[T]) -> int
+
+impl[T] Weak[T]:
+    ## Another owner of the value, if it has one still.
+    @intrinsic("Weak.upgrade")
+    pure def upgrade(self) -> Shared[T]?
+
+impl[T] Cell[T]:
+    @intrinsic("Cell.new")
+    pure def new(own value: T) -> Cell[T]
+    ## A copy of the value.
+    @intrinsic("Cell.get")
+    pure def get(self) -> T where T: Copy
+    ## Replaces the value, dropping the old one.
+    @intrinsic("Cell.set")
+    def set(self, own value: T)
+    ## Replaces the value and returns the old one.
+    @intrinsic("Cell.replace")
+    def replace(self, own value: T) -> T
+
+impl[T] Mutex[T]:
+    @intrinsic("Mutex.new")
+    pure def new(own value: T) -> Mutex[T]
+    ## The lock, until the guard is dropped; panics if the mutex is held
+    ## (stage 0 has one task) or poisoned.
+    @intrinsic("Mutex.lock")
+    def lock(self) -> MutexGuard[T]
+    ## Whether a guard dropped by unwinding left the value's invariant broken.
+    @intrinsic("Mutex.is_poisoned")
+    pure def is_poisoned(self) -> bool
+
+impl[T] Arena[T]:
+    @intrinsic("Arena.new")
+    pure def new() -> Arena[T]
+    ## Stores `value` and returns its key.
+    @intrinsic("Arena.insert")
+    @keeps(self, value)
+    pure def insert(mut self, own value: T) -> Key[T]
+    ## The value of `key`, or `None` if the key is stale.
+    @intrinsic("Arena.get")
+    pure def get(self, key: Key[T]) -> ref T?
+    @intrinsic("Arena.get_mut")
+    @keeps(self)
+    pure def get_mut(mut self, key: Key[T]) -> ref mut T?
+    ## Drops the value of `key`, if it is there; the key goes stale.
+    @intrinsic("Arena.remove")
+    pure def remove(mut self, key: Key[T])
+    ## Takes the value of `key` out, if it is there; the key goes stale.
+    @intrinsic("Arena.take")
+    @keeps(self)
+    pure def take(mut self, key: Key[T]) -> T?
+    @intrinsic("Arena.contains")
+    pure def contains(self, key: Key[T]) -> bool
+    ## The keys of the values, in slot order.
+    @intrinsic("Arena.keys")
+    pure def keys(self) -> Iter[Key[T]]
+
+impl[T] Len for Arena[T]:
+    @intrinsic("len")
+    pure def len(self) -> int
+
+impl[T: Debug] Debug for Shared[T]:
+    pure def fmt_debug(self, mut f: Formatter):
+        Shared.get(self).fmt_debug(mut f)
+
+impl[T: Display] Display for Shared[T]:
+    pure def fmt(self, mut f: Formatter):
+        Shared.get(self).fmt(mut f)
+
+impl[T: Eq] Eq for Shared[T]:
+    pure def eq(self, other: Shared[T]) -> bool:
+        return Shared.get(self) == Shared.get(other)
+
+impl[T] Debug for Weak[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for Cell[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for Mutex[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for MutexGuard[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for Arena[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
 
 # ------------------------------------------------------------------ Option and Result
 
@@ -581,8 +1049,11 @@ impl[T] Option[T]:
     ## The value, or `default`.
     @intrinsic("Option.or")
     pure def or(own self, own default: T) -> T
-    @intrinsic("Option.map")
-    pure def map[U](own self, f: (T) -> U) -> U?
+    ## `f` of the value, if there is one.
+    def map[U](own self, f: (T) -> U) -> U?:
+        if self.is_none():
+            return None
+        return Some(f(self.expect("a value")))
 
 impl[T, E] Result[T, E]:
     @intrinsic("Result.is_ok")
@@ -599,6 +1070,14 @@ impl[T, E] Result[T, E]:
     pure def ok(own self) -> T?
     @intrinsic("Result.err")
     pure def err(own self) -> E?
+    ## The error, if any, wrapped with what the program was doing:
+    ## `fs.read_to_string(p).context("loading {p}")` (05, "Context and
+    ## traces"; a std convention, not syntax).
+    pure def context(own self, message: str) -> T ! Contextual where E: Display:
+        if self.is_ok():
+            return Ok(self.expect("a value"))
+        let cause = self.err().expect("an error")
+        return Err(Context(message=message.to_string(), cause="{cause}"))
 
 # ------------------------------------------------------------------ capabilities
 
@@ -689,6 +1168,12 @@ impl[T: Ord] Ord for list[T]:
                 return c
             i += 1
         return len(self).cmp(len(other))
+
+impl[T: Hash] Hash for list[T]:
+    pure def hash(self, mut h: Hasher):
+        h.write_int(len(self))
+        for x in self:
+            x.hash(mut h)
 
 impl[T] Len for list[T]:
     @intrinsic("len")
@@ -784,6 +1269,7 @@ impl[T: Display] Display for Box[T]:
 impl[T] Iterator for Iter[T]:
     type Item = T
     @intrinsic("Iter.next")
+    @keeps(self)
     pure def next(mut self) -> T?
 
 impl[T] Debug for Iter[T]:
@@ -797,6 +1283,14 @@ impl[T] Display for Iter[T]:
 impl[K, V] Debug for Entry[K, V]:
     @intrinsic("structural.debug")
     pure def fmt_debug(self, mut f: Formatter)
+
+impl FromLiteral[str] for String:
+    @intrinsic("str.to_string")
+    pure def from_literal(literal: str) -> String
+
+impl FromLiteral[str] for Path:
+    @intrinsic("Path.new")
+    pure def from_literal(literal: str) -> Path
 
 impl Num for int:
     pass

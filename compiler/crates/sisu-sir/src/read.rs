@@ -556,10 +556,11 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
                 let from = c.indices("from")?;
                 let inner = c.indices("inner")?;
                 let own = c.indices("own")?;
+                let keeps = c.indices("keeps")?;
                 if !c.at_end() {
                     return Err(format!("unexpected `{}`", c.rest()));
                 }
-                let d = IntrinsicDecl { name, pure, from, inner, own };
+                let d = IntrinsicDecl { name, pure, from, inner, own, keeps };
                 if method {
                     p.trait_methods.push(d);
                 } else {
@@ -580,23 +581,30 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
                 let self_ty = c.ty()?;
                 c.expect("{")?;
                 let mut methods = Vec::new();
+                let mut assoc = Vec::new();
                 if !c.eat("}") {
                     loop {
-                        let m = c.name()?;
-                        c.expect(":")?;
-                        let target = if c.eat("intrinsic ") {
-                            ImplTarget::Intrinsic(c.type_name()?)
+                        if c.eat("type ") {
+                            let n = c.name()?;
+                            c.expect("=")?;
+                            assoc.push((n, c.ty()?));
                         } else {
-                            ImplTarget::Fn(c.name()?)
-                        };
-                        methods.push((m, target));
+                            let m = c.name()?;
+                            c.expect(":")?;
+                            let target = if c.eat("intrinsic ") {
+                                ImplTarget::Intrinsic(c.type_name()?)
+                            } else {
+                                ImplTarget::Fn(c.name()?)
+                            };
+                            methods.push((m, target));
+                        }
                         if c.eat("}") {
                             break;
                         }
                         c.expect(",")?;
                     }
                 }
-                p.impls.push(ImplDecl { params, trait_name, trait_args, self_ty, methods });
+                p.impls.push(ImplDecl { params, trait_name, trait_args, self_ty, methods, assoc });
             } else if c.eat("struct ") || c.eat("view struct ") {
                 let view = line.trim_start().starts_with("view ");
                 let name = c.type_name()?;
@@ -699,7 +707,7 @@ fn read_function(lines: &[&str], start: usize) -> Result<(Function, usize), (usi
         None => (header, None),
     };
     let mut c = Cur::new(header);
-    type Header = (String, Vec<String>, u32, FnKind, bool, u32, Vec<u32>, Vec<u32>);
+    type Header = (String, Vec<String>, u32, FnKind, bool, u32, Vec<u32>, Vec<u32>, Vec<u32>);
     let parse_header = |c: &mut Cur| -> R<Header> {
         c.expect("fn ")?;
         let name = c.name()?;
@@ -711,6 +719,8 @@ fn read_function(lines: &[&str], start: usize) -> Result<(Function, usize), (usi
             FnKind::Closure
         } else if c.eat("drop") {
             FnKind::Drop
+        } else if c.eat("glue") {
+            FnKind::Glue
         } else if c.eat("value") {
             FnKind::Value
         } else if c.eat("test") {
@@ -723,15 +733,16 @@ fn read_function(lines: &[&str], start: usize) -> Result<(Function, usize), (usi
         let src = c.uint()?;
         let from = c.indices("from")?;
         let inner = c.indices("inner")?;
+        let own = c.indices("own")?;
         if !c.at_end() {
             return Err(format!("expected `{{`, found `{}`", c.rest()));
         }
-        Ok((name, tparams, n, kind, pure, src, from, inner))
+        Ok((name, tparams, n, kind, pure, src, from, inner, own))
     };
     if !lines[start].trim().ends_with(" {") {
         return Err((start, "expected `{` at the end of the function header".into()));
     }
-    let (name, type_params, param_count, kind, pure, source, from, inner) =
+    let (name, type_params, param_count, kind, pure, source, from, inner, own) =
         parse_header(&mut c).map_err(|e| (start, e))?;
     let mut f = Function {
         name,
@@ -741,6 +752,7 @@ fn read_function(lines: &[&str], start: usize) -> Result<(Function, usize), (usi
         pure,
         from,
         inner,
+        own,
         locals: Vec::new(),
         blocks: Vec::new(),
         source,

@@ -78,8 +78,18 @@ impl InferTable {
                 pure: f.pure,
             })),
             Ty::Ref(t, m) => Ty::Ref(Box::new(self.zonk(&t)), m),
+            Ty::Dyn(tr) => Ty::Dyn(self.zonk_trait(&tr)),
+            Ty::Assoc(a) => Ty::Assoc(Box::new(sisu_resolve::AssocTy {
+                self_ty: self.zonk(&a.self_ty),
+                trait_: self.zonk_trait(&a.trait_),
+                name: a.name.clone(),
+            })),
             other => other,
         }
+    }
+
+    fn zonk_trait(&self, tr: &sisu_resolve::TraitRef) -> sisu_resolve::TraitRef {
+        sisu_resolve::TraitRef { def: tr.def, args: tr.args.iter().map(|x| self.zonk(x)).collect() }
     }
 
     pub fn has_vars(&self, t: &Ty) -> bool {
@@ -89,6 +99,8 @@ impl InferTable {
             Ty::Tuple(e, _) => e.iter().any(|x| self.has_vars(x)),
             Ty::Fn(f) => f.params.iter().any(|x| self.has_vars(x)) || self.has_vars(&f.ret),
             Ty::Ref(t, _) => self.has_vars(&t),
+            Ty::Dyn(tr) => tr.args.iter().any(|x| self.has_vars(x)),
+            Ty::Assoc(a) => self.has_vars(&a.self_ty) || a.trait_.args.iter().any(|x| self.has_vars(x)),
             _ => false,
         }
     }
@@ -100,6 +112,8 @@ impl InferTable {
             Ty::Tuple(e, _) => e.iter().any(|x| self.occurs(v, x)),
             Ty::Fn(f) => f.params.iter().any(|x| self.occurs(v, x)) || self.occurs(v, &f.ret),
             Ty::Ref(t, _) => self.occurs(v, &t),
+            Ty::Dyn(tr) => tr.args.iter().any(|x| self.occurs(v, x)),
+            Ty::Assoc(a) => self.occurs(v, &a.self_ty) || a.trait_.args.iter().any(|x| self.occurs(v, x)),
             _ => false,
         }
     }
@@ -150,6 +164,20 @@ impl InferTable {
                     && self.unify(&f1.ret, &f2.ret)
             }
             (Ty::Ref(t1, m1), Ty::Ref(t2, m2)) => m1 == m2 && self.unify(t1, t2),
+            (Ty::Dyn(t1), Ty::Dyn(t2)) => {
+                t1.def == t2.def
+                    && t1.args.len() == t2.args.len()
+                    && t1.args.iter().zip(t2.args.iter()).all(|(x, y)| self.unify(x, y))
+            }
+            // An associated type that is not known yet (its `Self` is a
+            // generic parameter) equals only itself.
+            (Ty::Assoc(a1), Ty::Assoc(a2)) => {
+                a1.name == a2.name
+                    && a1.trait_.def == a2.trait_.def
+                    && a1.trait_.args.len() == a2.trait_.args.len()
+                    && self.unify(&a1.self_ty, &a2.self_ty)
+                    && a1.trait_.args.iter().zip(a2.trait_.args.iter()).all(|(x, y)| self.unify(x, y))
+            }
             (x, y) => x == y,
         }
     }

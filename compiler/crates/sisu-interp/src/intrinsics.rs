@@ -31,17 +31,6 @@ impl Args {
     }
 }
 
-fn ordering_of(v: &Value) -> Result<Ordering, Unwind> {
-    match v {
-        Value::Variant(a) if &*a.ty == "Ordering" => Ok(match a.variant {
-            0 => Ordering::Less,
-            1 => Ordering::Equal,
-            _ => Ordering::Greater,
-        }),
-        other => Err(ice(format!("expected an Ordering, found {other:?}"))),
-    }
-}
-
 /// A stable merge sort of indices with a comparison that may panic.
 fn merge_sort(
     v: &mut Vec<usize>,
@@ -95,6 +84,10 @@ impl<'p> Interp<'p, '_> {
                 "list" => self.list_method(method, &mut a),
                 "dict" | "Entry" => self.dict_method(owner, method, &mut a),
                 "set" => self.set_method(method, &mut a),
+                "Shared" | "Weak" => self.shared_method(owner, method, &mut a),
+                "Cell" => self.cell_method(method, &mut a),
+                "Mutex" => self.mutex_method(method, &mut a),
+                "Arena" => self.arena_method(method, &mut a),
                 "Iter" => {
                     if method == "next" {
                         let p = self.pointer_of(a.get(0)?)?;
@@ -106,12 +99,7 @@ impl<'p> Interp<'p, '_> {
                         *self.write(&p)? = Value::Iter(st);
                         return Ok(Value::option(r?));
                     }
-                    let st = match a.take(0)? {
-                        Value::Iter(st) => *st,
-                        other => return Err(ice(format!("Iter.{method} on {other:?}"))),
-                    };
-                    let rest = a.0.into_iter().skip(1).collect();
-                    self.iter_method(method, st, rest)
+                    Err(ice(format!("unknown intrinsic `Iter.{method}`")))
                 }
                 "Option" | "Result" => self.option_method(owner, method, &mut a),
                 "Fs" | "Env" | "Clock" => self.capability(owner, method, &mut a),
@@ -124,6 +112,20 @@ impl<'p> Interp<'p, '_> {
                 },
                 "fmt" => self.fmt(method, &mut a),
                 "structural" => self.structural(method, &mut a),
+                // The numbers' operator traits (`<std>/builtin_impls.sisu`).
+                "op" => {
+                    let op = match method {
+                        "add" => sisu_sir::BinOp::Add,
+                        "sub" => sisu_sir::BinOp::Sub,
+                        "mul" => sisu_sir::BinOp::Mul,
+                        "div" => sisu_sir::BinOp::Div,
+                        "rem" => sisu_sir::BinOp::Mod,
+                        "neg" => return self.unary(sisu_sir::UnOp::Neg, a.get(0)?),
+                        other => return Err(ice(format!("no operator `{other}`"))),
+                    };
+                    let (x, y) = (a.get(0)?.clone(), a.get(1)?.clone());
+                    self.binary(op, &x, &y)
+                }
                 "assert" => self.assert_fail(method, &a),
                 "error" => self.error_method(method, tys, &a),
                 "cli" if method == "parse" => self.cli_parse(tys.first(), a.get(0)?),
@@ -148,6 +150,7 @@ impl<'p> Interp<'p, '_> {
                     Value::List(xs) => xs.len(),
                     Value::Set(s) => s.items.len(),
                     Value::Dict(d) => d.entries.len(),
+                    Value::Arena(a) => a.slots.iter().filter(|(_, v)| !v.is_moved()).count(),
                     other => return Err(ice(format!("len of {other:?}"))),
                 };
                 Ok(Value::Int(n as i64))
@@ -191,7 +194,7 @@ impl<'p> Interp<'p, '_> {
                 let o = self.total_compare(&x, &y)?;
                 let pick_y = if name == "min" { o == Ordering::Greater } else { o == Ordering::Less };
                 let (keep, other) = if pick_y { (y, x) } else { (x, y) };
-                self.drop_value(other)?;
+                self.queue_drop(other, None);
                 Ok(keep)
             }
             "sum" => {
@@ -493,20 +496,14 @@ impl<'p> Interp<'p, '_> {
                 let (p, _) = self.list_ptr(a.get(0)?)?;
                 Ok(Value::Iter(Box::new(IterState::ListRef { base: p, idx: 0 })))
             }
-            "sort" | "sort_by" => {
+            // The structural fast path of `list.sort` (its Sisu body is the
+            // contract): a stable merge sort by the values' structural order.
+            "sort" => {
                 let (p, len) = self.list_ptr(a.get(0)?)?;
-                let f = if method == "sort_by" { Some(a.take(1)?) } else { None };
                 let mut idx: Vec<usize> = (0..len).collect();
                 merge_sort(&mut idx, &mut |i, j| {
                     let (x, y) = (p.join(Step::Index(i)), p.join(Step::Index(j)));
-                    match &f {
-                        Some(f) => {
-                            let r =
-                                self.call_value(f, vec![Value::Ref(Box::new(x)), Value::Ref(Box::new(y))])?;
-                            ordering_of(&r)
-                        }
-                        None => self.total_compare(self.read(&x)?, self.read(&y)?),
-                    }
+                    self.total_compare(self.read(&x)?, self.read(&y)?)
                 })?;
                 match self.write(&p)? {
                     Value::List(xs) => {
@@ -523,7 +520,7 @@ impl<'p> Interp<'p, '_> {
             }),
             "clear" => {
                 let old = self.with_list(a.get(0)?, |xs| Ok(std::mem::take(xs)))?;
-                self.drop_value(Value::List(old))?;
+                self.queue_drop(Value::List(old), None);
                 Ok(Value::Unit)
             }
             "extend" => {
@@ -596,8 +593,8 @@ impl<'p> Interp<'p, '_> {
             let EntryVal { dict, key } = *e;
             let pos = match self.dict_position(&dict, &key)? {
                 Some(pos) => {
-                    self.drop_value(value)?;
-                    self.drop_value(key)?;
+                    self.queue_drop(value, None);
+                    self.queue_drop(key, None);
                     pos
                 }
                 None => {
@@ -647,7 +644,7 @@ impl<'p> Interp<'p, '_> {
                 };
                 match removed {
                     Some((key, v)) => {
-                        self.drop_value(key)?;
+                        self.queue_drop(key, None);
                         Ok(Value::some(v))
                     }
                     None => Ok(Value::none()),
@@ -756,30 +753,23 @@ impl<'p> Interp<'p, '_> {
                 let default = a.take(1)?;
                 match (first, payload) {
                     (true, Some(v)) => {
-                        self.drop_value(default)?;
+                        self.queue_drop(default, None);
                         Ok(v)
                     }
                     (_, other) => {
                         if let Some(e) = other {
-                            self.drop_value(e)?;
+                            self.queue_drop(e, None);
                         }
                         Ok(default)
                     }
                 }
             }
-            "map" => match (first, payload) {
-                (true, Some(v)) => {
-                    let f = a.take(1)?;
-                    Ok(Value::some(self.call_value(&f, vec![v])?))
-                }
-                _ => Ok(Value::none()),
-            },
             "ok" | "err" => {
                 let want = method == "ok";
                 match payload {
                     Some(v) if first == want => Ok(Value::some(v)),
                     Some(v) => {
-                        self.drop_value(v)?;
+                        self.queue_drop(v, None);
                         Ok(Value::none())
                     }
                     None => Ok(Value::none()),
@@ -1072,4 +1062,209 @@ fn parse_int(s: &str) -> Option<i64> {
         return None;
     }
     s.parse().ok()
+}
+
+impl Interp<'_, '_> {
+    /// `Shared` and `Weak` (their contracts are in the prelude).
+    fn shared_method(&mut self, owner: &str, method: &str, a: &mut Args) -> Result<Value, Unwind> {
+        match (owner, method) {
+            ("Shared", "new") => {
+                let value = a.take(0)?;
+                self.serial += 1;
+                let id = self.heap.len() as u32;
+                self.heap.push(crate::value::HeapCell {
+                    value,
+                    strong: 1,
+                    weak: 0,
+                    serial: self.serial,
+                    atomic: false,
+                });
+                Ok(Value::Shared(id))
+            }
+            ("Shared", "get") => {
+                let id = self.shared_id(a.get(0)?)?;
+                let serial = self.heap.get(id as usize).map(|c| c.serial).unwrap_or(0);
+                let p = crate::value::Pointer {
+                    frame: crate::value::HEAP,
+                    serial,
+                    local: id,
+                    path: Vec::new(),
+                    tag: 0,
+                };
+                Ok(Value::Ref(Box::new(p)))
+            }
+            ("Shared", "downgrade") => {
+                let id = self.shared_id(a.get(0)?)?;
+                if let Some(c) = self.heap.get_mut(id as usize) {
+                    c.weak += 1;
+                }
+                Ok(Value::Weak(id))
+            }
+            ("Shared", "count") => {
+                let id = self.shared_id(a.get(0)?)?;
+                Ok(Value::Int(self.heap.get(id as usize).map(|c| c.strong).unwrap_or(0) as i64))
+            }
+            ("Weak", "upgrade") => {
+                let id = match self.target(a.get(0)?)? {
+                    Value::Weak(id) => *id,
+                    other => return Err(ice(format!("Weak.upgrade on {other:?}"))),
+                };
+                match self.heap.get_mut(id as usize) {
+                    Some(c) if c.strong > 0 => {
+                        c.strong += 1;
+                        Ok(Value::some(Value::Shared(id)))
+                    }
+                    _ => Ok(Value::none()),
+                }
+            }
+            _ => Err(ice(format!("unknown intrinsic `{owner}.{method}`"))),
+        }
+    }
+
+    fn shared_id(&self, v: &Value) -> Result<u32, Unwind> {
+        match self.target(v)? {
+            Value::Shared(id) => Ok(*id),
+            other => Err(ice(format!("expected a Shared, found {other:?}"))),
+        }
+    }
+
+    /// `Cell`: the value is replaced through a shared reference, which no
+    /// reference into the value can outlive (none is ever given out).
+    fn cell_method(&mut self, method: &str, a: &mut Args) -> Result<Value, Unwind> {
+        match method {
+            "new" => Ok(Value::Cell(Box::new(a.take(0)?))),
+            "get" => match self.target(a.get(0)?)? {
+                Value::Cell(v) => Ok((**v).clone()),
+                other => Err(ice(format!("Cell.get on {other:?}"))),
+            },
+            "set" | "replace" => {
+                let p = self.pointer_of(a.get(0)?)?;
+                let new = a.take(1)?;
+                let old = match self.write(&p)? {
+                    Value::Cell(v) => std::mem::replace(&mut **v, new),
+                    other => return Err(ice(format!("Cell.{method} on {other:?}"))),
+                };
+                if method == "replace" {
+                    return Ok(old);
+                }
+                self.queue_drop(old, None);
+                Ok(Value::Unit)
+            }
+            other => Err(ice(format!("unknown intrinsic `Cell.{other}`"))),
+        }
+    }
+
+    /// `Mutex` in one task (06; D-077 for a guard dropped by unwinding).
+    fn mutex_method(&mut self, method: &str, a: &mut Args) -> Result<Value, Unwind> {
+        match method {
+            "new" => Ok(Value::Mutex(Box::new(crate::value::MutexVal {
+                value: a.take(0)?,
+                locked: false,
+                poisoned: false,
+            }))),
+            "lock" => {
+                let p = self.pointer_of(a.get(0)?)?;
+                match self.write(&p)? {
+                    Value::Mutex(m) if m.poisoned => Err(panic(msg::PANIC_MUTEX_POISONED, &[])),
+                    Value::Mutex(m) if m.locked => Err(panic(msg::PANIC_MUTEX_HELD, &[])),
+                    Value::Mutex(m) => {
+                        m.locked = true;
+                        Ok(Value::Guard(Box::new(p)))
+                    }
+                    other => Err(ice(format!("Mutex.lock on {other:?}"))),
+                }
+            }
+            "is_poisoned" => match self.target(a.get(0)?)? {
+                Value::Mutex(m) => Ok(Value::Bool(m.poisoned)),
+                other => Err(ice(format!("Mutex.is_poisoned on {other:?}"))),
+            },
+            other => Err(ice(format!("unknown intrinsic `Mutex.{other}`"))),
+        }
+    }
+
+    /// `Arena` and its generational keys (04).
+    fn arena_method(&mut self, method: &str, a: &mut Args) -> Result<Value, Unwind> {
+        let key = |index: usize, generation: i64| {
+            Value::Struct(Value::adt("Key", 0, vec![Value::Int(index as i64), Value::Int(generation)]))
+        };
+        match method {
+            "new" => Ok(Value::Arena(Box::default())),
+            "insert" => {
+                let p = self.pointer_of(a.get(0)?)?;
+                let value = a.take(1)?;
+                match self.write(&p)? {
+                    Value::Arena(ar) => {
+                        let (index, generation) = match ar.free.pop() {
+                            Some(i) => {
+                                let slot = &mut ar.slots[i];
+                                slot.1 = value;
+                                (i, slot.0)
+                            }
+                            None => {
+                                ar.slots.push((0, value));
+                                (ar.slots.len() - 1, 0)
+                            }
+                        };
+                        Ok(key(index, generation))
+                    }
+                    other => Err(ice(format!("Arena.insert on {other:?}"))),
+                }
+            }
+            "get" | "get_mut" | "contains" => {
+                let p = self.pointer_of(a.get(0)?)?;
+                let (index, generation) = crate::place::arena_key(self.target(a.get(1)?)?)?;
+                let live = match self.read(&p)? {
+                    Value::Arena(ar) => {
+                        ar.slots.get(index).is_some_and(|(g, v)| *g == generation && !v.is_moved())
+                    }
+                    other => return Err(ice(format!("Arena.{method} on {other:?}"))),
+                };
+                if method == "contains" {
+                    return Ok(Value::Bool(live));
+                }
+                if !live {
+                    return Ok(Value::none());
+                }
+                Ok(Value::some(Value::Ref(Box::new(p.join(crate::value::Step::Slot(index))))))
+            }
+            "remove" | "take" => {
+                let p = self.pointer_of(a.get(0)?)?;
+                let (index, generation) = crate::place::arena_key(self.target(a.get(1)?)?)?;
+                let taken = match self.write(&p)? {
+                    Value::Arena(ar) => match ar.slots.get_mut(index) {
+                        Some((g, v)) if *g == generation && !v.is_moved() => {
+                            // The slot's next value gets the next generation.
+                            *g += 1;
+                            let v = std::mem::replace(v, Value::Moved);
+                            ar.free.push(index);
+                            Some(v)
+                        }
+                        _ => None,
+                    },
+                    other => return Err(ice(format!("Arena.{method} on {other:?}"))),
+                };
+                if method == "take" {
+                    return Ok(Value::option(taken));
+                }
+                if let Some(v) = taken {
+                    self.queue_drop(v, None);
+                }
+                Ok(Value::Unit)
+            }
+            "keys" => {
+                let keys: std::collections::VecDeque<Value> = match self.target(a.get(0)?)? {
+                    Value::Arena(ar) => ar
+                        .slots
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, (_, v))| !v.is_moved())
+                        .map(|(i, (g, _))| key(i, *g))
+                        .collect(),
+                    other => return Err(ice(format!("Arena.keys on {other:?}"))),
+                };
+                Ok(Value::Iter(Box::new(IterState::Items(keys))))
+            }
+            other => Err(ice(format!("unknown intrinsic `Arena.{other}`"))),
+        }
+    }
 }

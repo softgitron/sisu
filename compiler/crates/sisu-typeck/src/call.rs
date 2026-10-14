@@ -15,6 +15,8 @@ pub enum StaticPath {
     Module(ModuleId),
     Type(Ty),
     Fn(DefId, Option<Vec<Ty>>),
+    /// A trait, whose methods are called as `Trait.method(x, ...)`.
+    Trait(DefId),
 }
 
 #[derive(Clone, Debug)]
@@ -50,6 +52,23 @@ impl Checker<'_> {
             ast::ExprKind::Name(n) => {
                 if self.lookup_local(n).is_some() || n == "it" {
                     return None;
+                }
+                // A generic parameter: `T.zero()`.
+                if let Some(i) = self.generic_names.iter().position(|g| g == n) {
+                    return Some(StaticPath::Type(Ty::Param(i as u32)));
+                }
+                let prim = match n.as_str() {
+                    "int" => Some(Ty::Int),
+                    "f64" => Some(Ty::Float),
+                    "bool" => Some(Ty::Bool),
+                    "char" => Some(Ty::Char),
+                    "str" => Some(Ty::Str),
+                    _ => None,
+                };
+                if let Some(t) = prim
+                    && prog.lookup(self.module, n).is_none()
+                {
+                    return Some(StaticPath::Type(t));
                 }
                 let d = prog.lookup(self.module, n)?;
                 self.classify(d, e.range)
@@ -96,6 +115,7 @@ impl Checker<'_> {
                 Some(StaticPath::Type(self.def_type(d, Vec::new(), range)))
             }
             DefKind::Fn(f) if !f.generics.is_empty() => Some(StaticPath::Fn(d, None)),
+            DefKind::Trait(_) => Some(StaticPath::Trait(d)),
             _ => None,
         }
     }
@@ -204,6 +224,35 @@ impl Checker<'_> {
                         self.call_fn(d, None, Some(ty), None, args, trailing, range, expected)
                     }
                     (Some(d), None) => self.def_value(d, &name.text, range),
+                    (None, Some((args, trailing, expected)))
+                        if self.trait_static(&ty, &name.text).is_some() =>
+                    {
+                        let Some((tr, m)) = self.trait_static(&ty, &name.text) else {
+                            return Expr::error(span);
+                        };
+                        if prog.fn_info(m).is_some_and(|f| f.self_mode.is_some()) {
+                            let diag = self
+                                .error(msg::TYPE_METHOD_NEEDS_RECEIVER, name.range)
+                                .with("name", name.text.clone());
+                            self.report(diag);
+                            self.check_args_loosely(args);
+                            return Expr::error(span);
+                        }
+                        let norm = prog.normalize(&self.infer.zonk(&ty), &self.env);
+                        let mut outer = vec![norm.clone()];
+                        outer.extend(tr.args.iter().cloned());
+                        self.call_fn_with(
+                            m,
+                            None,
+                            Some(outer),
+                            Some(norm),
+                            None,
+                            args,
+                            trailing,
+                            range,
+                            expected,
+                        )
+                    }
                     (None, call) => {
                         let diag = self
                             .error(msg::TYPE_UNKNOWN_ASSOCIATED, name.range)
@@ -217,6 +266,7 @@ impl Checker<'_> {
                     }
                 }
             }
+            StaticPath::Trait(t) => self.trait_path_call(t, name, range, call),
             StaticPath::Fn(d, _) => {
                 let diag = self
                     .error(msg::TYPE_UNKNOWN_FIELD, name.range)
@@ -226,6 +276,74 @@ impl Checker<'_> {
                 Expr::error(span)
             }
         }
+    }
+
+    /// The one trait method called `name` that `ty` has through the traits
+    /// it implements.
+    fn trait_static(&self, ty: &Ty, name: &str) -> Option<(sisu_resolve::TraitRef, DefId)> {
+        let prog = self.prog;
+        let norm = prog.normalize(&self.infer.zonk(ty), &self.env);
+        let found = prog.trait_methods_for(&norm, name, &self.env);
+        if found.len() == 1 { found.into_iter().next() } else { None }
+    }
+
+    /// `Trait.method(x, ...)`: the trait's method called on `x`, or, for a
+    /// method without `self`, with `Self` inferred from the arguments and
+    /// the expected type (`Default.default()`).
+    fn trait_path_call(
+        &mut self,
+        t: DefId,
+        name: &ast::Name,
+        range: TextRange,
+        call: Option<(&[ast::Arg], Option<&ast::Closure>, Option<&Ty>)>,
+    ) -> Expr {
+        let span = self.span(range);
+        let prog = self.prog;
+        let Some(m) = prog.trait_method(t, &name.text) else {
+            let diag = self
+                .error(msg::TYPE_UNKNOWN_ASSOCIATED, name.range)
+                .with("ty", prog.def(t).name.clone())
+                .with("name", name.text.clone());
+            self.report(diag);
+            if let Some((args, _, _)) = call {
+                self.check_args_loosely(args);
+            }
+            return Expr::error(span);
+        };
+        let Some((args, trailing, expected)) = call else {
+            let diag = self
+                .error(msg::TYPE_NOT_A_VALUE, range)
+                .with("name", self.source_text(range))
+                .with("kind", "trait method");
+            self.report(diag);
+            return Expr::error(span);
+        };
+        // The trait's own parameters: inferred, or their defaults.
+        let generics = prog.trait_info(t).map(|i| i.generics.clone()).unwrap_or_default();
+        let targs: Vec<Ty> = generics.iter().map(|_| self.infer.fresh()).collect();
+        let tr = sisu_resolve::TraitRef { def: t, args: targs };
+        let has_self = prog.fn_info(m).is_some_and(|f| f.self_mode.is_some());
+        if has_self {
+            let Some((first, rest)) = args.split_first() else {
+                let d = self
+                    .error(msg::TYPE_ARGUMENT_COUNT, range)
+                    .with("name", name.text.clone())
+                    .with("expected", "1 or more")
+                    .with("found", "0");
+                self.report(d);
+                return Expr::error(span);
+            };
+            let recv = self.infer_expr(&first.value, None);
+            let recv = self.auto_deref(recv);
+            let self_ty = prog.normalize(&self.infer.zonk(&recv.ty), &self.env);
+            self.bounds.push((self_ty.clone(), tr.clone(), recv.span));
+            return self.trait_call(m, tr, recv, self_ty, name, rest, trailing, range, expected);
+        }
+        let self_ty = self.infer.fresh();
+        self.bounds.push((self_ty.clone(), tr.clone(), span));
+        let mut outer = vec![self_ty];
+        outer.extend(tr.args.iter().cloned());
+        self.call_fn_with(m, None, Some(outer), None, None, args, trailing, range, expected)
     }
 
     fn unit_variant_value(&mut self, def: DefId, vi: u32, ty: &Ty, range: TextRange) -> Expr {
@@ -593,6 +711,7 @@ impl Checker<'_> {
             self.bounds.push((p.ty.subst(&vars), p.bound.subst(&vars), span));
         }
         let has_body = f.intrinsic.is_none();
+        let fenv = prog.elaborate_env(&f.predicates);
         let params = f
             .params
             .iter()
@@ -601,7 +720,8 @@ impl Checker<'_> {
                 mode: p.mode,
                 ty: p.ty.subst(&vars),
                 has_default: p.default.is_some(),
-                opaque: has_body && crate::is_opaque(&p.ty),
+                // Passed by reference, unless a `Copy` bound makes it a value.
+                opaque: has_body && crate::is_opaque(&p.ty) && !prog.is_copy_in(&p.ty, &fenv),
             })
             .collect();
         InstSig {
@@ -703,6 +823,17 @@ impl Checker<'_> {
         }
         out.extend(self.check_args(&sig, args, trailing, range));
         let ret = prog.normalize(&self.infer.zonk(&sig.ret), &self.env);
+        // What a `Shared`, `Cell` or `Mutex` owns can be neither a view nor
+        // must-consume (checked when the type is known).
+        let owner = match prog.fn_info(d).and_then(|f| f.intrinsic.as_deref()) {
+            Some("Shared.new") => Some("Shared"),
+            Some("Cell.new") => Some("Cell"),
+            Some("Mutex.new") => Some("Mutex"),
+            _ => None,
+        };
+        if let (Some(owner), Some(t)) = (owner, sig.type_args.first()) {
+            self.owner_checks.push((t.clone(), owner, span));
+        }
         // A typed hole is reported with the type it stands for (D-061).
         if prog.fn_info(d).and_then(|f| f.intrinsic.as_deref()) == Some("todo") {
             let name = match out.first().map(|a| &a.expr.kind) {
@@ -846,7 +977,8 @@ impl Checker<'_> {
             );
             self.report(d);
         }
-        let pty = self.resolved(&p.ty);
+        // What earlier arguments inferred may settle an associated type.
+        let pty = self.prog.normalize(&self.infer.zonk(&p.ty), &self.env);
         // An argument that mentions `it` where a one-parameter function is
         // expected is a closure over `it`.
         if let Ty::Fn(f) = &pty
@@ -989,6 +1121,13 @@ impl Checker<'_> {
                 return Expr::new(ExprKind::Trace(Box::new(recv)), self.string_ty(), span);
             }
             let mut def = base.key().and_then(|k| prog.method(k, &name.text));
+            // A `Shared`'s own functions take it as an argument: a method
+            // call reaches the value's methods.
+            if self.smart_pointer(&base) == Some("Shared")
+                && def.is_some_and(|d| prog.fn_info(d).is_some_and(|f| f.self_mode.is_none()))
+            {
+                def = None;
+            }
             let mut base = base;
             if def.is_none()
                 && self.is_string(&base)
@@ -999,6 +1138,13 @@ impl Checker<'_> {
                 base = Ty::Str;
             }
             if let Some(d) = def {
+                // A `dict` or `set` finds its keys by their hash.
+                if let Ty::Adt(cd, a) = &base
+                    && (Some(*cd) == prog.wk.dict || Some(*cd) == prog.wk.set)
+                    && let Some(k) = a.first()
+                {
+                    self.require(k.clone(), prog.wk.hash, span);
+                }
                 return self.inherent_call(d, recv, base, name, args, trailing, range, expected);
             }
             // A method of a trait.
@@ -1022,9 +1168,15 @@ impl Checker<'_> {
                     return Expr::error(span);
                 }
             }
-            // A `Box` lends its methods' receiver to what it holds.
+            // A `Box` and a `Shared` lend their methods' receiver to what
+            // they hold.
             if self.is_box(&base) {
                 recv = self.unbox(recv);
+                recv = self.auto_deref(recv);
+                continue;
+            }
+            if self.smart_pointer(&base) == Some("Shared") {
+                recv = self.deref_smart(recv);
                 recv = self.auto_deref(recv);
                 continue;
             }
@@ -1188,6 +1340,15 @@ impl Checker<'_> {
         range: TextRange,
     ) -> Expr {
         let span = self.span(range);
+        // A reference to a function value calls the function (a function
+        // value is `Copy`): `for g in handlers: g(1)`.
+        let mut f = f;
+        while let Ty::Ref(inner, _) = self.resolved(&f.ty)
+            && matches!(self.resolved(&inner), Ty::Fn(_))
+        {
+            let fspan = f.span;
+            f = Expr::new(ExprKind::Deref(Box::new(f)), *inner, fspan);
+        }
         let t = self.resolved(&f.ty);
         let Ty::Fn(fty) = t else {
             if t != Ty::Error {

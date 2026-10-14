@@ -97,7 +97,11 @@ impl Interp<'_, '_> {
                 }
                 Some((_, ImplTarget::Intrinsic(i))) => Ok(Target::Intrinsic(i.clone(), args, targs)),
                 // The trait's provided method.
-                None => Ok(Target::Fn(self.fn_index(name)?, args, tys)),
+                None => {
+                    let fi = self.fn_index(name)?;
+                    self.adapt(fi, &tys, &mut args)?;
+                    Ok(Target::Fn(fi, args, tys))
+                }
             };
         }
         // The language's own impls: structural.
