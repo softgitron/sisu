@@ -1,0 +1,30 @@
+Superseded: the first full-scale runs of the four groups that measure time
+(spawn-join, starvation, probe-overhead, echo), five repetitions each, made
+between 19:54 and 22:53 UTC on 2026-10-13 with the same harness binary as their
+replacements (taskbench 0.2.0; binary sha256 5893a273e024240689137cf7bb1ca7d0346df3de55bce963261041733fee9f18,
+sources 789d610d... for spawn-join and 51e42157... for the others, versions.txt).
+
+Why: machine 1 is a development VM, and other work ran on it during these
+runs: compilations and tests elsewhere in the repository, at times that were
+not recorded. A listing of the build directory of the repository's compiler/
+workspace, made at 22:43 UTC, showed files last written in every ten-minute
+interval from 21:30 to 22:09 and from 22:20 to 22:43 UTC, which covers parts of
+the starvation, probe-overhead and echo groups; files rewritten later hide any
+earlier builds, so nothing is known about the spawn-join group (19:54), which
+was replaced as well. In the starvation group the first of the five runs of B
+at K = 10k (21:59:54 UTC) reached only 1,357,540,204 iterations per second
+against a median of 1,794,087,833, the kind of drop a competing process
+causes. The other groups (deep-recursion, idle-memory, max-tasks, cancel-uring)
+were kept: their memory, scale and correctness results do not depend on other
+processes' CPU use (their incidental timings, such as the cancellation
+latencies, do, and are not verdict inputs).
+
+Replaced by: the same four groups run again into the parent directory with
+run_all.sh --quiet-below 0.3 (load.sh): before every process the script waits
+until the other processes use fewer than 0.3 CPUs over 2 seconds, and it
+measures a process again when they used 0.3 CPUs or more on average while it
+ran; load.csv in the parent directory records the load during every process.
+
+These rows are kept for the record, outside summarize.py's reach (it reads
+only the directories it is given). timing.csv here holds these runs'
+repetitions, which were removed from the parent's timing.csv.

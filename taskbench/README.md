@@ -46,10 +46,14 @@ controls/go/          Go control (spawn-join, idle-memory, max-tasks, echo, idle
 controls/java/        Java virtual-thread control (same workloads)
 controls/run_controls.sh
 scale.sh              the smoke and full scale parameters, shared by run_all.sh and the controls
+load.sh               the machine-load record (load.csv) and the quiet gate (--quiet-below), shared likewise
 run_all.sh            every benchmark x every configuration x controls x repetitions -> results/<machine>/<date>/
 summarize.py          per-threshold tables (median [range] over repetitions, ratios to Go) from results directories
 docs/                 stackless-fallback cost estimate; the Phase 1 report template; the Phase 1 report
-results/              vm/2026-10-13-phase1: the Phase 1 runs (full scale, five repetitions, machine 1);
+report/               the Phase 1 report's source (report-phase1.md.in) and its renderer (render.py, tables.py),
+                      which computes every figure from the results CSVs
+results/              vm/2026-10-13-phase1: the Phase 1 runs (full scale, five repetitions, machine 1;
+                      superseded and aborted runs in subdirectories, each with a note);
                       github-runner/2026-10-13-smoke-b5349dd405e8: the CI smoke run on a runner (machine 2);
                       vm/2026-10-12 and vm/2026-10-12-large: development runs of harness 0.1.0
 ```
@@ -64,6 +68,7 @@ cargo clippy --all-targets     # clean
 ./run_all.sh                   # smoke scale, one repetition, about 3 minutes on 4 vCPUs
 ./run_all.sh --scale full      # five repetitions of every cell, about 3.5 hours on 4 vCPUs, 16 GiB
 ./run_all.sh --scale full --only idle-memory,max-tasks --reps 1   # a subset
+./run_all.sh --scale full --quiet-below 0.3   # on a shared machine: wait for quiet, measure again when busy
 python3 summarize.py [--markdown] results/<machine>/<date> [more directories]
 ```
 
@@ -291,9 +296,16 @@ hypervisor (CPUID vendor), governor, memory and swap, page size,
 transparent huge page settings, the Spectre v2 mitigation state, rlimits
 (NOFILE, NPROC, STACK, AS, MEMLOCK), cgroup memory and pids limits, and the
 harness version. `run_all.sh` also appends to `versions.txt` (rustc, cargo, uname,
-the arguments, a SHA-256 digest of the harness and control sources, and the
-commit on CI) and to `timing.csv` (each repetition's start and duration), once
-per invocation; the controls append to `controls-versions.txt`.
+the arguments, SHA-256 digests of the harness and control sources and of the
+binary, the quiet-gate setting, and the commit on CI) and to `timing.csv` (each
+repetition's start and duration), once per invocation; the controls append to
+`controls-versions.txt`. Both scripts write a row per benchmark process to
+`load.csv` (`load.sh`): its wall-clock and CPU time and the CPU time all other
+processes used meanwhile (from `/proc/stat`), so a run on a shared machine shows
+what it shared. With `--quiet-below CPUS`, every process first waits until the
+other processes use fewer than CPUS CPUs, and is measured again (at most three
+attempts, the last kept) when they used more while it ran; `summarize.py` prints
+the load per benchmark.
 
 ## Results on the development VM
 

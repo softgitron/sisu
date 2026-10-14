@@ -2,10 +2,12 @@
 # Builds and runs the Go and Java (virtual threads) controls of the bet-3 harness
 # with the same workloads, scale and CSV schema as run_all.sh (both take their
 # parameters from scale.sh), appending to OUT_DIR/<benchmark>.csv and recording
-# versions and flags in OUT_DIR/controls-versions.txt.
+# versions and flags in OUT_DIR/controls-versions.txt and the machine's load
+# during every process in OUT_DIR/load.csv (load.sh).
 #
 # Usage: controls/run_controls.sh OUT_DIR [--threads N] [--machine-id ID] [--scale smoke|full]
 #                                 [--only BENCH[,BENCH...]] [--build-only | --no-build]
+#                                 [--quiet-below CPUS]
 #
 # --build-only builds both controls into OUT_DIR/.controls-build and writes
 # controls-versions.txt; --no-build runs from an earlier --build-only. run_all.sh
@@ -24,7 +26,7 @@
 set -uo pipefail
 
 usage() {
-  echo "usage: $0 OUT_DIR [--threads N] [--machine-id ID] [--scale smoke|full] [--only BENCH,...] [--build-only|--no-build]" >&2
+  echo "usage: $0 OUT_DIR [--threads N] [--machine-id ID] [--scale smoke|full] [--only BENCH,...] [--build-only|--no-build] [--quiet-below CPUS]" >&2
   exit 2
 }
 [ $# -ge 1 ] || usage
@@ -35,6 +37,7 @@ SCALE=smoke
 ONLY=""
 BUILD=1
 RUN=1
+LOAD_QUIET=off
 while [ $# -gt 0 ]; do
   case "$1" in
     --threads) THREADS=$2; shift 2 ;;
@@ -43,6 +46,7 @@ while [ $# -gt 0 ]; do
     --only) ONLY=$2; shift 2 ;;
     --build-only) RUN=0; shift ;;
     --no-build) BUILD=0; shift ;;
+    --quiet-below) LOAD_QUIET=$2; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -53,6 +57,8 @@ scale_params "$SCALE" "$THREADS"
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
 BUILD_DIR="$OUT/.controls-build"
+# shellcheck source=../load.sh
+. "$HERE/../load.sh"
 
 GO=${GO:-$(command -v go || echo /usr/local/go/bin/go)}
 JAVA=${JAVA:-java}
@@ -122,21 +128,28 @@ record_exit() {
 # selected BENCH: whether --only (if given) includes BENCH.
 selected() { [ -z "$ONLY" ] || [[ ",$ONLY," == *",$1,"* ]]; }
 
+# go_proc / java_proc BENCH ARGS...: one control process, its rows in $LOAD_TMP.
+go_proc() {
+  GOMAXPROCS=$THREADS "$BUILD_DIR/gocontrol" "$@"
+}
+java_proc() {
+  # shellcheck disable=SC2086
+  "$JAVA" $JFLAGS -cp "$BUILD_DIR/java" TaskBench "$@" 2>&1 | grep -v 'Picked up' >&2
+  return "${PIPESTATUS[0]}"
+}
 go_run() {
   local bench=$1; shift
   [ $go_ok = 1 ] || return 0
   echo "== go $bench $*"
-  GOMAXPROCS=$THREADS "$BUILD_DIR/gocontrol" "$bench" --threads "$THREADS" --machine-id "$MACHINE" --csv "$OUT/$bench.csv" --quiet "$@"
+  load_run go "$bench" "$*" go_proc "$bench" --threads "$THREADS" --machine-id "$MACHINE" --csv "$LOAD_TMP" --quiet "$@"
   record_exit go "$bench" $? "$@"
 }
 java_run() {
   local bench=$1; shift
   [ $java_ok = 1 ] || return 0
   echo "== java $bench $*"
-  # shellcheck disable=SC2086
-  "$JAVA" $JFLAGS -cp "$BUILD_DIR/java" TaskBench "$bench" --threads "$THREADS" --machine-id "$MACHINE" --csv "$OUT/$bench.csv" --quiet "$@" 2>&1 \
-    | grep -v 'Picked up' >&2
-  record_exit java "$bench" "${PIPESTATUS[0]}" "$@"
+  load_run java "$bench" "$*" java_proc "$bench" --threads "$THREADS" --machine-id "$MACHINE" --csv "$LOAD_TMP" --quiet "$@"
+  record_exit java "$bench" $? "$@"
 }
 # connections IMPL BENCH N ARGS...: runs a connection benchmark, or records a
 # failed row when N in-process connections exceed the RLIMIT_NOFILE hard limit.

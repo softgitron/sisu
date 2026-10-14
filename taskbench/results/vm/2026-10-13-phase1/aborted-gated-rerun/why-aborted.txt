@@ -1,0 +1,23 @@
+Aborted: the first gated rerun (run_all.sh --scale full --reps 5 --only
+spawn-join --quiet-below 0.3, started 23:08:48 UTC on 2026-10-13; its record
+in ../versions.txt is the entry with that date_utc, source_sha256
+6a5112709fa6...), stopped by hand at 23:10 UTC during its third repetition,
+after two complete repetitions.
+
+Why: its load.sh counted only user, nice and system time as busy. Machine 1's
+kernel accounts CPU time by ticks without CONFIG_IRQ_TIME_ACCOUNTING, so a
+process's own time (from the shell's `times`) includes the interrupt and
+softirq time of the moments it was interrupted, while /proc/stat files those
+ticks under irq and softirq. In smoke-scale checks of the echo benchmark
+(1000 connections, about 4.1 s per process), whose loopback traffic is softirq
+work, a process's own time was about 15.7 CPU seconds, while /proc/stat's user,
+nice and system time over such a run was about 11.6, so the other processes'
+time came out about one CPU below zero, which would have hidden a competing
+process from the check that measures a process again. load.sh now counts interrupt and softirq time on both sides,
+and every gated group was run from its first repetition with it (source_sha256
+6a1fedf5e4b6... in ../versions.txt; only load.sh differs).
+
+Files: spawn-join.csv (the two repetitions and part of the third), load.csv
+(their load rows, with the old busy count), timing.csv (the two repetitions),
+java-attempt-killed.csv (the rows of the Java process running when the run was
+stopped). The harness binary was the same as in every other group here.

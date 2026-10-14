@@ -68,3 +68,83 @@ taskbench: taskbench: the bet-3 stack harness (stackful tasks on stacks that can
 source_sha256: 51e4215766503d35162635ecadf39cd2f956d783a92dc51e48ee6ede32770eb4
 commit: not recorded (working tree; see source_sha256)
 rlimit_nofile_hard: 20000; idle connections: 9900; echo connections: 10000 1000
+=== run_all.sh --scale full --reps 5 --only probe-overhead
+date_utc: 2026-10-13T22:20:38Z
+scale: full reps: 5 threads: 4 machine_id: vm
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+uname: Linux vm 6.18.44-fc-v114 #1 SMP PREEMPT_DYNAMIC @0 x86_64 x86_64 x86_64 GNU/Linux
+taskbench: taskbench: the bet-3 stack harness (stackful tasks on stacks that cannot move) version 0.2.0
+source_sha256: 51e4215766503d35162635ecadf39cd2f956d783a92dc51e48ee6ede32770eb4
+commit: not recorded (working tree; see source_sha256)
+rlimit_nofile_hard: 20000; idle connections: 9900; echo connections: 10000 1000
+=== run_all.sh --scale full --reps 5 --only echo
+date_utc: 2026-10-13T22:26:51Z
+scale: full reps: 5 threads: 4 machine_id: vm
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+uname: Linux vm 6.18.44-fc-v114 #1 SMP PREEMPT_DYNAMIC @0 x86_64 x86_64 x86_64 GNU/Linux
+taskbench: taskbench: the bet-3 stack harness (stackful tasks on stacks that cannot move) version 0.2.0
+source_sha256: 51e4215766503d35162635ecadf39cd2f956d783a92dc51e48ee6ede32770eb4
+commit: not recorded (working tree; see source_sha256)
+rlimit_nofile_hard: 20000; idle connections: 9900; echo connections: 10000 1000
+=== run_all.sh --scale full --reps 5 --only spawn-join
+date_utc: 2026-10-13T23:08:48Z
+scale: full reps: 5 threads: 4 machine_id: vm
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+uname: Linux vm 6.18.44-fc-v114 #1 SMP PREEMPT_DYNAMIC @0 x86_64 x86_64 x86_64 GNU/Linux
+taskbench: taskbench: the bet-3 stack harness (stackful tasks on stacks that cannot move) version 0.2.0
+source_sha256: 6a5112709fa620202e090c1f96564c84a317eae5700c2b2cb243046439e7e64c
+binary_sha256: 5893a273e024240689137cf7bb1ca7d0346df3de55bce963261041733fee9f18
+commit: not recorded (working tree; see source_sha256)
+rlimit_nofile_hard: 20000; idle connections: 9900; echo connections: 10000 1000
+quiet_below: 0.3 (CPUs used by other processes; load.sh)
+=== run_all.sh --scale full --reps 5 --only spawn-join
+date_utc: 2026-10-13T23:12:49Z
+scale: full reps: 5 threads: 4 machine_id: vm
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+uname: Linux vm 6.18.44-fc-v114 #1 SMP PREEMPT_DYNAMIC @0 x86_64 x86_64 x86_64 GNU/Linux
+taskbench: taskbench: the bet-3 stack harness (stackful tasks on stacks that cannot move) version 0.2.0
+source_sha256: 6a1fedf5e4b611ff8413dfc0e29073d9c69580690bf997ea610a131ba9ac3482
+binary_sha256: 5893a273e024240689137cf7bb1ca7d0346df3de55bce963261041733fee9f18
+commit: not recorded (working tree; see source_sha256)
+rlimit_nofile_hard: 20000; idle connections: 9900; echo connections: 10000 1000
+quiet_below: 0.3 (CPUs used by other processes; load.sh)
+=== run_all.sh --scale full --reps 5 --only probe-overhead
+date_utc: 2026-10-13T23:15:59Z
+scale: full reps: 5 threads: 4 machine_id: vm
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+uname: Linux vm 6.18.44-fc-v114 #1 SMP PREEMPT_DYNAMIC @0 x86_64 x86_64 x86_64 GNU/Linux
+taskbench: taskbench: the bet-3 stack harness (stackful tasks on stacks that cannot move) version 0.2.0
+source_sha256: 6a1fedf5e4b611ff8413dfc0e29073d9c69580690bf997ea610a131ba9ac3482
+binary_sha256: 5893a273e024240689137cf7bb1ca7d0346df3de55bce963261041733fee9f18
+commit: not recorded (working tree; see source_sha256)
+rlimit_nofile_hard: 20000; idle connections: 9900; echo connections: 10000 1000
+quiet_below: 0.3 (CPUs used by other processes; load.sh)
+=== run_all.sh --scale full --reps 5 --only starvation
+date_utc: 2026-10-13T23:26:13Z
+scale: full reps: 5 threads: 4 machine_id: vm
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+uname: Linux vm 6.18.44-fc-v114 #1 SMP PREEMPT_DYNAMIC @0 x86_64 x86_64 x86_64 GNU/Linux
+taskbench: taskbench: the bet-3 stack harness (stackful tasks on stacks that cannot move) version 0.2.0
+source_sha256: 6a1fedf5e4b611ff8413dfc0e29073d9c69580690bf997ea610a131ba9ac3482
+binary_sha256: 5893a273e024240689137cf7bb1ca7d0346df3de55bce963261041733fee9f18
+commit: not recorded (working tree; see source_sha256)
+rlimit_nofile_hard: 20000; idle connections: 9900; echo connections: 10000 1000
+quiet_below: 0.3 (CPUs used by other processes; load.sh)
+=== run_all.sh --scale full --reps 5 --only echo
+date_utc: 2026-10-14T00:04:01Z
+scale: full reps: 5 threads: 4 machine_id: vm
+rustc: rustc 1.97.0 (2d8144b78 2026-07-07)
+cargo: cargo 1.97.0 (c980f4866 2026-06-30)
+uname: Linux vm 6.18.44-fc-v114 #1 SMP PREEMPT_DYNAMIC @0 x86_64 x86_64 x86_64 GNU/Linux
+taskbench: taskbench: the bet-3 stack harness (stackful tasks on stacks that cannot move) version 0.2.0
+source_sha256: 6a1fedf5e4b611ff8413dfc0e29073d9c69580690bf997ea610a131ba9ac3482
+binary_sha256: 5893a273e024240689137cf7bb1ca7d0346df3de55bce963261041733fee9f18
+commit: not recorded (working tree; see source_sha256)
+rlimit_nofile_hard: 20000; idle connections: 9900; echo connections: 10000 1000
+quiet_below: 0.3 (CPUs used by other processes; load.sh)

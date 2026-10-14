@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Runs every benchmark of the bet-3 harness for every strategy configuration and
 # the Go and Java controls, writing results/<machine>/<date>/<benchmark>.csv,
-# machine-spec.csv, versions.txt, controls-versions.txt and timing.csv.
+# machine-spec.csv, versions.txt, controls-versions.txt, timing.csv and load.csv.
 #
 # Usage: ./run_all.sh [--scale smoke|full] [--reps N] [--threads N] [--machine-id ID] [--out DIR]
-#                     [--no-controls] [--only BENCH[,BENCH...]]
+#                     [--no-controls] [--only BENCH[,BENCH...]] [--quiet-below CPUS]
 #
 # smoke (default) sizes every run for a development machine (minutes in total,
 # one repetition). full is the Phase 1 report's scale (scale.sh): 100k and 1M
@@ -20,6 +20,11 @@
 # --only runs a subset of the benchmarks at the chosen scale, for example
 # "--scale full --only idle-memory,max-tasks".
 #
+# --quiet-below CPUS is for a machine shared with other work: every process waits
+# until the rest of the machine uses fewer than CPUS CPUs, and is measured again
+# when the rest used more while it ran (load.sh). load.csv records the load
+# during every process either way.
+#
 # A configuration that fails (for example strategy A at 100k tasks, which hits
 # vm.max_map_count) is a result and is recorded with status "failed". A process
 # that dies (a crash would be a harness bug) is recorded as a "process_exit" row.
@@ -34,8 +39,9 @@ MACHINE=${MACHINE_ID:-$(cat /proc/sys/kernel/hostname 2>/dev/null || hostname)}
 OUT=""
 CONTROLS=1
 ONLY=""
+LOAD_QUIET=off
 usage() {
-  echo "usage: $0 [--scale smoke|full] [--reps N] [--threads N] [--machine-id ID] [--out DIR] [--no-controls] [--only BENCH,...]" >&2
+  echo "usage: $0 [--scale smoke|full] [--reps N] [--threads N] [--machine-id ID] [--out DIR] [--no-controls] [--only BENCH,...] [--quiet-below CPUS]" >&2
   exit 2
 }
 while [ $# -gt 0 ]; do
@@ -47,15 +53,18 @@ while [ $# -gt 0 ]; do
     --out) OUT=$2; shift 2 ;;
     --no-controls) CONTROLS=0; shift ;;
     --only) ONLY=$2; shift 2 ;;
+    --quiet-below) LOAD_QUIET=$2; shift 2 ;;
     *) usage ;;
   esac
 done
 case "$SCALE" in smoke|full) ;; *) usage ;; esac
+[ "$LOAD_QUIET" = off ] || awk -v q="$LOAD_QUIET" 'BEGIN {exit !(q + 0 > 0)}' || usage
 scale_params "$SCALE" "$THREADS"
 REPS=${REPS:-$REPS_DEFAULT}
 DATE=$(date -u +%Y-%m-%d)
 OUT=${OUT:-results/$MACHINE/$DATE}
 mkdir -p "$OUT"
+. ./load.sh
 
 cargo build --release --quiet || exit 1
 BIN=target/release/taskbench
@@ -64,7 +73,7 @@ BIN=target/release/taskbench
 # results directory names its harness even when it was produced from a working
 # tree (the commit is GITHUB_SHA on CI, or whatever commit the results land in).
 source_digest() {
-  find src tests controls Cargo.toml Cargo.lock run_all.sh scale.sh -type f \
+  find src tests controls Cargo.toml Cargo.lock run_all.sh scale.sh load.sh -type f \
     \( -name '*.rs' -o -name '*.go' -o -name '*.java' -o -name '*.sh' -o -name '*.py' -o -name '*.toml' \
        -o -name '*.lock' -o -name 'go.mod' \) -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1
 }
@@ -79,18 +88,21 @@ source_digest() {
   echo "uname: $(uname -a)"
   echo "taskbench: $($BIN help | head -1) version $(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
   echo "source_sha256: $(source_digest)"
+  echo "binary_sha256: $(sha256sum "$BIN" | cut -d' ' -f1)"
   echo "commit: ${GITHUB_SHA:-not recorded (working tree; see source_sha256)}"
   echo "rlimit_nofile_hard: $(nofile_hard); idle connections: $IC_CONNS; echo connections: $ECHO_CONNS"
+  echo "quiet_below: $LOAD_QUIET (CPUs used by other processes; load.sh)"
 } >> "$OUT/versions.txt"
 "$BIN" machine-spec --machine-id "$MACHINE" --csv "$OUT/machine-spec.csv" --quiet
 TIMING="$OUT/timing.csv"
 [ -s "$TIMING" ] || echo "rep,benchmark,start_utc,seconds" > "$TIMING"
 
-# run BENCH ARGS...: one benchmark process; a non-zero exit becomes a CSV row.
+# run BENCH ARGS...: one benchmark process (load.sh's load_run measures it again
+# if the machine was busy); a non-zero exit becomes a CSV row.
 run() {
   local bench=$1; shift
   echo "== $bench $*"
-  "$BIN" "$bench" "$@" --threads "$THREADS" --machine-id "$MACHINE" --csv "$OUT/$bench.csv" --quiet
+  load_run taskbench "$bench" "$*" "$BIN" "$bench" "$@" --threads "$THREADS" --machine-id "$MACHINE" --csv "$LOAD_TMP" --quiet
   local rc=$?
   if [ $rc -ne 0 ]; then
     local strat=B base=A prev=""
@@ -229,7 +241,7 @@ BENCHES="spawn-join idle-memory max-tasks echo idle-connections deep-recursion s
 CONTROLLED=",spawn-join,idle-memory,max-tasks,echo,idle-connections,starvation,"
 selected() { [ -z "$ONLY" ] || [[ ",$ONLY," == *",$1,"* ]]; }
 
-ctl=(controls/run_controls.sh "$OUT" --threads "$THREADS" --machine-id "$MACHINE" --scale "$SCALE")
+ctl=(controls/run_controls.sh "$OUT" --threads "$THREADS" --machine-id "$MACHINE" --scale "$SCALE" --quiet-below "$LOAD_QUIET")
 if [ $CONTROLS = 1 ]; then
   "${ctl[@]}" --build-only || CONTROLS=0
 fi
@@ -247,4 +259,5 @@ for rep in $(seq 1 "$REPS"); do
   done
 done
 rm -rf "$OUT/.controls-build"
+rm -f "$OUT"/.attempt-*.csv "$OUT"/.times-*
 echo "results in $OUT"

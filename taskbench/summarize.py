@@ -14,7 +14,11 @@ starvation against Go with its default asynchronous preemption (no
 runtime.Gosched). Ratio intervals are 95% percentile bootstrap intervals from
 10,000 resamples of the runs (section 7.2; reported, never used for a decision),
 followed by the conservative range [min/max, max/min] that section 2.4 uses to
-call a cell inconclusive when it crosses a threshold. Standard library only.
+call a cell inconclusive when it crosses a threshold. The last table is the
+machine's load during the runs (load.csv, written by load.sh): how many
+processes were measured again because other processes were busy, and how many
+CPUs the other processes used during the processes that were kept. Standard
+library only.
 """
 import csv
 import glob
@@ -31,7 +35,7 @@ def load(dirs):
     rows = []
     for d in dirs:
         for path in sorted(glob.glob(os.path.join(d, "*.csv"))):
-            if os.path.basename(path) in ("machine-spec.csv", "timing.csv"):
+            if os.path.basename(path) in ("machine-spec.csv", "timing.csv", "load.csv"):
                 continue
             with open(path, newline="") as f:
                 for r in csv.DictReader(f):
@@ -516,6 +520,39 @@ def t_cancel_uring(cells, md):
                      "buffer bytes written after return", "cancel to return p50 / p99 (ms)"], lines, md)
 
 
+def t_load(dirs, md):
+    lines = []
+    for d in dirs:
+        path = os.path.join(d, "load.csv")
+        if not os.path.exists(path):
+            continue
+        with open(path, newline="") as f:
+            by = defaultdict(list)
+            for r in csv.DictReader(f):
+                by[r["benchmark"]].append(r)
+        name = "/".join(os.path.normpath(d).split(os.sep)[-2:])
+        for bench in sorted(by):
+            rs = by[bench]
+            kept = [r for r in rs if r["kept"] == "yes"]
+            cpus = [float(r["others_cpus"]) for r in kept]
+            busy = sum(1 for r in kept if r["quiet_below"] != "off" and float(r["others_cpu_s"]) >= 0.05
+                       and float(r["others_cpus"]) >= float(r["quiet_below"]))
+            waited = [int(r["gate_wait_s"]) for r in rs]
+            steal = [float(r["steal_s"]) / float(r["wall_s"]) for r in kept if float(r["wall_s"]) > 0.05]
+            lines.append([
+                name, bench, ", ".join(sorted({r["quiet_below"] for r in rs})), str(len(kept)), str(len(rs) - len(kept)),
+                str(sum(1 for r in rs if r["gate"] == "timeout")), str(busy),
+                f"{statistics.median(cpus):.3f}" if cpus else "", f"{max(cpus):.3f}" if cpus else "",
+                f"{statistics.median(steal):.3f}" if steal else "",
+                f"{sum(waited)} / {max(waited)}" if waited else "",
+            ])
+    if lines:
+        print_table("Machine load during the runs (load.csv)",
+                    ["results", "benchmark", "quiet below (CPUs)", "processes kept", "attempts measured again",
+                     "gate timeouts", "kept although busy", "others' CPUs while kept: median", "max",
+                     "steal (CPUs): median", "gate wait (s): total / longest"], lines, md)
+
+
 def main():
     args = sys.argv[1:]
     md = "--markdown" in args
@@ -535,6 +572,7 @@ def main():
     t_starvation(cells, md)
     t_probe_overhead(cells, md)
     t_cancel_uring(cells, md)
+    t_load(dirs, md)
     crashes = [r for r in rows if r["metric"] == "process_exit"]
     print(f"\nprocess_exit rows (crashes): {len(crashes)}")
     for r in crashes:

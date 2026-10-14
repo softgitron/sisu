@@ -75,3 +75,80 @@ javac: javac 21.0.12.1
 java_flags: -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC
 java_tool_options: flags: none; system properties set (values not recorded): javax.net.ssl.trustStore javax.net.ssl.trustStoreType https.proxyHost https.proxyPort http.nonProxyHosts jdk.http.auth.tunneling.disabledSchemes jdk.http.auth.proxying.disabledSchemes
 warm-up: spawn-join Go 10000 rounds, Java 20000 rounds (JIT); echo 5 s unrecorded
+=== controls build
+date_utc: 2026-10-13T22:20:38Z
+machine_id: vm
+scale: full
+threads: 4 (GOMAXPROCS and jdk.virtualThreadScheduler.parallelism)
+go: go version go1.24.7 linux/amd64
+java: openjdk version "21.0.12.1" 2026-08-18 OpenJDK Runtime Environment (build 21.0.12.1+1-1-24.04.4-Ubuntu) OpenJDK 64-Bit Server VM (build 21.0.12.1+1-1-24.04.4-Ubuntu, mixed mode, sharing) 
+javac: javac 21.0.12.1
+java_flags: -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC
+java_tool_options: flags: none; system properties set (values not recorded): javax.net.ssl.trustStore javax.net.ssl.trustStoreType https.proxyHost https.proxyPort http.nonProxyHosts jdk.http.auth.tunneling.disabledSchemes jdk.http.auth.proxying.disabledSchemes
+warm-up: spawn-join Go 10000 rounds, Java 20000 rounds (JIT); echo 5 s unrecorded
+=== controls build
+date_utc: 2026-10-13T22:26:52Z
+machine_id: vm
+scale: full
+threads: 4 (GOMAXPROCS and jdk.virtualThreadScheduler.parallelism)
+go: go version go1.24.7 linux/amd64
+java: openjdk version "21.0.12.1" 2026-08-18 OpenJDK Runtime Environment (build 21.0.12.1+1-1-24.04.4-Ubuntu) OpenJDK 64-Bit Server VM (build 21.0.12.1+1-1-24.04.4-Ubuntu, mixed mode, sharing) 
+javac: javac 21.0.12.1
+java_flags: -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC
+java_tool_options: flags: none; system properties set (values not recorded): javax.net.ssl.trustStore javax.net.ssl.trustStoreType https.proxyHost https.proxyPort http.nonProxyHosts jdk.http.auth.tunneling.disabledSchemes jdk.http.auth.proxying.disabledSchemes
+warm-up: spawn-join Go 10000 rounds, Java 20000 rounds (JIT); echo 5 s unrecorded
+=== controls build
+date_utc: 2026-10-13T23:08:48Z
+machine_id: vm
+scale: full
+threads: 4 (GOMAXPROCS and jdk.virtualThreadScheduler.parallelism)
+go: go version go1.24.7 linux/amd64
+java: openjdk version "21.0.12.1" 2026-08-18 OpenJDK Runtime Environment (build 21.0.12.1+1-1-24.04.4-Ubuntu) OpenJDK 64-Bit Server VM (build 21.0.12.1+1-1-24.04.4-Ubuntu, mixed mode, sharing) 
+javac: javac 21.0.12.1
+java_flags: -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC
+java_tool_options: flags: none; system properties set (values not recorded): javax.net.ssl.trustStore javax.net.ssl.trustStoreType https.proxyHost https.proxyPort http.nonProxyHosts jdk.http.auth.tunneling.disabledSchemes jdk.http.auth.proxying.disabledSchemes
+warm-up: spawn-join Go 10000 rounds, Java 20000 rounds (JIT); echo 5 s unrecorded
+=== controls build
+date_utc: 2026-10-13T23:12:49Z
+machine_id: vm
+scale: full
+threads: 4 (GOMAXPROCS and jdk.virtualThreadScheduler.parallelism)
+go: go version go1.24.7 linux/amd64
+java: openjdk version "21.0.12.1" 2026-08-18 OpenJDK Runtime Environment (build 21.0.12.1+1-1-24.04.4-Ubuntu) OpenJDK 64-Bit Server VM (build 21.0.12.1+1-1-24.04.4-Ubuntu, mixed mode, sharing) 
+javac: javac 21.0.12.1
+java_flags: -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC
+java_tool_options: flags: none; system properties set (values not recorded): javax.net.ssl.trustStore javax.net.ssl.trustStoreType https.proxyHost https.proxyPort http.nonProxyHosts jdk.http.auth.tunneling.disabledSchemes jdk.http.auth.proxying.disabledSchemes
+warm-up: spawn-join Go 10000 rounds, Java 20000 rounds (JIT); echo 5 s unrecorded
+=== controls build
+date_utc: 2026-10-13T23:15:59Z
+machine_id: vm
+scale: full
+threads: 4 (GOMAXPROCS and jdk.virtualThreadScheduler.parallelism)
+go: go version go1.24.7 linux/amd64
+java: openjdk version "21.0.12.1" 2026-08-18 OpenJDK Runtime Environment (build 21.0.12.1+1-1-24.04.4-Ubuntu) OpenJDK 64-Bit Server VM (build 21.0.12.1+1-1-24.04.4-Ubuntu, mixed mode, sharing) 
+javac: javac 21.0.12.1
+java_flags: -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC
+java_tool_options: flags: none; system properties set (values not recorded): javax.net.ssl.trustStore javax.net.ssl.trustStoreType https.proxyHost https.proxyPort http.nonProxyHosts jdk.http.auth.tunneling.disabledSchemes jdk.http.auth.proxying.disabledSchemes
+warm-up: spawn-join Go 10000 rounds, Java 20000 rounds (JIT); echo 5 s unrecorded
+=== controls build
+date_utc: 2026-10-13T23:26:13Z
+machine_id: vm
+scale: full
+threads: 4 (GOMAXPROCS and jdk.virtualThreadScheduler.parallelism)
+go: go version go1.24.7 linux/amd64
+java: openjdk version "21.0.12.1" 2026-08-18 OpenJDK Runtime Environment (build 21.0.12.1+1-1-24.04.4-Ubuntu) OpenJDK 64-Bit Server VM (build 21.0.12.1+1-1-24.04.4-Ubuntu, mixed mode, sharing) 
+javac: javac 21.0.12.1
+java_flags: -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC
+java_tool_options: flags: none; system properties set (values not recorded): javax.net.ssl.trustStore javax.net.ssl.trustStoreType https.proxyHost https.proxyPort http.nonProxyHosts jdk.http.auth.tunneling.disabledSchemes jdk.http.auth.proxying.disabledSchemes
+warm-up: spawn-join Go 10000 rounds, Java 20000 rounds (JIT); echo 5 s unrecorded
+=== controls build
+date_utc: 2026-10-14T00:04:01Z
+machine_id: vm
+scale: full
+threads: 4 (GOMAXPROCS and jdk.virtualThreadScheduler.parallelism)
+go: go version go1.24.7 linux/amd64
+java: openjdk version "21.0.12.1" 2026-08-18 OpenJDK Runtime Environment (build 21.0.12.1+1-1-24.04.4-Ubuntu) OpenJDK 64-Bit Server VM (build 21.0.12.1+1-1-24.04.4-Ubuntu, mixed mode, sharing) 
+javac: javac 21.0.12.1
+java_flags: -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC
+java_tool_options: flags: none; system properties set (values not recorded): javax.net.ssl.trustStore javax.net.ssl.trustStoreType https.proxyHost https.proxyPort http.nonProxyHosts jdk.http.auth.tunneling.disabledSchemes jdk.http.auth.proxying.disabledSchemes
+warm-up: spawn-join Go 10000 rounds, Java 20000 rounds (JIT); echo 5 s unrecorded
