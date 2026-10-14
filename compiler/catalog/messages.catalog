@@ -107,7 +107,7 @@ E0239 error   resolve.no-assoc-type       `{ty}` has no associated type `{name}`
 E0240 error   resolve.sealed-trait        `{trait}` is implemented only by the standard library, so `{ty}` cannot implement it
 E0241 error   resolve.not-object-safe     `{trait}` cannot be used as `dyn {trait}`: its method `{method}` cannot be called through it, because {reason}
 E0242 error   resolve.supertrait-missing  `{ty}` implements `{trait}`, which requires `{super}`, but `{ty}` does not implement `{super}`
-E0243 error   resolve.not-derivable       `{name}` cannot be derived; `@derive` takes `Copy`, `Debug`, `Eq`, `PartialOrd`, `Ord` and `Hash`
+E0243 error   resolve.not-derivable       `{name}` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one
 E0244 error   resolve.derive-field        `{ty}` cannot derive `{trait}`: its field `{field}` has type `{fty}`, which does not implement `{trait}`
 E0245 error   resolve.generic-default-order  a type parameter without a default cannot follow one with a default
 E0246 error   resolve.impl-default        the type parameters of an `impl` or a function take no defaults; a default belongs to a type's or a trait's parameter
@@ -216,6 +216,7 @@ E0395 error   type.unsized-dyn            `{ty}` has no size of its own; hold it
 E0396 error   type.view-to-dyn            `{ty}` borrows, so it cannot become `{dyn}`, which owns its value
 E0397 error   type.must-consume-argument  `{ty}` is must-consume, so it cannot be the argument of the generic parameter `{param}`, whose values the body may drop
 E0398 error   type.structural-only        {callee} is hashed and compared structurally in stage 0, and `{ty}` has an impl of `{trait}` of its own; derive `Hash` and `Eq` for it, or key by a field
+E0399 error   type.bad-format-spec        `{spec}` is not a format spec; it is `[[fill]align][sign][#][0][width][,|_][.precision][type]`, as in `>8.2f`, with the type one of `d x X o b e E f F % s ?`
 -     note    type.method-of-traits       `{name}` is a method of {traits}
 -     label   type.expected-because       expected because of this
 -     label   type.found-here             this is `{ty}`
@@ -293,10 +294,10 @@ E0501 error   sir.invalid                 invalid SIR in `{function}`: {detail}
 
 # ---------------------------------------------------------------- compile-time evaluation
 E0600 error   comptime.not-constant       `comptime` evaluates what is known at compile time, and `{name}` is known only at run time
-E0601 error   comptime.impure             `comptime` evaluates pure code, and `{callee}` is not pure
+E0601 error   comptime.io                 the compile-time evaluation of this expression used {what}; nothing reaches the world at compile time
 E0602 error   comptime.panicked           the compile-time evaluation of this expression panicked: {message}
 E0603 error   comptime.budget             the compile-time evaluation in `{item}` used up its budget of {steps} steps; raise it with `@comptime_budget(steps=N)` on `{item}`
-E0604 error   comptime.not-kept           a `{ty}` made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can
+E0604 error   comptime.not-kept           {what} made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can
 E0605 error   comptime.only               `{name}` is a `comptime def`: it can be called only at compile time, inside `comptime`
 E0606 error   comptime.budget-attribute   `@comptime_budget` takes `steps=N`, a positive number of steps
 E0607 error   comptime.derive-template    a trait's derive is `comptime def derive(T: type) -> impl {trait} for T`, whose body is `return impl {trait} for T:` with the impl's methods
@@ -393,7 +394,7 @@ R0075 runtime panic.cell-in-use           a `Cell` was replaced while its value 
 # ---------------------------------------------------------------- driver
 
 D0001 cli     cli.cannot-read             cannot read `{path}`: {reason}
-D0002 cli     cli.usage                   usage: sisu <command> [options] <file>\n\ncommands:\n  run <file> [args...]   check and run a program (`--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor)\n  check <file>           report diagnostics (`--format=ids` for the conformance form)\n  sir <file>             print the serialised SIR\n  test <file>            run the `test` blocks under the ownership monitor (`--no-monitor` without it, `--defer-borrow` as for `run`)\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--print` reprints the source\n  explain <code>         describe a diagnostic code\n  explain-borrow <file>:<line>  show every borrow live on a line
+D0002 cli     cli.usage                   usage: sisu <command> [options] <file>\n\ncommands:\n  run <file> [args...]   check and run a program (`--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor)\n  check <file>           report diagnostics (`--format=ids` for the conformance form)\n  sir <file>             print the serialised SIR\n  test <file>            run the `test` blocks under the ownership monitor (`--no-monitor` without it, `--defer-borrow` as for `run`)\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--print` reprints the source\n  explain <code>         describe a diagnostic code\n  explain-borrow <file>:<line>  show every borrow live on a line\n  audit --ownership <file>...  count the uses of `Shared`, `Weak`, `Cell`, `Arena`, `Key`, `.copy()` and `unsafe` in each file
 D0003 cli     cli.unknown-command         unknown command `{command}`; run `sisu help`
 D0004 cli     cli.missing-file            `sisu {command}` needs a file
 D0005 cli     cli.no-main                 `{file}` has no `main` function
@@ -413,3 +414,4 @@ D0018 cli     cli.explain-borrow-usage    `sisu explain-borrow` takes FILE:LINE,
 D0019 cli     cli.explain-borrow-shared   a shared
 D0020 cli     cli.explain-borrow-mut      a `mut`
 D0021 cli     cli.ownership-errors        the program was not run: the ownership checker found errors ({count}); `--defer-borrow` runs it under the monitor
+D0022 cli     cli.audit-usage             `sisu audit` needs `--ownership`, the one audit stage 0 has: `sisu audit --ownership FILE...`

@@ -93,7 +93,9 @@ pub(crate) struct Resolver<'a> {
     /// The bounds of every struct's and enum's generic parameters.
     pub type_preds: HashMap<DefId, Vec<Predicate>>,
     /// Each trait's `comptime def derive` (08), by module and trait name.
-    pub derive_templates: HashMap<(ModuleId, String), ast::FnDef>,
+    pub derive_templates: HashMap<(ModuleId, String), std::rc::Rc<ast::FnDef>>,
+    /// The text of each module that has a derive template, for unfolding it.
+    pub template_sources: HashMap<ModuleId, std::rc::Rc<str>>,
 }
 
 /// What a type expression may mention where it is written.
@@ -134,6 +136,7 @@ pub fn resolve(sources: &mut SourceMap, root_file: FileId, root: &ast::Module) -
         derive_checks: Vec::new(),
         type_preds: HashMap::new(),
         derive_templates: HashMap::new(),
+        template_sources: HashMap::new(),
     };
     let prelude = r.load_std("prelude", std_sources::PRELUDE);
     r.prog.prelude = prelude;
@@ -309,6 +312,7 @@ impl Resolver<'_> {
             from: Vec::new(),
             err_inferred: false,
             pure: false,
+            comptime: false,
             intrinsic: None,
             structural: None,
             keeps: Vec::new(),
@@ -336,6 +340,7 @@ impl Resolver<'_> {
                         DefKind::Fn(Box::new(self.placeholder_fn(module, FnKind::Free))),
                     );
                     self.bind(module, &f.name.text, def, f.name.range);
+                    self.comptime_budget(module, def, &item.attrs);
                     self.pending.push(Pending::Fn { def, module, ast: f.clone(), owner: None });
                 }
                 ItemKind::Struct(s) => {
@@ -412,7 +417,16 @@ impl Resolver<'_> {
                     // The trait's derive, which `@derive` runs at compile time.
                     for m in t.methods.iter().filter(|m| m.is_comptime && m.name.text == "derive") {
                         if crate::template::template_parts(m).is_some() {
-                            self.derive_templates.insert((module, t.name.text.clone()), m.clone());
+                            self.derive_templates
+                                .insert((module, t.name.text.clone()), std::rc::Rc::new(m.clone()));
+                            if !self.template_sources.contains_key(&module) {
+                                let text = self
+                                    .sources
+                                    .get(self.file(module))
+                                    .map(|f| f.text.as_str())
+                                    .unwrap_or("");
+                                self.template_sources.insert(module, std::rc::Rc::from(text));
+                            }
                         } else {
                             let span = self.span(module, m.name.range);
                             self.report(
@@ -467,6 +481,7 @@ impl Resolver<'_> {
                         DefKind::Const(info),
                     );
                     self.bind(module, &c.name.text, def, c.name.range);
+                    self.comptime_budget(module, def, &item.attrs);
                     self.pending.push(Pending::Const { def, module, ast: c.clone() });
                 }
                 ItemKind::TypeAlias(a) => {
@@ -490,6 +505,35 @@ impl Resolver<'_> {
                     self.unsupported(span, "`extern`", "foreign functions (Phase 8)");
                 }
                 ItemKind::Stmt(_) | ItemKind::Error => {}
+            }
+        }
+    }
+
+    /// `@comptime_budget(steps=N)` (08): the item's own budget for its
+    /// `comptime` expressions.
+    fn comptime_budget(&mut self, module: ModuleId, def: DefId, attrs: &[ast::Attr]) {
+        for a in attrs.iter().filter(|a| a.name == "comptime_budget") {
+            let steps = match a.args.as_slice() {
+                [ast::Arg { name: Some(n), value, .. }] if n.text == "steps" => match &value.kind {
+                    ast::ExprKind::Int { value: Some(v), suffix: None, .. } if *v > 0 => {
+                        u64::try_from(*v).ok()
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
+            match steps {
+                Some(n) => {
+                    self.prog.comptime_budgets.insert(def, n);
+                }
+                None => {
+                    // The attribute without the line break after it.
+                    let text = self.sources.get(self.file(module)).map(|f| f.text.as_str()).unwrap_or("");
+                    let written = text.get(a.range.start as usize..a.range.end as usize).unwrap_or("");
+                    let end = a.range.start + written.trim_end().len() as u32;
+                    let span = self.span(module, TextRange::new(a.range.start, end));
+                    self.report(Diagnostic::new(msg::COMPTIME_BUDGET_ATTRIBUTE, span));
+                }
             }
         }
     }
@@ -1032,13 +1076,10 @@ impl Resolver<'_> {
         info.impl_ = impl_def;
         info.owner = self_ty.clone();
         info.pure = f.is_pure;
+        info.comptime = f.is_comptime;
         info.body = f.body.clone();
         info.intrinsic = Self::builtin_attr(&f.attrs, "intrinsic");
         info.structural = Self::builtin_attr(&f.attrs, "structural");
-        if f.is_comptime {
-            let span = self.span(module, f.name.range);
-            self.unsupported(span, "`comptime def`", "compile-time evaluation (Phase 4)");
-        }
         let mut seen_default = false;
         for (i, p) in f.params.iter().enumerate() {
             let ctx = TyCtx {

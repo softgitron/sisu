@@ -77,6 +77,9 @@ pub struct Lowered {
     pub diagnostics_by_finding: Vec<Diagnostic>,
     /// The diagnostics in source order.
     pub diagnostics: Vec<Diagnostic>,
+    /// The errors of compile-time evaluation (also in `diagnostics`), which
+    /// runs once the ownership checker accepts the program.
+    pub comptime: Vec<Diagnostic>,
 }
 
 impl Lowered {
@@ -181,17 +184,27 @@ impl Db {
         }
         self.counters.lower += 1;
         let lowered = sisu_lower::lower(&c.program, &c.typed, &c.map);
-        let checked = sisu_borrowck::check(&lowered, &sisu_borrowck::Options::default());
+        let mut checked = sisu_borrowck::check(&lowered, &sisu_borrowck::Options::default());
         let files = source_files(&c.map, &checked.program);
         let by_finding: Vec<Diagnostic> =
             checked.findings.iter().map(|f| sisu_borrowck::to_diagnostic(f, &c.map, &files)).collect();
+        // The compiler runs the `comptime` expressions of a program the
+        // ownership checker accepts (08).
+        let comptime = if checked.findings.is_empty() {
+            let errors = sisu_interp::comptime::evaluate(&mut checked.program);
+            errors.iter().map(|e| comptime_diagnostic(e, &c.map, &files, &checked.program)).collect()
+        } else {
+            Vec::new()
+        };
         let mut diagnostics = by_finding.clone();
+        diagnostics.extend(comptime.iter().cloned());
         sisu_diag::diagnostic::sort(&mut diagnostics);
         let l = Rc::new(Lowered {
             sir: checked.program,
             findings: checked.findings,
             diagnostics_by_finding: by_finding,
             diagnostics,
+            comptime,
         });
         self.lowered.insert(name.to_string(), (h, l.clone()));
         Some(l)
@@ -214,6 +227,33 @@ impl Db {
             sisu_diag::diagnostic::sort(&mut all);
         }
         all
+    }
+}
+
+/// A failed `comptime` expression as a diagnostic at the expression.
+fn comptime_diagnostic(
+    e: &sisu_interp::comptime::Error,
+    map: &SourceMap,
+    files: &[FileId],
+    p: &sir::Program,
+) -> Diagnostic {
+    use sisu_diag::msg;
+    use sisu_interp::comptime::Failure;
+    let f = p.function(&e.function);
+    let file = f.and_then(|f| files.get(f.source as usize)).copied().unwrap_or_default();
+    let span = sisu_borrowck::span_of(map, file, f.and_then(|f| f.loc));
+    // The item that holds the expression: `main` for `main#comptime0`.
+    let item = e.function.split("#comptime").next().unwrap_or(&e.function).to_string();
+    match &e.failure {
+        Failure::Panicked(m) => Diagnostic::new(msg::COMPTIME_PANICKED, span).with("message", m.clone()),
+        Failure::Budget(n) => {
+            Diagnostic::new(msg::COMPTIME_BUDGET, span).with("item", item).with("steps", n.to_string())
+        }
+        Failure::World(what) => Diagnostic::new(msg::COMPTIME_IO, span).with("what", *what),
+        Failure::NotKept(what) => Diagnostic::new(msg::COMPTIME_NOT_KEPT, span).with("what", what.clone()),
+        Failure::Internal(m) => Diagnostic::new(msg::STAGE0_INTERNAL, span)
+            .with("stage", "compile-time evaluation")
+            .with("detail", m.clone()),
     }
 }
 

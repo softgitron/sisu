@@ -94,7 +94,11 @@ impl Resolver<'_> {
             if m.is_comptime {
                 if m.name.text != "derive" {
                     let span = self.span(module, m.name.range);
-                    self.unsupported(span, "a `comptime def` in a trait other than `derive`", "reflection beyond derive (Phase 8)");
+                    self.unsupported(
+                        span,
+                        "a `comptime def` in a trait other than `derive`",
+                        "reflection beyond derive (Phase 8)",
+                    );
                 }
                 continue;
             }

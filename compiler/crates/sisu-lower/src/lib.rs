@@ -257,8 +257,10 @@ pub fn lower(prog: &Program, typed: &Typed, sources: &SourceMap) -> sir::Program
     // Keep what the entry, the tests and the root module's functions reach.
     let mut roots: Vec<String> = entry.iter().map(|e| e.function.clone()).collect();
     roots.extend(tests.iter().map(|(_, f)| f.clone()));
+    // A constant is computed even when nothing uses it: a `comptime` in it
+    // that fails is an error of the program (08).
     for b in &typed.bodies {
-        if prog.def(b.def).module == prog.root && matches!(b.kind, BodyKind::Fn) {
+        if prog.def(b.def).module == prog.root && matches!(b.kind, BodyKind::Fn | BodyKind::Const) {
             roots.push(ctx.body_name(b));
         }
     }

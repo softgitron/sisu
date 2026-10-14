@@ -171,3 +171,30 @@ fn mutated_programs_never_break_the_pipeline() {
         }
     }
 }
+
+#[test]
+fn audit_counts_the_escape_hatches_per_file() {
+    // `Key` is the file's own type here, so it is not counted; neither are
+    // names in comments and strings, a field after a `.`, nor `copy`
+    // that is not called.
+    let a = temp_file(
+        "audit_a.sisu",
+        "# Shared, Weak and Cell in a comment\n\
+         struct Key:\n    copy: int\n\n\
+         def main():\n    let s = Shared(Cell(1))\n    let w = Shared.downgrade(s)\n    \
+         let t = s.copy()\n    let k = Key(copy=2)\n    print(k.copy)\n    print(\"Weak\")\n",
+    );
+    let b = temp_file("audit_b.sisu", "def f(xs: Arena[int]) -> Key[int]?:\n    return None\n");
+    let (code, host) = cli(&["audit", "--ownership", &a, &b]);
+    assert_eq!(code, 0, "{}", host.err);
+    assert_eq!(
+        host.out,
+        format!(
+            "{a} lines=9 Shared=2 Weak=0 Cell=1 Arena=0 Key=0 copy=1 unsafe=0\n\
+             {b} lines=2 Shared=0 Weak=0 Cell=0 Arena=1 Key=1 copy=0 unsafe=0\n"
+        )
+    );
+    let (code, host) = cli(&["audit", &a]);
+    assert_eq!(code, 2);
+    assert!(host.err.contains("error[D0022]"), "{}", host.err);
+}

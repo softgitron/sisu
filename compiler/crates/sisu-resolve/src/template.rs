@@ -41,8 +41,17 @@ pub(crate) enum Body {
 enum Value {
     /// The type the derive is for.
     Type,
-    Field { name: String, index: usize, variant: Option<usize>, named: bool },
-    Variant { name: String, index: usize, fields: Vec<Value> },
+    Field {
+        name: String,
+        index: usize,
+        variant: Option<usize>,
+        named: bool,
+    },
+    Variant {
+        name: String,
+        index: usize,
+        fields: Vec<Value>,
+    },
     Str(String),
     Int(i64),
     Bool(bool),
@@ -103,7 +112,12 @@ pub(crate) fn template_parts(f: &ast::FnDef) -> Option<(String, &ast::ImplDef)> 
 
 /// The source of the impl that `template` (from the file whose text is
 /// `source`) derives for `target`, under the impl header `head`.
-pub(crate) fn unfold(template: &ast::FnDef, source: &str, head: &str, target: &Target) -> Result<String, Failure> {
+pub(crate) fn unfold(
+    template: &ast::FnDef,
+    source: &str,
+    head: &str,
+    target: &Target,
+) -> Result<String, Failure> {
     let (param, imp) =
         template_parts(template).ok_or((template.name.range, "it is not a derive template".to_string()))?;
     let mut u = Unfold { source, target, param, env: Vec::new(), arms: Vec::new() };
@@ -230,20 +244,32 @@ impl Unfold<'_> {
             ExprKind::Int { .. } => true,
             ExprKind::Str(parts) => parts.iter().all(|p| match p {
                 StrPart::Text(_) => true,
-                StrPart::Interp { expr, spec, debug, .. } => spec.is_none() && debug.is_none() && self.is_static(expr),
+                StrPart::Interp { expr, spec, debug, .. } => {
+                    spec.is_none() && debug.is_none() && self.is_static(expr)
+                }
             }),
-            ExprKind::Field { base, .. } => self.is_static(base),
+            // The attributes of descriptors; anything else (a method) runs
+            // at run time on the value.
+            ExprKind::Field { base, name } => {
+                matches!(name.text.as_str(), "name" | "index" | "named" | "fields") && self.is_static(base)
+            }
             ExprKind::Call { callee, args, trailing: None } => {
                 let known = match &callee.kind {
                     ExprKind::Field { base, .. } => matches!(&base.kind, ExprKind::Name(n) if n == "reflect"),
-                    ExprKind::Name(n) => matches!(n.as_str(), "enumerate" | "len") && self.lookup(n).is_none(),
+                    ExprKind::Name(n) => {
+                        matches!(n.as_str(), "enumerate" | "len") && self.lookup(n).is_none()
+                    }
                     _ => false,
                 };
                 known && args.iter().all(|a| a.name.is_none() && self.is_static(&a.value))
             }
             ExprKind::Binary { lhs, rhs, .. } => self.is_static(lhs) && self.is_static(rhs),
-            ExprKind::Compare { first, rest } => self.is_static(first) && rest.iter().all(|(_, x)| self.is_static(x)),
-            ExprKind::Unary { expr, .. } | ExprKind::Paren(expr) | ExprKind::Comptime(expr) => self.is_static(expr),
+            ExprKind::Compare { first, rest } => {
+                self.is_static(first) && rest.iter().all(|(_, x)| self.is_static(x))
+            }
+            ExprKind::Unary { expr, .. } | ExprKind::Paren(expr) | ExprKind::Comptime(expr) => {
+                self.is_static(expr)
+            }
             ExprKind::Tuple(xs) | ExprKind::List(xs) => xs.iter().all(|x| self.is_static(x)),
             _ => false,
         }
@@ -271,7 +297,9 @@ impl Unfold<'_> {
                             Value::Str(t) => s.push_str(&t),
                             Value::Int(i) => s.push_str(&i.to_string()),
                             Value::Bool(b) => s.push_str(if b { "True" } else { "False" }),
-                            other => return fail(format!("{} cannot be written into text", describe(&other))),
+                            other => {
+                                return fail(format!("{} cannot be written into text", describe(&other)));
+                            }
                         },
                     }
                 }
@@ -306,7 +334,10 @@ impl Unfold<'_> {
                     }
                     ExprKind::Name(n) if n == "enumerate" => match one()? {
                         Value::List(xs) => Ok(Value::List(
-                            xs.into_iter().enumerate().map(|(i, x)| Value::Tuple(vec![Value::Int(i as i64), x])).collect(),
+                            xs.into_iter()
+                                .enumerate()
+                                .map(|(i, x)| Value::Tuple(vec![Value::Int(i as i64), x]))
+                                .collect(),
                         )),
                         other => fail(format!("`enumerate` of {}", describe(&other))),
                     },
@@ -315,12 +346,16 @@ impl Unfold<'_> {
                         Value::Str(s) => Ok(Value::Int(s.chars().count() as i64)),
                         other => fail(format!("`len` of {}", describe(&other))),
                     },
-                    _ => fail("only `reflect`, `enumerate` and `len` can be called at compile time here".into()),
+                    _ => fail(
+                        "only `reflect`, `enumerate` and `len` can be called at compile time here".into(),
+                    ),
                 }
             }
             ExprKind::Unary { op, expr } => match (op, self.eval(expr)?) {
                 (UnOp::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
-                (UnOp::Neg, Value::Int(i)) => i.checked_neg().map(Value::Int).ok_or((e.range, "overflow".into())),
+                (UnOp::Neg, Value::Int(i)) => {
+                    i.checked_neg().map(Value::Int).ok_or((e.range, "overflow".into()))
+                }
                 (_, v) => fail(format!("`{}` of {}", op.text(), describe(&v))),
             },
             ExprKind::Binary { op, lhs, rhs } => {
@@ -347,7 +382,14 @@ impl Unfold<'_> {
                         (CmpOp::Le, Value::Int(a), Value::Int(b)) => a <= b,
                         (CmpOp::Gt, Value::Int(a), Value::Int(b)) => a > b,
                         (CmpOp::Ge, Value::Int(a), Value::Int(b)) => a >= b,
-                        _ => return fail(format!("`{}` of {} and {}", op.text(), describe(&left), describe(&right))),
+                        _ => {
+                            return fail(format!(
+                                "`{}` of {} and {}",
+                                op.text(),
+                                describe(&left),
+                                describe(&right)
+                            ));
+                        }
                     };
                     if !holds {
                         return Ok(Value::Bool(false));
@@ -468,8 +510,10 @@ impl Unfold<'_> {
         }
         if self.is_static(e) {
             let v = self.eval(e)?;
-            let lit = literal(&v)
-                .ok_or((e.range, format!("{} is a compile-time value with no run-time form", describe(&v))))?;
+            let lit = literal(&v).ok_or((
+                e.range,
+                format!("{} is a compile-time value with no run-time form", describe(&v)),
+            ))?;
             out.push((e.range, lit));
             return Ok(());
         }
@@ -589,10 +633,15 @@ impl Unfold<'_> {
     fn stmt(&mut self, s: &Stmt, depth: usize, out: &mut String) -> R<usize> {
         match &s.kind {
             StmtKind::Comptime(inner) => self.comptime_stmt(inner, depth, out),
-            StmtKind::If { branches, else_block } if branches.first().is_some_and(|b| comptime_cond(&b.0).is_some()) => {
+            StmtKind::If { branches, else_block }
+                if branches.first().is_some_and(|b| comptime_cond(&b.0).is_some()) =>
+            {
                 for (c, b) in branches {
                     let Some(e) = comptime_cond(c) else {
-                        return Err((c.range, "an `if comptime` chain needs `comptime` in each `elif`".into()));
+                        return Err((
+                            c.range,
+                            "an `if comptime` chain needs `comptime` in each `elif`".into(),
+                        ));
                     };
                     if self.truth(e)? {
                         return self.stmts(&b.stmts, depth, out);
@@ -737,11 +786,15 @@ impl Unfold<'_> {
             PatKind::Ctor { path, args } if path.len() == 1 => match self.lookup(&path[0].text) {
                 Some(Value::Variant { name, index, fields }) => {
                     if !matches!(args.as_deref(), None | Some([ast::PatArg::Rest])) {
-                        return Err((a.pat.range, "a variant bound at compile time is matched as `V(..)`".into()));
+                        return Err((
+                            a.pat.range,
+                            "a variant bound at compile time is matched as `V(..)`".into(),
+                        ));
                     }
                     let stem: String = key.chars().filter(|c| c.is_alphanumeric() || *c == '_').collect();
                     let names: Vec<String> = (0..fields.len()).map(|i| format!("__{stem}_{i}")).collect();
-                    let pat = if names.is_empty() { name.clone() } else { format!("{name}({})", names.join(", ")) };
+                    let pat =
+                        if names.is_empty() { name.clone() } else { format!("{name}({})", names.join(", ")) };
                     Some((pat, ArmScope { key: key.to_string(), variant: *index, names }))
                 }
                 Some(other) => return Err((a.pat.range, format!("{} is not a variant", describe(other)))),
@@ -779,7 +832,9 @@ impl Unfold<'_> {
         match &s.kind {
             StmtKind::Comptime(_) => true,
             StmtKind::If { branches, else_block } => {
-                branches.iter().any(|(c, b)| self.cond_depends(c) || b.stmts.iter().any(|s| self.stmt_depends(s)))
+                branches
+                    .iter()
+                    .any(|(c, b)| self.cond_depends(c) || b.stmts.iter().any(|s| self.stmt_depends(s)))
                     || else_block.as_ref().is_some_and(|b| b.stmts.iter().any(|s| self.stmt_depends(s)))
             }
             StmtKind::While { cond, body } => {
@@ -795,7 +850,9 @@ impl Unfold<'_> {
 
     fn expr_stmt_depends(&self, e: &Expr) -> bool {
         match &e.kind {
-            ExprKind::Match { scrutinee, arms } => self.depends(scrutinee) || arms.iter().any(|a| self.arm_depends(a)),
+            ExprKind::Match { scrutinee, arms } => {
+                self.depends(scrutinee) || arms.iter().any(|a| self.arm_depends(a))
+            }
             _ => self.depends(e),
         }
     }

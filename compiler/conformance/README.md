@@ -84,25 +84,44 @@ parameters each identifier takes.
 ## Groups
 
 - `examples/` holds copies of `proposal/examples/hello.sisu` and
-  `wordcount.sisu`, kept identical to the originals by a test.
+  `wordcount.sisu`, kept identical to the originals by a test, and of
+  `traits.sisu` and `errors.sisu` with a `main` appended, kept starting
+  with the originals.
 - `syntax/` is lexing and parsing, with the error-tolerance cases: one
   mistake gives one diagnostic, and the rest of the file is still parsed.
 - `names/` is name resolution; `types/` is the checker, including cases
   where broken code still gets a typed tree and only the first error in a
   chain is reported.
 - `run/` is the semantics: arithmetic and its traps, strings and
-  formatting, collections, `match`, loops, closures, errors and traces,
-  options, `Drop` order on normal and unwinding paths, panics and their
-  exit statuses, capabilities, and tests.
+  formatting (`format_specs`: the spec mini-language, written in Sisu),
+  collections, `match`, loops, closures, errors and traces, options,
+  `Drop` order on normal and unwinding paths (`drop_panic_fields`: a
+  `Drop` that panics; `drop_chain`: a long chain dropped at constant
+  depth), panics and their exit statuses, capabilities, and tests.
+- `traits/` is traits and impls (18, Phase 4): provided methods,
+  associated types, supertraits, coherence and the orphan rule, sealed
+  traits, method resolution and ambiguity, `dyn Trait` and object safety,
+  operator traits, `FromLiteral`, derives and delegation, and their
+  diagnostics.
+- `generics/` is user generics: functions and types with bounds checked
+  at the definition, defaults, type arguments at run time, views through
+  generic parameters, and `Drop` for a generic type.
+- `comptime/` is compile-time evaluation: constants computed by the
+  compiler (`baked` pins the SIR built from literals), `comptime assert`,
+  `comptime def`, budgets, the evaluation errors, and derives written as
+  compile-time Sisu, with `proposal_derive`, the user-defined derive of
+  `proposal/examples/comptime.sisu`, kept identical by a test.
 - `sir/` pins the serialised SIR of small programs.
 - `ownership/` is the ownership checker (18, Phase 3). Accepted programs
   run (and so run again under the monitor): moves and partial moves, drop
   placement on every path (`drop_torture` is the drop-order torture
   program), the parameter conventions, non-lexical and two-phase borrows,
   returned borrows and `from`, views, closures, the three iteration modes,
-  `@must_consume`, and `proposal_core`, the part of
-  `proposal/examples/ownership.sisu` stage 0 can run, kept identical to
-  the original by a test. Rejected programs pin their diagnostics by code
+  `@must_consume`, the library types (`Box`, `Shared` and `Weak`,
+  `Cell`, a single-task `Mutex` with D-077's poisoning, `Arena` with
+  generational keys), `own` closures, and `proposal_core` and
+  `proposal_graph`, the parts of `proposal/examples/ownership.sisu` stage
+  0 can run, kept identical to the original by tests. Rejected programs pin their diagnostics by code
   and span, and most also pin their counterexample run (`.defer`): the
   monitor's concrete conflict, or "no conflict" with the account of why
   the checker still rejects them (`candidate_false_positive` and

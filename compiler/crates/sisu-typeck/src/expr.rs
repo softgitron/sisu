@@ -423,10 +423,7 @@ impl Checker<'_> {
                 self.if_expr(branches, else_.as_deref(), e.range, expected)
             }
             ast::ExprKind::Match { scrutinee, arms } => self.match_expr(scrutinee, arms, e.range, expected),
-            ast::ExprKind::Comptime(_) => {
-                self.unsupported(e.range, "`comptime`", "compile-time evaluation (Phase 4)");
-                Expr::error(span)
-            }
+            ast::ExprKind::Comptime(inner) => self.comptime_expr(inner, expected, e.range),
             ast::ExprKind::FieldOf { .. } => {
                 self.unsupported(
                     e.range,
@@ -436,12 +433,7 @@ impl Checker<'_> {
                 Expr::error(span)
             }
             ast::ExprKind::Unsupported(what) => {
-                let phase = if what.contains("comptime") || what.contains("compile-time") {
-                    "compile-time evaluation (Phase 4)"
-                } else {
-                    "foreign functions (Phase 8)"
-                };
-                self.unsupported(e.range, what, phase);
+                self.unsupported(e.range, what, "foreign functions (Phase 8)");
                 Expr::error(span)
             }
             ast::ExprKind::Error => Expr::error(span),
@@ -543,13 +535,20 @@ impl Checker<'_> {
                 ast::StrPart::Interp { expr, debug, spec, .. } => {
                     let x = self.infer_expr(expr, None);
                     let spec = spec.clone().unwrap_or_default();
-                    let wanted = if debug.is_none() && spec != "?" {
+                    // A spec ending in `?` asks for `Debug` (`{x:>8?}`).
+                    let wanted = if debug.is_none() && !spec.ends_with('?') {
                         self.prog.wk.display
                     } else {
                         self.prog.wk.debug
                     };
                     let span = self.span(expr.range);
                     self.require(x.ty.clone(), wanted, span);
+                    // A `DateTime` takes a `strftime` pattern instead.
+                    let is_time = matches!(self.resolved(x.ty.strip_ref()), Ty::Adt(d, _) if self.prog.builtin(d) == Some("DateTime"));
+                    if !spec.is_empty() && !is_time && !is_format_spec(&spec) {
+                        let d = self.error(msg::TYPE_BAD_FORMAT_SPEC, expr.range).with("spec", spec.clone());
+                        self.report(d);
+                    }
                     out.push(InterpPart::Value { expr: x, debug: debug.clone(), spec });
                 }
             }
@@ -645,6 +644,18 @@ impl Checker<'_> {
         if self.quiet_unknown_names || self.prog.poisoned.contains(n) {
             return Expr::error(span);
         }
+        // The compile-time modules of 08 exist only in a derive's template.
+        match n {
+            "reflect" => {
+                self.unsupported(range, "`reflect` outside a derive", "reflection beyond derive (Phase 8)");
+                return Expr::error(span);
+            }
+            "target" => {
+                self.unsupported(range, "`target`", "conditional compilation on the target (Phase 8)");
+                return Expr::error(span);
+            }
+            _ => {}
+        }
         let mut d = self.error(msg::RESOLVE_UNDEFINED_NAME, range).with("name", n);
         if let Some(similar) = self.similar_name(n) {
             let edit = sisu_diag::Edit { span, text: similar.clone() };
@@ -689,6 +700,10 @@ impl Checker<'_> {
                     let diag = self.error(msg::TYPE_NOT_A_VALUE, range).with("name", n).with("kind", kind);
                     self.report(diag);
                     return Expr::error(span);
+                }
+                if f.comptime && !self.in_comptime {
+                    let diag = self.error(msg::COMPTIME_ONLY, range).with("name", n);
+                    self.report(diag);
                 }
                 let ret = self.fn_ret(d);
                 let ty = Ty::Fn(Box::new(FnTy {
@@ -1503,7 +1518,11 @@ impl Checker<'_> {
         if a.generated.is_none() {
             return false;
         }
-        self.unsupported(a.range, "arms made at compile time outside a derive", "reflection beyond derive (Phase 8)");
+        self.unsupported(
+            a.range,
+            "arms made at compile time outside a derive",
+            "reflection beyond derive (Phase 8)",
+        );
         true
     }
 
@@ -1562,6 +1581,55 @@ impl Checker<'_> {
             self.own_closure(id, c.range);
         }
         x
+    }
+
+    /// `comptime e` (08): `e` is checked as the body of a closure that
+    /// takes nothing, which must capture nothing (a local or parameter is a
+    /// run-time value) and name none of the function's type parameters
+    /// (checked once inference is done). The compiler runs it, refusing
+    /// anything that would reach the world, and keeps its value.
+    pub fn comptime_expr(&mut self, inner: &ast::Expr, expected: Option<&Ty>, range: TextRange) -> Expr {
+        let span = self.span(range);
+        let ret = expected.cloned().unwrap_or_else(|| self.infer.fresh());
+        let fn_ty = FnTy { params: Vec::new(), ret: ret.clone(), pure: true };
+        let was = std::mem::replace(&mut self.in_comptime, true);
+        let x = self.closure_from_parts(Vec::new(), ClosureSource::Expr(inner.clone()), Some(fn_ty), range);
+        self.in_comptime = was;
+        let ExprKind::Closure(id) = x.kind else { return Expr::error(span) };
+        self.comptime_closure(id, range);
+        Expr::new(ExprKind::Comptime(id), ret, span)
+    }
+
+    /// `comptime assert c, m` and other statements run at compile time: a
+    /// `comptime` closure whose body is the statement.
+    pub fn comptime_block(&mut self, b: &ast::Block, range: TextRange) -> Expr {
+        let span = self.span(range);
+        let fn_ty = FnTy { params: Vec::new(), ret: Ty::Unit, pure: true };
+        let was = std::mem::replace(&mut self.in_comptime, true);
+        let x = self.closure_from_parts(Vec::new(), ClosureSource::Block(b.clone()), Some(fn_ty), range);
+        self.in_comptime = was;
+        let ExprKind::Closure(id) = x.kind else { return Expr::error(span) };
+        self.comptime_closure(id, range);
+        Expr::new(ExprKind::Comptime(id), Ty::Unit, span)
+    }
+
+    fn comptime_closure(&mut self, id: ClosureId, range: TextRange) {
+        let Some(Some(cl)) = self.closures.get(id.0 as usize) else { return };
+        let mut names: Vec<String> = Vec::new();
+        for cap in &cl.captures {
+            let n = self.locals[cap.local.0 as usize].name.clone();
+            if !names.contains(&n) {
+                names.push(n);
+            }
+        }
+        for n in names {
+            let d = self.error(msg::COMPTIME_NOT_CONSTANT, range).with("name", n);
+            self.report(d);
+        }
+        if let Some(Some(c)) = self.closures.get_mut(id.0 as usize) {
+            c.comptime = true;
+        }
+        self.comptime_sites.push((id, range));
     }
 
     /// An `own` closure keeps copies of what it captures (04, "Closures"),
@@ -1665,8 +1733,16 @@ impl Checker<'_> {
         let captures = ctx.map(|c| c.captures).unwrap_or_default();
         let pure = crate::purity::first_impure_in_block(self.prog, &block, &self.locals).is_none();
         let fn_ty = Ty::Fn(Box::new(FnTy { params: ptys, ret: ret.clone(), pure }));
-        self.closures[id.0 as usize] =
-            Some(Closure { params, captures, own: false, ret, body: block, span, fn_ty: fn_ty.clone() });
+        self.closures[id.0 as usize] = Some(Closure {
+            params,
+            captures,
+            own: false,
+            ret,
+            body: block,
+            span,
+            fn_ty: fn_ty.clone(),
+            comptime: false,
+        });
         Expr::new(ExprKind::Closure(id), fn_ty, span)
     }
 
@@ -2042,4 +2118,34 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
         }
     }
     d[a.len()][b.len()]
+}
+
+/// Whether `spec` is a format spec (03, "Strings"):
+/// `[[fill]align][sign][#][0][width][,|_][.precision][type]`, the grammar
+/// `Spec.parse` in std/prelude.sisu reads.
+fn is_format_spec(spec: &str) -> bool {
+    let cs: Vec<char> = spec.chars().collect();
+    let align = |c: char| matches!(c, '<' | '>' | '^' | '=');
+    let mut i =
+        if cs.len() >= 2 && align(cs[1]) { 2 } else { usize::from(cs.first().is_some_and(|c| align(*c))) };
+    let eat = |ok: &dyn Fn(char) -> bool, i: &mut usize| {
+        if cs.get(*i).is_some_and(|c| ok(*c)) {
+            *i += 1;
+        }
+    };
+    eat(&|c| matches!(c, '+' | '-' | ' '), &mut i);
+    eat(&|c| c == '#', &mut i);
+    eat(&|c| c == '0', &mut i);
+    while cs.get(i).is_some_and(|c| c.is_ascii_digit()) {
+        i += 1;
+    }
+    eat(&|c| c == ',' || c == '_', &mut i);
+    if cs.get(i) == Some(&'.') {
+        i += 1;
+        while cs.get(i).is_some_and(|c| c.is_ascii_digit()) {
+            i += 1;
+        }
+    }
+    eat(&|c| "boxXdeEfF%s?".contains(c), &mut i);
+    i == cs.len()
 }

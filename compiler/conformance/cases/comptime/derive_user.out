@@ -1,0 +1,8 @@
+["x", "y"]
+7
+a Point with 2 fields
+Shape.Dot(), variant 1 of 3
+Shape.Circle(r=1.5), variant 2 of 3
+Shape.Rect(0=2.0, 1=3.0), variant 3 of 3
+True
+False

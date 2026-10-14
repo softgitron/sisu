@@ -23,6 +23,7 @@
 //! through [`Host`], so a run is deterministic under a deterministic host.
 
 mod cli;
+pub mod comptime;
 mod dispatch;
 mod drops;
 mod exec;
@@ -384,7 +385,10 @@ pub fn run_tests_report(
     .unwrap_or_default()
 }
 
-fn on_big_stack<R: Send>(host: &mut dyn Host, f: impl FnOnce(&mut dyn Host) -> R + Send) -> Option<R> {
+pub(crate) fn on_big_stack<R: Send>(
+    host: &mut dyn Host,
+    f: impl FnOnce(&mut dyn Host) -> R + Send,
+) -> Option<R> {
     std::thread::scope(|s| {
         let h = std::thread::Builder::new()
             .name("sisu-interp".into())

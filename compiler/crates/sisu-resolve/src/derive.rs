@@ -1,8 +1,11 @@
-//! `@derive` (08, "Derive"; 18, Phase 4: the built-in derives). Stage 0
-//! writes each derived impl as Sisu source, parses it, and declares it in
-//! the module of the type, so it is checked and lowered like any other
-//! impl; the structural impls follow fixed rules the interpreter's fast
-//! paths reproduce (docs/architecture.md, "Traits and generics").
+//! `@derive` (08, "Derive"; 18, Phase 4: the built-in derives). A trait
+//! derives by its `comptime def derive`, which the compiler runs for the
+//! type (`template.rs`): the prelude's `Debug`, `Eq`, `PartialOrd`, `Ord`
+//! and `Hash` have one, and so may any trait a program declares. The
+//! derived impl is Sisu source, parsed and declared in the module of the
+//! type, so it is checked and lowered like any other impl; the derives of
+//! the language's traits compute what the interpreter's structural fast
+//! paths do (docs/architecture.md, "Traits and generics").
 //!
 //! Every struct and enum without an explicit `Debug` gets the derived one
 //! (11, "Every type has `Debug`"). `@derive(Ord)` derives `PartialOrd`
@@ -17,7 +20,10 @@ use crate::ty::Ty;
 use sisu_diag::{Diagnostic, Span, TextRange, msg};
 use sisu_syntax::ast::{self, ExprKind, ItemKind};
 
-/// The traits `@derive` knows, besides `Copy`.
+/// The language's derivable traits, besides `Copy`: their derives (in the
+/// prelude) compute what the structural fast paths compute, and need the
+/// trait of every field. Any other trait with a `comptime def derive` can
+/// be derived too.
 pub const DERIVABLE: &[&str] = &["Debug", "Eq", "PartialOrd", "Ord", "Hash"];
 
 /// The traits `@delegate` forwards (03, "Coherence": "cheap newtypes and
@@ -46,7 +52,6 @@ struct Shape {
     used: Vec<bool>,
     body: Body,
 }
-
 
 impl Resolver<'_> {
     /// Declares the derived impls of the structs and enums among `items`.
@@ -113,7 +118,8 @@ impl Resolver<'_> {
                             checks.push((shape.name.clone(), "Copy".into(), span, None));
                         }
                         ExprKind::Name(n)
-                            if DERIVABLE.contains(&n.as_str()) || self.derive_template(module, n).is_some() =>
+                            if DERIVABLE.contains(&n.as_str())
+                                || self.derive_template(module, n).is_some() =>
                         {
                             if !wanted.iter().any(|(w, _)| w == n) {
                                 wanted.push((n.clone(), span));
@@ -162,7 +168,8 @@ impl Resolver<'_> {
                     Some((tm, template)) => {
                         let (head, written) = header(&shape, &t);
                         let target = Target { name: &shape.name, written: &written, body: &shape.body };
-                        let source = self.sources.get(self.file(tm)).map(|f| f.text.clone()).unwrap_or_default();
+                        let source =
+                            self.template_sources.get(&tm).cloned().unwrap_or_else(|| std::rc::Rc::from(""));
                         match crate::template::unfold(&template, &source, &head, &target) {
                             Ok(impl_text) => text.push_str(&impl_text),
                             Err((range, reason)) => {
@@ -178,7 +185,8 @@ impl Resolver<'_> {
                             }
                         }
                     }
-                    None => text.push_str(&derive_text(&shape, &t)),
+                    // Every trait `@derive` knows has one in the prelude.
+                    None => continue,
                 }
                 checks.push((shape.name.clone(), t, span, None));
             }
@@ -200,7 +208,7 @@ impl Resolver<'_> {
     /// The `comptime def derive` of the trait `name` as `module` sees it:
     /// its own trait of that name, or the prelude's; with the module the
     /// template is written in.
-    fn derive_template(&self, module: ModuleId, name: &str) -> Option<(ModuleId, ast::FnDef)> {
+    fn derive_template(&self, module: ModuleId, name: &str) -> Option<(ModuleId, std::rc::Rc<ast::FnDef>)> {
         [module, self.prog.prelude]
             .into_iter()
             .find_map(|m| self.derive_templates.get(&(m, name.to_string())).map(|f| (m, f.clone())))
@@ -290,8 +298,10 @@ impl Resolver<'_> {
                 continue;
             }
             let home = self.prog.def(c.ty).module;
-            let Some(trait_def) =
-                self.prog.lookup(home, &c.trait_name).or_else(|| self.prog.lookup(self.prog.prelude, &c.trait_name))
+            let Some(trait_def) = self
+                .prog
+                .lookup(home, &c.trait_name)
+                .or_else(|| self.prog.lookup(self.prog.prelude, &c.trait_name))
             else {
                 continue;
             };
@@ -514,250 +524,6 @@ fn header(shape: &Shape, trait_name: &str) -> (String, String) {
         format!("[{}]", ps.join(", "))
     };
     (format!("impl{params} {trait_name} for {ty}:\n"), ty)
-}
-
-fn quote(s: &str) -> String {
-    let mut q = String::from("\"");
-    for c in s.chars() {
-        match c {
-            '"' => q.push_str("\\\""),
-            '\\' => q.push_str("\\\\"),
-            '{' => q.push_str("{{"),
-            '}' => q.push_str("}}"),
-            c => q.push(c),
-        }
-    }
-    q.push('"');
-    q
-}
-
-/// The pattern for a variant with its fields bound to `prefix0, prefix1, ...`.
-fn variant_pattern(name: &str, fields: &[Option<String>], prefix: &str) -> String {
-    if fields.is_empty() {
-        name.to_string()
-    } else {
-        let bs: Vec<String> = (0..fields.len()).map(|i| format!("{prefix}{i}")).collect();
-        format!("{name}({})", bs.join(", "))
-    }
-}
-
-/// The source of one derived impl.
-fn derive_text(shape: &Shape, trait_name: &str) -> String {
-    let (head, ty) = header(shape, trait_name);
-    let mut out = head;
-    let w = |out: &mut String, depth: usize, line: &str| {
-        for _ in 0..depth {
-            out.push_str("    ");
-        }
-        out.push_str(line);
-        out.push('\n');
-    };
-    match (trait_name, &shape.body) {
-        ("Debug", Body::Struct(fields)) => {
-            w(&mut out, 1, "pure def fmt_debug(self, mut f: Formatter):");
-            w(&mut out, 2, &format!("f.write({})", quote(&format!("{}(", shape.name))));
-            w(&mut out, 2, "f.depth += 1");
-            for (i, fname) in fields.iter().enumerate() {
-                let sep = if i == 0 { String::new() } else { ", ".to_string() };
-                w(&mut out, 2, &format!("f.write({})", quote(&format!("{sep}{fname}="))));
-                w(&mut out, 2, &format!("self.{fname}.fmt_debug(mut f)"));
-            }
-            w(&mut out, 2, "f.depth -= 1");
-            w(&mut out, 2, "f.write(\")\")");
-        }
-        ("Debug", Body::Enum(variants)) => {
-            w(&mut out, 1, "pure def fmt_debug(self, mut f: Formatter):");
-            if variants.is_empty() {
-                w(&mut out, 2, "pass");
-            } else {
-                w(&mut out, 2, "match self:");
-                for (v, fields) in variants {
-                    w(&mut out, 3, &format!("case {}:", variant_pattern(v, fields, "a")));
-                    if fields.is_empty() {
-                        w(&mut out, 4, &format!("f.write({})", quote(v)));
-                        continue;
-                    }
-                    w(&mut out, 4, &format!("f.write({})", quote(&format!("{v}("))));
-                    w(&mut out, 4, "f.depth += 1");
-                    for (i, fname) in fields.iter().enumerate() {
-                        let sep = if i == 0 { "" } else { ", " };
-                        let label = match fname {
-                            Some(n) => format!("{sep}{n}="),
-                            None => sep.to_string(),
-                        };
-                        if !label.is_empty() {
-                            w(&mut out, 4, &format!("f.write({})", quote(&label)));
-                        }
-                        w(&mut out, 4, &format!("a{i}.fmt_debug(mut f)"));
-                    }
-                    w(&mut out, 4, "f.depth -= 1");
-                    w(&mut out, 4, "f.write(\")\")");
-                }
-            }
-        }
-        ("Eq", Body::Struct(fields)) => {
-            w(&mut out, 1, &format!("pure def eq(self, other: {ty}) -> bool:"));
-            if fields.is_empty() {
-                w(&mut out, 2, "return True");
-            } else {
-                let parts: Vec<String> = fields.iter().map(|f| format!("self.{f} == other.{f}")).collect();
-                w(&mut out, 2, &format!("return {}", parts.join(" and ")));
-            }
-        }
-        ("Eq", Body::Enum(variants)) => {
-            w(&mut out, 1, &format!("pure def eq(self, other: {ty}) -> bool:"));
-            enum_pairs(&mut out, variants, "return True", "return False", |out, fields| {
-                let parts: Vec<String> = (0..fields.len()).map(|i| format!("a{i} == b{i}")).collect();
-                let mut s = String::new();
-                for _ in 0..6 {
-                    s.push_str("    ");
-                }
-                out.push_str(&format!("{s}return {}\n", parts.join(" and ")));
-            });
-        }
-        ("Hash", Body::Struct(fields)) => {
-            w(&mut out, 1, "pure def hash(self, mut h: Hasher):");
-            if fields.is_empty() {
-                w(&mut out, 2, "pass");
-            }
-            for f in fields {
-                w(&mut out, 2, &format!("self.{f}.hash(mut h)"));
-            }
-        }
-        ("Hash", Body::Enum(variants)) => {
-            w(&mut out, 1, "pure def hash(self, mut h: Hasher):");
-            if variants.is_empty() {
-                w(&mut out, 2, "pass");
-            } else {
-                w(&mut out, 2, "match self:");
-                for (k, (v, fields)) in variants.iter().enumerate() {
-                    w(&mut out, 3, &format!("case {}:", variant_pattern(v, fields, "a")));
-                    w(&mut out, 4, &format!("h.write_int({k})"));
-                    for i in 0..fields.len() {
-                        w(&mut out, 4, &format!("a{i}.hash(mut h)"));
-                    }
-                }
-            }
-        }
-        ("PartialOrd", Body::Struct(fields)) => {
-            w(&mut out, 1, &format!("pure def partial_cmp(self, other: {ty}) -> Ordering?:"));
-            for (i, f) in fields.iter().enumerate() {
-                if i + 1 == fields.len() {
-                    w(&mut out, 2, &format!("return self.{f}.partial_cmp(other.{f})"));
-                } else {
-                    w(&mut out, 2, &format!("let c{i} = self.{f}.partial_cmp(other.{f})"));
-                    w(&mut out, 2, &format!("if c{i} != Some(Equal):"));
-                    w(&mut out, 3, &format!("return c{i}"));
-                }
-            }
-            if fields.is_empty() {
-                w(&mut out, 2, "return Some(Equal)");
-            }
-        }
-        ("PartialOrd", Body::Enum(variants)) => {
-            w(&mut out, 1, &format!("pure def partial_cmp(self, other: {ty}) -> Ordering?:"));
-            enum_ordering(&mut out, variants, "partial_cmp", true);
-        }
-        ("Ord", Body::Struct(fields)) => {
-            w(&mut out, 1, &format!("pure def cmp(self, other: {ty}) -> Ordering:"));
-            for (i, f) in fields.iter().enumerate() {
-                if i + 1 == fields.len() {
-                    w(&mut out, 2, &format!("return self.{f}.cmp(other.{f})"));
-                } else {
-                    w(&mut out, 2, &format!("let c{i} = self.{f}.cmp(other.{f})"));
-                    w(&mut out, 2, &format!("if c{i} != Equal:"));
-                    w(&mut out, 3, &format!("return c{i}"));
-                }
-            }
-            if fields.is_empty() {
-                w(&mut out, 2, "return Equal");
-            }
-        }
-        ("Ord", Body::Enum(variants)) => {
-            w(&mut out, 1, &format!("pure def cmp(self, other: {ty}) -> Ordering:"));
-            enum_ordering(&mut out, variants, "cmp", false);
-        }
-        _ => {}
-    }
-    out
-}
-
-/// `match self:` with, per variant, `match other:` on the same variant
-/// (bodies from `same`) and every other variant (`differ`).
-fn enum_pairs(
-    out: &mut String,
-    variants: &[(String, Vec<Option<String>>)],
-    unit_same: &str,
-    differ: &str,
-    same: impl Fn(&mut String, &[Option<String>]),
-) {
-    let ind = |n: usize| "    ".repeat(n);
-    if variants.is_empty() {
-        out.push_str(&format!("{}{unit_same}\n", ind(2)));
-        return;
-    }
-    out.push_str(&format!("{}match self:\n", ind(2)));
-    for (v, fields) in variants {
-        out.push_str(&format!("{}case {}:\n", ind(3), variant_pattern(v, fields, "a")));
-        out.push_str(&format!("{}match other:\n", ind(4)));
-        out.push_str(&format!("{}case {}:\n", ind(5), variant_pattern(v, fields, "b")));
-        if fields.is_empty() {
-            out.push_str(&format!("{}{unit_same}\n", ind(6)));
-        } else {
-            same(out, fields);
-        }
-        if variants.len() > 1 {
-            out.push_str(&format!("{}case _:\n", ind(5)));
-            out.push_str(&format!("{}{differ}\n", ind(6)));
-        }
-    }
-}
-
-/// The derived `cmp` or `partial_cmp` of an enum: variants in declaration
-/// order, then fields in order.
-fn enum_ordering(out: &mut String, variants: &[(String, Vec<Option<String>>)], method: &str, partial: bool) {
-    let ind = |n: usize| "    ".repeat(n);
-    let equal = if partial { "Some(Equal)" } else { "Equal" };
-    if variants.is_empty() {
-        out.push_str(&format!("{}return {equal}\n", ind(2)));
-        return;
-    }
-    // The index of `other`'s variant.
-    out.push_str(&format!("{}let j = match other:\n", ind(2)));
-    for (k, (v, fields)) in variants.iter().enumerate() {
-        let pat = if fields.is_empty() { v.clone() } else { format!("{v}(..)") };
-        out.push_str(&format!("{}case {pat}: {k}\n", ind(3)));
-    }
-    out.push_str(&format!("{}match self:\n", ind(2)));
-    for (k, (v, fields)) in variants.iter().enumerate() {
-        out.push_str(&format!("{}case {}:\n", ind(3), variant_pattern(v, fields, "a")));
-        out.push_str(&format!("{}let i = {k}\n", ind(4)));
-        let differ =
-            if partial { "return Some(i.cmp(j))".to_string() } else { "return i.cmp(j)".to_string() };
-        if variants.len() > 1 {
-            out.push_str(&format!("{}if i != j:\n", ind(4)));
-            out.push_str(&format!("{}{differ}\n", ind(5)));
-        }
-        if fields.is_empty() {
-            out.push_str(&format!("{}return {equal}\n", ind(4)));
-            continue;
-        }
-        out.push_str(&format!("{}match other:\n", ind(4)));
-        out.push_str(&format!("{}case {}:\n", ind(5), variant_pattern(v, fields, "b")));
-        for i in 0..fields.len() {
-            if i + 1 == fields.len() {
-                out.push_str(&format!("{}return a{i}.{method}(b{i})\n", ind(6)));
-            } else {
-                out.push_str(&format!("{}let c{i} = a{i}.{method}(b{i})\n", ind(6)));
-                out.push_str(&format!("{}if c{i} != {equal}:\n", ind(6)));
-                out.push_str(&format!("{}return c{i}\n", ind(7)));
-            }
-        }
-        if variants.len() > 1 {
-            out.push_str(&format!("{}case _:\n", ind(5)));
-            out.push_str(&format!("{}return {equal}\n", ind(6)));
-        }
-    }
 }
 
 /// The source of one delegated impl: the trait's method on the field, the

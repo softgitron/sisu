@@ -5,11 +5,12 @@
 //! `Debug` renders a value the way it is written: `"text"`, `'c'`,
 //! `[1, 2]`, `Point(x=1.0, y=2.0)`, `Err(BadDigit(at=1, found='x'))`, as
 //! in 17-testing.md. `Display` is the plain text of strings, characters,
-//! numbers and `bool`; every other type displays as its `Debug` form until
-//! traits let a type define its own (Phase 4).
+//! numbers and `bool`. These are the structural impls of the builtin types
+//! (`structural.*`), and what the derived impls compute; a type with an
+//! impl of its own is formatted by it, through the `Formatter` protocol.
 
+use crate::Interp;
 use crate::value::{IterState, Value};
-use crate::{Interp, Unwind, ice};
 use sisu_sir as sir;
 
 impl Interp<'_, '_> {
@@ -220,38 +221,6 @@ impl Interp<'_, '_> {
     }
 
     /// The text of `{value:spec}` (`debug` for `{value=}` and `{value:?}`).
-    pub(crate) fn format(&self, v: &Value, spec: &str, debug: bool) -> Result<String, Unwind> {
-        let t = self.target(v)?;
-        if spec.is_empty() {
-            return Ok(if debug { self.debug_string(t) } else { self.display_string(t) });
-        }
-        if let (Value::DateTime(secs), false) = (t, debug) {
-            return Ok(strftime(*secs, spec));
-        }
-        let s = Spec::parse(spec).ok_or_else(|| ice(format!("bad format spec `{spec}`")))?;
-        let debug = debug || s.ty == Some('?');
-        let (body, numeric) = match (t, s.ty) {
-            _ if debug => (self.debug_string(t), false),
-            (Value::Int(i), None | Some('d')) => (s.int_body(*i, 10, false), true),
-            (Value::Int(i), Some('x')) => (s.int_body(*i, 16, false), true),
-            (Value::Int(i), Some('X')) => (s.int_body(*i, 16, true), true),
-            (Value::Int(i), Some('o')) => (s.int_body(*i, 8, false), true),
-            (Value::Int(i), Some('b')) => (s.int_body(*i, 2, false), true),
-            (Value::Int(i), Some(c @ ('e' | 'E' | 'f' | 'F' | '%'))) => {
-                (s.float_body(*i as f64, Some(c)), true)
-            }
-            (Value::Float(f), ty) => (s.float_body(*f, ty), true),
-            (other, _) => {
-                let text = self.display_string(other);
-                match s.precision {
-                    Some(p) => (text.chars().take(p).collect(), false),
-                    None => (text, false),
-                }
-            }
-        };
-        Ok(s.pad(body, numeric))
-    }
-
     /// The locations an error passed through, oldest first.
     pub(crate) fn trace_lines(&self, v: &Value) -> Vec<String> {
         match self.target(v) {
@@ -261,182 +230,36 @@ impl Interp<'_, '_> {
     }
 }
 
-/// A parsed format spec: `[[fill]align][sign][#][0][width][,|_][.precision][type]`.
-#[derive(Debug, Default)]
-struct Spec {
-    fill: char,
-    align: Option<char>,
-    sign: Option<char>,
-    alt: bool,
-    zero: bool,
-    width: usize,
-    grouping: Option<char>,
-    precision: Option<usize>,
-    ty: Option<char>,
-}
-
-impl Spec {
-    fn parse(spec: &str) -> Option<Spec> {
-        let cs: Vec<char> = spec.chars().collect();
-        let mut s = Spec { fill: ' ', ..Spec::default() };
-        let mut i = 0;
-        let is_align = |c: char| matches!(c, '<' | '>' | '^' | '=');
-        if cs.len() >= 2 && is_align(cs[1]) {
-            s.fill = cs[0];
-            s.align = Some(cs[1]);
-            i = 2;
-        } else if !cs.is_empty() && is_align(cs[0]) {
-            s.align = Some(cs[0]);
-            i = 1;
-        }
-        if let Some(&c) = cs.get(i)
-            && matches!(c, '+' | '-' | ' ')
-        {
-            s.sign = Some(c);
-            i += 1;
-        }
-        if cs.get(i) == Some(&'#') {
-            s.alt = true;
-            i += 1;
-        }
-        if cs.get(i) == Some(&'0') {
-            s.zero = true;
-            i += 1;
-        }
-        let start = i;
-        while cs.get(i).is_some_and(|c| c.is_ascii_digit()) {
-            i += 1;
-        }
-        if i > start {
-            s.width = cs[start..i].iter().collect::<String>().parse().ok()?;
-        }
-        if let Some(&c) = cs.get(i)
-            && (c == ',' || c == '_')
-        {
-            s.grouping = Some(c);
-            i += 1;
-        }
-        if cs.get(i) == Some(&'.') {
-            i += 1;
-            let start = i;
-            while cs.get(i).is_some_and(|c| c.is_ascii_digit()) {
-                i += 1;
-            }
-            s.precision = Some(cs[start..i].iter().collect::<String>().parse().ok()?);
-        }
-        if let Some(&c) = cs.get(i) {
-            if !matches!(c, 'b' | 'o' | 'x' | 'X' | 'd' | 'e' | 'E' | 'f' | 'F' | '%' | 's' | '?') {
-                return None;
-            }
-            s.ty = Some(c);
-            i += 1;
-        }
-        if i != cs.len() {
-            return None;
-        }
-        Some(s)
-    }
-
-    fn sign_of(&self, negative: bool) -> &'static str {
-        match (negative, self.sign) {
-            (true, _) => "-",
-            (false, Some('+')) => "+",
-            (false, Some(' ')) => " ",
-            _ => "",
-        }
-    }
-
-    fn int_body(&self, i: i64, radix: u32, upper: bool) -> String {
-        let mag = i.unsigned_abs();
-        let mut digits = match radix {
-            16 if upper => format!("{mag:X}"),
-            16 => format!("{mag:x}"),
-            8 => format!("{mag:o}"),
-            2 => format!("{mag:b}"),
-            _ => mag.to_string(),
-        };
-        if let Some(g) = self.grouping {
-            digits = group(&digits, g, if radix == 10 { 3 } else { 4 });
-        }
-        let prefix = match (self.alt, radix) {
-            (true, 16) => "0x",
-            (true, 8) => "0o",
-            (true, 2) => "0b",
-            _ => "",
-        };
-        format!("{}{prefix}{digits}", self.sign_of(i < 0))
-    }
-
-    fn float_body(&self, f: f64, ty: Option<char>) -> String {
-        if f.is_nan() {
-            return "NaN".into();
-        }
-        let neg = f.is_sign_negative() && f != 0.0;
-        let mag = f.abs();
-        if mag.is_infinite() {
-            return format!("{}inf", self.sign_of(neg));
-        }
-        let mut body = match ty {
-            Some('f' | 'F') => format!("{mag:.*}", self.precision.unwrap_or(6)),
-            Some('e' | 'E') => {
-                let s = exponent_form(mag, self.precision.unwrap_or(6));
-                if ty == Some('E') { s.to_uppercase() } else { s }
-            }
-            Some('%') => format!("{:.*}%", self.precision.unwrap_or(6), mag * 100.0),
-            _ => match self.precision {
-                Some(p) => format!("{mag:.p$}"),
-                None => float_repr(mag),
-            },
-        };
-        if let Some(g) = self.grouping {
-            let (int_part, rest) = match body.find(|c: char| !c.is_ascii_digit()) {
-                Some(k) => body.split_at(k),
-                None => (body.as_str(), ""),
-            };
-            body = format!("{}{rest}", group(int_part, g, 3));
-        }
-        format!("{}{body}", self.sign_of(neg))
-    }
-
-    fn pad(&self, body: String, numeric: bool) -> String {
-        let len = body.chars().count();
-        if len >= self.width {
-            return body;
-        }
-        let gap = self.width - len;
-        let (fill, align) = if self.zero && self.align.is_none() && numeric {
-            ('0', '=')
-        } else {
-            (self.fill, self.align.unwrap_or(if numeric { '>' } else { '<' }))
-        };
-        let fills = |n: usize| std::iter::repeat_n(fill, n).collect::<String>();
-        match align {
-            '<' => format!("{body}{}", fills(gap)),
-            '^' => format!("{}{body}{}", fills(gap / 2), fills(gap - gap / 2)),
-            '=' => {
-                // Padding goes after the sign and any prefix.
-                let mut split = body.chars().take_while(|c| matches!(c, '+' | '-' | ' ')).count();
-                if ["0x", "0o", "0b"].iter().any(|p| body[split..].starts_with(p)) {
-                    split += 2;
-                }
-                let (head, tail) = body.split_at(split);
-                format!("{head}{}{tail}", fills(gap))
-            }
-            _ => format!("{}{body}", fills(gap)),
-        }
+/// `fmt.digits`: the digits of `|n|` in `base` (capitals with `upper`).
+pub(crate) fn digits(n: i64, base: i64, upper: bool) -> String {
+    let mag = n.unsigned_abs();
+    match base {
+        16 if upper => format!("{mag:X}"),
+        16 => format!("{mag:x}"),
+        8 => format!("{mag:o}"),
+        2 => format!("{mag:b}"),
+        _ => mag.to_string(),
     }
 }
 
-fn group(digits: &str, sep: char, every: usize) -> String {
-    let cs: Vec<char> = digits.chars().collect();
-    let mut out = String::new();
-    for (i, c) in cs.iter().enumerate() {
-        if i > 0 && (cs.len() - i).is_multiple_of(every) {
-            out.push(sep);
-        }
-        out.push(*c);
+/// `fmt.float_digits`: the text of `x >= 0` by the type letter, with
+/// `precision` digits after the point; `inf` for infinity.
+pub(crate) fn float_digits(x: f64, kind: Option<char>, precision: Option<usize>) -> String {
+    if x.is_infinite() {
+        return "inf".into();
     }
-    out
+    match kind {
+        Some('f' | 'F') => format!("{x:.*}", precision.unwrap_or(6)),
+        Some('e' | 'E') => {
+            let s = exponent_form(x, precision.unwrap_or(6));
+            if kind == Some('E') { s.to_uppercase() } else { s }
+        }
+        Some('%') => format!("{:.*}%", precision.unwrap_or(6), x * 100.0),
+        _ => match precision {
+            Some(p) => format!("{x:.p$}"),
+            None => float_repr(x),
+        },
+    }
 }
 
 /// `1.500000e+00`.

@@ -285,26 +285,28 @@ fn civil_time_formats() {
     assert_eq!(strftime(0, "%F %T"), "1970-01-01 00:00:00");
 }
 
+/// The host's part of a format spec: digits and float text. Specs
+/// themselves are applied in Sisu (`Spec` in std/prelude.sisu; the
+/// conformance cases `run/interpolation` and `run/format_specs`).
 #[test]
-fn format_specs_follow_python() {
+fn format_digits_come_from_the_host() {
+    use crate::format::{digits, float_digits};
+    assert_eq!(digits(255, 16, false), "ff");
+    assert_eq!(digits(255, 16, true), "FF");
+    assert_eq!(digits(-8, 8, false), "10");
+    assert_eq!(digits(i64::MIN, 10, false), "9223372036854775808");
+    assert_eq!(digits(5, 2, false), "101");
+    assert_eq!(float_digits(1.23456, None, Some(2)), "1.23");
+    assert_eq!(float_digits(1.23456, Some('f'), None), "1.234560");
+    assert_eq!(float_digits(1500.0, Some('e'), Some(2)), "1.50e+03");
+    assert_eq!(float_digits(1500.0, Some('E'), Some(2)), "1.50E+03");
+    assert_eq!(float_digits(0.25, Some('%'), Some(0)), "25%");
+    assert_eq!(float_digits(f64::INFINITY, Some('f'), None), "inf");
+    assert_eq!(float_digits(0.1, None, None), "0.1");
     let p = program("sir 0\nsource 0 \"t.sisu\"\n");
     let mut host = TestHost::default();
     let i = Interp::new(&p, &mut host, &Options::default());
-    let f = |v: Value, spec: &str| i.format(&v, spec, false).unwrap_or_default();
-    assert_eq!(f(Value::Int(42), ">6"), "    42");
-    assert_eq!(f(Value::Int(42), "<6"), "42    ");
-    assert_eq!(f(Value::Int(42), "^6"), "  42  ");
-    assert_eq!(f(Value::Int(-7), "05"), "-0007");
-    assert_eq!(f(Value::Int(255), "#x"), "0xff");
-    assert_eq!(f(Value::Int(1234567), ","), "1,234,567");
-    assert_eq!(f(Value::Int(5), "+"), "+5");
-    assert_eq!(f(Value::Float(1.23456), ".2"), "1.23");
-    assert_eq!(f(Value::Float(1.23456), ".2f"), "1.23");
-    assert_eq!(f(Value::Float(1500.0), ".2e"), "1.50e+03");
-    assert_eq!(f(Value::Float(0.25), ".0%"), "25%");
-    assert_eq!(f(Value::str("abc"), ".2"), "ab");
-    assert_eq!(f(Value::str("abc"), "*>5"), "**abc");
-    assert_eq!(i.format(&Value::str("a\"b"), "", true).unwrap_or_default(), "\"a\\\"b\"");
+    assert_eq!(i.debug_string(&Value::str("a\"b")), "\"a\\\"b\"");
 }
 
 #[test]

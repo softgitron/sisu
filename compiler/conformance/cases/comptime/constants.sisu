@@ -1,0 +1,50 @@
+# Compile-time evaluation (08): `comptime e` runs `e` in the compiler, with
+# the semantics it has at run time, and the program keeps the value. A
+# `const` computed by `comptime` is built from literals when the program
+# runs; `comptime assert` checks at compile time and leaves nothing behind;
+# a `comptime def` can be called only at compile time; `if comptime` decides
+# its condition at compile time (both branches are checked); and
+# `@comptime_budget` raises an item's budget of steps.
+
+def crc_table() -> list[int]:
+    var t: list[int] = []
+    for i in range(16):
+        var c = i
+        for _ in range(8):
+            c = if c & 1 == 1: 0xEDB88320 ^ (c >> 1) else: c >> 1
+        t.push(c)
+    return t
+
+const CRC: list[int] = comptime crc_table()
+
+comptime def power_of_two(n: int) -> bool:
+    return n > 0 and n & (n - 1) == 0
+
+const CAPACITY: int = 64
+
+def fib(n: int) -> int:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+@comptime_budget(steps=10_000_000)
+const FIB: int = comptime fib(22)
+
+struct Limits:
+    lo: int
+    hi: int
+
+const LIMITS: (Limits, String?) = comptime (Limits(lo=1, hi=CAPACITY), Some("named".to_string()))
+
+def main():
+    comptime assert power_of_two(CAPACITY), "a capacity of {CAPACITY} is not a power of two"
+    print(len(CRC))
+    print("{CRC[1]:x} {CRC[15]:x}")
+    print(FIB)
+    let (limits, name) = LIMITS
+    print("{limits.lo}..{limits.hi} {name}")
+    if comptime power_of_two(CAPACITY):
+        print("a power of two")
+    else:
+        print("not a power of two")
+    print(comptime "computed at compile time".to_uppercase())

@@ -260,6 +260,10 @@ pub enum FnKind {
     /// A default value or a constant.
     Value,
     Test,
+    /// A `comptime` expression (08): a function of no arguments that the
+    /// compiler runs with this budget of steps, replacing its body by the
+    /// value it returns (which makes it a `value` function).
+    Comptime(u64),
 }
 
 #[derive(Clone, Debug, PartialEq)]

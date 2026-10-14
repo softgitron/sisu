@@ -771,6 +771,10 @@ impl Checker<'_> {
     ) -> Expr {
         let span = self.span(range);
         let prog = self.prog;
+        if prog.fn_info(d).is_some_and(|f| f.comptime) && !self.in_comptime {
+            let diag = self.error(msg::COMPTIME_ONLY, range).with("name", prog.def(d).name.clone());
+            self.report(diag);
+        }
         if prog.fn_info(d).is_some_and(|f| f.header_broken) {
             // Its signature is unknown (the header did not parse): check the
             // arguments on their own and give the call the error type.

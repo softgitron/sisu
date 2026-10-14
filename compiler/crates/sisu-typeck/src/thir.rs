@@ -76,6 +76,9 @@ pub struct Closure {
     pub body: Block,
     pub span: Span,
     pub fn_ty: Ty,
+    /// The body of `comptime e` (08): no parameters, no captures, pure,
+    /// run by the compiler.
+    pub comptime: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -417,6 +420,9 @@ pub enum ExprKind {
         arms: Vec<Arm>,
     },
     Closure(ClosureId),
+    /// `comptime e`: the value of the closure, which takes nothing and
+    /// captures nothing, computed at compile time.
+    Comptime(ClosureId),
     Try {
         expr: Box<Expr>,
         kind: TryKind,

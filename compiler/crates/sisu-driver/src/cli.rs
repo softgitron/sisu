@@ -90,6 +90,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
         }
         "explain" => explain(rest, host),
         "explain-borrow" => explain_borrow(rest, host),
+        "audit" => audit(rest, host),
         "run" | "check" | "sir" | "test" | "tokens" | "parse" => {
             let p = split_args(rest);
             let allowed: &[&str] = match cmd.as_str() {
@@ -267,6 +268,16 @@ fn command(
             }
             stage.set("the ownership checker");
             let Some(lowered) = db.lowered(file) else { return exit::ERROR };
+            // A `comptime` expression that failed is an error of the program.
+            if !lowered.comptime.is_empty() && cmd != "sir" {
+                let mut out = sisu_diag::render::render_human(&c.map, &lowered.comptime);
+                out.push_str(&plain_error(
+                    msg::CLI_ERRORS_FOUND,
+                    &[("count", lowered.comptime.len().to_string())],
+                ));
+                host.stderr(&out);
+                return exit::ERROR;
+            }
             // `sisu sir` prints the SIR of a rejected program too.
             if lowered.has_errors() && !defer && cmd != "sir" {
                 let n = lowered.diagnostics.iter().filter(|d| d.is_error()).count();
@@ -573,6 +584,49 @@ fn explain_borrow(args: &[String], host: &mut dyn Host) -> i32 {
             msg::CLI_EXPLAIN_BORROW_NONE,
             &[("line", line.to_string()), ("file", file.clone())],
         ));
+        out.push('\n');
+    }
+    host.stdout(&out);
+    exit::OK
+}
+
+/// `sisu audit --ownership FILE...`: per file, the uses of the ownership
+/// model's escape hatches ([`crate::audit`]), one line of data per file.
+fn audit(args: &[String], host: &mut dyn Host) -> i32 {
+    let (flags, files): (Vec<&String>, Vec<&String>) = args.iter().partition(|a| a.starts_with("--"));
+    if let Some(bad) = flags.iter().find(|f| f.as_str() != "--ownership") {
+        host.stderr(&plain_error(
+            msg::CLI_UNKNOWN_OPTION,
+            &[("option", bad.to_string()), ("command", "audit".into())],
+        ));
+        return EXIT_USAGE;
+    }
+    if flags.is_empty() {
+        host.stderr(&plain_error(msg::CLI_AUDIT_USAGE, &[]));
+        return EXIT_USAGE;
+    }
+    if files.is_empty() {
+        host.stderr(&plain_error(msg::CLI_MISSING_FILE, &[("command", "audit".into())]));
+        return EXIT_USAGE;
+    }
+    let mut out = String::new();
+    for file in files {
+        let source = match std::fs::read_to_string(file) {
+            Ok(s) => s,
+            Err(e) => {
+                host.stdout(&out);
+                host.stderr(&plain_error(
+                    msg::CLI_CANNOT_READ,
+                    &[("path", file.clone()), ("reason", e.to_string())],
+                ));
+                return exit::ERROR;
+            }
+        };
+        let mut db = Db::new();
+        db.set_file(file, &source);
+        let Some(p) = db.parsed(file) else { return exit::ERROR };
+        let lexed = sisu_lexer::lex(p.file, &source);
+        out.push_str(&crate::audit::ownership(&source, &lexed.tokens, &p.module).line(file));
         out.push('\n');
     }
     host.stdout(&out);

@@ -1,0 +1,15 @@
+# The value of a `comptime` expression is built from literals in the SIR
+# that runs: the function the compiler ran became a `value` function.
+
+def squares(n: int) -> list[int]:
+    var out: list[int] = []
+    var i = 0
+    while i < n:
+        out.push(i * i)
+        i += 1
+    return out
+
+const SQUARES: list[int] = comptime squares(5)
+
+def main():
+    print(SQUARES)

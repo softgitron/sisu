@@ -253,7 +253,7 @@ impl Resolver<'_> {
                     self.unsupported(
                         span,
                         "a reference type in a declaration",
-                        "references in signatures (Phase 3)",
+                        "references in constants and aliases (a later phase)",
                     );
                 }
                 let t = self.resolve_ty(inner, ctx);
@@ -279,7 +279,7 @@ impl Resolver<'_> {
                 let phase = if what.contains("pointer") {
                     "foreign functions (Phase 8)"
                 } else {
-                    "compile-time evaluation (Phase 4)"
+                    "reflection beyond derive (Phase 8)"
                 };
                 self.unsupported(span, what, phase);
                 Ty::Error

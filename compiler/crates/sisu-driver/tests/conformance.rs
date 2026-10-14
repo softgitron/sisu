@@ -80,3 +80,23 @@ fn ownership_graph_matches_the_proposal() {
         "ownership/proposal_graph.sisu no longer holds the proposal's graph section"
     );
 }
+
+/// The user-defined derive of proposal/examples/comptime.sisu (the trait
+/// `Describe` with its `comptime def derive`, and `Point`) is the case
+/// `comptime/proposal_derive.sisu`, kept identical.
+#[test]
+fn comptime_derive_matches_the_proposal() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let original =
+        std::fs::read_to_string(root.join("../proposal/examples/comptime.sisu")).unwrap_or_default();
+    let start = original.find("# A user-defined derive: any trait can provide one.");
+    let end = original.find("# A checked string DSL");
+    assert!(start.is_some() && end.is_some(), "proposal/examples/comptime.sisu has no derive section");
+    let section = original[start.unwrap_or(0)..end.unwrap_or(0)].trim_end();
+    let case = std::fs::read_to_string(root.join("conformance/cases/comptime/proposal_derive.sisu"))
+        .unwrap_or_default();
+    assert!(
+        case.contains(section),
+        "comptime/proposal_derive.sisu no longer holds the proposal's derive section"
+    );
+}

@@ -1,0 +1,5 @@
+10:12-10:22 E0600 comptime.not-constant name="x"
+13:12-13:23 E0600 comptime.not-constant name="T"
+16:12-16:20 E0605 comptime.only name="twice"
+18:1-18:27 E0606 comptime.budget-attribute
+21:1-21:27 E0606 comptime.budget-attribute

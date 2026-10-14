@@ -128,6 +128,7 @@ fn check_fn(
         c.report(d);
     }
     check_bounds(&mut c);
+    check_comptime_types(&mut c);
     let absorbed = c.infer.absorbed();
     report_uninferred(&mut c);
     let has_errors = c.diags.iter().any(|d| d.is_error());
@@ -143,6 +144,7 @@ fn check_fn(
                 body: Block::empty(def_span),
                 span: def_span,
                 fn_ty: Ty::Error,
+                comptime: false,
             })
         })
         .collect();
@@ -239,6 +241,36 @@ fn report_uninferred(c: &mut Checker) {
     }
 }
 
+/// What a `comptime` expression computes cannot depend on the function's
+/// type arguments, which are known only when it is called (E0600).
+fn check_comptime_types(c: &mut Checker) {
+    for (id, range) in std::mem::take(&mut c.comptime_sites) {
+        let Some(Some(cl)) = c.closures.get(id.0 as usize) else { continue };
+        let mut tys = vec![cl.ret.clone()];
+        for st in &cl.body.stmts {
+            purity::visit_stmt(st, &mut |e| {
+                tys.push(e.ty.clone());
+                if let ExprKind::Call { callee: Callee::Fn { type_args, .. }, .. } = &e.kind {
+                    tys.extend(type_args.iter().cloned());
+                }
+            });
+        }
+        let mut param = None;
+        for t in &tys {
+            c.infer.zonk(t).walk(&mut |x| {
+                if let Ty::Param(i) = x {
+                    param.get_or_insert(*i);
+                }
+            });
+        }
+        if let Some(i) = param {
+            let name = c.generic_names.get(i as usize).cloned().unwrap_or_else(|| "Self".into());
+            let d = c.error(msg::COMPTIME_NOT_CONSTANT, range).with("name", name);
+            c.report(d);
+        }
+    }
+}
+
 /// Checks a default value or a constant as a body returning it.
 #[allow(clippy::too_many_arguments)]
 fn check_value(
@@ -259,6 +291,7 @@ fn check_value(
     c.ret.push(RetCtx { ty: ty.clone(), closure: None, first_local: 0, loops: 0, captures: Vec::new() });
     let x = c.check_expr(expr, ty);
     check_bounds(&mut c);
+    check_comptime_types(&mut c);
     let span = x.span;
     let block = Block { stmts: vec![Stmt::Return { value: Some(x), span }], span };
     let has_errors = c.diags.iter().any(|d| d.is_error());

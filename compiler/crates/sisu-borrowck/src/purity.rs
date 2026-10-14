@@ -6,7 +6,8 @@
 //! prelude's higher-order functions are pure when their function arguments
 //! are). Taking a capability as a parameter, and passing an impure
 //! function where a pure one is expected, are type rules checked before
-//! SIR (E0334, E0335).
+//! SIR (E0334, E0335). A `comptime` expression is a value to the code
+//! around it: the compiler runs it, with no access to the world (08).
 
 use crate::Finding;
 use crate::loans::display_fn;
@@ -18,7 +19,12 @@ pub fn check(p: &Program) -> Vec<Finding> {
     let types = Types::new(p);
     let mut out = Vec::new();
     for f in &p.functions {
-        if !f.pure || f.kind == sisu_sir::FnKind::Closure || f.kind == sisu_sir::FnKind::Value {
+        if !f.pure
+            || matches!(
+                f.kind,
+                sisu_sir::FnKind::Closure | sisu_sir::FnKind::Value | sisu_sir::FnKind::Comptime(_)
+            )
+        {
             continue;
         }
         let name = display_fn(&f.name);
@@ -30,7 +36,12 @@ pub fn check(p: &Program) -> Vec<Finding> {
                     match &s.kind {
                         StatementKind::Call { callee, .. } => {
                             let impure = match callee {
-                                Callee::Fn(n, _) => p.function(n).filter(|c| !c.pure).map(|_| display_fn(n)),
+                                // A `comptime` expression is a value by the time
+                                // the program runs; the compiler ran it.
+                                Callee::Fn(n, _) => p
+                                    .function(n)
+                                    .filter(|c| !c.pure && !matches!(c.kind, sisu_sir::FnKind::Comptime(_)))
+                                    .map(|_| display_fn(n)),
                                 Callee::Trait(n, _) => {
                                     p.trait_method(n).filter(|d| !d.pure).map(|_| n.clone())
                                 }

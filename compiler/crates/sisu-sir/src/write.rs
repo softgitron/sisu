@@ -234,14 +234,15 @@ fn write_decl(out: &mut String, word: &str, i: &IntrinsicDecl) {
     );
 }
 
-fn kind_name(k: FnKind) -> &'static str {
+fn kind_name(k: FnKind) -> String {
     match k {
-        FnKind::Normal => "",
-        FnKind::Closure => " closure",
-        FnKind::Drop => " drop",
-        FnKind::Glue => " glue",
-        FnKind::Value => " value",
-        FnKind::Test => " test",
+        FnKind::Normal => "".into(),
+        FnKind::Closure => " closure".into(),
+        FnKind::Drop => " drop".into(),
+        FnKind::Glue => " glue".into(),
+        FnKind::Value => " value".into(),
+        FnKind::Test => " test".into(),
+        FnKind::Comptime(steps) => format!(" comptime {steps}"),
     }
 }
 

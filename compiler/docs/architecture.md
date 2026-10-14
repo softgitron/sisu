@@ -9,16 +9,20 @@ is written so that the stage-1 front end in Sisu
 transcription: every rule here is a rule of the language implementation,
 not of Rust.
 
-Scope: [18](../../proposal/18-next-steps.md) Phases 0 and 2, the
-non-generic, non-concurrent core, and Phase 3's ownership checker,
-dynamic ownership monitor and counterexample mode. Phase 3's library
-types (`Shared`, `Weak`, `Cell`, `Mutex`, `Box`, `Arena` with generational
-keys) and `own` closures are not here yet; neither are traits, user
-generics and the comptime evaluator (Phase 4), tasks (Phase 6), and
+Scope: [18](../../proposal/18-next-steps.md) Phases 0 and 2, the core;
+Phase 3's ownership checker, dynamic ownership monitor, counterexample
+mode and `sisu audit --ownership`, with its library types (`Box`, `Shared`, `Weak`, `Cell`, a
+single-task `Mutex`, `Arena[T]` with generational `Key[T]`) and `own`
+closures; and Phase 4's traits and impls, user generics, `dyn Trait`, the
+standard library's iterators, formatting and collection algorithms
+written in Sisu, drop glue as SIR functions, and the comptime evaluator
+with derive written as compile-time Sisu. Not here: from Phase 4,
+`Array`, `Slice`, the sized integer types, const generics and byte
+strings; reflection beyond derive and the checked string DSLs (Phase 8);
+tasks, scopes and capabilities beyond what `wordcount` needs (Phase 6);
 contracts and the rest of the interpreter-era surface (Phase 8). Their
 syntax parses, and using them is a diagnostic (`E0900
-stage0.unsupported`, or a specific one such as `E0210` for user generics
-and `E0214` for trait impls other than `Drop`).
+stage0.unsupported`).
 
 ## Crate map
 
@@ -28,22 +32,24 @@ architecture"); data flows down the table.
 | Crate | Lines | Role |
 |---|---:|---|
 | `sisu-diag` | 852 | Spans, the source map (1-based lines, columns in characters), the message catalog, diagnostics with labels, notes and fixes, the human and `--format=ids` renderers |
-| `sisu-syntax` | 3405 | Token and node kinds, the lossless arena tree with stable node identities, and the AST built from the tree as a total function |
+| `sisu-syntax` | 3614 | Token and node kinds, the lossless arena tree with stable node identities, and the AST built from the tree as a total function |
 | `sisu-lexer` | 1179 | Scanning (every byte a token, interpolation split into tokens) and layout (Python's INDENT/DEDENT algorithm) |
-| `sisu-parser` | 3237 | Error-tolerant recursive descent that always returns a tree |
-| `sisu-resolve` | 2283 | Loads the Sisu-written std (`compiler/std/`), declares every item, resolves signatures to types, registers methods; the borrow rules about declarations (views, `from` clauses and elision) |
-| `sisu-typeck` | 6335 | The bidirectional checker; produces the typed tree (THIR) for every body, broken or not |
-| `sisu-sir` | 2040 | SIR: the data model, the text writer and reader, the validator |
-| `sisu-lower` | 2906 | THIR to SIR: control flow, scopes and their drops, unwind edges, closure conversion, the borrow facts of signatures |
-| `sisu-borrowck` | 4306 | The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, escapes, must-consume, purity, `explain-borrow` |
-| `sisu-interp` | 5004 | The trampolined SIR interpreter, values, drop glue, unwinding, host intrinsics, and the dynamic ownership monitor |
-| `sisu-driver` | 1320 | The query layer and the `sisu` command line, the counterexample mode, and the soundness tests (fault injection, mutation fuzzing) |
+| `sisu-parser` | 3301 | Error-tolerant recursive descent that always returns a tree |
+| `sisu-resolve` | 6055 | Loads the Sisu-written std (`compiler/std/`), declares every item, resolves signatures to types, registers methods; traits, impls, coherence and the trait solver; derives (unfolding each trait's `comptime def derive`) and delegation; the borrow rules about declarations |
+| `sisu-typeck` | 7509 | The bidirectional checker, with method resolution through traits and `comptime` expressions; produces the typed tree (THIR) for every body, broken or not |
+| `sisu-sir` | 2622 | SIR: the data model, the text writer and reader, the validator, the types of places |
+| `sisu-lower` | 3963 | THIR to SIR: control flow, scopes and their drops, unwind edges, closure conversion, trait calls and their static resolution, drop glue, `comptime` functions, the borrow facts of signatures |
+| `sisu-borrowck` | 4497 | The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, escapes, must-consume, purity, `explain-borrow` |
+| `sisu-interp` | 6202 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the dynamic ownership monitor, and the compile-time evaluator |
+| `sisu-driver` | 1618 | The query layer and the `sisu` command line, the counterexample mode, `audit --ownership`, and the soundness tests (fault injection, mutation fuzzing) |
 | `sisu-conformance` | 472 | The language-agnostic conformance runner |
 
 Line counts include each crate's unit tests. Besides the crates:
-`catalog/messages.catalog` (every message), `std/prelude.sisu`,
-`std/cli.sisu` and `std/math.sisu` (the standard library surface, in
-Sisu), and `conformance/` (the suite, described in its own
+`catalog/messages.catalog` (every message), `std/prelude.sisu` (1629
+lines: the builtin types, the core traits and their derives, iterators,
+formatting, collections, `Shared` and the other library types),
+`std/cli.sisu` and `std/math.sisu` (the standard library, in Sisu), and
+`conformance/` (the suite, described in its own
 [README](../conformance/README.md)).
 
 The workspace forbids `unsafe` and denies `unwrap`, `expect`, `panic`,
@@ -55,10 +61,11 @@ host panic.
 
 ```text
 source --lex--> tokens --parse--> lossless tree --ast::build--> AST
-       --resolve--> Program (items, signatures, methods)
+       --resolve--> Program (items, signatures, methods, impls, derived impls)
        --typeck--> THIR (typed bodies) + diagnostics
-       --lower--> SIR (every drop unconditional)
+       --lower--> SIR (every drop unconditional, drop glue, comptime functions)
        --borrowck--> SIR with its drops placed + ownership findings
+       --comptime--> SIR with every `comptime` value built from literals
        --validate--> SIR --interp [--monitor]--> output, exit status
 ```
 
@@ -68,7 +75,10 @@ lowering requires a program without errors; the driver does not lower a
 program that has any, except that the ownership rules about declarations
 (`E04xx` from name resolution) do not stop lowering, so that the
 counterexample mode can run such a program. The ownership checker's SIR
-is always complete and valid, even when it reports errors.
+is always complete and valid, even when it reports errors. The compiler
+runs the `comptime` expressions of a program the ownership checker
+accepts (section "Compile-time evaluation"); one that it rejects runs
+them at run time, in the counterexample mode, with the same result.
 
 ## Lexing
 
@@ -267,7 +277,8 @@ part of another (a label, a note, a fix). `KIND` is one of `error`,
 is the rest of the line: `{name}` is a parameter, `{{` and `}}` are
 literal braces, `\n` is a line break. Code ranges: `E00xx` lexer, `E01xx`
 parser, `E02xx` names, `E03xx` types, `E04xx` ownership, `E05xx` SIR,
-`E09xx` stage-0 limits and internal errors, `W0xxx` warnings, `R0xxx` run
+`E06xx` compile-time evaluation, `E09xx` stage-0 limits and internal
+errors, `W0xxx` warnings, `R0xxx` run
 time (the monitor and the counterexample mode from `R0042`), `D0xxx`
 driver. Two ownership findings keep the type checker's codes they had
 before the checks moved to SIR: `E0366` (use before assignment) and
@@ -294,19 +305,22 @@ The prelude and the std modules are Sisu source (`compiler/std/*.sisu`)
 compiled by the same front end as user code. A function without a body
 names a host intrinsic with `@intrinsic("name")`, and the `##` comment
 above it is the intrinsic's contract, stated in Sisu terms; `@builtin`
-marks a type whose values the host represents. Both attributes are
-reserved for std (`E0225`). Generic parameters appear only in std until
-Phase 4 (`E0210` for user declarations), with the bounds `Display`,
-`Debug`, `Eq`, `Ord`, `Hash`, `Len` and `Num`, which the checker decides
-from a table:
-
-| Bound | Satisfied by |
-|---|---|
-| `Display`, `Debug`, `Eq` | every type except function types |
-| `Len` | `str`, `String`, `list`, `dict`, `set` |
-| `Num` | `int`, `f64` |
-| `Ord` | `int`, `char`, `str`, `bool`, `()`, `String`, `Path`, `Ordering`; tuples, `list` and `Option` of `Ord` types (not `f64`, which has NaN) |
-| `Hash` | `int`, `char`, `str`, `bool`, `()`, error sets; tuples and other types whose arguments are `Hash`; not `f64`, functions, `list`, `dict`, `set`, `Iter` or `Entry` |
+marks a type whose values the host represents. Four more attributes are
+std's: `@structural("name")` on a function with a body says that the
+intrinsic `name` computes the same result whenever the call's type
+arguments meet every bound with a structural impl (lowering then calls
+the intrinsic: `list.sort` and `join` are written in Sisu and run on the
+host for builtin elements); `@keeps(self, x)` on an intrinsic names the
+`own` and `mut` arguments whose every value it keeps or returns (the only
+ones that may take a must-consume value); `@sealed` on a trait means only
+std implements it (`Num`); `@marker` on a trait means it has no methods
+and is implemented by the language's rules (`Copy`). All six are reserved
+for std (`E0225`). The prelude declares the core traits (`Display`,
+`Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, `Len`, `Copy`, `Num`, `Drop`,
+`Iterator`, the operator traits, `FromLiteral`), their impls for the
+builtin types, and the generic code over them; the impls of the leaf
+types and of tuples are generated (`<std>/builtin_impls.sisu`, from
+`sisu-resolve/src/std_sources.rs`).
 
 `Iterable[T]`, a parameter type only, accepts a `list`, `set`, `dict` or
 `Iter` whose items are `T`; a borrowed collection's items are references,
@@ -319,9 +333,8 @@ and records every variant by its unqualified name. A name in an
 expression is a variant of the expected type first, then a declaration of
 that name, then a variant declared in the current module, then any
 visible variant, where two candidates are ambiguous (`E0211`); a name in a
-pattern is a variant of the scrutinee's type first. `impl Drop
-for T` is the only trait impl (`E0214` otherwise), for a struct or enum of
-the same module, with exactly `def drop(mut self)`.
+pattern is a variant of the scrutinee's type first. Traits, impls and
+generics are the next section's.
 
 Resolution also checks the ownership rules that are about declarations
 (04, "Views" and "Borrowing rules in detail"), after every signature is
@@ -343,6 +356,186 @@ known:
   (`E0415`, with a fix removing it).
 - `@must_consume` on a struct or enum is recorded for the ownership
   checker (D-054).
+
+## Traits and generics
+
+Phase 4 of 18, after [03](../../proposal/03-types-and-generics.md).
+
+**Traits** declare required and provided methods and associated types
+(`type Item`, with an optional default), and may name supertraits
+(`trait Ord(Eq, PartialOrd)`); in a trait's signatures `Self` is the
+first type parameter and the trait's own parameters follow. **Impls**
+(`impl[T: Eq] Eq for list[T]:`) define every required method with the
+trait's signature (`E0232`, `E0233`, `E0234`) and bind every associated
+type without a default (`E0237`). A method of an impl inherits `pure`
+from the trait's declaration of it. An impl for a type implements the
+trait's supertraits only if the type implements them too (`E0242`).
+
+**Coherence.** A type implements a trait at most once: two impl headers
+of one trait overlap when their patterns (the self type and the trait's
+arguments) unify, which is an error at the second (`E0235`); impl
+selection then matches headers only, and `where` clauses never choose
+between impls. The orphan rule: an impl lives in the package of the
+trait or of the type, except in the root package, which nothing depends
+on (D-013, Q-11; `E0236`). Stage 0 has one user package, so a program
+may implement std's traits for std's types, and std may implement
+anything. A `@sealed` trait has only std's impls (`E0240`).
+
+**Generics.** Functions, structs, enums, traits and impls take type
+parameters with bounds (`[T: Display + Hash]`, `where` clauses,
+`I.Item: Display`); a type's and a trait's parameters may have defaults
+(`A: Allocator = Global`), where a parameter without a default cannot
+follow one with a default (`E0245`); an impl's and a function's may not
+have defaults (`E0246`). A generic body is checked once, at its definition, against
+its bounds: calling a method on a `T` needs a bound that has it, and a
+violation is reported in the body, never at a use (18, Phase 4 exit
+criterion). A call infers its type arguments by unification; a
+definition-site bound of a type (`struct Labelled[T: Display]`) is
+required where the type is written. Const generics are not here
+(`E0900`).
+
+**Type arguments are values at run time** (18, Phase 4: "polymorphic
+interpretation ... no monomorphisation"). Every call of a generic SIR
+function passes its type arguments (`call fn total[Sq](...)`), a frame
+holds them, and a type in the body (`$0`, `<$0 as Iterator>.Item`) is
+made concrete by substituting them and replacing associated types by
+what the matching impl binds. Intrinsics receive type arguments only
+where lowering's rule says they need them (section "Lowering").
+
+**Methods.** `x.name(...)` is a method of `x`'s type, then a method of a
+trait the type implements (or, for a generic parameter, a trait it is
+bounded by), looking through references and `Box`es; a name that more
+than one such trait has is ambiguous (`E0394`), and `Trait.method(x)`
+names one. A call whose `Self` is known when lowering is resolved there
+to the impl's method or the trait's provided body; one whose `Self` is a
+type parameter, an associated type of one, a reference or a `dyn` is a
+`call trait` that the interpreter dispatches: it matches the impls'
+patterns against the concrete type arguments (a reference dispatches on
+what it points to, a `dyn` on the type it carries), and with no impl
+uses the language's own structural one for the core traits. A borrowed
+parameter whose declared type is a type parameter is passed by
+reference even when the argument is `Copy`, unless the parameter is
+bounded by `Copy`; dispatch to an impl that takes a `Copy` type by value
+reads the value through the reference.
+
+**`dyn Trait`** is a value of some type that implements the trait,
+carrying its type: behind `ref` (a `ref T` coerces to `ref dyn Trait`) or
+in a `Box` (`E0395` for a bare one). A trait is object safe when every
+method takes `self` or `mut self`, has no type parameters of its own and
+mentions `Self` nowhere but its receiver (`E0241`); `dyn Trait`
+implements its supertraits. A `dyn` owns its value, so a view cannot
+become one (`E0396`).
+
+**The core traits are std's.** `Display`, `Debug`, `Eq`, `PartialOrd`,
+`Ord`, `Hash` and `Len` are prelude traits with impls for the builtin
+types, collections, options, results and tuples; `Copy` is a marker
+computed from fields (`@derive(Copy)` opts a type in when every field is
+`Copy`); `Num` (`int`, `f64`) is sealed; every type has `Debug`, its own
+or the derived one (11). The operators `+ - * / %` and unary `-` on
+non-numbers call the operator traits `Add`, `Sub`, `Mul`, `Div`, `Rem`
+and `Neg`; on numbers they are the language's own operations, with their
+traps. `FromLiteral[L]` makes a literal of type `L` a value of a type
+that implements it where that type is expected (a string literal is a
+`String` or a `Path`). `Iterator` has `type Item` and `next`, and its
+adapters and consumers are provided methods written in Sisu.
+
+**Structural impls.** The impls std writes for the builtin types, and
+every derived impl, compute what the interpreter's structural operations
+compute (compare field by field, hash the fields, print the way values
+are written). When every bound of a call's type arguments is met by
+such an impl, lowering calls the host's operation instead (an
+interpolation of a struct, `sorted(xs)`, the `@structural` functions);
+otherwise the Sisu code runs. A `dict` key or `set` element is hashed and
+compared structurally by the host in stage 0, so a key type with its own
+`Eq` or `Hash` impl is rejected there (`E0398`) rather than silently
+hashed the other way.
+
+**Derive and delegation.** `@derive(T)` runs `T`'s `comptime def derive`
+at compile time (section "Compile-time evaluation"); `Debug`, `Eq`,
+`PartialOrd`, `Ord` and `Hash` are written that way in the prelude, and
+any trait may declare one. The derived impl of a generic type bounds each
+parameter that a field uses by the trait (`impl[T: Eq] Eq for P[T]`), and
+the fields of a type deriving one of the language's traits must
+implement it (`E0244`). `@delegate(Trait, ..., to="field")` writes impls
+that forward to a field (03, "cheap newtypes and delegation"): the
+operator traits (when the field is the type's only one, since they
+return `Self`), `Eq`, the orders, `Hash`, `Display`, `Debug` and `Len`
+(`E0250`-`E0253`).
+
+**`Drop`** is for a struct or enum of the same module, with exactly
+`def drop(mut self)` (`E0213`, `E0216`), and, for a generic type, for all
+of it: `impl[T] Drop for W[T]` with the type's parameters in order and
+no bound the type does not declare (`E0254`), since the drop glue runs it
+for every value.
+
+## Compile-time evaluation
+
+[08](../../proposal/08-metaprogramming.md) and 18, Phase 4: "the comptime
+evaluator as the same interpreter with fuel, a memory limit and no
+`System`; used first for the built-in `@derive`".
+
+**`comptime e`** asks the compiler to compute `e`. It is checked as the
+body of a closure of no parameters, which must capture nothing (a local
+or a parameter is a run-time value, `E0600`) and whose value cannot
+depend on the function's type parameters (`E0600`, checked once types
+are known). As an operator, `comptime` takes the operand after it
+(`comptime f() + 1` adds at run time); before a condition it makes all
+of it compile-time (`if comptime a or b:`), and both branches are
+checked. `comptime assert c, "m"` and `comptime e` as statements run at
+compile time and leave nothing. A `comptime def` may be called only at
+compile time, inside `comptime` or another `comptime def` (`E0605`, also
+for taking it as a function value). `const X: T = comptime f()` is a
+constant computed by the compiler; a constant is computed even when
+nothing uses it.
+
+**Evaluation.** Lowering makes each `comptime` expression a SIR function
+of no arguments, `OWNER#comptimeN`, of kind `comptime STEPS`, and the use
+a call of it. Once the ownership checker accepts the program, the driver
+runs each such function in the interpreter, the ones whose values it
+uses first (so each spends its own budget), with a budget of SIR steps
+and a host through which nothing reaches the world, and replaces its
+body by statements that build the value from literals, which makes it a
+`value` function: the program then does at run time what it would do for
+a literal. The semantics are the run-time semantics: the same
+interpreter, the same overflow traps, `Drop` order and iteration order.
+The budget is 1 000 000 steps, or `@comptime_budget(steps=N)` on the
+function or constant that holds the expression (`E0606` for a malformed
+one); the budget belongs to the item that spends it.
+
+Errors, each at the `comptime` expression: a panic (`E0602`, with its
+message; a failed `comptime assert` is one), a spent budget (`E0603`,
+naming the item and the budget; 08's deny-by-default diagnostic, an
+error, since stage 0 has no lint levels), a use of the world (`E0601`:
+standard output or error, arguments, the environment, the clock, the
+file system), and a value with no literal form (`E0604`: a function, a
+reference, a `Shared` or another handle; numbers, text, booleans,
+characters and the lists, sets, dicts, tuples, options, results, structs
+and enums of them have one). An expression that uses a failed one is not
+evaluated: its error is that one's. Purity is not required: a function
+that does no I/O can run at compile time whether or not it is declared
+`pure`, and one that tries is stopped where it does.
+
+**Derive at compile time.** A trait's derive is `comptime def derive(T:
+type) -> impl Trait for T` whose body is `return impl Trait for T:` with
+the impl's methods (`E0607` otherwise). `@derive(Trait)` on a type runs it
+for that type: the code that runs at compile time is evaluated and the
+rest becomes the impl's source, with the compile-time values in it as
+literals, declared beside the type and checked like any impl. Compile-time
+code in a template is `comptime for x in e:` (unrolled), `comptime if c:`
+and `if comptime c:` (decided), the same two among a `match`'s arms
+(arms made per item), and any expression made only of compile-time
+values: the type `T`; reflection, the compile-time module `reflect`, with
+`name_of(T)`, `is_struct(T)`, `is_enum(T)`, `fields_of(T)` and
+`variants_of(T)`; a field's `name` (its position for a positional variant
+field), `index` and `named`; a variant's `name`, `index` and `fields`;
+integers, text and booleans with `enumerate`, `len`, arithmetic,
+comparisons, `and`, `or`, `not`, and interpolation into text. `x.[f]` is
+the field `f` of `x`; a variant's field is reached inside an arm `case
+V(..)` that `comptime for V in reflect.variants_of(T)` made for a `match
+x`, where it is the arm's binding (`__x_0`, ...). A template that cannot
+unfold for a type is reported at the `@derive`, with a label where it
+stopped (`E0608`). Outside templates, `reflect`, `x.[f]`, `comptime for`
+and `return impl` are `E0900` (reflection beyond derive is Phase 8).
 
 ## Type checking
 
@@ -375,7 +568,18 @@ body yields a THIR body, with ill-typed parts typed `Error`.
 - `pure` (D-074): a pure function takes no capability, and a closure
   passed for a `pure` function type must be pure (`E0334`, `E0335`);
   which functions it calls, and which `Drop` its drops run, are checked on
-  SIR by the ownership checker (`E0333`, `E0392`, `E0393`).
+  SIR by the ownership checker (`E0333`, `E0392`, `E0393`). A `comptime`
+  expression is a value to the code around it.
+- Closures capture by reference; an `own` closure (`own x -> ...`) keeps
+  copies of what it captures, which must be `Copy` (`E0423`) and which it
+  cannot change (`E0424`), and so may be stored and returned (a capture by
+  move arrives with tasks).
+- What a `Shared`, `Cell` or `Mutex` owns can be neither a view
+  (`E0421`) nor must-consume (`E0422`), checked once the type is known; a
+  `Shared` value is reached through the owner, and nothing may be changed
+  through it except inside a `Cell` or a `Mutex`.
+- A format spec is checked where it is written (`E0399`); a spec ending
+  in `?` asks for `Debug`.
 - `a?.f` through a reference borrows a field that is not `Copy` (as a
   `str` view for a `String`), since nothing can be moved out of a borrowed
   value: `eldest?.name ?? "nobody"` is a `str`.
@@ -388,10 +592,11 @@ body yields a THIR body, with ill-typed parts typed `Error`.
   there and is reported as warning `W0001` with that type.
 - Desugaring decided here: `it` closures, `do` blocks bound to the last
   function-typed parameter, `Type(...)` constructors with field defaults,
-  parameter defaults, `range(n)` as `range(0, n)`, string literals as
-  `String` or `Path` where expected, auto-deref, and implicit borrows of
-  arguments, all made explicit in THIR (`Coerce`, `Borrow`, `Deref`,
-  `DefaultArg` nodes).
+  parameter defaults, `range(n)` as `range(0, n)`, literals through
+  `FromLiteral` where its implementer is expected, auto-deref through
+  references, `Box`, `Shared` and mutex guards, `ref T` to `ref dyn
+  Trait`, and implicit borrows of arguments, all made explicit in THIR
+  (`Coerce`, `Borrow`, `Deref`, `DefaultArg` nodes).
 
 ## SIR
 
@@ -406,15 +611,27 @@ of statements, each ending in one terminator.
 ```text
 Statement  := Assign(Place, Rvalue) | Call { dest, callee, args } | Drop { place, flag? }
               | StorageDead(local)
-Callee     := fn NAME | intrinsic NAME[TYPES] | Operand (a function value)
+Callee     := fn NAME[TYPES] | intrinsic NAME[TYPES] | trait TRAIT.METHOD[TYPES]
+              | Operand (a function value)
 Terminator := Goto(bb) | Switch { value, cases: [(int, bb)], default: bb }
               | Return | Resume | Unreachable
 Place      := local projection*      projection := .* | .N | .as(V) | [_i] | [^_i] | {_k}
 Operand    := copy Place | move Place | const Const
 Rvalue     := Use(Operand) | ref [mut] Place | BinOp(Operand, Operand) | UnOp(Operand)
-              | tuple/struct/variant/list/set/dict(Operand...) | discriminant Place
-              | closure NAME(Operand...) | copyof Place | strview Place
+              | tuple/struct/variant/list/set/dict(Operand...) | dyn TYPE(Operand)
+              | discriminant Place | closure NAME[TYPES](Operand...) | copyof Place
+              | strview Place
 ```
+
+A generic function has type parameters, `$0` and on in its types, and
+every call passes their arguments; `call trait Trait.method[Self, trait
+arguments..., the method's own...]` is dispatched at run time to the impl
+whose pattern matches. The program lists the impls it may dispatch to
+(`impl[N] Trait[args] for Type { method: function, type Item = T }`, the
+impl's parameters `$0` to `$(N-1)` in its patterns; a method it omits is
+the trait's provided one, the function `Trait.method`) and declares the
+trait methods it calls through `call trait` with their facts (`method
+Shape.area pure`), as it declares intrinsics.
 
 Every block may name an `unwind` block, the cleanup that runs when
 anything in it panics; cleanup blocks are marked, cannot unwind, and end
@@ -450,10 +667,13 @@ every intrinsic it calls:
   `Path`) outside references: `longest(words: list[str]) -> str` returns
   one of the views the list holds, so the caller may change the list while
   the result lives, but not the text.
-- For an intrinsic, also `own`: the arguments it takes with `own`, the
+- `own`: the arguments taken with `own`. For an intrinsic they are the
   only ones it may keep in what its `mut` arguments point to
-  (`list.push(mut self, own x)` keeps `x`; `list.sort_by(mut self, cmp)`
-  keeps nothing).
+  (`list.push(mut self, own x)` keeps `x`); a caller of a function assumes
+  the call may keep what they hold in its `mut` arguments.
+- For an intrinsic, also `keeps`: the `own` and `mut` arguments whose
+  every value it keeps or returns, from its contract's `@keeps`; only
+  these may take must-consume values (D-054).
 
 A function records where it is declared (its name, or the closure), for
 diagnostics about it as a whole. A local records where its binding is
@@ -502,11 +722,15 @@ enum Shape { Circle(r: f64), Dot }
 error IoError open { NotFound(path: Path), Interrupted }
 
 intrinsic print
-intrinsic list.push pure own 1
+intrinsic list.push pure own 1 keeps 0 1
 intrinsic str.split_whitespace pure from 0
-intrinsic Iter.next pure inner 0
+intrinsic Iter.next pure inner 0 keeps 0
 
-fn NAME(PARAM_COUNT) [closure|drop|value|test] [pure] source N [from I...] [inner I...] [@L:C-L:C] {
+method Shape.area pure
+impl[1] Eq for list[$0] { eq: list.Eq.eq }
+impl Iterator for Count { next: Count.Iterator.next, type Item = int }
+
+fn NAME[T, U](PARAM_COUNT) [closure|drop|glue|value|test|comptime STEPS] [pure] source N [from I...] [inner I...] [own I...] [@L:C-L:C] {
     let _0: TYPE ["source name"] [once] [@L:C-L:C]
   bb0:
     STATEMENT [@L:C | @L:C-L:C]
@@ -529,7 +753,9 @@ _1 = add copy _2, const 1               _1 = not copy _2
 _1 = tuple(copy _2, move _3) | struct Point(...) | variant Option::Some(...)
 _1 = list(...) | set(...) | dict(k1, v1, k2, v2)
 _1 = discriminant _2 | closure main#closure0(copy _3) | copyof _2.* | strview _2
-_1 = call fn parse_args(copy _2) | call intrinsic dict.new[String, int]() | call copy _3(copy _4)
+_1 = dyn ref Sq(copy _2)
+_1 = call fn parse_args(copy _2) | call fn total[Sq](copy _2) | call intrinsic dict.new[String, int]()
+_1 = call trait Shape.area[$0](copy _2) | call copy _3(copy _4)
 drop _1 | drop _1 if _5 | dead _1
 goto bb2 | switch copy _1 [0: bb3, 1: bb4, else: bb5] | return | resume | unreachable
 ```
@@ -537,7 +763,9 @@ goto bb2 | switch copy _1 [0: bb3, 1: bb4, else: bb5] | return | resume | unreac
 Types: `int f64 bool char str () Never`, a named type with arguments
 (`list[int]`, `Option[str]`, `cli.Error`), tuples `(int, str)` and
 `(int,)`, error-set unions `{IoError, cli.Error}`, function types
-`fn(int) -> bool` and `pure fn(int) -> bool`, and `ref T`, `ref mut T`.
+`fn(int) -> bool` and `pure fn(int) -> bool`, `ref T` and `ref mut T`, a
+type parameter `$0`, `dyn Shape` (a value carrying its type), and an
+associated type of a parameter, `<$0 as Iterator>.Item`.
 A location is the source range of the construct, `@line:col-line:col`
 (the end exclusive), or a point `@line:col`; the ownership checker's
 diagnostics are built from these ranges, so they must be exact.
@@ -546,13 +774,37 @@ decimal, floats always with a `.` or an exponent (or `nan`, `inf`,
 `-inf`), `true` and `false`, strings and characters with the escapes
 `\n \t \r \0 \\ \" \'` and `\u{hex}`, `()`, and `fn NAME`.
 
-Names: a function is its source name; a method is `Type.method`; a std
-module function is `module.function`; a test is `test#N`; a closure is
-`OWNER#closureN`; a field default is `Type#field` and a parameter default
-`function#param`, each a `value` function of no parameters. Builtin types
-(`String list dict set Iter Entry Path DateTime Fs Env Clock System Option
-Result`) are not declared; every other type a function mentions is, with
-`drop` naming its `Drop` function.
+Names: a function is its source name; a method is `Type.method`, and a
+trait impl's method `Type.Trait.method`; a trait's provided method is
+`Trait.method`; a std module function is `module.function`; a test is
+`test#N`; a closure is `OWNER#closureN`; a `comptime` expression is
+`OWNER#comptimeN`; a field default is `Type#field` and a parameter
+default `function#param`, each a `value` function of no parameters; the
+drop glue of a type is `Type#drop`. Builtin types (`String list dict set
+Iter Entry Path DateTime Fs Env Clock System Option Result Iterable`) are
+not declared; every other type a function mentions is, with its type
+parameters, and with `drop` naming its `Drop` function.
+
+**Drop glue** is a function of kind `glue` per declared type whose drop
+can do anything (run a `Drop`, change a count, unlock a mutex), made by
+lowering: it takes the value with `own` (`_1 "self"`), calls the type's
+`Drop` with a reference to the whole value, then drops the fields in
+reverse declaration order (of the active variant, through a switch on the
+discriminant, for an enum), each in a block of its own, and returns right
+after the last. Cleanup blocks beside them form a ladder: if the `Drop`
+or a field's drop panics, the fields that remain are still dropped,
+where a second panic aborts. A field whose type drops nothing is left
+out; a type parameter's field is dropped, since it may stand for
+anything. The host-backed types have no glue: their drops are part of
+their contracts (section "The interpreter").
+
+**Kinds**: `closure` (parameter 1 is the environment tuple), `drop` (the
+method of `impl Drop`), `glue`, `value` (a default or a constant, or a
+`comptime` expression once evaluated), `test`, and `comptime STEPS`: a
+`comptime` expression not yet evaluated, with its budget of steps. The
+driver evaluates and bakes every `comptime` function before it writes or
+runs SIR, so written SIR has one only when the ownership checker
+rejected the program; running one computes its value at run time.
 
 ### Invariants
 
@@ -560,7 +812,11 @@ Result`) are not declared; every other type a function mentions is, with
 every local, block and function named exists; unwind edges lead to cleanup
 blocks; cleanup blocks do not unwind; `resume` only in cleanup; `from` and
 `inner` name existing arguments; `dead` names a local other than the
-return place and the parameters; and the lowering invariant: a statement
+return place and the parameters; types and type arguments name only the
+function's parameters; an impl's methods exist and its patterns name only
+its parameters; a type with a `Drop` has its glue, and glue is a declared
+type's, taking the value, with the type's parameters; and the lowering
+invariant: a statement
 that initialises a value needing drop, or drops one, is the last
 statement of its block, so each block's unwind edge is exact for every
 statement in it. The ownership checker keeps the invariant when it
@@ -614,18 +870,39 @@ closures). The rules, so that another front end produces the same SIR:
   stores `Err(e)` (or `None`) in `_0`, drops every scope and returns.
 - **Closures** become a function whose parameter 1 is a tuple of
   references to the captured locals (`ref mut` when the closure assigns
-  them); the closure value is `closure NAME(refs...)`, and holds the loans
-  of those references, so the ownership checker keeps it from escaping
-  the frame of what it captures (`own` closures, which capture by move,
-  are not implemented yet: `E0900`).
-- **Interpolation** builds a `String` with `fmt.new`, then `fmt.text` and
-  `fmt.display` or `fmt.debug` (with the format spec) per part.
+  them); the closure value is `closure NAME[TYPES](refs...)`, with the
+  type arguments of the function that makes it, and holds the loans of
+  those references, so the ownership checker keeps it from escaping the
+  frame of what it captures. An `own` closure's tuple holds copies
+  instead, and no loan.
+- **Interpolation** builds a `String` with `fmt.new`, then `fmt.text` per
+  text part, and per value: without a spec, `fmt.display` or `fmt.debug`
+  when the value's impl is structural (the host writes its plain text);
+  otherwise a `Formatter` with the spec (`fmt.formatter`), a call of the
+  value's `Display.fmt` (or `Debug.fmt_debug`, for `{x:?}`, `{x=}` and a
+  spec ending in `?`), and `Formatter.finish`, which pads the text by what
+  is left of the spec (section "Formatting").
+- **Generic calls** pass every type argument to a SIR function. A trait
+  method whose `Self` is known is called as the impl's method (or the
+  trait's provided one) directly; otherwise `call trait`. A call whose
+  function is `@structural` and whose type arguments meet every bound
+  with a structural impl calls the intrinsic instead.
 - **Intrinsic calls** carry type arguments when the intrinsic needs them at
   run time: when a generic parameter appears in the result and in no
   parameter (`list.new[T]`, `cli.parse[T]`), or when a parameter is
   `Iterable[T]` (whose items are copies when `T` is not a reference).
-- Only what the entry, the tests and the root module's functions reach is
-  emitted, with the declarations of every type they mention.
+- **Drop glue** (section "SIR") is made for every declared type that
+  needs it, once the program's types are known: a type with a `Drop`, or
+  with a field whose type drops something (a type parameter, a `dyn`, a
+  `Shared`, `Weak` or mutex guard, a declared type with glue, or a
+  collection, option, tuple, `Cell`, `Mutex` or `Arena` of one).
+- **`comptime e`** becomes the function `OWNER#comptimeN` of kind
+  `comptime STEPS`, with the item's budget, whose body computes `e`, and
+  the expression a call of it.
+- Only what the entry, the tests, the root module's functions and its
+  constants reach is emitted, with the declarations of every type they
+  mention and the impls of every trait they call through `call trait`
+  for the types they mention.
 
 ### Lowering-only intrinsics
 
@@ -638,7 +915,8 @@ contracts:
 | `iter.own(c)` | an `Iter` that consumes `c`; a dict yields `(K, V)` pairs |
 | `fmt.new()` | an empty `String` |
 | `fmt.text(ref mut s, t: str)` | appends `t` |
-| `fmt.display(ref mut s, v, spec: str)`, `fmt.debug(...)` | appends `v` rendered by `Display` (or `Debug`) and the format spec |
+| `fmt.display(ref mut s, v, spec: str)`, `fmt.debug(...)` | appends the plain `Display` (or `Debug`) text of a value whose impl is structural; the spec is empty (a spec is applied in Sisu) |
+| `fmt.formatter(spec: str) -> Formatter` | `Formatter(out="", spec=spec, depth=0)` |
 | `assert.fail(text, message)` | panics with `assertion failed: text` and the message |
 | `assert.fail_compare(text, message, left, right)` | the same, with the `Debug` renderings of both sides |
 | `error.trace_push(ref mut e, location: str)` | appends a location to the error's return trace |
@@ -809,14 +1087,21 @@ path (D-054):
 - `E0417`: a drop at the end of the value's scope;
 - `E0418`: a drop on a path that leaves the scope early (`return`, `?`);
 - `E0420`: an intrinsic that may drop what it is given receives one with
-  `own` or `mut`. Only intrinsics that keep or return everything they
-  are given at those positions may (`list.push`, `pop`, `insert`,
-  `remove`, `extend`, `sort`, `sort_by`, `reverse`, `dict.insert`'s value,
-  `dict.remove`, `iter.own`, `Iter.next`); `list.clear`, `set.add` (which
-  drops a duplicate) and the key of `dict.insert` may not.
+  `own` or `mut`. Only the arguments its contract names with `@keeps`
+  may take one (`list.push`, `pop`, `insert`, `remove`, `extend`,
+  `reverse`, `dict.insert`'s value, `dict.remove`, `Iter.next`, the
+  `Arena`'s `insert`, `take` and `get_mut`); `list.clear`, `set.add`
+  (which drops a duplicate) and the key of `dict.insert` may not.
+- `E0397`: a must-consume type argument of a generic function whose body,
+  instantiated with the call's type arguments (drops placed for them),
+  drops one, or passes one on to a generic function that does. The check
+  runs per instantiation, as 18 describes for monomorphised code; a
+  recursion deeper than eight calls is assumed to drop.
 
 Exempt are drops in cleanup blocks (unwinding, D-054), drops in the
-type's own methods (`def settled(own self)` is where a receipt ends), and
+type's own methods (`def settled(own self)` is where a receipt ends),
+drop glue (it drops the parts of a value whose own drop was checked
+where it happened), and
 the drop of a consuming loop's iterator once `Iter.next` has returned
 `None` on every path to it: `for r in own receipts` discharges the list,
 and leaving the loop early is the error 04 describes (named after the
@@ -858,9 +1143,10 @@ counterexample mode finds should be checked against this list first.
    xs; print(len(xs)); r.push(1)` is rejected, as in Rust.
 5. **Closures capture whole variables, by reference, for as long as the
    closure lives**, and a closure that assigns a capture borrows it with
-   `mut`; with no `own` closures yet, every closure that captures
-   anything is rejected when stored in a struct, returned, or kept past
-   the frame of its captures, even when it captures only `Copy` values.
+   `mut`; a plain closure that captures anything is rejected when stored
+   in a struct, returned, or kept past the frame of its captures. An
+   `own` closure may be, but it copies its captures, so it can capture
+   only `Copy` values until capture by move arrives with tasks.
 6. **Stores into a `mut` parameter.** Storing a value that holds any loan
    other than the parameter's own through a `mut` parameter is rejected,
    even when the caller's argument would outlive the value (a string
@@ -873,9 +1159,10 @@ counterexample mode finds should be checked against this list first.
 8. **Must-consume is about types, not contents.** An empty list of
    must-consume values is still must-consume; `xs.clear()` on one is
    rejected even when it is empty; leaving a consuming loop early is
-   rejected even when no element is left; an intrinsic outside the list
-   above is rejected for any must-consume argument, even one it would
-   keep.
+   rejected even when no element is left; an intrinsic argument without
+   `@keeps` is rejected for any must-consume value, even one it would
+   keep; a generic function that drops a `T` on some path is rejected
+   for a must-consume `T` whatever path the call takes.
 9. **A reference read out of a value points anywhere that value
    borrows.** `Some(x)` and `(a, b)` lose which part holds which loan
    when a reference is read back out of them.
@@ -890,30 +1177,41 @@ counterexample mode finds should be checked against this list first.
     a view field, an enum payload of view type and a missing `from`
     clause are rejected whatever the program does (`E0411`-`E0415`); the
     counterexample mode reports them as such.
+13. **A type parameter may stand for a view.** A value of a generic type
+    is assumed to hold the loans its parameters may, so storing a generic
+    value where a view may not go is rejected even when every call's
+    type argument owns its data.
+14. **What a `Shared`, `Cell` or `Mutex` holds is decided by its type.**
+    A view or a must-consume value cannot be put in one (`E0421`,
+    `E0422`) even when it would be released before what it borrows.
 
 ## The interpreter
 
 `sisu-interp` runs SIR directly (18, "The interpreter").
 
-**Frames and the run loop.** A frame holds its function, locals, current
-block and statement index, its current source location, and, while it
-runs cleanup, the panic it is unwinding from. The loop is a trampoline: a
-call to a SIR function pushes a frame and the loop continues in it; a
-return pops it and stores the result in the caller's destination. Sisu
-calls never recurse on the host stack (a test runs 50 000 nested calls on
-a small test thread); deeper than 100 000 frames is a stack-overflow
-panic. The host recurses only when an intrinsic calls back into Sisu (a
-`sort_by` comparator, `Iter.map` and the other adapters) and for drop glue
-calling a type's `Drop`; those nest a run loop on the same frame stack.
-The run happens on a thread with a 256 MiB stack so that nesting is safe.
+**Frames and the run loop.** A frame holds its function, its type
+arguments, locals, current block and statement index, its current source
+location, the values it has to drop before its next statement, and,
+while it runs cleanup, the panic it is unwinding from. The loop is a
+trampoline: a call to a SIR function pushes a frame and the loop
+continues in it; a return pops it and stores the result in the caller's
+destination. Sisu calls never recurse on the host stack (a test runs
+50 000 nested calls on a small test thread); deeper than 100 000 frames
+is a stack-overflow panic. No intrinsic calls back into Sisu (the
+functions that take closures are written in Sisu) except `cli.parse`,
+which runs a field's default; the host's structural operations recurse
+over deeply nested values. The run happens on a thread with a 256 MiB
+stack so that both are safe.
 
 **Values** are a tagged enum: `int`, `f64`, `bool`, `char`, `()`, `str`
 (an immutable shared text), `String`, `Path`, `DateTime` (seconds since
 the Unix epoch, UTC), tuples, structs, enum values (with an error return
 trace when the enum is an error set), `list`, `dict` and `set`
 (insertion-ordered, as D-074 and 11 require, with a hash index), function
-values, closures (function and captured references), iterators, dict
-entries, the capability handles, references, and `Moved`.
+values, closures (function, type arguments and captures), `dyn` values
+(a value and its type), `Shared` and `Weak` handles on a heap cell,
+`Cell`, `Mutex` and its guard, `Arena`, iterators, dict entries, the
+capability handles, references, and `Moved`.
 
 **References are places**: a frame index and serial number, a local, and
 a path of steps (field, payload, list index, dict key or value position,
@@ -928,13 +1226,48 @@ references, so a pointer never contains a dereference.
 every program that can, and under the monitor it is a violation.
 Dropping `Moved` does nothing.
 
-**Drop glue.** `drop` takes the value out of its place, then runs the
-type's `Drop` with a reference to it (in a scratch frame), then drops its
-parts: fields and tuple elements in reverse order (04, rule 6), collection
-elements first to last, a dict entry's value before its key, an
-iterator's remaining owned items, an entry's key. Because the place is
-`Moved` from the moment its drop begins, a cleanup block reached from that
-drop does not drop it again.
+**Drops** run on the loop. A `drop` takes the value out of its place and
+puts it, with the place's type made concrete, on the frame's stack of
+values to drop, which the loop empties before the frame's next statement.
+A value of a declared type with glue is dropped by pushing the glue's
+frame, with the type's arguments from the place's type; the glue's last
+drop is handed back to its caller, so a chain of values (a list of
+boxes) takes one frame, not one per link. A host-backed value is taken
+apart there and its parts go back on the stack, so the first part is
+dropped with everything it owns before the second: a `list`, `set` or
+`Arena` first to last, a `dict` entry's value before its key, a tuple's
+elements last to first, an option's or result's payload, an iterator's
+remaining owned items. A `Shared` decrements its count and drops the
+value with the last owner; a `Weak` decrements its own. A mutex guard
+unlocks; when a panic is unwinding, the value's type's `invariant` is
+checked first, as a frame of its own, and the mutex is poisoned if it
+fails (D-077). A drop never nests the host stack and a `Drop` runs like
+any call. A frame that a panic leaves without a cleanup block still
+drops what it was dropping, then lets the panic continue. Because the
+place is `Moved` from the moment its drop begins, a cleanup block reached
+from that drop does not drop it again. Drop glue frames are left out of
+stack traces. A value dropped inside an intrinsic (`list.clear`,
+`Cell.set`) has no static type, and the glue of a generic type then runs
+without type arguments (port-debt.md).
+
+**Trait calls** (`call trait`) are dispatched by matching the impls'
+patterns against the concrete type arguments, as described under
+"Traits and generics"; a frame's types are made concrete by its type
+arguments and by the impls' associated type bindings.
+
+**Shared ownership and interior mutability.** A `Shared` is an owner of a
+heap cell (its value, a strong and a weak count; the count is never
+atomic, since stage 0 has one task); `.copy()` makes another owner, and
+the value is dropped with the last one. `Weak.upgrade` gives a `Shared`
+while the value lives. A reference to a `Shared`'s value is a pointer
+into the heap cell. `Cell` replaces its value through a shared reference
+and never gives out a reference into it. `Mutex.lock` gives a guard
+through which the value is reached; locking a mutex its task holds panics
+(`R0073`), as does locking a poisoned one (`R0074`). An `Arena[T]` holds
+slots with generations; `insert` gives a `Key[T]` (a `Copy` struct of the
+slot and its generation), `remove` frees the slot for reuse under a new
+generation, and a stale key gives `None` from `get` and panics when
+indexed (`R0072`).
 
 **Panics** unwind: a panicking statement makes the frame continue in its
 block's cleanup, which ends in `resume`, which continues in the caller's
@@ -956,18 +1289,8 @@ panic; 134 an abort (a panic while unwinding, a run past its step
 limit, or an ownership violation under the monitor). The driver adds 2
 for usage errors and 70 for an internal compiler error.
 
-**Formatting.** `Debug` renders a value the way it is written:
-`"text"`, `'c'`, `[1, 2]`, `(1,)`, `{"k": 1}`, `set()`, `Point(x=1.0,
-y=2.0)`, `BadDigit(at=1, found='x')`, `Some(3)`, `None`. `Display` is the
-plain text of strings, characters and paths, decimal for integers, the
-shortest text that reads back as the same value for floats (`3.0`, `0.1`,
-`1e100`, `inf`, `NaN`), `True`/`False`, ISO 8601 for a `DateTime`, and
-the `Debug` form for every other type until traits let a type define its
-own. Format specs follow Python's mini-language,
-`[[fill]align][sign][#][0][width][,|_][.precision][type]` with types
-`b o x X d e E f F % s ?`; a precision without a type means that many
-decimals; `?` asks for `Debug`. A `DateTime` takes a `strftime` pattern
-(`%Y %y %m %d %H %M %S %F %T %%`) as its spec.
+**Formatting** is the next section's; the host's part is the plain
+text of a value and the digits of numbers.
 
 ### The host contract
 
@@ -1020,7 +1343,10 @@ checker agree on what a conflict is. A `mut` borrow into an unnamed
 temporary is two-phase, as in the checker: it survives reads until its
 first use. The reborrows of a call's operands are made only after all
 of the call's operands have been read, so `f(mut xs, ...)` behaves as
-the checker's operand order says.
+the checker's operand order says. A mutex's value changes behind shared
+references to the mutex: an access through a guard ends no shared loan
+of the mutex or of what holds it. A `Shared`'s value lives in a heap
+cell, whose loans end with its last owner.
 
 **Uses that read views.** An intrinsic reads what its arguments point
 to, and so does an operator (`first == 1` through a reference), so a
@@ -1036,15 +1362,17 @@ holds no value (moved out, or never assigned) is the use-after-move
 violation; a reference into a frame that has returned, found by the
 frame's serial number, is the dangling one; and a drop on a normal path
 of a value holding a must-consume value, outside the methods of that
-value's type, is the must-consume one (unwinding is exempt), as is
-`list.clear` on a list holding one.
+value's type, is the must-consume one (unwinding and drop glue are
+exempt: the value's own drop was checked), as is `list.clear` on a list
+holding one.
 
 **The report.** A violation stops the program at once with exit status
 134 and a report on standard error: what happened; for an ended loan,
 the loan (kind, place, function, location and SIR statement that made
 it), what ended it, and where it was used afterwards; the value of the
-borrowed place and how many loans of it are not ended yet; the stack;
-and the SIR of the function where the violation happened.
+borrowed place and how many loans of it are not ended yet; the stack
+(without drop glue frames); and the SIR of the function where the
+violation happened.
 
 ```text
 ownership violation: a reference was used after its loan had ended
@@ -1105,6 +1433,62 @@ wording; the mode is for the team (20, A2), and the `.defer` files of
 `conformance/cases/ownership/` pin its output for every rejected case
 that has a `main`.
 
+## Formatting
+
+`Display` is text for a program's users and `Debug` text for programmers
+(03, "Strings"); both write to a `Formatter` (`std/prelude.sisu`).
+
+**Forms.** `Debug` renders a value the way it is written: `"text"`,
+`'c'`, `[1, 2]`, `(1,)`, `{"k": 1}`, `set()`, `Point(x=1.0, y=2.0)`,
+`BadDigit(at=1, found='x')`, `Some(3)`, `None`; a positional variant
+field has no label. `Display` is the plain text of strings, characters
+and paths, decimal for integers, the shortest text that reads back as the
+same value for floats (`3.0`, `0.1`, `1e100`, `inf`, `NaN`),
+`True`/`False`, ISO 8601 for a `DateTime`, a type's own impl when it has
+one, and the `Debug` form for collections, options and results. These
+are what the structural impls and the derived ones compute, and what the
+host's structural text gives.
+
+**The protocol.** A `Formatter` holds the text being built, the format
+spec of the value being rendered and a depth. A value's impl writes its
+parts at a greater depth (`f.depth += 1`), where the spec does not apply
+to them. A leaf (a number, text, a character, a boolean, a path, `()`)
+written at depth 0 with a spec applies the whole spec itself and clears
+it, so `{c:.1}` with a `Display` that writes `self.degrees.fmt(mut f)`
+rounds the degrees; whatever spec is left when the impl returns pads the
+whole text, as text, in `Formatter.finish`.
+
+**Specs** follow Python's mini-language,
+`[[fill]align][sign][#][0][width][,|_][.precision][type]`, written in
+Sisu (`Spec` in the prelude; the checker validates them, `E0399`):
+
+- align `<` (left; texts' default), `>` (right; numbers' default), `^`
+  (centred, the extra fill on the right), `=` (a number's fill after its
+  sign and prefix); the fill is one character, a space by default;
+- sign `+` (always), `-` (negatives only, the default), ` ` (a space for
+  positives);
+- `#` writes the prefix `0x`, `0o` or `0b`; `0` before the width pads a
+  number with zeros after its sign and prefix, when no alignment is
+  given;
+- `,` or `_` groups an integer's digits, and a float's integer part, by
+  three from the right, and by four in bases other than ten;
+- a precision is the digits after the point of a number (a float
+  without a type is written fixed with that many), and the most
+  characters of a text;
+- types: `d` (decimal), `x`, `X`, `o`, `b` for integers; `f` and `F`
+  (fixed, six digits after the point unless a precision says), `e` and
+  `E` (exponent, `1.500000e+00`, two exponent digits at least), `%` (a
+  percentage, fixed) for numbers; `s` for the plain text; `?` for the
+  `Debug` text, padded as text.
+
+A `DateTime` takes a `strftime` pattern as its spec instead (`%Y %y %m %d
+%H %M %S %F %T %%`, UTC). The host gives the digits of an integer in a
+base (`fmt.digits`), the text of a non-negative float by type and
+precision (`fmt.float_digits`, correctly rounded, Rust's
+shortest-round-trip for the plain form) and the `strftime` text
+(`fmt.strftime`); signs, prefixes, grouping, precision of texts and
+padding are Sisu.
+
 ## The query layer and the driver
 
 `sisu_driver::Db` memoises `parsed`, `checked` and `lowered` (the SIR
@@ -1123,20 +1507,33 @@ sisu run FILE [ARGS...]      check, lower and run; `--sir` runs a SIR text file,
                              `--monitor` runs under the ownership monitor,
                              `--defer-borrow` runs a rejected program in the counterexample mode
 sisu check FILE              diagnostics; `--format=ids` for the conformance form
-sisu sir FILE                the serialised SIR, drops placed (also for a program the
-                             ownership checker rejects)
+sisu sir FILE                the serialised SIR, drops placed and `comptime` values baked
+                             (also for a program the ownership checker rejects)
 sisu test FILE               run the `test` blocks under the monitor: ok, FAILED, or
                              blocked by a hole; `--no-monitor`, `--defer-borrow`
 sisu tokens FILE             the token stream; `--trivia` includes trivia
 sisu parse FILE              `--tree` the syntax tree, `--print` the source again
 sisu explain CODE            the catalog entry for a code or identifier
 sisu explain-borrow FILE:LINE  every borrow live on the line
+sisu audit --ownership FILE...  per file, the uses of the ownership model's escape hatches
 ```
+
+`sisu audit --ownership` is the corpus study's count (18, Phase 3; T1.1
+and T1.2): for each file, one line of data, the file's name and then
+`lines=N Shared=N Weak=N Cell=N Arena=N Key=N copy=N unsafe=N`. The
+counts are of tokens: those names where they mean std's types (not after
+a `.`, and not in a file that declares the name itself), calls of
+`.copy()`, and the keyword `unsafe`; `lines` counts the lines on which a
+token other than trivia and layout starts. A file need not check to be
+counted.
 
 `run` prints warnings and runs; with any error it prints the diagnostics
 and does not run (`D0006`, or `D0021` for ownership errors, which names
 `--defer-borrow`). The ownership checker runs only on a program without
-front-end errors, so one mistake is not reported twice. An internal compiler error (a host panic, which the
+front-end errors, so one mistake is not reported twice, and the
+compile-time evaluation only on a program the checker accepts; a failed
+`comptime` expression is an error (`D0006`) for `run`, `test` and
+`check`. `sisu sir` writes the SIR with every `comptime` value baked. An internal compiler error (a host panic, which the
 lints are meant to make impossible) is caught and reported as `D0012`
 naming the stage, with the input written to the temporary directory, and
 exits 70.
@@ -1172,9 +1569,11 @@ exits 70.
    place goes through `mon_access` with the reference it uses. Add an
    accepted case (which the suite also runs under the monitor) and a
    rejected one with its `.defer`.
-8. **Running**: in `sisu-interp`; a new intrinsic gets its contract as a
-   `##` comment in `compiler/std/*.sisu` (or in the table above if only
-   lowering uses it).
+8. **Running**: library behaviour is Sisu in `compiler/std/` where it can
+   be, over intrinsics that are primitives; a new intrinsic is
+   implemented in `sisu-interp` and gets its contract as a `##` comment in
+   `compiler/std/*.sisu` (or in the table above if only lowering uses
+   it), with `@keeps` for the arguments it keeps.
 9. **Cases**: conformance cases under `conformance/cases/` for the
    working construct, its diagnostics, and a broken use; bless them,
    review every expected file, and run the suite.
@@ -1249,12 +1648,14 @@ open to revision; the conformance cases pin the current choice.
     first, and exits 1.
 23. `e.trace()` is those lines joined with line breaks; the location is
     where each `?` the error passed through was written.
-24. `Display` of a non-text type is its `Debug` form until traits.
+24. A struct or enum displays only through its own (or a delegated)
+    `Display` impl (`E0347` otherwise); collections, options and results
+    display as their `Debug` form.
 25. Floats display as the shortest text that reads back as the same
     value, always with a `.` or an exponent.
 26. In a format spec, a precision without a type is that many decimals
     (`{x:.2}` is `3.14`), as in Rust; Python's general format needs `g`,
-    which stage 0 does not have.
+    which stage 0 does not have. A spec ending in `?` asks for `Debug`.
 27. Float `sum` adds pairwise by halves (the "fixed shape" of D-074).
 28. `Option.expect` and `Result.expect` with an empty message panic with
     "called `expect` on `None`" (or "on an error" and the error); with a
@@ -1310,8 +1711,9 @@ open to revision; the conformance cases pin the current choice.
     reference that owns no text outside references, borrows only what
     the argument holds (`inner`), not the argument.
 45. Closures capture by reference and cannot escape the frame of what
-    they capture until `own` closures exist; a closure's result may
-    borrow from any of its arguments and its environment.
+    they capture; an `own` closure copies its captures, which must be
+    `Copy`, until capture by move arrives with tasks. A closure's result
+    may borrow from any of its arguments and its environment.
 46. A loan of a `mut` parameter, or of anything reached through one, is
     memory of the caller: only that parameter's own loan may be stored
     there. An intrinsic keeps only the arguments it takes with `own`; a
@@ -1319,8 +1721,9 @@ open to revision; the conformance cases pin the current choice.
 47. A must-consume value ends in its type's own methods (functions named
     `Type.method`); a consuming loop discharges its collection on every
     path where `Iter.next` returned `None`; intrinsics may take one with
-    `own` or `mut` only if they keep or return it (the list in the
-    ownership checker's section).
+    `own` or `mut` only at the arguments their contract marks `@keeps`; a
+    generic function may take one for a type parameter only if its body,
+    instantiated, drops none.
 48. A drop flag is a `bool` local named `flag`, set after each
     initialisation and cleared before each move; a flagged drop clears its
     own flag. A partly moved value drops its remaining parts in reverse
@@ -1345,3 +1748,112 @@ open to revision; the conformance cases pin the current choice.
     rules about declarations, and not purity or a second assignment to a
     `let`; its outcome is one of conflict reached, no conflict with a
     candidate false positive, or inconclusive, an untested path.
+
+**Traits and generics**
+
+55. Type arguments are run-time values: every generic SIR function
+    receives them, and a trait call whose `Self` is not known when
+    lowering is dispatched at run time by matching the impls' headers
+    against the concrete type arguments; nothing is monomorphised.
+56. Impl selection matches headers only; `where` clauses never choose
+    between impls (coherence leaves at most one header that matches), and
+    are checked once the impl is chosen.
+57. For the orphan rule, std is one package and the program another; the
+    program is the root package, which may implement std's traits for
+    std's types.
+58. A method call looks for the receiver type's own method first, then
+    the traits it implements or (for a type parameter) is bounded by;
+    a name in more than one of those traits is an error, resolved by
+    calling `Trait.method(x)`.
+59. A borrowed parameter whose type is a type parameter is passed by
+    reference unless the parameter is bounded by `Copy`, so one body
+    serves `Copy` and non-`Copy` arguments; dispatch to an impl that takes
+    a `Copy` type by value reads it through the reference.
+60. An impl's method inherits `pure` from the trait's declaration.
+61. Arithmetic operators on numbers are the language's own operations;
+    on other types they call `Add`, `Sub`, `Mul`, `Div`, `Rem` and `Neg`.
+62. `FromLiteral[L]` converts a literal of type `L` where a type that
+    implements it is expected; std's `String` and `Path` do for `str`.
+63. The derived and std impls of the language's traits compute the
+    host's structural operations, so lowering calls the host when every
+    bound is met structurally; `dict` keys and `set` elements are hashed
+    structurally, so a key type with its own `Eq` or `Hash` impl is
+    rejected (`E0398`) rather than hashed inconsistently.
+64. `Iterator.next` and the iterator adapters are not `pure` (03); an
+    impl's `next` may be, and a `pure` function may loop over a host
+    iterator.
+65. `Drop` for a generic type covers all of it, with the type's
+    parameters in declaration order and no bound the type does not
+    declare (Rust accepts any order of distinct parameters; stage 0
+    rejects that, an over-rejection).
+66. Every struct and enum without its own `Debug` gets the derived one.
+
+**The library types of 04**
+
+67. `Shared`'s own functions take it as an argument (`Shared.count(s)`,
+    `Shared.downgrade(s)`), since the value's fields and methods are
+    reached through it; `.copy()` makes another owner. Whether its count
+    is atomic is a flag, never set in stage 0.
+68. A `Mutex` in one task: locking one the task already holds panics,
+    since it would wait forever. When unwinding drops a guard, the value's
+    type's `invariant` is checked (D-077): if it fails the mutex is
+    poisoned, and every later `lock` panics; a type without an invariant
+    unlocks.
+69. `Key[T]` is a `Copy` struct of a slot and a generation; a stale key
+    gives `None` from `get` and panics when indexed.
+70. `@keeps` in a contract is the must-consume rule for an intrinsic.
+
+**Drops**
+
+71. Drop glue is a SIR function per declared type that needs one; the
+    drops of host-backed types are part of their contracts; a drop
+    statement's place gives the glue its type arguments, and a value
+    dropped inside an intrinsic is dropped by what it is.
+72. A `Drop` that panics still has its value's fields dropped, in reverse
+    order, while the panic unwinds; a second panic aborts.
+73. The glue's last drop runs in its caller's frame, so a chain of
+    values takes constant depth; nothing but the frame limit can tell.
+
+**Compile-time evaluation**
+
+74. `comptime` is a prefix operator on the operand after it; before a
+    condition (`if comptime`) it covers the whole condition.
+75. Purity is not required: the evaluator refuses the world as it runs
+    (any use of the host is an error), so a function that does no I/O can
+    run at compile time whether or not it is declared `pure`.
+76. The budget is 1 000 000 SIR steps unless `@comptime_budget(steps=N)`
+    on the function or constant holding the expression says otherwise;
+    exhausting it is an error (stage 0 has no lint levels to make it
+    deny-by-default and nothing else).
+77. A `comptime` expression that uses another's value runs after it, each
+    with its own budget; one that uses a failed one is not reported.
+78. A value made at compile time is kept as statements that build it
+    from literals; one with no literal form is an error.
+79. A `comptime` expression cannot depend on the function's type
+    parameters, whose arguments are known only at a call.
+80. The root module's constants are computed even when nothing uses
+    them.
+81. A derive template unfolds to source text: its compile-time parts are
+    evaluated, the rest is copied with the compile-time values as
+    literals, and the impl is checked as written code. Arms are made with
+    `comptime for` and `comptime if` among a `match`'s arms, and `case
+    V(..)` for a variant bound at compile time binds its fields as
+    `__x_0`, ... for a `match x`. A positional variant field's `name` is
+    its position.
+
+**Formatting**
+
+82. The format-spec mini-language is Sisu (`Spec`); the host gives
+    digits only. A spec is checked where it is written (`E0399`).
+83. A type's `Display` that writes a leaf at depth 0 passes the whole
+    spec to it (`{p:>6}` of a `Display` writing `"P"` and then a `7` is
+    `P     7`), as the protocol says.
+
+**Tooling**
+
+84. `sisu audit --ownership` counts tokens, not resolved uses, and a name
+    the file declares itself is not counted. It counts `Cell` (T1.2's
+    density includes it) as well as 18's `Shared`, `Weak`, arena handles,
+    `.copy()` and `unsafe`, with `Arena` and `Key` apart, and its `lines`
+    are the lines that hold code, the denominator of "per 100 final
+    lines".

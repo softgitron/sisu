@@ -195,6 +195,8 @@ pub struct FnInfo {
     /// `T !`: the error set is inferred from the body.
     pub err_inferred: bool,
     pub pure: bool,
+    /// `comptime def` (08): callable only at compile time.
+    pub comptime: bool,
     pub intrinsic: Option<String>,
     /// `@structural("name")` on a std function with a body: the intrinsic
     /// `name` computes the same result when every bound of the call's type
@@ -305,6 +307,9 @@ pub struct Program {
     /// Names in top-level code of the root module that failed to parse; an
     /// undefined use of one is not reported (see `ast::Module::broken_names`).
     pub poisoned: std::collections::HashSet<String>,
+    /// `@comptime_budget(steps=N)` on a function or constant: the steps its
+    /// `comptime` expressions may take (08), instead of the default.
+    pub comptime_budgets: HashMap<DefId, u64>,
 }
 
 impl Program {

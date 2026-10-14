@@ -1,0 +1,27 @@
+# A trait's derive is `comptime def derive(T: type) -> impl Trait for T`
+# returning `impl Trait for T:` (E0607). A derive that cannot be unfolded
+# for a type is reported at the `@derive`, with where its template stopped
+# (E0608).
+
+trait Wrong:
+    def wrong(self) -> int
+
+    comptime def derive(x: int) -> int:
+        return x
+
+trait Named:
+    def name(self) -> String
+
+    comptime def derive(T: type) -> impl Named for T:
+        return impl Named for T:
+            def name(self) -> String:
+                comptime for f in reflect.fields_of(T):
+                    return self.[f.name]
+                return ""
+
+@derive(Named)
+struct Point:
+    x: int
+
+def main():
+    pass

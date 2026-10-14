@@ -378,7 +378,6 @@ impl<'p> Interp<'p, '_> {
             "to_lowercase" => Value::String(s.to_lowercase()),
             "to_uppercase" => Value::String(s.to_uppercase()),
             "to_string" => Value::String(s.to_string()),
-            "parse_int" => Value::option(parse_int(&s).map(Value::Int)),
             "repeat" => {
                 let n = self.int(a.get(1)?)?;
                 if n < 0 {
@@ -910,23 +909,32 @@ impl<'p> Interp<'p, '_> {
                 vec![Value::String(String::new()), Value::String(spec), Value::Int(0)],
             )));
         }
-        let text = match method {
-            "finish" => {
-                // The formatter's text, padded by what is left of its spec.
-                let (out, spec) = match a.take(1)? {
-                    Value::Struct(f) => match (f.fields.first(), f.fields.get(1)) {
-                        (Some(Value::String(o)), Some(Value::String(sp))) => (o.clone(), sp.clone()),
-                        _ => return Err(ice("a Formatter without its fields")),
-                    },
-                    other => return Err(ice(format!("fmt.finish of {other:?}"))),
+        match method {
+            "digits" => {
+                let (n, base, upper) = (self.int(a.get(0)?)?, self.int(a.get(1)?)?, self.bool(a.get(2)?)?);
+                return Ok(Value::String(crate::format::digits(n, base, upper)));
+            }
+            "float_digits" => {
+                let x = self.float(a.get(0)?)?;
+                let kind = self.text(a.get(1)?)?.chars().next();
+                let precision = usize::try_from(self.int(a.get(2)?)?).ok();
+                return Ok(Value::String(crate::format::float_digits(x, kind, precision)));
+            }
+            "strftime" => {
+                let t = match self.target(a.get(0)?)? {
+                    Value::DateTime(t) => *t,
+                    other => return Err(ice(format!("fmt.strftime of {other:?}"))),
                 };
-                if spec.is_empty() { out } else { self.format(&Value::String(out), &spec, false)? }
+                return Ok(Value::String(crate::format::strftime(t, self.text(a.get(1)?)?)));
             }
+            _ => {}
+        }
+        let text = match method {
             "text" => self.text(a.get(1)?)?.to_string(),
-            "display" | "debug" => {
-                let spec = self.text(a.get(2)?)?.to_string();
-                self.format(a.get(1)?, &spec, method == "debug")?
-            }
+            // Without a spec: an interpolation with one formats through the
+            // value's impl (std/prelude.sisu, `Spec`).
+            "display" => self.display_string(self.target(a.get(1)?)?),
+            "debug" => self.debug_string(self.target(a.get(1)?)?),
             other => return Err(ice(format!("no fmt operation `{other}`"))),
         };
         let p = self.pointer_of(a.get(0)?)?;
@@ -947,31 +955,14 @@ impl<'p> Interp<'p, '_> {
             "display" | "debug" => {
                 let debug = method == "debug";
                 let f = self.pointer_of(a.get(1)?)?;
-                let (depth, spec) = match self.read(&f)? {
-                    Value::Struct(fm) => match (fm.fields.get(2), fm.fields.get(1)) {
-                        (Some(Value::Int(d)), Some(Value::String(s))) => (*d, s.clone()),
-                        _ => return Err(ice("a Formatter without its fields")),
-                    },
-                    other => return Err(ice(format!("formatting into {other:?}"))),
-                };
+                // The plain text: a spec is applied by the leaves' impls in
+                // Sisu, and padding by `Formatter.finish` (std/prelude.sisu).
                 let v = self.target(a.get(0)?)?;
-                // A leaf at depth 0 applies the whole spec and clears it.
-                let text = if depth == 0 && !spec.is_empty() {
-                    self.format(v, &spec, debug)?
-                } else if debug {
-                    self.debug_string(v)
-                } else {
-                    self.display_string(v)
-                };
+                let text = if debug { self.debug_string(v) } else { self.display_string(v) };
                 match self.write(&f)? {
                     Value::Struct(fm) => {
                         if let Some(Value::String(o)) = fm.fields.get_mut(0) {
                             o.push_str(&text);
-                        }
-                        if depth == 0
-                            && let Some(Value::String(sp)) = fm.fields.get_mut(1)
-                        {
-                            sp.clear();
                         }
                         Ok(Value::Unit)
                     }
@@ -1053,15 +1044,6 @@ impl<'p> Interp<'p, '_> {
             other => Err(ice(format!("no error operation `{other}`"))),
         }
     }
-}
-
-/// `str.parse_int`: an optional sign and decimal digits, nothing else.
-fn parse_int(s: &str) -> Option<i64> {
-    let digits = s.strip_prefix(['+', '-']).unwrap_or(s);
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    s.parse().ok()
 }
 
 impl Interp<'_, '_> {

@@ -1,0 +1,36 @@
+# A `comptime` expression that fails is an error of the program at the
+# expression: a panic (E0602, a failed `comptime assert` among them), a
+# spent budget (E0603), a use of the world (E0601), or a value with no
+# literal form (E0604). An expression that uses a failed one is not
+# evaluated: its error is that one's.
+
+def spin(n: int) -> int:
+    var i = 0
+    while i < n:
+        i += 1
+    return i
+
+def first(xs: list[int]) -> int:
+    return xs[0]
+
+def loud() -> int:
+    print("compiling")
+    return 1
+
+def adder() -> (int) -> int:
+    return x -> x + 1
+
+@comptime_budget(steps=1000)
+const SPUN: int = comptime spin(1_000_000)
+
+const FIRST: int = comptime first([])
+
+const LOUD: int = comptime loud()
+
+const ADD: (int) -> int = comptime adder()
+
+const USES_SPUN: int = comptime SPUN + 1
+
+def main():
+    comptime assert len([1, 2, 3]) == 2, "three is not two"
+    print(SPUN)

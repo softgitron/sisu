@@ -47,6 +47,11 @@ pub(crate) struct Checker<'p> {
     /// find is most likely a parameter or binding lost in that error, so it
     /// is not reported.
     pub quiet_unknown_names: bool,
+    /// Checking code that runs at compile time: the body of a `comptime def`
+    /// or a `comptime` expression, where a `comptime def` may be called.
+    pub in_comptime: bool,
+    /// The `comptime` closures, for the checks once types are known.
+    pub comptime_sites: Vec<(ClosureId, TextRange)>,
 }
 
 impl<'p> Checker<'p> {
@@ -77,6 +82,8 @@ impl<'p> Checker<'p> {
             generic_names: Vec::new(),
             owner_checks: Vec::new(),
             quiet_unknown_names: prog.fn_info(def).is_some_and(|f| f.header_broken || f.body_broken),
+            in_comptime: prog.fn_info(def).is_some_and(|f| f.comptime),
+            comptime_sites: Vec::new(),
         }
     }
 
@@ -647,13 +654,26 @@ impl<'p> Checker<'p> {
                     ast::ItemKind::Const(_) => "a local `const`",
                     _ => "a nested declaration",
                 };
-                self.unsupported(item.range, what, "closures with captures by move (Phase 3)");
+                self.unsupported(item.range, what, "nested declarations (a later phase)");
                 out.push(Stmt::Error(span));
             }
-            ast::StmtKind::Comptime(_) => {
-                self.unsupported(s.range, "`comptime`", "compile-time evaluation (Phase 4)");
-                out.push(Stmt::Error(span));
-            }
+            ast::StmtKind::Comptime(inner) => match &inner.kind {
+                // Run at compile time; nothing is left for run time.
+                ast::StmtKind::Assert { .. } | ast::StmtKind::Expr(_) => {
+                    let b =
+                        ast::Block { node: inner.node, range: inner.range, stmts: vec![(**inner).clone()] };
+                    let x = self.comptime_block(&b, s.range);
+                    out.push(Stmt::Expr(x));
+                }
+                _ => {
+                    self.unsupported(
+                        s.range,
+                        "`comptime for` and `comptime if` outside a derive",
+                        "reflection beyond derive (Phase 8)",
+                    );
+                    out.push(Stmt::Error(span));
+                }
+            },
             ast::StmtKind::ReturnImpl(_) => {
                 self.unsupported(
                     s.range,
@@ -666,7 +686,6 @@ impl<'p> Checker<'p> {
                 let phase = match *what {
                     "`yield`" => "generators (Phase 8)",
                     "`select`" => "tasks (Phase 6)",
-                    "`comptime`" | "`return impl`" => "compile-time evaluation (Phase 4)",
                     "an `unsafe` block" => "foreign functions (Phase 8)",
                     _ => "contracts (Phase 8)",
                 };
@@ -1046,6 +1065,16 @@ impl<'p> Checker<'p> {
     // ---------------------------------------------------------------- conditions
 
     pub fn check_condition_expr(&mut self, e: &ast::Expr) -> Expr {
+        // `if comptime a or b:` makes the whole condition compile-time (08),
+        // though as an operator `comptime` takes the operand after it.
+        let whole;
+        let e = match whole_comptime(e) {
+            Some(w) => {
+                whole = w;
+                &whole
+            }
+            None => e,
+        };
         let x = self.infer_expr(e, Some(&Ty::Bool));
         let x = self.decay(x);
         let t = self.resolved(&x.ty);
@@ -1189,4 +1218,27 @@ pub(crate) fn pattern_is_refutable(p: &ast::Pattern) -> bool {
         ast::PatKind::Tuple(ps) => ps.iter().any(pattern_is_refutable),
         _ => true,
     }
+}
+
+/// A condition whose first operand is `comptime x`, as `comptime` of the
+/// whole condition.
+fn whole_comptime(e: &ast::Expr) -> Option<ast::Expr> {
+    fn strip(e: &ast::Expr) -> Option<ast::Expr> {
+        let kind = match &e.kind {
+            ast::ExprKind::Comptime(inner) => return Some((**inner).clone()),
+            ast::ExprKind::Binary { op, lhs, rhs } => {
+                ast::ExprKind::Binary { op: *op, lhs: Box::new(strip(lhs)?), rhs: rhs.clone() }
+            }
+            ast::ExprKind::Compare { first, rest } => {
+                ast::ExprKind::Compare { first: Box::new(strip(first)?), rest: rest.clone() }
+            }
+            _ => return None,
+        };
+        Some(ast::Expr { kind, ..e.clone() })
+    }
+    if matches!(e.kind, ast::ExprKind::Comptime(_)) {
+        return None;
+    }
+    let inner = strip(e)?;
+    Some(ast::Expr { node: e.node, range: e.range, kind: ast::ExprKind::Comptime(Box::new(inner)) })
 }

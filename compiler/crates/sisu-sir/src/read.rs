@@ -721,6 +721,9 @@ fn read_function(lines: &[&str], start: usize) -> Result<(Function, usize), (usi
             FnKind::Drop
         } else if c.eat("glue") {
             FnKind::Glue
+        } else if c.eat("comptime ") {
+            let n = c.int()?;
+            FnKind::Comptime(u64::try_from(n).map_err(|_| format!("a negative budget, {n}"))?)
         } else if c.eat("value") {
             FnKind::Value
         } else if c.eat("test") {

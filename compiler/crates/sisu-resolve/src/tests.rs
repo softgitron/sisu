@@ -96,3 +96,113 @@ fn variants_are_indexed() {
     assert_eq!(p.variants.get("Circle").map(|v| v.len()), Some(1));
     assert!(p.variants.contains_key("Some") && p.variants.contains_key("NotFound"));
 }
+
+/// The source the derives of the root module unfolded to.
+fn derived_text(src: &str) -> String {
+    let (r, map) = run(src);
+    let msgs: Vec<String> = r.diagnostics.iter().map(|d| format!("{} {}", d.code(), d.message())).collect();
+    assert!(msgs.is_empty(), "{}", msgs.join("\n"));
+    map.files().iter().find(|f| f.name == "<derive>/main.sisu").map(|f| f.text.clone()).unwrap_or_default()
+}
+
+#[test]
+fn derives_unfold_their_templates_at_compile_time() {
+    let text = derived_text("@derive(Eq, Hash)\nstruct P:\n    x: int\n    y: String\n");
+    assert_eq!(
+        text,
+        "
+impl Eq for P:
+    pure def eq(self, other: Self) -> bool:
+        if self.x != other.x:
+            return False
+        if self.y != other.y:
+            return False
+        return True
+
+impl Hash for P:
+    pure def hash(self, mut h: Hasher):
+        self.x.hash(mut h)
+        self.y.hash(mut h)
+
+impl Debug for P:
+    pure def fmt_debug(self, mut f: Formatter):
+        f.write(\"P(\")
+        f.depth += 1
+        f.write(\"x=\")
+        self.x.fmt_debug(mut f)
+        f.write(\", \")
+        f.write(\"y=\")
+        self.y.fmt_debug(mut f)
+        f.depth -= 1
+        f.write(\")\")
+"
+    );
+}
+
+#[test]
+fn enum_derives_make_an_arm_per_variant() {
+    let text = derived_text("@derive(Eq)\nenum Shape[T]:\n    Dot\n    Circle(r: T)\n    Pair(T, T)\n");
+    assert_eq!(
+        text,
+        "
+impl[T: Eq] Eq for Shape[T]:
+    pure def eq(self, other: Self) -> bool:
+        match self:
+            case Dot:
+                match other:
+                    case Dot:
+                        return True
+                    case _:
+                        return False
+            case Circle(__self_0):
+                match other:
+                    case Circle(__other_0):
+                        if __self_0 != __other_0:
+                            return False
+                        return True
+                    case _:
+                        return False
+            case Pair(__self_0, __self_1):
+                match other:
+                    case Pair(__other_0, __other_1):
+                        if __self_0 != __other_0:
+                            return False
+                        if __self_1 != __other_1:
+                            return False
+                        return True
+                    case _:
+                        return False
+
+impl[T: Debug] Debug for Shape[T]:
+    pure def fmt_debug(self, mut f: Formatter):
+        match self:
+            case Dot:
+                f.write(\"Dot\")
+            case Circle(__self_0):
+                f.write(\"Circle(\")
+                f.depth += 1
+                f.write(\"r=\")
+                __self_0.fmt_debug(mut f)
+                f.depth -= 1
+                f.write(\")\")
+            case Pair(__self_0, __self_1):
+                f.write(\"Pair(\")
+                f.depth += 1
+                __self_0.fmt_debug(mut f)
+                f.write(\", \")
+                __self_1.fmt_debug(mut f)
+                f.depth -= 1
+                f.write(\")\")
+"
+    );
+}
+
+#[test]
+fn a_template_that_cannot_unfold_is_reported_where_it_stops() {
+    let src = "trait Show:\n    def show(self) -> String\n\n    comptime def derive(T: type) -> impl Show for T:\n        return impl Show for T:\n            def show(self) -> String:\n                comptime for f in reflect.fields_of(T):\n                    print(self.[f.name])\n                return \"\"\n\n@derive(Show)\nstruct P:\n    x: int\n";
+    assert_eq!(codes(src), vec!["E0608"]);
+    assert_eq!(
+        codes("trait Show:\n    comptime def derive(x: int) -> int:\n        return 1\n"),
+        vec!["E0607"]
+    );
+}

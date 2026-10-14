@@ -622,6 +622,15 @@ impl FnLower<'_, '_> {
                 let tys = (0..self.type_params.len() as u32).map(sir::Type::Param).collect();
                 self.assign(dest, Rvalue::Closure(name, tys, ops), loc);
             }
+            // The compiler runs the function and replaces its body by the
+            // value; what runs here is a call that builds it.
+            ExprKind::Comptime(id) => {
+                let name = crate::func::comptime_name(&self.ctx.body_name(self.body), *id);
+                self.emit(
+                    StatementKind::Call { dest, callee: Callee::Fn(name, Vec::new()), args: Vec::new() },
+                    loc,
+                );
+            }
             ExprKind::Try { expr, kind } => {
                 let p = self.place_of(expr);
                 let d = self.temp_sir(sir::Type::Int);
@@ -757,16 +766,19 @@ impl FnLower<'_, '_> {
                                     loc,
                                 );
                             }
-                            let is_debug = debug.is_some() || spec == "?";
-                            let (name, spec) = if is_debug {
-                                ("fmt.debug", if spec == "?" { String::new() } else { spec.clone() })
-                            } else {
-                                ("fmt.display", spec.clone())
+                            // A spec ending in `?` asks for `Debug` (`{x:>8?}`).
+                            let (is_debug, spec) = match spec.strip_suffix('?') {
+                                Some(rest) => (true, rest.to_string()),
+                                None => (debug.is_some(), spec.clone()),
                             };
+                            let name = if is_debug { "fmt.debug" } else { "fmt.display" };
                             let base = expr.ty.strip_ref().clone();
                             let wk = &self.ctx.prog.wk;
                             let tr = if is_debug { wk.debug } else { wk.display };
-                            if tr.is_some_and(|t| !self.ctx.prog.is_structural(&base, t)) {
+                            // A spec is applied by the value's impl, in Sisu; the host
+                            // writes the plain text of a structural value.
+                            if !spec.is_empty() || tr.is_some_and(|t| !self.ctx.prog.is_structural(&base, t))
+                            {
                                 self.format_via_trait(Operand::Copy(Place::local(r)), expr, is_debug, &spec);
                                 continue;
                             }
@@ -1053,7 +1065,8 @@ impl FnLower<'_, '_> {
 
     /// Writes `expr` to the `String` that `buf` refers to through its
     /// `Display` (or `Debug`) impl: a `Formatter` with the spec, the trait's
-    /// method, and `fmt.finish`, which pads what is left of the spec.
+    /// method, and `Formatter.finish`, which pads by what is left of the
+    /// spec.
     fn format_via_trait(&mut self, buf: Operand, expr: &thir::Expr, debug: bool, spec: &str) {
         let prog = self.ctx.prog;
         let loc = self.ctx.loc(expr.span);
@@ -1076,8 +1089,13 @@ impl FnLower<'_, '_> {
         let (tr, method) = if debug { (prog.wk.debug, "fmt_debug") } else { (prog.wk.display, "fmt") };
         let u = self.unit();
         self.trait_method_call(u, tr, method, &base, vec![v, Operand::Copy(Place::local(fr))], loc);
+        let Some(finish) = prog.method(sisu_resolve::TyKey::Adt(fdef), "finish") else { return };
         let u = self.unit();
-        self.intrinsic_call(u, "fmt.finish", Vec::new(), vec![buf, Operand::Move(Place::local(f))], loc);
+        let callee = Callee::Fn(self.ctx.fn_name(finish), Vec::new());
+        self.emit(
+            StatementKind::Call { dest: u, callee, args: vec![Operand::Move(Place::local(f)), buf] },
+            loc,
+        );
     }
 
     /// `print` and `print_err` of a value whose `Display` is its own impl,

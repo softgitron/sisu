@@ -9,7 +9,7 @@ backend can be transcriptions of documented behaviour
 ([architecture.md](architecture.md)) instead of reverse engineering.
 
 Each entry says where the debt is, why it is debt, and what paying it
-means. The last part lists what Phases 0, 2 and 3 ask for that stage 0
+means. The last part lists what Phases 0, 2, 3 and 4 ask for that stage 0
 does not have yet.
 
 ## Behaviour that comes from the host
@@ -23,12 +23,13 @@ std contracts and pin it in stage 1's tables; add conformance cases at the
 edges (a character added in a recent version, Turkish dotted `İ`).
 
 **Float to text.** `Display` of an `f64` is Rust's shortest round-trip
-form and `{x:.N}` is Rust's correctly rounded fixed form
-(`sisu-interp/src/format.rs`). Any correct shortest-round-trip algorithm
-gives the same digits, but the exponent spelling (`1e100`, `1.5e-7`) and
-the rounding of fixed forms are Rust's. *Pay*: specify both in std's
-`fmt` contract and implement them in Sisu (Ryu-style shortest digits,
-round half to even on the exact binary value).
+form and `{x:.N}` is Rust's correctly rounded fixed form (the intrinsic
+`fmt.float_digits`, `sisu-interp/src/format.rs`; the rest of a format
+spec is Sisu). Any correct shortest-round-trip algorithm gives the same
+digits, but the exponent spelling (`1e100`, `1.5e-7`) and the rounding of
+fixed forms are Rust's. *Pay*: specify both in std's contract and
+implement them in Sisu (Ryu-style shortest digits, round half to even on
+the exact binary value).
 
 **Text to float.** Float literals are converted by Rust's `str::parse`
 in the lexer, which is correctly rounded. *Pay*: stage 1 needs a
@@ -36,37 +37,59 @@ correctly rounded parser; add literals at rounding boundaries to the
 suite.
 
 **Hashing.** `dict` and `set` keep an insertion-ordered vector with a Rust
-`HashMap` as the index (`sisu-interp/src/value.rs`). Nothing observable
-depends on the hash, since iteration is in insertion order (D-074). *Pay*:
-keep it that way; when `Hash` becomes a trait (Phase 4), the per-process
-SipHash key of D-049 is the std implementation's, not the host's.
+`HashMap` as the index (`sisu-interp/src/value.rs`), over the host's
+structural key of a value, not the `Hash` and `Eq` impls: a key type with
+impls of its own is rejected (`E0398`) instead. Nothing observable
+depends on the hash, since iteration is in insertion order (D-074).
+*Pay*: write `dict` and `set` in Sisu over `Hash` and `Eq`, with the
+per-process SipHash key of D-049 as std's, and lift `E0398`.
 
-**Integer and string parsing at run time.** `str.parse_int` checks the
-syntax itself, then uses Rust's `parse` for the value; `cli.parse` uses
-Rust's `parse` for `int` and `f64` options. *Pay*: write both in Sisu
-with the contracts in `compiler/std/`.
+**Text methods are host code.** `str`'s searching, splitting, trimming,
+replacing and case methods, and `String`'s, are intrinsics whose
+contracts are their prelude comments; of the text functions only
+`parse_int`, `join` and formatting are Sisu. 03 makes `String` a
+`list[u8]` with a validity invariant and `s.byte_slice(a, b)` the
+explicit, checked way into a text, which needs `u8`, `Slice` and `bytes`
+(not yet done, below); written over characters now, the methods would be
+rewritten then. *Pay*: with those types, write the methods in Sisu over
+bytes, keeping only the Unicode tables (above) on the host.
+
+**Number parsing in `cli.parse`.** An `int` or `f64` option's value is
+read by Rust's `parse` (`str.parse_int` is Sisu, in the prelude). *Pay*:
+with "`cli.parse` is one intrinsic" below, through `str.parse_int` and a
+Sisu `f64` parser (correctly rounded, as for literals).
 
 **Civil time.** `DateTime` is seconds since the epoch in UTC and
-`strftime` supports a fixed subset (`format.rs`). *Pay*: the time module
-of `std` replaces it; time zones are its problem.
+`strftime` supports a fixed subset (`format.rs`, `fmt.strftime`). *Pay*:
+the time module of `std` replaces it; time zones are its problem.
 
 ## Shortcuts in the interpreter
 
-**Callbacks nest the host stack.** Sisu calls are trampolined, but an
-intrinsic that calls a closure (`list.sort_by`, `Iter.map`, `filter`,
-`find`, `fold`, `max_by`, `min_by`, `all`, `any`, `Option.map`) runs a
-nested run loop on the host stack, and so does drop glue calling a type's
-`Drop`. The run uses a 256 MiB host stack to make this safe. *Pay*: write
-these functions in Sisu (Phase 4, "std in Sisu"), and emit drop glue as SIR
-functions (below); then only the run loop remains in the host.
+**`cli.parse` calls back into Sisu.** The run loop is a trampoline and
+no other intrinsic calls Sisu code, but `cli.parse` runs a field's
+default on a nested run loop (`sisu-interp/src/cli.rs`). *Pay*: with
+"`cli.parse` is one intrinsic" below.
 
-**Drop glue is computed from values.** `drop` walks the value it drops
-and finds `Drop` implementations by type name at run time
-(`sisu-interp/src/exec.rs`), and a partly moved value is handled by the
-`Moved` marker left in its moved parts. A native backend has neither.
-*Pay*: generate a drop function per type in SIR (fields in reverse order,
-elements in order), and track partial moves with per-field drop flags or
-move paths in lowering, as Rust's MIR does.
+**Structural operations recurse.** The host's structural printing,
+comparison, hashing and `.copy()` recurse over a value on the host
+stack, which is why the run uses a 256 MiB stack. *Pay*: none for the
+interpreter; std written in Sisu over the traits replaces them where the
+fast paths stop paying.
+
+**Drops inside intrinsics are untyped.** A drop statement gives the drop
+glue its type arguments from the place's type, but a value an intrinsic
+drops (`list.clear`, `Cell.set`, `dict.insert` replacing a value) is
+dropped by what it is, so the glue of a generic type runs there without
+type arguments, which only a `Drop` calling through a trait on them
+could notice. *Pay*: give those intrinsics their element types (or write
+them in Sisu, where the drop is a statement).
+
+**The host-backed types' drops are interpreter code.** A `list`, `dict`,
+`set`, tuple, option, `Shared`, `Weak`, `Cell`, `Mutex`, guard and
+`Arena` are taken apart by the interpreter (`sisu-interp/src/drops.rs`),
+in the orders their contracts give. *Pay*: when they are written in Sisu
+over raw storage (stage 1 and the backend), their glue is SIR like any
+declared type's.
 
 **`str` is a copy.** `strview` copies the text into a shared immutable
 string, so a view costs O(length). Semantics are the same because the
@@ -129,20 +152,17 @@ the limits become options of `sisu run`.
 on a hash of its text. *Pay*: per-item queries with stable node identities
 as keys (the tree already provides them) before the language server.
 
-**Bounds are a table.** Which types are `Display`, `Ord`, `Hash` and so
-on is decided by `Program::satisfies` in `sisu-resolve/src/ty.rs`, and
-`Display` of a user type is its `Debug` form. *Pay*: Phase 4's traits
-and impls replace the table; the prelude's bounds become real traits.
+**Intrinsics get type arguments by a rule.** Generic Sisu functions get
+every type argument at run time; an intrinsic gets them only when
+lowering's rule says it needs them (a type parameter only in the result,
+or an `Iterable[T]` parameter). *Pay*: pass every intrinsic its type
+arguments, which the untyped drops above also want.
 
-**Generic intrinsics run polymorphically.** Std generics are checked with
-inference but run without monomorphisation; an intrinsic receives type
-arguments only when lowering's rule says it needs them (a type parameter
-only in the result, or an `Iterable[T]` parameter). *Pay*: with generic
-Sisu bodies (Phase 4), pass type arguments as run-time values to every
-generic call, as 18 describes, and drop the rule.
-
-**`cli.parse` is one intrinsic.** It stands in for a comptime derive over
-reflection (11, `std.x.cli`). *Pay*: Phase 4 and 8.
+**`cli.parse` is one intrinsic.** It stands in for a derive over
+reflection (11, `std.x.cli`). *Pay*: a `comptime def derive` for a
+command-line trait, now that derives run at compile time; it needs
+reflection over field types and defaults (Phase 8), and then calls the
+defaults as ordinary Sisu.
 
 **Capabilities are host objects with flags.** `read_only` and
 `restrict_to` are flags on the Rust-side handle, and `Fs.in_memory` is a
@@ -155,13 +175,6 @@ type's own methods are where its values end) recognises a method by its
 SIR name, `Type.method`, in the checker and in the monitor. *Pay*: SIR
 records a method's owner type.
 
-**Which intrinsics may take must-consume values is a table.** The
-intrinsics that keep or return everything they take with `own` or `mut`
-are listed in `sisu-borrowck/src/consume.rs`, from their contracts.
-*Pay*: state it in the std contracts (a `##` line or an attribute), so the
-list is generated, and write the collection functions in Sisu (Phase 4),
-where the checker sees what they do.
-
 **Borrow facts of lowering-only intrinsics are written in lowering.**
 `iter.ref`, `iter.mut`, `iter.own` and `list.slice` get their `from`,
 `inner` and `own` lists from a match in `sisu-lower/src/lib.rs`, because
@@ -172,8 +185,8 @@ module that only lowering may call.
 into an argument's storage is decided by a walk over types in
 `sisu-resolve/src/borrows.rs` that knows `String` and `Path` own text and
 treats `Iter`, `Entry`, `Iterable` and generic parameters as owning
-anything. *Pay*: a property of the type declarations (or a trait in
-Phase 4) instead of a list of names.
+anything. *Pay*: a property of the type declarations (or a marker
+trait, now that traits exist) instead of a list of names.
 
 **Temporaries are named by their source text.** A diagnostic about an
 unnamed local names it by the source range of the statement that first
@@ -193,19 +206,54 @@ exit of its scope, normal and cleanup, which multiplies code for a scope
 with many exits. *Pay*: acceptable for the interpreter; a backend may
 share one landing block.
 
-**Formatting lives in the interpreter.** The format-spec mini-language,
-`Display` and `Debug` are Rust code in `format.rs`. *Pay*: a `fmt`
-module in Sisu (Phase 4), with the rules in architecture.md as its
-contract.
+**A format spec is read at run time.** `Spec.parse` reads the spec text
+each time a leaf applies it. *Pay*: lowering can pass the spec already
+read, `comptime Spec.parse(...)` at the interpolation.
 
-## Not yet done from Phases 0, 2 and 3
+**Derive templates unfold as text.** A trait's `comptime def derive` is
+evaluated by unfolding its body into source text (`template.rs`): the
+compile-time parts are evaluated over a small domain of values (the
+type, its fields and variants, integers, text, booleans), and the impl is
+then parsed and checked like written code, so an error in derived code is
+reported in the generated text. *Pay*: the comptime evaluator over typed
+IR producing the impl as a value (08: "`return impl ... for T:` is an
+expression form"), with reflection as a module of values.
+
+**Compile-time evaluation is incomplete.** There is no memory limit (08
+asks for one) and no progress report for a long evaluation; the order of
+evaluation follows direct calls and constants, not calls through a
+trait; and a `comptime` expression cannot depend on its function's type
+parameters, since nothing is monomorphised. *Pay*: count heap cells and
+collection sizes against a limit; report progress past a time; with
+monomorphisation (the backend), evaluate per instantiation.
+
+**The library types of 04 are host values.** `Shared`, `Weak`, `Cell`,
+`Mutex` (and its guard) and `Arena` are values the interpreter
+represents (`sisu-interp/src/value.rs`), with their contracts in the
+prelude; a `Shared`'s value lives in a heap of cells that are never
+reused, and the monitor sees a mutex's interior through the guard's
+path. *Pay*: write them in Sisu over raw memory and atomics (stage 1 and
+the backend), with the count's atomicity decided by escape analysis
+(06, when tasks exist).
+
+**Invariants are checked only by `Mutex`.** A struct's `invariant` lines
+become a generated `__invariant` method that only D-077's check calls,
+when unwinding drops a guard. *Pay*: contracts (Phase 8) check them at
+the boundaries 07 gives.
+
+**`Contextual` is displayed by a host rule.** `Result.context` wraps an
+error in std's `Contextual`, whose `Display` (`message: cause`) is a case
+in the host's display text (`format.rs`) because error sets display
+structurally. *Pay*: a `Display` impl in the prelude, when error sets can
+have impls that the fast path respects.
+
+## Not yet done from Phases 0, 2, 3 and 4
 
 - **Modules and packages.** Phase 2 asks for file and directory modules,
   `pub`/`pub(package)`, `sisu.toml` with path dependencies and `sisu run`
   on a package. Stage 0 runs one file and imports only std modules
   (`import cli`, `import std.math`); `pub` parses and has no effect yet,
   since nothing imports user code.
-- **`Array`** as a host-backed builtin.
 - **The wrong-program corpus.** The suite has about thirty cases with
   expected codes under `syntax/`, `names/` and `types/`; Phase 2 asks for
   forty files, and for the checker to return a typed tree for every
@@ -219,34 +267,32 @@ contract.
   under 50 ms per kLOC".
 - **Power assertions.** A failing `assert a == b` shows both sides; 17
   wants the value of every sub-expression.
-- **The other examples.** `hello.sisu` and `wordcount.sisu` run
-  unmodified; `errors.sisu` checks except for the two names it uses
-  without defining (`default_port_for`, and `.context`, a std convention
-  that does not exist yet) and has no `main`; the other examples use
-  features of later phases.
+- **The examples.** `hello.sisu` and `wordcount.sisu` run unmodified;
+  `traits.sisu` and `errors.sisu` run with a `main` (and, for
+  `errors.sisu`, the `default_port_for` it uses) appended, and the
+  conformance cases are kept starting with the originals by a test.
+  `ownership.sisu`: everything before `Shared` (`ownership/proposal_core`)
+  and the graph section (`ownership/proposal_graph`) run, kept identical
+  by tests; `shared_demo` and `counter_demo` need `task.scope` (Phase 6).
+  `comptime.sisu`: the user-defined derive (`Describe` and `Point`) runs
+  as `comptime/proposal_derive`, kept identical by a test; the rest needs
+  `Array`, the sized integers, const generics, reflection in generic code
+  (`if comptime reflect.is_int(T)` narrowing `T`), `target`, `@cfg`, and
+  the `json` and `sql` packages. `capabilities.sisu`, `concurrency.sisu`,
+  `contracts.sisu`, `ffi.sisu` and `testing.sisu` use features of Phases
+  6 and 8.
 
 From Phase 3 (18, "Phase 3: the ownership checker and the dynamic
 monitor"):
 
-- **The library types**: `Shared[T]`, `Weak`, `Cell`, `Mutex`
-  (single-task until Phase 6), `Box` and `Arena[T]` with generational
-  `Key`s and stale-handle detection are not implemented (`E0900`), so the
-  escape rule "no `ref` or view in `Shared`" has nothing to apply to yet.
-- **`own` closures** (capture by move, `own x -> ...`, `do own x:`) are
-  `E0900`; until they exist, a closure that captures anything cannot be
-  stored or returned (a known over-rejection).
-- **`proposal/examples/ownership.sisu` does not run**: `shared_demo` and
-  `counter_demo` need `Shared`, `Mutex` and `task.scope` (Phase 6), and
-  `graph_demo` needs `Arena` and `Key`. Everything before `Shared` (the
-  conventions, returned borrows, `from`, the tokenizer of views) runs, as
-  the conformance case `ownership/proposal_core`, kept identical to the
-  original by a test.
+- **Capture by move.** `own` closures copy their captures, which must be
+  `Copy` (`E0423`); a capture by move arrives with tasks (Phase 6).
 - **The generation-checked reference type** behind a flag, if Phase 0
-  triggered it; `sisu audit --ownership`; `sisu check --diary`.
+  triggered it; `sisu check --diary`.
 - **The corpora**: a translated slice of rustc's borrow-checker UI tests,
   the referee's 20 adversarial programs, and the 60-file wrong-ownership
-  corpus with expected codes and named fixes. The suite has 59 ownership
-  cases (21 accepted, 38 rejected) and the soundness tests below.
+  corpus with expected codes and named fixes. The suite has 73 ownership
+  cases (31 accepted, 42 rejected) and the soundness tests below.
 - **24 hours of mutation fuzzing.** `sisu-driver/tests/soundness.rs` runs
   a deterministic mutation fuzz (statement reorderings of accepted
   programs' SIR) on every `cargo test`, and more with
@@ -256,3 +302,22 @@ monitor"):
 - **Diagnostics that name the fix.** Most ownership diagnostics have a
   note or a fix with an edit (`E0411`, `E0413`, `E0415`); the conflict
   diagnostics' notes are prose, not edits.
+
+From Phase 4 (18, "Phase 4: traits, generics, std in Sisu"):
+
+- **`Array`, `Slice`, the sized integer types, const generics and byte
+  strings** are `E0900`.
+- **`@derive(Default)` and the auto traits** `Send`, `Sync` and
+  `Escapable` (consulted at spawn boundaries from Phase 6); `Copy` is
+  computed from fields.
+- **`std` as modules.** The core traits and their impls, the iterator
+  adapters, the collection methods that take closures, formatting and
+  `parse_int` are written in Sisu, but in the prelude, not as `std.core`,
+  `std.collections`, `std.string` and `std.fmt` modules; the host-backed
+  collections and text methods are intrinsics with their contracts there.
+  Its doctests do not run through the conformance runner.
+- **The re-check target** of 300 ms for one edited body is not measured
+  (the query layer is per file).
+- **Reflection beyond derive** (Phase 8 in 18): `reflect` in generic
+  code, `comptime for` outside a derive's template, `x.[f]` there, and
+  `comptime def` in a trait other than its derive are `E0900`.

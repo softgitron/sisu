@@ -122,6 +122,23 @@ pub(crate) fn lower_body(ctx: &mut Ctx, body: &thir::Body) -> Vec<sir::Function>
     out.push(main.run(kind, source, pure, (from, inner), own));
     for (i, cl) in body.closures.iter().enumerate() {
         let id = thir::ClosureId(i as u32);
+        if cl.comptime {
+            // `comptime e`: a function of nothing, which the compiler runs
+            // with the item's budget.
+            let budget = ctx.prog.comptime_budgets.get(&body.def).copied().unwrap_or(DEFAULT_COMPTIME_BUDGET);
+            // Its value cannot depend on the owner's type arguments (E0600).
+            let mut fl = FnLower::new(ctx, body, Some(id), &comptime_name(&name, id));
+            fl.bounds = env.clone();
+            let pure = matches!(&cl.fn_ty, Ty::Fn(f) if f.pure);
+            out.push(fl.run(
+                sir::FnKind::Comptime(budget),
+                source,
+                pure,
+                (Vec::new(), Vec::new()),
+                Vec::new(),
+            ));
+            continue;
+        }
         let cname = closure_name(&name, id);
         let pure = matches!(&cl.fn_ty, Ty::Fn(f) if f.pure);
         // A closure's result may borrow from any argument, its environment
@@ -137,6 +154,14 @@ pub(crate) fn lower_body(ctx: &mut Ctx, body: &thir::Body) -> Vec<sir::Function>
 
 pub(crate) fn closure_name(owner: &str, id: thir::ClosureId) -> String {
     format!("{owner}#closure{}", id.0)
+}
+
+/// The steps a `comptime` expression may take without
+/// `@comptime_budget(steps=N)` on its item (08 leaves the number open).
+pub const DEFAULT_COMPTIME_BUDGET: u64 = 1_000_000;
+
+pub(crate) fn comptime_name(owner: &str, id: thir::ClosureId) -> String {
+    format!("{owner}#comptime{}", id.0)
 }
 
 impl<'c, 'a> FnLower<'c, 'a> {
@@ -193,7 +218,7 @@ impl<'c, 'a> FnLower<'c, 'a> {
         self.add_local(self.ctx.ty(&ret), None);
         // Parameters.
         let mut param_count = 0;
-        if let Some(c) = self.closure {
+        if let Some(c) = self.closure.filter(|c| !body.closures[c.0 as usize].comptime) {
             let cl = &body.closures[c.0 as usize];
             let env_tys: Vec<sir::Type> = cl
                 .captures
