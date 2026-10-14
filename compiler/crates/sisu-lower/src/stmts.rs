@@ -376,7 +376,12 @@ impl FnLower<'_, '_> {
         };
         let loc = self.ctx.loc(head);
         self.push_scope();
-        let iter_ty = sir::Type::Named("Iter".into(), vec![self.ctx.ty(item)]);
+        // A type that implements `Iterator` is driven through the trait.
+        let iter_ty = if mode == ForMode::Trait {
+            self.ctx.ty(&iter.ty)
+        } else {
+            sir::Type::Named("Iter".into(), vec![self.ctx.ty(item)])
+        };
         let it = self.temp_sir(iter_ty.clone());
         match mode {
             ForMode::Borrow | ForMode::Mut => {
@@ -414,7 +419,7 @@ impl FnLower<'_, '_> {
                     loc,
                 );
             }
-            ForMode::Iter => self.into(Place::local(it), iter),
+            ForMode::Iter | ForMode::Trait => self.into(Place::local(it), iter),
         }
         self.register(DropEntry::Local(it));
         self.split();
@@ -428,10 +433,15 @@ impl FnLower<'_, '_> {
         self.assign(Place::local(r), Rvalue::Ref(Place::local(it), true), loc);
         let opt_ty = sir::Type::Named("Option".into(), vec![self.ctx.ty(item)]);
         let next = self.temp_sir(opt_ty);
+        let callee =
+            match (mode, self.ctx.prog.wk.iterator.and_then(|t| self.ctx.prog.trait_method(t, "next"))) {
+                (ForMode::Trait, Some(m)) => self.callee_for(m, std::slice::from_ref(&iter.ty)).0,
+                _ => sir::Callee::Intrinsic("Iter.next".into(), Vec::new()),
+            };
         self.emit(
             StatementKind::Call {
                 dest: Place::local(next),
-                callee: sir::Callee::Intrinsic("Iter.next".into(), Vec::new()),
+                callee,
                 args: vec![Operand::Copy(Place::local(r))],
             },
             loc,

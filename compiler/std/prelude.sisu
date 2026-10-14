@@ -9,11 +9,13 @@
 ##! values the host represents; such a type has no fields unless it lists
 ##! them, and code constructs it only through its associated functions.
 ##!
-##! Generic parameters and the bounds `Display`, `Debug`, `Eq`, `Ord`,
-##! `Hash`, `Len` and `Num` appear only here, until traits arrive in Phase 4;
-##! the checker knows which builtin types satisfy each bound (see
-##! docs/architecture.md). `Iterable[T]` in a parameter accepts a `list`,
-##! `set`, `dict` or `Iter` whose items are `T`.
+##! The traits the language uses (`Display`, `Debug`, `Eq`, `PartialOrd`,
+##! `Ord`, `Hash`, `Len`, `Copy`, `Drop`, `Iterator`, the operators) are
+##! declared here, with their impls for the builtin types. An impl whose
+##! methods are intrinsics named `structural.*` implements the trait the
+##! way the interpreter compares, hashes and prints values structurally
+##! (docs/architecture.md, "Traits and generics"). `Iterable[T]` in a
+##! parameter accepts a `list`, `set`, `dict` or `Iter` whose items are `T`.
 
 # ------------------------------------------------------------------ host-backed types
 
@@ -85,19 +87,128 @@ struct System:
     env: Env
     clock: Clock
 
+## An owned value on the heap (04, rule 7). Methods and fields of the value
+## are reached through it (its own field, `boxed`, is the value), and a
+## `Box[dyn Trait]` holds a value of any type that implements the trait.
+struct Box[T]:
+    boxed: T
+
+## Where `Display` and `Debug` write: the text being built and the format
+## spec (`{x:>8.2}`) of the value being rendered. The parts of a value are
+## written at a greater `depth`, where the spec does not apply to them. A
+## leaf value written at depth 0 applies the whole spec itself and clears
+## it; what is left of it pads the whole text when the interpolation ends.
+struct Formatter:
+    out: String
+    spec: String
+    depth: int
+
+impl Formatter:
+    ## Appends `text`.
+    pure def write(mut self, text: str):
+        self.out.push(text)
+
+## What `Hash` feeds a value's parts into.
+struct Hasher:
+    state: int
+
+impl Hasher:
+    ## Mixes an integer into the state (FNV-1a over its value).
+    pure def write_int(mut self, n: int):
+        self.state = (self.state ^ n) *% 1099511628211
+
+# ------------------------------------------------------------------ traits
+
+## Text for a program's users: what `print` and `"{x}"` write (03, "Strings").
+trait Display:
+    ## Writes the value's text to `f`.
+    pure def fmt(self, mut f: Formatter)
+
+## Text for programmers: what `"{x:?}"` writes, the value the way it is
+## written. Every type has `Debug` (11): a struct or enum without its own
+## impl gets the derived one.
+trait Debug:
+    pure def fmt_debug(self, mut f: Formatter)
+
+## Equality: `==` and `!=` (02, "Expressions").
+trait Eq:
+    pure def eq(self, other: Self) -> bool
+
+## A partial order: `<`, `<=`, `>` and `>=`. `f64` has only this one, since
+## NaN is unordered (03, "Numbers").
+trait PartialOrd:
+    pure def partial_cmp(self, other: Self) -> Ordering?
+
+## A total order, for sorting, `min` and `max`.
+trait Ord(Eq, PartialOrd):
+    pure def cmp(self, other: Self) -> Ordering
+
+## Hashing, for `dict` keys and `set` elements.
+trait Hash(Eq):
+    pure def hash(self, mut h: Hasher)
+
+## A number of items, `len(x)`.
+trait Len:
+    pure def len(self) -> int
+
+## Values that are copied rather than moved (04, rule 1); `@derive(Copy)`
+## opts a type in when all its fields are `Copy`.
+@marker
+trait Copy:
+    pass
+
+## The numbers `sum` and `abs` work on.
+@sealed
+trait Num:
+    pass
+
+## Runs when a value's owner goes out of scope, before its fields are
+## dropped (04, rule 6).
+trait Drop:
+    def drop(mut self)
+
+## The items of a `for` loop (03, "Traits"); `Iter[T]` is the iterator the
+## standard library's methods return.
+trait Iterator:
+    type Item
+    ## The next item, or `None` at the end.
+    pure def next(mut self) -> Item?
+
+## `a + b` (D-022). The other operators are `Sub`, `Mul`, `Div`, `Rem` and
+## `Neg` (`-a`).
+trait Add[Rhs = Self]:
+    pure def add(self, other: Rhs) -> Self
+
+trait Sub[Rhs = Self]:
+    pure def sub(self, other: Rhs) -> Self
+
+trait Mul[Rhs = Self]:
+    pure def mul(self, other: Rhs) -> Self
+
+trait Div[Rhs = Self]:
+    pure def div(self, other: Rhs) -> Self
+
+trait Rem[Rhs = Self]:
+    pure def rem(self, other: Rhs) -> Self
+
+trait Neg:
+    pure def neg(self) -> Self
+
 # ------------------------------------------------------------------ core enums and error sets
 
 ## `T?` is `Option[T]`.
+@derive(Eq, Ord, Hash)
 enum Option[T]:
     Some(T)
     None
 
 ## `T ! E` is `Result[T, E]`.
+@derive(Eq, Ord, Hash)
 enum Result[T, E]:
     Ok(T)
     Err(E)
 
-@derive(Copy)
+@derive(Copy, Eq, Ord, Hash)
 enum Ordering:
     Less
     Equal
@@ -524,3 +635,171 @@ impl Clock:
     ## The current time.
     @intrinsic("Clock.now")
     def now(self) -> DateTime
+
+# ------------------------------------------------------------------ the traits of the builtin types
+# The leaf types (`int`, `f64`, `bool`, `char`, `str`, `String`, `Path`,
+# `DateTime`, `()`) and tuples of up to six elements implement `Display`,
+# `Debug`, `Eq`, `PartialOrd`, `Ord` (not `f64`) and `Hash` (not `f64`) in
+# the generated module `<std>/builtin_impls.sisu` (see
+# compiler/crates/sisu-resolve/src/std_sources.rs), with the intrinsics
+# `structural.*`, whose contracts are written there.
+
+impl[T: Debug] Debug for list[T]:
+    pure def fmt_debug(self, mut f: Formatter):
+        f.write("[")
+        f.depth += 1
+        var first = True
+        for x in self:
+            if not first:
+                f.write(", ")
+            first = False
+            x.fmt_debug(mut f)
+        f.depth -= 1
+        f.write("]")
+
+impl[T: Debug] Display for list[T]:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl[T: Eq] Eq for list[T]:
+    pure def eq(self, other: list[T]) -> bool:
+        if len(self) != len(other):
+            return False
+        for i in range(len(self)):
+            if self[i] != other[i]:
+                return False
+        return True
+
+impl[T: PartialOrd] PartialOrd for list[T]:
+    pure def partial_cmp(self, other: list[T]) -> Ordering?:
+        var i = 0
+        while i < len(self) and i < len(other):
+            let c = self[i].partial_cmp(other[i])
+            if c != Some(Equal):
+                return c
+            i += 1
+        return Some(len(self).cmp(len(other)))
+
+impl[T: Ord] Ord for list[T]:
+    pure def cmp(self, other: list[T]) -> Ordering:
+        var i = 0
+        while i < len(self) and i < len(other):
+            let c = self[i].cmp(other[i])
+            if c != Equal:
+                return c
+            i += 1
+        return len(self).cmp(len(other))
+
+impl[T] Len for list[T]:
+    @intrinsic("len")
+    pure def len(self) -> int
+
+impl[T: Debug] Debug for set[T]:
+    pure def fmt_debug(self, mut f: Formatter):
+        if len(self) == 0:
+            f.write("set()")
+            return
+        f.write("{{")
+        f.depth += 1
+        var first = True
+        for x in self:
+            if not first:
+                f.write(", ")
+            first = False
+            x.fmt_debug(mut f)
+        f.depth -= 1
+        f.write("}}")
+
+impl[T: Debug] Display for set[T]:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl[T: Hash] Eq for set[T]:
+    pure def eq(self, other: set[T]) -> bool:
+        if len(self) != len(other):
+            return False
+        for x in self:
+            if not other.contains(x):
+                return False
+        return True
+
+impl[T] Len for set[T]:
+    @intrinsic("len")
+    pure def len(self) -> int
+
+impl[K: Debug, V: Debug] Debug for dict[K, V]:
+    pure def fmt_debug(self, mut f: Formatter):
+        f.write("{{")
+        f.depth += 1
+        var first = True
+        for k, v in self:
+            if not first:
+                f.write(", ")
+            first = False
+            k.fmt_debug(mut f)
+            f.write(": ")
+            v.fmt_debug(mut f)
+        f.depth -= 1
+        f.write("}}")
+
+impl[K: Debug, V: Debug] Display for dict[K, V]:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl[K: Hash, V: Eq] Eq for dict[K, V]:
+    pure def eq(self, other: dict[K, V]) -> bool:
+        if len(self) != len(other):
+            return False
+        for k, v in self:
+            let Some(w) = other.get(k) else:
+                return False
+            if v != w:
+                return False
+        return True
+
+impl[K, V] Len for dict[K, V]:
+    @intrinsic("len")
+    pure def len(self) -> int
+
+impl[T: Debug] Display for Option[T]:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl[T: Debug, E: Debug] Display for Result[T, E]:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl Display for Ordering:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl[T: Debug] Debug for Box[T]:
+    pure def fmt_debug(self, mut f: Formatter):
+        self.boxed.fmt_debug(mut f)
+
+impl[T: Display] Display for Box[T]:
+    pure def fmt(self, mut f: Formatter):
+        self.boxed.fmt(mut f)
+
+impl[T] Iterator for Iter[T]:
+    type Item = T
+    @intrinsic("Iter.next")
+    pure def next(mut self) -> T?
+
+impl[T] Debug for Iter[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Display for Iter[T]:
+    @intrinsic("structural.display")
+    pure def fmt(self, mut f: Formatter)
+
+impl[K, V] Debug for Entry[K, V]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl Num for int:
+    pass
+
+impl Num for f64:
+    pass

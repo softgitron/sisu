@@ -84,7 +84,7 @@ impl MovePaths {
                         if let Rvalue::Use(Operand::Move(p)) = rv {
                             mp.add(&trackable(p));
                         }
-                        if let Rvalue::Aggregate(_, ops) | Rvalue::Closure(_, ops) = rv {
+                        if let Rvalue::Aggregate(_, ops) | Rvalue::Closure(_, _, ops) = rv {
                             for o in ops {
                                 if let Operand::Move(p) = o {
                                     mp.add(&trackable(p));

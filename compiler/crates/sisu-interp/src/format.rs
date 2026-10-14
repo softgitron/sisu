@@ -35,6 +35,7 @@ impl Interp<'_, '_> {
                 Ok(t) => self.display_into(t, out),
                 Err(_) => out.push_str("<dangling>"),
             },
+            Value::Dyn(d) => self.display_into(&d.value, out),
             other => self.debug_into(other, out),
         }
     }
@@ -115,6 +116,7 @@ impl Interp<'_, '_> {
                 out.push('>');
             }
             Value::Closure(..) => out.push_str("<closure>"),
+            Value::Dyn(d) => self.debug_into(&d.value, out),
             Value::Iter(it) => {
                 out.push_str(if matches!(**it, IterState::Done) { "<iter (done)>" } else { "<iter>" })
             }

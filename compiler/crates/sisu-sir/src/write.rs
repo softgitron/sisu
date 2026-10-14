@@ -33,6 +33,18 @@ pub fn write(p: &Program) -> String {
     for i in &p.intrinsics {
         write_intrinsic(&mut out, i);
     }
+    if !p.trait_methods.is_empty() {
+        out.push('\n');
+    }
+    for i in &p.trait_methods {
+        write_decl(&mut out, "method", i);
+    }
+    if !p.impls.is_empty() {
+        out.push('\n');
+    }
+    for i in &p.impls {
+        write_impl(&mut out, i);
+    }
     for f in &p.functions {
         out.push('\n');
         write_function(&mut out, f);
@@ -95,13 +107,58 @@ pub fn ty(t: &Type) -> String {
         ),
         Type::Ref(t, false) => format!("ref {}", ty(t)),
         Type::Ref(t, true) => format!("ref mut {}", ty(t)),
+        Type::Param(i) => format!("${i}"),
+        Type::Dyn(n, args) => format!("dyn {}", named(n, args)),
+        Type::Assoc(t, tr, args, n) => format!("<{} as {}>.{n}", ty(t), named(tr, args)),
     }
+}
+
+/// `Name` or `Name[A, B]`.
+fn named(n: &str, args: &[Type]) -> String {
+    if args.is_empty() {
+        n.to_string()
+    } else {
+        format!("{n}[{}]", args.iter().map(ty).collect::<Vec<_>>().join(", "))
+    }
+}
+
+/// `[A, B]` after a name, or nothing.
+fn type_args(args: &[Type]) -> String {
+    if args.is_empty() {
+        String::new()
+    } else {
+        format!("[{}]", args.iter().map(ty).collect::<Vec<_>>().join(", "))
+    }
+}
+
+/// `[T, U]` after a declaration's name, or nothing.
+fn params(ps: &[String]) -> String {
+    if ps.is_empty() { String::new() } else { format!("[{}]", ps.join(", ")) }
+}
+
+fn write_impl(out: &mut String, i: &ImplDecl) {
+    let ms: Vec<String> = i
+        .methods
+        .iter()
+        .map(|(m, t)| match t {
+            ImplTarget::Fn(f) => format!("{m}: {f}"),
+            ImplTarget::Intrinsic(f) => format!("{m}: intrinsic {f}"),
+        })
+        .collect();
+    let n = if i.params == 0 { String::new() } else { format!("[{}]", i.params) };
+    let _ = writeln!(
+        out,
+        "impl{n} {} for {} {{ {} }}",
+        named(&i.trait_name, &i.trait_args),
+        ty(&i.self_ty),
+        ms.join(", ")
+    );
 }
 
 fn write_type_decl(out: &mut String, t: &TypeDecl) {
     match t {
-        TypeDecl::Struct { name, fields, drop, view, must_consume } => {
-            let _ = write!(out, "{}struct {name}", if *view { "view " } else { "" });
+        TypeDecl::Struct { name, params: ps, fields, drop, view, must_consume } => {
+            let _ = write!(out, "{}struct {name}{}", if *view { "view " } else { "" }, params(ps));
             if *must_consume {
                 out.push_str(" must_consume");
             }
@@ -117,8 +174,8 @@ fn write_type_decl(out: &mut String, t: &TypeDecl) {
                 .collect();
             let _ = writeln!(out, " {{ {} }}", fs.join(", "));
         }
-        TypeDecl::Enum { name, variants, drop, error, open, must_consume } => {
-            let _ = write!(out, "{} {name}", if *error { "error" } else { "enum" });
+        TypeDecl::Enum { name, params: ps, variants, drop, error, open, must_consume } => {
+            let _ = write!(out, "{} {name}{}", if *error { "error" } else { "enum" }, params(ps));
             if *open {
                 out.push_str(" open");
             }
@@ -160,9 +217,13 @@ fn indices(word: &str, xs: &[u32]) -> String {
 }
 
 fn write_intrinsic(out: &mut String, i: &IntrinsicDecl) {
+    write_decl(out, "intrinsic", i);
+}
+
+fn write_decl(out: &mut String, word: &str, i: &IntrinsicDecl) {
     let _ = writeln!(
         out,
-        "intrinsic {}{}{}{}{}",
+        "{word} {}{}{}{}{}",
         i.name,
         if i.pure { " pure" } else { "" },
         indices("from", &i.from),
@@ -191,8 +252,9 @@ pub fn function(f: &Function) -> String {
 fn write_function(out: &mut String, f: &Function) {
     let _ = writeln!(
         out,
-        "fn {}({}){}{} source {}{}{}{} {{",
+        "fn {}{}({}){}{} source {}{}{}{} {{",
         f.name,
+        params(&f.type_params),
         f.param_count,
         kind_name(f.kind),
         if f.pure { " pure" } else { "" },
@@ -247,11 +309,9 @@ pub fn stmt(s: &Statement) -> String {
         StatementKind::Assign(p, r) => format!("{} = {}", place(p), rvalue(r)),
         StatementKind::Call { dest, callee, args } => {
             let c = match callee {
-                Callee::Fn(n) => format!("fn {n}"),
-                Callee::Intrinsic(n, tys) if tys.is_empty() => format!("intrinsic {n}"),
-                Callee::Intrinsic(n, tys) => {
-                    format!("intrinsic {n}[{}]", tys.iter().map(ty).collect::<Vec<_>>().join(", "))
-                }
+                Callee::Fn(n, tys) => format!("fn {n}{}", type_args(tys)),
+                Callee::Intrinsic(n, tys) => format!("intrinsic {n}{}", type_args(tys)),
+                Callee::Trait(n, tys) => format!("trait {n}{}", type_args(tys)),
                 Callee::Value(o) => operand(o),
             };
             format!("{} = call {c}({})", place(dest), args.iter().map(operand).collect::<Vec<_>>().join(", "))
@@ -352,7 +412,8 @@ pub fn rvalue(r: &Rvalue) -> String {
         Rvalue::Aggregate(Aggregate::Set, ops) => format!("set({})", list(ops)),
         Rvalue::Aggregate(Aggregate::Dict, ops) => format!("dict({})", list(ops)),
         Rvalue::Discriminant(p) => format!("discriminant {}", place(p)),
-        Rvalue::Closure(n, ops) => format!("closure {n}({})", list(ops)),
+        Rvalue::Closure(n, tys, ops) => format!("closure {n}{}({})", type_args(tys), list(ops)),
+        Rvalue::Aggregate(Aggregate::Dyn(t), ops) => format!("dyn {}({})", ty(t), list(ops)),
         Rvalue::CopyOf(p) => format!("copyof {}", place(p)),
         Rvalue::StrView(p) => format!("strview {}", place(p)),
     }

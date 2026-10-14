@@ -75,6 +75,30 @@ impl Checker<'_> {
                 return self.wrap(x, Coercion::Widen, exp);
             }
         }
+        // A value of a type that implements a trait, as `dyn Trait`; a
+        // `ref T` as a `ref dyn Trait`; a `Box[T]` as a `Box[dyn Trait]`.
+        if let (Ty::Ref(inner, m1), Ty::Ref(target, m2)) = (&actual, &exp)
+            && (*m1 || !*m2)
+            && let Ty::Dyn(tr) = self.resolved(target)
+            && !matches!(self.resolved(inner), Ty::Dyn(_) | Ty::Var(_))
+        {
+            let inner = self.resolved(inner);
+            return self.coerce_to_dyn(x, &inner, &tr, &exp, Coercion::RefToDyn);
+        }
+        if let Ty::Dyn(tr) = &exp
+            && !matches!(actual, Ty::Dyn(_) | Ty::Var(_))
+        {
+            return self.coerce_to_dyn(x, &actual, tr, &exp, Coercion::ToDyn);
+        }
+        if let (Ty::Adt(d1, a1), Ty::Adt(d2, a2)) = (&actual, &exp)
+            && d1 == d2
+            && Some(*d1) == prog.wk.boxed
+            && let (Some(inner), Some(Ty::Dyn(tr))) = (a1.first(), a2.first().map(|t| self.resolved(t)))
+            && !matches!(self.resolved(inner), Ty::Dyn(_) | Ty::Var(_))
+        {
+            let inner = self.resolved(inner);
+            return self.coerce_to_dyn(x, &inner, &tr, &exp, Coercion::BoxToDyn);
+        }
         // `Iterable[T]` accepts any collection or iterator of `T`.
         if let Ty::Adt(d, args) = &exp
             && Some(*d) == prog.wk.iterable
@@ -131,6 +155,31 @@ impl Checker<'_> {
 
     pub fn range_of(&self, x: &Expr) -> TextRange {
         x.span.range
+    }
+
+    /// A coercion to `dyn Trait` of a value of type `concrete`: it must
+    /// implement the trait, and it must own what it holds (a view cannot
+    /// hide behind `dyn`, which owns its value; 04, "Views").
+    fn coerce_to_dyn(
+        &mut self,
+        x: Expr,
+        concrete: &Ty,
+        tr: &sisu_resolve::TraitRef,
+        exp: &Ty,
+        kind: Coercion,
+    ) -> Expr {
+        let prog = self.prog;
+        let concrete = prog.normalize(&self.infer.zonk(concrete), &self.env);
+        if prog.can_borrow(&concrete) && !concrete.contains_error() {
+            let d = self
+                .error(msg::TYPE_VIEW_TO_DYN, self.range_of(&x))
+                .with("ty", self.show(&concrete))
+                .with("dyn", self.show(&Ty::Dyn(tr.clone())));
+            self.report(d);
+            return self.wrap(x, Coercion::Mismatch, exp.clone());
+        }
+        self.bounds.push((concrete, tr.clone(), x.span));
+        self.wrap(x, kind, exp.clone())
     }
 
     /// A function passed where a `pure` one is required must be pure.
@@ -205,6 +254,21 @@ impl Checker<'_> {
         x
     }
 
+    /// Whether the type is a `Box[T]`.
+    pub fn is_box(&self, ty: &Ty) -> bool {
+        matches!(self.resolved(ty), Ty::Adt(d, _) if Some(d) == self.prog.wk.boxed)
+    }
+
+    /// The value a `Box` holds, as a place inside it.
+    pub fn unbox(&mut self, x: Expr) -> Expr {
+        let inner = match self.resolved(&x.ty) {
+            Ty::Adt(_, a) => a.first().cloned().unwrap_or(Ty::Error),
+            _ => Ty::Error,
+        };
+        let span = x.span;
+        Expr::new(ExprKind::Field { base: Box::new(x), index: 0 }, inner, span)
+    }
+
     // ---------------------------------------------------------------- inference
 
     pub fn infer_expr(&mut self, e: &ast::Expr, expected: Option<&Ty>) -> Expr {
@@ -267,7 +331,7 @@ impl Checker<'_> {
                     _ => None,
                 };
                 let (elems, ty) = self.homogeneous(items, elem);
-                self.bounds.push((ty.clone(), "Hash".into(), span));
+                self.require(ty.clone(), self.prog.wk.hash, span);
                 let set_ty = self.prog.wk.set.map(|s| Ty::Adt(s, vec![ty])).unwrap_or(Ty::Error);
                 Expr::new(ExprKind::Set(elems), set_ty, span)
             }
@@ -282,7 +346,7 @@ impl Checker<'_> {
                 let values: Vec<ast::Expr> = entries.iter().map(|(_, v)| v.clone()).collect();
                 let (ks, kt) = self.homogeneous(&keys, kt);
                 let (vs, vt) = self.homogeneous(&values, vt);
-                self.bounds.push((kt.clone(), "Hash".into(), span));
+                self.require(kt.clone(), self.prog.wk.hash, span);
                 let ty = self.prog.wk.dict.map(|d| Ty::Adt(d, vec![kt, vt])).unwrap_or(Ty::Error);
                 Expr::new(ExprKind::Dict(ks.into_iter().zip(vs).collect()), ty, span)
             }
@@ -406,14 +470,13 @@ impl Checker<'_> {
                 ast::StrPart::Interp { expr, debug, spec, .. } => {
                     let x = self.infer_expr(expr, None);
                     let spec = spec.clone().unwrap_or_default();
-                    if debug.is_none() && spec != "?" && matches!(self.resolved(&x.ty), Ty::Fn(_)) {
-                        let shown = self.show(&x.ty);
-                        let d = self
-                            .error(msg::TYPE_NO_DISPLAY, expr.range)
-                            .with("ty", shown)
-                            .with("spec", format!("{{{}}}", self.source_text(expr.range)));
-                        self.report(d);
-                    }
+                    let wanted = if debug.is_none() && spec != "?" {
+                        self.prog.wk.display
+                    } else {
+                        self.prog.wk.debug
+                    };
+                    let span = self.span(expr.range);
+                    self.require(x.ty.clone(), wanted, span);
                     out.push(InterpPart::Value { expr: x, debug: debug.clone(), spec });
                 }
             }
@@ -728,6 +791,9 @@ impl Checker<'_> {
             (ExprKind::Int(n), Ty::Float) => Expr::new(ExprKind::Float(*n as f64), Ty::Float, l.span),
             _ => l,
         };
+        if let Some(call) = self.operator_call(op, l.clone(), Some(r.clone()), range) {
+            return call;
+        }
         let (ty, _) = self.binary_result(op, &l, &r, range);
         let (l, r) = if ty == Ty::Str || self.is_string(&ty) {
             // String concatenation views both sides as `str`.
@@ -738,6 +804,67 @@ impl Checker<'_> {
             (l, r)
         };
         Expr::new(ExprKind::Binary { op, lhs: Box::new(l), rhs: Box::new(r) }, ty, span)
+    }
+
+    /// The trait behind an operator of the fixed set (D-022), and its method.
+    pub fn operator_trait(&self, op: BinOp) -> Option<(sisu_resolve::DefId, &'static str)> {
+        let wk = &self.prog.wk;
+        match op {
+            BinOp::Add => wk.add.map(|d| (d, "add")),
+            BinOp::Sub => wk.sub.map(|d| (d, "sub")),
+            BinOp::Mul => wk.mul.map(|d| (d, "mul")),
+            BinOp::Div => wk.div.map(|d| (d, "div")),
+            BinOp::Mod => wk.rem.map(|d| (d, "rem")),
+            _ => None,
+        }
+    }
+
+    /// `l op r` (or `-l`, for `r` = `None`) on a type that is not a number
+    /// or text: a call of the operator's trait method, when the type
+    /// implements the trait. `None` leaves it to the builtin operators.
+    pub fn operator_call(&mut self, op: BinOp, l: Expr, r: Option<Expr>, range: TextRange) -> Option<Expr> {
+        let prog = self.prog;
+        let base =
+            |c: &Self, t: &Ty| -> Ty { prog.normalize(&c.infer.zonk(c.resolved(t).strip_ref()), &c.env) };
+        let lt = base(self, &l.ty);
+        let builtin = |c: &Self, t: &Ty| {
+            matches!(t, Ty::Int | Ty::Float | Ty::Str | Ty::Var(_) | Ty::Error | Ty::Never) || c.is_string(t)
+        };
+        if builtin(self, &lt) {
+            return None;
+        }
+        let (tdef, method) = match &r {
+            Some(_) => self.operator_trait(op)?,
+            None => (prog.wk.neg?, "neg"),
+        };
+        let rt = r.as_ref().map(|r| base(self, &r.ty));
+        let tr = sisu_resolve::TraitRef { def: tdef, args: rt.iter().cloned().collect() };
+        if prog.implements(&lt, &tr, &self.env) == sisu_resolve::Answer::No {
+            return None;
+        }
+        let m = prog.trait_method(tdef, method)?;
+        let span = self.span(range);
+        let sig = self.instantiate(m, None, range);
+        if let Some(v) = sig.type_args.first() {
+            self.infer.try_unify(v, &lt);
+        }
+        if let (Some(v), Some(rt)) = (sig.type_args.get(1), &rt) {
+            self.infer.try_unify(v, rt);
+        }
+        let as_ref = |c: &Self, x: Expr| match c.resolved(&x.ty) {
+            Ty::Ref(..) => Arg { expr: x, mode: ArgMode::Value },
+            _ => Arg { expr: x, mode: ArgMode::Ref },
+        };
+        let mut args = vec![as_ref(self, l)];
+        if let Some(r) = r {
+            args.push(as_ref(self, r));
+        }
+        let ret = prog.normalize(&self.infer.zonk(&sig.ret), &self.env);
+        Some(Expr::new(
+            ExprKind::Call { callee: Callee::Fn { def: m, type_args: sig.type_args.clone() }, args },
+            ret,
+            span,
+        ))
     }
 
     /// The type of `lhs op rhs`, reporting a misuse.
@@ -852,6 +979,11 @@ impl Checker<'_> {
                 self.decay(x)
             }
         };
+        if op == UnOp::Neg
+            && let Some(call) = self.operator_call(BinOp::Sub, x.clone(), None, range)
+        {
+            return call;
+        }
         let t = self.resolved(&x.ty);
         let ty = match (op, &t) {
             (_, Ty::Error) => Ty::Error,
@@ -912,6 +1044,8 @@ impl Checker<'_> {
                     Some(el) => {
                         let a = strip(self, &lt);
                         let b = strip(self, &el);
+                        let span = self.span(range);
+                        self.require(b.clone(), self.prog.wk.eq, span);
                         if !self.infer.try_unify(&a, &b) {
                             let d = self
                                 .error(msg::TYPE_COMPARISON_TYPES, range)
@@ -942,8 +1076,15 @@ impl Checker<'_> {
                     return;
                 }
                 if matches!(op, CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge) {
-                    let t = self.infer.zonk(&a);
-                    if t != Ty::Float && !matches!(t, Ty::Var(_)) && !self.prog.satisfies(&t, "Ord") {
+                    let t = self.prog.normalize(&self.infer.zonk(&a), &self.env);
+                    let ordered = match self.prog.wk.partial_ord {
+                        Some(def) => {
+                            let tr = sisu_resolve::TraitRef { def, args: Vec::new() };
+                            !matches!(self.prog.implements(&t, &tr, &self.env), sisu_resolve::Answer::No)
+                        }
+                        None => true,
+                    };
+                    if !ordered {
                         let d = self
                             .error(msg::TYPE_NOT_ORDERED, range)
                             .with("ty", self.show(&t))
@@ -956,6 +1097,9 @@ impl Checker<'_> {
                         .with("lhs", self.show(&lt))
                         .with("rhs", self.show(&rt));
                     self.report(d);
+                } else {
+                    let span = self.span(range);
+                    self.require(a.clone(), self.prog.wk.eq, span);
                 }
             }
         }
@@ -1028,7 +1172,7 @@ impl Checker<'_> {
         let t = self.resolved(ty.strip_ref());
         let behind_ref = matches!(self.resolved(ty), Ty::Ref(..));
         let Ty::Adt(d, args) = &t else {
-            return if t == Ty::Error { Some((Ty::Error, ForMode::Borrow)) } else { None };
+            return if t == Ty::Error { Some((Ty::Error, ForMode::Borrow)) } else { self.iterator_item(&t) };
         };
         let fmode = match mode {
             ast::Mode::Borrow => ForMode::Borrow,
@@ -1058,8 +1202,22 @@ impl Checker<'_> {
                 Some((item, m))
             }
             Some("Iter") => Some((args.first().cloned().unwrap_or(Ty::Error), ForMode::Iter)),
-            _ => None,
+            _ => self.iterator_item(&t),
         }
+    }
+
+    /// The item of a type that implements `Iterator`, which a `for` loop
+    /// drives through the trait.
+    fn iterator_item(&self, t: &Ty) -> Option<(Ty, ForMode)> {
+        let prog = self.prog;
+        let def = prog.wk.iterator?;
+        let tr = sisu_resolve::TraitRef { def, args: Vec::new() };
+        let t = prog.normalize(&self.infer.zonk(t), &self.env);
+        if !prog.implements(&t, &tr, &self.env).holds() {
+            return None;
+        }
+        let item = Ty::Assoc(Box::new(sisu_resolve::AssocTy { self_ty: t, trait_: tr, name: "Item".into() }));
+        Some((prog.normalize(&item, &self.env), ForMode::Trait))
     }
 
     /// The iterable of a `for` loop or comprehension clause.
@@ -1068,7 +1226,7 @@ impl Checker<'_> {
         match self.iteration_item(&x.ty, mode) {
             Some((item, fmode)) => {
                 let x = match fmode {
-                    ForMode::Own | ForMode::Iter => self.check_movable(x),
+                    ForMode::Own | ForMode::Iter | ForMode::Trait => self.check_movable(x),
                     ForMode::Mut => {
                         self.require_mutable(&x, iter.range);
                         x
@@ -1532,7 +1690,12 @@ impl Checker<'_> {
     pub fn field_of(&mut self, b: Expr, name: &ast::Name, range: TextRange) -> Expr {
         let span = self.span(range);
         let prog = self.prog;
-        let b = self.auto_deref(b);
+        let mut b = self.auto_deref(b);
+        // A `Box` lends its fields to its value: `boxed` is its own.
+        while self.is_box(&b.ty) && name.text != "boxed" {
+            b = self.unbox(b);
+            b = self.auto_deref(b);
+        }
         let t = self.resolved(&b.ty);
         match &t {
             Ty::Error => return Expr::error(span),

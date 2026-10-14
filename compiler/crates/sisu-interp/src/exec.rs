@@ -31,8 +31,18 @@ impl<'p> Interp<'p, '_> {
     /// and intrinsics that call back into Sisu; Sisu-to-Sisu calls push a
     /// frame on the running loop instead.
     pub(crate) fn call_fn(&mut self, fi: usize, args: Vec<Value>) -> Result<Value, Unwind> {
+        self.call_fn_tys(fi, args, Vec::new())
+    }
+
+    /// [`Interp::call_fn`] with type arguments.
+    pub(crate) fn call_fn_tys(
+        &mut self,
+        fi: usize,
+        args: Vec<Value>,
+        tys: Vec<sir::Type>,
+    ) -> Result<Value, Unwind> {
         let base = self.frames.len();
-        self.push_frame(fi, args, None)?;
+        self.push_frame(fi, args, None, tys)?;
         self.run(base)
     }
 
@@ -43,22 +53,41 @@ impl<'p> Interp<'p, '_> {
 
     /// Calls a function value (a function constant or a closure) to completion.
     pub(crate) fn call_value(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, Unwind> {
-        let (fi, args) = self.callee_of(f, args)?;
-        self.call_fn(fi, args)
+        let (fi, args, tys) = self.callee_of(f, args)?;
+        self.call_fn_tys(fi, args, tys)
     }
 
-    fn callee_of(&self, f: &Value, mut args: Vec<Value>) -> Result<(usize, Vec<Value>), Unwind> {
+    #[allow(clippy::type_complexity)]
+    fn callee_of(
+        &self,
+        f: &Value,
+        mut args: Vec<Value>,
+    ) -> Result<(usize, Vec<Value>, Vec<sir::Type>), Unwind> {
         match self.target(f)? {
-            Value::Fn(name) => Ok((self.fn_index(name)?, args)),
-            Value::Closure(name, env) => {
-                args.insert(0, Value::Tuple((**env).clone()));
-                Ok((self.fn_index(name)?, args))
+            Value::Fn(name) => Ok((self.fn_index(name)?, args, Vec::new())),
+            Value::Closure(c) => {
+                args.insert(0, Value::Tuple(c.env.clone()));
+                Ok((self.fn_index(&c.name)?, args, c.tys.clone()))
             }
             other => Err(ice(format!("calling a value that is not a function: {other:?}"))),
         }
     }
 
-    fn push_frame(&mut self, fi: usize, args: Vec<Value>, ret: Option<&'p Place>) -> Result<(), Unwind> {
+    /// A type of the running function with its type arguments filled in.
+    pub(crate) fn concrete(&self, t: &sir::Type) -> sir::Type {
+        match self.frames.last() {
+            Some(f) if !f.tys.is_empty() => t.subst(&f.tys),
+            _ => t.clone(),
+        }
+    }
+
+    fn push_frame(
+        &mut self,
+        fi: usize,
+        args: Vec<Value>,
+        ret: Option<&'p Place>,
+        tys: Vec<sir::Type>,
+    ) -> Result<(), Unwind> {
         if self.frames.len() >= MAX_DEPTH {
             return Err(panic(msg::PANIC_STACK_OVERFLOW, &[("depth", MAX_DEPTH.to_string())]));
         }
@@ -79,6 +108,7 @@ impl<'p> Interp<'p, '_> {
             next: 0,
             pending: None,
             ret,
+            tys,
         });
         Ok(())
     }
@@ -105,6 +135,7 @@ impl<'p> Interp<'p, '_> {
             next: 0,
             pending: None,
             ret: None,
+            tys: Vec::new(),
         });
         let r = f(self, ptrs);
         self.frames.truncate(frame as usize + 1);
@@ -292,22 +323,40 @@ impl<'p> Interp<'p, '_> {
                 self.store(p, v)
             }
             StatementKind::Call { dest, callee, args } => match callee {
-                Callee::Fn(name) => {
+                Callee::Fn(name, tys) => {
                     let fi = self.fn_index(name)?;
                     let vals = self.operands(args)?;
                     // Passing a reference or a view is a use of its loan.
                     vals.iter().try_for_each(|v| self.mon_passed(v))?;
-                    self.push_frame(fi, vals, Some(dest))
+                    let tys = tys.iter().map(|t| self.concrete(t)).collect();
+                    self.push_frame(fi, vals, Some(dest), tys)
+                }
+                Callee::Trait(name, tys) => {
+                    let vals = self.operands(args)?;
+                    vals.iter().try_for_each(|v| self.mon_passed(v))?;
+                    let tys: Vec<sir::Type> = tys.iter().map(|t| self.concrete(t)).collect();
+                    match self.dispatch(name, tys, vals)? {
+                        crate::dispatch::Target::Fn(fi, vals, tys) => {
+                            self.push_frame(fi, vals, Some(dest), tys)
+                        }
+                        crate::dispatch::Target::Intrinsic(n, vals, tys) => {
+                            let ret = self.dest_type(dest);
+                            let v = self.intrinsic(&n, &tys, vals, ret)?;
+                            self.store(dest, v)
+                        }
+                    }
                 }
                 Callee::Value(op) => {
                     let f = self.operand(op)?;
                     let vals = self.operands(args)?;
                     vals.iter().try_for_each(|v| self.mon_passed(v))?;
                     self.mon_passed(&f)?;
-                    let (fi, vals) = self.callee_of(&f, vals)?;
-                    self.push_frame(fi, vals, Some(dest))
+                    let (fi, vals, tys) = self.callee_of(&f, vals)?;
+                    self.push_frame(fi, vals, Some(dest), tys)
                 }
                 Callee::Intrinsic(name, tys) => {
+                    let tys: Vec<sir::Type> = tys.iter().map(|t| self.concrete(t)).collect();
+                    let tys = &tys;
                     let vals = self.operands(args)?;
                     self.mon_args(&vals)?;
                     // `list.clear` drops the elements: under the monitor, a
@@ -451,7 +500,12 @@ impl<'p> Interp<'p, '_> {
                     }
                     ptr.tag = self.mon_borrow(&ptr, *m, !self.dest_is_temp())?;
                 }
-                Ok(Value::Ref(Box::new(ptr)))
+                let r = Value::Ref(Box::new(ptr));
+                // Reborrowing a `ref dyn` made from a `ref T` keeps `T`.
+                Ok(match self.fat_type_of_deref(p)? {
+                    Some(ty) => Value::Dyn(Box::new(crate::value::DynVal { ty, value: r })),
+                    None => r,
+                })
             }
             Rvalue::Binary(op, a, b) => {
                 let a = self.operand(a)?;
@@ -478,9 +532,14 @@ impl<'p> Interp<'p, '_> {
                     other => Err(ice(format!("discriminant of {other:?}"))),
                 }
             }
-            Rvalue::Closure(name, ops) => {
+            Rvalue::Closure(name, tys, ops) => {
                 let env = self.operands(ops)?;
-                Ok(Value::Closure(Rc::from(name.as_str()), Rc::new(env)))
+                let tys = tys.iter().map(|t| self.concrete(t)).collect();
+                Ok(Value::Closure(Rc::new(crate::value::ClosureVal {
+                    name: Rc::from(name.as_str()),
+                    tys,
+                    env,
+                })))
             }
             Rvalue::CopyOf(p) => {
                 let ptr = self.resolve(p)?;
@@ -516,6 +575,11 @@ impl<'p> Interp<'p, '_> {
                 Value::variant(t, i, vals)
             }
             sir::Aggregate::List => Value::List(vals),
+            sir::Aggregate::Dyn(t) => {
+                let ty = self.concrete(t);
+                let value = vals.into_iter().next().unwrap_or(Value::Unit);
+                Value::Dyn(Box::new(crate::value::DynVal { ty, value }))
+            }
             sir::Aggregate::Set => {
                 let mut s = crate::value::Set::default();
                 for v in vals {
@@ -581,6 +645,7 @@ impl<'p> Interp<'p, '_> {
                 self.drop_parts(parts.into_iter())
             }
             Value::Entry(e) => self.drop_value(e.key),
+            Value::Dyn(d) => self.drop_value(d.value),
             _ => Ok(()),
         }
     }

@@ -19,25 +19,34 @@ mod zonk;
 
 use check::{Checker, RetCtx};
 use sisu_diag::{Diagnostic, SourceMap, msg};
-use sisu_resolve::{DefId, DefKind, Program, Ty};
+use sisu_resolve::{Answer, DefId, DefKind, Program, Ty};
 use std::collections::HashMap;
 pub use thir::*;
 
 /// The type of a parameter as a local of its function: a borrowed
-/// parameter is a `ref T` unless `T` is `Copy` (04, rule 2).
+/// parameter is a `ref T` unless `T` is `Copy` (04, rule 2). A borrowed
+/// parameter whose type is a generic parameter, or an associated type of
+/// one, is always a `ref`: whether its type argument is `Copy` is not known
+/// in the body, and every caller passes it the same way.
 pub fn param_local_ty(prog: &Program, ty: &Ty, mode: sisu_syntax::ast::Mode) -> Ty {
     use sisu_syntax::ast::Mode;
     match mode {
         Mode::Own => ty.clone(),
         Mode::Mut => Ty::Ref(Box::new(ty.clone()), true),
         Mode::Borrow => {
-            if prog.is_copy(ty) || matches!(ty, Ty::Param(_)) {
+            if !is_opaque(ty) && prog.is_copy(ty) {
                 ty.clone()
             } else {
                 Ty::Ref(Box::new(ty.clone()), false)
             }
         }
     }
+}
+
+/// A generic parameter or an associated type of one: a type whose values
+/// the body knows only through its bounds.
+pub fn is_opaque(ty: &Ty) -> bool {
+    matches!(ty, Ty::Param(_) | Ty::Assoc(_))
 }
 
 fn file_text(sources: &SourceMap, file: sisu_diag::FileId) -> &str {
@@ -66,6 +75,8 @@ fn check_fn(
     let Some(body_ast) = &f.body else { return (empty, Vec::new(), Vec::new()) };
     let mut c = Checker::new(prog, inferred, def, f.file, file_text(sources, f.file));
     c.self_ty = f.owner.clone();
+    c.env = prog.elaborate_env(&f.predicates);
+    c.generic_names = f.generics.iter().map(|g| g.name.clone()).collect();
     let ret = if f.err_inferred {
         let ok = match &f.ret {
             Ty::Adt(_, a) => a.first().cloned().unwrap_or(Ty::Unit),
@@ -109,15 +120,7 @@ fn check_fn(
             .with("ty", prog.display(&r));
         c.report(d);
     }
-    for (ty, bound, span) in std::mem::take(&mut c.bounds) {
-        let t = c.infer.zonk(&ty);
-        if !c.infer.has_vars(&t) && !prog.satisfies(&t, &bound) {
-            let d = Diagnostic::new(msg::TYPE_BOUND_NOT_SATISFIED, span)
-                .with("ty", prog.display(&t))
-                .with("bound", bound);
-            c.report(d);
-        }
-    }
+    check_bounds(&mut c);
     let absorbed = c.infer.absorbed();
     report_uninferred(&mut c);
     let has_errors = c.diags.iter().any(|d| d.is_error());
@@ -152,6 +155,35 @@ fn check_fn(
     (body, diags, absorbed)
 }
 
+/// Checks the bounds the body's calls and constructs required, once
+/// inference is done: each type must implement its trait (03, "Generic
+/// syntax"; a generic body is checked against its own bounds only).
+fn check_bounds(c: &mut Checker) {
+    let prog = c.prog;
+    let mut seen: Vec<(Ty, sisu_resolve::TraitRef)> = Vec::new();
+    for (ty, bound, span) in std::mem::take(&mut c.bounds) {
+        let t = prog.normalize(&c.infer.zonk(&ty), &c.env);
+        let b = sisu_resolve::TraitRef {
+            def: bound.def,
+            args: bound.args.iter().map(|a| prog.normalize(&c.infer.zonk(a), &c.env)).collect(),
+        };
+        if c.infer.has_vars(&t) || t.contains_error() || b.args.iter().any(|a| a.contains_error()) {
+            continue;
+        }
+        if seen.contains(&(t.clone(), b.clone())) {
+            continue;
+        }
+        if prog.implements(&t, &b, &c.env) == Answer::No {
+            seen.push((t.clone(), b.clone()));
+            let d = Diagnostic::new(msg::TYPE_BOUND_NOT_SATISFIED, span)
+                .with("ty", c.show(&t))
+                .with("bound", prog.display_trait_in(&b, &c.generic_names));
+            let d = c.missing_impl_fix(d, &t, &b);
+            c.report(d);
+        }
+    }
+}
+
 /// Reports locals whose type inference left open, once per body.
 fn report_uninferred(c: &mut Checker) {
     if c.diags.iter().any(|d| d.is_error()) {
@@ -182,8 +214,13 @@ fn check_value(
     sources: &SourceMap,
 ) -> (Body, Vec<Diagnostic>) {
     let mut c = Checker::new(prog, inferred, def, file, file_text(sources, file));
+    if let Some(f) = prog.fn_info(def) {
+        c.env = prog.elaborate_env(&f.predicates);
+        c.generic_names = f.generics.iter().map(|g| g.name.clone()).collect();
+    }
     c.ret.push(RetCtx { ty: ty.clone(), closure: None, first_local: 0, loops: 0, captures: Vec::new() });
     let x = c.check_expr(expr, ty);
+    check_bounds(&mut c);
     let span = x.span;
     let block = Block { stmts: vec![Stmt::Return { value: Some(x), span }], span };
     let has_errors = c.diags.iter().any(|d| d.is_error());

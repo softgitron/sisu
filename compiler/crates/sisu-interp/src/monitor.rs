@@ -350,6 +350,8 @@ impl Interp<'_, '_> {
                 self.mon_held_views(k, depth + 1, budget)?;
                 self.mon_held_views(x, depth + 1, budget)
             }),
+            Value::Dyn(d) => self.mon_held_views(&d.value, depth + 1, budget),
+            Value::Closure(c) => c.env.iter().try_for_each(|x| self.mon_held_views(x, depth + 1, budget)),
             _ => Ok(()),
         }
     }
@@ -383,7 +385,7 @@ impl Interp<'_, '_> {
         }
         let mut budget = VIEW_SCAN_BUDGET;
         match v {
-            Value::Closure(_, env) => env.iter().try_for_each(|x| self.mon_held_views(x, 0, &mut budget)),
+            Value::Closure(c) => c.env.iter().try_for_each(|x| self.mon_held_views(x, 0, &mut budget)),
             _ => self.mon_held_views(v, 0, &mut budget),
         }
     }
@@ -552,6 +554,7 @@ impl Interp<'_, '_> {
                     s.push_str(&format!(".items[{i}]"));
                     ty = arg(&ty, 0);
                 }
+                Step::DynValue => ty = None,
             }
         }
         s

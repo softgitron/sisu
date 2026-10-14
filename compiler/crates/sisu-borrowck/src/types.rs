@@ -82,13 +82,13 @@ impl<'p> Types<'p> {
                 (1, 0) => args.get(1).cloned(),
                 _ => None,
             },
-            (Type::Named(n, _), None) => match self.decl(n)? {
-                TypeDecl::Struct { fields, .. } => fields.get(i as usize).map(|f| f.ty.clone()),
+            (Type::Named(n, args), None) => match self.decl(n)? {
+                TypeDecl::Struct { fields, .. } => fields.get(i as usize).map(|f| f.ty.subst(args)),
                 TypeDecl::Enum { .. } => None,
             },
-            (Type::Named(n, _), Some(v)) => match self.decl(n)? {
+            (Type::Named(n, args), Some(v)) => match self.decl(n)? {
                 TypeDecl::Enum { variants, .. } => {
-                    variants.get(v as usize)?.fields.get(i as usize).map(|(_, t)| t.clone())
+                    variants.get(v as usize)?.fields.get(i as usize).map(|(_, t)| t.subst(args))
                 }
                 TypeDecl::Struct { .. } => None,
             },
@@ -141,7 +141,8 @@ impl<'p> Types<'p> {
             return true;
         }
         match t {
-            Type::Ref(..) | Type::Str | Type::Fn(..) => true,
+            // A type parameter may stand for a view.
+            Type::Ref(..) | Type::Str | Type::Fn(..) | Type::Param(_) | Type::Assoc(..) => true,
             Type::Tuple(es) => es.iter().any(|e| self.may_hold_depth(e, depth + 1)),
             Type::Named(n, args) => {
                 if BORROWING_BUILTINS.contains(&n.as_str()) {
@@ -153,8 +154,11 @@ impl<'p> Types<'p> {
                 if matches!(n.as_str(), "list" | "dict" | "set" | "Option" | "Result") {
                     return args.iter().any(|a| self.may_hold_depth(a, depth + 1));
                 }
+                // A generic type holds what its arguments hold.
                 matches!(self.decl(n), Some(TypeDecl::Struct { view: true, .. }))
+                    || args.iter().any(|a| self.may_hold_depth(a, depth + 1))
             }
+            // Only a value that owns what it holds becomes `dyn`.
             _ => false,
         }
     }
@@ -179,6 +183,8 @@ impl<'p> Types<'p> {
             return true;
         }
         match t {
+            // Its type argument, or the value behind a `dyn`, may have one.
+            Type::Param(_) | Type::Assoc(..) | Type::Dyn(..) => true,
             Type::Tuple(es) => es.iter().any(|e| self.drop_glue_depth(e, depth + 1)),
             Type::Named(n, args) => {
                 if args.iter().any(|a| self.drop_glue_depth(a, depth + 1)) {
@@ -217,7 +223,7 @@ impl<'p> Types<'p> {
                     || (matches!(n.as_str(), "Option" | "Result")
                         && args.iter().all(|a| self.trivial_drop(a)))
             }
-            Type::ErrSet(_) => false,
+            Type::ErrSet(_) | Type::Param(_) | Type::Assoc(..) | Type::Dyn(..) => false,
         }
     }
 

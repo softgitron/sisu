@@ -8,6 +8,7 @@ fn sample() -> Program {
         types: vec![
             TypeDecl::Struct {
                 name: "Point".into(),
+                params: vec![],
                 fields: vec![
                     FieldDecl { name: "x".into(), ty: Type::Float, default: Some("Point#x".into()) },
                     FieldDecl {
@@ -22,13 +23,27 @@ fn sample() -> Program {
             },
             TypeDecl::Struct {
                 name: "Token".into(),
+                params: vec![],
                 fields: vec![FieldDecl { name: "text".into(), ty: Type::Str, default: None }],
                 drop: None,
                 view: true,
                 must_consume: true,
             },
+            TypeDecl::Struct {
+                name: "Stack".into(),
+                params: vec!["T".into()],
+                fields: vec![FieldDecl {
+                    name: "items".into(),
+                    ty: Type::Named("list".into(), vec![Type::Param(0)]),
+                    default: None,
+                }],
+                drop: None,
+                view: false,
+                must_consume: false,
+            },
             TypeDecl::Enum {
                 name: "E".into(),
+                params: vec![],
                 variants: vec![
                     VariantDecl { name: "A".into(), fields: vec![] },
                     VariantDecl {
@@ -51,6 +66,7 @@ fn sample() -> Program {
         functions: vec![
             Function {
                 name: "Point#x".into(),
+                type_params: vec![],
                 kind: FnKind::Value,
                 param_count: 0,
                 pure: true,
@@ -74,7 +90,70 @@ fn sample() -> Program {
                 source: 0,
             },
             Function {
+                name: "show".into(),
+                type_params: vec!["T".into()],
+                kind: FnKind::Normal,
+                param_count: 1,
+                pure: false,
+                from: vec![],
+                inner: vec![],
+                loc: None,
+                locals: vec![
+                    LocalDecl::new(Type::Unit, None),
+                    LocalDecl::new(Type::Ref(Box::new(Type::Param(0)), false), Some("x".into())),
+                    LocalDecl::new(Type::Dyn("Display".into(), vec![]), None),
+                    LocalDecl::new(
+                        Type::Assoc(Box::new(Type::Param(0)), "Container".into(), vec![], "Item".into()),
+                        None,
+                    ),
+                    LocalDecl::new(Type::Fn(vec![], Box::new(Type::Unit), false), None),
+                ],
+                blocks: vec![BasicBlock {
+                    stmts: vec![
+                        Statement {
+                            kind: StatementKind::Call {
+                                dest: Place::local(l(0)),
+                                callee: Callee::Trait("Display.fmt".into(), vec![Type::Param(0)]),
+                                args: vec![Operand::Copy(Place::local(l(1)))],
+                            },
+                            loc: None,
+                        },
+                        Statement {
+                            kind: StatementKind::Call {
+                                dest: Place::local(l(0)),
+                                callee: Callee::Fn("show".into(), vec![Type::Int]),
+                                args: vec![Operand::Const(Const::Int(1))],
+                            },
+                            loc: None,
+                        },
+                        Statement {
+                            kind: StatementKind::Assign(
+                                Place::local(l(2)),
+                                Rvalue::Aggregate(
+                                    Aggregate::Dyn(Type::Int),
+                                    vec![Operand::Const(Const::Int(2))],
+                                ),
+                            ),
+                            loc: None,
+                        },
+                        Statement {
+                            kind: StatementKind::Assign(
+                                Place::local(l(4)),
+                                Rvalue::Closure("show".into(), vec![Type::Param(0)], vec![]),
+                            ),
+                            loc: None,
+                        },
+                    ],
+                    term: Terminator::Return,
+                    unwind: None,
+                    cleanup: false,
+                    loc: None,
+                }],
+                source: 0,
+            },
+            Function {
                 name: "main".into(),
+                type_params: vec![],
                 kind: FnKind::Normal,
                 param_count: 0,
                 pure: false,
@@ -182,6 +261,29 @@ fn sample() -> Program {
             },
         ],
         tests: vec![("a test".into(), "main".into())],
+        trait_methods: vec![IntrinsicDecl {
+            name: "Display.fmt".into(),
+            pure: true,
+            from: vec![],
+            inner: vec![],
+            own: vec![],
+        }],
+        impls: vec![
+            ImplDecl {
+                params: 0,
+                trait_name: "Display".into(),
+                trait_args: vec![],
+                self_ty: Type::Int,
+                methods: vec![("fmt".into(), ImplTarget::Intrinsic("structural.display".into()))],
+            },
+            ImplDecl {
+                params: 1,
+                trait_name: "Add".into(),
+                trait_args: vec![Type::Param(0)],
+                self_ty: Type::Named("Stack".into(), vec![Type::Param(0)]),
+                methods: vec![("add".into(), ImplTarget::Fn("show".into()))],
+            },
+        ],
     }
 }
 
@@ -215,6 +317,17 @@ fn text_form_is_readable() {
     assert!(text.contains("  bb0 (unwind bb2):"));
     assert!(text.contains("  bb2 (cleanup):"));
     assert!(text.contains("switch copy _4 [0: bb1, 1: bb1, else: bb2] @4:1"));
+    assert!(text.contains("struct Stack[T] { items: list[$0] }"));
+    assert!(text.contains("\nmethod Display.fmt pure\n"));
+    assert!(text.contains("impl Display for int { fmt: intrinsic structural.display }"));
+    assert!(text.contains("impl[1] Add[$0] for Stack[$0] { add: show }"));
+    assert!(text.contains("fn show[T](1) source 0 {"));
+    assert!(text.contains("    let _2: dyn Display\n"));
+    assert!(text.contains("    let _3: <$0 as Container>.Item\n"));
+    assert!(text.contains("_0 = call trait Display.fmt[$0](copy _1)"));
+    assert!(text.contains("_0 = call fn show[int](const 1)"));
+    assert!(text.contains("_2 = dyn int(const 2)"));
+    assert!(text.contains("_4 = closure show[$0]()"));
 }
 
 #[test]
@@ -238,28 +351,28 @@ fn reader_reports_lines() {
 #[test]
 fn function_headers_name_their_from_arguments() {
     let mut p = sample();
-    p.functions[1].param_count = 2;
-    p.functions[1].from = vec![0, 1];
+    p.functions[2].param_count = 2;
+    p.functions[2].from = vec![0, 1];
     let text = write(&p);
     assert!(text.contains("fn main(2) source 0 from 0 1 @1:5-1:9 {"), "{text}");
-    assert_eq!(read(&text).map(|b| b.functions[1].from.clone()), Ok(vec![0, 1]));
-    p.functions[1].from = vec![2];
+    assert_eq!(read(&text).map(|b| b.functions[2].from.clone()), Ok(vec![0, 1]));
+    p.functions[2].from = vec![2];
     assert!(validate(&p).iter().any(|m| m.contains("`from` names argument 2")));
     // Arguments the result borrows through their values only.
-    p.functions[1].from = vec![0];
-    p.functions[1].inner = vec![1];
+    p.functions[2].from = vec![0];
+    p.functions[2].inner = vec![1];
     let text = write(&p);
     assert!(text.contains("fn main(2) source 0 from 0 inner 1 @1:5-1:9 {"), "{text}");
-    assert_eq!(read(&text).map(|b| b.functions[1].inner.clone()), Ok(vec![1]));
-    p.functions[1].inner = vec![3];
+    assert_eq!(read(&text).map(|b| b.functions[2].inner.clone()), Ok(vec![1]));
+    p.functions[2].inner = vec![3];
     assert!(validate(&p).iter().any(|m| m.contains("`inner` names argument 3")));
 }
 
 #[test]
 fn validator_catches_broken_graphs() {
     let mut p = sample();
-    p.functions[1].blocks[1].term = Terminator::Goto(BlockId(9));
-    p.functions[1].blocks[0].unwind = Some(BlockId(1));
+    p.functions[2].blocks[1].term = Terminator::Goto(BlockId(9));
+    p.functions[2].blocks[0].unwind = Some(BlockId(1));
     let problems = validate(&p);
     assert!(problems.iter().any(|m| m.contains("missing bb9")));
     assert!(problems.iter().any(|m| m.contains("not a cleanup block")));

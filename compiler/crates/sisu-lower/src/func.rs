@@ -56,6 +56,10 @@ struct BlockBuild {
 pub(crate) struct FnLower<'c, 'a> {
     pub ctx: &'c Ctx<'a>,
     pub body: &'a thir::Body,
+    /// The generic parameters of the function (a closure has its owner's).
+    pub type_params: Vec<String>,
+    /// The bounds in scope, for associated types and trait calls.
+    pub bounds: Vec<sisu_resolve::Predicate>,
     pub closure: Option<thir::ClosureId>,
     pub name: String,
     pub locals: Vec<sir::LocalDecl>,
@@ -97,7 +101,17 @@ pub(crate) fn lower_body(ctx: &mut Ctx, body: &thir::Body) -> Vec<sir::Function>
         }
         None => (true, Vec::new(), Vec::new()),
     };
-    out.push(FnLower::new(ctx, body, None, &name).run(kind, source, pure, (from, inner)));
+    let generics_of = match &body.kind {
+        thir::BodyKind::Fn => ctx.prog.fn_info(body.def),
+        _ => None,
+    };
+    let type_params: Vec<String> =
+        generics_of.map(|f| f.generics.iter().map(|g| g.name.clone()).collect()).unwrap_or_default();
+    let env = generics_of.map(|f| ctx.prog.elaborate_env(&f.predicates)).unwrap_or_default();
+    let mut main = FnLower::new(ctx, body, None, &name);
+    main.type_params = type_params.clone();
+    main.bounds = env.clone();
+    out.push(main.run(kind, source, pure, (from, inner)));
     for (i, cl) in body.closures.iter().enumerate() {
         let id = thir::ClosureId(i as u32);
         let cname = closure_name(&name, id);
@@ -105,12 +119,10 @@ pub(crate) fn lower_body(ctx: &mut Ctx, body: &thir::Body) -> Vec<sir::Function>
         // A closure's result may borrow from any argument, its environment
         // (argument 0) included: function types carry no `from` clause.
         let from: Vec<u32> = (0..cl.params.len() as u32 + 1).collect();
-        out.push(FnLower::new(ctx, body, Some(id), &cname).run(
-            sir::FnKind::Closure,
-            source,
-            pure,
-            (from, Vec::new()),
-        ));
+        let mut fl = FnLower::new(ctx, body, Some(id), &cname);
+        fl.type_params = type_params.clone();
+        fl.bounds = env.clone();
+        out.push(fl.run(sir::FnKind::Closure, source, pure, (from, Vec::new())));
     }
     out
 }
@@ -124,6 +136,8 @@ impl<'c, 'a> FnLower<'c, 'a> {
         FnLower {
             ctx,
             body,
+            type_params: Vec::new(),
+            bounds: Vec::new(),
             closure,
             name: name.to_string(),
             locals: Vec::new(),
@@ -224,6 +238,7 @@ impl<'c, 'a> FnLower<'c, 'a> {
         let blocks = self.finish_blocks();
         sir::Function {
             name: self.name.clone(),
+            type_params: self.type_params.clone(),
             kind,
             param_count,
             pure,

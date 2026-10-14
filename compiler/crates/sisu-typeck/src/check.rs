@@ -5,7 +5,7 @@
 use crate::infer::InferTable;
 use crate::thir::*;
 use sisu_diag::{Diagnostic, FileId, MsgId, Span, TextRange, msg};
-use sisu_resolve::{DefId, DefKind, ModuleId, Program, Ty};
+use sisu_resolve::{DefId, DefKind, ModuleId, Predicate, Program, TraitRef, Ty};
 use sisu_syntax::ast::{self, TypeKind};
 use std::collections::HashMap;
 
@@ -34,7 +34,12 @@ pub(crate) struct Checker<'p> {
     pub ret: Vec<RetCtx>,
     pub self_ty: Option<Ty>,
     /// Bounds to check once inference is done: (type, bound, span).
-    pub bounds: Vec<(Ty, String, Span)>,
+    pub bounds: Vec<(Ty, TraitRef, Span)>,
+    /// The bounds in scope: the function's own, elaborated with
+    /// supertraits.
+    pub env: Vec<Predicate>,
+    /// The names of the function's generic parameters, for diagnostics.
+    pub generic_names: Vec<String>,
     /// The function's header or body did not parse: a name the body cannot
     /// find is most likely a parameter or binding lost in that error, so it
     /// is not reported.
@@ -65,6 +70,8 @@ impl<'p> Checker<'p> {
             ret: Vec::new(),
             self_ty: None,
             bounds: Vec::new(),
+            env: Vec::new(),
+            generic_names: Vec::new(),
             quiet_unknown_names: prog.fn_info(def).is_some_and(|f| f.header_broken || f.body_broken),
         }
     }
@@ -97,7 +104,32 @@ impl<'p> Checker<'p> {
 
     /// The display form of a type, with variables resolved as far as known.
     pub fn show(&self, ty: &Ty) -> String {
-        self.prog.display(&self.infer.zonk(ty))
+        self.prog.display_in(&self.infer.zonk(ty), &self.generic_names)
+    }
+
+    /// Requires `ty` to implement the trait `tr` (a well-known one, when
+    /// `tr` is `None` the prelude lacks it and nothing is required).
+    pub fn require(&mut self, ty: Ty, tr: Option<DefId>, span: Span) {
+        if let Some(def) = tr {
+            self.bounds.push((ty, TraitRef { def, args: Vec::new() }, span));
+        }
+    }
+
+    /// The fix of a missing impl (10, "Missing-trait errors list the
+    /// candidates"): when the type has every method of the trait as its
+    /// own, adding the impl is enough.
+    pub fn missing_impl_fix(&self, d: Diagnostic, ty: &Ty, tr: &TraitRef) -> Diagnostic {
+        let prog = self.prog;
+        let Some(info) = prog.trait_info(tr.def) else { return d };
+        let Some(key) = ty.key() else { return d };
+        if info.methods.is_empty() {
+            return d;
+        }
+        let all = info.methods.iter().all(|m| prog.method(key, &prog.def(*m).name).is_some());
+        if !all {
+            return d;
+        }
+        d.fix(msg::TYPE_ADD_IMPL, vec![("trait", prog.display_trait(tr)), ("ty", self.show(ty))], Vec::new())
     }
 
     pub fn source_text(&self, range: TextRange) -> String {
@@ -182,6 +214,34 @@ impl<'p> Checker<'p> {
             TypeKind::Path { segments, args } => {
                 let args: Vec<Ty> = args.iter().map(|a| self.resolve_ty(a)).collect();
                 let names: Vec<&str> = segments.iter().map(|s| s.text.as_str()).collect();
+                if let [n] = names.as_slice()
+                    && let Some(i) = self.generic_names.iter().position(|g| g == n)
+                {
+                    return Ty::Param(i as u32);
+                }
+                // `C.Item`, `Self.Item`: an associated type of a parameter.
+                if let [base, name] = names.as_slice() {
+                    let subject = if let Some(i) = self.generic_names.iter().position(|g| g == base) {
+                        Some(Ty::Param(i as u32))
+                    } else if *base == "Self" {
+                        self.self_ty.clone()
+                    } else {
+                        None
+                    };
+                    if let Some(subject) = subject {
+                        return match self.assoc_of(&subject, name) {
+                            Some(t) => prog.normalize(&t, &self.env),
+                            None => {
+                                let d = self
+                                    .error(msg::RESOLVE_NO_ASSOC_TYPE, te.range)
+                                    .with("ty", self.show(&subject))
+                                    .with("name", name.to_string());
+                                self.report(d);
+                                Ty::Error
+                            }
+                        };
+                    }
+                }
                 match names.as_slice() {
                     ["int"] => Ty::Int,
                     ["f64"] => Ty::Float,
@@ -241,6 +301,20 @@ impl<'p> Checker<'p> {
                 let t = self.resolve_ty(inner);
                 Ty::Ref(Box::new(t), *mutable)
             }
+            TypeKind::Dyn(inner) => {
+                let TypeKind::Path { segments, args } = &inner.kind else { return Ty::Error };
+                let names: Vec<&str> = segments.iter().map(|s| s.text.as_str()).collect();
+                let args: Vec<Ty> = args.iter().map(|a| self.resolve_ty(a)).collect();
+                match self.lookup_type_path(&names) {
+                    Some(d) if prog.trait_info(d).is_some() => Ty::Dyn(TraitRef { def: d, args }),
+                    _ => {
+                        let d =
+                            self.error(msg::RESOLVE_NOT_A_TRAIT, inner.range).with("name", names.join("."));
+                        self.report(d);
+                        Ty::Error
+                    }
+                }
+            }
             TypeKind::Union(_) => {
                 let d = self.error(msg::RESOLVE_UNION_OUTSIDE_RESULT, te.range);
                 self.report(d);
@@ -251,6 +325,41 @@ impl<'p> Checker<'p> {
                 Ty::Error
             }
         }
+    }
+
+    /// The associated type `name` of `subject`, from the bounds in scope.
+    pub fn assoc_of(&self, subject: &Ty, name: &str) -> Option<Ty> {
+        let prog = self.prog;
+        for p in &self.env {
+            if p.ty != *subject {
+                continue;
+            }
+            let declares =
+                prog.trait_info(p.bound.def).is_some_and(|i| i.assoc.iter().any(|a| a.name == name));
+            if declares {
+                return Some(Ty::Assoc(Box::new(sisu_resolve::AssocTy {
+                    self_ty: subject.clone(),
+                    trait_: p.bound.clone(),
+                    name: name.to_string(),
+                })));
+            }
+        }
+        // A concrete type: whichever trait it implements declares the name.
+        for (i, def) in prog.defs.iter().enumerate() {
+            let DefKind::Trait(info) = &def.kind else { continue };
+            if !info.assoc.iter().any(|a| a.name == name) || !info.generics.is_empty() {
+                continue;
+            }
+            let tr = TraitRef { def: DefId(i as u32), args: Vec::new() };
+            if prog.implements(subject, &tr, &self.env).holds() {
+                return Some(Ty::Assoc(Box::new(sisu_resolve::AssocTy {
+                    self_ty: subject.clone(),
+                    trait_: tr,
+                    name: name.to_string(),
+                })));
+            }
+        }
+        None
     }
 
     fn resolve_err_set(&mut self, te: &ast::TypeExpr) -> Ty {
@@ -296,12 +405,36 @@ impl<'p> Checker<'p> {
             DefKind::Enum(e) => e.generics.len(),
             DefKind::ErrorSet(_) => return Ty::ErrSet(vec![d]),
             DefKind::TypeAlias(t) => return t.clone(),
+            DefKind::Trait(_) => {
+                let at = Span::new(self.file, TextRange::empty(range.start));
+                let diag = self.error(msg::RESOLVE_TRAIT_AS_TYPE, range).with("name", name.clone()).fix(
+                    msg::RESOLVE_ADD_DYN,
+                    vec![("name", name)],
+                    vec![sisu_diag::Edit { span: at, text: "dyn ".into() }],
+                );
+                self.report(diag);
+                return Ty::Error;
+            }
             _ => {
                 let diag = self.error(msg::RESOLVE_NOT_A_TYPE, range).with("name", name);
                 self.report(diag);
                 return Ty::Error;
             }
         };
+        let mut args = args;
+        // Omitted trailing arguments take their defaults (D-060).
+        if !args.is_empty() && args.len() < generics {
+            let gs = prog.type_generics(d);
+            while args.len() < generics {
+                match gs.get(args.len()).and_then(|g| g.default.clone()) {
+                    Some(t) => {
+                        let t = t.subst(&args);
+                        args.push(t);
+                    }
+                    None => break,
+                }
+            }
+        }
         if args.len() != generics {
             if args.is_empty() {
                 // `list` in a body annotation: the arguments are inferred.

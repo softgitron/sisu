@@ -87,7 +87,8 @@ pub struct FnDef {
     pub ret: Option<TypeExpr>,
     /// `-> ref T from a, b`.
     pub from: Vec<Name>,
-    pub has_where: bool,
+    /// `where T: Display + Hash, C.Item: Display`.
+    pub where_: Vec<WherePred>,
     /// `None` for a signature without a body (an intrinsic).
     pub body: Option<Block>,
     pub attrs: Vec<Attr>,
@@ -103,7 +104,27 @@ pub struct FnDef {
 pub struct GenericParam {
     pub name: Name,
     pub bounds: Vec<TypeExpr>,
+    /// `A: Allocator = Global`: the type a use site that omits it gets.
+    pub default: Option<TypeExpr>,
     pub is_const: bool,
+}
+
+/// One predicate of a `where` clause: a type and the traits it must
+/// implement.
+#[derive(Clone, Debug)]
+pub struct WherePred {
+    pub ty: TypeExpr,
+    pub bounds: Vec<TypeExpr>,
+    pub range: TextRange,
+}
+
+/// `type Item` in a trait (an associated type, with an optional default),
+/// or `type Item = T` in an impl (its binding).
+#[derive(Clone, Debug)]
+pub struct AssocTypeDef {
+    pub name: Name,
+    pub ty: Option<TypeExpr>,
+    pub range: TextRange,
 }
 
 /// A parameter or argument convention (04, "The decision").
@@ -193,11 +214,19 @@ pub struct ImplDef {
     pub trait_ty: Option<TypeExpr>,
     pub self_ty: TypeExpr,
     pub methods: Vec<FnDef>,
+    /// `type Item = T` lines.
+    pub assoc_types: Vec<AssocTypeDef>,
 }
 
 #[derive(Clone, Debug)]
 pub struct TraitDef {
     pub name: Name,
+    pub generics: Vec<GenericParam>,
+    /// `trait Container(Len)`: traits every implementer must implement too.
+    pub supertraits: Vec<TypeExpr>,
+    /// Required (no body) and provided methods.
+    pub methods: Vec<FnDef>,
+    pub assoc_types: Vec<AssocTypeDef>,
 }
 
 #[derive(Clone, Debug)]
@@ -635,6 +664,8 @@ pub enum TypeKind {
         inner: Box<TypeExpr>,
     },
     ConstArg(i128),
+    /// `dyn Trait`: the inner type is the trait's path.
+    Dyn(Box<TypeExpr>),
     Unsupported(&'static str),
     Error,
 }

@@ -1,6 +1,5 @@
 sir 0
 source 0 "match_lowering.sisu"
-source 1 "<std>/prelude.sisu"
 entry main
 
 enum Op { Add(int, int), Neg(int), Zero }

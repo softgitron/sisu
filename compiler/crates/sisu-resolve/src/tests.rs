@@ -68,7 +68,7 @@ fn resolution_errors() {
     assert_eq!(codes("def f(x: dict[int]):\n    pass\n"), vec!["E0208"]);
     assert_eq!(codes("struct S:\n    x: int\ndef f() -> ! S:\n    pass\n"), vec!["E0212"]);
     assert_eq!(codes("import nothing.here\n"), vec!["E0220"]);
-    assert_eq!(codes("def f[T](x: T):\n    pass\n"), vec!["E0210"]);
+    assert!(codes("def f[T](x: T):\n    pass\n").is_empty());
     assert_eq!(codes("def f(x: Shared[int]):\n    pass\n"), vec!["E0900"]);
     assert_eq!(codes("def f()\n"), vec!["E0224"]);
     assert_eq!(codes("struct S:\n    x: int\n    x: int\n"), vec!["E0205"]);
@@ -85,7 +85,7 @@ fn drop_impls_register() {
     assert!(p.struct_info(g).unwrap().drop.is_some());
     assert_eq!(
         codes("struct G:\n    x: int\nimpl Display for G:\n    def f(self):\n        pass\n"),
-        vec!["E0214"]
+        vec!["E0233", "E0232"]
     );
 }
 

@@ -13,7 +13,7 @@ def main():
     let rx = ref p.x
     p.y += 10
     print(rx)
-    print(p)
+    print("{p:?}")
     var a = Account(owner="aino".to_string(), balance=5)
     let who = ref a.owner
     a.balance += 1

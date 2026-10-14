@@ -1,6 +1,5 @@
 sir 0
 source 0 "try_operator.sisu"
-source 1 "<std>/prelude.sisu"
 entry main
 
 error E { Bad }

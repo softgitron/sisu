@@ -19,6 +19,18 @@ impl Interp<'_, '_> {
         self.resolve_mode(p, Mode::Read)?.ok_or_else(|| ice("place did not resolve"))
     }
 
+    /// The type a `ref dyn` made from a `ref T` carries, when the place
+    /// is `r.*` for such a reference `r`: reborrowing it keeps the type.
+    pub(crate) fn fat_type_of_deref(&mut self, p: &Place) -> Result<Option<sisu_sir::Type>, Unwind> {
+        let Some((Proj::Deref, init)) = p.proj.split_last() else { return Ok(None) };
+        let base = Place { local: p.local, proj: init.to_vec() };
+        let ptr = self.resolve(&base)?;
+        Ok(match self.read(&ptr)? {
+            Value::Dyn(d) if matches!(d.ty, sisu_sir::Type::Ref(..)) => Some(d.ty.clone()),
+            _ => None,
+        })
+    }
+
     pub(crate) fn resolve_for_write(&mut self, p: &Place) -> Result<Pointer, Unwind> {
         self.resolve_mode(p, Mode::Write)?.ok_or_else(|| ice("place did not resolve"))
     }
@@ -36,6 +48,11 @@ impl Interp<'_, '_> {
             match proj {
                 Proj::Deref => match self.read(&ptr)? {
                     Value::Ref(q) => ptr = (**q).clone(),
+                    // A `ref dyn` made from a `ref T` holds the reference.
+                    Value::Dyn(d) if matches!(d.ty, sisu_sir::Type::Ref(..)) => match &d.value {
+                        Value::Ref(q) => ptr = (**q).clone(),
+                        other => return Err(ice(format!("a `ref dyn` holding {other:?}"))),
+                    },
                     Value::Moved => return Err(self.moved_at(&ptr)),
                     other => return Err(ice(format!("dereferencing {other:?}"))),
                 },
@@ -148,12 +165,15 @@ impl Interp<'_, '_> {
         walk_mut(root, &p.path)
     }
 
-    /// Follows references to the value they point at.
+    /// Follows references (and `dyn` wrappers) to the value they lead to.
     pub(crate) fn target<'v>(&'v self, mut v: &'v Value) -> Result<&'v Value, Unwind> {
-        while let Value::Ref(p) = v {
-            v = self.read(p)?;
+        loop {
+            match v {
+                Value::Ref(p) => v = self.read(p)?,
+                Value::Dyn(d) => v = &d.value,
+                _ => return Ok(v),
+            }
         }
-        Ok(v)
     }
 
     /// The pointer to the non-reference value a reference leads to.
@@ -236,6 +256,7 @@ fn step(v: &Value, s: Step) -> Result<&Value, Unwind> {
         (Step::DictKey(i), Value::Dict(d)) => d.entries.get(i).map(|e| &e.0),
         (Step::DictVal(i), Value::Dict(d)) => d.entries.get(i).map(|e| &e.1),
         (Step::SetItem(i), Value::Set(s)) => s.items.get(i),
+        (Step::DynValue, Value::Dyn(d)) => Some(&d.value),
         _ => None,
     };
     r.ok_or_else(|| ice(format!("{s:?} does not apply to {v:?}")))
@@ -262,6 +283,7 @@ fn walk_mut<'v>(mut v: &'v mut Value, path: &[Step]) -> Result<&'v mut Value, Un
             (Step::DictKey(i), Value::Dict(d)) => d.entries.get_mut(i).map(|e| &mut e.0),
             (Step::DictVal(i), Value::Dict(d)) => d.entries.get_mut(i).map(|e| &mut e.1),
             (Step::SetItem(i), Value::Set(s)) => s.items.get_mut(i),
+            (Step::DynValue, Value::Dyn(d)) => Some(&mut d.value),
             (s, _) => return Err(ice(format!("{s:?} does not apply to the value"))),
         }
         .ok_or_else(|| ice(format!("{s:?} is out of range")))?;

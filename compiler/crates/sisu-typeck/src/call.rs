@@ -23,6 +23,10 @@ pub struct InstParam {
     pub mode: Mode,
     pub ty: Ty,
     pub has_default: bool,
+    /// The declared type is a generic parameter (or an associated type of
+    /// one) of a function with a body: a borrowed argument is passed by
+    /// reference even when its type is `Copy`.
+    pub opaque: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -542,7 +546,8 @@ impl Checker<'_> {
     }
 
     /// Instantiates a function's signature with fresh type variables, or
-    /// the explicit type arguments for its own generic parameters.
+    /// the explicit type arguments for its own generic parameters; its
+    /// bounds are required of the arguments.
     pub fn instantiate(&mut self, d: DefId, explicit: Option<Vec<Ty>>, range: TextRange) -> InstSig {
         let prog = self.prog;
         let span = self.span(range);
@@ -573,7 +578,7 @@ impl Checker<'_> {
             self.report(diag);
         }
         let mut vars = Vec::new();
-        for (i, g) in f.generics.iter().enumerate() {
+        for i in 0..f.generics.len() {
             let v = if i >= f.impl_generics {
                 explicit
                     .as_ref()
@@ -582,11 +587,12 @@ impl Checker<'_> {
             } else {
                 self.infer.fresh()
             };
-            for b in &g.bounds {
-                self.bounds.push((v.clone(), b.clone(), span));
-            }
             vars.push(v);
         }
+        for p in &f.predicates {
+            self.bounds.push((p.ty.subst(&vars), p.bound.subst(&vars), span));
+        }
+        let has_body = f.intrinsic.is_none();
         let params = f
             .params
             .iter()
@@ -595,6 +601,7 @@ impl Checker<'_> {
                 mode: p.mode,
                 ty: p.ty.subst(&vars),
                 has_default: p.default.is_some(),
+                opaque: has_body && crate::is_opaque(&p.ty),
             })
             .collect();
         InstSig {
@@ -624,6 +631,24 @@ impl Checker<'_> {
         range: TextRange,
         expected: Option<&Ty>,
     ) -> Expr {
+        self.call_fn_with(d, tys, None, owner, recv, args, trailing, range, expected)
+    }
+
+    /// [`Checker::call_fn`] where the outer generic parameters are known:
+    /// for a trait's method, `Self` and the trait's arguments.
+    #[allow(clippy::too_many_arguments)]
+    pub fn call_fn_with(
+        &mut self,
+        d: DefId,
+        tys: Option<Vec<Ty>>,
+        outer: Option<Vec<Ty>>,
+        owner: Option<Ty>,
+        recv: Option<Arg>,
+        args: &[ast::Arg],
+        trailing: Option<&ast::Closure>,
+        range: TextRange,
+        expected: Option<&Ty>,
+    ) -> Expr {
         let span = self.span(range);
         let prog = self.prog;
         if prog.fn_info(d).is_some_and(|f| f.header_broken) {
@@ -632,10 +657,21 @@ impl Checker<'_> {
             self.check_args_loosely(args);
             return Expr::error(span);
         }
-        let sig = self.instantiate(d, tys, range);
+        let mut sig = self.instantiate(d, tys, range);
+        if let Some(outer) = &outer {
+            for (v, t) in sig.type_args.iter().zip(outer) {
+                self.infer.try_unify(v, t);
+            }
+        }
         if let (Some(o), Some(so)) = (&owner, &sig.owner) {
             self.infer.try_unify(so, o);
         }
+        // Associated types of what is known now.
+        let env = self.env.clone();
+        for p in sig.params.iter_mut() {
+            p.ty = prog.normalize(&self.infer.zonk(&p.ty), &env);
+        }
+        sig.ret = prog.normalize(&self.infer.zonk(&sig.ret), &env);
         if let Some(exp) = expected {
             // Let the expected type drive inference (`list()`, `todo()`).
             if self.infer.has_vars(&sig.ret) {
@@ -666,6 +702,7 @@ impl Checker<'_> {
             out.push(r);
         }
         out.extend(self.check_args(&sig, args, trailing, range));
+        let ret = prog.normalize(&self.infer.zonk(&sig.ret), &self.env);
         // A typed hole is reported with the type it stands for (D-061).
         if prog.fn_info(d).and_then(|f| f.intrinsic.as_deref()) == Some("todo") {
             let name = match out.first().map(|a| &a.expr.kind) {
@@ -678,7 +715,7 @@ impl Checker<'_> {
         }
         Expr::new(
             ExprKind::Call { callee: Callee::Fn { def: d, type_args: sig.type_args.clone() }, args: out },
-            sig.ret,
+            ret,
             span,
         )
     }
@@ -849,6 +886,17 @@ impl Checker<'_> {
                 }
                 Arg { expr: x, mode: ArgMode::BorrowMut }
             }
+            Mode::Borrow if p.opaque => {
+                // A generic parameter: always by reference.
+                let x = self.infer_expr(&a.value, Some(&pty));
+                if let Ty::Ref(inner, _) = self.resolved(&x.ty)
+                    && self.infer.try_unify(&inner, &pty)
+                {
+                    return Arg { expr: x, mode: ArgMode::Value };
+                }
+                let x = self.coerce(x, &pty);
+                Arg { expr: x, mode: ArgMode::Ref }
+            }
             Mode::Borrow => {
                 let prog = self.prog;
                 if let Ty::Adt(d, targs) = &pty
@@ -902,7 +950,9 @@ impl Checker<'_> {
         }
     }
 
-    /// `recv.name(args)`.
+    /// `recv.name(args)`: a method of the receiver's type, then of a trait
+    /// it implements (or, for a generic parameter, a trait it is bounded
+    /// by); through references and `Box`es.
     pub fn method_call_on(
         &mut self,
         recv: Expr,
@@ -914,41 +964,70 @@ impl Checker<'_> {
     ) -> Expr {
         let span = self.span(range);
         let prog = self.prog;
-        let recv = self.auto_deref(recv);
-        let base = self.resolved(&recv.ty);
-        match &base {
-            Ty::Error => {
-                self.check_args_loosely(args);
-                return Expr::error(span);
+        let mut recv = self.auto_deref(recv);
+        loop {
+            let base = self.resolved(&recv.ty);
+            match &base {
+                Ty::Error => {
+                    self.check_args_loosely(args);
+                    return Expr::error(span);
+                }
+                Ty::Var(_) => {
+                    let d = self
+                        .error(msg::TYPE_CANNOT_INFER, recv.span.range)
+                        .with("name", self.source_text(recv.span.range));
+                    self.report(d);
+                    self.check_args_loosely(args);
+                    return Expr::error(span);
+                }
+                _ => {}
             }
-            Ty::Var(_) => {
-                let d = self
-                    .error(msg::TYPE_CANNOT_INFER, recv.span.range)
-                    .with("name", self.source_text(recv.span.range));
-                self.report(d);
-                self.check_args_loosely(args);
-                return Expr::error(span);
+            if name.text == "copy" && args.is_empty() && trailing.is_none() {
+                return Expr::new(ExprKind::CopyOf(Box::new(recv)), base, span);
             }
-            _ => {}
-        }
-        if name.text == "copy" && args.is_empty() && trailing.is_none() {
-            return Expr::new(ExprKind::CopyOf(Box::new(recv)), base, span);
-        }
-        if name.text == "trace" && args.is_empty() && matches!(base, Ty::ErrSet(_)) {
-            return Expr::new(ExprKind::Trace(Box::new(recv)), self.string_ty(), span);
-        }
-        let mut def = base.key().and_then(|k| prog.method(k, &name.text));
-        let mut recv = recv;
-        let mut base = base;
-        if def.is_none()
-            && self.is_string(&base)
-            && let Some(d) = prog.method(TyKey::Str, &name.text)
-        {
-            def = Some(d);
-            recv = self.coerce(recv, &Ty::Str);
-            base = Ty::Str;
-        }
-        let Some(d) = def else {
+            if name.text == "trace" && args.is_empty() && matches!(base, Ty::ErrSet(_)) {
+                return Expr::new(ExprKind::Trace(Box::new(recv)), self.string_ty(), span);
+            }
+            let mut def = base.key().and_then(|k| prog.method(k, &name.text));
+            let mut base = base;
+            if def.is_none()
+                && self.is_string(&base)
+                && let Some(d) = prog.method(TyKey::Str, &name.text)
+            {
+                def = Some(d);
+                recv = self.coerce(recv, &Ty::Str);
+                base = Ty::Str;
+            }
+            if let Some(d) = def {
+                return self.inherent_call(d, recv, base, name, args, trailing, range, expected);
+            }
+            // A method of a trait.
+            let norm = prog.normalize(&self.infer.zonk(&base), &self.env);
+            let candidates = prog.trait_methods_for(&norm, &name.text, &self.env);
+            match candidates.len() {
+                1 => {
+                    let (tr, m) = candidates[0].clone();
+                    return self.trait_call(m, tr, recv, norm, name, args, trailing, range, expected);
+                }
+                0 => {}
+                _ => {
+                    let traits: Vec<String> = candidates.iter().map(|(t, _)| self.show_trait(t)).collect();
+                    let d = self
+                        .error(msg::TYPE_AMBIGUOUS_METHOD, name.range)
+                        .with("name", name.text.clone())
+                        .with("ty", self.show(&base))
+                        .with("traits", traits.join(", "));
+                    self.report(d);
+                    self.check_args_loosely(args);
+                    return Expr::error(span);
+                }
+            }
+            // A `Box` lends its methods' receiver to what it holds.
+            if self.is_box(&base) {
+                recv = self.unbox(recv);
+                recv = self.auto_deref(recv);
+                continue;
+            }
             // A field holding a function.
             if let Ty::Adt(sd, _) = &base
                 && prog.struct_info(*sd).is_some_and(|s| s.fields.iter().any(|f| f.name == name.text))
@@ -960,10 +1039,50 @@ impl Checker<'_> {
                 .error(msg::TYPE_UNKNOWN_METHOD, name.range)
                 .with("ty", self.show(&base))
                 .with("name", name.text.clone());
+            let d = self.unknown_method_note(d, &name.text);
             self.report(d);
             self.check_args_loosely(args);
             return Expr::error(span);
-        };
+        }
+    }
+
+    /// A note naming the traits that have a method called `name`, when the
+    /// receiver implements none of them.
+    fn unknown_method_note(&self, d: sisu_diag::Diagnostic, name: &str) -> sisu_diag::Diagnostic {
+        let prog = self.prog;
+        let traits: Vec<String> = prog
+            .defs
+            .iter()
+            .enumerate()
+            .filter(|(i, def)| {
+                matches!(def.kind, DefKind::Trait(_)) && prog.trait_method(DefId(*i as u32), name).is_some()
+            })
+            .map(|(_, def)| format!("`{}`", def.name))
+            .collect();
+        if traits.is_empty() {
+            return d;
+        }
+        d.note(msg::TYPE_METHOD_OF_TRAITS, vec![("name", name.to_string()), ("traits", traits.join(", "))])
+    }
+
+    pub fn show_trait(&self, t: &sisu_resolve::TraitRef) -> String {
+        self.prog.display_trait_in(t, &self.generic_names)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn inherent_call(
+        &mut self,
+        d: DefId,
+        recv: Expr,
+        base: Ty,
+        name: &ast::Name,
+        args: &[ast::Arg],
+        trailing: Option<&ast::Closure>,
+        range: TextRange,
+        expected: Option<&Ty>,
+    ) -> Expr {
+        let span = self.span(range);
+        let prog = self.prog;
         let Some(info) = prog.fn_info(d) else { return Expr::error(span) };
         if info.header_broken {
             self.check_args_loosely(args);
@@ -997,6 +1116,69 @@ impl Checker<'_> {
         self.call_fn(d, None, Some(base), Some(recv_arg), args, trailing, range, expected)
     }
 
+    /// A call of the trait method `m` of `tr` on `recv`, of type `self_ty`.
+    /// `self` is the trait's `Self`, a generic parameter, so a borrowed one
+    /// is passed by reference whatever its type.
+    #[allow(clippy::too_many_arguments)]
+    pub fn trait_call(
+        &mut self,
+        m: DefId,
+        tr: sisu_resolve::TraitRef,
+        recv: Expr,
+        self_ty: Ty,
+        name: &ast::Name,
+        args: &[ast::Arg],
+        trailing: Option<&ast::Closure>,
+        range: TextRange,
+        expected: Option<&Ty>,
+    ) -> Expr {
+        let span = self.span(range);
+        let prog = self.prog;
+        let Some(info) = prog.fn_info(m) else { return Expr::error(span) };
+        if info.header_broken {
+            self.check_args_loosely(args);
+            return Expr::error(span);
+        }
+        let Some(mode) = info.self_mode else {
+            let d = self
+                .error(msg::TYPE_ASSOC_NOT_METHOD, name.range)
+                .with("name", name.text.clone())
+                .with("ty", self.show(&self_ty));
+            self.report(d);
+            self.check_args_loosely(args);
+            return Expr::error(span);
+        };
+        let recv_arg = match mode {
+            Mode::Borrow => {
+                if let Ty::Ref(..) = self.resolved(&recv.ty) {
+                    Arg { expr: recv, mode: ArgMode::Value }
+                } else {
+                    Arg { expr: recv, mode: ArgMode::Ref }
+                }
+            }
+            Mode::Mut => {
+                if recv.is_place() {
+                    self.require_mutable(&recv, recv.span.range);
+                }
+                Arg { expr: recv, mode: ArgMode::BorrowMut }
+            }
+            Mode::Own => Arg { expr: self.check_movable(recv), mode: ArgMode::Value },
+        };
+        let mut outer = vec![self_ty.clone()];
+        outer.extend(tr.args.iter().cloned());
+        self.call_fn_with(
+            m,
+            None,
+            Some(outer),
+            Some(self_ty),
+            Some(recv_arg),
+            args,
+            trailing,
+            range,
+            expected,
+        )
+    }
+
     /// Calls a value of function type.
     pub fn call_value(
         &mut self,
@@ -1024,6 +1206,7 @@ impl Checker<'_> {
                 mode: Mode::Own,
                 ty: p.clone(),
                 has_default: false,
+                opaque: false,
             })
             .collect();
         let sig = InstSig {

@@ -1,10 +1,13 @@
 //! The resolver: declares every item of every module, loads the std
 //! modules an import names, resolves signatures to [`Ty`], and registers
 //! methods. Bodies are left to the type checker.
+//!
+//! Types are resolved in `types.rs`, traits and impls in `traits.rs`, and
+//! `@derive` writes its impls as Sisu source in `derive.rs`.
 
 use crate::program::*;
 use crate::std_sources;
-use crate::ty::{FnTy, Ty};
+use crate::ty::Ty;
 use sisu_diag::{Diagnostic, FileId, MsgId, SourceMap, Span, TextRange, msg};
 use sisu_syntax::ast::{self, ExprKind, ItemKind, ParamKind, TypeKind};
 use std::collections::HashMap;
@@ -18,7 +21,7 @@ pub struct Resolved {
 
 /// Type names this stage knows but does not implement, with the phase of
 /// proposal/18-next-steps.md that brings them.
-const LATER_TYPES: &[(&str, &str)] = &[
+pub(crate) const LATER_TYPES: &[(&str, &str)] = &[
     ("uint", "the sized numeric types (Phase 4)"),
     ("i8", "the sized numeric types (Phase 4)"),
     ("i16", "the sized numeric types (Phase 4)"),
@@ -34,7 +37,6 @@ const LATER_TYPES: &[(&str, &str)] = &[
     ("bytes", "byte strings (Phase 4)"),
     ("Array", "`Array` and `Slice` (Phase 4)"),
     ("Slice", "`Array` and `Slice` (Phase 4)"),
-    ("Box", "`Box` and shared ownership (Phase 3)"),
     ("Shared", "`Shared` and shared ownership (Phase 3)"),
     ("Weak", "`Weak` and shared ownership (Phase 3)"),
     ("Cell", "`Cell` and shared ownership (Phase 3)"),
@@ -48,35 +50,75 @@ const LATER_TYPES: &[(&str, &str)] = &[
     ("Url", "`std.net` (Phase 6)"),
 ];
 
-struct Owner {
-    generics: Vec<String>,
-    self_ty: Ty,
+/// Where a method is declared, which decides the generics, bounds and
+/// `Self` of its signature.
+#[derive(Clone, Debug)]
+pub(crate) enum Owner {
+    /// Written in a struct's or enum's body.
+    Type(DefId),
+    /// `impl[...] Type:`.
+    Inherent { generics: Vec<Generic>, names: Vec<String>, predicates: Vec<Predicate>, self_ty: Ty },
+    /// A trait's method.
+    Trait(DefId),
+    /// A trait impl's method.
+    Impl(DefId),
 }
 
-enum Pending {
-    Fn { def: DefId, module: ModuleId, ast: ast::FnDef, owner: Option<Owner>, drop_for: Option<DefId> },
+/// What a method's owner brings to its signature: the generics, their
+/// names, the bounds, `Self`, the trait (for a trait's method) and the impl
+/// (for an impl's method).
+type OwnerScope = (Vec<Generic>, Vec<String>, Vec<Predicate>, Option<Ty>, Option<DefId>, Option<DefId>);
+
+pub(crate) enum Pending {
+    Fn { def: DefId, module: ModuleId, ast: ast::FnDef, owner: Option<Owner> },
     Struct { def: DefId, module: ModuleId, ast: ast::StructDef, attrs: Vec<ast::Attr> },
     Enum { def: DefId, module: ModuleId, ast: ast::EnumDef, attrs: Vec<ast::Attr> },
-    Impl { module: ModuleId, ast: ast::ImplDef, range: TextRange },
+    Trait { def: DefId, module: ModuleId, ast: ast::TraitDef, attrs: Vec<ast::Attr> },
+    Impl { module: ModuleId, ast: ast::ImplDef, range: TextRange, derived: bool },
     Test { def: DefId, module: ModuleId, ast: ast::TestDef },
     Const { def: DefId, module: ModuleId, ast: ast::ConstDef },
 }
 
-struct Resolver<'a> {
-    prog: Program,
-    diags: Vec<Diagnostic>,
-    sources: &'a mut SourceMap,
-    std_loaded: HashMap<&'static str, ModuleId>,
-    pending: Vec<Pending>,
-    aliases: HashMap<DefId, (ModuleId, ast::TypeAlias)>,
-    resolving_alias: Vec<DefId>,
+pub(crate) struct Resolver<'a> {
+    pub prog: Program,
+    pub diags: Vec<Diagnostic>,
+    pub sources: &'a mut SourceMap,
+    pub std_loaded: HashMap<&'static str, ModuleId>,
+    pub pending: Vec<Pending>,
+    pub aliases: HashMap<DefId, (ModuleId, ast::TypeAlias)>,
+    pub resolving_alias: Vec<DefId>,
+    /// The generic parameter names of every struct, enum and trait, known
+    /// before any of them is resolved.
+    pub type_params: HashMap<DefId, Vec<ast::GenericParam>>,
+    /// Uses of `dyn Trait`, checked for object safety once every trait's
+    /// methods are known.
+    pub dyn_uses: Vec<(DefId, Span)>,
+    /// Derived impls whose fields must implement the trait, checked once
+    /// every impl is known.
+    pub derive_checks: Vec<crate::derive::DeriveCheck>,
+    /// The bounds of every struct's and enum's generic parameters.
+    pub type_preds: HashMap<DefId, Vec<Predicate>>,
 }
 
-struct TyCtx<'g> {
-    module: ModuleId,
-    generics: &'g [String],
-    self_ty: Option<&'g Ty>,
-    allow_ref: bool,
+/// What a type expression may mention where it is written.
+pub(crate) struct TyCtx<'g> {
+    pub module: ModuleId,
+    pub generics: &'g [String],
+    pub self_ty: Option<&'g Ty>,
+    pub allow_ref: bool,
+    /// Bounds in scope, which give `C.Item` its trait.
+    pub predicates: &'g [Predicate],
+    /// Inside a trait: its own associated types may be named bare.
+    pub in_trait: Option<DefId>,
+    /// Inside a trait impl: what it binds its associated types to, for
+    /// `Self.Item`.
+    pub impl_assoc: &'g [(String, Ty)],
+}
+
+impl<'g> TyCtx<'g> {
+    pub fn plain(module: ModuleId, generics: &'g [String], allow_ref: bool) -> TyCtx<'g> {
+        TyCtx { module, generics, self_ty: None, allow_ref, predicates: &[], in_trait: None, impl_assoc: &[] }
+    }
 }
 
 /// Resolves a program whose root module is `root` (already parsed from
@@ -91,16 +133,24 @@ pub fn resolve(sources: &mut SourceMap, root_file: FileId, root: &ast::Module) -
         pending: Vec::new(),
         aliases: HashMap::new(),
         resolving_alias: Vec::new(),
+        type_params: HashMap::new(),
+        dyn_uses: Vec::new(),
+        derive_checks: Vec::new(),
+        type_preds: HashMap::new(),
     };
     let prelude = r.load_std("prelude", std_sources::PRELUDE);
     r.prog.prelude = prelude;
     r.fill_well_known();
+    // The impls of the leaf types and tuples; nothing names the module.
+    r.load_std("builtin_impls", std_sources::builtin_impls());
     let root_id = r.add_module("main".into(), root_file, false);
     r.prog.root = root_id;
     r.prog.poisoned = root.broken_names.iter().cloned().collect();
     r.declare_items(root_id, &root.items, "");
+    r.declare_derived(root_id, &root.items);
     r.resolve_pending();
     r.build_variant_index();
+    r.check_traits();
     r.check_borrow_signatures();
     Resolved { program: r.prog, diagnostics: r.diags }
 }
@@ -108,7 +158,7 @@ pub fn resolve(sources: &mut SourceMap, root_file: FileId, root: &ast::Module) -
 impl Resolver<'_> {
     /// The empty span at the start of `keyword` where it comes last before
     /// `span` on the same line (`struct` before a struct's name).
-    fn keyword_before(&self, span: Span, keyword: &str) -> Option<Span> {
+    pub fn keyword_before(&self, span: Span, keyword: &str) -> Option<Span> {
         let text = &self.sources.get(span.file)?.text;
         let before = text.get(..span.range.start as usize)?;
         let line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
@@ -116,23 +166,23 @@ impl Resolver<'_> {
         Some(Span::new(span.file, TextRange::new(at as u32, at as u32)))
     }
 
-    fn span(&self, module: ModuleId, range: TextRange) -> Span {
+    pub fn span(&self, module: ModuleId, range: TextRange) -> Span {
         Span::new(self.prog.modules[module.0 as usize].file, range)
     }
 
-    fn file(&self, module: ModuleId) -> FileId {
+    pub fn file(&self, module: ModuleId) -> FileId {
         self.prog.modules[module.0 as usize].file
     }
 
-    fn is_std(&self, module: ModuleId) -> bool {
+    pub fn is_std(&self, module: ModuleId) -> bool {
         self.prog.modules[module.0 as usize].is_std
     }
 
-    fn report(&mut self, d: Diagnostic) {
+    pub fn report(&mut self, d: Diagnostic) {
         self.diags.push(d);
     }
 
-    fn unsupported(&mut self, span: Span, construct: &str, phase: &str) {
+    pub fn unsupported(&mut self, span: Span, construct: &str, phase: &str) {
         self.report(
             Diagnostic::new(msg::STAGE0_UNSUPPORTED, span).with("construct", construct).with("phase", phase),
         );
@@ -140,7 +190,14 @@ impl Resolver<'_> {
 
     fn add_module(&mut self, name: String, file: FileId, is_std: bool) -> ModuleId {
         let id = ModuleId(self.prog.modules.len() as u32);
-        self.prog.modules.push(ModuleData { name, file, items: HashMap::new(), order: Vec::new(), is_std });
+        self.prog.modules.push(ModuleData {
+            name,
+            file,
+            items: HashMap::new(),
+            order: Vec::new(),
+            is_std,
+            parent: None,
+        });
         id
     }
 
@@ -155,32 +212,53 @@ impl Resolver<'_> {
         let m = self.add_module(name.to_string(), file, true);
         self.std_loaded.insert(name, m);
         self.declare_items(m, &ast.items, "");
+        self.declare_derived(m, &ast.items);
         m
     }
 
     fn fill_well_known(&mut self) {
         let p = self.prog.prelude;
         let get = |prog: &Program, n: &str| prog.lookup_in(p, n);
+        let prog = &self.prog;
         let wk = WellKnown {
-            option: get(&self.prog, "Option"),
-            result: get(&self.prog, "Result"),
-            ordering: get(&self.prog, "Ordering"),
-            string: get(&self.prog, "String"),
-            list: get(&self.prog, "list"),
-            dict: get(&self.prog, "dict"),
-            set: get(&self.prog, "set"),
-            iter: get(&self.prog, "Iter"),
-            entry: get(&self.prog, "Entry"),
-            iterable: get(&self.prog, "Iterable"),
-            path: get(&self.prog, "Path"),
-            system: get(&self.prog, "System"),
-            io_error: get(&self.prog, "IoError"),
-            range: get(&self.prog, "range"),
+            option: get(prog, "Option"),
+            result: get(prog, "Result"),
+            ordering: get(prog, "Ordering"),
+            string: get(prog, "String"),
+            list: get(prog, "list"),
+            dict: get(prog, "dict"),
+            set: get(prog, "set"),
+            iter: get(prog, "Iter"),
+            entry: get(prog, "Entry"),
+            iterable: get(prog, "Iterable"),
+            path: get(prog, "Path"),
+            system: get(prog, "System"),
+            io_error: get(prog, "IoError"),
+            range: get(prog, "range"),
+            formatter: get(prog, "Formatter"),
+            boxed: get(prog, "Box"),
+            display: get(prog, "Display"),
+            debug: get(prog, "Debug"),
+            eq: get(prog, "Eq"),
+            partial_ord: get(prog, "PartialOrd"),
+            ord: get(prog, "Ord"),
+            hash: get(prog, "Hash"),
+            len: get(prog, "Len"),
+            copy: get(prog, "Copy"),
+            drop: get(prog, "Drop"),
+            iterator: get(prog, "Iterator"),
+            add: get(prog, "Add"),
+            sub: get(prog, "Sub"),
+            mul: get(prog, "Mul"),
+            div: get(prog, "Div"),
+            rem: get(prog, "Rem"),
+            neg: get(prog, "Neg"),
+            num: get(prog, "Num"),
         };
         self.prog.wk = wk;
     }
 
-    fn new_def(
+    pub fn new_def(
         &mut self,
         module: ModuleId,
         name: &str,
@@ -216,10 +294,13 @@ impl Resolver<'_> {
         m.order.push(def);
     }
 
-    fn placeholder_fn(&self, module: ModuleId, kind: FnKind) -> FnInfo {
+    pub fn placeholder_fn(&self, module: ModuleId, kind: FnKind) -> FnInfo {
         FnInfo {
             generics: Vec::new(),
             impl_generics: 0,
+            predicates: Vec::new(),
+            trait_: None,
+            impl_: None,
             self_mode: None,
             owner: None,
             params: Vec::new(),
@@ -241,7 +322,7 @@ impl Resolver<'_> {
 
     // ---------------------------------------------------------------- pass 1
 
-    fn declare_items(&mut self, module: ModuleId, items: &[ast::Item], test_prefix: &str) {
+    pub fn declare_items(&mut self, module: ModuleId, items: &[ast::Item], test_prefix: &str) {
         for item in items {
             self.check_attrs(module, &item.attrs);
             match &item.kind {
@@ -255,13 +336,7 @@ impl Resolver<'_> {
                         DefKind::Fn(self.placeholder_fn(module, FnKind::Free)),
                     );
                     self.bind(module, &f.name.text, def, f.name.range);
-                    self.pending.push(Pending::Fn {
-                        def,
-                        module,
-                        ast: f.clone(),
-                        owner: None,
-                        drop_for: None,
-                    });
+                    self.pending.push(Pending::Fn { def, module, ast: f.clone(), owner: None });
                 }
                 ItemKind::Struct(s) => {
                     let info = StructInfo {
@@ -282,7 +357,8 @@ impl Resolver<'_> {
                         DefKind::Struct(info),
                     );
                     self.bind(module, &s.name.text, def, s.name.range);
-                    self.declare_methods(module, def, &s.generics, &s.methods);
+                    self.type_params.insert(def, s.generics.clone());
+                    self.declare_methods(module, def, &s.methods);
                     self.pending.push(Pending::Struct {
                         def,
                         module,
@@ -307,7 +383,8 @@ impl Resolver<'_> {
                     let def =
                         self.new_def(module, &e.name.text, e.name.range, item.vis, item.docs.clone(), kind);
                     self.bind(module, &e.name.text, def, e.name.range);
-                    self.declare_methods(module, def, &e.generics, &e.methods);
+                    self.type_params.insert(def, e.generics.clone());
+                    self.declare_methods(module, def, &e.methods);
                     self.pending.push(Pending::Enum {
                         def,
                         module,
@@ -315,21 +392,29 @@ impl Resolver<'_> {
                         attrs: item.attrs.clone(),
                     });
                 }
-                ItemKind::Impl(i) => {
-                    self.pending.push(Pending::Impl { module, ast: i.clone(), range: item.range })
-                }
+                ItemKind::Impl(i) => self.pending.push(Pending::Impl {
+                    module,
+                    ast: i.clone(),
+                    range: item.range,
+                    derived: self.prog.modules[module.0 as usize].parent.is_some(),
+                }),
                 ItemKind::Trait(t) => {
-                    let span = self.span(module, item.range);
-                    self.unsupported(span, "`trait`", "traits (Phase 4)");
                     let def = self.new_def(
                         module,
                         &t.name.text,
                         t.name.range,
                         item.vis,
                         item.docs.clone(),
-                        DefKind::Unsupported,
+                        DefKind::Trait(TraitInfo::default()),
                     );
                     self.bind(module, &t.name.text, def, t.name.range);
+                    self.type_params.insert(def, t.generics.clone());
+                    self.pending.push(Pending::Trait {
+                        def,
+                        module,
+                        ast: t.clone(),
+                        attrs: item.attrs.clone(),
+                    });
                 }
                 ItemKind::Import(imp) => self.import(module, imp, item.range),
                 ItemKind::FromImport(imp) => self.import_from(module, imp, item.range),
@@ -402,7 +487,7 @@ impl Resolver<'_> {
             return;
         }
         for a in attrs {
-            if a.name == "builtin" || a.name == "intrinsic" {
+            if a.name == "builtin" || a.name == "intrinsic" || a.name == "sealed" || a.name == "marker" {
                 let span = self.span(module, a.range);
                 self.report(
                     Diagnostic::new(msg::RESOLVE_STD_ONLY_ATTRIBUTE, span).with("name", a.name.clone()),
@@ -415,7 +500,7 @@ impl Resolver<'_> {
     /// (04, "Borrowing rules in detail"), once every type is resolved.
     fn check_borrow_signatures(&mut self) {
         let mut found = Vec::new();
-        for (i, def) in self.prog.defs.iter().enumerate() {
+        for def in self.prog.defs.iter() {
             let DefKind::Fn(f) = &def.kind else { continue };
             if self.prog.modules[def.module.0 as usize].is_std || f.header_broken {
                 continue;
@@ -477,7 +562,6 @@ impl Resolver<'_> {
             let self_wins = f.self_mode.is_some() && borrowed.first().is_some_and(|p| p.name == "self");
             if borrowed.len() >= 2 && !self_wins {
                 let names: Vec<String> = borrowed.iter().map(|p| p.name.clone()).collect();
-                let _ = i;
                 let mut d = Diagnostic::new(msg::BORROW_FROM_REQUIRED, ret_span)
                     .with("name", def.name.clone())
                     .with("ret", self.prog.display(&f.ret))
@@ -499,15 +583,7 @@ impl Resolver<'_> {
         self.diags.extend(found);
     }
 
-    fn declare_methods(
-        &mut self,
-        module: ModuleId,
-        owner: DefId,
-        generics: &[ast::GenericParam],
-        methods: &[ast::FnDef],
-    ) {
-        let names: Vec<String> = generics.iter().map(|g| g.name.text.clone()).collect();
-        let self_ty = Ty::Adt(owner, (0..names.len() as u32).map(Ty::Param).collect());
+    fn declare_methods(&mut self, module: ModuleId, owner: DefId, methods: &[ast::FnDef]) {
         for m in methods {
             let def = self.new_def(
                 module,
@@ -517,13 +593,7 @@ impl Resolver<'_> {
                 Vec::new(),
                 DefKind::Fn(self.placeholder_fn(module, FnKind::Method)),
             );
-            self.pending.push(Pending::Fn {
-                def,
-                module,
-                ast: m.clone(),
-                owner: Some(Owner { generics: names.clone(), self_ty: self_ty.clone() }),
-                drop_for: None,
-            });
+            self.pending.push(Pending::Fn { def, module, ast: m.clone(), owner: Some(Owner::Type(owner)) });
         }
     }
 
@@ -590,31 +660,46 @@ impl Resolver<'_> {
     // ---------------------------------------------------------------- pass 2
 
     fn resolve_pending(&mut self) {
-        // Aliases first, on demand, so that later declarations can use them.
-        let alias_ids: Vec<DefId> = self.aliases.keys().copied().collect();
-        let mut alias_ids = alias_ids;
+        // The generic parameters of every type and trait first, with their
+        // defaults, so that a use site anywhere can fill omitted arguments.
+        self.resolve_headers();
+        // Aliases next, on demand, so that later declarations can use them.
+        let mut alias_ids: Vec<DefId> = self.aliases.keys().copied().collect();
         alias_ids.sort();
         for d in alias_ids {
             self.resolve_alias(d);
         }
-        // Types before functions, so method owners have their generics.
+        // Types, then traits, then impls, then functions: a method's
+        // signature needs its owner's generics and bounds, and an impl
+        // needs its trait.
         let pending = std::mem::take(&mut self.pending);
         let (types, rest): (Vec<Pending>, Vec<Pending>) =
             pending.into_iter().partition(|p| matches!(p, Pending::Struct { .. } | Pending::Enum { .. }));
         for p in types {
             self.resolve_one(p);
         }
+        let (traits, rest): (Vec<Pending>, Vec<Pending>) =
+            rest.into_iter().partition(|p| matches!(p, Pending::Trait { .. }));
+        for p in traits {
+            self.resolve_one(p);
+        }
+        let (impls, rest): (Vec<Pending>, Vec<Pending>) =
+            rest.into_iter().partition(|p| matches!(p, Pending::Impl { .. }));
+        for p in impls {
+            self.resolve_one(p);
+        }
         let mut queue = rest;
+        // Traits and impls push the functions they declare.
+        queue.extend(std::mem::take(&mut self.pending));
         while !queue.is_empty() {
             for p in std::mem::take(&mut queue) {
                 self.resolve_one(p);
             }
-            // Impls push the functions they declare.
             queue = std::mem::take(&mut self.pending);
         }
     }
 
-    fn resolve_alias(&mut self, d: DefId) -> Ty {
+    pub fn resolve_alias(&mut self, d: DefId) -> Ty {
         if let DefKind::TypeAlias(t) = &self.prog.def(d).kind
             && *t != Ty::Error
         {
@@ -629,7 +714,7 @@ impl Resolver<'_> {
             return Ty::Error;
         }
         self.resolving_alias.push(d);
-        let ctx = TyCtx { module, generics: &[], self_ty: None, allow_ref: self.is_std(module) };
+        let ctx = TyCtx::plain(module, &[], self.is_std(module));
         let ty = match &alias.ty {
             Some(t) => self.resolve_ty(t, &ctx),
             None => Ty::Error,
@@ -639,23 +724,14 @@ impl Resolver<'_> {
         ty
     }
 
-    fn generics_allowed(&mut self, module: ModuleId, generics: &[ast::GenericParam]) -> Vec<String> {
-        if !generics.is_empty() && !self.is_std(module) {
-            let range = generics[0].name.range.cover(generics[generics.len() - 1].name.range);
-            let span = self.span(module, range);
-            self.report(Diagnostic::new(msg::RESOLVE_USER_GENERICS, span));
-        }
-        generics.iter().map(|g| g.name.text.clone()).collect()
-    }
-
-    fn has_derive(attrs: &[ast::Attr], what: &str) -> bool {
+    pub fn has_derive(attrs: &[ast::Attr], what: &str) -> bool {
         attrs.iter().any(|a| {
             a.name == "derive"
                 && a.args.iter().any(|arg| matches!(&arg.value.kind, ExprKind::Name(n) if n == what))
         })
     }
 
-    fn builtin_attr(attrs: &[ast::Attr], name: &str) -> Option<String> {
+    pub fn builtin_attr(attrs: &[ast::Attr], name: &str) -> Option<String> {
         attrs.iter().find(|a| a.name == name).and_then(|a| a.args.first()).and_then(|arg| {
             match &arg.value.kind {
                 ExprKind::Str(parts) => Some(ast::build::plain_text(parts)),
@@ -667,8 +743,8 @@ impl Resolver<'_> {
     fn resolve_one(&mut self, p: Pending) {
         match p {
             Pending::Struct { def, module, ast: s, attrs } => {
-                let generics = self.generics_allowed(module, &s.generics);
-                let self_ty = Ty::Adt(def, (0..generics.len() as u32).map(Ty::Param).collect());
+                let (names, predicates) = self.type_param_scope(def, module);
+                let self_ty = Ty::Adt(def, (0..names.len() as u32).map(Ty::Param).collect());
                 let std = self.is_std(module);
                 let mut fields: Vec<FieldInfo> = Vec::new();
                 for f in &s.fields {
@@ -681,7 +757,15 @@ impl Resolver<'_> {
                         );
                         continue;
                     }
-                    let ctx = TyCtx { module, generics: &generics, self_ty: Some(&self_ty), allow_ref: true };
+                    let ctx = TyCtx {
+                        module,
+                        generics: &names,
+                        self_ty: Some(&self_ty),
+                        allow_ref: true,
+                        predicates: &predicates,
+                        in_trait: None,
+                        impl_assoc: &[],
+                    };
                     let ty = self.resolve_ty(&f.ty, &ctx);
                     // Views are infectious upwards (04): only a `view struct`
                     // may hold a reference or a view.
@@ -722,7 +806,6 @@ impl Resolver<'_> {
                 let copy = Self::has_derive(&attrs, "Copy");
                 let must_consume = attrs.iter().any(|a| a.name == "must_consume");
                 if let DefKind::Struct(info) = &mut self.prog.defs[def.0 as usize].kind {
-                    info.generics = generics;
                     info.fields = fields;
                     info.builtin = builtin;
                     info.copy = copy;
@@ -730,8 +813,8 @@ impl Resolver<'_> {
                 }
             }
             Pending::Enum { def, module, ast: e, attrs } => {
-                let generics = self.generics_allowed(module, &e.generics);
-                let self_ty = Ty::Adt(def, (0..generics.len() as u32).map(Ty::Param).collect());
+                let (names, predicates) = self.type_param_scope(def, module);
+                let self_ty = Ty::Adt(def, (0..names.len() as u32).map(Ty::Param).collect());
                 let std = self.is_std(module);
                 let mut variants: Vec<VariantInfo> = Vec::new();
                 for v in &e.variants {
@@ -744,7 +827,15 @@ impl Resolver<'_> {
                         );
                         continue;
                     }
-                    let ctx = TyCtx { module, generics: &generics, self_ty: Some(&self_ty), allow_ref: std };
+                    let ctx = TyCtx {
+                        module,
+                        generics: &names,
+                        self_ty: Some(&self_ty),
+                        allow_ref: std,
+                        predicates: &predicates,
+                        in_trait: None,
+                        impl_assoc: &[],
+                    };
                     let mut fields = Vec::new();
                     for f in &v.fields {
                         let ty = self.resolve_ty(&f.ty, &ctx);
@@ -777,21 +868,19 @@ impl Resolver<'_> {
                 if let DefKind::Enum(info) | DefKind::ErrorSet(info) =
                     &mut self.prog.defs[def.0 as usize].kind
                 {
-                    info.generics = generics;
                     info.variants = variants;
                     info.copy = copy;
                     info.must_consume = must_consume;
                 }
             }
-            Pending::Fn { def, module, ast: f, owner, drop_for } => {
-                self.resolve_fn(def, module, &f, owner, drop_for)
-            }
+            Pending::Trait { def, module, ast: t, attrs } => self.resolve_trait(def, module, &t, &attrs),
+            Pending::Fn { def, module, ast: f, owner } => self.resolve_fn(def, module, &f, owner),
             Pending::Test { def, module, ast: t } => {
                 let mut info = self.placeholder_fn(module, FnKind::Test(self.prog.def(def).name.clone()));
                 let ctx_generics: Vec<String> = Vec::new();
                 for p in &t.params {
                     if let ParamKind::Named { name, ty, .. } = &p.kind {
-                        let ctx = TyCtx { module, generics: &ctx_generics, self_ty: None, allow_ref: false };
+                        let ctx = TyCtx::plain(module, &ctx_generics, false);
                         let ty = self.resolve_ty(ty, &ctx);
                         info.params.push(ParamInfo {
                             name: name.text.clone(),
@@ -812,7 +901,7 @@ impl Resolver<'_> {
             Pending::Const { def, module, ast: c } => {
                 let ty = match &c.ty {
                     Some(t) => {
-                        let ctx = TyCtx { module, generics: &[], self_ty: None, allow_ref: false };
+                        let ctx = TyCtx::plain(module, &[], false);
                         self.resolve_ty(t, &ctx)
                     }
                     None => {
@@ -827,110 +916,100 @@ impl Resolver<'_> {
                 self.prog.defs[def.0 as usize].kind =
                     DefKind::Const(ConstInfo { ty, value: c.value.clone(), file: self.file(module) });
             }
-            Pending::Impl { module, ast: imp, range } => self.resolve_impl(module, &imp, range),
+            Pending::Impl { module, ast: imp, range, derived } => {
+                self.resolve_impl(module, &imp, range, derived)
+            }
         }
     }
 
-    fn resolve_impl(&mut self, module: ModuleId, imp: &ast::ImplDef, range: TextRange) {
-        let span = self.span(module, range);
-        let generics = self.generics_allowed(module, &imp.generics);
-        let ctx = TyCtx { module, generics: &generics, self_ty: None, allow_ref: false };
-        let self_ty = self.resolve_ty(&imp.self_ty, &ctx);
-        let mut drop_for = None;
-        if let Some(t) = &imp.trait_ty {
-            let trait_name = match &t.kind {
-                TypeKind::Path { segments, .. } => {
-                    segments.iter().map(|s| s.text.clone()).collect::<Vec<_>>().join(".")
-                }
-                _ => String::new(),
-            };
-            if trait_name != "Drop" {
-                let at = self.span(module, t.range);
-                self.report(Diagnostic::new(msg::RESOLVE_TRAIT_IMPL, at).with("trait", trait_name));
-                return;
+    /// The names and bounds of a struct's or enum's generic parameters.
+    pub fn type_param_scope(&mut self, def: DefId, _module: ModuleId) -> (Vec<String>, Vec<Predicate>) {
+        let names: Vec<String> = self.prog.type_generics(def).iter().map(|g| g.name.clone()).collect();
+        let predicates = self.type_preds.get(&def).cloned().unwrap_or_default();
+        (names, predicates)
+    }
+
+    fn resolve_fn(&mut self, def: DefId, module: ModuleId, f: &ast::FnDef, owner: Option<Owner>) {
+        // The generics, bounds and `Self` the owner brings.
+        let (outer, outer_names, mut predicates, self_ty, in_trait, impl_def): OwnerScope = match &owner {
+            None => (Vec::new(), Vec::new(), Vec::new(), None, None, None),
+            Some(Owner::Type(t)) => {
+                let generics = self.prog.type_generics(*t).to_vec();
+                let names: Vec<String> = generics.iter().map(|g| g.name.clone()).collect();
+                let (_, preds) = self.type_param_scope(*t, module);
+                let self_ty = Ty::Adt(*t, (0..names.len() as u32).map(Ty::Param).collect());
+                (generics, names, preds, Some(self_ty), None, None)
             }
-            match &self_ty {
-                Ty::Adt(d, _)
-                    if self.prog.def(*d).module == module
-                        && matches!(self.prog.def(*d).kind, DefKind::Struct(_) | DefKind::Enum(_)) =>
-                {
-                    drop_for = Some(*d);
-                }
-                Ty::Error => return,
-                _ => {
-                    self.report(Diagnostic::new(msg::RESOLVE_DROP_TARGET, span));
-                    return;
-                }
+            Some(Owner::Inherent { generics, names, predicates, self_ty }) => {
+                (generics.clone(), names.clone(), predicates.clone(), Some(self_ty.clone()), None, None)
             }
-            let ok = imp.methods.len() == 1
-                && imp.methods[0].name.text == "drop"
-                && imp.methods[0].params.len() == 1
-                && matches!(imp.methods[0].params[0].kind, ParamKind::SelfParam)
-                && imp.methods[0].params[0].mode == ast::Mode::Mut
-                && imp.methods[0].ret.is_none();
-            if !ok {
-                self.report(Diagnostic::new(msg::RESOLVE_DROP_SIGNATURE, span));
-                return;
+            Some(Owner::Trait(t)) => {
+                let info = self.prog.trait_info(*t).cloned().unwrap_or_default();
+                let mut generics = vec![Generic { name: "Self".into(), default: None }];
+                generics.extend(info.generics.iter().cloned());
+                let names: Vec<String> = generics.iter().map(|g| g.name.clone()).collect();
+                let tr = TraitRef { def: *t, args: (1..generics.len() as u32).map(Ty::Param).collect() };
+                let preds = vec![Predicate { ty: Ty::Param(0), bound: tr, span: self.prog.def(*t).span }];
+                (generics, names, preds, Some(Ty::Param(0)), Some(*t), None)
             }
+            Some(Owner::Impl(i)) => match self.prog.impl_info(*i).cloned() {
+                Some(info) => {
+                    let names: Vec<String> = info.generics.iter().map(|g| g.name.clone()).collect();
+                    (info.generics, names, info.predicates, Some(info.self_ty), None, Some(*i))
+                }
+                None => (Vec::new(), Vec::new(), Vec::new(), None, None, None),
+            },
+        };
+        let mut names = outer_names.clone();
+        for g in &f.generics {
+            names.push(g.name.text.clone());
         }
-        if self_ty.key().is_none() {
-            if self_ty != Ty::Error {
-                let s = self.span(module, imp.self_ty.range);
+        let mut generics = outer.clone();
+        for (k, g) in f.generics.iter().enumerate() {
+            let default = g.default.as_ref().map(|d| {
+                let ctx = TyCtx::plain(module, &names[..outer.len() + k], true);
+                self.resolve_ty(d, &ctx)
+            });
+            if default.is_some() {
+                let span = self.span(module, g.name.range);
                 self.report(
-                    Diagnostic::new(msg::RESOLVE_NOT_A_TYPE, s).with("name", self.prog.display(&self_ty)),
+                    Diagnostic::new(msg::STAGE0_UNSUPPORTED, span)
+                        .with("construct", "a defaulted parameter of a function")
+                        .with("phase", "a later phase; defaults are for the parameters of types and traits"),
                 );
             }
-            return;
+            generics.push(Generic { name: g.name.text.clone(), default: None });
         }
-        for m in &imp.methods {
-            let kind = if drop_for.is_some() { FnKind::Drop } else { FnKind::Method };
-            let def = self.new_def(
+        let impl_assoc: Vec<(String, Ty)> =
+            impl_def.and_then(|i| self.prog.impl_info(i)).map(|i| i.assoc.clone()).unwrap_or_default();
+        // The function's own bounds, then its `where` clause.
+        let own = self.resolve_bounds(module, &f.generics, &names, outer.len(), in_trait);
+        predicates.extend(own);
+        for w in &f.where_ {
+            let ctx = TyCtx {
                 module,
-                &m.name.text,
-                m.name.range,
-                ast::Vis::Pub,
-                Vec::new(),
-                DefKind::Fn(self.placeholder_fn(module, kind)),
-            );
-            self.pending.push(Pending::Fn {
-                def,
-                module,
-                ast: m.clone(),
-                owner: Some(Owner { generics: generics.clone(), self_ty: self_ty.clone() }),
-                drop_for,
-            });
+                generics: &names,
+                self_ty: self_ty.as_ref(),
+                allow_ref: true,
+                predicates: &predicates,
+                in_trait,
+                impl_assoc: &impl_assoc,
+            };
+            let ty = self.resolve_ty(&w.ty, &ctx);
+            let mut new = Vec::new();
+            for b in &w.bounds {
+                if let Some(tr) = self.resolve_bound(b, &ty, &ctx) {
+                    new.push(Predicate { ty: ty.clone(), bound: tr, span: self.span(module, b.range) });
+                }
+            }
+            predicates.extend(new);
         }
-    }
-
-    fn resolve_fn(
-        &mut self,
-        def: DefId,
-        module: ModuleId,
-        f: &ast::FnDef,
-        owner: Option<Owner>,
-        drop_for: Option<DefId>,
-    ) {
-        let impl_generics: Vec<String> = owner.as_ref().map(|o| o.generics.clone()).unwrap_or_default();
-        let own_generics = self.generics_allowed(module, &f.generics);
-        let mut generics: Vec<Generic> =
-            impl_generics.iter().map(|n| Generic { name: n.clone(), bounds: Vec::new() }).collect();
-        for g in &f.generics {
-            let bounds = g
-                .bounds
-                .iter()
-                .filter_map(|b| match &b.kind {
-                    TypeKind::Path { segments, .. } => segments.last().map(|s| s.text.clone()),
-                    _ => None,
-                })
-                .collect();
-            generics.push(Generic { name: g.name.text.clone(), bounds });
-        }
-        let names: Vec<String> = impl_generics.iter().cloned().chain(own_generics).collect();
-        let self_ty = owner.as_ref().map(|o| o.self_ty.clone());
-        let ctx_self = self_ty.clone();
         let mut info = self.placeholder_fn(module, FnKind::Free);
         info.generics = generics;
-        info.impl_generics = impl_generics.len();
+        info.impl_generics = outer.len();
+        info.predicates = predicates.clone();
+        info.trait_ = in_trait;
+        info.impl_ = impl_def;
         info.owner = self_ty.clone();
         info.pure = f.is_pure;
         info.body = f.body.clone();
@@ -939,13 +1018,17 @@ impl Resolver<'_> {
             let span = self.span(module, f.name.range);
             self.unsupported(span, "`comptime def`", "compile-time evaluation (Phase 4)");
         }
-        if f.has_where {
-            let span = self.span(module, f.name.range);
-            self.unsupported(span, "a `where` clause", "traits (Phase 4)");
-        }
         let mut seen_default = false;
         for (i, p) in f.params.iter().enumerate() {
-            let ctx = TyCtx { module, generics: &names, self_ty: ctx_self.as_ref(), allow_ref: true };
+            let ctx = TyCtx {
+                module,
+                generics: &names,
+                self_ty: self_ty.as_ref(),
+                allow_ref: true,
+                predicates: &predicates,
+                in_trait,
+                impl_assoc: &impl_assoc,
+            };
             match &p.kind {
                 ParamKind::SelfParam => {
                     if owner.is_none() {
@@ -991,12 +1074,20 @@ impl Resolver<'_> {
             }
         }
         // The result type; `T !` infers the error set from the body.
+        let ctx = TyCtx {
+            module,
+            generics: &names,
+            self_ty: self_ty.as_ref(),
+            allow_ref: true,
+            predicates: &predicates,
+            in_trait,
+            impl_assoc: &impl_assoc,
+        };
         match &f.ret {
             None => info.ret = Ty::Unit,
             Some(t) => {
                 info.ret_span = Some(self.span(module, t.range));
                 if let TypeKind::Result { ok, err: None } = &t.kind {
-                    let ctx = TyCtx { module, generics: &names, self_ty: ctx_self.as_ref(), allow_ref: true };
                     let ok_ty = match ok {
                         Some(o) => self.resolve_ty(o, &ctx),
                         None => Ty::Unit,
@@ -1007,7 +1098,6 @@ impl Resolver<'_> {
                         None => Ty::Error,
                     };
                 } else {
-                    let ctx = TyCtx { module, generics: &names, self_ty: ctx_self.as_ref(), allow_ref: true };
                     info.ret = self.resolve_ty(t, &ctx);
                 }
             }
@@ -1020,292 +1110,58 @@ impl Resolver<'_> {
             info.err_inferred = false;
         }
         // A function whose header did not parse (no name) was reported by
-        // the parser already.
-        if info.body.is_none() && info.intrinsic.is_none() && !f.name.text.is_empty() {
+        // the parser already; a trait's required method has no body.
+        if info.body.is_none() && info.intrinsic.is_none() && !f.name.text.is_empty() && in_trait.is_none() {
             let span = self.span(module, f.name.range);
             self.report(Diagnostic::new(msg::RESOLVE_MISSING_BODY, span).with("name", f.name.text.clone()));
         }
         // Register methods and associated functions.
         if let Some(o) = &owner {
-            info.kind = if drop_for.is_some() {
+            info.kind = if self.is_drop_impl(impl_def) {
                 FnKind::Drop
             } else if info.self_mode.is_some() {
                 FnKind::Method
             } else {
                 FnKind::Assoc
             };
-            if let Some(key) = o.self_ty.key() {
-                let k = (key, f.name.text.clone());
-                if drop_for.is_some() {
-                    if let Some(d) = drop_for {
-                        match &mut self.prog.defs[d.0 as usize].kind {
-                            DefKind::Struct(s) => s.drop = Some(def),
-                            DefKind::Enum(e) => e.drop = Some(def),
-                            _ => {}
+            match o {
+                Owner::Type(_) | Owner::Inherent { .. } => {
+                    let key = self_ty.as_ref().and_then(|t| t.key());
+                    if let Some(key) = key {
+                        let k = (key, f.name.text.clone());
+                        if let std::collections::hash_map::Entry::Vacant(e) = self.prog.methods.entry(k) {
+                            e.insert(def);
+                        } else {
+                            let span = self.span(module, f.name.range);
+                            let owner_name = self.prog.display(self_ty.as_ref().unwrap_or(&Ty::Error));
+                            self.report(
+                                Diagnostic::new(msg::RESOLVE_DUPLICATE_METHOD, span)
+                                    .with("owner", owner_name)
+                                    .with("name", f.name.text.clone()),
+                            );
                         }
                     }
-                } else if let std::collections::hash_map::Entry::Vacant(e) = self.prog.methods.entry(k) {
-                    e.insert(def);
-                } else {
-                    let span = self.span(module, f.name.range);
-                    let owner_name = self.prog.display(&o.self_ty);
-                    self.report(
-                        Diagnostic::new(msg::RESOLVE_DUPLICATE_METHOD, span)
-                            .with("owner", owner_name)
-                            .with("name", f.name.text.clone()),
-                    );
+                }
+                Owner::Trait(t) => {
+                    if let DefKind::Trait(ti) = &mut self.prog.defs[t.0 as usize].kind {
+                        ti.methods.push(def);
+                    }
+                }
+                Owner::Impl(i) => {
+                    if let DefKind::Impl(ii) = &mut self.prog.defs[i.0 as usize].kind {
+                        ii.methods.push((f.name.text.clone(), def));
+                    }
                 }
             }
         }
         self.prog.defs[def.0 as usize].kind = DefKind::Fn(info);
     }
 
-    // ---------------------------------------------------------------- types
-
-    fn resolve_ty(&mut self, te: &ast::TypeExpr, ctx: &TyCtx) -> Ty {
-        let span = self.span(ctx.module, te.range);
-        match &te.kind {
-            TypeKind::Error => Ty::Error,
-            TypeKind::Path { segments, args } => {
-                let args: Vec<Ty> = args.iter().map(|a| self.resolve_ty(a, ctx)).collect();
-                self.resolve_path_ty(segments, args, ctx, span)
-            }
-            TypeKind::Option(inner) => {
-                let t = self.resolve_ty(inner, ctx);
-                match self.prog.wk.option {
-                    Some(o) => Ty::Adt(o, vec![t]),
-                    None => Ty::Error,
-                }
-            }
-            TypeKind::Result { ok, err } => {
-                let ok_ty = match ok {
-                    Some(o) => self.resolve_ty(o, ctx),
-                    None => Ty::Unit,
-                };
-                let err_ty = match err {
-                    None => {
-                        self.report(Diagnostic::new(msg::RESOLVE_INFERRED_SET_POSITION, span));
-                        Ty::Error
-                    }
-                    Some(e) => self.resolve_error_set(e, ctx),
-                };
-                match self.prog.wk.result {
-                    Some(r) => Ty::Adt(r, vec![ok_ty, err_ty]),
-                    None => Ty::Error,
-                }
-            }
-            TypeKind::Union(_) => {
-                self.report(Diagnostic::new(msg::RESOLVE_UNION_OUTSIDE_RESULT, span));
-                Ty::Error
-            }
-            TypeKind::Tuple(elems) => {
-                let tys: Vec<Ty> = elems.iter().map(|(_, t)| self.resolve_ty(t, ctx)).collect();
-                let labels: Vec<String> = if !elems.is_empty() && elems.iter().all(|(n, _)| n.is_some()) {
-                    elems.iter().filter_map(|(n, _)| n.as_ref().map(|n| n.text.clone())).collect()
-                } else {
-                    Vec::new()
-                };
-                if tys.is_empty() { Ty::Unit } else { Ty::Tuple(tys, labels) }
-            }
-            TypeKind::Fn { pure, params, ret } => {
-                let params = params.iter().map(|p| self.resolve_ty(p, ctx)).collect();
-                let ret = self.resolve_ty(ret, ctx);
-                Ty::Fn(Box::new(FnTy { params, ret, pure: *pure }))
-            }
-            TypeKind::Ref { mutable, inner } => {
-                if !ctx.allow_ref {
-                    self.unsupported(
-                        span,
-                        "a reference type in a declaration",
-                        "references in signatures (Phase 3)",
-                    );
-                }
-                let t = self.resolve_ty(inner, ctx);
-                // A shared borrow of a view is the view: `ref str` is a
-                // `str` (04, "Views"), valid while the text it views is.
-                if t == Ty::Str && !*mutable {
-                    return Ty::Str;
-                }
-                Ty::Ref(Box::new(t), *mutable)
-            }
-            TypeKind::ConstArg(_) => {
-                self.unsupported(span, "a constant type argument", "const generics (Phase 4)");
-                Ty::Error
-            }
-            TypeKind::Unsupported(what) => {
-                let phase = if what.contains("dyn") {
-                    "traits (Phase 4)"
-                } else if what.contains("pointer") {
-                    "foreign functions (Phase 8)"
-                } else {
-                    "compile-time evaluation (Phase 4)"
-                };
-                self.unsupported(span, what, phase);
-                Ty::Error
-            }
-        }
-    }
-
-    fn resolve_error_set(&mut self, te: &ast::TypeExpr, ctx: &TyCtx) -> Ty {
-        let span = self.span(ctx.module, te.range);
-        let parts: Vec<&ast::TypeExpr> = match &te.kind {
-            TypeKind::Union(list) => list.iter().collect(),
-            _ => vec![te],
-        };
-        let mut members = Vec::new();
-        for p in parts {
-            match self.resolve_ty(p, ctx) {
-                Ty::ErrSet(m) => members.extend(m),
-                Ty::Error => return Ty::Error,
-                other => {
-                    let name = self.prog.display(&other);
-                    let s = self.span(ctx.module, p.range);
-                    self.report(Diagnostic::new(msg::RESOLVE_NOT_AN_ERROR_SET, s).with("name", name));
-                    let _ = span;
-                    return Ty::Error;
-                }
-            }
-        }
-        members.sort();
-        members.dedup();
-        Ty::ErrSet(members)
-    }
-
-    fn resolve_path_ty(&mut self, segments: &[ast::Name], args: Vec<Ty>, ctx: &TyCtx, span: Span) -> Ty {
-        let Some(first) = segments.first() else { return Ty::Error };
-        if segments.len() == 1 {
-            let name = first.text.as_str();
-            if let Some(i) = ctx.generics.iter().position(|g| g == name) {
-                return Ty::Param(i as u32);
-            }
-            let prim = match name {
-                "int" => Some(Ty::Int),
-                "f64" => Some(Ty::Float),
-                "bool" => Some(Ty::Bool),
-                "char" => Some(Ty::Char),
-                "str" => Some(Ty::Str),
-                "Never" => Some(Ty::Never),
-                _ => None,
-            };
-            if let Some(p) = prim {
-                if !args.is_empty() {
-                    self.report(Diagnostic::new(msg::TYPE_NOT_GENERIC, span).with("name", name));
-                }
-                return p;
-            }
-            if name == "Self" {
-                return match ctx.self_ty {
-                    Some(t) => t.clone(),
-                    None => {
-                        self.report(Diagnostic::new(msg::RESOLVE_SELF_TYPE_OUTSIDE, span));
-                        Ty::Error
-                    }
-                };
-            }
-            if let Some(d) = self.prog.lookup(ctx.module, name) {
-                return self.def_as_type(d, name, args, span);
-            }
-            if let Some((_, phase)) = LATER_TYPES.iter().find(|(n, _)| *n == name) {
-                self.unsupported(span, &format!("`{name}`"), phase);
-                return Ty::Error;
-            }
-            if !self.prog.poisoned.contains(name) {
-                self.report(Diagnostic::new(msg::RESOLVE_UNDEFINED_TYPE, span).with("name", name));
-            }
-            return Ty::Error;
-        }
-        // A qualified name: module.Type.
-        let mut module = ctx.module;
-        for (i, seg) in segments.iter().enumerate() {
-            let last = i + 1 == segments.len();
-            let found = if i == 0 {
-                self.prog.lookup(module, &seg.text)
-            } else {
-                self.prog.lookup_in(module, &seg.text)
-            };
-            let Some(d) = found else {
-                if i == 0 {
-                    self.report(
-                        Diagnostic::new(msg::RESOLVE_UNDEFINED_TYPE, span).with("name", seg.text.clone()),
-                    );
-                } else {
-                    let mname = self.prog.modules[module.0 as usize].name.clone();
-                    self.report(
-                        Diagnostic::new(msg::RESOLVE_NOT_IN_MODULE, span)
-                            .with("module", mname)
-                            .with("name", seg.text.clone()),
-                    );
-                }
-                return Ty::Error;
-            };
-            if last {
-                return self.def_as_type(d, &seg.text, args, span);
-            }
-            match &self.prog.def(d).kind {
-                DefKind::Module(m) => module = *m,
-                _ => {
-                    self.report(
-                        Diagnostic::new(msg::RESOLVE_NOT_A_MODULE, span).with("name", seg.text.clone()),
-                    );
-                    return Ty::Error;
-                }
-            }
-        }
-        Ty::Error
-    }
-
-    fn def_as_type(&mut self, d: DefId, name: &str, args: Vec<Ty>, span: Span) -> Ty {
-        let generics_len = match &self.prog.def(d).kind {
-            DefKind::Struct(s) => Some(s.generics.len()),
-            DefKind::Enum(e) => Some(e.generics.len()),
-            DefKind::ErrorSet(_) => {
-                if !args.is_empty() {
-                    self.report(Diagnostic::new(msg::TYPE_NOT_GENERIC, span).with("name", name));
-                }
-                return Ty::ErrSet(vec![d]);
-            }
-            DefKind::TypeAlias(_) => return self.resolve_alias(d),
-            DefKind::Unsupported => return Ty::Error,
-            _ => None,
-        };
-        let Some(n) = generics_len else {
-            self.report(Diagnostic::new(msg::RESOLVE_NOT_A_TYPE, span).with("name", name));
-            return Ty::Error;
-        };
-        // Generics of a type not yet resolved are counted from its AST later;
-        // the prelude's are resolved first, so this is exact for builtins.
-        let declared = self.declared_generics(d).unwrap_or(n);
-        if args.len() != declared {
-            if args.is_empty() {
-                self.report(Diagnostic::new(msg::TYPE_TYPE_ARGUMENTS_NEEDED, span).with("name", name));
-            } else {
-                self.report(
-                    Diagnostic::new(msg::RESOLVE_TYPE_ARGUMENT_COUNT, span)
-                        .with("name", name)
-                        .with("expected", declared.to_string())
-                        .with("found", args.len().to_string()),
-                );
-            }
-            return Ty::Adt(d, (0..declared).map(|_| Ty::Error).collect());
-        }
-        Ty::Adt(d, args)
-    }
-
-    /// The number of generic parameters a type declares, from its pending
-    /// AST when its signature is not resolved yet.
-    fn declared_generics(&self, d: DefId) -> Option<usize> {
-        for p in &self.pending {
-            match p {
-                Pending::Struct { def, ast, .. } if *def == d => return Some(ast.generics.len()),
-                Pending::Enum { def, ast, .. } if *def == d => return Some(ast.generics.len()),
-                _ => {}
-            }
-        }
-        match &self.prog.def(d).kind {
-            DefKind::Struct(s) => Some(s.generics.len()),
-            DefKind::Enum(e) => Some(e.generics.len()),
-            _ => None,
-        }
+    /// Whether an impl is of `Drop`.
+    fn is_drop_impl(&self, impl_def: Option<DefId>) -> bool {
+        impl_def
+            .and_then(|i| self.prog.impl_info(i))
+            .is_some_and(|i| Some(i.trait_ref.def) == self.prog.wk.drop)
     }
 
     fn build_variant_index(&mut self) {

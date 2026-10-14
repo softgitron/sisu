@@ -3,10 +3,10 @@ a.txt
 counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
 ownership violation: `self.name` was used while it holds no value: it was moved out, or never assigned
   used at: move_out_of_drop.sisu:9:25 (`_6 = ref _1.*.0`)
-  at File.drop (move_out_of_drop.sisu:9:25)
+  at File.Drop.drop (move_out_of_drop.sisu:9:25)
   at main (move_out_of_drop.sisu:16:17)
-SIR of `File.drop`:
-fn File.drop(1) drop source 0 @8:9-8:13 {
+SIR of `File.Drop.drop`:
+fn File.Drop.drop(1) drop source 0 @8:9-8:13 {
     let _0: ()
     let _1: ref mut File "self" @8:9-8:13
     let _2: ()

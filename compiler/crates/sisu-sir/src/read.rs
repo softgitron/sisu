@@ -174,10 +174,59 @@ impl<'a> Cur<'a> {
         Ok(BlockId(self.uint()?))
     }
 
+    /// `[A, B]` if next, else nothing.
+    fn type_args(&mut self) -> R<Vec<Type>> {
+        let mut args = Vec::new();
+        if self.rest().starts_with('[') {
+            self.pos += 1;
+            loop {
+                args.push(self.ty()?);
+                if self.eat("]") {
+                    break;
+                }
+                self.expect(",")?;
+            }
+        }
+        Ok(args)
+    }
+
+    /// `[T, U]` after a declaration's name, if next.
+    fn param_names(&mut self) -> R<Vec<String>> {
+        let mut out = Vec::new();
+        if self.rest().starts_with('[') {
+            self.pos += 1;
+            loop {
+                out.push(self.type_name()?);
+                if self.eat("]") {
+                    break;
+                }
+                self.expect(",")?;
+            }
+        }
+        Ok(out)
+    }
+
     fn ty(&mut self) -> R<Type> {
         self.ws();
         if self.eat("()") {
             return Ok(Type::Unit);
+        }
+        if self.eat("$") {
+            return Ok(Type::Param(self.uint()?));
+        }
+        if self.eat("dyn ") {
+            let n = self.type_name()?;
+            let args = self.type_args()?;
+            return Ok(Type::Dyn(n, args));
+        }
+        if self.eat("<") {
+            let t = self.ty()?;
+            self.expect("as ")?;
+            let tr = self.type_name()?;
+            let args = self.type_args()?;
+            self.expect(">.")?;
+            let n = self.type_name()?;
+            return Ok(Type::Assoc(Box::new(t), tr, args, n));
         }
         if self.eat("ref mut ") {
             return Ok(Type::Ref(Box::new(self.ty()?), true));
@@ -236,17 +285,7 @@ impl<'a> Cur<'a> {
             "str" => Type::Str,
             "Never" => Type::Never,
             _ => {
-                let mut args = Vec::new();
-                if self.rest().starts_with('[') {
-                    self.pos += 1;
-                    loop {
-                        args.push(self.ty()?);
-                        if self.eat("]") {
-                            break;
-                        }
-                        self.expect(",")?;
-                    }
-                }
+                let args = self.type_args()?;
                 Type::Named(n, args)
             }
         };
@@ -397,7 +436,12 @@ impl<'a> Cur<'a> {
         }
         if self.eat("closure ") {
             let n = self.name()?;
-            return Ok(Rvalue::Closure(n, self.operands()?));
+            let tys = self.type_args()?;
+            return Ok(Rvalue::Closure(n, tys, self.operands()?));
+        }
+        if self.eat("dyn ") {
+            let t = self.ty()?;
+            return Ok(Rvalue::Aggregate(Aggregate::Dyn(t), self.operands()?));
         }
         if self.eat("copyof ") {
             return Ok(Rvalue::CopyOf(self.place()?));
@@ -461,6 +505,8 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
         intrinsics: Vec::new(),
         functions: Vec::new(),
         tests: Vec::new(),
+        trait_methods: Vec::new(),
+        impls: Vec::new(),
     };
     let mut i = 0;
     let err = |line: usize, message: String| ReadError { line: line + 1, message };
@@ -503,7 +549,8 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
                 let name = c.string()?;
                 let f = c.name()?;
                 p.tests.push((name, f));
-            } else if c.eat("intrinsic ") {
+            } else if c.eat("intrinsic ") || c.eat("method ") {
+                let method = line.trim_start().starts_with("method ");
                 let name = c.type_name()?;
                 let pure = c.eat("pure");
                 let from = c.indices("from")?;
@@ -512,10 +559,48 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
                 if !c.at_end() {
                     return Err(format!("unexpected `{}`", c.rest()));
                 }
-                p.intrinsics.push(IntrinsicDecl { name, pure, from, inner, own });
+                let d = IntrinsicDecl { name, pure, from, inner, own };
+                if method {
+                    p.trait_methods.push(d);
+                } else {
+                    p.intrinsics.push(d);
+                }
+            } else if c.eat("impl") {
+                let params = if c.rest().starts_with('[') {
+                    c.pos += 1;
+                    let n = c.uint()?;
+                    c.expect("]")?;
+                    n
+                } else {
+                    0
+                };
+                let trait_name = c.type_name()?;
+                let trait_args = c.type_args()?;
+                c.expect("for ")?;
+                let self_ty = c.ty()?;
+                c.expect("{")?;
+                let mut methods = Vec::new();
+                if !c.eat("}") {
+                    loop {
+                        let m = c.name()?;
+                        c.expect(":")?;
+                        let target = if c.eat("intrinsic ") {
+                            ImplTarget::Intrinsic(c.type_name()?)
+                        } else {
+                            ImplTarget::Fn(c.name()?)
+                        };
+                        methods.push((m, target));
+                        if c.eat("}") {
+                            break;
+                        }
+                        c.expect(",")?;
+                    }
+                }
+                p.impls.push(ImplDecl { params, trait_name, trait_args, self_ty, methods });
             } else if c.eat("struct ") || c.eat("view struct ") {
                 let view = line.trim_start().starts_with("view ");
                 let name = c.type_name()?;
+                let params = c.param_names()?;
                 let must_consume = c.eat("must_consume");
                 let mut drop = None;
                 if c.eat("drop ") {
@@ -536,10 +621,11 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
                         c.expect(",")?;
                     }
                 }
-                p.types.push(TypeDecl::Struct { name, fields, drop, view, must_consume });
+                p.types.push(TypeDecl::Struct { name, params, fields, drop, view, must_consume });
             } else if c.eat("enum ") || c.eat("error ") {
                 let error = line.trim_start().starts_with("error ");
                 let name = c.type_name()?;
+                let params = c.param_names()?;
                 let open = c.eat("open");
                 let must_consume = c.eat("must_consume");
                 let mut drop = None;
@@ -578,7 +664,7 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
                         c.expect(",")?;
                     }
                 }
-                p.types.push(TypeDecl::Enum { name, variants, drop, error, open, must_consume });
+                p.types.push(TypeDecl::Enum { name, params, variants, drop, error, open, must_consume });
             } else if c.eat("fn ") {
                 return Err("FN".into());
             } else {
@@ -613,10 +699,11 @@ fn read_function(lines: &[&str], start: usize) -> Result<(Function, usize), (usi
         None => (header, None),
     };
     let mut c = Cur::new(header);
-    type Header = (String, u32, FnKind, bool, u32, Vec<u32>, Vec<u32>);
+    type Header = (String, Vec<String>, u32, FnKind, bool, u32, Vec<u32>, Vec<u32>);
     let parse_header = |c: &mut Cur| -> R<Header> {
         c.expect("fn ")?;
         let name = c.name()?;
+        let tparams = c.param_names()?;
         c.expect("(")?;
         let n = c.uint()?;
         c.expect(")")?;
@@ -639,15 +726,16 @@ fn read_function(lines: &[&str], start: usize) -> Result<(Function, usize), (usi
         if !c.at_end() {
             return Err(format!("expected `{{`, found `{}`", c.rest()));
         }
-        Ok((name, n, kind, pure, src, from, inner))
+        Ok((name, tparams, n, kind, pure, src, from, inner))
     };
     if !lines[start].trim().ends_with(" {") {
         return Err((start, "expected `{` at the end of the function header".into()));
     }
-    let (name, param_count, kind, pure, source, from, inner) =
+    let (name, type_params, param_count, kind, pure, source, from, inner) =
         parse_header(&mut c).map_err(|e| (start, e))?;
     let mut f = Function {
         name,
+        type_params,
         kind,
         param_count,
         pure,
@@ -764,21 +852,14 @@ fn read_function(lines: &[&str], start: usize) -> Result<(Function, usize), (usi
                 c.expect("=")?;
                 if c.eat("call ") {
                     let callee = if c.eat("fn ") {
-                        Callee::Fn(c.name()?)
+                        let n = c.name()?;
+                        Callee::Fn(n, c.type_args()?)
                     } else if c.eat("intrinsic ") {
                         let n = c.type_name()?;
-                        let mut tys = Vec::new();
-                        if c.rest().starts_with('[') {
-                            c.pos += 1;
-                            loop {
-                                tys.push(c.ty()?);
-                                if c.eat("]") {
-                                    break;
-                                }
-                                c.expect(",")?;
-                            }
-                        }
-                        Callee::Intrinsic(n, tys)
+                        Callee::Intrinsic(n, c.type_args()?)
+                    } else if c.eat("trait ") {
+                        let n = c.type_name()?;
+                        Callee::Trait(n, c.type_args()?)
                     } else {
                         Callee::Value(c.operand()?)
                     };

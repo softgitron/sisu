@@ -11,6 +11,20 @@ pub const BUILTIN_TYPES: &[&str] = &[
     "Option", "Result", "Iterable",
 ];
 
+/// The largest `$N` a type mentions, plus one.
+fn params_needed(t: &Type) -> u32 {
+    match t {
+        Type::Param(i) => i + 1,
+        Type::Named(_, a) | Type::Tuple(a) | Type::Dyn(_, a) => {
+            a.iter().map(params_needed).max().unwrap_or(0)
+        }
+        Type::Fn(ps, r, _) => ps.iter().map(params_needed).max().unwrap_or(0).max(params_needed(r)),
+        Type::Ref(t, _) => params_needed(t),
+        Type::Assoc(t, _, a, _) => a.iter().map(params_needed).max().unwrap_or(0).max(params_needed(t)),
+        _ => 0,
+    }
+}
+
 pub fn validate(p: &Program) -> Vec<String> {
     let mut problems = Vec::new();
     let fn_names: Vec<&str> = p.functions.iter().map(|f| f.name.as_str()).collect();
@@ -30,6 +44,12 @@ pub fn validate(p: &Program) -> Vec<String> {
         }
         if let Some(a) = f.inner.iter().find(|a| **a >= f.param_count) {
             bad(format!("`inner` names argument {a}, but the function has {} parameters", f.param_count));
+        }
+        let ntp = f.type_params.len() as u32;
+        for (i, l) in f.locals.iter().enumerate() {
+            if params_needed(&l.ty) > ntp {
+                bad(format!("the type of _{i} names a type parameter the function does not have"));
+            }
         }
         let nb = f.blocks.len() as u32;
         let nl = f.locals.len() as u32;
@@ -68,7 +88,7 @@ pub fn validate(p: &Program) -> Vec<String> {
                         {
                             check_place(x, &mut bad);
                         }
-                        if let Rvalue::Closure(n, _) = r
+                        if let Rvalue::Closure(n, _, _) = r
                             && !fn_names.contains(&n.as_str())
                         {
                             bad(format!("closure function {n} does not exist"));
@@ -76,10 +96,26 @@ pub fn validate(p: &Program) -> Vec<String> {
                     }
                     StatementKind::Call { dest, callee, .. } => {
                         check_place(dest, &mut bad);
-                        if let Callee::Fn(n) = callee
+                        if let Callee::Fn(n, _) = callee
                             && !fn_names.contains(&n.as_str())
                         {
                             bad(format!("bb{bi}: calls missing function {n}"));
+                        }
+                        if let Callee::Trait(n, _) = callee
+                            && p.trait_method(n).is_none()
+                        {
+                            bad(format!(
+                                "bb{bi}: calls the trait method {n}, which has no `method` declaration"
+                            ));
+                        }
+                        let tys = match callee {
+                            Callee::Fn(_, t) | Callee::Intrinsic(_, t) | Callee::Trait(_, t) => t.as_slice(),
+                            Callee::Value(_) => &[],
+                        };
+                        if tys.iter().any(|t| params_needed(t) > ntp) {
+                            bad(format!(
+                                "bb{bi}: a type argument names a type parameter the function does not have"
+                            ));
                         }
                     }
                     StatementKind::Drop { place, flag } => {
@@ -127,6 +163,26 @@ pub fn validate(p: &Program) -> Vec<String> {
         && !fn_names.contains(&e.function.as_str())
     {
         problems.push(format!("entry {} does not exist", e.function));
+    }
+    for i in &p.impls {
+        for (m, t) in &i.methods {
+            if let ImplTarget::Fn(f) = t
+                && !fn_names.contains(&f.as_str())
+            {
+                problems.push(format!(
+                    "impl {} for {}: method {m} names missing function {f}",
+                    i.trait_name,
+                    write::ty(&i.self_ty)
+                ));
+            }
+        }
+        if params_needed(&i.self_ty) > i.params || i.trait_args.iter().any(|t| params_needed(t) > i.params) {
+            problems.push(format!(
+                "impl {} for {}: a pattern names a parameter the impl does not have",
+                i.trait_name,
+                write::ty(&i.self_ty)
+            ));
+        }
     }
     problems
 }

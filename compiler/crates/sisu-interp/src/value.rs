@@ -48,6 +48,8 @@ pub enum Step {
     DictVal(usize),
     /// A set element at a position.
     SetItem(usize),
+    /// The value a `dyn` holds.
+    DynValue,
 }
 
 /// A struct or enum value; `variant` is 0 for a struct. `trace` is the
@@ -222,6 +224,23 @@ pub enum IterState {
     Done,
 }
 
+/// A `dyn Trait` value: the value and its type, which a call through the
+/// trait dispatches on.
+#[derive(Clone, Debug)]
+pub struct DynVal {
+    pub ty: sisu_sir::Type,
+    pub value: Value,
+}
+
+/// A closure: its function, the type arguments of the function that made
+/// it, and the tuple of captured references.
+#[derive(Clone, Debug)]
+pub struct ClosureVal {
+    pub name: Rc<str>,
+    pub tys: Vec<sisu_sir::Type>,
+    pub env: Vec<Value>,
+}
+
 #[derive(Clone, Debug)]
 pub struct EntryVal {
     pub dict: Pointer,
@@ -252,8 +271,8 @@ pub enum Value {
     Set(Box<Set>),
     Ref(Box<Pointer>),
     Fn(Rc<str>),
-    /// A closure: its function and the tuple of captured references.
-    Closure(Rc<str>, Rc<Vec<Value>>),
+    Closure(Rc<ClosureVal>),
+    Dyn(Box<DynVal>),
     Iter(Box<IterState>),
     Entry(Box<EntryVal>),
     Fs(Rc<FsCap>),

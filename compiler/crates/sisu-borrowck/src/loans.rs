@@ -511,7 +511,26 @@ impl Analysis {
     ) -> BitSet {
         let mut out = BitSet::new(self.nloans);
         match callee {
-            Callee::Fn(name) => {
+            Callee::Trait(name, _) => match p.trait_method(name) {
+                Some(d) => {
+                    for &i in &d.from {
+                        if let Some(o) = ops.get(i as usize) {
+                            out.union(&o.holds);
+                        }
+                    }
+                    for &i in &d.inner {
+                        if let Some(o) = ops.get(i as usize) {
+                            out.union(&o.inner);
+                        }
+                    }
+                }
+                None => {
+                    for o in ops {
+                        out.union(&o.holds);
+                    }
+                }
+            },
+            Callee::Fn(name, _) => {
                 if let Some(g) = p.function(name) {
                     for &i in &g.from {
                         if let Some(o) = ops.get(i as usize) {
@@ -599,7 +618,7 @@ impl Analysis {
                         }
                         (h, Some(dset))
                     }
-                    Rvalue::Aggregate(_, ops) | Rvalue::Closure(_, ops) => {
+                    Rvalue::Aggregate(_, ops) | Rvalue::Closure(_, _, ops) => {
                         let mut h = BitSet::new(self.nloans);
                         for (oi, o) in ops.iter().enumerate() {
                             h.union(&self.op_loans(st, made, oi, o).holds);
@@ -1340,7 +1359,7 @@ impl Analysis {
         }
         let stored: BitSet = match &s.kind {
             StatementKind::Assign(_, Rvalue::Use(o)) => self.op_loans(st, made, 0, o).holds,
-            StatementKind::Assign(_, Rvalue::Aggregate(_, ops) | Rvalue::Closure(_, ops)) => {
+            StatementKind::Assign(_, Rvalue::Aggregate(_, ops) | Rvalue::Closure(_, _, ops)) => {
                 let mut h = BitSet::new(self.nloans);
                 for (oi, o) in ops.iter().enumerate() {
                     h.union(&self.op_loans(st, made, oi, o).holds);

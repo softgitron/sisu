@@ -1,6 +1,5 @@
 sir 0
 source 0 "straight_line.sisu"
-source 1 "<std>/prelude.sisu"
 entry main
 
 intrinsic print

@@ -26,6 +26,8 @@ pub(crate) struct Ctx<'a> {
     pub sources: &'a SourceMap,
     pub files: HashMap<sisu_diag::FileId, u32>,
     pub file_names: Vec<String>,
+    /// The prefix of the names of each trait impl's methods: `Circle.Shape`.
+    pub impl_names: HashMap<DefId, String>,
 }
 
 impl Ctx<'_> {
@@ -34,6 +36,15 @@ impl Ctx<'_> {
         let def = prog.def(d);
         if let Some(i) = prog.tests.iter().position(|t| *t == d) {
             return format!("test#{i}");
+        }
+        if let Some(f) = prog.fn_info(d) {
+            if let Some(i) = f.impl_ {
+                let prefix = self.impl_names.get(&i).cloned().unwrap_or_else(|| "impl".into());
+                return format!("{prefix}.{}", def.name);
+            }
+            if let Some(t) = f.trait_ {
+                return format!("{}.{}", prog.qualified_name(t), def.name);
+            }
         }
         match prog.fn_info(d).and_then(|f| f.owner.as_ref()) {
             Some(owner) => format!("{}.{}", self.owner_name(owner), def.name),
@@ -55,7 +66,29 @@ impl Ctx<'_> {
             Ty::Bool => "bool".into(),
             Ty::Char => "char".into(),
             Ty::Str => "str".into(),
-            _ => "?".into(),
+            Ty::Unit => "unit".into(),
+            Ty::Tuple(es, _) => format!("tuple{}", es.len()),
+            Ty::Ref(..) => "ref".into(),
+            Ty::Fn(_) => "fn".into(),
+            Ty::Dyn(tr) => format!("dyn{}", self.prog.def(tr.def).name),
+            Ty::ErrSet(ms) if ms.len() == 1 => self.type_name(ms[0]),
+            _ => "any".into(),
+        }
+    }
+
+    /// Names every trait impl's methods: `Type.Trait.method`, with `#2` and
+    /// on for a second impl of one trait for one type constructor.
+    fn name_impls(&mut self) {
+        let prog = self.prog;
+        let mut used: HashMap<String, u32> = HashMap::new();
+        for &i in &prog.impls {
+            let Some(info) = prog.impl_info(i) else { continue };
+            let base =
+                format!("{}.{}", self.owner_name(&info.self_ty), prog.qualified_name(info.trait_ref.def));
+            let n = used.entry(base.clone()).or_insert(0);
+            *n += 1;
+            let name = if *n == 1 { base } else { format!("{base}#{n}") };
+            self.impl_names.insert(i, name);
         }
     }
 
@@ -116,7 +149,17 @@ impl Ctx<'_> {
             Ty::Bool => sir::Type::Bool,
             Ty::Char => sir::Type::Char,
             Ty::Str => sir::Type::Str,
-            Ty::Unit | Ty::Param(_) | Ty::Var(_) | Ty::Error => sir::Type::Unit,
+            Ty::Unit | Ty::Var(_) | Ty::Error => sir::Type::Unit,
+            Ty::Param(i) => sir::Type::Param(*i),
+            Ty::Dyn(tr) => {
+                sir::Type::Dyn(prog.qualified_name(tr.def), tr.args.iter().map(|a| self.ty(a)).collect())
+            }
+            Ty::Assoc(a) => sir::Type::Assoc(
+                Box::new(self.ty(&a.self_ty)),
+                prog.qualified_name(a.trait_.def),
+                a.trait_.args.iter().map(|t| self.ty(t)).collect(),
+                a.name.clone(),
+            ),
             Ty::Never => sir::Type::Never,
             Ty::Adt(d, args) => {
                 let name = if Some(*d) == prog.wk.option {
@@ -180,7 +223,9 @@ fn trimmed_end(text: &str, r: sisu_diag::TextRange) -> u32 {
 /// Lowers a checked program. The program must have no errors; lowering
 /// does not report diagnostics.
 pub fn lower(prog: &Program, typed: &Typed, sources: &SourceMap) -> sir::Program {
-    let mut ctx = Ctx { prog, sources, files: HashMap::new(), file_names: Vec::new() };
+    let mut ctx =
+        Ctx { prog, sources, files: HashMap::new(), file_names: Vec::new(), impl_names: HashMap::new() };
+    ctx.name_impls();
     // The root module's file is source 0.
     if let Some(m) = prog.modules.get(prog.root.0 as usize) {
         ctx.source_index(m.file);
@@ -217,10 +262,104 @@ pub fn lower(prog: &Program, typed: &Typed, sources: &SourceMap) -> sir::Program
         }
     }
     let types = collect_types(&ctx, &functions);
-    let functions = prune(functions, &roots, &types);
+    let mut functions = prune(&ctx, functions, &roots, &types);
     let types = collect_types(&ctx, &functions);
     let intrinsics = intrinsic_decls(prog, &functions);
-    sir::Program { sources: ctx.file_names.clone(), entry, types, intrinsics, functions, tests }
+    let (trait_methods, impls) = trait_decls(&ctx, &functions);
+    let sources = renumber_sources(&ctx.file_names, &mut functions);
+    sir::Program { sources, entry, types, intrinsics, functions, tests, trait_methods, impls }
+}
+
+/// The trait methods the functions call through `call trait`, with their
+/// facts, and the impls of their traits, which the interpreter dispatches
+/// to.
+fn trait_decls(ctx: &Ctx, functions: &[sir::Function]) -> (Vec<sir::IntrinsicDecl>, Vec<sir::ImplDecl>) {
+    let prog = ctx.prog;
+    let called = trait_calls(functions);
+    let mut methods = Vec::new();
+    let mut traits: Vec<DefId> = Vec::new();
+    for name in &called {
+        let Some(m) = trait_method_def(ctx, name) else { continue };
+        let Some(f) = prog.fn_info(m) else { continue };
+        let b = prog.result_borrows_of(f);
+        let own = prog
+            .sig_params(f)
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.mode == sisu_syntax::ast::Mode::Own)
+            .map(|(i, _)| i as u32)
+            .collect();
+        methods.push(sir::IntrinsicDecl {
+            name: name.clone(),
+            pure: f.pure,
+            from: b.deep,
+            inner: b.inner,
+            own,
+        });
+        if let Some(t) = f.trait_
+            && !traits.contains(&t)
+        {
+            traits.push(t);
+        }
+    }
+    let mut impls = Vec::new();
+    for &i in &prog.impls {
+        let Some(info) = prog.impl_info(i) else { continue };
+        if !traits.contains(&info.trait_ref.def) {
+            continue;
+        }
+        let methods = info
+            .methods
+            .iter()
+            .filter(|(_, m)| prog.fn_info(*m).is_some_and(|f| f.body.is_some() || f.intrinsic.is_some()))
+            .map(|(n, m)| {
+                let target = match prog.fn_info(*m).and_then(|f| f.intrinsic.clone()) {
+                    Some(intr) => sir::ImplTarget::Intrinsic(intr),
+                    None => sir::ImplTarget::Fn(ctx.fn_name(*m)),
+                };
+                (n.clone(), target)
+            })
+            .collect();
+        impls.push(sir::ImplDecl {
+            params: info.generics.len() as u32,
+            trait_name: prog.qualified_name(info.trait_ref.def),
+            trait_args: info.trait_ref.args.iter().map(|t| ctx.ty(t)).collect(),
+            self_ty: ctx.ty(&info.self_ty),
+            methods,
+        });
+    }
+    (methods, impls)
+}
+
+/// The names of the trait methods called through `call trait`.
+fn trait_calls(functions: &[sir::Function]) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for f in functions {
+        for b in &f.blocks {
+            for s in &b.stmts {
+                if let sir::StatementKind::Call { callee: sir::Callee::Trait(n, _), .. } = &s.kind
+                    && !names.contains(n)
+                {
+                    names.push(n.clone());
+                }
+            }
+        }
+    }
+    names.sort();
+    names
+}
+
+/// The trait method a `Trait.method` name stands for.
+fn trait_method_def(ctx: &Ctx, name: &str) -> Option<DefId> {
+    let prog = ctx.prog;
+    let (t, m) = name.rsplit_once('.')?;
+    (0..prog.defs.len() as u32).map(DefId).find_map(|d| {
+        if matches!(prog.def(d).kind, DefKind::Trait(_)) && prog.qualified_name(d) == t {
+            prog.trait_method(d, m)
+        } else {
+            None
+        }
+    })
 }
 
 /// The facts the SIR checkers need about every intrinsic the functions
@@ -276,8 +415,15 @@ fn intrinsic_decls(prog: &Program, functions: &[sir::Function]) -> Vec<sir::Intr
         .collect()
 }
 
-fn prune(functions: Vec<sir::Function>, roots: &[String], types: &[sir::TypeDecl]) -> Vec<sir::Function> {
+fn prune(
+    ctx: &Ctx,
+    functions: Vec<sir::Function>,
+    roots: &[String],
+    types: &[sir::TypeDecl],
+) -> Vec<sir::Function> {
+    let prog = ctx.prog;
     let by_name: HashMap<&str, &sir::Function> = functions.iter().map(|f| (f.name.as_str(), f)).collect();
+    let mut dispatched: HashSet<DefId> = HashSet::new();
     let mut keep: HashSet<String> = HashSet::new();
     let mut work: Vec<String> = roots.to_vec();
     // Defaults and drops of declared types are reached through the types.
@@ -298,13 +444,31 @@ fn prune(functions: Vec<sir::Function>, roots: &[String], types: &[sir::TypeDecl
         for b in &f.blocks {
             for s in &b.stmts {
                 match &s.kind {
-                    sir::StatementKind::Call { callee: sir::Callee::Fn(c), args, .. } => {
+                    sir::StatementKind::Call { callee: sir::Callee::Fn(c, _), args, .. } => {
                         work.push(c.clone());
                         refs_in_operands(args, &mut work);
                     }
+                    sir::StatementKind::Call { callee: sir::Callee::Trait(c, _), args, .. } => {
+                        refs_in_operands(args, &mut work);
+                        // A call through a trait reaches the trait's provided
+                        // body and every impl's method.
+                        work.push(c.clone());
+                        if let Some(m) = trait_method_def(ctx, c)
+                            && let Some(t) = prog.fn_info(m).and_then(|f| f.trait_)
+                            && dispatched.insert(t)
+                        {
+                            for &i in &prog.impls {
+                                if let Some(info) = prog.impl_info(i)
+                                    && info.trait_ref.def == t
+                                {
+                                    work.extend(info.methods.iter().map(|(_, m)| ctx.fn_name(*m)));
+                                }
+                            }
+                        }
+                    }
                     sir::StatementKind::Call { args, .. } => refs_in_operands(args, &mut work),
                     sir::StatementKind::Assign(_, r) => match r {
-                        sir::Rvalue::Closure(c, ops) => {
+                        sir::Rvalue::Closure(c, _, ops) => {
                             work.push(c.clone());
                             refs_in_operands(ops, &mut work);
                         }
@@ -318,6 +482,32 @@ fn prune(functions: Vec<sir::Function>, roots: &[String], types: &[sir::TypeDecl
         }
     }
     functions.into_iter().filter(|f| keep.contains(&f.name)).collect()
+}
+
+/// The sources the kept functions come from: the root module's file
+/// first, then the others in the order they were first met; each
+/// function's index is rewritten to match.
+fn renumber_sources(names: &[String], functions: &mut [sir::Function]) -> Vec<String> {
+    let mut map: HashMap<u32, u32> = HashMap::new();
+    let mut out = Vec::new();
+    if let Some(root) = names.first() {
+        map.insert(0, 0);
+        out.push(root.clone());
+    }
+    let mut used: Vec<u32> = functions.iter().map(|f| f.source).collect();
+    used.sort_unstable();
+    used.dedup();
+    for i in used {
+        if let (std::collections::hash_map::Entry::Vacant(e), Some(n)) = (map.entry(i), names.get(i as usize))
+        {
+            e.insert(out.len() as u32);
+            out.push(n.clone());
+        }
+    }
+    for f in functions {
+        f.source = map.get(&f.source).copied().unwrap_or(0);
+    }
+    out
 }
 
 fn refs_in_operands(ops: &[sir::Operand], work: &mut Vec<String>) {
@@ -348,6 +538,11 @@ fn collect_types(ctx: &Ctx, functions: &[sir::Function]) -> Vec<sir::TypeDecl> {
                 walk(r, out);
             }
             sir::Type::Ref(t, _) => walk(t, out),
+            sir::Type::Dyn(_, args) => args.iter().for_each(|a| walk(a, out)),
+            sir::Type::Assoc(t, _, args, _) => {
+                walk(t, out);
+                args.iter().for_each(|a| walk(a, out));
+            }
             _ => {}
         }
     }
@@ -363,6 +558,19 @@ fn collect_types(ctx: &Ctx, functions: &[sir::Function]) -> Vec<sir::TypeDecl> {
                 ) = &s.kind
                 {
                     names.insert(n.clone());
+                }
+                if let sir::StatementKind::Assign(_, sir::Rvalue::Aggregate(sir::Aggregate::Dyn(t), _)) =
+                    &s.kind
+                {
+                    walk(t, &mut names);
+                }
+                if let sir::StatementKind::Call {
+                    callee:
+                        sir::Callee::Fn(_, tys) | sir::Callee::Trait(_, tys) | sir::Callee::Intrinsic(_, tys),
+                    ..
+                } = &s.kind
+                {
+                    tys.iter().for_each(|t| walk(t, &mut names));
                 }
             }
         }
@@ -385,6 +593,7 @@ fn collect_types(ctx: &Ctx, functions: &[sir::Function]) -> Vec<sir::TypeDecl> {
         let decl = match &prog.def(d).kind {
             DefKind::Struct(s) => sir::TypeDecl::Struct {
                 name: n.clone(),
+                params: s.generics.iter().map(|g| g.name.clone()).collect(),
                 fields: s
                     .fields
                     .iter()
@@ -401,6 +610,7 @@ fn collect_types(ctx: &Ctx, functions: &[sir::Function]) -> Vec<sir::TypeDecl> {
             },
             DefKind::Enum(e) | DefKind::ErrorSet(e) => sir::TypeDecl::Enum {
                 name: n.clone(),
+                params: e.generics.iter().map(|g| g.name.clone()).collect(),
                 variants: e
                     .variants
                     .iter()

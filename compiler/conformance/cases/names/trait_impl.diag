@@ -1,1 +1,1 @@
-4:6-4:13 E0214 resolve.trait-impl trait="Display"
+5:9-5:12 E0234 resolve.method-signature name="fmt" trait="Display" expected="pure def fmt(self, mut f: Formatter)" found="def fmt(self) -> String"

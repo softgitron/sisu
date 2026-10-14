@@ -273,9 +273,7 @@ impl B<'_> {
             ENUM_DEF => ItemKind::Enum(self.enum_def(n)),
             ERROR_DEF => ItemKind::ErrorSet(self.enum_def(n)),
             IMPL_DEF => ItemKind::Impl(self.impl_def(n)),
-            TRAIT_DEF => ItemKind::Trait(TraitDef {
-                name: self.ident_after(n, TRAIT_KW).unwrap_or(self.missing_name(n)),
-            }),
+            TRAIT_DEF => ItemKind::Trait(self.trait_def(n)),
             IMPORT_ITEM => ItemKind::Import(self.import(n)),
             FROM_IMPORT => ItemKind::FromImport(self.import_from(n)),
             TEST_DEF => ItemKind::Test(self.test_def(n)),
@@ -319,22 +317,116 @@ impl B<'_> {
         self.nodes(g)
             .into_iter()
             .filter(|&p| self.kind(p) == GENERIC_PARAM)
-            .map(|p| GenericParam {
-                name: self
-                    .tokens(p)
-                    .into_iter()
-                    .find(|&t| self.t.token_kind(t) == IDENT)
-                    .map(|t| self.name(t))
-                    .unwrap_or(self.missing_name(p)),
-                bounds: self
-                    .nodes(p)
-                    .into_iter()
-                    .filter(|&c| is_type_node(self.kind(c)))
-                    .map(|c| self.type_expr(c))
-                    .collect(),
-                is_const: self.has(p, CONST_KW),
+            .map(|p| {
+                // The types after `:` are bounds; the one after `=` is the default.
+                let mut bounds = Vec::new();
+                let mut default = None;
+                let mut after_eq = false;
+                for e in self.t.children(p) {
+                    match e {
+                        Element::Token(t) if self.t.token_kind(*t) == EQ => after_eq = true,
+                        Element::Node(c) if is_type_node(self.kind(*c)) || self.kind(*c) == ERROR => {
+                            if after_eq {
+                                default = Some(self.type_expr(*c));
+                            } else {
+                                bounds.push(self.type_expr(*c));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                GenericParam {
+                    name: self
+                        .tokens(p)
+                        .into_iter()
+                        .find(|&t| self.t.token_kind(t) == IDENT)
+                        .map(|t| self.name(t))
+                        .unwrap_or(self.missing_name(p)),
+                    bounds,
+                    default,
+                    is_const: self.has(p, CONST_KW),
+                }
             })
             .collect()
+    }
+
+    /// The predicates of a `where` clause: `T: A + B, C.Item: D`.
+    fn where_preds(&self, n: NodeId) -> Vec<WherePred> {
+        let Some(w) = self.child(n, WHERE_CLAUSE) else { return Vec::new() };
+        let mut out: Vec<WherePred> = Vec::new();
+        let mut subject: Option<TypeExpr> = None;
+        let mut bounds = Vec::new();
+        let mut after_colon = false;
+        let mut start = self.range(w).start;
+        let finish = |subject: &mut Option<TypeExpr>,
+                      bounds: &mut Vec<TypeExpr>,
+                      out: &mut Vec<WherePred>,
+                      start: u32| {
+            if let Some(ty) = subject.take() {
+                let end = bounds.last().map(|b: &TypeExpr| b.range.end).unwrap_or(ty.range.end);
+                out.push(WherePred { ty, bounds: std::mem::take(bounds), range: TextRange::new(start, end) });
+            }
+        };
+        for e in self.t.children(w) {
+            match e {
+                Element::Token(t) => match self.t.token_kind(*t) {
+                    COLON => after_colon = true,
+                    COMMA => {
+                        finish(&mut subject, &mut bounds, &mut out, start);
+                        after_colon = false;
+                    }
+                    _ => {}
+                },
+                Element::Node(c) if is_type_node(self.kind(*c)) || self.kind(*c) == ERROR => {
+                    let ty = self.type_expr(*c);
+                    if after_colon {
+                        bounds.push(ty);
+                    } else {
+                        start = ty.range.start;
+                        subject = Some(ty);
+                    }
+                }
+                _ => {}
+            }
+        }
+        finish(&mut subject, &mut bounds, &mut out, start);
+        out
+    }
+
+    /// `type Item` or `type Item = T` inside a trait or an impl.
+    fn assoc_type(&self, n: NodeId) -> AssocTypeDef {
+        AssocTypeDef {
+            name: self.ident_after(n, TYPE_KW).unwrap_or(self.missing_name(n)),
+            ty: self.nodes(n).into_iter().find(|&c| is_type_node(self.kind(c))).map(|c| self.type_expr(c)),
+            range: self.range(n),
+        }
+    }
+
+    fn trait_def(&self, n: NodeId) -> TraitDef {
+        let supertraits = self
+            .nodes(n)
+            .into_iter()
+            .filter(|&c| is_type_node(self.kind(c)))
+            .map(|c| self.type_expr(c))
+            .collect();
+        let mut methods = Vec::new();
+        let mut assoc_types = Vec::new();
+        if let Some(b) = self.child(n, BLOCK) {
+            for c in self.nodes(b) {
+                match self.kind(c) {
+                    FN_DEF => methods.push(self.fn_def(c)),
+                    TYPE_ALIAS => assoc_types.push(self.assoc_type(c)),
+                    _ => {}
+                }
+            }
+        }
+        TraitDef {
+            name: self.ident_after(n, TRAIT_KW).unwrap_or(self.missing_name(n)),
+            generics: self.generics(n),
+            supertraits,
+            methods,
+            assoc_types,
+        }
     }
 
     fn fn_def(&self, n: NodeId) -> FnDef {
@@ -371,7 +463,7 @@ impl B<'_> {
             params,
             ret,
             from,
-            has_where: self.child(n, WHERE_CLAUSE).is_some(),
+            where_: self.where_preds(n),
             body: self.child(n, BLOCK).map(|b| self.block(b)),
             attrs: self.attrs(n),
             header_broken: self.error_outside_block(n),
@@ -576,17 +668,18 @@ impl B<'_> {
                 }),
             )
         };
-        let methods = self
-            .child(n, BLOCK)
-            .map(|b| {
-                self.nodes(b)
-                    .into_iter()
-                    .filter(|&c| self.kind(c) == FN_DEF)
-                    .map(|c| self.fn_def(c))
-                    .collect()
-            })
-            .unwrap_or_default();
-        ImplDef { generics: self.generics(n), trait_ty, self_ty, methods }
+        let mut methods = Vec::new();
+        let mut assoc_types = Vec::new();
+        if let Some(b) = self.child(n, BLOCK) {
+            for c in self.nodes(b) {
+                match self.kind(c) {
+                    FN_DEF => methods.push(self.fn_def(c)),
+                    TYPE_ALIAS => assoc_types.push(self.assoc_type(c)),
+                    _ => {}
+                }
+            }
+        }
+        ImplDef { generics: self.generics(n), trait_ty, self_ty, methods, assoc_types }
     }
 
     fn path_names(&self, n: NodeId) -> Vec<Name> {
@@ -1445,7 +1538,10 @@ impl B<'_> {
                     .map(|v| v as i128)
                     .unwrap_or(0),
             ),
-            DYN_TYPE => TypeKind::Unsupported("`dyn` trait objects"),
+            DYN_TYPE => match types.first() {
+                Some(&c) => TypeKind::Dyn(Box::new(self.type_expr(c))),
+                None => TypeKind::Error,
+            },
             IMPL_TYPE => TypeKind::Unsupported("`impl Trait for T` types"),
             PTR_TYPE => TypeKind::Unsupported("raw pointers"),
             _ => TypeKind::Error,

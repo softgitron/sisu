@@ -8,14 +8,19 @@
 
 pub mod borrows;
 mod collect;
+mod derive;
 pub mod program;
+pub mod solve;
 pub mod std_sources;
+mod traits;
 pub mod ty;
+mod types;
 
 pub use borrows::{ResultBorrows, ResultShape, SigParam};
 pub use collect::{Resolved, resolve};
 pub use program::*;
-pub use ty::{FnTy, Ty, TyKey, is_subset, union};
+pub use solve::{Answer, ImplSource};
+pub use ty::{AssocTy, FnTy, Ty, TyKey, is_subset, union};
 
 #[cfg(test)]
 mod tests;

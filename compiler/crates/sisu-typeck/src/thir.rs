@@ -185,6 +185,8 @@ pub enum ForMode {
     Own,
     /// Drives an `Iter` value.
     Iter,
+    /// Drives a value of another type that implements `Iterator`.
+    Trait,
 }
 
 #[derive(Clone, Debug)]
@@ -238,6 +240,10 @@ pub enum ArgMode {
     Borrow,
     /// An exclusive borrow; the argument is a mutable place.
     BorrowMut,
+    /// A shared borrow even of a `Copy` value: the parameter's declared
+    /// type is a generic parameter (or an associated type of one), which
+    /// every caller passes by reference.
+    Ref,
 }
 
 #[derive(Clone, Debug)]
@@ -310,6 +316,12 @@ pub enum Coercion {
     MutToShared,
     /// An error set widened to a superset, possibly inside `T ! E`.
     Widen,
+    /// A value of a type that implements the trait, as a `dyn Trait`.
+    ToDyn,
+    /// `Box[T]` to `Box[dyn Trait]`.
+    BoxToDyn,
+    /// `ref T` to `ref dyn Trait`: the reference, carrying `T`.
+    RefToDyn,
     /// A type error: the expression is kept, its type replaced by the
     /// expected one so nothing downstream reports again.
     Mismatch,

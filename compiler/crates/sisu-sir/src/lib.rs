@@ -48,6 +48,31 @@ pub struct Program {
     pub functions: Vec<Function>,
     /// Test name and the function that runs it.
     pub tests: Vec<(String, String)>,
+    /// The trait methods called through `call trait`, with the facts the
+    /// checkers need about them (as for intrinsics).
+    pub trait_methods: Vec<IntrinsicDecl>,
+    /// The impls a `call trait` may dispatch to at run time.
+    pub impls: Vec<ImplDecl>,
+}
+
+/// `impl[N] Trait[args] for Type { method: target, ... }`: what a call of
+/// one of the trait's methods runs for a type matching the pattern. The
+/// impl's parameters are `$0` to `$(N-1)` in the patterns; a method the
+/// impl does not list is the trait's provided one, the function named
+/// `Trait.method`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImplDecl {
+    pub params: u32,
+    pub trait_name: String,
+    pub trait_args: Vec<Type>,
+    pub self_ty: Type,
+    pub methods: Vec<(String, ImplTarget)>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ImplTarget {
+    Fn(String),
+    Intrinsic(String),
 }
 
 /// What the checkers know about a host intrinsic: its contract in the
@@ -79,6 +104,8 @@ pub struct Entry {
 pub enum TypeDecl {
     Struct {
         name: String,
+        /// Generic parameters, `$0` and on in the fields' types.
+        params: Vec<String>,
         fields: Vec<FieldDecl>,
         drop: Option<String>,
         /// A `view struct`: it may hold references (04, "Views").
@@ -89,6 +116,7 @@ pub enum TypeDecl {
     },
     Enum {
         name: String,
+        params: Vec<String>,
         variants: Vec<VariantDecl>,
         drop: Option<String>,
         error: bool,
@@ -101,6 +129,12 @@ impl TypeDecl {
     pub fn name(&self) -> &str {
         match self {
             TypeDecl::Struct { name, .. } | TypeDecl::Enum { name, .. } => name,
+        }
+    }
+
+    pub fn params(&self) -> &[String] {
+        match self {
+            TypeDecl::Struct { params, .. } | TypeDecl::Enum { params, .. } => params,
         }
     }
 }
@@ -136,6 +170,48 @@ pub enum Type {
     /// Parameters, result, and whether the function is `pure`.
     Fn(Vec<Type>, Box<Type>, bool),
     Ref(Box<Type>, bool),
+    /// Type parameter `N` of the function (or of the type declaration).
+    Param(u32),
+    /// `dyn Trait[args]`: a value of a type implementing the trait, which
+    /// carries its type.
+    Dyn(String, Vec<Type>),
+    /// `<T as Trait[args]>.Name`: an associated type of a type parameter.
+    Assoc(Box<Type>, String, Vec<Type>, String),
+}
+
+impl Type {
+    /// Replaces `$i` by `args[i]` (and leaves a parameter without an
+    /// argument as it is).
+    pub fn subst(&self, args: &[Type]) -> Type {
+        match self {
+            Type::Param(i) => args.get(*i as usize).cloned().unwrap_or(Type::Param(*i)),
+            Type::Named(n, a) => Type::Named(n.clone(), a.iter().map(|t| t.subst(args)).collect()),
+            Type::Tuple(e) => Type::Tuple(e.iter().map(|t| t.subst(args)).collect()),
+            Type::Fn(p, r, pure) => {
+                Type::Fn(p.iter().map(|t| t.subst(args)).collect(), Box::new(r.subst(args)), *pure)
+            }
+            Type::Ref(t, m) => Type::Ref(Box::new(t.subst(args)), *m),
+            Type::Dyn(n, a) => Type::Dyn(n.clone(), a.iter().map(|t| t.subst(args)).collect()),
+            Type::Assoc(t, tr, a, n) => Type::Assoc(
+                Box::new(t.subst(args)),
+                tr.clone(),
+                a.iter().map(|x| x.subst(args)).collect(),
+                n.clone(),
+            ),
+            other => other.clone(),
+        }
+    }
+
+    /// Whether the type mentions a type parameter.
+    pub fn has_params(&self) -> bool {
+        match self {
+            Type::Param(_) | Type::Assoc(..) => true,
+            Type::Named(_, a) | Type::Tuple(a) | Type::Dyn(_, a) => a.iter().any(Type::has_params),
+            Type::Fn(p, r, _) => p.iter().any(Type::has_params) || r.has_params(),
+            Type::Ref(t, _) => t.has_params(),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -177,6 +253,10 @@ pub enum FnKind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Function {
     pub name: String,
+    /// Generic parameters: `$0` and on in the function's types, whose
+    /// arguments every call passes at run time (type arguments are values
+    /// in stage 0; nothing is monomorphised).
+    pub type_params: Vec<String>,
     pub kind: FnKind,
     pub param_count: u32,
     /// Declared `pure` (D-074), or a closure whose body is pure.
@@ -265,8 +345,13 @@ pub enum StatementKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Callee {
-    Fn(String),
+    /// A function, with its type arguments.
+    Fn(String, Vec<Type>),
     Intrinsic(String, Vec<Type>),
+    /// `Trait.method` for the type arguments `[Self, trait arguments...,
+    /// the method's own...]`, dispatched at run time to the impl for
+    /// `Self`.
+    Trait(String, Vec<Type>),
     Value(Operand),
 }
 
@@ -386,6 +471,8 @@ pub enum Aggregate {
     Set,
     /// Keys and values alternate.
     Dict,
+    /// A `dyn` value holding the operand, whose type is given.
+    Dyn(Type),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -398,8 +485,9 @@ pub enum Rvalue {
     Aggregate(Aggregate, Vec<Operand>),
     /// The variant index of the enum value at a place.
     Discriminant(Place),
-    /// A closure value: its function and its captured references.
-    Closure(String, Vec<Operand>),
+    /// A closure value: its function, the type arguments of the function
+    /// that makes it, and its captured references.
+    Closure(String, Vec<Type>, Vec<Operand>),
     /// A deep copy of the value at a place (`.copy()`).
     CopyOf(Place),
     /// A `str` view of the `String` (or `str`) at a place.
@@ -475,6 +563,10 @@ impl Program {
 
     pub fn intrinsic(&self, name: &str) -> Option<&IntrinsicDecl> {
         self.intrinsics.iter().find(|i| i.name == name)
+    }
+
+    pub fn trait_method(&self, name: &str) -> Option<&IntrinsicDecl> {
+        self.trait_methods.iter().find(|i| i.name == name)
     }
 }
 

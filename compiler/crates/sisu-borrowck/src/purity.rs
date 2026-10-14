@@ -30,7 +30,10 @@ pub fn check(p: &Program) -> Vec<Finding> {
                     match &s.kind {
                         StatementKind::Call { callee, .. } => {
                             let impure = match callee {
-                                Callee::Fn(n) => p.function(n).filter(|c| !c.pure).map(|_| display_fn(n)),
+                                Callee::Fn(n, _) => p.function(n).filter(|c| !c.pure).map(|_| display_fn(n)),
+                                Callee::Trait(n, _) => {
+                                    p.trait_method(n).filter(|d| !d.pure).map(|_| n.clone())
+                                }
                                 Callee::Intrinsic(n, _) => p
                                     .intrinsic(n)
                                     .filter(|d| !d.pure)
@@ -70,8 +73,12 @@ pub fn check(p: &Program) -> Vec<Finding> {
                             if let Some(t) = types.place_ty(g, place) {
                                 for d in types.drop_fns(&t) {
                                     if p.function(&d).is_some_and(|c| !c.pure) {
-                                        let owner =
-                                            d.rsplit_once('.').map(|(o, _)| o).unwrap_or(&d).to_string();
+                                        // `Type.Drop.drop`, the method of `impl Drop for Type`.
+                                        let owner = d
+                                            .strip_suffix(".Drop.drop")
+                                            .or_else(|| d.rsplit_once('.').map(|(o, _)| o))
+                                            .unwrap_or(&d)
+                                            .to_string();
                                         let value = crate::names::place_name(&types, g, place);
                                         let mut fd = Finding::new(msg::TYPE_IMPURE_DROP, g, s.loc)
                                             .with_arg("value", value.clone())
@@ -92,7 +99,7 @@ pub fn check(p: &Program) -> Vec<Finding> {
                                 }
                             }
                         }
-                        StatementKind::Assign(_, Rvalue::Closure(c, _)) => {
+                        StatementKind::Assign(_, Rvalue::Closure(c, _, _)) => {
                             if !seen.contains(c)
                                 && let Some(cf) = p.function(c)
                             {

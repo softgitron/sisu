@@ -75,11 +75,9 @@ E0206 error   resolve.duplicate-variant   `{owner}` has more than one variant na
 E0207 error   resolve.duplicate-parameter  the parameter `{name}` appears more than once
 E0208 error   resolve.type-argument-count  wrong number of type arguments for `{name}`: expected {expected}, found {found}
 E0209 error   resolve.not-a-type          `{name}` is not a type
-E0210 error   resolve.user-generics       generic parameters on user declarations arrive with traits; stage 0 has only the builtin generic types
 E0211 error   resolve.ambiguous-variant   `{name}` is a variant of more than one type ({candidates}); qualify it, as in `{example}`
 E0212 error   resolve.not-an-error-set    `{name}` is not an error set, so it cannot follow `!`
 E0213 error   resolve.drop-target         `Drop` can be implemented only for a struct or enum declared in this module
-E0214 error   resolve.trait-impl          implementing `{trait}` arrives with traits; stage 0 implements only `Drop`
 E0215 error   resolve.self-outside-method  `self` exists only inside a method
 E0216 error   resolve.drop-signature      `Drop` has one method, `def drop(mut self)`
 E0217 error   resolve.duplicate-method    `{owner}` has more than one method named `{name}`
@@ -95,6 +93,29 @@ E0226 error   resolve.inferred-set-position  an inferred error set (`T !`) can o
 E0227 error   resolve.union-outside-result  `{{A, B}}` is a union of error sets and can only follow `!`
 E0228 error   resolve.alias-cycle         the type alias `{name}` refers to itself
 E0229 error   resolve.self-type-outside   `Self` exists only inside a type's declaration or `impl`
+# E0210 and E0214 (generics and trait impls before Phase 4) are retired.
+E0230 error   resolve.not-a-trait         `{name}` is not a trait
+E0231 error   resolve.trait-as-type       `{name}` is a trait, not a type; a value of a type that implements it is `dyn {name}`
+E0232 error   resolve.missing-trait-method  the impl of `{trait}` for `{ty}` is missing {methods}
+E0233 error   resolve.not-a-trait-method  `{name}` is not a method of `{trait}`
+E0234 error   resolve.method-signature    `{name}` does not have the signature `{trait}` gives it: expected `{expected}`, found `{found}`
+E0235 error   resolve.overlapping-impl    `{trait}` is implemented for `{ty}` more than once; a type implements a trait at most once
+E0236 error   resolve.orphan-impl         `{trait}` for `{ty}` can be implemented only in the package of the trait or of the type, or in the root package
+E0237 error   resolve.missing-assoc-type  the impl of `{trait}` for `{ty}` does not say what `{name}` is; add `type {name} = ...`
+E0238 error   resolve.unknown-assoc-type  `{trait}` has no associated type `{name}`
+E0239 error   resolve.no-assoc-type       `{ty}` has no associated type `{name}` among its bounds
+E0240 error   resolve.sealed-trait        `{trait}` is implemented only by the standard library, so `{ty}` cannot implement it
+E0241 error   resolve.not-object-safe     `{trait}` cannot be used as `dyn {trait}`: its method `{method}` cannot be called through it, because {reason}
+E0242 error   resolve.supertrait-missing  `{ty}` implements `{trait}`, which requires `{super}`, but `{ty}` does not implement `{super}`
+E0243 error   resolve.not-derivable       `{name}` cannot be derived; `@derive` takes `Copy`, `Debug`, `Eq`, `PartialOrd`, `Ord` and `Hash`
+E0244 error   resolve.derive-field        `{ty}` cannot derive `{trait}`: its field `{field}` has type `{fty}`, which does not implement `{trait}`
+E0245 error   resolve.generic-default-order  a type parameter without a default cannot follow one with a default
+E0246 error   resolve.impl-default        the parameters of an `impl` take no defaults
+E0247 error   resolve.trait-cycle         `{name}` cannot be its own supertrait
+E0248 error   resolve.assoc-outside-trait-impl  an associated type belongs in an impl of a trait
+E0249 error   resolve.assoc-needs-type    `type {name}` in an impl needs a type: `type {name} = ...`
+-     label   resolve.first-impl          the other impl is here
+-     fix     resolve.add-dyn             write `dyn {name}`
 -     label   resolve.first-defined       first defined here
 -     label   resolve.defined-here        `{name}` is defined here
 -     fix     resolve.similar-name        a similar name is in scope
@@ -185,6 +206,12 @@ E0390 error   type.not-a-struct-pattern   `{name}` cannot be matched with fields
 E0391 error   type.const-pattern          a constant cannot be used as a pattern yet; compare with `==` in a guard
 E0392 error   type.impure-value-call      `{name}` is pure, so it cannot call a function value whose type is not `pure`
 E0393 error   type.impure-drop            dropping `{value}` here runs the `Drop` of `{ty}`, which is not pure, so the pure function `{name}` cannot do it
+E0394 error   type.ambiguous-method       `{name}` is a method of more than one trait `{ty}` implements ({traits}); call it on the trait, as in `Trait.{name}(x)`
+E0395 error   type.unsized-dyn            `{ty}` is a `dyn` type and has no size of its own; keep it behind `ref` or in a `Box`
+E0396 error   type.view-to-dyn            `{ty}` borrows, so it cannot become `{dyn}`, which owns its value
+E0397 error   type.must-consume-argument  `{ty}` is must-consume, so it cannot be the argument of the generic parameter `{param}`, whose values the body may drop
+E0398 error   type.structural-only        `{callee}` uses the structural `{trait}` of its type, and `{ty}` has an impl of its own; this arrives with the standard library in Sisu (Phase 4)
+-     note    type.method-of-traits       `{name}` is a method of {traits}
 -     label   type.expected-because       expected because of this
 -     label   type.found-here             this is `{ty}`
 -     note    type.missing-patterns       add an arm for {missing}, or a `case _` arm
@@ -196,6 +223,7 @@ E0393 error   type.impure-drop            dropping `{value}` here runs the `Drop
 -     fix     type.add-copy               copy it with `.copy()`
 -     fix     type.add-mut                write `mut` before the argument
 -     fix     type.remove-mut             remove `mut`
+-     fix     type.add-impl               `{ty}` has every method of `{trait}`; add `impl {trait} for {ty}`
 -     help    type.truthiness             write the test explicitly, as in `not xs.is_empty()` or `x != 0`
 
 # ---------------------------------------------------------------- ownership

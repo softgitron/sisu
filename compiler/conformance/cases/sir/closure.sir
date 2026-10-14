@@ -1,6 +1,5 @@
 sir 0
 source 0 "closure.sisu"
-source 1 "<std>/prelude.sisu"
 entry main
 
 intrinsic Iter.count pure own 0

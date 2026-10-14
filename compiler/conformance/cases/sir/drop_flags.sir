@@ -1,9 +1,8 @@
 sir 0
 source 0 "drop_flags.sisu"
-source 1 "<std>/prelude.sisu"
 entry main
 
-struct Res drop Res.drop { id: int }
+struct Res drop Res.Drop.drop { id: int }
 
 intrinsic fmt.display pure
 intrinsic fmt.new pure
@@ -77,7 +76,7 @@ fn main(0) source 0 @11:5-11:9 {
     return
 }
 
-fn Res.drop(1) drop source 0 @5:9-5:13 {
+fn Res.Drop.drop(1) drop source 0 @5:9-5:13 {
     let _0: ()
     let _1: ref mut Res "self" @5:9-5:13
     let _2: ()

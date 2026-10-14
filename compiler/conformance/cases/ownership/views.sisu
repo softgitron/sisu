@@ -6,6 +6,7 @@ view struct Token:
     kind: TokenKind
     text: str
 
+@derive(Eq)
 enum TokenKind:
     Word
     Number

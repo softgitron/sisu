@@ -1,3 +1,4 @@
+@derive(Eq)
 struct Point:
     x: f64
     y: f64
@@ -56,10 +57,10 @@ def main():
     var p = Point(x=3.0, y=4.0)
     print(p.length())
     p.scale(2.0)
-    print(p)
-    print(Point.origin())
+    print("{p:?}")
+    print("{Point.origin():?}")
     let c = Config(name="svc".to_string())
-    print(c)
+    print("{c:?}")
     let c2 = Config(name="db".to_string(), verbose=True)
     print("{c2.name} {c2.retries} {c2.verbose}")
     let q = p.copy()

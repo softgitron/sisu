@@ -22,6 +22,7 @@
 //! through [`Host`], so a run is deterministic under a deterministic host.
 
 mod cli;
+mod dispatch;
 mod exec;
 mod format;
 mod host;
@@ -139,6 +140,9 @@ pub(crate) struct Frame<'p> {
     pub pending: Option<Box<PanicInfo>>,
     /// Where the caller wants the result.
     pub ret: Option<&'p sir::Place>,
+    /// The function's type arguments, `$0` and on in its SIR (type
+    /// arguments are run-time values in stage 0).
+    pub tys: Vec<sir::Type>,
 }
 
 pub struct Interp<'p, 'h> {

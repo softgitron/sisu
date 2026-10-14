@@ -1,6 +1,6 @@
 //! Types as the checker sees them.
 
-use crate::program::{DefId, DefKind, Program};
+use crate::program::{DefId, DefKind, Program, TraitRef};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Ty {
@@ -22,11 +22,25 @@ pub enum Ty {
     Ref(Box<Ty>, bool),
     /// A generic parameter of the declaration being instantiated.
     Param(u32),
+    /// `dyn Trait`: a value of some type implementing the trait, chosen at
+    /// run time; it lives behind `ref` or in a `Box`.
+    Dyn(TraitRef),
+    /// An associated type of a type that is not known here: `C.Item`
+    /// where `C: Container`, or `Self.Item` in a trait.
+    Assoc(Box<AssocTy>),
     /// An inference variable of the body being checked.
     Var(u32),
     /// A type that could not be determined; it unifies with everything, so
     /// one mistake is reported once (a poisoned type).
     Error,
+}
+
+/// `self_ty.name`, the associated type `name` of `trait_` for `self_ty`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct AssocTy {
+    pub self_ty: Ty,
+    pub trait_: TraitRef,
+    pub name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -76,19 +90,48 @@ impl Ty {
                 pure: f.pure,
             })),
             Ty::Ref(t, m) => Ty::Ref(Box::new(t.subst(args)), *m),
+            Ty::Dyn(tr) => Ty::Dyn(tr.subst(args)),
+            Ty::Assoc(a) => Ty::Assoc(Box::new(AssocTy {
+                self_ty: a.self_ty.subst(args),
+                trait_: a.trait_.subst(args),
+                name: a.name.clone(),
+            })),
             other => other.clone(),
         }
     }
 
-    pub fn contains_error(&self) -> bool {
+    /// Calls `f` on this type and every type inside it.
+    pub fn walk(&self, f: &mut dyn FnMut(&Ty)) {
+        f(self);
         match self {
-            Ty::Error => true,
-            Ty::Adt(_, a) => a.iter().any(Ty::contains_error),
-            Ty::Tuple(e, _) => e.iter().any(Ty::contains_error),
-            Ty::Fn(f) => f.params.iter().any(Ty::contains_error) || f.ret.contains_error(),
-            Ty::Ref(t, _) => t.contains_error(),
-            _ => false,
+            Ty::Adt(_, a) => a.iter().for_each(|t| t.walk(f)),
+            Ty::Tuple(e, _) => e.iter().for_each(|t| t.walk(f)),
+            Ty::Fn(ft) => {
+                ft.params.iter().for_each(|t| t.walk(f));
+                ft.ret.walk(f);
+            }
+            Ty::Ref(t, _) => t.walk(f),
+            Ty::Dyn(tr) => tr.args.iter().for_each(|t| t.walk(f)),
+            Ty::Assoc(a) => {
+                a.self_ty.walk(f);
+                a.trait_.args.iter().for_each(|t| t.walk(f));
+            }
+            _ => {}
         }
+    }
+
+    /// Whether the type mentions a generic parameter or an associated
+    /// type of one: its meaning depends on the type arguments.
+    pub fn has_params(&self) -> bool {
+        let mut found = false;
+        self.walk(&mut |t| found |= matches!(t, Ty::Param(_) | Ty::Assoc(_)));
+        found
+    }
+
+    pub fn contains_error(&self) -> bool {
+        let mut found = false;
+        self.walk(&mut |t| found |= matches!(t, Ty::Error));
+        found
     }
 
     pub fn strip_ref(&self) -> &Ty {
@@ -112,10 +155,37 @@ pub fn is_subset(sub: &[DefId], sup: &[DefId]) -> bool {
     sub.iter().all(|d| sup.contains(d))
 }
 
+impl TraitRef {
+    pub fn subst(&self, args: &[Ty]) -> TraitRef {
+        TraitRef { def: self.def, args: self.args.iter().map(|t| t.subst(args)).collect() }
+    }
+}
+
 impl Program {
     /// The canonical spelling of a type, as the formatter would write it
     /// (`T?`, `T ! E`), used in diagnostics and in SIR.
     pub fn display(&self, ty: &Ty) -> String {
+        self.display_in(ty, &[])
+    }
+
+    /// A trait with its arguments: `Add[int]`.
+    pub fn display_trait(&self, tr: &TraitRef) -> String {
+        self.display_trait_in(tr, &[])
+    }
+
+    pub fn display_trait_in(&self, tr: &TraitRef, names: &[String]) -> String {
+        let name = self.qualified_name(tr.def);
+        if tr.args.is_empty() {
+            name
+        } else {
+            let a: Vec<String> = tr.args.iter().map(|t| self.display_in(t, names)).collect();
+            format!("{name}[{}]", a.join(", "))
+        }
+    }
+
+    /// The spelling of a type whose generic parameters are named `names`.
+    pub fn display_in(&self, ty: &Ty, names: &[String]) -> String {
+        let display = |t: &Ty| self.display_in(t, names);
         match ty {
             Ty::Int => "int".into(),
             Ty::Float => "f64".into(),
@@ -126,10 +196,20 @@ impl Program {
             Ty::Never => "Never".into(),
             Ty::Error => "{unknown}".into(),
             Ty::Var(_) => "_".into(),
-            Ty::Param(i) => format!("T{i}"),
+            Ty::Param(i) => names.get(*i as usize).cloned().unwrap_or_else(|| format!("T{i}")),
+            Ty::Dyn(tr) => format!("dyn {}", self.display_trait_in(tr, names)),
+            Ty::Assoc(a) => {
+                let base = display(&a.self_ty);
+                let base = if matches!(a.self_ty, Ty::Param(_) | Ty::Assoc(_) | Ty::Adt(..)) {
+                    base
+                } else {
+                    format!("({base})")
+                };
+                format!("{base}.{}", a.name)
+            }
             Ty::Adt(d, args) => {
                 if Some(*d) == self.wk.option {
-                    let inner = args.first().map(|a| self.display(a)).unwrap_or_default();
+                    let inner = args.first().map(&display).unwrap_or_default();
                     let inner = match args.first() {
                         Some(Ty::Fn(_)) | Some(Ty::Ref(..)) => format!("({inner})"),
                         _ => inner,
@@ -138,17 +218,17 @@ impl Program {
                 }
                 if Some(*d) == self.wk.result {
                     let ok = args.first().cloned().unwrap_or(Ty::Unit);
-                    let err = args.get(1).map(|e| self.display(e)).unwrap_or_default();
+                    let err = args.get(1).map(&display).unwrap_or_default();
                     if ok == Ty::Unit {
                         return format!("! {err}");
                     }
-                    return format!("{} ! {err}", self.display(&ok));
+                    return format!("{} ! {err}", display(&ok));
                 }
                 let name = self.qualified_name(*d);
                 if args.is_empty() {
                     name
                 } else {
-                    let a: Vec<String> = args.iter().map(|t| self.display(t)).collect();
+                    let a: Vec<String> = args.iter().map(&display).collect();
                     format!("{name}[{}]", a.join(", "))
                 }
             }
@@ -157,8 +237,8 @@ impl Program {
                     .iter()
                     .enumerate()
                     .map(|(i, t)| match labels.get(i) {
-                        Some(l) => format!("{l}: {}", self.display(t)),
-                        None => self.display(t),
+                        Some(l) => format!("{l}: {}", display(t)),
+                        None => display(t),
                     })
                     .collect();
                 if parts.len() == 1 && labels.is_empty() {
@@ -172,10 +252,10 @@ impl Program {
                 if names.len() == 1 { names[0].clone() } else { format!("{{{}}}", names.join(", ")) }
             }
             Ty::Fn(f) => {
-                let p: Vec<String> = f.params.iter().map(|t| self.display(t)).collect();
-                format!("{}({}) -> {}", if f.pure { "pure " } else { "" }, p.join(", "), self.display(&f.ret))
+                let p: Vec<String> = f.params.iter().map(&display).collect();
+                format!("{}({}) -> {}", if f.pure { "pure " } else { "" }, p.join(", "), display(&f.ret))
             }
-            Ty::Ref(t, m) => format!("ref {}{}", if *m { "mut " } else { "" }, self.display(t)),
+            Ty::Ref(t, m) => format!("ref {}{}", if *m { "mut " } else { "" }, display(t)),
         }
     }
 
@@ -204,7 +284,7 @@ impl Program {
                 }
                 self.def_is_copy(*d, args)
             }
-            Ty::Param(_) | Ty::Var(_) => false,
+            Ty::Param(_) | Ty::Var(_) | Ty::Dyn(_) | Ty::Assoc(_) => false,
         }
     }
 
@@ -214,53 +294,6 @@ impl Program {
                 s.copy || matches!(s.builtin.as_deref(), Some("Fs" | "Env" | "Clock" | "System" | "DateTime"))
             }
             DefKind::Enum(e) | DefKind::ErrorSet(e) => e.copy,
-            _ => false,
-        }
-    }
-
-    /// Whether a type satisfies one of the builtin bounds of the prelude
-    /// (the stand-in for traits until Phase 4).
-    pub fn satisfies(&self, ty: &Ty, bound: &str) -> bool {
-        match ty {
-            Ty::Error | Ty::Never => return true,
-            Ty::Ref(t, _) => return self.satisfies(t, bound),
-            _ => {}
-        }
-        let builtin = |d: DefId| match &self.def(d).kind {
-            DefKind::Struct(s) => s.builtin.clone(),
-            _ => None,
-        };
-        match bound {
-            "Display" | "Debug" | "Eq" => !matches!(ty, Ty::Fn(_)),
-            "Len" => match ty {
-                Ty::Str => true,
-                Ty::Adt(d, _) => matches!(builtin(*d).as_deref(), Some("String" | "list" | "dict" | "set")),
-                _ => false,
-            },
-            "Num" => matches!(ty, Ty::Int | Ty::Float),
-            "Ord" => match ty {
-                Ty::Int | Ty::Char | Ty::Str | Ty::Bool | Ty::Unit => true,
-                Ty::Tuple(e, _) => e.iter().all(|t| self.satisfies(t, "Ord")),
-                Ty::Adt(d, args) => {
-                    matches!(builtin(*d).as_deref(), Some("String" | "Path"))
-                        || (Some(*d) == self.wk.option && args.iter().all(|t| self.satisfies(t, "Ord")))
-                        || (matches!(builtin(*d).as_deref(), Some("list"))
-                            && args.iter().all(|t| self.satisfies(t, "Ord")))
-                        || Some(*d) == self.wk.ordering
-                }
-                _ => false,
-            },
-            "Hash" => match ty {
-                Ty::Int | Ty::Char | Ty::Str | Ty::Bool | Ty::Unit => true,
-                Ty::Float | Ty::Fn(_) => false,
-                Ty::Tuple(e, _) => e.iter().all(|t| self.satisfies(t, "Hash")),
-                Ty::ErrSet(_) => true,
-                Ty::Adt(d, args) => match builtin(*d).as_deref() {
-                    Some("list" | "dict" | "set" | "Iter" | "Entry") => false,
-                    _ => args.iter().all(|t| self.satisfies(t, "Hash")),
-                },
-                _ => false,
-            },
             _ => false,
         }
     }

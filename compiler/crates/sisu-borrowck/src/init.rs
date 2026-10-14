@@ -70,7 +70,7 @@ pub fn rvalue_operands(rv: &Rvalue) -> Vec<&Operand> {
     match rv {
         Rvalue::Use(o) | Rvalue::Unary(_, o) => vec![o],
         Rvalue::Binary(_, a, b) => vec![a, b],
-        Rvalue::Aggregate(_, ops) | Rvalue::Closure(_, ops) => ops.iter().collect(),
+        Rvalue::Aggregate(_, ops) | Rvalue::Closure(_, _, ops) => ops.iter().collect(),
         _ => Vec::new(),
     }
 }

@@ -123,6 +123,7 @@ impl<'p> Interp<'p, '_> {
                     }
                 },
                 "fmt" => self.fmt(method, &mut a),
+                "structural" => self.structural(method, &mut a),
                 "assert" => self.assert_fail(method, &a),
                 "error" => self.error_method(method, tys, &a),
                 "cli" if method == "parse" => self.cli_parse(tys.first(), a.get(0)?),
@@ -910,7 +911,27 @@ impl<'p> Interp<'p, '_> {
         if method == "new" {
             return Ok(Value::String(String::new()));
         }
+        if method == "formatter" {
+            // `Formatter(out="", spec=spec, depth=0)`.
+            let spec = self.text(a.get(0)?)?.to_string();
+            return Ok(Value::Struct(Value::adt(
+                "Formatter",
+                0,
+                vec![Value::String(String::new()), Value::String(spec), Value::Int(0)],
+            )));
+        }
         let text = match method {
+            "finish" => {
+                // The formatter's text, padded by what is left of its spec.
+                let (out, spec) = match a.take(1)? {
+                    Value::Struct(f) => match (f.fields.first(), f.fields.get(1)) {
+                        (Some(Value::String(o)), Some(Value::String(sp))) => (o.clone(), sp.clone()),
+                        _ => return Err(ice("a Formatter without its fields")),
+                    },
+                    other => return Err(ice(format!("fmt.finish of {other:?}"))),
+                };
+                if spec.is_empty() { out } else { self.format(&Value::String(out), &spec, false)? }
+            }
             "text" => self.text(a.get(1)?)?.to_string(),
             "display" | "debug" => {
                 let spec = self.text(a.get(2)?)?.to_string();
@@ -925,6 +946,73 @@ impl<'p> Interp<'p, '_> {
                 Ok(Value::Unit)
             }
             other => Err(ice(format!("formatting into {other:?}"))),
+        }
+    }
+
+    /// The `structural.*` intrinsics: the builtin types' impls of
+    /// `Display`, `Debug`, `Eq`, `PartialOrd`, `Ord` and `Hash` (their
+    /// contracts are in `<std>/builtin_impls.sisu`).
+    fn structural(&mut self, method: &str, a: &mut Args) -> Result<Value, Unwind> {
+        match method {
+            "display" | "debug" => {
+                let debug = method == "debug";
+                let f = self.pointer_of(a.get(1)?)?;
+                let (depth, spec) = match self.read(&f)? {
+                    Value::Struct(fm) => match (fm.fields.get(2), fm.fields.get(1)) {
+                        (Some(Value::Int(d)), Some(Value::String(s))) => (*d, s.clone()),
+                        _ => return Err(ice("a Formatter without its fields")),
+                    },
+                    other => return Err(ice(format!("formatting into {other:?}"))),
+                };
+                let v = self.target(a.get(0)?)?;
+                // A leaf at depth 0 applies the whole spec and clears it.
+                let text = if depth == 0 && !spec.is_empty() {
+                    self.format(v, &spec, debug)?
+                } else if debug {
+                    self.debug_string(v)
+                } else {
+                    self.display_string(v)
+                };
+                match self.write(&f)? {
+                    Value::Struct(fm) => {
+                        if let Some(Value::String(o)) = fm.fields.get_mut(0) {
+                            o.push_str(&text);
+                        }
+                        if depth == 0
+                            && let Some(Value::String(sp)) = fm.fields.get_mut(1)
+                        {
+                            sp.clear();
+                        }
+                        Ok(Value::Unit)
+                    }
+                    _ => Err(ice("a Formatter changed while it was written")),
+                }
+            }
+            "eq" => Ok(Value::Bool(self.equal(a.get(0)?, a.get(1)?)?)),
+            "partial_cmp" => {
+                let o = self.compare(a.get(0)?, a.get(1)?)?;
+                Ok(Value::option(o.map(Value::ordering)))
+            }
+            "cmp" => Ok(Value::ordering(self.total_compare(a.get(0)?, a.get(1)?)?)),
+            "hash" => {
+                // FNV-1a over the structural key's hash, into the state.
+                use std::hash::{Hash, Hasher};
+                let k = self.key_of(a.get(0)?)?;
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                k.hash(&mut h);
+                let mixed = h.finish() as i64;
+                let p = self.pointer_of(a.get(1)?)?;
+                match self.write(&p)? {
+                    Value::Struct(hs) => {
+                        if let Some(Value::Int(st)) = hs.fields.get_mut(0) {
+                            *st = (*st ^ mixed).wrapping_mul(1_099_511_628_211);
+                        }
+                        Ok(Value::Unit)
+                    }
+                    other => Err(ice(format!("hashing into {other:?}"))),
+                }
+            }
+            other => Err(ice(format!("no structural operation `{other}`"))),
         }
     }
 

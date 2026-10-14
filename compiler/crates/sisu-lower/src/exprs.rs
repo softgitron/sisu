@@ -196,8 +196,29 @@ impl FnLower<'_, '_> {
         }
     }
 
+    /// An argument as the callee takes it; `by_value` when the callee
+    /// takes by value what the call passes by reference (a trait method
+    /// resolved to the impl of a `Copy` type).
+    fn arg_operand_for(&mut self, a: &thir::Arg, by_value: bool) -> Operand {
+        if by_value && matches!(a.mode, ArgMode::Ref | ArgMode::Value) {
+            if let Ty::Ref(..) = &a.expr.ty {
+                let p = self.place_of(&a.expr).project(Proj::Deref);
+                return Operand::Copy(p);
+            }
+            return self.operand(&a.expr);
+        }
+        self.arg_operand(a)
+    }
+
+    /// A reference to the value of an expression: the expression itself
+    /// when it is one, a borrow of its place otherwise.
+    pub fn ref_operand(&mut self, e: &thir::Expr) -> Operand {
+        if let Ty::Ref(..) = &e.ty { self.operand(e) } else { self.borrow_operand(e, false) }
+    }
+
     fn arg_operand(&mut self, a: &thir::Arg) -> Operand {
         match a.mode {
+            ArgMode::Ref => self.ref_operand(&a.expr),
             ArgMode::Value => self.operand(&a.expr),
             ArgMode::Borrow => {
                 if self.ctx.prog.is_copy(&a.expr.ty) || matches!(a.expr.ty, Ty::Ref(..)) {
@@ -270,26 +291,26 @@ impl FnLower<'_, '_> {
             }
             ExprKind::Const(d) => {
                 let name = self.ctx.const_name(*d);
-                self.emit(StatementKind::Call { dest, callee: Callee::Fn(name), args: Vec::new() }, loc);
+                self.emit(
+                    StatementKind::Call { dest, callee: Callee::Fn(name, Vec::new()), args: Vec::new() },
+                    loc,
+                );
             }
             ExprKind::Call { callee, args } => {
-                let c = match callee {
-                    thir::Callee::Fn { def, type_args } => {
-                        match prog.fn_info(*def).and_then(|f| f.intrinsic.clone()) {
-                            Some(n) => {
-                                let tys = if self.needs_type_args(*def) {
-                                    type_args.iter().map(|t| self.ctx.ty(t)).collect()
-                                } else {
-                                    Vec::new()
-                                };
-                                Callee::Intrinsic(n, tys)
-                            }
-                            None => Callee::Fn(self.ctx.fn_name(*def)),
-                        }
-                    }
-                    thir::Callee::Value(f) => Callee::Value(self.operand(f)),
+                if let thir::Callee::Fn { def, type_args } = callee
+                    && self.special_call(dest.clone(), *def, type_args, args, e, loc)
+                {
+                    return;
+                }
+                let (c, by_value) = match callee {
+                    thir::Callee::Fn { def, type_args } => self.callee_for(*def, type_args),
+                    thir::Callee::Value(f) => (Callee::Value(self.operand(f)), Vec::new()),
                 };
-                let ops = args.iter().map(|a| self.arg_operand(a)).collect();
+                let ops = args
+                    .iter()
+                    .enumerate()
+                    .map(|(i, a)| self.arg_operand_for(a, by_value.get(i).copied().unwrap_or(false)))
+                    .collect();
                 self.emit(StatementKind::Call { dest, callee: c, args: ops }, loc);
                 if e.ty == Ty::Never {
                     self.terminate(Terminator::Unreachable, loc);
@@ -316,7 +337,7 @@ impl FnLower<'_, '_> {
                             self.emit(
                                 StatementKind::Call {
                                     dest: Place::local(t),
-                                    callee: Callee::Fn(name),
+                                    callee: Callee::Fn(name, Vec::new()),
                                     args: Vec::new(),
                                 },
                                 loc,
@@ -410,24 +431,49 @@ impl FnLower<'_, '_> {
                 self.switch_to(join);
             }
             ExprKind::Compare { first, rest } => {
-                let mut a = self.compare_operand(first);
+                // Equality and order through the traits when the type's
+                // impls are not the structural ones the operators compute.
+                let prog = self.ctx.prog;
+                let base = prog.normalize(first.ty.strip_ref(), &self.bounds);
+                let eq_trait = prog.wk.eq.filter(|t| !prog.is_structural(&base, *t));
+                let ord_trait = prog.wk.partial_ord.filter(|t| !prog.is_structural(&base, *t));
+                let any_trait = rest.iter().any(|(op, _)| match op {
+                    CmpOp::Eq | CmpOp::Ne => eq_trait.is_some(),
+                    CmpOp::In | CmpOp::NotIn => false,
+                    _ => ord_trait.is_some(),
+                });
+                let mut a = if any_trait { self.ref_operand(first) } else { self.compare_operand(first) };
                 let join = self.new_block();
                 for (i, (op, x)) in rest.iter().enumerate() {
-                    let b = self.compare_operand(x);
-                    if *op == CmpOp::NotIn {
-                        let t = self.temp_sir(sir::Type::Bool);
-                        self.assign(
-                            Place::local(t),
-                            Rvalue::Binary(sir::BinOp::In, a.clone(), b.clone()),
-                            loc,
-                        );
-                        self.assign(
+                    let b = if any_trait { self.ref_operand(x) } else { self.compare_operand(x) };
+                    match op {
+                        CmpOp::NotIn => {
+                            let t = self.temp_sir(sir::Type::Bool);
+                            self.assign(
+                                Place::local(t),
+                                Rvalue::Binary(sir::BinOp::In, a.clone(), b.clone()),
+                                loc,
+                            );
+                            self.assign(
+                                dest.clone(),
+                                Rvalue::Unary(sir::UnOp::Not, Operand::Copy(Place::local(t))),
+                                loc,
+                            );
+                        }
+                        CmpOp::Eq | CmpOp::Ne if eq_trait.is_some() => self.eq_via_trait(
                             dest.clone(),
-                            Rvalue::Unary(sir::UnOp::Not, Operand::Copy(Place::local(t))),
+                            a.clone(),
+                            b.clone(),
+                            *op == CmpOp::Ne,
+                            &base,
                             loc,
-                        );
-                    } else {
-                        self.assign(dest.clone(), Rvalue::Binary(cmp_op(*op), a.clone(), b.clone()), loc);
+                        ),
+                        CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge if ord_trait.is_some() => {
+                            self.order_via_trait(dest.clone(), a.clone(), b.clone(), *op, &base, loc)
+                        }
+                        _ => {
+                            self.assign(dest.clone(), Rvalue::Binary(cmp_op(*op), a.clone(), b.clone()), loc)
+                        }
                     }
                     if i + 1 < rest.len() {
                         let next = self.new_block();
@@ -513,7 +559,8 @@ impl FnLower<'_, '_> {
                     ops.push(Operand::Copy(Place::local(t)));
                 }
                 let name = closure_name(&self.ctx.body_name(self.body), *id);
-                self.assign(dest, Rvalue::Closure(name, ops), loc);
+                let tys = (0..self.type_params.len() as u32).map(sir::Type::Param).collect();
+                self.assign(dest, Rvalue::Closure(name, tys, ops), loc);
             }
             ExprKind::Try { expr, kind } => {
                 let p = self.place_of(expr);
@@ -650,12 +697,20 @@ impl FnLower<'_, '_> {
                                     loc,
                                 );
                             }
-                            let v = self.compare_operand(expr);
-                            let (name, spec) = if debug.is_some() || spec == "?" {
+                            let is_debug = debug.is_some() || spec == "?";
+                            let (name, spec) = if is_debug {
                                 ("fmt.debug", if spec == "?" { String::new() } else { spec.clone() })
                             } else {
                                 ("fmt.display", spec.clone())
                             };
+                            let base = expr.ty.strip_ref().clone();
+                            let wk = &self.ctx.prog.wk;
+                            let tr = if is_debug { wk.debug } else { wk.display };
+                            if tr.is_some_and(|t| !self.ctx.prog.is_structural(&base, t)) {
+                                self.format_via_trait(Operand::Copy(Place::local(r)), expr, is_debug, &spec);
+                                continue;
+                            }
+                            let v = self.compare_operand(expr);
                             let u = self.unit();
                             self.intrinsic_call(
                                 u,
@@ -710,10 +765,40 @@ impl FnLower<'_, '_> {
                     self.assign(dest, Rvalue::Use(Operand::Copy(p)), loc);
                 }
                 Coercion::NeverToAny | Coercion::Widen | Coercion::Mismatch => self.into(dest, expr),
+                Coercion::ToDyn | Coercion::RefToDyn => {
+                    let v = self.operand(expr);
+                    let t = self.ctx.ty(&expr.ty);
+                    self.assign(dest, Rvalue::Aggregate(sir::Aggregate::Dyn(t), vec![v]), loc);
+                }
+                Coercion::BoxToDyn => {
+                    // `Box(dyn C(b.value))`.
+                    let p = self.place_of(expr);
+                    let inner = match &expr.ty {
+                        Ty::Adt(_, a) => a.first().cloned().unwrap_or(Ty::Error),
+                        _ => Ty::Error,
+                    };
+                    let dyn_ty = match &e.ty {
+                        Ty::Adt(_, a) => a.first().cloned().unwrap_or(Ty::Error),
+                        _ => Ty::Error,
+                    };
+                    let t = self.temp(&dyn_ty);
+                    let v = self.copy_or_move(p.project(Proj::Field(0)), &inner);
+                    let ct = self.ctx.ty(&inner);
+                    self.assign(Place::local(t), Rvalue::Aggregate(sir::Aggregate::Dyn(ct), vec![v]), loc);
+                    let name = self.ctx.type_name(self.ctx.prog.wk.boxed.unwrap_or(sisu_resolve::DefId(0)));
+                    self.assign(
+                        dest,
+                        Rvalue::Aggregate(sir::Aggregate::Struct(name), vec![Operand::Move(Place::local(t))]),
+                        loc,
+                    );
+                }
             },
             ExprKind::DefaultArg { def, param } => {
                 let name = self.ctx.param_default_name(*def, *param);
-                self.emit(StatementKind::Call { dest, callee: Callee::Fn(name), args: Vec::new() }, loc);
+                self.emit(
+                    StatementKind::Call { dest, callee: Callee::Fn(name, Vec::new()), args: Vec::new() },
+                    loc,
+                );
             }
             ExprKind::CopyOf(inner) => {
                 let p = self.place_of(inner);
@@ -730,6 +815,249 @@ impl FnLower<'_, '_> {
             | ExprKind::Char(_)
             | ExprKind::Unit
             | ExprKind::FnRef(_) => {}
+        }
+    }
+
+    /// A call of `def` with the THIR type arguments: the SIR callee, and
+    /// for each argument whether the callee takes by value what the call
+    /// passes by reference. A trait method whose `Self` is known here is
+    /// resolved to its impl's method (or the trait's provided body); a
+    /// `Self` that is a generic parameter, an associated type of one, a
+    /// reference or a `dyn` is resolved at run time (`call trait`).
+    pub fn callee_for(&mut self, def: sisu_resolve::DefId, type_args: &[Ty]) -> (Callee, Vec<bool>) {
+        let prog = self.ctx.prog;
+        let Some(f) = prog.fn_info(def) else {
+            return (Callee::Fn(self.ctx.fn_name(def), Vec::new()), Vec::new());
+        };
+        let type_args: Vec<Ty> = type_args.iter().map(|t| prog.normalize(t, &self.bounds)).collect();
+        if let Some(t) = f.trait_ {
+            let n = prog.trait_info(t).map(|i| i.generics.len()).unwrap_or(0);
+            let self_ty = type_args.first().cloned().unwrap_or(Ty::Error);
+            if !matches!(self_ty, Ty::Param(_) | Ty::Assoc(_) | Ty::Dyn(_) | Ty::Ref(..) | Ty::ErrSet(_)) {
+                let trait_args = type_args.get(1..1 + n).unwrap_or(&[]);
+                let own = type_args.get(1 + n..).unwrap_or(&[]);
+                if let Some((target, mut targs)) =
+                    prog.resolve_method(def, trait_args, &self_ty, &self.bounds)
+                {
+                    targs.extend(own.iter().cloned());
+                    return self.direct_callee(target, &targs);
+                }
+            }
+            let tys = type_args.iter().map(|t| self.ctx.ty(t)).collect();
+            return (Callee::Trait(self.ctx.fn_name(def), tys), Vec::new());
+        }
+        self.direct_callee(def, &type_args)
+    }
+
+    fn direct_callee(&mut self, def: sisu_resolve::DefId, type_args: &[Ty]) -> (Callee, Vec<bool>) {
+        let prog = self.ctx.prog;
+        let Some(f) = prog.fn_info(def) else {
+            return (Callee::Fn(self.ctx.fn_name(def), Vec::new()), Vec::new());
+        };
+        if let Some(n) = &f.intrinsic {
+            let tys = if self.needs_type_args(def) {
+                type_args.iter().map(|t| self.ctx.ty(t)).collect()
+            } else {
+                Vec::new()
+            };
+            return (Callee::Intrinsic(n.clone(), tys), Vec::new());
+        }
+        // Which borrowed parameters the callee takes by value: `Copy` ones
+        // whose declared type is not a generic parameter.
+        let mut by_value = Vec::new();
+        let mut slots: Vec<(Ty, sisu_syntax::ast::Mode)> = Vec::new();
+        if let (Some(m), Some(o)) = (f.self_mode, &f.owner) {
+            slots.push((o.clone(), m));
+        }
+        slots.extend(f.params.iter().map(|p| (p.ty.clone(), p.mode)));
+        for (ty, mode) in slots {
+            let local = sisu_typeck::param_local_ty(prog, &ty, mode);
+            let concrete = prog.normalize(&local.subst(type_args), &self.bounds);
+            by_value.push(mode == sisu_syntax::ast::Mode::Borrow && !matches!(concrete, Ty::Ref(..)));
+        }
+        let tys = type_args.iter().map(|t| self.ctx.ty(t)).collect();
+        (Callee::Fn(self.ctx.fn_name(def), tys), by_value)
+    }
+
+    /// The referent of an operand that holds a reference, copied.
+    fn deref_operand(&mut self, o: Operand) -> Operand {
+        match o {
+            Operand::Copy(p) | Operand::Move(p) => Operand::Copy(p.project(Proj::Deref)),
+            c => c,
+        }
+    }
+
+    /// Calls `method` of the trait `tr` for `ty` with references `args`.
+    fn trait_method_call(
+        &mut self,
+        dest: Place,
+        tr: Option<sisu_resolve::DefId>,
+        method: &str,
+        ty: &Ty,
+        args: Vec<Operand>,
+        loc: Option<sir::Loc>,
+    ) {
+        let prog = self.ctx.prog;
+        let Some(m) = tr.and_then(|t| prog.trait_method(t, method)) else {
+            self.terminate(Terminator::Unreachable, loc);
+            return;
+        };
+        let (callee, by_value) = self.callee_for(m, std::slice::from_ref(ty));
+        let args = args
+            .into_iter()
+            .enumerate()
+            .map(|(i, a)| if by_value.get(i).copied().unwrap_or(false) { self.deref_operand(a) } else { a })
+            .collect();
+        self.emit(StatementKind::Call { dest, callee, args }, loc);
+    }
+
+    /// `a == b` (or `!=`) through `Eq` for references `a` and `b`.
+    fn eq_via_trait(
+        &mut self,
+        dest: Place,
+        a: Operand,
+        b: Operand,
+        negate: bool,
+        ty: &Ty,
+        loc: Option<sir::Loc>,
+    ) {
+        let eq = self.ctx.prog.wk.eq;
+        if negate {
+            let t = self.temp_sir(sir::Type::Bool);
+            self.trait_method_call(Place::local(t), eq, "eq", ty, vec![a, b], loc);
+            self.assign(dest, Rvalue::Unary(sir::UnOp::Not, Operand::Copy(Place::local(t))), loc);
+        } else {
+            self.trait_method_call(dest, eq, "eq", ty, vec![a, b], loc);
+        }
+    }
+
+    /// `a < b` and the other orderings through `PartialOrd`: the order is
+    /// `Some(o)` and `o` is what the operator asks for; `None` (unordered)
+    /// makes every ordering false.
+    fn order_via_trait(
+        &mut self,
+        dest: Place,
+        a: Operand,
+        b: Operand,
+        op: CmpOp,
+        ty: &Ty,
+        loc: Option<sir::Loc>,
+    ) {
+        let prog = self.ctx.prog;
+        let ord_ty = sir::Type::Named("Ordering".into(), Vec::new());
+        let o = self.temp_sir(sir::Type::Named("Option".into(), vec![ord_ty]));
+        self.trait_method_call(Place::local(o), prog.wk.partial_ord, "partial_cmp", ty, vec![a, b], loc);
+        let d = self.temp_sir(sir::Type::Int);
+        self.assign(Place::local(d), Rvalue::Discriminant(Place::local(o)), loc);
+        let some = self.new_block();
+        let none = self.new_block();
+        let join = self.new_block();
+        self.terminate(
+            Terminator::Switch {
+                value: Operand::Copy(Place::local(d)),
+                cases: vec![(0, some)],
+                default: none,
+            },
+            loc,
+        );
+        self.switch_to(some);
+        let v = self.temp_sir(sir::Type::Int);
+        let payload = Place::local(o).project(Proj::Downcast(0)).project(Proj::Field(0));
+        self.assign(Place::local(v), Rvalue::Discriminant(payload), loc);
+        // Less is 0, Equal 1, Greater 2.
+        let (bop, k) = match op {
+            CmpOp::Lt => (sir::BinOp::Eq, 0),
+            CmpOp::Le => (sir::BinOp::Ne, 2),
+            CmpOp::Gt => (sir::BinOp::Eq, 2),
+            _ => (sir::BinOp::Ne, 0),
+        };
+        self.assign(
+            dest.clone(),
+            Rvalue::Binary(bop, Operand::Copy(Place::local(v)), Operand::Const(Const::Int(k))),
+            loc,
+        );
+        self.goto(join);
+        self.switch_to(none);
+        self.assign(dest, Rvalue::Use(Operand::Const(Const::Bool(false))), loc);
+        self.goto(join);
+        self.switch_to(join);
+    }
+
+    /// Writes `expr` to the `String` that `buf` refers to through its
+    /// `Display` (or `Debug`) impl: a `Formatter` with the spec, the trait's
+    /// method, and `fmt.finish`, which pads what is left of the spec.
+    fn format_via_trait(&mut self, buf: Operand, expr: &thir::Expr, debug: bool, spec: &str) {
+        let prog = self.ctx.prog;
+        let loc = self.ctx.loc(expr.span);
+        let Some(fdef) = prog.wk.formatter else { return };
+        let fty = Ty::Adt(fdef, Vec::new());
+        let f = self.temp(&fty);
+        self.intrinsic_call(
+            Place::local(f),
+            "fmt.formatter",
+            Vec::new(),
+            vec![Operand::Const(Const::Str(spec.into()))],
+            loc,
+        );
+        self.register(DropEntry::Local(f));
+        self.split();
+        let fr = self.temp_sir(sir::Type::Ref(Box::new(self.ctx.ty(&fty)), true));
+        self.assign(Place::local(fr), Rvalue::Ref(Place::local(f), true), loc);
+        let base = prog.normalize(expr.ty.strip_ref(), &self.bounds);
+        let v = self.ref_operand(expr);
+        let (tr, method) = if debug { (prog.wk.debug, "fmt_debug") } else { (prog.wk.display, "fmt") };
+        let u = self.unit();
+        self.trait_method_call(u, tr, method, &base, vec![v, Operand::Copy(Place::local(fr))], loc);
+        let u = self.unit();
+        self.intrinsic_call(u, "fmt.finish", Vec::new(), vec![buf, Operand::Move(Place::local(f))], loc);
+    }
+
+    /// `print` and `print_err` of a value whose `Display` is its own impl,
+    /// and `len` of a value of a type that implements `Len` itself: through
+    /// the traits. Returns whether it lowered the call.
+    fn special_call(
+        &mut self,
+        dest: Place,
+        def: sisu_resolve::DefId,
+        type_args: &[Ty],
+        args: &[thir::Arg],
+        _e: &thir::Expr,
+        loc: Option<sir::Loc>,
+    ) -> bool {
+        let prog = self.ctx.prog;
+        let Some(intr) = prog.fn_info(def).and_then(|f| f.intrinsic.clone()) else { return false };
+        let Some(arg) = args.first() else { return false };
+        let base = prog.normalize(type_args.first().unwrap_or(&Ty::Error).strip_ref(), &self.bounds);
+        match intr.as_str() {
+            "print" | "print_err" => {
+                if prog.wk.display.is_none_or(|d| prog.is_structural(&base, d)) {
+                    return false;
+                }
+                let sty = Ty::Adt(prog.wk.string.unwrap_or(def), Vec::new());
+                let s = self.temp(&sty);
+                self.intrinsic_call(Place::local(s), "fmt.new", Vec::new(), Vec::new(), loc);
+                self.register(DropEntry::Local(s));
+                self.split();
+                let r = self.temp_sir(sir::Type::Ref(Box::new(self.ctx.ty(&sty)), true));
+                self.assign(Place::local(r), Rvalue::Ref(Place::local(s), true), loc);
+                self.format_via_trait(Operand::Copy(Place::local(r)), &arg.expr, false, "");
+                self.intrinsic_call(dest, &intr, Vec::new(), vec![Operand::Move(Place::local(s))], loc);
+                true
+            }
+            "len" => {
+                let builtin = match &base {
+                    Ty::Str => true,
+                    Ty::Adt(d, _) => matches!(prog.builtin(*d), Some("String" | "list" | "dict" | "set")),
+                    _ => false,
+                };
+                if builtin {
+                    return false;
+                }
+                let v = self.ref_operand(&arg.expr);
+                self.trait_method_call(dest, prog.wk.len, "len", &base, vec![v], loc);
+                true
+            }
+            _ => false,
         }
     }
 
