@@ -1,0 +1,36 @@
+schema,run_id,timestamp_utc,machine_id,implementation,benchmark,strategy,reservation_bytes,stack_bytes,threads,tasks,params,metric,value,unit,status,note
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,uname,,,ok,Linux 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,hostname,,,ok,runnervmmprz5
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,os,,,ok,Ubuntu 24.04.5 LTS
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,cpu_model,,,ok,Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,threads_per_core,,,ok,2
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,smt,,,ok,active=1 control=on
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,hypervisor,,,ok,Microsoft Hv
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,cpus_available,,,ok,2
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,cpus_online,,,ok,0-1
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,cpu_governor,,,ok,performance
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,mem_total_bytes,,,ok,8322932736
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,swap,,,ok,0 kB
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,page_size,,,ok,4096
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,sysctl.vm.max_map_count,,,ok,65530
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,sysctl.vm.overcommit_memory,,,ok,0
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,sysctl.vm.overcommit_ratio,,,ok,50
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,sysctl.kernel.threads-max,,,ok,63275
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,sysctl.kernel.pid_max,,,ok,4194304
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,sysctl.kernel.io_uring_disabled,,,ok,0
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,sysctl.fs.nr_open,,,ok,1048576
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,sysctl.fs.file-max,,,ok,9223372036854775807
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,sysctl.net.core.somaxconn,,,ok,4096
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,sysctl.net.ipv4.ip_local_port_range,,,ok,32768	60999
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,sysctl.net.ipv4.tcp_max_syn_backlog,,,ok,512
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,thp_enabled,,,ok,always [madvise] never
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,thp_defrag,,,ok,always defer defer+madvise [madvise] never
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,cpu_mitigations,,,ok,Mitigation: Retpolines; STIBP: disabled; RSB filling; PBRSB-eIBRS: Not affected; BHI: Retpoline
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,rlimit_nofile,,,ok,1048576/1048576
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,rlimit_nproc,,,ok,31637/31637
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,rlimit_stack,,,ok,8388608/unlimited
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,rlimit_as,,,ok,unlimited/unlimited
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,rlimit_memlock,,,ok,1040363520/1040363520
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,cgroup_memory_max,,,ok,12884901888
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,cgroup_pids_max,,,ok,9491
+1,20261014T054247Z-2570,2026-10-14T05:42:47Z,github-runner,machine,machine-spec,,,,,,,harness_version,,,ok,0.2.0
