@@ -8,8 +8,9 @@
 #
 # Codes are stable and never reused. Ranges: E00xx lexer, E01xx parser,
 # E02xx names and declarations, E03xx types, E04xx ownership, E05xx
-# lowering, E06xx compile-time evaluation, E09xx stage-0 limits and
-# internal errors, W0xxx warnings, R0xxx run time, D0xxx driver.
+# lowering, E06xx compile-time evaluation, E07xx capabilities, E09xx
+# stage-0 limits and internal errors, W0xxx warnings, R0xxx run time,
+# D0xxx driver.
 
 # ---------------------------------------------------------------- lexer
 E0001 error   lex.tab-in-indentation      a tab in indentation; Sisu indents with spaces only
@@ -196,6 +197,7 @@ E0375 error   type.type-arguments-needed  `{name}` needs a type argument, as in 
 E0376 error   type.positional-after-keyword  a positional argument cannot follow a keyword argument
 E0377 error   type.default-needs-value    the parameter `{name}` has no default, so it must be given
 E0378 error   type.main-signature         `main` must take nothing or one `System` parameter, and return nothing or `! E`
+E0702 error   type.test-signature         a test takes nothing, or the real `System` as its one parameter: `test "name"(sys: System):`
 E0379 error   type.assert-message         the message of `assert` must be a string
 E0380 error   type.no-display             `{ty}` has no text rendering for `{spec}`
 E0381 error   type.return-in-test         a test returns nothing
@@ -320,6 +322,10 @@ E0607 error   comptime.derive-template    a trait's derive is `comptime def deri
 E0608 error   comptime.derive-failed      deriving `{trait}` for `{ty}` stopped at compile time: {reason}
 -     label   comptime.derive-here        the derive's template, where it stopped
 
+# ---------------------------------------------------------------- capabilities
+E0700 error   cap.not-shareable          `{ty}` cannot become `{cap}`: a capability may reach every task, and `{ty}` is not `{auto}`{path}
+E0701 error   cap.internal               `{name}` is internal to the standard library; a program reaches the world only through the capabilities it is given
+
 # ---------------------------------------------------------------- stage-0 limits and internal errors
 E0900 error   stage0.unsupported          {construct} is not implemented in stage 0 yet; it arrives with {phase}
 E0901 error   stage0.internal             internal compiler error in {stage}: {detail}
@@ -336,6 +342,8 @@ R0002 runtime panic.index-out-of-bounds   index out of bounds: the length is {le
 R0003 runtime panic.overflow              integer overflow: {expr}
 R0004 runtime panic.divide-by-zero        division by zero
 R0005 runtime panic.shift-out-of-range    a shift by {amount} is out of range; shifts take 0 to 63
+R0094 runtime panic.bad-port              {port} is not a port; ports are 0 to 65535
+R0093 runtime panic.shift-out-of-range-sized  a shift of a `{ty}` by {amount} is out of range; shifts take 0 to {max}
 R0006 runtime panic.assert                assertion failed: {expr}
 R0007 runtime panic.assert-message        assertion failed: {expr}\n  message: {message}
 R0008 runtime panic.expect                {message}: {value}

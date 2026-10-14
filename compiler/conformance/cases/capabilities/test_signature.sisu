@@ -1,0 +1,19 @@
+# A test takes nothing, or one `System` (02; 17, "Isolation and
+# parallelism"): `sisu test` hands it the real one, and has nothing to
+# pass for any other parameter (E0702). A test that wants a fake makes
+# it.
+
+test "takes nothing":
+    assert 1 + 1 == 2
+
+test "takes the real System"(sys: System):
+    assert sys.fs.exists("test_signature.sisu")
+
+test "takes a number"(n: int):
+    assert n == n
+
+test "takes one capability"(fs: Fs):
+    assert not fs.exists("note")
+
+test "takes two systems"(sys: System, again: System):
+    assert sys.env.args() == again.env.args()

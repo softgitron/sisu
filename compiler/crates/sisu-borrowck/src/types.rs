@@ -12,11 +12,40 @@ pub struct Types<'p> {
 
 /// The builtin types whose values can hold no loan and own nothing that
 /// can.
-const PLAIN_BUILTINS: &[&str] = &["String", "Path", "DateTime", "Fs", "Env", "Clock", "System"];
+const PLAIN_BUILTINS: &[&str] = &[
+    "String",
+    "Path",
+    "DateTime",
+    "bytes",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "i8",
+    "i16",
+    "i32",
+    "Fs",
+    "Net",
+    "Clock",
+    "Rand",
+    "Env",
+    "Proc",
+    "System",
+    "HostFs",
+    "HostNet",
+    "HostClock",
+    "HostRand",
+    "HostEnv",
+    "HostProc",
+    "TestClock",
+    // What a `Cap` holds is neither a view nor must-consume (checked where
+    // one is made).
+    "Cap",
+];
 
 /// The builtin types whose values may borrow whatever their arguments are:
 /// an iterator walks a collection it may borrow, an entry borrows its dict.
-const BORROWING_BUILTINS: &[&str] = &["Iter", "Entry", "Iterable", "MutexGuard"];
+const BORROWING_BUILTINS: &[&str] = &["Iter", "Entry", "Iterable", "MutexGuard", "Lent", "Slice"];
 
 impl<'p> Types<'p> {
     pub fn new(p: &'p Program) -> Types<'p> {

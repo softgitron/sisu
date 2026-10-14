@@ -1,0 +1,75 @@
+# Capabilities: no ambient authority, attenuation, testing with fakes.
+
+import http      # the blessed std.x.http client; it works through the Net capability
+from std.net import Url
+from std.time import DateTime
+
+struct Cache:
+    fs: Fs                   # a capability stored at construction, already narrowed
+    clock: Clock
+    ttl: Duration
+
+    def get(self, key: Path) -> bytes?:
+        let meta = self.fs.metadata(key) else: return None
+        if self.clock.now() - meta.modified > self.ttl:
+            return None
+        return self.fs.read(key).ok()
+
+    def put(self, key: Path, value: bytes) -> ! IoError:
+        return self.fs.write(key, value)
+
+def fetch_cached(net: Net, cache: Cache, url: Url) -> bytes ! HttpError:
+    if let Some(hit) = cache.get(url.as_key()):
+        return Ok(hit)
+    let body = http.get(net, url)?
+    _ = cache.put(url.as_key(), body)        # cache write failure is not a fetch failure
+    return Ok(body)
+
+def main(sys: System) -> ! AppError:
+    # Narrow before passing on. The cache can only touch ./cache; the fetcher
+    # can only reach one host. Neither can read the environment or spawn processes.
+    let cache_fs = sys.fs.restrict_to("./cache")
+    let api = sys.net.only_hosts(["api.example.com"]).https_only()
+    let cache = Cache(fs=cache_fs, clock=sys.clock, ttl=Duration.minutes(10))
+
+    let data = fetch_cached(api, cache, Url.parse("https://api.example.com/v1/data")?)?
+    print("{len(data)} bytes")
+    return Ok(())
+
+# Tests: no mocking framework, no global hooks. Fakes are standard.
+test "cache expires entries":
+    let fs = Fs.in_memory()
+    let clock = Clock.frozen_at(DateTime.parse("2026-10-11T12:00:00Z").expect("valid"))
+    let cache = Cache(fs=fs, clock=clock, ttl=Duration.hours(1))
+
+    cache.put(Path("k"), b"value").expect("in-memory write")
+    assert cache.get(Path("k")) == Some(b"value")
+
+    clock.advance(Duration.hours(2))
+    assert cache.get(Path("k")) == None
+
+test "fetch uses the cache before the network":
+    let net = http.FakeNet().respond_to("https://api.example.com/v1/data", b"from net")
+    let clock = Clock.frozen_at(DateTime.epoch())
+    let cache = Cache(fs=Fs.in_memory(), clock=clock, ttl=Duration.hours(1))
+    let url = Url.parse("https://api.example.com/v1/data").expect("valid")
+
+    assert fetch_cached(net, cache, url) == Ok(b"from net")
+    assert net.request_count() == 1
+    assert fetch_cached(net, cache, url) == Ok(b"from net")
+    assert net.request_count() == 1          # second call served from cache
+
+# What a dependency cannot do. This function has no capability parameters,
+# so it provably performs no I/O; the compiler can evaluate it at compile time.
+pure def checksum(data: Slice[u8]) -> u32:
+    return data.iter().fold(0u32, (acc, b) -> acc *% 31 +% b.into())
+
+# ---------------------------------------------------------------- appended for the conformance suite
+# The proposal's text above names `AppError` without declaring it: here it
+# is the union of what `main` propagates.
+from std.net import UrlError
+
+type AppError = {HttpError, UrlError}
+
+test "the checksum is the corpus's":
+    assert checksum(b"value") == 111972721

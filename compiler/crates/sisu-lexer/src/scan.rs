@@ -376,7 +376,16 @@ impl Scanner<'_> {
                 break;
             }
             if c == '\\' && !raw {
-                self.escape();
+                // A byte string also takes `\xNN`, any byte.
+                let hex = self.text.get(self.pos + 1..self.pos + 4);
+                if let Some(h) = hex
+                    && h.starts_with('x')
+                    && h[1..].chars().all(|d| d.is_ascii_hexdigit())
+                {
+                    self.pos += 4;
+                } else {
+                    self.escape();
+                }
             } else {
                 self.pos += c.len_utf8();
             }

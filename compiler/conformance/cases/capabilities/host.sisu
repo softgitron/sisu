@@ -1,0 +1,27 @@
+# The root objects of `System`: the host's file system, clock, random
+# bits, environment and processes. The run's directory holds the case's
+# fixture files; what is printed does not depend on the machine.
+
+def main(sys: System):
+    let fs = sys.fs
+    fs.create_dir("out/logs").expect("made")
+    fs.write_text("out/logs/run.txt", "started").expect("written")
+    print(fs.read_to_string("out/logs/run.txt"))
+    print(fs.list_dir("out"))
+    print(fs.metadata("out/logs").map((m) -> m.is_dir))
+    print(fs.metadata("out/logs/run.txt").map((m) -> m.len))
+    print(fs.remove("out/logs/run.txt"))
+    print(fs.exists("out/logs/run.txt"))
+    print(fs.read_to_string("data.txt"))
+    print(fs.read_to_string("absent.txt"))
+    let x = sys.rand.between(0, 10)
+    print(x >= 0 and x < 10)
+    print(sys.env.get("SISU_SURELY_UNSET"))
+    match sys.proc.run("sisu-no-such-program", ["--version"]):
+        case Ok(_):
+            print("ran")
+        case Err(e):
+            print(e)
+    let t1 = sys.clock.now()
+    let t2 = sys.clock.now()
+    print(t2 >= t1)

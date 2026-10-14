@@ -1042,7 +1042,7 @@ impl Analysis {
         for (place, acc, own) in self.accesses(f, types, b, si, s) {
             let live = if after_dest { &post_without_return } else { pre };
             for y in live.iter().chain(pending.iter()) {
-                if Some(y) == own {
+                if Some(y) == own || (acc == Access::Dead && self.through_reference(f, &place, y)) {
                     continue;
                 }
                 if self.conflicts_with(&place, acc, y, before) {
@@ -1069,6 +1069,18 @@ impl Analysis {
     }
 
     /// Whether an access to `place` conflicts with live loan `y`.
+    /// Whether loan `y` borrows through the reference that `place`, a
+    /// local going out of storage, holds (`ref (*r).f`): the reborrow
+    /// holds the reference's own loans, which keep what it points into
+    /// alive, so the reference itself may go.
+    fn through_reference(&self, f: &Function, place: &Place, y: LoanId) -> bool {
+        let Some(lp) = self.loans[y].place() else { return false };
+        place.proj.is_empty()
+            && lp.local == place.local
+            && matches!(lp.proj.first(), Some(Proj::Deref))
+            && f.locals.get(place.local.0 as usize).is_some_and(|l| matches!(l.ty, Type::Ref(..)))
+    }
+
     fn conflicts_with(&self, place: &Place, acc: Access, y: LoanId, st: &State) -> bool {
         let loan = &self.loans[y];
         let Some(lp) = loan.place() else { return false };

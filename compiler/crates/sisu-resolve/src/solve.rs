@@ -173,7 +173,12 @@ impl Program {
             // The impl's own bounds, for these arguments.
             let mut ok = Answer::Yes(ImplSource::Impl { def: i, args: args.clone() });
             for p in &info.predicates {
-                match self.implements_depth(&p.ty.subst(&args), &p.bound.subst(&args), env, depth + 1) {
+                let (pt, pb) = (p.ty.subst(&args), p.bound.subst(&args));
+                match self.implements_depth(&pt, &pb, env, depth + 1) {
+                    Answer::Yes(src) if !self.defaults_hold(&pt, &pb, &src, env) => {
+                        ok = Answer::No;
+                        break;
+                    }
                     Answer::Yes(_) => {}
                     Answer::No => {
                         ok = Answer::No;
@@ -193,6 +198,32 @@ impl Program {
     pub fn passes_through_refs(&self, t: DefId) -> bool {
         let wk = &self.wk;
         [wk.display, wk.debug, wk.eq, wk.partial_ord, wk.ord, wk.hash, wk.len].contains(&Some(t))
+    }
+
+    /// Whether `ty` meets the bound `tr`: it implements the trait, and each
+    /// associated type to which the trait gives a default is that default.
+    /// A bound fixes them (`T: Sub` means that `T - T` is a `T`), while
+    /// an impl may bind another (`DateTime - DateTime` is a `Duration`).
+    pub fn bound_holds(&self, ty: &Ty, tr: &TraitRef, env: &[Predicate]) -> Answer {
+        match self.implements(ty, tr, env) {
+            Answer::Yes(src) if !self.defaults_hold(ty, tr, &src, env) => Answer::No,
+            other => other,
+        }
+    }
+
+    fn defaults_hold(&self, ty: &Ty, tr: &TraitRef, src: &ImplSource, env: &[Predicate]) -> bool {
+        let ImplSource::Impl { def, args } = src else { return true };
+        let (Some(info), Some(t)) = (self.impl_info(*def), self.trait_info(tr.def)) else { return true };
+        let mut targs = vec![ty.clone()];
+        targs.extend(tr.args.iter().cloned());
+        t.assoc.iter().all(|a| {
+            let (Some(default), Some((_, bound))) =
+                (&a.default, info.assoc.iter().find(|(n, _)| *n == a.name))
+            else {
+                return true;
+            };
+            self.normalize(&default.subst(&targs), env) == self.normalize(&bound.subst(args), env)
+        })
     }
 
     /// The impl that makes `ty` implement `tr`, when one does.
@@ -231,6 +262,16 @@ impl Program {
                         targs.extend(trait_.args.iter().cloned());
                         return n(&d.subst(&targs));
                     }
+                } else if env.iter().any(|p| p.ty == self_ty && p.bound == trait_)
+                    && let Some(d) = self.trait_info(trait_.def).and_then(|t| {
+                        t.assoc.iter().find(|x| x.name == a.name).and_then(|x| x.default.clone())
+                    })
+                {
+                    // A bound in scope fixes a defaulted associated type to
+                    // its default (`bound_holds`).
+                    let mut targs = vec![self_ty.clone()];
+                    targs.extend(trait_.args.iter().cloned());
+                    return n(&d.subst(&targs));
                 }
                 Ty::Assoc(Box::new(AssocTy { self_ty, trait_, name: a.name.clone() }))
             }
@@ -349,7 +390,13 @@ impl Program {
                         _ => Vec::new(),
                     };
                     fields.iter().all(rec) && iargs.iter().all(rec)
-                } else if module.is_std {
+                } else if module.is_std
+                    && (self.builtin(*d).is_some()
+                        || matches!(self.def(*d).name.as_str(), "Option" | "Result" | "Ordering" | "Box"))
+                {
+                    // std's impls of the host-backed types and the core
+                    // enums render as the host does; another std type's
+                    // own impl (`Duration`'s `Display`) is its own.
                     args.iter().all(rec)
                 } else {
                     false

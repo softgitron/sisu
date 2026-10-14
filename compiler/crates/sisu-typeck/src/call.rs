@@ -708,7 +708,16 @@ impl Checker<'_> {
             vars.push(v);
         }
         for p in &f.predicates {
-            self.bounds.push((p.ty.subst(&vars), p.bound.subst(&vars), span));
+            // A trait method's `Self: Trait` asks for an impl, whose
+            // associated types are its own; any other predicate is a bound,
+            // which fixes the defaulted ones (`Program::bound_holds`).
+            let own_trait = f.trait_ == Some(p.bound.def) && p.ty == Ty::Param(0);
+            let b = (p.ty.subst(&vars), p.bound.subst(&vars), span);
+            if own_trait {
+                self.impl_bounds.push(b);
+            } else {
+                self.bounds.push(b);
+            }
         }
         let has_body = f.intrinsic.is_none();
         let fenv = prog.elaborate_env(&f.predicates);
@@ -775,6 +784,7 @@ impl Checker<'_> {
             let diag = self.error(msg::COMPTIME_ONLY, range).with("name", prog.def(d).name.clone());
             self.report(diag);
         }
+        self.check_internal(d, range);
         if prog.fn_info(d).is_some_and(|f| f.header_broken) {
             // Its signature is unknown (the header did not parse): check the
             // arguments on their own and give the call the error type.
@@ -841,6 +851,7 @@ impl Checker<'_> {
             Some("Shared.new") => Some("Shared"),
             Some("Cell.new") => Some("Cell"),
             Some("Mutex.new") => Some("Mutex"),
+            Some("Cap.new") => Some("Cap"),
             _ => None,
         };
         if let (Some(owner), Some(t)) = (owner, sig.type_args.first()) {
@@ -947,14 +958,26 @@ impl Checker<'_> {
         for (i, p) in sig.params.iter().enumerate() {
             match &slots[i] {
                 Some(a) => out.push(self.check_arg(a, p)),
-                None if p.has_default => out.push(Arg {
-                    expr: Expr::new(
-                        ExprKind::DefaultArg { def: sig.def, param: i as u32 },
-                        p.ty.clone(),
-                        span,
-                    ),
-                    mode: ArgMode::Value,
-                }),
+                None if p.has_default => {
+                    // A default is a temporary, passed as an argument
+                    // written there would be: by reference to a borrowed
+                    // parameter that is not `Copy`.
+                    let mode = match p.mode {
+                        Mode::Own => ArgMode::Value,
+                        Mode::Mut => ArgMode::BorrowMut,
+                        Mode::Borrow if p.opaque => ArgMode::Ref,
+                        Mode::Borrow if self.is_copy(&p.ty) => ArgMode::Value,
+                        Mode::Borrow => ArgMode::Borrow,
+                    };
+                    out.push(Arg {
+                        expr: Expr::new(
+                            ExprKind::DefaultArg { def: sig.def, param: i as u32 },
+                            p.ty.clone(),
+                            span,
+                        ),
+                        mode,
+                    })
+                }
                 None => {
                     if !extra {
                         let d = self
@@ -1168,6 +1191,20 @@ impl Checker<'_> {
                     return self.trait_call(m, tr, recv, norm, name, args, trailing, range, expected);
                 }
                 0 => {}
+                // One generic trait implemented for several of its
+                // arguments (`Into[u32]`, `Into[int]`): the arguments are
+                // inferred, and the impl is the one they name.
+                _ if candidates
+                    .iter()
+                    .all(|(t, m)| t.def == candidates[0].0.def && *m == candidates[0].1) =>
+                {
+                    let (tr, m) = candidates[0].clone();
+                    let tr = sisu_resolve::TraitRef {
+                        def: tr.def,
+                        args: tr.args.iter().map(|_| self.infer.fresh()).collect(),
+                    };
+                    return self.trait_call(m, tr, recv, norm, name, args, trailing, range, expected);
+                }
                 _ => {
                     let traits: Vec<String> = candidates.iter().map(|(t, _)| self.show_trait(t)).collect();
                     let d = self

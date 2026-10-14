@@ -1,0 +1,72 @@
+# The network capability over `Net.fake`, an in-process network (17): a
+# listener and its connections, attenuations by host and port, a revoked
+# caretaker, an interceptor, and cancellation of a task waiting in
+# `accept` or in a `read` (blocking points like any other).
+# explore 20
+
+@derive(Copy)
+struct Trace:
+    lines: Cap[Mutex[list[String]]]
+
+impl cap.Interceptor for Trace:
+    def before(self, call: cap.Call):
+        var g = self.lines.get().lock()
+        g.value.push("{call.capability}.{call.method}({call.args})")
+
+def echo_once(listener: Listener) -> ! {NetError, TaskError}:
+    var conn = listener.accept()?
+    let got = conn.read_to_end()?
+    conn.write(got)?
+    conn.close()
+    return Ok(())
+
+def main():
+    let net = Net.fake()
+    let listener = net.listen("localhost", 7).expect("free")
+    print(listener.port)
+    let back = task.scope do s:
+        s.spawn(() -> echo_once(listener))
+        var c = net.connect("localhost", 7)?
+        c.write(b"ping")?
+        c.close()
+        return c.read_to_end()
+    print(back)
+    print(net.connect("localhost", 8).is_err())
+    let any = net.listen("localhost", 0).expect("a free port")
+    print(any.port)
+
+    let narrow = net.only_hosts(["localhost"]).https_only()
+    print(narrow.connect("example.com", 443).is_err())
+    print(narrow.connect("localhost", 80).is_err())
+    match narrow.connect("localhost", 443):
+        case Err(e):
+            print("refused: {e}")
+        case Ok(_):
+            print("connected")
+
+    let plugin, revoker = net.revocable()
+    revoker.revoke()
+    match plugin.listen("localhost", 9):
+        case Err(e):
+            print("revoked: {e}")
+        case Ok(_):
+            print("listening")
+
+    let trace = Trace(lines=Cap(Mutex(list())))
+    let watched: Net = cap.Wrap(inner=net, hook=trace)
+    _ = watched.connect("localhost", 7)
+    _ = watched.listen("localhost", 10)
+    for l in trace.lines.get().lock().value.iter():
+        print(l)
+
+    # A task waiting to accept, and one waiting to read, are cancelled
+    # with their scope.
+    let idle = net.listen("localhost", 11).expect("free")
+    task.scope do s:
+        let waiting = s.spawn(() -> idle.accept().map((c) -> c.peer))
+        let reader = s.spawn do:
+            var c = net.connect("localhost", 7)?
+            return c.read(16)
+        s.cancel()
+        print("accept: {waiting.join()}")
+        print("read: {reader.join()}")

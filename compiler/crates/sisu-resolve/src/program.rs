@@ -205,6 +205,10 @@ pub struct FnInfo {
     /// `@keeps(self, x)` on an intrinsic: the `own` and `mut` arguments
     /// (by position, `self` first) whose every value it keeps or returns.
     pub keeps: Vec<u32>,
+    /// `@internal` on a std function: only the standard library may call
+    /// it (the forwarding of lent capabilities, the assembling of a
+    /// `System`).
+    pub internal: bool,
     pub body: Option<ast::Block>,
     pub kind: FnKind,
     pub file: FileId,
@@ -296,6 +300,13 @@ pub struct WellKnown {
     pub send: Option<DefId>,
     pub sync: Option<DefId>,
     pub escapable: Option<DefId>,
+    /// Capabilities (06): the operations trait of each handle type.
+    pub fs_ops: Option<DefId>,
+    pub net_ops: Option<DefId>,
+    pub clock_ops: Option<DefId>,
+    pub rand_ops: Option<DefId>,
+    pub env_ops: Option<DefId>,
+    pub proc_ops: Option<DefId>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -376,6 +387,46 @@ impl Program {
 
     pub fn builtin(&self, d: DefId) -> Option<&str> {
         self.struct_info(d).and_then(|s| s.builtin.as_deref())
+    }
+
+    /// The operations trait of a capability handle type (`Fs`: `FsOps`).
+    pub fn capability_ops(&self, d: DefId) -> Option<DefId> {
+        let wk = &self.wk;
+        match self.builtin(d)? {
+            "Fs" => wk.fs_ops,
+            "Net" => wk.net_ops,
+            "Clock" => wk.clock_ops,
+            "Rand" => wk.rand_ops,
+            "Env" => wk.env_ops,
+            "Proc" => wk.proc_ops,
+            _ => None,
+        }
+    }
+
+    /// Whether a value of the type is or lends a capability, or is the
+    /// `System` of them: what a `pure` function cannot take (06).
+    pub fn is_capability(&self, ty: &Ty) -> bool {
+        match ty {
+            Ty::Ref(t, _) => self.is_capability(t),
+            Ty::Adt(d, args) => {
+                self.capability_ops(*d).is_some()
+                    || matches!(
+                        self.builtin(*d),
+                        Some(
+                            "System"
+                                | "TestClock"
+                                | "HostFs"
+                                | "HostNet"
+                                | "HostClock"
+                                | "HostRand"
+                                | "HostEnv"
+                                | "HostProc"
+                        )
+                    )
+                    || (self.builtin(*d) == Some("Lent") && args.iter().any(|a| self.is_capability(a)))
+            }
+            _ => false,
+        }
     }
 
     /// Looks a name up in a module (and the module it derives for), then

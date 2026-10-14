@@ -383,6 +383,11 @@ pub enum Coercion {
     BoxToDyn,
     /// `ref T` to `ref dyn Trait`: the reference, carrying `T`.
     RefToDyn,
+    /// A value of a type that implements a capability's operations trait,
+    /// as the capability's handle (06): the handle takes the value over.
+    ToCap,
+    /// An integer as a wider integer type that holds all its values.
+    IntWiden,
     /// A type error: the expression is kept, its type replaced by the
     /// expected one so nothing downstream reports again.
     Mismatch,
@@ -396,6 +401,8 @@ pub enum ExprKind {
     Char(char),
     /// A string literal of type `str`, `String` or `Path` (FromLiteral).
     Str(String),
+    /// A byte string literal, `b"..."`.
+    Bytes(Vec<u8>),
     Unit,
     Local(LocalId),
     Const(DefId),

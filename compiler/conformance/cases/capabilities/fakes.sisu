@@ -1,0 +1,39 @@
+# The standard fakes (17, "Mocks"), written in Sisu (std.cap): an
+# in-memory file system, the test clock, a seeded generator, an
+# environment and a process runner. Each is deterministic.
+
+def main():
+    let fs = Fs.in_memory({"dir/a.txt": "one"})
+    fs.create_dir("dir/empty").expect("in memory")
+    print(fs.list_dir("dir"))
+    print(fs.metadata("dir/a.txt"))
+    print(fs.metadata("dir/empty").map((m) -> m.is_dir))
+    print(fs.remove("dir/a.txt"))
+    print(fs.remove("dir/a.txt"))
+    print(fs.write_text("dir", "a directory"))
+
+    let clock = Clock.frozen_at(DateTime.parse("2026-10-11T12:00:00Z").expect("valid"))
+    fs.write_text("stamped", "x").expect("in memory")
+    print(fs.metadata("stamped").map((m) -> m.modified))
+    clock.advance(Duration.minutes(90))
+    print(clock.now())
+    let as_clock: Clock = clock
+    print(as_clock.now() - DateTime.parse("2026-10-11T12:00:00Z").expect("valid"))
+
+    let a = Rand.seeded(1)
+    let b = Rand.seeded(1)
+    print([a.between(0, 1000), a.between(0, 1000), a.between(0, 1000)])
+    print([b.between(0, 1000), b.between(0, 1000), b.between(0, 1000)])
+    print(a.unit() < 1.0)
+    var xs = [1, 2, 3, 4, 5, 6]
+    a.shuffle(mut xs)
+    print(xs)
+
+    let env = Env.fake(args=["--verbose", "in.txt"], vars={"LANG": "fi_FI"})
+    print(env.args())
+    print(env.get("LANG"))
+    print(env.get("HOME"))
+
+    let proc = Proc.fake({"date": "Sun Oct 11"})
+    print(proc.run("date", []).map((o) -> o.stdout))
+    print(proc.run("rm", ["-rf", "/"]))

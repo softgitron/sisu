@@ -56,6 +56,8 @@ impl Interp<'_, '_> {
         let (a, b) = (self.target(a)?, self.target(b)?);
         Ok(match (a, b) {
             (Value::Int(x), Value::Int(y)) => x == y,
+            (Value::U64(x), Value::U64(y)) => x == y,
+            (Value::Bytes(x), Value::Bytes(y)) => x == y,
             (Value::Float(x), Value::Float(y)) => x == y,
             (Value::Bool(x), Value::Bool(y)) => x == y,
             (Value::Char(x), Value::Char(y)) => x == y,
@@ -86,8 +88,7 @@ impl Interp<'_, '_> {
                 }
                 true
             }
-            (Value::Fs(x), Value::Fs(y)) => Rc::ptr_eq(x, y),
-            (Value::Env, Value::Env) | (Value::Clock(_), Value::Clock(_)) => true,
+            (Value::Cap(x), Value::Cap(y)) | (Value::Clock(x), Value::Clock(y)) => x == y,
             (Value::Fn(x), Value::Fn(y)) => x == y,
             _ => false,
         })
@@ -111,6 +112,8 @@ impl Interp<'_, '_> {
         let (a, b) = (self.target(a)?, self.target(b)?);
         Ok(match (a, b) {
             (Value::Int(x), Value::Int(y)) => Some(x.cmp(y)),
+            (Value::U64(x), Value::U64(y)) => Some(x.cmp(y)),
+            (Value::Bytes(x), Value::Bytes(y)) => Some(x.cmp(y)),
             (Value::Float(x), Value::Float(y)) => x.partial_cmp(y),
             (Value::Bool(x), Value::Bool(y)) => Some(x.cmp(y)),
             (Value::Char(x), Value::Char(y)) => Some(x.cmp(y)),
@@ -152,6 +155,8 @@ impl Interp<'_, '_> {
         Ok(match self.target(v)? {
             Value::Unit => Key::Unit,
             Value::Int(i) => Key::Int(*i),
+            Value::U64(i) => Key::U64(*i),
+            Value::Bytes(b) => Key::Bytes(b.clone()),
             Value::Bool(b) => Key::Bool(*b),
             Value::Char(c) => Key::Char(*c),
             Value::Str(s, _) => Key::Text(s.clone()),
@@ -164,7 +169,7 @@ impl Interp<'_, '_> {
                 a.variant,
                 a.fields.iter().map(|x| self.key_of(x)).collect::<Result<_, _>>()?,
             ),
-            Value::Fs(_) | Value::Env | Value::Clock(_) => Key::Handle,
+            Value::Cap(_) | Value::Clock(_) => Key::Handle,
             other => return Err(ice(format!("{other:?} is not hashable"))),
         })
     }

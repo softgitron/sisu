@@ -35,6 +35,9 @@ pub(crate) struct Checker<'p> {
     pub self_ty: Option<Ty>,
     /// Bounds to check once inference is done: (type, bound, span).
     pub bounds: Vec<(Ty, TraitRef, Span)>,
+    /// The impls a call of a trait method asks for: like `bounds`, but an
+    /// impl's associated types are its own.
+    pub impl_bounds: Vec<(Ty, TraitRef, Span)>,
     /// The bounds in scope: the function's own, elaborated with
     /// supertraits.
     pub env: Vec<Predicate>,
@@ -62,6 +65,9 @@ pub(crate) struct Checker<'p> {
     pub own_checks: Vec<(ClosureId, TextRange)>,
     /// In a generator, the type of what `yield` gives.
     pub generator: Option<Ty>,
+    /// Values made into capability handles, with the handle's name, for
+    /// the `Send` and `Sync` checks once types are known.
+    pub cap_checks: Vec<(Ty, String, Span)>,
 }
 
 impl<'p> Checker<'p> {
@@ -88,6 +94,7 @@ impl<'p> Checker<'p> {
             ret: Vec::new(),
             self_ty: None,
             bounds: Vec::new(),
+            impl_bounds: Vec::new(),
             env: Vec::new(),
             generic_names: Vec::new(),
             owner_checks: Vec::new(),
@@ -98,6 +105,7 @@ impl<'p> Checker<'p> {
             spawn_checks: Vec::new(),
             own_checks: Vec::new(),
             generator: None,
+            cap_checks: Vec::new(),
         }
     }
 
@@ -125,6 +133,21 @@ impl<'p> Checker<'p> {
     pub fn unsupported(&mut self, range: TextRange, construct: &str, phase: &str) {
         let d = self.error(msg::STAGE0_UNSUPPORTED, range).with("construct", construct).with("phase", phase);
         self.report(d);
+    }
+
+    /// A function only the standard library may call (`@internal`): the
+    /// forwarding of lent capabilities, the assembling of a `System`.
+    pub fn check_internal(&mut self, d: DefId, range: TextRange) {
+        let prog = self.prog;
+        let Some(f) = prog.fn_info(d) else { return };
+        if f.internal && !prog.modules[self.module.0 as usize].is_std {
+            let name = match &f.owner {
+                Some(o) => format!("{}.{}", prog.display(o), prog.def(d).name),
+                None => prog.qualified_name(d),
+            };
+            let diag = self.error(msg::CAP_INTERNAL, range).with("name", name);
+            self.report(diag);
+        }
     }
 
     /// The display form of a type, with variables resolved as far as known.

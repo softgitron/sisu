@@ -1,0 +1,48 @@
+# Each test gets fresh capability fakes (17, "Isolation and
+# parallelism"): it makes the ones it needs, `Fs.in_memory()`,
+# `Clock.fake()`, `Rand.seeded(seed)`, `Env.fake()`, `Net.fake()`, or the
+# whole set as `System.fake(seed)`, and nothing one test does is seen by
+# another. The test clock moves only when every task waits. A test that
+# declares `sys: System` receives the real one, and runs alone.
+# explore 5
+
+def wait_for(clock: Clock, d: Duration) -> int ! TaskError:
+    clock.sleep(d)?
+    return Ok(d.as_seconds())
+
+test "a test that declares a System receives the real one"(sys: System):
+    sys.fs.write_text("note", "on the disk").expect("writable")
+    assert sys.fs.read_to_string("note") == Ok("on the disk".to_string())
+
+test "the fakes see none of it":
+    let sys = System.fake(1)
+    assert not sys.fs.exists("note")
+    assert sys.env.args() == []
+    assert sys.env.get("HOME") == None
+
+test "writes stay in the test":
+    let fs = Fs.in_memory()
+    fs.write_text("draft", "kept").expect("in memory")
+    assert fs.read_to_string("draft") == Ok("kept".to_string())
+
+test "the next test sees none of them":
+    assert not Fs.in_memory().exists("draft")
+    assert not System.fake(2).fs.exists("draft")
+
+test "time moves only when every task waits":
+    let clock: Clock = Clock.fake()
+    let start = clock.now()
+    let r = task.scope do s:
+        let a = s.spawn(() -> wait_for(clock, Duration.seconds(30)))
+        let b = s.spawn(() -> wait_for(clock, Duration.seconds(10)))
+        return Ok(a.join()? + b.join()?)
+    assert r == Ok(40)
+    assert clock.now() - start == Duration.seconds(30)
+
+test "a frozen clock is the test clock":
+    let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("valid"))
+    let fs = Fs.in_memory()
+    fs.write_text("k", "v").expect("in memory")
+    clock.advance(Duration.hours(1))
+    let m = fs.metadata("k").expect("there")
+    assert clock.now() - m.modified == Duration.hours(1)

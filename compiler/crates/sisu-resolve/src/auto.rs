@@ -10,7 +10,8 @@
 //! a `Mutex[T]`, a channel half and a task handle are both when `T` is
 //! `Send`; a mutex guard is never `Send` (it unlocks in the task that
 //! locked) and `Sync` when `T` is; a `Shared[T]` and a `Weak[T]` are both
-//! when `T` is `Sync`. A function or closure value is neither, since its
+//! when `T` is `Sync`, and so are a `Cap[T]` and a `Lent[T]`, which every
+//! copy shares. A function or closure value is neither, since its
 //! captures are not in its type; a `dyn Trait` is what its trait's
 //! supertraits require; a type parameter is what its bounds say. Tuples,
 //! collections, options, results and declared types are what all their
@@ -126,7 +127,11 @@ impl Program {
                         }
                         elem(both(self, &arg(0), Auto::Sync, seen))
                     }
-                    Some("Shared" | "Weak") => elem(both(self, &arg(0), Auto::Sync, seen)),
+                    // A `Cap` is shared by its copies, a `Lent` is a view
+                    // of a capability: both are references in effect.
+                    Some("Shared" | "Weak" | "Cap" | "Lent" | "Slice") => {
+                        elem(both(self, &arg(0), Auto::Sync, seen))
+                    }
                     Some(_) => {
                         for a in args {
                             elem(both(self, a, auto, seen))?;

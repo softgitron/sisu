@@ -8,12 +8,10 @@
 //! `mut` ones are references; `own` ones are values. The accessors below
 //! look through references, so an intrinsic does not care which it got.
 
-use crate::value::{DictPart, EntryVal, FsCap, FsStore, IterState, Pointer, Step, Value};
+use crate::value::{DictPart, EntryVal, IterState, Pointer, Step, Value};
 use crate::{Interp, IoErrorKind, Unwind, ice, msg, panic, render};
 use sisu_sir as sir;
-use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 use std::rc::Rc;
 
 struct Args(Vec<Value>);
@@ -79,6 +77,15 @@ impl<'p> Interp<'p, '_> {
         if let Some(r) = self.task_intrinsic(name, tys, &mut args) {
             return r;
         }
+        if let Some(r) = self.cap_intrinsic(name, tys, &mut args) {
+            return r;
+        }
+        if let Some(r) = self.sized_intrinsic(name, &args) {
+            return r;
+        }
+        if let Some(r) = self.bytes_intrinsic(name, &args) {
+            return r;
+        }
         if name == "Mutex.lock" {
             return self.lock(&mut args);
         }
@@ -122,7 +129,6 @@ impl<'p> Interp<'p, '_> {
                     Err(ice(format!("unknown intrinsic `Iter.{method}`")))
                 }
                 "Option" | "Result" => self.option_method(owner, method, &mut a),
-                "Fs" | "Env" | "Clock" => self.capability(owner, method, &mut a),
                 "iter" => match method {
                     "ref" | "mut" => Ok(Value::Iter(Box::new(self.iter_borrow(a.get(0)?)?))),
                     _ => {
@@ -168,6 +174,7 @@ impl<'p> Interp<'p, '_> {
                     Value::Str(s, _) => s.chars().count(),
                     Value::String(s) => s.chars().count(),
                     Value::List(xs) => xs.len(),
+                    Value::Bytes(b) => b.len(),
                     Value::Set(s) => s.items.len(),
                     Value::Dict(d) => d.entries.len(),
                     Value::Arena(a) => a.slots.iter().filter(|(_, v)| !v.is_moved()).count(),
@@ -537,6 +544,26 @@ impl<'p> Interp<'p, '_> {
                 xs.reverse();
                 Ok(Value::Unit)
             }),
+            "swap" => {
+                let (i, j) = (self.int(a.get(1)?)?, self.int(a.get(2)?)?);
+                self.with_list(a.get(0)?, |xs| {
+                    let n = xs.len();
+                    let at = |k: i64| usize::try_from(k).ok().filter(|k| *k < n);
+                    match (at(i), at(j)) {
+                        (Some(i), Some(j)) => {
+                            xs.swap(i, j);
+                            Ok(Value::Unit)
+                        }
+                        _ => Err(crate::panic(
+                            msg::PANIC_INDEX_OUT_OF_BOUNDS,
+                            &[
+                                ("index", (if at(i).is_none() { i } else { j }).to_string()),
+                                ("len", n.to_string()),
+                            ],
+                        )),
+                    }
+                })
+            }
             "clear" => {
                 let old = self.with_list(a.get(0)?, |xs| Ok(std::mem::take(xs)))?;
                 self.queue_drop(Value::List(old), None);
@@ -798,7 +825,7 @@ impl<'p> Interp<'p, '_> {
         }
     }
 
-    fn io_error(&self, kind: IoErrorKind, path: &str) -> Value {
+    pub(crate) fn io_error(&self, kind: IoErrorKind, path: &str) -> Value {
         let (name, fields) = match kind {
             IoErrorKind::NotFound => ("NotFound", vec![Value::Path(Rc::from(path))]),
             IoErrorKind::PermissionDenied => ("PermissionDenied", vec![Value::Path(Rc::from(path))]),
@@ -809,111 +836,6 @@ impl<'p> Interp<'p, '_> {
         };
         let i = self.variants.get(&("IoError", name)).copied().unwrap_or(0);
         Value::variant("IoError", i, fields)
-    }
-
-    /// The path an `Fs` operation uses, or the error for one outside its root.
-    fn fs_path(cap: &FsCap, path: &str) -> Result<String, IoErrorKind> {
-        match &cap.root {
-            None => Ok(path.to_string()),
-            Some(root) => {
-                let p = std::path::Path::new(path);
-                if p.is_absolute() || p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-                    return Err(IoErrorKind::PermissionDenied);
-                }
-                Ok(format!("{}/{path}", root.trim_end_matches('/')))
-            }
-        }
-    }
-
-    fn capability(&mut self, owner: &str, method: &str, a: &mut Args) -> Result<Value, Unwind> {
-        if (owner, method) == ("Fs", "in_memory") {
-            let mut files = BTreeMap::new();
-            if let Value::Dict(d) = self.target(a.get(0)?)? {
-                for (k, v) in &d.entries {
-                    files.insert(self.text(k)?.to_string(), self.text(v)?.to_string());
-                }
-            }
-            return Ok(Value::Fs(Rc::new(FsCap {
-                store: FsStore::Memory(Rc::new(RefCell::new(files))),
-                read_only: false,
-                root: None,
-            })));
-        }
-        match (owner, method) {
-            ("Env", "args") => Ok(Value::List(self.host.args().iter().map(|s| Value::str(s)).collect())),
-            ("Env", "get") => {
-                let name = self.text(a.get(1)?)?.to_string();
-                Ok(Value::option(self.host.env_var(&name).map(Value::String)))
-            }
-            ("Clock", "now") => Ok(Value::DateTime(self.host.now())),
-            ("Fs", m) => {
-                let cap = match self.target(a.get(0)?)? {
-                    Value::Fs(c) => c.clone(),
-                    other => return Err(ice(format!("Fs.{m} on {other:?}"))),
-                };
-                match m {
-                    "read_only" => Ok(Value::Fs(Rc::new(FsCap { read_only: true, ..(*cap).clone() }))),
-                    "restrict_to" => {
-                        let dir = self.text(a.get(1)?)?.to_string();
-                        let root = match Self::fs_path(&cap, &dir) {
-                            Ok(r) => r,
-                            Err(_) => dir,
-                        };
-                        Ok(Value::Fs(Rc::new(FsCap { root: Some(root), ..(*cap).clone() })))
-                    }
-                    "read_to_string" | "write_text" | "exists" => {
-                        let path = self.text(a.get(1)?)?.to_string();
-                        let full = match Self::fs_path(&cap, &path) {
-                            Ok(f) => f,
-                            Err(k) if m == "exists" => {
-                                let _ = k;
-                                return Ok(Value::Bool(false));
-                            }
-                            Err(k) => return Ok(Value::err(self.io_error(k, &path))),
-                        };
-                        match m {
-                            "exists" => Ok(Value::Bool(match &cap.store {
-                                FsStore::Host => self.host.exists(&full),
-                                FsStore::Memory(files) => files.borrow().contains_key(&full),
-                            })),
-                            "read_to_string" => {
-                                let r = match &cap.store {
-                                    FsStore::Host => self.host.read_file(&full),
-                                    FsStore::Memory(files) => {
-                                        files.borrow().get(&full).cloned().ok_or(IoErrorKind::NotFound)
-                                    }
-                                };
-                                Ok(match r {
-                                    Ok(text) => Value::ok(Value::String(text)),
-                                    Err(k) => Value::err(self.io_error(k, &path)),
-                                })
-                            }
-                            _ => {
-                                if cap.read_only {
-                                    return Ok(Value::err(
-                                        self.io_error(IoErrorKind::PermissionDenied, &path),
-                                    ));
-                                }
-                                let text = self.text(a.get(2)?)?.to_string();
-                                let r = match &cap.store {
-                                    FsStore::Host => self.host.write_file(&full, &text),
-                                    FsStore::Memory(files) => {
-                                        files.borrow_mut().insert(full, text);
-                                        Ok(())
-                                    }
-                                };
-                                Ok(match r {
-                                    Ok(()) => Value::ok(Value::Unit),
-                                    Err(k) => Value::err(self.io_error(k, &path)),
-                                })
-                            }
-                        }
-                    }
-                    other => Err(ice(format!("no Fs method `{other}`"))),
-                }
-            }
-            (o, m) => Err(ice(format!("no {o} method `{m}`"))),
-        }
     }
 
     fn fmt(&mut self, method: &str, a: &mut Args) -> Result<Value, Unwind> {
@@ -1089,6 +1011,7 @@ impl Interp<'_, '_> {
                     atomic,
                     creator: self.sched.cur,
                     crossed: false,
+                    label: None,
                 });
                 Ok(Value::Shared(id))
             }

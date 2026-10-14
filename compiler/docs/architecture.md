@@ -11,17 +11,22 @@ not of Rust.
 
 Scope: [18](../../proposal/18-next-steps.md) Phases 0 and 2, the core;
 Phase 3's ownership checker, dynamic ownership monitor, counterexample
-mode and `sisu audit --ownership`, with its library types (`Box`, `Shared`, `Weak`, `Cell`, a
-single-task `Mutex`, `Arena[T]` with generational `Key[T]`) and `own`
-closures; and Phase 4's traits and impls, user generics, `dyn Trait`, the
-standard library's iterators, formatting and collection algorithms
-written in Sisu, drop glue as SIR functions, and the comptime evaluator
-with derive written as compile-time Sisu. Not here: from Phase 4,
-`Array`, `Slice`, the sized integer types, const generics and byte
-strings; reflection beyond derive and the checked string DSLs (Phase 8);
-tasks, scopes and capabilities beyond what `wordcount` needs (Phase 6);
-contracts and the rest of the interpreter-era surface (Phase 8). Their
-syntax parses, and using them is a diagnostic (`E0900
+mode and `sisu audit --ownership`, with its library types (`Box`, `Shared`, `Weak`, `Cell`, `Mutex`,
+`Arena[T]` with generational `Key[T]`) and `own` closures; Phase 4's
+traits and impls, user generics, `dyn Trait`, the standard library's
+iterators, formatting and collection algorithms written in Sisu, drop
+glue as SIR functions, the comptime evaluator with derive written as
+compile-time Sisu, the sized integer types, `bytes` and `Slice`; and
+Phase 6's tasks on a seeded cooperative scheduler (scopes, cancellation,
+shields, deadlines, races, channels, `select`, generators), `Send` and
+`Sync` checked at spawns, the `Shared` escape analysis, the capabilities
+of `std.cap` with their fakes and interceptors, and `std.x.http`, a
+minimal HTTP/1.1 client and server written in Sisu. Not here: from
+Phase 4, `Array` and const generics, `f32` and the 128-bit integers;
+from Phase 6, the `sim` profile, `RwLock`, `Atomic`, `Condvar`, TLS and
+`sisu audit --caps`; reflection beyond derive and the checked string
+DSLs, contracts and the rest of the interpreter-era surface (Phase 8).
+Their syntax parses, and using them is a diagnostic (`E0900
 stage0.unsupported`).
 
 ## Crate map
@@ -32,24 +37,28 @@ architecture"); data flows down the table.
 | Crate | Lines | Role |
 |---|---:|---|
 | `sisu-diag` | 852 | Spans, the source map (1-based lines, columns in characters), the message catalog, diagnostics with labels, notes and fixes, the human and `--format=ids` renderers |
-| `sisu-syntax` | 3614 | Token and node kinds, the lossless arena tree with stable node identities, and the AST built from the tree as a total function |
-| `sisu-lexer` | 1179 | Scanning (every byte a token, interpolation split into tokens) and layout (Python's INDENT/DEDENT algorithm) |
-| `sisu-parser` | 3301 | Error-tolerant recursive descent that always returns a tree |
-| `sisu-resolve` | 6055 | Loads the Sisu-written std (`compiler/std/`), declares every item, resolves signatures to types, registers methods; traits, impls, coherence and the trait solver; derives (unfolding each trait's `comptime def derive`) and delegation; the borrow rules about declarations |
-| `sisu-typeck` | 7509 | The bidirectional checker, with method resolution through traits and `comptime` expressions; produces the typed tree (THIR) for every body, broken or not |
-| `sisu-sir` | 2622 | SIR: the data model, the text writer and reader, the validator, the types of places |
-| `sisu-lower` | 3963 | THIR to SIR: control flow, scopes and their drops, unwind edges, closure conversion, trait calls and their static resolution, drop glue, `comptime` functions, the borrow facts of signatures |
-| `sisu-borrowck` | 4497 | The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, escapes, must-consume, purity, `explain-borrow` |
-| `sisu-interp` | 6202 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the dynamic ownership monitor, and the compile-time evaluator |
-| `sisu-driver` | 1618 | The query layer and the `sisu` command line, the counterexample mode, `audit --ownership`, and the soundness tests (fault injection, mutation fuzzing) |
-| `sisu-conformance` | 472 | The language-agnostic conformance runner |
+| `sisu-syntax` | 3698 | Token and node kinds, the lossless arena tree with stable node identities, and the AST built from the tree as a total function |
+| `sisu-lexer` | 1188 | Scanning (every byte a token, interpolation split into tokens) and layout (Python's INDENT/DEDENT algorithm) |
+| `sisu-parser` | 3304 | Error-tolerant recursive descent that always returns a tree |
+| `sisu-resolve` | 6602 | Loads the Sisu-written std (`compiler/std/`), declares every item, resolves signatures to types, registers methods; traits, impls, coherence and the trait solver; derives (unfolding each trait's `comptime def derive`) and delegation; the borrow rules about declarations |
+| `sisu-typeck` | 8551 | The bidirectional checker, with method resolution through traits and `comptime` expressions; produces the typed tree (THIR) for every body, broken or not |
+| `sisu-sir` | 2647 | SIR: the data model, the text writer and reader, the validator, the types of places |
+| `sisu-lower` | 4206 | THIR to SIR: control flow, scopes and their drops, unwind edges, closure conversion, trait calls and their static resolution, drop glue, `comptime` functions, the borrow facts of signatures |
+| `sisu-borrowck` | 4936 | The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, the task rules, escapes, must-consume, purity, `explain-borrow`, and the `Shared` escape analysis |
+| `sisu-interp` | 9280 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the task scheduler, capabilities and the host's objects, the dynamic ownership monitor, and the compile-time evaluator |
+| `sisu-driver` | 1998 | The query layer and the `sisu` command line, the counterexample mode, `audit --ownership`, and the soundness tests (fault injection, mutation fuzzing) |
+| `sisu-conformance` | 505 | The language-agnostic conformance runner |
 
 Line counts include each crate's unit tests. Besides the crates:
-`catalog/messages.catalog` (every message), `std/prelude.sisu` (1629
-lines: the builtin types, the core traits and their derives, iterators,
-formatting, collections, `Shared` and the other library types),
-`std/cli.sisu` and `std/math.sisu` (the standard library, in Sisu), and
-`conformance/` (the suite, described in its own
+`catalog/messages.catalog` (every message); the standard library, in
+Sisu: `std/prelude.sisu` (2713 lines: the builtin types, the core traits
+and their derives, iterators, formatting, collections, `Shared` and the
+other library types, tasks and channels, time, the sized integers and
+`bytes`, the capabilities and their operations traits), `std/cap.sisu`
+(696: std.cap's attenuations, caretakers, fakes and interceptor),
+`std/task.sisu`, `std/log.sisu`, `std/net.sisu` (`Url`),
+`std/http.sisu` (282: std.x.http), `std/time.sisu`, `std/cli.sisu` and
+`std/math.sisu`; and `conformance/` (the suite, described in its own
 [README](../conformance/README.md)).
 
 The workspace forbids `unsafe` and denies `unwrap`, `expect`, `panic`,
@@ -305,7 +314,7 @@ The prelude and the std modules are Sisu source (`compiler/std/*.sisu`)
 compiled by the same front end as user code. A function without a body
 names a host intrinsic with `@intrinsic("name")`, and the `##` comment
 above it is the intrinsic's contract, stated in Sisu terms; `@builtin`
-marks a type whose values the host represents. Four more attributes are
+marks a type whose values the host represents. Five more attributes are
 std's: `@structural("name")` on a function with a body says that the
 intrinsic `name` computes the same result whenever the call's type
 arguments meet every bound with a structural impl (lowering then calls
@@ -314,8 +323,11 @@ host for builtin elements); `@keeps(self, x)` on an intrinsic names the
 `own` and `mut` arguments whose every value it keeps or returns (the only
 ones that may take a must-consume value); `@sealed` on a trait means only
 std implements it (`Num`); `@marker` on a trait means it has no methods
-and is implemented by the language's rules (`Copy`). All six are reserved
-for std (`E0225`). The prelude declares the core traits (`Display`,
+and is implemented by the language's rules (`Copy`); `@internal` on a
+function means only std may call it (`E0701`). All seven are reserved
+for std (`E0225`). A std module may name prelude items too
+(`std_sources::reexports`), so `from std.time import DateTime` finds the
+prelude's. The prelude declares the core traits (`Display`,
 `Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, `Len`, `Copy`, `Num`, `Drop`,
 `Iterator`, the operator traits, `FromLiteral`), their impls for the
 builtin types, and the generic code over them; the impls of the leaf
@@ -547,12 +559,14 @@ body yields a THIR body, with ill-typed parts typed `Error`.
 - Integer literals are `int` and float literals `f64` unless the expected
   type is another numeric type (03, "Integer literals without context are
   `int`"); `half(3)` with an `f64` parameter is fine, and `a + b` with an
-  `int` and an `f64` is `E0373`.
+  `int` and an `f64` is `E0373`. The sized integers are "Numbers, bytes
+  and slices".
 - A parameter is borrowed unless marked `own` or `mut`; as a local it is
   `ref T`, or `T` for a `Copy` type (04, rule 2). `Copy` types: the
   scalars, `str`, `()`, shared references, functions, tuples and `Option`
   of `Copy` types, error sets whose members are `@derive(Copy)`,
-  `@derive(Copy)` structs and enums, and the capability handles.
+  `@derive(Copy)` structs and enums, the sized integers, the capability
+  handles, `TestClock`, `Cap` and `Lent`, and the task handles.
 - A pattern matched against a place binds references to non-`Copy` parts
   and copies of `Copy` ones; against a temporary it takes the parts by
   value.
@@ -570,14 +584,23 @@ body yields a THIR body, with ill-typed parts typed `Error`.
   which functions it calls, and which `Drop` its drops run, are checked on
   SIR by the ownership checker (`E0333`, `E0392`, `E0393`). A `comptime`
   expression is a value to the code around it.
-- Closures capture by reference; an `own` closure (`own x -> ...`) keeps
-  copies of what it captures, which must be `Copy` (`E0423`) and which it
-  cannot change (`E0424`), and so may be stored and returned (a capture by
-  move arrives with tasks).
-- What a `Shared`, `Cell` or `Mutex` owns can be neither a view
-  (`E0421`) nor must-consume (`E0422`), checked once the type is known; a
-  `Shared` value is reached through the owner, and nothing may be changed
-  through it except inside a `Cell` or a `Mutex`.
+- Closures capture by reference; an `own` closure (`own x -> ...`) moves
+  what it captures in (copies what is `Copy`), cannot change it
+  (`E0424`), and so may be stored and returned. A task's captures are
+  "Send, Sync and what a task captures".
+- What a `Shared`, `Cell`, `Mutex`, `Cap` or capability handle owns can
+  be neither a view (`E0421`) nor must-consume (`E0422`, which looks
+  through fields), checked once the type is known; a `Shared` value is
+  reached through the owner, and nothing may be changed through it except
+  inside a `Cell` or a `Mutex`.
+- Coercions where a type is expected, besides those below: a value
+  implementing a capability's operations trait to the handle
+  (`Coercion::ToCap`), a narrower integer to a wider one
+  (`Coercion::IntWiden`), and a `list[T]` or `bytes` to a `Slice` (a call
+  of `as_slice`).
+- Bounds are checked once inference is done: a bound fixes a defaulted
+  associated type to its default (`Program::bound_holds`), while the
+  `Self: Trait` of a trait method's own call asks only for an impl.
 - A format spec is checked where it is written (`E0399`); a spec ending
   in `?` asks for `Debug`.
 - `a?.f` through a reference borrows a field that is not `Copy` (as a
@@ -924,6 +947,16 @@ contracts:
 | `error.is[D](ref e) -> bool` | whether the error value belongs to declaration `D` |
 | `list.slice(ref xs, lo, hi)` | a new list of copies of `xs[lo:hi]`, bounds clamped to the length; negative bounds panic |
 | `list.slice_middle(ref xs, n, m)` | copies of the elements between the first `n` and the last `m` (a `*rest` binding) |
+| `cap.new[T, H](own v)` | a handle of type `H` on a new heap cell holding `v` as a `dyn` of type `T`, never freed (a `Coercion::ToCap`) |
+| `u64.from_bits(n)`, `u64.widen(x)` | the `u64` whose 64-bit pattern is `n`; an integer as a `u64` (a literal; a widening) |
+| `T.add(a, b)` ... `T.not(a)` for a sized integer type `T` | the operators on `T`: `add`, `sub`, `mul`, `floordiv`, `rem`, `pow` trap at `T`'s bounds (`R0003`), `wrap_*` wrap, `sat_*` saturate, `shl` and `shr` take 0 to the width less one (`R0093`), `and`, `or`, `xor`, `not` are on the bits |
+| `bytes.from_hex(text)` | the bytes the hex digits spell (a `b"..."` literal) |
+| `select.wait(kind, subject, ...)` | the index of the `select` arm to take (06, "Channels and select"; "Tasks and the scheduler") |
+| `gen.new(own body)`, `gen.yield(own item)` | a generator's iterator; giving an item to its consumer |
+
+A call through the trait of a capability handle (`cap.forward` in the
+prelude) is a `call trait` whose `Self` the dispatcher replaces by the
+object in the handle's cell.
 
 ## The ownership checker
 
@@ -1203,15 +1236,20 @@ which runs a field's default; the host's structural operations recurse
 over deeply nested values. The run happens on a thread with a 256 MiB
 stack so that both are safe.
 
-**Values** are a tagged enum: `int`, `f64`, `bool`, `char`, `()`, `str`
-(an immutable shared text), `String`, `Path`, `DateTime` (seconds since
-the Unix epoch, UTC), tuples, structs, enum values (with an error return
-trace when the enum is an error set), `list`, `dict` and `set`
-(insertion-ordered, as D-074 and 11 require, with a hash index), function
-values, closures (function, type arguments and captures), `dyn` values
-(a value and its type), `Shared` and `Weak` handles on a heap cell,
-`Cell`, `Mutex` and its guard, `Arena`, iterators, dict entries, the
-capability handles, references, and `Moved`.
+**Values** are a tagged enum: `int` (and every sized integer type but
+`u64`, kept in its type's range), `u64`, `f64`, `bool`, `char`, `()`,
+`str` (an immutable shared text), `String`, `Path`, `bytes` (immutable,
+shared by its copies), `DateTime` (nanoseconds since the Unix epoch,
+UTC), tuples, structs, enum values (with an error return trace when the
+enum is an error set), `list`, `dict` and `set` (insertion-ordered, as
+D-074 and 11 require, with a hash index), function values, closures
+(function, type arguments and captures), `dyn` values (a value and its
+type), `Shared` and `Weak` handles on a heap cell, `Cell`, `Mutex` and
+its guard, `Arena`, iterators, dict entries, capability handles and
+`Cap`s (a heap cell nothing frees), clocks, host sockets, the task
+handles (scopes, task handles, cancellations, channel halves, timers),
+references, and `Moved`. A `Slice` is a `list` of its values (a copy,
+like `str`'s; port-debt.md).
 
 **References are places**: a frame index and serial number, a local, and
 a path of steps (field, payload, list index, dict key or value position,
@@ -1256,14 +1294,16 @@ patterns against the concrete type arguments, as described under
 arguments and by the impls' associated type bindings.
 
 **Shared ownership and interior mutability.** A `Shared` is an owner of a
-heap cell (its value, a strong and a weak count; the count is never
-atomic, since stage 0 has one task); `.copy()` makes another owner, and
-the value is dropped with the last one. `Weak.upgrade` gives a `Shared`
+heap cell (its value, a strong and a weak count, and whether the count is
+atomic, which the escape analysis decides per construction site: "Send,
+Sync and what a task captures"); `.copy()` makes another owner, and the
+value is dropped with the last one. `Weak.upgrade` gives a `Shared`
 while the value lives. A reference to a `Shared`'s value is a pointer
 into the heap cell. `Cell` replaces its value through a shared reference
 and never gives out a reference into it. `Mutex.lock` gives a guard
-through which the value is reached; locking a mutex its task holds panics
-(`R0073`), as does locking a poisoned one (`R0074`). An `Arena[T]` holds
+through which the value is reached; locking a mutex another task holds
+waits, locking one the task itself holds panics (`R0073`), as does
+locking a poisoned one (`R0074`). An `Arena[T]` holds
 slots with generations; `insert` gives a `Key[T]` (a `Copy` struct of the
 slot and its generation), `remove` frees the slot for reuse under a new
 generation, and a stale key gives `None` from `get` and panics when
@@ -1296,20 +1336,22 @@ text of a value and the digits of numbers.
 
 Everything a program does to the world goes through the `Host` trait:
 standard output and error, the arguments after the program's name,
-environment variables, the clock, and file reads, writes and existence
-checks. There is no other I/O intrinsic. `System` is built only for a
-`main(sys: System)`, from three handles, `Fs`, `Env` and `Clock`, whose
-methods are intrinsics. `Fs.read_only` returns a handle whose writes fail
-with `PermissionDenied`; `Fs.restrict_to(dir)` one whose paths are
-relative to `dir` and may not be absolute or contain `..`;
-`Fs.in_memory(files)` a fake held in memory and shared by every copy of
-the handle (17, "Fixtures").
+environment variables, the clock and real-time sleeps, file reads, writes,
+metadata, listings, removals and directories, random bits, running a
+program to its end, and TCP (connect, listen, accept, read, write and
+close, each of which reports `Wait` instead of blocking). There is no
+other I/O intrinsic: the intrinsics `host.*` behind the root objects of a
+`System` (see "Capabilities") call these and nothing else.
 
-`StdHost` is the real process. `TestHost` is deterministic: captured
-output, a fixed clock, given arguments and variables, and files in memory
-over an optional read-only directory. The conformance runner uses the real
-`sisu` executable in an empty environment and a fresh directory instead,
-so that it can test any implementation.
+`StdHost` is the real process; its sockets are nonblocking, and a task
+whose socket would block waits on a one-millisecond timer of the host's
+clock and tries again, so the scheduler runs other tasks meanwhile (a
+poll: functional, not fast). `TestHost` is deterministic: captured
+output, a virtual clock, given arguments and variables, files in memory
+over an optional read-only directory, a seeded stream of random bits, no
+programs and no network. The conformance runner uses the real `sisu`
+executable in an empty environment and a fresh directory instead, so
+that it can test any implementation.
 
 ### The dynamic ownership monitor
 
@@ -1432,6 +1474,331 @@ One run proves nothing about other inputs, which the report says by its
 wording; the mode is for the team (20, A2), and the `.defer` files of
 `conformance/cases/ownership/` pin its output for every rejected case
 that has a `main`.
+
+## Tasks and the scheduler
+
+Tasks run on the interpreter's own loop, one task at a time, under a
+seeded cooperative scheduler (18, Phase 6: "the `single` profile of
+[12](../../proposal/12-interop-and-targets.md), deliberately"). The code
+is `sisu-interp/src/sched.rs`; the typing rules are in
+`sisu-typeck/src/tasks.rs`, the ownership rules in `sisu-borrowck`.
+
+**A task is a frame stack.** The running task's stack is the
+interpreter's frame stack; every other task's is in its record, and a
+switch swaps the two. A reference names the task whose stack holds its
+frame, so a task reads the frames of the task that opened its scope,
+which cannot return before the task ends. The root task runs `main` (or
+a test).
+
+**Anchors.** The scheduler pushes frames of its own, with no function and
+one result slot. The anchor at the bottom of a spawned task receives what
+the task's closure returns or the panic that unwound it. A scope's anchor
+sits under the body of `task.scope`: when the body returns or panics, it
+cancels as the rules below say, waits for every task of the scope, and
+gives the scope's result (or lets the panic go on). A shield's anchor
+marks the code under `task.shield`. The innermost scope or shield anchor
+of the running stack is the cancellation context of the code that runs;
+a task's context is its own node, under its scope.
+
+**Scheduling.** The yield points are the back edges of loops (a jump to
+a block at or before the current one), calls of Sisu functions, spawns
+and `task.yield_now` (Q-34). Each task runs a budget of 1 to 8 yield
+points drawn from the scheduler's generator (SplitMix64, seeded by
+`--schedule-seed N`, 0 by default); when the budget is spent, the next
+task is drawn from the ready ones by the same generator. A run is
+therefore a function of the program, its input and the seed. `sisu run
+--explore N` and `sisu test --explore N` run under the seeds 0 to N-1 and
+report the first seed whose run differs (for `run`, in output or status
+from seed 0's; for `test`, a test that fails), with the
+`--schedule-seed` that reproduces it. `--stats` reports tasks, switches,
+the most tasks alive at once, the scheduling latency (statements and
+microseconds from ready to running, p50 and p99) and the `Shared` tags.
+
+**Blocking.** An intrinsic that must wait (`join`, `recv`, `send` on a
+full channel, `lock` of a mutex another task holds, a timer, `select`,
+a scope's end, a host socket) returns `Unwind::Block` with its
+arguments and what it waits for: keys (a task, a scope, a channel, the
+lock) and possibly a timer. The statement records the call in the task,
+the task waits, and when an event wakes a key it is ready again; its
+call is then retried with the same arguments, so it completes exactly
+once. When no task is ready the virtual clocks advance together to the
+earliest of their timers; the host's real clock is waited for; when
+there is no timer either, the program is deadlocked (`R0080`), and the
+report names each task, what it waits for and where (`R0081`).
+
+**Cancellation** (06, "Cancellation") is a flag on scopes and tasks.
+`s.cancel()` sets its scope's; a scope is cancelled when an ancestor is;
+a task when its scope is, or its deadline (`spawn_with(deadline=timer)`)
+has passed on the timer's clock. Every blocking operation but `lock`
+checks the cancellation of its code's context first and returns
+`Err(Cancelled)` when it is cancelled; a shield's context is never
+cancelled. Cancelling wakes every waiting task, which retries and sees
+it. `task.checkpoint()` is a blocking point that waits for nothing, and
+`task.is_cancelled()` asks.
+
+**Scopes.** `task.scope do s:` runs its body on the calling task above
+the scope's anchor; `s.spawn(closure)` starts a task on the scope and
+returns its `Handle[T]`. At the end of the body the anchor waits for
+every task. The result rules:
+
+- A task fails when it panics, or when it returns `Err` and was not
+  cancelled into it (an `Err(Cancelled)` of a cancelled task is not a
+  failure). In an effectful scope the first failure in time cancels the
+  task's siblings. In a scope opened by `pure` code (the scope is marked
+  `pure` by its call), a failure cancels only the siblings spawned after
+  the failing task, so those before it run to completion, and the
+  failure reported is the lowest-index one (06, "Effects").
+- A body that panics, or returns `Err`, cancels the tasks still running;
+  a panic is the scope's outcome once every task has ended, an `Err` its
+  result.
+- Otherwise a failure nobody joined becomes the scope's result: a panic
+  as `Err(TaskPanicked(message, trace))` when the result type carries
+  `TaskError`, an error when the result type carries its set. When the
+  result type cannot carry it, the panic goes on, or the error becomes a
+  panic (`R0079`): a failure is never lost.
+- Results nobody joined are dropped when the scope ends.
+
+The checker types a scope whose body returns `T ! E` as `T ! {E,
+TaskError}` widened by the error sets of the tasks spawned on it, and
+`h.join()` as `U ! {E, TaskError}` for a task returning `U ! E` (the sets
+flattened) and `T ! TaskError` otherwise; joining twice panics
+(`R0077`). A body cannot return its scope or a handle (`E0430`).
+`task.race do s:` is a scope whose first task to finish wins: its result
+is the race's, the others are cancelled (`E0431` asks the tasks for one
+type; a race with no task panics, `R0078`). `task.shield do:` runs its
+block under a context that is never cancelled. The closures given to
+`scope`, `race`, `shield` and `spawn` must be written at the call
+(`E0425`), so the checker sees what they capture.
+
+**Channels.** `channel[T](capacity)` gives a `Sender[T]` and a
+`Receiver[T]` over a bounded queue of at least one value. `send` waits
+while it is full and `recv` while it is empty; closing (`Sender.close`,
+or dropping every sender) lets the receiver drain what was sent and then
+get `Closed`, and dropping the receiver makes `send` give `Closed` (the
+value dropped). `.copy()` of a sender makes another. A `for` loop over a
+receiver receives until the channel is closed and drained, or its task is
+cancelled. What a channel carries is neither a view nor must-consume.
+
+**`select`** waits for the first ready arm among `recv`, `send`, `join`
+calls, `Timer`s and `Cancellation`s (`E0434` for anything else); among
+several ready arms the seeded generator chooses. When the code running
+is cancelled, a ready cancellation arm is taken, else the first arm whose
+operation reports `Cancelled`, which then gives `Err(Cancelled)`.
+
+**Time.** A `Timer` is a moment on a clock (`clock.after(d)`), which
+`Timer.wait` and `select` wait for. A run has the host's clock (real
+under `StdHost`, virtual under `TestHost`) and the test clock of
+`Clock.fake` (virtual, made on first use). Virtual clocks move only when
+told to (`TestClock.advance`, `TestClock.set`) or when every task waits:
+then all of them advance by the smallest wait among their timers (17,
+"Isolation and parallelism", Go's `synctest`). `clock.sleep(d)` is
+`clock.after(d).wait()`, written in Sisu.
+
+**Generators.** A function whose body yields returns an `Iter` whose
+items come from a task-like closure run on demand: `next` switches to it
+until its next `yield`, which hands the item over and switches back. An
+abandoned generator is dropped with its iterator (port-debt.md). A
+receiver's or generator's iterator inside another iterator's adapter
+cannot wait (`R0091`).
+
+**`log`** writes records to the standard error with their level and,
+for a task, the task's path (`R0085`), which stands in for the trace
+context D-075 gives a scope's tasks.
+
+**Ambient.** `task` and `log` are modules every module sees without an
+import (Q-6, Q-5), as is `cap` (std.cap, which grants nothing by itself).
+
+## Send, Sync and what a task captures
+
+`Send` and `Sync` are inferred structurally, as Rust infers them
+(`sisu-resolve/src/auto.rs`), and checked where a value crosses a
+`spawn`, where a value becomes a capability handle, and where a bound
+asks for them. The leaves (numbers, text, paths, times, bytes, the
+capability handles, scopes) are both. `ref T` is both when `T` is
+`Sync`; `ref mut T` is `Send` when `T` is and `Sync` when `T` is.
+`Cell[T]` is `Send` when `T` is and never `Sync`; `Mutex[T]`, a channel
+half and a task handle are both when `T` is `Send`; a mutex guard is
+never `Send` and `Sync` when `T` is; `Shared[T]`, `Weak[T]`, `Cap[T]`,
+`Lent[T]` and `Slice[T]` are both when `T` is `Sync`. A function or
+closure value is neither (its captures are not in its type); a `dyn
+Trait` is what the trait's supertraits require; a type parameter what
+its bounds say; everything else what its parts are, coinductively for a
+recursive type. A failure names the field in the way and the wrapper
+that would help (`E0426`, `E0427`, `E0437`, `E0433` for a task's result;
+`E0700` for a capability's object).
+
+**What a task captures.** Once the types are known, a task's `Copy`
+captures that it does not change are copied into it, and the rest are
+borrowed; an `own` task moves its captures in. A copied or moved capture
+must be `Send`, a borrowed one `Sync`, one changed through a reference
+`Send`.
+
+**What a task may borrow** (the ownership checker). A task spawned on
+the scope of the body it is spawned in (the body's parameter) may borrow
+what the body's environment borrows, which outlives the scope: a loan
+the environment brought, or one reached through it; not a local of the
+body (`E0428`), since the body ends before the scope joins. A task
+spawned anywhere else (on a scope passed in, in a helper) borrows
+nothing (`E0429`), since the checker cannot see how long its scope
+lasts; it may still copy and move. The loans a task holds are pinned
+until its scope's body returns. A generator's `yield` gives its item to
+the consumer, so the item may borrow only what the generator's
+environment does.
+
+**`Shared` atomicity** (Q-2; `sisu-borrowck/src/shared.rs`). After the
+ownership checker, an escape analysis tags each construction site of a
+`Shared` task-local or may-cross. A program that spawns no task, sends on
+no channel and makes no generator has only task-local sites. Otherwise a
+site may cross when a local that may hold its value (or a copy, a
+reference to it, or something holding one, followed flow-insensitively
+through assignments, borrows, aggregates, `.copy()`, closures and call
+results) reaches a spawn, a send, a generator, a scope's body, a
+capability handle or a `Cap`, a store through a reference, the
+function's result, or a call of a function that may itself let what it
+is given cross (one that, directly or through the functions it calls,
+does one of those or calls through a function value or a trait). A
+may-cross site is written `call intrinsic Shared.new_atomic`. The
+monitor checks the tags: a cell from a task-local site reached by
+another task is a soundness error of the analysis (`R0089`).
+`--stats shared` counts the cells of each kind and those another task
+reached.
+
+## Capabilities
+
+A capability is a `Copy` handle (`Fs`, `Net`, `Clock`, `Rand`, `Env`,
+`Proc`) on an object that implements the capability's operations trait
+(`FsOps`, `NetOps`, `ClockOps`, `RandOps`, `EnvOps`, `ProcOps`; 06, "The
+rule"). The object lives in a heap cell that every copy of the handle
+reaches and nothing frees; copying the handle grants nothing new, and a
+fake's state, behind the handle, is seen by every copy. The handle
+implements the trait by forwarding: its impl's methods are the intrinsic
+`cap.forward`, which lowering turns into a call through the trait whose
+`Self` the dispatcher replaces by the object in the cell, so the object's
+own method (Sisu or intrinsic) runs with `self` pointing into the cell.
+
+**Becoming a handle.** Where a handle type is expected, a value of
+another type that implements its operations trait becomes one
+(`Coercion::ToCap`, lowered to `call intrinsic cap.new[T, Handle]`, which
+puts the value in a new cell). The value must own what it holds (a view
+is `E0421`), must not be must-consume, since the handle never drops it
+(`E0422`), and must be `Send` and `Sync`, since a handle may reach every
+task (`E0700`). A result that borrows `self` borrows the handle, whose
+object outlives every use: a handle, a `Cap` and a `Lent` lend nothing of
+their own to the ownership checker.
+
+**The root objects** are the host's: `HostFs`, `HostNet`, `HostClock`,
+`HostRand`, `HostEnv` and `HostProc`, builtin types that no code can
+construct, whose operations are the intrinsics `host.*` over the host
+contract. The runtime builds a `System` of handles on them for a
+`main(sys: System)`. `System.assemble`, which makes one from handles, is
+`@internal`: only std may call it (`E0701`).
+
+**Attenuations and the forms of 06** are written in Sisu, in std.cap
+(`std/cap.sisu`, the ambient module `cap`), over the operations traits:
+
+- `fs.read_only()` refuses every change as `PermissionDenied`;
+  `fs.restrict_to(dir)` puts paths below `dir` and refuses an absolute
+  path or one with a `..` part, reporting errors with the caller's path;
+  `net.only_hosts(hosts)` and `net.https_only()` (port 443: stage 0 has
+  no TLS) refuse other addresses as `NotAllowed`. They compose, and a
+  narrowed capability cannot be widened again.
+- `fs.lend()` is a `Lent[Fs]`, a view of the handle at no cost: it
+  implements the trait (forwarding as the handle does), so a generic
+  parameter `[F: FsOps]` accepts it with every other form, but it never
+  becomes a handle, which could be stored.
+- `fs.revocable()` and `net.revocable()` give a caretaker and its
+  `Revoker`, a `Copy` handle on a flag every copy of the caretaker
+  checks; after `revoke()`, every operation fails with `Revoked` (and
+  nothing exists).
+- `cap.Wrap(inner=c, hook=i)` shows every call through the capability
+  `c`'s trait to the interceptor `i` (a `cap.Interceptor`) as a
+  `cap.Call` before it runs, and its `Debug` outcome after. Its impls
+  are written for each standard capability; a `Wrap` of any trait waits
+  for reflection (Phase 8).
+- `Cap[T]` is the building block of objects written in Sisu: a `Copy`
+  handle on a value every copy shares, never dropped, `Sync` when `T`
+  is; what it holds can be neither a view nor must-consume, and changing
+  it goes through a `Mutex` inside.
+
+**The fakes** (17, "Mocks"), also in Sisu: `Fs.in_memory(files)` (files
+and directories in mutexes, writes stamped by the test clock),
+`Clock.fake()` and `Clock.frozen_at(t)` (the run's test clock, a
+`TestClock` with `advance` and `set`, which becomes a `Clock`),
+`Rand.seeded(seed)` (SplitMix64 in Sisu), `Env.fake(args, vars)`,
+`Proc.fake(outputs)`, `Net.fake()` (an in-process network: listeners by
+address, connections as pairs of bounded channels of bytes, counted),
+and `http.FakeNet()` (scripted HTTP answers and a request count).
+`System.fake(seed)` assembles a set of them: an empty in-memory `Fs`, a
+`Net` that reaches nothing, the test clock, `Rand.seeded(seed)`, and an
+empty `Env` and `Proc`. Each test gets fresh fakes by making them (17,
+"Isolation and parallelism"; 10, "each test gets fresh capability fakes
+(`Fs.in_memory()`, `Clock.frozen_at(...)`)"): every test runs in an
+interpreter of its own, so its test clock, its fakes and the module
+statics start new. A test that declares `sys: System` receives the real
+one, as `main` does (02, "a test that needs a real capability runs
+serially"); stage 0 runs tests one after another, so it runs alone, and
+it is the one kind of test a seed does not reproduce. Any other test
+parameter is `E0702`. The ambient standard streams and `log` stay
+ambient (Q-5).
+
+**The network.** A `Conn` is a `Box[dyn Stream]` and the peer's address;
+a `Listener` a `Box[dyn Accept]` and its port. A read waits for data and
+gives at most what it is asked for, nothing at the end of the stream; a
+write sends everything. The host's streams and listeners are builtin
+types over the host's nonblocking sockets; the fake network's are Sisu
+structs over channels, so every network wait is a blocking point that
+cancellation interrupts.
+
+**`std.x.http`** (`std/http.sisu`) is HTTP/1.1 in Sisu over `Net`:
+`http.request(net, method, url, body)` and `http.get(net, url)` (a
+non-2xx status is `Status(code)`); `http.serve(listener, handler)` runs
+until cancelled, answering each connection on a task of its own with a
+`Handler`'s response, and drops a connection that fails. One request per
+connection, bodies by `Content-Length` or to the end of the stream.
+`HttpError` is in the prelude, because the proposal's examples name it
+after `import http`. `std.net` has `Url`.
+
+**Purity.** A `pure` function cannot take a capability, a `TestClock`, a
+lent capability or a `System` (`E0334`); the capabilities' operations
+are not pure, so it could not use one either.
+
+## Numbers, bytes and slices
+
+**The sized integers** `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`
+are builtin types of the prelude (`i64` is an alias of `int`, `uint` of
+`u64`). A literal takes the sized type expected, or its suffix's
+(`0u32`), and must fit (`E0374`). Two operands of one sized type take
+the operators `int` takes, with the same result type (`/` is `E0301`,
+as for `int`); operands of two integer types widen the
+narrower when that loses nothing; otherwise the types mix (`E0373`).
+Where an integer type is expected, a narrower one that it holds widens
+(`Coercion::IntWiden`); every other conversion is a method: `x.to_int()`,
+`n.to_u8()` (`None` when it does not fit), and `x.into()` for each
+lossless widening (`Into[T]`). Lowering calls the typed intrinsics
+(`u8.add`, `u32.wrap_mul`, ...), which trap, wrap or saturate at the
+type's bounds, and a shift by the width or more panics (`R0093`). The
+operator traits (`Add` ... `Neg`) and `FromLiteral[int]` are implemented
+for generic code. A `u64` is a value of its own kind; the others are
+`int` values in range.
+
+**`bytes`** is an immutable owned byte sequence (03): the type of
+`b"..."` (with `\xNN` for any byte), of a file's contents and of what a
+connection reads. `b[i]` is a `u8`, `b[i:j]` a copy, `a + b`
+concatenates, `for x in b` iterates; `s.encode()` gives the UTF-8 bytes
+of a text, and `b.decode()` the text or `InvalidUtf8(at)`.
+
+**`Slice[T]`** is a read-only view of a run of values: a `list[T]` is
+one, and `bytes` a `Slice[u8]`, where one is expected. `s[i]` is a
+reference to a value and `s[i:j]` a view of a run. A `Slice` is not
+`Copy` in stage 0 (a `str` is), so it is passed by reference as a `list`
+is.
+
+**Operators with other result types.** The operator traits have an
+associated `Output = Self`, so an impl can bind another
+(`DateTime - DateTime` is a `Duration`). A bound fixes a defaulted
+associated type to its default (`T: Sub` means `T - T` is a `T`), so
+generic code keeps the meaning it had, while a call of a trait's method
+on a concrete type asks for the impl only.
 
 ## Formatting
 
@@ -1615,7 +1982,7 @@ open to revision; the conformance cases pin the current choice.
     compare with `f64.cmp`, which panics on NaN.
 11. The `IoError` variants are `NotFound(path)`, `PermissionDenied(path)`,
     `AlreadyExists(path)`, `InvalidData(path)` (not UTF-8),
-    `Interrupted` and `Other(message: String)`.
+    `Interrupted`, `Revoked` and `Other(message: String)`.
 12. `cli.parse[T]` (the stand-in for `std.x.cli`'s derive): each field
     `f` of type `int`, `f64`, `str`, `String`, `Path` or `bool` is the
     option `--f`, with `-` for `_`, given as `--f value` or `--f=value`; a
@@ -1634,8 +2001,9 @@ open to revision; the conformance cases pin the current choice.
 16. `xs[lo:hi]` copies, with the bounds clamped to the length; negative
     bounds panic (`^` counts from the end, so a negative index is never
     meaningful).
-17. A shift amount outside 0..63 panics; bits shifted out of `<<` are lost
-    rather than trapping, since shifts are bit operations, not arithmetic.
+17. A shift amount outside 0..63 (0 to the width less one, for a sized
+    integer) panics; bits shifted out of `<<` are lost rather than
+    trapping, since shifts are bit operations, not arithmetic.
 18. Float `/` by zero follows IEEE 754 (an infinity or NaN); `%` on floats
     has the sign of the divisor, like the integer `%`.
 19. Collections drop their elements first to last; a dict drops each
@@ -1711,9 +2079,9 @@ open to revision; the conformance cases pin the current choice.
     reference that owns no text outside references, borrows only what
     the argument holds (`inner`), not the argument.
 45. Closures capture by reference and cannot escape the frame of what
-    they capture; an `own` closure copies its captures, which must be
-    `Copy`, until capture by move arrives with tasks. A closure's result
-    may borrow from any of its arguments and its environment.
+    they capture; an `own` closure moves its captures in (copies the
+    `Copy` ones). A closure's result may borrow from any of its
+    arguments and its environment.
 46. A loan of a `mut` parameter, or of anything reached through one, is
     memory of the caller: only that parameter's own loan may be stored
     there. An intrinsic keeps only the arguments it takes with `own`; a
@@ -1771,7 +2139,9 @@ open to revision; the conformance cases pin the current choice.
     a `Copy` type by value reads it through the reference.
 60. An impl's method inherits `pure` from the trait's declaration.
 61. Arithmetic operators on numbers are the language's own operations;
-    on other types they call `Add`, `Sub`, `Mul`, `Div`, `Rem` and `Neg`.
+    on other types they call `Add`, `Sub`, `Mul`, `Div`, `Rem` and `Neg`,
+    whose result is the impl's `Output` (by default `Self`); a bound
+    fixes a defaulted associated type to its default.
 62. `FromLiteral[L]` converts a literal of type `L` where a type that
     implements it is expected; std's `String` and `Path` do for `str`.
 63. The derived and std impls of the language's traits compute the
@@ -1793,12 +2163,13 @@ open to revision; the conformance cases pin the current choice.
 67. `Shared`'s own functions take it as an argument (`Shared.count(s)`,
     `Shared.downgrade(s)`), since the value's fields and methods are
     reached through it; `.copy()` makes another owner. Whether its count
-    is atomic is a flag, never set in stage 0.
-68. A `Mutex` in one task: locking one the task already holds panics,
-    since it would wait forever. When unwinding drops a guard, the value's
-    type's `invariant` is checked (D-077): if it fails the mutex is
-    poisoned, and every later `lock` panics; a type without an invariant
-    unlocks.
+    is atomic is decided per construction site by the escape analysis.
+68. Locking a `Mutex` another task holds waits, and cancellation does not
+    interrupt the wait (`lock` cannot fail); locking one the task already
+    holds panics, since it would wait forever. When unwinding drops a
+    guard, the value's type's `invariant` is checked (D-077): if it fails
+    the mutex is poisoned, and every later `lock` panics; a type without
+    an invariant unlocks.
 69. `Key[T]` is a `Copy` struct of a slot and a generation; a stale key
     gives `None` from `get` and panics when indexed.
 70. `@keeps` in a contract is the must-consume rule for an intrinsic.
@@ -1857,3 +2228,108 @@ open to revision; the conformance cases pin the current choice.
     `.copy()` and `unsafe`, with `Arena` and `Key` apart, and its `lines`
     are the lines that hold code, the denominator of "per 100 final
     lines".
+
+**Tasks** (06; 18, Phase 6)
+
+85. The yield points are loop back edges, calls of Sisu functions,
+    spawns and `task.yield_now`; a task runs 1 to 8 of them, drawn from
+    the seeded generator, before the scheduler may switch, and the next
+    task is drawn among the ready ones. Seed 0 is the default.
+86. Every blocking operation but `lock` checks cancellation before it
+    waits, so a cancelled task returns `Err(Cancelled)` at its next one
+    even when it would not have waited; `lock` waits uncancellably,
+    since it cannot fail.
+87. A task's `Err(Cancelled)` after its scope or task was cancelled is
+    not a failure: it cancels nothing and is not the scope's result.
+88. In a `pure` scope, a failure cancels only the tasks spawned after the
+    failing one, and the unjoined failure reported is the lowest-index
+    one; the body joining later tasks first can still observe them in
+    time order (port-debt.md).
+89. A failure nobody joined that the scope's result type cannot carry
+    panics (`R0079`), and an unjoined panic re-raises unless the result
+    carries `TaskError`; results nobody joined are dropped at the end of
+    the scope.
+90. The closures of `scope`, `race`, `shield` and `spawn` must be written
+    at the call (`E0425`); a task spawned outside its scope's body
+    borrows nothing (`E0429`).
+91. A task's `Copy` captures that it does not change are copied, so a
+    loop variable given to a task is the iteration's value.
+92. A channel's capacity is at least one; `select` among ready arms
+    chooses by the seeded generator; a cancelled `select` takes a ready
+    cancellation arm, else the first arm that reports `Cancelled`.
+93. Every virtual clock advances by the smallest wait among the virtual
+    timers when every task waits; a real timer is waited for only when
+    no virtual one is pending.
+94. A function or closure value is neither `Send` nor `Sync`, since its
+    captures are not in its type; a server's handler is a trait object
+    or a generic parameter instead (`http.Handler`).
+95. A generator dropped before its end is abandoned with its iterator;
+    its frames are dropped without running to completion.
+96. `log` records carry the task's path, not a span identifier: the
+    trace context of D-075 is that path until Phase 8's tooling.
+
+**Capabilities** (06; 11; 17)
+
+97. Each capability is a builtin `Copy` handle type on an object of a
+    type implementing its operations trait (`Fs`/`FsOps`, ...); the
+    proposal calls the trait "a trait" without a name. The handle
+    forwards by dispatch (`cap.forward`), and a value implementing the
+    trait becomes a handle where one is expected (the handle takes it
+    over; a `Copy` one is copied).
+98. An object must own what it holds, not be must-consume, and be `Send`
+    and `Sync`, since a handle can be stored and can reach every task;
+    nothing frees it (port-debt.md).
+99. `Lent[T]` implements the capability's trait but never becomes a
+    handle: a parameter that accepts the lent form is generic
+    (`[F: FsOps]`), not of the handle's type, which could be stored.
+100. `Cap[T]` is a `Copy` handle on a shared value, the building block of
+     fakes and caretakers written in Sisu; its value is never dropped.
+101. `System`'s fields are `fs`, `net`, `clock`, `rand`, `env`, `proc`,
+     in the proposal's order; the standard streams stay ambient (Q-5),
+     so it has no `stdin`, `stdout` or `stderr`.
+102. A test takes nothing or one `System` (`E0702`), and one that takes
+     a `System` receives the host's, as the proposal's text says; a test
+     that wants a whole fake set makes it with `System.fake(seed)`, so no
+     test is handed fakes implicitly.
+103. A run has one test clock (`Clock.fake`), which `Clock.frozen_at(t)`
+     sets to `t` and every `TestClock` reads, and which stamps the writes
+     of in-memory file systems; it starts at the epoch and is virtual.
+104. `restrict_to` reports an error with the path the caller gave, and
+     an attenuation of an attenuation narrows again; `https_only` is a
+     restriction to port 443, since stage 0 has no TLS.
+105. A revoked caretaker answers `exists` with `False` and fails every
+     other operation with `Revoked`; `Revoked` joins `IoError`,
+     `NetError` and `ProcError`.
+106. `Wrap[T, I]` takes the interceptor as a type parameter rather than a
+     `Box[dyn Interceptor]`; the interceptor sees each call's arguments
+     and outcome rendered with `Debug`.
+107. `@internal` marks a std function only std may call (`E0701`);
+     `System.assemble` is the one that builds a `System`.
+108. `Env.args()` gives `list[str]` (views of the object's text), as
+     `wordcount` needs; `Proc.run` runs a program to its end with no
+     input; `Rand.bits()` is the one primitive, and `between`, `unit`,
+     `coin` and `shuffle` are Sisu over it.
+109. `HttpError` is a prelude error set, since the proposal's examples
+     name it bare after `import http`; `std.time` and `std.net` re-export
+     the prelude's names they document (`from std.time import DateTime`).
+110. A host socket that would block makes its task wait a millisecond on
+     the host's clock and try again: a poll, not an event loop.
+
+**Numbers and bytes** (03)
+
+111. The sized integers are builtin types; a `u64` is a value of its own
+     kind and the others `int` values in range; a literal takes the
+     expected sized type or its suffix's, checked at compile time.
+112. Two integer operands of different types widen the narrower when
+     that loses nothing; comparisons do not widen.
+113. `Into[T]` has an impl for each lossless widening, and a method of
+     one generic trait implemented for several arguments infers them
+     (`b.into()` where a `u32` is expected).
+114. `bytes` is immutable and shared by its copies; `b[i:j]` copies;
+     `Slice[T]` is not `Copy`.
+115. `Iter.fold` is `pure` with a `pure` function, so `pure` code can
+     fold (03, "Function types"); `Iterator.fold` keeps any function.
+116. `DateTime` holds nanoseconds since the epoch (the years 1678 to
+     2261), parses RFC 3339 in Sisu, and displays with the fraction of a
+     second only when there is one.
+

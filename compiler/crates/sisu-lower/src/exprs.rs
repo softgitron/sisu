@@ -138,6 +138,8 @@ impl FnLower<'_, '_> {
 
     fn literal(&self, e: &thir::Expr) -> Option<Const> {
         Some(match &e.kind {
+            // A `u64` is a value of its own kind, made from its bits.
+            ExprKind::Int(_) if self.sized_int(&e.ty) == Some("u64") => return None,
             ExprKind::Int(n) => Const::Int(*n),
             ExprKind::Float(f) => Const::Float(*f),
             ExprKind::Bool(b) => Const::Bool(*b),
@@ -147,6 +149,17 @@ impl FnLower<'_, '_> {
             ExprKind::FnRef(d) => Const::Fn(self.ctx.fn_name(*d)),
             _ => return None,
         })
+    }
+
+    /// The name of a sized integer type (`u8`), `None` for any other.
+    pub fn sized_int(&self, t: &Ty) -> Option<&'static str> {
+        match t {
+            Ty::Adt(d, a) if a.is_empty() => {
+                let b = self.ctx.prog.builtin(*d)?;
+                sisu_resolve::std_sources::SIZED.iter().copied().find(|s| *s == b)
+            }
+            _ => None,
+        }
     }
 
     /// The value of an expression as an operand.
@@ -405,6 +418,58 @@ impl FnLower<'_, '_> {
             ExprKind::Borrow { place, mutable } => {
                 let p = self.place_of(place);
                 self.assign(dest, Rvalue::Ref(p, *mutable), loc);
+            }
+            ExprKind::Bytes(b) => {
+                // The bytes travel as hex text, which any byte survives.
+                let hex: String = b.iter().map(|x| format!("{x:02x}")).collect();
+                self.intrinsic_call(
+                    dest,
+                    "bytes.from_hex",
+                    Vec::new(),
+                    vec![Operand::Const(Const::Str(hex))],
+                    loc,
+                );
+            }
+            ExprKind::Int(n) => {
+                // A `u64` literal (the others are constants).
+                self.intrinsic_call(
+                    dest,
+                    "u64.from_bits",
+                    Vec::new(),
+                    vec![Operand::Const(Const::Int(*n))],
+                    loc,
+                );
+            }
+            ExprKind::Unary { op: UnOp::BitNot, operand } if self.sized_int(&operand.ty).is_some() => {
+                let k = self.sized_int(&operand.ty).unwrap_or("int");
+                let v = self.operand(operand);
+                self.intrinsic_call(dest, &format!("{k}.not"), Vec::new(), vec![v], loc);
+            }
+            ExprKind::Binary { op, lhs, rhs } if self.sized_int(&lhs.ty).is_some() => {
+                // The sized integers' arithmetic is the host's, by type.
+                let k = self.sized_int(&lhs.ty).unwrap_or("int");
+                let name = match op {
+                    BinOp::Add => "add",
+                    BinOp::Sub => "sub",
+                    BinOp::Mul => "mul",
+                    BinOp::FloorDiv | BinOp::Div => "floordiv",
+                    BinOp::Mod => "rem",
+                    BinOp::Pow => "pow",
+                    BinOp::WrapAdd => "wrap_add",
+                    BinOp::WrapSub => "wrap_sub",
+                    BinOp::WrapMul => "wrap_mul",
+                    BinOp::SatAdd => "sat_add",
+                    BinOp::SatSub => "sat_sub",
+                    BinOp::SatMul => "sat_mul",
+                    BinOp::Shl => "shl",
+                    BinOp::Shr => "shr",
+                    BinOp::BitAnd => "and",
+                    BinOp::BitOr => "or",
+                    BinOp::BitXor => "xor",
+                    BinOp::And | BinOp::Or | BinOp::Coalesce => "invalid",
+                };
+                let (a, b) = (self.operand(lhs), self.operand(rhs));
+                self.intrinsic_call(dest, &format!("{k}.{name}"), Vec::new(), vec![a, b], loc);
             }
             ExprKind::Unary { op, operand } => {
                 let v = self.operand(operand);
@@ -848,6 +913,23 @@ impl FnLower<'_, '_> {
                     self.assign(dest, Rvalue::Use(Operand::Copy(p)), loc);
                 }
                 Coercion::NeverToAny | Coercion::Widen | Coercion::Mismatch => self.into(dest, expr),
+                Coercion::IntWiden => {
+                    // The same value; a `u64` is a kind of its own.
+                    let v = self.operand(expr);
+                    if self.sized_int(&e.ty) == Some("u64") {
+                        self.intrinsic_call(dest, "u64.widen", Vec::new(), vec![v], loc);
+                    } else {
+                        self.assign(dest, Rvalue::Use(v), loc);
+                    }
+                }
+                Coercion::ToCap => {
+                    // The handle takes the value over, with its type for
+                    // the calls through the operations trait.
+                    let v = self.operand(expr);
+                    let t = self.ctx.ty(&expr.ty);
+                    let handle = self.ctx.ty(&e.ty);
+                    self.intrinsic_call(dest, "cap.new", vec![t, handle], vec![v], loc);
+                }
                 Coercion::ToDyn | Coercion::RefToDyn => {
                     let v = self.operand(expr);
                     let t = self.ctx.ty(&expr.ty);
@@ -892,8 +974,7 @@ impl FnLower<'_, '_> {
                 self.intrinsic_call(dest, "error.trace", Vec::new(), vec![r], loc);
             }
             ExprKind::Error => self.terminate(Terminator::Unreachable, loc),
-            ExprKind::Int(_)
-            | ExprKind::Float(_)
+            ExprKind::Float(_)
             | ExprKind::Bool(_)
             | ExprKind::Char(_)
             | ExprKind::Unit
@@ -922,6 +1003,12 @@ impl FnLower<'_, '_> {
                 if let Some((target, mut targs)) =
                     prog.resolve_method(def, trait_args, &self_ty, &self.bounds)
                 {
+                    // A capability handle (or a `Lent` of one) forwards to
+                    // its object, whose type only the run knows.
+                    if prog.fn_info(target).and_then(|f| f.intrinsic.as_deref()) == Some("cap.forward") {
+                        let tys = type_args.iter().map(|t| self.ctx.ty(t)).collect();
+                        return (Callee::Trait(self.ctx.fn_name(def), tys), Vec::new());
+                    }
                     targs.extend(own.iter().cloned());
                     return self.direct_callee(target, &targs);
                 }

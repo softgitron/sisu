@@ -39,6 +39,11 @@ is compared byte for byte.
 | `NAME.tree` | `sisu parse --tree NAME.sisu` |
 | `NAME.defer` | `sisu run --defer-borrow NAME.sisu ARGS...`: standard output, then `--- stderr`, standard error, and `--- status N` |
 | `NAME.explain` | `sisu explain-borrow NAME.sisu:N`, where `N` is given by a line `# explain-borrow N` in the case |
+| `NAME.explore` | `sisu test --explore N NAME.sisu`, where `N` is given by a line `# explore N` in the case |
+
+A line `# explore N` also runs a case that runs again as `sisu run
+--explore N NAME.sisu ARGS...`: the program under the schedule seeds 0 to
+N-1, each of which must give the expected output and status.
 
 A case is run when any of `.out`, `.err` or `.status` exists.
 
@@ -63,7 +68,8 @@ Three checks apply to every case without an expectation file:
   "the checker checks itself").
 
 The summary line counts the cases, the checks, the runs repeated under
-the monitor and the counterexample runs (`.defer`).
+the monitor, the counterexample runs (`.defer`), and the cases explored
+under several schedules with the number of schedules.
 
 ## The diagnostic form
 
@@ -85,8 +91,9 @@ parameters each identifier takes.
 
 - `examples/` holds copies of `proposal/examples/hello.sisu` and
   `wordcount.sisu`, kept identical to the originals by a test, and of
-  `traits.sisu` and `errors.sisu` with a `main` appended, kept starting
-  with the originals.
+  `traits.sisu`, `errors.sisu`, `capabilities.sisu` and
+  `concurrency.sisu` with what they leave undeclared and a `main` (or a
+  test) appended, kept starting with the originals.
 - `syntax/` is lexing and parsing, with the error-tolerance cases: one
   mistake gives one diagnostic, and the rest of the file is still parsed.
 - `names/` is name resolution; `types/` is the checker, including cases
@@ -112,16 +119,30 @@ parameters each identifier takes.
   compile-time Sisu, with `proposal_derive`, the user-defined derive of
   `proposal/examples/comptime.sisu`, kept identical by a test.
 - `sir/` pins the serialised SIR of small programs.
+- `concurrency/` is tasks (18, Phase 6), most cases under several
+  schedules: joins and their error sets, failures and the scope's result,
+  panics in tasks, cancellation at the blocking points, shields and
+  deadlines, channels, `select`, races, mutexes across tasks with guards
+  dropped by unwinding, the lowest-index rule of `pure` scopes, deadlock
+  reports, generators, `log`, and the diagnostics of `Send`, `Sync` and
+  what a task may borrow.
+- `capabilities/` is std.cap (06): attenuations, lent capabilities and
+  their diagnostics, caretakers, interceptors, the fakes, the test clock,
+  the fresh fakes of each test and the real `System` a test may declare
+  (and the signatures it may not), the network over `Net.fake`, the
+  host's objects, `DateTime`, and what the capability rules reject.
+- `http/` is std.x.http over the in-process network, under several
+  schedules (a test of the driver runs it under a thousand).
 - `ownership/` is the ownership checker (18, Phase 3). Accepted programs
   run (and so run again under the monitor): moves and partial moves, drop
   placement on every path (`drop_torture` is the drop-order torture
   program), the parameter conventions, non-lexical and two-phase borrows,
   returned borrows and `from`, views, closures, the three iteration modes,
   `@must_consume`, the library types (`Box`, `Shared` and `Weak`,
-  `Cell`, a single-task `Mutex` with D-077's poisoning, `Arena` with
-  generational keys), `own` closures, and `proposal_core` and
-  `proposal_graph`, the parts of `proposal/examples/ownership.sisu` stage
-  0 can run, kept identical to the original by tests. Rejected programs pin their diagnostics by code
+  `Cell`, a `Mutex` with D-077's poisoning, `Arena` with generational
+  keys), `own` closures, and `proposal_core`, `proposal_shared` and
+  `proposal_graph`, the sections of `proposal/examples/ownership.sisu`,
+  kept identical to the original by tests. Rejected programs pin their diagnostics by code
   and span, and most also pin their counterexample run (`.defer`): the
   monitor's concrete conflict, or "no conflict" with the account of why
   the checker still rejects them (`candidate_false_positive` and

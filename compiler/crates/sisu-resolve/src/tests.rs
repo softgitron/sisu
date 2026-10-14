@@ -69,7 +69,7 @@ fn resolution_errors() {
     assert_eq!(codes("struct S:\n    x: int\ndef f() -> ! S:\n    pass\n"), vec!["E0212"]);
     assert_eq!(codes("import nothing.here\n"), vec!["E0220"]);
     assert!(codes("def f[T](x: T):\n    pass\n").is_empty());
-    assert_eq!(codes("def f(x: Slice[int]):\n    pass\n"), vec!["E0900"]);
+    assert_eq!(codes("def f(x: Array[int]):\n    pass\n"), vec!["E0900"]);
     assert_eq!(codes("def f()\n"), vec!["E0224"]);
     assert_eq!(codes("struct S:\n    x: int\n    x: int\n"), vec!["E0205"]);
 }

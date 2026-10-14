@@ -347,6 +347,35 @@ impl Baker<'_> {
                 self.call(dest, "Path.new", p);
                 return Ok(());
             }
+            Value::Bytes(b) => {
+                let hex: String = b.iter().map(|x| format!("{x:02x}")).collect();
+                if !self.intrinsics.contains(&"bytes.from_hex") {
+                    self.intrinsics.push("bytes.from_hex");
+                }
+                self.stmts.push(Statement {
+                    kind: StatementKind::Call {
+                        dest,
+                        callee: Callee::Intrinsic("bytes.from_hex".into(), Vec::new()),
+                        args: vec![Operand::Const(Const::Str(hex))],
+                    },
+                    loc: None,
+                });
+                return Ok(());
+            }
+            Value::U64(n) => {
+                if !self.intrinsics.contains(&"u64.from_bits") {
+                    self.intrinsics.push("u64.from_bits");
+                }
+                self.stmts.push(Statement {
+                    kind: StatementKind::Call {
+                        dest,
+                        callee: Callee::Intrinsic("u64.from_bits".into(), Vec::new()),
+                        args: vec![Operand::Const(Const::Int(*n as i64))],
+                    },
+                    loc: None,
+                });
+                return Ok(());
+            }
             Value::Tuple(xs) => {
                 let ts = match ty {
                     Type::Tuple(ts) => ts.clone(),
@@ -443,7 +472,7 @@ fn kind_of(v: &Value) -> String {
         Value::Arena(_) => "an `Arena`",
         Value::Iter(_) => "an iterator",
         Value::Entry(_) => "a dict entry",
-        Value::Fs(_) | Value::Env | Value::Clock(_) => "a capability",
+        Value::Cap(_) | Value::Clock(_) => "a capability",
         Value::DateTime(_) => "a `DateTime`",
         _ => "a value",
     }

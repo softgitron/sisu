@@ -485,8 +485,9 @@ fn intrinsic_decls(prog: &Program, functions: &[sir::Function]) -> Vec<sir::Intr
                     _ => (vec![], vec![]),
                 };
                 // `iter.own` takes the collection and keeps every element;
-                // a generator keeps its body, and `yield` gives its item away.
-                let own = if matches!(name.as_str(), "iter.own" | "gen.new" | "gen.yield") {
+                // a generator keeps its body, and `yield` gives its item
+                // away; a capability handle keeps its object for good.
+                let own = if matches!(name.as_str(), "iter.own" | "gen.new" | "gen.yield" | "cap.new") {
                     vec![0]
                 } else {
                     Vec::new()

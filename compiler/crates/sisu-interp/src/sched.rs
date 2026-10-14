@@ -87,6 +87,8 @@ pub(crate) enum Wait {
     Timer,
     Select,
     Cancellation,
+    /// A socket of the host, polled.
+    Io,
 }
 
 /// What a waiting task is registered under, so an event wakes only the
@@ -252,6 +254,8 @@ pub(crate) struct Sched<'p> {
     pub keep_stats: bool,
     /// The `Shared` cells a `.copy()` counted, for the monitor's check.
     pub copied_shared: Vec<u32>,
+    /// The run's test clock (`Clock.fake`), once made.
+    pub fake_clock: Option<u32>,
 }
 
 impl<'p> Sched<'p> {
@@ -294,6 +298,7 @@ impl<'p> Sched<'p> {
             stats: Stats { tasks: 1, max_live: 1, ..Stats::default() },
             keep_stats,
             copied_shared: Vec::new(),
+            fake_clock: None,
         }
     }
 }
@@ -1018,6 +1023,7 @@ impl<'p> Interp<'p, '_> {
                 Wait::Timer => "a timer".into(),
                 Wait::Select => "select".into(),
                 Wait::Cancellation => "a cancellation".into(),
+                Wait::Io => "the network".into(),
             };
             let location = self
                 .frames_of(i as u32)
@@ -1097,7 +1103,7 @@ impl<'p> Interp<'p, '_> {
             }),
             "Receiver.recv" => self.recv(args),
             "Receiver.try_recv" => self.try_recv(args),
-            "Clock.after" => self.clock_after(args),
+            "clock.after" => self.clock_after(args),
             "Timer.wait" => self.timer_wait(args),
             "select.wait" => self.select_wait(args),
             "log.write" => self.log_write(args),

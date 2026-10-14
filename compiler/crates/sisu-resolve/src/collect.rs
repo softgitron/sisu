@@ -22,25 +22,10 @@ pub struct Resolved {
 /// Type names this stage knows but does not implement, with the phase of
 /// proposal/18-next-steps.md that brings them.
 pub(crate) const LATER_TYPES: &[(&str, &str)] = &[
-    ("uint", "the sized numeric types (Phase 4)"),
-    ("i8", "the sized numeric types (Phase 4)"),
-    ("i16", "the sized numeric types (Phase 4)"),
-    ("i32", "the sized numeric types (Phase 4)"),
-    ("i64", "the sized numeric types (Phase 4)"),
-    ("i128", "the sized numeric types (Phase 4)"),
-    ("u8", "the sized numeric types (Phase 4)"),
-    ("u16", "the sized numeric types (Phase 4)"),
-    ("u32", "the sized numeric types (Phase 4)"),
-    ("u64", "the sized numeric types (Phase 4)"),
-    ("u128", "the sized numeric types (Phase 4)"),
-    ("f32", "the sized numeric types (Phase 4)"),
-    ("bytes", "byte strings (Phase 4)"),
-    ("Array", "`Array` and `Slice` (Phase 4)"),
-    ("Slice", "`Array` and `Slice` (Phase 4)"),
-    ("Net", "the `Net` capability (Phase 6)"),
-    ("Rand", "the `Rand` capability (Phase 6)"),
-    ("Proc", "the `Proc` capability (Phase 6)"),
-    ("Url", "`std.net` (Phase 6)"),
+    ("i128", "the 128-bit integers"),
+    ("u128", "the 128-bit integers"),
+    ("f32", "`f32`"),
+    ("Array", "`Array` and const generics"),
 ];
 
 /// Where a method is declared, which decides the generics, bounds and
@@ -269,6 +254,12 @@ impl Resolver<'_> {
             send: get(prog, "Send"),
             sync: get(prog, "Sync"),
             escapable: get(prog, "Escapable"),
+            fs_ops: get(prog, "FsOps"),
+            net_ops: get(prog, "NetOps"),
+            clock_ops: get(prog, "ClockOps"),
+            rand_ops: get(prog, "RandOps"),
+            env_ops: get(prog, "EnvOps"),
+            proc_ops: get(prog, "ProcOps"),
         };
         self.prog.wk = wk;
     }
@@ -330,6 +321,7 @@ impl Resolver<'_> {
             intrinsic: None,
             structural: None,
             keeps: Vec::new(),
+            internal: false,
             body: None,
             kind,
             file: self.file(module),
@@ -559,7 +551,7 @@ impl Resolver<'_> {
         for a in attrs {
             if matches!(
                 a.name.as_str(),
-                "builtin" | "intrinsic" | "structural" | "keeps" | "sealed" | "marker"
+                "builtin" | "intrinsic" | "structural" | "keeps" | "sealed" | "marker" | "internal"
             ) {
                 let span = self.span(module, a.range);
                 self.report(
@@ -706,8 +698,15 @@ impl Resolver<'_> {
             return;
         };
         let m = self.load_std(name, source);
+        let prelude = self.prog.prelude;
         for (n, alias) in &imp.names {
-            match self.prog.lookup_in(m, &n.text) {
+            let found = self.prog.lookup_in(m, &n.text).or_else(|| {
+                std_sources::reexports(name)
+                    .contains(&n.text.as_str())
+                    .then(|| self.prog.lookup_in(prelude, &n.text))
+                    .flatten()
+            });
+            match found {
                 Some(d) => {
                     let bound = alias.as_ref().unwrap_or(n);
                     let m_items = &self.prog.modules[module.0 as usize].items;
@@ -794,6 +793,8 @@ impl Resolver<'_> {
         self.resolving_alias.push(d);
         let ctx = TyCtx::plain(module, &[], self.is_std(module));
         let ty = match &alias.ty {
+            // An alias may name a union of error sets (05, "Error sets").
+            Some(t) if matches!(t.kind, ast::TypeKind::Union(_)) => self.resolve_error_set(t, &ctx),
             Some(t) => self.resolve_ty(t, &ctx),
             None => Ty::Error,
         };
@@ -1094,6 +1095,7 @@ impl Resolver<'_> {
         info.body = f.body.clone();
         info.intrinsic = Self::builtin_attr(&f.attrs, "intrinsic");
         info.structural = Self::builtin_attr(&f.attrs, "structural");
+        info.internal = f.attrs.iter().any(|a| a.name == "internal");
         let mut seen_default = false;
         for (i, p) in f.params.iter().enumerate() {
             let ctx = TyCtx {

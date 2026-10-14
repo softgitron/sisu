@@ -31,7 +31,7 @@ impl Interp<'_, '_> {
             Value::Str(s, _) | Value::Path(s) => out.push_str(s),
             Value::String(s) => out.push_str(s),
             Value::Char(c) => out.push(*c),
-            Value::DateTime(t) => out.push_str(&strftime(*t, "%Y-%m-%dT%H:%M:%SZ")),
+            Value::DateTime(t) => out.push_str(&datetime_text(*t)),
             Value::Ref(p) => match self.read(p) {
                 Ok(t) => self.display_into(t, out),
                 Err(_) => out.push_str("<dangling>"),
@@ -52,12 +52,14 @@ impl Interp<'_, '_> {
             Value::Moved => out.push_str("<moved>"),
             Value::Unit => out.push_str("()"),
             Value::Int(i) => out.push_str(&i.to_string()),
+            Value::U64(i) => out.push_str(&i.to_string()),
             Value::Float(f) => out.push_str(&float_repr(*f)),
             Value::Bool(b) => out.push_str(if *b { "True" } else { "False" }),
             Value::Char(c) => out.push_str(&quote_char(*c)),
             Value::Str(s, _) | Value::Path(s) => out.push_str(&quote_str(s)),
             Value::String(s) => out.push_str(&quote_str(s)),
-            Value::DateTime(t) => out.push_str(&strftime(*t, "%Y-%m-%dT%H:%M:%SZ")),
+            Value::Bytes(b) => out.push_str(&quote_bytes(b)),
+            Value::DateTime(t) => out.push_str(&datetime_text(*t)),
             Value::Tuple(xs) => {
                 out.push('(');
                 self.debug_list(xs, out);
@@ -162,9 +164,12 @@ impl Interp<'_, '_> {
                 }
                 out.push_str("])");
             }
-            Value::Fs(_) => out.push_str("Fs"),
-            Value::Env => out.push_str("Env"),
+            Value::Cap(id) => match self.heap.get(*id as usize).and_then(|c| c.label.as_deref()) {
+                Some(l) => out.push_str(l),
+                None => out.push_str("Cap"),
+            },
             Value::Clock(_) => out.push_str("Clock"),
+            Value::Socket(h) => out.push_str(&format!("<socket {h}>")),
             Value::Scope(_) => out.push_str("<scope>"),
             Value::Handle(t) => out.push_str(&format!("<task {}>", self.task_path(*t))),
             Value::Cancellation(_) => out.push_str("<cancellation>"),
@@ -332,9 +337,25 @@ fn civil(days: i64) -> (i64, u32, u32) {
     (y, m, d)
 }
 
-/// Formats a time with the `strftime` directives `%Y %y %m %d %H %M %S
-/// %F %T %%`; other characters are copied.
-pub(crate) fn strftime(secs: i64, pattern: &str) -> String {
+/// The RFC 3339 text of a time in nanoseconds since the epoch, in UTC:
+/// `2026-10-11T12:00:00Z`, with the fraction of a second when there is
+/// one, without trailing zeros (`12:00:00.5Z`).
+pub(crate) fn datetime_text(nanos: i64) -> String {
+    let mut s = strftime(nanos, "%Y-%m-%dT%H:%M:%S");
+    let frac = nanos.rem_euclid(1_000_000_000);
+    if frac != 0 {
+        let digits = format!("{frac:09}");
+        s.push('.');
+        s.push_str(digits.trim_end_matches('0'));
+    }
+    s.push('Z');
+    s
+}
+
+/// A time in nanoseconds since the epoch by the `strftime` directives
+/// `%Y %y %m %d %H %M %S %F %T %%`, in UTC; other characters are copied.
+pub(crate) fn strftime(nanos: i64, pattern: &str) -> String {
+    let secs = nanos.div_euclid(1_000_000_000);
     let days = secs.div_euclid(86_400);
     let rem = secs.rem_euclid(86_400);
     let (y, m, d) = civil(days);
@@ -364,5 +385,24 @@ pub(crate) fn strftime(secs: i64, pattern: &str) -> String {
             None => out.push('%'),
         }
     }
+    out
+}
+
+/// `bytes` as Sisu writes them: `b"..."`, printable ASCII as itself and
+/// every other byte as `\xNN` (with `\n`, `\t`, `\r`, `\\` and `\"`).
+pub(crate) fn quote_bytes(b: &[u8]) -> String {
+    let mut out = String::from("b\"");
+    for &x in b {
+        match x {
+            b'\n' => out.push_str("\\n"),
+            b'\t' => out.push_str("\\t"),
+            b'\r' => out.push_str("\\r"),
+            b'\\' => out.push_str("\\\\"),
+            b'"' => out.push_str("\\\""),
+            0x20..=0x7e => out.push(x as char),
+            _ => out.push_str(&format!("\\x{x:02x}")),
+        }
+    }
+    out.push('"');
     out
 }

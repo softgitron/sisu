@@ -345,7 +345,34 @@ impl Program {
             DefKind::Struct(s) if s.builtin.is_some() => {
                 matches!(
                     s.builtin.as_deref(),
-                    Some("Fs" | "Env" | "Clock" | "System" | "DateTime" | "Scope" | "Cancellation" | "Timer")
+                    Some(
+                        "Fs" | "Net"
+                            | "Clock"
+                            | "Rand"
+                            | "Env"
+                            | "Proc"
+                            | "System"
+                            | "HostFs"
+                            | "HostNet"
+                            | "HostClock"
+                            | "HostRand"
+                            | "HostEnv"
+                            | "HostProc"
+                            | "TestClock"
+                            | "Cap"
+                            | "Lent"
+                            | "DateTime"
+                            | "u8"
+                            | "u16"
+                            | "u32"
+                            | "u64"
+                            | "i8"
+                            | "i16"
+                            | "i32"
+                            | "Scope"
+                            | "Cancellation"
+                            | "Timer"
+                    )
                 )
             }
             DefKind::Struct(s) => {

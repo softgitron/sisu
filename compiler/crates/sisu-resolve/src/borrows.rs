@@ -56,7 +56,11 @@ impl Program {
             Ty::Ref(..) | Ty::Str => true,
             Ty::Tuple(es, _) => es.iter().any(|t| self.is_view_type(t)),
             Ty::Adt(d, args) => match &self.def(*d).kind {
-                DefKind::Struct(s) if s.builtin.as_deref() == Some("MutexGuard") => true,
+                DefKind::Struct(s)
+                    if matches!(s.builtin.as_deref(), Some("MutexGuard" | "Lent" | "Slice")) =>
+                {
+                    true
+                }
                 DefKind::Struct(s) if s.builtin.is_some() => args.iter().any(|t| self.is_view_type(t)),
                 // A generic type holds what its arguments hold.
                 DefKind::Struct(s) => s.view || args.iter().any(|t| self.is_view_type(t)),
@@ -77,13 +81,26 @@ impl Program {
             Ty::Tuple(es, _) => es.iter().any(|t| self.can_borrow(t)),
             Ty::Adt(d, args) => match &self.def(*d).kind {
                 DefKind::Struct(s) => match s.builtin.as_deref() {
-                    Some("Iter" | "Entry" | "Iterable" | "MutexGuard") => true,
+                    Some("Iter" | "Entry" | "Iterable" | "MutexGuard" | "Lent" | "Slice") => true,
                     Some(_) => args.iter().any(|t| self.can_borrow(t)),
                     None => s.view || args.iter().any(|t| self.can_borrow(t)),
                 },
                 DefKind::Enum(_) => args.iter().any(|t| self.can_borrow(t)),
                 _ => false,
             },
+            _ => false,
+        }
+    }
+
+    /// Whether a value of the type is a `Copy` handle on a heap cell that
+    /// nothing frees: a capability handle, a `TestClock`, a `Cap` or a
+    /// `Lent`.
+    pub fn is_heap_handle(&self, ty: &Ty) -> bool {
+        match ty {
+            Ty::Adt(d, _) => matches!(
+                self.builtin(*d),
+                Some("Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "TestClock" | "Cap" | "Lent")
+            ),
             _ => false,
         }
     }
@@ -96,7 +113,7 @@ impl Program {
                 Ty::Tuple(es, _) => es.iter().any(|t| deep(p, t)),
                 Ty::Adt(d, args) => match &p.def(*d).kind {
                     DefKind::Struct(s) => match s.builtin.as_deref() {
-                        Some("Iter" | "Entry" | "Iterable" | "MutexGuard") => true,
+                        Some("Iter" | "Entry" | "Iterable" | "MutexGuard" | "Lent" | "Slice") => true,
                         Some(_) => args.iter().any(|t| deep(p, t)),
                         None => s.view || args.iter().any(|t| deep(p, t)),
                     },
@@ -141,7 +158,7 @@ impl Program {
                 let of_args = most(&mut args.iter());
                 match &self.def(*d).kind {
                     DefKind::Struct(s) => match s.builtin.as_deref() {
-                        Some("Iter" | "Entry" | "Iterable") => Reach::Anything,
+                        Some("Iter" | "Entry" | "Iterable" | "Lent" | "Slice") => Reach::Anything,
                         Some(_) => of_args,
                         None if s.view => most(&mut s.fields.iter().map(|f| &f.ty)).max(of_args),
                         None => of_args,
@@ -280,7 +297,14 @@ impl Program {
             return ResultBorrows::default();
         }
         let params = self.sig_params(f);
-        let from = self.from_params(f);
+        // A handle on a heap cell that is never freed (a capability, a
+        // `Cap`, a `Lent`) lends nothing of its own: what a result reaches
+        // through it lives as long as the program.
+        let from: Vec<u32> = self
+            .from_params(f)
+            .into_iter()
+            .filter(|i| !self.is_heap_handle(&params[*i as usize].ty))
+            .collect();
         let owned: Vec<u32> = params
             .iter()
             .enumerate()

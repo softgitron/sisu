@@ -22,6 +22,7 @@
 //! `compiler/std/*.sisu`. Everything the program does to the world goes
 //! through [`Host`], so a run is deterministic under a deterministic host.
 
+mod caps;
 mod cli;
 pub mod comptime;
 mod dispatch;
@@ -35,15 +36,15 @@ mod monitor;
 mod ops;
 mod place;
 mod sched;
+mod sized;
 pub mod value;
 
-pub use host::{Host, IoErrorKind, StdHost, TestHost};
+pub use host::{Host, IoErrorKind, NetFail, Poll, StdHost, TestHost};
 pub use sched::Stats;
 
 use sisu_diag::{Catalog, MsgId, msg};
 use sisu_sir as sir;
 use std::collections::HashMap;
-use std::rc::Rc;
 use value::Value;
 
 /// Calls nested deeper than this panic with a stack overflow. Sisu frames
@@ -332,7 +333,12 @@ impl<'p, 'h> Interp<'p, 'h> {
                 "internal error in the interpreter: no function `{function}`"
             ));
         };
-        match self.call_fn(fi, Vec::new()) {
+        // A test that declares a `System` receives the real one, as `main`
+        // does (17, "Isolation and parallelism"); the others make the
+        // fakes they need.
+        let takes_system = self.prog.functions.get(fi).is_some_and(|f| f.param_count == 1);
+        let args = if takes_system { vec![self.system()] } else { Vec::new() };
+        match self.call_fn(fi, args) {
             Ok(_) => TestResult::Passed,
             Err(Unwind::Panic(p)) => match &p.hole {
                 Some(h) => TestResult::Blocked(h.clone()),
@@ -344,12 +350,6 @@ impl<'p, 'h> Interp<'p, 'h> {
                 &[("detail", "a task switch escaped the run loop".into())],
             )),
         }
-    }
-
-    fn system(&self) -> Value {
-        let fs =
-            Value::Fs(Rc::new(value::FsCap { store: value::FsStore::Host, read_only: false, root: None }));
-        Value::Struct(Value::adt("System", 0, vec![fs, Value::Env, Value::Clock(0)]))
     }
 }
 

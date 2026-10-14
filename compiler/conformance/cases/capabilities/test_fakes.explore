@@ -1,0 +1,8 @@
+test "a test that declares a System receives the real one" ... ok
+test "the fakes see none of it" ... ok
+test "writes stay in the test" ... ok
+test "the next test sees none of them" ... ok
+test "time moves only when every task waits" ... ok
+test "a frozen clock is the test clock" ... ok
+6 passed, 0 failed, 0 blocked
+explored 5 schedules per test (seeds 0 to 4)

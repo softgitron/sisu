@@ -8,8 +8,7 @@
 //! place leaves [`Value::Moved`] there, so dropping a value whose parts
 //! were moved drops only the parts that remain.
 
-use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
 /// The `frame` of a pointer into the heap: its `local` is a cell of
@@ -96,6 +95,8 @@ pub struct HeapCell {
     /// The task that made it, and whether another task has reached it.
     pub creator: u32,
     pub crossed: bool,
+    /// For a capability's cell, the handle type's name (`Fs`, `Cap`).
+    pub label: Option<Rc<str>>,
 }
 
 /// A struct or enum value; `variant` is 0 for a struct. `trace` is the
@@ -126,10 +127,12 @@ pub struct Set {
 pub enum Key {
     Unit,
     Int(i64),
+    U64(u64),
     Bool(bool),
     Char(char),
     Text(Rc<str>),
     Path(Rc<str>),
+    Bytes(Rc<[u8]>),
     Tuple(Vec<Key>),
     Adt(Rc<str>, u32, Vec<Key>),
     Handle,
@@ -183,23 +186,6 @@ impl Set {
         }
         true
     }
-}
-
-/// The file system behind an `Fs` capability.
-#[derive(Clone, Debug)]
-pub enum FsStore {
-    /// The host's file system, through [`crate::Host`].
-    Host,
-    /// `Fs.in_memory`: files by path, shared by every copy of the handle.
-    Memory(Rc<RefCell<BTreeMap<String, String>>>),
-}
-
-#[derive(Clone, Debug)]
-pub struct FsCap {
-    pub store: FsStore,
-    pub read_only: bool,
-    /// `restrict_to`: paths are relative to this directory.
-    pub root: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -287,6 +273,8 @@ pub enum Value {
     Moved,
     Unit,
     Int(i64),
+    /// A `u64`; the other sized integers are `Int`s in their range.
+    U64(u64),
     Float(f64),
     Bool(bool),
     Char(char),
@@ -295,7 +283,9 @@ pub enum Value {
     Str(Rc<str>, u32),
     String(String),
     Path(Rc<str>),
-    /// Seconds since 1970-01-01T00:00:00Z.
+    /// `bytes`: immutable, so its copies share it.
+    Bytes(Rc<[u8]>),
+    /// Nanoseconds since 1970-01-01T00:00:00Z.
     DateTime(i64),
     Tuple(Vec<Value>),
     Struct(Box<Adt>),
@@ -321,10 +311,16 @@ pub enum Value {
     Arena(Box<ArenaVal>),
     Iter(Box<IterState>),
     Entry(Box<EntryVal>),
-    Fs(Rc<FsCap>),
-    Env,
-    /// A clock, by its index among the run's clocks (`sched.rs`).
+    /// A capability handle (`Fs`, `Clock`, ...) or a `Cap[T]`: a heap cell
+    /// that every copy shares and nothing frees. A handle's cell holds its
+    /// object as a `dyn` of the object's type; a `Lent` is the handle.
+    Cap(u32),
+    /// A clock, by its index among the run's clocks (`sched.rs`): the
+    /// value of a `HostClock` and of a `TestClock`.
     Clock(u32),
+    /// A socket of the host, by its handle: a `HostStream` or a
+    /// `HostListener`.
+    Socket(u64),
     /// A task scope, a task's handle, a scope's cancellation: indices into
     /// the scheduler's tables.
     Scope(u32),

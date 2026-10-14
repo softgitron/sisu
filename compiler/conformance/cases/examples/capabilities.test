@@ -1,0 +1,4 @@
+test "cache expires entries" ... ok
+test "fetch uses the cache before the network" ... ok
+test "the checksum is the corpus's" ... ok
+3 passed, 0 failed, 0 blocked

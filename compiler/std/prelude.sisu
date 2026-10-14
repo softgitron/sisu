@@ -67,33 +67,175 @@ struct Iterable[T]:
 struct Path:
     pass
 
-## A point in civil time, in UTC.
+## The sized integers (03, "Numbers"), for layouts, protocols and FFI;
+## `i64` is `int` and `uint` is `u64`. Their arithmetic traps on overflow
+## as `int`'s does, `+%`, `-%` and `*%` wrap, and `+|`, `-|` and `*|`
+## saturate. A literal takes the sized type expected (or the one its
+## suffix names, `0u32`), checked to fit. A value becomes a wider integer
+## type where one is expected when that loses nothing (`u8` to `u32`,
+## `i32` or `int`; `u64` to nothing); the other conversions are methods
+## (`int.to_u8`, `u8.to_int`), the narrowing ones giving `None` for a
+## value that does not fit.
+@builtin("u8")
+struct u8:
+    pass
+
+@builtin("u16")
+struct u16:
+    pass
+
+@builtin("u32")
+struct u32:
+    pass
+
+@builtin("u64")
+struct u64:
+    pass
+
+@builtin("i8")
+struct i8:
+    pass
+
+@builtin("i16")
+struct i16:
+    pass
+
+@builtin("i32")
+struct i32:
+    pass
+
+type i64 = int
+
+type uint = u64
+
+## An immutable owned sequence of bytes (03, "Strings and text"): the type
+## of `b"..."` and of what a connection reads. It views as `Slice[u8]`
+## where one is expected; `b[i]` is a byte and `b[i:j]` a copy of a run.
+@builtin("bytes")
+struct bytes:
+    pass
+
+## A read-only view of a run of values (a `list[T]`, or `bytes` as
+## `Slice[u8]`), borrowing what it views; `s[i]` is a reference to a value.
+## Unlike `str`, a `Slice` is not `Copy` in stage 0 (it is passed by
+## reference, as a `list` is).
+@builtin("Slice")
+view struct Slice[T]:
+    pass
+
+## A point in civil time, in UTC, to the nanosecond (from 1677 to 2262).
+## `t - u` is the `Duration` from `u` to `t`; `t + d` and `t - d` move a time
+## by a `Duration`.
 @builtin("DateTime")
 struct DateTime:
     pass
 
-## The file system capability (06). A `Copy` handle.
+## The file system capability (06, "Capabilities"): a `Copy` handle on an
+## object that implements `FsOps`, which every copy of the handle reaches,
+## so copying it grants nothing new. Where an `Fs` is expected, a value of
+## another type that implements `FsOps` becomes one: the handle takes the
+## value over (a copy of it, for a `Copy` type). That value must own what it
+## holds, be `Send` and `Sync`, and not be must-consume; a lent capability
+## (`Lent[Fs]`), being a view, never becomes a handle. The same holds for
+## each capability below and its operations trait.
 @builtin("Fs")
 struct Fs:
     pass
 
-## The environment capability: arguments and variables.
-@builtin("Env")
-struct Env:
+## The network capability: TCP connections and listeners (`NetOps`).
+@builtin("Net")
+struct Net:
     pass
 
-## The clock capability.
+## The clock capability: the time, and timers to wait for (`ClockOps`).
 @builtin("Clock")
 struct Clock:
     pass
 
+## The randomness capability (`RandOps`).
+@builtin("Rand")
+struct Rand:
+    pass
+
+## The environment capability: arguments and variables (`EnvOps`).
+@builtin("Env")
+struct Env:
+    pass
+
+## The process capability: running other programs (`ProcOps`).
+@builtin("Proc")
+struct Proc:
+    pass
+
 ## The root of all capabilities, constructed by the runtime only when
-## `main(sys: System)` declares it, and passed to `main` alone.
+## `main(sys: System)` declares it, and passed to `main` alone, or to a test
+## that declares one (`test "name"(sys: System):`, which then runs alone;
+## 17). Its fields are the root objects of the host, which no code can
+## make. `System.fake(seed)` is a set of fakes in the same shape.
 @builtin("System")
 struct System:
     fs: Fs
-    env: Env
+    net: Net
     clock: Clock
+    rand: Rand
+    env: Env
+    proc: Proc
+
+## The host's objects behind the root capabilities of a `System`: nothing
+## constructs one, so every effect on the world passes through a `System`.
+@builtin("HostFs")
+struct HostFs:
+    pass
+
+@builtin("HostNet")
+struct HostNet:
+    pass
+
+@builtin("HostClock")
+struct HostClock:
+    pass
+
+@builtin("HostRand")
+struct HostRand:
+    pass
+
+@builtin("HostEnv")
+struct HostEnv:
+    pass
+
+@builtin("HostProc")
+struct HostProc:
+    pass
+
+## The run's test clock, from `Clock.fake` and `Clock.frozen_at` (17): one
+## per run (per test under `sisu test`), which every `TestClock` reads and
+## the in-memory file systems stamp their writes with. It starts at the
+## epoch and stands still until `advance` or `set`, or until every task
+## waits: then it moves to the earliest timer, as the other virtual clocks
+## do. A `Copy` handle; it becomes a `Clock` where one is expected.
+@builtin("TestClock")
+struct TestClock:
+    pass
+
+## A `Copy` handle on a value that every copy shares (06: "a fake's state
+## lives behind the handle"), the building block of capability objects
+## written in Sisu: fakes, caretakers, interceptors. The value is never
+## dropped, since a `Copy` handle has no last copy; it can be neither a view
+## nor must-consume, and changing it goes through a `Mutex` inside. A
+## `Cap[T]` is `Send` and `Sync` when `T` is `Sync`.
+@builtin("Cap")
+struct Cap[T]:
+    pass
+
+## A capability lent for the length of a call (06; Q-51): a view of the
+## capability `T` (`fs.lend()`), so the callee can neither keep it nor
+## copy a `T` out of it. It implements `T`'s operations trait, so a generic
+## parameter `[F: FsOps]` accepts it with every other form; a parameter of
+## type `Fs`, which can be stored, does not. A `Copy` view, at no run-time
+## cost: it is the handle.
+@builtin("Lent")
+view struct Lent[T]:
+    pass
 
 ## An owned value on the heap (04, rule 7). Methods and fields of the value
 ## are reached through it (its own field, `boxed`, is the value), and a
@@ -745,22 +887,34 @@ trait Iterator:
 ## `a + b` (D-022). The other operators are `Sub`, `Mul`, `Div`, `Rem` and
 ## `Neg` (`-a`).
 trait Add[Rhs = Self]:
-    pure def add(self, other: Rhs) -> Self
+    ## The type of the result, `Self` unless the impl says otherwise.
+    type Output = Self
+    pure def add(self, other: Rhs) -> Output
 
 trait Sub[Rhs = Self]:
-    pure def sub(self, other: Rhs) -> Self
+    type Output = Self
+    pure def sub(self, other: Rhs) -> Output
 
 trait Mul[Rhs = Self]:
-    pure def mul(self, other: Rhs) -> Self
+    type Output = Self
+    pure def mul(self, other: Rhs) -> Output
 
 trait Div[Rhs = Self]:
-    pure def div(self, other: Rhs) -> Self
+    type Output = Self
+    pure def div(self, other: Rhs) -> Output
 
 trait Rem[Rhs = Self]:
-    pure def rem(self, other: Rhs) -> Self
+    type Output = Self
+    pure def rem(self, other: Rhs) -> Output
 
 trait Neg:
-    pure def neg(self) -> Self
+    type Output = Self
+    pure def neg(self) -> Output
+
+## A conversion that loses nothing, `x.into()` (03, "Numbers"): each
+## sized integer into every wider integer type that holds all its values.
+trait Into[T]:
+    pure def into(self) -> T
 
 ## A type that literals can be written as (02, "Literals"; 03, "Numbers"):
 ## a literal whose expected type implements `FromLiteral[L]` is
@@ -797,13 +951,41 @@ enum Ordering:
 error Contextual:
     Context(message: String, cause: String)
 
-## The errors of the file system capability.
+## The errors of the file system capability. `Revoked`: the capability is
+## a caretaker whose revoker revoked it (`Fs.revocable`, Q-51).
 error IoError:
     NotFound(path: Path)
     PermissionDenied(path: Path)
     AlreadyExists(path: Path)
     InvalidData(path: Path)
     Interrupted
+    Revoked
+    Other(message: String)
+
+## The errors of the network capability: nothing listens at `address`, an
+## attenuation refuses it, the other end closed, the capability was revoked.
+error NetError:
+    Refused(address: String)
+    NotAllowed(address: String)
+    Closed
+    Revoked
+    Other(message: String)
+
+## The errors of std.x.http's exchanges (11): the connection failed
+## (refused, not allowed, closed early, or the wait for it cancelled); the
+## other end did not speak HTTP/1.1 as the module reads it; a `get` was
+## answered with a status that is not 2xx. In the prelude, so a program
+## that imports `http` names it bare.
+error HttpError:
+    Network(message: String)
+    Malformed(detail: String)
+    Status(code: int)
+
+## The errors of the process capability.
+error ProcError:
+    NotFound(program: String)
+    PermissionDenied(program: String)
+    Revoked
     Other(message: String)
 
 # ------------------------------------------------------------------ prelude functions
@@ -993,6 +1175,9 @@ impl str:
     pure def to_uppercase(self) -> String
     @intrinsic("str.to_string")
     pure def to_string(self) -> String
+    ## The UTF-8 bytes of the text.
+    @intrinsic("str.encode")
+    pure def encode(self) -> bytes
     ## The decimal integer the whole text spells, with an optional sign, or
     ## `None`: when a character is not an ASCII digit, when there are no
     ## digits, and when the value is out of range for `int`.
@@ -1087,6 +1272,9 @@ impl[T] list[T]:
     ## Borrows each element in order.
     @intrinsic("list.iter")
     pure def iter(self) -> Iter[ref T]
+    ## The elements as a `Slice[T]`.
+    @intrinsic("list.as_slice")
+    pure def as_slice(self) -> Slice[T]
     ## Sorts in ascending order; stable.
     @structural("list.sort")
     @keeps(self)
@@ -1115,6 +1303,10 @@ impl[T] list[T]:
     @intrinsic("list.reverse")
     @keeps(self)
     pure def reverse(mut self)
+    ## Exchanges the elements at `i` and `j`; panics if either is out of bounds.
+    @intrinsic("list.swap")
+    @keeps(self)
+    pure def swap(mut self, i: int, j: int)
     @intrinsic("list.clear")
     pure def clear(mut self)
     ## Moves the elements of `other` to the end.
@@ -1189,6 +1381,14 @@ impl[T] Iter[T]:
     @intrinsic("Iter.next")
     @keeps(self)
     pure def next(mut self) -> T?
+    ## `f` applied to the running value, from `init`, and each item in
+    ## turn. Pure with a `pure` function (03, "Function types": `pure` code
+    ## demands `pure` callbacks); `Iterator.fold` takes any function.
+    pure def fold[B](own self, own init: B, f: pure (B, T) -> B) -> B:
+        var acc = init
+        for x in self:
+            acc = f(acc, x)
+        return acc
 
 ## The elements of two sorted runs in one sorted run; of equal elements,
 ## `earlier`'s come first (`list.sort_by`).
@@ -1589,6 +1789,210 @@ impl Display for Duration:
             scale = scale // 10
         f.write("{whole}.{digits}s")
 
+## The error of `bytes.decode`: the bytes are not UTF-8 from index `at` on.
+error Utf8Error:
+    InvalidUtf8(at: int)
+
+impl bytes:
+    ## No bytes.
+    @intrinsic("bytes.new")
+    pure def new() -> bytes
+    ## The bytes of `xs`.
+    @intrinsic("bytes.from_list")
+    pure def from_list(xs: list[u8]) -> bytes
+    ## The byte at `i`, which must be in bounds (`b[i]`).
+    @intrinsic("bytes.at")
+    pure def at(self, i: int) -> u8
+    ## The byte at `i`, or `None` out of bounds.
+    @intrinsic("bytes.get")
+    pure def get(self, i: int) -> u8?
+    @intrinsic("bytes.is_empty")
+    pure def is_empty(self) -> bool
+    ## A copy of the bytes from `start` up to `end`, both within the
+    ## bounds and in order (`b[start:end]`).
+    @intrinsic("bytes.slice")
+    pure def slice(self, start: int, end: int) -> bytes
+    ## The bytes, in order.
+    @intrinsic("bytes.iter")
+    pure def iter(self) -> Iter[u8]
+    @intrinsic("bytes.to_list")
+    pure def to_list(self) -> list[u8]
+    ## The index of the first occurrence of `part`, or `None`; an empty
+    ## `part` is at 0.
+    @intrinsic("bytes.find")
+    pure def find(self, part: bytes) -> int?
+    @intrinsic("bytes.starts_with")
+    pure def starts_with(self, prefix: bytes) -> bool
+    @intrinsic("bytes.ends_with")
+    pure def ends_with(self, suffix: bytes) -> bool
+    ## The text the bytes are in UTF-8; `InvalidUtf8` at the first byte
+    ## that does not continue a valid sequence.
+    @intrinsic("bytes.decode")
+    pure def decode(self) -> String ! Utf8Error
+    ## `self` followed by `other`, as `self + other`.
+    @intrinsic("bytes.concat")
+    pure def concat(self, other: bytes) -> bytes
+    ## The bytes as a `Slice[u8]`.
+    @intrinsic("bytes.as_slice")
+    pure def as_slice(self) -> Slice[u8]
+    ## `b[start:end]`, where a bound left out is the least `int`.
+    @internal
+    @intrinsic("bytes.cut")
+    pure def cut(self, start: int, end: int) -> bytes
+
+impl Len for bytes:
+    @intrinsic("len")
+    pure def len(self) -> int
+
+impl Add for bytes:
+    @intrinsic("bytes.concat")
+    pure def add(self, other: bytes) -> bytes
+
+impl[T] Slice[T]:
+    ## A reference to the value at `i`, which must be in bounds (`s[i]`).
+    @intrinsic("Slice.at")
+    pure def at(self, i: int) -> ref T
+    @intrinsic("Slice.get")
+    pure def get(self, i: int) -> ref T?
+    @intrinsic("Slice.is_empty")
+    pure def is_empty(self) -> bool
+    ## The values from `start` up to `end` (`s[start:end]`).
+    @intrinsic("Slice.slice")
+    pure def slice(self, start: int, end: int) -> Slice[T]
+    ## References to the values, in order.
+    @intrinsic("Slice.iter")
+    pure def iter(self) -> Iter[ref T]
+    ## Copies of the values in a new list.
+    @intrinsic("Slice.to_list")
+    pure def to_list(self) -> list[T] where T: Copy
+    ## `s[start:end]`, where a bound left out is the least `int`.
+    @internal
+    @intrinsic("Slice.cut")
+    pure def cut(self, start: int, end: int) -> Slice[T]
+
+impl[T] Len for Slice[T]:
+    @intrinsic("len")
+    pure def len(self) -> int
+
+impl[T] Debug for Slice[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+## The error of `DateTime.parse`.
+error TimeError:
+    InvalidTime(text: String)
+
+impl DateTime:
+    ## 1970-01-01T00:00:00Z.
+    pure def epoch() -> DateTime:
+        return DateTime.from_unix_nanos(0)
+    ## The time `seconds` after the epoch (before it, for a negative number).
+    pure def from_unix(seconds: int) -> DateTime:
+        return DateTime.from_unix_nanos(seconds * 1000000000)
+    @intrinsic("DateTime.from_unix_nanos")
+    pure def from_unix_nanos(nanos: int) -> DateTime
+    ## The nanoseconds since the epoch.
+    @intrinsic("DateTime.unix_nanos")
+    pure def unix_nanos(self) -> int
+    ## The whole seconds since the epoch, rounded down.
+    pure def unix_seconds(self) -> int:
+        return self.unix_nanos() // 1000000000
+    ## The time an RFC 3339 text gives, as `2026-10-11T12:00:00Z`: a date, `T`,
+    ## a time with optional fractions of a second, and `Z` or an offset
+    ## such as `+02:00`; `InvalidTime` for anything else, or a time outside
+    ## the years 1678 to 2261.
+    pure def parse(text: str) -> DateTime ! TimeError:
+        var cs: list[char] = []
+        for c in text.chars():
+            cs.push(c)
+        let n = len(cs)
+        if n < 20 or cs[4] != '-' or cs[7] != '-' or (cs[10] != 'T' and cs[10] != 't') or cs[13] != ':' or cs[16] != ':':
+            return Err(InvalidTime(text=text.to_string()))
+        let year = time_digits(cs, 0, 4) ?? -1
+        let month = time_digits(cs, 5, 2) ?? -1
+        let day = time_digits(cs, 8, 2) ?? -1
+        let hour = time_digits(cs, 11, 2) ?? -1
+        let minute = time_digits(cs, 14, 2) ?? -1
+        let second = time_digits(cs, 17, 2) ?? -1
+        if year < 0 or month < 1 or month > 12 or day < 1 or day > days_in_month(year, month):
+            return Err(InvalidTime(text=text.to_string()))
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59 or second < 0 or second > 59:
+            return Err(InvalidTime(text=text.to_string()))
+        var at = 19
+        var nanos = 0
+        if cs[at] == '.':
+            at += 1
+            var scale = 100000000
+            let start = at
+            while at < n and cs[at].is_digit():
+                nanos += (cs[at].to_digit() ?? 0) * scale
+                scale = scale // 10
+                at += 1
+            if at == start:
+                return Err(InvalidTime(text=text.to_string()))
+        var offset = 0
+        if at == n - 1 and (cs[at] == 'Z' or cs[at] == 'z'):
+            offset = 0
+        elif at + 6 == n and (cs[at] == '+' or cs[at] == '-') and cs[at + 3] == ':':
+            let oh = time_digits(cs, at + 1, 2) ?? -1
+            let om = time_digits(cs, at + 4, 2) ?? -1
+            if oh < 0 or oh > 23 or om < 0 or om > 59:
+                return Err(InvalidTime(text=text.to_string()))
+            offset = oh * 3600 + om * 60
+            if cs[at] == '-':
+                offset = -offset
+        else:
+            return Err(InvalidTime(text=text.to_string()))
+        let secs = days_from_civil(year, month, day) * 86400 + hour * 3600 + minute * 60 + second - offset
+        if secs < -9223372036 or secs > 9223372035:
+            return Err(InvalidTime(text=text.to_string()))
+        return Ok(DateTime.from_unix_nanos(secs * 1000000000 + nanos))
+
+## The number that the ASCII digits `cs[at]` to `cs[at + n - 1]` spell, or `None`.
+pure def time_digits(cs: list[char], at: int, n: int) -> int?:
+    var v = 0
+    for i in range(at, at + n):
+        let c = cs.get(i) else:
+            return None
+        let d = c.to_digit() else:
+            return None
+        v = v * 10 + d
+    return Some(v)
+
+## The days in a month of the proleptic Gregorian calendar.
+pure def days_in_month(year: int, month: int) -> int:
+    if month == 2:
+        let leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+        return if leap: 29 else: 28
+    if month == 4 or month == 6 or month == 9 or month == 11:
+        return 30
+    return 31
+
+## The days from 1970-01-01 to a date of the proleptic Gregorian calendar
+## (Howard Hinnant's `days_from_civil`).
+pure def days_from_civil(year: int, month: int, day: int) -> int:
+    let y = if month <= 2: year - 1 else: year
+    let era = y // 400
+    let yoe = y - era * 400
+    let mp = (month + 9) % 12
+    let doy = (153 * mp + 2) // 5 + day - 1
+    let doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
+    return era * 146097 + doe - 719468
+
+impl Sub for DateTime:
+    type Output = Duration
+    ## The time from `other` to `self`.
+    pure def sub(self, other: DateTime) -> Duration:
+        return Duration(nanos=self.unix_nanos() - other.unix_nanos())
+
+impl Add[Duration] for DateTime:
+    pure def add(self, d: Duration) -> DateTime:
+        return DateTime.from_unix_nanos(self.unix_nanos() + d.nanos)
+
+impl Sub[Duration] for DateTime:
+    pure def sub(self, d: Duration) -> DateTime:
+        return DateTime.from_unix_nanos(self.unix_nanos() - d.nanos)
+
 ## A moment on a clock that a task can wait for: `clock.after(d)`, the arm
 ## of a `select`, or a deadline for `Scope.spawn_with`.
 @builtin("Timer")
@@ -1634,6 +2038,16 @@ impl[T, E] Result[T, E]:
     pure def ok(own self) -> T?
     @intrinsic("Result.err")
     pure def err(own self) -> E?
+    ## `f` of the value, or the error.
+    def map[U](own self, f: (T) -> U) -> Result[U, E]:
+        if self.is_ok():
+            return Ok(f(self.expect("a value")))
+        return Err(self.err().expect("an error"))
+    ## The error passed through `f`, or the value.
+    def map_err[F](own self, f: (E) -> F) -> Result[T, F]:
+        if self.is_ok():
+            return Ok(self.expect("a value"))
+        return Err(f(self.err().expect("an error")))
     ## The error, if any, wrapped with what the program was doing:
     ## `fs.read_to_string(p).context("loading {p}")` (05, "Context and
     ## traces"; a std convention, not syntax).
@@ -1643,47 +2057,477 @@ impl[T, E] Result[T, E]:
         let cause = self.err().expect("an error")
         return Err(Context(message=message.to_string(), cause="{cause}"))
 
-# ------------------------------------------------------------------ capabilities
+# ------------------------------------------------------------------ capabilities (06, "Capabilities")
+# Each capability is a handle (`Fs`, ...) on an object that implements its
+# operations trait (`FsOps`, ...): a root object of the host, an
+# attenuation, a fake or an interceptor (std.cap, `cap` in every module).
+# The handle, and a `Lent` of it, implement the trait by forwarding each
+# call to the object: the intrinsic `cap.forward` is that call through the
+# trait, with the object as `self` (a result that borrows `self` borrows
+# the handle, behind which the object lives as long as the program).
+
+## What `metadata` reports about a file or a directory.
+@derive(Copy, Eq)
+struct Metadata:
+    len: int
+    modified: DateTime
+    is_dir: bool
+
+## The operations of the file system capability: the root object, the
+## attenuations, `Lent[Fs]`, the fakes and the interceptors implement them,
+## so a parameter of type `Fs` accepts every form but the lent one, and a
+## generic parameter `[F: FsOps]` accepts every form. A path is relative to
+## the working directory of the root object.
+trait FsOps:
+    ## The whole file; `NotFound` or `PermissionDenied` on failure.
+    def read(self, path: Path) -> bytes ! IoError
+    ## Creates or replaces the file with `data`.
+    def write(self, path: Path, data: bytes) -> ! IoError
+    ## Whether the path names a file or a directory.
+    def exists(self, path: Path) -> bool
+    ## The file's or directory's size, time of last change and kind.
+    def metadata(self, path: Path) -> Metadata ! IoError
+    ## Removes the file.
+    def remove(self, path: Path) -> ! IoError
+    ## The entries of the directory, sorted, as paths that start with it.
+    def list_dir(self, path: Path) -> list[Path] ! IoError
+    ## Creates the directory and any missing parents.
+    def create_dir(self, path: Path) -> ! IoError
+    ## The whole file as text; `InvalidData` when it is not UTF-8.
+    def read_to_string(self, path: Path) -> String ! IoError:
+        let data = self.read(path)?
+        return data.decode().map_err((e) -> InvalidData(path=path.copy()))
+    ## Creates or replaces the file with `text` in UTF-8.
+    def write_text(self, path: Path, text: str) -> ! IoError:
+        return self.write(path, text.encode())
+
+impl FsOps for Fs:
+    @intrinsic("cap.forward")
+    def read(self, path: Path) -> bytes ! IoError
+    @intrinsic("cap.forward")
+    def write(self, path: Path, data: bytes) -> ! IoError
+    @intrinsic("cap.forward")
+    def read_to_string(self, path: Path) -> String ! IoError
+    @intrinsic("cap.forward")
+    def write_text(self, path: Path, text: str) -> ! IoError
+    @intrinsic("cap.forward")
+    def exists(self, path: Path) -> bool
+    @intrinsic("cap.forward")
+    def metadata(self, path: Path) -> Metadata ! IoError
+    @intrinsic("cap.forward")
+    def remove(self, path: Path) -> ! IoError
+    @intrinsic("cap.forward")
+    def list_dir(self, path: Path) -> list[Path] ! IoError
+    @intrinsic("cap.forward")
+    def create_dir(self, path: Path) -> ! IoError
 
 impl Fs:
-    ## The whole file as text; `NotFound`, `PermissionDenied` or `InvalidData`
-    ## (not UTF-8) on failure.
-    @intrinsic("Fs.read_to_string")
-    def read_to_string(self, path: Path) -> String ! IoError
-    ## Creates or replaces the file with `text`.
-    @intrinsic("Fs.write_text")
-    def write_text(self, path: Path, text: str) -> ! IoError
-    @intrinsic("Fs.exists")
-    def exists(self, path: Path) -> bool
-    ## The same file system with every write refused as `PermissionDenied`.
-    @intrinsic("Fs.read_only")
-    pure def read_only(self) -> Fs
-    ## The same file system limited to `dir`; paths are relative to it and
-    ## may not leave it.
-    @intrinsic("Fs.restrict_to")
-    pure def restrict_to(self, dir: Path) -> Fs
-    ## A fake file system in memory, holding `files` (17, "Fixtures").
-    @intrinsic("Fs.in_memory")
-    pure def in_memory(files: dict[str, str] = {}) -> Fs
+    ## The same file system with every change refused as `PermissionDenied`.
+    def read_only(self) -> Fs:
+        return cap.ReadOnly(inner=self)
+    ## The same file system limited to the directory `dir`: a path is
+    ## relative to it, and one that is absolute or has a `..` part is
+    ## refused as `PermissionDenied` (and does not exist).
+    def restrict_to(self, dir: Path) -> Fs:
+        return cap.Restricted(inner=self, root=dir.as_str().strip_suffix("/").to_string())
+    ## The file system lent for a call: a view, which the callee cannot keep.
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[Fs]
+    ## A caretaker of the file system and its revoker: once revoked, every
+    ## copy of the caretaker fails with `Revoked` (Q-51).
+    def revocable(self) -> (Fs, Revoker):
+        let r = Revoker.new()
+        let fs: Fs = cap.Caretaker(inner=self, revoker=r)
+        return (fs, r)
+    ## A fake file system in memory holding `files`, text by path (17,
+    ## "Fixtures"). Each write is stamped with the run's test clock
+    ## (`Clock.fake`).
+    def in_memory(files: dict[str, str] = {}) -> Fs:
+        return cap.MemFs.new(files)
 
-impl Env:
-    ## The command-line arguments after the program's own name.
-    @intrinsic("Env.args")
-    def args(self) -> list[str]
-    ## The variable `name`, or `None`.
-    @intrinsic("Env.get")
-    def get(self, name: str) -> String?
+impl FsOps for HostFs:
+    @intrinsic("host.fs.read")
+    def read(self, path: Path) -> bytes ! IoError
+    @intrinsic("host.fs.write")
+    def write(self, path: Path, data: bytes) -> ! IoError
+    @intrinsic("host.fs.read_to_string")
+    def read_to_string(self, path: Path) -> String ! IoError
+    @intrinsic("host.fs.write_text")
+    def write_text(self, path: Path, text: str) -> ! IoError
+    @intrinsic("host.fs.exists")
+    def exists(self, path: Path) -> bool
+    @intrinsic("host.fs.metadata")
+    def metadata(self, path: Path) -> Metadata ! IoError
+    @intrinsic("host.fs.remove")
+    def remove(self, path: Path) -> ! IoError
+    @intrinsic("host.fs.list_dir")
+    def list_dir(self, path: Path) -> list[Path] ! IoError
+    @intrinsic("host.fs.create_dir")
+    def create_dir(self, path: Path) -> ! IoError
+
+impl[T: FsOps + Copy] FsOps for Lent[T]:
+    @intrinsic("cap.forward")
+    def read(self, path: Path) -> bytes ! IoError
+    @intrinsic("cap.forward")
+    def write(self, path: Path, data: bytes) -> ! IoError
+    @intrinsic("cap.forward")
+    def read_to_string(self, path: Path) -> String ! IoError
+    @intrinsic("cap.forward")
+    def write_text(self, path: Path, text: str) -> ! IoError
+    @intrinsic("cap.forward")
+    def exists(self, path: Path) -> bool
+    @intrinsic("cap.forward")
+    def metadata(self, path: Path) -> Metadata ! IoError
+    @intrinsic("cap.forward")
+    def remove(self, path: Path) -> ! IoError
+    @intrinsic("cap.forward")
+    def list_dir(self, path: Path) -> list[Path] ! IoError
+    @intrinsic("cap.forward")
+    def create_dir(self, path: Path) -> ! IoError
+
+## A byte stream to another program, both ways: a TCP connection, or one
+## end of a fake network's in-process pipe. A read waits for data and gives
+## at most `max` bytes, and none once the other end has closed its side; a
+## write sends all of `data`. Both are blocking points.
+trait Stream(Send, Sync):
+    def read(mut self, max: int) -> bytes ! {NetError, TaskError}
+    def write(mut self, data: bytes) -> ! {NetError, TaskError}
+    ## Closes this end's side: the other end reads the end of the stream.
+    def close(mut self)
+
+## A connection (`Net.connect`, `Listener.accept`): a stream and the
+## address of the other end. Dropping it closes it.
+struct Conn:
+    stream: Box[dyn Stream]
+    peer: String
+
+impl Conn:
+    ## At most `max` bytes, waiting for some; none at the end of the stream.
+    def read(mut self, max: int = 65536) -> bytes ! {NetError, TaskError}:
+        return self.stream.read(max)
+    ## Sends all of `data`.
+    def write(mut self, data: bytes) -> ! {NetError, TaskError}:
+        return self.stream.write(data)
+    ## Every byte until the other end closes its side.
+    def read_to_end(mut self) -> bytes ! {NetError, TaskError}:
+        var out = bytes.new()
+        while True:
+            let chunk = self.stream.read(65536)?
+            if chunk.is_empty():
+                return Ok(out)
+            out = out + chunk
+    ## Closes this end's side.
+    def close(mut self):
+        self.stream.close()
+
+## Accepts the connections a listener receives.
+trait Accept(Send, Sync):
+    ## The next connection, waiting for one. A blocking point.
+    def accept(self) -> Conn ! {NetError, TaskError}
+
+## A listener (`Net.listen`) and the port it listens at.
+struct Listener:
+    inner: Box[dyn Accept]
+    port: int
+
+impl Listener:
+    ## The next connection, waiting for one. A blocking point.
+    def accept(self) -> Conn ! {NetError, TaskError}:
+        return self.inner.accept()
+
+## The operations of the network capability: TCP connections and
+## listeners, by host name and port.
+trait NetOps:
+    ## A connection to `host` at `port`; `Refused` when nothing listens
+    ## there.
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}
+    ## Listens at `port` of `host` (port 0: a free one, which the listener
+    ## tells).
+    def listen(self, host: str, port: int) -> Listener ! NetError
+
+impl NetOps for Net:
+    @intrinsic("cap.forward")
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}
+    @intrinsic("cap.forward")
+    def listen(self, host: str, port: int) -> Listener ! NetError
+
+impl Net:
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[Net]
+    ## The same network limited to the named hosts: a connection to or a
+    ## listener at any other is refused as `NotAllowed`.
+    def only_hosts(self, hosts: list[str]) -> Net:
+        var allowed: list[String] = []
+        for h in hosts:
+            allowed.push(h.to_string())
+        return cap.OnlyHosts(inner=self, hosts=allowed)
+    ## The same network limited to port 443, HTTPS's (stage 0 has no TLS:
+    ## the attenuation is by port).
+    def https_only(self) -> Net:
+        return cap.OnlyPorts(inner=self, ports=[443])
+    ## A caretaker of the network and its revoker (Q-51).
+    def revocable(self) -> (Net, Revoker):
+        let r = Revoker.new()
+        let net: Net = cap.NetCaretaker(inner=self, revoker=r)
+        return (net, r)
+    ## A fake network in this process (17): `listen` registers an address,
+    ## `connect` to it makes a pair of pipes, and nothing else is reached.
+    def fake() -> Net:
+        return cap.FakeNet.new()
+
+impl NetOps for HostNet:
+    @intrinsic("host.net.connect")
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}
+    @intrinsic("host.net.listen")
+    def listen(self, host: str, port: int) -> Listener ! NetError
+
+## A TCP connection of the host.
+@builtin("HostStream")
+struct HostStream:
+    pass
+
+impl Stream for HostStream:
+    @intrinsic("host.net.read")
+    def read(mut self, max: int) -> bytes ! {NetError, TaskError}
+    @intrinsic("host.net.write")
+    def write(mut self, data: bytes) -> ! {NetError, TaskError}
+    @intrinsic("host.net.close")
+    def close(mut self)
+
+## A TCP listener of the host.
+@builtin("HostListener")
+struct HostListener:
+    pass
+
+impl Accept for HostListener:
+    @intrinsic("host.net.accept")
+    def accept(self) -> Conn ! {NetError, TaskError}
+
+impl[T: NetOps + Copy] NetOps for Lent[T]:
+    @intrinsic("cap.forward")
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}
+    @intrinsic("cap.forward")
+    def listen(self, host: str, port: int) -> Listener ! NetError
+
+## The operations of the clock capability.
+trait ClockOps:
+    ## The current time on this clock.
+    def now(self) -> DateTime
+    ## A timer at `d` from now on this clock, to wait for.
+    def after(self, d: Duration) -> Timer
+
+impl ClockOps for Clock:
+    @intrinsic("cap.forward")
+    def now(self) -> DateTime
+    @intrinsic("cap.forward")
+    def after(self, d: Duration) -> Timer
 
 impl Clock:
-    ## The current time.
-    @intrinsic("Clock.now")
-    def now(self) -> DateTime
-    ## A timer at `d` from now on this clock.
-    @intrinsic("Clock.after")
-    def after(self, d: Duration) -> Timer
     ## Waits for `d` on this clock. A blocking point.
     def sleep(self, d: Duration) -> ! TaskError:
         return self.after(d).wait()
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[Clock]
+    ## The run's test clock (`TestClock`), as it stands.
+    @intrinsic("Clock.fake")
+    def fake() -> TestClock
+    ## The run's test clock, set to `t` (17): it stands still at `t` until
+    ## `advance`, or until every task waits for a timer.
+    def frozen_at(t: DateTime) -> TestClock:
+        let c = Clock.fake()
+        c.set(t)
+        return c
+
+impl ClockOps for HostClock:
+    @intrinsic("clock.now")
+    def now(self) -> DateTime
+    @intrinsic("clock.after")
+    def after(self, d: Duration) -> Timer
+
+impl ClockOps for TestClock:
+    @intrinsic("clock.now")
+    def now(self) -> DateTime
+    @intrinsic("clock.after")
+    def after(self, d: Duration) -> Timer
+
+impl TestClock:
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[TestClock]
+    ## Moves the clock forward by `d`; the timers it passes are due.
+    @intrinsic("TestClock.advance")
+    def advance(self, d: Duration)
+    ## Sets the clock to `t`.
+    @intrinsic("TestClock.set")
+    def set(self, t: DateTime)
+    ## Waits for `d` on this clock. A blocking point.
+    def sleep(self, d: Duration) -> ! TaskError:
+        return self.after(d).wait()
+
+impl[T: ClockOps + Copy] ClockOps for Lent[T]:
+    @intrinsic("cap.forward")
+    def now(self) -> DateTime
+    @intrinsic("cap.forward")
+    def after(self, d: Duration) -> Timer
+
+## The operations of the randomness capability.
+trait RandOps:
+    ## 64 random bits as an `int`, every pattern equally likely.
+    def bits(self) -> int
+
+impl RandOps for Rand:
+    @intrinsic("cap.forward")
+    def bits(self) -> int
+
+impl Rand:
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[Rand]
+    ## A random integer in `range(lo, hi)`, each equally likely; `hi` must
+    ## be greater than `lo`.
+    def between(self, lo: int, hi: int) -> int:
+        assert hi > lo, "an empty range"
+        let n = hi - lo
+        # 63 random bits, rejected above the largest multiple of `n`.
+        let top = 9223372036854775807
+        let over = (top % n + 1) % n
+        while True:
+            let x = self.bits() & top
+            if over == 0 or x <= top - over:
+                return lo + x % n
+    ## A random float in [0, 1), a multiple of 2**-53.
+    def unit(self) -> f64:
+        return (self.bits() & 9007199254740991).to_f64() / 9007199254740992.0
+    ## `True` or `False`, each half the time.
+    def coin(self) -> bool:
+        return self.bits() < 0
+    ## Puts the items of `xs` in a random order, each order equally likely.
+    def shuffle[T](self, mut xs: list[T]):
+        var i = len(xs) - 1
+        while i > 0:
+            let j = self.between(0, i + 1)
+            xs.swap(i, j)
+            i -= 1
+    ## A generator seeded with `seed` (SplitMix64): the same seed gives the
+    ## same values in every run.
+    def seeded(seed: int) -> Rand:
+        return cap.SeededRand.new(seed)
+
+impl RandOps for HostRand:
+    @intrinsic("host.rand.bits")
+    def bits(self) -> int
+
+impl[T: RandOps + Copy] RandOps for Lent[T]:
+    @intrinsic("cap.forward")
+    def bits(self) -> int
+
+## The operations of the environment capability.
+trait EnvOps:
+    ## The command-line arguments after the program's own name.
+    def args(self) -> list[str]
+    ## The variable `name`, or `None`.
+    def get(self, name: str) -> String?
+
+impl EnvOps for Env:
+    @intrinsic("cap.forward")
+    def args(self) -> list[str]
+    @intrinsic("cap.forward")
+    def get(self, name: str) -> String?
+
+impl Env:
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[Env]
+    ## A fake environment with these arguments and variables (17).
+    def fake(args: list[str] = [], vars: dict[str, str] = {}) -> Env:
+        return cap.FakeEnv.new(args, vars)
+
+impl EnvOps for HostEnv:
+    @intrinsic("host.env.args")
+    def args(self) -> list[str]
+    @intrinsic("host.env.get")
+    def get(self, name: str) -> String?
+
+impl[T: EnvOps + Copy] EnvOps for Lent[T]:
+    @intrinsic("cap.forward")
+    def args(self) -> list[str]
+    @intrinsic("cap.forward")
+    def get(self, name: str) -> String?
+
+## What a finished program left: its exit status and its output.
+struct ProcOutput:
+    status: int
+    stdout: String
+    stderr: String
+
+## The operations of the process capability.
+trait ProcOps:
+    ## Runs `program` with `args` to its end, with no input. A blocking point.
+    def run(self, program: str, args: list[str]) -> ProcOutput ! ProcError
+
+impl ProcOps for Proc:
+    @intrinsic("cap.forward")
+    def run(self, program: str, args: list[str]) -> ProcOutput ! ProcError
+
+impl Proc:
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[Proc]
+    ## A fake that runs the programs named in `outputs`, each printing its
+    ## text and exiting with status 0; any other program is `NotFound`.
+    def fake(outputs: dict[str, str] = {}) -> Proc:
+        return cap.FakeProc.new(outputs)
+
+impl ProcOps for HostProc:
+    @intrinsic("host.proc.run")
+    def run(self, program: str, args: list[str]) -> ProcOutput ! ProcError
+
+impl[T: ProcOps + Copy] ProcOps for Lent[T]:
+    @intrinsic("cap.forward")
+    def run(self, program: str, args: list[str]) -> ProcOutput ! ProcError
+
+impl System:
+    ## A test's capability set in one value (17, "Isolation and
+    ## parallelism"): an empty in-memory `Fs`, a `Net` that reaches
+    ## nothing, the run's test clock, `Rand.seeded(seed)`, an `Env` without
+    ## arguments or variables and a `Proc` that runs nothing. Each call
+    ## makes a fresh set; a test that declares a `System` receives the
+    ## real one instead.
+    def fake(seed: int) -> System:
+        return System.assemble(
+            fs=Fs.in_memory(), net=cap.NoNet(), clock=Clock.fake(), rand=Rand.seeded(seed),
+            env=Env.fake(), proc=Proc.fake(),
+        )
+    @internal
+    @intrinsic("System.assemble")
+    def assemble(fs: Fs, net: Net, clock: Clock, rand: Rand, env: Env, proc: Proc) -> System
+
+## The revoker of a caretaker (`Fs.revocable`): a `Copy` handle on the
+## flag every copy of the caretaker checks.
+@derive(Copy)
+struct Revoker:
+    flag: Cap[Mutex[bool]]
+
+impl Revoker:
+    pure def new() -> Revoker:
+        return Revoker(flag=Cap(Mutex(False)))
+    ## Every copy of the caretaker fails with `Revoked` from now on.
+    def revoke(self):
+        var g = self.flag.get().lock()
+        g.value = True
+    def is_revoked(self) -> bool:
+        return self.flag.get().lock().value
+
+impl[T] Cap[T]:
+    @intrinsic("Cap.new")
+    pure def new(own value: T) -> Cap[T]
+    ## The shared value.
+    @intrinsic("Cap.get")
+    pure def get(self) -> ref T
+
+impl[T] Debug for Cap[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for Lent[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
 
 # ------------------------------------------------------------------ the traits of the builtin types
 # The leaf types (`int`, `f64`, `bool`, `char`, `str`, `String`, `Path`,

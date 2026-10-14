@@ -1,0 +1,282 @@
+##! std.x.http (11; 18, Phase 6): a minimal HTTP/1.1 client and server,
+##! written in Sisu over the `Net` capability. One request per connection
+##! (`Connection: close`); a body is read by its `Content-Length`, or to
+##! the end of the stream; no chunked transfer, no keep-alive, no TLS
+##! (`https` URLs go to port 443 in the clear). `FakeNet` is a scripted
+##! network for the tests of clients.
+
+from std.net import Url
+
+# `HttpError`, what an exchange can fail with, is the prelude's, so a
+# program that imports `http` names it bare, as the proposal's examples do.
+
+## A request as a server reads it.
+struct Request:
+    method: String
+    ## The path and query (`/v1/data?x=1`).
+    target: String
+    headers: list[(String, String)]
+    body: bytes
+
+## A response.
+struct Response:
+    status: int
+    reason: String
+    headers: list[(String, String)]
+    body: bytes
+
+impl Response:
+    ## `200 OK` with `body`.
+    pure def ok(own body: bytes) -> Response:
+        return Response(status=200, reason="OK".to_string(), headers=[], body=body)
+    ## `status` with a plain text body.
+    pure def text(status: int, reason: str, body: str) -> Response:
+        let headers = [("Content-Type".to_string(), "text/plain; charset=utf-8".to_string())]
+        return Response(status=status, reason=reason.to_string(), headers=headers, body=body.encode())
+    ## The value of the header `name`, compared without case, if any.
+    pure def header(self, name: str) -> String?:
+        return find_header(self.headers, name)
+
+impl Request:
+    pure def header(self, name: str) -> String?:
+        return find_header(self.headers, name)
+
+pure def find_header(headers: list[(String, String)], name: str) -> String?:
+    let want = name.to_lowercase()
+    for h in headers:
+        if h.0.to_lowercase() == want:
+            return Some(h.1.copy())
+    return None
+
+## Reads a message from a connection: what it read past the last message
+## stays in `buf`.
+struct Reader:
+    conn: Conn
+    buf: bytes
+
+impl Reader:
+    ## The bytes up to and including `delim`, which must come within
+    ## `limit` bytes.
+    def until(mut self, delim: bytes, limit: int) -> bytes ! HttpError:
+        while True:
+            if let Some(i) = self.buf.find(delim):
+                let end = i + len(delim)
+                let head = self.buf.slice(0, end)
+                self.buf = self.buf.slice(end, len(self.buf))
+                return Ok(head)
+            if len(self.buf) > limit:
+                return Err(Malformed(detail="a header longer than {limit} bytes"))
+            let chunk = self.conn.read(65536).map_err((e) -> Network(message="{e}"))?
+            if chunk.is_empty():
+                return Err(Malformed(detail="the stream ended inside a header"))
+            self.buf = self.buf + chunk
+
+    ## Exactly `n` bytes.
+    def exactly(mut self, n: int) -> bytes ! HttpError:
+        while len(self.buf) < n:
+            let chunk = self.conn.read(65536).map_err((e) -> Network(message="{e}"))?
+            if chunk.is_empty():
+                return Err(Malformed(detail="the stream ended inside a body"))
+            self.buf = self.buf + chunk
+        let body = self.buf.slice(0, n)
+        self.buf = self.buf.slice(n, len(self.buf))
+        return Ok(body)
+
+    ## Every byte to the end of the stream.
+    def rest(mut self) -> bytes ! HttpError:
+        var out = self.buf.copy()
+        self.buf = bytes.new()
+        while True:
+            let chunk = self.conn.read(65536).map_err((e) -> Network(message="{e}"))?
+            if chunk.is_empty():
+                return Ok(out)
+            out = out + chunk
+
+## A message's head: its first line and its headers.
+struct Head:
+    line: String
+    headers: list[(String, String)]
+
+## The head of a message, ending in an empty line.
+pure def parse_head(raw: bytes) -> Head ! HttpError:
+    let text = raw.decode() else:
+        return Err(Malformed(detail="a header that is not UTF-8"))
+    var line = String.new()
+    var headers: list[(String, String)] = []
+    var first = True
+    for l in text.lines():
+        if first:
+            line = l.to_string()
+            first = False
+            continue
+        if l.is_empty():
+            break
+        let name, value = l.split_once(":") else:
+            return Err(Malformed(detail="a header line without `:`: {l}"))
+        headers.push((name.trim().to_string(), value.trim().to_string()))
+    return Ok(Head(line=line, headers=headers))
+
+## A message's body after its head: by `Content-Length`, or (`to_end`)
+## to the end of the stream, or none.
+def read_body(mut r: Reader, headers: list[(String, String)], to_end: bool) -> bytes ! HttpError:
+    match find_header(headers, "content-length"):
+        case Some(n):
+            let count = n.parse_int() else:
+                return Err(Malformed(detail="a Content-Length of {n}"))
+            return r.exactly(count)
+        case None:
+            if to_end:
+                return r.rest()
+            return Ok(bytes.new())
+
+## A message: the first line, the headers, an empty line and the body.
+pure def message(first: str, headers: list[(String, String)], body: bytes) -> bytes:
+    var head = String.new(first)
+    head.push("\r\n")
+    for h in headers:
+        head.push("{h.0}: {h.1}\r\n")
+    head.push("Content-Length: {len(body)}\r\nConnection: close\r\n\r\n")
+    return head.encode() + body
+
+## Sends `method` for `url`, with `body`, and reads the response.
+def request(net: Net, method: str, url: Url, body: bytes = b"") -> Response ! HttpError:
+    var conn = net.connect(url.host, url.port).map_err((e) -> Network(message="{e}"))?
+    let headers = [("Host".to_string(), url.host.copy())]
+    conn.write(message("{method} {url.target()} HTTP/1.1", headers, body)).map_err((e) -> Network(message="{e}"))?
+    var r = Reader(conn=conn, buf=bytes.new())
+    let head = parse_head(r.until(b"\r\n\r\n", 65536)?)?
+    let parts: list[str] = head.line.split(" ").collect()
+    if len(parts) < 2 or not parts[0].starts_with("HTTP/1."):
+        return Err(Malformed(detail="a status line `{head.line}`"))
+    let status = parts[1].parse_int() else:
+        return Err(Malformed(detail="a status line `{head.line}`"))
+    var reason = String.new()
+    for i in range(2, len(parts)):
+        if i > 2:
+            reason.push(" ")
+        reason.push(parts[i])
+    let data = read_body(mut r, head.headers, True)?
+    r.conn.close()
+    return Ok(Response(status=status, reason=reason, headers=head.headers.copy(), body=data))
+
+## The body of a `GET` of `url`, which must answer with a 2xx status.
+def get(net: Net, url: Url) -> bytes ! HttpError:
+    let r = request(net, "GET", url)?
+    if r.status < 200 or r.status > 299:
+        return Err(Status(code=r.status))
+    return Ok(r.body)
+
+## Answers the requests a server reads.
+trait Handler(Send, Sync):
+    def handle(self, request: Request) -> Response
+
+## Serves HTTP/1.1 on `listener` until it is cancelled: each connection is
+## a task, on a scope of its own, that reads one request and writes
+## `handler`'s response. A connection that fails is dropped; the server
+## goes on.
+def serve[H: Handler](listener: Listener, handler: H) -> ! {NetError, TaskError}:
+    return task.scope do s:
+        while True:
+            let conn = listener.accept()?
+            s.spawn(own () -> answer(conn, handler))
+
+## Reads one request from `conn` and writes `handler`'s answer; a
+## malformed request gets `400`.
+def answer[H: Handler](own conn: Conn, handler: H):
+    var r = Reader(conn=conn, buf=bytes.new())
+    let response = match read_request(mut r):
+        case Ok(req): handler.handle(req)
+        case Err(e): Response.text(400, "Bad Request", "{e}\n")
+    var headers = response.headers.copy()
+    let first = "HTTP/1.1 {response.status} {response.reason}"
+    _ = r.conn.write(message(first, headers, response.body))
+    r.conn.close()
+
+## A request: its line, headers and body.
+def read_request(mut r: Reader) -> Request ! HttpError:
+    let head = parse_head(r.until(b"\r\n\r\n", 65536)?)?
+    let parts: list[str] = head.line.split(" ").collect()
+    if len(parts) != 3 or not parts[2].starts_with("HTTP/1."):
+        return Err(Malformed(detail="a request line `{head.line}`"))
+    let body = read_body(mut r, head.headers, False)?
+    return Ok(Request(method=parts[0].to_string(), target=parts[1].to_string(), headers=head.headers.copy(), body=body))
+
+# ------------------------------------------------------------------ the scripted network
+
+## What a `FakeNet` answers, and how many requests it answered.
+struct Script:
+    routes: dict[String, bytes]
+    requests: int
+
+## A scripted network for tests of clients (17, "Mocks"):
+## `respond_to(url, body)` answers each `GET` of `url` with `200 OK` and
+## `body`, anything else with `404 Not Found`; `request_count` tells how
+## many requests it answered. A `Copy` handle on its script, which every
+## copy shares; it becomes a `Net` where one is expected.
+@derive(Copy)
+struct FakeNet:
+    state: Cap[Mutex[Script]] = Cap(Mutex(Script(routes={}, requests=0)))
+
+impl FakeNet:
+    ## The network with `url` answered by `body`.
+    def respond_to(self, url: str, body: bytes) -> FakeNet:
+        var g = self.state.get().lock()
+        _ = g.value.routes.insert(url.to_string(), body.copy())
+        return FakeNet(state=self.state)
+
+    ## The number of requests answered so far.
+    def request_count(self) -> int:
+        let g = self.state.get().lock()
+        return g.value.requests
+
+    ## The response to the request `raw` sent to `host` at `port`.
+    def answer(self, host: str, port: int, raw: bytes) -> bytes:
+        let head = parse_head(raw) else:
+            return message("HTTP/1.1 400 Bad Request", [], b"")
+        let parts: list[str] = head.line.split(" ").collect()
+        if len(parts) < 2:
+            return message("HTTP/1.1 400 Bad Request", [], b"")
+        let scheme = if port == 443: "https" else: "http"
+        let url = match Url.parse("{scheme}://{host}:{port}{parts[1]}"):
+            case Ok(u): "{u}"
+            case Err(_): ""
+        var g = self.state.get().lock()
+        g.value.requests += 1
+        let found = match g.value.routes.get(url):
+            case Some(b): Some(b.copy())
+            case None: None
+        return match found:
+            case Some(body) if parts[0] == "GET": message("HTTP/1.1 200 OK", [], body)
+            case _: message("HTTP/1.1 404 Not Found", [], b"not found\n")
+
+impl NetOps for FakeNet:
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}:
+        let stream = ScriptedStream(net=FakeNet(state=self.state), host=host.to_string(), port=port, sent=bytes.new(), reply=None)
+        return Ok(Conn(stream=Box(stream), peer="{host}:{port}"))
+    def listen(self, host: str, port: int) -> Listener ! NetError:
+        return Err(NotAllowed(address="{host}:{port}"))
+
+## A connection of a `FakeNet`: it keeps what the client sends, and
+## answers once the request's head is complete.
+struct ScriptedStream:
+    net: FakeNet
+    host: String
+    port: int
+    sent: bytes
+    reply: bytes?
+
+impl Stream for ScriptedStream:
+    def read(mut self, max: int) -> bytes ! {NetError, TaskError}:
+        if self.reply.is_none():
+            if self.sent.find(b"\r\n\r\n").is_none():
+                return Ok(bytes.new())
+            self.reply = Some(self.net.answer(self.host, self.port, self.sent))
+        let left = self.reply.copy().expect("an answer")
+        let n = if max < len(left): max else: len(left)
+        self.reply = Some(left.slice(n, len(left)))
+        return Ok(left.slice(0, n))
+    def write(mut self, data: bytes) -> ! {NetError, TaskError}:
+        self.sent = self.sent + data
+        return Ok(())
+    def close(mut self):
+        pass

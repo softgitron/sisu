@@ -131,10 +131,7 @@ fn check_fn(
     }
     for p in &f.params {
         let ty = param_local_ty(prog, &p.ty, p.mode, &c.env);
-        if f.pure
-            && let Ty::Adt(d, _) = &p.ty
-            && matches!(prog.builtin(*d), Some("Fs" | "Env" | "Clock" | "System"))
-        {
+        if f.pure && prog.is_capability(&p.ty) {
             let d = Diagnostic::new(msg::TYPE_IMPURE_CAPABILITY, p.span)
                 .with("name", prog.def(def).name.clone())
                 .with("ty", prog.display(&p.ty));
@@ -255,6 +252,50 @@ fn check_spawns(c: &mut Checker) {
     }
 }
 
+/// The part of a type in the way of `Send` or `Sync`, as a clause: `
+/// because of `name.field`, a `Cell[int]``; empty when it is the type.
+fn obstacle_path(c: &Checker, name: &str, o: &sisu_resolve::Obstacle) -> String {
+    if o.path.is_empty() {
+        return String::new();
+    }
+    let mut p = name.to_string();
+    for seg in &o.path {
+        if seg == "[]" {
+            p.push_str("[...]");
+        } else {
+            if !p.is_empty() {
+                p.push('.');
+            }
+            p.push_str(seg);
+        }
+    }
+    format!(" because of `{p}`, a `{}`", c.show(&o.ty))
+}
+
+/// A value made into a capability handle must be `Send` and `Sync`: the
+/// handle is both, so every task may use what it holds (06).
+fn check_capabilities(c: &mut Checker) {
+    use sisu_resolve::Auto;
+    let prog = c.prog;
+    for (ty, cap, span) in std::mem::take(&mut c.cap_checks) {
+        let ty = prog.normalize(&c.infer.zonk(&ty), &c.env);
+        if c.infer.has_vars(&ty) || ty.contains_error() {
+            continue;
+        }
+        for (auto, name) in [(Auto::Send, "Send"), (Auto::Sync, "Sync")] {
+            if let Err(o) = prog.auto_trait(&ty, auto, &c.env) {
+                let d = Diagnostic::new(msg::CAP_NOT_SHAREABLE, span)
+                    .with("ty", c.show(&ty))
+                    .with("cap", cap.clone())
+                    .with("auto", name)
+                    .with("path", obstacle_path(c, "", &o));
+                c.report(d);
+                break;
+            }
+        }
+    }
+}
+
 /// A `Send` or `Sync` diagnostic: the capture, its type, and the part of
 /// the type in the way, with the wrapper that would make it shareable.
 fn obstacle_diag(
@@ -266,22 +307,7 @@ fn obstacle_diag(
     o: &sisu_resolve::Obstacle,
 ) -> Diagnostic {
     let prog = c.prog;
-    let path = if o.path.is_empty() {
-        String::new()
-    } else {
-        let mut p = name.to_string();
-        for seg in &o.path {
-            if seg == "[]" {
-                p.push_str("[...]");
-            } else {
-                if !p.is_empty() {
-                    p.push('.');
-                }
-                p.push_str(seg);
-            }
-        }
-        format!(" because of `{p}`, a `{}`", c.show(&o.ty))
-    };
+    let path = obstacle_path(c, name, o);
     let mut d =
         Diagnostic::new(m, span).with("name", name.to_string()).with("ty", c.show(ty)).with("path", path);
     // A `Cell` shares mutation through a `Mutex` instead.
@@ -302,6 +328,7 @@ fn obstacle_diag(
 fn check_bounds(c: &mut Checker) {
     let prog = c.prog;
     check_spawns(c);
+    check_capabilities(c);
     for (ty, owner, span) in std::mem::take(&mut c.owner_checks) {
         let t = prog.normalize(&c.infer.zonk(&ty), &c.env);
         if c.infer.has_vars(&t) || t.contains_error() {
@@ -319,7 +346,9 @@ fn check_bounds(c: &mut Checker) {
         }
     }
     let mut seen: Vec<(Ty, sisu_resolve::TraitRef)> = Vec::new();
-    for (ty, bound, span) in std::mem::take(&mut c.bounds) {
+    let bounds = std::mem::take(&mut c.bounds).into_iter().map(|b| (b, true));
+    let impls = std::mem::take(&mut c.impl_bounds).into_iter().map(|b| (b, false));
+    for ((ty, bound, span), strict) in bounds.chain(impls).collect::<Vec<_>>() {
         let t = prog.normalize(&c.infer.zonk(&ty), &c.env);
         let b = sisu_resolve::TraitRef {
             def: bound.def,
@@ -331,7 +360,8 @@ fn check_bounds(c: &mut Checker) {
         if seen.contains(&(t.clone(), b.clone())) {
             continue;
         }
-        if prog.implements(&t, &b, &c.env) == Answer::No {
+        let answer = if strict { prog.bound_holds(&t, &b, &c.env) } else { prog.implements(&t, &b, &c.env) };
+        if answer == Answer::No {
             seen.push((t.clone(), b.clone()));
             let d = Diagnostic::new(msg::TYPE_BOUND_NOT_SATISFIED, span)
                 .with("ty", c.show(&t))
@@ -539,6 +569,18 @@ pub fn check(prog: &Program, sources: &SourceMap) -> (Typed, Vec<Diagnostic>) {
             diags.push(Diagnostic::new(msg::TYPE_MAIN_SIGNATURE, prog.def(main).span));
         }
     }
+    // A test takes nothing, or the real `System`, which it then receives
+    // (02; 17, "Isolation and parallelism").
+    for &t in &prog.tests {
+        let Some(f) = prog.fn_info(t) else { continue };
+        let sys = prog.wk.system;
+        let ok = f.params.is_empty()
+            || (f.params.len() == 1 && matches!(&f.params[0].ty, Ty::Adt(d, _) if Some(*d) == sys));
+        if !ok && !f.header_broken {
+            let span = f.params.first().map(|p| p.span).unwrap_or(prog.def(t).span);
+            diags.push(Diagnostic::new(msg::TYPE_TEST_SIGNATURE, span));
+        }
+    }
     (typed, diags)
 }
 
@@ -552,13 +594,21 @@ fn must_consume_ty(prog: &Program, t: &Ty, depth: u32) -> bool {
     }
     match t {
         Ty::Tuple(es, _) => es.iter().any(|e| must_consume_ty(prog, e, depth + 1)),
+        // A type is must-consume when it is declared so or holds one, in
+        // a field or a type argument (D-054's propagation).
         Ty::Adt(d, args) => {
-            let flag = match &prog.def(*d).kind {
-                sisu_resolve::DefKind::Struct(s) => s.must_consume,
-                sisu_resolve::DefKind::Enum(e) | sisu_resolve::DefKind::ErrorSet(e) => e.must_consume,
-                _ => false,
+            let (flag, fields): (bool, Vec<Ty>) = match &prog.def(*d).kind {
+                sisu_resolve::DefKind::Struct(s) => {
+                    (s.must_consume, s.fields.iter().map(|f| f.ty.subst(args)).collect())
+                }
+                sisu_resolve::DefKind::Enum(e) | sisu_resolve::DefKind::ErrorSet(e) => (
+                    e.must_consume,
+                    e.variants.iter().flat_map(|v| v.fields.iter().map(|(_, t)| t.subst(args))).collect(),
+                ),
+                _ => (false, Vec::new()),
             };
             flag || args.iter().any(|a| must_consume_ty(prog, a, depth + 1))
+                || fields.iter().any(|f| must_consume_ty(prog, f, depth + 1))
         }
         _ => false,
     }

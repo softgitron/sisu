@@ -1,0 +1,11 @@
+Ok("on")
+False
+1970-01-01T00:00:00Z
+> Fs.read_to_string("settings")
+< read_to_string = Ok("on")
+> Fs.exists("other")
+< exists = False
+> Fs.write_text("other", "x")
+< write_text = Ok(())
+> Clock.now()
+< now = 1970-01-01T00:00:00Z

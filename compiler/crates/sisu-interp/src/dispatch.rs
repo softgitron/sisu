@@ -9,7 +9,7 @@
 //! matches, the trait is one the language implements itself for the
 //! type (error sets, functions, long tuples), structurally.
 
-use crate::value::{Step, Value};
+use crate::value::{HEAP, Pointer, Step, Value};
 use crate::{Interp, Unwind, ice};
 use sisu_sir as sir;
 use sisu_sir::{ImplTarget, Type};
@@ -69,6 +69,42 @@ impl Interp<'_, '_> {
                     }
                     other => return Err(ice(format!("`{name}` on a `dyn` without one: {other:?}"))),
                 },
+                // A capability handle forwards to its object, a `dyn` in a
+                // heap cell; a `Lent` is its handle.
+                Type::Named(n, a) if n == "Lent" && a.len() == 1 => {
+                    let inner = a[0].clone();
+                    if let Some(Value::Ref(p)) = args.first() {
+                        let v = self.read(p)?.clone();
+                        args[0] = v;
+                    }
+                    self_ty = inner;
+                }
+                Type::Named(n, a)
+                    if a.is_empty()
+                        && matches!(n.as_str(), "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc") =>
+                {
+                    let id = match self
+                        .target(args.first().ok_or_else(|| ice("a handle call without `self`"))?)?
+                    {
+                        Value::Cap(id) => *id,
+                        other => return Err(ice(format!("`{name}` on a handle without one: {other:?}"))),
+                    };
+                    let cell = self.heap.get(id as usize).ok_or_else(|| ice("a handle without its cell"))?;
+                    let ty = match &cell.value {
+                        Value::Dyn(d) => d.ty.clone(),
+                        other => return Err(ice(format!("a handle's cell holds {other:?}"))),
+                    };
+                    let p = Pointer {
+                        task: 0,
+                        frame: HEAP,
+                        serial: cell.serial,
+                        local: id,
+                        path: Vec::new(),
+                        tag: 0,
+                    };
+                    args[0] = Value::Ref(Box::new(p.join(Step::DynValue)));
+                    self_ty = ty;
+                }
                 _ => break,
             }
         }

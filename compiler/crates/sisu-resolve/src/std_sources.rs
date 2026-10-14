@@ -9,11 +9,16 @@ pub const CLI: &str = include_str!("../../../std/cli.sisu");
 pub const MATH: &str = include_str!("../../../std/math.sisu");
 pub const TASK: &str = include_str!("../../../std/task.sisu");
 pub const LOG: &str = include_str!("../../../std/log.sisu");
+pub const CAP: &str = include_str!("../../../std/cap.sisu");
+pub const NET: &str = include_str!("../../../std/net.sisu");
+pub const TIME: &str = include_str!("../../../std/time.sisu");
+pub const HTTP: &str = include_str!("../../../std/http.sisu");
 
 /// The std modules every module sees by name without an import, as the
 /// prelude's own items: `task.scope` is ambient (Q-6), and so is the `log`
-/// facade (Q-5).
-pub const AMBIENT: &[(&str, &str)] = &[("task", TASK), ("log", LOG)];
+/// facade (Q-5). `cap` (std.cap) grants nothing by itself: its fakes,
+/// attenuations and interceptors work on capabilities they are given.
+pub const AMBIENT: &[(&str, &str)] = &[("task", TASK), ("log", LOG), ("cap", CAP)];
 
 /// The std module an import path names, as (module name, source).
 pub fn module_for(path: &[&str]) -> Option<(&'static str, &'static str)> {
@@ -22,7 +27,41 @@ pub fn module_for(path: &[&str]) -> Option<(&'static str, &'static str)> {
         ["std", "math"] | ["math"] => Some(("math", MATH)),
         ["std", "task"] | ["task"] => Some(("task", TASK)),
         ["std", "log"] | ["log"] => Some(("log", LOG)),
+        ["std", "cap"] | ["cap"] => Some(("cap", CAP)),
+        ["std", "net"] | ["net"] => Some(("net", NET)),
+        ["std", "time"] | ["time"] => Some(("time", TIME)),
+        ["std", "x", "http"] | ["http"] => Some(("http", HTTP)),
         _ => None,
+    }
+}
+
+/// The prelude's names a std module names too (`from std.time import
+/// DateTime`).
+pub fn reexports(module: &str) -> &'static [&'static str] {
+    match module {
+        "time" => &["DateTime", "Duration", "Timer", "TimeError", "TestClock", "Clock"],
+        "net" => &["Net", "NetOps", "NetError", "Conn", "Listener", "Stream", "Accept"],
+        "cap" => &[
+            "System",
+            "Fs",
+            "Net",
+            "Clock",
+            "Rand",
+            "Env",
+            "Proc",
+            "FsOps",
+            "NetOps",
+            "ClockOps",
+            "RandOps",
+            "EnvOps",
+            "ProcOps",
+            "Lent",
+            "Cap",
+            "Revoker",
+            "TestClock",
+        ],
+        "task" => &["Scope", "Handle", "TaskError", "Cancellation", "channel", "Sender", "Receiver", "Mutex"],
+        _ => &[],
     }
 }
 
@@ -37,10 +76,28 @@ const LEAVES: &[(&str, &[&str])] = &[
     ("Path", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
     ("DateTime", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
     ("()", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
+    ("bytes", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
+    ("u8", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
+    ("u16", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
+    ("u32", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
+    ("u64", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
+    ("i8", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
+    ("i16", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
+    ("i32", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
     ("Fs", &["Display", "Debug"]),
-    ("Env", &["Display", "Debug"]),
+    ("Net", &["Display", "Debug"]),
     ("Clock", &["Display", "Debug"]),
+    ("Rand", &["Display", "Debug"]),
+    ("Env", &["Display", "Debug"]),
+    ("Proc", &["Display", "Debug"]),
     ("System", &["Display", "Debug"]),
+    ("TestClock", &["Display", "Debug"]),
+    ("HostFs", &["Debug"]),
+    ("HostNet", &["Debug"]),
+    ("HostClock", &["Debug"]),
+    ("HostRand", &["Debug"]),
+    ("HostEnv", &["Debug"]),
+    ("HostProc", &["Debug"]),
 ];
 
 /// The largest tuple the generated impls cover.
@@ -84,6 +141,7 @@ pub fn builtin_impls() -> &'static str {
                 let _ = writeln!(s, "    @intrinsic(\"{name}\")\n    pure def {sig}");
             }
         }
+        sized_impls(&mut s);
         // The operators of the numbers, as traits for generic code; `a + b`
         // on numbers stays the language's own operation.
         for ty in ["int", "f64"] {
@@ -108,7 +166,7 @@ pub fn builtin_impls() -> &'static str {
 /// interpolation `"{self}"` gives without a spec (the host's structural
 /// text).
 fn leaf_format(t: &str, ty: &str) -> Option<String> {
-    if matches!(ty, "Fs" | "Env" | "Clock" | "System") {
+    if is_handle(ty) {
         return None;
     }
     let (sig, plain, with_spec) = match (t, ty) {
@@ -122,6 +180,16 @@ fn leaf_format(t: &str, ty: &str) -> Option<String> {
             );
         }
         ("Display", "int") => ("fmt", "\"{self}\"", "f.write(s.int(self))".to_string()),
+        // A sized integer formats as the `int` it equals; a `u64` beyond
+        // `int` as text.
+        ("Display", "u64") => (
+            "fmt",
+            "\"{self}\"",
+            "match self.to_int():\n                    case Some(n):\n                        f.write(s.int(n))\n                    \
+             case None:\n                        f.write(s.text(\"{self}\"))"
+                .to_string(),
+        ),
+        ("Display", t) if SIZED.contains(&t) => ("fmt", "\"{self}\"", "f.write(s.int(self.to_int()))".to_string()),
         ("Display", "f64") => ("fmt", "\"{self}\"", "f.write(s.float(self))".to_string()),
         // `?` as the spec's type asks for the `Debug` text.
         ("Display", _) => (
@@ -197,5 +265,93 @@ fn tuple_impls(s: &mut String, n: usize) {
     let _ = writeln!(s, "    pure def hash(self, mut h: Hasher):");
     for i in 0..n {
         let _ = writeln!(s, "        self.{i}.hash(mut h)");
+    }
+}
+
+/// The capability handles and host objects among the leaves: they print
+/// as their type's name and take no format spec.
+fn is_handle(ty: &str) -> bool {
+    matches!(
+        ty,
+        "Fs" | "Net"
+            | "Clock"
+            | "Rand"
+            | "Env"
+            | "Proc"
+            | "System"
+            | "TestClock"
+            | "HostFs"
+            | "HostNet"
+            | "HostClock"
+            | "HostRand"
+            | "HostEnv"
+            | "HostProc"
+    )
+}
+
+/// The sized integer types (03, "Numbers"), narrowest first in each kind.
+pub const SIZED: &[&str] = &["u8", "u16", "u32", "u64", "i8", "i16", "i32"];
+
+/// The bits of a sized integer type and whether it is signed; `int` is
+/// `i64`.
+pub fn int_width(ty: &str) -> Option<(u32, bool)> {
+    Some(match ty {
+        "u8" => (8, false),
+        "u16" => (16, false),
+        "u32" => (32, false),
+        "u64" => (64, false),
+        "i8" => (8, true),
+        "i16" => (16, true),
+        "i32" => (32, true),
+        "int" => (64, true),
+        _ => return None,
+    })
+}
+
+/// Whether every value of integer type `from` is one of `to` (the implicit
+/// widening of 03).
+pub fn widens(from: &str, to: &str) -> bool {
+    let (Some((fw, fs)), Some((tw, ts))) = (int_width(from), int_width(to)) else { return false };
+    from != to && if fs == ts { tw >= fw } else { !fs && ts && tw > fw }
+}
+
+/// The arithmetic of the sized integers: the operator traits for generic
+/// code, the conversions to and from `int`, and `Into` for each widening.
+fn sized_impls(s: &mut String) {
+    for ty in SIZED {
+        let signed = int_width(ty).is_some_and(|(_, sg)| sg);
+        for (t, m) in [("Add", "add"), ("Sub", "sub"), ("Mul", "mul"), ("Rem", "rem")] {
+            let _ = writeln!(s, "\nimpl {t} for {ty}:");
+            let _ = writeln!(s, "    @intrinsic(\"{ty}.{m}\")\n    pure def {m}(self, other: {ty}) -> {ty}");
+        }
+        if signed {
+            let _ = writeln!(s, "\nimpl Neg for {ty}:");
+            let _ = writeln!(s, "    @intrinsic(\"{ty}.neg\")\n    pure def neg(self) -> {ty}");
+        }
+        let _ = writeln!(s, "\nimpl {ty}:");
+        if *ty == "u64" {
+            let _ = writeln!(s, "    ## The value as an `int`, or `None` above `int`'s range.");
+            let _ = writeln!(s, "    @intrinsic(\"u64.to_int\")\n    pure def to_int(self) -> int?");
+        } else {
+            let _ = writeln!(s, "    ## The value as an `int`, which holds every one.");
+            let _ = writeln!(s, "    @intrinsic(\"{ty}.to_int\")\n    pure def to_int(self) -> int");
+        }
+        let _ = writeln!(s, "    @intrinsic(\"{ty}.cmp\")\n    pure def cmp(self, other: {ty}) -> Ordering");
+        let _ = writeln!(s, "\nimpl FromLiteral[int] for {ty}:");
+        let _ = writeln!(
+            s,
+            "    @intrinsic(\"{ty}.from_literal\")\n    pure def from_literal(literal: int) -> {ty}"
+        );
+        for to in SIZED.iter().chain(std::iter::once(&"int")) {
+            if widens(ty, to) {
+                let _ = writeln!(s, "\nimpl Into[{to}] for {ty}:");
+                let _ = writeln!(s, "    @intrinsic(\"{to}.widen\")\n    pure def into(self) -> {to}");
+            }
+        }
+    }
+    let _ = writeln!(s, "\nimpl int:");
+    for ty in SIZED {
+        let _ = writeln!(s, "    ## The value as a `{ty}`, or `None` if it does not fit.");
+        let _ = writeln!(s, "    @intrinsic(\"int.to_{ty}\")\n    pure def to_{ty}(self) -> {ty}?");
     }
 }

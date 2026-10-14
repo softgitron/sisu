@@ -1,0 +1,14 @@
+Ok("alpha")
+refused: PermissionDenied(path="data/c.txt")
+Ok("alpha")
+Err(PermissionDenied(path="../secret.txt"))
+Err(PermissionDenied(path="/secret.txt"))
+False
+Err(NotFound(path="missing.txt"))
+Ok(["a.txt", "sub"])
+Ok(["sub/b.txt"])
+Ok("beta")
+Err(PermissionDenied(path="secret.txt"))
+refused: PermissionDenied(path="a.txt")
+wrote c.txt
+Ok("new")

@@ -1,0 +1,22 @@
+# Civil time (11, `std.time`): `DateTime` to the nanosecond, RFC 3339
+# parsing written in Sisu, and the arithmetic with `Duration`:
+# `t - u` is a `Duration` (the impl binds `Sub`'s `Output`), `t + d` and
+# `t - d` are times.
+
+def main():
+    let t = DateTime.parse("2026-10-11T12:00:00Z").expect("valid")
+    print(t)
+    print(t.unix_seconds())
+    print(t + Duration.hours(36))
+    print(t - Duration.seconds(1))
+    print(t - DateTime.epoch() > Duration.hours(24 * 365 * 56))
+    print(DateTime.parse("2026-10-11T14:30:00.125+02:30").expect("valid"))
+    print(DateTime.parse("1969-12-31T23:59:59Z").map((x) -> x.unix_seconds()))
+    print(DateTime.parse("2024-02-29T00:00:00Z").is_ok())
+    print(DateTime.parse("2023-02-29T00:00:00Z"))
+    print(DateTime.parse("2026-13-01T00:00:00Z").is_ok())
+    print(DateTime.parse("2026-10-11 12:00:00Z").is_ok())
+    print(DateTime.parse("2300-01-01T00:00:00Z").is_ok())
+    print(DateTime.from_unix(86400))
+    print(Duration.minutes(90) + Duration.seconds(30))
+    print("{t:%Y/%m/%d %H:%M}")

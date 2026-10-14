@@ -279,10 +279,12 @@ fn floats_print_shortest_with_a_point() {
 #[test]
 fn civil_time_formats() {
     // 2026-10-13T12:34:56Z.
-    let t = 1_791_894_896;
+    let t = 1_791_894_896 * 1_000_000_000;
     assert_eq!(strftime(t, "%Y-%m-%dT%H:%M:%SZ"), "2026-10-13T12:34:56Z");
     assert_eq!(strftime(t, "%H:%M"), "12:34");
     assert_eq!(strftime(0, "%F %T"), "1970-01-01 00:00:00");
+    assert_eq!(crate::format::datetime_text(t + 500_000_000), "2026-10-13T12:34:56.5Z");
+    assert_eq!(crate::format::datetime_text(-1), "1969-12-31T23:59:59.999999999Z");
 }
 
 /// The host's part of a format spec: digits and float text. Specs

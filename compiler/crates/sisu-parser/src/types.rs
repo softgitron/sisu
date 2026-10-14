@@ -6,7 +6,7 @@
 //! option    := ref_type '?'*
 //! ref_type  := 'ref' 'mut'? primary_type | primary_type
 //! primary_type := path generic_args? | 'Self' | 'pure'? '(' types? ')' ('->' type)?
-//!              | 'dyn' path
+//!              | 'dyn' path | '{' option (',' option)* '}'
 //! generic_args := '[' (type | integer) (',' (type | integer))* ']'
 //! ```
 //!
@@ -87,6 +87,9 @@ impl Parser<'_> {
 
     fn primary_type(&mut self) {
         match self.current() {
+            // A union of error sets as a type of its own (05, "Error sets"):
+            // `type AppError = {IoError, ParseError}`.
+            L_BRACE => self.error_set(),
             IDENT if self.current_text() == "pure" && self.nth(1) == L_PAREN => {
                 self.start(FN_TYPE);
                 self.bump();

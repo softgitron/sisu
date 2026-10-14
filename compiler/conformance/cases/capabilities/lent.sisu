@@ -1,0 +1,24 @@
+# Lent capabilities (06; Q-51): `fs.lend()` is a `Lent[Fs]`, a view of the
+# handle at no run-time cost. A generic parameter bounded by the
+# operations trait accepts it with every other form; it does what the
+# handle does, through the same trait.
+
+def count_chars[F: FsOps](fs: F, names: list[str]) -> int:
+    var n = 0
+    for name in names:
+        let text = fs.read_to_string(Path.new(name)) else:
+            continue
+        n += len(text)
+    return n
+
+def now_twice[C: ClockOps](clock: C) -> bool:
+    return clock.now() == clock.now()
+
+def main():
+    let fs = Fs.in_memory({"a.txt": "alpha", "b.txt": "be"})
+    print(count_chars(fs.lend(), ["a.txt", "b.txt", "c.txt"]))
+    print(count_chars(fs, ["a.txt"]))
+    print(count_chars(fs.read_only(), ["b.txt"]))
+    let lent = fs.lend()
+    print(lent.exists("a.txt"))
+    print(now_twice(Clock.frozen_at(DateTime.epoch()).lend()))

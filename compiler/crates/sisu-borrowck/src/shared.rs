@@ -44,6 +44,9 @@ fn crossing_intrinsic(name: &str) -> bool {
             | "task.scope"
             | "task.race"
             | "task.shield"
+            // A capability handle may reach every task.
+            | "cap.new"
+            | "Cap.new"
     )
 }
 

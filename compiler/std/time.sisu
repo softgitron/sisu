@@ -1,0 +1,3 @@
+##! std.time (11): `DateTime`, `Duration`, `Timer`, `TimeError` and the
+##! test clock `TestClock` are the prelude's, which this module also names.
+##! `Ticker` and `Timeline` (D-075) are not written yet.

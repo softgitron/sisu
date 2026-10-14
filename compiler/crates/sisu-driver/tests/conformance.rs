@@ -35,7 +35,7 @@ fn example_copies_match_the_proposal() {
 #[test]
 fn examples_with_a_main_start_with_the_proposal() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for name in ["traits.sisu", "errors.sisu"] {
+    for name in ["traits.sisu", "errors.sisu", "capabilities.sisu", "concurrency.sisu"] {
         let original =
             std::fs::read_to_string(root.join("../proposal/examples").join(name)).unwrap_or_default();
         let case =
@@ -61,6 +61,26 @@ fn ownership_core_matches_the_proposal() {
     let case = std::fs::read_to_string(root.join("conformance/cases/ownership/proposal_core.sisu"))
         .unwrap_or_default();
     assert!(case.starts_with(core), "ownership/proposal_core.sisu no longer starts with the proposal's text");
+}
+
+/// The `Shared` section of proposal/examples/ownership.sisu (`shared_demo`
+/// and `counter_demo`, which need tasks) is the case
+/// `ownership/proposal_shared.sisu`, kept identical.
+#[test]
+fn ownership_shared_matches_the_proposal() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let original =
+        std::fs::read_to_string(root.join("../proposal/examples/ownership.sisu")).unwrap_or_default();
+    let start = original.find("# Shared ownership is a type you choose.");
+    let end = original.find("# Graphs: an arena with generational handles, not pointers.");
+    assert!(start.is_some() && end.is_some(), "proposal/examples/ownership.sisu has no Shared section");
+    let section = original[start.unwrap_or(0)..end.unwrap_or(0)].trim_end();
+    let case = std::fs::read_to_string(root.join("conformance/cases/ownership/proposal_shared.sisu"))
+        .unwrap_or_default();
+    assert!(
+        case.contains(section),
+        "ownership/proposal_shared.sisu no longer holds the proposal's Shared section"
+    );
 }
 
 /// The graph section of proposal/examples/ownership.sisu (`Arena` and
@@ -99,4 +119,21 @@ fn comptime_derive_matches_the_proposal() {
         case.contains(section),
         "comptime/proposal_derive.sisu no longer holds the proposal's derive section"
     );
+}
+
+/// std.x.http's tests pass under a thousand schedules (18, Phase 6: "`sisu
+/// test` of it under `--explore 1000`"); the suite itself runs fewer.
+#[test]
+fn http_tests_pass_under_a_thousand_schedules() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let case = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases/http/server.sisu");
+    let out = std::process::Command::new(&sisu)
+        .args(["test", "--explore", "1000"])
+        .arg(&case)
+        .output()
+        .expect("sisu runs");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "sisu test --explore 1000 failed:\n{stdout}");
+    assert!(stdout.contains("0 failed"), "{stdout}");
+    assert!(stdout.contains("explored 1000 schedules per test"), "{stdout}");
 }

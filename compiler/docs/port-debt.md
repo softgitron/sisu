@@ -9,8 +9,8 @@ backend can be transcriptions of documented behaviour
 ([architecture.md](architecture.md)) instead of reverse engineering.
 
 Each entry says where the debt is, why it is debt, and what paying it
-means. The last part lists what Phases 0, 2, 3 and 4 ask for that stage 0
-does not have yet.
+means. The last part lists what Phases 0, 2, 3, 4 and 6 ask for that
+stage 0 does not have yet.
 
 ## Behaviour that comes from the host
 
@@ -47,21 +47,24 @@ per-process SipHash key of D-049 as std's, and lift `E0398`.
 **Text methods are host code.** `str`'s searching, splitting, trimming,
 replacing and case methods, and `String`'s, are intrinsics whose
 contracts are their prelude comments; of the text functions only
-`parse_int`, `join` and formatting are Sisu. 03 makes `String` a
-`list[u8]` with a validity invariant and `s.byte_slice(a, b)` the
-explicit, checked way into a text, which needs `u8`, `Slice` and `bytes`
-(not yet done, below); written over characters now, the methods would be
-rewritten then. *Pay*: with those types, write the methods in Sisu over
-bytes, keeping only the Unicode tables (above) on the host.
+`parse_int`, `join`, formatting and `DateTime.parse` are Sisu. 03 makes
+`String` a `list[u8]` with a validity invariant and `s.byte_slice(a, b)`
+the explicit, checked way into a text. `u8`, `bytes` and `Slice` now
+exist, but `String` is still a host string, so the methods could not yet
+be written over its bytes without a copy per call. *Pay*: represent
+`String` as bytes with the invariant, then write the methods in Sisu over
+them, keeping only the Unicode tables (above) on the host.
 
 **Number parsing in `cli.parse`.** An `int` or `f64` option's value is
 read by Rust's `parse` (`str.parse_int` is Sisu, in the prelude). *Pay*:
 with "`cli.parse` is one intrinsic" below, through `str.parse_int` and a
 Sisu `f64` parser (correctly rounded, as for literals).
 
-**Civil time.** `DateTime` is seconds since the epoch in UTC and
-`strftime` supports a fixed subset (`format.rs`, `fmt.strftime`). *Pay*:
-the time module of `std` replaces it; time zones are its problem.
+**Civil time.** `DateTime` is nanoseconds since the epoch in UTC, in an
+`i64` (the years 1678 to 2261); its RFC 3339 parser is Sisu, its
+`Display` and `strftime` (a fixed subset) are the host's (`format.rs`).
+*Pay*: the time module of `std` replaces them; time zones are its
+problem.
 
 ## Shortcuts in the interpreter
 
@@ -164,11 +167,36 @@ command-line trait, now that derives run at compile time; it needs
 reflection over field types and defaults (Phase 8), and then calls the
 defaults as ordinary Sisu.
 
-**Capabilities are host objects with flags.** `read_only` and
-`restrict_to` are flags on the Rust-side handle, and `Fs.in_memory` is a
-Rust map shared through a reference-counted cell. *Pay*: 18 puts fakes in
-Sisu over the `std.cap` traits; the shared map needs synchronisation once
-tasks exist (Phase 6).
+**Capability objects are never freed.** A capability handle's object and
+a `Cap`'s value live in a heap cell that every copy reaches and that
+nothing frees, because a `Copy` handle has no last copy; a `Drop` of the
+object never runs. In the interpreter the cells go with the run. *Pay*:
+the backend needs a lifetime for them: an arena per run (they are few),
+or counting copies, which would make handles not `Copy`.
+
+**Handles forward by dispatch.** A call on a capability handle or a
+`Lent` is a `call trait` that the dispatcher resolves by the object in
+the handle's cell (`cap.forward` in the prelude, a special case in
+lowering's `callee_for` and in `dispatch.rs`), since the object's type is
+known only at run time. *Pay*: none for the interpreter; a backend
+compiles a handle as a `dyn` of its trait.
+
+**`Wrap[T]` is written per capability.** 06 builds it from the
+reflection behind `Fake[T]`; std.cap writes its impl for each standard
+capability's trait. *Pay*: with reflection over traits (Phase 8), one
+generic impl, and `Fake[T]` beside it.
+
+**The host's network is polled.** A host socket that would block makes
+its task wait one millisecond on the host's clock and try again; there is
+no event loop, and a host socket is closed only by `close` (dropping a
+`Conn` does not). *Pay*: an event loop (`epoll` or `kqueue`) behind the
+host contract, and a `Drop` for the host's streams.
+
+**`Slice` is a copy, and not `Copy`.** A `Slice[T]` is a list of copies
+of the values it views (like `str`), so making one costs a copy, and it
+is passed by reference because an intrinsic cannot point into a value
+passed to it by value. *Pay*: a view is a pointer and a length in the
+backend, and then `Copy`, as `str` is.
 
 **A method's type is read from its name.** The must-consume rule (a
 type's own methods are where its values end) recognises a method by its
@@ -232,9 +260,27 @@ monomorphisation (the backend), evaluate per instantiation.
 represents (`sisu-interp/src/value.rs`), with their contracts in the
 prelude; a `Shared`'s value lives in a heap of cells that are never
 reused, and the monitor sees a mutex's interior through the guard's
-path. *Pay*: write them in Sisu over raw memory and atomics (stage 1 and
-the backend), with the count's atomicity decided by escape analysis
-(06, when tasks exist).
+path. The escape analysis tags each `Shared` site atomic or not, but the
+interpreter's counts are never contended. *Pay*: write them in Sisu over
+raw memory and atomics (stage 1 and the backend), with the tags choosing
+the counting.
+
+**The scheduler is the interpreter's.** Tasks are frame stacks swapped
+into the interpreter, the run is single-threaded, and a schedule is the
+seeded generator's (`sched.rs`): there is no M:N runtime, no PCT or
+exhaustive mode, no `sim` profile and no work stealing. A generator
+dropped before its end is abandoned; a receiver's or generator's
+iterator inside another iterator's adapter cannot wait (`R0091`); in a
+`pure` scope the lowest-index failure is reported, but a body that joins
+a later task first sees it in time order. *Pay*: the runtime of 12's
+profiles; PCT and bounded exhaustive scheduling in the explorer (18,
+Phase 6); the generator's frames dropped with it.
+
+**Sized integers and bytes are host values.** A `u64` is a value kind of
+its own and the other sized integers are `int` values kept in range by
+typed intrinsics (`sisu-interp/src/sized.rs`); `bytes` is a shared
+immutable host buffer. *Pay*: none for the interpreter; the backend gives
+each its width.
 
 **Invariants are checked only by `Mutex`.** A struct's `invariant` lines
 become a generated `__invariant` method that only D-077's check calls,
@@ -247,7 +293,7 @@ in the host's display text (`format.rs`) because error sets display
 structurally. *Pay*: a `Display` impl in the prelude, when error sets can
 have impls that the fast path respects.
 
-## Not yet done from Phases 0, 2, 3 and 4
+## Not yet done from Phases 0, 2, 3, 4 and 6
 
 - **Modules and packages.** Phase 2 asks for file and directory modules,
   `pub`/`pub(package)`, `sisu.toml` with path dependencies and `sisu run`
@@ -273,20 +319,20 @@ have impls that the fast path respects.
   conformance cases are kept starting with the originals by a test.
   `ownership.sisu`: everything before `Shared` (`ownership/proposal_core`)
   and the graph section (`ownership/proposal_graph`) run, kept identical
-  by tests; `shared_demo` and `counter_demo` need `task.scope` (Phase 6).
+  by tests, as does the `Shared` section (`shared_demo` and
+  `counter_demo`, `ownership/proposal_shared`).
   `comptime.sisu`: the user-defined derive (`Describe` and `Point`) runs
   as `comptime/proposal_derive`, kept identical by a test; the rest needs
-  `Array`, the sized integers, const generics, reflection in generic code
-  (`if comptime reflect.is_int(T)` narrowing `T`), `target`, `@cfg`, and
-  the `json` and `sql` packages. `capabilities.sisu`, `concurrency.sisu`,
-  `contracts.sisu`, `ffi.sisu` and `testing.sisu` use features of Phases
-  6 and 8.
+  `Array`, const generics, reflection in generic code (`if comptime
+  reflect.is_int(T)` narrowing `T`), `target`, `@cfg`, and the `json` and
+  `sql` packages. `capabilities.sisu` (its tests) and `concurrency.sisu`
+  run with their missing declarations and a `main` appended, kept
+  starting with the originals by a test. `contracts.sisu`, `ffi.sisu`
+  and `testing.sisu` use features of Phase 8.
 
 From Phase 3 (18, "Phase 3: the ownership checker and the dynamic
 monitor"):
 
-- **Capture by move.** `own` closures copy their captures, which must be
-  `Copy` (`E0423`); a capture by move arrives with tasks (Phase 6).
 - **The generation-checked reference type** behind a flag, if Phase 0
   triggered it; `sisu check --diary`.
 - **The corpora**: a translated slice of rustc's borrow-checker UI tests,
@@ -305,11 +351,10 @@ monitor"):
 
 From Phase 4 (18, "Phase 4: traits, generics, std in Sisu"):
 
-- **`Array`, `Slice`, the sized integer types, const generics and byte
-  strings** are `E0900`.
-- **`@derive(Default)` and the auto traits** `Send`, `Sync` and
-  `Escapable` (consulted at spawn boundaries from Phase 6); `Copy` is
-  computed from fields.
+- **`Array` and const generics, `f32` and the 128-bit integers** are
+  `E0900`; the sized integers, `bytes` and `Slice` exist.
+- **`@derive(Default)`**; the auto traits `Send`, `Sync` and `Escapable`
+  are inferred, and `Copy` is computed from fields.
 - **`std` as modules.** The core traits and their impls, the iterator
   adapters, the collection methods that take closures, formatting and
   `parse_int` are written in Sisu, but in the prelude, not as `std.core`,
@@ -321,3 +366,26 @@ From Phase 4 (18, "Phase 4: traits, generics, std in Sisu"):
 - **Reflection beyond derive** (Phase 8 in 18): `reflect` in generic
   code, `comptime for` outside a derive's template, `x.[f]` there, and
   `comptime def` in a trait other than its derive are `E0900`.
+
+From Phase 6 (18, "Phase 6: tasks, capabilities, an HTTP server in
+Sisu"):
+
+- **The `sim` profile**: fakes that inject faults from the called
+  method's error set, a `Net` with latency, loss and partitions, an `Fs`
+  with a pessimistic durability model, and PCT and bounded exhaustive
+  scheduling with state hashing. The explorer has random seeds only.
+- **`RwLock`, `Atomic`, `Condvar`, `Once`**, and `task.scope`'s trace
+  context beyond the task path `log` prints.
+- **`sisu audit --caps`**: capability parameters per I/O function,
+  threading depth to `main`, structs bundling three or more.
+- **The 10k-connection echo server** (the exit criterion is functional,
+  not fast): the polled host network above holds connections but has not
+  been measured at that count; the corpus echo and HTTP servers run over
+  `Net.fake` under `--explore 1000` (`http/server`).
+- **`--stats` latency of an I/O task under a compute-bound sibling** (the
+  Q-34 number) is reported but not yet measured on a corpus program.
+- **Per-test capability declarations** beyond `sys: System` (which
+  receives the real one), the test cache keyed by the capabilities a test
+  touched, replay tokens, and tests in parallel: stage 0 runs them one
+  after another, each in an interpreter of its own.
+

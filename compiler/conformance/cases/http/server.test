@@ -1,0 +1,6 @@
+test "a server answers a client" ... ok
+test "clients on many tasks each get their own answer" ... ok
+test "nothing listens: the client is refused" ... ok
+test "the scripted network counts requests" ... ok
+test "an echo server returns what it reads" ... ok
+5 passed, 0 failed, 0 blocked

@@ -63,6 +63,52 @@ impl Host for WithArgs<'_> {
     fn exists(&self, path: &str) -> bool {
         self.inner.exists(path)
     }
+    fn read_bytes(&mut self, path: &str) -> Result<Vec<u8>, sisu_interp::IoErrorKind> {
+        self.inner.read_bytes(path)
+    }
+    fn write_bytes(&mut self, path: &str, data: &[u8]) -> Result<(), sisu_interp::IoErrorKind> {
+        self.inner.write_bytes(path, data)
+    }
+    fn metadata(&self, path: &str) -> Result<(i64, i64, bool), sisu_interp::IoErrorKind> {
+        self.inner.metadata(path)
+    }
+    fn remove_file(&mut self, path: &str) -> Result<(), sisu_interp::IoErrorKind> {
+        self.inner.remove_file(path)
+    }
+    fn list_dir(&self, path: &str) -> Result<Vec<String>, sisu_interp::IoErrorKind> {
+        self.inner.list_dir(path)
+    }
+    fn create_dir(&mut self, path: &str) -> Result<(), sisu_interp::IoErrorKind> {
+        self.inner.create_dir(path)
+    }
+    fn random_bits(&mut self) -> u64 {
+        self.inner.random_bits()
+    }
+    fn tcp_connect(&mut self, host: &str, port: u16) -> Result<u64, sisu_interp::NetFail> {
+        self.inner.tcp_connect(host, port)
+    }
+    fn tcp_listen(&mut self, host: &str, port: u16) -> Result<(u64, u16), sisu_interp::NetFail> {
+        self.inner.tcp_listen(host, port)
+    }
+    fn tcp_accept(&mut self, l: u64) -> Result<sisu_interp::Poll<(u64, String)>, sisu_interp::NetFail> {
+        self.inner.tcp_accept(l)
+    }
+    fn tcp_read(&mut self, c: u64, max: usize) -> Result<sisu_interp::Poll<Vec<u8>>, sisu_interp::NetFail> {
+        self.inner.tcp_read(c, max)
+    }
+    fn tcp_write(&mut self, c: u64, data: &[u8]) -> Result<sisu_interp::Poll<usize>, sisu_interp::NetFail> {
+        self.inner.tcp_write(c, data)
+    }
+    fn tcp_close(&mut self, h: u64) {
+        self.inner.tcp_close(h)
+    }
+    fn run_process(
+        &mut self,
+        program: &str,
+        args: &[String],
+    ) -> Result<(i64, String, String), sisu_interp::IoErrorKind> {
+        self.inner.run_process(program, args)
+    }
 }
 
 /// Command-line flags before the file, and the rest. A flag that takes a
@@ -149,6 +195,52 @@ impl Host for Captured<'_> {
     }
     fn exists(&self, path: &str) -> bool {
         self.inner.exists(path)
+    }
+    fn read_bytes(&mut self, path: &str) -> Result<Vec<u8>, sisu_interp::IoErrorKind> {
+        self.inner.read_bytes(path)
+    }
+    fn write_bytes(&mut self, path: &str, data: &[u8]) -> Result<(), sisu_interp::IoErrorKind> {
+        self.inner.write_bytes(path, data)
+    }
+    fn metadata(&self, path: &str) -> Result<(i64, i64, bool), sisu_interp::IoErrorKind> {
+        self.inner.metadata(path)
+    }
+    fn remove_file(&mut self, path: &str) -> Result<(), sisu_interp::IoErrorKind> {
+        self.inner.remove_file(path)
+    }
+    fn list_dir(&self, path: &str) -> Result<Vec<String>, sisu_interp::IoErrorKind> {
+        self.inner.list_dir(path)
+    }
+    fn create_dir(&mut self, path: &str) -> Result<(), sisu_interp::IoErrorKind> {
+        self.inner.create_dir(path)
+    }
+    fn random_bits(&mut self) -> u64 {
+        self.inner.random_bits()
+    }
+    fn tcp_connect(&mut self, host: &str, port: u16) -> Result<u64, sisu_interp::NetFail> {
+        self.inner.tcp_connect(host, port)
+    }
+    fn tcp_listen(&mut self, host: &str, port: u16) -> Result<(u64, u16), sisu_interp::NetFail> {
+        self.inner.tcp_listen(host, port)
+    }
+    fn tcp_accept(&mut self, l: u64) -> Result<sisu_interp::Poll<(u64, String)>, sisu_interp::NetFail> {
+        self.inner.tcp_accept(l)
+    }
+    fn tcp_read(&mut self, c: u64, max: usize) -> Result<sisu_interp::Poll<Vec<u8>>, sisu_interp::NetFail> {
+        self.inner.tcp_read(c, max)
+    }
+    fn tcp_write(&mut self, c: u64, data: &[u8]) -> Result<sisu_interp::Poll<usize>, sisu_interp::NetFail> {
+        self.inner.tcp_write(c, data)
+    }
+    fn tcp_close(&mut self, h: u64) {
+        self.inner.tcp_close(h)
+    }
+    fn run_process(
+        &mut self,
+        program: &str,
+        args: &[String],
+    ) -> Result<(i64, String, String), sisu_interp::IoErrorKind> {
+        self.inner.run_process(program, args)
     }
 }
 

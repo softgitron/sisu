@@ -106,6 +106,61 @@ impl Checker<'_> {
             let inner = self.resolved(inner);
             return self.coerce_to_dyn(x, &inner, &tr, &exp, Coercion::BoxToDyn);
         }
+        // A `list[T]` as a `Slice[T]`, and `bytes` as a `Slice[u8]`: a view.
+        if let Ty::Adt(sd, sargs) = &exp
+            && prog.builtin(*sd) == Some("Slice")
+            && let Ty::Adt(src, srcargs) = self.resolved(actual.strip_ref())
+        {
+            let elem = sargs.first().cloned().unwrap_or(Ty::Error);
+            let src_ty = Ty::Adt(src, srcargs.clone());
+            let ok = match prog.builtin(src) {
+                Some("bytes") => {
+                    let u8_ty = self.sized_ty("u8");
+                    self.infer.try_unify(&elem, &u8_ty)
+                }
+                Some("list") => srcargs.first().is_some_and(|t| self.infer.try_unify(t, &elem)),
+                _ => false,
+            };
+            if ok && let Some(call) = self.builtin_call(x.clone(), &src_ty, "as_slice", exp.clone()) {
+                return call;
+            }
+        }
+        // An integer as a wider integer type that holds all its values.
+        if let (Some(a), Some(b)) = (self.int_kind(&actual), self.int_kind(&exp))
+            && sisu_resolve::std_sources::widens(a, b)
+        {
+            return self.wrap(x, Coercion::IntWiden, exp);
+        }
+        // A value of a type that implements a capability's operations
+        // trait, as the capability (06, "Capabilities").
+        if let Ty::Adt(d, _) = &exp
+            && let Some(ops) = prog.capability_ops(*d)
+        {
+            let (x, concrete) = match &actual {
+                Ty::Ref(inner, _) if self.is_copy(inner) => {
+                    let inner = self.resolved(inner);
+                    (self.wrap(x, Coercion::DerefCopy, inner.clone()), inner)
+                }
+                _ => (x, actual.clone()),
+            };
+            let concrete = prog.normalize(&self.infer.zonk(&concrete), &self.env);
+            if concrete == exp {
+                return x;
+            }
+            let tr = sisu_resolve::TraitRef { def: ops, args: Vec::new() };
+            if !matches!(concrete, Ty::Var(_))
+                && prog.implements(&concrete, &tr, &self.env) != sisu_resolve::Answer::No
+            {
+                return self.coerce_to_cap(x, &concrete, tr, &exp);
+            }
+            let found_s = self.show(&concrete);
+            let d = self
+                .error(msg::TYPE_MISMATCH, self.range_of(&x))
+                .with("expected", self.show(&exp))
+                .with("found", found_s);
+            self.report(d);
+            return self.wrap(x, Coercion::Mismatch, exp);
+        }
         // `Iterable[T]` accepts any collection or iterator of `T`.
         if let Ty::Adt(d, args) = &exp
             && Some(*d) == prog.wk.iterable
@@ -187,6 +242,30 @@ impl Checker<'_> {
         }
         self.bounds.push((concrete, tr.clone(), x.span));
         self.wrap(x, kind, exp.clone())
+    }
+
+    /// A value as a capability handle: it implements the operations trait,
+    /// and since the handle can be stored and reach every task, it owns
+    /// what it holds, is not must-consume (the handle never drops it), and
+    /// is `Send` and `Sync` (checked once types are known).
+    fn coerce_to_cap(&mut self, x: Expr, concrete: &Ty, tr: sisu_resolve::TraitRef, exp: &Ty) -> Expr {
+        let prog = self.prog;
+        let cap_name = self.show(exp);
+        let owner: &'static str = match exp {
+            Ty::Adt(d, _) => match prog.builtin(*d) {
+                Some("Fs") => "Fs",
+                Some("Net") => "Net",
+                Some("Clock") => "Clock",
+                Some("Rand") => "Rand",
+                Some("Env") => "Env",
+                _ => "Proc",
+            },
+            _ => "Proc",
+        };
+        self.bounds.push((concrete.clone(), tr, x.span));
+        self.owner_checks.push((concrete.clone(), owner, x.span));
+        self.cap_checks.push((concrete.clone(), cap_name, x.span));
+        self.wrap(x, Coercion::ToCap, exp.clone())
     }
 
     /// A function passed where a `pure` one is required must be pure.
@@ -320,9 +399,9 @@ impl Checker<'_> {
             ast::ExprKind::Char(c) => Expr::new(ExprKind::Char(*c), Ty::Char, span),
             ast::ExprKind::Str(parts) => self.string_literal(parts, e.range, expected),
             ast::ExprKind::RawStr(s) => self.plain_string(s.clone(), span, expected),
-            ast::ExprKind::ByteStr(_) => {
-                self.unsupported(e.range, "a byte string", "byte strings (Phase 4)");
-                Expr::error(span)
+            ast::ExprKind::ByteStr(b) => {
+                let ty = self.prog.lookup_in(self.prog.prelude, "bytes").map(|d| Ty::Adt(d, Vec::new()));
+                Expr::new(ExprKind::Bytes(b.clone()), ty.unwrap_or(Ty::Error), span)
             }
             ast::ExprKind::Name(n) => self.name_expr(n, e.range, expected),
             ast::ExprKind::SelfValue => match self.lookup_local("self") {
@@ -450,8 +529,17 @@ impl Checker<'_> {
         expected: Option<&Ty>,
     ) -> Expr {
         let span = self.span(range);
+        // A sized integer: the suffix's, or the expected type's.
+        let sized = match suffix {
+            None => expected.and_then(|t| self.int_kind(t)).filter(|k| *k != "int"),
+            Some("uint") => Some("u64"),
+            Some(s) => sisu_resolve::std_sources::SIZED.iter().copied().find(|k| *k == s),
+        };
+        if let Some(k) = sized {
+            return self.sized_literal(k, value, text, negative, range);
+        }
         match suffix {
-            None | Some("int") => {}
+            None | Some("int") | Some("i64") => {}
             Some("f64") => {
                 return Expr::new(
                     ExprKind::Float(value.unwrap_or(0) as f64 * if negative { -1.0 } else { 1.0 }),
@@ -481,6 +569,80 @@ impl Checker<'_> {
                 self.report(d);
                 Expr::error(span)
             }
+        }
+    }
+
+    /// An integer literal of the sized type `k`, checked to fit. A `u64`
+    /// literal is its 64-bit pattern.
+    fn sized_literal(
+        &mut self,
+        k: &str,
+        value: Option<u128>,
+        text: &str,
+        negative: bool,
+        range: TextRange,
+    ) -> Expr {
+        let span = self.span(range);
+        let (bits, signed) = sisu_resolve::std_sources::int_width(k).unwrap_or((64, true));
+        let ty =
+            self.prog.lookup_in(self.prog.prelude, k).map(|d| Ty::Adt(d, Vec::new())).unwrap_or(Ty::Error);
+        let max: u128 = if signed { (1u128 << (bits - 1)) - 1 } else { (1u128 << bits) - 1 };
+        let fits = match value {
+            Some(v) if negative => signed && v <= max + 1,
+            Some(v) => v <= max,
+            None => false,
+        };
+        if !fits {
+            let t = if negative { format!("-{text}") } else { text.to_string() };
+            let d = self.error(msg::TYPE_LITERAL_OUT_OF_RANGE, range).with("text", t).with("ty", k);
+            self.report(d);
+            return Expr::error(span);
+        }
+        let v = value.unwrap_or(0);
+        let n = if negative { (v as i128).wrapping_neg() as i64 } else { v as u64 as i64 };
+        Expr::new(ExprKind::Int(n), ty, span)
+    }
+
+    /// The sized integer type named `k` (`u8`).
+    pub fn sized_ty(&self, k: &str) -> Ty {
+        self.prog.lookup_in(self.prog.prelude, k).map(|d| Ty::Adt(d, Vec::new())).unwrap_or(Ty::Error)
+    }
+
+    /// An expression as the borrowed receiver of a builtin method: a
+    /// reference is passed on, a `Copy` value copied, anything else
+    /// borrowed.
+    pub fn receiver_arg(&self, x: Expr) -> Arg {
+        let mode = match self.resolved(&x.ty) {
+            Ty::Ref(..) => ArgMode::Value,
+            t if self.is_copy(&t) => ArgMode::Value,
+            _ => ArgMode::Borrow,
+        };
+        Arg { expr: x, mode }
+    }
+
+    /// A call of the builtin method `name` of `owner` on `recv`, with the
+    /// owner's type arguments and the result type `ret`.
+    fn builtin_call(&self, recv: Expr, owner: &Ty, name: &str, ret: Ty) -> Option<Expr> {
+        let Ty::Adt(d, a) = owner else { return None };
+        let m = self.prog.method(sisu_resolve::TyKey::Adt(*d), name)?;
+        let span = recv.span;
+        let recv = self.receiver_arg(recv);
+        Some(Expr::new(
+            ExprKind::Call { callee: Callee::Fn { def: m, type_args: a.clone() }, args: vec![recv] },
+            ret,
+            span,
+        ))
+    }
+
+    /// `int` for `int`, the type's name for a sized integer type.
+    pub fn int_kind(&self, t: &Ty) -> Option<&'static str> {
+        match self.resolved(t) {
+            Ty::Int => Some("int"),
+            Ty::Adt(d, a) if a.is_empty() => {
+                let b = self.prog.builtin(d)?;
+                sisu_resolve::std_sources::SIZED.iter().copied().find(|s| *s == b)
+            }
+            _ => None,
         }
     }
 
@@ -705,6 +867,7 @@ impl Checker<'_> {
                     let diag = self.error(msg::COMPTIME_ONLY, range).with("name", n);
                     self.report(diag);
                 }
+                self.check_internal(d, range);
                 let ret = self.fn_ret(d);
                 let ty = Ty::Fn(Box::new(FnTy {
                     params: f.params.iter().map(|p| p.ty.clone()).collect(),
@@ -867,11 +1030,17 @@ impl Checker<'_> {
             BinOp::Coalesce => return self.coalesce(lhs, rhs, range, expected),
             _ => {}
         }
-        let hint = expected.map(|t| self.resolved(t)).filter(|t| matches!(t, Ty::Int | Ty::Float));
+        let hint = expected
+            .map(|t| self.resolved(t))
+            .filter(|t| matches!(t, Ty::Int | Ty::Float) || self.int_kind(t).is_some());
         let l = self.infer_expr(lhs, hint.as_ref());
         let l = self.decay(l);
         let lt = self.resolved(&l.ty);
-        let rhint = if matches!(lt, Ty::Int | Ty::Float) { Some(lt.clone()) } else { None };
+        let rhint = if matches!(lt, Ty::Int | Ty::Float) || self.int_kind(&lt).is_some() {
+            Some(lt.clone())
+        } else {
+            None
+        };
         let r = self.infer_expr(rhs, rhint.as_ref());
         // A reference to what is not known yet, against a number, reads a
         // number (`n % it` over `found.iter()` before `found` is known).
@@ -886,6 +1055,30 @@ impl Checker<'_> {
         let l = match (&l.kind, self.resolved(&r.ty)) {
             (ExprKind::Int(n), Ty::Float) => Expr::new(ExprKind::Float(*n as f64), Ty::Float, l.span),
             _ => l,
+        };
+        // A literal on the left takes the sized integer type on the right.
+        let rt = self.resolved(&r.ty);
+        let l = match self.int_kind(&rt) {
+            Some(k)
+                if k != "int" && matches!(l.kind, ExprKind::Int(_)) && self.resolved(&l.ty) == Ty::Int =>
+            {
+                self.infer_expr(lhs, Some(&rt))
+            }
+            _ => l,
+        };
+        // Integers of two types: the narrower widens when that loses
+        // nothing (03, "Numbers").
+        let (l, r) = match (self.int_kind(&l.ty), self.int_kind(&r.ty)) {
+            (Some(a), Some(b)) if a != b && sisu_resolve::std_sources::widens(a, b) => {
+                let to = self.resolved(&r.ty);
+                (self.wrap(l, Coercion::IntWiden, to), r)
+            }
+            (Some(a), Some(b)) if a != b && sisu_resolve::std_sources::widens(b, a) => {
+                let to = self.resolved(&l.ty);
+                let r = self.wrap(r, Coercion::IntWiden, to);
+                (l, r)
+            }
+            _ => (l, r),
         };
         if let Some(call) = self.operator_call(op, l.clone(), Some(r.clone()), range) {
             return call;
@@ -979,6 +1172,21 @@ impl Checker<'_> {
         let lt = self.resolved(&lt);
         let rt = self.resolved(&rt);
         let is_text = |c: &Checker, t: &Ty| *t == Ty::Str || c.is_string(t);
+        // Two values of one sized integer type: what `int` allows.
+        if let (Some(a), Some(b)) = (self.int_kind(&lt), self.int_kind(&rt))
+            && a == b
+            && a != "int"
+        {
+            return match op {
+                BinOp::Div => {
+                    let d = self.error(msg::TYPE_INTEGER_DIVISION, range);
+                    self.report(d);
+                    (lt.clone(), false)
+                }
+                BinOp::And | BinOp::Or | BinOp::Coalesce => (Ty::Error, false),
+                _ => (lt.clone(), true),
+            };
+        }
         let result = match (op, &lt, &rt) {
             (BinOp::Div, Ty::Int, Ty::Int) => {
                 let op_span = self.op_span(l, r, "/");
@@ -1088,6 +1296,7 @@ impl Checker<'_> {
             (UnOp::Not, _) => Ty::Bool,
             (UnOp::Neg, Ty::Int | Ty::Float) => t.clone(),
             (UnOp::BitNot, Ty::Int) => Ty::Int,
+            (UnOp::BitNot, t) if self.int_kind(t).is_some() => t.clone(),
             _ => {
                 let d = self
                     .error(msg::TYPE_UNARY_OPERATOR, range)
@@ -1333,6 +1542,19 @@ impl Checker<'_> {
     /// The iterable of a `for` loop or comprehension clause.
     pub fn check_iterable(&mut self, iter: &ast::Expr, mode: ast::Mode) -> (Expr, ForMode, Ty) {
         let x = self.infer_expr(iter, None);
+        // `bytes` and a `Slice` are iterated through their iterators.
+        let base = self.resolved(x.ty.strip_ref());
+        let x = match &base {
+            Ty::Adt(d, a) if matches!(self.prog.builtin(*d), Some("bytes" | "Slice")) => {
+                let item = match self.prog.builtin(*d) {
+                    Some("bytes") => self.sized_ty("u8"),
+                    _ => Ty::Ref(Box::new(a.first().cloned().unwrap_or(Ty::Error)), false),
+                };
+                let iter_ty = self.prog.wk.iter.map(|i| Ty::Adt(i, vec![item])).unwrap_or(Ty::Error);
+                self.builtin_call(x.clone(), &base, "iter", iter_ty).unwrap_or(x)
+            }
+            _ => x,
+        };
         match self.iteration_item(&x.ty, mode) {
             Some((item, fmode)) => {
                 let x = match fmode {
@@ -2078,6 +2300,39 @@ impl Checker<'_> {
                 Expr::new(
                     ExprKind::Index { base: Box::new(b), index: Box::new(idx), kind: IndexKind::Dict },
                     v,
+                    span,
+                )
+            }
+            // `b[i]` and `s[i]`: a byte, a reference to a value; `b[i:j]`
+            // and `s[i:j]`: a copy of the bytes, a view of the values.
+            (Ty::Adt(d, a), _) if matches!(prog.builtin(*d), Some("bytes" | "Slice")) => {
+                let (name, args) = match arg {
+                    ast::IndexArg::Expr(e) => ("at", vec![self.check_expr(e, &Ty::Int)]),
+                    ast::IndexArg::Slice { lo, hi } => {
+                        let bound = |c: &mut Self, x: &Option<ast::Expr>| match x {
+                            Some(x) => c.check_expr(x, &Ty::Int),
+                            None => Expr::new(ExprKind::Int(i64::MIN), Ty::Int, span),
+                        };
+                        let lo = bound(self, lo);
+                        let hi = bound(self, hi);
+                        ("cut", vec![lo, hi])
+                    }
+                };
+                let Some(m) = prog.method(sisu_resolve::TyKey::Adt(*d), name) else {
+                    return Expr::error(span);
+                };
+                let elem = a.first().cloned().unwrap_or(Ty::Error);
+                let ret = match (prog.builtin(*d), name) {
+                    (Some("bytes"), "at") => self.sized_ty("u8"),
+                    (Some("Slice"), "at") => Ty::Ref(Box::new(elem), false),
+                    _ => t.clone(),
+                };
+                let recv = self.receiver_arg(b);
+                let mut call_args = vec![recv];
+                call_args.extend(args.into_iter().map(|x| Arg { expr: x, mode: ArgMode::Value }));
+                Expr::new(
+                    ExprKind::Call { callee: Callee::Fn { def: m, type_args: a.clone() }, args: call_args },
+                    ret,
                     span,
                 )
             }

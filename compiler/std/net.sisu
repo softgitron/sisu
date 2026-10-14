@@ -1,0 +1,78 @@
+##! std.net (11): addresses. The network is the capability `Net` of the
+##! prelude, with `Conn`, `Listener`, `Stream`, `NetOps` and `NetError`,
+##! which this module also names.
+
+## The error of `Url.parse`.
+error UrlError:
+    InvalidUrl(text: String)
+
+## A URL of the form `scheme://host[:port][/path][?query]`: the common
+## subset of RFC 3986, without user information; a fragment is dropped.
+struct Url:
+    scheme: String
+    host: String
+    ## The port written, or the scheme's (80 for `http`, 443 for `https`).
+    port: int
+    ## The path, starting with `/`.
+    path: String
+    ## The query without its `?`; empty when there is none.
+    query: String
+
+impl Url:
+    ## The URL `text` spells; `InvalidUrl` when it is not of the form.
+    pure def parse(text: str) -> Url ! UrlError:
+        let scheme, rest = text.split_once("://") else:
+            return Err(InvalidUrl(text=text.to_string()))
+        if scheme.is_empty() or rest.is_empty():
+            return Err(InvalidUrl(text=text.to_string()))
+        # Up to the fragment.
+        let rest = match rest.split_once("#"):
+            case Some((before, _)): before
+            case None: rest
+        let authority, target = match rest.split_once("/"):
+            case Some((a, after)): (a, "/{after}")
+            case None: (rest, "/".to_string())
+        let path, query = match target.split_once("?"):
+            case Some((p, q)): (p, q)
+            case None: (target, "")
+        let host, port = match authority.split_once(":"):
+            case Some((h, p)): (h, p.parse_int() ?? -1)
+            case None: (authority, default_port(scheme))
+        if host.is_empty() or port < 0 or port > 65535:
+            return Err(InvalidUrl(text=text.to_string()))
+        let path = if path.is_empty(): "/" else: path
+        return Ok(Url(scheme=scheme.to_lowercase(), host=host.to_lowercase(), port=port, path=path.to_string(), query=query.to_string()))
+
+    ## The path and the query, as a request names them (`/v1/data?x=1`).
+    pure def target(self) -> String:
+        if self.query.is_empty():
+            return self.path.copy()
+        return "{self.path}?{self.query}"
+
+    ## A name for the URL that is a plain file name: what is not a letter,
+    ## a digit, `.` or `-` becomes `_` (`https_api.example.com_v1_data`).
+    pure def as_key(self) -> Path:
+        var out = String.new()
+        for c in "{self}".chars():
+            if c.is_alphabetic() or c.is_digit() or c == '.' or c == '-':
+                out.push_char(c)
+            elif not out.ends_with("_"):
+                out.push_char('_')
+        return Path.new(out.strip_suffix("_"))
+
+impl Display for Url:
+    ## `scheme://host[:port]/path[?query]`, the port written when it is not
+    ## the scheme's.
+    pure def fmt(self, mut f: Formatter):
+        f.write("{self.scheme}://{self.host}")
+        if self.port != default_port(self.scheme):
+            f.write(":{self.port}")
+        f.write(self.target())
+
+## The port a scheme uses when a URL names none (0 when it has none).
+pure def default_port(scheme: str) -> int:
+    if scheme == "https":
+        return 443
+    if scheme == "http":
+        return 80
+    return 0

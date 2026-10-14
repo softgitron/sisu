@@ -1476,7 +1476,7 @@ impl B<'_> {
             BYTE_STRING => {
                 let s = text.strip_prefix('b').unwrap_or(text);
                 let s = s.trim_start_matches('"').trim_end_matches('"');
-                ExprKind::ByteStr(decode_escapes(s).into_bytes())
+                ExprKind::ByteStr(decode_byte_escapes(s))
             }
             _ => ExprKind::Error,
         }
@@ -1829,6 +1829,31 @@ pub fn parse_int(text: &str) -> Option<u128> {
 
 /// Decodes `\n`, `\t`, `\r`, `\0`, `\\`, `\"`, `\'` and `\u{...}`; an
 /// unknown escape (already reported by the lexer) is kept as written.
+/// The bytes of a byte string's text: its escapes, with `\xNN` for any
+/// byte, and every other character as its UTF-8 bytes.
+pub fn decode_byte_escapes(s: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find("\\x") {
+        let hex = rest.get(i + 2..i + 4).filter(|h| h.chars().all(|d| d.is_ascii_hexdigit()));
+        match hex.and_then(|h| u8::from_str_radix(h, 16).ok()) {
+            // `\\x` is a backslash and an `x`, not an escape: only an odd
+            // run of backslashes escapes.
+            Some(b) if rest[..i].chars().rev().take_while(|c| *c == '\\').count() % 2 == 0 => {
+                out.extend(decode_escapes(&rest[..i]).into_bytes());
+                out.push(b);
+                rest = &rest[i + 4..];
+            }
+            _ => {
+                out.extend(decode_escapes(&rest[..i + 2]).into_bytes());
+                rest = &rest[i + 2..];
+            }
+        }
+    }
+    out.extend(decode_escapes(rest).into_bytes());
+    out
+}
+
 pub fn decode_escapes(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
