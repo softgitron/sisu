@@ -1,8 +1,10 @@
 # Full-scale run of the bet-3 stack harness (taskbench) on a GitHub-hosted
 # runner: machine 2 of the Phase 1 report (taskbench/docs/report-phase1.md).
 #
-# Triggered only by pushing a tag that matches harness-run-* (for example
-# `git tag harness-run-1 && git push origin harness-run-1`); there is no
+# Triggered only by a push: a tag that matches harness-run-* (for example
+# `git tag harness-run-1 && git push origin harness-run-1`), or a push to
+# the working branch whose head commit message contains the marker
+# [harness-full] (the working session cannot push tags). There is no
 # schedule and no manual dispatch (the owner's decision, October 2026).
 #
 # The run is `./run_all.sh --scale full` with five repetitions of every cell
@@ -21,12 +23,15 @@ on:
   push:
     tags:
       - 'harness-run-*'
+    branches:
+      - 'claude/beyond-the-box'
 
 permissions:
   contents: read
 
 jobs:
   full:
+    if: startsWith(github.ref, 'refs/tags/harness-run-') || contains(github.event.head_commit.message, '[harness-full]')
     name: taskbench full scale (machine 2)
     runs-on: ubuntu-latest
     timeout-minutes: 300
