@@ -40,6 +40,10 @@ pub(crate) enum Owner {
     Trait(DefId),
     /// A trait impl's method.
     Impl(DefId),
+    /// The predicate of a refinement type: its parameters are the
+    /// refinement's, `self` is a value of its base, and it is nobody's
+    /// method.
+    Refinement(DefId),
 }
 
 /// What a method's owner brings to its signature: the generics, their
@@ -55,6 +59,7 @@ pub(crate) enum Pending {
     Impl { module: ModuleId, ast: ast::ImplDef, range: TextRange, derived: bool },
     Test { def: DefId, module: ModuleId, ast: ast::TestDef },
     Const { def: DefId, module: ModuleId, ast: ast::ConstDef },
+    Refinement { def: DefId, module: ModuleId, ast: ast::TypeAlias, range: TextRange },
 }
 
 pub(crate) struct Resolver<'a> {
@@ -80,6 +85,9 @@ pub(crate) struct Resolver<'a> {
     pub derive_templates: HashMap<(ModuleId, String), std::rc::Rc<ast::FnDef>>,
     /// The text of each module that has a derive template, for unfolding it.
     pub template_sources: HashMap<ModuleId, std::rc::Rc<str>>,
+    /// Functions the compiler writes whose kind their declaration does not
+    /// tell: a refinement's predicate, a struct's invariant check.
+    pub special_kinds: HashMap<DefId, FnKind>,
 }
 
 /// What a type expression may mention where it is written.
@@ -121,6 +129,7 @@ pub fn resolve(sources: &mut SourceMap, root_file: FileId, root: &ast::Module) -
         type_preds: HashMap::new(),
         derive_templates: HashMap::new(),
         template_sources: HashMap::new(),
+        special_kinds: HashMap::new(),
     };
     let prelude = r.load_std("prelude", std_sources::PRELUDE);
     r.prog.prelude = prelude;
@@ -370,6 +379,30 @@ impl Resolver<'_> {
                     self.bind(module, &s.name.text, def, s.name.range);
                     self.type_params.insert(def, s.generics.clone());
                     self.declare_methods(module, def, &s.methods);
+                    for c in &s.consts {
+                        self.declare_assoc_const(module, crate::ty::TyKey::Adt(def), &s.name.text, c);
+                    }
+                    // `invariant e` lines (07): a method of the struct that
+                    // checks them, which construction, every `mut self`
+                    // method and the `Mutex` rule call.
+                    if !s.invariants.is_empty() {
+                        let check = invariant_check_def(item.node, s);
+                        let m = self.new_def(
+                            module,
+                            &check.name.text,
+                            check.name.range,
+                            ast::Vis::Private,
+                            Vec::new(),
+                            DefKind::Fn(Box::new(self.placeholder_fn(module, FnKind::Method))),
+                        );
+                        self.special_kinds.insert(m, FnKind::Invariant(def));
+                        self.pending.push(Pending::Fn {
+                            def: m,
+                            module,
+                            ast: check,
+                            owner: Some(Owner::Type(def)),
+                        });
+                    }
                     self.pending.push(Pending::Struct {
                         def,
                         module,
@@ -490,11 +523,37 @@ impl Resolver<'_> {
                     self.comptime_budget(module, def, &item.attrs);
                     self.pending.push(Pending::Const { def, module, ast: c.clone() });
                 }
+                ItemKind::TypeAlias(a) if a.refinement => {
+                    let text = match &a.predicate {
+                        Some(p) => self
+                            .sources
+                            .get(self.file(module))
+                            .and_then(|f| f.text.get(p.range.start as usize..p.range.end as usize))
+                            .unwrap_or("")
+                            .trim()
+                            .to_string(),
+                        None => String::new(),
+                    };
+                    let info = RefinementInfo {
+                        generics: Vec::new(),
+                        base: Ty::Error,
+                        predicate: None,
+                        text,
+                        domain: None,
+                    };
+                    let def = self.new_def(
+                        module,
+                        &a.name.text,
+                        a.name.range,
+                        item.vis,
+                        item.docs.clone(),
+                        DefKind::Refinement(info),
+                    );
+                    self.bind(module, &a.name.text, def, a.name.range);
+                    self.type_params.insert(def, a.generics.clone());
+                    self.pending.push(Pending::Refinement { def, module, ast: a.clone(), range: item.range });
+                }
                 ItemKind::TypeAlias(a) => {
-                    if a.refinement {
-                        let span = self.span(module, item.range);
-                        self.unsupported(span, "a refinement type", "contracts (Phase 8)");
-                    }
                     let def = self.new_def(
                         module,
                         &a.name.text,
@@ -513,6 +572,25 @@ impl Resolver<'_> {
                 ItemKind::Stmt(_) | ItemKind::Error => {}
             }
         }
+    }
+
+    /// An associated constant of a type (03), named `Type.NAME`.
+    pub fn declare_assoc_const(&mut self, module: ModuleId, key: crate::ty::TyKey, owner: &str, c: &ast::ConstDef) {
+        let info = ConstInfo { ty: Ty::Error, value: None, file: self.file(module) };
+        let name = format!("{owner}.{}", c.name.text);
+        let def = self.new_def(module, &name, c.name.range, ast::Vis::Pub, Vec::new(), DefKind::Const(info));
+        let k = (key, c.name.text.clone());
+        if self.prog.assoc_consts.contains_key(&k) || self.prog.methods.contains_key(&k) {
+            let span = self.span(module, c.name.range);
+            self.report(
+                Diagnostic::new(msg::RESOLVE_DUPLICATE_METHOD, span)
+                    .with("owner", owner.to_string())
+                    .with("name", c.name.text.clone()),
+            );
+            return;
+        }
+        self.prog.assoc_consts.insert(k, def);
+        self.pending.push(Pending::Const { def, module, ast: c.clone() });
     }
 
     /// `@comptime_budget(steps=N)` (08): the item's own budget for its
@@ -750,8 +828,9 @@ impl Resolver<'_> {
                 self.resolve_trait_header(*def, *module, t, attrs);
             }
         }
-        let (types, rest): (Vec<Pending>, Vec<Pending>) =
-            pending.into_iter().partition(|p| matches!(p, Pending::Struct { .. } | Pending::Enum { .. }));
+        let (types, rest): (Vec<Pending>, Vec<Pending>) = pending.into_iter().partition(|p| {
+            matches!(p, Pending::Struct { .. } | Pending::Enum { .. } | Pending::Refinement { .. })
+        });
         for p in types {
             self.resolve_one(p);
         }
@@ -791,7 +870,10 @@ impl Resolver<'_> {
             return Ty::Error;
         }
         self.resolving_alias.push(d);
-        let ctx = TyCtx::plain(module, &[], self.is_std(module));
+        // `type Pair[T] = (T, T)`: the alias's parameters are `Param(i)` in
+        // what it stands for, replaced by the arguments where it is used.
+        let names: Vec<String> = alias.generics.iter().map(|g| g.name.text.clone()).collect();
+        let ctx = TyCtx::plain(module, &names, self.is_std(module));
         let ty = match &alias.ty {
             // An alias may name a union of error sets (05, "Error sets").
             Some(t) if matches!(t.kind, ast::TypeKind::Union(_)) => self.resolve_error_set(t, &ctx),
@@ -1002,7 +1084,66 @@ impl Resolver<'_> {
             Pending::Impl { module, ast: imp, range, derived } => {
                 self.resolve_impl(module, &imp, range, derived)
             }
+            Pending::Refinement { def, module, ast: a, range } => self.resolve_refinement(def, module, &a, range),
         }
+    }
+
+    /// A refinement type's base, and its predicate as a function the
+    /// compiler writes: `def X#where(self) -> bool: return pred`, `pure`,
+    /// with `self` a value of the base.
+    fn resolve_refinement(&mut self, def: DefId, module: ModuleId, a: &ast::TypeAlias, range: TextRange) {
+        let names: Vec<String> = a.generics.iter().map(|g| g.name.text.clone()).collect();
+        let predicates = self.type_preds.get(&def).cloned().unwrap_or_default();
+        let ctx = TyCtx {
+            module,
+            generics: &names,
+            self_ty: None,
+            allow_ref: false,
+            predicates: &predicates,
+            in_trait: None,
+            impl_assoc: &[],
+        };
+        let base = match &a.ty {
+            Some(t) => self.resolve_ty(t, &ctx),
+            None => Ty::Error,
+        };
+        // A refinement of a refinement refines the first one's base.
+        let base = match &base {
+            Ty::Adt(d, _) if *d == def => {
+                let span = self.span(module, a.name.range);
+                self.report(
+                    Diagnostic::new(msg::RESOLVE_ALIAS_CYCLE, span).with("name", a.name.text.clone()),
+                );
+                Ty::Error
+            }
+            Ty::Adt(d, args) => self.prog.refinement_base(*d, args).unwrap_or(base.clone()),
+            _ => base,
+        };
+        let domain = match (&base, &a.predicate) {
+            (Ty::Int, Some(p)) => int_domain(p),
+            _ => None,
+        };
+        let pred = a.predicate.clone().unwrap_or(ast::Expr {
+            node: sisu_syntax::tree::NodeId(0),
+            range,
+            kind: ast::ExprKind::Error,
+        });
+        let pred_def = self.new_def(
+            module,
+            "where",
+            pred.range,
+            ast::Vis::Private,
+            Vec::new(),
+            DefKind::Fn(Box::new(self.placeholder_fn(module, FnKind::Free))),
+        );
+        if let DefKind::Refinement(r) = &mut self.prog.defs[def.0 as usize].kind {
+            r.base = base;
+            r.predicate = Some(pred_def);
+            r.domain = domain;
+        }
+        self.special_kinds.insert(pred_def, FnKind::Predicate(def));
+        let f = predicate_def(&pred);
+        self.pending.push(Pending::Fn { def: pred_def, module, ast: f, owner: Some(Owner::Refinement(def)) });
     }
 
     /// The names and bounds of a struct's or enum's generic parameters.
@@ -1034,6 +1175,13 @@ impl Resolver<'_> {
                 let tr = TraitRef { def: *t, args: (1..generics.len() as u32).map(Ty::Param).collect() };
                 let preds = vec![Predicate { ty: Ty::Param(0), bound: tr, span: self.prog.def(*t).span }];
                 (generics, names, preds, Some(Ty::Param(0)), Some(*t), None)
+            }
+            Some(Owner::Refinement(r)) => {
+                let generics = self.prog.type_generics(*r).to_vec();
+                let names: Vec<String> = generics.iter().map(|g| g.name.clone()).collect();
+                let (_, preds) = self.type_param_scope(*r, module);
+                let base = self.prog.refinement(*r).map(|x| x.base.clone()).unwrap_or(Ty::Error);
+                (generics, names, preds, Some(base), None, None)
             }
             Some(Owner::Impl(i)) => match self.prog.impl_info(*i).cloned() {
                 Some(info) => {
@@ -1227,6 +1375,8 @@ impl Resolver<'_> {
                 FnKind::Assoc
             };
             match o {
+                // A refinement's predicate is nobody's method.
+                Owner::Refinement(_) => {}
                 Owner::Type(_) | Owner::Inherent { .. } => {
                     let key = self_ty.as_ref().and_then(|t| t.key());
                     if let Some(key) = key {
@@ -1256,6 +1406,9 @@ impl Resolver<'_> {
                 }
             }
         }
+        if let Some(k) = self.special_kinds.get(&def) {
+            info.kind = k.clone();
+        }
         self.prog.defs[def.0 as usize].kind = DefKind::Fn(Box::new(info));
     }
 
@@ -1281,4 +1434,141 @@ impl Resolver<'_> {
 #[allow(dead_code)]
 fn diag(m: MsgId, span: Span) -> Diagnostic {
     Diagnostic::new(m, span)
+}
+
+/// The method that checks a struct's `invariant` lines (07): `pure def
+/// __check_invariant(self)`, whose body is the lines themselves, each a
+/// check that panics naming the line and the values in it. It is
+/// `@internal`: only the compiler's checks call it.
+fn invariant_check_def(node: sisu_syntax::tree::NodeId, s: &ast::StructDef) -> ast::FnDef {
+    let range = s.invariants.first().map(|c| c.range).unwrap_or(s.name.range);
+    let stmts = s
+        .invariants
+        .iter()
+        .map(|c| ast::Stmt { node, range: c.range, kind: ast::StmtKind::Contract(c.clone()) })
+        .collect();
+    ast::FnDef {
+        node,
+        range,
+        name: ast::Name { text: "__check_invariant".into(), range },
+        is_pure: true,
+        is_comptime: false,
+        generics: Vec::new(),
+        params: vec![ast::Param { node, range, mode: ast::Mode::Borrow, kind: ParamKind::SelfParam }],
+        ret: None,
+        from: Vec::new(),
+        where_: Vec::new(),
+        body: Some(ast::Block { node, range, stmts }),
+        attrs: vec![ast::Attr { name: "internal".into(), args: Vec::new(), range }],
+        header_broken: false,
+        body_broken: false,
+    }
+}
+
+/// A refinement's predicate as a function of `self`: `pure def
+/// where(self) -> bool: return pred`.
+fn predicate_def(pred: &ast::Expr) -> ast::FnDef {
+    let node = pred.node;
+    let range = pred.range;
+    let ret = ast::TypeExpr {
+        node,
+        range,
+        kind: TypeKind::Path { segments: vec![ast::Name { text: "bool".into(), range }], args: Vec::new() },
+    };
+    let body = ast::Block {
+        node,
+        range,
+        stmts: vec![ast::Stmt { node, range, kind: ast::StmtKind::Return(Some(pred.clone())) }],
+    };
+    ast::FnDef {
+        node,
+        range,
+        name: ast::Name { text: "where".into(), range },
+        is_pure: true,
+        is_comptime: false,
+        generics: Vec::new(),
+        params: vec![ast::Param { node, range, mode: ast::Mode::Borrow, kind: ParamKind::SelfParam }],
+        ret: Some(ret),
+        from: Vec::new(),
+        where_: Vec::new(),
+        body: Some(body),
+        attrs: Vec::new(),
+        header_broken: false,
+        body_broken: false,
+    }
+}
+
+/// The range `[lo, hi)` an integer refinement's predicate bounds `self`
+/// to: a conjunction (`and`) of comparisons of `self` with integer
+/// literals, chains included (`1 <= self <= 65535`). Any other predicate
+/// gives no domain.
+pub(crate) fn int_domain(p: &ast::Expr) -> Option<(i64, i64)> {
+    fn lit(e: &ast::Expr) -> Option<i64> {
+        match &e.kind {
+            ExprKind::Int { value: Some(v), suffix: None, .. } => i64::try_from(*v).ok(),
+            ExprKind::Unary { op: ast::UnOp::Neg, expr } => lit(expr).map(|v| -v),
+            ExprKind::Paren(inner) => lit(inner),
+            _ => None,
+        }
+    }
+    fn is_self(e: &ast::Expr) -> bool {
+        match &e.kind {
+            ExprKind::SelfValue => true,
+            ExprKind::Paren(inner) => is_self(inner),
+            _ => false,
+        }
+    }
+    // Narrows `[lo, hi)` by `a op b` where one side is `self`.
+    fn narrow(lo: &mut i64, hi: &mut i64, a: &ast::Expr, op: ast::CmpOp, b: &ast::Expr) -> Option<()> {
+        use ast::CmpOp::*;
+        let (op, k) = if is_self(a) {
+            (op, lit(b)?)
+        } else if is_self(b) {
+            // `k op self` is `self op' k`.
+            let flipped = match op {
+                Lt => Gt,
+                Le => Ge,
+                Gt => Lt,
+                Ge => Le,
+                Eq => Eq,
+                _ => return None,
+            };
+            (flipped, lit(a)?)
+        } else {
+            return None;
+        };
+        match op {
+            Lt => *hi = (*hi).min(k),
+            Le => *hi = (*hi).min(k.checked_add(1)?),
+            Gt => *lo = (*lo).max(k.checked_add(1)?),
+            Ge => *lo = (*lo).max(k),
+            Eq => {
+                *lo = (*lo).max(k);
+                *hi = (*hi).min(k.checked_add(1)?);
+            }
+            _ => return None,
+        }
+        Some(())
+    }
+    fn walk(e: &ast::Expr, lo: &mut i64, hi: &mut i64) -> Option<()> {
+        match &e.kind {
+            ExprKind::Paren(inner) => walk(inner, lo, hi),
+            ExprKind::Binary { op: ast::BinOp::And, lhs, rhs } => {
+                walk(lhs, lo, hi)?;
+                walk(rhs, lo, hi)
+            }
+            ExprKind::Compare { first, rest } => {
+                let mut left: &ast::Expr = first;
+                for (op, right) in rest {
+                    narrow(lo, hi, left, *op, right)?;
+                    left = right;
+                }
+                Some(())
+            }
+            _ => None,
+        }
+    }
+    let (mut lo, mut hi) = (i64::MIN, i64::MAX);
+    walk(p, &mut lo, &mut hi)?;
+    (lo > i64::MIN && hi < i64::MAX && lo < hi).then_some((lo, hi))
 }

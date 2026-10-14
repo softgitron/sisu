@@ -55,6 +55,19 @@ impl Zonker<'_> {
         if let Some(g) = &mut b.generator {
             self.ty(g);
         }
+        if let Some(c) = &mut b.contracts {
+            for k in c.requires.iter_mut().chain(c.ensures.iter_mut()) {
+                self.expr(&mut k.cond);
+            }
+            for (_, e) in &mut c.olds {
+                self.expr(e);
+            }
+            if let Some((_, args)) = &mut c.invariant {
+                for t in args {
+                    self.ty(t);
+                }
+            }
+        }
         self.block(&mut b.block);
     }
 
@@ -136,6 +149,7 @@ impl Zonker<'_> {
                     self.expr(m);
                 }
             }
+            Stmt::Contract(c) => self.expr(&mut c.cond),
             Stmt::Defer { body, .. } | Stmt::Block(body) => self.block(body),
             Stmt::Select { arms, .. } => {
                 for a in arms {
@@ -271,6 +285,12 @@ impl Zonker<'_> {
                 }
             }
             ExprKind::Try { expr, .. } | ExprKind::Coerce { expr, .. } => self.expr(expr),
+            ExprKind::RefineTry { value, type_args, .. } => {
+                self.expr(value);
+                for t in type_args {
+                    self.ty(t);
+                }
+            }
             ExprKind::OptChain { base, then, .. } => {
                 self.expr(base);
                 self.expr(then);

@@ -253,7 +253,7 @@ impl NetOps for FakeNet:
     def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}:
         let stream = ScriptedStream(net=FakeNet(state=self.state), host=host.to_string(), port=port, sent=bytes.new(), reply=None)
         return Ok(Conn(stream=Box(stream), peer="{host}:{port}"))
-    def listen(self, host: str, port: int) -> Listener ! NetError:
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
         return Err(NotAllowed(address="{host}:{port}"))
 
 ## A connection of a `FakeNet`: it keeps what the client sends, and

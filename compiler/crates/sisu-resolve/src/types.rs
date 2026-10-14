@@ -52,6 +52,7 @@ impl Resolver<'_> {
                 DefKind::Struct(s) => s.generics = generics,
                 DefKind::Enum(e) | DefKind::ErrorSet(e) => e.generics = generics,
                 DefKind::Trait(t) => t.generics = generics,
+                DefKind::Refinement(r) => r.generics = generics,
                 _ => {}
             }
         }
@@ -446,13 +447,27 @@ impl Resolver<'_> {
         let generics: Vec<Generic> = match &self.prog.def(d).kind {
             DefKind::Struct(s) => s.generics.clone(),
             DefKind::Enum(e) => e.generics.clone(),
+            DefKind::Refinement(r) => r.generics.clone(),
             DefKind::ErrorSet(_) => {
                 if !args.is_empty() {
                     self.report(Diagnostic::new(msg::TYPE_NOT_GENERIC, span).with("name", name));
                 }
                 return Ty::ErrSet(vec![d]);
             }
-            DefKind::TypeAlias(_) => return self.resolve_alias_public(d),
+            DefKind::TypeAlias(_) => {
+                // A generic alias stands for its type with the arguments in it.
+                let declared = self.aliases.get(&d).map(|(_, a)| a.generics.len()).unwrap_or(0);
+                if args.len() != declared && !(args.is_empty() && declared == 0) {
+                    self.report(
+                        Diagnostic::new(msg::RESOLVE_TYPE_ARGUMENT_COUNT, span)
+                            .with("name", name)
+                            .with("expected", declared.to_string())
+                            .with("found", args.len().to_string()),
+                    );
+                    return Ty::Error;
+                }
+                return self.resolve_alias_public(d).subst(&args);
+            }
             DefKind::Trait(_) => {
                 let at = Span::new(span.file, sisu_diag::TextRange::empty(span.range.start));
                 self.report(Diagnostic::new(msg::RESOLVE_TRAIT_AS_TYPE, span).with("name", name).fix(

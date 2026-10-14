@@ -7,6 +7,12 @@ struct Account:
     balance: int
     invariant self.balance >= 0
 
+    # Only the type's own methods change its fields (07); one that panics
+    # before it returns leaves its invariant to the guard's drop.
+    def set_then_panic(mut self, balance: int, message: str):
+        self.balance = balance
+        panic(message)
+
 def main():
     let total = Mutex(0)
     task.scope do s:
@@ -22,16 +28,14 @@ def main():
     task.scope do s:
         let bad = s.spawn do:
             var g = account.lock()
-            g.balance = -5
-            panic("left the account negative")
+            g.set_then_panic(-5, "left the account negative")
         print(bad.join().is_err())
     print(account.is_poisoned())
     let kept = Mutex(Account(balance=10))
     task.scope do s:
         let ok = s.spawn do:
             var g = kept.lock()
-            g.balance = 7
-            panic("panicked, the invariant still holding")
+            g.set_then_panic(7, "panicked, the invariant still holding")
         print(ok.join().is_err())
     print(kept.is_poisoned())
     print(kept.lock().balance)

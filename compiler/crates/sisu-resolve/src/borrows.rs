@@ -52,6 +52,11 @@ impl Program {
     /// reference, `str`, a `view struct`, or a collection, option or tuple
     /// of views. Only a `view struct` may have a field of such a type.
     pub fn is_view_type(&self, ty: &Ty) -> bool {
+        if let Ty::Adt(d, args) = ty
+            && let Some(b) = self.refinement_base(*d, args)
+        {
+            return self.is_view_type(&b);
+        }
         match ty {
             Ty::Ref(..) | Ty::Str => true,
             Ty::Tuple(es, _) => es.iter().any(|t| self.is_view_type(t)),
@@ -76,6 +81,11 @@ impl Program {
     /// iterator or dict entry (they borrow what they walk). A generic
     /// parameter can, since it may stand for any of these.
     pub fn can_borrow(&self, ty: &Ty) -> bool {
+        if let Ty::Adt(d, args) = ty
+            && let Some(b) = self.refinement_base(*d, args)
+        {
+            return self.can_borrow(&b);
+        }
         match ty {
             Ty::Ref(..) | Ty::Str | Ty::Fn(_) | Ty::Param(_) | Ty::Var(_) | Ty::Error => true,
             Ty::Tuple(es, _) => es.iter().any(|t| self.can_borrow(t)),
@@ -108,6 +118,11 @@ impl Program {
     /// The shape of a declared result type (before substitution).
     pub fn result_shape(&self, ret: &Ty) -> ResultShape {
         fn deep(p: &Program, t: &Ty) -> bool {
+            if let Ty::Adt(d, args) = t
+                && let Some(b) = p.refinement_base(*d, args)
+            {
+                return deep(p, &b);
+            }
             match t {
                 Ty::Ref(..) | Ty::Str | Ty::Fn(_) => true,
                 Ty::Tuple(es, _) => es.iter().any(|t| deep(p, t)),
@@ -150,6 +165,11 @@ impl Program {
         let most = |ts: &mut dyn Iterator<Item = &Ty>| {
             ts.map(|t| self.reach(t, depth + 1)).max().unwrap_or(Reach::Nothing)
         };
+        if let Ty::Adt(d, args) = t
+            && let Some(b) = self.refinement_base(*d, args)
+        {
+            return self.reach(&b, depth + 1);
+        }
         match t {
             Ty::Ref(..) | Ty::Fn(_) | Ty::Param(_) | Ty::Var(_) | Ty::Error => Reach::Anything,
             Ty::Str => Reach::Text,
@@ -176,6 +196,11 @@ impl Program {
     fn owns_text(&self, t: &Ty, depth: u32) -> bool {
         if depth > 16 {
             return true;
+        }
+        if let Ty::Adt(d, args) = t
+            && let Some(b) = self.refinement_base(*d, args)
+        {
+            return self.owns_text(&b, depth + 1);
         }
         match t {
             Ty::Ref(..) | Ty::Str | Ty::Fn(_) => false,
@@ -241,6 +266,11 @@ impl Program {
     fn holds_fn_value(&self, t: &Ty, depth: u32) -> bool {
         if depth > 16 {
             return true;
+        }
+        if let Ty::Adt(d, args) = t
+            && let Some(b) = self.refinement_base(*d, args)
+        {
+            return self.holds_fn_value(&b, depth + 1);
         }
         match t {
             Ty::Fn(_) => true,

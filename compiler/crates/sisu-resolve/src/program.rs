@@ -36,9 +36,33 @@ pub enum DefKind {
     /// `impl Trait for Type` (an inherent `impl Type` registers its methods
     /// and is not a definition of its own).
     Impl(ImplInfo),
+    /// `type Port = int where 1 <= self <= 65535` (07): a subtype of its
+    /// base whose values satisfy the predicate.
+    Refinement(RefinementInfo),
     /// A declaration this stage does not implement, kept so that names
     /// resolve and nothing cascades.
     Unsupported,
+}
+
+/// A refinement type (07, "Refinement types"): a nominal subtype of `base`
+/// whose every value satisfies its predicate. A value of the base becomes
+/// one by `X.try_from(v)`, checked when it runs, or by a constant written
+/// where one is expected, checked at compile time; a value of the
+/// refinement is used wherever its base is.
+#[derive(Clone, Debug)]
+pub struct RefinementInfo {
+    pub generics: Vec<Generic>,
+    /// The base type, in terms of the refinement's parameters.
+    pub base: Ty,
+    /// The predicate, a `pure` function of the base value (`self`) that
+    /// the compiler writes from the `where` clause: `Port#where`.
+    pub predicate: Option<DefId>,
+    /// The predicate as written.
+    pub text: String,
+    /// For an integer refinement, the range `[lo, hi)` its predicate
+    /// bounds `self` to, when it is a conjunction of comparisons of `self`
+    /// with constants: what `exhaustive[T]` enumerates.
+    pub domain: Option<(i64, i64)>,
 }
 
 /// A trait with its type arguments, `Self` not among them: `Add[int]`.
@@ -144,6 +168,12 @@ pub enum FnKind {
     Assoc,
     Test(String),
     Drop,
+    /// The predicate of the refinement type, which the compiler writes
+    /// from its `where` clause (`Port#where`).
+    Predicate(DefId),
+    /// The check of a struct's `invariant` lines, which the compiler
+    /// writes as a method of the struct (`Account.__check_invariant`).
+    Invariant(DefId),
 }
 
 #[derive(Clone, Debug)]
@@ -318,6 +348,8 @@ pub struct Program {
     pub wk: WellKnown,
     /// Methods and associated functions by receiver type and name.
     pub methods: HashMap<(TyKey, String), DefId>,
+    /// Associated constants (`Money.ZERO`) by type and name.
+    pub assoc_consts: HashMap<(TyKey, String), DefId>,
     /// Every variant by its unqualified name: (enum or error set, index).
     pub variants: HashMap<String, Vec<(DefId, u32)>>,
     /// Tests in declaration order.
@@ -365,13 +397,91 @@ impl Program {
         }
     }
 
-    /// The generic parameters of a struct or enum.
+    /// The generic parameters of a struct, enum or refinement type.
     pub fn type_generics(&self, d: DefId) -> &[Generic] {
         match &self.def(d).kind {
             DefKind::Struct(s) => &s.generics,
             DefKind::Enum(e) | DefKind::ErrorSet(e) => &e.generics,
+            DefKind::Refinement(r) => &r.generics,
             _ => &[],
         }
+    }
+
+    pub fn refinement(&self, d: DefId) -> Option<&RefinementInfo> {
+        match &self.def(d).kind {
+            DefKind::Refinement(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// The base of a refinement type with these arguments (`list[int]` for
+    /// `NonEmpty[int]`).
+    pub fn refinement_base(&self, d: DefId, args: &[Ty]) -> Option<Ty> {
+        self.refinement(d).map(|r| r.base.subst(args))
+    }
+
+    /// The type with every refinement replaced by its base, at the top
+    /// only (`Port` is `int`; `list[Port]` stays as it is).
+    pub fn unrefine(&self, ty: &Ty) -> Ty {
+        let mut t = ty.clone();
+        for _ in 0..16 {
+            match &t {
+                Ty::Adt(d, args) => match self.refinement_base(*d, args) {
+                    Some(b) => t = b,
+                    None => return t,
+                },
+                _ => return t,
+            }
+        }
+        t
+    }
+
+    /// The type with every refinement anywhere in it replaced by its base:
+    /// how values of it are represented.
+    pub fn erase_refinements(&self, ty: &Ty) -> Ty {
+        let mut has = false;
+        ty.walk(&mut |t| has |= matches!(t, Ty::Adt(d, _) if self.refinement(*d).is_some()));
+        if !has {
+            return ty.clone();
+        }
+        self.erase_depth(ty, 0)
+    }
+
+    fn erase_depth(&self, ty: &Ty, depth: u32) -> Ty {
+        if depth > 32 {
+            return ty.clone();
+        }
+        let e = |t: &Ty| self.erase_depth(t, depth + 1);
+        match ty {
+            Ty::Adt(d, args) => {
+                let args: Vec<Ty> = args.iter().map(e).collect();
+                match self.refinement_base(*d, &args) {
+                    Some(b) => e(&b),
+                    None => Ty::Adt(*d, args),
+                }
+            }
+            Ty::Tuple(es, l) => Ty::Tuple(es.iter().map(e).collect(), l.clone()),
+            Ty::Fn(f) => Ty::Fn(Box::new(crate::ty::FnTy {
+                params: f.params.iter().map(e).collect(),
+                ret: e(&f.ret),
+                pure: f.pure,
+            })),
+            Ty::Ref(t, m) => Ty::Ref(Box::new(e(t)), *m),
+            Ty::Dyn(tr) => Ty::Dyn(TraitRef { def: tr.def, args: tr.args.iter().map(e).collect() }),
+            Ty::Assoc(a) => Ty::Assoc(Box::new(crate::ty::AssocTy {
+                self_ty: e(&a.self_ty),
+                trait_: TraitRef { def: a.trait_.def, args: a.trait_.args.iter().map(e).collect() },
+                name: a.name.clone(),
+            })),
+            other => other.clone(),
+        }
+    }
+
+    /// The check of a struct's invariant, `T.__check_invariant`, when the
+    /// struct has `invariant` lines.
+    pub fn invariant_check(&self, d: DefId) -> Option<DefId> {
+        let m = self.method(crate::ty::TyKey::Adt(d), "__check_invariant")?;
+        matches!(self.fn_info(m)?.kind, FnKind::Invariant(_)).then_some(m)
     }
 
     pub fn enum_info(&self, d: DefId) -> Option<&EnumInfo> {

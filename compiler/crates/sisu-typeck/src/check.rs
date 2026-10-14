@@ -68,6 +68,9 @@ pub(crate) struct Checker<'p> {
     /// Values made into capability handles, with the handle's name, for
     /// the `Send` and `Sync` checks once types are known.
     pub cap_checks: Vec<(Ty, String, Span)>,
+    /// While `ensures` clauses are checked: `result`'s scope and the
+    /// values `old(...)` saves on entry.
+    pub ensures: Option<crate::contracts::EnsuresCtx>,
 }
 
 impl<'p> Checker<'p> {
@@ -106,6 +109,7 @@ impl<'p> Checker<'p> {
             own_checks: Vec::new(),
             generator: None,
             cap_checks: Vec::new(),
+            ensures: None,
         }
     }
 
@@ -459,8 +463,9 @@ impl<'p> Checker<'p> {
         let generics = match &prog.def(d).kind {
             DefKind::Struct(s) => s.generics.len(),
             DefKind::Enum(e) => e.generics.len(),
+            DefKind::Refinement(r) => r.generics.len(),
             DefKind::ErrorSet(_) => return Ty::ErrSet(vec![d]),
-            DefKind::TypeAlias(t) => return t.clone(),
+            DefKind::TypeAlias(t) => return t.subst(&args),
             DefKind::Trait(_) => {
                 let at = Span::new(self.file, TextRange::empty(range.start));
                 let diag = self.error(msg::RESOLVE_TRAIT_AS_TYPE, range).with("name", name.clone()).fix(
@@ -653,15 +658,18 @@ impl<'p> Checker<'p> {
                 let c = self.check_condition_expr(cond);
                 let m = message.as_ref().map(|m| self.check_expr(m, &Ty::Str));
                 let text = self.source_text(cond.range);
-                out.push(Stmt::Assert { cond: c, message: m, text, span });
+                let replay = self.only_reads(&c, false);
+                out.push(Stmt::Assert { cond: c, message: m, text, span, replay });
             }
             ast::StmtKind::Expect(cond) => {
                 // `expect` records and continues in tests (17); stage 0 has no
                 // test runner that continues, so it checks like `assert`.
                 let c = self.check_condition_expr(cond);
                 let text = self.source_text(cond.range);
-                out.push(Stmt::Assert { cond: c, message: None, text, span });
+                let replay = self.only_reads(&c, false);
+                out.push(Stmt::Assert { cond: c, message: None, text, span, replay });
             }
+            ast::StmtKind::Contract(c) => self.contract_stmt(c, out),
             ast::StmtKind::Defer(block) => {
                 let b = self.check_block(block);
                 out.push(Stmt::Defer { body: b, span });
@@ -934,6 +942,13 @@ impl<'p> Checker<'p> {
                 let pty = self.decay_ty(&place.ty);
                 let v = self.infer_expr(value, Some(&pty));
                 let v = self.decay(v);
+                // On a type with an operator trait, `x -= y` is `x = x - y`
+                // through the trait (D-022).
+                let read = self.decay(place.clone());
+                if let Some(call) = self.operator_call(op, read, Some(v.clone()), range) {
+                    let call = self.coerce(call, &pty);
+                    return Stmt::Assign { place, value: call, span };
+                }
                 let lhs = Expr::new(ExprKind::Error, pty.clone(), place.span);
                 let (result, _) = self.binary_result(op, &lhs, &v, range);
                 if result != Ty::Error {
@@ -1018,6 +1033,7 @@ impl<'p> Checker<'p> {
                 }
             }
         }
+        self.check_protected_place(e, range);
         if let Some(root) = e.place_root() {
             self.note_use(root, true);
         }

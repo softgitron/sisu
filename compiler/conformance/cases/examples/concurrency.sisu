@@ -104,7 +104,7 @@ def handle(job: Job) -> Outcome:
 # The first run of the server fails at once; the second finds its port
 # taken by the first's listener, and stops.
 def serve(net: Net, port: int):
-    match net.listen("localhost", port):
+    match net.listen(port):
         case Ok(_):
             panic("the listener at port {port} failed")
         case Err(_):
@@ -125,7 +125,7 @@ def url(text: str) -> Url:
 def main():
     let net = Net.fake()
     let clock = Clock.fake()
-    let listener = net.listen("localhost", 80).expect("free")
+    let listener = net.listen(80).expect("free")
     task.scope do s:
         s.spawn(() -> http.serve(listener, Pages(clock=clock)))
         let pages = fetch_all(net, [url("http://localhost/a"), url("http://localhost/b")])

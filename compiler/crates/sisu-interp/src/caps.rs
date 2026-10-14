@@ -341,8 +341,8 @@ impl Interp<'_, '_> {
                 })
             }
             "listen" => {
-                let host = self.text(&args[1])?.to_string();
-                let port = port_of(self, &args[2])?;
+                let port = port_of(self, &args[1])?;
+                let host = self.text(&args[2])?.to_string();
                 let address = format!("{host}:{port}");
                 Ok(match self.host.tcp_listen(&host, port) {
                     Ok((h, at)) => Value::ok(Value::Struct(Value::adt(

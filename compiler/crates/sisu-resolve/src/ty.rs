@@ -291,6 +291,10 @@ impl Program {
             Ty::Adt(d, args) if Some(*d) == self.wk.option => {
                 args.iter().all(|t| self.is_copy_in_depth(t, env, depth + 1))
             }
+            Ty::Adt(d, args) if self.refinement(*d).is_some() => {
+                let base = self.refinement_base(*d, args).unwrap_or(Ty::Error);
+                self.is_copy_in_depth(&base, env, depth + 1)
+            }
             // A `@derive(Copy)` type: its fields with the arguments in them.
             Ty::Adt(d, args) if !args.is_empty() => match &self.def(*d).kind {
                 DefKind::Struct(s) if s.builtin.is_none() => {
@@ -342,6 +346,8 @@ impl Program {
     /// `Key[T]` is for any `T`, which no field holds).
     fn def_is_copy(&self, d: DefId, args: &[Ty], depth: u32) -> bool {
         match &self.def(d).kind {
+            // A refinement is represented as its base.
+            DefKind::Refinement(r) => self.is_copy_depth(&r.base.subst(args), depth),
             DefKind::Struct(s) if s.builtin.is_some() => {
                 matches!(
                     s.builtin.as_deref(),

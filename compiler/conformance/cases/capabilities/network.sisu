@@ -22,7 +22,7 @@ def echo_once(listener: Listener) -> ! {NetError, TaskError}:
 
 def main():
     let net = Net.fake()
-    let listener = net.listen("localhost", 7).expect("free")
+    let listener = net.listen(7).expect("free")
     print(listener.port)
     let back = task.scope do s:
         s.spawn(() -> echo_once(listener))
@@ -32,7 +32,7 @@ def main():
         return c.read_to_end()
     print(back)
     print(net.connect("localhost", 8).is_err())
-    let any = net.listen("localhost", 0).expect("a free port")
+    let any = net.listen(0).expect("a free port")
     print(any.port)
 
     let narrow = net.only_hosts(["localhost"]).https_only()
@@ -46,7 +46,7 @@ def main():
 
     let plugin, revoker = net.revocable()
     revoker.revoke()
-    match plugin.listen("localhost", 9):
+    match plugin.listen(9):
         case Err(e):
             print("revoked: {e}")
         case Ok(_):
@@ -55,13 +55,13 @@ def main():
     let trace = Trace(lines=Cap(Mutex(list())))
     let watched: Net = cap.Wrap(inner=net, hook=trace)
     _ = watched.connect("localhost", 7)
-    _ = watched.listen("localhost", 10)
+    _ = watched.listen(10)
     for l in trace.lines.get().lock().value.iter():
         print(l)
 
     # A task waiting to accept, and one waiting to read, are cancelled
     # with their scope.
-    let idle = net.listen("localhost", 11).expect("free")
+    let idle = net.listen(11).expect("free")
     task.scope do s:
         let waiting = s.spawn(() -> idle.accept().map((c) -> c.peer))
         let reader = s.spawn do:

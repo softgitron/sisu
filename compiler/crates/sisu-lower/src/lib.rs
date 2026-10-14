@@ -9,8 +9,11 @@
 //! The rules are written down in docs/architecture.md ("Lowering"), so a
 //! front end in another language produces the same SIR.
 
+mod contracts;
 mod exprs;
 mod func;
+
+pub use contracts::ContractLevel;
 mod glue;
 mod pats;
 mod stmts;
@@ -29,6 +32,8 @@ pub(crate) struct Ctx<'a> {
     pub file_names: Vec<String>,
     /// The prefix of the names of each trait impl's methods: `Circle.Shape`.
     pub impl_names: HashMap<DefId, String>,
+    /// Which contracts the build checks.
+    pub level: ContractLevel,
 }
 
 impl Ctx<'_> {
@@ -39,6 +44,10 @@ impl Ctx<'_> {
             return format!("test#{i}");
         }
         if let Some(f) = prog.fn_info(d) {
+            // A refinement's predicate, which the compiler writes.
+            if let sisu_resolve::FnKind::Predicate(r) = f.kind {
+                return format!("{}#where", prog.qualified_name(r));
+            }
             if let Some(i) = f.impl_ {
                 let prefix = self.impl_names.get(&i).cloned().unwrap_or_else(|| "impl".into());
                 return format!("{prefix}.{}", def.name);
@@ -162,6 +171,11 @@ impl Ctx<'_> {
                 a.name.clone(),
             ),
             Ty::Never => sir::Type::Never,
+            // A refinement is represented as its base (07).
+            Ty::Adt(d, args) if prog.refinement(*d).is_some() => {
+                let base = prog.refinement_base(*d, args).unwrap_or(Ty::Error);
+                self.ty(&base)
+            }
             Ty::Adt(d, args) => {
                 let name = if Some(*d) == prog.wk.option {
                     "Option".to_string()
@@ -221,11 +235,22 @@ fn trimmed_end(text: &str, r: sisu_diag::TextRange) -> u32 {
     end as u32
 }
 
-/// Lowers a checked program. The program must have no errors; lowering
-/// does not report diagnostics.
+/// Lowers a checked program with every contract checked. The program
+/// must have no errors; lowering does not report diagnostics.
 pub fn lower(prog: &Program, typed: &Typed, sources: &SourceMap) -> sir::Program {
-    let mut ctx =
-        Ctx { prog, sources, files: HashMap::new(), file_names: Vec::new(), impl_names: HashMap::new() };
+    lower_with(prog, typed, sources, ContractLevel::All)
+}
+
+/// [`lower`] at a level of contract checking (07).
+pub fn lower_with(prog: &Program, typed: &Typed, sources: &SourceMap, level: ContractLevel) -> sir::Program {
+    let mut ctx = Ctx {
+        prog,
+        sources,
+        files: HashMap::new(),
+        file_names: Vec::new(),
+        impl_names: HashMap::new(),
+        level,
+    };
     ctx.name_impls();
     // The root module's file is source 0.
     if let Some(m) = prog.modules.get(prog.root.0 as usize) {

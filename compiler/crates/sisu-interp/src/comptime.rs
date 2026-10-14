@@ -30,6 +30,9 @@ use std::collections::HashMap;
 pub enum Failure {
     /// It panicked, with this message.
     Panicked(String),
+    /// A refinement's predicate was false for a constant (07): the type,
+    /// the value and the predicate.
+    Refinement { ty: String, value: String, predicate: String },
     /// It ran out of its budget of steps.
     Budget(u64),
     /// It used the world: what it used.
@@ -243,7 +246,10 @@ fn run(prog: &sir::Program, name: &str, budget: u64) -> Result<Baked, Failure> {
                     .map(|()| (b.locals, b.stmts, b.intrinsics))
                     .map_err(Failure::NotKept)
             }
-            Err(Unwind::Panic(p)) => Err(Failure::Panicked(p.message)),
+            Err(Unwind::Panic(p)) => match p.refinement {
+                Some((ty, value, predicate)) => Err(Failure::Refinement { ty, value, predicate }),
+                None => Err(Failure::Panicked(p.message)),
+            },
             Err(Unwind::Abort(_)) if spent => Err(Failure::Budget(budget)),
             Err(Unwind::Abort(m)) => Err(Failure::Internal(m)),
             Err(Unwind::Block(_) | Unwind::Switch) => {

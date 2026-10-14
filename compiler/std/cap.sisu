@@ -298,7 +298,7 @@ struct NoNet:
 impl NetOps for NoNet:
     def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}:
         return Err(NotAllowed(address="{host}:{port}"))
-    def listen(self, host: str, port: int) -> Listener ! NetError:
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
         return Err(NotAllowed(address="{host}:{port}"))
 
 ## `Net.only_hosts`: the named hosts only.
@@ -318,10 +318,10 @@ impl[T: NetOps] NetOps for OnlyHosts[T]:
         if not self.allows(host):
             return Err(NotAllowed(address="{host}:{port}"))
         return self.inner.connect(host, port)
-    def listen(self, host: str, port: int) -> Listener ! NetError:
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
         if not self.allows(host):
             return Err(NotAllowed(address="{host}:{port}"))
-        return self.inner.listen(host, port)
+        return self.inner.listen(port, host)
 
 ## `Net.https_only`: the listed ports only.
 struct OnlyPorts[T]:
@@ -333,10 +333,10 @@ impl[T: NetOps] NetOps for OnlyPorts[T]:
         if not self.ports.contains(port):
             return Err(NotAllowed(address="{host}:{port}"))
         return self.inner.connect(host, port)
-    def listen(self, host: str, port: int) -> Listener ! NetError:
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
         if not self.ports.contains(port):
             return Err(NotAllowed(address="{host}:{port}"))
-        return self.inner.listen(host, port)
+        return self.inner.listen(port, host)
 
 ## `Net.revocable`: forwards until revoked, then fails with `Revoked`.
 struct NetCaretaker[T]:
@@ -348,10 +348,10 @@ impl[T: NetOps] NetOps for NetCaretaker[T]:
         if self.revoker.is_revoked():
             return Err(Revoked)
         return self.inner.connect(host, port)
-    def listen(self, host: str, port: int) -> Listener ! NetError:
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
         if self.revoker.is_revoked():
             return Err(Revoked)
-        return self.inner.listen(host, port)
+        return self.inner.listen(port, host)
 
 ## One end of an in-process pipe of `Net.fake`: what it writes the other
 ## end reads, through bounded channels of chunks, so a writer waits for a
@@ -466,7 +466,7 @@ impl NetOps for FakeNet:
                 return Err(Cancelled)
             case Err(TaskPanicked(message, trace)):
                 return Err(TaskPanicked(message=message, trace=trace))
-    def listen(self, host: str, port: int) -> Listener ! NetError:
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
         var g = self.state.get().lock()
         var at = port
         if at == 0:
@@ -685,10 +685,10 @@ impl[T: NetOps, I: Interceptor] NetOps for Wrap[T, I]:
             case Err(e): "Err({e:?})"
         self.hook.after(c, outcome)
         return r
-    def listen(self, host: str, port: int) -> Listener ! NetError:
-        let c = Call(capability="Net".to_string(), method="listen".to_string(), args="{host:?}, {port:?}")
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
+        let c = Call(capability="Net".to_string(), method="listen".to_string(), args="{port:?}, {host:?}")
         self.hook.before(c.copy())
-        let r = self.inner.listen(host, port)
+        let r = self.inner.listen(port, host)
         let outcome = match r:
             case Ok(l): "Ok(<listener at {l.port}>)"
             case Err(e): "Err({e:?})"

@@ -170,7 +170,9 @@ pub struct StructDef {
     pub fields: Vec<FieldDef>,
     pub methods: Vec<FnDef>,
     /// `invariant e` lines (07): what every value of the type satisfies.
-    pub invariants: Vec<Expr>,
+    pub invariants: Vec<Contract>,
+    /// Associated constants (`const ZERO: Money = ...`), named `T.NAME`.
+    pub consts: Vec<ConstDef>,
     /// Other members (a contract other than `invariant`, a nested type),
     /// by range and kind.
     pub unsupported: Vec<(TextRange, &'static str)>,
@@ -219,6 +221,8 @@ pub struct ImplDef {
     pub methods: Vec<FnDef>,
     /// `type Item = T` lines.
     pub assoc_types: Vec<AssocTypeDef>,
+    /// Associated constants of an inherent impl (03, "Traits").
+    pub consts: Vec<ConstDef>,
 }
 
 #[derive(Clone, Debug)]
@@ -271,8 +275,13 @@ pub struct ConstDef {
 #[derive(Clone, Debug)]
 pub struct TypeAlias {
     pub name: Name,
+    /// `type NonEmpty[T] = ...`.
+    pub generics: Vec<GenericParam>,
     pub ty: Option<TypeExpr>,
+    /// Written with `where`: a refinement type (07).
     pub refinement: bool,
+    /// The predicate after `where`, over `self`.
+    pub predicate: Option<Expr>,
 }
 
 #[derive(Clone, Debug)]
@@ -346,9 +355,67 @@ pub enum StmtKind {
     Select(Vec<SelectArm>),
     /// `yield e` in a generator.
     Yield(Option<Expr>),
+    /// `requires e`, `ensures e`, `invariant e` or `decreases e` (07).
+    Contract(Contract),
     /// A construct this stage parses but does not implement.
     Unsupported(&'static str),
     Error,
+}
+
+/// A contract clause (07): `requires e` and `ensures e` are the first
+/// lines of a function's body, `invariant e` a line of a struct (and,
+/// with `decreases e`, of a loop, where neither has a meaning yet).
+#[derive(Clone, Debug)]
+pub struct Contract {
+    pub kind: ContractKind,
+    pub expr: Expr,
+    /// The whole clause, its keyword included.
+    pub range: TextRange,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContractKind {
+    Requires,
+    Ensures,
+    Invariant,
+    Decreases,
+}
+
+impl ContractKind {
+    pub fn keyword(self) -> &'static str {
+        match self {
+            ContractKind::Requires => "requires",
+            ContractKind::Ensures => "ensures",
+            ContractKind::Invariant => "invariant",
+            ContractKind::Decreases => "decreases",
+        }
+    }
+}
+
+impl FnDef {
+    /// The `requires` and `ensures` clauses the body starts with (07:
+    /// "Contract clauses are the first lines of a body, before any
+    /// statement").
+    pub fn contracts(&self) -> Vec<&Contract> {
+        let Some(b) = &self.body else { return Vec::new() };
+        b.stmts
+            .iter()
+            .map_while(|s| match &s.kind {
+                StmtKind::Contract(c) if matches!(c.kind, ContractKind::Requires | ContractKind::Ensures) => {
+                    Some(c)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Whether the body holds nothing but contract clauses: a trait's
+    /// required method that states its contract.
+    pub fn only_contracts(&self) -> bool {
+        self.body.as_ref().is_some_and(|b| {
+            !b.stmts.is_empty() && b.stmts.iter().all(|s| matches!(s.kind, StmtKind::Contract(_)))
+        })
+    }
 }
 
 /// `case pattern = operation:` and its block.

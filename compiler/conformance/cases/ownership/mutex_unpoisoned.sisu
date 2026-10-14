@@ -6,6 +6,14 @@ struct Account:
     limit: int
     invariant self.balance >= -self.limit
 
+    # Only the type's own methods change its fields (07). This one panics
+    # before it returns while the balance is negative, so its own check of
+    # the invariant on return never runs: the guard's drop checks it.
+    def take(mut self, amount: int):
+        self.balance -= amount
+        if self.balance < 0:
+            panic("overdrawn by {-self.balance}")
+
 struct Auditor:
     accounts: Shared[Mutex[Account]]
 
@@ -16,9 +24,7 @@ impl Drop for Auditor:
 
 def withdraw(m: Shared[Mutex[Account]], amount: int):
     var g = m.lock()
-    g.value.balance -= amount
-    if g.value.balance < 0:
-        panic("overdrawn by {-g.value.balance}")
+    g.value.take(amount)
 
 def main():
     let m = Shared(Mutex(Account(balance=10, limit=5)))

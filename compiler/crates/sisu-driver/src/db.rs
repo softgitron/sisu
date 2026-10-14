@@ -246,6 +246,10 @@ fn comptime_diagnostic(
     let item = e.function.split("#comptime").next().unwrap_or(&e.function).to_string();
     match &e.failure {
         Failure::Panicked(m) => Diagnostic::new(msg::COMPTIME_PANICKED, span).with("message", m.clone()),
+        Failure::Refinement { ty, value, predicate } => Diagnostic::new(msg::REFINE_NOT_SATISFIED, span)
+            .with("value", value.clone())
+            .with("ty", ty.clone())
+            .with("predicate", predicate.clone()),
         Failure::Budget(n) => {
             Diagnostic::new(msg::COMPTIME_BUDGET, span).with("item", item).with("steps", n.to_string())
         }

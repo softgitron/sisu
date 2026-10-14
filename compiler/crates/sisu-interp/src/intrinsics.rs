@@ -153,6 +153,8 @@ impl<'p> Interp<'p, '_> {
                     self.binary(op, &x, &y)
                 }
                 "assert" => self.assert_fail(method, &a),
+                "contract" if method == "fail" => self.contract_fail(&a),
+                "test" => self.test_intrinsic(method, &a),
                 "error" => self.error_method(method, tys, &a),
                 "cli" if method == "parse" => self.cli_parse(tys.first(), a.get(0)?),
                 _ => Err(ice(format!("unknown intrinsic `{name}`"))),
@@ -280,6 +282,7 @@ impl<'p> Interp<'p, '_> {
                     message: render(msg::PANIC_HOLE, &[("hole", shown)]),
                     stack: Vec::new(),
                     hole: Some(n),
+                    refinement: None,
                 })))
             }
             _ => Err(ice(format!("unknown intrinsic `{name}`"))),
@@ -939,14 +942,83 @@ impl<'p> Interp<'p, '_> {
         }
     }
 
+    /// The parts a failed check shows: `(column, Debug text)` pairs.
+    fn shown_parts(&self, v: &Value) -> Result<Vec<(usize, String)>, Unwind> {
+        let Value::List(xs) = self.target(v)? else { return Ok(Vec::new()) };
+        let mut out = Vec::new();
+        for x in xs {
+            if let Value::Tuple(t) = x
+                && let [c, s] = t.as_slice()
+            {
+                out.push((self.int(c)?.max(0) as usize, self.text(s)?.to_string()));
+            }
+        }
+        Ok(out)
+    }
+
+    /// The intrinsics `check` runs on (17, "Property-based testing").
+    fn test_intrinsic(&mut self, method: &str, a: &Args) -> Result<Value, Unwind> {
+        match method {
+            "case_seed" => Ok(Value::Int(self.case_seed as i64)),
+            "replay_case" => Ok(Value::option(
+                self.replay_case.take().map(|c| Value::List(c.into_iter().map(Value::Int).collect())),
+            )),
+            "record_case" => {
+                let mut out = Vec::new();
+                if let Value::List(xs) = self.target(a.get(0)?)? {
+                    for x in xs {
+                        out.push(self.int(x)?);
+                    }
+                }
+                self.recorded_case = Some(out);
+                Ok(Value::Unit)
+            }
+            _ => Err(ice(format!("unknown intrinsic `test.{method}`"))),
+        }
+    }
+
+    /// `contract.fail(kind, owner, clause, parts)`: a contract's clause did
+    /// not hold (07: "A contract violation is a panic").
+    fn contract_fail(&mut self, a: &Args) -> Result<Value, Unwind> {
+        let kind = self.int(a.get(0)?)?;
+        let owner = self.text(a.get(1)?)?.to_string();
+        let clause = self.text(a.get(2)?)?.to_string();
+        let parts = self.shown_parts(a.get(3)?)?;
+        if kind == 3 {
+            let value = parts.first().map(|(_, v)| v.clone()).unwrap_or_default();
+            let message = render(
+                msg::CONTRACT_REFINEMENT_FAILED,
+                &[("value", value.clone()), ("ty", owner.clone()), ("clause", clause.clone())],
+            );
+            return Err(Unwind::Panic(Box::new(crate::PanicInfo {
+                message,
+                stack: Vec::new(),
+                hole: None,
+                refinement: Some((owner, value, clause)),
+            })));
+        }
+        let (id, key) = match kind {
+            0 => (msg::CONTRACT_REQUIRES_FAILED, "function"),
+            1 => (msg::CONTRACT_ENSURES_FAILED, "function"),
+            _ => (msg::CONTRACT_INVARIANT_FAILED, "ty"),
+        };
+        let mut m = render(id, &[(key, owner), ("clause", clause.clone())]);
+        m.push_str(&crate::format::parts_diagram(&clause, &parts));
+        Err(panic(msg::PANIC_EXPLICIT, &[("message", m)]))
+    }
+
     fn assert_fail(&mut self, method: &str, a: &Args) -> Result<Value, Unwind> {
         let expr = self.text(a.get(0)?)?.to_string();
         let message = self.text(a.get(1)?)?.to_string();
         let mut m = if message.is_empty() {
-            render(msg::PANIC_ASSERT, &[("expr", expr)])
+            render(msg::PANIC_ASSERT, &[("expr", expr.clone())])
         } else {
-            render(msg::PANIC_ASSERT_MESSAGE, &[("expr", expr), ("message", message)])
+            render(msg::PANIC_ASSERT_MESSAGE, &[("expr", expr.clone()), ("message", message)])
         };
+        if method == "fail_parts" {
+            let parts = self.shown_parts(a.get(2)?)?;
+            m.push_str(&crate::format::parts_diagram(&expr, &parts));
+        }
         if method == "fail_compare" {
             m.push_str("\n  ");
             m.push_str(&render(

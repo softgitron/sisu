@@ -12,6 +12,15 @@ impl Checker<'_> {
     /// Checks an expression against a type: infer with the type as a hint,
     /// then coerce.
     pub fn check_expr(&mut self, e: &ast::Expr, ty: &Ty) -> Expr {
+        // A constant where a refinement is expected is checked at compile
+        // time (07); it is written as a value of the base.
+        if let Some((d, args, base)) = self.refinement_of(ty)
+            && crate::contracts::is_constant(self, e)
+        {
+            let x = self.check_expr(e, &base);
+            let exp = self.resolved(ty);
+            return self.refine_constant(x, d, args, exp);
+        }
         let x = self.infer_expr(e, Some(ty));
         self.coerce(x, ty)
     }
@@ -37,6 +46,38 @@ impl Checker<'_> {
             return x;
         }
         let prog = self.prog;
+        // A refinement where its base (or anything its base becomes) is
+        // expected: the same value.
+        if let Some((d, _, _)) = self.refinement_of(&actual)
+            && !matches!(&exp, Ty::Adt(e, _) if *e == d)
+        {
+            let x = self.unrefined(x);
+            return self.coerce(x, &exp);
+        }
+        // A value of the base where a refinement is expected: only a
+        // constant is checked where it is written; anything else is checked
+        // where it runs, with `X.try_from` (07).
+        if let Some((d, _, base)) = self.refinement_of(&exp)
+            && !matches!(&actual, Ty::Adt(a, _) if *a == d)
+        {
+            let base_ok = {
+                let snap = self.infer.snapshot();
+                let ok = self.infer.unify(&actual, &base);
+                self.infer.rollback(snap);
+                ok
+            };
+            if base_ok || actual == Ty::Never {
+                let name = prog.def(d).name.clone();
+                let diag = self
+                    .error(msg::REFINE_NEEDS_TRY_FROM, self.range_of(&x))
+                    .with("expected", self.show(&exp))
+                    .with("found", self.show(&actual))
+                    .with("name", name.clone())
+                    .note(msg::REFINE_USE_TRY_FROM, vec![("name", name)]);
+                self.report(diag);
+                return self.wrap(x, Coercion::Mismatch, exp);
+            }
+        }
         match (&actual, &exp) {
             (Ty::Adt(d, _), Ty::Str) if prog.builtin(*d) == Some("String") => {
                 return self.wrap(x, Coercion::StrView, Ty::Str);
@@ -879,9 +920,11 @@ impl Checker<'_> {
             DefKind::Const(c) => Expr::new(ExprKind::Const(d), c.ty.clone(), span),
             other => {
                 let kind = match other {
-                    DefKind::Struct(_) | DefKind::Enum(_) | DefKind::ErrorSet(_) | DefKind::TypeAlias(_) => {
-                        "type"
-                    }
+                    DefKind::Struct(_)
+                    | DefKind::Enum(_)
+                    | DefKind::ErrorSet(_)
+                    | DefKind::TypeAlias(_)
+                    | DefKind::Refinement(_) => "type",
                     DefKind::Module(_) => "module",
                     _ => "declaration",
                 };
@@ -1035,6 +1078,7 @@ impl Checker<'_> {
             .filter(|t| matches!(t, Ty::Int | Ty::Float) || self.int_kind(t).is_some());
         let l = self.infer_expr(lhs, hint.as_ref());
         let l = self.decay(l);
+        let l = self.unrefined(l);
         let lt = self.resolved(&l.ty);
         let rhint = if matches!(lt, Ty::Int | Ty::Float) || self.int_kind(&lt).is_some() {
             Some(lt.clone())
@@ -1051,6 +1095,7 @@ impl Checker<'_> {
             self.infer.unify(&inner, num);
         }
         let r = self.decay(r);
+        let r = self.unrefined(r);
         // A literal on the left takes the type of a float on the right.
         let l = match (&l.kind, self.resolved(&r.ty)) {
             (ExprKind::Int(n), Ty::Float) => Expr::new(ExprKind::Float(*n as f64), Ty::Float, l.span),
@@ -1282,7 +1327,8 @@ impl Checker<'_> {
             _ => {
                 let hint = expected.map(|t| self.resolved(t)).filter(|t| matches!(t, Ty::Int | Ty::Float));
                 let x = self.infer_expr(inner, hint.as_ref());
-                self.decay(x)
+                let x = self.decay(x);
+                self.unrefined(x)
             }
         };
         if op == UnOp::Neg
@@ -1312,12 +1358,14 @@ impl Checker<'_> {
     fn compare_expr(&mut self, first: &ast::Expr, rest: &[(CmpOp, ast::Expr)], range: TextRange) -> Expr {
         let span = self.span(range);
         let f = self.infer_expr(first, None);
+        let f = self.unrefined(f);
         let mut prev = f.clone();
         let mut out = Vec::new();
         for (op, e) in rest {
             let pt = self.decay_ty(&prev.ty);
             let hint = if matches!(op, CmpOp::In | CmpOp::NotIn) { None } else { Some(pt.clone()) };
             let x = self.infer_expr(e, hint.as_ref());
+            let x = self.unrefined(x);
             self.check_comparison(*op, &prev, &x, range);
             prev = x.clone();
             out.push((*op, x));
@@ -1486,6 +1534,10 @@ impl Checker<'_> {
     pub fn iteration_item(&mut self, ty: &Ty, mode: ast::Mode) -> Option<(Ty, ForMode)> {
         let prog = self.prog;
         let t = self.resolved(ty.strip_ref());
+        if let Some((_, _, base)) = self.refinement_of(&t) {
+            let b = if let Ty::Ref(_, m) = self.resolved(ty) { Ty::Ref(Box::new(base), m) } else { base };
+            return self.iteration_item(&b, mode);
+        }
         let behind_ref = matches!(self.resolved(ty), Ty::Ref(..));
         let Ty::Adt(d, args) = &t else {
             return if t == Ty::Error { Some((Ty::Error, ForMode::Borrow)) } else { self.iterator_item(&t) };
@@ -2154,7 +2206,8 @@ impl Checker<'_> {
     pub fn field_of(&mut self, b: Expr, name: &ast::Name, range: TextRange) -> Expr {
         let span = self.span(range);
         let prog = self.prog;
-        let mut b = self.auto_deref(b);
+        let b = self.auto_deref(b);
+        let mut b = self.unrefined(b);
         // A `Box` lends its fields to its value: `boxed` is its own. So
         // does a `Shared`, and a mutex guard's `value` is the value.
         loop {
@@ -2235,6 +2288,7 @@ impl Checker<'_> {
         let span = self.span(range);
         let b = self.infer_expr(base, None);
         let b = self.auto_deref(b);
+        let b = self.unrefined(b);
         let t = self.resolved(&b.ty);
         if t == Ty::Error {
             for a in args {

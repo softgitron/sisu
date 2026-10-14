@@ -20,7 +20,7 @@ def url(text: str) -> Url:
 
 test "a server answers a client":
     let net = Net.fake()
-    let listener = net.listen("localhost", 8080).expect("free")
+    let listener = net.listen(8080).expect("free")
     let r = task.scope do s:
         s.spawn(() -> http.serve(listener, Greeter(greeting="hello".to_string())))
         let r = http.request(net, "POST", url("http://localhost:8080/a"), b"aino")
@@ -35,7 +35,7 @@ test "a server answers a client":
 # a 404 asks with `request`, for which a status is not a failure.
 test "clients on many tasks each get their own answer":
     let net = Net.fake()
-    let listener = net.listen("localhost", 80).expect("free")
+    let listener = net.listen(80).expect("free")
     let answers = task.scope do s:
         s.spawn(() -> http.serve(listener, Greeter(greeting="hi".to_string())))
         let a = s.spawn(() -> http.get(net, url("http://localhost/one")))
@@ -64,7 +64,7 @@ test "the scripted network counts requests":
 
 test "an echo server returns what it reads":
     let net = Net.fake()
-    let listener = net.listen("localhost", 7).expect("free")
+    let listener = net.listen(7).expect("free")
     let back = task.scope do s:
         s.spawn do:
             let conn = listener.accept()?

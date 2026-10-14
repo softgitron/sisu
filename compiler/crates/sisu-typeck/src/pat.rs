@@ -31,6 +31,12 @@ impl Checker<'_> {
             let inner_p = self.check_pat_with(p, inner, Some(*m), mutable, warn);
             return Pat { kind: PatKind::Deref(Box::new(inner_p)), ty: t.clone(), span };
         }
+        // A refinement is matched as its base, the same value.
+        if !matches!(p.kind, ast::PatKind::Bind(_) | ast::PatKind::Wildcard | ast::PatKind::Error)
+            && let Some((_, _, base)) = self.refinement_of(&t)
+        {
+            return self.check_pat_with(p, &base, by_ref, mutable, warn);
+        }
         let kind = match &p.kind {
             ast::PatKind::Wildcard => PatKind::Wild,
             ast::PatKind::Error => PatKind::Error,

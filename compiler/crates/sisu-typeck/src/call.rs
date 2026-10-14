@@ -111,9 +111,11 @@ impl Checker<'_> {
         let prog = self.prog;
         match &prog.def(d).kind {
             DefKind::Module(m) => Some(StaticPath::Module(*m)),
-            DefKind::Struct(_) | DefKind::Enum(_) | DefKind::ErrorSet(_) | DefKind::TypeAlias(_) => {
-                Some(StaticPath::Type(self.def_type(d, Vec::new(), range)))
-            }
+            DefKind::Struct(_)
+            | DefKind::Enum(_)
+            | DefKind::ErrorSet(_)
+            | DefKind::TypeAlias(_)
+            | DefKind::Refinement(_) => Some(StaticPath::Type(self.def_type(d, Vec::new(), range))),
             DefKind::Fn(f) if !f.generics.is_empty() => Some(StaticPath::Fn(d, None)),
             DefKind::Trait(_) => Some(StaticPath::Trait(d)),
             _ => None,
@@ -198,6 +200,23 @@ impl Checker<'_> {
                         self.check_args_loosely(args);
                     }
                     return Expr::error(span);
+                }
+                // `X.try_from(v)` for a refinement type (07).
+                if name.text == "try_from"
+                    && self.refinement_of(&ty).is_some()
+                    && let Some((args, trailing, _)) = call
+                {
+                    return self.refine_try(&ty, args, trailing, range);
+                }
+                // An associated constant (`Money.ZERO`).
+                if let Some(k) = ty.key()
+                    && let Some(&c) = prog.assoc_consts.get(&(k, name.text.clone()))
+                {
+                    let value = self.def_value(c, &name.text, range);
+                    return match call {
+                        Some((args, trailing, _)) => self.call_value(value, args, trailing, range),
+                        None => value,
+                    };
                 }
                 // A variant of the type.
                 if let Some((def, vi)) = self.variant_in(&ty, &name.text) {
@@ -402,6 +421,9 @@ impl Checker<'_> {
                 if let Some(t) = self.self_ty.clone() {
                     return self.construct(t, args, trailing, range, expected);
                 }
+            }
+            ast::ExprKind::Name(n) if n == "old" && self.lookup_local(n).is_none() && prog.lookup(self.module, n).is_none() => {
+                return self.old_expr(args, trailing, range);
             }
             ast::ExprKind::Name(n) if self.lookup_local(n).is_none() && n != "it" => {
                 if let Some(exp) = expected
@@ -1216,6 +1238,13 @@ impl Checker<'_> {
                     self.check_args_loosely(args);
                     return Expr::error(span);
                 }
+            }
+            // A refinement has its base's methods, with the same value as
+            // the receiver; one that changes it is checked where the
+            // receiver is borrowed `mut` (E0812).
+            if self.refinement_of(&base).is_some() {
+                recv = self.unrefined(recv);
+                continue;
             }
             // A `Box` and a `Shared` lend their methods' receiver to what
             // they hold.

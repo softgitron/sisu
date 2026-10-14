@@ -81,6 +81,7 @@ impl FnLower<'_, '_> {
                         loc,
                     ),
                 }
+                self.contract_exit(loc);
                 self.emit_exit(0, loc);
                 self.terminate(Terminator::Return, loc);
             }
@@ -133,7 +134,10 @@ impl FnLower<'_, '_> {
                 self.for_loop(pat, iter, *mode, item, ForBody::Block(body), *span)
             }
             Stmt::Match { scrutinee, arms, span } => self.match_into(None, scrutinee, arms, *span),
-            Stmt::Assert { cond, message, text, span } => self.assert(cond, message.as_ref(), text, *span),
+            Stmt::Assert { cond, message, text, span, replay } => {
+                self.assert(cond, message.as_ref(), text, *span, *replay)
+            }
+            Stmt::Contract(c) => self.contract_stmt(c),
             Stmt::Defer { body, .. } => {
                 let i = self.defers.len();
                 self.defers.push(body.clone());
@@ -533,8 +537,21 @@ impl FnLower<'_, '_> {
         self.pop_scope();
     }
 
-    fn assert(&mut self, cond: &thir::Expr, message: Option<&thir::Expr>, text: &str, span: sisu_diag::Span) {
+    fn assert(
+        &mut self,
+        cond: &thir::Expr,
+        message: Option<&thir::Expr>,
+        text: &str,
+        span: sisu_diag::Span,
+        replay: bool,
+    ) {
         let loc = self.ctx.loc(span);
+        // A condition that only reads shows every part's value when it
+        // fails (17, "Assertions").
+        if replay && self.can_show_parts(cond) {
+            self.assert_showing_parts(cond, message, span);
+            return;
+        }
         // `assert a == b` shows both sides when it fails (17, "Assertions").
         if let ExprKind::Compare { first, rest } = &cond.kind
             && rest.len() == 1

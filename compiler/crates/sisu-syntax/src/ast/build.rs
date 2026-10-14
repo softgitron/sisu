@@ -282,12 +282,18 @@ impl B<'_> {
             CONST_DEF => ItemKind::Const(self.const_def(n)),
             TYPE_ALIAS => ItemKind::TypeAlias(TypeAlias {
                 name: self.ident_after(n, TYPE_KW).unwrap_or(self.missing_name(n)),
+                generics: self.generics(n),
                 ty: self
                     .nodes(n)
                     .into_iter()
                     .find(|&c| is_type_node(self.kind(c)))
                     .map(|c| self.type_expr(c)),
                 refinement: self.has(n, WHERE_KW),
+                predicate: self
+                    .nodes(n)
+                    .into_iter()
+                    .find(|&c| is_expr_node(self.kind(c)) || self.kind(c) == ERROR)
+                    .map(|c| self.expr(c)),
             }),
             EXTERN_BLOCK => {
                 let mut items = Vec::new();
@@ -541,6 +547,7 @@ impl B<'_> {
         let mut methods = Vec::new();
         let mut invariants = Vec::new();
         let mut unsupported = Vec::new();
+        let mut consts = Vec::new();
         if let Some(b) = self.child(n, BLOCK) {
             for c in self.nodes(b) {
                 match self.kind(c) {
@@ -573,11 +580,12 @@ impl B<'_> {
                         });
                     }
                     FN_DEF => methods.push(self.fn_def(c)),
+                    CONST_DEF => consts.push(self.const_def(c)),
                     PASS_STMT | ATTRIBUTE => {}
                     CONTRACT_STMT => {
-                        let keyword = self.tokens(c).first().map(|&t| self.text(t).to_string());
-                        if keyword.as_deref() == Some("invariant") {
-                            invariants.push(self.first_expr(c));
+                        let contract = self.contract(c);
+                        if contract.kind == ContractKind::Invariant {
+                            invariants.push(contract);
                         } else {
                             unsupported.push((self.range(c), "a contract"));
                         }
@@ -594,6 +602,7 @@ impl B<'_> {
             fields,
             methods,
             invariants,
+            consts,
             unsupported,
         }
     }
@@ -679,16 +688,18 @@ impl B<'_> {
         };
         let mut methods = Vec::new();
         let mut assoc_types = Vec::new();
+        let mut consts = Vec::new();
         if let Some(b) = self.child(n, BLOCK) {
             for c in self.nodes(b) {
                 match self.kind(c) {
                     FN_DEF => methods.push(self.fn_def(c)),
                     TYPE_ALIAS => assoc_types.push(self.assoc_type(c)),
+                    CONST_DEF => consts.push(self.const_def(c)),
                     _ => {}
                 }
             }
         }
-        ImplDef { generics: self.generics(n), trait_ty, self_ty, methods, assoc_types }
+        ImplDef { generics: self.generics(n), trait_ty, self_ty, methods, assoc_types, consts }
     }
 
     fn path_names(&self, n: NodeId) -> Vec<Name> {
@@ -939,7 +950,7 @@ impl B<'_> {
             YIELD_STMT => StmtKind::Yield(
                 self.nodes(n).into_iter().find(|&c| is_expr_node(self.kind(c))).map(|e| self.expr(e)),
             ),
-            CONTRACT_STMT => StmtKind::Unsupported("contracts (`requires`, `ensures`, `invariant`)"),
+            CONTRACT_STMT => StmtKind::Contract(self.contract(n)),
             COMPTIME_STMT => match self.nodes(n).into_iter().next() {
                 Some(c) => StmtKind::Comptime(Box::new(self.stmt(c))),
                 None => StmtKind::Error,
@@ -1027,6 +1038,27 @@ impl B<'_> {
 
     fn error_expr(&self, n: NodeId) -> Expr {
         Expr { node: n, range: TextRange::empty(self.range(n).end), kind: ExprKind::Error }
+    }
+
+    /// A contract clause: its keyword and expression.
+    fn contract(&self, n: NodeId) -> Contract {
+        let kind = match self.tokens(n).first().map(|&t| self.text(t)) {
+            Some("requires") => ContractKind::Requires,
+            Some("ensures") => ContractKind::Ensures,
+            Some("invariant") => ContractKind::Invariant,
+            _ => ContractKind::Decreases,
+        };
+        let range = self.range(n);
+        // The clause without the line break that ends it.
+        let end = self
+            .tokens(n)
+            .into_iter()
+            .rev()
+            .find(|&t| !matches!(self.t.token_kind(t), NEWLINE | DEDENT | INDENT | WHITESPACE | LINE_BREAK))
+            .map(|t| self.t.token_range(t).end)
+            .unwrap_or(range.end);
+        let expr = self.first_expr(n);
+        Contract { kind, expr: expr.clone(), range: TextRange::new(range.start, end.max(expr.range.end)) }
     }
 
     fn first_expr(&self, n: NodeId) -> Expr {

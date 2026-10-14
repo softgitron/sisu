@@ -101,6 +101,8 @@ impl FnLower<'_, '_> {
                     IndexKind::Dict => Proj::Key(i),
                 })
             }
+            // A refinement's value is its base's: the same place.
+            ExprKind::Coerce { expr, kind: Coercion::Unrefine } => self.place_of(expr),
             ExprKind::Deref(inner) => {
                 if inner.is_place() {
                     self.place_of(inner).project(Proj::Deref)
@@ -378,10 +380,16 @@ impl FnLower<'_, '_> {
                     }
                 }
                 self.assign(
-                    dest,
+                    dest.clone(),
                     Rvalue::Aggregate(sir::Aggregate::Struct(self.ctx.type_name(*def)), ops),
                     loc,
                 );
+                // A struct with an invariant checks it once built (07).
+                let args = match &e.ty {
+                    Ty::Adt(_, a) => a.clone(),
+                    _ => Vec::new(),
+                };
+                self.invariant_after_construction(&dest, *def, &args, loc);
             }
             ExprKind::Tuple(xs) => {
                 let ops = xs.iter().map(|x| self.operand(x)).collect();
@@ -765,6 +773,7 @@ impl FnLower<'_, '_> {
                         );
                     }
                 }
+                self.contract_exit(loc);
                 self.emit_exit(0, loc);
                 self.terminate(Terminator::Return, loc);
                 self.switch_to(ok);
@@ -848,7 +857,7 @@ impl FnLower<'_, '_> {
                                 None => (debug.is_some(), spec.clone()),
                             };
                             let name = if is_debug { "fmt.debug" } else { "fmt.display" };
-                            let base = expr.ty.strip_ref().clone();
+                            let base = self.ctx.prog.erase_refinements(expr.ty.strip_ref());
                             let wk = &self.ctx.prog.wk;
                             let tr = if is_debug { wk.debug } else { wk.display };
                             // A spec is applied by the value's impl, in Sisu; the host
@@ -912,7 +921,9 @@ impl FnLower<'_, '_> {
                     let p = self.place_of(expr);
                     self.assign(dest, Rvalue::Use(Operand::Copy(p)), loc);
                 }
-                Coercion::NeverToAny | Coercion::Widen | Coercion::Mismatch => self.into(dest, expr),
+                Coercion::NeverToAny | Coercion::Widen | Coercion::Mismatch | Coercion::Unrefine => {
+                    self.into(dest, expr)
+                }
                 Coercion::IntWiden => {
                     // The same value; a `u64` is a kind of its own.
                     let v = self.operand(expr);
@@ -973,6 +984,9 @@ impl FnLower<'_, '_> {
                 let r = self.borrow_operand(inner, false);
                 self.intrinsic_call(dest, "error.trace", Vec::new(), vec![r], loc);
             }
+            ExprKind::RefineTry { value, refinement, type_args } => {
+                self.refine_try(dest, value, *refinement, type_args, loc)
+            }
             ExprKind::Error => self.terminate(Terminator::Unreachable, loc),
             ExprKind::Float(_)
             | ExprKind::Bool(_)
@@ -993,7 +1007,9 @@ impl FnLower<'_, '_> {
         let Some(f) = prog.fn_info(def) else {
             return (Callee::Fn(self.ctx.fn_name(def), Vec::new()), Vec::new());
         };
-        let type_args: Vec<Ty> = type_args.iter().map(|t| prog.normalize(t, &self.bounds)).collect();
+        // A refinement is its base here: it has its base's impls (07).
+        let type_args: Vec<Ty> =
+            type_args.iter().map(|t| prog.normalize(&prog.erase_refinements(t), &self.bounds)).collect();
         if let Some(t) = f.trait_ {
             let n = prog.trait_info(t).map(|i| i.generics.len()).unwrap_or(0);
             let self_ty = type_args.first().cloned().unwrap_or(Ty::Error);
@@ -1182,7 +1198,7 @@ impl FnLower<'_, '_> {
         self.split();
         let fr = self.temp_sir(sir::Type::Ref(Box::new(self.ctx.ty(&fty)), true));
         self.assign(Place::local(fr), Rvalue::Ref(Place::local(f), true), loc);
-        let base = prog.normalize(expr.ty.strip_ref(), &self.bounds);
+        let base = prog.normalize(&prog.erase_refinements(expr.ty.strip_ref()), &self.bounds);
         let v = self.ref_operand(expr);
         let (tr, method) = if debug { (prog.wk.debug, "fmt_debug") } else { (prog.wk.display, "fmt") };
         let u = self.unit();
@@ -1211,7 +1227,8 @@ impl FnLower<'_, '_> {
         let prog = self.ctx.prog;
         let Some(intr) = prog.fn_info(def).and_then(|f| f.intrinsic.clone()) else { return false };
         let Some(arg) = args.first() else { return false };
-        let base = prog.normalize(type_args.first().unwrap_or(&Ty::Error).strip_ref(), &self.bounds);
+        let first = prog.erase_refinements(type_args.first().unwrap_or(&Ty::Error));
+        let base = prog.normalize(first.strip_ref(), &self.bounds);
         match intr.as_str() {
             "print" | "print_err" => {
                 if prog.wk.display.is_none_or(|d| prog.is_structural(&base, d)) {

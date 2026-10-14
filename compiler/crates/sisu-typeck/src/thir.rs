@@ -58,6 +58,55 @@ pub struct Body {
     /// A generator's item type: the body has a `yield`, and calling the
     /// function makes an `Iter` of these.
     pub generator: Option<Ty>,
+    /// The function's contract (07): what lowering checks on entry and on
+    /// every exit.
+    pub contracts: Option<Contracts>,
+}
+
+/// What a check of a contract is for (07), which names it when it fails.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContractKind {
+    Requires,
+    Ensures,
+    Invariant,
+    /// A constant written where a refinement type is expected, checked at
+    /// compile time.
+    Refinement,
+}
+
+/// One clause of a contract, checked where lowering puts it.
+#[derive(Clone, Debug)]
+pub struct ContractCheck {
+    pub kind: ContractKind,
+    pub cond: Expr,
+    /// The clause as written, without its keyword.
+    pub text: String,
+    /// The clause's expression.
+    pub span: Span,
+    /// The condition only reads: it calls `pure` functions and changes
+    /// nothing, so when it fails its parts can be evaluated again to show
+    /// their values (17, "Assertions").
+    pub replay: bool,
+}
+
+/// A function's contract: `requires` on entry, `ensures` on every exit
+/// (with `result` and the values `old(e)` saved on entry), and for a `mut
+/// self` method of a type with an invariant, the invariant on every exit.
+#[derive(Clone, Debug, Default)]
+pub struct Contracts {
+    pub requires: Vec<ContractCheck>,
+    pub ensures: Vec<ContractCheck>,
+    /// `old(e)`: the local that holds `e`'s value from the entry, and `e`.
+    pub olds: Vec<(LocalId, Expr)>,
+    /// The local `ensures` calls `result`: the returned value, by
+    /// reference unless it is `Copy`.
+    pub result: Option<LocalId>,
+    /// The labels of a labelled result (`-> (q: int, r: int)`), each the
+    /// local that names the element at that index.
+    pub labels: Vec<(LocalId, u32)>,
+    /// The invariant check a `mut self` method runs on every exit, with
+    /// its type arguments.
+    pub invariant: Option<(DefId, Vec<Ty>)>,
 }
 
 #[derive(Clone, Debug)]
@@ -183,13 +232,20 @@ pub enum Stmt {
         arms: Vec<Arm>,
         span: Span,
     },
-    /// `text` is the condition as written, for the panic message.
+    /// `text` is the condition as written, for the panic message; with
+    /// `replay`, the condition only reads, so its parts can be evaluated
+    /// again to show their values when it fails.
     Assert {
         cond: Expr,
         message: Option<Expr>,
         text: String,
         span: Span,
+        replay: bool,
     },
+    /// A clause of a contract checked here: an `invariant` line in the
+    /// check the compiler writes for a struct, a refinement's predicate
+    /// on a constant.
+    Contract(ContractCheck),
     Defer {
         body: Block,
         span: Span,
@@ -388,6 +444,8 @@ pub enum Coercion {
     ToCap,
     /// An integer as a wider integer type that holds all its values.
     IntWiden,
+    /// A value of a refinement type used as its base (07): the same value.
+    Unrefine,
     /// A type error: the expression is kept, its type replaced by the
     /// expected one so nothing downstream reports again.
     Mismatch,
@@ -519,6 +577,13 @@ pub enum ExprKind {
     CopyOf(Box<Expr>),
     /// `e.trace()` on an error: its error return trace as text (05).
     Trace(Box<Expr>),
+    /// `X.try_from(v)` for a refinement type `X` (07): `Ok(v)` when `v`
+    /// satisfies the predicate, else `Err(Unsatisfied(...))`.
+    RefineTry {
+        value: Box<Expr>,
+        refinement: DefId,
+        type_args: Vec<Ty>,
+    },
     Error,
 }
 
@@ -594,6 +659,8 @@ impl Expr {
         match &self.kind {
             ExprKind::Local(_) | ExprKind::Deref(_) | ExprKind::Index { .. } => true,
             ExprKind::Field { base, .. } => base.is_place(),
+            // A refinement's value is its base's: the same place.
+            ExprKind::Coerce { expr, kind: Coercion::Unrefine } => expr.is_place(),
             _ => false,
         }
     }
@@ -604,6 +671,7 @@ impl Expr {
         match &self.kind {
             ExprKind::Deref(_) | ExprKind::Index { .. } => true,
             ExprKind::Field { base, .. } => base.is_behind_ref(),
+            ExprKind::Coerce { expr, kind: Coercion::Unrefine } => expr.is_behind_ref(),
             _ => false,
         }
     }
@@ -613,6 +681,7 @@ impl Expr {
         match &self.kind {
             ExprKind::Local(l) => Some(*l),
             ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => base.place_root(),
+            ExprKind::Coerce { expr, kind: Coercion::Unrefine } => expr.place_root(),
             _ => None,
         }
     }

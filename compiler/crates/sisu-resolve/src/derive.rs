@@ -132,14 +132,6 @@ impl Resolver<'_> {
                     }
                 }
             }
-            // `invariant e` lines: the check D-077 runs when unwinding drops
-            // a guard of a `Mutex` holding the type (the other checks of 07
-            // arrive with contracts, Phase 8).
-            if let ItemKind::Struct(st) = &item.kind
-                && !st.invariants.is_empty()
-            {
-                text.push_str(&invariant_text(&shape, &st.invariants, &source));
-            }
             // `@delegate(Trait, ..., to="field")`: impls that forward to a field.
             let delegated = self.delegations(module, item, &shape);
             for (t, field, span) in &delegated {
@@ -561,28 +553,4 @@ fn delegate_text(shape: &Shape, trait_name: &str, field: &str) -> String {
         _ => format!("    pure def len(self) -> int:\n        return len(self.{v})\n"),
     };
     format!("\n{head}{body}")
-}
-
-/// `impl Type: pure def __invariant(self) -> bool`, the conjunction of the
-/// type's `invariant` lines.
-fn invariant_text(shape: &Shape, invariants: &[ast::Expr], source: &str) -> String {
-    let (ty, params) = if shape.generics.is_empty() {
-        (shape.name.clone(), String::new())
-    } else {
-        let names: Vec<String> = shape.generics.iter().map(|(n, _)| n.clone()).collect();
-        let ps: Vec<String> = shape
-            .generics
-            .iter()
-            .map(|(n, b)| if b.is_empty() { n.clone() } else { format!("{n}: {}", b.join(" + ")) })
-            .collect();
-        (format!("{}[{}]", shape.name, names.join(", ")), format!("[{}]", ps.join(", ")))
-    };
-    let parts: Vec<String> = invariants
-        .iter()
-        .map(|e| format!("({})", source.get(e.range.start as usize..e.range.end as usize).unwrap_or("True")))
-        .collect();
-    format!(
-        "\nimpl{params} {ty}:\n    pure def __invariant(self) -> bool:\n        return {}\n",
-        parts.join(" and ")
-    )
 }

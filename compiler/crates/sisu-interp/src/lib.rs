@@ -92,6 +92,10 @@ pub struct Options {
     pub seed: u64,
     /// Keep the scheduling numbers of `--stats`.
     pub stats: bool,
+    /// The seed of a property's random cases (`check`), per test.
+    pub case_seed: u64,
+    /// The choices of the case a replay token names: `check` runs it first.
+    pub replay_case: Option<Vec<i64>>,
 }
 
 /// How a monitored run went, beyond its exit status.
@@ -105,6 +109,9 @@ pub struct RunReport {
     pub coverage: HashMap<(String, u32, u32), u32>,
     /// The `--stats` report, when asked for.
     pub stats: Option<String>,
+    /// The choices of the failing case a property recorded, for the
+    /// test's replay token.
+    pub case: Option<Vec<i64>>,
 }
 
 /// Why execution left a frame other than by returning.
@@ -127,6 +134,10 @@ pub(crate) struct PanicInfo {
     pub stack: Vec<String>,
     /// Set when the panic is a typed hole (`todo`).
     pub hole: Option<String>,
+    /// Set when the panic is a refinement's predicate failing on a
+    /// constant: the type, the value and the predicate, which compile-time
+    /// evaluation reports as a diagnostic of its own.
+    pub refinement: Option<(String, String, String)>,
 }
 
 /// A catalog message (D-065): run-time messages are catalog entries too.
@@ -135,7 +146,12 @@ pub(crate) fn render(id: MsgId, params: &[(&str, String)]) -> String {
 }
 
 pub(crate) fn panic(id: MsgId, params: &[(&str, String)]) -> Unwind {
-    Unwind::Panic(Box::new(PanicInfo { message: render(id, params), stack: Vec::new(), hole: None }))
+    Unwind::Panic(Box::new(PanicInfo {
+        message: render(id, params),
+        stack: Vec::new(),
+        hole: None,
+        refinement: None,
+    }))
 }
 
 /// An internal error: the SIR broke an invariant the interpreter relies on.
@@ -194,6 +210,12 @@ pub struct Interp<'p, 'h> {
     pub(crate) heap: Vec<value::HeapCell>,
     /// Tasks, scopes, channels and clocks.
     pub(crate) sched: sched::Sched<'p>,
+    /// The seed of a property's random cases, and the case a replay token
+    /// names (17).
+    pub(crate) case_seed: u64,
+    pub(crate) replay_case: Option<Vec<i64>>,
+    /// The failing case a property recorded.
+    pub(crate) recorded_case: Option<Vec<i64>>,
 }
 
 impl<'p, 'h> Interp<'p, 'h> {
@@ -252,12 +274,15 @@ impl<'p, 'h> Interp<'p, 'h> {
             }),
             heap: Vec::new(),
             sched: sched::Sched::new(options.seed, options.stats, host_clock),
+            case_seed: options.case_seed,
+            replay_case: options.replay_case.clone(),
+            recorded_case: None,
         }
     }
 
     /// What the monitor saw: whether it stopped the run, and the coverage.
     pub fn report(&self, status: i32) -> RunReport {
-        let mut r = RunReport { status, ..Default::default() };
+        let mut r = RunReport { status, case: self.recorded_case.clone(), ..Default::default() };
         if self.sched.keep_stats {
             r.stats = Some(self.stats_report());
         }

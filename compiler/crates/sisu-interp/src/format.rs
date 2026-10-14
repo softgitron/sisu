@@ -406,3 +406,73 @@ pub(crate) fn quote_bytes(b: &[u8]) -> String {
     out.push('"');
     out
 }
+
+/// The values of a failed condition's parts drawn under it (17,
+/// "Assertions"), each under its column with a bar above it, as lines
+/// starting with a line break:
+///
+/// ```text
+///     parse_int(text).ok() == Some(expected)
+///     │         │     │        │
+///     │         "4x"  None     Some(42)
+///     Err(BadDigit(at=1, found='x'))
+/// ```
+///
+/// Values are placed from the rightmost part to the leftmost, each on the
+/// first row below the bars where it does not overlap one already there;
+/// every part's bar runs down to its value. Nothing is drawn for a
+/// condition on more than one line or with no parts.
+pub fn parts_diagram(text: &str, parts: &[(usize, String)]) -> String {
+    if parts.is_empty() || text.contains('\n') {
+        return String::new();
+    }
+    let mut parts: Vec<(usize, String)> = parts.to_vec();
+    parts.sort_by(|a, b| b.0.cmp(&a.0));
+    parts.dedup_by_key(|p| p.0);
+    // rows[r] holds the values on row r + 1 (row 0 is the bars), as
+    // (column, text); depth[i] the row of part i.
+    let mut rows: Vec<Vec<(usize, String)>> = Vec::new();
+    let mut depth = Vec::new();
+    for (c, v) in &parts {
+        let len = v.chars().count();
+        let fits = |row: &Vec<(usize, String)>| {
+            row.iter().all(|(k, w)| c + len < *k || *k + w.chars().count() < *c)
+        };
+        let r = match rows.iter().position(fits) {
+            Some(r) => r,
+            None => {
+                rows.push(Vec::new());
+                rows.len() - 1
+            }
+        };
+        rows[r].push((*c, v.clone()));
+        depth.push(r);
+    }
+    let width = parts.iter().map(|(c, v)| c + v.chars().count()).max().unwrap_or(0) + 1;
+    let mut out = format!("\n    {text}");
+    // The bar row, then each row of values with the bars that pass it.
+    for r in 0..=rows.len() {
+        let mut line: Vec<char> = vec![' '; width];
+        for (i, (c, _)) in parts.iter().enumerate() {
+            // A part's bar runs down through the rows above its value.
+            if r == 0 || depth[i] >= r {
+                if let Some(slot) = line.get_mut(*c) {
+                    *slot = '│';
+                }
+            }
+        }
+        if r > 0 {
+            for (c, v) in &rows[r - 1] {
+                for (k, ch) in v.chars().enumerate() {
+                    if let Some(slot) = line.get_mut(c + k) {
+                        *slot = ch;
+                    }
+                }
+            }
+        }
+        let s: String = line.into_iter().collect();
+        out.push_str("\n    ");
+        out.push_str(s.trim_end());
+    }
+    out
+}

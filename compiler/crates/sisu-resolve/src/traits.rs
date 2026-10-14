@@ -166,6 +166,13 @@ impl Resolver<'_> {
                 let s = self.span(module, a.name.range);
                 self.report(Diagnostic::new(msg::RESOLVE_ASSOC_OUTSIDE_TRAIT_IMPL, s));
             }
+            if let Some(key) = self_ty.key() {
+                let owner = self.prog.display(&self_ty);
+                let owner = owner.split('[').next().unwrap_or("").to_string();
+                for c in &imp.consts {
+                    self.declare_assoc_const(module, key, &owner, c);
+                }
+            }
             for m in &imp.methods {
                 let def = self.new_def(
                     module,
@@ -189,6 +196,18 @@ impl Resolver<'_> {
             TyCtx { self_ty: Some(&self_ty), predicates: &predicates, ..TyCtx::plain(module, &names, true) };
         let Some(trait_ref) = self.resolve_bound(trait_ty, &self_ty, &ctx) else { return };
         if self_ty == Ty::Error {
+            return;
+        }
+        // A refinement has its base's reading impls and no others (07).
+        if let Ty::Adt(d, args) = &self_ty
+            && let Some(base) = self.prog.refinement_base(*d, args)
+        {
+            self.report(
+                Diagnostic::new(msg::REFINE_OWN_IMPL, span)
+                    .with("ty", self.prog.display(&self_ty))
+                    .with("base", self.prog.display(&base))
+                    .with("trait", self.prog.display_trait(&trait_ref)),
+            );
             return;
         }
         // `Drop` is for a struct or enum of this module, with exactly

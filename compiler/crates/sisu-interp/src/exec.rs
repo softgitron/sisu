@@ -58,7 +58,7 @@ impl<'p> Interp<'p, '_> {
     }
 
     #[allow(clippy::type_complexity)]
-    fn callee_of(
+    pub(crate) fn callee_of(
         &self,
         f: &Value,
         mut args: Vec<Value>,
@@ -545,6 +545,9 @@ impl<'p> Interp<'p, '_> {
                     // anchor, which gives the result to `dest`.
                     if matches!(name.as_str(), "task.scope" | "task.race" | "task.shield") {
                         return self.open_scope(name, vals, dest, ret);
+                    }
+                    if name == "test.catch" {
+                        return self.open_catch(vals, dest);
                     }
                     let r = self.intrinsic(name, tys, vals, ret.as_ref());
                     self.finish_call(name, tys, dest, ret, r)

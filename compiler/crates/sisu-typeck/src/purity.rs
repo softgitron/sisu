@@ -127,6 +127,7 @@ pub fn visit_stmt(s: &Stmt, f: &mut dyn FnMut(&Expr)) {
                 visit_expr(m, f);
             }
         }
+        Stmt::Contract(c) => visit_expr(&c.cond, f),
         Stmt::Defer { body, .. } | Stmt::Block(body) => visit_block(body, f),
         Stmt::Select { arms, .. } => {
             for a in arms {
@@ -242,6 +243,7 @@ pub fn visit_expr(e: &Expr, f: &mut dyn FnMut(&Expr)) {
             }
         }
         ExprKind::Try { expr, .. } | ExprKind::Coerce { expr, .. } => visit_expr(expr, f),
+        ExprKind::RefineTry { value, .. } => visit_expr(value, f),
         ExprKind::OptChain { base, then, .. } => {
             visit_expr(base, f);
             visit_expr(then, f);
@@ -267,4 +269,73 @@ pub fn visit_expr(e: &Expr, f: &mut dyn FnMut(&Expr)) {
         }
         _ => {}
     }
+}
+
+/// Why an expression could not be evaluated again without changing
+/// anything (a contract's condition must be such; 07, "Contract
+/// expressions must be `pure`"): the impure function it calls, or what it
+/// changes. Closures it makes are looked into through `closure`.
+pub fn reading_problem(
+    prog: &Program,
+    e: &Expr,
+    closure: &dyn Fn(ClosureId) -> Option<Block>,
+) -> Option<Reading> {
+    let mut found: Option<Reading> = None;
+    let mut bodies: Vec<Block> = Vec::new();
+    visit_expr(e, &mut |x| {
+        if found.is_some() {
+            return;
+        }
+        if let Some(name) = impure_callee(prog, x) {
+            found = Some(Reading::Calls(name));
+            return;
+        }
+        match &x.kind {
+            ExprKind::Call { args, .. } if args.iter().any(|a| a.mode == ArgMode::BorrowMut) => {
+                found = Some(Reading::Changes);
+            }
+            ExprKind::Borrow { mutable: true, .. } => found = Some(Reading::Changes),
+            ExprKind::Closure(c) | ExprKind::Comptime(c) => {
+                if let Some(b) = closure(*c) {
+                    bodies.push(b);
+                }
+            }
+            _ => {}
+        }
+    });
+    while found.is_none()
+        && let Some(b) = bodies.pop()
+    {
+        visit_block(&b, &mut |x| {
+            if found.is_some() {
+                return;
+            }
+            if let Some(name) = impure_callee(prog, x) {
+                found = Some(Reading::Calls(name));
+            } else if matches!(&x.kind, ExprKind::Call { args, .. } if args.iter().any(|a| a.mode == ArgMode::BorrowMut))
+                || matches!(&x.kind, ExprKind::Borrow { mutable: true, .. })
+            {
+                found = Some(Reading::Changes);
+            } else if let ExprKind::Closure(c) = &x.kind
+                && let Some(b) = closure(*c)
+            {
+                bodies.push(b);
+            }
+        });
+        for s in &b.stmts {
+            if matches!(s, Stmt::Assign { .. } | Stmt::AugAssign { .. } | Stmt::AssignTuple { .. }) {
+                found.get_or_insert(Reading::Changes);
+            }
+        }
+    }
+    found
+}
+
+/// What keeps an expression from only reading.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Reading {
+    /// It calls this function, which is not `pure`.
+    Calls(String),
+    /// It changes something (a `mut` argument or borrow, an assignment).
+    Changes,
 }

@@ -52,6 +52,9 @@ pub(crate) enum Anchor {
     Task,
     Scope(u32),
     Shield,
+    /// `test.catch`: receives what the call returns, or the panic that
+    /// unwound it (a typed hole goes on).
+    Catch,
 }
 
 /// The seeded generator behind every scheduling choice (SplitMix64).
@@ -402,10 +405,25 @@ impl<'p> Interp<'p, '_> {
                 Some(Anchor::Scope(s)) => return Some(Node::Scope(s)),
                 Some(Anchor::Shield) => return None,
                 Some(Anchor::Task) => return Some(Node::Task(self.sched.cur)),
-                None => {}
+                Some(Anchor::Catch) | None => {}
             }
         }
         None
+    }
+
+    /// `test.catch(f, x)`: the call `f(x)` above an anchor that gives
+    /// `Ok(result)`, or `Err(Panicked(message))` when a panic unwinds it.
+    pub(crate) fn open_catch(&mut self, mut args: Vec<Value>, dest: &'p sir::Place) -> Result<(), Unwind> {
+        if args.len() != 2 {
+            return Err(ice("test.catch takes a function and its argument"));
+        }
+        let x = args.pop().unwrap_or(Value::Unit);
+        let f = args.pop().unwrap_or(Value::Unit);
+        let (fi, vals, tys) = self.callee_of(&f, vec![x])?;
+        let anchor = self.anchor_frame(Anchor::Catch, Some(dest));
+        let fr = self.make_frame(fi, vals, Some(&RESULT_SLOT), tys)?;
+        self.push_built(anchor)?;
+        self.push_built(fr)
     }
 
     fn deadline_passed(&self, d: Option<(u32, i128)>) -> bool {
@@ -644,6 +662,20 @@ impl<'p> Interp<'p, '_> {
                 Ok(Event::Switch)
             }
             Anchor::Scope(s) => self.step_scope_end(s),
+            Anchor::Catch => {
+                let fr = self.pop_frame()?;
+                let v = match fr.pending {
+                    // A typed hole blocks the test; it is not a failure.
+                    Some(p) if p.hole.is_some() => return Err(Unwind::Panic(p)),
+                    Some(p) => Value::err(Value::Variant(Value::adt(
+                        "Panicked",
+                        0,
+                        vec![Value::String(p.message)],
+                    ))),
+                    None => Value::ok(fr.locals.into_iter().next().unwrap_or(Value::Unit)),
+                };
+                Ok(Event::Returned(v, fr.ret))
+            }
         }
     }
 

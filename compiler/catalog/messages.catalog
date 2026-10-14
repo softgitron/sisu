@@ -326,6 +326,22 @@ E0608 error   comptime.derive-failed      deriving `{trait}` for `{ty}` stopped 
 E0700 error   cap.not-shareable          `{ty}` cannot become `{cap}`: a capability may reach every task, and `{ty}` is not `{auto}`{path}
 E0701 error   cap.internal               `{name}` is internal to the standard library; a program reaches the world only through the capabilities it is given
 
+# ---------------------------------------------------------------- contracts and refinement types (07)
+E0800 error   contract.misplaced          `{keyword}` is a function's contract and belongs at the start of its body, before its first statement
+E0801 error   contract.not-pure           a contract only reads what it is given, and `{callee}` is not `pure`
+E0802 error   contract.changes            a contract only reads what it is given, and this changes it
+E0803 error   contract.old-outside        `old(...)` is a value as it was on entry, which only an `ensures` clause can ask for
+E0804 error   contract.old-arguments      `old` takes one expression, as in `old(self.balance)`
+E0805 error   contract.generator-ensures  a generator has no `ensures`: what it returns is its iterator
+E0806 error   contract.invariant-field    `{what}` is part of a `{ty}`, whose invariant only its own methods may change and check again; change it through one of them
+E0807 error   contract.not-in-test        a test has no contract; check what it needs with `assert`
+E0810 error   refine.not-satisfied        `{value}` is not a `{ty}`: `{predicate}` is false for it
+E0811 error   refine.needs-try-from       expected `{expected}`, found `{found}`; a value becomes a `{expected}` where its predicate is checked, with `{name}.try_from(...)`
+E0812 error   refine.change-through-base  `{method}` could change a `{ty}` so that `{predicate}` no longer holds; change a copy of its base instead
+E0813 error   refine.own-impl             `{ty}` refines `{base}` and has its reading impls; it cannot have an impl of `{trait}` of its own
+E0814 error   refine.predicate-type       the predicate of `{ty}` must be a `bool`, found `{found}`
+-     help    refine.use-try-from         check it where it runs: `{name}.try_from(...)`
+
 # ---------------------------------------------------------------- stage-0 limits and internal errors
 E0900 error   stage0.unsupported          {construct} is not implemented in stage 0 yet; it arrives with {phase}
 E0901 error   stage0.internal             internal compiler error in {stage}: {detail}
@@ -431,6 +447,10 @@ R0088 runtime run.stats-shared            stats shared: {local} cells from task-
 R0089 runtime monitor.shared-crossed      a `Shared` whose construction site the escape analysis tagged task-local was reached by another task
 R0091 runtime panic.nested-recv           a receiver inside another iterator would have to wait; iterate the receiver itself
 R0090 runtime panic.into-inner-poisoned   `into_inner` of a poisoned mutex: a task panicked holding it and left its value's invariant broken
+R0100 runtime contract.requires-failed    precondition of `{function}` failed: {clause}
+R0101 runtime contract.ensures-failed     postcondition of `{function}` failed: {clause}
+R0102 runtime contract.invariant-failed   invariant of `{ty}` failed: {clause}
+R0103 runtime contract.refinement-failed  `{value}` is not a `{ty}`: `{clause}` is false for it
 
 # ---------------------------------------------------------------- driver
 

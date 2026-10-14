@@ -9,6 +9,7 @@
 
 mod call;
 mod check;
+mod contracts;
 mod exhaustive;
 mod expr;
 mod infer;
@@ -79,6 +80,7 @@ fn check_fn(
         span: prog.def(def).span,
         has_errors: false,
         generator: None,
+        contracts: None,
     };
     let Some(f) = prog.fn_info(def) else { return (empty, Vec::new(), Vec::new()) };
     let Some(body_ast) = &f.body else { return (empty, Vec::new(), Vec::new()) };
@@ -141,6 +143,27 @@ fn check_fn(
         c.declare(&p.name, l, false, p.span.range);
         params.push(l);
     }
+    // The contract: the clauses the body starts with (07).
+    let leading = contracts::leading_contracts(body_ast);
+    let clauses: Vec<&sisu_syntax::ast::Contract> = body_ast.stmts[..leading]
+        .iter()
+        .filter_map(|s| match &s.kind {
+            sisu_syntax::ast::StmtKind::Contract(k) => Some(k),
+            _ => None,
+        })
+        .collect();
+    let contracts = c.check_contracts(f, &clauses, &ret);
+    let trimmed;
+    let body_ast = if leading > 0 {
+        trimmed = sisu_syntax::ast::Block {
+            node: body_ast.node,
+            range: body_ast.range,
+            stmts: body_ast.stmts[leading..].to_vec(),
+        };
+        &trimmed
+    } else {
+        body_ast
+    };
     let mut block = c.check_block_in_scope(body_ast);
     let r = c.infer.zonk(&ret);
     let ret = if generator.is_some() { c.fn_ret(def) } else { ret };
@@ -206,6 +229,7 @@ fn check_fn(
         span: def_span,
         has_errors,
         generator,
+        contracts,
     };
     zonk::Zonker { prog, infer: &c.infer }.body(&mut body);
     // A pure body's calls are checked on SIR (sisu-borrowck's purity pass).
@@ -471,6 +495,7 @@ fn check_value(
         span,
         has_errors,
         generator: None,
+        contracts: None,
     };
     zonk::Zonker { prog, infer: &c.infer }.body(&mut body);
     (body, std::mem::take(&mut c.diags))
@@ -596,6 +621,10 @@ fn must_consume_ty(prog: &Program, t: &Ty, depth: u32) -> bool {
         Ty::Tuple(es, _) => es.iter().any(|e| must_consume_ty(prog, e, depth + 1)),
         // A type is must-consume when it is declared so or holds one, in
         // a field or a type argument (D-054's propagation).
+        Ty::Adt(d, args) if prog.refinement(*d).is_some() => {
+            let base = prog.refinement_base(*d, args).unwrap_or(Ty::Error);
+            must_consume_ty(prog, &base, depth + 1)
+        }
         Ty::Adt(d, args) => {
             let (flag, fields): (bool, Vec<Ty>) = match &prog.def(*d).kind {
                 sisu_resolve::DefKind::Struct(s) => {

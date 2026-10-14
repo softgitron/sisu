@@ -156,6 +156,9 @@ impl Program {
         seen: &mut Vec<(DefId, Vec<Ty>, Auto)>,
         depth: u32,
     ) -> Result<(), Obstacle> {
+        if let Some(base) = self.refinement_base(d, args) {
+            return self.auto_depth(&base, auto, env, seen, depth + 1);
+        }
         let key = (d, args.to_vec(), auto);
         if seen.contains(&key) {
             return Ok(());

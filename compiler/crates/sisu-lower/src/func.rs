@@ -76,6 +76,9 @@ pub(crate) struct FnLower<'c, 'a> {
     pub loops: Vec<LoopCtx>,
     pub defers: Vec<thir::Block>,
     pub unit_temp: Option<sir::LocalId>,
+    /// Lowering a struct's invariant check as `T.__invariant`, which
+    /// returns whether it holds instead of panicking (D-077's check).
+    pub bool_invariant: bool,
 }
 
 /// Lowers a body and its closures to SIR functions.
@@ -119,7 +122,19 @@ pub(crate) fn lower_body(ctx: &mut Ctx, body: &thir::Body) -> Vec<sir::Function>
     let mut main = FnLower::new(ctx, body, None, &name);
     main.type_params = type_params.clone();
     main.bounds = env.clone();
-    out.push(main.run(kind, source, pure, (from, inner), own));
+    out.push(main.run(kind, source, pure, (from.clone(), inner.clone()), own.clone()));
+    // A struct's invariant check also becomes `T.__invariant`, which says
+    // whether the invariant holds: the check D-077 runs when unwinding
+    // drops a mutex guard, in every build.
+    if let Some(sisu_resolve::FnKind::Invariant(_)) = fn_info.map(|f| &f.kind)
+        && let Some(base) = name.strip_suffix(".__check_invariant")
+    {
+        let mut b = FnLower::new(ctx, body, None, &format!("{base}.__invariant"));
+        b.type_params = type_params.clone();
+        b.bounds = env.clone();
+        b.bool_invariant = true;
+        out.push(b.run(kind, source, pure, (from, inner), own));
+    }
     for (i, cl) in body.closures.iter().enumerate() {
         let id = thir::ClosureId(i as u32);
         if cl.comptime {
@@ -192,6 +207,7 @@ impl<'c, 'a> FnLower<'c, 'a> {
             loops: Vec::new(),
             defers: Vec::new(),
             unit_temp: None,
+            bool_invariant: false,
         }
     }
 
@@ -220,7 +236,8 @@ impl<'c, 'a> FnLower<'c, 'a> {
                 (cl.ret.clone(), &cl.body, cl.params.clone())
             }
         };
-        self.add_local(self.ctx.ty(&ret), None);
+        let ret_sir = if self.bool_invariant { sir::Type::Bool } else { self.ctx.ty(&ret) };
+        self.add_local(ret_sir, None);
         // Parameters.
         let mut param_count = 0;
         if let Some(c) = self.closure.filter(|c| !body.closures[c.0 as usize].comptime) {
@@ -280,16 +297,16 @@ impl<'c, 'a> FnLower<'c, 'a> {
         if !self.scopes[0].entries.is_empty() {
             self.split();
         }
+        // The contract's checks on entry (07).
+        self.contract_entry();
         self.block_stmts(block);
         if !self.terminated() {
             // Falling off the end: only unit functions do (the checker
             // rejects the rest).
-            self.assign(
-                Place::local(sir::LocalId(0)),
-                sir::Rvalue::Use(sir::Operand::Const(sir::Const::Unit)),
-                None,
-            );
+            let done = if self.bool_invariant { sir::Const::Bool(true) } else { sir::Const::Unit };
+            self.assign(Place::local(sir::LocalId(0)), sir::Rvalue::Use(sir::Operand::Const(done)), None);
             let end = self.scopes.first().and_then(|s| s.end);
+            self.contract_exit(end);
             self.emit_exit(0, end);
             self.terminate(Terminator::Return, None);
         }
@@ -705,6 +722,7 @@ pub(crate) fn stmt_span(s: &thir::Stmt) -> sisu_diag::Span {
         | For { span, .. }
         | Match { span, .. }
         | Assert { span, .. }
+        | Contract(thir::ContractCheck { span, .. })
         | Select { span, .. }
         | Yield { span, .. }
         | Defer { span, .. } => *span,

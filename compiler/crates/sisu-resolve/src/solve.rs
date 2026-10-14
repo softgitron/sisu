@@ -127,6 +127,18 @@ impl Program {
         if is(wk.escapable) {
             return if !self.can_borrow(&ty) { Answer::Yes(ImplSource::Builtin) } else { Answer::No };
         }
+        // A refinement implements the reading traits of its base, through
+        // the base's impls (07: it "can be used wherever `T` can"); the
+        // traits that make or change values (`Add`, `Iterator`) are not
+        // its, since what they make need not satisfy the predicate.
+        if let Ty::Adt(d, args) = &ty
+            && let Some(base) = self.refinement_base(*d, args)
+        {
+            if !self.passes_through_refs(tr.def) {
+                return Answer::No;
+            }
+            return self.implements_depth(&base, tr, env, depth + 1);
+        }
         match &ty {
             Ty::Dyn(d) if self.elaborate(&ty, d).contains(tr) => return Answer::Yes(ImplSource::Dyn),
             // A reference reads what it points to.
