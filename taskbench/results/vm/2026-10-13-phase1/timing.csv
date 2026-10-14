@@ -35,3 +35,11 @@ rep,benchmark,start_utc,seconds
 4,starvation,2026-10-13T23:47:08Z,513
 5,starvation,2026-10-13T23:55:41Z,500
 1,echo,2026-10-14T00:04:02Z,541
+2,echo,2026-10-14T00:13:03Z,754
+3,echo,2026-10-14T00:25:37Z,355
+4,echo,2026-10-14T00:31:32Z,354
+5,echo,2026-10-14T00:37:26Z,359
+1,idle-connections,2026-10-14T00:43:38Z,326
+2,idle-connections,2026-10-14T00:49:04Z,359
+3,idle-connections,2026-10-14T00:55:03Z,325
+4,idle-connections,2026-10-14T01:00:28Z,327

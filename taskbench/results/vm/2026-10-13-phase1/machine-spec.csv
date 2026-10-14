@@ -489,3 +489,38 @@ schema,run_id,timestamp_utc,machine_id,implementation,benchmark,strategy,reserva
 1,20261014T000401Z-20212,2026-10-14T00:04:01Z,vm,machine,machine-spec,,,,,,,cgroup_memory_max,,,ok,14343688192
 1,20261014T000401Z-20212,2026-10-14T00:04:01Z,vm,machine,machine-spec,,,,,,,cgroup_pids_max,,,ok,unreadable
 1,20261014T000401Z-20212,2026-10-14T00:04:01Z,vm,machine,machine-spec,,,,,,,harness_version,,,ok,0.2.0
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,uname,,,ok,Linux 6.18.44-fc-v114 #1 SMP PREEMPT_DYNAMIC @0
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,hostname,,,ok,vm
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,os,,,ok,Ubuntu 24.04.5 LTS
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,cpu_model,,,ok,Intel(R) Xeon(R) Processor @ 2.10GHz
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,threads_per_core,,,ok,1
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,smt,,,ok,active=0 control=notsupported
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,hypervisor,,,ok,KVMKVMKVM
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,cpus_available,,,ok,4
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,cpus_online,,,ok,0-3
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,cpu_governor,,,ok,unreadable: No such file or directory (os error 2)
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,mem_total_bytes,,,ok,16874930176
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,swap,,,ok,0 kB
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,page_size,,,ok,4096
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,sysctl.vm.max_map_count,,,ok,65530
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,sysctl.vm.overcommit_memory,,,ok,0
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,sysctl.vm.overcommit_ratio,,,ok,50
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,sysctl.kernel.threads-max,,,ok,128599
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,sysctl.kernel.pid_max,,,ok,32768
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,sysctl.kernel.io_uring_disabled,,,ok,0
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,sysctl.fs.nr_open,,,ok,1048576
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,sysctl.fs.file-max,,,ok,1645207
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,sysctl.net.core.somaxconn,,,ok,4096
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,sysctl.net.ipv4.ip_local_port_range,,,ok,32768	60999
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,sysctl.net.ipv4.tcp_max_syn_backlog,,,ok,1024
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,thp_enabled,,,ok,always [madvise] never
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,thp_defrag,,,ok,always defer defer+madvise [madvise] never
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,cpu_mitigations,,,ok,Mitigation: Enhanced / Automatic IBRS; IBPB: conditional; PBRSB-eIBRS: SW sequence; BHI: Vulnerable
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,rlimit_nofile,,,ok,20000/20000
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,rlimit_nproc,,,ok,64299/64299
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,rlimit_stack,,,ok,8388608/unlimited
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,rlimit_as,,,ok,unlimited/unlimited
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,rlimit_memlock,,,ok,8388608/8388608
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,cgroup_memory_max,,,ok,14343688192
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,cgroup_pids_max,,,ok,unreadable
+1,20261014T004337Z-23104,2026-10-14T00:43:37Z,vm,machine,machine-spec,,,,,,,harness_version,,,ok,0.2.0

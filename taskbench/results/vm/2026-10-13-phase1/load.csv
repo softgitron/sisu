@@ -283,3 +283,108 @@ start_utc,benchmark,implementation,args,attempt,kept,wall_s,own_cpu_s,others_cpu
 2026-10-14T00:21:42Z,echo,taskbench,"--strategy D --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.22,133.07,5.80,0.165,1.43,0.3,quiet,84
 2026-10-14T00:22:29Z,echo,taskbench,"--strategy D --base B --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.43,137.36,1.42,0.040,1.59,0.3,quiet,12
 2026-10-14T00:23:07Z,echo,taskbench,"--strategy E --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.39,127.83,9.60,0.271,1.78,0.3,quiet,2
+2026-10-14T00:23:44Z,echo,taskbench,"--strategy tokio --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.45,134.47,3.46,0.098,1.73,0.3,quiet,2
+2026-10-14T00:24:22Z,echo,go,"--connections 1000 --duration 30 --warmup-secs 5",1,yes,37.51,130.60,10.40,0.277,1.43,0.3,quiet,2
+2026-10-14T00:25:01Z,echo,java,"--connections 1000 --duration 30 --warmup-secs 5",1,yes,36.29,130.58,1.13,0.031,1.44,0.3,quiet,2
+2026-10-14T00:25:39Z,echo,taskbench,"--strategy A --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.02,0.00,0.000,0.00,0.3,quiet,2
+2026-10-14T00:25:41Z,echo,taskbench,"--strategy B --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.02,-0.01,0.000,0.00,0.3,quiet,2
+2026-10-14T00:25:43Z,echo,taskbench,"--strategy C --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.01,-0.01,0.000,0.00,0.3,quiet,2
+2026-10-14T00:25:46Z,echo,taskbench,"--strategy D --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.02,-0.02,0.000,0.00,0.3,quiet,2
+2026-10-14T00:25:48Z,echo,taskbench,"--strategy D --base B --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.01,-0.01,0.000,0.00,0.3,quiet,2
+2026-10-14T00:25:50Z,echo,taskbench,"--strategy E --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.02,-0.01,0.000,0.00,0.3,quiet,2
+2026-10-14T00:25:52Z,echo,taskbench,"--strategy tokio --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.01,-0.00,0.000,0.00,0.3,quiet,2
+2026-10-14T00:25:54Z,echo,taskbench,"--strategy A --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.50,137.81,1.20,0.034,1.39,0.3,quiet,2
+2026-10-14T00:26:31Z,echo,taskbench,"--strategy B --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.41,136.74,1.91,0.054,1.65,0.3,quiet,2
+2026-10-14T00:27:09Z,echo,taskbench,"--strategy C --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.43,138.06,0.65,0.018,1.65,0.3,quiet,2
+2026-10-14T00:27:46Z,echo,taskbench,"--strategy D --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.25,137.56,1.45,0.041,1.46,0.3,quiet,2
+2026-10-14T00:28:23Z,echo,taskbench,"--strategy D --base B --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.43,138.43,0.60,0.017,1.35,0.3,quiet,2
+2026-10-14T00:29:01Z,echo,taskbench,"--strategy E --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.48,138.38,0.60,0.017,1.44,0.3,quiet,2
+2026-10-14T00:29:38Z,echo,taskbench,"--strategy tokio --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.50,137.89,0.95,0.027,1.25,0.3,quiet,2
+2026-10-14T00:30:16Z,echo,go,"--connections 1000 --duration 30 --warmup-secs 5",1,yes,37.53,140.42,1.22,0.033,1.39,0.3,quiet,2
+2026-10-14T00:30:55Z,echo,java,"--connections 1000 --duration 30 --warmup-secs 5",1,yes,36.27,130.68,-1.29,-0.036,1.58,0.3,quiet,2
+2026-10-14T00:31:34Z,echo,taskbench,"--strategy A --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.02,-0.01,0.000,0.00,0.3,quiet,2
+2026-10-14T00:31:36Z,echo,taskbench,"--strategy B --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.01,-0.00,0.000,0.01,0.3,quiet,2
+2026-10-14T00:31:38Z,echo,taskbench,"--strategy C --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.02,0.00,0.000,0.00,0.3,quiet,2
+2026-10-14T00:31:40Z,echo,taskbench,"--strategy D --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.01,-0.00,0.000,0.00,0.3,quiet,2
+2026-10-14T00:31:42Z,echo,taskbench,"--strategy D --base B --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.02,-0.01,0.000,0.00,0.3,quiet,2
+2026-10-14T00:31:44Z,echo,taskbench,"--strategy E --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.02,-0.01,0.000,0.00,0.3,quiet,2
+2026-10-14T00:31:46Z,echo,taskbench,"--strategy tokio --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.02,0.00,0.000,0.00,0.3,quiet,2
+2026-10-14T00:31:48Z,echo,taskbench,"--strategy A --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.46,138.19,0.85,0.024,1.46,0.3,quiet,2
+2026-10-14T00:32:25Z,echo,taskbench,"--strategy B --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.42,138.40,0.56,0.016,1.37,0.3,quiet,2
+2026-10-14T00:33:03Z,echo,taskbench,"--strategy C --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.44,137.83,0.89,0.025,1.59,0.3,quiet,2
+2026-10-14T00:33:40Z,echo,taskbench,"--strategy D --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.27,138.39,0.69,0.020,1.40,0.3,quiet,2
+2026-10-14T00:34:18Z,echo,taskbench,"--strategy D --base B --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.43,138.41,0.60,0.017,1.39,0.3,quiet,2
+2026-10-14T00:34:55Z,echo,taskbench,"--strategy E --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.48,138.39,0.62,0.017,1.48,0.3,quiet,2
+2026-10-14T00:35:33Z,echo,taskbench,"--strategy tokio --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.47,138.41,0.50,0.014,1.14,0.3,quiet,2
+2026-10-14T00:36:10Z,echo,go,"--connections 1000 --duration 30 --warmup-secs 5",1,yes,37.63,140.89,0.99,0.026,1.29,0.3,quiet,2
+2026-10-14T00:36:50Z,echo,java,"--connections 1000 --duration 30 --warmup-secs 5",1,yes,36.36,135.69,0.28,0.008,1.25,0.3,quiet,2
+2026-10-14T00:37:28Z,echo,taskbench,"--strategy A --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.02,-0.01,0.000,0.00,0.3,quiet,2
+2026-10-14T00:37:30Z,echo,taskbench,"--strategy B --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.02,-0.01,0.000,0.00,0.3,quiet,2
+2026-10-14T00:37:32Z,echo,taskbench,"--strategy C --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.02,-0.01,0.000,0.00,0.3,quiet,2
+2026-10-14T00:37:34Z,echo,taskbench,"--strategy D --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.01,-0.01,0.000,0.00,0.3,quiet,2
+2026-10-14T00:37:36Z,echo,taskbench,"--strategy D --base B --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.02,0.00,0.000,0.00,0.3,quiet,2
+2026-10-14T00:37:42Z,echo,taskbench,"--strategy E --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.01,-0.00,0.000,0.00,0.3,quiet,6
+2026-10-14T00:37:44Z,echo,taskbench,"--strategy tokio --connections 10000 --duration 30 --warmup-secs 5",1,yes,0.00,0.02,0.00,0.000,0.00,0.3,quiet,2
+2026-10-14T00:37:46Z,echo,taskbench,"--strategy A --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.47,138.74,0.65,0.018,1.12,0.3,quiet,2
+2026-10-14T00:38:24Z,echo,taskbench,"--strategy B --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.42,138.42,0.82,0.023,1.11,0.3,quiet,2
+2026-10-14T00:39:01Z,echo,taskbench,"--strategy C --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.42,137.90,1.25,0.035,1.12,0.3,quiet,2
+2026-10-14T00:39:39Z,echo,taskbench,"--strategy D --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.27,138.14,1.09,0.031,1.19,0.3,quiet,2
+2026-10-14T00:40:16Z,echo,taskbench,"--strategy D --base B --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.43,138.39,0.75,0.021,1.23,0.3,quiet,2
+2026-10-14T00:40:54Z,echo,taskbench,"--strategy E --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.46,138.10,1.13,0.032,1.26,0.3,quiet,2
+2026-10-14T00:41:31Z,echo,taskbench,"--strategy tokio --connections 1000 --duration 30 --warmup-secs 5",1,yes,35.45,137.21,1.49,0.042,1.42,0.3,quiet,2
+2026-10-14T00:42:09Z,echo,go,"--connections 1000 --duration 30 --warmup-secs 5",1,yes,37.68,140.57,1.43,0.038,1.21,0.3,quiet,2
+2026-10-14T00:42:48Z,echo,java,"--connections 1000 --duration 30 --warmup-secs 5",1,yes,36.32,134.34,-0.06,-0.002,1.30,0.3,quiet,2
+2026-10-14T00:43:40Z,idle-connections,taskbench,"--strategy A --connections 9900 --settle-ms 30000",1,yes,30.70,1.29,1.96,0.064,0.08,0.3,quiet,2
+2026-10-14T00:44:13Z,idle-connections,taskbench,"--strategy B --connections 9900 --settle-ms 30000",1,no,30.32,0.70,9.91,0.327,0.15,0.3,quiet,2
+2026-10-14T00:44:45Z,idle-connections,taskbench,"--strategy B --connections 9900 --settle-ms 30000",2,yes,30.41,0.75,4.51,0.148,0.06,0.3,quiet,2
+2026-10-14T00:45:17Z,idle-connections,taskbench,"--strategy C --connections 9900 --settle-ms 30000",1,yes,30.35,0.83,0.88,0.029,0.09,0.3,quiet,2
+2026-10-14T00:45:50Z,idle-connections,taskbench,"--strategy D --connections 9900 --settle-ms 30000",1,yes,30.70,1.41,0.94,0.031,0.07,0.3,quiet,2
+2026-10-14T00:46:23Z,idle-connections,taskbench,"--strategy D --base B --connections 9900 --settle-ms 30000",1,yes,30.36,0.67,1.06,0.035,0.05,0.3,quiet,2
+2026-10-14T00:46:55Z,idle-connections,taskbench,"--strategy E --connections 9900 --settle-ms 30000",1,yes,30.41,0.77,0.87,0.029,0.07,0.3,quiet,2
+2026-10-14T00:47:27Z,idle-connections,taskbench,"--strategy tokio --connections 9900 --settle-ms 30000",1,yes,30.44,0.60,0.97,0.032,0.08,0.3,quiet,2
+2026-10-14T00:48:00Z,idle-connections,go,"--connections 9900 --settle-ms 30000",1,yes,30.74,1.23,0.62,0.020,0.04,0.3,quiet,2
+2026-10-14T00:48:33Z,idle-connections,java,"--connections 9900 --settle-ms 30000",1,yes,31.06,2.15,0.87,0.028,0.13,0.3,quiet,2
+2026-10-14T00:49:06Z,idle-connections,taskbench,"--strategy A --connections 9900 --settle-ms 30000",1,yes,30.64,1.13,0.97,0.032,0.12,0.3,quiet,2
+2026-10-14T00:49:38Z,idle-connections,taskbench,"--strategy B --connections 9900 --settle-ms 30000",1,yes,30.36,0.79,1.27,0.042,0.08,0.3,quiet,2
+2026-10-14T00:50:11Z,idle-connections,taskbench,"--strategy C --connections 9900 --settle-ms 30000",1,no,30.31,0.69,19.17,0.632,0.24,0.3,quiet,2
+2026-10-14T00:50:43Z,idle-connections,taskbench,"--strategy C --connections 9900 --settle-ms 30000",2,yes,30.39,0.68,0.90,0.030,0.03,0.3,quiet,2
+2026-10-14T00:51:16Z,idle-connections,taskbench,"--strategy D --connections 9900 --settle-ms 30000",1,yes,30.77,1.47,0.84,0.027,0.05,0.3,quiet,2
+2026-10-14T00:51:48Z,idle-connections,taskbench,"--strategy D --base B --connections 9900 --settle-ms 30000",1,yes,30.43,0.73,0.97,0.032,0.04,0.3,quiet,2
+2026-10-14T00:52:21Z,idle-connections,taskbench,"--strategy E --connections 9900 --settle-ms 30000",1,yes,30.39,0.66,1.29,0.042,0.07,0.3,quiet,2
+2026-10-14T00:52:53Z,idle-connections,taskbench,"--strategy tokio --connections 9900 --settle-ms 30000",1,yes,30.39,0.55,0.91,0.030,0.10,0.3,quiet,2
+2026-10-14T00:53:26Z,idle-connections,go,"--connections 9900 --settle-ms 30000",1,yes,30.68,1.15,8.92,0.291,0.21,0.3,quiet,2
+2026-10-14T00:53:58Z,idle-connections,java,"--connections 9900 --settle-ms 30000",1,no,31.13,2.13,26.12,0.839,0.34,0.3,quiet,2
+2026-10-14T00:54:32Z,idle-connections,java,"--connections 9900 --settle-ms 30000",2,yes,31.03,2.08,1.22,0.039,0.09,0.3,quiet,2
+2026-10-14T00:55:05Z,idle-connections,taskbench,"--strategy A --connections 9900 --settle-ms 30000",1,yes,30.72,1.23,1.50,0.049,0.20,0.3,quiet,2
+2026-10-14T00:55:37Z,idle-connections,taskbench,"--strategy B --connections 9900 --settle-ms 30000",1,yes,30.42,0.70,3.80,0.125,0.13,0.3,quiet,2
+2026-10-14T00:56:10Z,idle-connections,taskbench,"--strategy C --connections 9900 --settle-ms 30000",1,yes,30.40,0.73,0.79,0.026,0.04,0.3,quiet,2
+2026-10-14T00:56:42Z,idle-connections,taskbench,"--strategy D --connections 9900 --settle-ms 30000",1,yes,30.79,1.62,1.48,0.048,0.11,0.3,quiet,2
+2026-10-14T00:57:15Z,idle-connections,taskbench,"--strategy D --base B --connections 9900 --settle-ms 30000",1,yes,30.38,0.69,1.38,0.045,0.11,0.3,quiet,2
+2026-10-14T00:57:47Z,idle-connections,taskbench,"--strategy E --connections 9900 --settle-ms 30000",1,yes,30.27,0.71,1.25,0.041,0.07,0.3,quiet,2
+2026-10-14T00:58:20Z,idle-connections,taskbench,"--strategy tokio --connections 9900 --settle-ms 30000",1,no,30.44,0.57,16.37,0.538,0.25,0.3,quiet,2
+2026-10-14T00:58:52Z,idle-connections,taskbench,"--strategy tokio --connections 9900 --settle-ms 30000",2,yes,30.41,0.57,0.74,0.024,0.04,0.3,quiet,2
+2026-10-14T00:59:25Z,idle-connections,go,"--connections 9900 --settle-ms 30000",1,yes,30.68,1.20,1.12,0.037,0.07,0.3,quiet,2
+2026-10-14T00:59:57Z,idle-connections,java,"--connections 9900 --settle-ms 30000",1,yes,31.06,2.04,1.58,0.051,0.19,0.3,quiet,2
+2026-10-14T01:00:30Z,idle-connections,taskbench,"--strategy A --connections 9900 --settle-ms 30000",1,yes,30.76,1.33,6.50,0.211,0.16,0.3,quiet,2
+2026-10-14T01:01:03Z,idle-connections,taskbench,"--strategy B --connections 9900 --settle-ms 30000",1,yes,30.46,0.79,8.18,0.269,0.15,0.3,quiet,2
+2026-10-14T01:01:36Z,idle-connections,taskbench,"--strategy C --connections 9900 --settle-ms 30000",1,yes,30.38,0.70,0.62,0.020,0.05,0.3,quiet,2
+2026-10-14T01:02:08Z,idle-connections,taskbench,"--strategy D --connections 9900 --settle-ms 30000",1,no,30.91,1.74,10.67,0.345,0.31,0.3,quiet,2
+2026-10-14T01:02:41Z,idle-connections,taskbench,"--strategy D --connections 9900 --settle-ms 30000",2,yes,30.76,1.46,1.18,0.038,0.10,0.3,quiet,2
+2026-10-14T01:03:14Z,idle-connections,taskbench,"--strategy D --base B --connections 9900 --settle-ms 30000",1,yes,30.41,0.69,1.16,0.038,0.09,0.3,quiet,2
+2026-10-14T01:03:46Z,idle-connections,taskbench,"--strategy E --connections 9900 --settle-ms 30000",1,yes,30.42,0.69,1.00,0.033,0.06,0.3,quiet,2
+2026-10-14T01:04:19Z,idle-connections,taskbench,"--strategy tokio --connections 9900 --settle-ms 30000",1,yes,30.39,0.55,1.06,0.035,0.08,0.3,quiet,2
+2026-10-14T01:04:51Z,idle-connections,go,"--connections 9900 --settle-ms 30000",1,yes,30.73,1.22,1.26,0.041,0.09,0.3,quiet,2
+2026-10-14T01:05:24Z,idle-connections,java,"--connections 9900 --settle-ms 30000",1,yes,31.02,1.95,1.91,0.062,0.12,0.3,quiet,2
+2026-10-14T01:05:57Z,idle-connections,taskbench,"--strategy A --connections 9900 --settle-ms 30000",1,no,30.69,1.19,9.84,0.321,0.13,0.3,quiet,2
+2026-10-14T01:06:30Z,idle-connections,taskbench,"--strategy A --connections 9900 --settle-ms 30000",2,no,30.67,1.17,10.73,0.350,0.18,0.3,quiet,2
+2026-10-14T01:07:02Z,idle-connections,taskbench,"--strategy A --connections 9900 --settle-ms 30000",3,yes,30.74,1.33,1.70,0.055,0.16,0.3,quiet,2
+2026-10-14T01:07:35Z,idle-connections,taskbench,"--strategy B --connections 9900 --settle-ms 30000",1,yes,30.44,0.74,1.33,0.044,0.09,0.3,quiet,2
+2026-10-14T01:08:08Z,idle-connections,taskbench,"--strategy C --connections 9900 --settle-ms 30000",1,yes,30.41,0.85,1.34,0.044,0.10,0.3,quiet,2
+2026-10-14T01:08:40Z,idle-connections,taskbench,"--strategy D --connections 9900 --settle-ms 30000",1,yes,30.66,1.14,8.93,0.291,0.17,0.3,quiet,2
+2026-10-14T01:09:17Z,idle-connections,taskbench,"--strategy D --base B --connections 9900 --settle-ms 30000",1,no,30.60,0.74,51.37,1.679,0.68,0.3,quiet,6
+2026-10-14T01:10:10Z,idle-connections,taskbench,"--strategy D --base B --connections 9900 --settle-ms 30000",2,no,30.52,0.97,9.22,0.302,0.26,0.3,quiet,23
+2026-10-14T01:10:42Z,idle-connections,taskbench,"--strategy D --base B --connections 9900 --settle-ms 30000",3,yes,30.47,0.82,0.97,0.032,0.06,0.3,quiet,2
+2026-10-14T01:11:15Z,idle-connections,taskbench,"--strategy E --connections 9900 --settle-ms 30000",1,yes,30.44,0.75,0.94,0.031,0.12,0.3,quiet,2
+2026-10-14T01:11:47Z,idle-connections,taskbench,"--strategy tokio --connections 9900 --settle-ms 30000",1,yes,30.43,0.59,0.72,0.024,0.07,0.3,quiet,2
+2026-10-14T01:16:11Z,idle-connections,go,"--connections 9900 --settle-ms 30000",1,yes,30.72,1.24,6.67,0.217,0.18,0.3,quiet,36
+2026-10-14T01:16:44Z,idle-connections,java,"--connections 9900 --settle-ms 30000",1,yes,31.07,2.14,1.14,0.037,0.11,0.3,quiet,2

@@ -21,3 +21,14 @@ Files: spawn-join.csv (the two repetitions and part of the third), load.csv
 (their load rows, with the old busy count), timing.csv (the two repetitions),
 java-attempt-killed.csv (the rows of the Java process running when the run was
 stopped). The harness binary was the same as in every other group here.
+
+Also here: go-idle-connections-attempt-killed.csv, the one row written by the
+Go control's idle-connections process of the fifth repetition, which was
+running when the idle-connections group's runner was stopped by a time limit
+between 01:12 and 01:15 UTC on 2026-10-14 (the harness's own seven
+configurations of that repetition had finished). The fifth repetition's Go and Java runs were
+then made by hand, 01:15-01:17 UTC, with the same gate:
+controls/run_controls.sh results/vm/2026-10-13-phase1 --threads 4
+--machine-id vm --scale full --only idle-connections --no-build
+--quiet-below 0.3. The group's timing.csv has four repetitions for that
+reason.

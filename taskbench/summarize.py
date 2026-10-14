@@ -198,7 +198,9 @@ def fmt_num(v, unit, digits=None):
     x = scaled(v, unit)
     if digits is None:
         digits = 0 if abs(x) >= 100 or float(x).is_integer() else (1 if abs(x) >= 10 else 2)
-    return f"{x:,.{digits}f}"
+    s = f"{x:,.{digits}f}"
+    # a value that rounds to zero is shown without a sign ("-0.0" reads as negative)
+    return s[1:] if s.startswith("-") and float(s[1:].replace(",", "")) == 0 else s
 
 
 def fmt_cell(cell, metric, unit="", digits=None):
