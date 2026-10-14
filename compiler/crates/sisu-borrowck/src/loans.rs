@@ -93,11 +93,15 @@ pub struct State {
     pub direct: Vec<Option<BitSet>>,
     /// Two-phase loans whose reference has been used.
     pub activated: BitSet,
+    /// Loans a task spawned on this scope holds: live until the body
+    /// returns, which is when the scope can end (06).
+    pub pinned: BitSet,
 }
 
 impl State {
     fn join(&mut self, o: &State) -> bool {
         let mut changed = false;
+        changed |= self.pinned.union(&o.pinned);
         for (a, b) in self.holds.iter_mut().zip(&o.holds) {
             changed |= a.union(b);
         }
@@ -122,6 +126,9 @@ impl State {
 
 pub struct Analysis {
     pub loans: Vec<Loan>,
+    /// Whether a task's loans are pinned to the end of its scope's body
+    /// (the task rules; off only for fault injection).
+    pin: bool,
     made: HashMap<(usize, usize), Made>,
     /// The projected operand places whose type is a reference.
     ref_places: Vec<Place>,
@@ -191,6 +198,10 @@ fn is_ref_mut(t: &Option<Type>) -> bool {
 
 impl Analysis {
     pub fn run(p: &Program, f: &Function, types: &Types) -> Analysis {
+        Self::run_with(p, f, types, true)
+    }
+
+    pub fn run_with(p: &Program, f: &Function, types: &Types, pin: bool) -> Analysis {
         let cfg = Cfg::new(f);
         let mut loans = Vec::new();
         let mut made: HashMap<(usize, usize), Made> = HashMap::new();
@@ -270,6 +281,7 @@ impl Analysis {
         }
         let mut a = Analysis {
             loans,
+            pin,
             made,
             ref_places,
             cfg,
@@ -371,6 +383,7 @@ impl Analysis {
             holds: vec![BitSet::new(self.nloans); self.nloc],
             direct: vec![None; self.nloc],
             activated: BitSet::new(self.nloans),
+            pinned: BitSet::new(self.nloans),
         }
     }
 
@@ -691,6 +704,15 @@ impl Analysis {
                         st.direct[src.local.0 as usize] = None;
                     }
                 }
+                // A task spawned on this body's own scope keeps what it
+                // borrows until the scope ends.
+                if self.pin
+                    && let Some(k) = spawn_task_arg(callee)
+                    && scope_body_spawn(f, args)
+                    && let Some(o) = ops.get(k)
+                {
+                    st.pinned.union(&o.holds);
+                }
                 let result = self.with_keys(st, d, result);
                 self.write(f, types, st, d, result, None);
             }
@@ -825,7 +847,7 @@ impl Analysis {
     }
 
     fn live_loans(&self, st: &State, live: &BitSet) -> BitSet {
-        let mut out = BitSet::new(self.nloans);
+        let mut out = st.pinned.clone();
         for l in live.iter() {
             if let Some(h) = st.holds.get(l) {
                 out.union(h);
@@ -871,6 +893,7 @@ impl Analysis {
                 }
                 if opts.on(Rule::Escapes) {
                     self.check_stores(p, f, types, b, si, s, before, &mut out);
+                    self.check_tasks(f, types, b, si, s, before, &mut out);
                 }
             }
             if opts.on(Rule::Escapes)
@@ -883,6 +906,12 @@ impl Analysis {
         // A borrow that outlives its place is the mistake; the conflicts
         // the same loan meets afterwards (the place made again in the
         // next iteration) follow from it.
+        // A task that borrows what it may not is the mistake; the end of
+        // what it borrows follows from it.
+        let task_rules = [msg::TASK_BORROWS_BODY_LOCAL, msg::TASK_BORROWS_ELSEWHERE];
+        let tasks: Vec<u32> =
+            out.iter().filter(|fd| task_rules.contains(&fd.msg)).filter_map(|fd| fd.loan).collect();
+        out.retain(|fd| task_rules.contains(&fd.msg) || !fd.loan.is_some_and(|l| tasks.contains(&l)));
         let gone: Vec<u32> = out
             .iter()
             .filter(|fd| fd.msg == msg::BORROW_DOES_NOT_LIVE_LONG_ENOUGH)
@@ -1457,6 +1486,98 @@ impl Analysis {
         false
     }
 
+    /// The task rules (06, "Tasks and scopes"). A task spawned on the
+    /// scope of the body it is spawned in (the body's parameter) may
+    /// borrow only what the body's environment borrows, which outlives the
+    /// scope: a loan the environment brought, or one through it. A task
+    /// spawned anywhere else borrows nothing, since the checker cannot tell
+    /// how long its scope lasts. A generator's `yield` gives its item to
+    /// the consumer, so the item may borrow only what the generator's
+    /// environment does, as a `return` may borrow only from parameters.
+    #[allow(clippy::too_many_arguments)]
+    fn check_tasks(
+        &self,
+        f: &Function,
+        types: &Types,
+        b: usize,
+        si: usize,
+        s: &Statement,
+        st: &State,
+        out: &mut Vec<Finding>,
+    ) {
+        let StatementKind::Call { callee, args, .. } = &s.kind else { return };
+        let made = self.made.get(&(b, si));
+        let yielding = matches!(callee, Callee::Intrinsic(n, _) if n == "gen.yield");
+        let k = match spawn_task_arg(callee) {
+            Some(k) => k,
+            None if yielding => 0,
+            None => return,
+        };
+        let Some(o) = args.get(k) else { return };
+        let ol = self.op_loans(st, made, k, o);
+        let through_env = yielding
+            || (matches!(f.kind, sisu_sir::FnKind::Closure(sisu_sir::ClosureRole::ScopeBody))
+                && scope_body_spawn(f, args));
+        let offending = ol.holds.iter().find(|&l| !through_env || !self.borrows_through_env(f, st, l));
+        let Some(l) = offending else { return };
+        let msg = if yielding {
+            msg::BORROW_RETURN_LOCAL
+        } else if through_env {
+            msg::TASK_BORROWS_BODY_LOCAL
+        } else {
+            msg::TASK_BORROWS_ELSEWHERE
+        };
+        let mut fd = Finding::new(msg, f, s.loc)
+            .with_arg("name", self.loan_name(f, types, l))
+            .label(self.loans[l].loc, msg::BORROW_BORROWED_HERE, Vec::new())
+            .at(b, si);
+        if yielding {
+            fd = fd.with("function", display_fn(&f.name)).note(msg::BORROW_RETURN_OWNED, Vec::new());
+        } else {
+            fd = fd.note(msg::TASK_USE_OWN, Vec::new());
+        }
+        fd.loan = Some(l as u32);
+        out.push(fd);
+    }
+
+    /// Whether a loan is one the environment of a closure brought (its
+    /// parameter 1, the caller's loans), or a borrow through it.
+    fn borrows_through_env(&self, f: &Function, st: &State, l: LoanId) -> bool {
+        let mut work = vec![l];
+        let mut seen = BitSet::new(self.nloans);
+        while let Some(t) = work.pop() {
+            if !seen.insert(t) {
+                continue;
+            }
+            match &self.loans[t].kind {
+                // The environment is argument 0; the scope (argument 1 of a
+                // scope's body) lasts as long as the scope.
+                LoanKind::Param(i) => {
+                    let scope_param = *i == 1
+                        && matches!(f.kind, sisu_sir::FnKind::Closure(sisu_sir::ClosureRole::ScopeBody));
+                    if *i != 0 && !scope_param {
+                        return false;
+                    }
+                }
+                LoanKind::Local { place, .. } => {
+                    let Some(k) = place.proj.iter().position(|x| matches!(x, Proj::Deref)) else {
+                        return false;
+                    };
+                    let base = place.local.0 as usize;
+                    let set = match &st.direct[base] {
+                        Some(d) if k == 0 => d,
+                        _ => &st.holds[base],
+                    };
+                    if set.is_empty() {
+                        return false;
+                    }
+                    work.extend(set.iter());
+                }
+            }
+        }
+        true
+    }
+
     /// The fix for a borrow stored in a plain struct: make it a `view
     /// struct` (an enum has no view form, so it gets no fix).
     fn declare_view(types: &Types, ty: &str, fd: Finding) -> Finding {
@@ -1662,4 +1783,20 @@ fn kept_args(p: &Program, name: &str, n: usize) -> Vec<usize> {
         Some(d) => d.own.iter().map(|i| *i as usize).collect(),
         None => (0..n).collect(),
     }
+}
+
+/// The argument of a `spawn` call that is the task.
+fn spawn_task_arg(callee: &Callee) -> Option<usize> {
+    match callee {
+        Callee::Intrinsic(n, _) if n == "Scope.spawn" => Some(1),
+        Callee::Intrinsic(n, _) if n == "Scope.spawn_with" => Some(2),
+        _ => None,
+    }
+}
+
+/// Whether a `spawn` in `f` spawns on the scope `f` is the body of: `f` is
+/// a scope's body and the receiver is its parameter, the scope.
+fn scope_body_spawn(f: &Function, args: &[Operand]) -> bool {
+    matches!(f.kind, sisu_sir::FnKind::Closure(sisu_sir::ClosureRole::ScopeBody))
+        && matches!(args.first(), Some(Operand::Copy(p) | Operand::Move(p)) if p.local.0 == 2 && p.proj.is_empty())
 }

@@ -15,12 +15,16 @@ use sisu_sir as sir;
 use sisu_sir::{Callee, Operand, Place, Rvalue, StatementKind, Terminator};
 use std::rc::Rc;
 
-enum Event<'p> {
+pub(crate) enum Event<'p> {
     Continue,
+    /// A yield point: a loop's back edge or a call (Q-34).
+    Yield,
     /// The top frame returned (and was popped).
     Returned(Value, Option<&'p Place>),
     /// The top frame finished its cleanup (and was popped).
     Resumed(Box<PanicInfo>),
+    /// The running task finished: the scheduler runs another.
+    Switch,
 }
 
 impl<'p> Interp<'p, '_> {
@@ -128,9 +132,18 @@ impl<'p> Interp<'p, '_> {
         ret: Option<&'p Place>,
         tys: Vec<sir::Type>,
     ) -> Result<(), Unwind> {
-        if self.frames.len() >= MAX_DEPTH {
-            return Err(panic(msg::PANIC_STACK_OVERFLOW, &[("depth", MAX_DEPTH.to_string())]));
-        }
+        let fr = self.make_frame(fi, args, ret, tys)?;
+        self.push_built(fr)
+    }
+
+    /// A frame for a call of function `fi`, not pushed yet.
+    pub(crate) fn make_frame(
+        &mut self,
+        fi: usize,
+        args: Vec<Value>,
+        ret: Option<&'p Place>,
+        tys: Vec<sir::Type>,
+    ) -> Result<Frame<'p>, Unwind> {
         let f = self.prog.functions.get(fi).ok_or_else(|| ice("no such function"))?;
         let mut locals = vec![Value::Moved; f.locals.len()];
         for (i, a) in args.into_iter().enumerate() {
@@ -139,7 +152,7 @@ impl<'p> Interp<'p, '_> {
             }
         }
         self.serial += 1;
-        self.frames.push(Frame {
+        Ok(Frame {
             serial: self.serial,
             func: Some(fi),
             locals,
@@ -152,50 +165,136 @@ impl<'p> Interp<'p, '_> {
             drops: Vec::new(),
             after: None,
             resume_after_drops: false,
-        });
+            anchor: None,
+        })
+    }
+
+    pub(crate) fn push_built(&mut self, fr: Frame<'p>) -> Result<(), Unwind> {
+        if self.frames.len() >= MAX_DEPTH {
+            return Err(panic(msg::PANIC_STACK_OVERFLOW, &[("depth", MAX_DEPTH.to_string())]));
+        }
+        self.frames.push(fr);
         Ok(())
     }
 
-    /// Runs until the frame at index `base` returns.
+    /// Runs until the frame at index `base` of the running task returns.
+    /// Other tasks run in between, when this one waits or gives way.
     fn run(&mut self, base: usize) -> Result<Value, Unwind> {
+        let root = self.sched.cur;
         loop {
-            match self.step() {
-                Ok(Event::Continue) => {}
+            let cur = self.sched.cur as usize;
+            let ev = match self.sched.tasks.get_mut(cur).and_then(|t| t.pending.take()) {
+                // The call the task waited in, again.
+                Some(pc) => self.retry(pc).map(|()| Event::Continue),
+                None => self.step(),
+            };
+            self.sched.steps += 1;
+            match ev {
+                Ok(Event::Continue) => {
+                    if self.sched.yield_asked && self.yield_point() {
+                        self.preempt()?;
+                    }
+                }
+                Ok(Event::Yield) => {
+                    if self.yield_point() {
+                        self.preempt()?;
+                    }
+                }
                 Ok(Event::Returned(v, ret)) => {
-                    if self.frames.len() <= base {
+                    if self.sched.cur == root && self.frames.len() <= base {
                         return Ok(v);
                     }
                     if let Some(dest) = ret
                         && let Err(e) = self.store(dest, v)
                     {
-                        self.raise(e, base)?;
+                        self.raise(e, base, root)?;
                     }
                 }
                 Ok(Event::Resumed(p)) => {
-                    if self.frames.len() <= base {
+                    if self.sched.cur == root && self.frames.len() <= base {
                         return Err(Unwind::Panic(p));
                     }
-                    self.raise(Unwind::Panic(p), base)?;
+                    self.raise(Unwind::Panic(p), base, root)?;
                 }
-                Err(e) => self.raise(e, base)?,
+                Ok(Event::Switch) | Err(Unwind::Switch) => self.switch()?,
+                Err(e) => self.raise(e, base, root)?,
             }
+        }
+    }
+
+    /// Retries the intrinsic call the running task waited in.
+    fn retry(&mut self, pc: crate::sched::PendingCall<'p>) -> Result<(), Unwind> {
+        let r = self.intrinsic(&pc.name, &pc.tys, pc.args, pc.ret.as_ref());
+        self.finish_call(&pc.name, &pc.tys, pc.dest, pc.ret, r)
+    }
+
+    /// Stores what an intrinsic returned, or records the call when it must
+    /// wait.
+    fn finish_call(
+        &mut self,
+        name: &str,
+        tys: &[sir::Type],
+        dest: &'p Place,
+        ret: Option<sir::Type>,
+        r: Result<Value, Unwind>,
+    ) -> Result<(), Unwind> {
+        match r {
+            Ok(v) => self.store(dest, v),
+            Err(Unwind::Block(b)) => {
+                let crate::sched::Blocked { args, wait, keys, timer } = *b;
+                let cur = self.sched.cur as usize;
+                if let Some(t) = self.sched.tasks.get_mut(cur) {
+                    t.pending = Some(crate::sched::PendingCall {
+                        name: name.to_string(),
+                        tys: tys.to_vec(),
+                        args,
+                        dest,
+                        ret,
+                    });
+                }
+                Err(self.block_on(crate::sched::Blocked { args: Vec::new(), wait, keys, timer }))
+            }
+            Err(e) => Err(e),
         }
     }
 
     /// A panic in the top frame's current block: continue in its cleanup
     /// block, or leave the frame and repeat in the caller. Returns an error
-    /// when the panic leaves the frame at `base`, or aborts.
-    fn raise(&mut self, e: Unwind, base: usize) -> Result<(), Unwind> {
+    /// when the panic leaves the frame at `base` of task `root`, or aborts.
+    /// The anchor of a task or a scope stops a panic: it records it, and
+    /// its next step joins what it must before the panic goes on.
+    fn raise(&mut self, e: Unwind, base: usize, root: u32) -> Result<(), Unwind> {
         let mut p = match e {
             Unwind::Panic(p) => p,
+            Unwind::Switch | Unwind::Block(_) => return Err(ice("a task switch where a panic was expected")),
             abort => {
-                self.frames.truncate(base);
+                if self.sched.cur == root {
+                    self.frames.truncate(base);
+                }
                 return Err(abort);
             }
         };
         loop {
-            if self.frames.len() <= base {
+            let at_base = self.sched.cur == root && self.frames.len() <= base;
+            if at_base {
                 return Err(Unwind::Panic(p));
+            }
+            if let Some(anchor) = self.frames.last().and_then(|f| f.anchor) {
+                match anchor {
+                    crate::sched::Anchor::Shield => {
+                        if let Some(fr) = self.frames.pop() {
+                            let n = self.frames.len() as u32;
+                            self.mon_frame_gone(fr.serial, n, fr.locals.len());
+                        }
+                        continue;
+                    }
+                    _ => {
+                        if let Some(fr) = self.frames.last_mut() {
+                            fr.pending = Some(p);
+                        }
+                        return Ok(());
+                    }
+                }
             }
             let (cleanup, unwind) = match self.current_block() {
                 Some(b) => (b.cleanup, b.unwind),
@@ -209,7 +308,9 @@ impl<'p> Interp<'p, '_> {
                     .and_then(|f| f.pending.as_ref())
                     .map(|q| q.message.clone())
                     .unwrap_or_default();
-                self.frames.truncate(base);
+                if self.sched.cur == root {
+                    self.frames.truncate(base);
+                }
                 return Err(Unwind::Abort(render(
                     msg::PANIC_DURING_UNWIND,
                     &[("first", first), ("message", p.message.clone())],
@@ -294,7 +395,7 @@ impl<'p> Interp<'p, '_> {
 
     /// Executes one statement or terminator of the top frame.
     fn step(&mut self) -> Result<Event<'p>, Unwind> {
-        let top = self.frames.len() - 1;
+        let top = self.frames.len().checked_sub(1).ok_or_else(|| ice("a task without frames"))?;
         if let Some(d) = self.frames[top].drops.pop() {
             if top > 0 && self.frames[top].drops.is_empty() && self.glue_returns_next() {
                 // The glue's last drop: the glue is done, and its caller
@@ -314,6 +415,9 @@ impl<'p> Interp<'p, '_> {
             self.mon_frame_gone(fr.serial, n, fr.locals.len());
             return fr.pending.map(Event::Resumed).ok_or_else(|| ice("resume outside unwinding"));
         }
+        if let Some(a) = self.frames[top].anchor {
+            return self.step_anchor(a);
+        }
         let block = self.current_block().ok_or_else(|| ice("the top frame has no current block"))?;
         let next = self.frames[top].next;
         if let Some(s) = block.stmts.get(next) {
@@ -325,8 +429,10 @@ impl<'p> Interp<'p, '_> {
                 self.frames[top].loc = s.loc;
             }
             self.tick()?;
+            let depth = self.frames.len();
             self.stmt(s)?;
-            return Ok(Event::Continue);
+            // A call of a Sisu function is a yield point.
+            return Ok(if self.frames.len() > depth { Event::Yield } else { Event::Continue });
         }
         if block.loc.is_some() {
             self.frames[top].loc = block.loc;
@@ -334,10 +440,13 @@ impl<'p> Interp<'p, '_> {
         if self.monitoring() {
             self.mon_cover(block.loc);
         }
+        let here = self.frames[top].bb;
+        // A jump back is a loop's back edge: a yield point.
+        let back = |t: usize| if t <= here { Event::Yield } else { Event::Continue };
         match &block.term {
             Terminator::Goto(t) => {
                 self.jump(t.0 as usize);
-                Ok(Event::Continue)
+                Ok(back(t.0 as usize))
             }
             Terminator::Switch { value, cases, default } => {
                 let v = self.operand(value)?;
@@ -348,7 +457,7 @@ impl<'p> Interp<'p, '_> {
                 };
                 let t = cases.iter().find(|(c, _)| *c == n).map(|(_, t)| *t).unwrap_or(*default);
                 self.jump(t.0 as usize);
-                Ok(Event::Continue)
+                Ok(back(t.0 as usize))
             }
             Terminator::Return => {
                 let mut fr = self.frames.pop().ok_or_else(|| ice("return without a frame"))?;
@@ -404,8 +513,8 @@ impl<'p> Interp<'p, '_> {
                         }
                         crate::dispatch::Target::Intrinsic(n, vals, tys) => {
                             let ret = self.dest_type(dest);
-                            let v = self.intrinsic(&n, &tys, vals, ret.as_ref())?;
-                            self.store(dest, v)
+                            let r = self.intrinsic(&n, &tys, vals, ret.as_ref());
+                            self.finish_call(&n, &tys, dest, ret, r)
                         }
                     }
                 }
@@ -432,8 +541,13 @@ impl<'p> Interp<'p, '_> {
                         self.mon_drop_unconsumed(&at, self.read(&at)?)?;
                     }
                     let ret = self.dest_type(dest);
-                    let v = self.intrinsic(name, tys, vals, ret.as_ref())?;
-                    self.store(dest, v)
+                    // A scope's body runs as a frame above the scope's
+                    // anchor, which gives the result to `dest`.
+                    if matches!(name.as_str(), "task.scope" | "task.race" | "task.shield") {
+                        return self.open_scope(name, vals, dest, ret);
+                    }
+                    let r = self.intrinsic(name, tys, vals, ret.as_ref());
+                    self.finish_call(name, tys, dest, ret, r)
                 }
             },
             StatementKind::Drop { place, flag } => {
@@ -616,7 +730,12 @@ impl<'p> Interp<'p, '_> {
                     return Err(self.moved_at(&ptr));
                 }
                 let v = v.clone();
-                Ok(self.copy_value(&v))
+                let copy = self.copy_value(&v);
+                // A copy of a `Shared` is an access to its count.
+                for id in std::mem::take(&mut self.sched.copied_shared) {
+                    self.note_shared_access(id)?;
+                }
+                Ok(copy)
             }
             Rvalue::StrView(p) => {
                 let ptr = self.resolve(p)?;
@@ -678,6 +797,7 @@ impl<'p> Interp<'p, '_> {
     pub(crate) fn copy_value(&mut self, v: &Value) -> Value {
         match v {
             Value::Shared(id) => {
+                self.sched.copied_shared.push(*id);
                 if let Some(c) = self.heap.get_mut(*id as usize) {
                     c.strong += 1;
                 }
@@ -707,8 +827,13 @@ impl<'p> Interp<'p, '_> {
             Value::Mutex(m) => Value::Mutex(Box::new(crate::value::MutexVal {
                 value: self.copy_value(&m.value),
                 locked: false,
+                holder: 0,
                 poisoned: m.poisoned,
             })),
+            Value::Sender(_) | Value::Receiver(_) => {
+                self.copy_channel_end(v);
+                v.clone()
+            }
             Value::Arena(a) => {
                 let slots = a.slots.iter().map(|(g, x)| (*g, self.copy_value(x))).collect();
                 Value::Arena(Box::new(crate::value::ArenaVal { slots, free: a.free.clone() }))

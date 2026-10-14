@@ -14,6 +14,7 @@ impl Interp<'_, '_> {
             Value::List(_) => IterState::ListRef { base: p, idx: 0 },
             Value::Set(_) => IterState::SetRef { base: p, idx: 0 },
             Value::Dict(_) => IterState::DictRef { base: p, idx: 0, part: DictPart::Items },
+            Value::Receiver(c) => IterState::Recv(*c),
             other => return Err(ice(format!("iterating over a borrowed {other:?}"))),
         })
     }
@@ -135,6 +136,23 @@ impl Interp<'_, '_> {
             IterState::Decay(inner) => match self.iter_next(inner)? {
                 Some(x @ Value::Ref(_)) => Ok(Some(self.target(&x)?.clone())),
                 other => Ok(other),
+            },
+            // A receiver inside another iterator (`enumerate(rx)`) takes
+            // what has arrived; only `Iter.next` on the receiver's own
+            // iterator waits (port-debt.md).
+            IterState::Recv(c) => match self.recv_now(*c)? {
+                Some(Value::Variant(a)) if &*a.ty == "Result" && a.variant == 0 => {
+                    Ok(a.fields.into_iter().next())
+                }
+                Some(_) => Ok(None),
+                None => Err(panic(msg::PANIC_NESTED_RECV, &[])),
+            },
+            // A generator inside another iterator would have to run its
+            // body; it gives what it has yielded already (port-debt.md).
+            IterState::Gen(t) => match self.gen_take(*t)? {
+                Some(v) => Ok(Some(v)),
+                None if self.gen_done(*t) => Ok(None),
+                None => Err(panic(msg::PANIC_NESTED_RECV, &[])),
             },
             IterState::Done => Ok(None),
         }

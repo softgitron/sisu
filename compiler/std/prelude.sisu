@@ -106,9 +106,11 @@ struct Box[T]:
 ## a count increment, not a copy of the value; the value is dropped with
 ## its last owner. Changing it goes through a `Cell` or a `Mutex` inside. A
 ## view cannot be shared (it would outlive what it borrows), and neither can
-## a must-consume value (no owner is the last one statically). Whether the
-## count is atomic is a flag the runtime keeps; stage 0 has one task, so it
-## is never set (the escape analysis that sets it comes with tasks, 06).
+## a must-consume value (no owner is the last one statically). A `Shared`
+## is `Send` and `Sync` when its value is `Sync`. Whether the count is
+## atomic is decided by escape analysis per construction site (Q-2): a
+## site whose values can reach another task counts atomically, the others
+## do not (docs/architecture.md, "Shared atomicity").
 @builtin("Shared")
 struct Shared[T]:
     pass
@@ -121,14 +123,17 @@ struct Weak[T]:
 
 ## A value replaced through a shared reference, in one task (04, rule 5):
 ## no reference into it is ever given out, so replacing it invalidates none.
+## A `Cell` is never `Sync`: tasks cannot share one.
 @builtin("Cell")
 struct Cell[T]:
     pass
 
 ## Mutual exclusion over a value the mutex owns (06, "Send, Sync, and shared
 ## state"): `lock` gives a guard, `guard.value` is the value, and dropping
-## the guard unlocks. Stage 0 has one task, so `lock` on a mutex its own
-## task holds panics (it would wait forever). When unwinding drops a guard,
+## the guard unlocks. `lock` waits while another task holds the mutex, and
+## panics on a mutex its own task holds (it would wait forever). A `Mutex`
+## is `Sync` when its value is `Send`, so tasks share one through a
+## reference or a `Shared`. When unwinding drops a guard,
 ## the value's type's `invariant` is checked again (D-077): if it fails, the
 ## mutex is poisoned and every later `lock` panics; if it holds, or the type
 ## has none, the mutex unlocks.
@@ -596,6 +601,30 @@ trait Len:
 ## opts a type in when all its fields are `Copy`.
 @marker
 trait Copy:
+    pass
+
+## Values that may move to another task (06, "Send, Sync, and shared
+## state"): inferred from the type's parts, as Rust infers them, and
+## checked only where a value crosses a `spawn` (and where a bound asks).
+## Everything is `Send` except a mutex guard, a function or closure value
+## and a `dyn` value whose trait does not require `Send`, and what holds
+## one; a reference `ref T` is `Send` when `T` is `Sync`, `ref mut T` when
+## `T` is `Send`.
+@marker
+trait Send:
+    pass
+
+## Values that tasks may share through references: inferred like `Send`.
+## A `Cell` is never `Sync`; a `Mutex[T]` and a channel half are when `T`
+## is `Send`; a `Shared[T]` is `Send` and `Sync` when `T` is `Sync`.
+@marker
+trait Sync:
+    pass
+
+## Values that may leave the frame that made them: whatever holds no
+## reference or view (04, "Views").
+@marker
+trait Escapable:
     pass
 
 ## The numbers `sum` and `abs` work on.
@@ -1296,13 +1325,19 @@ impl[T] Cell[T]:
 impl[T] Mutex[T]:
     @intrinsic("Mutex.new")
     pure def new(own value: T) -> Mutex[T]
-    ## The lock, until the guard is dropped; panics if the mutex is held
-    ## (stage 0 has one task) or poisoned.
+    ## The lock, until the guard is dropped. A mutex another task holds is
+    ## waited for (a blocking point that cancellation does not interrupt:
+    ## `lock` cannot fail); one this task holds already panics, since it
+    ## would wait forever, as does a poisoned one.
     @intrinsic("Mutex.lock")
     def lock(self) -> MutexGuard[T]
     ## Whether a guard dropped by unwinding left the value's invariant broken.
     @intrinsic("Mutex.is_poisoned")
     pure def is_poisoned(self) -> bool
+    ## The value, taking the mutex apart; panics if it is poisoned.
+    @intrinsic("Mutex.into_inner")
+    @keeps(self)
+    pure def into_inner(own self) -> T
 
 impl[T] Arena[T]:
     @intrinsic("Arena.new")
@@ -1365,6 +1400,205 @@ impl[T] Debug for MutexGuard[T]:
 impl[T] Debug for Arena[T]:
     @intrinsic("structural.debug")
     pure def fmt_debug(self, mut f: Formatter)
+
+impl Debug for Scope:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for Handle[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl Debug for Cancellation:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for Sender[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for Receiver[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl Debug for Timer:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+# ------------------------------------------------------------------ tasks, channels and time (06)
+
+## What every task operation can report (06, "Cancellation" and "Panics").
+error TaskError:
+    ## The scope, or the task at its deadline, was cancelled: returned at a
+    ## blocking point.
+    Cancelled
+    ## The task panicked: the panic's message, and the stack it unwound.
+    TaskPanicked(message: String, trace: String)
+
+## What a channel operation can report besides `TaskError`.
+error ChannelError:
+    ## The other end is gone: every sender was dropped or closed (for
+    ## `recv`, once the values sent are drained), or the receiver was
+    ## dropped (for `send`).
+    Closed
+
+## A task scope, the `s` of `task.scope do s:` (06, "Tasks and scopes").
+## It ends when its body has returned and every task spawned on it has
+## finished: a task cannot outlive it, so a task's closure may borrow what
+## the body's environment borrows. A `Copy` handle; spawning on a scope
+## that has ended panics.
+@builtin("Scope")
+struct Scope:
+    pass
+
+impl Scope:
+    ## Starts `task`, written here as a closure or `do` block, and returns
+    ## its handle. The task captures its `Copy` variables by copy and the
+    ## rest by reference (an `own` closure moves them in); what it shares
+    ## must be `Sync` and what it moves `Send`, checked here. In the body of
+    ## a scope, a task may borrow what the body's environment borrows;
+    ## anywhere else it borrows nothing.
+    @intrinsic("Scope.spawn")
+    pure def spawn[T](self, own task: () -> T) -> Handle[T]
+    ## `spawn` with a deadline: the task, and every scope it opens, is
+    ## cancelled when the timer's clock reaches it.
+    @intrinsic("Scope.spawn_with")
+    def spawn_with[T](self, deadline: Timer, own task: () -> T) -> Handle[T]
+    ## Cancels the scope: its body's and its tasks' blocking operations
+    ## return `Err(Cancelled)` from now on, unless shielded.
+    @intrinsic("Scope.cancel")
+    def cancel(self)
+    ## Whether the scope is cancelled.
+    @intrinsic("Scope.is_cancelled")
+    def is_cancelled(self) -> bool
+    ## The scope's cancellation as something to wait for: a `select` arm
+    ## `case _ = s.cancelled():` is taken once the scope is cancelled.
+    @intrinsic("Scope.cancelled")
+    pure def cancelled(self) -> Cancellation
+
+## A spawned task, from `Scope.spawn`.
+@builtin("Handle")
+struct Handle[T]:
+    pass
+
+impl[T] Handle[T]:
+    ## Waits for the task and takes its result, as `T ! TaskError`, or, for
+    ## a task returning `U ! E`, as `U ! {E, TaskError}` (06): a panic is
+    ## `TaskPanicked`, a cancelled wait `Cancelled`. A second `join` of one
+    ## task panics. A blocking point.
+    @intrinsic("Handle.join")
+    pure def join(self) -> T ! TaskError
+    ## Whether the task has finished.
+    @intrinsic("Handle.is_finished")
+    def is_finished(self) -> bool
+
+## A scope's cancellation, to wait for in `select` (`Scope.cancelled`).
+@builtin("Cancellation")
+struct Cancellation:
+    pass
+
+impl Cancellation:
+    ## Waits until the scope is cancelled.
+    @intrinsic("Cancellation.wait")
+    def wait(self)
+
+## The sending half of a channel (06, "Channels and select"). `.copy()`
+## makes another sender; the channel closes when every sender is closed or
+## dropped.
+@builtin("Sender")
+struct Sender[T]:
+    pass
+
+## The receiving half of a channel. A `for` loop over it receives until the
+## channel is closed and drained (or the loop's task is cancelled).
+@builtin("Receiver")
+struct Receiver[T]:
+    pass
+
+## A bounded channel of `capacity` values, at least 1: `send` waits while
+## it is full and `recv` while it is empty. What a channel carries can be
+## neither a view nor must-consume.
+@intrinsic("channel")
+def channel[T](capacity: int) -> (Sender[T], Receiver[T])
+
+impl[T] Sender[T]:
+    ## Sends `value`, waiting while the channel is full; `Closed` once the
+    ## receiver is gone (the value is dropped). A blocking point.
+    @intrinsic("Sender.send")
+    def send(self, own value: T) -> ! {ChannelError, TaskError}
+    ## Sends `value` if there is room now, or gives it back.
+    @intrinsic("Sender.try_send")
+    def try_send(self, own value: T) -> T?
+    ## Closes the channel for every sender: the receiver drains what was
+    ## sent, then gets `Closed`.
+    @intrinsic("Sender.close")
+    def close(self)
+
+impl[T] Receiver[T]:
+    ## The next value, waiting while the channel is empty; `Closed` once it
+    ## is closed and drained. A blocking point.
+    @intrinsic("Receiver.recv")
+    def recv(self) -> T ! {ChannelError, TaskError}
+    ## The next value if there is one now.
+    @intrinsic("Receiver.try_recv")
+    def try_recv(self) -> T?
+
+## A span of time, in nanoseconds.
+@derive(Copy, Eq, Ord, Hash)
+struct Duration:
+    nanos: int
+
+impl Duration:
+    pure def seconds(n: int) -> Duration:
+        return Duration(nanos=n * 1000000000)
+    pure def millis(n: int) -> Duration:
+        return Duration(nanos=n * 1000000)
+    pure def micros(n: int) -> Duration:
+        return Duration(nanos=n * 1000)
+    pure def minutes(n: int) -> Duration:
+        return Duration(nanos=n * 60000000000)
+    pure def hours(n: int) -> Duration:
+        return Duration(nanos=n * 3600000000000)
+    ## The whole seconds.
+    pure def as_seconds(self) -> int:
+        return self.nanos // 1000000000
+    pure def as_millis(self) -> int:
+        return self.nanos // 1000000
+
+impl Add for Duration:
+    pure def add(self, other: Duration) -> Duration:
+        return Duration(nanos=self.nanos + other.nanos)
+
+impl Sub for Duration:
+    pure def sub(self, other: Duration) -> Duration:
+        return Duration(nanos=self.nanos - other.nanos)
+
+impl Display for Duration:
+    ## Seconds with as many decimals as they need: `5s`, `1.5s`, `0.001s`.
+    pure def fmt(self, mut f: Formatter):
+        let whole = self.nanos // 1000000000
+        var frac = self.nanos % 1000000000
+        if frac == 0:
+            f.write("{whole}s")
+            return
+        var digits = String.new("")
+        var scale = 100000000
+        while frac > 0:
+            digits.push("{frac // scale}")
+            frac = frac % scale
+            scale = scale // 10
+        f.write("{whole}.{digits}s")
+
+## A moment on a clock that a task can wait for: `clock.after(d)`, the arm
+## of a `select`, or a deadline for `Scope.spawn_with`.
+@builtin("Timer")
+struct Timer:
+    pass
+
+impl Timer:
+    ## Waits until the timer's clock reaches it. A blocking point.
+    @intrinsic("Timer.wait")
+    def wait(self) -> ! TaskError
 
 # ------------------------------------------------------------------ Option and Result
 
@@ -1444,6 +1678,12 @@ impl Clock:
     ## The current time.
     @intrinsic("Clock.now")
     def now(self) -> DateTime
+    ## A timer at `d` from now on this clock.
+    @intrinsic("Clock.after")
+    def after(self, d: Duration) -> Timer
+    ## Waits for `d` on this clock. A blocking point.
+    def sleep(self, d: Duration) -> ! TaskError:
+        return self.after(d).wait()
 
 # ------------------------------------------------------------------ the traits of the builtin types
 # The leaf types (`int`, `f64`, `bool`, `char`, `str`, `String`, `Path`,

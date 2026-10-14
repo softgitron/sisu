@@ -342,9 +342,23 @@ pub enum StmtKind {
     /// `return impl Trait for T:` in a trait's `comptime def derive` (08,
     /// "Derive"): the impl the derive makes.
     ReturnImpl(Box<ImplDef>),
+    /// `select:` with its arms (06, "Channels and select").
+    Select(Vec<SelectArm>),
+    /// `yield e` in a generator.
+    Yield(Option<Expr>),
     /// A construct this stage parses but does not implement.
     Unsupported(&'static str),
     Error,
+}
+
+/// `case pattern = operation:` and its block.
+#[derive(Clone, Debug)]
+pub struct SelectArm {
+    pub node: NodeId,
+    pub range: TextRange,
+    pub pat: Pattern,
+    pub op: Expr,
+    pub body: Block,
 }
 
 #[derive(Clone, Debug)]

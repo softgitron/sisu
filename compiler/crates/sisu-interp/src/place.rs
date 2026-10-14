@@ -42,7 +42,8 @@ impl Interp<'_, '_> {
     fn resolve_mode(&mut self, p: &Place, mode: Mode) -> Result<Option<Pointer>, Unwind> {
         let top = self.frames.len().checked_sub(1).ok_or_else(|| ice("no frame"))?;
         let serial = self.frames[top].serial;
-        let mut ptr = Pointer { frame: top as u32, serial, local: p.local.0, path: Vec::new(), tag: 0 };
+        let task = self.sched.cur;
+        let mut ptr = Pointer { task, frame: top as u32, serial, local: p.local.0, path: Vec::new(), tag: 0 };
         let n = p.proj.len();
         for (idx, proj) in p.proj.iter().enumerate() {
             match proj {
@@ -56,8 +57,9 @@ impl Interp<'_, '_> {
                     // A `Shared` leads to its heap cell.
                     Value::Shared(id) => {
                         let id = *id;
+                        self.note_shared_access(id)?;
                         let serial = self.heap.get(id as usize).map(|c| c.serial).unwrap_or(0);
-                        ptr = Pointer { frame: HEAP, serial, local: id, path: Vec::new(), tag: 0 };
+                        ptr = Pointer { task: 0, frame: HEAP, serial, local: id, path: Vec::new(), tag: 0 };
                     }
                     // A guard leads to the value its mutex protects.
                     Value::Guard(q) => ptr = q.join(Step::MutexValue),
@@ -162,7 +164,7 @@ impl Interp<'_, '_> {
                 None => return Err(dangling()),
             }
         } else {
-            let frame = self.frames.get(p.frame as usize).filter(|f| f.serial == p.serial);
+            let frame = self.frames_of(p.task).get(p.frame as usize).filter(|f| f.serial == p.serial);
             let frame = match frame {
                 Some(f) => f,
                 None if self.monitoring() => return Err(self.mon_dangling(p)),
@@ -198,7 +200,7 @@ impl Interp<'_, '_> {
             let cell = self.heap.get_mut(p.local as usize).ok_or_else(dangling)?;
             return walk_mut(&mut cell.value, &p.path);
         }
-        if !self.frames.get(p.frame as usize).is_some_and(|f| f.serial == p.serial) {
+        if !self.frames_of(p.task).get(p.frame as usize).is_some_and(|f| f.serial == p.serial) {
             return Err(if self.monitoring() { self.mon_dangling(p) } else { dangling() });
         }
         // A write into a part of a moved value is a use after move.
@@ -207,8 +209,11 @@ impl Interp<'_, '_> {
         {
             return Err(self.moved_at(p));
         }
-        let frame =
-            self.frames.get_mut(p.frame as usize).filter(|f| f.serial == p.serial).ok_or_else(dangling)?;
+        let frame = self
+            .frames_of_mut(p.task)
+            .get_mut(p.frame as usize)
+            .filter(|f| f.serial == p.serial)
+            .ok_or_else(dangling)?;
         let root = frame.locals.get_mut(p.local as usize).ok_or_else(|| ice("pointer to a missing local"))?;
         walk_mut(root, &p.path)
     }

@@ -46,11 +46,38 @@ pub fn place_name(types: &Types, f: &Function, p: &Place) -> Arg {
     Arg::Text(place_text(types, f, p))
 }
 
+/// The names of a closure's captures, from its environment's name
+/// (`env(a, b)`, which lowering gives it).
+pub fn capture_names(f: &Function) -> Option<Vec<String>> {
+    let n = f.locals.get(1)?.name.as_ref()?;
+    let inner = n.strip_prefix("env(")?.strip_suffix(')')?;
+    Some(inner.split(", ").map(str::to_string).collect())
+}
+
 pub fn place_text(types: &Types, f: &Function, p: &Place) -> String {
     let mut s = local_name(f, p.local);
     let mut ty = f.locals.get(p.local.0 as usize).map(|d| d.ty.clone());
     let mut variant: Option<u32> = None;
-    for proj in &p.proj {
+    let mut projs: &[Proj] = &p.proj;
+    // A capture is named as the closure's code names it: `counter`, not
+    // `env.0.*`.
+    if p.local.0 == 1
+        && let Some(names) = capture_names(f)
+        && let Some(Proj::Field(k)) = projs.first()
+        && let Some(name) = names.get(*k as usize)
+    {
+        s = name.clone();
+        ty = ty.and_then(|t| match t {
+            sisu_sir::Type::Tuple(es) => es.get(*k as usize).cloned(),
+            _ => None,
+        });
+        projs = &projs[1..];
+        if let (Some(Proj::Deref), Some(sisu_sir::Type::Ref(inner, _))) = (projs.first(), ty.clone()) {
+            ty = Some(*inner);
+            projs = &projs[1..];
+        }
+    }
+    for proj in projs {
         match proj {
             Proj::Deref => {
                 ty = match ty {

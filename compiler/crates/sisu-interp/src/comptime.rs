@@ -226,7 +226,7 @@ type Baked = (Vec<LocalDecl>, Vec<Statement>, Vec<&'static str>);
 fn run(prog: &sir::Program, name: &str, budget: u64) -> Result<Baked, Failure> {
     let mut host = ComptimeHost::default();
     let result = on_big_stack(&mut host, |host| {
-        let options = Options { fuel: Some(budget), monitor: false, coverage: false };
+        let options = Options { fuel: Some(budget), ..Options::default() };
         let mut it = Interp::new(prog, host, &options);
         let r = it.call_by_name(name, Vec::new());
         let spent = it.fuel == Some(0);
@@ -246,6 +246,9 @@ fn run(prog: &sir::Program, name: &str, budget: u64) -> Result<Baked, Failure> {
             Err(Unwind::Panic(p)) => Err(Failure::Panicked(p.message)),
             Err(Unwind::Abort(_)) if spent => Err(Failure::Budget(budget)),
             Err(Unwind::Abort(m)) => Err(Failure::Internal(m)),
+            Err(Unwind::Block(_) | Unwind::Switch) => {
+                Err(Failure::Internal("a task switch escaped the run loop".into()))
+            }
         }
     });
     if let Some(what) = host.used.get() {
@@ -440,7 +443,7 @@ fn kind_of(v: &Value) -> String {
         Value::Arena(_) => "an `Arena`",
         Value::Iter(_) => "an iterator",
         Value::Entry(_) => "a dict entry",
-        Value::Fs(_) | Value::Env | Value::Clock => "a capability",
+        Value::Fs(_) | Value::Env | Value::Clock(_) => "a capability",
         Value::DateTime(_) => "a `DateTime`",
         _ => "a value",
     }

@@ -33,6 +33,20 @@ pub trait Host: Send {
     fn read_file(&mut self, path: &str) -> Result<String, IoErrorKind>;
     fn write_file(&mut self, path: &str, text: &str) -> Result<(), IoErrorKind>;
     fn exists(&self, path: &str) -> bool;
+    /// The current time in nanoseconds since 1970-01-01T00:00:00Z.
+    fn now_nanos(&self) -> i128 {
+        i128::from(self.now()) * 1_000_000_000
+    }
+    /// Whether the host's clock is virtual: it advances only when the
+    /// scheduler has nothing to run (17, "Isolation and parallelism").
+    fn virtual_time(&self) -> bool {
+        false
+    }
+    /// Waits `nanos` of real time (the scheduler has nothing to run until
+    /// a timer of the host's clock).
+    fn sleep_nanos(&mut self, nanos: u64) {
+        std::thread::sleep(std::time::Duration::from_nanos(nanos));
+    }
 }
 
 /// The real world: the process's streams, arguments, environment, clock
@@ -75,6 +89,13 @@ impl Host for StdHost {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    }
+
+    fn now_nanos(&self) -> i128 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as i128)
             .unwrap_or(0)
     }
 
@@ -126,6 +147,12 @@ impl Host for TestHost {
     fn now(&self) -> i64 {
         self.now
     }
+
+    fn virtual_time(&self) -> bool {
+        true
+    }
+
+    fn sleep_nanos(&mut self, _nanos: u64) {}
 
     fn read_file(&mut self, path: &str) -> Result<String, IoErrorKind> {
         if let Some(t) = self.files.get(path) {

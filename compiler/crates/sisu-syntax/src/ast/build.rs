@@ -925,8 +925,20 @@ impl B<'_> {
                 }),
             },
             UNSAFE_BLOCK => StmtKind::Unsupported("an `unsafe` block"),
-            SELECT_STMT => StmtKind::Unsupported("`select`"),
-            YIELD_STMT => StmtKind::Unsupported("`yield`"),
+            SELECT_STMT => StmtKind::Select(
+                self.child(n, MATCH_ARM_LIST)
+                    .map(|l| {
+                        self.nodes(l)
+                            .into_iter()
+                            .filter(|&c| self.kind(c) == MATCH_ARM)
+                            .map(|c| self.select_arm(c))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            ),
+            YIELD_STMT => StmtKind::Yield(
+                self.nodes(n).into_iter().find(|&c| is_expr_node(self.kind(c))).map(|e| self.expr(e)),
+            ),
             CONTRACT_STMT => StmtKind::Unsupported("contracts (`requires`, `ensures`, `invariant`)"),
             COMPTIME_STMT => match self.nodes(n).into_iter().next() {
                 Some(c) => StmtKind::Comptime(Box::new(self.stmt(c))),
@@ -1374,6 +1386,39 @@ impl B<'_> {
             body: ArmBody::Block(Block { node: n, range, stmts: Vec::new() }),
             generated: Some(Box::new(made)),
         })
+    }
+
+    fn select_arm(&self, n: NodeId) -> SelectArm {
+        let range = self.range(n);
+        let pat = self
+            .nodes(n)
+            .into_iter()
+            .find(|&c| is_pattern_node(self.kind(c)) || self.kind(c) == ERROR)
+            .map(|c| self.pattern(c))
+            .unwrap_or(Pattern { node: n, range, kind: PatKind::Error });
+        // The operation is the expression after `=`.
+        let mut after_eq = false;
+        let mut op = None;
+        for e in self.t.children(n) {
+            match e {
+                Element::Token(t) if self.t.token_kind(*t) == EQ => after_eq = true,
+                Element::Node(c) if after_eq && op.is_none() && is_expr_node(self.kind(*c)) => {
+                    op = Some(self.expr(*c));
+                }
+                _ => {}
+            }
+        }
+        SelectArm {
+            node: n,
+            range,
+            pat,
+            op: op.unwrap_or(self.error_expr(n)),
+            body: self.child(n, BLOCK).map(|b| self.block(b)).unwrap_or(Block {
+                node: n,
+                range,
+                stmts: Vec::new(),
+            }),
+        }
     }
 
     fn arm(&self, n: NodeId) -> Arm {

@@ -164,7 +164,13 @@ impl Interp<'_, '_> {
             }
             Value::Fs(_) => out.push_str("Fs"),
             Value::Env => out.push_str("Env"),
-            Value::Clock => out.push_str("Clock"),
+            Value::Clock(_) => out.push_str("Clock"),
+            Value::Scope(_) => out.push_str("<scope>"),
+            Value::Handle(t) => out.push_str(&format!("<task {}>", self.task_path(*t))),
+            Value::Cancellation(_) => out.push_str("<cancellation>"),
+            Value::Sender(_) => out.push_str("<sender>"),
+            Value::Receiver(_) => out.push_str("<receiver>"),
+            Value::Timer { .. } => out.push_str("<timer>"),
         }
     }
 

@@ -480,14 +480,21 @@ fn intrinsic_decls(prog: &Program, functions: &[sir::Function]) -> Vec<sir::Intr
             }
             None => {
                 let (from, inner): (Vec<u32>, Vec<u32>) = match name.as_str() {
-                    "iter.ref" | "iter.mut" | "iter.own" => (vec![0], vec![]),
+                    "iter.ref" | "iter.mut" | "iter.own" | "gen.new" => (vec![0], vec![]),
                     "list.slice" | "list.slice_middle" => (vec![], vec![0]),
                     _ => (vec![], vec![]),
                 };
-                // `iter.own` takes the collection and keeps every element.
-                let own = if name == "iter.own" { vec![0] } else { Vec::new() };
+                // `iter.own` takes the collection and keeps every element;
+                // a generator keeps its body, and `yield` gives its item away.
+                let own = if matches!(name.as_str(), "iter.own" | "gen.new" | "gen.yield") {
+                    vec![0]
+                } else {
+                    Vec::new()
+                };
                 let keeps = own.clone();
-                sir::IntrinsicDecl { name, pure: true, from, inner, own, keeps }
+                // `select` observes the schedule (06, "Effects").
+                let pure = name != "select.wait";
+                sir::IntrinsicDecl { name, pure, from, inner, own, keeps }
             }
         })
         .collect()

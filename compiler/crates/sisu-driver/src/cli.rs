@@ -45,6 +45,15 @@ impl Host for WithArgs<'_> {
     fn now(&self) -> i64 {
         self.inner.now()
     }
+    fn now_nanos(&self) -> i128 {
+        self.inner.now_nanos()
+    }
+    fn virtual_time(&self) -> bool {
+        self.inner.virtual_time()
+    }
+    fn sleep_nanos(&mut self, nanos: u64) {
+        self.inner.sleep_nanos(nanos)
+    }
     fn read_file(&mut self, path: &str) -> Result<String, sisu_interp::IoErrorKind> {
         self.inner.read_file(path)
     }
@@ -56,23 +65,91 @@ impl Host for WithArgs<'_> {
     }
 }
 
-/// Command-line flags before the file, and the rest.
+/// Command-line flags before the file, and the rest. A flag that takes a
+/// value is written `--flag=N` or `--flag N`.
 struct Parsed<'a> {
     flags: Vec<&'a str>,
+    values: Vec<(&'a str, &'a str)>,
     file: Option<&'a str>,
     rest: Vec<String>,
 }
 
+/// The flags that take a value.
+const VALUE_FLAGS: &[&str] = &["--schedule-seed", "--explore"];
+
 fn split_args(args: &[String]) -> Parsed<'_> {
     let mut flags = Vec::new();
+    let mut values = Vec::new();
     let mut i = 0;
     while i < args.len() && args[i].starts_with("--") {
-        flags.push(args[i].as_str());
+        let a = args[i].as_str();
+        if let Some((k, v)) = a.split_once('=')
+            && VALUE_FLAGS.contains(&k)
+        {
+            values.push((k, v));
+        } else if VALUE_FLAGS.contains(&a) {
+            values.push((a, args.get(i + 1).map(String::as_str).unwrap_or("")));
+            i += 1;
+        } else {
+            flags.push(a);
+        }
         i += 1;
     }
     let file = args.get(i).map(String::as_str);
     let rest = args.iter().skip(i + 1).cloned().collect();
-    Parsed { flags, file, rest }
+    Parsed { flags, values, file, rest }
+}
+
+/// How the scheduler is seeded: one seed, or `--explore N` seeds from the
+/// first.
+#[derive(Clone, Copy, Debug)]
+struct Seeds {
+    first: u64,
+    explore: Option<u64>,
+}
+
+/// Captures a run's standard streams, for `--explore`; everything else goes
+/// to the host.
+struct Captured<'a> {
+    inner: &'a mut dyn Host,
+    out: String,
+    err: String,
+}
+
+impl Host for Captured<'_> {
+    fn stdout(&mut self, t: &str) {
+        self.out.push_str(t)
+    }
+    fn stderr(&mut self, t: &str) {
+        self.err.push_str(t)
+    }
+    fn args(&self) -> Vec<String> {
+        self.inner.args()
+    }
+    fn env_var(&self, name: &str) -> Option<String> {
+        self.inner.env_var(name)
+    }
+    fn now(&self) -> i64 {
+        self.inner.now()
+    }
+    fn now_nanos(&self) -> i128 {
+        self.inner.now_nanos()
+    }
+    fn virtual_time(&self) -> bool {
+        self.inner.virtual_time()
+    }
+    fn sleep_nanos(&mut self, nanos: u64) {
+        self.inner.sleep_nanos(nanos)
+    }
+    fn read_file(&mut self, path: &str) -> Result<String, sisu_interp::IoErrorKind> {
+        self.inner.read_file(path)
+    }
+    fn write_file(&mut self, path: &str, t: &str) -> Result<(), sisu_interp::IoErrorKind> {
+        self.inner.write_file(path, t)
+    }
+    fn exists(&self, path: &str) -> bool {
+        self.inner.exists(path)
+    }
 }
 
 /// Runs the command line `args` (without the program name). Program
@@ -94,7 +171,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
         "run" | "check" | "sir" | "test" | "tokens" | "parse" => {
             let p = split_args(rest);
             let allowed: &[&str] = match cmd.as_str() {
-                "run" => &["--sir", "--monitor", "--defer-borrow"],
+                "run" => &["--sir", "--monitor", "--defer-borrow", "--stats"],
                 "test" => &["--no-monitor", "--defer-borrow"],
                 "check" => &["--format=ids", "--format=human"],
                 "tokens" => &["--trivia"],
@@ -107,6 +184,27 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                     &[("option", bad.to_string()), ("command", cmd.clone())],
                 ));
                 return EXIT_USAGE;
+            }
+            if let Some((bad, _)) = p.values.iter().find(|_| !matches!(cmd.as_str(), "run" | "test")) {
+                host.stderr(&plain_error(
+                    msg::CLI_UNKNOWN_OPTION,
+                    &[("option", bad.to_string()), ("command", cmd.clone())],
+                ));
+                return EXIT_USAGE;
+            }
+            let mut seeds = Seeds { first: 0, explore: None };
+            for (k, v) in &p.values {
+                let Ok(n) = v.parse::<u64>() else {
+                    host.stderr(&plain_error(
+                        msg::CLI_BAD_OPTION_VALUE,
+                        &[("option", k.to_string()), ("value", v.to_string())],
+                    ));
+                    return EXIT_USAGE;
+                };
+                match *k {
+                    "--schedule-seed" => seeds.first = n,
+                    _ => seeds.explore = Some(n.max(1)),
+                }
             }
             let Some(file) = p.file else {
                 host.stderr(&plain_error(msg::CLI_MISSING_FILE, &[("command", cmd.clone())]));
@@ -131,7 +229,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
             }
             let stage = std::cell::Cell::new("the front end");
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                command(cmd, &p.flags, file, &source, p.rest.clone(), host, &stage)
+                command(cmd, &p.flags, seeds, file, &source, p.rest.clone(), host, &stage)
             }));
             match r {
                 Ok(code) => code,
@@ -162,9 +260,11 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn command(
     cmd: &str,
     flags: &[&str],
+    seeds: Seeds,
     file: &str,
     source: &str,
     args: Vec<String>,
@@ -192,7 +292,8 @@ fn command(
         }
         stage.set("the interpreter");
         let mut h = WithArgs { inner: host, args };
-        return sisu_interp::run_main(&prog, &mut h, &Options::default());
+        let options = Options { seed: seeds.first, stats: has("--stats"), ..Options::default() };
+        return run_main_seeds(&prog, &mut h, &options, seeds);
     }
     let mut db = Db::new();
     db.set_file(file, source);
@@ -329,12 +430,13 @@ fn command(
                     let options = Options {
                         monitor: defer || !has("--no-monitor"),
                         coverage: deferring,
+                        seed: seeds.first,
                         ..Options::default()
                     };
                     if deferring {
                         host.stderr(&format!("{}\n", text(msg::DEFER_HEADER, &[])));
                     }
-                    let (code, reports) = run_tests(&prog, host, &options);
+                    let (code, reports) = run_tests(&prog, host, &options, seeds);
                     if deferring {
                         let violation = reports.iter().any(|r| r.violation);
                         let coverage = merge_coverage(&reports);
@@ -351,13 +453,21 @@ fn command(
                     let options = Options {
                         monitor: defer || has("--monitor"),
                         coverage: deferring,
+                        seed: seeds.first,
+                        stats: has("--stats"),
                         ..Options::default()
                     };
                     if deferring {
                         host.stderr(&format!("{}\n", text(msg::DEFER_HEADER, &[])));
                     }
                     let mut h = WithArgs { inner: host, args };
+                    if seeds.explore.is_some() && !deferring {
+                        return run_main_seeds(&prog, &mut h, &options, seeds);
+                    }
                     let report = sisu_interp::run_main_report(&prog, &mut h, &options);
+                    if let Some(st) = &report.stats {
+                        h.stderr(st);
+                    }
                     if deferring {
                         host.stderr(&defer_report(
                             &lowered,
@@ -448,16 +558,90 @@ fn defer_report(
     out
 }
 
+/// Runs `main` once, or under each seed of `--explore N` with its output
+/// captured: the first run that fails is reported with its output, and
+/// when none fails the first run's output is printed with a summary.
+fn run_main_seeds(prog: &sisu_sir::Program, host: &mut dyn Host, options: &Options, seeds: Seeds) -> i32 {
+    let Some(n) = seeds.explore else {
+        let report = sisu_interp::run_main_report(prog, host, options);
+        if let Some(st) = &report.stats {
+            host.stderr(st);
+        }
+        return report.status;
+    };
+    let mut first: Option<(String, String)> = None;
+    for k in 0..n {
+        let seed = seeds.first.wrapping_add(k);
+        let mut cap = Captured { inner: &mut *host, out: String::new(), err: String::new() };
+        let status = sisu_interp::run_main(prog, &mut cap, &Options { seed, ..options.clone() });
+        let (out, err) = (std::mem::take(&mut cap.out), std::mem::take(&mut cap.err));
+        if status != exit::OK {
+            host.stdout(&out);
+            host.stderr(&err);
+            host.stderr(&format!(
+                "{}\n",
+                text(
+                    msg::CLI_EXPLORE_FAILED,
+                    &[("seed", seed.to_string()), ("count", n.to_string()), ("status", status.to_string())]
+                )
+            ));
+            return status;
+        }
+        if first.is_none() {
+            first = Some((out, err));
+        }
+    }
+    if let Some((out, err)) = first {
+        host.stdout(&out);
+        host.stderr(&err);
+    }
+    let last = seeds.first.wrapping_add(n - 1);
+    host.stderr(&format!(
+        "{}\n",
+        text(
+            msg::CLI_EXPLORE_OK,
+            &[("count", n.to_string()), ("first", seeds.first.to_string()), ("last", last.to_string())]
+        )
+    ));
+    exit::OK
+}
+
 fn run_tests(
     prog: &sisu_sir::Program,
     host: &mut dyn Host,
     options: &Options,
+    seeds: Seeds,
 ) -> (i32, Vec<sisu_interp::RunReport>) {
-    let results = sisu_interp::run_tests_report(prog, host, options);
+    let mut results = sisu_interp::run_tests_report(prog, host, options);
+    // `--explore N`: every test again under the other seeds, quietly; a
+    // test fails with the first seed it fails under.
+    let mut failed_seed: Vec<Option<u64>> = vec![None; results.len()];
+    if let Some(n) = seeds.explore {
+        for k in 1..n {
+            let seed = seeds.first.wrapping_add(k);
+            let mut quiet = Captured { inner: &mut *host, out: String::new(), err: String::new() };
+            let again = sisu_interp::run_tests_report(prog, &mut quiet, &Options { seed, ..options.clone() });
+            for (i, (_, r, rep)) in again.into_iter().enumerate() {
+                if failed_seed[i].is_some() || matches!(results[i].1, TestResult::Failed(_)) {
+                    continue;
+                }
+                if let TestResult::Failed(m) = r {
+                    failed_seed[i] = Some(seed);
+                    results[i].1 = TestResult::Failed(m);
+                    results[i].2 = rep;
+                }
+            }
+        }
+        for (i, (_, r, _)) in results.iter().enumerate() {
+            if failed_seed[i].is_none() && matches!(r, TestResult::Failed(_)) {
+                failed_seed[i] = Some(seeds.first);
+            }
+        }
+    }
     let (mut passed, mut failed, mut blocked) = (0, 0, 0);
     let mut out = String::new();
     let mut failures = String::new();
-    for (name, r, _) in &results {
+    for (i, (name, r, _)) in results.iter().enumerate() {
         let outcome = match r {
             TestResult::Passed => {
                 passed += 1;
@@ -465,8 +649,14 @@ fn run_tests(
             }
             TestResult::Failed(m) => {
                 failed += 1;
+                let seed = match failed_seed.get(i).copied().flatten() {
+                    Some(s) => {
+                        format!("{}\n", text(msg::CLI_EXPLORE_TEST_FAILED, &[("seed", s.to_string())]))
+                    }
+                    None => String::new(),
+                };
                 failures.push_str(&format!(
-                    "\n{}\n{m}",
+                    "\n{}\n{seed}{m}",
                     text(
                         msg::CLI_TEST_RESULT,
                         &[("name", sisu_diag::render::quote(name)), ("outcome", "FAILED".into())]
@@ -494,6 +684,14 @@ fn run_tests(
         &[("passed", passed.to_string()), ("failed", failed.to_string()), ("blocked", blocked.to_string())],
     ));
     out.push('\n');
+    if let Some(n) = seeds.explore {
+        let last = seeds.first.wrapping_add(n - 1);
+        out.push_str(&text(
+            msg::CLI_EXPLORE_SUMMARY,
+            &[("count", n.to_string()), ("first", seeds.first.to_string()), ("last", last.to_string())],
+        ));
+        out.push('\n');
+    }
     host.stdout(&out);
     let reports = results.into_iter().map(|(_, _, r)| r).collect();
     (if failed > 0 { exit::ERROR } else { exit::OK }, reports)

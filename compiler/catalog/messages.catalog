@@ -260,6 +260,22 @@ E0421 error   borrow.view-in-owner        `{ty}` borrows, so it cannot be put in
 E0422 error   borrow.must-consume-in-owner  `{ty}` is must-consume, so it cannot be put in `{owner}`, which can drop it where the checker does not see
 E0423 error   type.own-closure-capture    an `own` closure keeps a copy of `{name}`, and `{ty}` is not `Copy`; stage 0 copies captures (a capture by move arrives with tasks)
 E0424 error   type.own-closure-changes    an `own` closure keeps a copy of `{name}` and cannot change it; borrow it with a plain closure instead
+E0425 error   task.closure-literal        `{function}` takes a closure written at the call (or a `do` block), so that what it captures can be checked; a function value is not one
+E0426 error   task.not-send               `{name}` moves into the task, but `{ty}` is not `Send`{path}
+E0427 error   task.not-sync               `{name}` is shared with the task by reference, but `{ty}` is not `Sync`{path}
+E0428 error   task.borrows-body-local     the task borrows `{name}`, which belongs to the scope's body: the body ends before the scope joins its tasks
+E0429 error   task.borrows-elsewhere      the task borrows `{name}`, but only a task spawned on a scope in that scope's body may borrow, and only what the body's environment borrows
+E0430 error   task.scope-escapes          a scope's body cannot return `{ty}`: a scope and the handles of its tasks end with the scope
+E0431 error   task.race-types             the tasks of a race return one type: this one returns `{found}`, an earlier one `{expected}`
+E0432 error   task.result-unknown         the type of the task's result must be known where it is joined
+E0433 error   task.result-not-send        the task returns `{ty}`, which is not `Send`{path}, so it cannot cross back to the task that joins it
+E0434 error   task.select-arm             a `select` arm waits for a `recv`, `send` or `join` call, a `Timer` or a `Cancellation`, not `{ty}`
+E0437 error   task.not-send-mut           `{name}` is changed by the task through a reference, but `{ty}` is not `Send`{path}
+E0435 error   type.yield-outside-generator  `yield` belongs in the body of a generator, a function that returns `Iter[T]` (not in a closure)
+E0436 error   type.generator-result       `{name}` yields, so it must return `Iter[T]`, not `{ty}`
+-     help    task.wrap-mutex             wrap it: `Mutex[{ty}]` shares mutation between tasks; or move the value with an `own` task
+-     help    task.use-own                move it into the task instead: write `own () -> ...` (or `do own:`), or copy what the task needs into a local before the `spawn`
+-     note    task.field-path             through {path}
 -     label   borrow.moved-here           `{name}` is moved here
 -     label   borrow.moved-in-loop        `{name}` is moved here, in an earlier iteration of the loop
 -     label   borrow.borrowed-by          borrowed here by `{borrower}`
@@ -390,11 +406,28 @@ R0072 runtime panic.stale-key             stale arena key: slot {index}, generat
 R0073 runtime panic.mutex-held            the mutex is already locked by this task, which would wait for itself forever
 R0074 runtime panic.mutex-poisoned        the mutex is poisoned: a task panicked holding it and left its value's invariant broken
 R0075 runtime panic.cell-in-use           a `Cell` was replaced while its value was being replaced
+R0076 runtime panic.scope-ended           a task was spawned on a scope that has ended
+R0077 runtime panic.joined-twice          the task was joined already: its result was taken by an earlier `join`
+R0078 runtime panic.empty-race            a race whose body spawned no task has no winner
+R0079 runtime panic.unobserved-error      a task failed with {error} and nobody joined it, and the scope's result cannot carry it
+R0080 runtime run.deadlock                deadlock: every task is waiting, and no timer can wake any of them
+R0081 runtime run.deadlock-task           {task} waits for {wait} at {location}
+R0082 runtime run.task-root               the root task
+R0092 runtime run.task-named              task {task}
+R0083 runtime panic.channel-capacity      a channel's capacity must be at least 1, not {capacity}
+R0084 runtime run.log-record              {level}: {message}
+R0085 runtime run.log-record-task         {level} [task {task}]: {message}
+R0086 runtime run.stats-tasks             stats: {tasks} tasks, at most {max} at once, {switches} switches
+R0087 runtime run.stats-latency           stats: scheduling latency p50 {p50} p99 {p99} max {max} statements; p50 {p50us} p99 {p99us} microseconds
+R0088 runtime run.stats-shared            stats shared: {local} cells from task-local sites, {crossing} from may-cross sites, {crossed} reached by another task
+R0089 runtime monitor.shared-crossed      a `Shared` whose construction site the escape analysis tagged task-local was reached by another task
+R0091 runtime panic.nested-recv           a receiver inside another iterator would have to wait; iterate the receiver itself
+R0090 runtime panic.into-inner-poisoned   `into_inner` of a poisoned mutex: a task panicked holding it and left its value's invariant broken
 
 # ---------------------------------------------------------------- driver
 
 D0001 cli     cli.cannot-read             cannot read `{path}`: {reason}
-D0002 cli     cli.usage                   usage: sisu <command> [options] <file>\n\ncommands:\n  run <file> [args...]   check and run a program (`--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor)\n  check <file>           report diagnostics (`--format=ids` for the conformance form)\n  sir <file>             print the serialised SIR\n  test <file>            run the `test` blocks under the ownership monitor (`--no-monitor` without it, `--defer-borrow` as for `run`)\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--print` reprints the source\n  explain <code>         describe a diagnostic code\n  explain-borrow <file>:<line>  show every borrow live on a line\n  audit --ownership <file>...  count the uses of `Shared`, `Weak`, `Cell`, `Arena`, `Key`, `.copy()` and `unsafe` in each file
+D0002 cli     cli.usage                   usage: sisu <command> [options] <file>\n\ncommands:\n  run <file> [args...]   check and run a program (`--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor, `--schedule-seed N` seeds the task scheduler, `--explore N` runs under N seeds and reports the first that fails, `--stats` reports the scheduler's numbers)\n  check <file>           report diagnostics (`--format=ids` for the conformance form)\n  sir <file>             print the serialised SIR\n  test <file>            run the `test` blocks under the ownership monitor (`--no-monitor` without it, `--defer-borrow`, `--schedule-seed N` and `--explore N` as for `run`)\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--print` reprints the source\n  explain <code>         describe a diagnostic code\n  explain-borrow <file>:<line>  show every borrow live on a line\n  audit --ownership <file>...  count the uses of `Shared`, `Weak`, `Cell`, `Arena`, `Key`, `.copy()` and `unsafe` in each file
 D0003 cli     cli.unknown-command         unknown command `{command}`; run `sisu help`
 D0004 cli     cli.missing-file            `sisu {command}` needs a file
 D0005 cli     cli.no-main                 `{file}` has no `main` function
@@ -415,3 +448,8 @@ D0019 cli     cli.explain-borrow-shared   a shared
 D0020 cli     cli.explain-borrow-mut      a `mut`
 D0021 cli     cli.ownership-errors        the program was not run: the ownership checker found errors ({count}); `--defer-borrow` runs it under the monitor
 D0022 cli     cli.audit-usage             `sisu audit` needs `--ownership`, the one audit stage 0 has: `sisu audit --ownership FILE...`
+D0023 cli     cli.bad-option-value        `{option}` needs a number, not `{value}`
+D0024 cli     cli.explore-ok              explored {count} schedules (seeds {first} to {last}): every run exited with status 0
+D0025 cli     cli.explore-failed          schedule seed {seed} of {count} failed with exit status {status}; `--schedule-seed {seed}` runs it again
+D0026 cli     cli.explore-test-failed     with schedule seed {seed}; `--schedule-seed {seed}` runs it again
+D0027 cli     cli.explore-summary         explored {count} schedules per test (seeds {first} to {last})

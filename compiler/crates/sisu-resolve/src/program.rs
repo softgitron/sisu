@@ -287,6 +287,15 @@ pub struct WellKnown {
     pub neg: Option<DefId>,
     pub num: Option<DefId>,
     pub from_literal: Option<DefId>,
+    /// Tasks (06).
+    pub task_error: Option<DefId>,
+    pub scope: Option<DefId>,
+    pub handle: Option<DefId>,
+    pub sender: Option<DefId>,
+    pub receiver: Option<DefId>,
+    pub send: Option<DefId>,
+    pub sync: Option<DefId>,
+    pub escapable: Option<DefId>,
 }
 
 #[derive(Clone, Debug, Default)]

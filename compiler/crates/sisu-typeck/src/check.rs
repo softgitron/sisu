@@ -52,6 +52,16 @@ pub(crate) struct Checker<'p> {
     pub in_comptime: bool,
     /// The `comptime` closures, for the checks once types are known.
     pub comptime_sites: Vec<(ClosureId, TextRange)>,
+    /// The `spawn` calls of the body, for the type of their scope.
+    pub spawn_sites: Vec<crate::tasks::SpawnSite>,
+    /// The tasks spawned, for the `Send` and `Sync` checks once types are
+    /// known.
+    pub spawn_checks: Vec<(ClosureId, Span)>,
+    /// The `own` closures, for the checks of their captures once types are
+    /// known (a task's may move what it captures).
+    pub own_checks: Vec<(ClosureId, TextRange)>,
+    /// In a generator, the type of what `yield` gives.
+    pub generator: Option<Ty>,
 }
 
 impl<'p> Checker<'p> {
@@ -84,6 +94,10 @@ impl<'p> Checker<'p> {
             quiet_unknown_names: prog.fn_info(def).is_some_and(|f| f.header_broken || f.body_broken),
             in_comptime: prog.fn_info(def).is_some_and(|f| f.comptime),
             comptime_sites: Vec::new(),
+            spawn_sites: Vec::new(),
+            spawn_checks: Vec::new(),
+            own_checks: Vec::new(),
+            generator: None,
         }
     }
 
@@ -206,7 +220,7 @@ impl<'p> Checker<'p> {
             }
             match ctx.captures.iter_mut().find(|c| c.local == local) {
                 Some(c) => c.mutable |= mutable,
-                None => ctx.captures.push(Capture { local, mutable }),
+                None => ctx.captures.push(Capture { local, mutable, by_value: false }),
             }
         }
     }
@@ -682,6 +696,8 @@ impl<'p> Checker<'p> {
                 );
                 out.push(Stmt::Error(span));
             }
+            ast::StmtKind::Select(arms) => out.push(self.check_select(arms, s.range)),
+            ast::StmtKind::Yield(value) => out.push(self.check_yield(value.as_ref(), s.range)),
             ast::StmtKind::Unsupported(what) => {
                 let phase = match *what {
                     "`yield`" => "generators (Phase 8)",
@@ -1143,6 +1159,9 @@ impl<'p> Checker<'p> {
                     })
             }
             Stmt::Block(b) => self.block_diverges(b),
+            Stmt::Select { arms, .. } => {
+                !arms.is_empty() && arms.iter().all(|a| self.block_diverges(&a.body))
+            }
             Stmt::While { cond, body, .. } => {
                 let infinite = matches!(
                     cond.parts.as_slice(),

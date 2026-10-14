@@ -113,6 +113,20 @@ impl Program {
                 Answer::No
             };
         }
+        // `Send` and `Sync` are structural (06), and so is `Escapable`:
+        // whatever holds no reference or view.
+        for (def, auto) in [(wk.send, crate::auto::Auto::Send), (wk.sync, crate::auto::Auto::Sync)] {
+            if is(def) {
+                return if self.auto_trait(&ty, auto, env).is_ok() {
+                    Answer::Yes(ImplSource::Builtin)
+                } else {
+                    Answer::No
+                };
+            }
+        }
+        if is(wk.escapable) {
+            return if !self.can_borrow(&ty) { Answer::Yes(ImplSource::Builtin) } else { Answer::No };
+        }
         match &ty {
             Ty::Dyn(d) if self.elaborate(&ty, d).contains(tr) => return Answer::Yes(ImplSource::Dyn),
             // A reference reads what it points to.

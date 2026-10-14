@@ -41,6 +41,7 @@ mod loans;
 mod names;
 mod paths;
 mod purity;
+pub mod shared;
 mod types;
 
 use sisu_diag::{Diagnostic, Edit, FileId, LineCol, MsgId, SourceMap, Span, TextRange, msg};
@@ -156,6 +157,9 @@ pub enum Rule {
     Conflicts,
     Escapes,
     MustConsume,
+    /// The `Shared` escape analysis: switched off, every construction site
+    /// is tagged task-local.
+    SharedEscape,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -169,11 +173,14 @@ impl Options {
     }
 }
 
-/// The checked program: SIR with its drops elaborated, and the findings.
+/// The checked program: SIR with its drops elaborated and its `Shared`
+/// construction sites tagged, and the findings.
 #[derive(Clone, Debug)]
 pub struct Checked {
     pub program: sir::Program,
     pub findings: Vec<Finding>,
+    /// How many `Shared` sites were tagged task-local and may-cross.
+    pub shared: shared::SharedStats,
 }
 
 impl Checked {
@@ -201,7 +208,7 @@ pub fn check(p: &sir::Program, opts: &Options) -> Checked {
     let mut program = p.clone();
     program.functions = functions;
     for f in &program.functions {
-        let a = loans::Analysis::run(&program, f, &types);
+        let a = loans::Analysis::run_with(&program, f, &types, opts.on(Rule::Escapes));
         findings.extend(a.findings(&program, f, &types, opts));
         if opts.on(Rule::MustConsume) {
             findings.extend(consume::check(f, &types));
@@ -209,7 +216,12 @@ pub fn check(p: &sir::Program, opts: &Options) -> Checked {
     }
     findings.extend(purity::check(&program));
     dedup(&mut findings);
-    Checked { program, findings }
+    let shared = if opts.on(Rule::SharedEscape) {
+        shared::tag_sites(&mut program)
+    } else {
+        shared::SharedStats::default()
+    };
+    Checked { program, findings, shared }
 }
 
 fn dedup(fs: &mut Vec<Finding>) {

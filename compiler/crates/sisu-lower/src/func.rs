@@ -147,7 +147,12 @@ pub(crate) fn lower_body(ctx: &mut Ctx, body: &thir::Body) -> Vec<sir::Function>
         let mut fl = FnLower::new(ctx, body, Some(id), &cname);
         fl.type_params = type_params.clone();
         fl.bounds = env.clone();
-        out.push(fl.run(sir::FnKind::Closure(sir::ClosureRole::Plain), source, pure, (from, Vec::new()), Vec::new()));
+        let role = match cl.role {
+            thir::ClosureRole::Plain => sir::ClosureRole::Plain,
+            thir::ClosureRole::ScopeBody => sir::ClosureRole::ScopeBody,
+            thir::ClosureRole::Task => sir::ClosureRole::Task,
+        };
+        out.push(fl.run(sir::FnKind::Closure(role), source, pure, (from, Vec::new()), Vec::new()));
     }
     out
 }
@@ -225,12 +230,17 @@ impl<'c, 'a> FnLower<'c, 'a> {
                 .iter()
                 .map(|cap| {
                     let t = self.ctx.ty(&body.locals[cap.local.0 as usize].ty);
-                    if cl.own { t } else { sir::Type::Ref(Box::new(t), cap.mutable) }
+                    if cap.by_value { t } else { sir::Type::Ref(Box::new(t), cap.mutable) }
                 })
                 .collect();
+            // The environment's name lists the captures, for diagnostics.
+            let names: Vec<String> =
+                cl.captures.iter().map(|cap| body.locals[cap.local.0 as usize].name.clone()).collect();
+            let env_name =
+                if names.is_empty() { "env".to_string() } else { format!("env({})", names.join(", ")) };
             self.add_local(
                 if env_tys.is_empty() { sir::Type::Unit } else { sir::Type::Tuple(env_tys) },
-                Some("env".into()),
+                Some(env_name),
             );
             for (i, cap) in cl.captures.iter().enumerate() {
                 self.env.insert(cap.local, i as u32);
@@ -240,6 +250,19 @@ impl<'c, 'a> FnLower<'c, 'a> {
         let entry = self.new_block();
         self.scopes.push(Scope { entries: Vec::new(), locals: Vec::new(), end: self.block_end(block) });
         self.switch_to(entry);
+        // A task owns its environment: it runs once, and drops what it
+        // keeps by value when it returns.
+        if let Some(c) = self.closure {
+            let cl = &body.closures[c.0 as usize];
+            if cl.role == thir::ClosureRole::Task
+                && cl
+                    .captures
+                    .iter()
+                    .any(|cap| cap.by_value && self.needs_drop(&body.locals[cap.local.0 as usize].ty))
+            {
+                self.register(DropEntry::Local(sir::LocalId(1)));
+            }
+        }
         for p in &params {
             let decl = &body.locals[p.0 as usize];
             let l = self.add_local(self.ctx.ty(&decl.ty), Some(decl.name.clone()));
@@ -682,6 +705,8 @@ pub(crate) fn stmt_span(s: &thir::Stmt) -> sisu_diag::Span {
         | For { span, .. }
         | Match { span, .. }
         | Assert { span, .. }
+        | Select { span, .. }
+        | Yield { span, .. }
         | Defer { span, .. } => *span,
         Expr(e) => e.span,
         Break(span) | Continue(span) | Error(span) => *span,

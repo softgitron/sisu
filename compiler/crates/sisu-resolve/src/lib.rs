@@ -6,6 +6,7 @@
 //! methods. The result, a [`Program`], is the "resolved module" of the
 //! query skeleton; bodies are checked by `sisu-typeck`.
 
+pub mod auto;
 pub mod borrows;
 mod collect;
 mod derive;
@@ -17,6 +18,7 @@ mod traits;
 pub mod ty;
 mod types;
 
+pub use auto::{Auto, Obstacle};
 pub use borrows::{ResultBorrows, ResultShape, SigParam};
 pub use collect::{Resolved, resolve};
 pub use program::*;

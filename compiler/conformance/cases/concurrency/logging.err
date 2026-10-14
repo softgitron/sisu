@@ -1,0 +1,5 @@
+info: starting
+debug [task 2]: in the second task
+warn [task 1]: in the first task
+error [task 1.1]: in its child
+info: done

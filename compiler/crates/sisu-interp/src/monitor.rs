@@ -231,7 +231,7 @@ impl Interp<'_, '_> {
         let op = if mutable && reborrow { Op::MutBorrow } else { Op::Read };
         self.mon_access(ptr, op)?;
         let created = self.site();
-        let owner = self.frames.iter().find(|f| f.serial == ptr.serial).and_then(|f| f.func);
+        let owner = self.frames_of(ptr.task).iter().find(|f| f.serial == ptr.serial).and_then(|f| f.func);
         let Some(m) = &mut self.monitor else { return Ok(0) };
         let mut at = ptr.clone();
         at.tag = 0;
@@ -275,7 +275,8 @@ impl Interp<'_, '_> {
         if self.monitor.is_none() {
             return;
         }
-        let ptr = Pointer { frame, serial, local, path: Vec::new(), tag: 0 };
+        let task = if frame == crate::value::HEAP { 0 } else { self.sched.cur };
+        let ptr = Pointer { task, frame, serial, local, path: Vec::new(), tag: 0 };
         self.end_conflicting(&ptr, op, &[]);
     }
 
@@ -486,6 +487,29 @@ impl Interp<'_, '_> {
         self.violation(Violation::Moved { name, used: self.site() })
     }
 
+    /// A `Shared` tagged task-local reached by another task: the escape
+    /// analysis is wrong (18, Phase 6: a soundness error).
+    pub(crate) fn mon_shared_crossed(&self, cell: u32) -> Unwind {
+        let mut lines =
+            vec![render(msg::MONITOR_HEADER, &[("what", render(msg::MONITOR_SHARED_CROSSED, &[]))])];
+        lines.push(format!("  cell {cell}"));
+        for fr in self.frames.iter().rev() {
+            let Some(f) = fr.func.and_then(|i| self.prog.functions.get(i)) else { continue };
+            if f.kind == sir::FnKind::Glue {
+                continue;
+            }
+            let s = Site { func: fr.func, bb: fr.bb, stmt: None, loc: fr.loc };
+            lines.push(format!(
+                "  {}",
+                render(msg::RUN_FRAME, &[("function", f.name.clone()), ("location", self.site_location(&s))])
+            ));
+        }
+        if let Some(m) = &self.monitor {
+            m.violated.set(true);
+        }
+        Unwind::Abort(lines.join("\n"))
+    }
+
     pub(crate) fn mon_dangling(&self, p: &Pointer) -> Unwind {
         let name = format!("_{}", p.local);
         self.violation(Violation::Dangling { name, used: self.site() })
@@ -526,7 +550,7 @@ impl Interp<'_, '_> {
     /// As [`Self::pointer_label`], naming the local by `owner`'s
     /// declarations when its frame has returned.
     fn pointer_label_in(&self, p: &Pointer, owner: Option<usize>) -> String {
-        let frame = self.frames.iter().find(|fr| fr.serial == p.serial);
+        let frame = self.frames_of(p.task).iter().find(|fr| fr.serial == p.serial);
         let f = frame.and_then(|fr| fr.func).or(owner);
         let decl = f.and_then(|i| self.prog.functions.get(i)).and_then(|f| f.locals.get(p.local as usize));
         let mut s = decl.and_then(|l| l.name.clone()).unwrap_or_else(|| format!("_{}", p.local));
@@ -536,7 +560,22 @@ impl Interp<'_, '_> {
             Some(sir::Type::Named(_, args)) => args.get(k).cloned(),
             _ => None,
         };
-        for st in &p.path {
+        let mut path: &[Step] = &p.path;
+        // A closure's capture by the name its code uses (`env(a, b)`).
+        if p.local == 1
+            && let Some(inner) = s.strip_prefix("env(").and_then(|x| x.strip_suffix(')'))
+            && let Some(Step::Field(k)) = path.first()
+            && let Some(name) = inner.split(", ").nth(*k as usize)
+        {
+            let name = name.to_string();
+            ty = match ty {
+                Some(sir::Type::Tuple(es)) => es.get(*k as usize).cloned(),
+                _ => None,
+            };
+            s = name;
+            path = &path[1..];
+        }
+        for st in path {
             match st {
                 Step::Field(i) => {
                     let (name, next) = self.field_label(ty.as_ref(), variant, *i);

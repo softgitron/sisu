@@ -7,12 +7,21 @@ use std::sync::OnceLock;
 pub const PRELUDE: &str = include_str!("../../../std/prelude.sisu");
 pub const CLI: &str = include_str!("../../../std/cli.sisu");
 pub const MATH: &str = include_str!("../../../std/math.sisu");
+pub const TASK: &str = include_str!("../../../std/task.sisu");
+pub const LOG: &str = include_str!("../../../std/log.sisu");
+
+/// The std modules every module sees by name without an import, as the
+/// prelude's own items: `task.scope` is ambient (Q-6), and so is the `log`
+/// facade (Q-5).
+pub const AMBIENT: &[(&str, &str)] = &[("task", TASK), ("log", LOG)];
 
 /// The std module an import path names, as (module name, source).
 pub fn module_for(path: &[&str]) -> Option<(&'static str, &'static str)> {
     match path {
         ["cli"] | ["std", "x", "cli"] => Some(("cli", CLI)),
         ["std", "math"] | ["math"] => Some(("math", MATH)),
+        ["std", "task"] | ["task"] => Some(("task", TASK)),
+        ["std", "log"] | ["log"] => Some(("log", LOG)),
         _ => None,
     }
 }

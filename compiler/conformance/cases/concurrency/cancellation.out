@@ -1,0 +1,8 @@
+recv: Err(Cancelled)
+send: Err(Cancelled)
+sleep: Err(Cancelled)
+the scope ended
+checkpoint: Err(Cancelled)
+shielded: Ok(())
+cancelled: True
+deadline: Err(Cancelled)

@@ -19,7 +19,10 @@ pub const HEAP: u32 = u32::MAX;
 /// A place reached from a frame's local, or from a heap cell.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Pointer {
-    /// Index into the frame stack, or [`HEAP`].
+    /// The task whose frame stack holds the frame (06: a task's closure
+    /// borrows from the frames of the task that opened its scope).
+    pub task: u32,
+    /// Index into the task's frame stack, or [`HEAP`].
     pub frame: u32,
     /// The frame's serial number, unique for the run.
     pub serial: u64,
@@ -60,11 +63,13 @@ pub enum Step {
     Slot(usize),
 }
 
-/// A `Mutex`: the value, and whether a guard holds it or left it poisoned.
+/// A `Mutex`: the value, and whether a guard holds it (and which task's)
+/// or left it poisoned.
 #[derive(Clone, Debug)]
 pub struct MutexVal {
     pub value: Value,
     pub locked: bool,
+    pub holder: u32,
     pub poisoned: bool,
 }
 
@@ -85,8 +90,12 @@ pub struct HeapCell {
     pub strong: u32,
     pub weak: u32,
     pub serial: u64,
-    /// Counted atomically: never in stage 0, which has one task.
+    /// Counted atomically: its construction site may let it reach another
+    /// task (the escape analysis of `sisu-borrowck`, Q-2).
     pub atomic: bool,
+    /// The task that made it, and whether another task has reached it.
+    pub creator: u32,
+    pub crossed: bool,
 }
 
 /// A struct or enum value; `variant` is 0 for a struct. `trace` is the
@@ -242,6 +251,10 @@ pub enum IterState {
     /// Copies the referents of an iterator of references (an `Iterable[T]`
     /// argument whose `T` is not a reference).
     Decay(Box<IterState>),
+    /// Receives from a channel until it is closed and drained.
+    Recv(u32),
+    /// A generator: the task that runs its body (`sched.rs`).
+    Gen(u32),
     Done,
 }
 
@@ -310,7 +323,21 @@ pub enum Value {
     Entry(Box<EntryVal>),
     Fs(Rc<FsCap>),
     Env,
-    Clock,
+    /// A clock, by its index among the run's clocks (`sched.rs`).
+    Clock(u32),
+    /// A task scope, a task's handle, a scope's cancellation: indices into
+    /// the scheduler's tables.
+    Scope(u32),
+    Handle(u32),
+    Cancellation(u32),
+    /// A channel's halves, by channel.
+    Sender(u32),
+    Receiver(u32),
+    /// A moment on a clock: nanoseconds since the epoch of clock `clock`.
+    Timer {
+        clock: u32,
+        at: i128,
+    },
 }
 
 impl Value {

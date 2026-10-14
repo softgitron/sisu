@@ -56,6 +56,8 @@ fn owns_anything(v: &Value) -> bool {
             | Value::Mutex(_)
             | Value::Guard(_)
             | Value::Arena(_)
+            | Value::Sender(_)
+            | Value::Receiver(_)
     )
 }
 
@@ -160,6 +162,7 @@ impl<'p> Interp<'p, '_> {
             Value::Dyn(d) => self.queue_drop(d.value, Some(d.ty)),
             // The last owner of a `Shared` drops its value.
             Value::Shared(id) => {
+                self.note_shared_access(id)?;
                 let Some(cell) = self.heap.get_mut(id as usize) else { return Ok(()) };
                 cell.strong = cell.strong.saturating_sub(1);
                 if cell.strong > 0 {
@@ -182,6 +185,7 @@ impl<'p> Interp<'p, '_> {
                 let t = arg(&ty, 0);
                 self.queue_drops(a.slots.into_iter().map(|(_, x)| (x, t.clone())).collect());
             }
+            v @ (Value::Sender(_) | Value::Receiver(_)) => self.drop_channel_end(&v),
             _ => {}
         }
         Ok(())
@@ -223,10 +227,11 @@ impl<'p> Interp<'p, '_> {
             Value::Mutex(m) => {
                 m.poisoned |= !holds;
                 m.locked = false;
-                Ok(())
             }
-            other => Err(ice(format!("a guard on {other:?}"))),
+            other => return Err(ice(format!("a guard on {other:?}"))),
         }
+        self.wake_key(crate::sched::Key::Lock);
+        Ok(())
     }
 
     /// What the run loop does with the result of a frame the run time

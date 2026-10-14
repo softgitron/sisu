@@ -55,6 +55,9 @@ pub struct Body {
     pub span: Span,
     /// Whether any diagnostic was reported in this body.
     pub has_errors: bool,
+    /// A generator's item type: the body has a `yield`, and calling the
+    /// function makes an `Iter` of these.
+    pub generator: Option<Ty>,
 }
 
 #[derive(Clone, Debug)]
@@ -62,6 +65,21 @@ pub struct Capture {
     pub local: LocalId,
     /// Captured by `ref mut` because the closure modifies it.
     pub mutable: bool,
+    /// Kept by value in the environment rather than borrowed: every
+    /// capture of an `own` closure, and a task's `Copy` captures it does
+    /// not change (decided once the types are known).
+    pub by_value: bool,
+}
+
+/// What a closure is for, which lowering and the ownership checker need
+/// (06, "Tasks and scopes").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClosureRole {
+    Plain,
+    /// The body of `task.scope` or `task.race`.
+    ScopeBody,
+    /// A task, written at its `spawn`.
+    Task,
 }
 
 #[derive(Clone, Debug)]
@@ -79,6 +97,7 @@ pub struct Closure {
     /// The body of `comptime e` (08): no parameters, no captures, pure,
     /// run by the compiler.
     pub comptime: bool,
+    pub role: ClosureRole,
 }
 
 #[derive(Clone, Debug)]
@@ -177,7 +196,43 @@ pub enum Stmt {
     },
     /// A nested scope (from `with`).
     Block(Block),
+    /// `select:` (06, "Channels and select").
+    Select {
+        arms: Vec<SelectArm>,
+        span: Span,
+    },
+    /// `yield e` in a generator.
+    Yield {
+        value: Expr,
+        span: Span,
+    },
     Error(Span),
+}
+
+/// `case pattern = operation:` of a `select`.
+#[derive(Clone, Debug)]
+pub struct SelectArm {
+    pub op: SelectOp,
+    pub pat: Pat,
+    pub body: Block,
+    pub span: Span,
+}
+
+/// What a `select` arm waits for. A call's arguments are evaluated before
+/// the `select` waits, and the call runs when its arm is taken; an event
+/// is evaluated, then waited for, and its arm binds `()`.
+#[derive(Clone, Debug)]
+pub enum SelectOp {
+    /// `rx.recv()`, the call.
+    Recv(Expr),
+    /// `tx.send(v)`.
+    Send(Expr),
+    /// `h.join()`.
+    Join(Expr),
+    /// A `Timer` value (`clock.after(d)`).
+    Timer(Expr),
+    /// A `Cancellation` value (`s.cancelled()`).
+    Cancelled(Expr),
 }
 
 /// How a `for` loop or comprehension takes its items.
@@ -423,6 +478,9 @@ pub enum ExprKind {
     /// `comptime e`: the value of the closure, which takes nothing and
     /// captures nothing, computed at compile time.
     Comptime(ClosureId),
+    /// A generator's `Iter`: the closure runs the generator's body, which
+    /// owns the function's parameters, as items are asked for.
+    Generator(ClosureId),
     Try {
         expr: Box<Expr>,
         kind: TryKind,

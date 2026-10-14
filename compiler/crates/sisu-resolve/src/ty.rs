@@ -343,7 +343,10 @@ impl Program {
     fn def_is_copy(&self, d: DefId, args: &[Ty], depth: u32) -> bool {
         match &self.def(d).kind {
             DefKind::Struct(s) if s.builtin.is_some() => {
-                matches!(s.builtin.as_deref(), Some("Fs" | "Env" | "Clock" | "System" | "DateTime"))
+                matches!(
+                    s.builtin.as_deref(),
+                    Some("Fs" | "Env" | "Clock" | "System" | "DateTime" | "Scope" | "Cancellation" | "Timer")
+                )
             }
             DefKind::Struct(s) => {
                 s.copy

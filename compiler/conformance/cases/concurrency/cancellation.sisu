@@ -1,0 +1,36 @@
+# Cancellation at blocking points (06, "Cancellation"): `s.cancel()` makes
+# every blocking operation of the scope's code and tasks return
+# `Err(Cancelled)`: `recv`, `send`, `join`, a timer, `checkpoint`. A shield
+# holds it off. A deadline cancels a task when its clock reaches it.
+# explore 20
+
+def recv_one(rx: Receiver[int]) -> int ! {ChannelError, TaskError}:
+    return rx.recv()
+
+def send_two(tx: Sender[int]) -> ! {ChannelError, TaskError}:
+    tx.send(1)?
+    tx.send(2)?
+    return Ok(())
+
+def main(sys: System):
+    let tx, rx = channel[int](capacity=1)
+    task.scope do s:
+        let a = s.spawn(() -> recv_one(rx))
+        let b = s.spawn(() -> send_two(tx))
+        let c = s.spawn(() -> sys.clock.sleep(Duration.seconds(30)))
+        s.cancel()
+        print("recv: {a.join()}")
+        print("send: {b.join()}")
+        print("sleep: {c.join()}")
+    print("the scope ended")
+    task.scope do s:
+        s.cancel()
+        print("checkpoint: {task.checkpoint()}")
+        let shielded = task.shield do:
+            return task.checkpoint()
+        print("shielded: {shielded}")
+        print("cancelled: {task.is_cancelled()}")
+    task.scope do s:
+        let late = s.spawn_with(deadline=sys.clock.after(Duration.millis(1))) do:
+            return recv_one(rx)
+        print("deadline: {late.join()}")

@@ -1,0 +1,46 @@
+# Bounded channels (06, "Channels and select"): `send` waits while the
+# channel is full, `recv` while it is empty; a `for` loop over a receiver
+# ends when the channel is closed and drained; a send to a channel whose
+# receiver is gone is `Closed`. The worker pool of concurrency.sisu.
+# explore 20
+
+def process_jobs(jobs: list[int], workers: int) -> list[int]:
+    let tx, rx = channel[int](capacity=2)
+    let results = Mutex(list())
+    task.scope do s:
+        for _ in range(workers):
+            s.spawn do:
+                for job in rx:
+                    results.lock().push(job * job)
+        for j in jobs:
+            tx.send(j).expect("workers outlive the sender")
+        tx.close()
+    var out = results.into_inner()
+    out.sort()
+    return out
+
+def producer(tx: Sender[int], n: int) -> ! {ChannelError, TaskError}:
+    for i in range(n):
+        tx.send(i)?
+    tx.close()
+    return Ok(())
+
+def main():
+    print(process_jobs([1, 2, 3, 4, 5, 6, 7], 3))
+    let tx, rx = channel[int](capacity=1)
+    let total = task.scope do s:
+        s.spawn(() -> producer(tx, 5))
+        var sum = 0
+        for v in rx:
+            sum += v
+        return sum
+    print(total)
+    # The receiver is gone: sending fails.
+    let tx2, rx2 = channel[str](capacity=1)
+    _ = rx2
+    print(tx2.try_send("kept"))
+    print(tx2.send("lost"))
+    let tx3, rx3 = channel[int](capacity=3)
+    print(tx3.try_send(1))
+    print(rx3.try_recv())
+    print(rx3.try_recv())

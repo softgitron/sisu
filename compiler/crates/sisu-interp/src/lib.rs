@@ -34,9 +34,11 @@ mod iter;
 mod monitor;
 mod ops;
 mod place;
+mod sched;
 pub mod value;
 
 pub use host::{Host, IoErrorKind, StdHost, TestHost};
+pub use sched::Stats;
 
 use sisu_diag::{Catalog, MsgId, msg};
 use sisu_sir as sir;
@@ -85,6 +87,10 @@ pub struct Options {
     pub monitor: bool,
     /// Count how often each statement runs (the counterexample mode).
     pub coverage: bool,
+    /// The seed of the scheduler's choices (`--schedule-seed`).
+    pub seed: u64,
+    /// Keep the scheduling numbers of `--stats`.
+    pub stats: bool,
 }
 
 /// How a monitored run went, beyond its exit status.
@@ -96,6 +102,8 @@ pub struct RunReport {
     /// How often each source position ran a statement: (function, line,
     /// column).
     pub coverage: HashMap<(String, u32, u32), u32>,
+    /// The `--stats` report, when asked for.
+    pub stats: Option<String>,
 }
 
 /// Why execution left a frame other than by returning.
@@ -104,6 +112,11 @@ pub(crate) enum Unwind {
     Panic(Box<PanicInfo>),
     /// Stops the program without running any more Sisu code.
     Abort(String),
+    /// From an intrinsic: the running task must wait; the call is retried
+    /// with these arguments when it is woken (`sched.rs`).
+    Block(Box<sched::Blocked>),
+    /// The running task waits or has finished: the scheduler runs another.
+    Switch,
 }
 
 #[derive(Debug)]
@@ -154,6 +167,9 @@ pub(crate) struct Frame<'p> {
     /// The frame is leaving by a panic and has no cleanup block: once its
     /// pending drops are done, unwinding continues in the caller.
     pub resume_after_drops: bool,
+    /// A frame the scheduler pushed: a task's bottom, a scope's end, a
+    /// shield (`sched.rs`).
+    pub anchor: Option<sched::Anchor>,
 }
 
 pub struct Interp<'p, 'h> {
@@ -175,10 +191,19 @@ pub struct Interp<'p, 'h> {
     pub(crate) monitor: Option<monitor::Monitor>,
     /// The values `Shared` owns, by cell (a cell is never reused).
     pub(crate) heap: Vec<value::HeapCell>,
+    /// Tasks, scopes, channels and clocks.
+    pub(crate) sched: sched::Sched<'p>,
 }
 
 impl<'p, 'h> Interp<'p, 'h> {
     pub fn new(prog: &'p sir::Program, host: &'h mut dyn Host, options: &Options) -> Interp<'p, 'h> {
+        // A real clock is read when it is used, never before (compile-time
+        // evaluation refuses the clock).
+        let host_clock = if host.virtual_time() {
+            sched::RtClock { virtual_: true, now: host.now_nanos() }
+        } else {
+            sched::RtClock { virtual_: false, now: 0 }
+        };
         let fns = prog.functions.iter().enumerate().map(|(i, f)| (f.name.as_str(), i)).collect();
         let glue = prog
             .functions
@@ -225,12 +250,16 @@ impl<'p, 'h> Interp<'p, 'h> {
                 ..Default::default()
             }),
             heap: Vec::new(),
+            sched: sched::Sched::new(options.seed, options.stats, host_clock),
         }
     }
 
     /// What the monitor saw: whether it stopped the run, and the coverage.
     pub fn report(&self, status: i32) -> RunReport {
         let mut r = RunReport { status, ..Default::default() };
+        if self.sched.keep_stats {
+            r.stats = Some(self.stats_report());
+        }
         if let Some(m) = &self.monitor {
             r.violation = m.violated.get();
             if let Some(c) = &m.coverage {
@@ -288,6 +317,11 @@ impl<'p, 'h> Interp<'p, 'h> {
                 self.host.stderr(&format!("{m}\n"));
                 exit::ABORT
             }
+            Err(Unwind::Block(_) | Unwind::Switch) => {
+                let m = render(msg::RUN_INTERNAL, &[("detail", "a task switch escaped the run loop".into())]);
+                self.host.stderr(&format!("{m}\n"));
+                exit::ABORT
+            }
         }
     }
 
@@ -305,13 +339,17 @@ impl<'p, 'h> Interp<'p, 'h> {
                 None => TestResult::Failed(panic_report(&p)),
             },
             Err(Unwind::Abort(m)) => TestResult::Failed(m),
+            Err(Unwind::Block(_) | Unwind::Switch) => TestResult::Failed(render(
+                msg::RUN_INTERNAL,
+                &[("detail", "a task switch escaped the run loop".into())],
+            )),
         }
     }
 
     fn system(&self) -> Value {
         let fs =
             Value::Fs(Rc::new(value::FsCap { store: value::FsStore::Host, read_only: false, root: None }));
-        Value::Struct(Value::adt("System", 0, vec![fs, Value::Env, Value::Clock]))
+        Value::Struct(Value::adt("System", 0, vec![fs, Value::Env, Value::Clock(0)]))
     }
 }
 
@@ -321,8 +359,10 @@ fn mentions_counted(t: &sir::Type) -> bool {
     use sir::Type;
     match t {
         Type::Named(n, args) => {
-            matches!(n.as_str(), "Shared" | "Weak" | "MutexGuard" | "Mutex" | "Cell" | "Arena")
-                || args.iter().any(mentions_counted)
+            matches!(
+                n.as_str(),
+                "Shared" | "Weak" | "MutexGuard" | "Mutex" | "Cell" | "Arena" | "Sender" | "Receiver"
+            ) || args.iter().any(mentions_counted)
         }
         Type::Tuple(es) | Type::Dyn(_, es) => es.iter().any(mentions_counted),
         Type::Ref(t, _) => mentions_counted(t),

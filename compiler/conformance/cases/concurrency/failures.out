@@ -1,0 +1,3 @@
+Err(TimedOut)
+Err(TimedOut)
+Ok((Err(TimedOut), Err(Cancelled)))

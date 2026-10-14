@@ -1,0 +1,54 @@
+##! std.task: structured, colourless tasks (06, "Tasks and scopes"). The
+##! module is visible everywhere as `task`, like the prelude: `task.scope`
+##! is ambient (Q-6). The types it works with (`Scope`, `Handle`,
+##! `TaskError`, channels, `Duration`, `Timer`) are the prelude's.
+##!
+##! Tasks run on the interpreter's seeded cooperative scheduler (the
+##! `single` profile of 12): a task runs until it blocks or reaches a yield
+##! point (a loop's back edge or a call) with its budget spent, and the
+##! seed decides which ready task runs next, so a run is a function of the
+##! program, its input and the seed (`--schedule-seed N`, `--explore N`).
+
+## Opens a scope, runs `body` with it, and joins every task spawned on it
+## before returning: there are no orphan tasks. `body` is written here, as
+## a closure or `do` block. When the body returns `T ! E`, the scope's
+## result is `T ! {E, TaskError}` widened by the error sets of the tasks
+## spawned on it in the body: a task that fails (returns an error or
+## panics) cancels its siblings, and when nobody joined it the scope
+## returns the first such failure in time, after joining everything (in a
+## `pure` function, the failure of the task spawned first, and only the
+## tasks spawned after it are cancelled). An error the body returns cancels
+## the tasks still running and is the result. When the body returns a value
+## that is not a result, a failure nobody joined panics in the scope's
+## task. A panic in the body cancels the tasks, joins them, and continues.
+@intrinsic("task.scope")
+pure def scope[T](body: (Scope) -> T) -> T
+
+## A scope whose result is the first of its tasks to finish, whatever its
+## outcome (06, `task.race`, D-075): the others are cancelled and joined
+## before it returns. Its type is the tasks' result, flattened as `join`
+## flattens it; every task spawned in the body returns the same type. Which
+## task finishes first is the schedule, so `pure` code cannot race.
+@intrinsic("task.race")
+def race[T](body: (Scope) -> ()) -> T
+
+## Runs `body` with cancellation held off (06, "Cancellation"): blocking
+## operations inside it do not see the cancellation of the scopes around
+## it, so code that must finish (flushing a file) does. A scope opened
+## inside is cancelled only by its own `cancel`, failures and deadline.
+@intrinsic("task.shield")
+pure def shield[T](body: () -> T) -> T
+
+## Lets other ready tasks run first.
+@intrinsic("task.yield_now")
+def yield_now()
+
+## Whether the code running is cancelled: the innermost scope around it, or
+## its task, was cancelled and no shield is in between.
+@intrinsic("task.is_cancelled")
+def is_cancelled() -> bool
+
+## A blocking point that does not block: `Err(Cancelled)` when the code
+## running is cancelled, for long computations that want to stop early.
+@intrinsic("task.checkpoint")
+def checkpoint() -> ! TaskError

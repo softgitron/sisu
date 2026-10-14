@@ -68,8 +68,10 @@ impl FnLower<'_, '_> {
             return p.clone();
         }
         if let Some(&k) = self.env.get(&l) {
-            // An `own` closure's environment holds the values themselves.
-            let own = self.closure.is_some_and(|c| self.body.closures[c.0 as usize].own);
+            // What a closure keeps by value its environment holds itself.
+            let own = self.closure.is_some_and(|c| {
+                self.body.closures[c.0 as usize].captures.get(k as usize).is_some_and(|cap| cap.by_value)
+            });
             return if own {
                 Place { local: sir::LocalId(1), proj: vec![Proj::Field(k)] }
             } else {
@@ -211,7 +213,7 @@ impl FnLower<'_, '_> {
     /// An argument as the callee takes it; `by_value` when the callee
     /// takes by value what the call passes by reference (a trait method
     /// resolved to the impl of a `Copy` type).
-    fn arg_operand_for(&mut self, a: &thir::Arg, by_value: bool) -> Operand {
+    pub(crate) fn arg_operand_for(&mut self, a: &thir::Arg, by_value: bool) -> Operand {
         if by_value && matches!(a.mode, ArgMode::Ref | ArgMode::Value) {
             if let Ty::Ref(..) = &a.expr.ty {
                 let p = self.place_of(&a.expr).project(Proj::Deref);
@@ -266,7 +268,7 @@ impl FnLower<'_, '_> {
         (tname, vname)
     }
 
-    fn intrinsic_call(
+    pub(crate) fn intrinsic_call(
         &mut self,
         dest: Place,
         name: &str,
@@ -602,15 +604,16 @@ impl FnLower<'_, '_> {
             ExprKind::Match { scrutinee, arms } => self.match_into(Some(dest), scrutinee, arms, e.span),
             ExprKind::Closure(id) => {
                 let cl = &self.body.closures[id.0 as usize];
-                let own = cl.own;
-                let caps: Vec<(thir::LocalId, bool)> =
-                    cl.captures.iter().map(|c| (c.local, c.mutable)).collect();
+                let caps: Vec<(thir::LocalId, bool, bool)> =
+                    cl.captures.iter().map(|c| (c.local, c.mutable, c.by_value)).collect();
                 let mut ops = Vec::new();
-                for (l, m) in caps {
+                for (l, m, by_value) in caps {
                     let p = self.local_place(l);
-                    // An `own` closure keeps a copy (its captures are `Copy`).
-                    if own {
-                        ops.push(Operand::Copy(p));
+                    // What the closure keeps by value is copied, or moved
+                    // into a task.
+                    if by_value {
+                        let ty = self.body.locals[l.0 as usize].ty.clone();
+                        ops.push(self.copy_or_move(p, &ty));
                         continue;
                     }
                     let ty = self.body.locals[l.0 as usize].ty.clone();
@@ -621,6 +624,14 @@ impl FnLower<'_, '_> {
                 let name = closure_name(&self.ctx.body_name(self.body), *id);
                 let tys = (0..self.type_params.len() as u32).map(sir::Type::Param).collect();
                 self.assign(dest, Rvalue::Closure(name, tys, ops), loc);
+            }
+            // A generator: the closure that runs its body, in an `Iter`.
+            ExprKind::Generator(id) => {
+                let fty = self.body.closures[id.0 as usize].fn_ty.clone();
+                let c = self.temp(&fty);
+                let closure = thir::Expr::new(ExprKind::Closure(*id), fty, e.span);
+                self.into(Place::local(c), &closure);
+                self.intrinsic_call(dest, "gen.new", Vec::new(), vec![Operand::Move(Place::local(c))], loc);
             }
             // The compiler runs the function and replaces its body by the
             // value; what runs here is a call that builds it.

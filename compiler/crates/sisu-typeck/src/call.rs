@@ -825,8 +825,16 @@ impl Checker<'_> {
         if let Some(r) = recv {
             out.push(r);
         }
+        let task_call = crate::tasks::task_call(prog.fn_info(d).and_then(|f| f.intrinsic.as_deref()));
+        let spawns_before = self.spawn_sites.len();
         out.extend(self.check_args(&sig, args, trailing, range));
-        let ret = prog.normalize(&self.infer.zonk(&sig.ret), &self.env);
+        let mut ret = prog.normalize(&self.infer.zonk(&sig.ret), &self.env);
+        if let Some(tc) = task_call {
+            let name = self.source_text(range);
+            let name =
+                name.split('(').next().unwrap_or("").split_whitespace().next().unwrap_or("").to_string();
+            ret = self.task_rules(tc, &out, ret, spawns_before, span, &name);
+        }
         // What a `Shared`, `Cell` or `Mutex` owns can be neither a view nor
         // must-consume (checked when the type is known).
         let owner = match prog.fn_info(d).and_then(|f| f.intrinsic.as_deref()) {
@@ -1179,7 +1187,7 @@ impl Checker<'_> {
                 recv = self.auto_deref(recv);
                 continue;
             }
-            if self.smart_pointer(&base) == Some("Shared") {
+            if self.smart_pointer(&base).is_some() {
                 recv = self.deref_smart(recv);
                 recv = self.auto_deref(recv);
                 continue;

@@ -98,7 +98,7 @@ fn main(0) source 0 @8:5-8:9 {
 
 fn main#closure0(2) closure pure source 0 from 0 1 @11:28-11:42 {
     let _0: bool
-    let _1: (ref int,) "env"
+    let _1: (ref int,) "env(limit)"
     let _2: int "x" @11:28-11:29
   bb0:
     _0 = gt copy _2, copy _1.0.* @11:33-11:42

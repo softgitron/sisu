@@ -56,6 +56,13 @@ impl FnLower<'_, '_> {
                 }
             }
             Stmt::AugAssign { place, op, value, span } => self.aug_assign(place, *op, value, *span),
+            Stmt::Select { arms, span } => self.select(arms, *span),
+            Stmt::Yield { value, span } => {
+                let loc = self.ctx.loc(*span);
+                let v = self.operand(value);
+                let u = self.unit();
+                self.intrinsic_call(u, "gen.yield", Vec::new(), vec![v], loc);
+            }
             Stmt::Expr(e) => {
                 let t = self.temp(&e.ty);
                 self.into(Place::local(t), e);
@@ -596,4 +603,105 @@ impl FnLower<'_, '_> {
 pub enum ForBody<'b> {
     Block(&'b thir::Block),
     Comprehension(Box<crate::exprs::CompRest<'b>>),
+}
+
+impl FnLower<'_, '_> {
+    /// `select:` (06, "Channels and select"): the arms' calls have their
+    /// arguments evaluated and their events their values, then
+    /// `select.wait(kind, subject, ...)` waits for one that can go on and
+    /// gives its index (`0` a receive, `1` a send, `2` a join, `3` a
+    /// timer, `4` a cancellation, each with the receiver or the event as
+    /// its subject), and the arm taken makes its call, binds its pattern
+    /// and runs its block.
+    fn select(&mut self, arms: &[thir::SelectArm], span: sisu_diag::Span) {
+        let loc = self.ctx.loc(span);
+        // Each arm: its kind, its subject, and how its value is made.
+        enum Made {
+            Call(sir::Callee, Vec<Operand>, Ty),
+            Event,
+        }
+        let mut made = Vec::new();
+        let mut wait_args = Vec::new();
+        for a in arms {
+            let (kind, e) = match &a.op {
+                thir::SelectOp::Recv(e) => (0, e),
+                thir::SelectOp::Send(e) => (1, e),
+                thir::SelectOp::Join(e) => (2, e),
+                thir::SelectOp::Timer(e) => (3, e),
+                thir::SelectOp::Cancelled(e) => (4, e),
+            };
+            wait_args.push(Operand::Const(sir::Const::Int(kind)));
+            if kind <= 2 {
+                let ExprKind::Call { callee: thir::Callee::Fn { def, type_args }, args } = &e.kind else {
+                    made.push(Made::Event);
+                    wait_args.push(Operand::Const(sir::Const::Unit));
+                    continue;
+                };
+                let (callee, by_value) = self.callee_for(*def, type_args);
+                let ops: Vec<Operand> = args
+                    .iter()
+                    .enumerate()
+                    .map(|(i, x)| {
+                        let o = self.arg_operand_for(x, by_value.get(i).copied().unwrap_or(false));
+                        // Each operand in a temporary, so it is evaluated once.
+                        match o {
+                            Operand::Copy(p) if !p.proj.is_empty() => {
+                                let t = self.temp(&x.expr.ty);
+                                self.assign(Place::local(t), Rvalue::Use(Operand::Copy(p)), loc);
+                                Operand::Copy(Place::local(t))
+                            }
+                            other => other,
+                        }
+                    })
+                    .collect();
+                wait_args.push(ops.first().cloned().unwrap_or(Operand::Const(sir::Const::Unit)));
+                made.push(Made::Call(callee, ops, e.ty.clone()));
+            } else {
+                let t = self.temp(&e.ty);
+                self.into(Place::local(t), e);
+                wait_args.push(Operand::Copy(Place::local(t)));
+                made.push(Made::Event);
+            }
+        }
+        let k = self.temp_sir(sir::Type::Int);
+        self.intrinsic_call(Place::local(k), "select.wait", Vec::new(), wait_args, loc);
+        let join = self.new_block();
+        let blocks: Vec<BlockId> = arms.iter().map(|_| self.new_block()).collect();
+        let none = self.new_block();
+        self.terminate(
+            Terminator::Switch {
+                value: Operand::Copy(Place::local(k)),
+                cases: blocks.iter().enumerate().map(|(i, b)| (i as i64, *b)).collect(),
+                default: none,
+            },
+            loc,
+        );
+        self.switch_to(none);
+        self.terminate(Terminator::Unreachable, loc);
+        for ((a, m), bb) in arms.iter().zip(made).zip(blocks) {
+            self.switch_to(bb);
+            self.push_scope();
+            let aloc = self.ctx.loc(a.span);
+            match m {
+                Made::Call(callee, ops, ty) => {
+                    let r = self.temp(&ty);
+                    self.emit(StatementKind::Call { dest: Place::local(r), callee, args: ops }, aloc);
+                    if self.needs_drop(&ty) {
+                        self.register(DropEntry::Local(r));
+                        self.split();
+                    }
+                    self.bind(&a.pat, &Place::local(r));
+                }
+                Made::Event => {
+                    let r = self.temp(&Ty::Unit);
+                    self.assign(Place::local(r), Rvalue::Use(Operand::Const(sir::Const::Unit)), aloc);
+                    self.bind(&a.pat, &Place::local(r));
+                }
+            }
+            self.block(&a.body);
+            self.pop_scope();
+            self.goto(join);
+        }
+        self.switch_to(join);
+    }
 }

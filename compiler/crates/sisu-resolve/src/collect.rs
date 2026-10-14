@@ -37,7 +37,6 @@ pub(crate) const LATER_TYPES: &[(&str, &str)] = &[
     ("bytes", "byte strings (Phase 4)"),
     ("Array", "`Array` and `Slice` (Phase 4)"),
     ("Slice", "`Array` and `Slice` (Phase 4)"),
-    ("Duration", "`Duration` and the time library (Phase 6)"),
     ("Net", "the `Net` capability (Phase 6)"),
     ("Rand", "the `Rand` capability (Phase 6)"),
     ("Proc", "the `Proc` capability (Phase 6)"),
@@ -141,6 +140,13 @@ pub fn resolve(sources: &mut SourceMap, root_file: FileId, root: &ast::Module) -
     let prelude = r.load_std("prelude", std_sources::PRELUDE);
     r.prog.prelude = prelude;
     r.fill_well_known();
+    // The ambient std modules, named in the prelude.
+    for (name, source) in std_sources::AMBIENT {
+        let m = r.load_std(name, source);
+        let def =
+            r.new_def(prelude, name, TextRange::empty(0), ast::Vis::Pub, Vec::new(), DefKind::Module(m));
+        r.prog.modules[prelude.0 as usize].items.insert(name.to_string(), def);
+    }
     // The impls of the leaf types and tuples; nothing names the module.
     r.load_std("builtin_impls", std_sources::builtin_impls());
     let root_id = r.add_module("main".into(), root_file, false);
@@ -255,6 +261,14 @@ impl Resolver<'_> {
             neg: get(prog, "Neg"),
             num: get(prog, "Num"),
             from_literal: get(prog, "FromLiteral"),
+            task_error: get(prog, "TaskError"),
+            scope: get(prog, "Scope"),
+            handle: get(prog, "Handle"),
+            sender: get(prog, "Sender"),
+            receiver: get(prog, "Receiver"),
+            send: get(prog, "Send"),
+            sync: get(prog, "Sync"),
+            escapable: get(prog, "Escapable"),
         };
         self.prog.wk = wk;
     }

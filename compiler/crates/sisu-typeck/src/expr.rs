@@ -873,6 +873,14 @@ impl Checker<'_> {
         let lt = self.resolved(&l.ty);
         let rhint = if matches!(lt, Ty::Int | Ty::Float) { Some(lt.clone()) } else { None };
         let r = self.infer_expr(rhs, rhint.as_ref());
+        // A reference to what is not known yet, against a number, reads a
+        // number (`n % it` over `found.iter()` before `found` is known).
+        if let Some(num) = &rhint
+            && let Ty::Ref(inner, _) = self.resolved(&r.ty)
+            && matches!(self.resolved(&inner), Ty::Var(_))
+        {
+            self.infer.unify(&inner, num);
+        }
         let r = self.decay(r);
         // A literal on the left takes the type of a float on the right.
         let l = match (&l.kind, self.resolved(&r.ty)) {
@@ -1301,6 +1309,9 @@ impl Checker<'_> {
                 Some((item, m))
             }
             Some("Iter") => Some((args.first().cloned().unwrap_or(Ty::Error), ForMode::Iter)),
+            // A receiver gives its values until the channel is closed and
+            // drained; the loop borrows it.
+            Some("Receiver") => Some((args.first().cloned().unwrap_or(Ty::Error), ForMode::Borrow)),
             _ => self.iterator_item(&t),
         }
     }
@@ -1632,29 +1643,40 @@ impl Checker<'_> {
         self.comptime_sites.push((id, range));
     }
 
-    /// An `own` closure keeps copies of what it captures (04, "Closures"),
-    /// so it holds no borrow of them and may be stored and returned. Stage
-    /// 0 copies: every capture must be `Copy`, and the closure cannot
-    /// change one (a call works on its own copy). A capture by move arrives
-    /// with tasks, where values cross into spawned closures (Phase 6).
+    /// An `own` closure keeps what it captures (04, "Closures"), so it
+    /// holds no borrow of it and may be stored and returned. Its captures
+    /// are checked once the types are known ([`Self::check_own_closures`]).
     fn own_closure(&mut self, id: ClosureId, range: TextRange) {
-        let caps = self.closures.get(id.0 as usize).and_then(|c| c.as_ref()).map(|c| c.captures.clone());
-        for cap in caps.unwrap_or_default() {
-            let local = &self.locals[cap.local.0 as usize];
-            let (name, ty) = (local.name.clone(), local.ty.clone());
-            if cap.mutable {
-                let d = self.error(msg::TYPE_OWN_CLOSURE_CHANGES, range).with("name", name);
-                self.report(d);
-            } else if !self.is_copy(&ty) && self.infer.zonk(&ty) != Ty::Error {
-                let d = self
-                    .error(msg::TYPE_OWN_CLOSURE_CAPTURE, range)
-                    .with("name", name)
-                    .with("ty", self.show(&ty));
-                self.report(d);
-            }
-        }
         if let Some(Some(c)) = self.closures.get_mut(id.0 as usize) {
             c.own = true;
+        }
+        self.own_checks.push((id, range));
+    }
+
+    /// The captures of `own` closures: a task's are moved in (it runs once
+    /// and owns its environment); any other `own` closure copies them, so
+    /// each must be `Copy`, and it cannot change one (a call works on its
+    /// own copy).
+    pub fn check_own_closures(&mut self) {
+        for (id, range) in std::mem::take(&mut self.own_checks) {
+            let Some(Some(c)) = self.closures.get(id.0 as usize) else { continue };
+            if c.role == ClosureRole::Task {
+                continue;
+            }
+            for cap in c.captures.clone() {
+                let local = &self.locals[cap.local.0 as usize];
+                let (name, ty) = (local.name.clone(), local.ty.clone());
+                if cap.mutable {
+                    let d = self.error(msg::TYPE_OWN_CLOSURE_CHANGES, range).with("name", name);
+                    self.report(d);
+                } else if !self.is_copy(&ty) && self.infer.zonk(&ty) != Ty::Error {
+                    let d = self
+                        .error(msg::TYPE_OWN_CLOSURE_CAPTURE, range)
+                        .with("name", name)
+                        .with("ty", self.show(&ty));
+                    self.report(d);
+                }
+            }
         }
     }
 
@@ -1742,6 +1764,7 @@ impl Checker<'_> {
             span,
             fn_ty: fn_ty.clone(),
             comptime: false,
+            role: ClosureRole::Plain,
         });
         Expr::new(ExprKind::Closure(id), fn_ty, span)
     }
@@ -1755,6 +1778,20 @@ impl Checker<'_> {
             return Expr::error(span);
         }
         let ret = self.ret.last().map(|r| r.ty.clone()).unwrap_or(Ty::Unit);
+        // A closure whose result is not known yet returns what `?` needs:
+        // an option for an option, a result for a result.
+        if matches!(self.resolved(&ret), Ty::Var(_)) && !self.infer.is_absorbing(&ret) {
+            let shape = if self.as_option(&x.ty).is_some() {
+                self.prog.wk.option.map(|o| Ty::Adt(o, vec![self.infer.fresh()]))
+            } else if self.as_result(&x.ty).is_some() {
+                self.prog.wk.result.map(|r| Ty::Adt(r, vec![self.infer.fresh(), self.infer.fresh()]))
+            } else {
+                None
+            };
+            if let Some(shape) = shape {
+                self.infer.unify(&ret, &shape);
+            }
+        }
         if let Some(t) = self.as_option(&x.ty) {
             if self.as_option(&ret).is_none() && self.resolved(&ret) != Ty::Error {
                 let d = self
@@ -1910,6 +1947,11 @@ impl Checker<'_> {
                     b = self.auto_deref(b);
                 }
                 Some("MutexGuard") if name.text == "value" => return self.deref_smart(b),
+                // Any other field is the value's.
+                Some("MutexGuard") => {
+                    b = self.deref_smart(b);
+                    b = self.auto_deref(b);
+                }
                 _ => break,
             }
         }

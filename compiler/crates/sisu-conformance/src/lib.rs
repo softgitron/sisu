@@ -52,6 +52,10 @@ pub struct Report {
     pub monitored: usize,
     /// Counterexample-mode runs of rejected programs (`.defer`).
     pub deferred: usize,
+    /// Cases run again under `--explore N` (`# explore N`), and the
+    /// schedules that makes.
+    pub explored: usize,
+    pub schedules: u64,
     pub failures: Vec<Failure>,
     pub blessed: Vec<String>,
 }
@@ -63,11 +67,13 @@ impl Report {
             out.push_str(&format!("FAIL {} [{}]\n{}\n", f.case, f.check, f.detail));
         }
         out.push_str(&format!(
-            "{} cases, {} checks, {} runs also under the monitor, {} counterexample runs, {} failed\n",
+            "{} cases, {} checks, {} runs also under the monitor, {} counterexample runs, {} explored ({} schedules), {} failed\n",
             self.cases,
             self.checks,
             self.monitored,
             self.deferred,
+            self.explored,
+            self.schedules,
             self.failures.len()
         ));
         if !self.blessed.is_empty() {
@@ -301,7 +307,34 @@ impl Runner<'_> {
             let out = invoke(self.sisu, &sandbox.dir, &s(&["explain-borrow", &format!("{file}:{line}")]));
             self.compare(case, "sisu explain-borrow", Some("explain"), &expected, &out.stdout);
         }
+        // `# explore N`: the run (and the tests) again under N schedule
+        // seeds; every seed must give the expected result.
+        let explore = source
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("# explore ").and_then(|n| n.trim().parse::<u64>().ok()));
         let wants_run = ["out", "err", "status"].iter().any(|e| case.path(e).exists());
+        if let Some(n) = explore {
+            self.report.explored += 1;
+            self.report.schedules += n;
+            if let Some(expected) = case.expected("explore") {
+                let out = invoke(self.sisu, &sandbox.dir, &s(&["test", "--explore", &n.to_string(), &file]));
+                self.compare(case, "sisu test --explore", Some("explore"), &expected, &out.stdout);
+            }
+            if wants_run {
+                let mut a = s(&["run", "--explore", &n.to_string(), &file]);
+                a.extend(args.iter().cloned());
+                let out = invoke(self.sisu, &sandbox.dir, &a);
+                let status =
+                    case.expected("status").map(|s| s.trim().to_string()).unwrap_or_else(|| "0".into());
+                self.compare(
+                    case,
+                    "sisu run --explore: every schedule's result",
+                    None,
+                    &format!("{}--- status {status}\n", case.expected("out").unwrap_or_default()),
+                    &format!("{}--- status {}\n", out.stdout, out.status),
+                );
+            }
+        }
         if !wants_run {
             return;
         }

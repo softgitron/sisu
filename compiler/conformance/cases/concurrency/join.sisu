@@ -1,0 +1,53 @@
+# Spawn and join (06, "Tasks and scopes"): `join` gives a task's result as
+# `T ! TaskError`, flattened for a task that returns `U ! E`; a scope joins
+# every task before it returns, and a scope whose body returns `T ! E`
+# returns `T ! {E, TaskError}` widened by its tasks' error sets.
+# explore 20
+
+error Bad:
+    Bad(n: int)
+
+def work(n: int) -> int ! Bad:
+    if n == 3:
+        return Err(Bad(n))
+    var total = 0
+    for i in range(n * 10):
+        total += i
+    return Ok(total)
+
+def all(ns: list[int]) -> list[int] ! {Bad, TaskError}:
+    return task.scope do s:
+        let hs = [s.spawn(() -> work(n)) for n in ns]
+        var out = []
+        for h in hs:
+            out.push(h.join()?)
+        return Ok(out)
+
+def pair() -> (int, str) ! TaskError:
+    return task.scope do s:
+        let a = s.spawn(() -> 1 + 1)
+        let b = s.spawn(() -> "two")
+        return Ok((a.join()?, b.join()?))
+
+def main():
+    print(all([1, 2, 4]))
+    print(all([1, 3, 4]))
+    print(pair())
+    # A scope whose body returns no result is that value.
+    let n = task.scope do s:
+        let h = s.spawn(() -> 40)
+        return h.join().or(0) + 2
+    print(n)
+    # Every task has finished when the scope returns.
+    var log = Mutex(list())
+    task.scope do s:
+        for i in range(3):
+            s.spawn do:
+                log.lock().push(i)
+    var done = log.into_inner()
+    done.sort()
+    print(done)
+
+test "joins flatten":
+    assert all([2]) == Ok([190])
+    assert pair() == Ok((2, "two"))

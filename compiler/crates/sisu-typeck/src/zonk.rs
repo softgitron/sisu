@@ -52,6 +52,9 @@ impl Zonker<'_> {
             self.block(&mut c.body);
         }
         self.ty(&mut b.ret);
+        if let Some(g) = &mut b.generator {
+            self.ty(g);
+        }
         self.block(&mut b.block);
     }
 
@@ -134,6 +137,20 @@ impl Zonker<'_> {
                 }
             }
             Stmt::Defer { body, .. } | Stmt::Block(body) => self.block(body),
+            Stmt::Select { arms, .. } => {
+                for a in arms {
+                    match &mut a.op {
+                        SelectOp::Recv(e)
+                        | SelectOp::Send(e)
+                        | SelectOp::Join(e)
+                        | SelectOp::Timer(e)
+                        | SelectOp::Cancelled(e) => self.expr(e),
+                    }
+                    self.pat(&mut a.pat);
+                    self.block(&mut a.body);
+                }
+            }
+            Stmt::Yield { value, .. } => self.expr(value),
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::Error(_) => {}
         }
     }

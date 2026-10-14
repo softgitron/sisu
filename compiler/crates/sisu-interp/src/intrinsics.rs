@@ -75,6 +75,26 @@ impl<'p> Interp<'p, '_> {
         args: Vec<Value>,
         ret: Option<&sir::Type>,
     ) -> Result<Value, Unwind> {
+        let mut args = args;
+        if let Some(r) = self.task_intrinsic(name, tys, &mut args) {
+            return r;
+        }
+        if name == "Mutex.lock" {
+            return self.lock(&mut args);
+        }
+        // A receiver's iterator waits for the next value.
+        if name == "Iter.next"
+            && let Some(v) = args.first()
+        {
+            let p = self.pointer_of(v)?;
+            if let Value::Iter(st) = self.read(&p)? {
+                match **st {
+                    IterState::Recv(c) => return self.recv_next(c, args),
+                    IterState::Gen(t) => return self.gen_next(t, args),
+                    _ => {}
+                }
+            }
+        }
         let mut a = Args(args);
         if let Some((owner, method)) = name.split_once('.') {
             return match owner {
@@ -1050,23 +1070,34 @@ impl Interp<'_, '_> {
     /// `Shared` and `Weak` (their contracts are in the prelude).
     fn shared_method(&mut self, owner: &str, method: &str, a: &mut Args) -> Result<Value, Unwind> {
         match (owner, method) {
-            ("Shared", "new") => {
+            // A site the escape analysis tagged may-cross counts atomically.
+            ("Shared", "new" | "new_atomic") => {
                 let value = a.take(0)?;
                 self.serial += 1;
                 let id = self.heap.len() as u32;
+                let atomic = method == "new_atomic";
+                if atomic {
+                    self.sched.stats.shared_crossing += 1;
+                } else {
+                    self.sched.stats.shared_local += 1;
+                }
                 self.heap.push(crate::value::HeapCell {
                     value,
                     strong: 1,
                     weak: 0,
                     serial: self.serial,
-                    atomic: false,
+                    atomic,
+                    creator: self.sched.cur,
+                    crossed: false,
                 });
                 Ok(Value::Shared(id))
             }
             ("Shared", "get") => {
                 let id = self.shared_id(a.get(0)?)?;
+                self.note_shared_access(id)?;
                 let serial = self.heap.get(id as usize).map(|c| c.serial).unwrap_or(0);
                 let p = crate::value::Pointer {
+                    task: 0,
                     frame: crate::value::HEAP,
                     serial,
                     local: id,
@@ -1077,6 +1108,7 @@ impl Interp<'_, '_> {
             }
             ("Shared", "downgrade") => {
                 let id = self.shared_id(a.get(0)?)?;
+                self.note_shared_access(id)?;
                 if let Some(c) = self.heap.get_mut(id as usize) {
                     c.weak += 1;
                 }
@@ -1084,6 +1116,7 @@ impl Interp<'_, '_> {
             }
             ("Shared", "count") => {
                 let id = self.shared_id(a.get(0)?)?;
+                self.note_shared_access(id)?;
                 Ok(Value::Int(self.heap.get(id as usize).map(|c| c.strong).unwrap_or(0) as i64))
             }
             ("Weak", "upgrade") => {
@@ -1091,6 +1124,7 @@ impl Interp<'_, '_> {
                     Value::Weak(id) => *id,
                     other => return Err(ice(format!("Weak.upgrade on {other:?}"))),
                 };
+                self.note_shared_access(id)?;
                 match self.heap.get_mut(id as usize) {
                     Some(c) if c.strong > 0 => {
                         c.strong += 1;
@@ -1142,6 +1176,7 @@ impl Interp<'_, '_> {
             "new" => Ok(Value::Mutex(Box::new(crate::value::MutexVal {
                 value: a.take(0)?,
                 locked: false,
+                holder: 0,
                 poisoned: false,
             }))),
             "lock" => {
@@ -1159,6 +1194,14 @@ impl Interp<'_, '_> {
             "is_poisoned" => match self.target(a.get(0)?)? {
                 Value::Mutex(m) => Ok(Value::Bool(m.poisoned)),
                 other => Err(ice(format!("Mutex.is_poisoned on {other:?}"))),
+            },
+            "into_inner" => match a.take(0)? {
+                Value::Mutex(m) if m.poisoned => {
+                    self.queue_drop(m.value, None);
+                    Err(panic(msg::PANIC_INTO_INNER_POISONED, &[]))
+                }
+                Value::Mutex(m) => Ok(m.value),
+                other => Err(ice(format!("Mutex.into_inner on {other:?}"))),
             },
             other => Err(ice(format!("unknown intrinsic `Mutex.{other}`"))),
         }

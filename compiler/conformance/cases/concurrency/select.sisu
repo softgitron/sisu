@@ -1,0 +1,50 @@
+# `select` (06, "Channels and select"): it waits for the first of its arms
+# that can go on, a receive, a send, a join, a timer or a scope's
+# cancellation, and runs that arm alone. Among arms that can all go on,
+# the seeded scheduler chooses.
+# explore 20
+
+error Late:
+    TimedOut
+
+def fetch_with_timeout(clock: Clock, n: int) -> int ! {Late, TaskError}:
+    return task.scope do s:
+        let h = s.spawn(() -> n * 2)
+        select:
+            case r = h.join():
+                return r
+            case _ = clock.after(Duration.seconds(5)):
+                s.cancel()
+                return Err(TimedOut)
+
+def first_message(rx: Receiver[str], other: Receiver[str]) -> String:
+    select:
+        case m = rx.recv():
+            return "from rx: {m}"
+        case m = other.recv():
+            return "from other: {m}"
+
+def main(sys: System):
+    print(fetch_with_timeout(sys.clock, 21))
+    let tx, rx = channel[str](capacity=1)
+    let tx2, rx2 = channel[str](capacity=1)
+    tx.send("hello").expect("room")
+    print(first_message(rx, rx2))
+    _ = tx2
+    let quiet = channel[int](capacity=1)
+    task.scope do s:
+        s.spawn do:
+            select:
+                case _ = s.cancelled():
+                    print("the watcher saw the cancellation")
+                case _ = quiet.1.recv():
+                    print("received")
+        s.cancel()
+    let full_tx, full_rx = channel[int](capacity=1)
+    full_tx.send(1).expect("room")
+    select:
+        case r = full_tx.send(2):
+            print("sent {r}")
+        case _ = sys.clock.after(Duration.millis(1)):
+            print("the channel stayed full")
+    _ = full_rx

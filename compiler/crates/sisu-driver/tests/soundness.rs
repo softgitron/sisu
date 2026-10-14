@@ -48,7 +48,7 @@ fn lower(src: &str) -> Option<sir::Program> {
 /// whether the interpreter hit an internal error, and what it printed.
 fn monitored(p: &sir::Program) -> (bool, bool, String) {
     let mut host = TestHost::default();
-    let options = Options { fuel: Some(200_000), monitor: true, coverage: false };
+    let options = Options { fuel: Some(200_000), monitor: true, ..Options::default() };
     let report = sisu_interp::run_main_report(p, &mut host, &options);
     let internal = host.err.contains("internal error in the interpreter");
     (report.violation, internal, host.err)
@@ -109,7 +109,60 @@ fn holes() -> Vec<(Rule, String)> {
             Rule::Moves,
             format!("{LOG}def take(own l: Log):\n    pass\n\ndef main():\n    let a = Log(name=\"a\")\n    take(a)\n    print(a.name)\n"),
         ),
+        // A task borrowing a local of the scope's body, which is gone
+        // before the scope joins the task (06).
+        (
+            Rule::Escapes,
+            "def main():\n    task.scope do s:\n        let name = String.new(\"x\")\n        s.spawn(() -> print(name))\n"
+                .into(),
+        ),
     ]
+}
+
+/// Runs `main` under the monitor with several schedule seeds; returns
+/// whether any run stopped at a violation.
+fn monitored_seeds(p: &sir::Program, seeds: u64) -> (bool, String) {
+    for seed in 0..seeds {
+        let mut host = TestHost::default();
+        let options = Options { fuel: Some(200_000), monitor: true, seed, ..Options::default() };
+        let report = sisu_interp::run_main_report(p, &mut host, &options);
+        if report.violation {
+            return (true, host.err);
+        }
+    }
+    (false, String::new())
+}
+
+/// The pinned loans of a task (06): with the conflict rules off, a body
+/// that reads what a task it spawned changes is accepted, and some
+/// schedule stops under the monitor.
+#[test]
+fn the_monitor_catches_a_task_race() {
+    let src = "def main():\n    var c = 0\n    task.scope do s:\n        s.spawn do:\n            c += 1\n        s.spawn(() -> print(c))\n";
+    let p = lower(src).unwrap_or_else(|| panic!("front-end errors in\n{src}"));
+    let full = sisu_borrowck::check(&p, &CheckOptions::default());
+    assert!(full.has_errors(), "the full checker accepts\n{src}");
+    let weak = sisu_borrowck::check(&p, &CheckOptions { disabled: vec![Rule::Conflicts] });
+    assert!(!weak.has_errors(), "with the conflict rules off the checker still rejects\n{src}");
+    let (violation, _) = monitored_seeds(&weak.program, 64);
+    assert!(violation, "no schedule of 64 stopped under the monitor:\n{src}");
+}
+
+/// The `Shared` escape analysis checked by the monitor (18, Phase 6): with
+/// the analysis off every site is task-local, and a `Shared` that tasks
+/// share is the monitor's soundness error; with it on, the run is clean.
+#[test]
+fn the_monitor_checks_shared_atomicity() {
+    let src = "def main():\n    let hits = Shared(Mutex(0))\n    task.scope do s:\n        for _ in range(4):\n            s.spawn do:\n                hits.lock().value += 1\n    print(hits.lock().value)\n";
+    let p = lower(src).unwrap_or_else(|| panic!("front-end errors in\n{src}"));
+    let full = sisu_borrowck::check(&p, &CheckOptions::default());
+    assert!(!full.has_errors());
+    assert_eq!(full.shared.crossing, 1, "the site is may-cross");
+    let (violation, err) = monitored_seeds(&full.program, 8);
+    assert!(!violation, "the tagged program stopped under the monitor:\n{err}");
+    let weak = sisu_borrowck::check(&p, &CheckOptions { disabled: vec![Rule::SharedEscape] });
+    let (violation, _) = monitored_seeds(&weak.program, 8);
+    assert!(violation, "a task-local tag on a shared `Shared` ran without a violation");
 }
 
 #[test]

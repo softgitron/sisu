@@ -87,7 +87,7 @@ impl Interp<'_, '_> {
                 true
             }
             (Value::Fs(x), Value::Fs(y)) => Rc::ptr_eq(x, y),
-            (Value::Env, Value::Env) | (Value::Clock, Value::Clock) => true,
+            (Value::Env, Value::Env) | (Value::Clock(_), Value::Clock(_)) => true,
             (Value::Fn(x), Value::Fn(y)) => x == y,
             _ => false,
         })
@@ -164,7 +164,7 @@ impl Interp<'_, '_> {
                 a.variant,
                 a.fields.iter().map(|x| self.key_of(x)).collect::<Result<_, _>>()?,
             ),
-            Value::Fs(_) | Value::Env | Value::Clock => Key::Handle,
+            Value::Fs(_) | Value::Env | Value::Clock(_) => Key::Handle,
             other => return Err(ice(format!("{other:?} is not hashable"))),
         })
     }

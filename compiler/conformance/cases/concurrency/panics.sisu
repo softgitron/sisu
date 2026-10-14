@@ -1,0 +1,44 @@
+# Panics in tasks (06, "Panics"): a panicking task unwinds to its scope,
+# which cancels its siblings and gives `TaskPanicked` to the joiner. The
+# supervisor of 06 restarts a worker that panics. A panic nobody joined, in
+# a scope whose result cannot carry it, continues in the scope's task.
+# explore 20
+
+struct Noisy:
+    name: String
+
+impl Drop for Noisy:
+    def drop(mut self):
+        print("dropped {self.name}")
+
+def worker(round: int) -> int:
+    let guard = Noisy(name="worker {round}")
+    if round < 2:
+        panic("worker {round} failed")
+    return round
+
+def supervise() -> int:
+    var round = 0
+    var result = 0
+    task.scope do s:
+        while True:
+            let r = round
+            let w = s.spawn(() -> worker(r))
+            match w.join():
+                case Err(TaskPanicked(message, _)):
+                    print("restarting after: {message}")
+                    round += 1
+                case Err(Cancelled):
+                    break
+                case Ok(v):
+                    result = v
+                    break
+    return result
+
+def main():
+    print(supervise())
+    task.scope do s:
+        s.spawn do:
+            let g = Noisy(name="the task's")
+            panic("nobody joins this")
+    print("not reached")

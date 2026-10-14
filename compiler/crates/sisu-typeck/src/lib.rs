@@ -14,6 +14,7 @@ mod expr;
 mod infer;
 mod pat;
 pub mod purity;
+mod tasks;
 pub mod thir;
 mod zonk;
 
@@ -77,6 +78,7 @@ fn check_fn(
         block: Block::empty(prog.def(def).span),
         span: prog.def(def).span,
         has_errors: false,
+        generator: None,
     };
     let Some(f) = prog.fn_info(def) else { return (empty, Vec::new(), Vec::new()) };
     let Some(body_ast) = &f.body else { return (empty, Vec::new(), Vec::new()) };
@@ -84,7 +86,30 @@ fn check_fn(
     c.self_ty = f.owner.clone();
     c.env = prog.elaborate_env(&f.predicates);
     c.generic_names = f.generics.iter().map(|g| g.name.clone()).collect();
-    let ret = if f.err_inferred {
+    // A generator: its `return` gives nothing, and calling it makes the
+    // `Iter` it declares.
+    let generator = if tasks::has_yield(body_ast) {
+        let declared = c.fn_ret(def);
+        match &declared {
+            Ty::Adt(d, a) if Some(*d) == prog.wk.iter && a.len() == 1 => Some(a[0].clone()),
+            _ => {
+                let span = f.ret_span.unwrap_or(prog.def(def).span);
+                let d = Diagnostic::new(msg::TYPE_GENERATOR_RESULT, span)
+                    .with("name", prog.def(def).name.clone())
+                    .with("ty", prog.display(&declared));
+                c.report(d);
+                // Checked as a generator of unknown items, so the one
+                // mistake is reported once.
+                Some(Ty::Error)
+            }
+        }
+    } else {
+        None
+    };
+    c.generator = generator.clone();
+    let ret = if generator.is_some() {
+        Ty::Unit
+    } else if f.err_inferred {
         let ok = match &f.ret {
             Ty::Adt(_, a) => a.first().cloned().unwrap_or(Ty::Unit),
             _ => Ty::Unit,
@@ -119,14 +144,38 @@ fn check_fn(
         c.declare(&p.name, l, false, p.span.range);
         params.push(l);
     }
-    let block = c.check_block_in_scope(body_ast);
+    let mut block = c.check_block_in_scope(body_ast);
     let r = c.infer.zonk(&ret);
+    let ret = if generator.is_some() { c.fn_ret(def) } else { ret };
+    // A generator's body becomes a task-like closure that owns the
+    // parameters; the function returns the iterator that runs it.
+    if generator.is_some() {
+        let id = ClosureId(c.closures.len() as u32);
+        let captures = params.iter().map(|&l| Capture { local: l, mutable: false, by_value: true }).collect();
+        let fn_ty = Ty::Fn(Box::new(sisu_resolve::FnTy { params: Vec::new(), ret: Ty::Unit, pure: f.pure }));
+        let span = block.span;
+        c.closures.push(Some(Closure {
+            params: Vec::new(),
+            captures,
+            own: true,
+            ret: Ty::Unit,
+            body: block,
+            span,
+            fn_ty,
+            comptime: false,
+            role: ClosureRole::Task,
+        }));
+        let value = Expr::new(ExprKind::Generator(id), ret.clone(), span);
+        block = Block { stmts: vec![Stmt::Return { value: Some(value), span }], span };
+    }
     if !matches!(r, Ty::Unit | Ty::Never | Ty::Error) && !f.body_broken && !c.block_diverges(&block) {
         let d = Diagnostic::new(msg::TYPE_MISSING_RETURN, def_span)
             .with("name", prog.def(def).name.clone())
             .with("ty", prog.display(&r));
         c.report(d);
     }
+    c.decide_captures();
+    c.check_own_closures();
     check_bounds(&mut c);
     check_comptime_types(&mut c);
     let absorbed = c.infer.absorbed();
@@ -145,6 +194,7 @@ fn check_fn(
                 span: def_span,
                 fn_ty: Ty::Error,
                 comptime: false,
+                role: ClosureRole::Plain,
             })
         })
         .collect();
@@ -158,6 +208,7 @@ fn check_fn(
         block,
         span: def_span,
         has_errors,
+        generator,
     };
     zonk::Zonker { prog, infer: &c.infer }.body(&mut body);
     // A pure body's calls are checked on SIR (sisu-borrowck's purity pass).
@@ -165,11 +216,92 @@ fn check_fn(
     (body, diags, absorbed)
 }
 
+/// The `Send` and `Sync` checks of the tasks the body spawns, once types
+/// are known (06, "Send, Sync, and shared state"): what a task moves in
+/// (or keeps a copy of) must be `Send`, what it shares by reference
+/// `Sync`, what it changes through a reference `Send`, and what it
+/// returns `Send`. The message names the part of the type in the way.
+fn check_spawns(c: &mut Checker) {
+    use sisu_resolve::Auto;
+    let prog = c.prog;
+    for (id, span) in std::mem::take(&mut c.spawn_checks) {
+        let Some(Some(cl)) = c.closures.get(id.0 as usize).cloned() else { continue };
+        for cap in &cl.captures {
+            let ty = prog.normalize(&c.infer.zonk(&c.local_ty(cap.local)), &c.env);
+            if c.infer.has_vars(&ty) || ty.contains_error() {
+                continue;
+            }
+            let name = c.locals[cap.local.0 as usize].name.clone();
+            let (auto, m) = if cap.by_value {
+                (Auto::Send, msg::TASK_NOT_SEND)
+            } else if cap.mutable {
+                (Auto::Send, msg::TASK_NOT_SEND_MUT)
+            } else {
+                (Auto::Sync, msg::TASK_NOT_SYNC)
+            };
+            if let Err(o) = prog.auto_trait(&ty, auto, &c.env) {
+                let d = obstacle_diag(c, m, span, &name, &ty, &o);
+                c.report(d);
+            }
+        }
+        let ret = prog.normalize(&c.infer.zonk(&cl.ret), &c.env);
+        if !c.infer.has_vars(&ret)
+            && !ret.contains_error()
+            && let Err(o) = prog.auto_trait(&ret, Auto::Send, &c.env)
+        {
+            let d = obstacle_diag(c, msg::TASK_RESULT_NOT_SEND, span, "", &ret, &o);
+            c.report(d);
+        }
+    }
+}
+
+/// A `Send` or `Sync` diagnostic: the capture, its type, and the part of
+/// the type in the way, with the wrapper that would make it shareable.
+fn obstacle_diag(
+    c: &Checker,
+    m: sisu_diag::MsgId,
+    span: sisu_diag::Span,
+    name: &str,
+    ty: &Ty,
+    o: &sisu_resolve::Obstacle,
+) -> Diagnostic {
+    let prog = c.prog;
+    let path = if o.path.is_empty() {
+        String::new()
+    } else {
+        let mut p = name.to_string();
+        for seg in &o.path {
+            if seg == "[]" {
+                p.push_str("[...]");
+            } else {
+                if !p.is_empty() {
+                    p.push('.');
+                }
+                p.push_str(seg);
+            }
+        }
+        format!(" because of `{p}`, a `{}`", c.show(&o.ty))
+    };
+    let mut d =
+        Diagnostic::new(m, span).with("name", name.to_string()).with("ty", c.show(ty)).with("path", path);
+    // A `Cell` shares mutation through a `Mutex` instead.
+    if let Ty::Adt(cd, a) = &o.ty
+        && prog.builtin(*cd) == Some("Cell")
+    {
+        let inner = a.first().map(|t| c.show(t)).unwrap_or_default();
+        d = d.note(msg::TASK_WRAP_MUTEX, vec![("ty", inner)]);
+    } else if m == msg::TASK_NOT_SYNC {
+        d = d.note(msg::TASK_USE_OWN, Vec::new());
+    }
+    d
+}
+
 /// Checks the bounds the body's calls and constructs required, once
 /// inference is done: each type must implement its trait (03, "Generic
 /// syntax"; a generic body is checked against its own bounds only).
 fn check_bounds(c: &mut Checker) {
     let prog = c.prog;
+    check_spawns(c);
     for (ty, owner, span) in std::mem::take(&mut c.owner_checks) {
         let t = prog.normalize(&c.infer.zonk(&ty), &c.env);
         if c.infer.has_vars(&t) || t.contains_error() {
@@ -290,6 +422,8 @@ fn check_value(
     }
     c.ret.push(RetCtx { ty: ty.clone(), closure: None, first_local: 0, loops: 0, captures: Vec::new() });
     let x = c.check_expr(expr, ty);
+    c.decide_captures();
+    c.check_own_closures();
     check_bounds(&mut c);
     check_comptime_types(&mut c);
     let span = x.span;
@@ -306,6 +440,7 @@ fn check_value(
         block,
         span,
         has_errors,
+        generator: None,
     };
     zonk::Zonker { prog, infer: &c.infer }.body(&mut body);
     (body, std::mem::take(&mut c.diags))

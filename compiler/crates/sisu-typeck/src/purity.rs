@@ -25,6 +25,10 @@ struct Walker<'a> {
 impl Walker<'_> {
     fn block(&mut self, b: &Block) {
         for s in &b.stmts {
+            // `select` observes the schedule (06, "Effects").
+            if matches!(s, Stmt::Select { .. }) && self.found.is_none() {
+                self.found = Some("select".into());
+            }
             visit_stmt(s, &mut |e| self.expr(e));
         }
     }
@@ -124,6 +128,19 @@ pub fn visit_stmt(s: &Stmt, f: &mut dyn FnMut(&Expr)) {
             }
         }
         Stmt::Defer { body, .. } | Stmt::Block(body) => visit_block(body, f),
+        Stmt::Select { arms, .. } => {
+            for a in arms {
+                match &a.op {
+                    SelectOp::Recv(e)
+                    | SelectOp::Send(e)
+                    | SelectOp::Join(e)
+                    | SelectOp::Timer(e)
+                    | SelectOp::Cancelled(e) => visit_expr(e, f),
+                }
+                visit_block(&a.body, f);
+            }
+        }
+        Stmt::Yield { value, .. } => visit_expr(value, f),
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::Error(_) => {}
     }
 }
