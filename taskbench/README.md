@@ -20,12 +20,12 @@ Rust code on native stacks, standing in for compiled Sisu.
 |---|---|
 | Runtime: scheduler, scopes, cancellation, parking, timers, network I/O, io_uring driver | done, unit-tested (`cargo test`) |
 | Stack strategies A (guard page), B (pooled + probes), C (exact small), D (decommit on park), E (stackless) | done, unit-tested |
-| Benchmarks `spawn-join`, `idle-memory`, `max-tasks`, `echo`, `idle-connections`, `deep-recursion`, `starvation`, `probe-overhead`, `cancel-uring` | done, smoke-tested (`tests/smoke.rs`), run at full scale on machine 1 |
-| Controls: Go, Java virtual threads, tokio, OS threads | done, run at full scale on machine 1 |
+| Benchmarks `spawn-join`, `idle-memory`, `max-tasks`, `echo`, `idle-connections`, `deep-recursion`, `starvation`, `probe-overhead`, `cancel-uring` | done, smoke-tested (`tests/smoke.rs`), run at full scale on both machines |
+| Controls: Go, Java virtual threads, tokio, OS threads | done, run at full scale on both machines |
 | `run_all.sh`, `scale.sh`, `load.sh`, `controls/run_controls.sh`, `summarize.py` | done, run here; `.github/workflows/harness-full.yml` runs them on a GitHub-hosted runner |
 | `docs/stackless-fallback-estimate.md`, `docs/report-template.md` | done |
-| Phase 1 report, [`docs/report-phase1.md`](docs/report-phase1.md) | done for machine 1: every configuration, the verdict per threshold (provisional) and the Q-6 recommendation; rendered from the CSVs by `report/render.py` |
-| Full-scale runs | machine 1 (this VM): every benchmark, five runs per cell, 2026-10-13, in [`results/vm/2026-10-13-phase1/`](results/vm/2026-10-13-phase1/), the groups that measure time behind the quiet gate; the 10k-connection echo is not run and idle connections ran at 9,900 (`RLIMIT_NOFILE`). Machine 2 (a GitHub-hosted runner): the CI smoke run only, in [`results/github-runner/2026-10-13-smoke-b5349dd405e8/`](results/github-runner/2026-10-13-smoke-b5349dd405e8/); its full-scale run is the `harness-full` workflow, started by pushing a `harness-run-*` tag (**not done yet**) |
+| Phase 1 report, [`docs/report-phase1.md`](docs/report-phase1.md) | done for both machines: every configuration side by side, the verdict per threshold (provisional until the pre-registration is frozen) and the Q-6 recommendation; rendered from the CSVs by `report/render.py` |
+| Full-scale runs | machine 1 (this VM): every benchmark, five runs per cell, 2026-10-13, in [`results/vm/2026-10-13-phase1/`](results/vm/2026-10-13-phase1/), the groups that measure time behind the quiet gate; the 10k-connection echo is not run and idle connections ran at 9,900 (`RLIMIT_NOFILE`). Machine 2 (a GitHub-hosted runner, 2 vCPUs, 7.75 GiB): every benchmark, five runs per cell, 2026-10-14, the `harness-full` workflow's run 38518035636 inside a 12 GiB memory scope, in [`results/github-runner/full-38518035636/`](results/github-runner/full-38518035636/); the memory guard stopped the 1M-task `idle-memory` cells of B and D(B) at 1 MiB and 8 MiB (failed rows). Its earlier CI smoke run is in [`results/github-runner/2026-10-13-smoke-b5349dd405e8/`](results/github-runner/2026-10-13-smoke-b5349dd405e8/), and the log summary of a lost first full run in [`results/github-runner/full-38495423545-log-summary.md`](results/github-runner/full-38495423545-log-summary.md) (a cross-check only) |
 
 ## Layout
 
@@ -55,7 +55,10 @@ report/               the Phase 1 report's source (report-phase1.md.in) and its 
                       which computes every figure from the results CSVs
 results/              vm/2026-10-13-phase1: the Phase 1 runs (full scale, five repetitions, machine 1;
                       superseded and aborted runs in subdirectories, each with a note);
-                      github-runner/2026-10-13-smoke-b5349dd405e8: the CI smoke run on a runner (machine 2);
+                      github-runner/full-38518035636: the Phase 1 runs on a runner (full scale, five
+                      repetitions, machine 2); github-runner/2026-10-13-smoke-b5349dd405e8: the CI smoke
+                      run on a runner; github-runner/full-38495423545-log-summary.md: the job log's
+                      summary of a full run whose CSVs were lost;
                       vm/2026-10-12 and vm/2026-10-12-large: development runs of harness 0.1.0
 ```
 
@@ -74,8 +77,10 @@ python3 summarize.py [--markdown] results/<machine>/<date> [more directories]
 ```
 
 The GitHub workflow `.github/workflows/harness-full.yml` runs `--scale full` on
-a GitHub-hosted runner when a tag `harness-run-*` is pushed, and uploads the
-results as the artifact `taskbench-full-<tag>`.
+a GitHub-hosted runner, inside a systemd scope with a 12 GiB memory cap, when a
+tag `harness-run-*` is pushed or a push to the working branch carries
+`[harness-full]` in its head commit message, and uploads the results as the
+artifact `taskbench-full-<run id>`.
 
 ## How the harness maps to the bet-3 thresholds
 
@@ -313,34 +318,43 @@ the load per benchmark.
 ### Phase 1 (October 2026)
 
 The Phase 1 report is [`docs/report-phase1.md`](docs/report-phase1.md): every
-configuration at full scale on machine 1 (this VM, five runs per cell, in
-[`results/vm/2026-10-13-phase1/`](results/vm/2026-10-13-phase1/)), machine 2's
-CI smoke run on a GitHub-hosted runner (in
-[`results/github-runner/2026-10-13-smoke-b5349dd405e8/`](results/github-runner/2026-10-13-smoke-b5349dd405e8/)),
+configuration at full scale on both machines, five runs per cell, side by side
+(machine 1 in [`results/vm/2026-10-13-phase1/`](results/vm/2026-10-13-phase1/),
+machine 2 in
+[`results/github-runner/full-38518035636/`](results/github-runner/full-38518035636/)),
 the verdict against each pre-registered threshold, and the Q-6 recommendation.
 Machine 1 is a 4-vCPU KVM guest (Intel Xeon @ 2.10 GHz, no PMU), 15.7 GiB with a
 13.4 GiB memory cgroup, no swap, Linux 6.18, default sysctls, `RLIMIT_NOFILE`
 20000; Rust 1.97.0, Go 1.24.7, OpenJDK 21.0.12. It is shared with other
 development work, so the groups that measure time ran behind the quiet gate
-(`--quiet-below 0.3`; the load is in `load.csv`). Medians of five runs; KiB per
-task is resident memory plus page tables.
+(`--quiet-below 0.3`; the load is in `load.csv`). Machine 2 is a GitHub-hosted
+runner: an Intel Xeon Platinum 8370C Hyper-V guest whose 2 vCPUs are one core's
+two hardware threads, 7.75 GiB (`machine-spec.csv`), no swap, Linux
+6.17.0-1022-azure, `vm.max_map_count` restored to 65530; Rust 1.99.0, Go
+1.24.13, Temurin 21.0.12.1; run by the `harness-full` workflow (run
+38518035636) inside a `systemd-run` scope with `MemoryMax=12G` and
+`MemorySwapMax=0`, whose `RLIMIT_NOFILE` was 1048576. The 12 GiB cap is above
+the machine's memory, so it never bound; the memory guard stopped the 1M-task
+`idle-memory` cells of B and D(B) at 1 MiB and 8 MiB, which are failed rows.
+Medians of five runs; KiB per task is resident memory plus page tables. The
+verdicts are provisional until the pre-registration is frozen.
 
-| Bet-3 row | Machine 1 | Verdict (provisional) |
-|---|---|---|
-| Memory per idle task within 4x Go (after the excursion: Go after GC) | D(B), 1 MiB: 6.43 KiB shallow and 6.44 KiB after the excursion at 1M tasks, against Go's 2.67 [2.65-2.70] and 5.02 [5.01-5.02] (after GC, 100k); worst ratio 2.41. B and C fail after the excursion (6.86x, 7.08x); A and D(A) stop at 32,730 tasks | not shown until machine 2 runs at full scale; on machine 1, D(B) passes |
-| Spawn plus join within 3x Go (pooled stacks) | B 0.64 [0.64-0.80] us, 1.40x Go | holds |
-| 1M idle tasks, default sysctls | B, C, D(B), E, tokio, Go, Java: 1M, still parked after 60 s; A and D(A): 32,730 (`vm.max_map_count`) | fails for guard pages per task, holds for pooled stacks |
-| Echo p99 at 10k connections within 2x Go | not run (descriptor limit); at 1000 connections D(B) 0.85x Go | not shown |
-| Clean "stack exhausted", never a segfault | every case clean, 0 crashes; at most 2,088 bytes of the 5 KiB reserve used | holds (harness part) |
-| Starvation: no worse than Go, under 10 ms | B 25.7 [25.0-30.0] us with yield points every 10k iterations; Go 39.3 [39.3-39.4] ms | holds |
-| Probe overhead at most 3 % | `split`: fib 13.3 %, calls 0.0 %, tree 4.5 %, back-edge yield check -0.1 % | not decided (no PMU; policy 1); at face value `fib` and `tree` exceed 3 % |
-| A1: no buffer written after its cancelled read returned | 0 bytes over 1M cancelled reads per run, 25 runs in all on the five stackful strategies | holds |
+| Bet-3 row | Machine 1 | Machine 2 | Verdict (provisional) |
+|---|---|---|---|
+| Memory per idle task within 4x Go (after the excursion: Go after GC), on both machines | D(B) passes at every reservation: worst ratio 1.75 / 2.41 / 3.16 at 128 KiB / 1 MiB / 8 MiB (D(B)/1 MiB: 6.43 KiB shallow and 6.44 KiB after the excursion at 1M tasks, against Go's 2.67 [2.65-2.70] and 5.02 [5.01-5.02] after GC at 100k). B and C fail after the excursion (6.86x, 7.08x); A and D(A) stop at 32,730 tasks | D(B) passes at 128 KiB (worst ratio 1.75); at 1 MiB and 8 MiB the 100k conditions pass (worst 2.41, 3.16) but the memory guard stopped the 1M cells at 950,272-962,560 and 712,704-733,184 tasks, so they are inconclusive. B and C fail after the excursion (6.94x, 7.15x); A and D(A) stop at 32,738 tasks | holds, through D(B) at 128 KiB on both machines; at the 1 MiB default, inconclusive on machine 2 (its 1M cells rest on machine 1) |
+| Spawn plus join within 3x Go (pooled stacks) | B 0.64 [0.64-0.80] us, 1.40x Go | B 0.73 [0.52-0.73] us, 1.84x Go | holds |
+| 1M idle tasks, default sysctls | B, C, D(B), E, tokio, Go, Java: 1M, still parked after 60 s; A and D(A): 32,730 (`vm.max_map_count`) | the same; A and D(A): 32,738 | fails for guard pages per task, holds for pooled stacks |
+| Echo p99 at 10k connections within 2x Go | not run (descriptor limit); at 1000 connections D(B) 0.85x Go | D(B) 0.91x and B 0.91x Go, every stackful strategy at most 1.07x; at 1000 connections D(B) 0.87x | not shown (one machine) |
+| Clean "stack exhausted", never a segfault | every case clean, 0 crashes; at most 2,088 bytes of the 5 KiB reserve used | the same | holds (harness part) |
+| Starvation: no worse than Go, under 10 ms | B 25.7 [25.0-30.0] us with yield points every 10k iterations; Go 39.3 [39.3-39.4] ms | B 23.6 [23.3-23.7] us; Go 39.2 ms | holds |
+| Probe overhead at most 3 % | `split`: fib 13.3 %, calls 0.0 %, tree 4.5 %, back-edge yield check -0.1 % | fib 8.6 %, calls 0.2 %, tree 2.2 %, back-edge yield check 3.5 % | not decided (no PMU; policy 1); at face value `fib` exceeds 3 % on both, `tree` on machine 1 and the back-edge check on machine 2 |
+| A1: no buffer written after its cancelled read returned | 0 bytes over 1M cancelled reads per run, 25 runs in all on the five stackful strategies | the same, 25 runs | holds |
 
 Q-6, provisionally: D(B) with a 1 MiB default reservation, software probes
 rather than guard pages, the 5 KiB reserve, `spawn` ambient, and no stackless
-fallback. The full-scale run on machine 2 is
-[`.github/workflows/harness-full.yml`](../.github/workflows/harness-full.yml),
-triggered by a `harness-run-*` tag.
+fallback. The 1 MiB default's 1M-task cells are measured on machine 1 only
+(machine 2's 7.75 GiB could not hold them); they should be reproduced on a
+second machine with 16 GiB before the default is final.
 
 ### Earlier development runs (harness 0.1.0, October 12)
 
@@ -435,19 +449,23 @@ CSVs in `results/vm/2026-10-12-large/`. This VM has the 16 GiB of the scale row.
 
 ## Not tested here, and why
 
-* **Machine 2 at full scale.** Only the CI smoke run (one run per cell, 2
-  workers, harness 0.1.0) exists for the GitHub-hosted runner. The full-scale
-  run is the `harness-full` workflow. This repository is private, so
-  `ubuntu-latest` is the 2-vCPU, 8 GB runner: there the 1M-task cells stop at
-  the memory guard (failed rows), and the scale row and the 1M memory cells need
-  a 16 GB runner (`ubuntu-latest` of a public repository, or a larger runner).
-* **10k-connection echo and 100k idle connections.** Both ends live in one
-  process, which needs `RLIMIT_NOFILE >= 2N + 64`. The hard limit here is 20000 and
-  cannot be raised (policy 3), so the 10k echo is a `failed` row and idle
-  connections run at 9,900, the most the limit allows; a runner with a hard
-  limit of 65536 runs the 10k echo and 32,700 idle connections. The echo is a
-  closed loop with in-process clients, not the open-loop generator on disjoint
-  cores of proposal/20, section 6.5.
+* **Machine 2's 1M-task cells at 1 MiB and 8 MiB.** Machine 2 is the 2-vCPU,
+  8 GB `ubuntu-latest` runner of a private repository (7.75 GiB in
+  `machine-spec.csv`), not the 16 GB machine of proposal/20, section 4.4. Its
+  memory guard stopped the 1M-task `idle-memory` cells of B and D(B) at 1 MiB
+  and 8 MiB (failed rows), so those cells, D(B)'s at the recommended default
+  among them, are measured on machine 1 only. The workflow's 12 GiB memory scope
+  is above that runner's memory and never bound. A 16 GB runner (`ubuntu-latest`
+  of a public repository, or a larger runner) would hold them.
+* **10k-connection echo and 100k idle connections on machine 1.** Both ends live
+  in one process, which needs `RLIMIT_NOFILE >= 2N + 64`. The hard limit here is
+  20000 and cannot be raised (policy 3), so the 10k echo is a `failed` row and
+  idle connections run at 9,900, the most the limit allows. Machine 2's
+  processes had a hard limit of 1048576 inside the workflow's scope (the
+  runner's own default is 65536) and ran both cells, except idle connections
+  for A and D(A), whose server tasks meet the VMA limit. The echo is a closed
+  loop with in-process clients, not the open-loop generator on disjoint cores
+  of proposal/20, section 6.5.
 * **1M tasks after the 32 KiB excursion, for designs that keep the pages.** A, B, C
   and Go would need about 33 GiB; policy 7 requires the cell only of strategies
   that release pages, so the others run `--skip-excursion` at 1M and the cell is
@@ -458,9 +476,9 @@ CSVs in `results/vm/2026-10-12-large/`. This VM has the 16 GiB of the scale row.
   figures are in section 7 of the report; `fib` is an upper bound, see
   `src/bench/probe_overhead.rs`). Policy 1 defers the decision to the native era
   on a machine with pinned frequency and `perf_event` hardware counters.
-* **Go "latest stable".** The machines have Go 1.24 (1.24.7 here); the plan asks
-  for the latest stable release. JDK is 21.0.12 (virtual threads final; JEP 491
-  unpinning is 24+).
+* **Go "latest stable".** The machines have Go 1.24 (1.24.7 on machine 1,
+  1.24.13 on machine 2); the plan asks for the latest stable release. JDK is
+  21.0.12 on both (virtual threads final; JEP 491 unpinning is 24+).
 
 ## Not implemented
 

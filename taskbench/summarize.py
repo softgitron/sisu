@@ -14,7 +14,9 @@ starvation against Go with its default asynchronous preemption (no
 runtime.Gosched). Ratio intervals are 95% percentile bootstrap intervals from
 10,000 resamples of the runs (section 7.2; reported, never used for a decision),
 followed by the conservative range [min/max, max/min] that section 2.4 uses to
-call a cell inconclusive when it crosses a threshold. The last table is the
+call a cell inconclusive when it crosses a threshold; with two machines,
+section 2.4's rule is also applied to both (a configuration passes or fails only
+if it does so on each machine). The last table is the
 machine's load during the runs (load.csv, written by load.sh): how many
 processes were measured again because other processes were busy, and how many
 CPUs the other processes used during the processes that were kept. Standard
@@ -197,7 +199,10 @@ def scaled(v, unit):
 def fmt_num(v, unit, digits=None):
     x = scaled(v, unit)
     if digits is None:
-        digits = 0 if abs(x) >= 100 or float(x).is_integer() else (1 if abs(x) >= 10 else 2)
+        # A whole number prints without decimals only when it is a count; a
+        # scaled value (1000 ns = 1.00 us) keeps them.
+        whole = unit == "" and float(x).is_integer()
+        digits = 0 if abs(x) >= 100 or whole else (1 if abs(x) >= 10 else 2)
     s = f"{x:,.{digits}f}"
     # a value that rounds to zero is shown without a sign ("-0.0" reads as negative)
     return s[1:] if s.startswith("-") and float(s[1:].replace(",", "")) == 0 else s
@@ -281,94 +286,135 @@ def t_idle_memory(cells, md):
                      "RSS-only excursion / Go after GC"], lines, md)
 
 
-def brief(why):
-    """A short form of a failure note: the limit and how far the run got."""
+def brief(why, created=None):
+    """A short form of a failure note: the limit and how far the run got. With
+    `created` (the cell's tasks_created values, one per run), the count is the
+    range over the runs, not the first run's."""
     m = re.search(r"created (\d+) of (\d+): (.*)", why)
     if m:
-        created, wanted, rest = int(m.group(1)), int(m.group(2)), m.group(3)
+        first, wanted, rest = int(m.group(1)), int(m.group(2)), m.group(3)
         limit = "VMA limit" if "VMA limit" in rest else ("memory guard" if "headroom" in rest else rest[:40])
-        return f"{limit} at {created:,} of {wanted:,} tasks"
+        lo, hi = (min(created), max(created)) if created else (first, first)
+        count = f"{lo:,.0f}" if lo == hi else f"{lo:,.0f}-{hi:,.0f}"
+        return f"{limit} at {count} of {wanted:,} tasks"
     return why[:70]
 
 
-def t_memory_rule(cells, md):
-    """Section 2.4 of proposal/20: for each stackful configuration, its worst ratio
-    w to Go over the four memory conditions (100k and 1M tasks, shallow and after
-    the excursion). Baselines: Go shallow; after the excursion, Go after its
-    collection (policy 4). The 1M cell after the excursion is required only of
-    strategies that release pages on park (policy 7); Go's own cell there does
-    not fit 16 GiB, so the substitute baselines are Go after GC at 100k (same
-    condition, nearest N) and Go shallow at 1M (a lower bound for Go after GC at
-    1M); the larger of the two ratios is used. A configuration passes at w <= 4;
-    a cell whose conservative range crosses 4, or that the memory guard stopped
-    because the machine is too small, is inconclusive."""
-    b = "idle-memory"
-    for m in machines(cells, b):
-        def cell(label, n):
-            return cells.get((m, b, f"{label} N={n}"))
+def memory_rule(cells, m):
+    """Section 2.4 of proposal/20 on machine `m`: for each stackful configuration,
+    its worst ratio w to Go over the four memory conditions (100k and 1M tasks,
+    shallow and after the excursion). Baselines: Go shallow; after the excursion,
+    Go after its collection (policy 4). The 1M cell after the excursion is
+    required only of strategies that release pages on park (policy 7); Go's own
+    cell there does not fit 16 GiB, so the substitute baselines are Go after GC
+    at 100k (same condition, nearest N) and Go shallow at 1M (a lower bound for
+    Go after GC at 1M); the larger of the two ratios is used. A configuration
+    passes at w <= 4; a cell whose conservative range crosses 4, or that the
+    memory guard stopped because the machine is too small, is inconclusive.
 
-        go = {n: cell("go", n) for n in (100000, 1000000)}
-        configs = sorted({k[2].split(" N=")[0] for k in cells if k[0] == m and k[1] == b
-                          and k[2].split("/")[0] in ("A", "B", "C", "D(A)", "D(B)")})
-        if not any(go.values()):
+    Returns None when the machine has no Go cell at 100k or 1M, else a list of
+    (label, [four condition texts], worst ratio or None (inf: a failed cell),
+    verdict, verdict text)."""
+    b = "idle-memory"
+
+    def cell(label, n):
+        return cells.get((m, b, f"{label} N={n}"))
+
+    go = {n: cell("go", n) for n in (100000, 1000000)}
+    if not any(go.values()):
+        return None
+    configs = sorted({k[2].split(" N=")[0] for k in cells if k[0] == m and k[1] == b
+                      and k[2].split("/")[0] in ("A", "B", "C", "D(A)", "D(B)")})
+    out = []
+    for lab in configs:
+        conds, worst, crosses, stopped = [], None, False, False
+        releases = lab.startswith("D(")
+        for n in (100000, 1000000):
+            c = cell(lab, n)
+            for phase in ("shallow", "excursion"):
+                metric = f"total_per_task_{phase}"
+                if n == 1000000 and phase == "excursion" and not releases:
+                    conds.append("not required (policy 7)")
+                    continue
+                if c is None:
+                    conds.append("not run")
+                    continue
+                bad = c.bad(metric)
+                if bad and bad[0] == "failed" or (c.bad("tasks_created") or ("", ""))[0] == "failed":
+                    why = (c.bad("tasks_created") or bad)[1]
+                    created = c.values.get("tasks_created")
+                    if "memory headroom below" in why:
+                        # The machine is too small for the cell (the guard
+                        # stopped it): no value, not a failure of the strategy.
+                        conds.append("not computable: " + brief(why, created))
+                        stopped = True
+                        continue
+                    conds.append("fails: " + brief(why, created))
+                    worst = float("inf")
+                    continue
+                if phase == "shallow":
+                    refs = [("Go", go[n], metric)]
+                elif n == 100000 or (go[n] and not go[n].bad("total_per_task_excursion_after_gc")):
+                    refs = [("Go after GC", go[n], "total_per_task_excursion_after_gc")]
+                else:
+                    refs = [("Go after GC at 100k", go[100000], "total_per_task_excursion_after_gc"),
+                            ("Go shallow at 1M", go[1000000], "total_per_task_shallow")]
+                parts = []
+                for name, ref, ref_metric in refs:
+                    r = ratio(c, metric, ref, ref_metric)
+                    if r is None:
+                        parts.append(f"no {name}")
+                        continue
+                    parts.append(f"{fmt_ratio(r)} vs {name}")
+                    worst = r[0] if worst is None else max(worst, r[0])
+                    if r[2] and r[2][0] <= 4 < r[2][1]:
+                        crosses = True
+                conds.append("; ".join(parts))
+        if worst is None:
+            verdict, text = "not computable", "not computable"
+        elif worst > 4:
+            verdict = "fails"
+            text = f"fails (w = {worst:.3g})" if worst != float("inf") else "fails"
+        elif crosses or stopped:
+            verdict = "inconclusive"
+            why = " and ".join(filter(None, ["a five-run range crosses 4" if crosses else "",
+                                             "the memory guard stopped a cell" if stopped else ""]))
+            # Without every condition, the worst ratio is only that of the measured ones.
+            text = f"inconclusive ({'worst measured' if stopped else 'w ='} {worst:.3g}; {why})"
+        else:
+            verdict, text = "passes", f"passes (w = {worst:.3g})"
+        out.append((lab, conds, worst, verdict, text))
+    return out
+
+
+def rule_on_both(v1, v2):
+    """Section 2.4's verdict for one configuration from its verdicts on the two
+    machines: passes on both, fails on both, otherwise inconclusive."""
+    if v1 == v2 and v1 in ("passes", "fails"):
+        return v1
+    return "inconclusive"
+
+
+def t_memory_rule(cells, md):
+    """Prints memory_rule for every machine, then, with two machines, the
+    configuration's verdict on both (section 2.4)."""
+    b = "idle-memory"
+    per = {}
+    for m in machines(cells, b):
+        rows = memory_rule(cells, m)
+        if rows is None:
             print(f"\n## memory rule (proposal/20, section 2.4) on {m}: no Go cell at 100k or 1M tasks; not computable")
             continue
-        lines = []
-        for lab in configs:
-            conds, notes, worst, crosses = [], [], None, False
-            releases = lab.startswith("D(")
-            for n in (100000, 1000000):
-                c = cell(lab, n)
-                for phase in ("shallow", "excursion"):
-                    metric = f"total_per_task_{phase}"
-                    if n == 1000000 and phase == "excursion" and not releases:
-                        conds.append("not required (policy 7)")
-                        continue
-                    if c is None:
-                        conds.append("not run")
-                        continue
-                    bad = c.bad(metric)
-                    if bad and bad[0] == "failed" or (c.bad("tasks_created") or ("", ""))[0] == "failed":
-                        why = (c.bad("tasks_created") or bad)[1]
-                        if "memory headroom below" in why:
-                            # The machine is too small for the cell (the guard
-                            # stopped it): no value, not a failure of the strategy.
-                            conds.append("not computable: " + brief(why))
-                            crosses = True
-                            continue
-                        conds.append("fails: " + brief(why))
-                        worst = float("inf")
-                        continue
-                    if phase == "shallow":
-                        refs = [("Go", go[n], metric)]
-                    elif n == 100000 or (go[n] and not go[n].bad("total_per_task_excursion_after_gc")):
-                        refs = [("Go after GC", go[n], "total_per_task_excursion_after_gc")]
-                    else:
-                        refs = [("Go after GC at 100k", go[100000], "total_per_task_excursion_after_gc"),
-                                ("Go shallow at 1M", go[1000000], "total_per_task_shallow")]
-                    parts = []
-                    for name, ref, ref_metric in refs:
-                        r = ratio(c, metric, ref, ref_metric)
-                        if r is None:
-                            parts.append(f"no {name}")
-                            continue
-                        parts.append(f"{fmt_ratio(r)} vs {name}")
-                        worst = r[0] if worst is None else max(worst, r[0])
-                        if r[2] and r[2][0] <= 4 < r[2][1]:
-                            crosses = True
-                    conds.append("; ".join(parts))
-            if worst is None:
-                verdict = "not computable"
-            elif worst > 4:
-                verdict = f"fails (w = {worst:.3g})" if worst != float("inf") else "fails"
-            elif crosses:
-                verdict = f"inconclusive (w = {worst:.3g}; a range crosses 4 or a cell did not fit)"
-            else:
-                verdict = f"passes (w = {worst:.3g})"
-            lines.append([lab] + conds + [verdict])
+        per[m] = {lab: verdict for lab, _, _, verdict, _ in rows}
         print_table(f"memory rule (proposal/20, section 2.4) on {m}: ratio to Go, worst over four conditions",
                     ["configuration", "100k shallow", "100k after excursion", "1M shallow", "1M after excursion",
-                     "verdict on this machine"], lines, md)
+                     "verdict on this machine"], [[lab] + conds + [text] for lab, conds, _, _, text in rows], md)
+    if len(per) == 2:
+        (m1, r1), (m2, r2) = sorted(per.items())
+        lines = [[lab, r1.get(lab, "not run"), r2.get(lab, "not run"),
+                  rule_on_both(r1.get(lab), r2.get(lab))] for lab in sorted(set(r1) | set(r2))]
+        print_table(f"memory rule (proposal/20, section 2.4) on both machines ({m1}, {m2})",
+                    ["configuration", m1, m2, "verdict (passes or fails only if both machines agree)"], lines, md)
 
 
 def t_spawn_join(cells, md):
