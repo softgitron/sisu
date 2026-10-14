@@ -88,8 +88,18 @@ jobs:
       # repetitions run in rep-major order, so every benchmark has some.
       - name: Full-scale run (harness and controls, five repetitions)
         timeout-minutes: 280
+        # The harness's memory guards read the limit of the cgroup they run in;
+        # a hosted runner has none, so the 1M-task cells can starve the runner
+        # agent itself (run 38513665561 was lost that way). A transient scope
+        # with a 12 GiB cap leaves the agent its memory and lets the guards
+        # turn an over-large cell into a failed row.
         run: |
-          ./run_all.sh --scale full --machine-id github-runner \
+          sudo systemd-run --scope --quiet --same-dir \
+            --uid="$(id -u)" --gid="$(id -g)" \
+            -p MemoryMax=12G -p MemorySwapMax=0 \
+            --setenv=PATH="$PATH" --setenv=HOME="$HOME" --setenv=GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            --setenv=JAVA_HOME="${JAVA_HOME:-}" --setenv=GOROOT="${GOROOT:-}" \
+            ./run_all.sh --scale full --machine-id github-runner \
             --out "results/github-runner/full-${GITHUB_RUN_ID}"
 
       - name: Summarise
