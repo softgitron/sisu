@@ -176,8 +176,14 @@ impl FnLower<'_, '_> {
                         let ty = pat.ty.clone();
                         self.bind_registered(*local, l, &ty, below);
                     }
-                    BindMode::Ref => self.assign(Place::local(l), Rvalue::Ref(place.clone(), false), loc),
-                    BindMode::RefMut => self.assign(Place::local(l), Rvalue::Ref(place.clone(), true), loc),
+                    BindMode::Ref => {
+                        self.assign(Place::local(l), Rvalue::Ref(place.clone(), false), loc);
+                        self.scope_local(below, l);
+                    }
+                    BindMode::RefMut => {
+                        self.assign(Place::local(l), Rvalue::Ref(place.clone(), true), loc);
+                        self.scope_local(below, l);
+                    }
                 }
             }
             PatKind::Variant { variant, fields, .. } => {

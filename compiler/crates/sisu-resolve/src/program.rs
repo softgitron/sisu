@@ -46,6 +46,8 @@ pub struct StructInfo {
     pub copy: bool,
     pub drop: Option<DefId>,
     pub view: bool,
+    /// `@must_consume` (D-054).
+    pub must_consume: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -63,6 +65,8 @@ pub struct EnumInfo {
     pub open: bool,
     pub copy: bool,
     pub drop: Option<DefId>,
+    /// `@must_consume` (D-054).
+    pub must_consume: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -111,6 +115,11 @@ pub struct FnInfo {
     /// Parameters before this index are positional-only (before a bare `/`).
     pub positional_only_until: usize,
     pub ret: Ty,
+    /// Where the result type is written, for diagnostics about it.
+    pub ret_span: Option<Span>,
+    /// The `from` clause as written (`-> ref str from a, b`): parameter
+    /// names, `self` included.
+    pub from: Vec<(String, Span)>,
     /// `T !`: the error set is inferred from the body.
     pub err_inferred: bool,
     pub pure: bool,

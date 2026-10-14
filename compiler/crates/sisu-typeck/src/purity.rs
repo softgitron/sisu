@@ -1,7 +1,8 @@
-//! `pure` (D-074): a pure function takes no capability and calls only pure
-//! functions; a closure is pure when its body is. Higher-order functions of
-//! the prelude are pure when their function arguments are, which the walk
-//! sees because closure bodies are walked where they are written.
+//! `pure` (D-074) in the type system: a closure's function type is `pure`
+//! when its body calls only pure functions, which this walk decides, and a
+//! function passed where a `pure` one is expected must be pure (E0335). The
+//! rule that a pure function's own body calls only pure functions is
+//! checked on SIR, with the other dataflow checks (`sisu-borrowck`).
 
 use crate::thir::*;
 use sisu_resolve::{Program, Ty};
@@ -11,13 +12,6 @@ pub fn first_impure_in_block(prog: &Program, b: &Block, locals: &[Local]) -> Opt
     let mut w = Walker { prog, locals, found: None, closures: None };
     w.block(b);
     w.found
-}
-
-/// Every impure call in a body, with its span: (callee name, span).
-pub fn impure_calls(prog: &Program, body: &Body) -> Vec<(String, sisu_diag::Span)> {
-    let mut w = Collector { prog, out: Vec::new(), closures: &body.closures };
-    w.block(&body.block);
-    w.out
 }
 
 struct Walker<'a> {
@@ -46,32 +40,6 @@ impl Walker<'_> {
             && let Some(cl) = cs.get(c.0 as usize)
         {
             self.block(&cl.body);
-        }
-    }
-}
-
-struct Collector<'a> {
-    prog: &'a Program,
-    out: Vec<(String, sisu_diag::Span)>,
-    closures: &'a [Closure],
-}
-
-impl Collector<'_> {
-    fn block(&mut self, b: &Block) {
-        for s in &b.stmts {
-            visit_stmt(s, &mut |e| self.expr(e));
-        }
-    }
-
-    fn expr(&mut self, e: &Expr) {
-        if let Some(name) = impure_callee(self.prog, e) {
-            self.out.push((name, e.span));
-        }
-        if let ExprKind::Closure(c) = &e.kind
-            && let Some(cl) = self.closures.get(c.0 as usize)
-        {
-            let body = cl.body.clone();
-            self.block(&body);
         }
     }
 }

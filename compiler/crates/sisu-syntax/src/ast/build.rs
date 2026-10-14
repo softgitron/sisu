@@ -353,7 +353,7 @@ impl B<'_> {
                 for t in self.tokens(r) {
                     if self.t.token_kind(t) == FROM_KW {
                         seen = true;
-                    } else if seen && self.t.token_kind(t) == IDENT {
+                    } else if seen && matches!(self.t.token_kind(t), IDENT | SELF_KW) {
                         from.push(self.name(t));
                     }
                 }

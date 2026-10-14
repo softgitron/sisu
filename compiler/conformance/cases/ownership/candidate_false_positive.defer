@@ -1,0 +1,8 @@
+1
+[1, 20, 3]
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+outcome: no conflict; this run ended without an ownership conflict
+  the checker still rejects line 10 (E0402 borrow.modify-while-borrowed), which this run reached without a conflict (count: 1)
+every rejected statement was reached without a conflict: a candidate false positive
+--- status 0

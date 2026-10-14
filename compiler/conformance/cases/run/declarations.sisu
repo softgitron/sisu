@@ -15,7 +15,7 @@ pure def clamp(x: int, lo: int = 0, hi: int = 10) -> int:
 def describe(name: str, *, loud: bool = False) -> String:
     return if loud: name.to_uppercase() else: name.to_string()
 
-struct Resource:
+view struct Resource:
     label: str
 
 impl Drop for Resource:

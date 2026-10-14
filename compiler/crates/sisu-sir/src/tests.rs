@@ -17,6 +17,15 @@ fn sample() -> Program {
                     },
                 ],
                 drop: None,
+                view: false,
+                must_consume: false,
+            },
+            TypeDecl::Struct {
+                name: "Token".into(),
+                fields: vec![FieldDecl { name: "text".into(), ty: Type::Str, default: None }],
+                drop: None,
+                view: true,
+                must_consume: true,
             },
             TypeDecl::Enum {
                 name: "E".into(),
@@ -30,14 +39,25 @@ fn sample() -> Program {
                 drop: None,
                 error: true,
                 open: true,
+                must_consume: true,
             },
+        ],
+        intrinsics: vec![
+            IntrinsicDecl { name: "print".into(), pure: false, from: vec![], inner: vec![], own: vec![] },
+            IntrinsicDecl { name: "Iter.next".into(), pure: true, from: vec![], inner: vec![0], own: vec![] },
+            IntrinsicDecl { name: "zip".into(), pure: true, from: vec![0, 1], inner: vec![], own: vec![] },
+            IntrinsicDecl { name: "list.push".into(), pure: true, from: vec![], inner: vec![], own: vec![1] },
         ],
         functions: vec![
             Function {
                 name: "Point#x".into(),
                 kind: FnKind::Value,
                 param_count: 0,
-                locals: vec![LocalDecl { ty: Type::Float, name: None }],
+                pure: true,
+                from: vec![],
+                inner: vec![],
+                loc: None,
+                locals: vec![LocalDecl::new(Type::Float, None)],
                 blocks: vec![BasicBlock {
                     stmts: vec![Statement {
                         kind: StatementKind::Assign(
@@ -57,24 +77,34 @@ fn sample() -> Program {
                 name: "main".into(),
                 kind: FnKind::Normal,
                 param_count: 0,
+                pure: false,
+                from: vec![],
+                inner: vec![],
+                loc: Some(Loc { line: 1, col: 5, end_line: 1, end_col: 9 }),
                 locals: vec![
-                    LocalDecl { ty: Type::Unit, name: None },
-                    LocalDecl { ty: Type::Str, name: Some("s \"q\"".into()) },
+                    LocalDecl::new(Type::Unit, None),
                     LocalDecl {
-                        ty: Type::Ref(
+                        ty: Type::Str,
+                        name: Some("s \"q\"".into()),
+                        loc: Some(Loc { line: 2, col: 9, end_line: 2, end_col: 10 }),
+                        once: true,
+                    },
+                    LocalDecl::new(
+                        Type::Ref(
                             Box::new(Type::Named(
                                 "Result".into(),
                                 vec![Type::Int, Type::ErrSet(vec!["E".into()])],
                             )),
                             true,
                         ),
-                        name: None,
-                    },
-                    LocalDecl {
-                        ty: Type::Fn(vec![Type::Int], Box::new(Type::Tuple(vec![Type::Bool]))),
-                        name: None,
-                    },
-                    LocalDecl { ty: Type::Int, name: None },
+                        None,
+                    ),
+                    LocalDecl::new(
+                        Type::Fn(vec![Type::Int], Box::new(Type::Tuple(vec![Type::Bool])), true),
+                        None,
+                    ),
+                    LocalDecl::new(Type::Int, None),
+                    LocalDecl::new(Type::Fn(vec![], Box::new(Type::Unit), false), Some("f".into())),
                 ],
                 blocks: vec![
                     BasicBlock {
@@ -84,7 +114,7 @@ fn sample() -> Program {
                                     Place::local(l(1)),
                                     Rvalue::Use(Operand::Const(Const::Str("a\nb".into()))),
                                 ),
-                                loc: Some(Loc { line: 3, col: 5 }),
+                                loc: Some(Loc { line: 3, col: 5, end_line: 3, end_col: 12 }),
                             },
                             Statement {
                                 kind: StatementKind::Call {
@@ -92,8 +122,9 @@ fn sample() -> Program {
                                     callee: Callee::Intrinsic("print".into(), vec![Type::Str]),
                                     args: vec![Operand::Copy(Place::local(l(1)))],
                                 },
-                                loc: Some(Loc { line: 3, col: 5 }),
+                                loc: Some(Loc::point(3, 5)),
                             },
+                            Statement { kind: StatementKind::StorageDead(l(5)), loc: None },
                             Statement {
                                 kind: StatementKind::Assign(
                                     Place::local(l(4)),
@@ -127,7 +158,7 @@ fn sample() -> Program {
                         },
                         unwind: Some(BlockId(2)),
                         cleanup: false,
-                        loc: Some(Loc { line: 4, col: 1 }),
+                        loc: Some(Loc::point(4, 1)),
                     },
                     BasicBlock {
                         stmts: vec![],
@@ -169,8 +200,17 @@ fn text_form_is_readable() {
     let text = write(&sample());
     assert!(text.starts_with("sir 0\nsource 0 \"t.sisu\"\nentry main\n"));
     assert!(text.contains("struct Point { x: f64 = Point#x, tags: list[str] }"));
-    assert!(text.contains("error E open { A, B(at: int, char) }"));
-    assert!(text.contains("    _0 = call intrinsic print[str](copy _1) @3:5"));
+    assert!(text.contains("view struct Token must_consume { text: str }"));
+    assert!(text.contains("error E open must_consume { A, B(at: int, char) }"));
+    assert!(
+        text.contains("\nintrinsic print\nintrinsic Iter.next pure inner 0\nintrinsic zip pure from 0 1\n")
+    );
+    assert!(text.contains("fn Point#x(0) value pure source 0 {"));
+    assert!(text.contains("    let _1: str \"s \\\"q\\\"\" once @2:9-2:10\n"));
+    assert!(text.contains("    let _3: pure fn(int) -> (bool,)\n"));
+    assert!(text.contains("    _1 = const \"a\\nb\" @3:5-3:12\n"));
+    assert!(text.contains("    _0 = call intrinsic print[str](copy _1) @3:5\n"));
+    assert!(text.contains("    dead _5\n"));
     assert!(text.contains("_4 = add copy _2.*.as(0).0, const -3"));
     assert!(text.contains("  bb0 (unwind bb2):"));
     assert!(text.contains("  bb2 (cleanup):"));
@@ -193,6 +233,26 @@ fn reader_reports_lines() {
     assert_eq!(e.line, 2);
     assert!(read("sir 9\n").is_err());
     assert!(read("fn f(0) source 0 {\n").is_err());
+}
+
+#[test]
+fn function_headers_name_their_from_arguments() {
+    let mut p = sample();
+    p.functions[1].param_count = 2;
+    p.functions[1].from = vec![0, 1];
+    let text = write(&p);
+    assert!(text.contains("fn main(2) source 0 from 0 1 @1:5-1:9 {"), "{text}");
+    assert_eq!(read(&text).map(|b| b.functions[1].from.clone()), Ok(vec![0, 1]));
+    p.functions[1].from = vec![2];
+    assert!(validate(&p).iter().any(|m| m.contains("`from` names argument 2")));
+    // Arguments the result borrows through their values only.
+    p.functions[1].from = vec![0];
+    p.functions[1].inner = vec![1];
+    let text = write(&p);
+    assert!(text.contains("fn main(2) source 0 from 0 inner 1 @1:5-1:9 {"), "{text}");
+    assert_eq!(read(&text).map(|b| b.functions[1].inner.clone()), Ok(vec![1]));
+    p.functions[1].inner = vec![3];
+    assert!(validate(&p).iter().any(|m| m.contains("`inner` names argument 3")));
 }
 
 #[test]

@@ -9,7 +9,7 @@ backend can be transcriptions of documented behaviour
 ([architecture.md](architecture.md)) instead of reverse engineering.
 
 Each entry says where the debt is, why it is debt, and what paying it
-means. The second part lists what Phases 0 and 2 ask for that stage 0
+means. The last part lists what Phases 0, 2 and 3 ask for that stage 0
 does not have yet.
 
 ## Behaviour that comes from the host
@@ -70,19 +70,37 @@ move paths in lowering, as Rust's MIR does.
 
 **`str` is a copy.** `strview` copies the text into a shared immutable
 string, so a view costs O(length). Semantics are the same because the
-viewed `String` cannot change while the view exists, which Phase 3
-enforces. *Pay*: a view is a pointer and a length in the backend.
+viewed `String` cannot change while the view exists, which the ownership
+checker enforces, and which the monitor checks through the loan each
+view carries. *Pay*: a view is a pointer and a length in the backend.
 
 **References are paths.** A reference is a frame, a local and a path of
 steps walked on every access, with a serial number to detect a reference
 into a returned frame. *Pay*: none for the interpreter (it is also the
 dynamic monitor's hook); a backend uses addresses.
 
-**Ownership errors are run-time panics.** Reading a moved value and using
-a dangling reference panic (`R0033`, `R0034`), because there is no
-ownership checker yet. *Pay*: Phase 3's checker rejects these programs;
-the interpreter's checks become the dynamic monitor of 18, which treats
-them as internal soundness errors with the SIR dump.
+**The monitor is interpreter code.** Loans, tags and the loan tree of
+the dynamic ownership monitor live in `sisu-interp/src/monitor.rs`, and
+reading a moved value or a dangling reference without the monitor still
+panics (`R0033`, `R0034`). *Pay*: none for the interpreter; the native
+backend has no monitor and relies on the checker, so the conformance
+suite's monitor rerun and the mutation fuzzing must keep running against
+the interpreter for as long as the checker changes.
+
+**The monitor's scan of held views is bounded.** Passing a reference to
+an intrinsic or an operator checks the views and references held by the
+value behind it, and passing a value to a function checks those the value
+itself holds, but only the first 256 values (`VIEW_SCAN_BUDGET`).
+`set.add` dropping a duplicate must-consume value, the key of
+`dict.insert`, and `Path.as_str` (a view without a loan) are not
+observed. *Pay*: tag every view-holding value with the loans it holds
+(as the static dataflow does), so a use checks a set instead of scanning
+a value.
+
+**The counterexample mode counts positions, not statements.** Its
+coverage is keyed by function, line and column, so statements that start
+at the same position are counted together. *Pay*: key coverage by SIR
+block and statement (findings already record theirs).
 
 **Error traces are always recorded.** Every `?` appends its location to
 the error value, in every build; 05 says traces cost nothing in release
@@ -132,14 +150,43 @@ Rust map shared through a reference-counted cell. *Pay*: 18 puts fakes in
 Sisu over the `std.cap` traits; the shared map needs synchronisation once
 tasks exist (Phase 6).
 
-**Purity is checked on the typed tree.** 18 lists the purity checker among
-the SIR checkers (pipeline step 6). *Pay*: move it to SIR with the other
-dataflow checks in Phase 3.
+**A method's type is read from its name.** The must-consume rule (a
+type's own methods are where its values end) recognises a method by its
+SIR name, `Type.method`, in the checker and in the monitor. *Pay*: SIR
+records a method's owner type.
 
-**Drop flags come from lowering twice.** A function is lowered once to
-find locals moved as a whole and again to give them flags. *Pay*: an
-initialisation dataflow on SIR (Phase 3 needs it anyway) decides where a
-flag is needed, including for partial moves.
+**Which intrinsics may take must-consume values is a table.** The
+intrinsics that keep or return everything they take with `own` or `mut`
+are listed in `sisu-borrowck/src/consume.rs`, from their contracts.
+*Pay*: state it in the std contracts (a `##` line or an attribute), so the
+list is generated, and write the collection functions in Sisu (Phase 4),
+where the checker sees what they do.
+
+**Borrow facts of lowering-only intrinsics are written in lowering.**
+`iter.ref`, `iter.mut`, `iter.own` and `list.slice` get their `from`,
+`inner` and `own` lists from a match in `sisu-lower/src/lib.rs`, because
+they have no prelude signature. *Pay*: give them signatures in a std
+module that only lowering may call.
+
+**`inner` knows which builtins own text.** Whether a result can point
+into an argument's storage is decided by a walk over types in
+`sisu-resolve/src/borrows.rs` that knows `String` and `Path` own text and
+treats `Iter`, `Entry`, `Iterable` and generic parameters as owning
+anything. *Pay*: a property of the type declarations (or a trait in
+Phase 4) instead of a list of names.
+
+**Temporaries are named by their source text.** A diagnostic about an
+unnamed local names it by the source range of the statement that first
+assigns it (`make()` does not live long enough), which depends on
+lowering's locations being exact ranges. *Pay*: SIR could record a
+display name for temporaries; until then, a front end must emit the same
+ranges.
+
+**Fixpoint bounds.** The liveness and must-consume dataflows stop after
+a bound (10 000 and 1 000 rounds) and then fall back to the conservative
+answer (everything live; no iterator exhausted). Union and intersection
+over finite sets converge well before, so the bound is never reached in
+practice. *Pay*: a worklist in reverse postorder, which needs no bound.
 
 **`defer` is copied to every exit.** A deferred block is emitted at each
 exit of its scope, normal and cleanup, which multiplies code for a scope
@@ -151,7 +198,7 @@ share one landing block.
 module in Sisu (Phase 4), with the rules in architecture.md as its
 contract.
 
-## Not yet done from Phases 0 and 2
+## Not yet done from Phases 0, 2 and 3
 
 - **Modules and packages.** Phase 2 asks for file and directory modules,
   `pub`/`pub(package)`, `sisu.toml` with path dependencies and `sisu run`
@@ -177,3 +224,35 @@ contract.
   without defining (`default_port_for`, and `.context`, a std convention
   that does not exist yet) and has no `main`; the other examples use
   features of later phases.
+
+From Phase 3 (18, "Phase 3: the ownership checker and the dynamic
+monitor"):
+
+- **The library types**: `Shared[T]`, `Weak`, `Cell`, `Mutex`
+  (single-task until Phase 6), `Box` and `Arena[T]` with generational
+  `Key`s and stale-handle detection are not implemented (`E0900`), so the
+  escape rule "no `ref` or view in `Shared`" has nothing to apply to yet.
+- **`own` closures** (capture by move, `own x -> ...`, `do own x:`) are
+  `E0900`; until they exist, a closure that captures anything cannot be
+  stored or returned (a known over-rejection).
+- **`proposal/examples/ownership.sisu` does not run**: `shared_demo` and
+  `counter_demo` need `Shared`, `Mutex` and `task.scope` (Phase 6), and
+  `graph_demo` needs `Arena` and `Key`. Everything before `Shared` (the
+  conventions, returned borrows, `from`, the tokenizer of views) runs, as
+  the conformance case `ownership/proposal_core`, kept identical to the
+  original by a test.
+- **The generation-checked reference type** behind a flag, if Phase 0
+  triggered it; `sisu audit --ownership`; `sisu check --diary`.
+- **The corpora**: a translated slice of rustc's borrow-checker UI tests,
+  the referee's 20 adversarial programs, and the 60-file wrong-ownership
+  corpus with expected codes and named fixes. The suite has 59 ownership
+  cases (21 accepted, 38 rejected) and the soundness tests below.
+- **24 hours of mutation fuzzing.** `sisu-driver/tests/soundness.rs` runs
+  a deterministic mutation fuzz (statement reorderings of accepted
+  programs' SIR) on every `cargo test`, and more with
+  `SISU_FUZZ_MUTANTS`; the longest run so far is 27 000 mutants (8 054
+  accepted by the checker, none tripping the monitor), not 24 hours, and
+  it is not a CI job.
+- **Diagnostics that name the fix.** Most ownership diagnostics have a
+  note or a fix with an edit (`E0411`, `E0413`, `E0415`); the conflict
+  diagnostics' notes are prose, not edits.

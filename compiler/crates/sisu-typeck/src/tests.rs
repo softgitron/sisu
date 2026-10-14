@@ -101,7 +101,8 @@ fn type_errors_have_codes() {
         vec!["E0339"]
     );
     assert_eq!(codes("def f():\n    let xs = [1]\n    xs.push(2)\n"), vec!["E0341"]);
-    assert_eq!(codes("pure def f():\n    print(1)\n"), vec!["E0333"]);
+    // Calls of impure functions from a pure one (E0333) are checked on SIR
+    // by sisu-borrowck.
     assert_eq!(codes("def f(x: int) -> int:\n    return x + 1.5\n"), vec!["E0373"]);
     assert_eq!(codes("def f() -> f64:\n    return 7.0 // 2.0\n"), vec!["E0372"]);
 }

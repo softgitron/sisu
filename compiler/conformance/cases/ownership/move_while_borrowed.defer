@@ -1,0 +1,41 @@
+text
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+ownership violation: a reference was used after its loan had ended
+  the loan: a shared borrow of `s` in `main`, created at move_while_borrowed.sisu:8:18 by `_2 = strview _1`
+  ended by: a move of `s` at move_while_borrowed.sisu:9:5 (`_3 = call fn keep(move _1)`)
+  used at: move_while_borrowed.sisu:10:5 (`_4 = call intrinsic print(copy _2)`)
+  value: `s` = <no value>
+  loans of `s` not ended yet: 0 shared, 0 with `mut`
+  at main (move_while_borrowed.sisu:10:5)
+SIR of `main`:
+fn main(0) source 0 @6:5-6:9 {
+    let _0: ()
+    let _1: String "s" @7:9-7:10
+    let _2: str "v" @8:9-8:10
+    let _3: ()
+    let _4: ()
+    let _5: bool "flag"
+  bb0:
+    _5 = const false
+    _1 = call intrinsic str.to_string(const "text") @7:13-7:31
+    _5 = const true
+    goto bb1
+  bb1 (unwind bb3):
+    _2 = strview _1 @8:18-8:19
+    _5 = const false
+    _3 = call fn keep(move _1) @9:5-9:12
+    _4 = call intrinsic print(copy _2) @10:5-10:13
+    _0 = const ()
+    goto bb4
+  bb2 (cleanup):
+    resume
+  bb3 (cleanup):
+    drop _1 if _5
+    goto bb2
+  bb4:
+    _5 = const false
+    return
+}
+outcome: conflict reached; the run stopped at a concrete ownership conflict
+--- status 134

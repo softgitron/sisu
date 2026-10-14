@@ -1,0 +1,34 @@
+# The example of 04, "Must-consume values": a list of receipts is
+# must-consume because a receipt is, and a `?` out of the consuming loop
+# would drop the receipts not yet visited.
+
+@must_consume
+struct Receipt:
+    amount: int
+
+    def settled(own self) -> int:
+        return self.amount
+
+error RepayError:
+    Refused(amount: int)
+
+struct Pool:
+    total: int
+
+def repay(mut pool: Pool, own r: Receipt) -> ! RepayError:
+    let amount = r.settled()
+    if amount > 100:
+        return Err(Refused(amount))
+    pool.total += amount
+    return Ok(())
+
+def settle(mut pool: Pool, own receipts: list[Receipt]) -> ! RepayError:
+    for r in own receipts:
+        repay(mut pool, r)?
+    return Ok(())
+
+def main() -> ! RepayError:
+    var pool = Pool(total=0)
+    settle(mut pool, [Receipt(amount=1), Receipt(amount=500), Receipt(amount=2)])?
+    print(pool.total)
+    return Ok(())

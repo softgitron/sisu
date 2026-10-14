@@ -191,10 +191,15 @@ impl Parser<'_> {
             self.bump();
             self.type_();
             if self.eat(FROM_KW) {
-                // `-> ref str from a, b`: which parameters a borrow comes from.
-                self.expect_name();
-                while self.eat(COMMA) {
+                // `-> ref str from a, b`: which parameters a borrow comes from;
+                // `self` may be one of them.
+                if !self.eat(SELF_KW) {
                     self.expect_name();
+                }
+                while self.eat(COMMA) {
+                    if !self.eat(SELF_KW) {
+                        self.expect_name();
+                    }
                 }
             }
             self.finish_node();

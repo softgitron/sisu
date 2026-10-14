@@ -1,0 +1,24 @@
+# A closure borrows what it captures, for as long as the closure is used.
+
+def apply(f: (int) -> int, x: int) -> int:
+    return f(x)
+
+def repeat(n: int, body: () -> ()):
+    for _ in range(n):
+        body()
+
+def main():
+    var k = 10
+    let add_k = x -> x + k
+    print(apply(add_k, 1))
+    k = 20
+    print(k)
+    var total = 0
+    repeat(3) do:
+        total += 5
+    print(total)
+    var log: list[String] = []
+    for i in range(2):
+        repeat(1) do:
+            log.push("tick {i}")
+    print(log)

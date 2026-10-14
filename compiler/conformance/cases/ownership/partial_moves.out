@@ -1,0 +1,22 @@
+move the middle field:
+  keep b
+  drop b
+  end of the block
+move two fields of a tuple:
+  keep second
+  drop second
+  x is first
+  drop first
+move a field conditionally:
+  iteration 0
+  drop c
+  drop b
+  drop a
+  keep c
+  drop c
+  iteration 1
+  drop b
+  drop a
+end of main
+  drop c
+  drop a

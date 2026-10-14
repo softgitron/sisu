@@ -84,7 +84,7 @@ impl FnLower<'_, '_> {
                 let i = self.temp(&index.ty);
                 self.into(Place::local(i), index);
                 if *kind == IndexKind::Dict && self.needs_drop(&index.ty) {
-                    self.register(DropEntry::Local(i, None));
+                    self.register(DropEntry::Local(i));
                     self.split();
                 }
                 b.project(match kind {
@@ -106,7 +106,7 @@ impl FnLower<'_, '_> {
                 let t = self.temp(&e.ty);
                 self.into(Place::local(t), e);
                 if self.needs_drop(&e.ty) && e.ty != Ty::Never {
-                    self.register(DropEntry::Local(t, None));
+                    self.register(DropEntry::Local(t));
                     self.split();
                 }
                 Place::local(t)
@@ -114,22 +114,10 @@ impl FnLower<'_, '_> {
         }
     }
 
-    /// Reads a place by value: a copy, or a move of a non-`Copy` value
-    /// (clearing the drop flag of a local moved as a whole).
+    /// Reads a place by value: a copy, or a move of a non-`Copy` value.
     pub fn copy_or_move(&mut self, p: Place, ty: &Ty) -> Operand {
         if self.ctx.prog.is_copy(ty) || matches!(ty, Ty::Ref(..)) {
             return Operand::Copy(p);
-        }
-        if p.proj.is_empty() {
-            let thir_local = self.map.iter().find(|(_, s)| **s == p.local).map(|(t, _)| *t);
-            if let Some(tl) = thir_local
-                && !self.alias.contains_key(&tl)
-            {
-                self.moved.insert(tl);
-                if let Some(&f) = self.flags.get(&tl) {
-                    self.assign(Place::local(f), Rvalue::Use(Operand::Const(Const::Bool(false))), None);
-                }
-            }
         }
         Operand::Move(p)
     }
@@ -169,7 +157,8 @@ impl FnLower<'_, '_> {
     pub fn borrow_operand(&mut self, e: &thir::Expr, mutable: bool) -> Operand {
         let p = self.place_of(e);
         let t = self.temp_sir(sir::Type::Ref(Box::new(self.ctx.ty(&e.ty)), mutable));
-        self.assign(Place::local(t), Rvalue::Ref(p, mutable), None);
+        let loc = self.ctx.loc(e.span);
+        self.assign(Place::local(t), Rvalue::Ref(p, mutable), loc);
         Operand::Copy(Place::local(t))
     }
 
@@ -193,13 +182,15 @@ impl FnLower<'_, '_> {
                     return Operand::Copy(p);
                 }
                 let t = self.temp_sir(sir::Type::Str);
-                self.assign(Place::local(t), Rvalue::StrView(p), None);
+                let loc = self.ctx.loc(e.span);
+                self.assign(Place::local(t), Rvalue::StrView(p), loc);
                 Operand::Copy(Place::local(t))
             }
             _ => {
                 let p = self.place_of(e);
                 let t = self.temp_sir(sir::Type::Str);
-                self.assign(Place::local(t), Rvalue::StrView(p), None);
+                let loc = self.ctx.loc(e.span);
+                self.assign(Place::local(t), Rvalue::StrView(p), loc);
                 Operand::Copy(Place::local(t))
             }
         }
@@ -582,7 +573,7 @@ impl FnLower<'_, '_> {
                         );
                     }
                 }
-                self.emit_exit(0);
+                self.emit_exit(0, loc);
                 self.terminate(Terminator::Return, loc);
                 self.switch_to(ok);
                 let v = self.copy_or_move(p.project(Proj::Downcast(0)).project(Proj::Field(0)), &e.ty);

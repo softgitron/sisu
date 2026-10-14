@@ -148,6 +148,27 @@ impl<'a> Cur<'a> {
         Ok(LocalId(self.uint()?))
     }
 
+    /// ` word 0 1 2`: indices after a keyword, if the keyword is next.
+    fn indices(&mut self, word: &str) -> R<Vec<u32>> {
+        let mut out = Vec::new();
+        let save = self.pos;
+        if !self.eat(word) {
+            return Ok(out);
+        }
+        if !self.rest().starts_with(' ') {
+            self.pos = save;
+            return Ok(out);
+        }
+        loop {
+            self.ws();
+            if !self.rest().starts_with(|c: char| c.is_ascii_digit()) {
+                break;
+            }
+            out.push(self.uint()?);
+        }
+        Ok(out)
+    }
+
     fn block_id(&mut self) -> R<BlockId> {
         self.expect("bb")?;
         Ok(BlockId(self.uint()?))
@@ -164,7 +185,8 @@ impl<'a> Cur<'a> {
         if self.eat("ref ") {
             return Ok(Type::Ref(Box::new(self.ty()?), false));
         }
-        if self.eat("fn(") {
+        let pure = self.eat("pure fn(");
+        if pure || self.eat("fn(") {
             let mut ps = Vec::new();
             if !self.eat(")") {
                 loop {
@@ -176,7 +198,7 @@ impl<'a> Cur<'a> {
                 }
             }
             self.expect("->")?;
-            return Ok(Type::Fn(ps, Box::new(self.ty()?)));
+            return Ok(Type::Fn(ps, Box::new(self.ty()?), pure));
         }
         if self.eat("(") {
             let mut es = Vec::new();
@@ -397,17 +419,34 @@ impl<'a> Cur<'a> {
     }
 }
 
-/// Splits a trailing ` @L:C` off a line.
+/// `L:C` as two numbers.
+fn line_col(text: &str) -> Option<(u32, u32)> {
+    let (l, c) = text.split_once(':')?;
+    if l.is_empty() || c.is_empty() || !l.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    if !c.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some((l.parse().ok()?, c.parse().ok()?))
+}
+
+/// Splits a trailing ` @L:C` or ` @L:C-L:C` off a line.
 fn split_loc(line: &str) -> (&str, Option<Loc>) {
     if let Some(i) = line.rfind(" @") {
         let tail = &line[i + 2..];
-        if let Some((l, c)) = tail.split_once(':')
-            && let (Ok(line_no), Ok(col)) = (l.parse(), c.parse())
-            && !l.is_empty()
-            && !c.is_empty()
-            && tail.chars().all(|ch| ch.is_ascii_digit() || ch == ':')
-        {
-            return (&line[..i], Some(Loc { line: line_no, col }));
+        let (start, end) = match tail.split_once('-') {
+            Some((a, b)) => (a, Some(b)),
+            None => (tail, None),
+        };
+        if let Some((l, c)) = line_col(start) {
+            match end.map(line_col) {
+                None => return (&line[..i], Some(Loc::point(l, c))),
+                Some(Some((el, ec))) => {
+                    return (&line[..i], Some(Loc { line: l, col: c, end_line: el, end_col: ec }));
+                }
+                Some(None) => {}
+            }
         }
     }
     (line, None)
@@ -419,6 +458,7 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
         sources: Vec::new(),
         entry: None,
         types: Vec::new(),
+        intrinsics: Vec::new(),
         functions: Vec::new(),
         tests: Vec::new(),
     };
@@ -463,8 +503,20 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
                 let name = c.string()?;
                 let f = c.name()?;
                 p.tests.push((name, f));
-            } else if c.eat("struct ") {
+            } else if c.eat("intrinsic ") {
                 let name = c.type_name()?;
+                let pure = c.eat("pure");
+                let from = c.indices("from")?;
+                let inner = c.indices("inner")?;
+                let own = c.indices("own")?;
+                if !c.at_end() {
+                    return Err(format!("unexpected `{}`", c.rest()));
+                }
+                p.intrinsics.push(IntrinsicDecl { name, pure, from, inner, own });
+            } else if c.eat("struct ") || c.eat("view struct ") {
+                let view = line.trim_start().starts_with("view ");
+                let name = c.type_name()?;
+                let must_consume = c.eat("must_consume");
                 let mut drop = None;
                 if c.eat("drop ") {
                     drop = Some(c.name()?);
@@ -484,11 +536,12 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
                         c.expect(",")?;
                     }
                 }
-                p.types.push(TypeDecl::Struct { name, fields, drop });
+                p.types.push(TypeDecl::Struct { name, fields, drop, view, must_consume });
             } else if c.eat("enum ") || c.eat("error ") {
                 let error = line.trim_start().starts_with("error ");
                 let name = c.type_name()?;
                 let open = c.eat("open");
+                let must_consume = c.eat("must_consume");
                 let mut drop = None;
                 if c.eat("drop ") {
                     drop = Some(c.name()?);
@@ -525,7 +578,7 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
                         c.expect(",")?;
                     }
                 }
-                p.types.push(TypeDecl::Enum { name, variants, drop, error, open });
+                p.types.push(TypeDecl::Enum { name, variants, drop, error, open, must_consume });
             } else if c.eat("fn ") {
                 return Err("FN".into());
             } else {
@@ -551,8 +604,17 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
 
 fn read_function(lines: &[&str], start: usize) -> Result<(Function, usize), (usize, String)> {
     let header = lines[start].trim();
+    // `fn ... @L:C-L:C {`: the declaration's location comes before the brace.
+    let (header, fn_loc) = match header.strip_suffix(" {") {
+        Some(h) => {
+            let (h, l) = split_loc(h);
+            (h, l)
+        }
+        None => (header, None),
+    };
     let mut c = Cur::new(header);
-    let parse_header = |c: &mut Cur| -> R<(String, u32, FnKind, u32)> {
+    type Header = (String, u32, FnKind, bool, u32, Vec<u32>, Vec<u32>);
+    let parse_header = |c: &mut Cur| -> R<Header> {
         c.expect("fn ")?;
         let name = c.name()?;
         c.expect("(")?;
@@ -569,13 +631,33 @@ fn read_function(lines: &[&str], start: usize) -> Result<(Function, usize), (usi
         } else {
             FnKind::Normal
         };
+        let pure = c.eat("pure");
         c.expect("source ")?;
         let src = c.uint()?;
-        c.expect("{")?;
-        Ok((name, n, kind, src))
+        let from = c.indices("from")?;
+        let inner = c.indices("inner")?;
+        if !c.at_end() {
+            return Err(format!("expected `{{`, found `{}`", c.rest()));
+        }
+        Ok((name, n, kind, pure, src, from, inner))
     };
-    let (name, param_count, kind, source) = parse_header(&mut c).map_err(|e| (start, e))?;
-    let mut f = Function { name, kind, param_count, locals: Vec::new(), blocks: Vec::new(), source };
+    if !lines[start].trim().ends_with(" {") {
+        return Err((start, "expected `{` at the end of the function header".into()));
+    }
+    let (name, param_count, kind, pure, source, from, inner) =
+        parse_header(&mut c).map_err(|e| (start, e))?;
+    let mut f = Function {
+        name,
+        kind,
+        param_count,
+        pure,
+        from,
+        inner,
+        locals: Vec::new(),
+        blocks: Vec::new(),
+        source,
+        loc: fn_loc,
+    };
     let mut i = start + 1;
     let mut current: Option<BasicBlock> = None;
     while i < lines.len() {
@@ -601,7 +683,11 @@ fn read_function(lines: &[&str], start: usize) -> Result<(Function, usize), (usi
                 c.expect(":")?;
                 let ty = c.ty()?;
                 let name = if c.rest().trim_start().starts_with('"') { Some(c.string()?) } else { None };
-                f.locals.push(LocalDecl { ty, name });
+                let once = c.eat("once");
+                if !c.at_end() {
+                    return Err(format!("unexpected `{}`", c.rest()));
+                }
+                f.locals.push(LocalDecl { ty, name, loc, once });
                 return Ok(());
             }
             if line.starts_with("bb") && line.ends_with(':') {
@@ -671,6 +757,8 @@ fn read_function(lines: &[&str], start: usize) -> Result<(Function, usize), (usi
                 let place = c.place()?;
                 let flag = if c.eat("if ") { Some(c.local()?) } else { None };
                 StatementKind::Drop { place, flag }
+            } else if c.eat("dead ") {
+                StatementKind::StorageDead(c.local()?)
             } else {
                 let dest = c.place()?;
                 c.expect("=")?;

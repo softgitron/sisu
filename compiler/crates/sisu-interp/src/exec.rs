@@ -93,8 +93,9 @@ impl<'p> Interp<'p, '_> {
         self.serial += 1;
         let serial = self.serial;
         let frame = self.frames.len() as u32;
-        let ptrs =
-            (0..vals.len() as u32).map(|local| Pointer { frame, serial, local, path: Vec::new() }).collect();
+        let ptrs = (0..vals.len() as u32)
+            .map(|local| Pointer { frame, serial, local, path: Vec::new(), tag: 0 })
+            .collect();
         self.frames.push(Frame {
             serial,
             func: None,
@@ -180,7 +181,10 @@ impl<'p> Interp<'p, '_> {
                     return Ok(());
                 }
                 None => {
-                    self.frames.pop();
+                    if let Some(fr) = self.frames.pop() {
+                        let n = self.frames.len() as u32;
+                        self.mon_frame_gone(fr.serial, n, fr.locals.len());
+                    }
                 }
             }
         }
@@ -223,6 +227,9 @@ impl<'p> Interp<'p, '_> {
         let top = self.frames.len() - 1;
         let next = self.frames[top].next;
         if let Some(s) = block.stmts.get(next) {
+            if self.monitoring() {
+                self.mon_cover(s.loc);
+            }
             self.frames[top].next += 1;
             if s.loc.is_some() {
                 self.frames[top].loc = s.loc;
@@ -233,6 +240,9 @@ impl<'p> Interp<'p, '_> {
         }
         if block.loc.is_some() {
             self.frames[top].loc = block.loc;
+        }
+        if self.monitoring() {
+            self.mon_cover(block.loc);
         }
         match &block.term {
             Terminator::Goto(t) => {
@@ -252,12 +262,16 @@ impl<'p> Interp<'p, '_> {
             }
             Terminator::Return => {
                 let mut fr = self.frames.pop().ok_or_else(|| ice("return without a frame"))?;
+                let n = self.frames.len() as u32;
+                self.mon_frame_gone(fr.serial, n, fr.locals.len());
                 let v =
                     fr.locals.first_mut().map(|v| std::mem::replace(v, Value::Moved)).unwrap_or(Value::Unit);
                 Ok(Event::Returned(if v.is_moved() { Value::Unit } else { v }, fr.ret))
             }
             Terminator::Resume => {
                 let fr = self.frames.pop().ok_or_else(|| ice("resume without a frame"))?;
+                let n = self.frames.len() as u32;
+                self.mon_frame_gone(fr.serial, n, fr.locals.len());
                 fr.pending.map(Event::Resumed).ok_or_else(|| ice("resume outside unwinding"))
             }
             Terminator::Unreachable => Err(panic(msg::PANIC_UNREACHABLE_PLAIN, &[])),
@@ -281,33 +295,79 @@ impl<'p> Interp<'p, '_> {
                 Callee::Fn(name) => {
                     let fi = self.fn_index(name)?;
                     let vals = self.operands(args)?;
+                    // Passing a reference or a view is a use of its loan.
+                    vals.iter().try_for_each(|v| self.mon_passed(v))?;
                     self.push_frame(fi, vals, Some(dest))
                 }
                 Callee::Value(op) => {
                     let f = self.operand(op)?;
                     let vals = self.operands(args)?;
+                    vals.iter().try_for_each(|v| self.mon_passed(v))?;
+                    self.mon_passed(&f)?;
                     let (fi, vals) = self.callee_of(&f, vals)?;
                     self.push_frame(fi, vals, Some(dest))
                 }
                 Callee::Intrinsic(name, tys) => {
                     let vals = self.operands(args)?;
+                    self.mon_args(&vals)?;
+                    // `list.clear` drops the elements: under the monitor, a
+                    // must-consume one among them is the violation.
+                    if name == "list.clear"
+                        && self.monitoring()
+                        && let Some(v) = vals.first()
+                    {
+                        let at = self.pointer_of(v)?;
+                        self.mon_drop_unconsumed(&at, self.read(&at)?)?;
+                    }
                     let ret = self.dest_type(dest);
                     let v = self.intrinsic(name, tys, vals, ret)?;
                     self.store(dest, v)
                 }
             },
             StatementKind::Drop { place, flag } => {
+                // A flagged drop runs when its flag is set, and clears it.
                 if let Some(f) = flag {
                     match self.local(*f)? {
                         Value::Bool(true) => {}
                         Value::Bool(false) | Value::Moved => return Ok(()),
                         other => return Err(ice(format!("drop flag holds {other:?}"))),
                     }
+                    if let Some(slot) = self.frames.last_mut().and_then(|fr| fr.locals.get_mut(f.0 as usize))
+                    {
+                        *slot = Value::Bool(false);
+                    }
                 }
                 let Some(ptr) = self.resolve_for_drop(place)? else { return Ok(()) };
+                self.mon_access(&ptr, crate::monitor::Op::Drop)?;
                 let v = std::mem::replace(self.write(&ptr)?, Value::Moved);
+                self.mon_drop_unconsumed(&ptr, &v)?;
                 self.drop_value(v)
             }
+            StatementKind::StorageDead(l) => {
+                if let Some(slot) = self.frames.last_mut().and_then(|f| f.locals.get_mut(l.0 as usize)) {
+                    *slot = Value::Moved;
+                }
+                let n = self.frames.len().saturating_sub(1) as u32;
+                if let Some(serial) = self.frames.last().map(|f| f.serial) {
+                    self.mon_dead(serial, l.0, n);
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Whether the statement being run stores into an unnamed local: a
+    /// `mut` borrow into one is two-phase (as the checker has it).
+    fn dest_is_temp(&self) -> bool {
+        let prog = self.prog;
+        let Some(fr) = self.frames.last() else { return false };
+        let Some(f) = fr.func.and_then(|i| prog.functions.get(i)) else { return false };
+        let Some(s) = f.blocks.get(fr.bb).and_then(|b| b.stmts.get(fr.next.wrapping_sub(1))) else {
+            return false;
+        };
+        match &s.kind {
+            StatementKind::Assign(p, _) => f.locals.get(p.local.0 as usize).is_some_and(|l| l.name.is_none()),
+            _ => false,
         }
     }
 
@@ -330,30 +390,49 @@ impl<'p> Interp<'p, '_> {
 
     fn store(&mut self, p: &Place, v: Value) -> Result<(), Unwind> {
         let ptr = self.resolve_for_write(p)?;
+        self.mon_access(&ptr, crate::monitor::Op::Write)?;
         *self.write(&ptr)? = v;
         Ok(())
     }
 
+    /// The operands of one statement. Under the monitor, a copied `ref mut`
+    /// reborrows only once every operand is read: a `mut` argument is
+    /// two-phase, active at the call, as the checker has it.
     fn operands(&mut self, ops: &[Operand]) -> Result<Vec<Value>, Unwind> {
-        ops.iter().map(|o| self.operand(o)).collect()
+        let mut vals = Vec::with_capacity(ops.len());
+        for o in ops {
+            vals.push(self.operand_value(o)?);
+        }
+        for v in vals.iter_mut() {
+            self.mon_copied(v)?;
+        }
+        Ok(vals)
     }
 
     pub(crate) fn operand(&mut self, o: &Operand) -> Result<Value, Unwind> {
+        let mut v = self.operand_value(o)?;
+        self.mon_copied(&mut v)?;
+        Ok(v)
+    }
+
+    fn operand_value(&mut self, o: &Operand) -> Result<Value, Unwind> {
         match o {
             Operand::Const(c) => Ok(const_value(c)),
             Operand::Copy(p) => {
                 let ptr = self.resolve(p)?;
+                self.mon_access(&ptr, crate::monitor::Op::Read)?;
                 let v = self.read(&ptr)?;
                 if v.is_moved() {
-                    return Err(panic(msg::PANIC_MOVED_VALUE, &[]));
+                    return Err(self.moved_at(&ptr));
                 }
                 Ok(v.clone())
             }
             Operand::Move(p) => {
                 let ptr = self.resolve(p)?;
+                self.mon_access(&ptr, crate::monitor::Op::Move)?;
                 let v = std::mem::replace(self.write(&ptr)?, Value::Moved);
                 if v.is_moved() {
-                    return Err(panic(msg::PANIC_MOVED_VALUE, &[]));
+                    return Err(self.moved_at(&ptr));
                 }
                 Ok(v)
             }
@@ -363,14 +442,28 @@ impl<'p> Interp<'p, '_> {
     fn rvalue(&mut self, r: &'p Rvalue) -> Result<Value, Unwind> {
         match r {
             Rvalue::Use(o) => self.operand(o),
-            Rvalue::Ref(p, _) => Ok(Value::Ref(Box::new(self.resolve(p)?))),
+            Rvalue::Ref(p, m) => {
+                let mut ptr = self.resolve(p)?;
+                if self.monitoring() {
+                    // Borrowing a moved-from place is a use after move.
+                    if self.read(&ptr)?.is_moved() {
+                        return Err(self.moved_at(&ptr));
+                    }
+                    ptr.tag = self.mon_borrow(&ptr, *m, !self.dest_is_temp())?;
+                }
+                Ok(Value::Ref(Box::new(ptr)))
+            }
             Rvalue::Binary(op, a, b) => {
                 let a = self.operand(a)?;
                 let b = self.operand(b)?;
+                // Comparing through references reads what they point to.
+                self.mon_read_value(&a)?;
+                self.mon_read_value(&b)?;
                 self.binary(*op, &a, &b)
             }
             Rvalue::Unary(op, a) => {
                 let a = self.operand(a)?;
+                self.mon_read_value(&a)?;
                 self.unary(*op, &a)
             }
             Rvalue::Aggregate(kind, ops) => {
@@ -379,6 +472,7 @@ impl<'p> Interp<'p, '_> {
             }
             Rvalue::Discriminant(p) => {
                 let ptr = self.resolve(p)?;
+                self.mon_access(&ptr, crate::monitor::Op::Read)?;
                 match self.target(self.read(&ptr)?)? {
                     Value::Variant(a) => Ok(Value::Int(a.variant as i64)),
                     other => Err(ice(format!("discriminant of {other:?}"))),
@@ -390,16 +484,21 @@ impl<'p> Interp<'p, '_> {
             }
             Rvalue::CopyOf(p) => {
                 let ptr = self.resolve(p)?;
+                self.mon_access(&ptr, crate::monitor::Op::Read)?;
                 let v = self.target(self.read(&ptr)?)?;
                 if v.is_moved() {
-                    return Err(panic(msg::PANIC_MOVED_VALUE, &[]));
+                    return Err(self.moved_at(&ptr));
                 }
                 Ok(v.clone())
             }
             Rvalue::StrView(p) => {
                 let ptr = self.resolve(p)?;
+                if self.target(self.read(&ptr)?)?.is_moved() {
+                    return Err(self.moved_at(&ptr));
+                }
+                let tag = if self.monitoring() { self.mon_borrow(&ptr, false, false)? } else { 0 };
                 let s = self.text(self.read(&ptr)?)?;
-                Ok(Value::str(s))
+                Ok(Value::Str(std::rc::Rc::from(s), tag))
             }
         }
     }

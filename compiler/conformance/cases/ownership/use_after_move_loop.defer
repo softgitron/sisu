@@ -1,0 +1,64 @@
+once
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+ownership violation: `s` was used while it holds no value: it was moved out, or never assigned
+  used at: use_after_move_loop.sisu:10:9 (`_8 = call fn consume(move _1)`)
+  at main (use_after_move_loop.sisu:10:9)
+SIR of `main`:
+fn main(0) source 0 @7:5-7:9 {
+    let _0: ()
+    let _1: String "s" @8:9-8:10
+    let _2: Iter[int]
+    let _3: int
+    let _4: ref mut Iter[int]
+    let _5: Option[int]
+    let _6: int
+    let _7: int "i" @9:9-9:10
+    let _8: ()
+    let _9: bool "flag"
+  bb0:
+    _9 = const false
+    _1 = call intrinsic str.to_string(const "once") @8:13-8:31
+    _9 = const true
+    goto bb1
+  bb1 (unwind bb3):
+    _3 = call fn range#step() @9:14-9:22
+    _2 = call intrinsic range(const 0, const 2, copy _3) @9:14-9:22
+    goto bb4
+  bb2 (cleanup):
+    resume
+  bb3 (cleanup):
+    drop _1 if _9
+    goto bb2
+  bb4 (unwind bb5):
+    goto bb6
+  bb5 (cleanup):
+    drop _2
+    goto bb3
+  bb6 (unwind bb5):
+    _4 = ref mut _2 @9:5-9:22
+    _5 = call intrinsic Iter.next(copy _4) @9:5-9:22
+    _6 = discriminant _5 @9:5-9:22
+    switch copy _6 [0: bb8, else: bb9] @9:5-9:22
+  bb7 (unwind bb5):
+    goto bb10
+  bb8 (unwind bb5):
+    _7 = copy _5.as(0).0 @9:9-9:10
+    _9 = const false
+    _8 = call fn consume(move _1) @10:9-10:19
+    goto bb6
+  bb9 (unwind bb5):
+    goto bb7
+  bb10 (unwind bb3):
+    drop _2 @10:19-10:19
+    goto bb11
+  bb11 (unwind bb3):
+    dead _2 @10:19-10:19
+    _0 = const ()
+    goto bb12
+  bb12:
+    drop _1 if _9 @10:19-10:19
+    return
+}
+outcome: conflict reached; the run stopped at a concrete ownership conflict
+--- status 134

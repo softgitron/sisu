@@ -147,16 +147,8 @@ fn check_fn(
         has_errors,
     };
     zonk::Zonker { prog, infer: &c.infer }.body(&mut body);
-    let mut diags = std::mem::take(&mut c.diags);
-    if f.pure {
-        for (callee, span) in purity::impure_calls(prog, &body) {
-            diags.push(
-                Diagnostic::new(msg::TYPE_IMPURE_CALL, span)
-                    .with("callee", callee)
-                    .with("name", prog.def(def).name.clone()),
-            );
-        }
-    }
+    // A pure body's calls are checked on SIR (sisu-borrowck's purity pass).
+    let diags = std::mem::take(&mut c.diags);
     (body, diags, absorbed)
 }
 

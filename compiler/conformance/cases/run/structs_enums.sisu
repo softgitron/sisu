@@ -43,7 +43,7 @@ def classify(n: int) -> str:
         case _:
             return "large"
 
-def first_two(xs: list[int]) -> str:
+def first_two(xs: list[int]) -> String:
     match xs:
         case []:
             return "empty"

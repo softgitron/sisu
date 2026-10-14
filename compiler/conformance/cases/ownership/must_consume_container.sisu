@@ -1,0 +1,20 @@
+# A container of must-consume values is itself must-consume (D-064): the
+# list must be consumed, by an `own` parameter or a consuming loop, not
+# left to be dropped.
+
+@must_consume
+struct Receipt:
+    amount: int
+
+    def settled(own self) -> int:
+        return self.amount
+
+def total(receipts: list[Receipt]) -> int:
+    var t = 0
+    for r in receipts:
+        t += r.amount
+    return t
+
+def main():
+    let receipts = [Receipt(amount=1), Receipt(amount=2)]
+    print(total(receipts))

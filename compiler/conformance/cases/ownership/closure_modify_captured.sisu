@@ -1,0 +1,8 @@
+# A closure borrows what it captures for as long as the closure is used,
+# so the captured variable cannot change in between.
+
+def main():
+    var k = 10
+    let add_k = x -> x + k
+    k = 20
+    print(add_k(1))

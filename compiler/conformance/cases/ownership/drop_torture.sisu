@@ -1,0 +1,105 @@
+# The drop-order torture program under the dataflow's drop placement:
+# partial moves, moves on some paths in loops with `break` and `continue`,
+# payloads moved out of options and results, `?` after a partial move,
+# and a panic after moves, where unwinding drops exactly what is live.
+
+error Stop:
+    Early
+
+view struct Log:
+    name: str
+
+impl Drop for Log:
+    def drop(mut self):
+        print("  drop {self.name}")
+
+view struct Pair:
+    left: Log
+    right: Log
+
+def keep(own l: Log):
+    print("  keep {l.name}")
+
+def pair(a: str, b: str) -> Pair from a, b:
+    return Pair(left=Log(name=a), right=Log(name=b))
+
+def make_some() -> Log?:
+    return Some(Log(name="temporary"))
+
+def fails(fail: bool) -> int ! Stop:
+    if fail:
+        return Err(Early)
+    return Ok(1)
+
+def partial():
+    print("partial:")
+    let p = pair("p.left", "p.right")
+    keep(p.left)
+    let q = pair("q.left", "q.right")
+    keep(q.right)
+    print("  end of partial")
+
+def loop_moves():
+    print("loop_moves:")
+    let outer = Log(name="outer")
+    for i in range(4):
+        let a = Log(name="a")
+        let b = Log(name="b")
+        print("  iteration {i}")
+        if i == 0:
+            keep(a)
+            continue
+        if i == 2:
+            keep(b)
+            break
+        print("  iteration {i} ends")
+    print("  after the loop")
+
+def payloads():
+    print("payloads:")
+    let opts = [Some(Log(name="some")), None]
+    for o in own opts:
+        match o:
+            case Some(l):
+                print("  saw {l.name}")
+            case None:
+                print("  none")
+    match make_some():
+        case Some(l):
+            keep(l)
+        case None:
+            print("  none")
+    let r: Log ! Stop = Ok(Log(name="ok payload"))
+    match r:
+        case Ok(l):
+            print("  borrowed {l.name}")
+        case Err(e):
+            print("  {e}")
+    print("  end of payloads")
+
+def early(fail: bool) -> int ! Stop:
+    print("early({fail}):")
+    let p = pair("e.left", "e.right")
+    keep(p.left)
+    let n = fails(fail)?
+    print("  not failed")
+    return Ok(n)
+
+def unwinding():
+    print("unwinding:")
+    let p = pair("u.left", "u.right")
+    keep(p.right)
+    let moved = Log(name="moved")
+    keep(moved)
+    let live = Log(name="live")
+    let xs: list[int] = []
+    print(xs[3])
+
+def main():
+    partial()
+    loop_moves()
+    payloads()
+    _ = early(False)
+    _ = early(True)
+    let survivor = Log(name="main")
+    unwinding()

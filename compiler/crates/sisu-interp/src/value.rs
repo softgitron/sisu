@@ -21,6 +21,9 @@ pub struct Pointer {
     pub serial: u64,
     pub local: u32,
     pub path: Vec<Step>,
+    /// The loan this pointer was obtained through, under the ownership
+    /// monitor (0: none, a direct access to the frame's local).
+    pub tag: u32,
 }
 
 impl Pointer {
@@ -234,8 +237,9 @@ pub enum Value {
     Float(f64),
     Bool(bool),
     Char(char),
-    /// A `str`: an immutable view, shared.
-    Str(Rc<str>),
+    /// A `str`: an immutable view, shared, and under the ownership monitor
+    /// the loan of the `String` it views (0 for a literal).
+    Str(Rc<str>, u32),
     String(String),
     Path(Rc<str>),
     /// Seconds since 1970-01-01T00:00:00Z.
@@ -259,7 +263,7 @@ pub enum Value {
 
 impl Value {
     pub fn str(s: &str) -> Value {
-        Value::Str(Rc::from(s))
+        Value::Str(Rc::from(s), 0)
     }
 
     pub fn adt(ty: &str, variant: u32, fields: Vec<Value>) -> Box<Adt> {

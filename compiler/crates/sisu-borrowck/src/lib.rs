@@ -1,0 +1,272 @@
+//! The ownership checker (proposal/18-next-steps.md, Phase 3; pipeline
+//! step 6, "Checkers on SIR"). It runs on SIR after lowering, function by
+//! function, and does five things:
+//!
+//! 1. **Initialisation and moves** ([`init`]): a forward dataflow over move
+//!    paths (a local and its fields and variant payloads) decides, before
+//!    every statement, which paths may be initialised and which may be
+//!    moved out. A use of a path that may be moved is a use-after-move (or
+//!    of a partly moved value); one that was never assigned is a use before
+//!    assignment; a second assignment to a `let` declared without a value
+//!    is reported too.
+//! 2. **Drop placement** ([`elaborate`]): lowering emits every `drop`
+//!    unconditionally; the dataflow removes the drops of values that are
+//!    moved on every path, guards those of values moved on some path with
+//!    a drop flag, and splits the drop of a partly moved value into drops
+//!    of the parts that remain, in reverse field order.
+//! 3. **Loans** ([`loans`]): every `ref`, `ref mut`, `strview` and copy of a
+//!    `ref mut` creates a loan; a forward dataflow tracks which locals may
+//!    hold each loan, a backward one which locals are live, and a loan is
+//!    live where a local holding it is live (non-lexical). An access that
+//!    conflicts with a live loan (a write against any loan, a read against
+//!    a `mut` loan) is an error naming both places; so is the end of a
+//!    local's storage while a loan of it is live, a return of a loan the
+//!    signature does not allow, and storing a loan where it may not go.
+//! 4. **Must-consume** ([`consume`]): a drop of a `@must_consume` value on
+//!    a normal path is an error (D-054, D-064).
+//! 5. **Purity** ([`purity`]): a `pure` function calls only pure functions
+//!    (D-074).
+//!
+//! The checker is sound before it is complete: where it cannot tell, it
+//! rejects, and docs/architecture.md lists each known over-rejection.
+//! The dynamic ownership monitor in `sisu-interp` re-checks every run.
+
+pub mod bitset;
+mod cfg;
+mod consume;
+mod elaborate;
+pub mod explain;
+mod init;
+mod loans;
+mod names;
+mod paths;
+mod purity;
+mod types;
+
+use sisu_diag::{Diagnostic, Edit, FileId, LineCol, MsgId, SourceMap, Span, TextRange, msg};
+use sisu_sir as sir;
+
+/// A message's parameters, by name.
+pub type Params = Vec<(&'static str, Arg)>;
+
+/// A fix: its message, the message's parameters, and the edit that makes
+/// it when there is one.
+pub type FindingFix = (MsgId, Params, Option<(sir::Loc, String)>);
+
+/// A parameter of a finding's message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Arg {
+    Text(String),
+    /// The source text at a location (a temporary's expression).
+    Source(sir::Loc),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FindingLabel {
+    pub loc: Option<sir::Loc>,
+    pub msg: MsgId,
+    pub params: Vec<(&'static str, Arg)>,
+}
+
+/// One diagnostic of the checker, located by SIR positions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Finding {
+    pub msg: MsgId,
+    pub params: Vec<(&'static str, Arg)>,
+    /// The SIR function and its source index.
+    pub function: String,
+    pub source: u32,
+    pub loc: Option<sir::Loc>,
+    pub labels: Vec<FindingLabel>,
+    pub notes: Vec<(MsgId, Params)>,
+    pub fixes: Vec<FindingFix>,
+    /// The block and statement the finding is about, for the
+    /// counterexample mode's account of what a run reached.
+    pub site: Option<(u32, u32)>,
+    /// The loan a conflict is about, so that one mistake is reported once.
+    pub loan: Option<u32>,
+}
+
+impl Finding {
+    /// Whether the finding is an ownership rule, which the dynamic monitor
+    /// observes, rather than purity or a second assignment to a `let`,
+    /// which it does not.
+    pub fn is_ownership(&self) -> bool {
+        ![msg::TYPE_IMPURE_CALL, msg::TYPE_IMPURE_VALUE_CALL, msg::TYPE_IMPURE_DROP, msg::TYPE_REASSIGN_LET]
+            .contains(&self.msg)
+    }
+
+    pub fn new(msg: MsgId, f: &sir::Function, loc: Option<sir::Loc>) -> Finding {
+        Finding {
+            msg,
+            params: Vec::new(),
+            function: f.name.clone(),
+            source: f.source,
+            loc,
+            labels: Vec::new(),
+            notes: Vec::new(),
+            fixes: Vec::new(),
+            site: None,
+            loan: None,
+        }
+    }
+
+    pub fn with(mut self, name: &'static str, value: impl Into<String>) -> Finding {
+        self.params.push((name, Arg::Text(value.into())));
+        self
+    }
+
+    pub fn with_arg(mut self, name: &'static str, value: Arg) -> Finding {
+        self.params.push((name, value));
+        self
+    }
+
+    pub fn label(mut self, loc: Option<sir::Loc>, msg: MsgId, params: Vec<(&'static str, Arg)>) -> Finding {
+        self.labels.push(FindingLabel { loc, msg, params });
+        self
+    }
+
+    pub fn note(mut self, msg: MsgId, params: Vec<(&'static str, Arg)>) -> Finding {
+        self.notes.push((msg, params));
+        self
+    }
+
+    /// A fix, with the edit that makes it when there is one.
+    pub fn fix(
+        mut self,
+        msg: MsgId,
+        params: Vec<(&'static str, Arg)>,
+        edit: Option<(sir::Loc, String)>,
+    ) -> Finding {
+        self.fixes.push((msg, params, edit));
+        self
+    }
+
+    pub fn at(mut self, block: usize, stmt: usize) -> Finding {
+        self.site = Some((block as u32, stmt as u32));
+        self
+    }
+}
+
+/// Rules that a fault-injection test can switch off, to show that the
+/// cross-check with the monitor catches an unsound checker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rule {
+    Moves,
+    Conflicts,
+    Escapes,
+    MustConsume,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Options {
+    pub disabled: Vec<Rule>,
+}
+
+impl Options {
+    fn on(&self, r: Rule) -> bool {
+        !self.disabled.contains(&r)
+    }
+}
+
+/// The checked program: SIR with its drops elaborated, and the findings.
+#[derive(Clone, Debug)]
+pub struct Checked {
+    pub program: sir::Program,
+    pub findings: Vec<Finding>,
+}
+
+impl Checked {
+    pub fn has_errors(&self) -> bool {
+        !self.findings.is_empty()
+    }
+}
+
+/// Checks a lowered program and places its drops. The result's program
+/// is what runs; it is complete and valid even when there are findings,
+/// so the counterexample mode can run a rejected program.
+pub fn check(p: &sir::Program, opts: &Options) -> Checked {
+    let types = types::Types::new(p);
+    let mut findings = Vec::new();
+    let mut functions = Vec::new();
+    for f in &p.functions {
+        let mut f = f.clone();
+        let init = init::Analysis::run(&f, &types);
+        if opts.on(Rule::Moves) {
+            findings.extend(init.findings(&f, &types));
+        }
+        elaborate::elaborate(&mut f, &init, &types);
+        functions.push(f);
+    }
+    let mut program = p.clone();
+    program.functions = functions;
+    for f in &program.functions {
+        let a = loans::Analysis::run(&program, f, &types);
+        findings.extend(a.findings(&program, f, &types, opts));
+        if opts.on(Rule::MustConsume) {
+            findings.extend(consume::check(f, &types));
+        }
+    }
+    findings.extend(purity::check(&program));
+    dedup(&mut findings);
+    Checked { program, findings }
+}
+
+fn dedup(fs: &mut Vec<Finding>) {
+    type Key = (MsgId, Option<sir::Loc>, Params, String);
+    let mut seen: Vec<Key> = Vec::new();
+    fs.retain(|f| {
+        let key = (f.msg, f.loc, f.params.clone(), f.function.clone());
+        if seen.contains(&key) {
+            false
+        } else {
+            seen.push(key);
+            true
+        }
+    });
+}
+
+/// The span of a SIR location in a file of the source map.
+pub fn span_of(map: &SourceMap, file: FileId, loc: Option<sir::Loc>) -> Span {
+    let Some(l) = loc else { return Span::new(file, TextRange::empty(0)) };
+    let Some(f) = map.get(file) else { return Span::new(file, TextRange::empty(0)) };
+    let start = f.offset(LineCol { line: l.line, col: l.col });
+    let end = if l.has_end() { f.offset(LineCol { line: l.end_line, col: l.end_col }) } else { start };
+    Span::new(file, TextRange::new(start, end))
+}
+
+fn render_arg(map: &SourceMap, file: FileId, a: &Arg) -> String {
+    match a {
+        Arg::Text(t) => t.clone(),
+        Arg::Source(l) => map.slice(span_of(map, file, Some(*l))).to_string(),
+    }
+}
+
+/// A finding as a diagnostic; `files[i]` is the file of SIR source `i`.
+pub fn to_diagnostic(f: &Finding, map: &SourceMap, files: &[FileId]) -> Diagnostic {
+    let file = files.get(f.source as usize).copied().unwrap_or_default();
+    let mut d = Diagnostic::new(f.msg, span_of(map, file, f.loc));
+    for (k, v) in &f.params {
+        d = d.with(k, render_arg(map, file, v));
+    }
+    for l in f.labels.iter().filter(|l| l.loc.is_some()) {
+        let params = l.params.iter().map(|(k, v)| (*k, render_arg(map, file, v))).collect();
+        d = d.label(span_of(map, file, l.loc), l.msg, params);
+    }
+    for (m, ps) in &f.notes {
+        let params = ps.iter().map(|(k, v)| (*k, render_arg(map, file, v))).collect();
+        d = d.note(*m, params);
+    }
+    for (m, ps, edit) in &f.fixes {
+        let params = ps.iter().map(|(k, v)| (*k, render_arg(map, file, v))).collect();
+        let edits = match edit {
+            Some((loc, text)) => vec![Edit { span: span_of(map, file, Some(*loc)), text: text.clone() }],
+            None => Vec::new(),
+        };
+        d = d.fix(*m, params, edits);
+    }
+    d
+}
+
+#[cfg(test)]
+mod tests;

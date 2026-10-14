@@ -1,0 +1,7 @@
+1
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+outcome: no conflict; this run ended without an ownership conflict
+  the checker still rejects line 9 (E0405 borrow.mut-while-borrowed), which this run never reached
+a rejected statement was never reached: inconclusive, an untested path
+--- status 0

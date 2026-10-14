@@ -1,0 +1,746 @@
+//! The dynamic ownership monitor (18, Phase 3: "every referent carries
+//! shared and exclusive borrow counts; use-after-move, aliasing
+//! violations, drop-while-borrowed and a view escaping its frame are
+//! internal soundness errors"; principle 5, "the checker checks itself").
+//!
+//! Under `sisu run --monitor` (and by default in `sisu test`) every
+//! borrow statement makes a run-time loan, and every reference and `str`
+//! view carries the loan it was made by (its *tag*). A loan records the
+//! place it borrows, whether it is `mut`, and the loan of the reference it
+//! was made through (its parent), so loans form a tree per place.
+//!
+//! Every access checks two things. First, the reference it goes through
+//! must carry a loan that is still active, with every ancestor active; a
+//! use of an ended loan is the violation. Second, the access ends the
+//! loans it conflicts with: a write (an assignment, a move, a drop, a
+//! `mut` borrow) ends every active loan of an overlapping place other than
+//! the one it goes through and that loan's ancestors; a read ends the
+//! active `mut` loans of an overlapping place likewise. Ending is not yet
+//! an error: the conflict is real only if the reference is used later,
+//! which is exactly when the static checker's non-lexical rule calls the
+//! loan live. So the monitor and the checker agree on what a conflict is,
+//! and the report names both halves: the operation that ended the loan and
+//! the use that came after.
+//!
+//! A `ref mut` is two-phase like the checker's: until its first use, its
+//! loan survives reads of the place. The end of a local's storage (`dead`)
+//! and the return of its frame end every loan of it; a reference into a
+//! frame that has returned is the dangling-reference violation, and a read
+//! of a moved-from place is the use-after-move one.
+//!
+//! A violation stops the program (exit status 134) with a report on
+//! standard error: the operation, the loan, the value of the borrowed
+//! place, the counts of loans still active on it, and the SIR of the
+//! function.
+
+use crate::value::{Pointer, Step, Value};
+use crate::{Interp, Unwind, render};
+use sisu_diag::msg;
+use sisu_sir as sir;
+use std::collections::HashMap;
+
+/// Where something happened: a statement of a function.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Site {
+    pub func: Option<usize>,
+    pub bb: usize,
+    pub stmt: Option<usize>,
+    pub loc: Option<sir::Loc>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Op {
+    Read,
+    Write,
+    Move,
+    Drop,
+    Dead,
+    /// The return of the frame that owns the place.
+    Return,
+    MutBorrow,
+}
+
+impl Op {
+    fn writes(self) -> bool {
+        !matches!(self, Op::Read)
+    }
+
+    fn msg(self) -> sisu_diag::MsgId {
+        match self {
+            Op::Read => msg::MONITOR_OP_READ,
+            Op::Write => msg::MONITOR_OP_WRITE,
+            Op::Move => msg::MONITOR_OP_MOVE,
+            Op::Drop => msg::MONITOR_OP_DROP,
+            Op::Dead => msg::MONITOR_OP_DEAD,
+            Op::Return => msg::MONITOR_OP_RETURN,
+            Op::MutBorrow => msg::MONITOR_OP_BORROW_MUT,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Ending {
+    pub op: Op,
+    pub site: Site,
+    pub at: Pointer,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct DynLoan {
+    pub at: Pointer,
+    pub mutable: bool,
+    /// A two-phase `ref mut` not used yet.
+    pub reserved: bool,
+    /// The loan of the reference this one was made through (0: none).
+    pub parent: u32,
+    pub ended: Option<Box<Ending>>,
+    pub created: Site,
+    /// The function whose frame holds the borrowed place, to name it in a
+    /// report after the frame has returned.
+    pub owner: Option<usize>,
+}
+
+#[derive(Default)]
+pub(crate) struct Monitor {
+    /// Loan `t` is `loans[t - 1]`.
+    pub loans: Vec<DynLoan>,
+    /// The active loans of each (frame serial, local).
+    pub active: HashMap<(u64, u32), Vec<u32>>,
+    /// How often each source position ran a statement: (function, line,
+    /// column).
+    pub coverage: Option<HashMap<(usize, u32, u32), u32>>,
+    /// Set once a violation was reported.
+    pub violated: std::cell::Cell<bool>,
+}
+
+/// How many values one use of a reference checks for ended views.
+const VIEW_SCAN_BUDGET: u32 = 256;
+
+/// Whether two paths reach overlapping places: one is a prefix of the
+/// other, variant payloads being the value itself.
+fn overlap(a: &[Step], b: &[Step]) -> bool {
+    let strip = |p: &[Step]| p.iter().filter(|s| !matches!(s, Step::Payload(_))).copied().collect::<Vec<_>>();
+    let (a, b) = (strip(a), strip(b));
+    a.iter().zip(&b).all(|(x, y)| x == y)
+}
+
+enum Violation {
+    Ended { tag: u32, used: Site },
+    Dangling { name: String, used: Site },
+    Moved { name: String, used: Site },
+    Unconsumed { name: String, ty: String, used: Site },
+}
+
+impl Interp<'_, '_> {
+    pub(crate) fn monitoring(&self) -> bool {
+        self.monitor.is_some()
+    }
+
+    /// The statement the top frame is executing.
+    pub(crate) fn site(&self) -> Site {
+        match self.frames.last() {
+            Some(f) => Site { func: f.func, bb: f.bb, stmt: f.next.checked_sub(1), loc: f.loc },
+            None => Site::default(),
+        }
+    }
+
+    fn loan(&self, tag: u32) -> Option<&DynLoan> {
+        self.monitor.as_ref()?.loans.get(tag.checked_sub(1)? as usize)
+    }
+
+    /// The loan and its ancestors, nearest first.
+    fn chain(&self, tag: u32) -> Vec<u32> {
+        let mut out = Vec::new();
+        let mut t = tag;
+        while t != 0 && out.len() < 10_000 {
+            out.push(t);
+            t = self.loan(t).map(|l| l.parent).unwrap_or(0);
+        }
+        out
+    }
+
+    /// An access to the place at `ptr`, through the loan `ptr.tag`.
+    pub(crate) fn mon_access(&mut self, ptr: &Pointer, op: Op) -> Result<(), Unwind> {
+        if self.monitor.is_none() {
+            return Ok(());
+        }
+        let chain = self.chain(ptr.tag);
+        for t in &chain {
+            if self.loan(*t).is_some_and(|l| l.ended.is_some()) {
+                return Err(self.violation(Violation::Ended { tag: *t, used: self.site() }));
+            }
+        }
+        // The first use of a two-phase `mut` loan activates it: a write.
+        if let Some(&t) = chain.first()
+            && self.loan(t).is_some_and(|l| l.reserved)
+        {
+            if let Some(m) = &mut self.monitor
+                && let Some(l) = m.loans.get_mut(t as usize - 1)
+            {
+                l.reserved = false;
+            }
+            let at = self.loan(t).map(|l| l.at.clone());
+            if let Some(at) = at {
+                self.end_conflicting(&at, Op::MutBorrow, &chain);
+            }
+        }
+        self.end_conflicting(ptr, op, &chain);
+        Ok(())
+    }
+
+    fn end_conflicting(&mut self, ptr: &Pointer, op: Op, through: &[u32]) {
+        let site = self.site();
+        let Some(m) = &mut self.monitor else { return };
+        let Some(list) = m.active.get(&(ptr.serial, ptr.local)) else { return };
+        let mut ending = Vec::new();
+        for &t in list {
+            if through.contains(&t) {
+                continue;
+            }
+            let Some(l) = m.loans.get(t as usize - 1) else { continue };
+            if !overlap(&l.at.path, &ptr.path) {
+                continue;
+            }
+            if op.writes() || (l.mutable && !l.reserved) {
+                ending.push(t);
+            }
+        }
+        for t in &ending {
+            if let Some(l) = m.loans.get_mut(*t as usize - 1) {
+                l.ended = Some(Box::new(Ending { op, site: site.clone(), at: ptr.clone() }));
+            }
+        }
+        if let Some(list) = m.active.get_mut(&(ptr.serial, ptr.local)) {
+            list.retain(|t| !ending.contains(t));
+        }
+    }
+
+    /// A new loan of the place at `ptr`; returns its tag. A `mut` loan is
+    /// reserved (two-phase) unless `active`: a reborrow, or a borrow bound
+    /// to a name.
+    pub(crate) fn mon_borrow(&mut self, ptr: &Pointer, mutable: bool, active: bool) -> Result<u32, Unwind> {
+        if self.monitor.is_none() {
+            return Ok(0);
+        }
+        let reborrow = active;
+        let op = if mutable && reborrow { Op::MutBorrow } else { Op::Read };
+        self.mon_access(ptr, op)?;
+        let created = self.site();
+        let owner = self.frames.iter().find(|f| f.serial == ptr.serial).and_then(|f| f.func);
+        let Some(m) = &mut self.monitor else { return Ok(0) };
+        let mut at = ptr.clone();
+        at.tag = 0;
+        m.loans.push(DynLoan {
+            at,
+            mutable,
+            reserved: mutable && !reborrow,
+            parent: ptr.tag,
+            ended: None,
+            created,
+            owner,
+        });
+        let tag = m.loans.len() as u32;
+        m.active.entry((ptr.serial, ptr.local)).or_default().push(tag);
+        Ok(tag)
+    }
+
+    /// A copy of a `ref mut` is a reborrow: a new `mut` loan under the
+    /// copied reference's loan.
+    pub(crate) fn mon_copied(&mut self, v: &mut Value) -> Result<(), Unwind> {
+        if self.monitor.is_none() {
+            return Ok(());
+        }
+        if let Value::Ref(p) = v
+            && p.tag != 0
+            && self.loan(p.tag).is_some_and(|l| l.mutable)
+        {
+            let target = (**p).clone();
+            let tag = self.mon_borrow(&target, true, true)?;
+            p.tag = tag;
+        }
+        Ok(())
+    }
+
+    /// The end of a local's storage ends every loan of it.
+    pub(crate) fn mon_dead(&mut self, serial: u64, local: u32, frame: u32) {
+        self.mon_end_local(serial, local, frame, Op::Dead);
+    }
+
+    fn mon_end_local(&mut self, serial: u64, local: u32, frame: u32, op: Op) {
+        if self.monitor.is_none() {
+            return;
+        }
+        let ptr = Pointer { frame, serial, local, path: Vec::new(), tag: 0 };
+        self.end_conflicting(&ptr, op, &[]);
+    }
+
+    /// A frame that returns ends every loan of its locals.
+    pub(crate) fn mon_frame_gone(&mut self, serial: u64, frame: u32, locals: usize) {
+        if self.monitor.is_none() {
+            return;
+        }
+        for l in 0..locals as u32 {
+            if self.monitor.as_ref().is_some_and(|m| m.active.contains_key(&(serial, l))) {
+                self.mon_end_local(serial, l, frame, Op::Return);
+                if let Some(m) = &mut self.monitor {
+                    m.active.remove(&(serial, l));
+                }
+            }
+        }
+    }
+
+    /// An intrinsic uses its reference arguments: reads through shared
+    /// ones and writes through `mut` ones; it reads a `str` view's string.
+    pub(crate) fn mon_args(&mut self, vals: &[Value]) -> Result<(), Unwind> {
+        if self.monitor.is_none() {
+            return Ok(());
+        }
+        for v in vals {
+            self.mon_value_use(v, 0)?;
+        }
+        Ok(())
+    }
+
+    fn mon_value_use(&mut self, v: &Value, depth: u32) -> Result<(), Unwind> {
+        if depth > 4 {
+            return Ok(());
+        }
+        match v {
+            Value::Ref(p) => {
+                let op = if self.loan(p.tag).is_some_and(|l| l.mutable) { Op::Write } else { Op::Read };
+                self.mon_access(p, op)?;
+                // Reading a value reads the views it holds: a list of `str`
+                // whose `String` is gone is a use of ended loans.
+                let mut at = (**p).clone();
+                at.tag = 0;
+                let mut budget = VIEW_SCAN_BUDGET;
+                self.mon_held_views(self.read(&at)?, 0, &mut budget)
+            }
+            Value::Str(_, tag) if *tag != 0 => self.mon_view_use(*tag),
+            Value::Entry(e) => self.mon_access(&e.dict, Op::Write),
+            Value::Tuple(xs) => {
+                for x in xs {
+                    self.mon_value_use(x, depth + 1)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Checks that every view and reference a value holds still has an
+    /// active loan, up to `budget` values (a bound on the monitor's cost
+    /// per use; docs/architecture.md lists it among the monitor's gaps).
+    fn mon_held_views(&self, v: &Value, depth: u32, budget: &mut u32) -> Result<(), Unwind> {
+        if depth > 8 || *budget == 0 {
+            return Ok(());
+        }
+        *budget -= 1;
+        match v {
+            Value::Str(_, tag) => self.mon_view_ok(*tag),
+            Value::Ref(p) => self.mon_view_ok(p.tag),
+            Value::Tuple(xs) | Value::List(xs) => {
+                xs.iter().try_for_each(|x| self.mon_held_views(x, depth + 1, budget))
+            }
+            Value::Struct(a) | Value::Variant(a) => {
+                a.fields.iter().try_for_each(|x| self.mon_held_views(x, depth + 1, budget))
+            }
+            Value::Set(s) => s.items.iter().try_for_each(|x| self.mon_held_views(x, depth + 1, budget)),
+            Value::Dict(d) => d.entries.iter().try_for_each(|(k, x)| {
+                self.mon_held_views(k, depth + 1, budget)?;
+                self.mon_held_views(x, depth + 1, budget)
+            }),
+            _ => Ok(()),
+        }
+    }
+
+    /// A value read by an operator: through a reference, a read of what it
+    /// points to; a view, a read of its text.
+    pub(crate) fn mon_read_value(&mut self, v: &Value) -> Result<(), Unwind> {
+        if self.monitor.is_none() {
+            return Ok(());
+        }
+        match v {
+            Value::Ref(p) => {
+                self.mon_access(p, Op::Read)?;
+                let mut at = (**p).clone();
+                at.tag = 0;
+                let mut budget = VIEW_SCAN_BUDGET;
+                self.mon_held_views(self.read(&at)?, 0, &mut budget)
+            }
+            Value::Str(_, tag) if *tag != 0 => self.mon_view_use(*tag),
+            Value::Tuple(xs) => xs.iter().try_for_each(|x| self.mon_read_value(x)),
+            _ => Ok(()),
+        }
+    }
+
+    /// A value passed to a function (or called, a closure): every
+    /// reference and view it holds must still have an active loan. The
+    /// callee's accesses through them are checked as it makes them.
+    pub(crate) fn mon_passed(&self, v: &Value) -> Result<(), Unwind> {
+        if self.monitor.is_none() {
+            return Ok(());
+        }
+        let mut budget = VIEW_SCAN_BUDGET;
+        match v {
+            Value::Closure(_, env) => env.iter().try_for_each(|x| self.mon_held_views(x, 0, &mut budget)),
+            _ => self.mon_held_views(v, 0, &mut budget),
+        }
+    }
+
+    /// A use of a `str` view: a read of the string it views.
+    pub(crate) fn mon_view_use(&mut self, tag: u32) -> Result<(), Unwind> {
+        let Some(at) = self.loan(tag).map(|l| l.at.clone()) else { return Ok(()) };
+        let mut p = at;
+        p.tag = tag;
+        self.mon_access(&p, Op::Read)
+    }
+
+    /// A borrowed iterator reads its collection through its loan.
+    pub(crate) fn mon_iter_use(&mut self, base: &Pointer) -> Result<(), Unwind> {
+        if self.monitor.is_none() || base.tag == 0 {
+            return Ok(());
+        }
+        let chain = self.chain(base.tag);
+        for t in &chain {
+            if self.loan(*t).is_some_and(|l| l.ended.is_some()) {
+                return Err(self.violation(Violation::Ended { tag: *t, used: self.site() }));
+            }
+        }
+        Ok(())
+    }
+
+    /// A drop on a normal path (not unwinding) of a value holding a
+    /// must-consume value, outside the methods of that value's type, where
+    /// its values end (D-054; the checker's rule, observed).
+    pub(crate) fn mon_drop_unconsumed(&self, at: &Pointer, v: &Value) -> Result<(), Unwind> {
+        if self.monitor.is_none() {
+            return Ok(());
+        }
+        let Some(fr) = self.frames.last() else { return Ok(()) };
+        let Some(f) = fr.func.and_then(|i| self.prog.functions.get(i)) else { return Ok(()) };
+        if f.blocks.get(fr.bb).is_some_and(|b| b.cleanup) {
+            return Ok(());
+        }
+        let Some(ty) = self.unconsumed(v, 0) else { return Ok(()) };
+        if f.name.strip_prefix(&*ty).is_some_and(|rest| rest.starts_with('.')) {
+            return Ok(());
+        }
+        let name = self.pointer_label(at);
+        Err(self.violation(Violation::Unconsumed { name, ty: ty.to_string(), used: self.site() }))
+    }
+
+    /// The type of a must-consume value that `v` holds, if any.
+    fn unconsumed(&self, v: &Value, depth: u32) -> Option<std::rc::Rc<str>> {
+        if depth > 64 {
+            return None;
+        }
+        let parts: Vec<&Value> = match v {
+            Value::Struct(a) | Value::Variant(a) => {
+                let mc = match self.types.get(&*a.ty) {
+                    Some(
+                        sir::TypeDecl::Struct { must_consume, .. } | sir::TypeDecl::Enum { must_consume, .. },
+                    ) => *must_consume,
+                    None => false,
+                };
+                if mc {
+                    return Some(a.ty.clone());
+                }
+                a.fields.iter().collect()
+            }
+            Value::Tuple(xs) | Value::List(xs) => xs.iter().collect(),
+            Value::Set(s) => s.items.iter().collect(),
+            Value::Dict(d) => d.entries.iter().flat_map(|e| [&e.0, &e.1]).collect(),
+            Value::Iter(it) => match &**it {
+                crate::value::IterState::Items(xs) => xs.iter().collect(),
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        };
+        parts.into_iter().find_map(|x| self.unconsumed(x, depth + 1))
+    }
+
+    /// A use of a place that holds no value.
+    pub(crate) fn mon_moved_at(&self, p: &Pointer) -> Unwind {
+        let name = self.pointer_label(p);
+        self.violation(Violation::Moved { name, used: self.site() })
+    }
+
+    pub(crate) fn mon_dangling(&self, p: &Pointer) -> Unwind {
+        let name = format!("_{}", p.local);
+        self.violation(Violation::Dangling { name, used: self.site() })
+    }
+
+    /// Whether a `str` view's loan, and every loan above it, is active.
+    pub(crate) fn mon_view_ok(&self, tag: u32) -> Result<(), Unwind> {
+        if self.monitor.is_none() || tag == 0 {
+            return Ok(());
+        }
+        for t in self.chain(tag) {
+            if self.loan(t).is_some_and(|l| l.ended.is_some()) {
+                return Err(self.violation(Violation::Ended { tag: t, used: self.site() }));
+            }
+        }
+        Ok(())
+    }
+
+    /// Counts a statement (or terminator) at a position as reached.
+    pub(crate) fn mon_cover(&mut self, loc: Option<sir::Loc>) {
+        let Some(func) = self.frames.last().and_then(|f| f.func) else { return };
+        let Some(l) = loc else { return };
+        if let Some(m) = &mut self.monitor
+            && let Some(c) = &mut m.coverage
+        {
+            *c.entry((func, l.line, l.col)).or_default() += 1;
+        }
+    }
+
+    // ---------------------------------------------------------------- the report
+
+    /// A run-time place: the local's source name and the concrete path,
+    /// with field names where the types give them.
+    fn pointer_label(&self, p: &Pointer) -> String {
+        self.pointer_label_in(p, None)
+    }
+
+    /// As [`Self::pointer_label`], naming the local by `owner`'s
+    /// declarations when its frame has returned.
+    fn pointer_label_in(&self, p: &Pointer, owner: Option<usize>) -> String {
+        let frame = self.frames.iter().find(|fr| fr.serial == p.serial);
+        let f = frame.and_then(|fr| fr.func).or(owner);
+        let decl = f.and_then(|i| self.prog.functions.get(i)).and_then(|f| f.locals.get(p.local as usize));
+        let mut s = decl.and_then(|l| l.name.clone()).unwrap_or_else(|| format!("_{}", p.local));
+        let mut ty = decl.map(|l| l.ty.clone());
+        // A frame of the interpreter's own: drop glue holds the value it
+        // drops there and passes it to `Drop.drop` as `self`.
+        if let Some(fr) = frame.filter(|fr| fr.func.is_none())
+            && let Some(Value::Struct(a) | Value::Variant(a)) = fr.locals.get(p.local as usize)
+        {
+            s = "self".to_string();
+            ty = Some(sir::Type::Named(a.ty.to_string(), Vec::new()));
+        }
+        let mut variant: Option<u32> = None;
+        let arg = |t: &Option<sir::Type>, k: usize| match t {
+            Some(sir::Type::Named(_, args)) => args.get(k).cloned(),
+            _ => None,
+        };
+        for st in &p.path {
+            match st {
+                Step::Field(i) => {
+                    let (name, next) = self.field_label(ty.as_ref(), variant, *i);
+                    if let Some(name) = name {
+                        s.push('.');
+                        s.push_str(&name);
+                    }
+                    ty = next;
+                    variant = None;
+                }
+                Step::Payload(v) => variant = Some(*v),
+                Step::Index(i) => {
+                    s.push_str(&format!("[{i}]"));
+                    ty = arg(&ty, 0);
+                }
+                Step::DictKey(i) => {
+                    s.push_str(&format!(".keys[{i}]"));
+                    ty = arg(&ty, 0);
+                }
+                Step::DictVal(i) => {
+                    s.push_str(&format!(".values[{i}]"));
+                    ty = arg(&ty, 1);
+                }
+                Step::SetItem(i) => {
+                    s.push_str(&format!(".items[{i}]"));
+                    ty = arg(&ty, 0);
+                }
+            }
+        }
+        s
+    }
+
+    /// The name of field `i` of a value of type `ty` (of variant `variant`
+    /// for an enum), and the field's type. The payload of an option or a
+    /// result has no name: it is the value inside.
+    fn field_label(
+        &self,
+        ty: Option<&sir::Type>,
+        variant: Option<u32>,
+        i: u32,
+    ) -> (Option<String>, Option<sir::Type>) {
+        let index = Some(i.to_string());
+        match ty {
+            Some(sir::Type::Tuple(ts)) => (index, ts.get(i as usize).cloned()),
+            Some(sir::Type::Named(n, args)) => match self.prog.types.iter().find(|t| t.name() == n) {
+                Some(sir::TypeDecl::Struct { fields, .. }) => match fields.get(i as usize) {
+                    Some(fd) => (Some(fd.name.clone()), Some(fd.ty.clone())),
+                    None => (index, None),
+                },
+                Some(sir::TypeDecl::Enum { variants, .. }) => {
+                    match variant
+                        .and_then(|v| variants.get(v as usize))
+                        .and_then(|v| v.fields.get(i as usize))
+                    {
+                        Some((name, t)) => (name.clone().or(index), Some(t.clone())),
+                        None => (index, None),
+                    }
+                }
+                None if variant.is_some() && matches!(n.as_str(), "Option" | "Result") => {
+                    let k = if n == "Result" && variant == Some(1) { 1 } else { 0 };
+                    (None, args.get(k).cloned())
+                }
+                None => (index, None),
+            },
+            _ => (index, None),
+        }
+    }
+
+    fn site_location(&self, s: &Site) -> String {
+        let f = s.func.and_then(|i| self.prog.functions.get(i));
+        let file =
+            f.and_then(|f| self.prog.sources.get(f.source as usize)).map(String::as_str).unwrap_or("?");
+        match s.loc {
+            Some(l) => format!("{file}:{}:{}", l.line, l.col),
+            None => file.to_string(),
+        }
+    }
+
+    fn site_stmt(&self, s: &Site) -> String {
+        let Some(f) = s.func.and_then(|i| self.prog.functions.get(i)) else { return String::new() };
+        let Some(b) = f.blocks.get(s.bb) else { return String::new() };
+        match s.stmt.and_then(|i| b.stmts.get(i)) {
+            Some(st) => {
+                let mut t = sir::write::stmt(st);
+                if let Some(i) = t.find(" @") {
+                    t.truncate(i);
+                }
+                t
+            }
+            None => sir::write::term(&b.term),
+        }
+    }
+
+    fn fn_name(&self, s: &Site) -> String {
+        s.func.and_then(|i| self.prog.functions.get(i)).map(|f| f.name.clone()).unwrap_or_default()
+    }
+
+    fn violation(&self, v: Violation) -> Unwind {
+        let mut lines: Vec<String> = Vec::new();
+        let used = match &v {
+            Violation::Ended { used, .. }
+            | Violation::Dangling { used, .. }
+            | Violation::Moved { used, .. }
+            | Violation::Unconsumed { used, .. } => used.clone(),
+        };
+        let what = match &v {
+            Violation::Ended { .. } => render(msg::MONITOR_USE_ENDED_LOAN, &[]),
+            Violation::Dangling { name, .. } => render(msg::MONITOR_USE_DANGLING, &[("name", name.clone())]),
+            Violation::Moved { name, .. } => render(msg::MONITOR_USE_MOVED, &[("name", name.clone())]),
+            Violation::Unconsumed { name, ty, .. } => {
+                render(msg::MONITOR_UNCONSUMED, &[("name", name.clone()), ("ty", ty.clone())])
+            }
+        };
+        lines.push(render(msg::MONITOR_HEADER, &[("what", what)]));
+        if let Violation::Ended { tag, .. } = &v
+            && let Some(l) = self.loan(*tag).cloned()
+        {
+            let kind = render(if l.mutable { msg::MONITOR_KIND_MUT } else { msg::MONITOR_KIND_SHARED }, &[]);
+            lines.push(format!(
+                "  {}",
+                render(
+                    msg::MONITOR_LOAN,
+                    &[
+                        ("kind", kind),
+                        ("place", self.pointer_label_in(&l.at, l.owner)),
+                        ("function", self.fn_name(&l.created)),
+                        ("location", self.site_location(&l.created)),
+                        ("stmt", self.site_stmt(&l.created)),
+                    ],
+                )
+            ));
+            if let Some(e) = &l.ended {
+                lines.push(format!(
+                    "  {}",
+                    render(
+                        msg::MONITOR_ENDED_BY,
+                        &[
+                            ("operation", render(e.op.msg(), &[])),
+                            (
+                                "place",
+                                self.pointer_label_in(&e.at, l.owner.filter(|_| e.at.serial == l.at.serial))
+                            ),
+                            ("location", self.site_location(&e.site)),
+                            ("stmt", self.site_stmt(&e.site)),
+                        ],
+                    )
+                ));
+            }
+            lines.push(format!(
+                "  {}",
+                render(
+                    msg::MONITOR_USED_AT,
+                    &[("location", self.site_location(&used)), ("stmt", self.site_stmt(&used))],
+                )
+            ));
+            let mut at = l.at.clone();
+            at.tag = 0;
+            if let Ok(val) = self.read(&at) {
+                let shown =
+                    if val.is_moved() { render(msg::MONITOR_NO_VALUE, &[]) } else { self.debug_string(val) };
+                lines.push(format!(
+                    "  {}",
+                    render(
+                        msg::MONITOR_VALUE,
+                        &[("place", self.pointer_label_in(&l.at, l.owner)), ("value", shown)]
+                    )
+                ));
+            }
+            let (mut shared, mut exclusive) = (0, 0);
+            if let Some(m) = &self.monitor
+                && let Some(list) = m.active.get(&(l.at.serial, l.at.local))
+            {
+                for t in list {
+                    match m.loans.get(*t as usize - 1) {
+                        Some(x) if x.mutable => exclusive += 1,
+                        Some(_) => shared += 1,
+                        None => {}
+                    }
+                }
+            }
+            lines.push(format!(
+                "  {}",
+                render(
+                    msg::MONITOR_COUNTS,
+                    &[
+                        ("place", self.pointer_label_in(&l.at, l.owner)),
+                        ("shared", shared.to_string()),
+                        ("exclusive", exclusive.to_string()),
+                    ],
+                )
+            ));
+        } else {
+            lines.push(format!(
+                "  {}",
+                render(
+                    msg::MONITOR_USED_AT,
+                    &[("location", self.site_location(&used)), ("stmt", self.site_stmt(&used))],
+                )
+            ));
+        }
+        // The stack, innermost first.
+        for fr in self.frames.iter().rev() {
+            let Some(f) = fr.func.and_then(|i| self.prog.functions.get(i)) else { continue };
+            let s = Site { func: fr.func, bb: fr.bb, stmt: None, loc: fr.loc };
+            lines.push(format!(
+                "  {}",
+                render(msg::RUN_FRAME, &[("function", f.name.clone()), ("location", self.site_location(&s))])
+            ));
+        }
+        if let Some(f) = used.func.and_then(|i| self.prog.functions.get(i)) {
+            lines.push(render(msg::MONITOR_SIR_HEADER, &[("function", f.name.clone())]));
+            lines.push(sir::write::function(f).trim_end().to_string());
+        }
+        if let Some(m) = &self.monitor {
+            m.violated.set(true);
+        }
+        Unwind::Abort(lines.join("\n"))
+    }
+}

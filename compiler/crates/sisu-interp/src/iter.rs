@@ -59,6 +59,7 @@ impl Interp<'_, '_> {
                 Ok(Some(Value::Int(v)))
             }
             IterState::ListRef { base, idx } => {
+                self.mon_iter_use(base)?;
                 let len = match self.read(base)? {
                     Value::List(xs) => xs.len(),
                     other => return Err(ice(format!("list iterator over {other:?}"))),
@@ -71,6 +72,7 @@ impl Interp<'_, '_> {
                 Ok(Some(Value::Ref(Box::new(p))))
             }
             IterState::SetRef { base, idx } => {
+                self.mon_iter_use(base)?;
                 let len = match self.read(base)? {
                     Value::Set(s) => s.items.len(),
                     other => return Err(ice(format!("set iterator over {other:?}"))),
@@ -83,6 +85,7 @@ impl Interp<'_, '_> {
                 Ok(Some(Value::Ref(Box::new(p))))
             }
             IterState::DictRef { base, idx, part } => {
+                self.mon_iter_use(base)?;
                 let len = match self.read(base)? {
                     Value::Dict(d) => d.entries.len(),
                     other => return Err(ice(format!("dict iterator over {other:?}"))),

@@ -73,18 +73,22 @@ fn drops_run_in_reverse_declaration_order() {
 }
 
 #[test]
-fn a_moved_local_gets_a_drop_flag() {
+fn drops_stay_unconditional_until_elaborated() {
+    // Lowering drops every local at the end of its scope, moved or not;
+    // the ownership checker's drop elaboration (sisu-borrowck) removes or
+    // flags the drops of moved values.
     let p = lower_src(
         "def take(own s: String):\n    pass\ndef f(c: bool):\n    let s = String.new()\n    if c:\n        take(s)\n",
     );
     valid(&p);
     let f = function(&p, "f");
+    assert_eq!(drops(f), vec![Some("s".into())], "{}", sir::write(&p));
     let flagged = f
         .blocks
         .iter()
         .flat_map(|b| &b.stmts)
         .any(|s| matches!(&s.kind, sir::StatementKind::Drop { flag: Some(_), .. }));
-    assert!(flagged, "{}", sir::write(&p));
+    assert!(!flagged, "{}", sir::write(&p));
 }
 
 #[test]

@@ -1,4 +1,4 @@
-struct Guard:
+view struct Guard:
     name: str
 
 impl Drop for Guard:

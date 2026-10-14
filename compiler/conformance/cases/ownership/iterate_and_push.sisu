@@ -1,0 +1,9 @@
+# A `for` loop borrows the list it walks for the whole loop, so the body
+# cannot change the list.
+
+def main():
+    var xs = [1, 2, 3]
+    for x in xs:
+        if x == 2:
+            xs.push(4)
+    print(xs)

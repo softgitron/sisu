@@ -1,0 +1,33 @@
+# The three iteration modes (04, "Iterators and projections"): borrow,
+# `mut`, and `own`, which consumes the collection.
+
+view struct Log:
+    name: str
+
+impl Drop for Log:
+    def drop(mut self):
+        print("  drop {self.name}")
+
+def keep(own l: Log):
+    print("  keep {l.name}")
+
+def main():
+    var nums = [1, 2, 3]
+    for n in mut nums:
+        n *= 10
+    var sum = 0
+    for n in nums:
+        sum += n
+    print(sum)
+    print("own iteration:")
+    let logs = [Log(name="a"), Log(name="b"), Log(name="c")]
+    for l in own logs:
+        if l.name == "b":
+            keep(l)
+        else:
+            print("  saw {l.name}")
+    print("borrowed iteration:")
+    let more = [Log(name="x"), Log(name="y")]
+    for l in more:
+        print("  saw {l.name}")
+    print("end of main")

@@ -1,0 +1,7 @@
+# An enum has no view form, so it cannot hold a borrow.
+
+error ParseError:
+    Unexpected(found: str)
+
+def main():
+    print("ok")

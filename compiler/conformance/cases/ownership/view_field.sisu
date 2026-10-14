@@ -1,0 +1,9 @@
+# Views are infectious upwards (04): a struct holding a `str` must be a
+# `view struct` or hold a `String`.
+
+struct Label:
+    text: str
+
+def main():
+    let l = Label(text="x")
+    print(l.text)

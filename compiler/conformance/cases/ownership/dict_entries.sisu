@@ -1,0 +1,22 @@
+# A dict entry borrows its dict with `mut` until the value it returns is
+# last used: the word count of proposal/examples/wordcount.sisu.
+
+def count(text: str) -> dict[String, int]:
+    var counts: dict[String, int] = {}
+    for word in text.split_whitespace():
+        counts.entry(word.to_lowercase()).or_insert(0) += 1
+    return counts
+
+def main():
+    let text = String.new("the cat the dog THE end")
+    let counts = count(text)
+    var ranked = [(w.copy(), n) for w, n in counts]
+    ranked.sort_by((a, b) -> b.1.cmp(a.1))
+    for w, n in ranked.iter().take(2):
+        print("{n} {w}")
+    var d: dict[str, int] = {}
+    d.entry("k").or_insert(1) += 41
+    let v = ref d["k"]
+    print(v)
+    d["j"] = 0
+    print(d)

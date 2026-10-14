@@ -5,113 +5,126 @@ entry main
 
 error E { Bad }
 
-fn inner(1) source 0 {
+intrinsic error.trace_push pure
+intrinsic print
+
+fn inner(1) source 0 @4:5-4:10 {
     let _0: Result[int, {E}]
-    let _1: bool "ok"
+    let _1: bool "ok" @4:11-4:19
     let _2: {E}
   bb0:
-    switch copy _1 [0: bb2, else: bb3] @5:8
+    switch copy _1 [0: bb2, else: bb3] @5:8-5:10
   bb1:
-    _2 = variant E::Bad() @7:16
-    _0 = variant Result::Err(move _2) @7:12
-    return @7:5
+    _2 = variant E::Bad() @7:16-7:19
+    _0 = variant Result::Err(move _2) @7:12-7:20
+    return @7:5-7:20
   bb2:
     goto bb1
   bb3:
-    _0 = variant Result::Ok(const 1) @6:16
-    return @6:9
+    _0 = variant Result::Ok(const 1) @6:16-6:21
+    return @6:9-6:21
 }
 
-fn outer(0) source 0 {
+fn outer(0) source 0 @9:5-9:10 {
     let _0: Result[int, {E}]
-    let _1: int "v"
+    let _1: int "v" @10:9-10:10
     let _2: Result[int, {E}]
     let _3: int
     let _4: {E}
     let _5: ref mut {E}
     let _6: ()
     let _7: int
+    let _8: bool "flag"
   bb0:
-    _2 = call fn inner(const false) @10:13
+    _8 = const false
+    _2 = call fn inner(const false) @10:13-10:25
+    _8 = const true
     goto bb1
   bb1 (unwind bb3):
-    _3 = discriminant _2 @10:13
-    switch copy _3 [0: bb4, else: bb5] @10:13
+    _3 = discriminant _2 @10:13-10:26
+    switch copy _3 [0: bb4, else: bb5] @10:13-10:26
   bb2 (cleanup):
     resume
   bb3 (cleanup):
-    drop _2
+    drop _2.as(1).0 if _8
     goto bb2
   bb4 (unwind bb3):
-    _1 = copy _2.as(0).0 @10:13
+    _1 = copy _2.as(0).0 @10:13-10:26
     goto bb7
   bb5 (unwind bb3):
-    _4 = move _2.as(1).0 @10:13
-    _5 = ref mut _4 @10:13
-    _6 = call intrinsic error.trace_push(copy _5, const "try_operator.sisu:10:13") @10:13
-    _0 = variant Result::Err(move _4) @10:13
+    _8 = const false
+    _4 = move _2.as(1).0 @10:13-10:26
+    _5 = ref mut _4 @10:13-10:26
+    _6 = call intrinsic error.trace_push(copy _5, const "try_operator.sisu:10:13") @10:13-10:26
+    _0 = variant Result::Err(move _4) @10:13-10:26
     goto bb6
   bb6:
-    drop _2
-    return @10:13
+    _8 = const false
+    return @10:13-10:26
   bb7:
-    drop _2
+    _8 = const false
     goto bb8
   bb8:
-    _7 = add copy _1, const 1 @11:15
-    _0 = variant Result::Ok(copy _7) @11:12
-    return @11:5
+    dead _4 @10:26-10:26
+    _7 = add copy _1, const 1 @11:15-11:20
+    _0 = variant Result::Ok(copy _7) @11:12-11:21
+    return @11:5-11:21
 }
 
-fn main(0) source 0 {
+fn main(0) source 0 @13:5-13:9 {
     let _0: ()
     let _1: Result[int, {E}]
     let _2: int
-    let _3: int "v"
+    let _3: int "v" @15:17-15:18
     let _4: ()
     let _5: int
-    let _6: {E} "e"
+    let _6: {E} "e" @17:18-17:19
     let _7: ()
     let _8: ref {E}
+    let _9: bool "flag"
   bb0:
-    _1 = call fn outer() @14:11
+    _9 = const false
+    _1 = call fn outer() @14:11-14:18
+    _9 = const true
     goto bb1
   bb1 (unwind bb3):
-    _2 = discriminant _1 @15:14
-    switch copy _2 [0: bb6, else: bb5] @15:14
+    _2 = discriminant _1 @15:14-15:19
+    switch copy _2 [0: bb6, else: bb5] @15:14-15:19
   bb2 (cleanup):
     resume
   bb3 (cleanup):
-    drop _1
+    drop _1.as(1).0 if _9
     goto bb2
   bb4 (unwind bb3):
     goto bb13
   bb5 (unwind bb3):
-    _5 = discriminant _1 @17:14
-    switch copy _5 [1: bb8, else: bb7] @17:14
+    _5 = discriminant _1 @17:14-17:20
+    switch copy _5 [1: bb8, else: bb7] @17:14-17:20
   bb6 (unwind bb3):
-    _3 = copy _1.as(0).0 @15:17
-    _4 = call intrinsic print(copy _3) @16:13
+    _3 = copy _1.as(0).0 @15:17-15:18
+    _4 = call intrinsic print(copy _3) @16:13-16:21
     goto bb4
   bb7 (unwind bb3):
-    unreachable @14:5
+    unreachable @14:5-18:21
   bb8 (unwind bb3):
-    _6 = move _1.as(1).0 @17:18
+    _9 = const false
+    _6 = move _1.as(1).0 @17:18-17:19
     goto bb9
   bb9 (unwind bb10):
-    _8 = ref _6
-    _7 = call intrinsic print(copy _8) @18:13
+    _8 = ref _6 @18:19-18:20
+    _7 = call intrinsic print(copy _8) @18:13-18:21
     goto bb11
   bb10 (cleanup):
     drop _6
     goto bb3
   bb11 (unwind bb3):
-    drop _6
+    drop _6 @18:21-18:21
     goto bb12
   bb12 (unwind bb3):
+    dead _6 @18:21-18:21
     goto bb4
   bb13:
-    drop _1
+    _9 = const false
     goto bb14
   bb14:
     _0 = const ()

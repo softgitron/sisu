@@ -1,0 +1,16 @@
+# A field cannot be moved out of a value whose type implements `Drop`:
+# its `Drop` needs the whole value.
+
+struct File:
+    name: String
+
+impl Drop for File:
+    def drop(mut self):
+        print("closing {self.name}")
+
+def keep(own s: String):
+    print(s)
+
+def main():
+    let f = File(name="a.txt".to_string())
+    keep(f.name)

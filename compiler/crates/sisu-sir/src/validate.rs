@@ -1,7 +1,7 @@
 //! Structural checks on SIR: every reference resolves, unwind edges lead
-//! to cleanup blocks, `resume` appears only in cleanup, and a `drop`
-//! outside cleanup ends its block (the lowering invariant that makes each
-//! block's unwind edge exact).
+//! to cleanup blocks, `resume` appears only in cleanup, a `drop` outside
+//! cleanup ends its block (the lowering invariant that makes each block's
+//! unwind edge exact), and the `from` arguments of a function exist.
 
 use crate::*;
 
@@ -24,6 +24,12 @@ pub fn validate(p: &Program) -> Vec<String> {
         }
         if f.source as usize >= p.sources.len() && !p.sources.is_empty() {
             bad(format!("source {} does not exist", f.source));
+        }
+        if let Some(a) = f.from.iter().find(|a| **a >= f.param_count) {
+            bad(format!("`from` names argument {a}, but the function has {} parameters", f.param_count));
+        }
+        if let Some(a) = f.inner.iter().find(|a| **a >= f.param_count) {
+            bad(format!("`inner` names argument {a}, but the function has {} parameters", f.param_count));
         }
         let nb = f.blocks.len() as u32;
         let nl = f.locals.len() as u32;
@@ -85,6 +91,14 @@ pub fn validate(p: &Program) -> Vec<String> {
                         }
                         if !b.cleanup && !last {
                             bad(format!("bb{bi}: a drop must end its block"));
+                        }
+                    }
+                    StatementKind::StorageDead(l) => {
+                        if l.0 >= nl {
+                            bad(format!("local _{} does not exist", l.0));
+                        }
+                        if l.0 == 0 || l.0 <= f.param_count {
+                            bad(format!("bb{bi}: the storage of _{} cannot end inside the function", l.0));
                         }
                     }
                 }

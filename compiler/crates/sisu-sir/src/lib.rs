@@ -15,10 +15,15 @@
 //! grammar is in docs/architecture.md. Reading what was written gives the
 //! same program, which a test checks for every conformance case.
 //!
-//! Lowering invariant (checked by [`validate()`]): a statement that
-//! initialises a value needing drop, or drops one, is the last statement
-//! of its block, so a block's unwind edge is exact for every statement in
-//! it.
+//! Lowering invariant (checked by [`validate()`]): a `drop` outside a
+//! cleanup block is the last statement of its block, so a block's unwind
+//! edge is exact for every statement in it.
+//!
+//! Lowering emits every `drop` unconditionally; the ownership checker
+//! (`sisu-borrowck`) runs the initialisation dataflow, removes the drops of
+//! values that were moved, guards the drops of values that may have been
+//! moved with a drop flag, and splits the drop of a partly moved value
+//! into drops of the parts that remain.
 
 pub mod read;
 pub mod validate;
@@ -36,9 +41,31 @@ pub struct Program {
     /// The entry function and whether it takes `System`.
     pub entry: Option<Entry>,
     pub types: Vec<TypeDecl>,
+    /// The host intrinsics the functions call, with the facts the SIR
+    /// checkers need about each (purity, which arguments the result
+    /// borrows from).
+    pub intrinsics: Vec<IntrinsicDecl>,
     pub functions: Vec<Function>,
     /// Test name and the function that runs it.
     pub tests: Vec<(String, String)>,
+}
+
+/// What the checkers know about a host intrinsic: its contract in the
+/// prelude, reduced to the facts that matter on SIR.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IntrinsicDecl {
+    pub name: String,
+    pub pure: bool,
+    /// Arguments (0-based) the result may borrow from, deeply: the result
+    /// may hold the argument's own loan and every loan it reaches.
+    pub from: Vec<u32>,
+    /// Arguments whose referent's loans the result may hold, but not the
+    /// loan of the reference itself (`Iter.next(mut self) -> T?` yields
+    /// what the iterator borrows, not the iterator).
+    pub inner: Vec<u32>,
+    /// Arguments taken with `own`: the only ones the intrinsic may keep in
+    /// what its `mut` arguments point to (`list.push(mut self, own x)`).
+    pub own: Vec<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -50,8 +77,24 @@ pub struct Entry {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TypeDecl {
-    Struct { name: String, fields: Vec<FieldDecl>, drop: Option<String> },
-    Enum { name: String, variants: Vec<VariantDecl>, drop: Option<String>, error: bool, open: bool },
+    Struct {
+        name: String,
+        fields: Vec<FieldDecl>,
+        drop: Option<String>,
+        /// A `view struct`: it may hold references (04, "Views").
+        view: bool,
+        /// `@must_consume` (D-054): a value must be passed to an `own`
+        /// parameter, never dropped on a normal path.
+        must_consume: bool,
+    },
+    Enum {
+        name: String,
+        variants: Vec<VariantDecl>,
+        drop: Option<String>,
+        error: bool,
+        open: bool,
+        must_consume: bool,
+    },
 }
 
 impl TypeDecl {
@@ -90,7 +133,8 @@ pub enum Type {
     Named(String, Vec<Type>),
     Tuple(Vec<Type>),
     ErrSet(Vec<String>),
-    Fn(Vec<Type>, Box<Type>),
+    /// Parameters, result, and whether the function is `pure`.
+    Fn(Vec<Type>, Box<Type>, bool),
     Ref(Box<Type>, bool),
 }
 
@@ -103,8 +147,19 @@ pub struct LocalId(pub u32);
 #[derive(Clone, Debug, PartialEq)]
 pub struct LocalDecl {
     pub ty: Type,
-    /// The source name, for debugging and for the SIR dump.
+    /// The source name, for debugging, diagnostics and the SIR dump.
     pub name: Option<String>,
+    /// Where the binding is declared, for diagnostics.
+    pub loc: Option<Loc>,
+    /// A `let` declared without a value: it may be assigned once on each
+    /// path (the checker reports a second assignment).
+    pub once: bool,
+}
+
+impl LocalDecl {
+    pub fn new(ty: Type, name: Option<String>) -> LocalDecl {
+        LocalDecl { ty, name, loc: None, once: false }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,8 +179,23 @@ pub struct Function {
     pub name: String,
     pub kind: FnKind,
     pub param_count: u32,
+    /// Declared `pure` (D-074), or a closure whose body is pure.
+    pub pure: bool,
+    /// The arguments (0-based; a closure's environment is argument 0) the
+    /// result may borrow from: the `from` clause or the elision rules
+    /// (04, "Borrowing rules in detail"), plus every owned parameter that
+    /// can hold a loan. Empty when the result cannot hold a loan.
+    pub from: Vec<u32>,
+    /// Borrowed arguments whose values' loans the result may hold, but not
+    /// the loan of the argument itself: the result cannot point into the
+    /// argument's own storage (a `str` taken from a `list[str]` views the
+    /// text the list's elements view, not the list).
+    pub inner: Vec<u32>,
     pub locals: Vec<LocalDecl>,
     pub blocks: Vec<BasicBlock>,
+    /// Where the function is declared (its name), for diagnostics about it
+    /// as a whole (a `pure` function calling an impure one).
+    pub loc: Option<Loc>,
     /// Index into `Program::sources` for statement locations.
     pub source: u32,
 }
@@ -145,11 +215,24 @@ pub struct BasicBlock {
     pub loc: Option<Loc>,
 }
 
-/// A 1-based source position.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// A 1-based source range: the start, and the end when it is known
+/// (`end_line == 0` means a position only).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Loc {
     pub line: u32,
     pub col: u32,
+    pub end_line: u32,
+    pub end_col: u32,
+}
+
+impl Loc {
+    pub fn point(line: u32, col: u32) -> Loc {
+        Loc { line, col, end_line: 0, end_col: 0 }
+    }
+
+    pub fn has_end(&self) -> bool {
+        self.end_line != 0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -167,11 +250,17 @@ pub enum StatementKind {
         args: Vec<Operand>,
     },
     /// Runs the value's drop glue, if `flag` (when given) is true; the
-    /// place is left uninitialised.
+    /// place is left uninitialised. Dropping the payload of a variant
+    /// (`drop _3.as(0).0`) when the value holds another variant drops
+    /// nothing.
     Drop {
         place: Place,
         flag: Option<LocalId>,
     },
+    /// The local's storage ends (`dead _5`): it holds no value from here,
+    /// and a reference to it must not be used again. Lowering emits it at
+    /// the end of the scope of every local that is borrowed somewhere.
+    StorageDead(LocalId),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -382,6 +471,10 @@ impl Program {
 
     pub fn type_decl(&self, name: &str) -> Option<&TypeDecl> {
         self.types.iter().find(|t| t.name() == name)
+    }
+
+    pub fn intrinsic(&self, name: &str) -> Option<&IntrinsicDecl> {
+        self.intrinsics.iter().find(|i| i.name == name)
     }
 }
 

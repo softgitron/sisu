@@ -1,0 +1,9 @@
+# A temporary lives until the end of its statement, so a borrow of it
+# cannot be used afterwards.
+
+def make() -> list[int]:
+    return [1, 2, 3]
+
+def main():
+    let first = make().first()
+    print(first ?? 0)

@@ -1,0 +1,8 @@
+# With two borrowed parameters and no `self`, a returned borrow must say
+# where it comes from.
+
+def longer(a: str, b: str) -> str:
+    return if len(a) >= len(b): a else: b
+
+def main():
+    print(longer("a", "bb"))

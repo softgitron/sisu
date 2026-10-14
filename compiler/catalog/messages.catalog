@@ -7,8 +7,9 @@
 #   CODE  KIND  IDENTIFIER  TEMPLATE
 #
 # Codes are stable and never reused. Ranges: E00xx lexer, E01xx parser,
-# E02xx names and declarations, E03xx types, E05xx lowering, E09xx stage-0
-# limits and internal errors, W0xxx warnings, R0xxx run time, D0xxx driver.
+# E02xx names and declarations, E03xx types, E04xx ownership, E05xx
+# lowering, E09xx stage-0 limits and internal errors, W0xxx warnings, R0xxx
+# run time, D0xxx driver.
 
 # ---------------------------------------------------------------- lexer
 E0001 error   lex.tab-in-indentation      a tab in indentation; Sisu indents with spaces only
@@ -182,6 +183,8 @@ E0388 error   type.rest-outside-arguments  `..` skips the remaining fields and a
 E0389 error   type.no-self                `self` exists only inside a method
 E0390 error   type.not-a-struct-pattern   `{name}` cannot be matched with fields
 E0391 error   type.const-pattern          a constant cannot be used as a pattern yet; compare with `==` in a guard
+E0392 error   type.impure-value-call      `{name}` is pure, so it cannot call a function value whose type is not `pure`
+E0393 error   type.impure-drop            dropping `{value}` here runs the `Drop` of `{ty}`, which is not pure, so the pure function `{name}` cannot do it
 -     label   type.expected-because       expected because of this
 -     label   type.found-here             this is `{ty}`
 -     note    type.missing-patterns       add an arm for {missing}, or a `case _` arm
@@ -194,6 +197,58 @@ E0391 error   type.const-pattern          a constant cannot be used as a pattern
 -     fix     type.add-mut                write `mut` before the argument
 -     fix     type.remove-mut             remove `mut`
 -     help    type.truthiness             write the test explicitly, as in `not xs.is_empty()` or `x != 0`
+
+# ---------------------------------------------------------------- ownership
+# The signature rules (E0411-E0415) are the resolver's; the rest are the
+# ownership checker's (sisu-borrowck), which runs on SIR.
+E0400 error   borrow.use-after-move       `{name}` was moved on line {line} and cannot be used afterwards
+E0401 error   borrow.use-after-partial-move  `{name}` cannot be used as a whole, because `{part}` was moved out of it on line {line}
+E0402 error   borrow.modify-while-borrowed  `{name}` is borrowed on line {line} and cannot be modified until that borrow ends on line {end}
+E0403 error   borrow.use-while-mut-borrowed  `{name}` is borrowed with `mut` on line {line} and cannot be used until that borrow ends on line {end}
+E0404 error   borrow.move-while-borrowed  `{name}` is borrowed on line {line} and cannot be moved until that borrow ends on line {end}
+E0405 error   borrow.mut-while-borrowed   `{name}` is already borrowed on line {line}, so it cannot be borrowed with `mut` until that borrow ends on line {end}
+E0406 error   borrow.does-not-live-long-enough  `{name}` does not live long enough: it is borrowed on line {line}, and the borrow is still used on line {end}, after `{name}` is gone
+E0407 error   borrow.return-local         this returns a borrow of `{name}`, which belongs to `{function}` and is gone when it returns
+E0408 error   borrow.return-not-from      this returns a borrow of the parameter `{param}`, which is not in the `from` clause of `{function}`
+E0409 error   borrow.store-in-plain-type  `{ty}` cannot hold this value, because it borrows `{name}`; only a `view struct` holds borrows
+E0410 error   borrow.store-into-caller    this value borrows `{name}`, so it cannot be stored in `{param}`, which belongs to the caller of `{function}`
+E0411 error   borrow.view-field-in-plain-struct  `{ty}` holds `{field}: {fty}`, which borrows; only a `view struct` may hold a borrow
+E0412 error   borrow.view-in-enum         `{ty}` cannot hold `{fty}`, which borrows; an enum has no view form, so store an owned value such as `String`
+E0413 error   borrow.from-required        `{name}` returns `{ret}`, which borrows, and has more than one borrowed parameter ({params}); name the ones it borrows from with `from`
+E0414 error   borrow.from-not-a-parameter  `{name}` in the `from` clause is not a borrowed parameter of `{function}`
+E0415 error   borrow.from-without-borrow  `{function}` returns `{ty}`, which does not borrow, so it takes no `from` clause
+E0416 error   borrow.move-out-of-drop     cannot move `{part}` out of `{name}`, because `{ty}` implements `Drop`, which needs the whole value
+E0417 error   borrow.must-consume         `{name}` is never consumed: a `{ty}` must be passed to an `own` parameter before it goes out of scope
+E0418 error   borrow.must-consume-exit    this leaves the scope with `{name}` unconsumed: a `{ty}` must be passed to an `own` parameter first
+E0419 error   borrow.move-out-of-place    cannot move out of `{name}` through a reference or an index; copy it with `.copy()`
+E0420 error   borrow.must-consume-intrinsic  `{callee}` may drop values that `{name}` holds, and a `{ty}` is must-consume: its values must be passed to an `own` parameter
+-     label   borrow.moved-here           `{name}` is moved here
+-     label   borrow.moved-in-loop        `{name}` is moved here, in an earlier iteration of the loop
+-     label   borrow.borrowed-by          borrowed here by `{borrower}`
+-     label   borrow.borrowed-here        borrowed here
+-     label   borrow.later-used           the borrow is still used here
+-     label   borrow.declared-here        `{name}` is declared here
+-     label   borrow.gone-here            `{name}` is gone here
+-     label   borrow.assigned-here        `{name}` is assigned here first
+-     note    borrow.move-after           move this after line {end}, where the borrow ends, or work on a copy made with `.copy()`
+-     note    borrow.copy-before-move     copy it with `.copy()` before it is moved, or move it later
+-     note    borrow.use-own-closure      a closure that is stored or returned must own what it captures: write it as an `own` closure
+-     note    borrow.return-owned         return an owned value instead, such as a copy made with `.copy()`
+-     note    borrow.unvisited-rest       the loop that consumes `{name}` has not visited every element yet; finish the loop first, or return what is left
+-     note    borrow.declare-outside      declare `{name}` where it lives as long as the borrow is used, outside the block or loop it is in now
+-     note    borrow.bind-temporary       a temporary lives until the end of its statement; bind it with `let` first so it lives as long as the borrow
+-     label   borrow.borrowed-param       `{name}` is a borrowed parameter
+-     label   borrow.not-borrowed-param   `{name}` lends nothing: it is passed with `own`, or its value is `Copy` and cannot borrow
+-     label   borrow.no-such-param        `{function}` has no parameter `{name}`
+-     label   borrow.result-cannot-borrow  `{ty}` cannot hold a borrow
+-     label   borrow.type-declared-here   `{ty}` is declared here
+-     label   borrow.drop-impl-here       `{ty}` implements `Drop` here
+-     label   borrow.assigned-in-loop     `{name}` is assigned here, in an earlier iteration of the loop
+-     label   borrow.made-here            the value is made here
+-     label   type.declared-pure-here     `{name}` is declared `pure` here
+-     fix     borrow.declare-view         declare it `view struct {ty}`
+-     fix     borrow.remove-from          remove the `from` clause
+-     fix     borrow.add-from             name `{param}` in the `from` clause
 
 # ---------------------------------------------------------------- lowering and SIR
 E0500 error   sir.parse                   SIR: {detail}
@@ -249,10 +304,43 @@ R0039 runtime run.trace-line              at {location}
 R0040 runtime run.no-entry                the program has no `main` function
 R0041 runtime run.trace-header            error return trace:
 
+# The dynamic ownership monitor (`sisu run --monitor`, on by default in
+# `sisu test`) and its counterexample mode (`--defer-borrow`, A2).
+R0042 runtime monitor.header              ownership violation: {what}
+R0043 runtime monitor.use-ended-loan      a reference was used after its loan had ended
+R0044 runtime monitor.use-dangling        a reference was used after `{name}` was gone
+R0045 runtime monitor.use-moved           `{name}` was used while it holds no value: it was moved out, or never assigned
+R0046 runtime monitor.loan                the loan: {kind} borrow of `{place}` in `{function}`, created at {location} by `{stmt}`
+R0047 runtime monitor.ended-by            ended by: {operation} of `{place}` at {location} (`{stmt}`)
+R0048 runtime monitor.used-at             used at: {location} (`{stmt}`)
+R0049 runtime monitor.value               value: `{place}` = {value}
+R0050 runtime monitor.counts              loans of `{place}` not ended yet: {shared} shared, {exclusive} with `mut`
+R0051 runtime monitor.sir-header          SIR of `{function}`:
+R0052 runtime monitor.op-write            a modification
+R0053 runtime monitor.op-read             a use
+R0054 runtime monitor.op-move             a move
+R0055 runtime monitor.op-drop             a drop
+R0056 runtime monitor.op-dead             the end of the scope
+R0057 runtime monitor.op-borrow-mut       a `mut` borrow
+R0058 runtime monitor.kind-shared         a shared
+R0059 runtime monitor.kind-mut            a `mut`
+R0060 runtime defer.header                counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+R0061 runtime defer.conflict              outcome: conflict reached; the run stopped at a concrete ownership conflict
+R0062 runtime defer.no-conflict           outcome: no conflict; this run ended without an ownership conflict
+R0063 runtime defer.reached               the checker still rejects line {line} ({code} {id}), which this run reached without a conflict (count: {count})
+R0064 runtime defer.not-reached           the checker still rejects line {line} ({code} {id}), which this run never reached
+R0065 runtime defer.false-positive        every rejected statement was reached without a conflict: a candidate false positive
+R0066 runtime defer.inconclusive          a rejected statement was never reached: inconclusive, an untested path
+R0067 runtime defer.signature             the checker still rejects line {line} ({code} {id}), a rule about declarations that no run can test
+R0068 runtime monitor.no-value            <no value>
+R0069 runtime monitor.unconsumed          `{name}` was dropped holding a `{ty}`, which must be passed to an `own` parameter
+R0070 runtime defer.declarations-only     only rules about declarations reject the program, and the run reached no conflict: a candidate false positive
+R0071 runtime monitor.op-return           the return from the frame
+
 # ---------------------------------------------------------------- driver
 
 D0001 cli     cli.cannot-read             cannot read `{path}`: {reason}
-D0002 cli     cli.usage                   usage: sisu <command> [options] <file>\n\ncommands:\n  run <file> [args...]   check and run a program (`--sir` runs a SIR file)\n  check <file>           report diagnostics (`--format=ids` for the conformance form)\n  sir <file>             print the serialised SIR\n  test <file>            run the `test` blocks\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--print` reprints the source\n  explain <code>         describe a diagnostic code
+D0002 cli     cli.usage                   usage: sisu <command> [options] <file>\n\ncommands:\n  run <file> [args...]   check and run a program (`--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor)\n  check <file>           report diagnostics (`--format=ids` for the conformance form)\n  sir <file>             print the serialised SIR\n  test <file>            run the `test` blocks under the ownership monitor (`--no-monitor` without it, `--defer-borrow` as for `run`)\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--print` reprints the source\n  explain <code>         describe a diagnostic code\n  explain-borrow <file>:<line>  show every borrow live on a line
 D0003 cli     cli.unknown-command         unknown command `{command}`; run `sisu help`
 D0004 cli     cli.missing-file            `sisu {command}` needs a file
 D0005 cli     cli.no-main                 `{file}` has no `main` function
@@ -264,3 +352,11 @@ D0010 cli     cli.explain-unknown         there is no diagnostic `{code}`
 D0011 cli     cli.explain                 {code} ({kind}) {id}: {template}
 D0012 cli     cli.ice                     internal compiler error in {stage}: {detail}\nthe intermediate form was written to {dump}
 D0013 cli     cli.cannot-write            cannot write `{path}`: {reason}
+D0014 cli     cli.explain-borrow-header   borrows live on line {line} of {file}, in `{function}`:
+D0015 cli     cli.explain-borrow-loan     {kind} borrow of `{place}` from {start}, held by {holders}, used until {end}
+D0016 cli     cli.explain-borrow-temporary  {kind} borrow of `{place}` from {start}, held by a temporary, used until {end}
+D0017 cli     cli.explain-borrow-none     no borrow is live on line {line} of {file}
+D0018 cli     cli.explain-borrow-usage    `sisu explain-borrow` takes FILE:LINE, as in `sisu explain-borrow main.sisu:12`
+D0019 cli     cli.explain-borrow-shared   a shared
+D0020 cli     cli.explain-borrow-mut      a `mut`
+D0021 cli     cli.ownership-errors        the program was not run: the ownership checker found errors ({count}); `--defer-borrow` runs it under the monitor

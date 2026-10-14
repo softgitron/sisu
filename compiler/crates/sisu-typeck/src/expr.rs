@@ -159,6 +159,11 @@ impl Checker<'_> {
     /// A `ref T` of a `Copy` type used as a value becomes the `T` (the
     /// rule that lets `(word.copy(), n)` hold an `int`, not a reference).
     pub fn decay(&mut self, x: Expr) -> Expr {
+        // An explicit `ref` keeps its reference: `let first = ref xs[0]`
+        // borrows `xs` (04, "Borrowing rules in detail").
+        if matches!(x.kind, ExprKind::Borrow { .. }) {
+            return x;
+        }
         match self.resolved(&x.ty) {
             Ty::Ref(inner, _) if self.is_copy(&inner) => self.wrap(x, Coercion::DerefCopy, *inner),
             _ => x,
@@ -1487,6 +1492,26 @@ impl Checker<'_> {
         };
         self.pop_scope();
         let then = self.decay(then);
+        // Through a reference, a field that is not `Copy` cannot be moved
+        // out: the chain borrows it, a `String` as a `str` view
+        // (`eldest?.name ?? "nobody"`).
+        let then = if then.is_place() && then.is_behind_ref() && !self.is_copy(&then.ty) {
+            let ty = self.resolved(&then.ty);
+            if self.is_string(&ty) {
+                self.wrap(then, Coercion::StrView, Ty::Str)
+            } else if ty == Ty::Error {
+                then
+            } else {
+                let span = then.span;
+                Expr::new(
+                    ExprKind::Borrow { place: Box::new(then), mutable: false },
+                    Ty::Ref(Box::new(ty), false),
+                    span,
+                )
+            }
+        } else {
+            then
+        };
         let flatten = self.as_option(&then.ty).is_some();
         let ty = if flatten { then.ty.clone() } else { self.option_of(then.ty.clone()) };
         Expr::new(ExprKind::OptChain { base: Box::new(b), binder, then: Box::new(then), flatten }, ty, span)

@@ -101,10 +101,21 @@ pub fn resolve(sources: &mut SourceMap, root_file: FileId, root: &ast::Module) -
     r.declare_items(root_id, &root.items, "");
     r.resolve_pending();
     r.build_variant_index();
+    r.check_borrow_signatures();
     Resolved { program: r.prog, diagnostics: r.diags }
 }
 
 impl Resolver<'_> {
+    /// The empty span at the start of `keyword` where it comes last before
+    /// `span` on the same line (`struct` before a struct's name).
+    fn keyword_before(&self, span: Span, keyword: &str) -> Option<Span> {
+        let text = &self.sources.get(span.file)?.text;
+        let before = text.get(..span.range.start as usize)?;
+        let line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let at = before[line_start..].rfind(keyword)? + line_start;
+        Some(Span::new(span.file, TextRange::new(at as u32, at as u32)))
+    }
+
     fn span(&self, module: ModuleId, range: TextRange) -> Span {
         Span::new(self.prog.modules[module.0 as usize].file, range)
     }
@@ -215,6 +226,8 @@ impl Resolver<'_> {
             keyword_only_from: None,
             positional_only_until: 0,
             ret: Ty::Unit,
+            ret_span: None,
+            from: Vec::new(),
             err_inferred: false,
             pure: false,
             intrinsic: None,
@@ -258,6 +271,7 @@ impl Resolver<'_> {
                         copy: false,
                         drop: None,
                         view: s.is_view,
+                        must_consume: false,
                     };
                     let def = self.new_def(
                         module,
@@ -283,6 +297,7 @@ impl Resolver<'_> {
                         open: e.open,
                         copy: false,
                         drop: None,
+                        must_consume: false,
                     };
                     let kind = if matches!(item.kind, ItemKind::ErrorSet(_)) {
                         DefKind::ErrorSet(info)
@@ -394,6 +409,94 @@ impl Resolver<'_> {
                 );
             }
         }
+    }
+
+    /// The `from` clauses and the elision rules of every user function
+    /// (04, "Borrowing rules in detail"), once every type is resolved.
+    fn check_borrow_signatures(&mut self) {
+        let mut found = Vec::new();
+        for (i, def) in self.prog.defs.iter().enumerate() {
+            let DefKind::Fn(f) = &def.kind else { continue };
+            if self.prog.modules[def.module.0 as usize].is_std || f.header_broken {
+                continue;
+            }
+            let shape = self.prog.result_shape(&f.ret);
+            let params = self.prog.sig_params(f);
+            let ret_span = f.ret_span.unwrap_or(def.span);
+            // Where each parameter is written; `self` has no span of its own.
+            let param_span =
+                |name: &str| f.params.iter().find(|p| p.name == name).map(|p| p.span).unwrap_or(def.span);
+            if !f.from.is_empty() {
+                if shape == crate::ResultShape::Plain {
+                    let span = f.from[0].1;
+                    let ty = self.prog.display(&f.ret);
+                    // The fix removes ` from a, b`: from the end of the
+                    // result type to the end of the last name.
+                    let last = f.from.last().map(|(_, s)| s.range.end).unwrap_or(span.range.end);
+                    let clause = Span::new(ret_span.file, TextRange::new(ret_span.range.end, last));
+                    found.push(
+                        Diagnostic::new(msg::BORROW_FROM_WITHOUT_BORROW, span)
+                            .with("function", def.name.clone())
+                            .with("ty", ty.clone())
+                            .label(ret_span, msg::BORROW_RESULT_CANNOT_BORROW, vec![("ty", ty)])
+                            .fix(
+                                msg::BORROW_REMOVE_FROM,
+                                Vec::new(),
+                                vec![sisu_diag::Edit { span: clause, text: String::new() }],
+                            ),
+                    );
+                    continue;
+                }
+                for (name, span) in &f.from {
+                    let ok = params.iter().any(|p| p.name == *name && self.prog.is_borrowed_param(p));
+                    if !ok {
+                        let label = if params.iter().any(|p| p.name == *name) {
+                            (param_span(name), msg::BORROW_NOT_BORROWED_PARAM, vec![("name", name.clone())])
+                        } else {
+                            (
+                                def.span,
+                                msg::BORROW_NO_SUCH_PARAM,
+                                vec![("function", def.name.clone()), ("name", name.clone())],
+                            )
+                        };
+                        found.push(
+                            Diagnostic::new(msg::BORROW_FROM_NOT_A_PARAMETER, *span)
+                                .with("name", name.clone())
+                                .with("function", def.name.clone())
+                                .label(label.0, label.1, label.2),
+                        );
+                    }
+                }
+                continue;
+            }
+            if shape == crate::ResultShape::Plain {
+                continue;
+            }
+            let borrowed: Vec<&crate::SigParam> =
+                params.iter().filter(|p| self.prog.is_borrowed_param(p)).collect();
+            let self_wins = f.self_mode.is_some() && borrowed.first().is_some_and(|p| p.name == "self");
+            if borrowed.len() >= 2 && !self_wins {
+                let names: Vec<String> = borrowed.iter().map(|p| p.name.clone()).collect();
+                let _ = i;
+                let mut d = Diagnostic::new(msg::BORROW_FROM_REQUIRED, ret_span)
+                    .with("name", def.name.clone())
+                    .with("ret", self.prog.display(&f.ret))
+                    .with("params", names.join(", "));
+                for n in &names {
+                    d = d.label(param_span(n), msg::BORROW_BORROWED_PARAM, vec![("name", n.clone())]);
+                }
+                // The fix names them all, which is always allowed; the
+                // author may then drop the ones the result never borrows.
+                let at = Span::new(ret_span.file, TextRange::new(ret_span.range.end, ret_span.range.end));
+                d = d.fix(
+                    msg::BORROW_ADD_FROM,
+                    vec![("param", names.join(", "))],
+                    vec![sisu_diag::Edit { span: at, text: format!(" from {}", names.join(", ")) }],
+                );
+                found.push(d);
+            }
+        }
+        self.diags.extend(found);
     }
 
     fn declare_methods(
@@ -578,8 +681,32 @@ impl Resolver<'_> {
                         );
                         continue;
                     }
-                    let ctx = TyCtx { module, generics: &generics, self_ty: Some(&self_ty), allow_ref: std };
+                    let ctx = TyCtx { module, generics: &generics, self_ty: Some(&self_ty), allow_ref: true };
                     let ty = self.resolve_ty(&f.ty, &ctx);
+                    // Views are infectious upwards (04): only a `view struct`
+                    // may hold a reference or a view.
+                    if !std && !s.is_view && self.prog.is_view_type(&ty) {
+                        let span = self.span(module, f.name.range.cover(f.ty.range));
+                        let fty = self.prog.display(&ty);
+                        let name_span = self.span(module, s.name.range);
+                        // The fix writes `view ` before the `struct` keyword.
+                        let edits = self
+                            .keyword_before(name_span, "struct")
+                            .map(|at| vec![sisu_diag::Edit { span: at, text: "view ".into() }])
+                            .unwrap_or_default();
+                        self.report(
+                            Diagnostic::new(msg::BORROW_VIEW_FIELD_IN_PLAIN_STRUCT, span)
+                                .with("ty", s.name.text.clone())
+                                .with("field", f.name.text.clone())
+                                .with("fty", fty)
+                                .label(
+                                    name_span,
+                                    msg::BORROW_TYPE_DECLARED_HERE,
+                                    vec![("ty", s.name.text.clone())],
+                                )
+                                .fix(msg::BORROW_DECLARE_VIEW, vec![("ty", s.name.text.clone())], edits),
+                        );
+                    }
                     fields.push(FieldInfo {
                         name: f.name.text.clone(),
                         ty,
@@ -593,11 +720,13 @@ impl Resolver<'_> {
                 }
                 let builtin = Self::builtin_attr(&attrs, "builtin");
                 let copy = Self::has_derive(&attrs, "Copy");
+                let must_consume = attrs.iter().any(|a| a.name == "must_consume");
                 if let DefKind::Struct(info) = &mut self.prog.defs[def.0 as usize].kind {
                     info.generics = generics;
                     info.fields = fields;
                     info.builtin = builtin;
                     info.copy = copy;
+                    info.must_consume = must_consume;
                 }
             }
             Pending::Enum { def, module, ast: e, attrs } => {
@@ -616,11 +745,27 @@ impl Resolver<'_> {
                         continue;
                     }
                     let ctx = TyCtx { module, generics: &generics, self_ty: Some(&self_ty), allow_ref: std };
-                    let fields = v
-                        .fields
-                        .iter()
-                        .map(|f| (f.name.as_ref().map(|n| n.text.clone()), self.resolve_ty(&f.ty, &ctx)))
-                        .collect();
+                    let mut fields = Vec::new();
+                    for f in &v.fields {
+                        let ty = self.resolve_ty(&f.ty, &ctx);
+                        // An enum has no `view` form, so it cannot hold a borrow.
+                        if !std && self.prog.is_view_type(&ty) {
+                            let span = self.span(module, f.ty.range);
+                            let fty = self.prog.display(&ty);
+                            let name_span = self.span(module, e.name.range);
+                            self.report(
+                                Diagnostic::new(msg::BORROW_VIEW_IN_ENUM, span)
+                                    .with("ty", e.name.text.clone())
+                                    .with("fty", fty)
+                                    .label(
+                                        name_span,
+                                        msg::BORROW_TYPE_DECLARED_HERE,
+                                        vec![("ty", e.name.text.clone())],
+                                    ),
+                            );
+                        }
+                        fields.push((f.name.as_ref().map(|n| n.text.clone()), ty));
+                    }
                     variants.push(VariantInfo {
                         name: v.name.text.clone(),
                         fields,
@@ -628,12 +773,14 @@ impl Resolver<'_> {
                     });
                 }
                 let copy = Self::has_derive(&attrs, "Copy");
+                let must_consume = attrs.iter().any(|a| a.name == "must_consume");
                 if let DefKind::Enum(info) | DefKind::ErrorSet(info) =
                     &mut self.prog.defs[def.0 as usize].kind
                 {
                     info.generics = generics;
                     info.variants = variants;
                     info.copy = copy;
+                    info.must_consume = must_consume;
                 }
             }
             Pending::Fn { def, module, ast: f, owner, drop_for } => {
@@ -763,7 +910,6 @@ impl Resolver<'_> {
         owner: Option<Owner>,
         drop_for: Option<DefId>,
     ) {
-        let std = self.is_std(module);
         let impl_generics: Vec<String> = owner.as_ref().map(|o| o.generics.clone()).unwrap_or_default();
         let own_generics = self.generics_allowed(module, &f.generics);
         let mut generics: Vec<Generic> =
@@ -799,7 +945,7 @@ impl Resolver<'_> {
         }
         let mut seen_default = false;
         for (i, p) in f.params.iter().enumerate() {
-            let ctx = TyCtx { module, generics: &names, self_ty: ctx_self.as_ref(), allow_ref: std };
+            let ctx = TyCtx { module, generics: &names, self_ty: ctx_self.as_ref(), allow_ref: true };
             match &p.kind {
                 ParamKind::SelfParam => {
                     if owner.is_none() {
@@ -848,8 +994,9 @@ impl Resolver<'_> {
         match &f.ret {
             None => info.ret = Ty::Unit,
             Some(t) => {
+                info.ret_span = Some(self.span(module, t.range));
                 if let TypeKind::Result { ok, err: None } = &t.kind {
-                    let ctx = TyCtx { module, generics: &names, self_ty: ctx_self.as_ref(), allow_ref: std };
+                    let ctx = TyCtx { module, generics: &names, self_ty: ctx_self.as_ref(), allow_ref: true };
                     let ok_ty = match ok {
                         Some(o) => self.resolve_ty(o, &ctx),
                         None => Ty::Unit,
@@ -860,15 +1007,12 @@ impl Resolver<'_> {
                         None => Ty::Error,
                     };
                 } else {
-                    let ctx = TyCtx { module, generics: &names, self_ty: ctx_self.as_ref(), allow_ref: std };
+                    let ctx = TyCtx { module, generics: &names, self_ty: ctx_self.as_ref(), allow_ref: true };
                     info.ret = self.resolve_ty(t, &ctx);
                 }
             }
         }
-        if !f.from.is_empty() {
-            let span = self.span(module, f.from[0].range);
-            self.unsupported(span, "a `from` clause", "references in signatures (Phase 3)");
-        }
+        info.from = f.from.iter().map(|n| (n.text.clone(), self.span(module, n.range))).collect();
         info.body_broken = f.body_broken;
         if f.header_broken {
             info.header_broken = true;
@@ -977,6 +1121,11 @@ impl Resolver<'_> {
                     );
                 }
                 let t = self.resolve_ty(inner, ctx);
+                // A shared borrow of a view is the view: `ref str` is a
+                // `str` (04, "Views"), valid while the text it views is.
+                if t == Ty::Str && !*mutable {
+                    return Ty::Str;
+                }
                 Ty::Ref(Box::new(t), *mutable)
             }
             TypeKind::ConstArg(_) => {

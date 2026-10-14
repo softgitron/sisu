@@ -1,0 +1,8 @@
+# A `let` declared without a value is assigned once; a loop would assign
+# it again.
+
+def main():
+    let total: int
+    for i in range(3):
+        total = i
+    print(total)

@@ -121,7 +121,7 @@ impl<'p> Checker<'p> {
     pub fn new_local(&mut self, name: &str, ty: Ty, mutable: bool, span: Span) -> LocalId {
         let id = LocalId(self.locals.len() as u32);
         let closure = self.current_closure();
-        self.locals.push(Local { name: name.to_string(), ty, mutable, span, closure });
+        self.locals.push(Local { name: name.to_string(), ty, mutable, once: false, span, closure });
         id
     }
 
@@ -560,6 +560,9 @@ impl<'p> Checker<'p> {
                 }
             };
             let p = self.bind_simple(pat, &ty, true);
+            if !mutable && let PatKind::Bind { local, .. } = &p.kind {
+                self.locals[local.0 as usize].once = true;
+            }
             out.push(Stmt::Let { pat: p, init: None, unwrap: None, else_: None, span });
             return;
         };

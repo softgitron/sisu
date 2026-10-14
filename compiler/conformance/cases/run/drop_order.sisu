@@ -1,11 +1,11 @@
-struct Noisy:
+view struct Noisy:
     name: str
 
 impl Drop for Noisy:
     def drop(mut self):
         print("drop {self.name}")
 
-struct Pair:
+view struct Pair:
     first: Noisy
     second: Noisy
 

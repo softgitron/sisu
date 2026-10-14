@@ -1,0 +1,10 @@
+# A closure borrows what it captures, so a closure capturing a local
+# cannot be returned: it would outlive the local.
+
+def make_adder(n: int) -> (int) -> int:
+    let k = n * 2
+    return x -> x + k
+
+def main():
+    let f = make_adder(1)
+    print(f(1))

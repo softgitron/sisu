@@ -62,8 +62,8 @@ impl Interp<'_, '_> {
             (Value::Unit, Value::Unit) => true,
             (Value::DateTime(x), Value::DateTime(y)) => x == y,
             (
-                Value::Str(_) | Value::String(_) | Value::Path(_),
-                Value::Str(_) | Value::String(_) | Value::Path(_),
+                Value::Str(..) | Value::String(_) | Value::Path(_),
+                Value::Str(..) | Value::String(_) | Value::Path(_),
             ) => self.text(a)? == self.text(b)?,
             (Value::Tuple(xs), Value::Tuple(ys)) | (Value::List(xs), Value::List(ys)) => {
                 self.all_equal(xs, ys)?
@@ -117,8 +117,8 @@ impl Interp<'_, '_> {
             (Value::Unit, Value::Unit) => Some(Ordering::Equal),
             (Value::DateTime(x), Value::DateTime(y)) => Some(x.cmp(y)),
             (
-                Value::Str(_) | Value::String(_) | Value::Path(_),
-                Value::Str(_) | Value::String(_) | Value::Path(_),
+                Value::Str(..) | Value::String(_) | Value::Path(_),
+                Value::Str(..) | Value::String(_) | Value::Path(_),
             ) => Some(self.text(a)?.cmp(self.text(b)?)),
             (Value::Tuple(xs), Value::Tuple(ys)) | (Value::List(xs), Value::List(ys)) => {
                 self.lexicographic(xs, ys)?
@@ -154,7 +154,7 @@ impl Interp<'_, '_> {
             Value::Int(i) => Key::Int(*i),
             Value::Bool(b) => Key::Bool(*b),
             Value::Char(c) => Key::Char(*c),
-            Value::Str(s) => Key::Text(s.clone()),
+            Value::Str(s, _) => Key::Text(s.clone()),
             Value::String(s) => Key::Text(Rc::from(s.as_str())),
             Value::Path(p) => Key::Path(p.clone()),
             Value::DateTime(t) => Key::Int(*t),
@@ -182,7 +182,7 @@ impl Interp<'_, '_> {
             }
             Value::Set(s) => Ok(s.index.contains_key(&self.key_of(item)?)),
             Value::Dict(d) => Ok(d.index.contains_key(&self.key_of(item)?)),
-            c @ (Value::Str(_) | Value::String(_)) => {
+            c @ (Value::Str(..) | Value::String(_)) => {
                 let text = self.text(c)?;
                 match self.target(item)? {
                     Value::Char(ch) => Ok(text.contains(*ch)),

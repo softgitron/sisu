@@ -1,0 +1,49 @@
+partial:
+  keep p.left
+  drop p.left
+  keep q.right
+  drop q.right
+  end of partial
+  drop q.left
+  drop p.right
+loop_moves:
+  iteration 0
+  keep a
+  drop a
+  drop b
+  iteration 1
+  iteration 1 ends
+  drop b
+  drop a
+  iteration 2
+  keep b
+  drop b
+  drop a
+  after the loop
+  drop outer
+payloads:
+  saw some
+  drop some
+  none
+  keep temporary
+  drop temporary
+  borrowed ok payload
+  end of payloads
+  drop ok payload
+early(False):
+  keep e.left
+  drop e.left
+  not failed
+  drop e.right
+early(True):
+  keep e.left
+  drop e.left
+  drop e.right
+unwinding:
+  keep u.right
+  drop u.right
+  keep moved
+  drop moved
+  drop live
+  drop u.left
+  drop main

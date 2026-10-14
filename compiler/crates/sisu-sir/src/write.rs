@@ -27,6 +27,12 @@ pub fn write(p: &Program) -> String {
         out.push('\n');
         write_type_decl(&mut out, t);
     }
+    if !p.intrinsics.is_empty() {
+        out.push('\n');
+    }
+    for i in &p.intrinsics {
+        write_intrinsic(&mut out, i);
+    }
     for f in &p.functions {
         out.push('\n');
         write_function(&mut out, f);
@@ -81,7 +87,12 @@ pub fn ty(t: &Type) -> String {
         Type::Tuple(es) if es.len() == 1 => format!("({},)", ty(&es[0])),
         Type::Tuple(es) => format!("({})", es.iter().map(ty).collect::<Vec<_>>().join(", ")),
         Type::ErrSet(ms) => format!("{{{}}}", ms.join(", ")),
-        Type::Fn(ps, r) => format!("fn({}) -> {}", ps.iter().map(ty).collect::<Vec<_>>().join(", "), ty(r)),
+        Type::Fn(ps, r, pure) => format!(
+            "{}fn({}) -> {}",
+            if *pure { "pure " } else { "" },
+            ps.iter().map(ty).collect::<Vec<_>>().join(", "),
+            ty(r)
+        ),
         Type::Ref(t, false) => format!("ref {}", ty(t)),
         Type::Ref(t, true) => format!("ref mut {}", ty(t)),
     }
@@ -89,8 +100,11 @@ pub fn ty(t: &Type) -> String {
 
 fn write_type_decl(out: &mut String, t: &TypeDecl) {
     match t {
-        TypeDecl::Struct { name, fields, drop } => {
-            let _ = write!(out, "struct {name}");
+        TypeDecl::Struct { name, fields, drop, view, must_consume } => {
+            let _ = write!(out, "{}struct {name}", if *view { "view " } else { "" });
+            if *must_consume {
+                out.push_str(" must_consume");
+            }
             if let Some(d) = drop {
                 let _ = write!(out, " drop {d}");
             }
@@ -103,10 +117,13 @@ fn write_type_decl(out: &mut String, t: &TypeDecl) {
                 .collect();
             let _ = writeln!(out, " {{ {} }}", fs.join(", "));
         }
-        TypeDecl::Enum { name, variants, drop, error, open } => {
+        TypeDecl::Enum { name, variants, drop, error, open, must_consume } => {
             let _ = write!(out, "{} {name}", if *error { "error" } else { "enum" });
             if *open {
                 out.push_str(" open");
+            }
+            if *must_consume {
+                out.push_str(" must_consume");
             }
             if let Some(d) = drop {
                 let _ = write!(out, " drop {d}");
@@ -134,6 +151,26 @@ fn write_type_decl(out: &mut String, t: &TypeDecl) {
     }
 }
 
+fn indices(word: &str, xs: &[u32]) -> String {
+    if xs.is_empty() {
+        return String::new();
+    }
+    let list: Vec<String> = xs.iter().map(|x| x.to_string()).collect();
+    format!(" {word} {}", list.join(" "))
+}
+
+fn write_intrinsic(out: &mut String, i: &IntrinsicDecl) {
+    let _ = writeln!(
+        out,
+        "intrinsic {}{}{}{}{}",
+        i.name,
+        if i.pure { " pure" } else { "" },
+        indices("from", &i.from),
+        indices("inner", &i.inner),
+        indices("own", &i.own)
+    );
+}
+
 fn kind_name(k: FnKind) -> &'static str {
     match k {
         FnKind::Normal => "",
@@ -144,13 +181,35 @@ fn kind_name(k: FnKind) -> &'static str {
     }
 }
 
+/// One function in the text form (the ownership monitor's SIR dump).
+pub fn function(f: &Function) -> String {
+    let mut out = String::new();
+    write_function(&mut out, f);
+    out
+}
+
 fn write_function(out: &mut String, f: &Function) {
-    let _ = writeln!(out, "fn {}({}){} source {} {{", f.name, f.param_count, kind_name(f.kind), f.source);
+    let _ = writeln!(
+        out,
+        "fn {}({}){}{} source {}{}{}{} {{",
+        f.name,
+        f.param_count,
+        kind_name(f.kind),
+        if f.pure { " pure" } else { "" },
+        f.source,
+        indices("from", &f.from),
+        indices("inner", &f.inner),
+        loc(&f.loc)
+    );
     for (i, l) in f.locals.iter().enumerate() {
         let _ = write!(out, "    let _{i}: {}", ty(&l.ty));
         if let Some(n) = &l.name {
             let _ = write!(out, " {}", quote(n));
         }
+        if l.once {
+            out.push_str(" once");
+        }
+        out.push_str(&loc(&l.loc));
         out.push('\n');
     }
     for (i, b) in f.blocks.iter().enumerate() {
@@ -168,16 +227,16 @@ fn write_function(out: &mut String, f: &Function) {
         }
         out.push_str("    ");
         out.push_str(&term(&b.term));
-        if let Some(l) = b.loc {
-            let _ = write!(out, " @{}:{}", l.line, l.col);
-        }
+        out.push_str(&loc(&b.loc));
         out.push('\n');
     }
     out.push_str("}\n");
 }
 
-fn loc(l: &Option<Loc>) -> String {
+/// ` @L:C` or ` @L:C-L:C`, or nothing.
+pub fn loc(l: &Option<Loc>) -> String {
     match l {
+        Some(l) if l.has_end() => format!(" @{}:{}-{}:{}", l.line, l.col, l.end_line, l.end_col),
         Some(l) => format!(" @{}:{}", l.line, l.col),
         None => String::new(),
     }
@@ -201,6 +260,7 @@ pub fn stmt(s: &Statement) -> String {
             Some(f) => format!("drop {} if _{}", place(p), f.0),
             None => format!("drop {}", place(p)),
         },
+        StatementKind::StorageDead(l) => format!("dead _{}", l.0),
     };
     format!("{body}{}", loc(&s.loc))
 }

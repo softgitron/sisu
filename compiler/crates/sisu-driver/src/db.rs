@@ -1,7 +1,10 @@
 //! The query layer: `source -> tokens -> syntax tree -> resolved module ->
-//! typed bodies -> SIR`, each step memoised on the text it was computed
-//! from (18, Phase 0, "Query skeleton"). It is an implementation detail:
-//! no result depends on whether a query was cached.
+//! typed bodies -> SIR -> checked SIR`, each step memoised on the text it
+//! was computed from (18, Phase 0, "Query skeleton"). It is an
+//! implementation detail: no result depends on whether a query was cached.
+//! The last step is the ownership checker, which places the drops; its
+//! SIR is the one that runs, even when it reports errors, so that the
+//! counterexample mode can run a rejected program.
 //!
 //! Stage 0 has one user file per program, so a query's key is the file's
 //! name and its input is the file's text; the standard library is fixed
@@ -40,6 +43,19 @@ impl Checked {
     pub fn has_errors(&self) -> bool {
         self.diagnostics.iter().any(|d| d.is_error())
     }
+
+    /// Whether an error stops lowering: every error but the ownership
+    /// rules about declarations (`E04xx` from name resolution, such as a
+    /// borrow in a plain struct), which leave the program well-formed, so
+    /// the counterexample mode can still run it.
+    pub fn blocks_lowering(&self) -> bool {
+        self.diagnostics.iter().any(|d| d.is_error() && !is_ownership_rule(d))
+    }
+}
+
+/// A diagnostic of the ownership family (`E04xx`).
+pub fn is_ownership_rule(d: &Diagnostic) -> bool {
+    d.code().starts_with("E04")
 }
 
 /// How many times each query ran (not counting cache hits).
@@ -50,12 +66,31 @@ pub struct Counters {
     pub lower: u32,
 }
 
+/// A program without front-end errors, lowered and through the
+/// ownership checker.
+pub struct Lowered {
+    /// The SIR with its drops placed: what runs.
+    pub sir: sir::Program,
+    /// The ownership checker's findings, by SIR position.
+    pub findings: Vec<sisu_borrowck::Finding>,
+    /// Each finding as a diagnostic, in the findings' order.
+    pub diagnostics_by_finding: Vec<Diagnostic>,
+    /// The diagnostics in source order.
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+impl Lowered {
+    pub fn has_errors(&self) -> bool {
+        self.diagnostics.iter().any(|d| d.is_error())
+    }
+}
+
 #[derive(Default)]
 pub struct Db {
     texts: HashMap<String, Rc<str>>,
     parsed: HashMap<String, (u64, Rc<Parsed>)>,
     checked: HashMap<String, (u64, Rc<Checked>)>,
-    lowered: HashMap<String, (u64, Rc<sir::Program>)>,
+    lowered: HashMap<String, (u64, Rc<Lowered>)>,
     pub counters: Counters,
 }
 
@@ -130,8 +165,10 @@ impl Db {
         Some(c)
     }
 
-    /// The SIR of a program without errors.
-    pub fn sir(&mut self, name: &str) -> Option<Rc<sir::Program>> {
+    /// The lowered and ownership-checked program, for a program whose
+    /// front end found no error, or only ownership errors about
+    /// declarations.
+    pub fn lowered(&mut self, name: &str) -> Option<Rc<Lowered>> {
         let (_, h) = self.key(name)?;
         if let Some((k, s)) = self.lowered.get(name)
             && *k == h
@@ -139,12 +176,51 @@ impl Db {
             return Some(s.clone());
         }
         let c = self.checked(name)?;
-        if c.has_errors() {
+        if c.blocks_lowering() {
             return None;
         }
         self.counters.lower += 1;
-        let s = Rc::new(sisu_lower::lower(&c.program, &c.typed, &c.map));
-        self.lowered.insert(name.to_string(), (h, s.clone()));
-        Some(s)
+        let lowered = sisu_lower::lower(&c.program, &c.typed, &c.map);
+        let checked = sisu_borrowck::check(&lowered, &sisu_borrowck::Options::default());
+        let files = source_files(&c.map, &checked.program);
+        let by_finding: Vec<Diagnostic> =
+            checked.findings.iter().map(|f| sisu_borrowck::to_diagnostic(f, &c.map, &files)).collect();
+        let mut diagnostics = by_finding.clone();
+        sisu_diag::diagnostic::sort(&mut diagnostics);
+        let l = Rc::new(Lowered {
+            sir: checked.program,
+            findings: checked.findings,
+            diagnostics_by_finding: by_finding,
+            diagnostics,
+        });
+        self.lowered.insert(name.to_string(), (h, l.clone()));
+        Some(l)
     }
+
+    /// The SIR of a program without front-end errors, drops placed.
+    pub fn sir(&mut self, name: &str) -> Option<Rc<sir::Program>> {
+        self.lowered(name).map(|l| Rc::new(l.sir.clone()))
+    }
+
+    /// Every diagnostic of a file: the front end's, then, when it found no
+    /// error, the ownership checker's, in source order.
+    pub fn diagnostics(&mut self, name: &str) -> Vec<Diagnostic> {
+        let Some(c) = self.checked(name) else { return Vec::new() };
+        let mut all = c.diagnostics.clone();
+        if !c.has_errors()
+            && let Some(l) = self.lowered(name)
+        {
+            all.extend(l.diagnostics.iter().cloned());
+            sisu_diag::diagnostic::sort(&mut all);
+        }
+        all
+    }
+}
+
+/// The file of each SIR source, by name.
+pub fn source_files(map: &SourceMap, p: &sir::Program) -> Vec<FileId> {
+    p.sources
+        .iter()
+        .map(|n| map.files().iter().find(|f| f.name == *n).map(|f| f.id).unwrap_or_default())
+        .collect()
 }

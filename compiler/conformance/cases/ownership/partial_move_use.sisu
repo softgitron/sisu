@@ -1,0 +1,18 @@
+# After a field is moved out, the value cannot be used as a whole; its
+# other fields still can.
+
+struct Pair:
+    left: String
+    right: String
+
+def take(own s: String):
+    print(s)
+
+def show(p: Pair):
+    print("{p.left} {p.right}")
+
+def main():
+    let p = Pair(left="l".to_string(), right="r".to_string())
+    take(p.left)
+    print(p.right)
+    show(p)

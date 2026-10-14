@@ -131,9 +131,11 @@ impl Ctx<'_> {
             Ty::Tuple(es, _) if es.is_empty() => sir::Type::Unit,
             Ty::Tuple(es, _) => sir::Type::Tuple(es.iter().map(|e| self.ty(e)).collect()),
             Ty::ErrSet(ms) => sir::Type::ErrSet(ms.iter().map(|d| self.type_name(*d)).collect()),
-            Ty::Fn(f) => {
-                sir::Type::Fn(f.params.iter().map(|p| self.ty(p)).collect(), Box::new(self.ty(&f.ret)))
-            }
+            Ty::Fn(f) => sir::Type::Fn(
+                f.params.iter().map(|p| self.ty(p)).collect(),
+                Box::new(self.ty(&f.ret)),
+                f.pure,
+            ),
             Ty::Ref(t, m) => sir::Type::Ref(Box::new(self.ty(t)), *m),
         }
     }
@@ -148,11 +150,31 @@ impl Ctx<'_> {
         i
     }
 
+    /// The source range of a span, without the line breaks and
+    /// indentation a statement's range ends with.
     pub fn loc(&self, span: sisu_diag::Span) -> Option<sir::Loc> {
         let f = self.sources.get(span.file)?;
-        let lc = f.line_col(span.range.start);
-        Some(sir::Loc { line: lc.line, col: lc.col })
+        let a = f.line_col(span.range.start);
+        let b = f.line_col(trimmed_end(&f.text, span.range));
+        Some(sir::Loc { line: a.line, col: a.col, end_line: b.line, end_col: b.col })
     }
+
+    /// The empty range at the end of a span.
+    pub fn end_loc(&self, span: sisu_diag::Span) -> Option<sir::Loc> {
+        let f = self.sources.get(span.file)?;
+        let b = f.line_col(trimmed_end(&f.text, span.range));
+        Some(sir::Loc { line: b.line, col: b.col, end_line: b.line, end_col: b.col })
+    }
+}
+
+/// The end of a range, before any trailing whitespace.
+fn trimmed_end(text: &str, r: sisu_diag::TextRange) -> u32 {
+    let bytes = text.as_bytes();
+    let mut end = (r.end as usize).min(bytes.len());
+    while end > r.start as usize && bytes.get(end - 1).is_some_and(|b| b.is_ascii_whitespace()) {
+        end -= 1;
+    }
+    end as u32
 }
 
 /// Lowers a checked program. The program must have no errors; lowering
@@ -197,7 +219,61 @@ pub fn lower(prog: &Program, typed: &Typed, sources: &SourceMap) -> sir::Program
     let types = collect_types(&ctx, &functions);
     let functions = prune(functions, &roots, &types);
     let types = collect_types(&ctx, &functions);
-    sir::Program { sources: ctx.file_names.clone(), entry, types, functions, tests }
+    let intrinsics = intrinsic_decls(prog, &functions);
+    sir::Program { sources: ctx.file_names.clone(), entry, types, intrinsics, functions, tests }
+}
+
+/// The facts the SIR checkers need about every intrinsic the functions
+/// call: the prelude's declaration reduced to purity and the arguments the
+/// result borrows from, or, for the intrinsics lowering introduces, the
+/// table in docs/architecture.md ("Lowering-only intrinsics").
+fn intrinsic_decls(prog: &Program, functions: &[sir::Function]) -> Vec<sir::IntrinsicDecl> {
+    let mut names: Vec<String> = Vec::new();
+    for f in functions {
+        for b in &f.blocks {
+            for s in &b.stmts {
+                if let sir::StatementKind::Call { callee: sir::Callee::Intrinsic(n, _), .. } = &s.kind
+                    && !names.contains(n)
+                {
+                    names.push(n.clone());
+                }
+            }
+        }
+    }
+    names.sort();
+    let mut by_name: HashMap<&str, &sisu_resolve::FnInfo> = HashMap::new();
+    for d in &prog.defs {
+        if let DefKind::Fn(f) = &d.kind
+            && let Some(n) = &f.intrinsic
+        {
+            by_name.insert(n.as_str(), f);
+        }
+    }
+    names
+        .into_iter()
+        .map(|name| match by_name.get(name.as_str()) {
+            Some(f) => {
+                let b = prog.result_borrows_of(f);
+                let own = prog
+                    .sig_params(f)
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.mode == sisu_syntax::ast::Mode::Own)
+                    .map(|(i, _)| i as u32)
+                    .collect();
+                sir::IntrinsicDecl { name, pure: f.pure, from: b.deep, inner: b.inner, own }
+            }
+            None => {
+                let (from, inner): (Vec<u32>, Vec<u32>) = match name.as_str() {
+                    "iter.ref" | "iter.mut" | "iter.own" => (vec![0], vec![]),
+                    "list.slice" | "list.slice_middle" => (vec![], vec![0]),
+                    _ => (vec![], vec![]),
+                };
+                let own = if name == "iter.own" { vec![0] } else { Vec::new() };
+                sir::IntrinsicDecl { name, pure: true, from, inner, own }
+            }
+        })
+        .collect()
 }
 
 fn prune(functions: Vec<sir::Function>, roots: &[String], types: &[sir::TypeDecl]) -> Vec<sir::Function> {
@@ -267,7 +343,7 @@ fn collect_types(ctx: &Ctx, functions: &[sir::Function]) -> Vec<sir::TypeDecl> {
             }
             sir::Type::Tuple(es) => es.iter().for_each(|e| walk(e, out)),
             sir::Type::ErrSet(ms) => out.extend(ms.iter().cloned()),
-            sir::Type::Fn(ps, r) => {
+            sir::Type::Fn(ps, r, _) => {
                 ps.iter().for_each(|p| walk(p, out));
                 walk(r, out);
             }
@@ -320,6 +396,8 @@ fn collect_types(ctx: &Ctx, functions: &[sir::Function]) -> Vec<sir::TypeDecl> {
                     })
                     .collect(),
                 drop: s.drop.map(|x| ctx.fn_name(x)),
+                view: s.view,
+                must_consume: s.must_consume,
             },
             DefKind::Enum(e) | DefKind::ErrorSet(e) => sir::TypeDecl::Enum {
                 name: n.clone(),
@@ -334,6 +412,7 @@ fn collect_types(ctx: &Ctx, functions: &[sir::Function]) -> Vec<sir::TypeDecl> {
                 drop: e.drop.map(|x| ctx.fn_name(x)),
                 error: prog.is_error_set(d),
                 open: e.open,
+                must_consume: e.must_consume,
             },
             _ => continue,
         };

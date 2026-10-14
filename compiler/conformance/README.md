@@ -37,6 +37,8 @@ is compared byte for byte.
 | `NAME.test` | standard output of `sisu test NAME.sisu` |
 | `NAME.tokens` | `sisu tokens NAME.sisu` |
 | `NAME.tree` | `sisu parse --tree NAME.sisu` |
+| `NAME.defer` | `sisu run --defer-borrow NAME.sisu ARGS...`: standard output, then `--- stderr`, standard error, and `--- status N` |
+| `NAME.explain` | `sisu explain-borrow NAME.sisu:N`, where `N` is given by a line `# explain-borrow N` in the case |
 
 A case is run when any of `.out`, `.err` or `.status` exists.
 
@@ -45,7 +47,7 @@ Every command runs in a fresh temporary directory holding only
 and names the file by its bare name, so paths in messages are the same on
 every machine. A program that writes files writes them there.
 
-Two checks apply to every case without an expectation file:
+Three checks apply to every case without an expectation file:
 
 - `sisu parse --print NAME.sisu` reproduces the file byte for byte (the
   syntax tree is lossless).
@@ -53,6 +55,15 @@ Two checks apply to every case without an expectation file:
   to a file and run with `sisu run --sir` gives the same standard output,
   standard error and exit status as running the source (minus any
   compile-time warnings that precede the program's own output).
+- For a case that runs, `sisu run --monitor` (the dynamic ownership
+  monitor) prints exactly what `sisu run` printed and exits the same way.
+  A case that runs was accepted by the ownership checker, so any
+  difference is the monitor stopping a program the checker accepted: a
+  soundness hole in the checker, which fails the suite (18, principle 5,
+  "the checker checks itself").
+
+The summary line counts the cases, the checks, the runs repeated under
+the monitor and the counterexample runs (`.defer`).
 
 ## The diagnostic form
 
@@ -84,3 +95,16 @@ parameters each identifier takes.
   options, `Drop` order on normal and unwinding paths, panics and their
   exit statuses, capabilities, and tests.
 - `sir/` pins the serialised SIR of small programs.
+- `ownership/` is the ownership checker (18, Phase 3). Accepted programs
+  run (and so run again under the monitor): moves and partial moves, drop
+  placement on every path (`drop_torture` is the drop-order torture
+  program), the parameter conventions, non-lexical and two-phase borrows,
+  returned borrows and `from`, views, closures, the three iteration modes,
+  `@must_consume`, and `proposal_core`, the part of
+  `proposal/examples/ownership.sisu` stage 0 can run, kept identical to
+  the original by a test. Rejected programs pin their diagnostics by code
+  and span, and most also pin their counterexample run (`.defer`): the
+  monitor's concrete conflict, or "no conflict" with the account of why
+  the checker still rejects them (`candidate_false_positive` and
+  `untested_path` show the two other outcomes). `explain_borrow` pins
+  `sisu explain-borrow`.

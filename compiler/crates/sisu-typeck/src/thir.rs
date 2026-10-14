@@ -24,6 +24,9 @@ pub struct Local {
     pub ty: Ty,
     /// `var`, or a `let` declared without a value (assigned later).
     pub mutable: bool,
+    /// A `let` declared without a value: it may be assigned once on each
+    /// path, which the ownership checker's dataflow decides.
+    pub once: bool,
     pub span: Span,
     /// The closure whose parameter or local this is; `None` for the function.
     pub closure: Option<ClosureId>,

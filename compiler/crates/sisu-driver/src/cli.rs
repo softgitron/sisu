@@ -8,6 +8,7 @@
 use crate::db::Db;
 use sisu_diag::{Catalog, MsgId, msg};
 use sisu_interp::{Host, Options, TestResult, exit};
+use std::rc::Rc;
 
 pub const EXIT_USAGE: i32 = 2;
 pub const EXIT_ICE: i32 = 70;
@@ -88,10 +89,12 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
             exit::OK
         }
         "explain" => explain(rest, host),
+        "explain-borrow" => explain_borrow(rest, host),
         "run" | "check" | "sir" | "test" | "tokens" | "parse" => {
             let p = split_args(rest);
             let allowed: &[&str] = match cmd.as_str() {
-                "run" => &["--sir"],
+                "run" => &["--sir", "--monitor", "--defer-borrow"],
+                "test" => &["--no-monitor", "--defer-borrow"],
                 "check" => &["--format=ids", "--format=human"],
                 "tokens" => &["--trivia"],
                 "parse" => &["--tree", "--print", "--trivia"],
@@ -232,24 +235,67 @@ fn command(
             let Some(c) = db.checked(file) else { return exit::ERROR };
             let errors = c.diagnostics.iter().filter(|d| d.is_error()).count();
             if cmd == "check" {
+                stage.set("the ownership checker");
+                let all = db.diagnostics(file);
+                let errors = all.iter().filter(|d| d.is_error()).count();
                 if has("--format=ids") {
-                    host.stdout(&sisu_diag::render::render_ids(&c.map, &c.diagnostics));
+                    host.stdout(&sisu_diag::render::render_ids(&c.map, &all));
                 } else {
-                    host.stderr(&sisu_diag::render::render_human(&c.map, &c.diagnostics));
+                    host.stderr(&sisu_diag::render::render_human(&c.map, &all));
                 }
                 return if errors > 0 { exit::ERROR } else { exit::OK };
             }
-            if errors > 0 {
+            let defer = has("--defer-borrow") && matches!(cmd, "run" | "test");
+            // The counterexample mode defers the ownership rules about
+            // declarations too; any other error stops here.
+            if errors > 0 && (!defer || c.blocks_lowering()) {
                 let mut out = sisu_diag::render::render_human(&c.map, &c.diagnostics);
                 out.push_str(&plain_error(msg::CLI_ERRORS_FOUND, &[("count", errors.to_string())]));
                 host.stderr(&out);
                 return exit::ERROR;
             }
-            if !c.diagnostics.is_empty() {
-                host.stderr(&sisu_diag::render::render_human(&c.map, &c.diagnostics));
+            let deferred: Vec<sisu_diag::Diagnostic> = c
+                .diagnostics
+                .iter()
+                .filter(|d| d.is_error() && crate::db::is_ownership_rule(d))
+                .cloned()
+                .collect();
+            let warnings: Vec<sisu_diag::Diagnostic> =
+                c.diagnostics.iter().filter(|d| !d.is_error()).cloned().collect();
+            if !warnings.is_empty() {
+                host.stderr(&sisu_diag::render::render_human(&c.map, &warnings));
             }
+            stage.set("the ownership checker");
+            let Some(lowered) = db.lowered(file) else { return exit::ERROR };
+            // `sisu sir` prints the SIR of a rejected program too.
+            if lowered.has_errors() && !defer && cmd != "sir" {
+                let n = lowered.diagnostics.iter().filter(|d| d.is_error()).count();
+                let mut out = sisu_diag::render::render_human(&c.map, &lowered.diagnostics);
+                out.push_str(&plain_error(msg::CLI_OWNERSHIP_ERRORS, &[("count", n.to_string())]));
+                host.stderr(&out);
+                return exit::ERROR;
+            }
+            // The counterexample mode defers the ownership rules only:
+            // purity and a second assignment to a `let` are not something
+            // the monitor observes.
+            let impure: Vec<sisu_diag::Diagnostic> = lowered
+                .findings
+                .iter()
+                .zip(&lowered.diagnostics_by_finding)
+                .filter(|(f, d)| d.is_error() && !f.is_ownership())
+                .map(|(_, d)| d.clone())
+                .collect();
+            if defer && !impure.is_empty() {
+                let mut out = sisu_diag::render::render_human(&c.map, &impure);
+                out.push_str(&plain_error(msg::CLI_ERRORS_FOUND, &[("count", impure.len().to_string())]));
+                host.stderr(&out);
+                return exit::ERROR;
+            }
+            // A program the checker accepts runs under the monitor as usual,
+            // without the counterexample account.
+            let deferring = defer && (lowered.has_errors() || !deferred.is_empty());
             stage.set("lowering");
-            let Some(prog) = db.sir(file) else { return exit::ERROR };
+            let prog = Rc::new(lowered.sir.clone());
             if let Some(problem) = sisu_sir::validate(&prog).into_iter().next() {
                 let (function, detail) =
                     problem.split_once(": ").map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or_default();
@@ -269,7 +315,21 @@ fn command(
                 }
                 "test" => {
                     stage.set("the interpreter");
-                    run_tests(&prog, host)
+                    let options = Options {
+                        monitor: defer || !has("--no-monitor"),
+                        coverage: deferring,
+                        ..Options::default()
+                    };
+                    if deferring {
+                        host.stderr(&format!("{}\n", text(msg::DEFER_HEADER, &[])));
+                    }
+                    let (code, reports) = run_tests(&prog, host, &options);
+                    if deferring {
+                        let violation = reports.iter().any(|r| r.violation);
+                        let coverage = merge_coverage(&reports);
+                        host.stderr(&defer_report(&lowered, &deferred, &c.map, violation, &coverage));
+                    }
+                    code
                 }
                 _ => {
                     stage.set("the interpreter");
@@ -277,20 +337,116 @@ fn command(
                         host.stderr(&plain_error(msg::CLI_NO_MAIN, &[("file", file.to_string())]));
                         return exit::ERROR;
                     }
+                    let options = Options {
+                        monitor: defer || has("--monitor"),
+                        coverage: deferring,
+                        ..Options::default()
+                    };
+                    if deferring {
+                        host.stderr(&format!("{}\n", text(msg::DEFER_HEADER, &[])));
+                    }
                     let mut h = WithArgs { inner: host, args };
-                    sisu_interp::run_main(&prog, &mut h, &Options::default())
+                    let report = sisu_interp::run_main_report(&prog, &mut h, &options);
+                    if deferring {
+                        host.stderr(&defer_report(
+                            &lowered,
+                            &deferred,
+                            &c.map,
+                            report.violation,
+                            &report.coverage,
+                        ));
+                    }
+                    report.status
                 }
             }
         }
     }
 }
 
-fn run_tests(prog: &sisu_sir::Program, host: &mut dyn Host) -> i32 {
-    let results = sisu_interp::run_tests(prog, host, &Options::default());
+type Coverage = std::collections::HashMap<(String, u32, u32), u32>;
+
+fn merge_coverage(reports: &[sisu_interp::RunReport]) -> Coverage {
+    let mut c = Coverage::new();
+    for r in reports {
+        for (k, n) in &r.coverage {
+            *c.entry(k.clone()).or_default() += n;
+        }
+    }
+    c
+}
+
+/// The counterexample mode's account (A2): the conflict was reached, or
+/// no conflict happened and each rejected statement was reached (a
+/// candidate false positive) or not (an untested path).
+fn defer_report(
+    lowered: &crate::db::Lowered,
+    declarations: &[sisu_diag::Diagnostic],
+    map: &sisu_diag::SourceMap,
+    violation: bool,
+    coverage: &Coverage,
+) -> String {
+    let mut out = String::new();
+    if violation {
+        out.push_str(&text(msg::DEFER_CONFLICT, &[]));
+        out.push('\n');
+        return out;
+    }
+    out.push_str(&text(msg::DEFER_NO_CONFLICT, &[]));
+    out.push('\n');
+    // Rules about declarations hold or not whatever the program does.
+    for d in declarations {
+        let params = [
+            ("line", map.line_col(d.span).0.line.to_string()),
+            ("code", d.code().to_string()),
+            ("id", d.msg.id().to_string()),
+        ];
+        out.push_str("  ");
+        out.push_str(&text(msg::DEFER_SIGNATURE, &params));
+        out.push('\n');
+    }
+    let mut all_reached = true;
+    for (f, d) in lowered.findings.iter().zip(&lowered.diagnostics_by_finding) {
+        let line = f.loc.map(|l| l.line).unwrap_or(0).to_string();
+        let count = f
+            .loc
+            .map(|l| coverage.get(&(f.function.clone(), l.line, l.col)).copied().unwrap_or(0))
+            .unwrap_or(0);
+        let params = [
+            ("line", line),
+            ("code", d.code().to_string()),
+            ("id", d.msg.id().to_string()),
+            ("count", count.to_string()),
+        ];
+        let m = if count > 0 { msg::DEFER_REACHED } else { msg::DEFER_NOT_REACHED };
+        if count == 0 {
+            all_reached = false;
+        }
+        out.push_str("  ");
+        out.push_str(&text(m, &params));
+        out.push('\n');
+    }
+    let verdict = if lowered.findings.is_empty() {
+        msg::DEFER_DECLARATIONS_ONLY
+    } else if all_reached {
+        msg::DEFER_FALSE_POSITIVE
+    } else {
+        msg::DEFER_INCONCLUSIVE
+    };
+    out.push_str(&text(verdict, &[]));
+    out.push('\n');
+    out
+}
+
+fn run_tests(
+    prog: &sisu_sir::Program,
+    host: &mut dyn Host,
+    options: &Options,
+) -> (i32, Vec<sisu_interp::RunReport>) {
+    let results = sisu_interp::run_tests_report(prog, host, options);
     let (mut passed, mut failed, mut blocked) = (0, 0, 0);
     let mut out = String::new();
     let mut failures = String::new();
-    for (name, r) in &results {
+    for (name, r, _) in &results {
         let outcome = match r {
             TestResult::Passed => {
                 passed += 1;
@@ -328,7 +484,99 @@ fn run_tests(prog: &sisu_sir::Program, host: &mut dyn Host) -> i32 {
     ));
     out.push('\n');
     host.stdout(&out);
-    if failed > 0 { exit::ERROR } else { exit::OK }
+    let reports = results.into_iter().map(|(_, _, r)| r).collect();
+    (if failed > 0 { exit::ERROR } else { exit::OK }, reports)
+}
+
+/// `sisu explain-borrow FILE:LINE`: every borrow live on the line, with
+/// where it starts, who holds it and where it is last used (10, "Language
+/// server": the "explain this borrow" command).
+fn explain_borrow(args: &[String], host: &mut dyn Host) -> i32 {
+    let target = args.first().and_then(|a| {
+        let (file, line) = a.rsplit_once(':')?;
+        Some((file.to_string(), line.parse::<u32>().ok()?))
+    });
+    let Some((file, line)) = target else {
+        host.stderr(&plain_error(msg::CLI_EXPLAIN_BORROW_USAGE, &[]));
+        return EXIT_USAGE;
+    };
+    let source = match std::fs::read_to_string(&file) {
+        Ok(s) => s,
+        Err(e) => {
+            host.stderr(&plain_error(
+                msg::CLI_CANNOT_READ,
+                &[("path", file.clone()), ("reason", e.to_string())],
+            ));
+            return exit::ERROR;
+        }
+    };
+    let mut db = Db::new();
+    db.set_file(&file, &source);
+    let Some(c) = db.checked(&file) else { return exit::ERROR };
+    if c.has_errors() {
+        let errors = c.diagnostics.iter().filter(|d| d.is_error()).count();
+        let mut out = sisu_diag::render::render_human(&c.map, &c.diagnostics);
+        out.push_str(&plain_error(msg::CLI_ERRORS_FOUND, &[("count", errors.to_string())]));
+        host.stderr(&out);
+        return exit::ERROR;
+    }
+    let Some(lowered) = db.lowered(&file) else { return exit::ERROR };
+    let files = crate::db::source_files(&c.map, &lowered.sir);
+    let root = files.first().copied().unwrap_or_default();
+    let mut out = String::new();
+    let mut any = false;
+    for fl in sisu_borrowck::explain::live_at(&lowered.sir, 0, line) {
+        if fl.loans.is_empty() {
+            continue;
+        }
+        any = true;
+        out.push_str(&text(
+            msg::CLI_EXPLAIN_BORROW_HEADER,
+            &[("line", line.to_string()), ("file", file.clone()), ("function", fl.function.clone())],
+        ));
+        out.push('\n');
+        for l in &fl.loans {
+            let kind = text(
+                if l.mutable { msg::CLI_EXPLAIN_BORROW_MUT } else { msg::CLI_EXPLAIN_BORROW_SHARED },
+                &[],
+            );
+            let pos =
+                |loc: Option<sisu_sir::Loc>| loc.map(|l| format!("{}:{}", l.line, l.col)).unwrap_or_default();
+            let place = match &l.place {
+                sisu_borrowck::Arg::Text(t) => t.clone(),
+                sisu_borrowck::Arg::Source(loc) => {
+                    c.map.slice(sisu_borrowck::span_of(&c.map, root, Some(*loc))).to_string()
+                }
+            };
+            let holders: Vec<String> = l.holders.iter().map(|h| format!("`{h}`")).collect();
+            let m = if holders.is_empty() {
+                msg::CLI_EXPLAIN_BORROW_TEMPORARY
+            } else {
+                msg::CLI_EXPLAIN_BORROW_LOAN
+            };
+            out.push_str("  ");
+            out.push_str(&text(
+                m,
+                &[
+                    ("kind", kind),
+                    ("place", place),
+                    ("start", pos(l.start)),
+                    ("holders", holders.join(", ")),
+                    ("end", pos(l.until)),
+                ],
+            ));
+            out.push('\n');
+        }
+    }
+    if !any {
+        out.push_str(&text(
+            msg::CLI_EXPLAIN_BORROW_NONE,
+            &[("line", line.to_string()), ("file", file.clone())],
+        ));
+        out.push('\n');
+    }
+    host.stdout(&out);
+    exit::OK
 }
 
 fn explain(args: &[String], host: &mut dyn Host) -> i32 {

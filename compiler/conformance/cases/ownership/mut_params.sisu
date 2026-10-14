@@ -1,0 +1,35 @@
+# Parameter conventions (04, rule 2): borrowed by default, `mut` for an
+# exclusive borrow the call site shows, `own` to take the value.
+
+struct User:
+    name: String
+    age: int
+
+def describe(u: User) -> String:
+    return "{u.name} ({u.age})"
+
+def birthday(mut u: User):
+    u.age += 1
+
+def rename(mut u: User, name: str):
+    u.name = name.to_string()
+
+def archive(own u: User, mut into: list[User]):
+    into.push(u)
+
+def grow_all(mut users: list[User]):
+    for u in mut users:
+        birthday(mut u)
+
+def main():
+    var roni = User(name="Roni".to_string(), age=30)
+    print(describe(roni))
+    birthday(mut roni)
+    rename(mut roni, "Roni J.")
+    print(describe(roni))
+    let copy = roni.copy()
+    var old: list[User] = []
+    archive(roni, mut old)
+    grow_all(mut old)
+    print(describe(old[0]))
+    print(describe(copy))

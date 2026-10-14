@@ -1,7 +1,7 @@
 //! Statements: blocks, `let`, assignment, `return`, loops, `if`, `match`,
 //! `assert`, `defer`.
 
-use crate::func::{DropEntry, FnLower, LoopCtx};
+use crate::func::{DropEntry, FnLower, LoopCtx, stmt_span};
 use sisu_resolve::Ty;
 use sisu_sir as sir;
 use sisu_sir::{BlockId, Operand, Place, Rvalue, StatementKind, Terminator};
@@ -10,7 +10,8 @@ use sisu_typeck::thir::{self, ArmBody, CondPart, ExprKind, ForMode, LetElse, Pat
 impl FnLower<'_, '_> {
     /// A block in its own scope.
     pub fn block(&mut self, b: &thir::Block) {
-        self.push_scope();
+        let end = self.block_end(b);
+        self.push_scope_at(end);
         self.block_stmts(b);
         self.pop_scope();
     }
@@ -23,7 +24,8 @@ impl FnLower<'_, '_> {
 
     fn stmt(&mut self, s: &Stmt) {
         // Temporaries of a statement live until its end.
-        self.push_scope();
+        let at = self.ctx.loc(stmt_span(s));
+        self.push_scope_at(self.ctx.end_loc(stmt_span(s)));
         match s {
             Stmt::Let { pat, init, unwrap, else_, span } => {
                 self.let_stmt(pat, init.as_ref(), *unwrap, else_.as_ref(), *span)
@@ -49,7 +51,7 @@ impl FnLower<'_, '_> {
                 let t = self.temp(&value.ty);
                 self.into(Place::local(t), value);
                 if self.needs_drop(&value.ty) {
-                    self.register(DropEntry::Local(t, None));
+                    self.register(DropEntry::Local(t));
                     self.split();
                 }
             }
@@ -58,7 +60,7 @@ impl FnLower<'_, '_> {
                 let t = self.temp(&e.ty);
                 self.into(Place::local(t), e);
                 if self.needs_drop(&e.ty) && e.ty != Ty::Never {
-                    self.register(DropEntry::Local(t, None));
+                    self.register(DropEntry::Local(t));
                     self.split();
                 }
             }
@@ -72,7 +74,7 @@ impl FnLower<'_, '_> {
                         loc,
                     ),
                 }
-                self.emit_exit(0);
+                self.emit_exit(0, loc);
                 self.terminate(Terminator::Return, loc);
             }
             Stmt::Break(_) | Stmt::Continue(_) => {
@@ -82,7 +84,7 @@ impl FnLower<'_, '_> {
                     } else {
                         (l.continue_bb, l.depth)
                     };
-                    self.emit_exit(depth);
+                    self.emit_exit(depth, at);
                     self.goto(target);
                 }
             }
@@ -138,24 +140,15 @@ impl FnLower<'_, '_> {
     }
 
     /// Stores `v` into the place `p` of the expression `pe`, dropping the
-    /// value it held.
+    /// value it held (if it holds one: the ownership checker removes the
+    /// drop of a place that is not initialised there).
     fn overwrite(&mut self, pe: &thir::Expr, p: Place, v: Operand, loc: Option<sir::Loc>) {
-        let whole = match &pe.kind {
-            ExprKind::Local(l) if !self.alias.contains_key(l) && !self.env.contains_key(l) => Some(*l),
-            _ => None,
-        };
         if self.needs_drop(&pe.ty) {
-            let flag = whole.and_then(|l| self.flags.get(&l).copied());
             self.split();
-            self.emit(StatementKind::Drop { place: p.clone(), flag }, loc);
+            self.emit(StatementKind::Drop { place: p.clone(), flag: None }, loc);
             self.split();
         }
         self.assign(p, Rvalue::Use(v), loc);
-        if let Some(l) = whole
-            && let Some(&f) = self.flags.get(&l)
-        {
-            self.assign(Place::local(f), Rvalue::Use(Operand::Const(sir::Const::Bool(true))), None);
-        }
     }
 
     fn aug_assign(
@@ -201,14 +194,13 @@ impl FnLower<'_, '_> {
     ) {
         let loc = self.ctx.loc(span);
         let Some(init) = init else {
-            // `let x: T`: the local exists from here, assigned later.
+            // `let x: T`: the local exists from here, assigned later; its
+            // drop at the end of the scope is guarded by the dataflow.
             if let PatKind::Bind { local, .. } = &pat.kind {
                 let l = self.local_for(*local);
+                self.scope_local(1, l);
                 if self.needs_drop(&pat.ty) {
-                    let f = self.add_local(sir::Type::Bool, Some("flag".into()));
-                    self.flags.insert(*local, f);
-                    self.assign(Place::local(f), Rvalue::Use(Operand::Const(sir::Const::Bool(false))), loc);
-                    self.register_below(1, DropEntry::Local(l, Some(f)));
+                    self.register_below(1, DropEntry::Local(l));
                     self.split();
                 }
             }
@@ -328,11 +320,13 @@ impl FnLower<'_, '_> {
         }
     }
 
-    /// Registers a value binding in the scope `below` levels down.
+    /// Registers a value binding in the scope `below` levels down: its
+    /// drop and the end of its storage.
     pub fn bind_registered(&mut self, tl: thir::LocalId, l: sir::LocalId, ty: &Ty, below: usize) {
+        let _ = tl;
+        self.scope_local(below, l);
         if self.needs_drop(ty) {
-            let flag = self.flag_init(tl);
-            self.register_below(below, DropEntry::Local(l, flag));
+            self.register_below(below, DropEntry::Local(l));
             self.split();
         }
     }
@@ -371,13 +365,34 @@ impl FnLower<'_, '_> {
         body: ForBody,
         span: sisu_diag::Span,
     ) {
-        let loc = self.ctx.loc(span);
+        // The loop's own statements are at its head, `for x in xs`.
+        let head = if iter.span.file == span.file && iter.span.range.end >= span.range.start {
+            sisu_diag::Span::new(
+                span.file,
+                sisu_diag::span::TextRange::new(span.range.start, iter.span.range.end),
+            )
+        } else {
+            span
+        };
+        let loc = self.ctx.loc(head);
         self.push_scope();
         let iter_ty = sir::Type::Named("Iter".into(), vec![self.ctx.ty(item)]);
         let it = self.temp_sir(iter_ty.clone());
         match mode {
             ForMode::Borrow | ForMode::Mut => {
-                let r = self.borrow_operand(iter, mode == ForMode::Mut);
+                let mutable = mode == ForMode::Mut;
+                // Iterating a reference (a borrowed parameter) borrows what
+                // it points to, not the reference itself.
+                let r = match &iter.ty {
+                    Ty::Ref(inner, _) => {
+                        let p = self.place_of(iter).project(sir::Proj::Deref);
+                        let t = self.temp_sir(sir::Type::Ref(Box::new(self.ctx.ty(inner)), mutable));
+                        let at = self.ctx.loc(iter.span);
+                        self.assign(Place::local(t), Rvalue::Ref(p, mutable), at);
+                        Operand::Copy(Place::local(t))
+                    }
+                    _ => self.borrow_operand(iter, mutable),
+                };
                 let name = if mode == ForMode::Mut { "iter.mut" } else { "iter.ref" };
                 self.emit(
                     StatementKind::Call {
@@ -401,7 +416,7 @@ impl FnLower<'_, '_> {
             }
             ForMode::Iter => self.into(Place::local(it), iter),
         }
-        self.register(DropEntry::Local(it, None));
+        self.register(DropEntry::Local(it));
         self.split();
         let head = self.new_block();
         let exit = self.new_block();
@@ -422,7 +437,7 @@ impl FnLower<'_, '_> {
             loc,
         );
         if self.needs_drop(item) {
-            self.register(DropEntry::Local(next, None));
+            self.register(DropEntry::Local(next));
             self.split();
         }
         let d = self.temp_sir(sir::Type::Int);
@@ -486,7 +501,7 @@ impl FnLower<'_, '_> {
                     let t = self.temp(&e.ty);
                     self.into(Place::local(t), e);
                     if self.needs_drop(&e.ty) {
-                        self.register(DropEntry::Local(t, None));
+                        self.register(DropEntry::Local(t));
                         self.split();
                     }
                 }

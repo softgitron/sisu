@@ -1,0 +1,3 @@
+panic: a negative receipt
+  at checked (must_consume.sisu:46:9)
+  at main (must_consume.sisu:61:11)

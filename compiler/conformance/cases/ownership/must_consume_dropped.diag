@@ -1,0 +1,2 @@
+15:27-15:27 E0417 borrow.must-consume name="u" ty="Transaction"
+  label 13:9-13:10 borrow.declared-here name="u"

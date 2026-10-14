@@ -1,0 +1,61 @@
+# `@must_consume` (D-054, D-064): a receipt must be passed to an `own`
+# parameter, and a type's own methods are where its values end; a list of
+# receipts is must-consume too, and consuming iteration discharges it.
+# Unwinding is exempt: the panic at the end drops a receipt on its way out.
+
+@must_consume
+struct Receipt:
+    amount: int
+
+    def settled(own self) -> int:
+        return self.amount
+
+error RepayError:
+    Refused(amount: int)
+
+struct Pool:
+    total: int
+
+def repay(mut pool: Pool, own r: Receipt) -> ! RepayError:
+    let amount = r.settled()
+    if amount > 100:
+        return Err(Refused(amount))
+    pool.total += amount
+    return Ok(())
+
+def settle(mut pool: Pool, own receipts: list[Receipt]):
+    for r in own receipts:
+        match repay(mut pool, r):
+            case Ok(()):
+                pass
+            case Err(e):
+                print("refused: {e}")
+
+def first_or_none(own receipts: list[Receipt]) -> Receipt?:
+    var rest = receipts
+    let r = rest.pop()
+    settle_quietly(rest)
+    return r
+
+def settle_quietly(own receipts: list[Receipt]):
+    var pool = Pool(total=0)
+    settle(mut pool, receipts)
+
+def checked(own r: Receipt) -> int:
+    if r.amount < 0:
+        panic("a negative receipt")
+    return r.settled()
+
+def main():
+    var pool = Pool(total=0)
+    let receipts = [Receipt(amount=10), Receipt(amount=200), Receipt(amount=5)]
+    settle(mut pool, receipts)
+    print(pool.total)
+    match first_or_none([Receipt(amount=1), Receipt(amount=2)]):
+        case Some(r):
+            settle(mut pool, [r])
+        case None:
+            pass
+    print(pool.total)
+    print(checked(Receipt(amount=3)))
+    print(checked(Receipt(amount=-1)))

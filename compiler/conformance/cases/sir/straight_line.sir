@@ -3,22 +3,24 @@ source 0 "straight_line.sisu"
 source 1 "<std>/prelude.sisu"
 entry main
 
-fn add(2) source 0 {
+intrinsic print
+
+fn add(2) source 0 @1:5-1:8 {
     let _0: int
-    let _1: int "a"
-    let _2: int "b"
+    let _1: int "a" @1:9-1:15
+    let _2: int "b" @1:17-1:23
   bb0:
-    _0 = add copy _1, copy _2 @2:12
-    return @2:5
+    _0 = add copy _1, copy _2 @2:12-2:17
+    return @2:5-2:17
 }
 
-fn main(0) source 0 {
+fn main(0) source 0 @4:5-4:9 {
     let _0: ()
-    let _1: int "x"
+    let _1: int "x" @5:9-5:10
     let _2: ()
   bb0:
-    _1 = call fn add(const 1, const 2) @5:13
-    _2 = call intrinsic print(copy _1) @6:5
+    _1 = call fn add(const 1, const 2) @5:13-5:22
+    _2 = call intrinsic print(copy _1) @6:5-6:13
     _0 = const ()
     return
 }

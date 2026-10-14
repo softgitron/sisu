@@ -70,17 +70,23 @@ fn severity_word(s: Severity) -> &'static str {
     }
 }
 
-fn excerpt(out: &mut String, map: &SourceMap, span: Span, marker: char, text: &str) {
+/// One source line with a span marked under it. `gutter` is the width of
+/// the line-number column, the same for every excerpt of a diagnostic.
+fn excerpt(out: &mut String, map: &SourceMap, span: Span, marker: char, text: &str, gutter: usize) {
     let Some(file) = map.get(span.file) else {
         return;
     };
     let (a, b) = map.line_col(span);
     let line = file.line_text(a.line);
-    let gutter = format!("{}", a.line).len();
     let pad = " ".repeat(gutter);
-    out.push_str(&format!("{pad} |\n{} | {line}\n", a.line));
+    out.push_str(&format!("{pad} |\n{:>gutter$} | {line}\n", a.line));
     let start = a.col.saturating_sub(1) as usize;
-    let width = if b.line == a.line { (b.col.saturating_sub(a.col) as usize).max(1) } else { 1 };
+    // A span over several lines is marked to the end of its first line.
+    let width = if b.line == a.line {
+        (b.col.saturating_sub(a.col) as usize).max(1)
+    } else {
+        line.trim_end().chars().count().saturating_sub(start).max(1)
+    };
     out.push_str(&format!("{pad} | {}{}", " ".repeat(start), marker.to_string().repeat(width)));
     if !text.is_empty() {
         out.push(' ');
@@ -97,15 +103,22 @@ pub fn render_human(map: &SourceMap, diags: &[Diagnostic]) -> String {
         out.push_str(&format!("{}[{}]: {}\n", severity_word(d.severity()), d.code(), d.message()));
         let (a, _) = map.line_col(d.span);
         out.push_str(&format!("  --> {}:{}:{}\n", map.name(d.span.file), a.line, a.col));
-        excerpt(&mut out, map, d.span, '^', "");
+        let gutter = std::iter::once(d.span)
+            .chain(d.labels.iter().map(|l| l.span))
+            .map(|s| map.line_col(s).0.line.to_string().len())
+            .max()
+            .unwrap_or(1);
+        excerpt(&mut out, map, d.span, '^', "", gutter);
         for l in &d.labels {
-            excerpt(&mut out, map, l.span, '-', &catalog.render(l.msg.id(), &l.params));
+            excerpt(&mut out, map, l.span, '-', &catalog.render(l.msg.id(), &l.params), gutter);
         }
         for n in &d.notes {
             out.push_str(&format!("  = note: {}\n", catalog.render(n.msg.id(), &n.params)));
         }
         for f in &d.fixes {
-            let edits: Vec<String> = f.edits.iter().map(|e| format!("`{}`", e.text)).collect();
+            // A deletion has no text to show; the fix's message says what goes.
+            let edits: Vec<String> =
+                f.edits.iter().filter(|e| !e.text.is_empty()).map(|e| format!("`{}`", e.text)).collect();
             let suffix = if edits.is_empty() { String::new() } else { format!(": {}", edits.join(", ")) };
             out.push_str(&format!("  = fix: {}{}\n", catalog.render(f.msg.id(), &f.params), suffix));
         }

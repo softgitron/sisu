@@ -1,0 +1,20 @@
+# `sisu explain-borrow FILE:LINE` lists the borrows live on a line: what
+# each borrows, where it starts, the names that hold it, and where it is
+# last used. The runner asks about the line named here:
+# explain-borrow 16
+
+def longest(words: list[str]) -> str:
+    var best = ""
+    for w in words:
+        if len(w) > len(best):
+            best = w
+    return best
+
+def main():
+    var text = String.new("a bb ccc")
+    let words = [w for w in text.split_whitespace()]
+    let best = longest(words)
+    print(best)
+    print(len(words))
+    text.push(" dddd")
+    print(text)

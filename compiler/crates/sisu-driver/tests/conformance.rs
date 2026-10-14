@@ -29,3 +29,18 @@ fn example_copies_match_the_proposal() {
         assert_eq!(original, copy, "conformance/cases/examples/{name} differs from proposal/examples/{name}");
     }
 }
+
+/// The part of proposal/examples/ownership.sisu that stage 0 can run
+/// (everything before `Shared`, which needs `Mutex`, `Arena` and tasks) is
+/// the conformance case `ownership/proposal_core.sisu`, kept identical.
+#[test]
+fn ownership_core_matches_the_proposal() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let original =
+        std::fs::read_to_string(root.join("../proposal/examples/ownership.sisu")).unwrap_or_default();
+    let core = original.split("# Shared ownership is a type you choose.").next().unwrap_or("").trim_end();
+    assert!(!core.is_empty(), "missing proposal/examples/ownership.sisu");
+    let case = std::fs::read_to_string(root.join("conformance/cases/ownership/proposal_core.sisu"))
+        .unwrap_or_default();
+    assert!(case.starts_with(core), "ownership/proposal_core.sisu no longer starts with the proposal's text");
+}

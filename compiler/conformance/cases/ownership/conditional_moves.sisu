@@ -1,0 +1,46 @@
+# A value moved on some paths only is dropped at the end of its scope on
+# the others: the drop is guarded by a flag the dataflow places.
+
+view struct Log:
+    name: str
+
+impl Drop for Log:
+    def drop(mut self):
+        print("  drop {self.name}")
+
+def keep(own l: Log):
+    print("  keep {l.name}")
+
+def maybe(flag: bool):
+    print("maybe({flag}):")
+    let a = Log(name="a")
+    let b = Log(name="b")
+    if flag:
+        keep(a)
+    else:
+        keep(b)
+    print("  end of maybe")
+
+def in_loop(n: int):
+    print("in_loop({n}):")
+    for i in range(n):
+        let item = Log(name="item")
+        if i % 2 == 0:
+            keep(item)
+            continue
+        print("  kept item {i} until the end of the iteration")
+
+def assigned_later(flag: bool):
+    print("assigned_later({flag}):")
+    let x: Log
+    if flag:
+        x = Log(name="x")
+        print("  x is {x.name}")
+    print("  end of assigned_later")
+
+def main():
+    maybe(True)
+    maybe(False)
+    in_loop(3)
+    assigned_later(True)
+    assigned_later(False)

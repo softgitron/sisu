@@ -227,7 +227,7 @@ fn main(0) source 0 {
 "#,
     );
     let mut host = TestHost::default();
-    let code = Interp::new(&p, &mut host, &Options { fuel: Some(1000) }).run_main();
+    let code = Interp::new(&p, &mut host, &Options { fuel: Some(1000), ..Options::default() }).run_main();
     assert_eq!(code, exit::ABORT);
     assert!(host.err.contains("1000 statements"), "{}", host.err);
 }

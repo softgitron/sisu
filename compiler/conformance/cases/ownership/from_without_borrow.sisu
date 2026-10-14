@@ -1,0 +1,10 @@
+# A result that cannot borrow takes no `from` clause.
+
+def total(xs: list[int]) -> int from xs:
+    var t = 0
+    for x in xs:
+        t += x
+    return t
+
+def main():
+    print(total([1, 2]))

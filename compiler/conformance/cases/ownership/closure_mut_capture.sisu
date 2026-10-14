@@ -1,0 +1,9 @@
+# A closure that changes what it captures borrows it with `mut` for as
+# long as the closure is used, so nothing else may use it in between.
+
+def main():
+    var log: list[String] = []
+    let note = () -> log.push("tick".to_string())
+    note()
+    print(len(log))
+    note()

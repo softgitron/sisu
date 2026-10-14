@@ -1,0 +1,125 @@
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+ownership violation: `_3` was dropped holding a `Receipt`, which must be passed to an `own` parameter
+  used at: must_consume_try.sisu:27:9 (`drop _3`)
+  at settle (must_consume_try.sisu:27:9)
+  at main (must_consume_try.sisu:32:5)
+SIR of `settle`:
+fn settle(2) source 0 @25:5-25:11 {
+    let _0: Result[(), {RepayError}]
+    let _1: ref mut Pool "pool" @25:12-25:26
+    let _2: list[Receipt] "receipts" @25:28-25:55
+    let _3: Iter[Receipt]
+    let _4: ref mut Iter[Receipt]
+    let _5: Option[Receipt]
+    let _6: int
+    let _7: Receipt "r" @26:9-26:10
+    let _8: ()
+    let _9: Result[(), {RepayError}]
+    let _10: int
+    let _11: {RepayError}
+    let _12: ref mut {RepayError}
+    let _13: ()
+    let _14: bool "flag"
+    let _15: bool "flag"
+  bb0:
+    _14 = const false
+    _15 = const false
+    goto bb1
+  bb1 (unwind bb3):
+    _3 = call intrinsic iter.own(move _2) @26:5-26:26
+    goto bb4
+  bb2 (cleanup):
+    resume
+  bb3 (cleanup):
+    goto bb2
+  bb4 (unwind bb5):
+    goto bb6
+  bb5 (cleanup):
+    drop _3
+    goto bb3
+  bb6 (unwind bb5):
+    _4 = ref mut _3 @26:5-26:26
+    _5 = call intrinsic Iter.next(copy _4) @26:5-26:26
+    _14 = const true
+    goto bb8
+  bb7 (unwind bb5):
+    goto bb31
+  bb8 (unwind bb9):
+    _6 = discriminant _5 @26:5-26:26
+    switch copy _6 [0: bb10, else: bb11] @26:5-26:26
+  bb9 (cleanup):
+    drop _5 if _14
+    goto bb5
+  bb10 (unwind bb9):
+    _7 = move _5.as(0).0 @26:9-26:10
+    goto bb14
+  bb11 (unwind bb9):
+    goto bb12
+  bb12 (unwind bb5):
+    _14 = const false
+    goto bb13
+  bb13 (unwind bb9):
+    goto bb7
+  bb14 (unwind bb15):
+    _9 = call fn repay(copy _1, move _7) @27:9-27:27
+    _15 = const true
+    goto bb16
+  bb15 (cleanup):
+    goto bb9
+  bb16 (unwind bb17):
+    _10 = discriminant _9 @27:9-27:28
+    switch copy _10 [0: bb18, else: bb19] @27:9-27:28
+  bb17 (cleanup):
+    drop _9.as(1).0 if _15
+    goto bb15
+  bb18 (unwind bb17):
+    _8 = copy _9.as(0).0 @27:9-27:28
+    goto bb25
+  bb19 (unwind bb17):
+    _15 = const false
+    _11 = move _9.as(1).0 @27:9-27:28
+    _12 = ref mut _11 @27:9-27:28
+    _13 = call intrinsic error.trace_push(copy _12, const "must_consume_try.sisu:27:9") @27:9-27:28
+    _0 = variant Result::Err(move _11) @27:9-27:28
+    goto bb20
+  bb20 (unwind bb15):
+    _15 = const false
+    goto bb21
+  bb21 (unwind bb9):
+    goto bb22
+  bb22 (unwind bb5):
+    _14 = const false
+    goto bb23
+  bb23 (unwind bb3):
+    drop _3 @27:9-27:28
+    goto bb24
+  bb24:
+    return @27:9-27:28
+  bb25 (unwind bb15):
+    _15 = const false
+    goto bb26
+  bb26 (unwind bb15):
+    dead _11 @27:28-27:28
+    goto bb27
+  bb27 (unwind bb9):
+    goto bb28
+  bb28 (unwind bb9):
+    goto bb29
+  bb29 (unwind bb5):
+    _14 = const false
+    goto bb30
+  bb30 (unwind bb5):
+    goto bb6
+  bb31 (unwind bb3):
+    drop _3 @27:28-27:28
+    goto bb32
+  bb32 (unwind bb3):
+    dead _3 @27:28-27:28
+    _0 = variant Result::Ok(const ()) @28:12-28:18
+    goto bb33
+  bb33:
+    return @28:5-28:18
+}
+outcome: conflict reached; the run stopped at a concrete ownership conflict
+--- status 134

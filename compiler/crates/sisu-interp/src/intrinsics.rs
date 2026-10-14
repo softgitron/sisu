@@ -142,7 +142,7 @@ impl<'p> Interp<'p, '_> {
             }
             "len" => {
                 let n = match self.target(a.get(0)?)? {
-                    Value::Str(s) => s.chars().count(),
+                    Value::Str(s, _) => s.chars().count(),
                     Value::String(s) => s.chars().count(),
                     Value::List(xs) => xs.len(),
                     Value::Set(s) => s.items.len(),
@@ -309,10 +309,17 @@ impl<'p> Interp<'p, '_> {
 
     fn str_method(&mut self, method: &str, a: &mut Args) -> Result<Value, Unwind> {
         let s: Rc<str> = Rc::from(self.text(a.get(0)?)?);
+        // A piece of a view is a view of the same text, under the same loan
+        // (the ownership monitor's tag).
+        let tag = match self.target(a.get(0)?)? {
+            Value::Str(_, t) => *t,
+            _ => 0,
+        };
+        let view = |x: &str| Value::Str(Rc::from(x), tag);
         let arg_text =
             |me: &Self, i: usize| -> Result<String, Unwind> { Ok(me.text(a.get(i)?)?.to_string()) };
         let pieces =
-            |v: Vec<&str>| Value::Iter(Box::new(IterState::Items(v.into_iter().map(Value::str).collect())));
+            |v: Vec<&str>| Value::Iter(Box::new(IterState::Items(v.into_iter().map(view).collect())));
         Ok(match method {
             "cmp" => {
                 let o = arg_text(self, 1)?;
@@ -334,23 +341,21 @@ impl<'p> Interp<'p, '_> {
             }
             "split_once" => {
                 let sep = arg_text(self, 1)?;
-                Value::option(
-                    s.split_once(sep.as_str()).map(|(x, y)| Value::Tuple(vec![Value::str(x), Value::str(y)])),
-                )
+                Value::option(s.split_once(sep.as_str()).map(|(x, y)| Value::Tuple(vec![view(x), view(y)])))
             }
-            "trim" => Value::str(s.trim()),
-            "trim_start" => Value::str(s.trim_start()),
-            "trim_end" => Value::str(s.trim_end()),
+            "trim" => view(s.trim()),
+            "trim_start" => view(s.trim_start()),
+            "trim_end" => view(s.trim_end()),
             "starts_with" => Value::Bool(s.starts_with(arg_text(self, 1)?.as_str())),
             "ends_with" => Value::Bool(s.ends_with(arg_text(self, 1)?.as_str())),
             "contains" => Value::Bool(s.contains(arg_text(self, 1)?.as_str())),
             "strip_prefix" => {
                 let p = arg_text(self, 1)?;
-                Value::str(s.strip_prefix(p.as_str()).unwrap_or(&s))
+                view(s.strip_prefix(p.as_str()).unwrap_or(&s))
             }
             "strip_suffix" => {
                 let p = arg_text(self, 1)?;
-                Value::str(s.strip_suffix(p.as_str()).unwrap_or(&s))
+                view(s.strip_suffix(p.as_str()).unwrap_or(&s))
             }
             "find" => {
                 let p = arg_text(self, 1)?;

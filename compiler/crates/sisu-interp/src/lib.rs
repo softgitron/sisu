@@ -27,6 +27,7 @@ mod format;
 mod host;
 mod intrinsics;
 mod iter;
+mod monitor;
 mod ops;
 mod place;
 pub mod value;
@@ -76,6 +77,21 @@ pub struct Options {
     /// Stop after this many statements (the conformance runner sets it so a
     /// case that loops forever fails instead of hanging).
     pub fuel: Option<u64>,
+    /// Run under the dynamic ownership monitor.
+    pub monitor: bool,
+    /// Count how often each statement runs (the counterexample mode).
+    pub coverage: bool,
+}
+
+/// How a monitored run went, beyond its exit status.
+#[derive(Clone, Debug, Default)]
+pub struct RunReport {
+    pub status: i32,
+    /// The monitor stopped the run at an ownership violation.
+    pub violation: bool,
+    /// How often each source position ran a statement: (function, line,
+    /// column).
+    pub coverage: HashMap<(String, u32, u32), u32>,
 }
 
 /// Why execution left a frame other than by returning.
@@ -139,6 +155,7 @@ pub struct Interp<'p, 'h> {
     pub(crate) any_drop: bool,
     pub(crate) fuel: Option<u64>,
     pub(crate) fuel_limit: u64,
+    pub(crate) monitor: Option<monitor::Monitor>,
 }
 
 impl<'p, 'h> Interp<'p, 'h> {
@@ -174,7 +191,27 @@ impl<'p, 'h> Interp<'p, 'h> {
             any_drop,
             fuel: options.fuel,
             fuel_limit: options.fuel.unwrap_or(0),
+            monitor: options.monitor.then(|| monitor::Monitor {
+                coverage: options.coverage.then(HashMap::new),
+                ..Default::default()
+            }),
         }
+    }
+
+    /// What the monitor saw: whether it stopped the run, and the coverage.
+    pub fn report(&self, status: i32) -> RunReport {
+        let mut r = RunReport { status, ..Default::default() };
+        if let Some(m) = &self.monitor {
+            r.violation = m.violated.get();
+            if let Some(c) = &m.coverage {
+                for ((f, line, col), n) in c {
+                    if let Some(func) = self.prog.functions.get(*f) {
+                        r.coverage.insert((func.name.clone(), *line, *col), *n);
+                    }
+                }
+            }
+        }
+        r
     }
 
     /// Runs the program's entry function and reports how it ended on the
@@ -261,15 +298,42 @@ fn panic_report(p: &PanicInfo) -> String {
 
 /// Runs `main` on a thread with a large stack. Returns the exit status.
 pub fn run_main(prog: &sir::Program, host: &mut dyn Host, options: &Options) -> i32 {
-    on_big_stack(host, |host| Interp::new(prog, host, options).run_main()).unwrap_or(exit::ABORT)
+    run_main_report(prog, host, options).status
+}
+
+/// Runs `main`, returning the exit status and what the monitor saw.
+pub fn run_main_report(prog: &sir::Program, host: &mut dyn Host, options: &Options) -> RunReport {
+    on_big_stack(host, |host| {
+        let mut i = Interp::new(prog, host, options);
+        let status = i.run_main();
+        i.report(status)
+    })
+    .unwrap_or(RunReport { status: exit::ABORT, ..Default::default() })
 }
 
 /// Runs every test of the program, in order, each with a fresh
 /// interpreter. Returns each test's name and result.
 pub fn run_tests(prog: &sir::Program, host: &mut dyn Host, options: &Options) -> Vec<(String, TestResult)> {
+    run_tests_report(prog, host, options).into_iter().map(|(n, r, _)| (n, r)).collect()
+}
+
+/// Runs every test, returning with each result what the monitor saw.
+pub fn run_tests_report(
+    prog: &sir::Program,
+    host: &mut dyn Host,
+    options: &Options,
+) -> Vec<(String, TestResult, RunReport)> {
     let tests = prog.tests.clone();
     on_big_stack(host, |host| {
-        tests.iter().map(|(name, f)| (name.clone(), Interp::new(prog, host, options).run_test(f))).collect()
+        tests
+            .iter()
+            .map(|(name, f)| {
+                let mut i = Interp::new(prog, host, options);
+                let r = i.run_test(f);
+                let status = if matches!(r, TestResult::Passed) { exit::OK } else { exit::ERROR };
+                (name.clone(), r, i.report(status))
+            })
+            .collect()
     })
     .unwrap_or_default()
 }

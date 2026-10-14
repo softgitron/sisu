@@ -1,12 +1,19 @@
 //! Lowering one function: the block builder, scopes and drops.
 //!
 //! Each block's unwind edge is computed when the block starts, from the
-//! values that need drop and are live at that point; the cleanup chain for
-//! a live set is built once and shared. A statement that makes a value
-//! live (initialises a local that needs drop) or dead (drops it) ends its
-//! block, so every block's unwind edge is exact. A function is lowered
-//! twice: the first pass finds the locals that are moved as a whole, and
-//! the second gives each of them a drop flag.
+//! values that need drop and are registered at that point; the cleanup
+//! chain for a set of values is built once and shared. A statement that
+//! drops a value ends its block, so every block's unwind edge is exact.
+//!
+//! Drops are emitted unconditionally: every value that needs drop is
+//! dropped at the end of its scope, on every exit, whether or not it was
+//! moved. The ownership checker's initialisation dataflow (`sisu-borrowck`)
+//! then removes the drops of moved values, guards the drops of values that
+//! may have been moved with a flag, and splits the drop of a partly moved
+//! value into drops of what remains. Every local that leaves a scope also
+//! gets a `dead` statement; [`finish_blocks`](FnLower) keeps only those of
+//! locals that are borrowed somewhere, which are the ones the checker and
+//! the monitor need.
 
 use crate::Ctx;
 use sisu_resolve::Ty;
@@ -17,13 +24,17 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum DropEntry {
-    Local(sir::LocalId, Option<sir::LocalId>),
+    Local(sir::LocalId),
     /// A `defer` block, by index into `FnLower::defers`.
     Defer(usize),
 }
 
 pub(crate) struct Scope {
     pub entries: Vec<DropEntry>,
+    /// Every local whose storage ends with the scope, in creation order.
+    pub locals: Vec<sir::LocalId>,
+    /// Where the scope ends: what a drop at its end points at.
+    pub end: Option<sir::Loc>,
 }
 
 pub(crate) struct LoopCtx {
@@ -54,9 +65,6 @@ pub(crate) struct FnLower<'c, 'a> {
     blocks: Vec<BlockBuild>,
     cur: usize,
     pub scopes: Vec<Scope>,
-    pub flags: HashMap<thir::LocalId, sir::LocalId>,
-    needs_flag: HashSet<thir::LocalId>,
-    pub moved: HashSet<thir::LocalId>,
     cleanups: HashMap<Vec<DropEntry>, BlockId>,
     resume_block: Option<BlockId>,
     override_live: Option<Vec<DropEntry>>,
@@ -72,19 +80,37 @@ pub(crate) fn lower_body(ctx: &mut Ctx, body: &thir::Body) -> Vec<sir::Function>
     let source = ctx.source_index(body.span.file);
     let ctx: &Ctx = ctx;
     let mut out = Vec::new();
-    let kind = match &body.kind {
-        thir::BodyKind::Fn => match ctx.prog.fn_info(body.def).map(|f| &f.kind) {
-            Some(sisu_resolve::FnKind::Test(_)) => sir::FnKind::Test,
-            Some(sisu_resolve::FnKind::Drop) => sir::FnKind::Drop,
-            _ => sir::FnKind::Normal,
-        },
-        _ => sir::FnKind::Value,
+    let fn_info = match &body.kind {
+        thir::BodyKind::Fn => ctx.prog.fn_info(body.def),
+        _ => None,
     };
-    out.push(lower_twice(ctx, body, None, &name, kind, source));
-    for i in 0..body.closures.len() {
+    let kind = match fn_info.map(|f| &f.kind) {
+        Some(sisu_resolve::FnKind::Test(_)) => sir::FnKind::Test,
+        Some(sisu_resolve::FnKind::Drop) => sir::FnKind::Drop,
+        Some(_) => sir::FnKind::Normal,
+        None => sir::FnKind::Value,
+    };
+    let (pure, from, inner) = match fn_info {
+        Some(f) => {
+            let b = ctx.prog.result_borrows_of(f);
+            (f.pure, b.deep, b.inner)
+        }
+        None => (true, Vec::new(), Vec::new()),
+    };
+    out.push(FnLower::new(ctx, body, None, &name).run(kind, source, pure, (from, inner)));
+    for (i, cl) in body.closures.iter().enumerate() {
         let id = thir::ClosureId(i as u32);
         let cname = closure_name(&name, id);
-        out.push(lower_twice(ctx, body, Some(id), &cname, sir::FnKind::Closure, source));
+        let pure = matches!(&cl.fn_ty, Ty::Fn(f) if f.pure);
+        // A closure's result may borrow from any argument, its environment
+        // (argument 0) included: function types carry no `from` clause.
+        let from: Vec<u32> = (0..cl.params.len() as u32 + 1).collect();
+        out.push(FnLower::new(ctx, body, Some(id), &cname).run(
+            sir::FnKind::Closure,
+            source,
+            pure,
+            (from, Vec::new()),
+        ));
     }
     out
 }
@@ -93,26 +119,8 @@ pub(crate) fn closure_name(owner: &str, id: thir::ClosureId) -> String {
     format!("{owner}#closure{}", id.0)
 }
 
-fn lower_twice(
-    ctx: &Ctx,
-    body: &thir::Body,
-    closure: Option<thir::ClosureId>,
-    name: &str,
-    kind: sir::FnKind,
-    source: u32,
-) -> sir::Function {
-    let first = FnLower::new(ctx, body, closure, name, HashSet::new()).run(kind, source);
-    FnLower::new(ctx, body, closure, name, first.1).run(kind, source).0
-}
-
 impl<'c, 'a> FnLower<'c, 'a> {
-    fn new(
-        ctx: &'c Ctx<'a>,
-        body: &'a thir::Body,
-        closure: Option<thir::ClosureId>,
-        name: &str,
-        needs_flag: HashSet<thir::LocalId>,
-    ) -> FnLower<'c, 'a> {
+    fn new(ctx: &'c Ctx<'a>, body: &'a thir::Body, closure: Option<thir::ClosureId>, name: &str) -> Self {
         FnLower {
             ctx,
             body,
@@ -125,9 +133,6 @@ impl<'c, 'a> FnLower<'c, 'a> {
             blocks: Vec::new(),
             cur: 0,
             scopes: Vec::new(),
-            flags: HashMap::new(),
-            needs_flag,
-            moved: HashSet::new(),
             cleanups: HashMap::new(),
             resume_block: None,
             override_live: None,
@@ -138,8 +143,23 @@ impl<'c, 'a> FnLower<'c, 'a> {
         }
     }
 
-    fn run(mut self, kind: sir::FnKind, source: u32) -> (sir::Function, HashSet<thir::LocalId>) {
+    /// Lowers the body; `borrows` are the arguments the result may borrow
+    /// from, deeply and through their values only.
+    fn run(
+        mut self,
+        kind: sir::FnKind,
+        source: u32,
+        pure: bool,
+        borrows: (Vec<u32>, Vec<u32>),
+    ) -> sir::Function {
+        let (from, inner) = borrows;
         let body = self.body;
+        // Where the function is declared: its name, or the closure.
+        let loc = match self.closure {
+            Some(c) => self.ctx.loc(body.closures[c.0 as usize].span),
+            None if matches!(body.kind, thir::BodyKind::Fn) => self.ctx.loc(self.ctx.prog.def(body.def).span),
+            None => None,
+        };
         let (ret, block, params) = match self.closure {
             None => (body.ret.clone(), &body.block, body.params.clone()),
             Some(c) => {
@@ -169,12 +189,12 @@ impl<'c, 'a> FnLower<'c, 'a> {
             param_count += 1;
         }
         let entry = self.new_block();
-        self.scopes.push(Scope { entries: Vec::new() });
+        self.scopes.push(Scope { entries: Vec::new(), locals: Vec::new(), end: self.block_end(block) });
         self.switch_to(entry);
         for p in &params {
-            let ty = body.locals[p.0 as usize].ty.clone();
-            let name = body.locals[p.0 as usize].name.clone();
-            let l = self.add_local(self.ctx.ty(&ty), Some(name));
+            let decl = &body.locals[p.0 as usize];
+            let l = self.add_local(self.ctx.ty(&decl.ty), Some(decl.name.clone()));
+            self.locals[l.0 as usize].loc = self.ctx.loc(decl.span);
             self.map.insert(*p, l);
             param_count += 1;
         }
@@ -182,8 +202,7 @@ impl<'c, 'a> FnLower<'c, 'a> {
             let ty = body.locals[p.0 as usize].ty.clone();
             if self.needs_drop(&ty) {
                 let l = self.map[p];
-                let flag = self.flag_init(*p);
-                self.register(DropEntry::Local(l, flag));
+                self.register(DropEntry::Local(l));
             }
         }
         if !self.scopes[0].entries.is_empty() {
@@ -198,30 +217,49 @@ impl<'c, 'a> FnLower<'c, 'a> {
                 sir::Rvalue::Use(sir::Operand::Const(sir::Const::Unit)),
                 None,
             );
-            self.emit_exit(0);
+            let end = self.scopes.first().and_then(|s| s.end);
+            self.emit_exit(0, end);
             self.terminate(Terminator::Return, None);
         }
         let blocks = self.finish_blocks();
-        let f =
-            sir::Function { name: self.name.clone(), kind, param_count, locals: self.locals, blocks, source };
-        (f, self.moved)
+        sir::Function {
+            name: self.name.clone(),
+            kind,
+            param_count,
+            pure,
+            from,
+            inner,
+            locals: self.locals,
+            blocks,
+            source,
+            loc,
+        }
+    }
+
+    /// The end of a block's last statement: where its scope ends.
+    pub fn block_end(&self, b: &thir::Block) -> Option<sir::Loc> {
+        let span = b.stmts.last().map(stmt_span).unwrap_or(b.span);
+        self.ctx.end_loc(span)
     }
 
     // ---------------------------------------------------------------- locals
 
     pub fn add_local(&mut self, ty: sir::Type, name: Option<String>) -> sir::LocalId {
         let id = sir::LocalId(self.locals.len() as u32);
-        self.locals.push(sir::LocalDecl { ty, name });
+        self.locals.push(sir::LocalDecl::new(ty, name));
         id
     }
 
+    /// A temporary whose storage ends with the innermost scope.
     pub fn temp(&mut self, ty: &Ty) -> sir::LocalId {
         let t = self.ctx.ty(ty);
-        self.add_local(t, None)
+        self.temp_sir(t)
     }
 
     pub fn temp_sir(&mut self, ty: sir::Type) -> sir::LocalId {
-        self.add_local(ty, None)
+        let l = self.add_local(ty, None);
+        self.scope_local(0, l);
+        l
     }
 
     /// The scratch destination of calls whose `()` result is unused.
@@ -246,30 +284,23 @@ impl<'c, 'a> FnLower<'c, 'a> {
         let ty = self.ctx.ty(&decl.ty);
         let name = if decl.name.is_empty() || decl.name == "?" { None } else { Some(decl.name.clone()) };
         let s = self.add_local(ty, name);
+        self.locals[s.0 as usize].loc = self.ctx.loc(decl.span);
+        self.locals[s.0 as usize].once = decl.once;
         self.map.insert(l, s);
         s
     }
 
-    pub fn needs_drop(&self, ty: &Ty) -> bool {
-        !self.ctx.prog.is_copy(ty) && !matches!(ty, Ty::Ref(..))
+    /// Records that `l`'s storage ends with the scope `below` levels under
+    /// the innermost.
+    pub fn scope_local(&mut self, below: usize, l: sir::LocalId) {
+        let len = self.scopes.len();
+        if let Some(s) = self.scopes.get_mut(len.saturating_sub(1 + below)) {
+            s.locals.push(l);
+        }
     }
 
-    /// The drop flag of a local that is moved as a whole somewhere, set
-    /// to true now.
-    pub fn flag_init(&mut self, l: thir::LocalId) -> Option<sir::LocalId> {
-        if !self.needs_flag.contains(&l) {
-            return None;
-        }
-        let f = match self.flags.get(&l) {
-            Some(&f) => f,
-            None => {
-                let f = self.add_local(sir::Type::Bool, Some("flag".into()));
-                self.flags.insert(l, f);
-                f
-            }
-        };
-        self.assign(Place::local(f), sir::Rvalue::Use(sir::Operand::Const(sir::Const::Bool(true))), None);
-        Some(f)
+    pub fn needs_drop(&self, ty: &Ty) -> bool {
+        !self.ctx.prog.is_copy(ty) && !matches!(ty, Ty::Ref(..))
     }
 
     // ---------------------------------------------------------------- blocks
@@ -333,7 +364,13 @@ impl<'c, 'a> FnLower<'c, 'a> {
     // ---------------------------------------------------------------- scopes and drops
 
     pub fn push_scope(&mut self) {
-        self.scopes.push(Scope { entries: Vec::new() });
+        let end = self.scopes.last().and_then(|s| s.end);
+        self.scopes.push(Scope { entries: Vec::new(), locals: Vec::new(), end });
+    }
+
+    /// A scope that ends at `end` (a block's last statement, a statement).
+    pub fn push_scope_at(&mut self, end: Option<sir::Loc>) {
+        self.scopes.push(Scope { entries: Vec::new(), locals: Vec::new(), end });
     }
 
     /// Registers a value to drop in the innermost scope; the next
@@ -375,7 +412,7 @@ impl<'c, 'a> FnLower<'c, 'a> {
         let b = self.new_block();
         self.switch_to(b);
         if let Some(e) = entries.last() {
-            self.emit_drop(e);
+            self.emit_drop(e, None);
         }
         self.goto(next);
         self.cur = saved.0;
@@ -400,10 +437,10 @@ impl<'c, 'a> FnLower<'c, 'a> {
         b
     }
 
-    fn emit_drop(&mut self, e: &DropEntry) {
+    fn emit_drop(&mut self, e: &DropEntry, loc: Option<sir::Loc>) {
         match e {
-            DropEntry::Local(l, flag) => {
-                self.emit(StatementKind::Drop { place: Place::local(*l), flag: *flag }, None)
+            DropEntry::Local(l) => {
+                self.emit(StatementKind::Drop { place: Place::local(*l), flag: None }, loc)
             }
             DropEntry::Defer(i) => {
                 let block = self.defers[*i].clone();
@@ -414,67 +451,91 @@ impl<'c, 'a> FnLower<'c, 'a> {
         }
     }
 
-    /// Pops the innermost scope, dropping its values in reverse order.
+    /// Pops the innermost scope, dropping its values in reverse order and
+    /// ending the storage of its locals.
     pub fn pop_scope(&mut self) {
+        let end = self.scopes.last().and_then(|s| s.end);
         while let Some(e) = self.scopes.last_mut().and_then(|s| s.entries.pop()) {
             if self.terminated() {
                 continue;
             }
             if self.in_cleanup {
-                self.emit_drop(&e);
+                self.emit_drop(&e, None);
             } else {
                 self.split();
-                self.emit_drop(&e);
+                self.emit_drop(&e, end);
                 if matches!(e, DropEntry::Local(..)) {
                     self.split();
                 }
             }
         }
-        self.scopes.pop();
+        let locals = self.scopes.pop().map(|s| s.locals).unwrap_or_default();
+        if !self.terminated() && !self.in_cleanup {
+            for l in locals.into_iter().rev() {
+                self.emit(StatementKind::StorageDead(l), end);
+            }
+        }
     }
 
     /// Drops every value of the scopes from `depth` up, innermost first,
-    /// without popping them: the path to a `return`, `break` or `continue`.
-    pub fn emit_exit(&mut self, depth: usize) {
+    /// without popping them: the path to a `return`, `break` or `continue`
+    /// written at `at`. Leaving for a loop's `break` or `continue` also ends
+    /// the storage of the scopes' locals; `return` leaves the frame.
+    pub fn emit_exit(&mut self, depth: usize, at: Option<sir::Loc>) {
         if self.terminated() {
             return;
         }
-        let base: Vec<DropEntry> = self.scopes[..depth.min(self.scopes.len())]
-            .iter()
-            .flat_map(|s| s.entries.iter().cloned())
-            .collect();
-        let leaving: Vec<DropEntry> = self.scopes[depth.min(self.scopes.len())..]
-            .iter()
-            .flat_map(|s| s.entries.iter().cloned())
-            .collect();
-        if leaving.is_empty() {
-            return;
+        let depth = depth.min(self.scopes.len());
+        let base: Vec<DropEntry> =
+            self.scopes[..depth].iter().flat_map(|s| s.entries.iter().cloned()).collect();
+        let leaving: Vec<DropEntry> =
+            self.scopes[depth..].iter().flat_map(|s| s.entries.iter().cloned()).collect();
+        let dead: Vec<sir::LocalId> = if depth == 0 {
+            Vec::new()
+        } else {
+            self.scopes[depth..].iter().flat_map(|s| s.locals.iter().copied()).collect()
+        };
+        if !leaving.is_empty() {
+            let mut remaining: Vec<DropEntry> = base.into_iter().chain(leaving.iter().cloned()).collect();
+            let saved = self.override_live.take();
+            for e in leaving.iter().rev() {
+                remaining.pop();
+                self.override_live = Some(remaining.clone());
+                if self.in_cleanup {
+                    self.emit_drop(e, None);
+                } else {
+                    self.split();
+                    self.emit_drop(e, at);
+                }
+            }
+            self.override_live = saved;
         }
-        let mut remaining: Vec<DropEntry> = base.into_iter().chain(leaving.iter().cloned()).collect();
-        let saved = self.override_live.take();
-        for e in leaving.iter().rev() {
-            remaining.pop();
-            self.override_live = Some(remaining.clone());
-            if self.in_cleanup {
-                self.emit_drop(e);
-            } else {
+        if !self.in_cleanup && !dead.is_empty() {
+            if self.blocks[self.cur]
+                .stmts
+                .last()
+                .is_some_and(|s| matches!(s.kind, StatementKind::Drop { .. }))
+            {
                 self.split();
-                self.emit_drop(e);
+            }
+            for l in dead.into_iter().rev() {
+                self.emit(StatementKind::StorageDead(l), at);
             }
         }
-        self.override_live = saved;
     }
 
     /// A block that drops the scopes from `depth` up and jumps to `target`.
     pub fn edge_to(&mut self, target: BlockId, depth: usize) -> BlockId {
-        let leaving = self.scopes[depth.min(self.scopes.len())..].iter().any(|s| !s.entries.is_empty());
+        let leaving = self.scopes[depth.min(self.scopes.len())..]
+            .iter()
+            .any(|s| !s.entries.is_empty() || !s.locals.is_empty());
         if !leaving {
             return target;
         }
         let saved = self.cur;
         let b = self.new_block();
         self.switch_to(b);
-        self.emit_exit(depth);
+        self.emit_exit(depth, None);
         self.goto(target);
         self.cur = saved;
         b
@@ -483,6 +544,21 @@ impl<'c, 'a> FnLower<'c, 'a> {
     // ---------------------------------------------------------------- finishing
 
     fn finish_blocks(&mut self) -> Vec<sir::BasicBlock> {
+        // Keep the `dead` statements of borrowed locals only.
+        let mut borrowed: HashSet<sir::LocalId> = HashSet::new();
+        for bb in &self.blocks {
+            for s in &bb.stmts {
+                if let StatementKind::Assign(_, sir::Rvalue::Ref(p, _) | sir::Rvalue::StrView(p)) = &s.kind {
+                    borrowed.insert(p.local);
+                }
+            }
+        }
+        for bb in &mut self.blocks {
+            bb.stmts.retain(|s| match s.kind {
+                StatementKind::StorageDead(l) => borrowed.contains(&l),
+                _ => true,
+            });
+        }
         // Drop blocks no edge reaches, and renumber.
         let n = self.blocks.len();
         let mut reach = vec![false; n];
@@ -537,5 +613,27 @@ impl<'c, 'a> FnLower<'c, 'a> {
             });
         }
         out
+    }
+}
+
+/// The span of a statement.
+pub(crate) fn stmt_span(s: &thir::Stmt) -> sisu_diag::Span {
+    use thir::Stmt::*;
+    match s {
+        Let { span, .. }
+        | Assign { span, .. }
+        | AssignTuple { span, .. }
+        | Discard { span, .. }
+        | AugAssign { span, .. }
+        | Return { span, .. }
+        | If { span, .. }
+        | While { span, .. }
+        | For { span, .. }
+        | Match { span, .. }
+        | Assert { span, .. }
+        | Defer { span, .. } => *span,
+        Expr(e) => e.span,
+        Break(span) | Continue(span) | Error(span) => *span,
+        Block(b) => b.span,
     }
 }

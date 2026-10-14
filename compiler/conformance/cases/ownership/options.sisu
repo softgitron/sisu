@@ -1,0 +1,57 @@
+# Moving a payload out of an option or a result, and the drops that are
+# left: none for the payload that moved, one for the payload that did not.
+
+view struct Log:
+    name: str
+
+impl Drop for Log:
+    def drop(mut self):
+        print("  drop {self.name}")
+
+error Fail:
+    Bad(reason: String)
+
+def make(n: int) -> Log?:
+    if n > 0:
+        return Some(Log(name="made"))
+    return None
+
+def try_make(n: int) -> Log ! Fail:
+    if n > 0:
+        return Ok(Log(name="tried"))
+    return Err(Bad("no".to_string()))
+
+def keep(own l: Log):
+    print("  keep {l.name}")
+
+def use_try(n: int) -> int ! Fail:
+    let l = try_make(n)?
+    print("  got {l.name}")
+    return Ok(1)
+
+def main():
+    print("match on a temporary:")
+    match make(1):
+        case Some(l):
+            keep(l)
+        case None:
+            print("  none")
+    print("if let on a local:")
+    let maybe = make(1)
+    if let Some(l) = maybe:
+        print("  borrowed {l.name}")
+    print("coalesce:")
+    let name = make(0)?.name ?? "default"
+    print("  {name}")
+    print("try:")
+    match use_try(1):
+        case Ok(n):
+            print("  ok {n}")
+        case Err(e):
+            print("  err {e}")
+    match use_try(0):
+        case Ok(n):
+            print("  ok {n}")
+        case Err(e):
+            print("  err {e}")
+    print("end of main")

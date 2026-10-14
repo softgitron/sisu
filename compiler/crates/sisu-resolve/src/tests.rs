@@ -77,7 +77,7 @@ fn resolution_errors() {
 #[test]
 fn drop_impls_register() {
     let (r, _) = run(
-        "struct Guard:\n    name: str\nimpl Drop for Guard:\n    def drop(mut self):\n        print(self.name)\n",
+        "view struct Guard:\n    name: str\nimpl Drop for Guard:\n    def drop(mut self):\n        print(self.name)\n",
     );
     assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics.iter().map(|d| d.message()).collect::<Vec<_>>());
     let p = &r.program;

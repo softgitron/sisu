@@ -1,0 +1,8 @@
+# The example of proposal/04 and 10: `xs` is borrowed by `first` and
+# cannot be modified until that borrow ends.
+
+def main():
+    var xs = [1, 2, 3]
+    let first = ref xs[0]
+    xs.push(4)
+    print(first)

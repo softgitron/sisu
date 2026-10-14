@@ -48,6 +48,10 @@ pub struct Failure {
 pub struct Report {
     pub cases: usize,
     pub checks: usize,
+    /// Cases that ran, each also under the ownership monitor.
+    pub monitored: usize,
+    /// Counterexample-mode runs of rejected programs (`.defer`).
+    pub deferred: usize,
     pub failures: Vec<Failure>,
     pub blessed: Vec<String>,
 }
@@ -59,9 +63,11 @@ impl Report {
             out.push_str(&format!("FAIL {} [{}]\n{}\n", f.case, f.check, f.detail));
         }
         out.push_str(&format!(
-            "{} cases, {} checks, {} failed\n",
+            "{} cases, {} checks, {} runs also under the monitor, {} counterexample runs, {} failed\n",
             self.cases,
             self.checks,
+            self.monitored,
+            self.deferred,
             self.failures.len()
         ));
         if !self.blessed.is_empty() {
@@ -274,16 +280,53 @@ impl Runner<'_> {
             self.compare(case, &format!("sisu {}", args.join(" ")), Some(ext), &expected, &out.stdout);
         }
 
+        let args: Vec<String> =
+            case.expected("args").map(|a| a.lines().map(str::to_string).collect()).unwrap_or_default();
+        // The counterexample mode (A2) on a program the checker rejects:
+        // the monitor's verdict for this input.
+        if let Some(expected) = case.expected("defer") {
+            self.report.deferred += 1;
+            let mut a = s(&["run", "--defer-borrow", &file]);
+            a.extend(args.iter().cloned());
+            let out = invoke(self.sisu, &sandbox.dir, &a);
+            let actual = format!("{}--- stderr\n{}--- status {}\n", out.stdout, out.stderr, out.status);
+            self.compare(case, "sisu run --defer-borrow", Some("defer"), &expected, &actual);
+        }
+        // `sisu explain-borrow` at the line a `# explain-borrow N` comment names.
+        if let Some(expected) = case.expected("explain") {
+            let line = source
+                .lines()
+                .find_map(|l| l.trim().strip_prefix("# explain-borrow ").map(|n| n.trim().to_string()))
+                .unwrap_or_default();
+            let out = invoke(self.sisu, &sandbox.dir, &s(&["explain-borrow", &format!("{file}:{line}")]));
+            self.compare(case, "sisu explain-borrow", Some("explain"), &expected, &out.stdout);
+        }
         let wants_run = ["out", "err", "status"].iter().any(|e| case.path(e).exists());
         if !wants_run {
             return;
         }
-        let args: Vec<String> =
-            case.expected("args").map(|a| a.lines().map(str::to_string).collect()).unwrap_or_default();
         let mut run_args = s(&["run", &file]);
         run_args.extend(args.iter().cloned());
         let run = invoke(self.sisu, &sandbox.dir, &run_args);
         self.compare(case, "stdout", Some("out"), &case.expected("out").unwrap_or_default(), &run.stdout);
+        // Principle 5 of 18: the checker checks itself. A program the
+        // checker accepted runs the same under the dynamic ownership
+        // monitor; any difference is the monitor rejecting it, which means
+        // the static checker has a soundness hole.
+        let mut monitored_args = s(&["run", "--monitor", &file]);
+        monitored_args.extend(args.iter().cloned());
+        let monitored = invoke(self.sisu, &sandbox.dir, &monitored_args);
+        self.report.monitored += 1;
+        self.compare(
+            case,
+            "the monitor agrees with the checker (a difference is a soundness hole)",
+            None,
+            &format!("{}\n--- stderr\n{}\n--- status {}\n", run.stdout, run.stderr, run.status),
+            &format!(
+                "{}\n--- stderr\n{}\n--- status {}\n",
+                monitored.stdout, monitored.stderr, monitored.status
+            ),
+        );
         self.compare(case, "stderr", Some("err"), &case.expected("err").unwrap_or_default(), &run.stderr);
         let status = case.expected("status").map(|s| s.trim().to_string()).unwrap_or_else(|| "0".into());
         let actual_status = run.status.to_string();

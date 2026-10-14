@@ -1,0 +1,12 @@
+# A reference cannot outlive the scope of what it borrows (04, rule 3:
+# every reference's lifetime is the stack frame it came from).
+
+def main():
+    let y = 1
+    let r: ref int
+    if len("x") > 0:
+        let x = 5
+        r = ref x
+    else:
+        r = ref y
+    print(r)

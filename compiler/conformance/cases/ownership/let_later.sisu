@@ -1,0 +1,29 @@
+# A `let` declared without a value is assigned once on every path before
+# its first use; its drop at the end of the scope follows the assignment.
+
+view struct Log:
+    name: str
+
+impl Drop for Log:
+    def drop(mut self):
+        print("  drop {self.name}")
+
+def pick(n: int) -> str:
+    let word: str
+    if n == 0:
+        word = "zero"
+    elif n == 1:
+        word = "one"
+    else:
+        word = "many"
+    return word
+
+def main():
+    print(pick(0))
+    print(pick(5))
+    let l: Log
+    if pick(1) == "one":
+        l = Log(name="chosen")
+    else:
+        l = Log(name="other")
+    print("using {l.name}")

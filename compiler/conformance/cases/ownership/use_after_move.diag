@@ -1,0 +1,2 @@
+13:11-13:20 E0400 borrow.use-after-move name="roni" line="12"
+  label 12:5-12:18 borrow.moved-here name="roni"

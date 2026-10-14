@@ -1,0 +1,40 @@
+# Returning a borrow of a parameter: one borrowed parameter needs no
+# `from`; `self` wins when present; otherwise `from` names the source.
+
+struct Item:
+    name: String
+    count: int
+
+struct Shelf:
+    items: list[Item]
+
+impl Shelf:
+    def get(self, i: int) -> ref Item:
+        return ref self.items[i]
+
+    def get_mut(mut self, i: int) -> ref mut Item:
+        return ref mut self.items[i]
+
+def head(xs: list[int]) -> ref int:
+    return ref xs[0]
+
+def longer(a: str, b: str) -> str from a, b:
+    return if len(a) >= len(b): a else: b
+
+def first_word(text: str) -> str:
+    for w in text.split_whitespace():
+        return w
+    return ""
+
+def main():
+    let xs = [7, 8]
+    print(head(xs))
+    var shelf = Shelf(items=[Item(name="tea".to_string(), count=2)])
+    let it = shelf.get(0)
+    print(it.name)
+    let m = shelf.get_mut(0)
+    m.count += 1
+    print(shelf.items[0].count)
+    let s = String.new("longer one")
+    print(longer("short", s))
+    print(first_word("hello there"))

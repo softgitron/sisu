@@ -1,0 +1,30 @@
+# Moves (04, rule 1): an `own` parameter takes the value, a moved local
+# can be assigned again, and every value is dropped exactly once.
+
+view struct Log:
+    name: str
+
+impl Drop for Log:
+    def drop(mut self):
+        print("  drop {self.name}")
+
+def keep(own l: Log):
+    print("  keep {l.name}")
+
+def give(name: str) -> Log:
+    return Log(name=name)
+
+def main():
+    print("moved into a call:")
+    let a = give("a")
+    keep(a)
+    print("assigned again after a move:")
+    var b = give("b1")
+    keep(b)
+    b = give("b2")
+    print("  b is {b.name}")
+    print("moved into another binding:")
+    let c = give("c")
+    let d = c
+    print("  d is {d.name}")
+    print("end of main")

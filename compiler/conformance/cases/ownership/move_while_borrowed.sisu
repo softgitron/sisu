@@ -1,0 +1,10 @@
+# A value cannot be moved while a borrow of it is still used.
+
+def keep(own s: String):
+    print(s)
+
+def main():
+    let s = "text".to_string()
+    let v: str = s
+    keep(s)
+    print(v)

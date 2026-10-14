@@ -1,0 +1,10 @@
+# A rejected statement this input never reaches: the counterexample mode
+# cannot say whether it conflicts, so its verdict is inconclusive, an
+# untested path.
+
+def main():
+    var xs = [1, 2, 3]
+    let first = ref xs[0]
+    if len(xs) > 5:
+        xs.push(4)
+    print(first)

@@ -30,17 +30,26 @@ impl Interp<'_, '_> {
     fn resolve_mode(&mut self, p: &Place, mode: Mode) -> Result<Option<Pointer>, Unwind> {
         let top = self.frames.len().checked_sub(1).ok_or_else(|| ice("no frame"))?;
         let serial = self.frames[top].serial;
-        let mut ptr = Pointer { frame: top as u32, serial, local: p.local.0, path: Vec::new() };
+        let mut ptr = Pointer { frame: top as u32, serial, local: p.local.0, path: Vec::new(), tag: 0 };
         let n = p.proj.len();
         for (idx, proj) in p.proj.iter().enumerate() {
             match proj {
                 Proj::Deref => match self.read(&ptr)? {
                     Value::Ref(q) => ptr = (**q).clone(),
-                    Value::Moved => return Err(panic(msg::PANIC_MOVED_VALUE, &[])),
+                    Value::Moved => return Err(self.moved_at(&ptr)),
                     other => return Err(ice(format!("dereferencing {other:?}"))),
                 },
                 Proj::Field(i) => ptr.path.push(Step::Field(*i)),
-                Proj::Downcast(v) => ptr.path.push(Step::Payload(*v)),
+                Proj::Downcast(v) => {
+                    // Dropping the payload of a variant the value does not
+                    // hold drops nothing (the drop elaboration relies on it).
+                    if mode == Mode::Drop
+                        && !matches!(self.target(self.read(&ptr)?)?, Value::Variant(a) if a.variant == *v)
+                    {
+                        return Ok(None);
+                    }
+                    ptr.path.push(Step::Payload(*v))
+                }
                 Proj::Index(l) | Proj::IndexFromEnd(l) => {
                     let i = match self.target(self.local(*l)?)? {
                         Value::Int(i) => *i,
@@ -101,16 +110,38 @@ impl Interp<'_, '_> {
 
     /// The value at a pointer.
     pub(crate) fn read(&self, p: &Pointer) -> Result<&Value, Unwind> {
-        let frame =
-            self.frames.get(p.frame as usize).filter(|f| f.serial == p.serial).ok_or_else(dangling)?;
+        let frame = self.frames.get(p.frame as usize).filter(|f| f.serial == p.serial);
+        let frame = match frame {
+            Some(f) => f,
+            None if self.monitoring() => return Err(self.mon_dangling(p)),
+            None => return Err(dangling()),
+        };
         let mut v = frame.locals.get(p.local as usize).ok_or_else(|| ice("pointer to a missing local"))?;
         for s in &p.path {
+            if v.is_moved() {
+                return Err(self.moved_at(p));
+            }
             v = step(v, *s)?;
         }
         Ok(v)
     }
 
+    /// A read of a place that holds no value (moved out, or never
+    /// assigned): a panic, or under the monitor a use-after-move violation.
+    pub(crate) fn moved_at(&self, p: &Pointer) -> Unwind {
+        if self.monitoring() { self.mon_moved_at(p) } else { panic(msg::PANIC_MOVED_VALUE, &[]) }
+    }
+
     pub(crate) fn write(&mut self, p: &Pointer) -> Result<&mut Value, Unwind> {
+        if !self.frames.get(p.frame as usize).is_some_and(|f| f.serial == p.serial) {
+            return Err(if self.monitoring() { self.mon_dangling(p) } else { dangling() });
+        }
+        // A write into a part of a moved value is a use after move.
+        if let Some((_, init)) = p.path.split_last()
+            && self.read(&Pointer { path: init.to_vec(), ..p.clone() })?.is_moved()
+        {
+            return Err(self.moved_at(p));
+        }
         let frame =
             self.frames.get_mut(p.frame as usize).filter(|f| f.serial == p.serial).ok_or_else(dangling)?;
         let root = frame.locals.get_mut(p.local as usize).ok_or_else(|| ice("pointer to a missing local"))?;
@@ -140,7 +171,11 @@ impl Interp<'_, '_> {
     /// The text of a `str`, `String` or `Path`, through references.
     pub(crate) fn text<'v>(&'v self, v: &'v Value) -> Result<&'v str, Unwind> {
         match self.target(v)? {
-            Value::Str(s) | Value::Path(s) => Ok(s),
+            Value::Str(s, tag) => {
+                self.mon_view_ok(*tag)?;
+                Ok(s)
+            }
+            Value::Path(s) => Ok(s),
             Value::String(s) => Ok(s),
             other => Err(ice(format!("expected text, found {other:?}"))),
         }

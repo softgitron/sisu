@@ -1,0 +1,11 @@
+# Two `mut` borrows of one value cannot be passed to one call.
+
+def swap_first(mut a: list[int], mut b: list[int]):
+    let t = a[0]
+    a[0] = b[0]
+    b[0] = t
+
+def main():
+    var xs = [1, 2]
+    swap_first(mut xs, mut xs)
+    print(xs)

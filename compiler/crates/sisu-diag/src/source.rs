@@ -46,6 +46,25 @@ impl SourceFile {
         LineCol { line: line_index as u32 + 1, col: col as u32 + 1 }
     }
 
+    /// The byte offset of a 1-based line and column (the inverse of
+    /// [`SourceFile::line_col`]); positions past the end clamp to it.
+    pub fn offset(&self, lc: LineCol) -> u32 {
+        let index = (lc.line as usize).saturating_sub(1);
+        let Some(&start) = self.line_starts.get(index) else {
+            return self.text.len() as u32;
+        };
+        let end = self.line_starts.get(index + 1).map(|&e| e as usize).unwrap_or(self.text.len());
+        let line = self.text.get(start as usize..end).unwrap_or("");
+        let mut off = start as usize;
+        for (i, c) in line.chars().enumerate() {
+            if i + 1 >= lc.col as usize {
+                break;
+            }
+            off += c.len_utf8();
+        }
+        off as u32
+    }
+
     /// The text of a 1-based line, without its line break.
     pub fn line_text(&self, line: u32) -> &str {
         let index = (line as usize).saturating_sub(1);
@@ -120,5 +139,8 @@ mod tests {
         assert_eq!(f.line_col(5), LineCol { line: 2, col: 2 });
         assert_eq!(f.line_text(2), "ä x");
         assert_eq!(f.line_col(100), LineCol { line: 3, col: 1 });
+        for off in [0u32, 1, 3, 5, 6] {
+            assert_eq!(f.offset(f.line_col(off)), off);
+        }
     }
 }

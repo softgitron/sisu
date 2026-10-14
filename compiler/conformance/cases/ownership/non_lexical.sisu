@@ -1,0 +1,15 @@
+# Borrows end at their last use, not at the end of the scope (04,
+# "Borrowing rules in detail"): the 04 example, with the borrow used
+# before the list changes.
+
+def main():
+    var xs = [1, 2, 3]
+    let first = ref xs[0]
+    print(first)
+    xs.push(4)
+    print(xs)
+    var total = 0
+    for x in xs:
+        total += x
+    xs.push(total)
+    print(xs)

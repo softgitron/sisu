@@ -1,0 +1,2 @@
+20:27-20:27 E0417 borrow.must-consume name="receipts" ty="list[Receipt]"
+  label 19:9-19:17 borrow.declared-here name="receipts"

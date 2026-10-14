@@ -1,0 +1,33 @@
+archived Roni
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+ownership violation: `roni.name` was used while it holds no value: it was moved out, or never assigned
+  used at: use_after_move.sisu:13:11 (`_5 = ref _1.0`)
+  at main (use_after_move.sisu:13:11)
+SIR of `main`:
+fn main(0) source 0 @10:5-10:9 {
+    let _0: ()
+    let _1: User "roni" @11:9-11:13
+    let _2: String
+    let _3: ()
+    let _4: ()
+    let _5: ref String
+  bb0:
+    _2 = call intrinsic str.to_string(const "Roni") @11:26-11:44
+    _1 = struct User(move _2) @11:16-11:45
+    goto bb1
+  bb1 (unwind bb3):
+    _3 = call fn archive(move _1) @12:5-12:18
+    _5 = ref _1.0 @13:11-13:20
+    _4 = call intrinsic print(copy _5) @13:5-13:21
+    _0 = const ()
+    goto bb4
+  bb2 (cleanup):
+    resume
+  bb3 (cleanup):
+    goto bb2
+  bb4:
+    return
+}
+outcome: conflict reached; the run stopped at a concrete ownership conflict
+--- status 134

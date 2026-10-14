@@ -7,14 +7,14 @@
 error Stop:
     Early
 
-struct Log:
+view struct Log:
     name: str
 
 impl Drop for Log:
     def drop(mut self):
         print("  drop {self.name}")
 
-struct Outer:
+view struct Outer:
     label: str
     a: Log
     b: Log

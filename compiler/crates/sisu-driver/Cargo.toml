@@ -16,6 +16,7 @@ sisu-resolve.workspace = true
 sisu-typeck.workspace = true
 sisu-sir.workspace = true
 sisu-lower.workspace = true
+sisu-borrowck.workspace = true
 sisu-interp.workspace = true
 
 [lints]

@@ -27,7 +27,7 @@ impl Interp<'_, '_> {
 
     fn display_into(&self, v: &Value, out: &mut String) {
         match v {
-            Value::Str(s) | Value::Path(s) => out.push_str(s),
+            Value::Str(s, _) | Value::Path(s) => out.push_str(s),
             Value::String(s) => out.push_str(s),
             Value::Char(c) => out.push(*c),
             Value::DateTime(t) => out.push_str(&strftime(*t, "%Y-%m-%dT%H:%M:%SZ")),
@@ -47,7 +47,7 @@ impl Interp<'_, '_> {
             Value::Float(f) => out.push_str(&float_repr(*f)),
             Value::Bool(b) => out.push_str(if *b { "True" } else { "False" }),
             Value::Char(c) => out.push_str(&quote_char(*c)),
-            Value::Str(s) | Value::Path(s) => out.push_str(&quote_str(s)),
+            Value::Str(s, _) | Value::Path(s) => out.push_str(&quote_str(s)),
             Value::String(s) => out.push_str(&quote_str(s)),
             Value::DateTime(t) => out.push_str(&strftime(*t, "%Y-%m-%dT%H:%M:%SZ")),
             Value::Tuple(xs) => {

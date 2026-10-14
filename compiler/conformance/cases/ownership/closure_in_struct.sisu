@@ -1,0 +1,10 @@
+# A plain struct cannot hold a borrow, so a closure that captures by
+# reference cannot be stored in one.
+
+struct Handler:
+    run: (int) -> int
+
+def main():
+    let base = 10
+    let h = Handler(run=x -> x + base)
+    print(h.run(1))

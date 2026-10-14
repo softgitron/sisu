@@ -3,6 +3,19 @@
 version = 4
 
 [[package]]
+name = "sisu-borrowck"
+version = "0.0.1"
+dependencies = [
+ "sisu-diag",
+ "sisu-lower",
+ "sisu-parser",
+ "sisu-resolve",
+ "sisu-sir",
+ "sisu-syntax",
+ "sisu-typeck",
+]
+
+[[package]]
 name = "sisu-conformance"
 version = "0.0.1"
 
@@ -14,6 +27,7 @@ version = "0.0.1"
 name = "sisu-driver"
 version = "0.0.1"
 dependencies = [
+ "sisu-borrowck",
  "sisu-conformance",
  "sisu-diag",
  "sisu-interp",

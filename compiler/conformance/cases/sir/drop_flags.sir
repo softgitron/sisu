@@ -5,9 +5,14 @@ entry main
 
 struct Res drop Res.drop { id: int }
 
-fn consume(1) source 0 {
+intrinsic fmt.display pure
+intrinsic fmt.new pure
+intrinsic fmt.text pure
+intrinsic print
+
+fn consume(1) source 0 @8:5-8:12 {
     let _0: ()
-    let _1: Res "r"
+    let _1: Res "r" @8:13-8:23
   bb0:
     goto bb1
   bb1 (unwind bb3):
@@ -19,73 +24,76 @@ fn consume(1) source 0 {
     drop _1
     goto bb2
   bb4:
-    drop _1
+    drop _1 @9:9-9:9
     return
 }
 
-fn main(0) source 0 {
+fn main(0) source 0 @11:5-11:9 {
     let _0: ()
-    let _1: Res "a"
-    let _2: bool "flag"
-    let _3: Res "b"
-    let _4: bool
+    let _1: Res "a" @12:9-12:10
+    let _2: Res "b" @13:9-13:10
+    let _3: bool
+    let _4: ()
     let _5: ()
-    let _6: ()
+    let _6: bool "flag"
   bb0:
-    _1 = struct Res(const 1) @12:13
-    _2 = const true
+    _6 = const false
+    _1 = struct Res(const 1) @12:13-12:22
+    _6 = const true
     goto bb1
   bb1 (unwind bb3):
-    _3 = struct Res(const 2) @13:13
+    _2 = struct Res(const 2) @13:13-13:22
     goto bb4
   bb2 (cleanup):
     resume
   bb3 (cleanup):
-    drop _1 if _2
+    drop _1 if _6
     goto bb2
   bb4 (unwind bb5):
-    _4 = gt copy _1.0, const 0 @14:8
+    _3 = gt copy _1.0, const 0 @14:8-14:16
     goto bb8
   bb5 (cleanup):
-    drop _3
+    drop _2
     goto bb3
   bb6 (unwind bb5):
-    _6 = call intrinsic print(const "end") @16:5
+    _5 = call intrinsic print(const "end") @16:5-16:17
     _0 = const ()
-    goto bb10
+    goto bb11
   bb7 (unwind bb5):
     goto bb6
   bb8 (unwind bb5):
-    switch copy _4 [0: bb7, else: bb9] @14:8
+    switch copy _3 [0: bb10, else: bb9] @14:8-14:16
   bb9 (unwind bb5):
-    _2 = const false
-    _5 = call fn consume(move _1) @15:9
+    _6 = const false
+    _4 = call fn consume(move _1) @15:9-15:19
     goto bb6
-  bb10 (unwind bb3):
-    drop _3
-    goto bb11
-  bb11:
-    drop _1 if _2
+  bb10 (unwind bb5):
+    goto bb7
+  bb11 (unwind bb3):
+    drop _2 @16:17-16:17
+    goto bb12
+  bb12:
+    drop _1 if _6 @16:17-16:17
     return
 }
 
-fn Res.drop(1) drop source 0 {
+fn Res.drop(1) drop source 0 @5:9-5:13 {
     let _0: ()
-    let _1: ref mut Res "self"
+    let _1: ref mut Res "self" @5:9-5:13
     let _2: ()
     let _3: String
     let _4: ref mut String
     let _5: ()
     let _6: ref String
   bb0:
-    _3 = call intrinsic fmt.new() @6:15
-    _4 = ref mut _3 @6:15
-    _5 = call intrinsic fmt.text(copy _4, const "drop ") @6:15
-    _5 = call intrinsic fmt.display(copy _4, copy _1.*.0, const "") @6:22
+    _3 = call intrinsic fmt.new() @6:15-6:31
+    _4 = ref mut _3 @6:15-6:31
+    _5 = call intrinsic fmt.text(copy _4, const "drop ") @6:15-6:31
+    _5 = call intrinsic fmt.display(copy _4, copy _1.*.0, const "") @6:22-6:29
     goto bb1
   bb1 (unwind bb3):
-    _6 = ref _3
-    _2 = call intrinsic print(copy _6) @6:9
+    _6 = ref _3 @6:15-6:31
+    _2 = call intrinsic print(copy _6) @6:9-6:32
     goto bb4
   bb2 (cleanup):
     resume
@@ -93,9 +101,10 @@ fn Res.drop(1) drop source 0 {
     drop _3
     goto bb2
   bb4:
-    drop _3
+    drop _3 @6:32-6:32
     goto bb5
   bb5:
+    dead _3 @6:32-6:32
     _0 = const ()
     return
 }

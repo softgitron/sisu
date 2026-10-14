@@ -1,0 +1,72 @@
+# Values, borrowing, views, shared ownership.
+
+struct User:
+    name: String
+    age: int
+
+# Default convention: borrowed, read-only. The caller keeps ownership.
+def describe(u: User) -> String:
+    return "{u.name} ({u.age})"
+
+# `mut`: borrowed for in-place modification. The call site shows it.
+def birthday(mut u: User):
+    u.age += 1
+
+# `own`: the function takes the value. The caller cannot use it afterwards.
+def archive(own u: User, mut archive: list[User]):
+    archive.push(u)
+
+# Returning a borrow of a parameter. One borrowed parameter: no `from` needed.
+def oldest(users: list[User]) -> ref User?:
+    return users.iter().max_by(it.age)
+
+# Two candidates: say which one the result comes from.
+def longer_name(a: User, b: User) -> ref str from a, b:
+    return if len(a.name) >= len(b.name): a.name else: b.name
+
+# A view struct holds references. It has one implicit lifetime and cannot
+# be stored on the heap or sent out of the frame that owns `source`.
+view struct Token:
+    kind: TokenKind
+    text: str
+
+enum TokenKind:
+    Word
+    Number
+    Punct
+
+def tokenize(source: str) -> list[Token]:
+    var out = list()
+    for piece in source.split_whitespace():
+        let kind: TokenKind = if piece.chars().all(it.is_digit()): Number else: Word
+        out.push(Token(kind=kind, text=piece))
+    return out                               # a list of views: itself view-like
+
+def demo():
+    var roni = User(name="Roni", age=30)
+    print(describe(roni))                    # borrowed
+    birthday(mut roni)                       # modified in place, visibly
+    let copy = roni.copy()                   # explicit deep copy
+    var old_users = list()
+    archive(roni, mut old_users)             # moved
+    # print(roni.name)                       # error: roni was moved on the previous line
+    print(copy.name)                         # the copy is still ours
+
+    var team = [User(name="Aino", age=27), copy]
+    let eldest = oldest(team)                # borrows team
+    # team.push(...)                         # error while `eldest` is alive
+    print(eldest?.name ?? "nobody")          # last use of `eldest`: borrow ends here
+    team.push(User(name="Eero", age=45))     # fine now
+
+    let src = String("let x = 42")
+    let tokens = tokenize(src)               # tokens borrow from src
+    # return tokens                          # error: cannot escape the frame owning `src`
+    for t in tokens:
+        print("{t.kind:?}: {t.text}")
+
+# The rest of proposal/examples/ownership.sisu needs `Shared`, `Mutex`,
+# `Arena` and `task.scope`, which stage 0 does not have yet; the test
+# `ownership_core_matches_the_proposal` keeps the part above identical to
+# the original.
+def main():
+    demo()

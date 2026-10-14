@@ -1,0 +1,39 @@
+# Moving a part out of a value leaves the rest to be dropped at the end of
+# the scope, fields in reverse declaration order (04, rule 6).
+
+view struct Log:
+    name: str
+
+impl Drop for Log:
+    def drop(mut self):
+        print("  drop {self.name}")
+
+view struct Trio:
+    a: Log
+    b: Log
+    c: Log
+
+def keep(own l: Log):
+    print("  keep {l.name}")
+
+def make() -> Trio:
+    return Trio(a=Log(name="a"), b=Log(name="b"), c=Log(name="c"))
+
+def main():
+    print("move the middle field:")
+    let t = make()
+    keep(t.b)
+    print("  end of the block")
+    if True:
+        print("move two fields of a tuple:")
+        let pair = (Log(name="first"), Log(name="second"))
+        let (x, y) = pair
+        keep(y)
+        print("  x is {x.name}")
+    print("move a field conditionally:")
+    for i in range(2):
+        let u = make()
+        if i == 1:
+            keep(u.c)
+        print("  iteration {i}")
+    print("end of main")
