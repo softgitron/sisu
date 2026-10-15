@@ -89,6 +89,37 @@ impl<'p> Interp<'p, '_> {
         if name == "Mutex.lock" {
             return self.lock(&mut args);
         }
+        // `Array.filled(value)`: `N` (its second type argument) copies.
+        if name == "Array.filled" {
+            let n = match tys.get(1) {
+                Some(sir::Type::Const(n)) if *n >= 0 => *n as usize,
+                other => return Err(ice(format!("an array length that is not a constant: {other:?}"))),
+            };
+            let value = args.into_iter().next().ok_or_else(|| ice("Array.filled without a value"))?;
+            let mut items = Vec::with_capacity(n);
+            for _ in 1..n {
+                let c = self.copy_value(&value);
+                items.push(c);
+            }
+            if n > 0 {
+                items.push(value);
+            }
+            return Ok(Value::List(items));
+        }
+        if name == "Array.to_list" {
+            let v = args.into_iter().next().ok_or_else(|| ice("Array.to_list without an array"))?;
+            let v = self.target(&v)?.clone();
+            return Ok(self.copy_value(&v));
+        }
+        // A `const` generic parameter's value: its type argument.
+        if name == "generic.value" {
+            return match tys.first() {
+                Some(sir::Type::Const(n)) => {
+                    i64::try_from(*n).map(Value::Int).map_err(|_| ice("a constant argument out of range"))
+                }
+                other => Err(ice(format!("a `const` parameter without a constant: {other:?}"))),
+            };
+        }
         // A receiver's iterator waits for the next value.
         if name == "Iter.next"
             && let Some(v) = args.first()
@@ -126,6 +157,11 @@ impl<'p> Interp<'p, '_> {
                         *self.write(&p)? = Value::Iter(st);
                         return Ok(Value::option(r?));
                     }
+                    // `iter_of(xs)`: the elements of a list, moved.
+                    if method == "of" {
+                        let v = a.take(0)?;
+                        return Ok(Value::Iter(Box::new(self.iter_own(v)?)));
+                    }
                     Err(ice(format!("unknown intrinsic `Iter.{method}`")))
                 }
                 "Option" | "Result" => self.option_method(owner, method, &mut a),
@@ -156,6 +192,16 @@ impl<'p> Interp<'p, '_> {
                 "contract" if method == "fail" => self.contract_fail(&a),
                 "test" => self.test_intrinsic(method, &a),
                 "error" => self.error_method(method, tys, &a),
+                // Hot replacement's boundaries (std `live`): the task adopts
+                // the newest published epoch.
+                "live" => match method {
+                    "boundary" => {
+                        self.live_boundary()?;
+                        Ok(Value::Unit)
+                    }
+                    "epoch" => Ok(Value::Int(self.live_epoch() as i64)),
+                    _ => Err(ice(format!("unknown intrinsic `{name}`"))),
+                },
                 _ => Err(ice(format!("unknown intrinsic `{name}`"))),
             };
         }
@@ -209,6 +255,10 @@ impl<'p> Interp<'p, '_> {
                 items.reverse();
                 Ok(Value::Iter(Box::new(IterState::Items(items.into()))))
             }
+            "iterable_list" => {
+                let mut st = self.iterable(a.take(0)?, tys.first())?;
+                Ok(Value::List(self.iter_collect(&mut st)?))
+            }
             "sorted" => {
                 let mut st = self.iterable(a.take(0)?, tys.first())?;
                 let items = self.iter_collect(&mut st)?;
@@ -218,7 +268,15 @@ impl<'p> Interp<'p, '_> {
                 Ok(Value::List(idx.into_iter().map(|i| slots[i].take().unwrap_or(Value::Moved)).collect()))
             }
             "min" | "max" => {
-                let (x, y) = (a.take(0)?, a.take(1)?);
+                // From the body's call (`@structural`), the values come by
+                // reference, as a type parameter's do: the result is a copy.
+                let (mut x, mut y) = (a.take(0)?, a.take(1)?);
+                if matches!(x, Value::Ref(_)) {
+                    x = self.target(&x)?.clone();
+                }
+                if matches!(y, Value::Ref(_)) {
+                    y = self.target(&y)?.clone();
+                }
                 let o = self.total_compare(&x, &y)?;
                 let pick_y = if name == "min" { o == Ordering::Greater } else { o == Ordering::Less };
                 let (keep, other) = if pick_y { (y, x) } else { (x, y) };
@@ -331,6 +389,10 @@ impl<'p> Interp<'p, '_> {
                     other => return Err(ice(format!("no f64 method `{other}`"))),
                 }
             }
+            ("char", "from_code") => {
+                let n = self.int(&x)?;
+                Value::option(u32::try_from(n).ok().and_then(char::from_u32).map(Value::Char))
+            }
             ("char", m) => {
                 let c = self.char(&x)?;
                 match m {
@@ -349,85 +411,70 @@ impl<'p> Interp<'p, '_> {
     }
 
     fn str_method(&mut self, method: &str, a: &mut Args) -> Result<Value, Unwind> {
-        let s: Rc<str> = Rc::from(self.text(a.get(0)?)?);
-        // A piece of a view is a view of the same text, under the same loan
-        // (the ownership monitor's tag).
-        let tag = match self.target(a.get(0)?)? {
-            Value::Str(_, t) => *t,
-            _ => 0,
+        // The text's bytes (03, "Strings and text"), read in place: the
+        // methods std writes in Sisu over them make many calls per text.
+        match method {
+            "byte_len" => return Ok(Value::Int(self.text(a.get(0)?)?.len() as i64)),
+            "byte_at" => {
+                let i = self.int(a.get(1)?)?;
+                let s = self.text(a.get(0)?)?;
+                return match usize::try_from(i).ok().and_then(|i| s.as_bytes().get(i)) {
+                    Some(b) => Ok(Value::Int(i64::from(*b))),
+                    None => Err(panic(
+                        msg::PANIC_INDEX_OUT_OF_BOUNDS,
+                        &[("len", s.len().to_string()), ("index", i.to_string())],
+                    )),
+                };
+            }
+            "byte_slice" => {
+                let (start, end) = (self.int(a.get(1)?)?, self.int(a.get(2)?)?);
+                let tag = match self.target(a.get(0)?)? {
+                    Value::Str(_, t) => *t,
+                    _ => 0,
+                };
+                let s = self.text(a.get(0)?)?;
+                let len = s.len() as i64;
+                if start < 0 || end < start || end > len {
+                    let bad = if start < 0 || start > len { start } else { end };
+                    return Err(panic(
+                        msg::PANIC_INDEX_OUT_OF_BOUNDS,
+                        &[("len", len.to_string()), ("index", bad.to_string())],
+                    ));
+                }
+                let (start, end) = (start as usize, end as usize);
+                for i in [start, end] {
+                    if !s.is_char_boundary(i) {
+                        return Err(panic(msg::PANIC_CHAR_BOUNDARY, &[("index", i.to_string())]));
+                    }
+                }
+                return Ok(Value::Str(Rc::from(&s[start..end]), tag));
+            }
+            "bytes" => {
+                let s = self.text(a.get(0)?)?;
+                let items = s.bytes().map(|b| Value::Int(i64::from(b))).collect();
+                return Ok(Value::Iter(Box::new(IterState::Items(items))));
+            }
+            _ => {}
+        }
+        let s: Rc<str> = match self.target(a.get(0)?)? {
+            Value::Str(s, tag) => {
+                self.mon_view_ok(*tag)?;
+                s.clone()
+            }
+            _ => Rc::from(self.text(a.get(0)?)?),
         };
-        let view = |x: &str| Value::Str(Rc::from(x), tag);
-        let arg_text =
-            |me: &Self, i: usize| -> Result<String, Unwind> { Ok(me.text(a.get(i)?)?.to_string()) };
-        let pieces =
-            |v: Vec<&str>| Value::Iter(Box::new(IterState::Items(v.into_iter().map(view).collect())));
         Ok(match method {
             "cmp" => {
-                let o = arg_text(self, 1)?;
-                Value::ordering((*s).cmp(o.as_str()))
+                let o = self.text(a.get(1)?)?;
+                Value::ordering((*s).cmp(o))
             }
-            "is_empty" => Value::Bool(s.is_empty()),
             "chars" => Value::Iter(Box::new(IterState::Chars { text: s, pos: 0 })),
-            "lines" => pieces(s.lines().collect()),
-            "split_whitespace" => pieces(s.split_whitespace().collect()),
-            "split" => {
-                let sep = arg_text(self, 1)?;
-                if sep.is_empty() {
-                    return Err(panic(
-                        msg::PANIC_EMPTY_ARGUMENT,
-                        &[("operation", "str.split".into()), ("what", "separator".into())],
-                    ));
-                }
-                pieces(s.split(sep.as_str()).collect())
-            }
-            "split_once" => {
-                let sep = arg_text(self, 1)?;
-                Value::option(s.split_once(sep.as_str()).map(|(x, y)| Value::Tuple(vec![view(x), view(y)])))
-            }
-            "trim" => view(s.trim()),
-            "trim_start" => view(s.trim_start()),
-            "trim_end" => view(s.trim_end()),
-            "starts_with" => Value::Bool(s.starts_with(arg_text(self, 1)?.as_str())),
-            "ends_with" => Value::Bool(s.ends_with(arg_text(self, 1)?.as_str())),
-            "contains" => Value::Bool(s.contains(arg_text(self, 1)?.as_str())),
-            "strip_prefix" => {
-                let p = arg_text(self, 1)?;
-                view(s.strip_prefix(p.as_str()).unwrap_or(&s))
-            }
-            "strip_suffix" => {
-                let p = arg_text(self, 1)?;
-                view(s.strip_suffix(p.as_str()).unwrap_or(&s))
-            }
-            "find" => {
-                let p = arg_text(self, 1)?;
-                Value::option(s.find(p.as_str()).map(|b| Value::Int(s[..b].chars().count() as i64)))
-            }
-            "replace" => {
-                let (old, new) = (arg_text(self, 1)?, arg_text(self, 2)?);
-                if old.is_empty() {
-                    return Err(panic(
-                        msg::PANIC_EMPTY_ARGUMENT,
-                        &[("operation", "str.replace".into()), ("what", "text to replace".into())],
-                    ));
-                }
-                Value::String(s.replace(old.as_str(), &new))
-            }
             "parse_float" => {
                 Value::option(decimal(&s).then(|| s.parse::<f64>().ok()).flatten().map(Value::Float))
             }
             "to_lowercase" => Value::String(s.to_lowercase()),
             "to_uppercase" => Value::String(s.to_uppercase()),
             "to_string" => Value::String(s.to_string()),
-            "repeat" => {
-                let n = self.int(a.get(1)?)?;
-                if n < 0 {
-                    return Err(panic(
-                        msg::PANIC_NEGATIVE_COUNT,
-                        &[("operation", "str.repeat".into()), ("count", n.to_string())],
-                    ));
-                }
-                Value::String(s.repeat(n as usize))
-            }
             other => return Err(ice(format!("no str method `{other}`"))),
         })
     }
@@ -868,6 +915,17 @@ impl<'p> Interp<'p, '_> {
             "digits" => {
                 let (n, base, upper) = (self.int(a.get(0)?)?, self.int(a.get(1)?)?, self.bool(a.get(2)?)?);
                 return Ok(Value::String(crate::format::digits(n, base, upper)));
+            }
+            "wide_digits" => {
+                let mag = match self.target(a.get(0)?)? {
+                    Value::Int(n) => u128::from(n.unsigned_abs()),
+                    Value::U64(n) => u128::from(*n),
+                    Value::I128(n) => n.unsigned_abs(),
+                    Value::U128(n) => *n,
+                    other => return Err(ice(format!("fmt.wide_digits of {other:?}"))),
+                };
+                let (base, upper) = (self.int(a.get(1)?)?, self.bool(a.get(2)?)?);
+                return Ok(Value::String(crate::format::wide_digits(mag, base, upper)));
             }
             "float_digits" => {
                 let x = self.float(a.get(0)?)?;

@@ -1,0 +1,20 @@
+# What a module lets other modules see (09): `pub`, `pub(package)`, and a
+# re-export with `pub from ... import`.
+import lib
+from lib import Counter, internal, hidden
+from lib.inner import helper
+from app.util import shared, tidy
+
+def main():
+    var c = Counter(count=0, step=2)
+    c.bump()
+    print(c.count)
+    print(c.step)
+    print(lib.secret())
+    print(lib.helper())
+    print(lib.again())
+    print(shared(1) + tidy(2))
+    c.reset()
+
+def takes(h: lib.Hidden) -> int:
+    return 0

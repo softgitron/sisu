@@ -17,12 +17,28 @@ struct Opts:
 
 def show(args: list[str]):
     match cli.parse[Opts](args):
-        case Ok(o): print("name={o.name} verbose={o.verbose} quiet={o.quiet} ratio={o.ratio} out={o.out} count={o.count} files={o.files:?}")
+        case Ok(o): print(
+            "name={o.name} verbose={o.verbose} quiet={o.quiet} ratio={o.ratio} out={o.out} count={o.count} files={o.files:?}"
+        )
         case Err(e): print("error: {e:?}")
 
 def main():
     show(["--name", "x"])
-    show(["--name=y", "--verbose", "--quiet=false", "--ratio", "1.25", "--out", "o.txt", "a", "b", "--", "--c"])
+    show(
+        [
+            "--name=y",
+            "--verbose",
+            "--quiet=false",
+            "--ratio",
+            "1.25",
+            "--out",
+            "o.txt",
+            "a",
+            "b",
+            "--",
+            "--c",
+        ]
+    )
     show(["--verbose"])
     show(["--name", "x", "--ratio", "inf"])
     show(["--name", "x", "--verbose=maybe"])

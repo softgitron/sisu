@@ -32,10 +32,17 @@ def parse[T](args: list[str]) -> T ! Error:
         else:
             _ = spec.takes_value.insert(f.name.to_string(), not reflect.is_bool(f.ty))
     let given = scan(args, spec)?
-    return Ok(reflect.construct(T, {
-        f.name: if comptime f.default and not reflect.is_list(f.ty): (if given.has(f.name): value[f.ty](given, f.name)? else: reflect.default_of(f)) else: value[f.ty](given, f.name)?
-        for f in reflect.fields_of(T)
-    }))
+    return Ok(
+        reflect.construct(
+            T,
+            {
+                f.name: if comptime f.default and not reflect.is_list(f.ty): (
+                    if given.has(f.name): value[f.ty](given, f.name)? else: reflect.default_of(f)
+                ) else: value[f.ty](given, f.name)?
+                for f in reflect.fields_of(T)
+            },
+        )
+    )
 
 ## The options `parse[T]` reads, one line each: the option, the kind of
 ## value it takes and its default, then the positional arguments.
@@ -49,7 +56,9 @@ def help_text[T]() -> String:
         elif comptime reflect.is_bool(f.ty):
             lines.push("  {option(f.name)}")
         elif comptime f.default:
-            lines.push("  {option(f.name)} <{reflect.name_of(f.ty)}>  (default: {reflect.default_of(f)})")
+            lines.push(
+                "  {option(f.name)} <{reflect.name_of(f.ty)}>  (default: {reflect.default_of(f)})"
+            )
         else:
             lines.push("  {option(f.name)} <{reflect.name_of(f.ty)}>")
     comptime for f in reflect.fields_of(T):

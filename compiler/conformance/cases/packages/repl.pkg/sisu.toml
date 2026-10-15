@@ -1,0 +1,6 @@
+# `sisu repl` in a package's directory loads the package (10, "REPL and
+# scripts"): the session imports its modules by their paths.
+[package]
+name = "shapes"
+version = "0.1.0"
+edition = "2027"

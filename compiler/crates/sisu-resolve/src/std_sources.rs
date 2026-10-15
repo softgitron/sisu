@@ -16,6 +16,9 @@ pub const HTTP: &str = include_str!("../../../std/http.sisu");
 pub const SIM: &str = include_str!("../../../std/sim.sisu");
 pub const JSON: &str = include_str!("../../../std/json.sisu");
 pub const TEST: &str = include_str!("../../../std/test.sisu");
+pub const COLLECTIONS: &str = include_str!("../../../std/collections.sisu");
+pub const NUM: &str = include_str!("../../../std/num.sisu");
+pub const LIVE: &str = include_str!("../../../std/live.sisu");
 
 /// `target` (08, "Conditional compilation"): the build target's facts as
 /// constants. Stage 0's target is the interpreter on the host, so they are
@@ -36,7 +39,7 @@ pub fn target() -> &'static str {
 /// prelude's own items: `task.scope` is ambient (Q-6), and so is the `log`
 /// facade (Q-5). `cap` (std.cap) grants nothing by itself: its fakes,
 /// attenuations and interceptors work on capabilities they are given.
-pub const AMBIENT: &[(&str, &str)] = &[("task", TASK), ("log", LOG), ("cap", CAP)];
+pub const AMBIENT: &[(&str, &str)] = &[("task", TASK), ("log", LOG), ("cap", CAP), ("live", LIVE)];
 
 /// The std module an import path names, as (module name, source).
 pub fn module_for(path: &[&str]) -> Option<(&'static str, &'static str)> {
@@ -52,7 +55,38 @@ pub fn module_for(path: &[&str]) -> Option<(&'static str, &'static str)> {
         ["std", "sim"] | ["sim"] => Some(("sim", SIM)),
         ["std", "json"] | ["json"] => Some(("json", JSON)),
         ["std", "test"] => Some(("test", TEST)),
+        ["std", "collections"] => Some(("collections", COLLECTIONS)),
+        ["std", "num"] => Some(("num", NUM)),
+        ["std", "live"] => Some(("live", LIVE)),
         _ => None,
+    }
+}
+
+/// The std modules whose doc examples `sisu test --std` runs, besides the
+/// prelude's.
+pub const DOCUMENTED: &[(&str, &str)] = &[
+    ("cap", CAP),
+    ("cli", CLI),
+    ("collections", COLLECTIONS),
+    ("live", LIVE),
+    ("num", NUM),
+    ("http", HTTP),
+    ("json", JSON),
+    ("log", LOG),
+    ("math", MATH),
+    ("net", NET),
+    ("sim", SIM),
+    ("task", TASK),
+    ("test", TEST),
+    ("time", TIME),
+];
+
+/// A std module's path as an import names it: `std.x.http` for `http`.
+pub fn display_path(name: &str) -> String {
+    match name {
+        "prelude" => "std.core".into(),
+        "cli" | "http" => format!("std.x.{name}"),
+        other => format!("std.{other}"),
     }
 }
 
@@ -85,6 +119,11 @@ pub fn reexports(module: &str) -> &'static [&'static str] {
         ],
         "task" => &["Scope", "Handle", "TaskError", "Cancellation", "channel", "Sender", "Receiver", "Mutex"],
         "test" => &["check", "arbitrary", "exhaustive", "Gen", "Draws"],
+        "collections" => &["list", "dict", "set", "Arena", "Key", "Slice", "Iter", "Entry"],
+        "num" => &[
+            "Num", "u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32", "i128", "bytes", "abs", "min",
+            "max", "sum",
+        ],
         _ => &[],
     }
 }
@@ -108,6 +147,8 @@ const LEAVES: &[(&str, &[&str])] = &[
     ("i8", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
     ("i16", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
     ("i32", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
+    ("u128", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
+    ("i128", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
     ("Fs", &["Display", "Debug"]),
     ("Net", &["Display", "Debug"]),
     ("Clock", &["Display", "Debug"]),
@@ -206,16 +247,20 @@ fn leaf_format(t: &str, ty: &str) -> Option<String> {
             );
         }
         ("Display", "int") => ("fmt", "\"{self}\"", "f.write(s.int(self))".to_string()),
-        // A sized integer formats as the `int` it equals; a `u64` beyond
-        // `int` as text.
-        ("Display", "u64") => (
+        // A sized integer formats as the `int` it equals; a `u64`, `u128`
+        // or `i128` beyond `int` as text.
+        ("Display", "u64" | "u128" | "i128") => (
             "fmt",
             "\"{self}\"",
-            "match self.to_int():\n                    case Some(n):\n                        f.write(s.int(n))\n                    \
-             case None:\n                        f.write(s.text(\"{self}\"))"
-                .to_string(),
+            format!(
+                "match self.to_int():\n                    case Some(n):\n                        f.write(s.int(n))\n                    \
+                 case None:\n                        f.write(s.wide(self, {}))",
+                if ty == "i128" { "self < 0" } else { "False" }
+            ),
         ),
-        ("Display", t) if SIZED.contains(&t) => ("fmt", "\"{self}\"", "f.write(s.int(self.to_int()))".to_string()),
+        ("Display", t) if SIZED.contains(&t) => {
+            ("fmt", "\"{self}\"", "f.write(s.int(self.to_int()))".to_string())
+        }
         ("Display", "f64") => ("fmt", "\"{self}\"", "f.write(s.float(self))".to_string()),
         // `?` as the spec's type asks for the `Debug` text.
         ("Display", _) => (
@@ -318,7 +363,15 @@ fn is_handle(ty: &str) -> bool {
 }
 
 /// The sized integer types (03, "Numbers"), narrowest first in each kind.
-pub const SIZED: &[&str] = &["u8", "u16", "u32", "u64", "i8", "i16", "i32"];
+pub const SIZED: &[&str] = &["u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32", "i128"];
+
+/// The sized integer types some of whose values `int` cannot hold: a
+/// value of one is a kind of its own at run time, made by an intrinsic
+/// (`u64.from_bits`, `i128.widen`, `u128.from_text`) rather than an `int`
+/// constant.
+pub fn own_kind(ty: &str) -> bool {
+    matches!(ty, "u64" | "u128" | "i128")
+}
 
 /// The bits of a sized integer type and whether it is signed; `int` is
 /// `i64`.
@@ -328,9 +381,11 @@ pub fn int_width(ty: &str) -> Option<(u32, bool)> {
         "u16" => (16, false),
         "u32" => (32, false),
         "u64" => (64, false),
+        "u128" => (128, false),
         "i8" => (8, true),
         "i16" => (16, true),
         "i32" => (32, true),
+        "i128" => (128, true),
         "int" => (64, true),
         _ => return None,
     })
@@ -357,14 +412,17 @@ fn sized_impls(s: &mut String) {
             let _ = writeln!(s, "    @intrinsic(\"{ty}.neg\")\n    pure def neg(self) -> {ty}");
         }
         let _ = writeln!(s, "\nimpl {ty}:");
-        if *ty == "u64" {
-            let _ = writeln!(s, "    ## The value as an `int`, or `None` above `int`'s range.");
-            let _ = writeln!(s, "    @intrinsic(\"u64.to_int\")\n    pure def to_int(self) -> int?");
+        if own_kind(ty) {
+            let _ = writeln!(s, "    ## The value as an `int`, or `None` outside `int`'s range.");
+            let _ = writeln!(s, "    @intrinsic(\"{ty}.to_int\")\n    pure def to_int(self) -> int?");
         } else {
             let _ = writeln!(s, "    ## The value as an `int`, which holds every one.");
             let _ = writeln!(s, "    @intrinsic(\"{ty}.to_int\")\n    pure def to_int(self) -> int");
         }
         let _ = writeln!(s, "    @intrinsic(\"{ty}.cmp\")\n    pure def cmp(self, other: {ty}) -> Ordering");
+        let _ = writeln!(s, "\nimpl Integer for {ty}:");
+        let _ =
+            writeln!(s, "    @intrinsic(\"{ty}.wrapping_from\")\n    pure def wrapping_from(n: int) -> {ty}");
         let _ = writeln!(s, "\nimpl FromLiteral[int] for {ty}:");
         let _ = writeln!(
             s,
@@ -377,7 +435,15 @@ fn sized_impls(s: &mut String) {
             }
         }
     }
+    let _ = writeln!(s, "\nimpl Integer for int:");
+    let _ = writeln!(s, "    pure def wrapping_from(n: int) -> int:\n        return n");
     let _ = writeln!(s, "\nimpl int:");
+    let _ = writeln!(
+        s,
+        "    ## The value reduced to `T`'s width, as two's complement wrapping does:\n    \
+         ## `300.truncate_to[u8]()` is `44`, `-1.truncate_to[u32]()` is `4294967295`.\n    \
+         pure def truncate_to[T: Integer](self) -> T:\n        return T.wrapping_from(self)"
+    );
     for ty in SIZED {
         let _ = writeln!(s, "    ## The value as a `{ty}`, or `None` if it does not fit.");
         let _ = writeln!(s, "    @intrinsic(\"int.to_{ty}\")\n    pure def to_{ty}(self) -> {ty}?");

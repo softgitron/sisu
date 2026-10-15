@@ -1,0 +1,20 @@
+# A save that changes a signature restarts the program with a message
+# (10, "Debugging and profiling"; D-068): an old frame could call `draw`
+# with the old parameters, so no swap can take the new one. The program
+# saves `restart.files/v2.sisu` at frame 1; the run stops at the next
+# boundary and starts the new `main`.
+from std.time import Ticker
+
+def draw(frame: int) -> String:
+    return "frame {frame}"
+
+def main(sys: System) -> !:
+    let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("a time"))
+    var ticker = Ticker.every(clock, Duration.millis(16))
+    for frame in range(4):
+        ticker.wait()?
+        print(draw(frame))
+        if frame == 1:
+            let text = sys.fs.read_to_string("v2.sisu").expect("the next version")
+            sys.fs.write_text("restart.sisu", text).expect("saved")
+    return Ok(())

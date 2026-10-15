@@ -61,6 +61,19 @@ pub struct Body {
     /// The function's contract (07): what lowering checks on entry and on
     /// every exit.
     pub contracts: Option<Contracts>,
+    /// Its `comptime assert`s on its `const` generic parameters, which only
+    /// a call with constant arguments can decide: each is checked at every
+    /// such call, once the program is typed (`generic_asserts.rs`).
+    pub generic_asserts: Vec<GenericAssert>,
+}
+
+/// A `comptime assert` on `const` generic parameters: its condition, its
+/// message, and the condition as written.
+#[derive(Clone, Debug)]
+pub struct GenericAssert {
+    pub cond: Expr,
+    pub message: Option<Expr>,
+    pub text: String,
 }
 
 /// What a check of a contract is for (07), which names it when it fails.
@@ -453,7 +466,10 @@ pub enum Coercion {
 
 #[derive(Clone, Debug)]
 pub enum ExprKind {
+    /// An integer literal: its value, or for a `u64` its 64 bits.
     Int(i64),
+    /// A literal of `i128` or `u128` that `i64` cannot hold: its 128 bits.
+    WideInt(u128),
     Float(f64),
     Bool(bool),
     Char(char),
@@ -590,6 +606,9 @@ pub enum ExprKind {
         refinement: DefId,
         type_args: Vec<Ty>,
     },
+    /// The value of the function's `const` generic parameter at this
+    /// index (03, "Const generics"), an `int`.
+    ConstParam(u32),
     Error,
 }
 
@@ -613,6 +632,7 @@ pub struct Pat {
 #[derive(Clone, Debug)]
 pub enum Lit {
     Int(i64),
+    WideInt(u128),
     Float(f64),
     Bool(bool),
     Char(char),

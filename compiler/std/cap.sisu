@@ -642,7 +642,9 @@ struct FakeNet:
 
 impl FakeNet:
     def new() -> Net:
-        return FakeNet(state=Cap(Mutex(FakeNetState(listeners={}, connections={}, next_port=40000))))
+        return FakeNet(
+            state=Cap(Mutex(FakeNetState(listeners={}, connections={}, next_port=40000)))
+        )
 
     ## How many connections were made to `host` at `port`.
     def connections(self, host: str, port: int) -> int:
@@ -828,19 +830,25 @@ impl[T: FsOps, I: Interceptor] FsOps for Wrap[T, I]:
         self.hook.after(c, "{r:?}")
         return r
     def write(self, path: Path, data: bytes) -> ! IoError:
-        let c = Call(capability="Fs".to_string(), method="write".to_string(), args="{path:?}, {data:?}")
+        let c = Call(
+            capability="Fs".to_string(), method="write".to_string(), args="{path:?}, {data:?}"
+        )
         self.hook.before(c.copy())
         let r = self.inner.write(path, data)
         self.hook.after(c, "{r:?}")
         return r
     def read_to_string(self, path: Path) -> String ! IoError:
-        let c = Call(capability="Fs".to_string(), method="read_to_string".to_string(), args="{path:?}")
+        let c = Call(
+            capability="Fs".to_string(), method="read_to_string".to_string(), args="{path:?}"
+        )
         self.hook.before(c.copy())
         let r = self.inner.read_to_string(path)
         self.hook.after(c, "{r:?}")
         return r
     def write_text(self, path: Path, text: str) -> ! IoError:
-        let c = Call(capability="Fs".to_string(), method="write_text".to_string(), args="{path:?}, {text:?}")
+        let c = Call(
+            capability="Fs".to_string(), method="write_text".to_string(), args="{path:?}, {text:?}"
+        )
         self.hook.before(c.copy())
         let r = self.inner.write_text(path, text)
         self.hook.after(c, "{r:?}")
@@ -920,7 +928,9 @@ impl[T: EnvOps, I: Interceptor] EnvOps for Wrap[T, I]:
 
 impl[T: ProcOps, I: Interceptor] ProcOps for Wrap[T, I]:
     def run(self, program: str, args: list[str]) -> ProcOutput ! ProcError:
-        let c = Call(capability="Proc".to_string(), method="run".to_string(), args="{program:?}, {args:?}")
+        let c = Call(
+            capability="Proc".to_string(), method="run".to_string(), args="{program:?}, {args:?}"
+        )
         self.hook.before(c.copy())
         let r = self.inner.run(program, args)
         self.hook.after(c, "{r:?}")
@@ -928,7 +938,9 @@ impl[T: ProcOps, I: Interceptor] ProcOps for Wrap[T, I]:
 
 impl[T: NetOps, I: Interceptor] NetOps for Wrap[T, I]:
     def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}:
-        let c = Call(capability="Net".to_string(), method="connect".to_string(), args="{host:?}, {port:?}")
+        let c = Call(
+            capability="Net".to_string(), method="connect".to_string(), args="{host:?}, {port:?}"
+        )
         self.hook.before(c.copy())
         let r = self.inner.connect(host, port)
         let outcome = match r:
@@ -937,7 +949,9 @@ impl[T: NetOps, I: Interceptor] NetOps for Wrap[T, I]:
         self.hook.after(c, outcome)
         return r
     def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
-        let c = Call(capability="Net".to_string(), method="listen".to_string(), args="{port:?}, {host:?}")
+        let c = Call(
+            capability="Net".to_string(), method="listen".to_string(), args="{port:?}, {host:?}"
+        )
         self.hook.before(c.copy())
         let r = self.inner.listen(port, host)
         let outcome = match r:

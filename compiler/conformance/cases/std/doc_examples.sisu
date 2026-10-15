@@ -1,0 +1,6 @@
+# select --std
+# The standard library's doc examples are tests (10, "Testing"; 11): `sisu
+# test --std` runs every fenced example in std's `##` comments, each named
+# after the item it documents, in its module.
+def main():
+    pass

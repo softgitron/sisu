@@ -12,7 +12,8 @@ impl http.Handler for Greeter:
     def handle(self, request: http.Request) -> http.Response:
         if request.target == "/missing":
             return http.Response.text(404, "Not Found", "no such page\n")
-        let who = if request.body.is_empty(): "?".to_string() else: request.body.decode().ok() ?? "?".to_string()
+        let who = if request.body.is_empty(): "?".to_string() else: request.body.decode().ok()
+            ?? "?".to_string()
         return http.Response.text(200, "OK", "{self.greeting}, {who} at {request.target}\n")
 
 def url(text: str) -> Url:

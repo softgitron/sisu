@@ -1,0 +1,5 @@
+#!/usr/bin/env sisu
+# /// script
+# [dependencies]
+# broken = "1.0"
+print("never runs")

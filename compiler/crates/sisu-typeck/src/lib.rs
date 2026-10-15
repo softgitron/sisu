@@ -12,6 +12,7 @@ mod check;
 mod contracts;
 mod exhaustive;
 mod expr;
+mod generic_asserts;
 mod infer;
 mod pat;
 pub mod purity;
@@ -81,6 +82,7 @@ fn check_fn(
         has_errors: false,
         generator: None,
         contracts: None,
+        generic_asserts: Vec::new(),
     };
     let Some(f) = prog.fn_info(def) else { return (empty, Vec::new(), Vec::new()) };
     let Some(body_ast) = &f.body else { return (empty, Vec::new(), Vec::new()) };
@@ -88,6 +90,7 @@ fn check_fn(
     c.self_ty = f.owner.clone();
     c.env = prog.elaborate_env(&f.predicates);
     c.generic_names = f.generics.iter().map(|g| g.name.clone()).collect();
+    c.const_generics = f.generics.iter().map(|g| g.is_const).collect();
     // A generator: its `return` gives nothing, and calling it makes the
     // `Iter` it declares.
     let generator = if tasks::has_yield(body_ast) {
@@ -230,6 +233,7 @@ fn check_fn(
         has_errors,
         generator,
         contracts,
+        generic_asserts: std::mem::take(&mut c.generic_asserts),
     };
     zonk::Zonker { prog, infer: &c.infer }.body(&mut body);
     // A pure body's calls are checked on SIR (sisu-borrowck's purity pass).
@@ -496,6 +500,7 @@ fn check_value(
         has_errors,
         generator: None,
         contracts: None,
+        generic_asserts: Vec::new(),
     };
     zonk::Zonker { prog, infer: &c.infer }.body(&mut body);
     (body, std::mem::take(&mut c.diags))
@@ -618,6 +623,7 @@ pub fn check(prog: &Program, sources: &SourceMap) -> (Typed, Vec<Diagnostic>) {
     let (requests, mut ds) = template_requests(prog, &typed.bodies);
     typed.requests = requests;
     diags.append(&mut ds);
+    diags.extend(generic_asserts::check_calls(&typed));
     (typed, diags)
 }
 

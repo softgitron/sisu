@@ -30,6 +30,7 @@ dependencies = [
  "sisu-borrowck",
  "sisu-conformance",
  "sisu-diag",
+ "sisu-fmt",
  "sisu-interp",
  "sisu-lexer",
  "sisu-lower",
@@ -38,6 +39,15 @@ dependencies = [
  "sisu-sir",
  "sisu-syntax",
  "sisu-typeck",
+]
+
+[[package]]
+name = "sisu-fmt"
+version = "0.0.1"
+dependencies = [
+ "sisu-diag",
+ "sisu-parser",
+ "sisu-syntax",
 ]
 
 [[package]]

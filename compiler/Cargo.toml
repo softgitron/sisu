@@ -8,6 +8,7 @@ members = [
     "crates/sisu-syntax",
     "crates/sisu-lexer",
     "crates/sisu-parser",
+    "crates/sisu-fmt",
     "crates/sisu-resolve",
     "crates/sisu-typeck",
     "crates/sisu-sir",
@@ -30,6 +31,7 @@ sisu-diag = { path = "crates/sisu-diag" }
 sisu-syntax = { path = "crates/sisu-syntax" }
 sisu-lexer = { path = "crates/sisu-lexer" }
 sisu-parser = { path = "crates/sisu-parser" }
+sisu-fmt = { path = "crates/sisu-fmt" }
 sisu-resolve = { path = "crates/sisu-resolve" }
 sisu-typeck = { path = "crates/sisu-typeck" }
 sisu-sir = { path = "crates/sisu-sir" }

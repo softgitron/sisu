@@ -9,18 +9,24 @@ backend can be transcriptions of documented behaviour
 ([architecture.md](architecture.md)) instead of reverse engineering.
 
 Each entry says where the debt is, why it is debt, and what paying it
-means. The last part lists what Phases 0, 2, 3, 4 and 6 ask for that
+means. The last part lists what Phases 0, 2, 3, 4, 6 and 8 ask for that
 stage 0 does not have yet.
 
 ## Behaviour that comes from the host
 
 **Unicode tables.** `char.is_alphabetic`, `is_whitespace`,
-`is_uppercase`, `is_lowercase`, `str.to_lowercase`, `to_uppercase`,
-`split_whitespace` and `trim` use the tables of the Rust standard
-library (`sisu-interp/src/intrinsics.rs`), which follow whatever Unicode
-version that Rust release ships. *Pay*: name the Unicode version in the
-std contracts and pin it in stage 1's tables; add conformance cases at the
-edges (a character added in a recent version, Turkish dotted `İ`).
+`is_uppercase`, `is_lowercase`, `str.to_lowercase` and `to_uppercase`
+use the tables of the Rust standard library
+(`sisu-interp/src/intrinsics.rs`), which follow whatever Unicode version
+that Rust release ships; `split_whitespace` and the `trim` methods are
+Sisu, over `char.is_whitespace`. The case mappings of a whole text stay
+on the host because a final sigma lowers by its context (`SpecialCasing`),
+which needs the `Cased` and `Case_Ignorable` properties that Rust does
+not expose. *Pay*: name the Unicode version in the std contracts and pin
+it in stage 1's tables (with `Cased` and `Case_Ignorable`, so the case
+mappings can be Sisu over `char` mappings); add conformance cases at the
+edges (a character added in a recent version, Turkish dotted `İ`, a
+final `Σ`).
 
 **Float to text.** `Display` of an `f64` is Rust's shortest round-trip
 form and `{x:.N}` is Rust's correctly rounded fixed form (the intrinsic
@@ -44,16 +50,11 @@ depends on the hash, since iteration is in insertion order (D-074).
 *Pay*: write `dict` and `set` in Sisu over `Hash` and `Eq`, with the
 per-process SipHash key of D-049 as std's, and lift `E0398`.
 
-**Text methods are host code.** `str`'s searching, splitting, trimming,
-replacing and case methods, and `String`'s, are intrinsics whose
-contracts are their prelude comments; of the text functions only
-`parse_int`, `join`, formatting and `DateTime.parse` are Sisu. 03 makes
-`String` a `list[u8]` with a validity invariant and `s.byte_slice(a, b)`
-the explicit, checked way into a text. `u8`, `bytes` and `Slice` now
-exist, but `String` is still a host string, so the methods could not yet
-be written over its bytes without a copy per call. *Pay*: represent
-`String` as bytes with the invariant, then write the methods in Sisu over
-them, keeping only the Unicode tables (above) on the host.
+**Text search is naive.** `str.byte_find`, which `find`, `contains`,
+`split`, `split_once`, `lines` and `replace` are written over, tries each
+place where the first byte matches: O(n·m) for a text of n bytes and a
+pattern of m in the worst case (`"aaaa...b".find("aa...ab")`). *Pay*: a
+search with a linear bound (Two-Way, as Rust's `str::find`), in Sisu.
 
 **Text to `f64` at run time.** `str.parse_float` (which `cli.parse` uses
 for an `f64` option) is Rust's `parse`, after a check that the text is
@@ -90,7 +91,8 @@ over raw storage (stage 1 and the backend), their glue is SIR like any
 declared type's.
 
 **`str` is a copy.** `strview` copies the text into a shared immutable
-string, so a view costs O(length). Semantics are the same because the
+string, so a view costs O(length), and so does a piece of a view
+(`byte_slice`, and the pieces `split` and the others make). Semantics are the same because the
 viewed `String` cannot change while the view exists, which the ownership
 checker enforces, and which the monitor checks through the loan each
 view carries. *Pay*: a view is a pointer and a length in the backend.
@@ -153,9 +155,14 @@ the limits become options of `sisu run`.
 
 ## Shortcuts in the front end
 
-**The query layer is hand-written.** `sisu_driver::Db` memoises per file
-on a hash of its text. *Pay*: per-item queries with stable node identities
-as keys (the tree already provides them) before the language server.
+**The query layer is hand-written.** `sisu_driver::Db` memoises per
+program on hashes of its files' and manifests' texts, so every change
+re-resolves and re-checks the whole program, std's modules included
+(only their parsing is shared): the language server answers a change to
+`std/num.sisu` in about 65 ms and to `std/json.sisu`, whose reflection
+takes three rounds (below), in about 115 ms, against 10's 100 ms. *Pay*:
+per-item queries with stable node identities as keys (the tree already
+provides them).
 
 **Intrinsics get type arguments by a rule.** Generic Sisu functions get
 every type argument at run time; an intrinsic gets them only when
@@ -310,15 +317,65 @@ the tests that touch only fakes of the world run in parallel too.
 the host contract (`record.rs`), so they see the interpreter's host
 calls, not Sisu's capability methods; the data a program writes is logged
 by its FNV-1a hash, `hash-key` is always 0 (hashing is not keyed per
-process in stage 0), and `swap` is reserved for hot replacement. *Pay*:
-the interception point of D-075 (`Wrap` around each root capability)
-records, so the log is of Sisu calls; the REPL's epochs write `swap`.
+process in stage 0), and hot replacement logs each save it saw (`edit`)
+rather than the swap it made, so a replay compiles the saves again.
+*Pay*: the interception point of D-075 (`Wrap` around each root
+capability) records, so the log is of Sisu calls; the epochs a run
+published are logged as `swap` records, as 10 says, so a replay needs no
+compiler.
 
-**Sized integers and bytes are host values.** A `u64` is a value kind of
-its own and the other sized integers are `int` values kept in range by
-typed intrinsics (`sisu-interp/src/sized.rs`); `bytes` is a shared
-immutable host buffer. *Pay*: none for the interpreter; the backend gives
-each its width.
+**Sized integers and bytes are host values.** A `u64`, `u128` and
+`i128` are value kinds of their own and the other sized integers are
+`int` values kept in range by typed intrinsics
+(`sisu-interp/src/sized.rs`), which compute in `i128` up to 64 bits and
+in the type's own host integer for the 128-bit ones; a 128-bit literal
+beyond `int` travels in SIR as decimal text (`i128.from_text`), since
+SIR's integer constant is 64 bits. `bytes` is a shared immutable host
+buffer. *Pay*: none for the interpreter; the backend gives each its
+width, and SIR may grow a 128-bit constant.
+
+**`Array` is a list.** An `Array[T, N]` is a host list of `N` values
+(`Array.filled` copies its value `N - 1` times), checked against its
+length on every index, so it has no inline layout and costs an
+allocation. *Pay*: the backend lays it out inline, `N` values wide, and
+can drop the check where `N` and the index are known.
+
+**A generic `comptime assert` is folded, not evaluated.** A `comptime
+assert` over `const` parameters is checked at each call that gives them
+constants by folding its condition (`sisu-typeck/src/generic_asserts.rs`):
+integer and boolean arithmetic, comparisons and interpolation. One that
+calls a function, or a call whose constants come from the caller's own
+`const` parameters, is checked nowhere, and the run never sees it either.
+*Pay*: evaluate it per instantiation with the comptime evaluator (with
+monomorphisation, the backend's).
+
+**The ownership checker trusts std per program.** A program's run takes
+std's function bodies as checked (`Options.trust_std`): their drops are
+elaborated but their loans are not analysed again for every program;
+`sisu test --std` and `sisu-driver/tests/std_ownership.rs` (every std
+body lowered) check them. *Pay*: none while std is checked whenever it
+changes; a later stage must keep that check in CI.
+
+**Hot replacement compares whole programs and keeps every epoch.** Each
+save is compiled again from the top, and the interpreter compares every
+function, type and impl of the new SIR with all the run has
+(`sisu-interp/src/live.rs`); the programs of every epoch live as long as
+the process (old frames point into them), so a long session's memory
+grows with its saves. A restart drops the old run's values without their
+`Drop`s, and there is no migration of a value whose layout changed: the
+program starts again. *Pay*: per-item queries decide what changed; a
+backend's indirection table frees an epoch's code when no frame of it is
+left; a layout change could migrate values by a `live` hook (D-068 leaves
+it open).
+
+**The REPL replays its session.** Each input runs every earlier input
+again against the log of the run before it (`record::Resume`), so a
+session of n inputs does O(n²) work, and an input whose capability
+results the world no longer gives diverges (`D0091`). `:why` follows the
+session's own bindings and their inputs' logs, not the data flow inside
+the functions they call (10's `sisu why`, a dynamic slice). *Pay*: the
+comptime interpreter of 10 keeps the session's values, or snapshots of
+them; the monitor's trace gives the dynamic slice.
 
 **Property testing is small.** The shrinker deletes runs of choices and
 lowers each by binary search, at most 1000 attempts; there is no
@@ -343,13 +400,8 @@ in the host's display text (`format.rs`) because error sets display
 structurally. *Pay*: a `Display` impl in the prelude, when error sets can
 have impls that the fast path respects.
 
-## Not yet done from Phases 0, 2, 3, 4 and 6
+## Not yet done from Phases 0, 2, 3, 4, 6 and 8
 
-- **Modules and packages.** Phase 2 asks for file and directory modules,
-  `pub`/`pub(package)`, `sisu.toml` with path dependencies and `sisu run`
-  on a package. Stage 0 runs one file and imports only std modules
-  (`import cli`, `import std.math`); `pub` parses and has no effect yet,
-  since nothing imports user code.
 - **The wrong-program corpus.** The suite has about thirty cases with
   expected codes under `syntax/`, `names/` and `types/`; Phase 2 asks for
   forty files, and for the checker to return a typed tree for every
@@ -370,11 +422,12 @@ have impls that the fast path respects.
   by tests, as does the `Shared` section (`shared_demo` and
   `counter_demo`, `ownership/proposal_shared`).
   `comptime.sisu`: the user-defined derive (`Describe` and `Point`) runs
-  as `comptime/proposal_derive`, and its JSON encoder over reflection,
-  the derive and the conditional compilation with its test run as
-  `reflect/proposal_comptime`, each section kept identical by a test; the
-  CRC table and the ring buffer need `Array`, `u32` arithmetic and const
-  generics, the checked SQL needs the `sql` package, and `@cfg` is not
+  as `comptime/proposal_derive`, its JSON encoder over reflection, the
+  derive and the conditional compilation with its test run as
+  `reflect/proposal_comptime`, and the CRC table and the ring buffer
+  (`Array`, `u32` arithmetic, const generics and a generic `comptime
+  assert`) as `comptime/proposal_arrays`, each section kept identical by
+  a test; the checked SQL needs the `sql` package, and `@cfg` is not
   there. `capabilities.sisu` (its tests), `concurrency.sisu`,
   `contracts.sisu` (`contracts/proposal_contracts`) and `testing.sisu`
   (`testing/proposal_testing`, whose last test reads `HOME` from the
@@ -403,18 +456,23 @@ monitor"):
 
 From Phase 4 (18, "Phase 4: traits, generics, std in Sisu"):
 
-- **`Array` and const generics, `f32` and the 128-bit integers** are
-  `E0900`; the sized integers, `bytes` and `Slice` exist.
+- **`f32`** is `E0900`; every sized integer type, `bytes`, `Slice`,
+  `Array` and const generics exist. A `const` parameter is an `int`
+  (another type is `E0900`), and its argument an integer literal or a
+  `const` parameter: an expression, as 03's `Array[T, W * H]`, does not
+  parse there yet.
 - **`@derive(Default)`**; the auto traits `Send`, `Sync` and `Escapable`
   are inferred, and `Copy` is computed from fields.
 - **`std` as modules.** The core traits and their impls, the iterator
   adapters, the collection methods that take closures, formatting and
-  `parse_int` are written in Sisu, but in the prelude, not as `std.core`,
-  `std.collections`, `std.string` and `std.fmt` modules; the host-backed
-  collections and text methods are intrinsics with their contracts there.
-  Its doctests do not run through the conformance runner.
-- **The re-check target** of 300 ms for one edited body is not measured
-  (the query layer is per file).
+  `parse_int` and the text methods are written in Sisu, but in the
+  prelude, not as `std.core`, `std.collections`, `std.string` and
+  `std.fmt` modules (std.collections and std.num re-export the
+  prelude's); the host-backed collections are intrinsics with their
+  contracts there.
+- **The re-check target** of 300 ms for one edited body: the language
+  server re-checks a whole std module in 50 to 115 ms (above), but the
+  query layer is per program, not per body.
 - **Reflection beyond templates** (Phase 8 in 18): `reflect`, `comptime
   for` and `x.[f]` in methods and non-generic functions, reflection over
   a trait's methods, and `comptime def` in a trait other than its derive
@@ -440,3 +498,23 @@ Sisu"):
   receives the real one, or the simulated one under `--sim`), and the
   test cache keyed by the capabilities a test touched.
 
+From Phase 8's tools (10, "Formatter", "Language server", "Debugging
+and profiling", "REPL and scripts"):
+
+- **The language server** has no completion, rename, references, fix-its
+  as code actions, inlay hints for inferred types and parameter
+  conventions, or the "explain this borrow" command (the CLI's
+  `explain-borrow` has it); documents are synchronised whole. None of the
+  four features 10 puts after 0.1 (always-on evaluation, worksheets in
+  the editor, structural editing, the stepper) is there: a worksheet runs
+  from the command line (`sisu ws`), not as the editor's virtual text.
+- **The formatter** keeps `Result[T, E]` rather than writing 10's
+  `T ! E`, since whether `E` is an error set is not in the syntax; with
+  name resolution in the formatter's reach (the language server has it)
+  it could be.
+- **Hot replacement** swaps bodies only; resuming from a chosen frame
+  after a fix (10's stated goal of the debug ABI) and DWARF-level
+  debugging are a backend's.
+- **The REPL** runs a session's inputs in the run interpreter, by
+  replay, not in the comptime interpreter as 10 says; it has no
+  completion and no `:type` or `:doc`.

@@ -214,6 +214,9 @@ impl<'a> Cur<'a> {
         if self.eat("$") {
             return Ok(Type::Param(self.uint()?));
         }
+        if self.rest().starts_with(|c: char| c.is_ascii_digit() || c == '-') {
+            return Ok(Type::Const(i128::from(self.int()?)));
+        }
         if self.eat("dyn ") {
             let n = self.type_name()?;
             let args = self.type_args()?;

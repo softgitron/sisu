@@ -1,0 +1,5 @@
+pub def shared(x: int) -> int:
+    return x
+
+def tidy(x: int) -> int:
+    return x

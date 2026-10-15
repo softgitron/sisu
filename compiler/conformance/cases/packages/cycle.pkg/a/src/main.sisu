@@ -1,0 +1,4 @@
+import b
+
+def main():
+    print(b.one())

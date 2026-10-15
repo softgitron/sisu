@@ -25,7 +25,9 @@ def main():
     print(json.encode(Point(x=1, y=-2)))
     let d = Drawing(
         title="plan".to_string(),
-        shapes=[Circle(center=Point(x=0, y=0), radius=1.5), Polygon(points=[Point(x=1, y=1)]), Empty],
+        shapes=[
+            Circle(center=Point(x=0, y=0), radius=1.5), Polygon(points=[Point(x=1, y=1)]), Empty
+        ],
         note=None,
         visible=True,
     )

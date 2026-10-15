@@ -12,6 +12,7 @@ sisu-diag.workspace = true
 sisu-syntax.workspace = true
 sisu-lexer.workspace = true
 sisu-parser.workspace = true
+sisu-fmt.workspace = true
 sisu-resolve.workspace = true
 sisu-typeck.workspace = true
 sisu-sir.workspace = true

@@ -21,9 +21,11 @@ const PLAIN_BUILTINS: &[&str] = &[
     "u16",
     "u32",
     "u64",
+    "u128",
     "i8",
     "i16",
     "i32",
+    "i128",
     "Fs",
     "Net",
     "Clock",
@@ -172,7 +174,7 @@ impl<'p> Types<'p> {
                 if PLAIN_BUILTINS.contains(&n.as_str()) {
                     return false;
                 }
-                if matches!(n.as_str(), "list" | "dict" | "set" | "Option" | "Result") {
+                if matches!(n.as_str(), "list" | "Array" | "dict" | "set" | "Option" | "Result") {
                     return args.iter().any(|a| self.may_hold_depth(a, depth + 1));
                 }
                 // A generic type holds what its arguments hold.
@@ -279,7 +281,7 @@ impl<'p> Types<'p> {
     pub fn trivial_drop(&self, t: &Type) -> bool {
         match t {
             Type::Int | Type::Float | Type::Bool | Type::Char | Type::Str | Type::Unit | Type::Never => true,
-            Type::Ref(..) | Type::Fn(..) => true,
+            Type::Ref(..) | Type::Fn(..) | Type::Const(_) => true,
             Type::Tuple(es) => es.iter().all(|e| self.trivial_drop(e)),
             Type::Named(n, args) => {
                 matches!(n.as_str(), "Fs" | "Env" | "Clock" | "DateTime")

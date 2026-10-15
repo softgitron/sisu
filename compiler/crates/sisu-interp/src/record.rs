@@ -29,7 +29,10 @@
 //! 64 bits, in hex), `source` the text itself, so a log replays without
 //! the file; `seed` the scheduler's; `hash-key` the per-process key of
 //! hashing (always 0 in stage 0, whose hash is not keyed per process);
-//! `contracts` the level the run checked (07). Then, in order:
+//! `contracts` the level the run checked (07). A program of several
+//! modules (09) adds, for each file besides the root module's, `file NAME
+//! TEXT`, and then `layout TEXT`, its modules and packages as the driver
+//! writes them, so it too replays without its files. Then, in order:
 //!
 //! - `call NAME FIELDS... -> RESULT...`: a call of the host contract and
 //!   its result (`call env_var "HOME" -> some "/root"`, `call read_file
@@ -38,8 +41,13 @@
 //! - `out TEXT` and `err TEXT`: what the program printed.
 //! - `redacted CAPABILITY`: a call whose result was left out (`--redact`):
 //!   a replay that reaches one stops there, as a divergence.
-//! - `swap FUNCTION VERSION`: a function replaced while the program ran
-//!   (hot replacement). Reserved: stage 0 replaces nothing.
+//! - `edit POLL FILE TEXT`: under `sisu run --watch` (whose log has a
+//!   `watch` line in its header), a save of one of the program's files
+//!   that the run saw at its POLL-th poll (1-based; the interpreter polls
+//!   at every task start and `live.boundary()`), with the file's new text.
+//!   A replay applies it at the same poll, so the same epochs are
+//!   published, the same rejected saves reported and the same restarts
+//!   made.
 //! - `exit STATUS`: the last record.
 
 use crate::host::{Host, IoErrorKind, NetFail, Poll};
@@ -95,7 +103,7 @@ fn net_word(k: &NetFail) -> String {
 }
 
 /// The header of a log: what a replay needs besides the records.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Header {
     pub toolchain: String,
     pub file: String,
@@ -104,11 +112,18 @@ pub struct Header {
     pub seed: u64,
     pub hash_key: u64,
     pub contracts: String,
+    /// For a program of several modules (09): the other files' names and
+    /// texts, in the order of its layout.
+    pub files: Vec<(String, String)>,
+    /// And its layout (modules and packages), as the driver writes it.
+    pub layout: Option<String>,
+    /// The run was under `--watch`: its saves are `edit` records.
+    pub watch: bool,
 }
 
 impl Header {
     pub fn write(&self) -> String {
-        format!(
+        let mut out = format!(
             "sisu-log {VERSION}\ntoolchain {}\nprogram {} {:016x}\nsource {}\nseed {}\nhash-key {}\ncontracts {}\n",
             q(&self.toolchain),
             q(&self.file),
@@ -117,7 +132,17 @@ impl Header {
             self.seed,
             self.hash_key,
             self.contracts
-        )
+        );
+        for (name, text) in &self.files {
+            out.push_str(&format!("file {} {}\n", q(name), q(text)));
+        }
+        if let Some(l) = &self.layout {
+            out.push_str(&format!("layout {}\n", q(l)));
+        }
+        if self.watch {
+            out.push_str("watch\n");
+        }
+        out
     }
 }
 
@@ -127,11 +152,13 @@ pub struct Recorder<'h> {
     lines: RefCell<Vec<String>>,
     /// The capabilities whose results are left out of the log.
     redact: Vec<String>,
+    /// The polls for saves so far (`--watch`).
+    polls: u64,
 }
 
 impl<'h> Recorder<'h> {
     pub fn new(inner: &'h mut dyn Host, redact: Vec<String>) -> Recorder<'h> {
-        Recorder { inner, lines: RefCell::new(Vec::new()), redact }
+        Recorder { inner, lines: RefCell::new(Vec::new()), redact, polls: 0 }
     }
 
     /// The records written so far, one per line, and the last one.
@@ -355,6 +382,14 @@ impl Host for Recorder<'_> {
         self.log("stdin", "read_line".into(), r);
         v
     }
+    fn poll_edits(&mut self) -> Vec<(String, String)> {
+        self.polls += 1;
+        let v = self.inner.poll_edits();
+        for (file, text) in &v {
+            self.lines.borrow_mut().push(format!("edit {} {} {}", self.polls, q(file), q(text)));
+        }
+        v
+    }
 }
 
 /// One field of a record.
@@ -441,7 +476,8 @@ enum Record {
     Out(String),
     Err(String),
     Redacted(String),
-    Swap(String),
+    /// A save seen at a poll: the poll's number, the file and its text.
+    Edit(u64, String, String),
     Exit(i32),
 }
 
@@ -483,11 +519,32 @@ impl Log {
             seed: str_at(&sd, 1).parse().map_err(|_| "a bad seed".to_string())?,
             hash_key: str_at(&hk, 1).parse().map_err(|_| "a bad hash key".to_string())?,
             contracts: str_at(&c, 1),
+            files: Vec::new(),
+            layout: None,
+            watch: false,
         };
+        let mut header = header;
         let mut records = Vec::new();
         for (n, l) in lines {
             let f = fields(l).map_err(|e| format!("line {}: {e}", n + 1))?;
             let Some(kind) = f.first() else { continue };
+            // The files and layout of a program of several modules belong
+            // to the header.
+            match kind.text() {
+                "file" if records.is_empty() => {
+                    header.files.push((str_at(&f, 1), str_at(&f, 2)));
+                    continue;
+                }
+                "layout" if records.is_empty() => {
+                    header.layout = Some(str_at(&f, 1));
+                    continue;
+                }
+                "watch" if records.is_empty() => {
+                    header.watch = true;
+                    continue;
+                }
+                _ => {}
+            }
             let rec = match kind.text() {
                 "call" => {
                     let arrow = f.iter().position(|x| *x == Field::Word("->".into()));
@@ -500,7 +557,11 @@ impl Log {
                 "out" => Record::Out(str_at(&f, 1)),
                 "err" => Record::Err(str_at(&f, 1)),
                 "redacted" => Record::Redacted(str_at(&f, 1)),
-                "swap" => Record::Swap(str_at(&f, 1)),
+                "edit" => Record::Edit(
+                    str_at(&f, 1).parse().map_err(|_| format!("line {}: a bad poll number", n + 1))?,
+                    str_at(&f, 2),
+                    str_at(&f, 3),
+                ),
                 "exit" => {
                     Record::Exit(str_at(&f, 1).parse().map_err(|_| format!("line {}: a bad status", n + 1))?)
                 }
@@ -509,6 +570,31 @@ impl Log {
             records.push(rec);
         }
         Ok(Log { header, records })
+    }
+
+    /// How many records the log has after its header.
+    pub fn len(&self) -> usize {
+        self.records.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty()
+    }
+
+    /// The calls of the host contract from record `from` on, each with
+    /// its number (1-based) and as the log writes it (`read_file "a.txt"
+    /// -> ok "..."`).
+    pub fn calls_from(&self, from: usize) -> Vec<(usize, String)> {
+        self.records
+            .iter()
+            .enumerate()
+            .skip(from)
+            .filter_map(|(i, r)| match r {
+                Record::Call { call, result } if result.is_empty() => Some((i + 1, call.clone())),
+                Record::Call { call, result } => Some((i + 1, format!("{call} -> {}", render(result)))),
+                _ => None,
+            })
+            .collect()
     }
 
     /// The status the recorded run exited with.
@@ -539,12 +625,14 @@ pub struct Replayer<'h> {
     records: Vec<Record>,
     pos: Cell<usize>,
     diverged: RefCell<Option<String>>,
+    /// The polls for saves so far (`--watch`).
+    polls: u64,
 }
 
 impl<'h> Replayer<'h> {
     pub fn new(log: &Log, out: &'h mut dyn Host) -> Replayer<'h> {
         let records = log.records.iter().filter(|r| !matches!(r, Record::Exit(_))).cloned().collect();
-        Replayer { out, records, pos: Cell::new(0), diverged: RefCell::new(None) }
+        Replayer { out, records, pos: Cell::new(0), diverged: RefCell::new(None), polls: 0 }
     }
 
     /// The first divergence, or the records the run never reached.
@@ -627,7 +715,7 @@ fn show(r: &Record) -> String {
         Record::Out(t) => format!("out {}", q(t)),
         Record::Err(t) => format!("err {}", q(t)),
         Record::Redacted(c) => format!("a call to `{c}` whose result was redacted"),
-        Record::Swap(f) => format!("a swap of `{f}`"),
+        Record::Edit(poll, f, _) => format!("a save of `{f}` seen at poll {poll}"),
         Record::Exit(s) => format!("exit {s}"),
     }
 }
@@ -811,6 +899,186 @@ impl Host for Replayer<'_> {
         let f = self.take("read_line".into())?;
         (word(&f, 0) == "some").then(|| word(&f, 1).to_string())
     }
+    /// The saves the recorded run saw at this poll: the `edit` records
+    /// numbered with it.
+    fn poll_edits(&mut self) -> Vec<(String, String)> {
+        self.polls += 1;
+        let mut out = Vec::new();
+        if self.diverged.borrow().is_some() {
+            return out;
+        }
+        let mut pos = self.pos.get();
+        while let Some(Record::Edit(poll, file, text)) = self.records.get(pos) {
+            if *poll != self.polls {
+                break;
+            }
+            out.push((file.clone(), text.clone()));
+            pos += 1;
+        }
+        self.pos.set(pos);
+        out
+    }
+}
+
+/// Prints nothing and has nothing: where a [`Resume`]'s replay prints.
+struct Sink;
+
+impl Host for Sink {
+    fn stdout(&mut self, _: &str) {}
+    fn stderr(&mut self, _: &str) {}
+    fn args(&self) -> Vec<String> {
+        Vec::new()
+    }
+    fn env_var(&self, _: &str) -> Option<String> {
+        None
+    }
+    fn now(&self) -> i64 {
+        0
+    }
+    fn read_file(&mut self, _: &str) -> Result<String, IoErrorKind> {
+        Err(GONE)
+    }
+    fn write_file(&mut self, _: &str, _: &str) -> Result<(), IoErrorKind> {
+        Err(GONE)
+    }
+    fn exists(&self, _: &str) -> bool {
+        false
+    }
+}
+
+/// A REPL's evaluation (10, "REPL and scripts"; REPL undo): the session's
+/// earlier inputs run again with the log of the evaluation before them
+/// standing in for the world, printing nothing again and touching
+/// nothing again, and what follows that log runs against `live`. Wrapped
+/// in a [`Recorder`], the evaluation's own log is the next one's.
+pub struct Resume<'h> {
+    replay: Replayer<'static>,
+    live: &'h mut dyn Host,
+    /// Whether the program may read the live standard input (a REPL's is
+    /// the session's own).
+    stdin: bool,
+}
+
+impl<'h> Resume<'h> {
+    pub fn new(earlier: Option<&Log>, live: &'h mut dyn Host) -> Resume<'h> {
+        // The sink is leaked: it holds nothing, and a REPL makes one per
+        // evaluation.
+        let sink: &'static mut Sink = Box::leak(Box::new(Sink));
+        let empty = Log { header: Header::default(), records: Vec::new() };
+        Resume { replay: Replayer::new(earlier.unwrap_or(&empty), sink), live, stdin: true }
+    }
+
+    /// The program reads no live standard input: it ends at once.
+    pub fn without_stdin(mut self) -> Resume<'h> {
+        self.stdin = false;
+        self
+    }
+
+    /// Whether a host call is answered from the earlier log: while it has
+    /// records, and has not diverged (an earlier input that no longer
+    /// does what it did, which stage 0 does not expect).
+    fn replaying(&self) -> bool {
+        self.replay.diverged.borrow().is_none() && self.replay.pos.get() < self.replay.records.len()
+    }
+
+    /// The divergence from the earlier log, if the replay of the session
+    /// met one.
+    pub fn divergence(&self) -> Option<String> {
+        self.replay.diverged.borrow().clone()
+    }
+}
+
+macro_rules! resume_to {
+    ($self:ident . $m:ident ( $($a:expr),* )) => {
+        if $self.replaying() { $self.replay.$m($($a),*) } else { $self.live.$m($($a),*) }
+    };
+}
+
+impl Host for Resume<'_> {
+    fn stdout(&mut self, text: &str) {
+        resume_to!(self.stdout(text))
+    }
+    fn stderr(&mut self, text: &str) {
+        resume_to!(self.stderr(text))
+    }
+    fn args(&self) -> Vec<String> {
+        resume_to!(self.args())
+    }
+    fn env_var(&self, name: &str) -> Option<String> {
+        resume_to!(self.env_var(name))
+    }
+    fn now(&self) -> i64 {
+        resume_to!(self.now())
+    }
+    fn now_nanos(&self) -> i128 {
+        resume_to!(self.now_nanos())
+    }
+    fn virtual_time(&self) -> bool {
+        resume_to!(self.virtual_time())
+    }
+    fn sleep_nanos(&mut self, nanos: u64) {
+        resume_to!(self.sleep_nanos(nanos))
+    }
+    fn read_file(&mut self, path: &str) -> Result<String, IoErrorKind> {
+        resume_to!(self.read_file(path))
+    }
+    fn write_file(&mut self, path: &str, text: &str) -> Result<(), IoErrorKind> {
+        resume_to!(self.write_file(path, text))
+    }
+    fn read_bytes(&mut self, path: &str) -> Result<Vec<u8>, IoErrorKind> {
+        resume_to!(self.read_bytes(path))
+    }
+    fn write_bytes(&mut self, path: &str, data: &[u8]) -> Result<(), IoErrorKind> {
+        resume_to!(self.write_bytes(path, data))
+    }
+    fn exists(&self, path: &str) -> bool {
+        resume_to!(self.exists(path))
+    }
+    fn metadata(&self, path: &str) -> Result<(i64, i64, bool), IoErrorKind> {
+        resume_to!(self.metadata(path))
+    }
+    fn remove_file(&mut self, path: &str) -> Result<(), IoErrorKind> {
+        resume_to!(self.remove_file(path))
+    }
+    fn list_dir(&self, path: &str) -> Result<Vec<String>, IoErrorKind> {
+        resume_to!(self.list_dir(path))
+    }
+    fn create_dir(&mut self, path: &str) -> Result<(), IoErrorKind> {
+        resume_to!(self.create_dir(path))
+    }
+    fn sync_path(&mut self, path: &str) -> Result<(), IoErrorKind> {
+        resume_to!(self.sync_path(path))
+    }
+    fn random_bits(&mut self) -> u64 {
+        resume_to!(self.random_bits())
+    }
+    fn run_process(&mut self, program: &str, args: &[String]) -> Result<(i64, String, String), IoErrorKind> {
+        resume_to!(self.run_process(program, args))
+    }
+    fn tcp_connect(&mut self, host: &str, port: u16) -> Result<u64, NetFail> {
+        resume_to!(self.tcp_connect(host, port))
+    }
+    fn tcp_listen(&mut self, host: &str, port: u16) -> Result<(u64, u16), NetFail> {
+        resume_to!(self.tcp_listen(host, port))
+    }
+    fn tcp_accept(&mut self, listener: u64) -> Result<Poll<(u64, String)>, NetFail> {
+        resume_to!(self.tcp_accept(listener))
+    }
+    fn tcp_read(&mut self, conn: u64, max: usize) -> Result<Poll<Vec<u8>>, NetFail> {
+        resume_to!(self.tcp_read(conn, max))
+    }
+    fn tcp_write(&mut self, conn: u64, data: &[u8]) -> Result<Poll<usize>, NetFail> {
+        resume_to!(self.tcp_write(conn, data))
+    }
+    fn tcp_close(&mut self, handle: u64) {
+        resume_to!(self.tcp_close(handle))
+    }
+    fn read_line(&mut self) -> Option<String> {
+        if !self.replaying() && !self.stdin {
+            return None;
+        }
+        resume_to!(self.read_line())
+    }
 }
 
 #[cfg(test)]
@@ -820,6 +1088,9 @@ mod tests {
 
     fn header() -> Header {
         Header {
+            files: Vec::new(),
+            layout: None,
+            watch: false,
             toolchain: "0.0.1".into(),
             file: "a.sisu".into(),
             hash: 0xabc,

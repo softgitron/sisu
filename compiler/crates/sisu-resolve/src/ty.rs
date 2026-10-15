@@ -28,6 +28,9 @@ pub enum Ty {
     /// An associated type of a type that is not known here: `C.Item`
     /// where `C: Container`, or `Self.Item` in a trait.
     Assoc(Box<AssocTy>),
+    /// A constant argument of a `const` generic parameter (03, "Const
+    /// generics"): the `256` of `Array[u32, 256]`.
+    Const(i128),
     /// An inference variable of the body being checked.
     Var(u32),
     /// A type that could not be determined; it unifies with everything, so
@@ -196,6 +199,7 @@ impl Program {
             Ty::Never => "Never".into(),
             Ty::Error => "{unknown}".into(),
             Ty::Var(_) => "_".into(),
+            Ty::Const(n) => n.to_string(),
             Ty::Param(i) => names.get(*i as usize).cloned().unwrap_or_else(|| format!("T{i}")),
             Ty::Dyn(tr) => format!("dyn {}", self.display_trait_in(tr, names)),
             Ty::Assoc(a) => {
@@ -342,7 +346,15 @@ impl Program {
             return false;
         }
         match ty {
-            Ty::Int | Ty::Float | Ty::Bool | Ty::Char | Ty::Str | Ty::Unit | Ty::Never | Ty::Error => true,
+            Ty::Int
+            | Ty::Float
+            | Ty::Bool
+            | Ty::Char
+            | Ty::Str
+            | Ty::Unit
+            | Ty::Never
+            | Ty::Error
+            | Ty::Const(_) => true,
             Ty::Ref(_, m) => !*m,
             Ty::Fn(_) => true,
             Ty::Tuple(e, _) => e.iter().all(|t| self.is_copy_depth(t, depth + 1)),
@@ -390,9 +402,11 @@ impl Program {
                             | "u16"
                             | "u32"
                             | "u64"
+                            | "u128"
                             | "i8"
                             | "i16"
                             | "i32"
+                            | "i128"
                             | "Scope"
                             | "Cancellation"
                             | "Timer"

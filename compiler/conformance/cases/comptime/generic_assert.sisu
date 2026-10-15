@@ -1,0 +1,16 @@
+# A `comptime assert` on a const generic parameter (08; 03, "Const
+# generics") is decided by each call that gives the parameter a constant:
+# `Pool[2]` passes, `Pool[3]` is a compile-time error at its call, with
+# the assertion's message as the call's arguments make it.
+
+struct Pool[const N: int]:
+    used: int
+
+    def new() -> Self:
+        comptime assert N > 0 and N & (N - 1) == 0, "a pool of {N} is not a power of two"
+        return Self(used=0)
+
+def main():
+    let a = Pool[2].new()
+    let b = Pool[3].new()
+    print(a.used + b.used)

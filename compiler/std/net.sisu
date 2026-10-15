@@ -20,6 +20,13 @@ struct Url:
 
 impl Url:
     ## The URL `text` spells; `InvalidUrl` when it is not of the form.
+    ##
+    ## ```
+    ## let u = Url.parse("https://example.com/v1/data").expect("a url")
+    ## assert u.host == "example.com" and u.port == 443
+    ## assert "{u}" == "https://example.com/v1/data"
+    ## assert Url.parse("example.com").is_err()
+    ## ```
     pure def parse(text: str) -> Url ! UrlError:
         let scheme, rest = text.split_once("://") else:
             return Err(InvalidUrl(text=text.to_string()))
@@ -41,7 +48,15 @@ impl Url:
         if host.is_empty() or port < 0 or port > 65535:
             return Err(InvalidUrl(text=text.to_string()))
         let path = if path.is_empty(): "/" else: path
-        return Ok(Url(scheme=scheme.to_lowercase(), host=host.to_lowercase(), port=port, path=path.to_string(), query=query.to_string()))
+        return Ok(
+            Url(
+                scheme=scheme.to_lowercase(),
+                host=host.to_lowercase(),
+                port=port,
+                path=path.to_string(),
+                query=query.to_string(),
+            )
+        )
 
     ## The path and the query, as a request names them (`/v1/data?x=1`).
     pure def target(self) -> String:

@@ -1,0 +1,4 @@
+test "geo.point/a 3-4-5 triangle" ... ok
+test "geo.point/the private helper is visible to its own tests" ... ok
+test "places/places have names" ... ok
+3 passed, 0 failed, 0 blocked

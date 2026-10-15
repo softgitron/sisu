@@ -99,6 +99,9 @@ pub struct FnDef {
     /// The body has a syntax error, so a binding it meant to make may be
     /// missing.
     pub body_broken: bool,
+    /// `pub` or `pub(package)` before `def` (09, "Modules"); a method's
+    /// own, since a struct's or impl's methods are items too.
+    pub vis: Vis,
 }
 
 #[derive(Clone, Debug)]

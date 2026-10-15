@@ -128,6 +128,8 @@ pub enum Key {
     Unit,
     Int(i64),
     U64(u64),
+    I128(i128),
+    U128(u128),
     Bool(bool),
     Char(char),
     Text(Rc<str>),
@@ -273,8 +275,11 @@ pub enum Value {
     Moved,
     Unit,
     Int(i64),
-    /// A `u64`; the other sized integers are `Int`s in their range.
+    /// A `u64`; the other sized integers are `Int`s in their range, but
+    /// for the 128-bit ones.
     U64(u64),
+    I128(i128),
+    U128(u128),
     Float(f64),
     Bool(bool),
     Char(char),

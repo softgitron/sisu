@@ -151,6 +151,7 @@ impl Checker<'_> {
         let x = self.infer_expr(e, Some(t));
         let lit = match &x.kind {
             ExprKind::Int(n) => Lit::Int(*n),
+            ExprKind::WideInt(n) => Lit::WideInt(*n),
             ExprKind::Float(f) => Lit::Float(*f),
             ExprKind::Char(c) => Lit::Char(*c),
             ExprKind::Str(s) => Lit::Str(s.clone()),

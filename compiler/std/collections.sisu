@@ -1,0 +1,308 @@
+##! `std.collections` (11): the collections beyond the prelude's `list`,
+##! `dict`, `set` and `Arena`, written in Sisu over `list`. The prelude's
+##! collections are reached from here too (`from std.collections import
+##! Arena`).
+##!
+##! Each type's doc examples are tests: `sisu test --std` runs them.
+
+## A double-ended queue: values go in and come out at either end.
+##
+## Two lists hold it, the front one reversed, so each end is a list's end;
+## taking from an empty end moves the other list across, so a value is
+## moved a constant number of times on average.
+##
+## ```
+## var q: Deque[int] = Deque.new()
+## q.push_back(2)
+## q.push_back(3)
+## q.push_front(1)
+## assert len(q) == 3
+## assert q.pop_front() == Some(1)
+## assert q.pop_back() == Some(3)
+## assert q.pop_front() == Some(2)
+## assert q.pop_front() == None
+## ```
+pub struct Deque[T]:
+    front: list[T]
+    back: list[T]
+
+    ## An empty queue.
+    pub pure def new() -> Deque[T]:
+        return Deque(front=[], back=[])
+
+    ## Adds `x` after the last value.
+    pub pure def push_back(mut self, own x: T):
+        self.back.push(x)
+
+    ## Adds `x` before the first value.
+    pub pure def push_front(mut self, own x: T):
+        self.front.push(x)
+
+    ## Takes the first value, or `None` when the queue is empty.
+    pub pure def pop_front(mut self) -> T?:
+        if self.front.is_empty():
+            while not self.back.is_empty():
+                self.front.push(self.back.pop().expect("a value"))
+        return self.front.pop()
+
+    ## Takes the last value, or `None` when the queue is empty.
+    ##
+    ## ```
+    ## var q: Deque[str] = Deque.new()
+    ## q.push_front("b")
+    ## q.push_front("a")
+    ## assert q.pop_back() == Some("b")
+    ## ```
+    pub pure def pop_back(mut self) -> T?:
+        if self.back.is_empty():
+            while not self.front.is_empty():
+                self.back.push(self.front.pop().expect("a value"))
+        return self.back.pop()
+
+    ## The first value, or `None`.
+    pub pure def first(self) -> ref T?:
+        if self.front.is_empty():
+            return self.back.first()
+        return self.front.last()
+
+    ## The last value, or `None`.
+    pub pure def last(self) -> ref T?:
+        if self.back.is_empty():
+            return self.front.first()
+        return self.back.last()
+
+    ## The value at position `i` from the front, or `None`.
+    ##
+    ## ```
+    ## var q: Deque[int] = Deque.new()
+    ## for x in [10, 20, 30]:
+    ##     q.push_back(x)
+    ## q.push_front(0)
+    ## assert q.get(0).copied() == Some(0)
+    ## assert q.get(3).copied() == Some(30)
+    ## assert q.get(4).copied() == None
+    ## ```
+    pub pure def get(self, i: int) -> ref T?:
+        let n = len(self.front)
+        if i < 0:
+            return None
+        if i < n:
+            return self.front.get(n - 1 - i)
+        return self.back.get(i - n)
+
+    pub pure def is_empty(self) -> bool:
+        return self.front.is_empty() and self.back.is_empty()
+
+impl[T] Len for Deque[T]:
+    def len(self) -> int:
+        return len(self.front) + len(self.back)
+
+## A priority queue: `pop` takes the smallest value first (a binary heap
+## over a list, so `push` and `pop` take time logarithmic in its size).
+##
+## ```
+## var h: Heap[int] = Heap.new()
+## for x in [5, 1, 4, 2, 3]:
+##     h.push(x)
+## var out: list[int] = []
+## while let Some(x) = h.pop():
+##     out.push(x)
+## assert out == [1, 2, 3, 4, 5]
+## ```
+pub struct Heap[T: Ord]:
+    items: list[T]
+
+    pub pure def new() -> Heap[T]:
+        return Heap(items=[])
+
+    ## Adds `x`.
+    pub pure def push(mut self, own x: T):
+        self.items.push(x)
+        var i = len(self.items) - 1
+        while i > 0:
+            let parent = (i - 1) // 2
+            if self.items[i].cmp(self.items[parent]) != Ordering.Less:
+                break
+            self.items.swap(i, parent)
+            i = parent
+
+    ## Takes the smallest value, or `None` when the heap is empty.
+    pub pure def pop(mut self) -> T?:
+        let n = len(self.items)
+        if n == 0:
+            return None
+        self.items.swap(0, n - 1)
+        let top = self.items.pop()
+        var i = 0
+        let size = n - 1
+        while True:
+            let l = 2 * i + 1
+            let r = l + 1
+            var least = i
+            if l < size and self.items[l].cmp(self.items[least]) == Ordering.Less:
+                least = l
+            if r < size and self.items[r].cmp(self.items[least]) == Ordering.Less:
+                least = r
+            if least == i:
+                break
+            self.items.swap(i, least)
+            i = least
+        return top
+
+    ## The smallest value, or `None`.
+    ##
+    ## ```
+    ## var h: Heap[str] = Heap.new()
+    ## h.push("pear")
+    ## h.push("apple")
+    ## assert h.peek().copied() == Some("apple")
+    ## ```
+    pub pure def peek(self) -> ref T?:
+        return self.items.first()
+
+    pub pure def is_empty(self) -> bool:
+        return self.items.is_empty()
+
+impl[T: Ord] Len for Heap[T]:
+    def len(self) -> int:
+        return len(self.items)
+
+## A map whose keys are kept in order (11 names a B-tree; stage 0's is a
+## sorted list, searched by halves): `keys` and `items` go from the
+## smallest key up, whatever order they were inserted in.
+##
+## ```
+## var d: SortedDict[str, int] = SortedDict.new()
+## _ = d.insert("pear", 3)
+## _ = d.insert("apple", 5)
+## _ = d.insert("fig", 1)
+## assert d.keys() == ["apple", "fig", "pear"]
+## assert d.get("fig").copied() == Some(1)
+## assert d.insert("fig", 2) == Some(1)
+## assert d.remove("apple") == Some(5)
+## assert len(d) == 2
+## ```
+pub struct SortedDict[K: Ord, V]:
+    ks: list[K]
+    vs: list[V]
+
+    pub pure def new() -> SortedDict[K, V]:
+        return SortedDict(ks=[], vs=[])
+
+    ## Where `key` is, or where it would go: the index of the first key not
+    ## smaller than it.
+    pure def position(self, key: K) -> int:
+        var lo = 0
+        var hi = len(self.ks)
+        while lo < hi:
+            let mid = (lo + hi) // 2
+            if self.ks[mid].cmp(key) == Ordering.Less:
+                lo = mid + 1
+            else:
+                hi = mid
+        return lo
+
+    ## Whether the key at `i` is `key`.
+    pure def holds(self, i: int, key: K) -> bool:
+        return i < len(self.ks) and self.ks[i].cmp(key) == Ordering.Equal
+
+    ## Inserts or replaces; gives the value `key` had.
+    pub pure def insert(mut self, own key: K, own value: V) -> V?:
+        let i = self.position(key)
+        if self.holds(i, key):
+            self.vs.insert(i, value)
+            return Some(self.vs.remove(i + 1))
+        self.ks.insert(i, key)
+        self.vs.insert(i, value)
+        return None
+
+    ## The value of `key`, or `None`.
+    pub pure def get(self, key: K) -> ref V?:
+        let i = self.position(key)
+        if self.holds(i, key):
+            return self.vs.get(i)
+        return None
+
+    ## Removes `key`; gives its value.
+    pub pure def remove(mut self, key: K) -> V?:
+        let i = self.position(key)
+        if not self.holds(i, key):
+            return None
+        let _ = self.ks.remove(i)
+        return Some(self.vs.remove(i))
+
+    pub pure def contains(self, key: K) -> bool:
+        return self.holds(self.position(key), key)
+
+    ## The keys, smallest first.
+    pub pure def keys(self) -> list[K] where K: Copy:
+        return self.ks.copy()
+
+    ## The smallest key and its value, or `None`.
+    ##
+    ## ```
+    ## var d: SortedDict[int, str] = SortedDict.new()
+    ## _ = d.insert(7, "seven")
+    ## _ = d.insert(2, "two")
+    ## assert d.first_key() == Some(2)
+    ## ```
+    pub pure def first_key(self) -> K? where K: Copy:
+        return self.ks.first().copied()
+
+    pub pure def is_empty(self) -> bool:
+        return self.ks.is_empty()
+
+impl[K: Ord, V] Len for SortedDict[K, V]:
+    def len(self) -> int:
+        return len(self.ks)
+
+## A set of small non-negative integers, one bit each, in 64-bit words.
+##
+## ```
+## var b = BitSet.new()
+## b.insert(3)
+## b.insert(64)
+## b.insert(3)
+## assert b.contains(64) and not b.contains(4)
+## assert len(b) == 2
+## b.remove(3)
+## assert b.members() == [64]
+## ```
+pub struct BitSet:
+    words: list[u64]
+
+    pub pure def new() -> BitSet:
+        return BitSet(words=[])
+
+    ## Adds `n`; panics for a negative one.
+    pub pure def insert(mut self, n: int):
+        assert n >= 0, "a BitSet holds non-negative integers, not {n}"
+        let w = n // 64
+        while len(self.words) <= w:
+            self.words.push(0u64)
+        self.words[w] = self.words[w] | (1u64 << (n % 64).to_u64().expect("in range"))
+
+    pub pure def remove(mut self, n: int):
+        let w = n // 64
+        if n < 0 or w >= len(self.words):
+            return
+        self.words[w] = self.words[w] & ~(1u64 << (n % 64).to_u64().expect("in range"))
+
+    pub pure def contains(self, n: int) -> bool:
+        let w = n // 64
+        if n < 0 or w >= len(self.words):
+            return False
+        return self.words[w] & (1u64 << (n % 64).to_u64().expect("in range")) != 0u64
+
+    ## The members, smallest first.
+    pub pure def members(self) -> list[int]:
+        var out: list[int] = []
+        for (i, word) in enumerate(self.words):
+            for bit in range(64):
+                if word & (1u64 << bit.to_u64().expect("in range")) != 0u64:
+                    out.push(i * 64 + bit)
+        return out
+
+impl Len for BitSet:
+    def len(self) -> int:
+        return len(self.members())

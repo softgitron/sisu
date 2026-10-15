@@ -11,6 +11,7 @@ pub mod auto;
 pub mod borrows;
 mod collect;
 mod derive;
+pub mod doctests;
 mod instances;
 pub mod program;
 mod shims;
@@ -24,7 +25,7 @@ mod types;
 
 pub use auto::{Auto, Obstacle};
 pub use borrows::{ResultBorrows, ResultShape, SigParam};
-pub use collect::{Resolved, resolve, resolve_with};
+pub use collect::{Resolved, SourceModule, SourcePackage, Sources, resolve, resolve_program, resolve_with};
 pub use program::*;
 pub use solve::{Answer, ImplSource};
 pub use ty::{AssocTy, FnTy, Ty, TyKey, is_subset, union, unsized_part};

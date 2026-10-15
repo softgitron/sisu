@@ -1,0 +1,5 @@
+from calc import mean
+
+test "a failing test in a module replays from its token":
+    check(arbitrary[list[int]]) do xs:
+        return len(xs) < 3 or mean(xs) * len(xs) == sum(xs)

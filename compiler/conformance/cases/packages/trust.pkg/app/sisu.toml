@@ -1,0 +1,13 @@
+# `[trust]` is where capabilities become real (09): a dependency it does
+# not list compiles without `unsafe` and `extern`, so it can only do what
+# the capabilities it is handed allow.
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+rawio = { path = "../rawio" }
+fastmath = { path = "../fastmath" }
+
+[trust]
+unsafe = ["fastmath"]

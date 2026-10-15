@@ -57,6 +57,8 @@ impl Interp<'_, '_> {
         Ok(match (a, b) {
             (Value::Int(x), Value::Int(y)) => x == y,
             (Value::U64(x), Value::U64(y)) => x == y,
+            (Value::I128(x), Value::I128(y)) => x == y,
+            (Value::U128(x), Value::U128(y)) => x == y,
             (Value::Bytes(x), Value::Bytes(y)) => x == y,
             (Value::Float(x), Value::Float(y)) => x == y,
             (Value::Bool(x), Value::Bool(y)) => x == y,
@@ -113,6 +115,8 @@ impl Interp<'_, '_> {
         Ok(match (a, b) {
             (Value::Int(x), Value::Int(y)) => Some(x.cmp(y)),
             (Value::U64(x), Value::U64(y)) => Some(x.cmp(y)),
+            (Value::I128(x), Value::I128(y)) => Some(x.cmp(y)),
+            (Value::U128(x), Value::U128(y)) => Some(x.cmp(y)),
             (Value::Bytes(x), Value::Bytes(y)) => Some(x.cmp(y)),
             (Value::Float(x), Value::Float(y)) => x.partial_cmp(y),
             (Value::Bool(x), Value::Bool(y)) => Some(x.cmp(y)),
@@ -156,6 +160,8 @@ impl Interp<'_, '_> {
             Value::Unit => Key::Unit,
             Value::Int(i) => Key::Int(*i),
             Value::U64(i) => Key::U64(*i),
+            Value::I128(i) => Key::I128(*i),
+            Value::U128(i) => Key::U128(*i),
             Value::Bytes(b) => Key::Bytes(b.clone()),
             Value::Bool(b) => Key::Bool(*b),
             Value::Char(c) => Key::Char(*c),

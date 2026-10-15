@@ -78,5 +78,19 @@ jobs:
         run: cargo clippy --all-targets
       - name: Build
         run: cargo build
+      - name: sisu fmt --check (std and the canonical conformance cases)
+        run: |
+          ./target/debug/sisu fmt --check std
+          # Every case file that parses, unless NAME.unformatted says why
+          # the case is not in canonical form (conformance/README.md).
+          status=0
+          while read -r f; do
+            base="${f%%.pkg/*}"
+            [ "$base" = "$f" ] && base="${f%.sisu}"
+            [ -e "$base.unformatted" ] && continue
+            ./target/debug/sisu parse --shape "$f" > /dev/null 2>&1 || continue
+            ./target/debug/sisu fmt --check "$f" || status=1
+          done < <(find conformance/cases -name '*.sisu' -not -path '*.files/*' | sort)
+          exit $status
       - name: Tests (unit tests and the conformance suite)
         run: cargo test

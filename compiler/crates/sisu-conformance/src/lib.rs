@@ -13,13 +13,18 @@ pub mod diff;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// One `.sisu` file and the expectations beside it.
+/// One `.sisu` file, or one package (a `NAME.pkg` directory), and the
+/// expectations beside it.
 #[derive(Clone, Debug)]
 pub struct Case {
-    /// The path relative to the suite root, without `.sisu`.
+    /// The path relative to the suite root, without `.sisu` or `.pkg`.
     pub name: String,
     pub dir: PathBuf,
     pub stem: String,
+    /// A package case: `NAME.pkg/` holds a package (or a workspace, or
+    /// several packages), and every command runs in it without naming a
+    /// file (09).
+    pub package: bool,
 }
 
 impl Case {
@@ -63,6 +68,14 @@ pub struct Report {
     /// Test runs repeated on one thread (`--jobs 1`), which must print
     /// what the parallel run printed.
     pub serial: usize,
+    /// Package cases (`NAME.pkg`), among `cases`.
+    pub packages: usize,
+    /// Files formatted, each checked to keep its tree and to be left as
+    /// it is by a second `sisu fmt`.
+    pub formatted: usize,
+    /// Cases run under `sisu run --watch` (`NAME.watch`), each also
+    /// recorded and replayed.
+    pub watched: usize,
     pub failures: Vec<Failure>,
     pub blessed: Vec<String>,
 }
@@ -74,9 +87,12 @@ impl Report {
             out.push_str(&format!("FAIL {} [{}]\n{}\n", f.case, f.check, f.detail));
         }
         out.push_str(&format!(
-            "{} cases, {} checks, {} runs also under the monitor, {} recorded and replayed, {} failing tests replayed from their tokens, {} test runs repeated on one thread, {} counterexample runs, {} explored ({} schedules), {} failed\n",
+            "{} cases ({} packages), {} checks, {} files formatted, {} runs under --watch, {} runs also under the monitor, {} recorded and replayed, {} failing tests replayed from their tokens, {} test runs repeated on one thread, {} counterexample runs, {} explored ({} schedules), {} failed\n",
             self.cases,
+            self.packages,
             self.checks,
+            self.formatted,
+            self.watched,
             self.monitored,
             self.replayed,
             self.tokens,
@@ -106,18 +122,24 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<Case>) {
     let mut entries: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
     entries.sort();
     for p in entries {
+        let case = |p: &Path, package: bool| {
+            let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let rel = p.strip_prefix(root).unwrap_or(p).with_extension("");
+            let name = rel.to_string_lossy().replace('\\', "/");
+            Case { name, dir: p.parent().map(Path::to_path_buf).unwrap_or_default(), stem, package }
+        };
         if p.is_dir() {
-            // `X.files` directories hold a case's input files.
-            if !p.extension().is_some_and(|e| e == "files") {
+            // `X.pkg` directories are package cases; `X.files` hold a
+            // case's input files.
+            if p.extension().is_some_and(|e| e == "pkg") {
+                out.push(case(&p, true));
+            } else if !p.extension().is_some_and(|e| e == "files") {
                 walk(root, &p, out);
             }
             continue;
         }
         if p.extension().is_some_and(|e| e == "sisu") {
-            let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-            let rel = p.strip_prefix(root).unwrap_or(&p).with_extension("");
-            let name = rel.to_string_lossy().replace('\\', "/");
-            out.push(Case { name, dir: p.parent().map(Path::to_path_buf).unwrap_or_default(), stem });
+            out.push(case(&p, false));
         }
     }
 }
@@ -226,12 +248,32 @@ impl Sandbox {
         let dir = std::env::temp_dir().join(format!("sisu-conformance-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir)?;
+        if case.package {
+            copy_dir(&case.path("pkg"), &dir)?;
+            return Ok(Sandbox { dir });
+        }
         std::fs::copy(case.source(), dir.join(format!("{}.sisu", case.stem)))?;
         let files = case.path("files");
         if files.is_dir() {
             copy_dir(&files, &dir)?;
         }
         Ok(Sandbox { dir })
+    }
+}
+
+/// Every `.sisu` file under `dir`, relative to it, sorted.
+fn sisu_files(dir: &Path, prefix: &str, out: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let mut entries: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
+    entries.sort();
+    for p in entries {
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let rel = if prefix.is_empty() { name.clone() } else { format!("{prefix}/{name}") };
+        if p.is_dir() {
+            sisu_files(&p, &rel, out);
+        } else if name.ends_with(".sisu") {
+            out.push(rel);
+        }
     }
 }
 
@@ -245,7 +287,8 @@ struct Runner<'a> {
     sisu: &'a Path,
     bless: bool,
     report: Report,
-    counter: usize,
+    /// Numbers the sandboxes, across the runner's threads.
+    counter: &'a std::sync::atomic::AtomicUsize,
 }
 
 /// Each failing test's block of `sisu test` output, by the token that
@@ -290,12 +333,21 @@ impl Runner<'_> {
     /// replay token: it must fail the same way (17, "Simulation and
     /// replay").
     fn replay_tokens(&mut self, case: &Case, sandbox: &Sandbox, out: &str) {
+        self.replay_tokens_in(case, &sandbox.dir, out);
+    }
+
+    /// [`Runner::replay_tokens`] in the directory `cwd`; a package case
+    /// names no file.
+    fn replay_tokens_in(&mut self, case: &Case, cwd: &Path, out: &str) {
         let file = format!("{}.sisu", case.stem);
         let first_test = |o: &str| failure_blocks(o).into_iter().next().map(|(_, b)| b).unwrap_or_default();
         for (token, block) in failure_blocks(out) {
             self.report.tokens += 1;
-            let args = vec!["test".to_string(), "--replay".to_string(), token.clone(), file.clone()];
-            let again = invoke(self.sisu, &sandbox.dir, &args);
+            let mut args = vec!["test".to_string(), "--replay".to_string(), token.clone()];
+            if !case.package {
+                args.push(file.clone());
+            }
+            let again = invoke(self.sisu, cwd, &args);
             self.compare(
                 case,
                 &format!("sisu test --replay {token}"),
@@ -328,9 +380,12 @@ impl Runner<'_> {
     }
 
     fn run_case(&mut self, case: &Case) {
+        if case.package {
+            return self.run_package_case(case);
+        }
         self.report.cases += 1;
-        self.counter += 1;
-        let sandbox = match Sandbox::new(case, self.counter) {
+        let n = self.counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sandbox = match Sandbox::new(case, n) {
             Ok(s) => s,
             Err(e) => {
                 self.report.failures.push(Failure {
@@ -341,6 +396,103 @@ impl Runner<'_> {
                 return;
             }
         };
+        self.run_file_case(case, &sandbox);
+        // Last, because it rewrites the case's file.
+        self.format_checks(case, &sandbox.dir, &[format!("{}.sisu", case.stem)]);
+    }
+
+    /// The formatter (02, "Formatting"; 10, "Formatter"): every file of the
+    /// case that parses keeps its tree when `sisu fmt` rewrites it (`sisu
+    /// parse --shape` before and after: the tree up to what formatting
+    /// changes on purpose), and formatting it again changes nothing. A
+    /// case without a `NAME.unformatted` beside it must already be in the
+    /// form `sisu fmt` writes.
+    fn format_checks(&mut self, case: &Case, dir: &Path, files: &[String]) {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let canonical = !case.path("unformatted").exists();
+        for f in files {
+            let before = invoke(self.sisu, dir, &s(&["parse", "--shape", f]));
+            // A file with a syntax error is not formatted.
+            if before.status != 0 {
+                continue;
+            }
+            self.report.formatted += 1;
+            if canonical {
+                let check = invoke(self.sisu, dir, &s(&["fmt", "--check", f]));
+                self.report.checks += 1;
+                if check.status != 0 {
+                    self.report.failures.push(Failure {
+                        case: case.name.clone(),
+                        check: format!("{f} is in canonical form (sisu fmt --check)"),
+                        detail: format!("{}{}", check.stdout, check.stderr),
+                    });
+                }
+            }
+            let read = || std::fs::read_to_string(dir.join(f)).unwrap_or_default();
+            let once = invoke(self.sisu, dir, &s(&["fmt", f]));
+            self.compare(case, &format!("sisu fmt {f} succeeds"), None, "", &once.stderr);
+            let formatted = read();
+            let after = invoke(self.sisu, dir, &s(&["parse", "--shape", f]));
+            self.compare(
+                case,
+                &format!("sisu fmt keeps the tree of {f}"),
+                None,
+                &before.stdout,
+                &after.stdout,
+            );
+            let _ = invoke(self.sisu, dir, &s(&["fmt", f]));
+            self.compare(case, &format!("formatting {f} again changes nothing"), None, &formatted, &read());
+        }
+    }
+
+    /// `NAME.watch` (10, "Debugging and profiling"): the program under
+    /// `sisu run --watch ARGS...`, which saves new versions of its own
+    /// files (from its `NAME.files/`) to drive the swaps, so it runs in a
+    /// sandbox of its own; then again recorded, and replayed from its log,
+    /// whose `edit` records stand in for the saves.
+    fn watch_checks(&mut self, case: &Case, expected: &str, watch_args: &[String], input: Option<&str>) {
+        self.report.watched += 1;
+        let shown = |o: &Output| format!("{}--- stderr\n{}--- status {}\n", o.stdout, o.stderr, o.status);
+        let fresh = |r: &mut Runner<'_>| {
+            let n = r.counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Sandbox::new(case, n)
+        };
+        let (Ok(first), Ok(second)) = (fresh(self), fresh(self)) else {
+            self.report.failures.push(Failure {
+                case: case.name.clone(),
+                check: "setup".into(),
+                detail: "a sandbox for `sisu run --watch`".into(),
+            });
+            return;
+        };
+        let cwd = |sb: &Sandbox| match case.expected("cwd") {
+            Some(d) => sb.dir.join(d.trim()),
+            None => sb.dir.clone(),
+        };
+        let out = invoke_with_input(self.sisu, &cwd(&first), watch_args, input);
+        self.compare(case, "sisu run --watch", Some("watch"), expected, &shown(&out));
+        let log = second.dir.join("watch.log").display().to_string();
+        let mut recorded_args = watch_args.to_vec();
+        recorded_args.splice(2..2, ["--record".to_string(), log.clone()]);
+        let recorded = invoke_with_input(self.sisu, &cwd(&second), &recorded_args, input);
+        self.compare(
+            case,
+            "sisu run --watch --record prints what the watched run printed",
+            None,
+            &shown(&out),
+            &shown(&recorded),
+        );
+        let replayed = invoke(self.sisu, &cwd(&second), &["replay".to_string(), log]);
+        self.compare(
+            case,
+            "sisu replay of a watched run prints what it printed",
+            None,
+            &shown(&recorded),
+            &shown(&replayed),
+        );
+    }
+
+    fn run_file_case(&mut self, case: &Case, sandbox: &Sandbox) {
         let file = format!("{}.sisu", case.stem);
         let source = std::fs::read_to_string(case.source()).unwrap_or_default();
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
@@ -367,7 +519,7 @@ impl Runner<'_> {
             let out = invoke(self.sisu, &sandbox.dir, &a);
             self.compare(case, &format!("sisu {}", args.join(" ")), Some(ext), &expected, &out.stdout);
             if ext == "test" {
-                self.replay_tokens(case, &sandbox, &out.stdout);
+                self.replay_tokens(case, sandbox, &out.stdout);
                 // Tests run in parallel by default; on one thread they
                 // must print the same (17, "Isolation and parallelism").
                 self.report.serial += 1;
@@ -418,7 +570,7 @@ impl Runner<'_> {
             let out = invoke(self.sisu, &sandbox.dir, &a);
             let expected = case.expected(ext).unwrap_or_default();
             self.compare(case, &format!("sisu {}", a.join(" ")), Some(ext), &expected, &out.stdout);
-            self.replay_tokens(case, &sandbox, &out.stdout);
+            self.replay_tokens(case, sandbox, &out.stdout);
         }
         // `sisu explain-borrow` at the line a `# explain-borrow N` comment names.
         if let Some(expected) = case.expected("explain") {
@@ -428,6 +580,20 @@ impl Runner<'_> {
                 .unwrap_or_default();
             let out = invoke(self.sisu, &sandbox.dir, &s(&["explain-borrow", &format!("{file}:{line}")]));
             self.compare(case, "sisu explain-borrow", Some("explain"), &expected, &out.stdout);
+        }
+        // `NAME.watch`: the program under `sisu run --watch`.
+        if let Some(expected) = case.expected("watch") {
+            let mut a = s(&["run", "--watch", &file]);
+            a.extend(args.iter().cloned());
+            self.watch_checks(case, &expected, &a, input);
+        }
+        // `NAME.repl`: a session of `sisu repl NAME.sisu`, its inputs from
+        // `NAME.stdin`; `NAME.ws`: `sisu ws NAME.sisu`, the worksheet.
+        for (ext, cmd) in [("repl", "repl"), ("ws", "ws")] {
+            let Some(expected) = case.expected(ext) else { continue };
+            let out = invoke_with_input(self.sisu, &sandbox.dir, &s(&[cmd, &file]), input);
+            let shown = format!("{}--- stderr\n{}--- status {}\n", out.stdout, out.stderr, out.status);
+            self.compare(case, &format!("sisu {cmd}"), Some(ext), &expected, &shown);
         }
         // `# explore N`: the run (and the tests) again under N schedule
         // seeds; every seed must give the expected result.
@@ -555,13 +721,226 @@ impl Runner<'_> {
     }
 }
 
+impl Runner<'_> {
+    /// A package case (09): the package (or workspace) in `NAME.pkg/`,
+    /// every command run in it, or in the directory `NAME.cwd` names,
+    /// without naming a file. The checks are a file case's, over every
+    /// file of the package, and the lockfile the commands wrote is
+    /// compared with `NAME.lock`.
+    fn run_package_case(&mut self, case: &Case) {
+        self.report.cases += 1;
+        self.report.packages += 1;
+        let n = self.counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sandbox = match Sandbox::new(case, n) {
+            Ok(s) => s,
+            Err(e) => {
+                self.report.failures.push(Failure {
+                    case: case.name.clone(),
+                    check: "setup".into(),
+                    detail: e.to_string(),
+                });
+                return;
+            }
+        };
+        self.package_checks(case, &sandbox);
+        let mut files = Vec::new();
+        sisu_files(&sandbox.dir, "", &mut files);
+        self.format_checks(case, &sandbox.dir, &files);
+    }
+
+    fn package_checks(&mut self, case: &Case, sandbox: &Sandbox) {
+        let cwd = match case.expected("cwd") {
+            Some(d) => sandbox.dir.join(d.trim()),
+            None => sandbox.dir.clone(),
+        };
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        // Every file of the package reprints itself.
+        let mut files = Vec::new();
+        sisu_files(&sandbox.dir, "", &mut files);
+        for f in &files {
+            let source = std::fs::read_to_string(sandbox.dir.join(f)).unwrap_or_default();
+            let printed = invoke(self.sisu, &sandbox.dir, &s(&["parse", "--print", f]));
+            self.compare(case, &format!("parse --print reproduces {f}"), None, &source, &printed.stdout);
+        }
+        let check = invoke(self.sisu, &cwd, &s(&["check", "--format=ids"]));
+        let expected = case.expected("diag").unwrap_or_default();
+        self.compare(case, "diagnostics", Some("diag"), &expected, &check.stdout);
+        // The lockfile the check wrote, beside the package's manifest or its
+        // workspace's.
+        if let Some(expected) = case.expected("lock") {
+            let mut found = String::new();
+            let mut dir = Some(cwd.as_path());
+            while let Some(d) = dir {
+                if let Ok(t) = std::fs::read_to_string(d.join("sisu.lock")) {
+                    found = t;
+                    break;
+                }
+                if d == sandbox.dir {
+                    break;
+                }
+                dir = d.parent();
+            }
+            self.compare(case, "sisu.lock", Some("lock"), &expected, &found);
+        }
+        if let Some(expected) = case.expected("build") {
+            let out = invoke(self.sisu, &cwd, &s(&["build"]));
+            let shown = format!("{}--- stderr\n{}--- status {}\n", out.stdout, out.stderr, out.status);
+            self.compare(case, "sisu build", Some("build"), &expected, &shown);
+        }
+        if let Some(expected) = case.expected("test") {
+            let out = invoke(self.sisu, &cwd, &s(&["test"]));
+            self.compare(case, "sisu test", Some("test"), &expected, &out.stdout);
+            self.replay_tokens_in(case, &cwd, &out.stdout);
+            self.report.serial += 1;
+            let one = invoke(self.sisu, &cwd, &s(&["test", "--jobs", "1"]));
+            self.compare(
+                case,
+                "sisu test --jobs 1 prints what the parallel run printed",
+                None,
+                &out.stdout,
+                &one.stdout,
+            );
+        }
+        let args: Vec<String> =
+            case.expected("args").map(|a| a.lines().map(str::to_string).collect()).unwrap_or_default();
+        let input = case.expected("stdin");
+        let input = input.as_deref();
+        if let Some(expected) = case.expected("watch") {
+            let mut a = s(&["run", "--watch"]);
+            if !args.is_empty() {
+                a.push("--".into());
+                a.extend(args.iter().cloned());
+            }
+            self.watch_checks(case, &expected, &a, input);
+        }
+        // `NAME.repl`: a session of `sisu repl` with the package loaded.
+        if let Some(expected) = case.expected("repl") {
+            let out = invoke_with_input(self.sisu, &cwd, &s(&["repl"]), input);
+            let shown = format!("{}--- stderr\n{}--- status {}\n", out.stdout, out.stderr, out.status);
+            self.compare(case, "sisu repl", Some("repl"), &expected, &shown);
+        }
+        let wants_run = ["out", "err", "status"].iter().any(|e| case.path(e).exists());
+        if !wants_run {
+            return;
+        }
+        let with_args = |cmd: &[&str]| {
+            let mut a = s(cmd);
+            if !args.is_empty() {
+                a.push("--".into());
+                a.extend(args.iter().cloned());
+            }
+            a
+        };
+        let run = invoke_with_input(self.sisu, &cwd, &with_args(&["run"]), input);
+        self.compare(case, "stdout", Some("out"), &case.expected("out").unwrap_or_default(), &run.stdout);
+        self.compare(case, "stderr", Some("err"), &case.expected("err").unwrap_or_default(), &run.stderr);
+        let status = case.expected("status").map(|s| s.trim().to_string()).unwrap_or_else(|| "0".into());
+        self.report.checks += 1;
+        if status != run.status.to_string() {
+            if self.bless && std::fs::write(case.path("status"), format!("{}\n", run.status)).is_ok() {
+                self.report.blessed.push(case.path("status").display().to_string());
+            } else {
+                self.report.failures.push(Failure {
+                    case: case.name.clone(),
+                    check: "exit status".into(),
+                    detail: format!("expected {status}, found {}", run.status),
+                });
+            }
+        }
+        let shown = |o: &Output| format!("{}\n--- stderr\n{}\n--- status {}\n", o.stdout, o.stderr, o.status);
+        let monitored = invoke_with_input(self.sisu, &cwd, &with_args(&["run", "--monitor"]), input);
+        self.report.monitored += 1;
+        self.compare(
+            case,
+            "the monitor agrees with the checker (a difference is a soundness hole)",
+            None,
+            &shown(&run),
+            &shown(&monitored),
+        );
+        let log = sandbox.dir.join("run.log").display().to_string();
+        let recorded = invoke_with_input(self.sisu, &cwd, &with_args(&["run", "--record", &log]), input);
+        self.report.replayed += 1;
+        self.compare(
+            case,
+            "sisu run --record prints what the run printed",
+            None,
+            &shown(&run),
+            &shown(&recorded),
+        );
+        let replayed = invoke(self.sisu, &cwd, &s(&["replay", &log]));
+        self.compare(
+            case,
+            "sisu replay prints what the recorded run printed",
+            None,
+            &shown(&recorded),
+            &shown(&replayed),
+        );
+        let sir = invoke(self.sisu, &cwd, &s(&["sir"]));
+        if sir.status == 0 {
+            let sir_file = sandbox.dir.join("program.sir").display().to_string();
+            if std::fs::write(&sir_file, &sir.stdout).is_ok() {
+                let mut a = s(&["run", "--sir", &sir_file]);
+                a.extend(args.iter().cloned());
+                let again = invoke_with_input(self.sisu, &cwd, &a, input);
+                self.compare(case, "run --sir: stdout", None, &run.stdout, &again.stdout);
+                self.compare(
+                    case,
+                    "run --sir: exit status",
+                    None,
+                    &run.status.to_string(),
+                    &again.status.to_string(),
+                );
+            }
+        }
+    }
+}
+
 /// Runs every case under `root` with the executable `sisu`. With `bless`,
 /// mismatching expectations are rewritten from the actual output instead
 /// of failing (review the result before committing it).
+///
+/// The cases run on as many threads as the machine has (at most eight),
+/// each case in a sandbox of its own; the report lists the failures in the
+/// cases' order, as one thread would.
 pub fn run_all(sisu: &Path, root: &Path, bless: bool) -> Report {
-    let mut r = Runner { sisu, bless, report: Report::default(), counter: 0 };
-    for case in discover(root) {
-        r.run_case(&case);
+    let cases = discover(root);
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).clamp(1, 8);
+    let counter = std::sync::atomic::AtomicUsize::new(0);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let results: std::sync::Mutex<Vec<(usize, Report)>> = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|s| {
+        for _ in 0..threads {
+            s.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(case) = cases.get(i) else { break };
+                    let mut r = Runner { sisu, bless, report: Report::default(), counter: &counter };
+                    r.run_case(case);
+                    if let Ok(mut all) = results.lock() {
+                        all.push((i, r.report));
+                    }
+                }
+            });
+        }
+    });
+    let mut all = results.into_inner().unwrap_or_default();
+    all.sort_by_key(|(i, _)| *i);
+    let mut report = Report::default();
+    for (_, r) in all {
+        report.cases += r.cases;
+        report.checks += r.checks;
+        report.monitored += r.monitored;
+        report.deferred += r.deferred;
+        report.explored += r.explored;
+        report.schedules += r.schedules;
+        report.replayed += r.replayed;
+        report.tokens += r.tokens;
+        report.serial += r.serial;
+        report.packages += r.packages;
+        report.formatted += r.formatted;
+        report.watched += r.watched;
+        report.failures.extend(r.failures);
+        report.blessed.extend(r.blessed);
     }
-    r.report
+    report
 }

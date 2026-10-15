@@ -53,6 +53,8 @@ impl Interp<'_, '_> {
             Value::Unit => out.push_str("()"),
             Value::Int(i) => out.push_str(&i.to_string()),
             Value::U64(i) => out.push_str(&i.to_string()),
+            Value::I128(i) => out.push_str(&i.to_string()),
+            Value::U128(i) => out.push_str(&i.to_string()),
             Value::Float(f) => out.push_str(&float_repr(*f)),
             Value::Bool(b) => out.push_str(if *b { "True" } else { "False" }),
             Value::Char(c) => out.push_str(&quote_char(*c)),
@@ -243,7 +245,11 @@ impl Interp<'_, '_> {
 
 /// `fmt.digits`: the digits of `|n|` in `base` (capitals with `upper`).
 pub(crate) fn digits(n: i64, base: i64, upper: bool) -> String {
-    let mag = n.unsigned_abs();
+    wide_digits(u128::from(n.unsigned_abs()), base, upper)
+}
+
+/// `fmt.wide_digits`: the digits of a magnitude in `base`.
+pub(crate) fn wide_digits(mag: u128, base: i64, upper: bool) -> String {
     match base {
         16 if upper => format!("{mag:X}"),
         16 => format!("{mag:x}"),

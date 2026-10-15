@@ -1,0 +1,50 @@
+# A text is its UTF-8 encoding (03, "Strings and text"): the host reads
+# the bytes and cuts the text at boundaries of characters, and std's text
+# methods are Sisu over those (std/prelude.sisu, "str and String").
+
+def show_pieces(label: str, pieces: Iter[str]):
+    var shown: list[String] = []
+    for p in pieces:
+        shown.push("{p:?}")
+    print("{label}: {shown.join(" ")}")
+
+def main():
+    let word = "naïve €"
+    print(word.byte_len())
+    print(len(word))
+    print([b for b in "aï".bytes()])
+    print(word.byte_at(2))
+    print(word.byte_slice(0, 4))
+    print([word.is_char_boundary(i) for i in range(5)])
+    print(word.is_char_boundary(-1) or word.is_char_boundary(11))
+    print(word.byte_find("€"))
+    print("a=b=c".byte_find("=", 2))
+    print("abc".byte_find("", 3))
+    print("abc".byte_find("", 4))
+    print(['a'.len_utf8(), 'ï'.len_utf8(), '€'.len_utf8(), '😀'.len_utf8()])
+    print([char.from_code(0x41), char.from_code(0xD800), char.from_code(0x110000)])
+    # Searching counts characters, not bytes, in `find`.
+    print(word.find("€"))
+    print("😀x".find("x"))
+    # Splitting: leftmost pieces, never overlapping.
+    show_pieces("split", "aaa".split("aa"))
+    show_pieces("split", "".split(","))
+    show_pieces("split", ",a,".split(","))
+    show_pieces("split", "x::y::z".split("::"))
+    show_pieces("lines", "a\rb\r\n\nc\r".lines())
+    show_pieces("lines", "\n".lines())
+    show_pieces("lines", "".lines())
+    # No-break and ideographic spaces are whitespace; a zero-width space is not.
+    let words: list[str] = "\u{a0}one\u{3000}two\u{200b}three ".split_whitespace().collect()
+    print("{len(words)} words, the second {len(words[1])} characters long")
+    print("aaa".replace("aa", "b"))
+    print("ïïï".replace("ï", "i"))
+    print("\u{3000} spaced\t\u{a0}".trim())
+    print("\u{2003}ü \n".trim_end().chars().map(c -> c.code()).collect())
+    print(" \u{2003}ü".trim_start())
+    print("abc".strip_prefix("abc").is_empty())
+    print("abc".strip_suffix("bc"))
+    print(("€uro".starts_with("€"), "€uro".ends_with("€"), "".ends_with("")))
+    print("".split_once("x"))
+    print("k=".split_once("="))
+    print("ab".repeat(0).is_empty())

@@ -29,6 +29,11 @@ fn position(map: &SourceMap, span: Span) -> String {
     format!("{}:{}-{}:{}", a.line, a.col, b.line, b.col)
 }
 
+/// A position with its file's name first, for a program of several files.
+fn position_in(map: &SourceMap, span: Span) -> String {
+    format!("{}:{}", map.name(span.file), position(map, span))
+}
+
 /// One line per diagnostic, then one indented line per label and fix:
 ///
 /// ```text
@@ -37,6 +42,16 @@ fn position(map: &SourceMap, span: Span) -> String {
 ///   fix type.use-floor-division 2:7-2:8 "//"
 /// ```
 pub fn render_ids(map: &SourceMap, diags: &[Diagnostic]) -> String {
+    render_ids_by(map, diags, position)
+}
+
+/// [`render_ids`] for a program of several files (09): every position is
+/// preceded by its file's name, `src/parser.sisu:3:5-3:8`.
+pub fn render_ids_with_files(map: &SourceMap, diags: &[Diagnostic]) -> String {
+    render_ids_by(map, diags, position_in)
+}
+
+fn render_ids_by(map: &SourceMap, diags: &[Diagnostic], position: fn(&SourceMap, Span) -> String) -> String {
     let mut out = String::new();
     for d in diags {
         out.push_str(&format!("{} {} {}", position(map, d.span), d.code(), d.msg.id()));

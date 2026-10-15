@@ -2,4 +2,10 @@
 
 const PI: f64 = 3.141592653589793
 const E: f64 = 2.718281828459045
+## A full turn: two `PI`.
+##
+## ```
+## assert TAU == 2.0 * PI
+## assert E > 2.718 and E < 2.719
+## ```
 const TAU: f64 = 6.283185307179586

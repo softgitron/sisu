@@ -1,0 +1,28 @@
+# Tasks and epochs (10, "Debugging and profiling"; D-068): a task adopts
+# the newest epoch when it starts and at `live.boundary()`, and resolves
+# every call in between in the epoch it adopted. Task `a` starts in epoch
+# 0 and waits; `main` saves `tasks.files/v2.sisu`, and task `b`, which
+# starts after the save, runs the new `greet`; `a` keeps epoch 0 until its
+# next boundary.
+
+def greet(who: str) -> String:
+    return "{who}: the new greeting"
+
+def main(sys: System):
+    let go_tx, go_rx = channel[int](capacity=1)
+    let ready_tx, ready_rx = channel[int](capacity=1)
+    task.scope do s:
+        s.spawn do:
+            print("{greet("a")}, epoch {live.epoch()}")
+            ready_tx.send(1).expect("main waits for a")
+            _ = go_rx.recv()
+            print("{greet("a")}, epoch {live.epoch()}")
+            live.boundary()
+            print("{greet("a")}, epoch {live.epoch()}")
+        _ = ready_rx.recv()
+        let text = sys.fs.read_to_string("v2.sisu").expect("the next version")
+        sys.fs.write_text("tasks.sisu", text).expect("saved")
+        let b = s.spawn do:
+            print("{greet("b")}, epoch {live.epoch()}")
+        _ = b.join()
+        go_tx.send(1).expect("a waits")

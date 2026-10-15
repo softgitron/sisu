@@ -1,0 +1,4 @@
+Rev(n=1) Rev(n=2)
+[Rev(n=3), Rev(n=2), Rev(n=1)]
+2 a [1, 2, 3] ["a", "b"]
+Some(10) None

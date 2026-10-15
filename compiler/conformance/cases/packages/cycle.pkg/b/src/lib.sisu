@@ -1,0 +1,4 @@
+import c
+
+pub def one() -> int:
+    return c.two() - 1

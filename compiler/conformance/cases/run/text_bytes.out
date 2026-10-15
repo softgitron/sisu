@@ -1,0 +1,34 @@
+10
+7
+[97, 195, 175]
+195
+naï
+[True, True, True, False, True]
+False
+Some(7)
+Some(3)
+Some(3)
+None
+[1, 2, 3, 4]
+[Some('A'), None, None]
+Some(6)
+Some(1)
+split: "" "a"
+split: ""
+split: "" "a" ""
+split: "x" "y" "z"
+lines: "a\rb" "" "c\r"
+lines: ""
+lines: 
+2 words, the second 9 characters long
+ba
+iii
+spaced
+[8195, 252]
+ü
+True
+a
+(True, False, True)
+None
+Some(("k", ""))
+True

@@ -73,7 +73,9 @@ def area_or_none[T](x: T) -> String:
 ## keys are known at compile time; a field it leaves out takes its
 ## default, which `reflect.default_of` also gives.
 def doubled[T](value: T) -> T:
-    return reflect.construct(T, {f.name: value.[f] * 2 for f in reflect.fields_of(T) if not f.default})
+    return reflect.construct(
+        T, {f.name: value.[f] * 2 for f in reflect.fields_of(T) if not f.default}
+    )
 
 def defaults[T]() -> list[String]:
     var out: list[String] = []

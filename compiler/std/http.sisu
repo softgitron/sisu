@@ -32,7 +32,9 @@ impl Response:
     ## `status` with a plain text body.
     pure def text(status: int, reason: str, body: str) -> Response:
         let headers = [("Content-Type".to_string(), "text/plain; charset=utf-8".to_string())]
-        return Response(status=status, reason=reason.to_string(), headers=headers, body=body.encode())
+        return Response(
+            status=status, reason=reason.to_string(), headers=headers, body=body.encode()
+        )
     ## The value of the header `name`, compared without case, if any.
     pure def header(self, name: str) -> String?:
         return find_header(self.headers, name)
@@ -142,7 +144,9 @@ pure def message(first: str, headers: list[(String, String)], body: bytes) -> by
 def request(net: Net, method: str, url: Url, body: bytes = b"") -> Response ! HttpError:
     var conn = net.connect(url.host, url.port).map_err((e) -> Network(message="{e}"))?
     let headers = [("Host".to_string(), url.host.copy())]
-    conn.write(message("{method} {url.target()} HTTP/1.1", headers, body)).map_err((e) -> Network(message="{e}"))?
+    conn.write(message("{method} {url.target()} HTTP/1.1", headers, body)).map_err(
+        (e) -> Network(message="{e}")
+    )?
     var r = Reader(conn=conn, buf=bytes.new())
     let head = parse_head(r.until(b"\r\n\r\n", 65536)?)?
     let parts: list[str] = head.line.split(" ").collect()
@@ -199,7 +203,14 @@ def read_request(mut r: Reader) -> Request ! HttpError:
     if len(parts) != 3 or not parts[2].starts_with("HTTP/1."):
         return Err(Malformed(detail="a request line `{head.line}`"))
     let body = read_body(mut r, head.headers, False)?
-    return Ok(Request(method=parts[0].to_string(), target=parts[1].to_string(), headers=head.headers.copy(), body=body))
+    return Ok(
+        Request(
+            method=parts[0].to_string(),
+            target=parts[1].to_string(),
+            headers=head.headers.copy(),
+            body=body,
+        )
+    )
 
 # ------------------------------------------------------------------ the scripted network
 
@@ -251,7 +262,13 @@ impl FakeNet:
 
 impl NetOps for FakeNet:
     def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}:
-        let stream = ScriptedStream(net=FakeNet(state=self.state), host=host.to_string(), port=port, sent=bytes.new(), reply=None)
+        let stream = ScriptedStream(
+            net=FakeNet(state=self.state),
+            host=host.to_string(),
+            port=port,
+            sent=bytes.new(),
+            reply=None,
+        )
         return Ok(Conn(stream=Box(stream), peer="{host}:{port}"))
     def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
         return Err(NotAllowed(address="{host}:{port}"))

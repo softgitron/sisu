@@ -1,0 +1,6 @@
+#!/usr/bin/env sisu
+# A script's top-level statements are its `main`; it cannot declare one too.
+print("top")
+
+def main():
+    print("declared")

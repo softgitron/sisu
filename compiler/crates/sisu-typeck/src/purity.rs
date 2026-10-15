@@ -64,7 +64,7 @@ fn impure_callee(prog: &Program, e: &Expr) -> Option<String> {
 
 /// Calls `f` on every expression of a statement, children before parents
 /// is not guaranteed; every expression is visited once.
-pub fn visit_stmt(s: &Stmt, f: &mut dyn FnMut(&Expr)) {
+pub fn visit_stmt<'a>(s: &'a Stmt, f: &mut dyn FnMut(&'a Expr)) {
     match s {
         Stmt::Let { init, else_, .. } => {
             if let Some(e) = init {
@@ -146,13 +146,13 @@ pub fn visit_stmt(s: &Stmt, f: &mut dyn FnMut(&Expr)) {
     }
 }
 
-pub fn visit_block(b: &Block, f: &mut dyn FnMut(&Expr)) {
+pub fn visit_block<'a>(b: &'a Block, f: &mut dyn FnMut(&'a Expr)) {
     for s in &b.stmts {
         visit_stmt(s, f);
     }
 }
 
-fn visit_cond(c: &Cond, f: &mut dyn FnMut(&Expr)) {
+fn visit_cond<'a>(c: &'a Cond, f: &mut dyn FnMut(&'a Expr)) {
     for p in &c.parts {
         match p {
             CondPart::Bool(e) | CondPart::Let { value: e, .. } => visit_expr(e, f),
@@ -160,7 +160,7 @@ fn visit_cond(c: &Cond, f: &mut dyn FnMut(&Expr)) {
     }
 }
 
-pub fn visit_expr(e: &Expr, f: &mut dyn FnMut(&Expr)) {
+pub fn visit_expr<'a>(e: &'a Expr, f: &mut dyn FnMut(&'a Expr)) {
     f(e);
     match &e.kind {
         ExprKind::Call { callee, args } => {

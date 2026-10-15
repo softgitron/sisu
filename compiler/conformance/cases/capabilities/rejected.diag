@@ -1,4 +1,4 @@
 16:22-16:30 E0334 type.impure-capability name="pure_reader" ty="Env"
 20:20-20:42 E0700 cap.not-shareable ty="Counting" cap="Env" auto="Sync" path=" because of `seen`, a `Cell[int]`"
-21:16-21:128 E0701 cap.internal name="System.assemble"
-36:12-36:40 E0422 borrow.must-consume-in-owner ty="Holding" owner="Rand"
+21:16-29:6 E0701 cap.internal name="System.assemble"
+44:12-44:40 E0422 borrow.must-consume-in-owner ty="Holding" owner="Rand"

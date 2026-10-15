@@ -28,8 +28,18 @@ pub(crate) enum Event<'p> {
 }
 
 impl<'p> Interp<'p, '_> {
+    /// The body of the function named `name` in the epoch the running
+    /// task has adopted (`live.rs`).
     pub(crate) fn fn_index(&self, name: &str) -> Result<usize, Unwind> {
-        self.fns.get(name).copied().ok_or_else(|| ice(format!("no function `{name}`")))
+        self.fn_index_in(self.task_epoch(), name)
+    }
+
+    pub(crate) fn fn_index_in(&self, epoch: usize, name: &str) -> Result<usize, Unwind> {
+        self.epochs
+            .get(epoch)
+            .and_then(|t| t.get(name))
+            .copied()
+            .ok_or_else(|| ice(format!("no function `{name}`")))
     }
 
     /// Calls a SIR function (for a closure, the environment tuple is the
@@ -144,7 +154,7 @@ impl<'p> Interp<'p, '_> {
         ret: Option<&'p Place>,
         tys: Vec<sir::Type>,
     ) -> Result<Frame<'p>, Unwind> {
-        let f = self.prog.functions.get(fi).ok_or_else(|| ice("no such function"))?;
+        let f = self.func(fi).ok_or_else(|| ice("no such function"))?;
         let mut locals = vec![Value::Moved; f.locals.len()];
         for (i, a) in args.into_iter().enumerate() {
             if let Some(slot) = locals.get_mut(i + 1) {
@@ -352,7 +362,7 @@ impl<'p> Interp<'p, '_> {
     /// cleanup.
     fn glue_returns_next(&self) -> bool {
         let Some(fr) = self.frames.last() else { return false };
-        let Some(f) = fr.func.and_then(|i| self.prog.functions.get(i)) else { return false };
+        let Some(f) = fr.func.and_then(|i| self.func(i)) else { return false };
         f.kind == sir::FnKind::Glue
             && fr.pending.is_none()
             && f.blocks.get(fr.bb).is_some_and(|b| fr.next >= b.stmts.len() && b.term == Terminator::Return)
@@ -360,20 +370,19 @@ impl<'p> Interp<'p, '_> {
 
     /// Whether the top frame runs drop glue, which a stack trace leaves out.
     fn in_glue(&self) -> bool {
-        let f = self.frames.last().and_then(|fr| fr.func).and_then(|i| self.prog.functions.get(i));
+        let f = self.frames.last().and_then(|fr| fr.func).and_then(|i| self.func(i));
         f.is_some_and(|f| f.kind == sir::FnKind::Glue)
     }
 
     fn current_block(&self) -> Option<&'p sir::BasicBlock> {
-        let prog = self.prog;
         let fr = self.frames.last()?;
-        prog.functions.get(fr.func?)?.blocks.get(fr.bb)
+        self.func(fr.func?)?.blocks.get(fr.bb)
     }
 
     /// Whether the top frame runs a function of the standard library.
     fn in_std(&self) -> bool {
         let Some(fr) = self.frames.last() else { return false };
-        let Some(f) = fr.func.and_then(|i| self.prog.functions.get(i)) else { return false };
+        let Some(f) = fr.func.and_then(|i| self.func(i)) else { return false };
         // The interceptors and fakes the compiler writes for the program's
         // traits are left out with the standard library.
         self.prog
@@ -385,7 +394,7 @@ impl<'p> Interp<'p, '_> {
     /// `name (file:line:col)` for the top frame, as a catalog line.
     fn frame_line(&self) -> String {
         let Some(fr) = self.frames.last() else { return String::new() };
-        let Some(f) = fr.func.and_then(|i| self.prog.functions.get(i)) else { return String::new() };
+        let Some(f) = fr.func.and_then(|i| self.func(i)) else { return String::new() };
         let file = self.prog.sources.get(f.source as usize).map(String::as_str).unwrap_or("?");
         let location = match fr.loc {
             Some(l) => format!("{file}:{}:{}", l.line, l.col),
@@ -626,9 +635,8 @@ impl<'p> Interp<'p, '_> {
     /// Whether the statement being run stores into an unnamed local: a
     /// `mut` borrow into one is two-phase (as the checker has it).
     fn dest_is_temp(&self) -> bool {
-        let prog = self.prog;
         let Some(fr) = self.frames.last() else { return false };
-        let Some(f) = fr.func.and_then(|i| prog.functions.get(i)) else { return false };
+        let Some(f) = fr.func.and_then(|i| self.func(i)) else { return false };
         let Some(s) = f.blocks.get(fr.bb).and_then(|b| b.stmts.get(fr.next.wrapping_sub(1))) else {
             return false;
         };
@@ -716,12 +724,11 @@ impl<'p> Interp<'p, '_> {
     }
 
     fn dest_type(&self, dest: &Place) -> Option<sir::Type> {
-        let prog = self.prog;
         if !dest.proj.is_empty() {
             return None;
         }
         let fi = self.frames.last()?.func?;
-        prog.functions.get(fi)?.locals.get(dest.local.0 as usize).map(|l| self.concrete(&l.ty))
+        self.func(fi)?.locals.get(dest.local.0 as usize).map(|l| self.concrete(&l.ty))
     }
 
     pub(crate) fn local(&self, l: sir::LocalId) -> Result<&Value, Unwind> {
@@ -961,7 +968,7 @@ impl<'p> Interp<'p, '_> {
 }
 
 /// The source-level name of a SIR function, for stack traces.
-fn display_fn_name(name: &str, prog: &sir::Program) -> String {
+pub(crate) fn display_fn_name(name: &str, prog: &sir::Program) -> String {
     if let Some(i) = name.strip_prefix("test#").and_then(|n| n.parse::<usize>().ok())
         && let Some((t, _)) = prog.tests.get(i)
     {

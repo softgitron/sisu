@@ -65,7 +65,14 @@ def main():
     print("{c2.name} {c2.retries} {c2.verbose}")
     let q = p.copy()
     print(q == p)
-    for s in [Circle(r=0.0), Circle(r=1.5), Rect(w=2.0, h=2.0), Rect(w=1.0, h=3.0), Tri(3.0, 4.0, 5.0), Dot]:
+    for s in [
+        Circle(r=0.0),
+        Circle(r=1.5),
+        Rect(w=2.0, h=2.0),
+        Rect(w=1.0, h=3.0),
+        Tri(3.0, 4.0, 5.0),
+        Dot,
+    ]:
         print(describe(s))
     for n in [0, 2, -5, 99]:
         print(classify(n))

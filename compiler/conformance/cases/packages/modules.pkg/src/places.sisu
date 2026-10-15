@@ -1,0 +1,17 @@
+##! `atlas.places`: the places it knows, by name.
+
+from atlas.geo.point import Point
+
+pub struct Place:
+    pub name: String
+    pub at: Point
+
+pub def named(name: str, at: Point) -> Place:
+    return Place(name="{name}", at=at)
+
+pub def all() -> list[Place]:
+    return [named("dock", Point(x=1, y=1)), named("hill", Point(x=-2, y=5))]
+
+test "places have names":
+    for p in all():
+        assert len(p.name) > 0

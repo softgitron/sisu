@@ -1,0 +1,13 @@
+# A literal of a sized integer type must fit in it (03, "Numbers"), and two
+# integer types meet only where one widens to the other without loss.
+
+def main():
+    let a: i128 = 170141183460469231731687303715884105728
+    let b: u128 = 340282366920938463463374607431768211456
+    let c: u128 = -1
+    let d: i128 = -170141183460469231731687303715884105729
+    let ok: i128 = -170141183460469231731687303715884105728
+    let e = 5i128 + 3u128
+    let wide: u64 = 7
+    let f: i128 = wide
+    let g: u128 = -1i128

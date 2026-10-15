@@ -1,0 +1,3 @@
+# A workspace whose members list a directory with no package in it (09).
+[workspace]
+members = ["app", "gone"]

@@ -492,6 +492,9 @@ impl Resolver<'_> {
                 Some(o) => format!("{o}.{}", f.name.text),
                 None => f.name.text.clone(),
             };
+            // A type's function without `self` is called through the type.
+            let has_self = f.params.first().is_some_and(|p| matches!(p.kind, ast::ParamKind::SelfParam));
+            let assoc = if has_self { None } else { owner.clone() };
             let n = k;
             k += 1;
             // `requires` as a predicate of the same parameters: a method of
@@ -529,7 +532,7 @@ impl Resolver<'_> {
                 let body = format!("        return {}\n", requires.join(" and "));
                 match &owner {
                     Some(o) => {
-                        let mut ps = vec!["self".to_string()];
+                        let mut ps = if has_self { vec!["self".to_string()] } else { Vec::new() };
                         ps.extend(named);
                         decl = format!(
                             "\nimpl {o}:\n    def __requires_{n}{gp}({}) -> bool:\n{body}",
@@ -556,9 +559,10 @@ impl Resolver<'_> {
             }
             let names: Vec<String> = (0..params.len()).map(|i| format!("a{i}")).collect();
             if !requires.is_empty() {
-                let call = match &owner {
-                    Some(_) => format!("a0.__requires_{n}({})", names[1..].join(", ")),
-                    None => format!("__requires_{n}({})", names.join(", ")),
+                let call = match (&owner, &assoc) {
+                    (_, Some(o)) => format!("{o}.__requires_{n}({})", names.join(", ")),
+                    (Some(_), None) => format!("a0.__requires_{n}({})", names[1..].join(", ")),
+                    (None, None) => format!("__requires_{n}({})", names.join(", ")),
                 };
                 cases.push_str(&format!("    if not {call}:\n        d.reject()\n"));
             }
@@ -577,12 +581,16 @@ impl Resolver<'_> {
                 let (_, _, mode) = &params[i];
                 if *mode == ast::Mode::Mut { format!("mut b{i}") } else { format!("b{i}") }
             };
-            let call = match &owner {
-                Some(_) => {
+            let call = match (&owner, &assoc) {
+                (_, Some(o)) => {
+                    let all: Vec<String> = (0..params.len()).map(arg).collect();
+                    format!("{o}.{}({})", f.name.text, all.join(", "))
+                }
+                (Some(_), None) => {
                     let rest: Vec<String> = (1..params.len()).map(arg).collect();
                     format!("b0.{}({})", f.name.text, rest.join(", "))
                 }
-                None => {
+                (None, None) => {
                     let all: Vec<String> = (0..params.len()).map(arg).collect();
                     format!("{}({})", f.name.text, all.join(", "))
                 }

@@ -5,6 +5,10 @@
 
 ## `s` as a JSON string: in double quotes, with `"`, `\` and the control
 ## characters escaped.
+##
+## ```
+## assert quote("say \"hi\"\n") == "\"say \\\"hi\\\"\\n\""
+## ```
 pure def quote(s: str) -> String:
     var out = "\"".to_string()
     for c in s.chars():
@@ -31,6 +35,13 @@ pure def quote(s: str) -> String:
 ## object of its fields in order, and an enum's variant as its name when
 ## it has no fields, else an object of the name and its fields. A type it
 ## cannot encode is a compile error where it is encoded.
+##
+## ```
+## assert encode([1, 2, 3]) == "[1,2,3]"
+## assert encode(True) == "true"
+## let missing: int? = None
+## assert encode(missing) == "null"
+## ```
 def encode[T](value: T) -> String:
     if comptime reflect.is_bool(T):
         return if value: "true".to_string() else: "false".to_string()

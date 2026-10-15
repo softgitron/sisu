@@ -108,6 +108,7 @@ pub fn ty(t: &Type) -> String {
         Type::Ref(t, false) => format!("ref {}", ty(t)),
         Type::Ref(t, true) => format!("ref mut {}", ty(t)),
         Type::Param(i) => format!("${i}"),
+        Type::Const(n) => n.to_string(),
         Type::Dyn(n, args) => format!("dyn {}", named(n, args)),
         Type::Assoc(t, tr, args, n) => format!("<{} as {}>.{n}", ty(t), named(tr, args)),
     }

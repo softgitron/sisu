@@ -1,0 +1,20 @@
+#!/usr/bin/env sisu
+# A script (10, "REPL and scripts"): one file with a `#!` line runs as
+# `sisu script.sisu ARGS`, its top-level statements are its `main` (with
+# `sys` and `?`), and the comment block below declares its dependencies,
+# PEP 723's shape with the manifest's tables.
+# /// script
+# [dependencies]
+# greetings = { path = "greetings" }
+# ///
+import greetings
+
+def twice(s: str) -> String:
+    return "{s} {s}"
+
+let names = sys.env.args()
+for n in names:
+    print(greetings.hello(n))
+print(twice("done"))
+let text = sys.fs.read("missing.txt")?
+print(text)

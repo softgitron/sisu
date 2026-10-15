@@ -25,7 +25,9 @@
 
 # ------------------------------------------------------------------ host-backed types
 
-## An owned, growable UTF-8 string. Views as `str` wherever a `str` is expected.
+## An owned, growable text: the bytes of its UTF-8 encoding, which only
+## ever hold a valid one (03, "Strings and text"; the methods of `str` read
+## and cut them). Views as `str` wherever a `str` is expected.
 @builtin("String")
 struct String:
     pass
@@ -33,6 +35,20 @@ struct String:
 ## A growable sequence, the type of `[a, b]`.
 @builtin("list")
 struct list[T]:
+    pass
+
+## The integer types, `int` and the sized ones (03, "Numbers"): what
+## `truncate_to` converts to.
+trait Integer:
+    ## `n` reduced to the type's width, as two's complement wrapping does.
+    pure def wrapping_from(n: int) -> Self
+
+## A fixed number of values of one type (03, "Arrays"): `N` of them, a
+## constant that is part of the type, `Array[u32, 256]`. `xs[i]` reads and
+## writes an element, checked against the length as a list's index is;
+## nothing adds or removes one.
+@builtin("Array")
+struct Array[T, const N: int]:
     pass
 
 ## A hash map iterating in insertion order (D-074), the type of `{k: v}`.
@@ -73,9 +89,9 @@ struct Path:
 ## saturate. A literal takes the sized type expected (or the one its
 ## suffix names, `0u32`), checked to fit. A value becomes a wider integer
 ## type where one is expected when that loses nothing (`u8` to `u32`,
-## `i32` or `int`; `u64` to nothing); the other conversions are methods
-## (`int.to_u8`, `u8.to_int`), the narrowing ones giving `None` for a
-## value that does not fit.
+## `i32` or `int`; `int` and `u64` to `i128`; `u64` to `u128`); the other
+## conversions are methods (`int.to_u8`, `u8.to_int`), the narrowing ones
+## giving `None` for a value that does not fit.
 @builtin("u8")
 struct u8:
     pass
@@ -92,6 +108,10 @@ struct u32:
 struct u64:
     pass
 
+@builtin("u128")
+struct u128:
+    pass
+
 @builtin("i8")
 struct i8:
     pass
@@ -102,6 +122,10 @@ struct i16:
 
 @builtin("i32")
 struct i32:
+    pass
+
+@builtin("i128")
+struct i128:
     pass
 
 type i64 = int
@@ -377,8 +401,15 @@ impl Spec:
         let cs = Spec.chars_of(text)
         let n = len(cs)
         var s = Spec(
-            fill=' ', align=None, sign=None, alternate=False, zero=False, width=0, grouping=None,
-            precision=None, kind=None,
+            fill=' ',
+            align=None,
+            sign=None,
+            alternate=False,
+            zero=False,
+            width=0,
+            grouping=None,
+            precision=None,
+            kind=None,
         )
         var i = 0
         if n >= 2 and Spec.is_align(cs[1]):
@@ -436,12 +467,6 @@ impl Spec:
 
     ## An integer by the spec.
     pure def int(self, n: int) -> String:
-        let base = match self.kind:
-            case Some('x'): 16
-            case Some('X'): 16
-            case Some('o'): 8
-            case Some('b'): 2
-            case _: 10
         match self.kind:
             case Some('e') | Some('E') | Some('f') | Some('F') | Some('%'):
                 return self.float(n.to_f64())
@@ -451,9 +476,40 @@ impl Spec:
                 return self.pad("{n:?}")
             case _:
                 pass
-        var digits = Spec.digits(n, base, self.kind == Some('X'))
+        return self.integer(n < 0, Spec.digits(n, self.base(), self.kind == Some('X')))
+
+    ## An integer of a type whose values reach past `int`'s (`u64`,
+    ## `u128`, `i128`) by the spec, as `int` would be; a float's letter
+    ## formats the nearest `f64`.
+    pure def wide[T: Display](self, n: T, negative: bool) -> String:
+        match self.kind:
+            case Some('e') | Some('E') | Some('f') | Some('F') | Some('%'):
+                return self.float("{n}".parse_float() ?? 0.0)
+            case Some('s'):
+                return self.text("{n}")
+            case Some('?'):
+                return self.pad("{n}")
+            case _:
+                pass
+        return self.integer(negative, Spec.wide_digits(n, self.base(), self.kind == Some('X')))
+
+    ## The base the spec's letter names: 16 for `x` and `X`, 8 for `o`, 2
+    ## for `b`, and otherwise 10.
+    pure def base(self) -> int:
+        return match self.kind:
+            case Some('x'): 16
+            case Some('X'): 16
+            case Some('o'): 8
+            case Some('b'): 2
+            case _: 10
+
+    ## An integer's digits with its sign, the base's prefix (`#`), the
+    ## grouping and the padding of the spec.
+    pure def integer(self, negative: bool, own digits: String) -> String:
+        let base = self.base()
+        var shown = digits
         if self.grouping != None:
-            digits = Spec.group(digits, self.grouping ?? ',', if base == 10: 3 else: 4)
+            shown = Spec.group(shown, self.grouping ?? ',', if base == 10: 3 else: 4)
         var prefix = ""
         if self.alternate:
             prefix = match base:
@@ -461,7 +517,7 @@ impl Spec:
                 case 8: "0o"
                 case 2: "0b"
                 case _: ""
-        return self.pad_number("{self.sign_of(n < 0)}{prefix}", digits)
+        return self.pad_number("{self.sign_of(negative)}{prefix}", shown)
 
     ## A float by the spec: fixed with `f` (six digits after the point
     ## unless a precision says), with an exponent with `e`, a percentage with
@@ -555,6 +611,11 @@ impl Spec:
     ## The digits of `|n|` in `base` (2, 8, 10 or 16; capitals with `upper`).
     @intrinsic("fmt.digits")
     pure def digits(n: int, base: int, upper: bool) -> String
+
+    ## The digits of `|n|`, an integer of any type, as `digits` gives
+    ## them.
+    @intrinsic("fmt.wide_digits")
+    pure def wide_digits[T](n: T, base: int, upper: bool) -> String
 
     ## The text of `x >= 0` by the type letter `kind` (`f`, `F`, `e`, `E`,
     ## `%`, or anything else for the shortest form) with `precision` digits
@@ -1039,6 +1100,14 @@ pure def range(start: int, stop: int, step: int = 1) -> Iter[int]
 pure def enumerate[T](xs: Iterable[T]) -> Iter[(int, T)]
 
 ## Pairs the items of `a` and `b`; panics if they have different lengths (PEP 618).
+## ```
+## let ns = [1, 2]
+## let ws = ["one", "two"]
+## var pairs: list[(int, str)] = []
+## for (n, w) in zip(ns, ws):
+##     pairs.push((n, w))
+## assert pairs == [(1, "one"), (2, "two")]
+## ```
 @intrinsic("zip")
 pure def zip[A, B](a: Iterable[A], b: Iterable[B]) -> Iter[(A, B)]
 
@@ -1050,17 +1119,40 @@ pure def zip_shortest[A, B](a: Iterable[A], b: Iterable[B]) -> Iter[(A, B)]
 @intrinsic("reversed")
 pure def reversed[T](xs: Iterable[T]) -> Iter[T]
 
-## A new list of the items in ascending order; the sort is stable.
-@intrinsic("sorted")
-pure def sorted[T: Ord](xs: Iterable[T]) -> list[T]
+## A new list of the items in ascending order; the sort is stable. By the
+## items' `Ord` (the host's structural order when it is the structural one).
+## ```
+## assert sorted([3, 1, 2]) == [1, 2, 3]
+## assert sorted({"b", "a"}) == ["a", "b"]
+## ```
+@structural("sorted")
+pure def sorted[T: Ord](xs: Iterable[T]) -> list[T]:
+    var out = iterable_list(xs)
+    out.sort()
+    return out
 
-## The smaller of `a` and `b`; `a` when they are equal.
-@intrinsic("min")
-pure def min[T: Ord](a: T, b: T) -> T
+## The items, in order, as a new list (of copies, unless the items are
+## references).
+@intrinsic("iterable_list")
+pure def iterable_list[T](xs: Iterable[T]) -> list[T]
 
-## The larger of `a` and `b`; `a` when they are equal.
-@intrinsic("max")
-pure def max[T: Ord](a: T, b: T) -> T
+## The smaller of `a` and `b` by their `Ord`; `a` when they are equal.
+@structural("min")
+pure def min[T: Ord](a: T, b: T) -> T:
+    if b.cmp(a) == Ordering.Less:
+        return b.copy()
+    return a.copy()
+
+## The larger of `a` and `b` by their `Ord`; `a` when they are equal.
+## ```
+## assert max(3, 7) == 7
+## assert min("pear", "apple") == "apple"
+## ```
+@structural("max")
+pure def max[T: Ord](a: T, b: T) -> T:
+    if b.cmp(a) == Ordering.Greater:
+        return b.copy()
+    return a.copy()
 
 ## The sum of the items, 0 for none; integer overflow panics. Floats are summed
 ## pairwise in a fixed shape (D-074).
@@ -1150,52 +1242,223 @@ impl char:
     ## The character's Unicode scalar value.
     @intrinsic("char.code")
     pure def code(self) -> int
+    ## The character whose Unicode scalar value is `n`, or `None` for a
+    ## surrogate (`0xD800` to `0xDFFF`) or a value outside `0` to
+    ## `0x10FFFF`.
+    @intrinsic("char.from_code")
+    pure def from_code(n: int) -> char?
+    ## The number of bytes of the character's UTF-8 encoding, 1 to 4.
+    ##
+    ## ```
+    ## assert 'a'.len_utf8() == 1 and 'ï'.len_utf8() == 2 and '€'.len_utf8() == 3
+    ## ```
+    pure def len_utf8(self) -> int:
+        let n = self.code()
+        if n < 0x80:
+            return 1
+        if n < 0x800:
+            return 2
+        if n < 0x10000:
+            return 3
+        return 4
 
 # ------------------------------------------------------------------ str and String
+# A text is its UTF-8 encoding, which is always valid (03, "Strings and
+# text"): `String` owns the bytes and `str` views them. The host reads the
+# bytes (`byte_len`, `byte_at`, `bytes`), cuts a text at boundaries of
+# characters (`byte_slice`), decodes it (`chars`, `len`), compares it
+# (`cmp`, by code points, which is the order of the bytes) and appends to
+# it (`String.push`, `push_char`), so the bytes stay valid; the methods
+# with bodies are written over those, and of Unicode's tables only the
+# character classes (`char.is_whitespace`, ...) and the case mappings
+# (`to_lowercase`, `to_uppercase`) are the host's.
 
 impl str:
     @intrinsic("str.cmp")
     pure def cmp(self, other: str) -> Ordering
-    @intrinsic("str.is_empty")
-    pure def is_empty(self) -> bool
-    ## The Unicode scalar values.
+    ## The number of bytes of the text's encoding.
+    @intrinsic("str.byte_len")
+    pure def byte_len(self) -> int
+    ## The byte at index `i` of the encoding, which must be in bounds.
+    @intrinsic("str.byte_at")
+    pure def byte_at(self, i: int) -> u8
+    ## The text from byte `start` up to byte `end`, which must be in
+    ## bounds, in order and at boundaries of characters.
+    ##
+    ## ```
+    ## assert "naïve".byte_slice(0, 4) == "naï"
+    ## assert "naïve".byte_len() == 6
+    ## ```
+    @intrinsic("str.byte_slice")
+    pure def byte_slice(self, start: int, end: int) -> str
+    ## The bytes of the encoding, in order.
+    @intrinsic("str.bytes")
+    pure def bytes(self) -> Iter[u8]
+    ## The Unicode scalar values the bytes encode.
     @intrinsic("str.chars")
     pure def chars(self) -> Iter[char]
-    ## The lines, split at `\n` with a trailing `\r` removed; no final empty line.
-    @intrinsic("str.lines")
-    pure def lines(self) -> Iter[str]
+    pure def is_empty(self) -> bool:
+        return self.byte_len() == 0
+    ## Whether byte index `i` is where a character starts or the end of the
+    ## text.
+    pure def is_char_boundary(self, i: int) -> bool:
+        if i < 0 or i > self.byte_len():
+            return False
+        return i == self.byte_len() or not is_continuation(self.byte_at(i))
+    ## The byte index of the first occurrence of `part` that starts at
+    ## byte `start` or after it, or `None`; an empty `part` occurs at
+    ## `start`. `start` must not be negative.
+    ##
+    ## ```
+    ## assert "a=b=c".byte_find("=") == Some(1)
+    ## assert "a=b=c".byte_find("=", 2) == Some(3)
+    ## assert "a=b=c".byte_find("-") == None
+    ## ```
+    pure def byte_find(self, part: str, start: int = 0) -> int?:
+        let last = self.byte_len() - part.byte_len()
+        if part.is_empty():
+            return if start <= last: Some(start) else: None
+        # Each place the first byte matches is a candidate.
+        let first = part.byte_at(0)
+        var i = start
+        while i <= last:
+            if self.byte_at(i) == first and self.has_at(part, i):
+                return Some(i)
+            i += 1
+        return None
+    ## The lines: the pieces between line breaks, `\n` or `\r\n`; a final
+    ## line break ends the last line rather than starting an empty one.
+    ##
+    ## ```
+    ## var lines: list[str] = []
+    ## for l in "one\r\ntwo\n\nthree\n".lines():
+    ##     lines.push(l)
+    ## assert lines == ["one", "two", "", "three"]
+    ## ```
+    pure def lines(self) -> Iter[str]:
+        var lines: list[str] = []
+        let n = self.byte_len()
+        var start = 0
+        while start < n:
+            var end = self.byte_find("\n", start).or(n)
+            let next = end + 1
+            if end > start and end < n and self.byte_at(end - 1) == 13:
+                end -= 1
+            lines.push(self.byte_slice(start, end))
+            start = next
+        return iter_of(lines)
     ## The runs of non-whitespace characters.
-    @intrinsic("str.split_whitespace")
-    pure def split_whitespace(self) -> Iter[str]
+    ##
+    ## ```
+    ## var words: list[str] = []
+    ## for w in "  the quick\tfox ".split_whitespace():
+    ##     words.push(w)
+    ## assert words == ["the", "quick", "fox"]
+    ## ```
+    pure def split_whitespace(self) -> Iter[str]:
+        var words: list[str] = []
+        var start = -1
+        var i = 0
+        for c in self.chars():
+            if c.is_whitespace():
+                if start >= 0:
+                    words.push(self.byte_slice(start, i))
+                    start = -1
+            elif start < 0:
+                start = i
+            i += c.len_utf8()
+        if start >= 0:
+            words.push(self.byte_slice(start, i))
+        return iter_of(words)
     ## The pieces between occurrences of `sep`, which must not be empty.
-    @intrinsic("str.split")
-    pure def split(self, sep: str) -> Iter[str]
+    ##
+    ## ```
+    ## var pieces: list[str] = []
+    ## for p in "a,b,,c".split(","):
+    ##     pieces.push(p)
+    ## assert pieces == ["a", "b", "", "c"]
+    ## ```
+    pure def split(self, sep: str) -> Iter[str]:
+        if sep.is_empty():
+            panic("str.split: the separator must not be empty")
+        var pieces: list[str] = []
+        var start = 0
+        while True:
+            match self.byte_find(sep, start):
+                case Some(at):
+                    pieces.push(self.byte_slice(start, at))
+                    start = at + sep.byte_len()
+                case None:
+                    pieces.push(self.byte_slice(start, self.byte_len()))
+                    return iter_of(pieces)
     ## The text before and after the first `sep`, or `None`.
-    @intrinsic("str.split_once")
-    pure def split_once(self, sep: str) -> (str, str)?
-    @intrinsic("str.trim")
-    pure def trim(self) -> str
-    @intrinsic("str.trim_start")
-    pure def trim_start(self) -> str
-    @intrinsic("str.trim_end")
-    pure def trim_end(self) -> str
-    @intrinsic("str.starts_with")
-    pure def starts_with(self, prefix: str) -> bool
-    @intrinsic("str.ends_with")
-    pure def ends_with(self, suffix: str) -> bool
-    @intrinsic("str.contains")
-    pure def contains(self, part: str) -> bool
+    pure def split_once(self, sep: str) -> (str, str)?:
+        let at = self.byte_find(sep) else:
+            return None
+        return Some((self.byte_slice(0, at), self.byte_slice(at + sep.byte_len(), self.byte_len())))
+    ## The text without whitespace at either end.
+    pure def trim(self) -> str:
+        return self.trim_start().trim_end()
+    ## The text without whitespace at its start.
+    pure def trim_start(self) -> str:
+        var start = 0
+        for c in self.chars():
+            if not c.is_whitespace():
+                break
+            start += c.len_utf8()
+        return self.byte_slice(start, self.byte_len())
+    ## The text without whitespace at its end.
+    pure def trim_end(self) -> str:
+        var end = self.byte_len()
+        while end > 0:
+            var start = end - 1
+            while is_continuation(self.byte_at(start)):
+                start -= 1
+            if not self.char_at(start).is_whitespace():
+                break
+            end = start
+        return self.byte_slice(0, end)
+    pure def starts_with(self, prefix: str) -> bool:
+        return self.has_at(prefix, 0)
+    pure def ends_with(self, suffix: str) -> bool:
+        return self.has_at(suffix, self.byte_len() - suffix.byte_len())
+    pure def contains(self, part: str) -> bool:
+        return self.byte_find(part).is_some()
     ## The text without `prefix`, or the whole text if it does not start with it.
-    @intrinsic("str.strip_prefix")
-    pure def strip_prefix(self, prefix: str) -> str
+    pure def strip_prefix(self, prefix: str) -> str:
+        if self.starts_with(prefix):
+            return self.byte_slice(prefix.byte_len(), self.byte_len())
+        return self
     ## The text without `suffix`, or the whole text if it does not end with it.
-    @intrinsic("str.strip_suffix")
-    pure def strip_suffix(self, suffix: str) -> str
+    pure def strip_suffix(self, suffix: str) -> str:
+        if self.ends_with(suffix):
+            return self.byte_slice(0, self.byte_len() - suffix.byte_len())
+        return self
     ## The index in characters of the first occurrence of `part`, or `None`.
-    @intrinsic("str.find")
-    pure def find(self, part: str) -> int?
-    @intrinsic("str.replace")
-    pure def replace(self, old: str, new: str) -> String
+    ##
+    ## ```
+    ## assert "naïve cafe".find("cafe") == Some(6)
+    ## ```
+    pure def find(self, part: str) -> int?:
+        let at = self.byte_find(part) else:
+            return None
+        return Some(len(self.byte_slice(0, at)))
+    ## The text with every occurrence of `old`, which must not be empty,
+    ## replaced by `new`.
+    pure def replace(self, old: str, new: str) -> String:
+        if old.is_empty():
+            panic("str.replace: the text to replace must not be empty")
+        var out = String.new()
+        var start = 0
+        while True:
+            match self.byte_find(old, start):
+                case Some(at):
+                    out.push(self.byte_slice(start, at))
+                    out.push(new)
+                    start = at + old.byte_len()
+                case None:
+                    out.push(self.byte_slice(start, self.byte_len()))
+                    return out
     ## Unicode lower-case mapping.
     @intrinsic("str.to_lowercase")
     pure def to_lowercase(self) -> String
@@ -1209,6 +1472,13 @@ impl str:
     ## The decimal integer the whole text spells, with an optional sign, or
     ## `None`: when a character is not an ASCII digit, when there are no
     ## digits, and when the value is out of range for `int`.
+    ##
+    ## ```
+    ## assert "-42".parse_int() == Some(-42)
+    ## assert "007".parse_int() == Some(7)
+    ## assert "4x".parse_int() == None
+    ## assert "9223372036854775808".parse_int() == None
+    ## ```
     pure def parse_int(self) -> int?:
         # The value is accumulated negated, so that the least `int`, whose
         # magnitude is one more than the greatest's, parses too.
@@ -1240,9 +1510,57 @@ impl str:
     ## the nearest `f64`, or `None`; `inf` and `nan` are not numbers here.
     @intrinsic("str.parse_float")
     pure def parse_float(self) -> f64?
-    ## `self` repeated `n` times.
-    @intrinsic("str.repeat")
-    pure def repeat(self, n: int) -> String
+    ## `self` repeated `n` times; `n` must not be negative.
+    pure def repeat(self, n: int) -> String:
+        if n < 0:
+            panic("str.repeat: the count {n} is negative")
+        var out = String.new()
+        for _ in range(n):
+            out.push(self)
+        return out
+    ## Whether `part` occurs at byte `i`.
+    @internal
+    pure def has_at(self, part: str, i: int) -> bool:
+        let m = part.byte_len()
+        if i < 0 or i + m > self.byte_len():
+            return False
+        for j in range(m):
+            if self.byte_at(i + j) != part.byte_at(j):
+                return False
+        return True
+    ## The character whose encoding starts at byte `i`, where one starts:
+    ## the lead byte gives the length and the high bits of the code, each
+    ## continuation byte six more bits.
+    @internal
+    pure def char_at(self, i: int) -> char:
+        let lead = self.byte_at(i).to_int()
+        var code = lead
+        var more = 0
+        if lead >= 0xF0:
+            code = lead & 0x07
+            more = 3
+        elif lead >= 0xE0:
+            code = lead & 0x0F
+            more = 2
+        elif lead >= 0xC0:
+            code = lead & 0x1F
+            more = 1
+        for k in range(1, more + 1):
+            code = (code << 6) | (self.byte_at(i + k).to_int() & 0x3F)
+        return char.from_code(code).expect("a valid encoding")
+
+## Whether `b` continues the encoding of a character (`0b10xxxxxx`) rather
+## than starting one.
+@internal
+pure def is_continuation(b: u8) -> bool:
+    return b & 0xC0 == 0x80
+
+## The elements of `xs`, moved into an iterator: the pieces `str.split`
+## and the others collect.
+@internal
+@intrinsic("Iter.of")
+@keeps(xs)
+pure def iter_of[T](own xs: list[T]) -> Iter[T]
 
 impl String:
     ## A new string: empty, or a copy of `text`.
@@ -1264,6 +1582,24 @@ impl Path:
     pure def as_str(self) -> str
 
 # ------------------------------------------------------------------ collections
+
+impl[T, const N: int] Array[T, N]:
+    ## `N` copies of `value` (`value.copy()`, 04, for every element but
+    ## one).
+    ##
+    ## ```
+    ## var a: Array[int, 3] = Array.filled(7)
+    ## a[1] = 0
+    ## assert a.len() == 3 and a[0] + a[1] + a[2] == 14
+    ## ```
+    @intrinsic("Array.filled")
+    pure def filled(own value: T) -> Array[T, N]
+    ## The number of elements: `N`.
+    pure def len(self) -> int:
+        return N
+    ## The elements, in order, as a list.
+    @intrinsic("Array.to_list")
+    pure def to_list(self) -> list[T] where T: Copy
 
 impl[T] list[T]:
     @intrinsic("list.new")
@@ -1425,7 +1761,9 @@ impl[T] Iter[T]:
 
 ## The elements of two sorted runs in one sorted run; of equal elements,
 ## `earlier`'s come first (`list.sort_by`).
-pure def merge_runs[T](own earlier: list[T], own later: list[T], cmp: pure (ref T, ref T) -> Ordering) -> list[T]:
+pure def merge_runs[T](
+    own earlier: list[T], own later: list[T], cmp: pure (ref T, ref T) -> Ordering
+) -> list[T]:
     var a = earlier
     var b = later
     var out: list[T] = []
@@ -1782,6 +2120,11 @@ struct Duration:
     nanos: int
 
 impl Duration:
+    ## ```
+    ## assert Duration.minutes(2) == Duration.seconds(120)
+    ## assert Duration.millis(1500).as_seconds() == 1
+    ## assert "{Duration.millis(1500)}" == "1.5s"
+    ## ```
     pure def seconds(n: int) -> Duration:
         return Duration(nanos=n * 1000000000)
     pure def millis(n: int) -> Duration:
@@ -1948,12 +2291,23 @@ impl DateTime:
     ## a time with optional fractions of a second, and `Z` or an offset
     ## such as `+02:00`; `InvalidTime` for anything else, or a time outside
     ## the years 1678 to 2261.
+    ##
+    ## ```
+    ## let t = DateTime.parse("2026-10-11T12:00:00+02:00").expect("a time")
+    ## assert "{t}" == "2026-10-11T10:00:00Z"
+    ## assert DateTime.parse("yesterday").is_err()
+    ## ```
     pure def parse(text: str) -> DateTime ! TimeError:
         var cs: list[char] = []
         for c in text.chars():
             cs.push(c)
         let n = len(cs)
-        if n < 20 or cs[4] != '-' or cs[7] != '-' or (cs[10] != 'T' and cs[10] != 't') or cs[13] != ':' or cs[16] != ':':
+        if n < 20
+                or cs[4] != '-'
+                or cs[7] != '-'
+                or (cs[10] != 'T' and cs[10] != 't')
+                or cs[13] != ':'
+                or cs[16] != ':':
             return Err(InvalidTime(text=text.to_string()))
         let year = time_digits(cs, 0, 4) ?? -1
         let month = time_digits(cs, 5, 2) ?? -1
@@ -1990,7 +2344,11 @@ impl DateTime:
                 offset = -offset
         else:
             return Err(InvalidTime(text=text.to_string()))
-        let secs = days_from_civil(year, month, day) * 86400 + hour * 3600 + minute * 60 + second - offset
+        let secs = days_from_civil(year, month, day) * 86400
+            + hour * 3600
+            + minute * 60
+            + second
+            - offset
         if secs < -9223372036 or secs > 9223372035:
             return Err(InvalidTime(text=text.to_string()))
         return Ok(DateTime.from_unix_nanos(secs * 1000000000 + nanos))
@@ -2060,7 +2418,7 @@ impl Timer:
 @intrinsic("f64.within_ulps")
 pure def within_ulps(a: f64, b: f64, n: int) -> bool
 
-impl[T] Option[T]:
+impl[T] T?:
     @intrinsic("Option.is_some")
     pure def is_some(self) -> bool
     @intrinsic("Option.is_none")
@@ -2079,6 +2437,23 @@ impl[T] Option[T]:
         if self.is_none():
             return None
         return Some(f(self.expect("a value")))
+
+impl[T: Copy] ref T?:
+    ## The value the reference points to, copied, as `xs.first().copied()`
+    ## gives the first element.
+    ##
+    ## ```
+    ## let xs = [3, 1]
+    ## assert xs.first().copied() == Some(3)
+    ## assert xs.get(5).copied() == None
+    ## ```
+    pure def copied(self) -> T?:
+        match self:
+            case Some(r):
+                let v: T = r
+                return Some(v)
+            case None:
+                return None
 
 impl[T, E] Result[T, E]:
     @intrinsic("Result.is_ok")
@@ -2156,7 +2531,16 @@ impl Draws:
     ## The draws of one case; `size` bounds how big values grow (the most
     ## items of a collection, the largest small integer).
     def new(own prefix: list[int], random: bool, exhaustive: bool, state: int, size: int) -> Draws:
-        let st = DrawState(prefix=prefix, choices=[], bounds=[], random=random, exhaustive=exhaustive, state=state, size=size, rejected=False)
+        let st = DrawState(
+            prefix=prefix,
+            choices=[],
+            bounds=[],
+            random=random,
+            exhaustive=exhaustive,
+            state=state,
+            size=size,
+            rejected=False,
+        )
         return Draws(cell=Cap.new(Mutex(st)))
     ## A choice in `range(n)`; past 4096 choices the case is refused.
     def draw(self, n: int) -> int:
@@ -2274,7 +2658,9 @@ impl Draws:
             _ = xs.add(elem(d))
             n += 1
         return xs
-    def gen_dict[K, V](d: Draws, key: (Draws) -> K, value: (Draws) -> V) -> dict[K, V] where K: Hash:
+    def gen_dict[K, V](
+        d: Draws, key: (Draws) -> K, value: (Draws) -> V
+    ) -> dict[K, V] where K: Hash:
         var xs: dict[K, V] = {}
         var n = 0
         while d.more(n):
@@ -2309,7 +2695,9 @@ view struct Gen[T]:
 
 impl[T] Gen[T]:
     ## `cases` random cases of `make`.
-    pure def of(make: (Draws) -> T, cases: int = 100, quiet: bool = False, steps: int = 1000000) -> Gen[T]:
+    pure def of(
+        make: (Draws) -> T, cases: int = 100, quiet: bool = False, steps: int = 1000000
+    ) -> Gen[T]:
         return Gen(make=make, exhaustive=False, max_len=0, cases=cases, quiet=quiet, steps=steps)
     ## Every case of `make` up to `max_len`.
     pure def every(make: (Draws) -> T, max_len: int, steps: int = 1000000) -> Gen[T]:
@@ -2366,7 +2754,9 @@ def replay_case() -> list[int]?
 def record_case(choices: list[int])
 
 ## Runs one case from `prefix`.
-def run_case[T](gen: Gen[T], prop: (T) -> bool, own prefix: list[int], random: bool, state: int, size: int) -> (Outcome, Draws):
+def run_case[T](
+    gen: Gen[T], prop: (T) -> bool, own prefix: list[int], random: bool, state: int, size: int
+) -> (Outcome, Draws):
     let d = Draws.new(prefix, random, gen.exhaustive, state, size)
     match catch(gen.make, d, gen.steps):
         case Err(Panicked(message)):
@@ -2554,7 +2944,9 @@ def check[T: Debug](gen: Gen[T], prop: (T) -> bool):
     record_case(best.choices)
     let d = Draws.new(best.choices.copy(), False, gen.exhaustive, 0, size)
     let times = if shrinks == 1: "once".to_string() else: "{shrinks} times"
-    panic("the property failed for {shown(gen.make, d, gen.steps)} (case {cases + refused + 1}, shrunk {times})\n  {best.reason}")
+    panic(
+        "the property failed for {shown(gen.make, d, gen.steps)} (case {cases + refused + 1}, shrunk {times})\n  {best.reason}"
+    )
 
 ## The case `d` makes, as `{:?}` shows it.
 def shown[T: Debug](make: (Draws) -> T, d: Draws, steps: int) -> String:
@@ -2638,6 +3030,13 @@ impl FsOps for Fs:
 
 impl Fs:
     ## The same file system with every change refused as `PermissionDenied`.
+    ##
+    ## ```
+    ## let fs = Fs.in_memory({"notes.txt": "kept"})
+    ## let ro = fs.read_only()
+    ## assert ro.read_to_string("notes.txt").expect("readable") == "kept"
+    ## assert ro.write_text("notes.txt", "lost").is_err()
+    ## ```
     def read_only(self) -> Fs:
         return cap.ReadOnly(inner=self)
     ## The same file system limited to the directory `dir`: a path is
@@ -3035,8 +3434,13 @@ impl System:
     ## `System` receives the real one instead.
     def fake(seed: int) -> System:
         return System.assemble(
-            fs=Fs.in_memory(), net=cap.NoNet(), clock=Clock.fake(), rand=Rand.seeded(seed),
-            env=Env.fake(), proc=Proc.fake(), stdin=Stdin.fake(),
+            fs=Fs.in_memory(),
+            net=cap.NoNet(),
+            clock=Clock.fake(),
+            rand=Rand.seeded(seed),
+            env=Env.fake(),
+            proc=Proc.fake(),
+            stdin=Stdin.fake(),
         )
     ## The `sim` profile's system (17, "Simulation and replay"), which
     ## `sisu test --sim` gives a test that declares a `System`: a
@@ -3046,12 +3450,19 @@ impl System:
     ## environment, processes and standard input.
     def sim(seed: int) -> System:
         return System.assemble(
-            fs=cap.SimFs.new(), net=cap.SimNetwork.new(), clock=Clock.fake(), rand=Rand.seeded(seed),
-            env=Env.fake(), proc=Proc.fake(), stdin=Stdin.fake(),
+            fs=cap.SimFs.new(),
+            net=cap.SimNetwork.new(),
+            clock=Clock.fake(),
+            rand=Rand.seeded(seed),
+            env=Env.fake(),
+            proc=Proc.fake(),
+            stdin=Stdin.fake(),
         )
     @internal
     @intrinsic("System.assemble")
-    def assemble(fs: Fs, net: Net, clock: Clock, rand: Rand, env: Env, proc: Proc, stdin: Stdin) -> System
+    def assemble(
+        fs: Fs, net: Net, clock: Clock, rand: Rand, env: Env, proc: Proc, stdin: Stdin
+    ) -> System
 
 ## What a transcript test's runs of `main` share (17, "Snapshots and
 ## transcripts"): an in-memory `Fs` holding the transcript's fixture
@@ -3067,13 +3478,22 @@ def transcript_world(own files: list[(str, str)]) -> TranscriptWorld:
     var d: dict[str, str] = dict()
     for path, text in files:
         _ = d.insert(path, text)
-    return TranscriptWorld(fs=Fs.in_memory(d), clock=Clock.frozen_at(DateTime.epoch()), rand=Rand.seeded(0))
+    return TranscriptWorld(
+        fs=Fs.in_memory(d), clock=Clock.frozen_at(DateTime.epoch()), rand=Rand.seeded(0)
+    )
 
 @internal
-def transcript_system(own world: TranscriptWorld, own args: list[str], own stdin: list[str]) -> System:
+def transcript_system(
+    own world: TranscriptWorld, own args: list[str], own stdin: list[str]
+) -> System:
     return System.assemble(
-        fs=world.fs, net=cap.NoNet(), clock=world.clock, rand=world.rand,
-        env=Env.fake(args), proc=Proc.fake(), stdin=Stdin.fake(stdin),
+        fs=world.fs,
+        net=cap.NoNet(),
+        clock=world.clock,
+        rand=world.rand,
+        env=Env.fake(args),
+        proc=Proc.fake(),
+        stdin=Stdin.fake(stdin),
     )
 
 ## The revoker of a caretaker (`Fs.revocable`): a `Copy` handle on the
@@ -3171,6 +3591,37 @@ impl[T] Len for list[T]:
     @intrinsic("len")
     pure def len(self) -> int
 
+impl[T: Debug, const N: int] Debug for Array[T, N]:
+    pure def fmt_debug(self, mut f: Formatter):
+        f.write("[")
+        f.depth += 1
+        for i in range(N):
+            if i > 0:
+                f.write(", ")
+            self[i].fmt_debug(mut f)
+        f.depth -= 1
+        f.write("]")
+
+impl[T: Debug, const N: int] Display for Array[T, N]:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl[T: Eq, const N: int] Eq for Array[T, N]:
+    pure def eq(self, other: Array[T, N]) -> bool:
+        for i in range(N):
+            if self[i] != other[i]:
+                return False
+        return True
+
+impl[T: Hash, const N: int] Hash for Array[T, N]:
+    pure def hash(self, mut h: Hasher):
+        for i in range(N):
+            self[i].hash(mut h)
+
+impl[T, const N: int] Len for Array[T, N]:
+    pure def len(self) -> int:
+        return N
+
 impl[T: Debug] Debug for set[T]:
     pure def fmt_debug(self, mut f: Formatter):
         if len(self) == 0:
@@ -3238,7 +3689,7 @@ impl[K, V] Len for dict[K, V]:
     @intrinsic("len")
     pure def len(self) -> int
 
-impl[T: Debug] Display for Option[T]:
+impl[T: Debug] Display for T?:
     pure def fmt(self, mut f: Formatter):
         self.fmt_debug(mut f)
 

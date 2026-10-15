@@ -18,10 +18,29 @@ impl FnLower<'_, '_> {
             PatKind::Lit(l) => {
                 let c = match l {
                     Lit::Int(n) => Const::Int(*n),
+                    Lit::WideInt(_) => Const::Int(0),
                     Lit::Float(f) => Const::Float(*f),
                     Lit::Bool(b) => Const::Bool(*b),
                     Lit::Char(c) => Const::Char(*c),
                     Lit::Str(s) => Const::Str(s.clone()),
+                };
+                // A literal of a `u64`, `u128` or `i128` is a value an
+                // intrinsic makes, as in an expression.
+                let c = match self.sized_int(&pat.ty).filter(|k| sisu_resolve::std_sources::own_kind(k)) {
+                    Some(_) => {
+                        let kind = match l {
+                            Lit::WideInt(b) => thir::ExprKind::WideInt(*b),
+                            _ => thir::ExprKind::Int(match c {
+                                Const::Int(n) => n,
+                                _ => 0,
+                            }),
+                        };
+                        let lit = thir::Expr::new(kind, pat.ty.clone(), pat.span);
+                        let t = self.temp(&pat.ty);
+                        self.into(Place::local(t), &lit);
+                        Operand::Copy(Place::local(t))
+                    }
+                    None => Operand::Const(c),
                 };
                 let lhs = if self.ctx.prog.is_copy_in(&pat.ty, &self.bounds) {
                     Operand::Copy(place.clone())
@@ -31,7 +50,7 @@ impl FnLower<'_, '_> {
                     Operand::Copy(Place::local(t))
                 };
                 let r = self.temp_sir(sir::Type::Bool);
-                self.assign(Place::local(r), Rvalue::Binary(sir::BinOp::Eq, lhs, Operand::Const(c)), loc);
+                self.assign(Place::local(r), Rvalue::Binary(sir::BinOp::Eq, lhs, c), loc);
                 let ok = self.new_block();
                 self.terminate(
                     Terminator::Switch {

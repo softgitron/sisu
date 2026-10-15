@@ -1,0 +1,7 @@
+frame 0: a circle of 2, shade 1, epoch 0
+frame 1: a circle of 2, shade 2, epoch 0
+frame 2: a square of 3, shade 102, epoch 1
+frame 3: a square of 3, shade 103, epoch 1
+--- stderr
+watch: epoch 1 replaces `draw`, `light`, `main`, `SIZE`
+--- status 0

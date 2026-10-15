@@ -21,6 +21,14 @@
 ## the tasks still running and is the result. When the body returns a value
 ## that is not a result, a failure nobody joined panics in the scope's
 ## task. A panic in the body cancels the tasks, joins them, and continues.
+##
+## ```
+## let total = task.scope do s:
+##     let a = s.spawn(() -> 20)
+##     let b = s.spawn(() -> 22)
+##     return a.join().expect("joined") + b.join().expect("joined")
+## assert total == 42
+## ```
 @intrinsic("task.scope")
 pure def scope[T](body: (Scope) -> T) -> T
 

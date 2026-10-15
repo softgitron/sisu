@@ -1,0 +1,17 @@
+# Mistakes in a manifest are diagnostics where they are written (09).
+[package]
+name = "Weather-App"
+version = "1.2"
+edition = "27"
+colour = "blue"
+
+[dependencies]
+http2 = "1.2"
+odd = { path = "../odd", when = { os = 3 } }
+gone = { path = "../nowhere" }
+
+[trust]
+unsafe = ["nobody"]
+
+[tooling]
+fast = true

@@ -1,0 +1,5 @@
+pub def helper() -> int:
+    return 1
+
+pub def again() -> int:
+    return 2

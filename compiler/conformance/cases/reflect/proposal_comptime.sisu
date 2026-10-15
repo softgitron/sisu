@@ -1,8 +1,8 @@
 # The parts of proposal/examples/comptime.sisu that stage 0 runs, each
 # section verbatim (a test keeps them so): reflection's JSON encoder, the
-# user-defined derive, and conditional compilation with a test. The rest
-# needs `Array`, `u32` and const generics (the CRC table and the ring
-# buffer) or the `sql` package (the checked string DSL).
+# user-defined derive, and conditional compilation with a test. The CRC
+# table and the ring buffer are `comptime/proposal_arrays`; the checked
+# string DSL needs the `sql` package, which stage 0 does not have.
 
 import std.json
 

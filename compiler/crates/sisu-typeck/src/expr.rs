@@ -642,7 +642,7 @@ impl Checker<'_> {
         let (bits, signed) = sisu_resolve::std_sources::int_width(k).unwrap_or((64, true));
         let ty =
             self.prog.lookup_in(self.prog.prelude, k).map(|d| Ty::Adt(d, Vec::new())).unwrap_or(Ty::Error);
-        let max: u128 = if signed { (1u128 << (bits - 1)) - 1 } else { (1u128 << bits) - 1 };
+        let max: u128 = if signed { (1u128 << (bits - 1)) - 1 } else { u128::MAX >> (128 - bits) };
         let fits = match value {
             Some(v) if negative => signed && v <= max + 1,
             Some(v) => v <= max,
@@ -655,6 +655,16 @@ impl Checker<'_> {
             return Expr::error(span);
         }
         let v = value.unwrap_or(0);
+        // A 128-bit literal beyond `i64` keeps its 128 bits.
+        if bits == 128 {
+            let bits = if negative { v.wrapping_neg() } else { v };
+            return match i64::try_from(bits as i128) {
+                Ok(n) if signed || !negative && v <= i64::MAX as u128 => {
+                    Expr::new(ExprKind::Int(n), ty, span)
+                }
+                _ => Expr::new(ExprKind::WideInt(bits), ty, span),
+            };
+        }
         let n = if negative { (v as i128).wrapping_neg() as i64 } else { v as u64 as i64 };
         Expr::new(ExprKind::Int(n), ty, span)
     }
@@ -845,6 +855,12 @@ impl Checker<'_> {
                 return Expr::error(span);
             }
             _ => {}
+        }
+        // A `const` generic parameter is an `int` (03, "Const generics").
+        if let Some(i) = self.generic_names.iter().position(|g| g == n)
+            && self.const_generics.get(i) == Some(&true)
+        {
+            return Expr::new(ExprKind::ConstParam(i as u32), Ty::Int, span);
         }
         // A variant of the expected type wins over a declaration.
         if let Some(exp) = expected
@@ -1407,7 +1423,11 @@ impl Checker<'_> {
             CmpOp::In | CmpOp::NotIn => {
                 let container = self.resolved(rt.strip_ref());
                 let elem = match &container {
-                    Ty::Adt(d, a) if Some(*d) == self.prog.wk.list || Some(*d) == self.prog.wk.set => {
+                    Ty::Adt(d, a)
+                        if Some(*d) == self.prog.wk.list
+                            || Some(*d) == self.prog.wk.set
+                            || self.prog.builtin(*d) == Some("Array") =>
+                    {
                         a.first().cloned()
                     }
                     Ty::Adt(d, a) if Some(*d) == self.prog.wk.dict => a.first().cloned(),
@@ -1573,7 +1593,7 @@ impl Checker<'_> {
             _ => t,
         };
         match prog.builtin(*d) {
-            Some("list") | Some("set") => {
+            Some("list") | Some("set") | Some("Array") => {
                 let el = args.first().cloned().unwrap_or(Ty::Error);
                 let m = if behind_ref && fmode == ForMode::Own { ForMode::Borrow } else { fmode };
                 Some((wrap(el, m), m))
@@ -2275,6 +2295,7 @@ impl Checker<'_> {
                 if let Some(s) = prog.struct_info(*d)
                     && let Some(i) = s.fields.iter().position(|f| f.name == name.text)
                 {
+                    self.check_field_vis(*d, i, name.range);
                     let ty = s.fields[i].ty.subst(args);
                     return Expr::new(ExprKind::Field { base: Box::new(b), index: i as u32 }, ty, span);
                 }
@@ -2304,6 +2325,39 @@ impl Checker<'_> {
         Expr::error(span)
     }
 
+    /// A field of a struct of another module is reached only when it is
+    /// `pub` (09).
+    pub fn check_field_vis(&mut self, d: DefId, i: usize, range: TextRange) {
+        let prog = self.prog;
+        let Some(f) = prog.struct_info(d).and_then(|s| s.fields.get(i)) else { return };
+        if !prog.vis_allows(f.vis, prog.def(d).module, self.module) {
+            let diag = self
+                .error(msg::RESOLVE_PRIVATE_FIELD, range)
+                .with("field", f.name.clone())
+                .with("ty", prog.def(d).name.clone())
+                .with("module", prog.module_path(prog.def(d).module));
+            self.report(diag);
+        }
+    }
+
+    /// A method or associated function of a type of another module is
+    /// called only when it is `pub` (09); a trait's methods are as visible
+    /// as the trait.
+    pub fn check_method_vis(&mut self, m: DefId, range: TextRange) {
+        let prog = self.prog;
+        let Some(f) = prog.fn_info(m) else { return };
+        if f.trait_.is_some() || f.impl_.is_some() || prog.visible_from(m, self.module) {
+            return;
+        }
+        let owner = f.owner.as_ref().map(|o| prog.display(o)).unwrap_or_default();
+        let diag = self
+            .error(msg::RESOLVE_PRIVATE_METHOD, range)
+            .with("name", prog.def(m).name.clone())
+            .with("ty", owner)
+            .with("module", prog.module_path(prog.def(m).module));
+        self.report(diag);
+    }
+
     fn index_expr(&mut self, base: &ast::Expr, args: &[ast::IndexArg], range: TextRange) -> Expr {
         let span = self.span(range);
         let b = self.infer_expr(base, None);
@@ -2321,7 +2375,7 @@ impl Checker<'_> {
         let prog = self.prog;
         let Some(arg) = args.first() else { return Expr::error(span) };
         match (&t, arg) {
-            (Ty::Adt(d, a), ast::IndexArg::Expr(e)) if prog.builtin(*d) == Some("list") => {
+            (Ty::Adt(d, a), ast::IndexArg::Expr(e)) if matches!(prog.builtin(*d), Some("list" | "Array")) => {
                 let elem = a.first().cloned().unwrap_or(Ty::Error);
                 let (idx, kind) = match &e.kind {
                     ast::ExprKind::FromEnd(inner) => {

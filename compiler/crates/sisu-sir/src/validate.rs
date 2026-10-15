@@ -8,8 +8,8 @@ use crate::*;
 
 /// The builtin types SIR knows without a declaration.
 pub const BUILTIN_TYPES: &[&str] = &[
-    "String", "list", "dict", "set", "Iter", "Entry", "Path", "DateTime", "Fs", "Net", "Clock", "Rand",
-    "Env", "Proc", "Stdin", "System", "Option", "Result", "Iterable",
+    "String", "list", "Array", "dict", "set", "Iter", "Entry", "Path", "DateTime", "Fs", "Net", "Clock",
+    "Rand", "Env", "Proc", "Stdin", "System", "Option", "Result", "Iterable",
 ];
 
 /// The largest `$N` a type mentions, plus one.

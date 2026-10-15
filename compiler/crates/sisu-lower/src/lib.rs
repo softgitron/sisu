@@ -38,6 +38,8 @@ pub(crate) struct Ctx<'a> {
     /// compiler writes for it): a prelude function of the same name, which
     /// the program's hides, is `std.NAME` in SIR.
     pub root_fns: HashSet<String>,
+    /// Each declared type by its SIR name (the first of a name).
+    pub type_defs: HashMap<String, DefId>,
 }
 
 impl Ctx<'_> {
@@ -184,6 +186,7 @@ impl Ctx<'_> {
             Ty::Str => sir::Type::Str,
             Ty::Unit | Ty::Var(_) | Ty::Error => sir::Type::Unit,
             Ty::Param(i) => sir::Type::Param(*i),
+            Ty::Const(n) => sir::Type::Const(*n),
             Ty::Dyn(tr) => {
                 sir::Type::Dyn(prog.qualified_name(tr.def), tr.args.iter().map(|a| self.ty(a)).collect())
             }
@@ -278,6 +281,29 @@ pub fn lower_for(
     level: ContractLevel,
     extra: &[&str],
 ) -> sir::Program {
+    lower_reaching(prog, typed, sources, level, extra, false)
+}
+
+/// Every body lowered, whether the program reaches it or not: what the
+/// test that puts the whole standard library through the ownership
+/// checker checks.
+pub fn lower_every_body(
+    prog: &Program,
+    typed: &Typed,
+    sources: &SourceMap,
+    level: ContractLevel,
+) -> sir::Program {
+    lower_reaching(prog, typed, sources, level, &[], true)
+}
+
+fn lower_reaching(
+    prog: &Program,
+    typed: &Typed,
+    sources: &SourceMap,
+    level: ContractLevel,
+    extra: &[&str],
+    every_body: bool,
+) -> sir::Program {
     let mut ctx = Ctx {
         prog,
         sources,
@@ -286,7 +312,13 @@ pub fn lower_for(
         impl_names: HashMap::new(),
         level,
         root_fns: HashSet::new(),
+        type_defs: HashMap::new(),
     };
+    for d in (0..prog.defs.len() as u32).map(DefId) {
+        if matches!(prog.def(d).kind, DefKind::Struct(_) | DefKind::Enum(_) | DefKind::ErrorSet(_)) {
+            ctx.type_defs.entry(ctx.type_name(d)).or_insert(d);
+        }
+    }
     ctx.root_fns = prog
         .defs
         .iter()
@@ -302,14 +334,18 @@ pub fn lower_for(
     if let Some(m) = prog.modules.get(prog.root.0 as usize) {
         ctx.source_index(m.file);
     }
-    let mut functions = Vec::new();
-    for b in &typed.bodies {
+    // Each body by the name of the function it lowers to. A body is lowered
+    // when a kept function first names it; its files are numbered in the
+    // order the bodies come, as lowering every body numbered them.
+    let mut bodies: HashMap<String, usize> = HashMap::new();
+    for (i, b) in typed.bodies.iter().enumerate() {
         let is_intrinsic =
             matches!(b.kind, BodyKind::Fn) && prog.fn_info(b.def).is_some_and(|f| f.intrinsic.is_some());
         if is_intrinsic {
             continue;
         }
-        functions.extend(func::lower_body(&mut ctx, b));
+        ctx.source_index(b.span.file);
+        bodies.entry(ctx.body_name(b)).or_insert(i);
     }
     let entry = prog.main().and_then(|m| {
         let f = prog.fn_info(m)?;
@@ -341,8 +377,12 @@ pub fn lower_for(
             roots.push(ctx.body_name(b));
         }
     }
-    let types = collect_types(&ctx, &functions);
-    let mut functions = prune(&ctx, functions, &roots, &types);
+    if every_body {
+        let mut all: Vec<String> = bodies.keys().cloned().collect();
+        all.sort();
+        roots.extend(all);
+    }
+    let mut functions = lower_reached(&mut ctx, typed, &bodies, &roots);
     let types = collect_types(&ctx, &functions);
     functions.extend(glue::glue_functions(&types));
     let intrinsics = intrinsic_decls(prog, &functions);
@@ -582,42 +622,79 @@ fn intrinsic_decls(prog: &Program, functions: &[sir::Function]) -> Vec<sir::Intr
 /// trait's provided body and the methods of every impl of the trait for a
 /// type some kept function names: a value of a type that no kept function
 /// mentions is never made, so it is never dispatched to.
-fn prune(
-    ctx: &Ctx,
-    functions: Vec<sir::Function>,
+/// The body a function's name comes from: its own, or the one its closure
+/// or `comptime` expression is in (`f#closure2`, `T#field#comptime0`).
+fn owner_body(name: &str, bodies: &HashMap<String, usize>) -> Option<usize> {
+    let mut n = name;
+    loop {
+        if let Some(&i) = bodies.get(n) {
+            return Some(i);
+        }
+        let cut = n.rfind("#closure").into_iter().chain(n.rfind("#comptime")).max()?;
+        n = &n[..cut];
+    }
+}
+
+/// Lowers what the roots reach, and only that: from each kept function,
+/// the functions it calls or names, the defaults, drops and invariant
+/// checks of the types it uses, and the methods of the impls of the
+/// traits it calls through `call trait` for the types the kept functions
+/// mention. The functions come in the order of their bodies.
+fn lower_reached(
+    ctx: &mut Ctx,
+    typed: &Typed,
+    bodies: &HashMap<String, usize>,
     roots: &[String],
-    types: &[sir::TypeDecl],
 ) -> Vec<sir::Function> {
     let prog = ctx.prog;
-    let by_name: HashMap<&str, &sir::Function> = functions.iter().map(|f| (f.name.as_str(), f)).collect();
+    let mut lowered: HashMap<usize, Vec<sir::Function>> = HashMap::new();
+    let mut where_is: HashMap<String, usize> = HashMap::new();
     let mut dispatched: HashSet<DefId> = HashSet::new();
     let mut added_impls: HashSet<DefId> = HashSet::new();
     let mut keep: HashSet<String> = HashSet::new();
     let mut mentioned: HashSet<String> = HashSet::new();
+    let mut typed_names: HashSet<String> = HashSet::new();
     let mut work: Vec<String> = roots.to_vec();
-    // Defaults and drops of declared types are reached through the types,
-    // and so is a type's invariant check, which the run time calls when
-    // unwinding drops a mutex guard (D-077).
-    for t in types {
-        match t {
-            sir::TypeDecl::Struct { name, fields, drop, .. } => {
-                work.extend(fields.iter().filter_map(|f| f.default.clone()));
-                work.extend(drop.clone());
-                work.push(format!("{name}.__invariant"));
-            }
-            sir::TypeDecl::Enum { drop, .. } => work.extend(drop.clone()),
-        }
-    }
     loop {
         while let Some(n) = work.pop() {
             if !keep.insert(n.clone()) {
                 continue;
             }
-            let Some(f) = by_name.get(n.as_str()) else { continue };
+            if !where_is.contains_key(&n)
+                && let Some(b) = owner_body(&n, bodies)
+                && !lowered.contains_key(&b)
+            {
+                let fs = func::lower_body(ctx, &typed.bodies[b]);
+                for f in &fs {
+                    where_is.insert(f.name.clone(), b);
+                }
+                lowered.insert(b, fs);
+            }
+            let Some(f) =
+                where_is.get(&n).and_then(|b| lowered.get(b)).and_then(|fs| fs.iter().find(|f| f.name == n))
+            else {
+                continue;
+            };
             for l in &f.locals {
                 type_names(&l.ty, &mut mentioned);
             }
             reach_from(ctx, f, &mut work, &mut dispatched);
+            // Defaults and drops of declared types are reached through the
+            // types, and so is a type's invariant check, which the run time
+            // calls when unwinding drops a mutex guard (D-077).
+            for t in collect_types(ctx, std::slice::from_ref(f)) {
+                if !typed_names.insert(t.name().to_string()) {
+                    continue;
+                }
+                match t {
+                    sir::TypeDecl::Struct { name, fields, drop, .. } => {
+                        work.extend(fields.iter().filter_map(|f| f.default.clone()));
+                        work.extend(drop);
+                        work.push(format!("{name}.__invariant"));
+                    }
+                    sir::TypeDecl::Enum { drop, .. } => work.extend(drop),
+                }
+            }
         }
         for &i in &prog.impls {
             let Some(info) = prog.impl_info(i) else { continue };
@@ -637,7 +714,13 @@ fn prune(
             break;
         }
     }
-    functions.into_iter().filter(|f| keep.contains(&f.name)).collect()
+    let mut order: Vec<usize> = lowered.keys().copied().collect();
+    order.sort_unstable();
+    order
+        .into_iter()
+        .flat_map(|b| lowered.remove(&b).unwrap_or_default())
+        .filter(|f| keep.contains(&f.name))
+        .collect()
 }
 
 /// The names of the named types in a type.
@@ -799,10 +882,7 @@ fn collect_types(ctx: &Ctx, functions: &[sir::Function]) -> Vec<sir::TypeDecl> {
         if !done.insert(n.clone()) || sisu_sir::validate::BUILTIN_TYPES.contains(&n.as_str()) {
             continue;
         }
-        let Some(d) = (0..prog.defs.len() as u32).map(DefId).find(|d| {
-            matches!(prog.def(*d).kind, DefKind::Struct(_) | DefKind::Enum(_) | DefKind::ErrorSet(_))
-                && ctx.type_name(*d) == n
-        }) else {
+        let Some(&d) = ctx.type_defs.get(&n) else {
             continue;
         };
         let decl = match &prog.def(d).kind {

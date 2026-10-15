@@ -226,5 +226,5 @@ fn a_weakened_checker_accepts_what_it_should_not() {
     let (typed, _) = sisu_typeck::check(&r.program, &map);
     let p = sisu_lower::lower(&r.program, &typed, &map);
     assert!(check(&p, &Options::default()).has_errors());
-    assert!(!check(&p, &Options { disabled: vec![Rule::Conflicts] }).has_errors());
+    assert!(!check(&p, &Options { disabled: vec![Rule::Conflicts], ..Default::default() }).has_errors());
 }

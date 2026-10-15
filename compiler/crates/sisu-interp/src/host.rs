@@ -122,6 +122,12 @@ pub trait Host: Send {
     fn read_line(&mut self) -> Option<String> {
         None
     }
+    /// Under `sisu run --watch` (hot replacement, `live.rs`): the program's
+    /// files that changed since the last poll, each with its new text.
+    /// The interpreter polls at every task start and `live.boundary()`.
+    fn poll_edits(&mut self) -> Vec<(String, String)> {
+        Vec::new()
+    }
 }
 
 /// Why a network operation failed: these become the `NetError` variants.

@@ -7,20 +7,20 @@
 type Port = int where 1 <= self <= 65535
 type Small = Port where self < 1024
 type Tags = list[String] where len(self) <= 3
-type Odd = int where self % 2               # E0814: an `int`, not a `bool`
-type Loop = Again where self > 0            # a cycle
+type Odd = int where self % 2  # E0814: an `int`, not a `bool`
+type Loop = Again where self > 0  # a cycle
 type Again = Loop where self < 9
 
 def listen(p: Port) -> int:
     return p
 
 def demo(n: int):
-    _ = listen(n)                            # E0811
-    let q: Port = n                          # E0811
+    _ = listen(n)  # E0811
+    let q: Port = n  # E0811
     var tags = Tags.try_from([]).expect("empty is fine")
-    tags.push("one".to_string())             # E0812
+    tags.push("one".to_string())  # E0812
     _ = (q, tags)
 
-impl Display for Port:                       # E0813
+impl Display for Port:  # E0813
     def fmt(self, mut f: Formatter) -> ! FormatError:
         return f.write("port")

@@ -14,7 +14,7 @@ def set(s: Shared2, ready: bool, value: int):
     g.value = (ready, value)
 
 def writer(s: Shared2):
-    set(s, True, 0)                     # the bug: ready before the value
+    set(s, True, 0)  # the bug: ready before the value
     task.yield_now()
     set(s, True, 42)
 

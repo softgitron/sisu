@@ -31,6 +31,7 @@ mod format;
 mod host;
 mod intrinsics;
 mod iter;
+mod live;
 mod monitor;
 mod ops;
 pub mod parallel;
@@ -41,6 +42,7 @@ mod sized;
 pub mod value;
 
 pub use host::{Host, IoErrorKind, NetFail, Poll, StdHost, TestHost};
+pub use live::Rebuild;
 pub use sched::{Choice, PCT_STEPS, Stats, Strategy, next_schedule};
 
 use sisu_diag::{Catalog, MsgId, msg};
@@ -223,7 +225,15 @@ pub(crate) struct Frame<'p> {
 pub struct Interp<'p, 'h> {
     pub(crate) prog: &'p sir::Program,
     pub(crate) host: &'h mut dyn Host,
-    pub(crate) fns: HashMap<&'p str, usize>,
+    /// Every function body the run has: the program's, then those each
+    /// epoch of hot replacement added (`live.rs`). A frame holds its body
+    /// by index here.
+    pub(crate) funcs: Vec<&'p sir::Function>,
+    /// The function table of each epoch: a function's name (its slot) to
+    /// its body in that epoch. Epoch 0 is the program's.
+    pub(crate) epochs: Vec<HashMap<&'p str, usize>>,
+    /// Hot replacement, under `--watch`.
+    pub(crate) live: Option<live::Live<'h>>,
     pub(crate) types: HashMap<&'p str, &'p sir::TypeDecl>,
     /// The drop glue of each declared type that has one, by type name.
     pub(crate) glue: HashMap<&'p str, usize>,
@@ -303,7 +313,9 @@ impl<'p, 'h> Interp<'p, 'h> {
         Interp {
             prog,
             host,
-            fns,
+            funcs: prog.functions.iter().collect(),
+            epochs: vec![fns],
+            live: None,
             types,
             glue,
             variants,
@@ -347,7 +359,7 @@ impl<'p, 'h> Interp<'p, 'h> {
             r.violation = m.violated.get();
             if let Some(c) = &m.coverage {
                 for ((f, line, col), n) in c {
-                    if let Some(func) = self.prog.functions.get(*f) {
+                    if let Some(func) = self.func(*f) {
                         r.coverage.insert((func.name.clone(), *line, *col), *n);
                     }
                 }
@@ -370,7 +382,7 @@ impl<'p, 'h> Interp<'p, 'h> {
             self.host.stderr(&format!("{m}\n"));
             return exit::ERROR;
         };
-        let Some(&fi) = self.fns.get(entry.function.as_str()) else {
+        let Ok(fi) = self.fn_index(entry.function.as_str()) else {
             let m = render(msg::RUN_INTERNAL, &[("detail", format!("no function `{}`", entry.function))]);
             self.host.stderr(&format!("{m}\n"));
             return exit::ABORT;
@@ -406,6 +418,9 @@ impl<'p, 'h> Interp<'p, 'h> {
                 self.host.stderr(&text);
                 exit::PANIC
             }
+            // A save under `--watch` that a swap cannot take: the caller
+            // starts the program again, and the message is printed.
+            Err(Unwind::Abort(_)) if self.restarting() => exit::ABORT,
             Err(Unwind::Abort(m)) => {
                 self.host.stderr(&format!("{m}\n"));
                 exit::ABORT
@@ -420,7 +435,7 @@ impl<'p, 'h> Interp<'p, 'h> {
 
     /// Runs one test function.
     pub fn run_bench(&mut self, function: &str, iterations: u64) -> TestResult {
-        let Some(&fi) = self.fns.get(function) else {
+        let Ok(fi) = self.fn_index(function) else {
             return TestResult::Failed(format!(
                 "internal error in the interpreter: no function `{function}`"
             ));
@@ -439,7 +454,7 @@ impl<'p, 'h> Interp<'p, 'h> {
     }
 
     pub fn run_test(&mut self, function: &str) -> TestResult {
-        let Some(&fi) = self.fns.get(function) else {
+        let Ok(fi) = self.fn_index(function) else {
             return TestResult::Failed(format!(
                 "internal error in the interpreter: no function `{function}`"
             ));
@@ -449,7 +464,7 @@ impl<'p, 'h> Interp<'p, 'h> {
         // A test that declares a `System` receives the real one, as `main`
         // does (17, "Isolation and parallelism"); the others make the
         // fakes they need.
-        let takes_system = self.prog.functions.get(fi).is_some_and(|f| f.param_count == 1);
+        let takes_system = self.func(fi).is_some_and(|f| f.param_count == 1);
         // In the `sim` profile it receives a simulated one instead (17).
         let args = if !takes_system {
             Vec::new()
@@ -475,6 +490,13 @@ impl<'p, 'h> Interp<'p, 'h> {
                 &[("detail", "a task switch escaped the run loop".into())],
             )),
         }
+    }
+}
+
+impl<'p> Interp<'p, '_> {
+    /// The body at index `i` of the run's function table.
+    pub(crate) fn func(&self, i: usize) -> Option<&'p sir::Function> {
+        self.funcs.get(i).copied()
     }
 }
 
@@ -519,6 +541,55 @@ pub fn run_main_report(prog: &sir::Program, host: &mut dyn Host, options: &Optio
         let mut i = Interp::new(prog, host, options);
         let status = i.run_main();
         i.report(status)
+    })
+    .unwrap_or(RunReport { status: exit::ABORT, ..Default::default() })
+}
+
+/// Runs `main` with the fake `System` a test makes (`System.fake(0)`:
+/// files in memory, no network, the test clock, seeded random numbers),
+/// whatever capabilities `main` asks for: a worksheet's run (10, "REPL and
+/// scripts": code that can reach a real capability runs only on an
+/// explicit run). The program must keep `System.fake`.
+pub fn run_main_faked(prog: &sir::Program, host: &mut dyn Host, options: &Options) -> RunReport {
+    on_big_stack(host, |host| {
+        let mut i = Interp::new(prog, host, options);
+        let status = match i.call_by_name("System.fake", vec![Value::Int(0)]) {
+            Ok(sys) => i.run_main_with(Some(sys)),
+            Err(Unwind::Panic(p)) => {
+                let text = panic_report(&p);
+                i.host.stderr(&text);
+                exit::PANIC
+            }
+            Err(_) => exit::ABORT,
+        };
+        i.report(status)
+    })
+    .unwrap_or(RunReport { status: exit::ABORT, ..Default::default() })
+}
+
+/// `sisu run --watch` (`live.rs`): runs `main`, publishing an epoch of
+/// hot replacement for every save that checks and swaps, and starting
+/// `main` again with the new program after a save that changes what a
+/// swap cannot. Returns how the last run ended. The programs live as long
+/// as the process: frames of every epoch point into them.
+pub fn run_watch(
+    prog: sir::Program,
+    host: &mut dyn Host,
+    options: &Options,
+    rebuild: &mut dyn Rebuild,
+) -> RunReport {
+    on_big_stack(host, |host| {
+        let mut prog: &'static sir::Program = Box::leak(Box::new(prog));
+        loop {
+            let mut i = Interp::new(prog, &mut *host, options);
+            i.live = Some(live::Live { rebuild: &mut *rebuild, restart: None });
+            let status = i.run_main();
+            let report = i.report(status);
+            match i.live.take().and_then(|l| l.restart) {
+                Some(next) => prog = Box::leak(Box::new(next)),
+                None => return report,
+            }
+        }
     })
     .unwrap_or(RunReport { status: exit::ABORT, ..Default::default() })
 }

@@ -35,6 +35,11 @@ pub fn parse(file: FileId, text: &str) -> Parse {
     p.lex_errors = diagnostics.iter().filter(|d| d.is_error()).map(|d| d.span.range.start).collect();
     p.source_file();
     let (tree, mut parse_diags) = p.finish();
+    // A script (`#!` on its first line, 10) may have statements at the top
+    // level: they run as its `main`.
+    if text.starts_with("#!") {
+        parse_diags.retain(|d| d.msg != msg::PARSE_TOP_LEVEL_STATEMENT);
+    }
     diagnostics.append(&mut parse_diags);
     sisu_diag::diagnostic::sort(&mut diagnostics);
     let diagnostics = without_bracket_echoes(text, diagnostics);

@@ -13,10 +13,13 @@ pub fn module(tree: &Tree) -> Module {
     let mut items = Vec::new();
     let mut docs = Vec::new();
     let mut broken_names = Vec::new();
+    // A script's top-level statements are its `main` (10), not code that
+    // failed to parse as a declaration.
+    let script = tree.text().starts_with("#!");
     for e in tree.children(root) {
         match e {
             Element::Node(n) => {
-                if !Tree::is_item_kind(tree.kind(*n)) && tree.kind(*n) != EOF {
+                if !script && !Tree::is_item_kind(tree.kind(*n)) && tree.kind(*n) != EOF {
                     for t in
                         tree.preorder(*n).into_iter().flat_map(|m| tree.child_tokens(m).collect::<Vec<_>>())
                     {
@@ -474,6 +477,7 @@ impl B<'_> {
             attrs: self.attrs(n),
             header_broken: self.error_outside_block(n),
             body_broken: self.child(n, BLOCK).is_some_and(|b| self.has_error(b)),
+            vis: self.vis(n),
         }
     }
 

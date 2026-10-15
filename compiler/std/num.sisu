@@ -1,0 +1,211 @@
+##! `std.num` (11): integer functions, overflow-checked arithmetic that
+##! reports instead of trapping, and `Ratio`, an exact fraction (D-076: the
+##! exact types are library types, and `int` stays 64-bit and trapping).
+##! The numeric types and traits are the prelude's (`int`, `f64`, the sized
+##! integers, `Num`), reached from here too.
+
+## The greatest common divisor, never negative; `gcd(0, 0)` is 0.
+##
+## ```
+## assert gcd(12, 18) == 6
+## assert gcd(-4, 6) == 2
+## assert gcd(0, 5) == 5
+## ```
+pub pure def gcd(a: int, b: int) -> int:
+    var x = abs(a)
+    var y = abs(b)
+    while y != 0:
+        let r = x % y
+        x = y
+        y = r
+    return x
+
+## The least common multiple, never negative; 0 when either is 0.
+##
+## ```
+## assert lcm(4, 6) == 12
+## assert lcm(0, 3) == 0
+## ```
+pub pure def lcm(a: int, b: int) -> int:
+    if a == 0 or b == 0:
+        return 0
+    return abs(a // gcd(a, b) * b)
+
+## The integer square root: the largest `r` with `r * r <= n`.
+##
+## ```
+## assert isqrt(17) == 4
+## assert isqrt(16) == 4
+## assert isqrt(0) == 0
+## ```
+pub pure def isqrt(n: int) -> int:
+    requires n >= 0
+    if n < 2:
+        return n
+    # Newton's iteration from above: it falls to the root and stops.
+    var x = n
+    var y = (x + 1) // 2
+    while y < x:
+        x = y
+        y = (x + n // x) // 2
+    return x
+
+## `base` to the power `exp`, modulo `m`, by squaring. Every step stays
+## below `m * m`, so `m` is at most 3037000499, whose square is the last
+## below 2**63 (the contract test found the first `m` past it).
+##
+## ```
+## assert pow_mod(2, 10, 1000) == 24
+## assert pow_mod(3, 0, 7) == 1
+## assert pow_mod(-2, 3, 5) == 2
+## ```
+pub pure def pow_mod(base: int, exp: int, m: int) -> int:
+    requires exp >= 0
+    requires 0 < m <= 3037000499
+    var result = 1 % m
+    var b = base % m
+    var e = exp
+    while e > 0:
+        if e % 2 == 1:
+            result = result * b % m
+        b = b * b % m
+        e = e // 2
+    return result
+
+## Whether `n` is prime, by trial division.
+##
+## ```
+## assert [n for n in range(20) if is_prime(n)] == [2, 3, 5, 7, 11, 13, 17, 19]
+## ```
+pub pure def is_prime(n: int) -> bool:
+    if n < 2:
+        return False
+    var d = 2
+    while d * d <= n:
+        if n % d == 0:
+            return False
+        d += 1
+    return True
+
+## The sum, or `None` where `+` would trap (03: `int` traps on overflow;
+## this asks first).
+##
+## ```
+## assert checked_add(1, 2) == Some(3)
+## assert checked_add(9223372036854775807, 1) == None
+## ```
+pub pure def checked_add(a: int, b: int) -> int?:
+    if b > 0 and a > 9223372036854775807 - b:
+        return None
+    if b < 0 and a < -9223372036854775807 - 1 - b:
+        return None
+    return Some(a + b)
+
+## The product, or `None` where `*` would trap.
+##
+## ```
+## assert checked_mul(6, 7) == Some(42)
+## assert checked_mul(4611686018427387904, 2) == None
+## ```
+pub pure def checked_mul(a: int, b: int) -> int?:
+    if a == 0 or b == 0:
+        return Some(0)
+    let min = -9223372036854775807 - 1
+    if (a == -1 and b == min) or (b == -1 and a == min):
+        return None
+    let r = a *% b
+    if r // b != a or r % b != 0:
+        return None
+    return Some(r)
+
+## An exact fraction of two `int`s, kept in lowest terms with a positive
+## denominator, so equal values are equal fields. The operators are exact
+## (and trap where the `int`s they make would overflow).
+##
+## ```
+## let half = Ratio.of(1, 2)
+## let third = Ratio.of(2, 6)
+## assert half + third == Ratio.of(5, 6)
+## assert half * third == Ratio.of(1, 6)
+## assert half - third == Ratio.of(1, 6)
+## assert half / third == Ratio.of(3, 2)
+## assert "{Ratio.of(-4, 8)}" == "-1/2"
+## assert "{Ratio.whole(3)}" == "3"
+## ```
+@derive(Copy, Eq, Hash)
+pub struct Ratio:
+    pub num: int
+    pub den: int
+
+    invariant self.den > 0
+    invariant gcd(self.num, self.den) == 1
+
+    ## `num / den` in lowest terms; panics when `den` is 0.
+    pub pure def of(num: int, den: int) -> Ratio:
+        requires den != 0
+        let g = gcd(num, den)
+        let sign = if den < 0: -1 else: 1
+        return Ratio(num=sign * num // g, den=sign * den // g)
+
+    ## The whole number `n`.
+    pub pure def whole(n: int) -> Ratio:
+        return Ratio(num=n, den=1)
+
+    ## Whether it is a whole number.
+    pub pure def is_whole(self) -> bool:
+        return self.den == 1
+
+    ## The value rounded toward negative infinity.
+    ##
+    ## ```
+    ## assert Ratio.of(7, 2).floor() == 3
+    ## assert Ratio.of(-7, 2).floor() == -4
+    ## ```
+    pub pure def floor(self) -> int:
+        return self.num // self.den
+
+    ## The nearest `f64`.
+    pub pure def to_f64(self) -> f64:
+        return self.num.to_f64() / self.den.to_f64()
+
+impl Add for Ratio:
+    def add(self, other: Ratio) -> Ratio:
+        return Ratio.of(self.num * other.den + other.num * self.den, self.den * other.den)
+
+impl Sub for Ratio:
+    def sub(self, other: Ratio) -> Ratio:
+        return Ratio.of(self.num * other.den - other.num * self.den, self.den * other.den)
+
+impl Mul for Ratio:
+    def mul(self, other: Ratio) -> Ratio:
+        return Ratio.of(self.num * other.num, self.den * other.den)
+
+impl Div for Ratio:
+    def div(self, other: Ratio) -> Ratio:
+        return Ratio.of(self.num * other.den, self.den * other.num)
+
+impl Neg for Ratio:
+    def neg(self) -> Ratio:
+        return Ratio(num=-self.num, den=self.den)
+
+impl PartialOrd for Ratio:
+    def partial_cmp(self, other: Ratio) -> Ordering?:
+        return Some(self.cmp(other))
+
+impl Ord for Ratio:
+    ## By value: `a/b < c/d` exactly when `a*d < c*b`, the denominators
+    ## being positive.
+    ##
+    ## ```
+    ## assert Ratio.of(1, 3) < Ratio.of(1, 2)
+    ## assert max(Ratio.of(2, 3), Ratio.of(3, 5)) == Ratio.of(2, 3)
+    ## ```
+    def cmp(self, other: Ratio) -> Ordering:
+        return (self.num * other.den).cmp(other.num * self.den)
+
+impl Display for Ratio:
+    def fmt(self, mut f: Formatter):
+        if self.den == 1:
+            f.write("{self.num}")
+        else:
+            f.write("{self.num}/{self.den}")

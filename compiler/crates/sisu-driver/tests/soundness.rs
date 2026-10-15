@@ -142,7 +142,8 @@ fn the_monitor_catches_a_task_race() {
     let p = lower(src).unwrap_or_else(|| panic!("front-end errors in\n{src}"));
     let full = sisu_borrowck::check(&p, &CheckOptions::default());
     assert!(full.has_errors(), "the full checker accepts\n{src}");
-    let weak = sisu_borrowck::check(&p, &CheckOptions { disabled: vec![Rule::Conflicts] });
+    let weak =
+        sisu_borrowck::check(&p, &CheckOptions { disabled: vec![Rule::Conflicts], ..Default::default() });
     assert!(!weak.has_errors(), "with the conflict rules off the checker still rejects\n{src}");
     let (violation, _) = monitored_seeds(&weak.program, 64);
     assert!(violation, "no schedule of 64 stopped under the monitor:\n{src}");
@@ -160,7 +161,8 @@ fn the_monitor_checks_shared_atomicity() {
     assert_eq!(full.shared.crossing, 1, "the site is may-cross");
     let (violation, err) = monitored_seeds(&full.program, 8);
     assert!(!violation, "the tagged program stopped under the monitor:\n{err}");
-    let weak = sisu_borrowck::check(&p, &CheckOptions { disabled: vec![Rule::SharedEscape] });
+    let weak =
+        sisu_borrowck::check(&p, &CheckOptions { disabled: vec![Rule::SharedEscape], ..Default::default() });
     let (violation, _) = monitored_seeds(&weak.program, 8);
     assert!(violation, "a task-local tag on a shared `Shared` ran without a violation");
 }
@@ -171,7 +173,7 @@ fn the_monitor_catches_a_weakened_checker() {
         let p = lower(&src).unwrap_or_else(|| panic!("front-end errors in\n{src}"));
         let full = sisu_borrowck::check(&p, &CheckOptions::default());
         assert!(full.has_errors(), "the full checker accepts\n{src}");
-        let weak = sisu_borrowck::check(&p, &CheckOptions { disabled: vec![rule] });
+        let weak = sisu_borrowck::check(&p, &CheckOptions { disabled: vec![rule], ..Default::default() });
         assert!(
             !weak.has_errors(),
             "with {rule:?} off the checker still rejects\n{src}\n{:?}",

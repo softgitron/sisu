@@ -38,7 +38,7 @@ def push_twice(mut xs: list[int], x: int):
 def wrong_abs(x: int) -> int:
     ensures result >= 0
     if x < -10:
-        return x                 # the bug the postcondition catches
+        return x  # the bug the postcondition catches
     return if x >= 0: x else: -x
 
 def main():

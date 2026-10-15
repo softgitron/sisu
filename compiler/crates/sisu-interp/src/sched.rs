@@ -231,6 +231,9 @@ pub(crate) struct Task<'p> {
     /// A generator's item, yielded and not taken yet.
     pub yielded: Option<Value>,
     pub generator: bool,
+    /// The epoch of hot replacement the task has adopted (`live.rs`): at
+    /// its start, and at each `live.boundary()` since.
+    pub epoch: usize,
 }
 
 /// What a scope was opened in, for cancellation.
@@ -362,6 +365,7 @@ impl<'p> Sched<'p> {
             ready_wall: None,
             yielded: None,
             generator: false,
+            epoch: 0,
         };
         let mut rng = Rng::new(seed);
         let budget = 1 + rng.next() % BUDGET_MAX;
@@ -517,15 +521,27 @@ impl<'p> Interp<'p, '_> {
     fn closure_frame(
         &mut self,
         f: Value,
+        args: Vec<Value>,
+        ret: Option<&'p sir::Place>,
+    ) -> Result<(Frame<'p>, usize), Unwind> {
+        let epoch = self.task_epoch();
+        self.closure_frame_in(f, args, ret, epoch)
+    }
+
+    /// [`Interp::closure_frame`] with the closure's body from an epoch.
+    fn closure_frame_in(
+        &mut self,
+        f: Value,
         mut args: Vec<Value>,
         ret: Option<&'p sir::Place>,
+        epoch: usize,
     ) -> Result<(Frame<'p>, usize), Unwind> {
         let Value::Closure(c) = f else {
             return Err(ice(format!("a task or scope body that is not a closure: {f:?}")));
         };
         let c = std::rc::Rc::try_unwrap(c).unwrap_or_else(|rc| (*rc).clone());
         args.insert(0, Value::Tuple(c.env));
-        let fi = self.fn_index(&c.name)?;
+        let fi = self.fn_index_in(epoch, &c.name)?;
         let fr = self.make_frame(fi, args, ret, c.tys)?;
         Ok((fr, fi))
     }
@@ -699,12 +715,7 @@ impl<'p> Interp<'p, '_> {
             self.push_built(anchor)?;
             return self.push_built(fr);
         }
-        let pure = self
-            .frames
-            .last()
-            .and_then(|f| f.func)
-            .and_then(|i| self.prog.functions.get(i))
-            .is_some_and(|f| f.pure);
+        let pure = self.frames.last().and_then(|f| f.func).and_then(|i| self.func(i)).is_some_and(|f| f.pure);
         let s = self.sched.scopes.len() as u32;
         let parent = self.context();
         self.sched.scopes.push(ScopeRec {
@@ -741,10 +752,14 @@ impl<'p> Interp<'p, '_> {
         };
         let k = if with_deadline { 2 } else { 1 };
         let f = std::mem::replace(args.get_mut(k).ok_or_else(|| ice("spawn without a task"))?, Value::Moved);
+        // A task adopts the newest epoch when it starts (`live.rs`), its
+        // own body included.
+        self.live_poll()?;
+        let epoch = self.newest_epoch();
         let t = self.sched.tasks.len() as u32;
         let anchor = self.anchor_frame(Anchor::Task, None);
-        let (fr, fi) = self.closure_frame(f, Vec::new(), Some(&RESULT_SLOT))?;
-        let ret_ty = self.prog.functions.get(fi).map(|g| g.ret().clone());
+        let (fr, fi) = self.closure_frame_in(f, Vec::new(), Some(&RESULT_SLOT), epoch)?;
+        let ret_ty = self.func(fi).map(|g| g.ret().clone());
         let returns_result = is_result_ty(&ret_ty);
         let cur = self.sched.cur as usize;
         self.sched.tasks[cur].spawned += 1;
@@ -773,6 +788,7 @@ impl<'p> Interp<'p, '_> {
             ready_wall: self.sched.keep_stats.then(std::time::Instant::now),
             yielded: None,
             generator: false,
+            epoch,
         });
         self.sched.ready.push(t);
         self.sched.live += 1;
@@ -1343,7 +1359,7 @@ impl<'p> Interp<'p, '_> {
                 .rev()
                 .find(|f| f.func.is_some())
                 .and_then(|f| {
-                    let func = self.prog.functions.get(f.func?)?;
+                    let func = self.func(f.func?)?;
                     let file = self.prog.sources.get(func.source as usize)?;
                     let l = f.loc?;
                     Some(format!("{file}:{}:{}", l.line, l.col))
@@ -1780,6 +1796,8 @@ impl<'p> Interp<'p, '_> {
             ready_wall: None,
             yielded: None,
             generator: true,
+            // A generator runs as part of its consumer's iterations.
+            epoch: self.task_epoch(),
         });
         Ok(Value::Iter(Box::new(crate::value::IterState::Gen(t))))
     }

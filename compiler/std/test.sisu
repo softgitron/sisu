@@ -20,6 +20,13 @@ def snapshot(text: str)
 ## A benchmark's loop (17, "Benchmarks"): `for _ in b.loop():` runs the
 ## body as many times as the harness chose. `sisu test` does not run a
 ## `bench`; `sisu bench` does.
+##
+## ```
+## var runs = 0
+## for _ in Bench(iterations=3).loop():
+##     runs += 1
+## assert runs == 3
+## ```
 @derive(Copy)
 struct Bench:
     iterations: int

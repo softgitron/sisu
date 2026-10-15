@@ -185,6 +185,9 @@ pub enum Type {
     Dyn(String, Vec<Type>),
     /// `<T as Trait[args]>.Name`: an associated type of a type parameter.
     Assoc(Box<Type>, String, Vec<Type>, String),
+    /// The argument of a `const` generic parameter: the `256` of
+    /// `Array[u32, 256]`, written as the number.
+    Const(i128),
 }
 
 impl Type {

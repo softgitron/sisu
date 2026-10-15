@@ -9,8 +9,9 @@
 # Codes are stable and never reused. Ranges: E00xx lexer, E01xx parser,
 # E02xx names and declarations, E03xx types, E04xx ownership, E05xx
 # lowering, E06xx compile-time evaluation, E07xx capabilities, E09xx
-# stage-0 limits and internal errors, W0xxx warnings, R0xxx run time,
-# D0xxx driver.
+# stage-0 limits and internal errors, E10xx packages and manifests
+# (`sisu.toml`, `sisu.lock`, the module tree), W0xxx warnings, R0xxx run
+# time, D0xxx driver.
 
 # ---------------------------------------------------------------- lexer
 E0001 error   lex.tab-in-indentation      a tab in indentation; Sisu indents with spaces only
@@ -84,7 +85,7 @@ E0216 error   resolve.drop-signature      `Drop` has one method, `def drop(mut s
 E0217 error   resolve.duplicate-method    `{owner}` has more than one method named `{name}`
 E0218 error   resolve.self-not-first      `self` must be the first parameter
 E0219 error   resolve.const-type-required  a `const` needs a type: `const {name}: T = ...`
-E0220 error   resolve.import-unknown      cannot import `{name}`: there is no such module in stage 0
+E0220 error   resolve.import-unknown      cannot import `{name}`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
 E0221 error   resolve.field-default-order  a field with a default must not use the value of another field
 E0222 error   resolve.parameter-default-order  a parameter without a default cannot follow one with a default
 E0223 error   resolve.not-a-module        `{name}` is not a module
@@ -120,6 +121,15 @@ E0251 error   resolve.delegate-to         `@delegate` needs `to="field"`, naming
 E0252 error   resolve.delegate-self       `{trait}` returns a `{ty}`, so `{ty}` can delegate it only when `{field}` is its one field
 E0253 error   resolve.delegate-field      `{ty}` cannot delegate `{trait}` to `{field}`: its type `{fty}` does not implement `{trait}`
 E0254 error   resolve.drop-generic        a `Drop` for `{ty}` must apply to every `{name}`: write `{expected}`, with the type's parameters in order and only the bounds the type declares
+E0255 error   resolve.private-item        `{name}` is private to the module `{module}`; declare it `pub` to use it from another module
+E0256 error   resolve.package-item        `{name}` is `pub(package)` in `{module}`, so only the modules of the package `{package}` can use it
+E0257 error   resolve.not-reexported      `{name}` is imported into `{module}`, not declared there; import it from `{origin}`, or re-export it with `pub from {origin} import {name}`
+E0258 error   resolve.private-field       the field `{field}` of `{ty}` is private to the module `{module}`; declare it `pub` to use it from another module
+E0259 error   resolve.private-method      the method `{name}` of `{ty}` is private to the module `{module}`; declare it `pub` to call it from another module
+E0260 error   resolve.not-a-dependency    cannot import `{name}`: `{package}` is not a dependency of `{this}`; add it to `[dependencies]` in that package's `sisu.toml`
+E0261 error   resolve.script-main         a script's statements at the top level are its `main`, so it cannot also declare `main`
+E0262 error   resolve.const-argument      `{param}` is a `const` parameter of `{name}`, so it takes a constant, such as `{name}[..., 8]`, not a type
+E0263 error   resolve.type-argument       `{param}` is a type parameter of `{name}`, so it takes a type, not a constant
 -     label   resolve.first-impl          the other impl is here
 -     fix     resolve.add-dyn             write `dyn {name}`
 -     label   resolve.first-defined       first defined here
@@ -332,6 +342,7 @@ E0614 error   comptime.no-fake            `cap.Fake[{name}]` needs a trait of th
 # ---------------------------------------------------------------- capabilities
 E0700 error   cap.not-shareable          `{ty}` cannot become `{cap}`: a capability may reach every task, and `{ty}` is not `{auto}`{path}
 E0701 error   cap.internal               `{name}` is internal to the standard library; a program reaches the world only through the capabilities it is given
+E0703 error   cap.untrusted              the package `{package}` is not trusted with {what}; a dependency may contain `unsafe` and `extern` only when `[trust] unsafe` in the root package's `sisu.toml` lists it
 
 # ---------------------------------------------------------------- contracts and refinement types (07)
 E0800 error   contract.misplaced          `{keyword}` is a function's contract and belongs at the start of its body, before its first statement
@@ -356,11 +367,33 @@ E0900 error   stage0.unsupported          {construct} is not implemented in stag
 E0901 error   stage0.internal             internal compiler error in {stage}: {detail}
 E0971 error   sim.unmodelled-extern       this `sim` build reaches `{callee}`, an `extern` call with no simulation model, in `{function}` at {at}
 
+# ---------------------------------------------------------------- packages and manifests
+E1000 error   package.toml-syntax         this is not TOML that `sisu.toml` reads: expected {expected}, found {found}
+E1001 error   package.toml-duplicate      `{key}` is given more than once in `{table}`
+E1002 error   package.missing-key         `{table}` needs `{key}`
+E1003 error   package.bad-value           `{key}` takes {expected}, found {found}
+E1004 error   package.bad-name            `{name}` cannot name a package: {why}
+E1005 error   package.no-manifest         the dependency `{name}` has no `sisu.toml` at `{path}`
+E1006 error   package.renamed-dependency  the dependency `{name}` is the package `{found}`; a path dependency is named by its own `[package] name`
+E1007 error   package.cycle               the packages depend on each other in a cycle: {cycle}; packages build in dependency order, so their graph has no cycle
+E1008 error   package.no-root-module      the package `{name}` has no root module; add `src/main.sisu` (an application) or `src/lib.sisu` (a library)
+E1009 error   package.two-root-modules    the package `{name}` has both `src/main.sisu` and `src/lib.sisu`; a package has one root module
+E1010 error   package.not-a-path          the dependency `{name}` is not a `path` dependency; stage 0 has no registry, so a dependency is `{name} = {{ path = "../{name}" }}`
+E1011 error   package.bad-when            `when` takes the build target's facts `os`, `arch` and `runtime`, each a string or a list of strings, as in `when = {{ os = "windows" }}`
+E1012 error   package.module-name         `{file}` is not a module: `{name}` is not a module name; a module is named in lowercase letters, digits and `_`
+E1013 error   package.no-member           the workspace member `{path}` has no `sisu.toml`
+E1014 error   package.script-metadata     a script's metadata starts with `# /// script` and ends with a line `# ///`; this block has no end
+E1015 error   package.trust-unknown       `[trust] unsafe` names `{name}`, which is not a dependency of this package
+E1016 error   package.no-package          `{path}` has `[workspace]` but no `[package]`, so it cannot be a dependency
+E1017 error   package.reserved-name       `{name}` is the name of a standard-library module, which `import {name}` names; a package of the program needs another name
+-     label   package.depends-here        `{name}` depends on `{dep}` here
+
 # ---------------------------------------------------------------- warnings
 W0001 warning type.hole                   typed hole `{name}` of type `{ty}`
 W0002 warning resolve.shadow-outer        `{name}` shadows a binding of an enclosing scope
 W0003 warning type.unreachable-arm        this `case` arm is unreachable; the arms above it cover every value it matches
 W0004 warning type.unreachable-code       this code is unreachable
+W0005 warning package.unknown-key         `{key}` is not a key of `{table}` that stage 0 knows; it is ignored
 
 # ---------------------------------------------------------------- run time
 R0001 runtime panic.explicit              {message}
@@ -396,8 +429,6 @@ R0031 runtime panic.expect-error          called `expect` on an error: {value}
 R0032 runtime panic.stack-overflow        stack overflow: more than {depth} nested calls
 R0033 runtime panic.moved-value           use of a value after it was moved
 R0034 runtime panic.dangling              use of a reference to a value that no longer exists
-R0035 runtime panic.empty-argument        {operation}: the {what} must not be empty
-R0036 runtime panic.negative-count        {operation}: the count {count} is negative
 R0037 runtime panic.insert-out-of-bounds  insert index {index} is out of bounds for a list of length {len}
 R0038 runtime run.step-limit              the program ran past its limit of {steps} statements
 R0039 runtime run.trace-line              at {location}
@@ -467,10 +498,19 @@ R0106 runtime sim.choose-none             `sim.choose` needs at least one option
 R0107 runtime test.snapshot-changed       the snapshot `{name}` changed (`sisu test --update` accepts the new one):\n{diff}
 R0108 runtime test.snapshot-missing       there is no snapshot `{name}` yet (`sisu test --update` stores this one):\n{value}
 
+# Hot replacement (`sisu run --watch`; 10, "Debugging and profiling";
+# D-053, D-068): what a save did to the running program.
+R0109 runtime run.live-epoch              watch: epoch {epoch} replaces {functions}
+R0110 runtime run.live-rejected           watch: the save of {files} does not check, so the program keeps running epoch {epoch}:\n{diagnostics}
+R0111 runtime run.live-restart-signature  watch: the signature of `{function}` changed, so the program starts again
+R0112 runtime run.live-restart-layout     watch: the layout of `{ty}` changed, so the program starts again
+R0114 runtime run.live-restart-impls      watch: the impls of `{trait}` changed, so the program starts again
+R0115 runtime panic.char-boundary         the byte index {index} is inside a character of the text
+
 # ---------------------------------------------------------------- driver
 
 D0001 cli     cli.cannot-read             cannot read `{path}`: {reason}
-D0002 cli     cli.usage                   usage: sisu <command> [options] <file>\n\ncommands:\n  run <file> [args...]   check and run a program (`--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor, `--contracts=off|preconditions|all` sets what it checks, `--record LOG` writes its capability log, `--stats` reports the scheduler's numbers)\n  replay <log>           run a recorded program again against its capability log\n  check <file>           report diagnostics (`--format=ids` for the conformance form, `--explain` for the signatures with their contracts)\n  sir <file>             print the serialised SIR\n  test <file>            run the tests and transcripts under the ownership monitor (`--no-monitor` without it, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`, `--update` for snapshots and transcripts, `--replay TOKEN`, `--sim` with `--faults P`)\n  bench <file>           run the benchmarks (`--iterations N`)\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--print` reprints the source\n  explain <code>         describe a diagnostic code\n  explain-borrow <file>:<line>  show every borrow live on a line\n  audit --ownership <file>...  count the uses of `Shared`, `Weak`, `Cell`, `Arena`, `Key`, `.copy()` and `unsafe` in each file\n\n`run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
+D0002 cli     cli.usage                   usage: sisu <command> [options] [<file>]\n\nWithout a file, a command works on the package of the current directory (`sisu.toml`).\n\ncommands:\n  run [<file>] [args...]  check and run a program (`--watch` swaps in each save, `--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor, `--contracts=off|preconditions|all` sets what it checks, `--record LOG` writes its capability log, `--stats` reports the scheduler's numbers)\n  check [<file>]         report diagnostics (`--format=ids` for the conformance form, `--explain` for the signatures with their contracts)\n  build [<file>]         check and lower a package, writing its lockfile\n  test [<file>]          run the tests and transcripts under the ownership monitor (`--no-monitor` without it, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`, `--update` for snapshots and transcripts, `--replay TOKEN`, `--sim` with `--faults P`, `--std` for the standard library's doc examples)\n  bench [<file>]         run the benchmarks (`--iterations N`)\n  replay <log>           run a recorded program again against its capability log\n  fmt [<path>...]        format files in place (`--check` reports what would change)\n  repl [<file>|<dir>]    an interactive session, with a package loaded from its directory\n  ws <file>              run a worksheet, showing each statement's value (`--run` with the real `System`)\n  lsp                    the language server, over standard input and output\n  new <name>             create a package (`--lib` for a library)\n  sir [<file>]           print the serialised SIR\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--print` reprints the source, `--shape` prints what formatting keeps\n  explain <code>         describe a diagnostic code\n  explain-borrow <file>:<line>  show every borrow live on a line\n  audit --ownership <file>...  count the uses of `Shared`, `Weak`, `Cell`, `Arena`, `Key`, `.copy()` and `unsafe` in each file\n\n`run`, `check`, `build`, `test` and `bench` take `--locked`, which keeps `sisu.lock` as it is. `run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
 D0003 cli     cli.unknown-command         unknown command `{command}`; run `sisu help`
 D0004 cli     cli.missing-file            `sisu {command}` needs a file
 D0005 cli     cli.no-main                 `{file}` has no `main` function
@@ -532,3 +572,32 @@ D0060 cli     cli.transcript-result       transcript {name} ... {outcome}
 D0061 cli     cli.transcript-differs      what the program printed differs from the transcript (`sisu test --update` accepts it):\n{diff}
 D0062 cli     cli.transcript-no-main      a transcript runs the program's `main`, and `{file}` has none
 D0063 cli     cli.transcript-updated      updated the transcript {name}:\n{diff}
+D0064 cli     cli.no-package              there is no `sisu.toml` in `{dir}` or a directory above it; `sisu {command}` without a file works on a package
+D0065 cli     cli.locked                  `sisu.lock` is not up to date, and `--locked` keeps it as it is: {what}
+D0066 cli     cli.built                   built the package `{name}` {version} (modules: {modules})
+D0067 cli     cli.workspace-run           `sisu {command}` in a workspace needs one member's application; name the member: {members}
+D0070 cli     cli.built-file              built `{file}`
+D0071 cli     cli.created                 created the package `{name}`, with its manifest `sisu.toml` and its root module `{root}`
+D0072 cli     cli.bad-package-name        `{name}` cannot name a package: a package is named in lowercase letters, digits and `_`, starting with a letter, and not as a standard-library module
+D0073 cli     cli.exists                  `{path}` exists already
+D0074 cli     cli.fmt-would-change        `{file}` is not formatted; `sisu fmt` would change it:\n{diff}
+D0075 cli     cli.fmt-syntax              `{file}` has syntax errors, so it was not formatted
+D0076 cli     cli.fmt-unstable            internal error: the formatted `{file}` would not parse to the same program (from byte {at}); it was left as it is
+D0077 cli     cli.fmt-nothing             there is no `.sisu` file to format in `{path}`
+D0078 cli     cli.watch-alone             `--watch` runs the program once, swapping in each save; it does not combine with `{option}`
+D0079 cli     cli.repl-banner             sisu repl: each input runs as the next line of a script; `:back N` forgets the last N inputs, `:why NAME` shows where a value came from, `:quit` ends
+D0080 cli     cli.repl-loaded             the package `{name}` is loaded: import its modules by their paths (`from {name} import ...`)
+D0081 cli     cli.repl-prompt             sisu>
+D0082 cli     cli.repl-more               ...
+D0083 cli     cli.repl-not-kept           the input did not run to its end, so the session is as it was before it
+D0084 cli     cli.repl-back               forgot the last inputs ({forgotten}); the session keeps {count}
+D0085 cli     cli.repl-back-too-far       there are not that many inputs to forget; the session has {count}
+D0086 cli     cli.repl-bad-command        `:{command}` is not a command of the REPL; the commands are `:back N`, `:why NAME` and `:quit`
+D0087 cli     cli.repl-why-value          {name} = {value}  <- {expr}  (input {input})
+D0088 cli     cli.repl-why-call           {call}  (log #{record})
+D0089 cli     cli.repl-why-change         then {text}  (input {input})
+D0090 cli     cli.repl-why-unbound        no input of the session binds `{name}`
+D0091 cli     cli.repl-diverged           the session's earlier inputs did not replay as they ran ({detail}); its values may differ from what they were
+D0092 cli     cli.ws-value                # => {value}
+D0093 cli     cli.ws-output               # | {text}
+D0069 cli     cli.no-application          the package `{name}` is a library (`src/lib.sisu`); `sisu run` runs an application, whose root module is `src/main.sisu`

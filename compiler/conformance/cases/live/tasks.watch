@@ -1,0 +1,7 @@
+a: the old greeting, epoch 0
+b: the new greeting, epoch 1
+a: the old greeting, epoch 0
+a: the new greeting, epoch 1
+--- stderr
+watch: epoch 1 replaces `greet`
+--- status 0

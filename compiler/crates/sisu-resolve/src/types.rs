@@ -43,12 +43,8 @@ impl Resolver<'_> {
                         None
                     }
                 };
-                if g.is_const {
-                    let span = self.span(module, g.name.range);
-                    self.unsupported(span, "a `const` generic parameter", "const generics (Phase 4)");
-                }
                 names.push(g.name.text.clone());
-                generics.push(Generic { name: g.name.text.clone(), default });
+                generics.push(Generic { name: g.name.text.clone(), default, is_const: g.is_const });
             }
             match &mut self.prog.defs[d.0 as usize].kind {
                 DefKind::Struct(s) => s.generics = generics,
@@ -83,8 +79,19 @@ impl Resolver<'_> {
         let mut out: Vec<Predicate> = Vec::new();
         for (k, g) in gps.iter().enumerate() {
             let subject = Ty::Param((offset + k) as u32);
-            // A `const` parameter's "bound" is its type (reported, E0900).
+            // A `const` parameter's "bound" is its type, which is `int` in
+            // stage 0.
             if g.is_const {
+                for b in &g.bounds {
+                    let is_int = matches!(&b.kind, TypeKind::Path { segments, args }
+                        if args.is_empty() && segments.len() == 1
+                            && matches!(segments[0].text.as_str(), "int" | "i64"));
+                    if !is_int {
+                        let span = self.span(module, b.range);
+                        let shown = "a `const` parameter of a type other than `int`";
+                        self.unsupported(span, shown, "const generics over other types (Phase 4)");
+                    }
+                }
                 continue;
             }
             for b in &g.bounds {
@@ -164,7 +171,17 @@ impl Resolver<'_> {
             let found = if i == 0 {
                 self.prog.lookup(module, &seg.text)
             } else {
-                self.prog.lookup_in(module, &seg.text)
+                // Through a module: only what it lets other modules see (09).
+                match self.prog.member(module, &seg.text, ctx.module) {
+                    Some((d, true)) => Some(d),
+                    Some((d, false)) => {
+                        let at = self.span(ctx.module, seg.range);
+                        let diag = self.prog.private_item(d, module, at);
+                        self.report(diag);
+                        Some(d)
+                    }
+                    None => None,
+                }
             };
             let Some(d) = found else {
                 if i == 0 {
@@ -322,10 +339,7 @@ impl Resolver<'_> {
                 }
                 None => Ty::Error,
             },
-            TypeKind::ConstArg(_) => {
-                self.unsupported(span, "a constant type argument", "const generics (Phase 4)");
-                Ty::Error
-            }
+            TypeKind::ConstArg(n) => Ty::Const(*n),
             TypeKind::Unsupported(what) => {
                 let phase = if what.contains("pointer") {
                     "foreign functions (Phase 8)"
@@ -564,6 +578,25 @@ impl Resolver<'_> {
                 );
             }
             return Ty::Adt(d, (0..declared).map(|_| Ty::Error).collect());
+        }
+        // A `const` parameter takes a constant, any other a type.
+        let consts: Vec<bool> = match self.type_params.get(&d) {
+            Some(gps) => gps.iter().map(|g| g.is_const).collect(),
+            None => generics.iter().map(|g| g.is_const).collect(),
+        };
+        for (i, a) in args.iter().enumerate() {
+            let Some(&is_const) = consts.get(i) else { continue };
+            let param = generics.get(i).map(|g| g.name.clone()).unwrap_or_else(|| (i + 1).to_string());
+            let wrong = if is_const {
+                (!matches!(a, Ty::Const(_) | Ty::Param(_) | Ty::Error | Ty::Var(_)))
+                    .then_some(msg::RESOLVE_CONST_ARGUMENT)
+            } else {
+                matches!(a, Ty::Const(_)).then_some(msg::RESOLVE_TYPE_ARGUMENT)
+            };
+            if let Some(m) = wrong {
+                self.report(Diagnostic::new(m, span).with("name", name).with("param", param));
+                return Ty::Adt(d, (0..declared).map(|_| Ty::Error).collect());
+            }
         }
         Ty::Adt(d, args)
     }

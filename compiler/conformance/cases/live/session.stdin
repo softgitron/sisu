@@ -1,0 +1,14 @@
+let port = config.strip_prefix("port = ").trim().parse_int().expect("a port") + 1
+port
+area(port, 2)
+let wrong: int = "text"
+[1, 2][5]
+var seen = [port]
+seen.push(area(2, 3))
+seen
+:why port
+:why seen
+:back 2
+seen
+:back 7
+:frob

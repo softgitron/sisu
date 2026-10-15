@@ -18,7 +18,15 @@ pure def pure_reader(env: Env) -> int:
 
 def main(sys: System):
     let env: Env = Counting(seen=Cell(0))
-    let copy = System.assemble(fs=sys.fs, net=sys.net, clock=sys.clock, rand=sys.rand, env=env, proc=sys.proc, stdin=sys.stdin)
+    let copy = System.assemble(
+        fs=sys.fs,
+        net=sys.net,
+        clock=sys.clock,
+        rand=sys.rand,
+        env=env,
+        proc=sys.proc,
+        stdin=sys.stdin,
+    )
     print(pure_reader(env))
 
 @must_consume

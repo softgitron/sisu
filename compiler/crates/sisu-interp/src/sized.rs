@@ -1,15 +1,17 @@
-//! The sized integers (03, "Numbers"): `u8` to `u64` and `i8` to `i32`
-//! (`i64` is `int`). A `u64` is a value of its own kind; the others are
-//! `int` values their type keeps in range. The intrinsics `T.op` compute
-//! in a wider host integer and trap, wrap or saturate at `T`'s bounds; the
-//! comparisons and hashing of the values are the structural ones.
+//! The sized integers (03, "Numbers"): `u8` to `u128` and `i8` to `i128`
+//! (`i64` is `int`). A `u64`, `u128` or `i128` is a value of its own kind;
+//! the others are `int` values their type keeps in range. The intrinsics
+//! `T.op` compute in a wider host integer (in `i128` up to 64 bits, in the
+//! type's own for the 128-bit ones) and trap, wrap or saturate at `T`'s
+//! bounds; the comparisons and hashing of the values are the structural
+//! ones.
 
 use crate::value::Value;
 use crate::{Interp, Unwind, ice, panic};
 use sisu_diag::msg;
 
 /// The sized integer types (as `sisu_resolve::std_sources::SIZED`).
-const SIZED: &[&str] = &["u8", "u16", "u32", "u64", "i8", "i16", "i32"];
+const SIZED: &[&str] = &["u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32", "i128"];
 
 /// The bits of a sized integer type and whether it is signed.
 fn int_width(ty: &str) -> Option<(u32, bool)> {
@@ -18,31 +20,43 @@ fn int_width(ty: &str) -> Option<(u32, bool)> {
         "u16" => (16, false),
         "u32" => (32, false),
         "u64" => (64, false),
+        "u128" => (128, false),
         "i8" => (8, true),
         "i16" => (16, true),
         "i32" => (32, true),
+        "i128" => (128, true),
         _ => return None,
     })
 }
 
-/// The bounds of a sized integer type.
+/// The bounds of a sized integer type, as far as `i128` holds them (all of
+/// them but `u128`'s greatest values, which have arithmetic of their own).
 fn bounds(kind: &str) -> (i128, i128, u32, bool) {
-    let (bits, signed) = int_width(kind).unwrap_or((64, true));
-    if signed {
-        (-(1i128 << (bits - 1)), (1i128 << (bits - 1)) - 1, bits, true)
-    } else {
-        (0, (1i128 << bits) - 1, bits, false)
+    match int_width(kind).unwrap_or((64, true)) {
+        (128, true) => (i128::MIN, i128::MAX, 128, true),
+        (128, false) => (0, i128::MAX, 128, false),
+        (bits, true) => (-(1i128 << (bits - 1)), (1i128 << (bits - 1)) - 1, bits, true),
+        (bits, false) => (0, (1i128 << bits) - 1, bits, false),
     }
 }
 
 /// The value of `v`, a sized integer of kind `kind`, in range.
 fn make(kind: &str, v: i128) -> Value {
-    if kind == "u64" { Value::U64(v as u64) } else { Value::Int(v as i64) }
+    match kind {
+        "u64" => Value::U64(v as u64),
+        "i128" => Value::I128(v),
+        "u128" => Value::U128(v as u128),
+        _ => Value::Int(v as i64),
+    }
 }
 
-/// `v` reduced to `kind`'s width, as two's complement wrapping does.
+/// `v` reduced to `kind`'s width, as two's complement wrapping does; an
+/// `i128` result is already reduced.
 fn wrap(kind: &str, v: i128) -> i128 {
     let (_, _, bits, signed) = bounds(kind);
+    if bits == 128 {
+        return v;
+    }
     let m = v & ((1i128 << bits) - 1);
     if signed && m >= 1i128 << (bits - 1) { m - (1i128 << bits) } else { m }
 }
@@ -52,7 +66,19 @@ impl Interp<'_, '_> {
         match self.target(v)? {
             Value::Int(n) => Ok(i128::from(*n)),
             Value::U64(n) => Ok(i128::from(*n)),
+            Value::I128(n) => Ok(*n),
             other => Err(ice(format!("expected an integer, found {other:?}"))),
+        }
+    }
+
+    /// The value of a `u128` operand, or of a narrower unsigned one that
+    /// widens to it; `None` for a negative `int` (a literal out of range).
+    fn unsigned_value(&self, v: &Value) -> Result<Option<u128>, Unwind> {
+        match self.target(v)? {
+            Value::U128(n) => Ok(Some(*n)),
+            Value::U64(n) => Ok(Some(u128::from(*n))),
+            Value::Int(n) => Ok(u128::try_from(*n).ok()),
+            other => Err(ice(format!("expected an unsigned integer, found {other:?}"))),
         }
     }
 
@@ -72,11 +98,19 @@ impl Interp<'_, '_> {
             })());
         }
         let kind = SIZED.iter().copied().find(|s| *s == owner)?;
+        if kind == "u128" {
+            return Some(self.u128_op(method, args));
+        }
         Some(self.sized_op(kind, method, args))
     }
 
     fn sized_op(&mut self, kind: &str, method: &str, args: &[Value]) -> Result<Value, Unwind> {
         let (lo, hi, bits, signed) = bounds(kind);
+        if method == "from_text" {
+            let text = self.text(args.first().ok_or_else(|| ice("from_text without a text"))?)?;
+            let v = text.parse::<i128>().map_err(|_| ice(format!("`{text}` is not a `{kind}` literal")))?;
+            return Ok(make(kind, v));
+        }
         let arg = |me: &Self, i: usize| -> Result<i128, Unwind> {
             me.sized_value(args.get(i).ok_or_else(|| ice(format!("missing argument {i}")))?)
         };
@@ -96,12 +130,14 @@ impl Interp<'_, '_> {
                 if y == 0 {
                     return Err(panic(msg::PANIC_DIVIDE_BY_ZERO, &[]));
                 }
-                // `//` floors and `%` has the sign of the divisor, as for `int`.
-                let inexact = x % y != 0 && ((x < 0) != (y < 0));
+                // `//` floors and `%` has the sign of the divisor, as for
+                // `int`; only `i128`'s least value over -1 overflows.
+                let r = x.wrapping_rem(y);
+                let inexact = r != 0 && ((x < 0) != (y < 0));
                 if method == "rem" {
-                    return Ok(make(kind, if inexact { x % y + y } else { x % y }));
+                    return Ok(make(kind, if inexact { r + y } else { r }));
                 }
-                checked(Some(if inexact { x / y - 1 } else { x / y }), "//", y)
+                checked(x.checked_div(y).map(|q| if inexact { q - 1 } else { q }), "//", y)
             }
             "pow" => {
                 let y = arg(self, 1)?;
@@ -126,14 +162,7 @@ impl Interp<'_, '_> {
             "shl" | "shr" => {
                 let y = arg(self, 1)?;
                 if !(0..i128::from(bits)).contains(&y) {
-                    return Err(panic(
-                        msg::PANIC_SHIFT_OUT_OF_RANGE_SIZED,
-                        &[
-                            ("ty", kind.to_string()),
-                            ("amount", y.to_string()),
-                            ("max", (bits - 1).to_string()),
-                        ],
-                    ));
+                    return Err(self.shift_range(kind, &y.to_string(), bits));
                 }
                 Ok(make(kind, if method == "shl" { wrap(kind, x << y) } else { x >> y }))
             }
@@ -143,12 +172,109 @@ impl Interp<'_, '_> {
             "not" => Ok(make(kind, if signed { !x } else { hi ^ x })),
             "neg" => checked(x.checked_neg(), "-", 0),
             "cmp" => Ok(Value::ordering(x.cmp(&arg(self, 1)?))),
-            "to_int" if kind == "u64" => Ok(Value::option(i64::try_from(x).ok().map(Value::Int))),
+            "to_int" if matches!(kind, "u64" | "i128") => {
+                Ok(Value::option(i64::try_from(x).ok().map(Value::Int)))
+            }
             "to_int" => Ok(Value::Int(x as i64)),
             "from_literal" => checked(Some(x), "as", 0),
             "widen" => Ok(make(kind, x)),
             "from_bits" => Ok(Value::U64(x as i64 as u64)),
+            // `T.wrapping_from(n)` (`int.truncate_to[T]`): `n` reduced to
+            // the type's width.
+            "wrapping_from" => Ok(make(kind, wrap(kind, x))),
             other => Err(ice(format!("no `{kind}` operation `{other}`"))),
+        }
+    }
+
+    fn shift_range(&self, kind: &str, amount: &str, bits: u32) -> Unwind {
+        panic(
+            msg::PANIC_SHIFT_OUT_OF_RANGE_SIZED,
+            &[("ty", kind.to_string()), ("amount", amount.to_string()), ("max", (bits - 1).to_string())],
+        )
+    }
+
+    /// The operations of `u128`, whose values beyond `i128` need its own
+    /// arithmetic: as [`Self::sized_op`]'s, at the bounds 0 and 2**128 - 1.
+    fn u128_op(&mut self, method: &str, args: &[Value]) -> Result<Value, Unwind> {
+        if method == "from_text" {
+            let text = self.text(args.first().ok_or_else(|| ice("from_text without a text"))?)?;
+            let v = text.parse::<u128>().map_err(|_| ice(format!("`{text}` is not a `u128` literal")))?;
+            return Ok(Value::U128(v));
+        }
+        if method == "wrapping_from" {
+            // Two's complement: -1 is the greatest value.
+            let n = self.sized_value(args.first().ok_or_else(|| ice("wrapping_from without a value"))?)?;
+            return Ok(Value::U128(n as u128));
+        }
+        let get = |me: &Self, i: usize| -> Result<Option<u128>, Unwind> {
+            me.unsigned_value(args.get(i).ok_or_else(|| ice(format!("missing argument {i}")))?)
+        };
+        let overflow = |expr: String| panic(msg::PANIC_OVERFLOW, &[("expr", expr)]);
+        let Some(x) = get(self, 0)? else {
+            let n = self.sized_value(&args[0])?;
+            return Err(overflow(format!("{n} as u128")));
+        };
+        let y = || -> Result<u128, Unwind> {
+            match get(self, 1)? {
+                Some(y) => Ok(y),
+                None => Err(ice("a negative `u128` operand")),
+            }
+        };
+        let checked = |r: Option<u128>, sym: &str, y: u128| -> Result<Value, Unwind> {
+            r.map(Value::U128).ok_or_else(|| overflow(format!("{x} {sym} {y} as u128")))
+        };
+        match method {
+            "add" => {
+                let y = y()?;
+                checked(x.checked_add(y), "+", y)
+            }
+            "sub" => {
+                let y = y()?;
+                checked(x.checked_sub(y), "-", y)
+            }
+            "mul" => {
+                let y = y()?;
+                checked(x.checked_mul(y), "*", y)
+            }
+            "floordiv" | "rem" => {
+                let y = y()?;
+                if y == 0 {
+                    return Err(panic(msg::PANIC_DIVIDE_BY_ZERO, &[]));
+                }
+                Ok(Value::U128(if method == "rem" { x % y } else { x / y }))
+            }
+            "pow" => {
+                let y = y()?;
+                let r = match u32::try_from(y).ok().and_then(|e| x.checked_pow(e)) {
+                    Some(v) => Some(v),
+                    None if x <= 1 => Some(x),
+                    None => None,
+                };
+                checked(r, "**", y)
+            }
+            "wrap_add" => Ok(Value::U128(x.wrapping_add(y()?))),
+            "wrap_sub" => Ok(Value::U128(x.wrapping_sub(y()?))),
+            "wrap_mul" => Ok(Value::U128(x.wrapping_mul(y()?))),
+            "sat_add" => Ok(Value::U128(x.saturating_add(y()?))),
+            "sat_sub" => Ok(Value::U128(x.saturating_sub(y()?))),
+            "sat_mul" => Ok(Value::U128(x.saturating_mul(y()?))),
+            "shl" | "shr" => {
+                let y = y()?;
+                if y >= 128 {
+                    return Err(self.shift_range("u128", &y.to_string(), 128));
+                }
+                Ok(Value::U128(if method == "shl" { x << y } else { x >> y }))
+            }
+            "and" => Ok(Value::U128(x & y()?)),
+            "or" => Ok(Value::U128(x | y()?)),
+            "xor" => Ok(Value::U128(x ^ y()?)),
+            "not" => Ok(Value::U128(!x)),
+            "neg" if x == 0 => Ok(Value::U128(0)),
+            "neg" => Err(overflow(format!("-{x} as u128"))),
+            "cmp" => Ok(Value::ordering(x.cmp(&y()?))),
+            "to_int" => Ok(Value::option(i64::try_from(x).ok().map(Value::Int))),
+            "from_literal" | "widen" => Ok(Value::U128(x)),
+            other => Err(ice(format!("no `u128` operation `{other}`"))),
         }
     }
 }

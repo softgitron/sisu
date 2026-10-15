@@ -140,8 +140,11 @@ impl FnLower<'_, '_> {
 
     fn literal(&self, e: &thir::Expr) -> Option<Const> {
         Some(match &e.kind {
-            // A `u64` is a value of its own kind, made from its bits.
-            ExprKind::Int(_) if self.sized_int(&e.ty) == Some("u64") => return None,
+            // A `u64`, `u128` or `i128` is a value of its own kind, which
+            // an intrinsic makes.
+            ExprKind::Int(_) if self.sized_int(&e.ty).is_some_and(sisu_resolve::std_sources::own_kind) => {
+                return None;
+            }
             ExprKind::Int(n) => Const::Int(*n),
             ExprKind::Float(f) => Const::Float(*f),
             ExprKind::Bool(b) => Const::Bool(*b),
@@ -325,6 +328,11 @@ impl FnLower<'_, '_> {
                     loc,
                 );
             }
+            // A `const` generic parameter: the constant its type argument
+            // is, which the frame has at run time.
+            ExprKind::ConstParam(i) => {
+                self.intrinsic_call(dest, "generic.value", vec![sir::Type::Param(*i)], Vec::new(), loc);
+            }
             ExprKind::Call { callee, args } => {
                 if let thir::Callee::Fn { def, type_args } = callee
                     && self.special_call(dest.clone(), *def, type_args, args, e, loc)
@@ -439,12 +447,22 @@ impl FnLower<'_, '_> {
                 );
             }
             ExprKind::Int(n) => {
-                // A `u64` literal (the others are constants).
+                // A literal of a kind of its own (the others are constants):
+                // a `u64` from its bits, a 128-bit integer from the `int`
+                // it equals.
+                let k = self.sized_int(&e.ty).unwrap_or("u64");
+                let name = if k == "u64" { "u64.from_bits".to_string() } else { format!("{k}.widen") };
+                self.intrinsic_call(dest, &name, Vec::new(), vec![Operand::Const(Const::Int(*n))], loc);
+            }
+            ExprKind::WideInt(bits) => {
+                // A 128-bit literal beyond `int` travels as its decimal text.
+                let k = self.sized_int(&e.ty).unwrap_or("i128");
+                let text = if k == "i128" { (*bits as i128).to_string() } else { bits.to_string() };
                 self.intrinsic_call(
                     dest,
-                    "u64.from_bits",
+                    &format!("{k}.from_text"),
                     Vec::new(),
-                    vec![Operand::Const(Const::Int(*n))],
+                    vec![Operand::Const(Const::Str(text))],
                     loc,
                 );
             }
@@ -931,10 +949,12 @@ impl FnLower<'_, '_> {
                     self.into(dest, expr)
                 }
                 Coercion::IntWiden => {
-                    // The same value; a `u64` is a kind of its own.
+                    // The same value; a `u64`, `u128` or `i128` is a kind of
+                    // its own.
                     let v = self.operand(expr);
-                    if self.sized_int(&e.ty) == Some("u64") {
-                        self.intrinsic_call(dest, "u64.widen", Vec::new(), vec![v], loc);
+                    if let Some(k) = self.sized_int(&e.ty).filter(|k| sisu_resolve::std_sources::own_kind(k))
+                    {
+                        self.intrinsic_call(dest, &format!("{k}.widen"), Vec::new(), vec![v], loc);
                     } else {
                         self.assign(dest, Rvalue::Use(v), loc);
                     }
@@ -1268,7 +1288,9 @@ impl FnLower<'_, '_> {
             "len" => {
                 let builtin = match &base {
                     Ty::Str => true,
-                    Ty::Adt(d, _) => matches!(prog.builtin(*d), Some("String" | "list" | "dict" | "set")),
+                    Ty::Adt(d, _) => {
+                        matches!(prog.builtin(*d), Some("String" | "list" | "Array" | "dict" | "set"))
+                    }
                     _ => false,
                 };
                 if builtin {

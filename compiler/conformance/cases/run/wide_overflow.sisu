@@ -1,0 +1,7 @@
+# The least `i128` divided by -1 is one more than the greatest: it traps,
+# as `int`'s does (03, "Numbers").
+
+def main():
+    let least: i128 = -170141183460469231731687303715884105728
+    print(least // 1)
+    print(least // -1)

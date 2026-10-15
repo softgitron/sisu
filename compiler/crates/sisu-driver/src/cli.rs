@@ -13,23 +13,41 @@ use std::rc::Rc;
 pub const EXIT_USAGE: i32 = 2;
 pub const EXIT_ICE: i32 = 70;
 
-fn text(id: MsgId, params: &[(&str, String)]) -> String {
+pub(crate) fn text(id: MsgId, params: &[(&str, String)]) -> String {
     Catalog::builtin().render(id.id(), params)
 }
 
 /// `error[CODE]: message` for a catalog message without a source span.
-fn plain_error(id: MsgId, params: &[(&str, String)]) -> String {
+pub(crate) fn plain_error(id: MsgId, params: &[(&str, String)]) -> String {
     let code = Catalog::builtin().code(id.id()).unwrap_or("");
     format!("error[{code}]: {}\n", text(id, params))
 }
 
 /// Delegates to a host, with the program's own arguments.
-struct WithArgs<'a> {
-    inner: &'a mut dyn Host,
-    args: Vec<String>,
+pub(crate) struct WithArgs<'a> {
+    pub(crate) inner: &'a mut dyn Host,
+    pub(crate) args: Vec<String>,
+    /// `sisu run --watch`: the program's files, each with its name as the
+    /// program names it, its path, and the hash of the text last seen.
+    pub(crate) watch: Vec<(String, std::path::PathBuf, u64)>,
 }
 
 impl Host for WithArgs<'_> {
+    /// The files whose text changed since the last poll. A file that
+    /// cannot be read (an editor between writing and renaming it) waits
+    /// for the next poll.
+    fn poll_edits(&mut self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for (name, disk, seen) in &mut self.watch {
+            let Ok(text) = std::fs::read_to_string(&*disk) else { continue };
+            let h = sisu_interp::record::content_hash(text.as_bytes());
+            if h != *seen {
+                *seen = h;
+                out.push((name.clone(), text));
+            }
+        }
+        out
+    }
     fn stdout(&mut self, t: &str) {
         self.inner.stdout(t)
     }
@@ -182,6 +200,92 @@ struct Opts {
     iterations: u64,
 }
 
+/// What a command works on, read from disk (09): a file, or the root
+/// module of a program of several modules with the rest of its files.
+pub(crate) struct Input {
+    /// The root module's file, as diagnostics name it.
+    pub(crate) file: String,
+    pub(crate) source: String,
+    /// For a program of several modules: its layout and every other file's
+    /// name and text.
+    pub(crate) program: Option<(crate::db::ProgramSource, Vec<(String, String)>)>,
+    /// The root module's file on disk: snapshots and transcripts are
+    /// beside it.
+    disk: std::path::PathBuf,
+    /// The package's name and version and its module count, for `sisu
+    /// build`.
+    package: Option<(String, String)>,
+    modules: usize,
+    /// How a command line names it again: the file, or the package's
+    /// directory relative to the working directory (`.`), as a failing
+    /// test's replay line gives it.
+    shown: String,
+    /// Every file of the program, by its name, with its path on disk (what
+    /// `sisu run --watch` watches).
+    disks: Vec<(String, std::path::PathBuf)>,
+}
+
+impl Input {
+    pub(crate) fn single(file: &str, source: String) -> Input {
+        Input {
+            file: file.to_string(),
+            source,
+            program: None,
+            disk: std::path::PathBuf::from(file),
+            package: None,
+            modules: 1,
+            shown: file.to_string(),
+            disks: vec![(file.to_string(), std::path::PathBuf::from(file))],
+        }
+    }
+
+    /// The files `sisu run --watch` watches, with the hashes of the texts
+    /// the program was compiled from.
+    fn watched(&self) -> Vec<(String, std::path::PathBuf, u64)> {
+        let text = |name: &str| -> &str {
+            if name == self.file {
+                return &self.source;
+            }
+            self.program
+                .as_ref()
+                .and_then(|(_, files)| files.iter().find(|(n, _)| n == name))
+                .map(|(_, t)| t.as_str())
+                .unwrap_or("")
+        };
+        self.disks
+            .iter()
+            .map(|(n, d)| (n.clone(), d.clone(), sisu_interp::record::content_hash(text(n).as_bytes())))
+            .collect()
+    }
+
+    /// The content hash of everything the program is made of: the file's
+    /// text for a single file (as replay tokens have always named it),
+    /// every file's name and text for a package.
+    fn hash(&self) -> u64 {
+        match &self.program {
+            None => sisu_interp::record::content_hash(self.source.as_bytes()),
+            Some((_, files)) => {
+                let mut all = format!("{}\n{}", self.file, self.source);
+                for (n, t) in files {
+                    all.push_str(&format!("\n{n}\n{t}"));
+                }
+                sisu_interp::record::content_hash(all.as_bytes())
+            }
+        }
+    }
+
+    /// Puts the program's files and layout in the query database.
+    pub(crate) fn load(&self, db: &mut Db) {
+        db.set_file(&self.file, &self.source);
+        if let Some((program, files)) = &self.program {
+            for (n, t) in files {
+                db.set_file(n, t);
+            }
+            db.set_program(&self.file, program.clone());
+        }
+    }
+}
+
 /// Which tests a `sisu test` runs: those whose name holds one of
 /// `filters`, that have one of `tags`, and that have none of `skip`
 /// (17, "Grouping is one level deep; tags select and skip"). Empty lists
@@ -211,6 +315,11 @@ fn split_args(args: &[String]) -> Parsed<'_> {
     let mut i = 0;
     while i < args.len() && args[i].starts_with("--") {
         let a = args[i].as_str();
+        // `--` ends the flags; what follows is the program's (`sisu run --
+        // ARGS` on a package).
+        if a == "--" {
+            return Parsed { flags, values, file: None, rest: args[i + 1..].to_vec() };
+        }
         if let Some((k, v)) = a.split_once('=')
             && VALUE_FLAGS.contains(&k)
         {
@@ -238,10 +347,10 @@ struct Seeds {
 
 /// Captures a run's standard streams, for `--explore`; everything else goes
 /// to the host.
-struct Captured<'a> {
-    inner: &'a mut dyn Host,
-    out: String,
-    err: String,
+pub(crate) struct Captured<'a> {
+    pub(crate) inner: &'a mut dyn Host,
+    pub(crate) out: String,
+    pub(crate) err: String,
 }
 
 impl Host for Captured<'_> {
@@ -346,17 +455,33 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
             exit::OK
         }
         "explain" => explain(rest, host),
+        "repl" => crate::repl::repl(rest, host),
+        "lsp" => {
+            if let Some(bad) = rest.first() {
+                host.stderr(&plain_error(
+                    msg::CLI_UNKNOWN_OPTION,
+                    &[("option", bad.clone()), ("command", "lsp".into())],
+                ));
+                return EXIT_USAGE;
+            }
+            crate::lsp::serve()
+        }
+        "ws" => crate::repl::worksheet(rest, host),
+        "new" => new_package(rest, host),
+        "fmt" => fmt(rest, host),
         "explain-borrow" => explain_borrow(rest, host),
         "replay" => replay(rest, host),
         "audit" => audit(rest, host),
-        "run" | "check" | "sir" | "test" | "bench" | "tokens" | "parse" => {
+        "run" | "check" | "sir" | "test" | "bench" | "build" | "tokens" | "parse" => {
             let p = split_args(rest);
             let allowed: &[&str] = match cmd.as_str() {
-                "run" => &["--sir", "--monitor", "--defer-borrow", "--stats"],
-                "test" => &["--no-monitor", "--defer-borrow", "--sim", "--update"],
-                "check" => &["--format=ids", "--format=human", "--explain"],
+                "run" => &["--sir", "--monitor", "--defer-borrow", "--stats", "--locked", "--watch"],
+                "test" => &["--no-monitor", "--defer-borrow", "--sim", "--update", "--locked", "--std"],
+                "check" => &["--format=ids", "--format=human", "--explain", "--locked"],
+                "build" => &["--locked"],
+                "bench" => &["--locked"],
                 "tokens" => &["--trivia"],
-                "parse" => &["--tree", "--print", "--trivia"],
+                "parse" => &["--tree", "--print", "--trivia", "--shape"],
                 _ => &[],
             };
             if let Some(bad) = p.flags.iter().find(|f| !allowed.contains(f)) {
@@ -497,19 +622,10 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                     _ => seeds.explore = Some(n.max(1)),
                 }
             }
-            let Some(file) = p.file else {
-                host.stderr(&plain_error(msg::CLI_MISSING_FILE, &[("command", cmd.clone())]));
-                return EXIT_USAGE;
-            };
-            let source = match std::fs::read_to_string(file) {
-                Ok(s) => s,
-                Err(e) => {
-                    host.stderr(&plain_error(
-                        msg::CLI_CANNOT_READ,
-                        &[("path", file.to_string()), ("reason", e.to_string())],
-                    ));
-                    return exit::ERROR;
-                }
+            let locked = p.flags.contains(&"--locked");
+            let inputs = match inputs_for(cmd, p.file, locked, has_ids(&p.flags), host) {
+                Ok(i) => i,
+                Err(code) => return code,
             };
             if cmd != "run" && !p.rest.is_empty() {
                 host.stderr(&plain_error(
@@ -524,6 +640,16 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                     .find(|o| p.flags.contains(o) || p.values.iter().any(|(k, _)| k == *o))
             {
                 host.stderr(&plain_error(msg::CLI_RECORD_ONCE, &[("option", other.to_string())]));
+                return EXIT_USAGE;
+            }
+            if p.flags.contains(&"--watch")
+                && let Some(other) = ["--explore", "--defer-borrow", "--sir"]
+                    .iter()
+                    .find(|o| p.flags.contains(o) || p.values.iter().any(|(k, _)| k == *o))
+                    .map(|o| o.to_string())
+                    .or_else(|| (scheduler == "exhaustive").then(|| "--scheduler exhaustive".to_string()))
+            {
+                host.stderr(&plain_error(msg::CLI_WATCH_ALONE, &[("option", other)]));
                 return EXIT_USAGE;
             }
             let sim = p.flags.contains(&"--sim");
@@ -553,31 +679,20 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 select,
                 iterations,
             };
-            let stage = std::cell::Cell::new("the front end");
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                command(cmd, &p.flags, &opts, file, &source, p.rest.clone(), host, &stage)
-            }));
-            match r {
-                Ok(code) => code,
-                Err(payload) => {
-                    let detail = payload
-                        .downcast_ref::<String>()
-                        .cloned()
-                        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
-                        .unwrap_or_else(|| "unknown".into());
-                    let dump = std::env::temp_dir().join("sisu-ice.sisu");
-                    let _ = std::fs::write(&dump, &source);
-                    host.stderr(&plain_error(
-                        msg::CLI_ICE,
-                        &[
-                            ("stage", stage.get().to_string()),
-                            ("detail", detail),
-                            ("dump", dump.display().to_string()),
-                        ],
-                    ));
-                    EXIT_ICE
-                }
+            // Each member of a workspace in turn (09); the worst status wins.
+            let mut status = exit::OK;
+            for input in &inputs {
+                let code = guarded(cmd, &p.flags, &opts, input, p.rest.clone(), host);
+                status = status.max(code);
             }
+            status
+        }
+        // `#!/usr/bin/env sisu` runs a script as `sisu FILE ARGS...` (10,
+        // "REPL and scripts").
+        other if other.ends_with(".sisu") && std::path::Path::new(other).is_file() => {
+            let mut again = vec!["run".to_string(), other.to_string()];
+            again.extend(rest.iter().cloned());
+            execute(&again, host)
         }
         other => {
             host.stderr(&plain_error(msg::CLI_UNKNOWN_COMMAND, &[("command", other.to_string())]));
@@ -586,17 +701,380 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
     }
 }
 
+/// Whether diagnostics are asked for in the conformance form.
+fn has_ids(flags: &[&str]) -> bool {
+    flags.contains(&"--format=ids")
+}
+
+/// Runs one command, turning a host panic (an internal compiler error,
+/// which the lints are meant to make impossible) into its report.
+fn guarded(
+    cmd: &str,
+    flags: &[&str],
+    opts: &Opts,
+    input: &Input,
+    args: Vec<String>,
+    host: &mut dyn Host,
+) -> i32 {
+    let stage = std::cell::Cell::new("the front end");
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        command(cmd, flags, opts, input, args, host, &stage)
+    }));
+    match r {
+        Ok(code) => code,
+        Err(payload) => {
+            let detail = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "unknown".into());
+            let dump = std::env::temp_dir().join("sisu-ice.sisu");
+            let _ = std::fs::write(&dump, &input.source);
+            host.stderr(&plain_error(
+                msg::CLI_ICE,
+                &[
+                    ("stage", stage.get().to_string()),
+                    ("detail", detail),
+                    ("dump", dump.display().to_string()),
+                ],
+            ));
+            EXIT_ICE
+        }
+    }
+}
+
+/// What a command works on (09): the file it names; else the package or
+/// workspace in the directory it names, or in the working directory or the
+/// nearest one above it. A package's files are read and its lockfile
+/// written (unless `--locked`, which refuses to change it).
+fn inputs_for(
+    cmd: &str,
+    target: Option<&str>,
+    locked: bool,
+    ids: bool,
+    host: &mut dyn Host,
+) -> Result<Vec<Input>, i32> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let read = |host: &mut dyn Host, file: &str| -> Result<String, i32> {
+        std::fs::read_to_string(file).map_err(|e| {
+            host.stderr(&plain_error(
+                msg::CLI_CANNOT_READ,
+                &[("path", file.to_string()), ("reason", e.to_string())],
+            ));
+            exit::ERROR
+        })
+    };
+    let file_level = matches!(cmd, "tokens" | "parse");
+    if let Some(f) = target
+        && (file_level || !cwd.join(f).is_dir())
+    {
+        let source = read(host, f)?;
+        if file_level {
+            return Ok(vec![Input::single(f, source)]);
+        }
+        let layout = crate::package::load_file(f, &source, &cwd);
+        if layout.packages.len() == 1 && layout.diagnostics.is_empty() {
+            return Ok(vec![Input::single(f, source)]);
+        }
+        let mut input = input_of(&layout, host, ids)?;
+        input.disk = std::path::PathBuf::from(f);
+        return Ok(vec![input]);
+    }
+    if file_level {
+        host.stderr(&plain_error(msg::CLI_MISSING_FILE, &[("command", cmd.to_string())]));
+        return Err(EXIT_USAGE);
+    }
+    let Some(found) = crate::package::locate(target, &cwd) else {
+        let dir = target.map(str::to_string).unwrap_or_else(|| cwd.display().to_string());
+        host.stderr(&plain_error(msg::CLI_NO_PACKAGE, &[("dir", dir), ("command", cmd.to_string())]));
+        return Err(EXIT_USAGE);
+    };
+    // The workspace the package belongs to, or that the directory is: its
+    // one lockfile covers every member (09).
+    let found_workspace = match &found {
+        crate::package::Target::Workspace(root, members) => Some((root.clone(), members.clone())),
+        crate::package::Target::Package(d) => crate::package::workspace_of(d),
+        crate::package::Target::File(_) => None,
+    };
+    let dirs = match found {
+        crate::package::Target::File(f) => {
+            let source = read(host, &f)?;
+            return Ok(vec![Input::single(&f, source)]);
+        }
+        crate::package::Target::Package(d) => vec![d],
+        crate::package::Target::Workspace(root, members) => {
+            // A member must be a package (09): its directory has a manifest.
+            let manifest = root.join(crate::package::MANIFEST);
+            let text = std::fs::read_to_string(&manifest).unwrap_or_default();
+            let listed = crate::manifest::read(sisu_diag::FileId(0), &text)
+                .0
+                .and_then(|m| m.members)
+                .unwrap_or_default();
+            let missing: Vec<sisu_diag::Diagnostic> = listed
+                .iter()
+                .filter(|(p, _)| !root.join(p).join(crate::package::MANIFEST).is_file())
+                .map(|(p, range)| {
+                    sisu_diag::Diagnostic::new(
+                        msg::PACKAGE_NO_MEMBER,
+                        sisu_diag::Span::new(sisu_diag::FileId(0), *range),
+                    )
+                    .with("path", p.clone())
+                })
+                .collect();
+            if !missing.is_empty() {
+                let mut map = sisu_diag::SourceMap::new();
+                map.add(crate::package::relative(&cwd, &manifest), text);
+                if ids {
+                    host.stdout(&sisu_diag::render::render_ids_with_files(&map, &missing));
+                } else {
+                    host.stderr(&sisu_diag::render::render_human(&map, &missing));
+                }
+                return Err(exit::ERROR);
+            }
+            if matches!(cmd, "run" | "sir" | "bench") {
+                // The one member with a `main`, or the member to name.
+                let apps: Vec<std::path::PathBuf> =
+                    members.iter().filter(|m| m.join("src/main.sisu").is_file()).cloned().collect();
+                if apps.len() != 1 {
+                    let names: Vec<String> = members
+                        .iter()
+                        .map(|m| crate::package::relative(&cwd, m))
+                        .map(|n| format!("`{n}`"))
+                        .collect();
+                    host.stderr(&plain_error(
+                        msg::CLI_WORKSPACE_RUN,
+                        &[("command", cmd.to_string()), ("members", names.join(", "))],
+                    ));
+                    return Err(EXIT_USAGE);
+                }
+                apps
+            } else {
+                members
+            }
+        }
+    };
+    let layouts: Vec<crate::package::Layout> =
+        dirs.iter().map(|dir| crate::package::load_package(dir, dir)).collect();
+    // One lockfile for a workspace's members (09): what all of them resolved.
+    let lock = match &found_workspace {
+        Some((root, members)) => {
+            let all: Vec<crate::package::Layout> =
+                members.iter().map(|m| crate::package::load_package(m, m)).collect();
+            let path = root.join(crate::package::LOCKFILE);
+            (!all.iter().any(|l| l.has_errors())).then(|| (path, crate::package::lockfile_of(&all, root)))
+        }
+        None => layouts.first().and_then(|l| l.lock.clone()),
+    };
+    let mut out = Vec::new();
+    for (k, layout) in layouts.into_iter().enumerate() {
+        if k == 0
+            && let Some((path, text)) = &lock
+            && !layout.has_errors()
+        {
+            let old = std::fs::read_to_string(path).ok();
+            if old.as_deref() != Some(text.as_str()) {
+                if locked {
+                    let what = match old {
+                        None => "there is none".to_string(),
+                        Some(o) => sisu_interp::diff::lines(&o, text),
+                    };
+                    host.stderr(&plain_error(msg::CLI_LOCKED, &[("what", what)]));
+                    return Err(exit::ERROR);
+                }
+                if let Err(e) = std::fs::write(path, text) {
+                    host.stderr(&plain_error(
+                        msg::CLI_CANNOT_WRITE,
+                        &[("path", path.display().to_string()), ("reason", e.to_string())],
+                    ));
+                    return Err(exit::ERROR);
+                }
+            }
+        }
+        if cmd == "run" && !layout.packages.first().is_none_or(|p| p.application) && !layout.has_errors() {
+            let name = layout.packages.first().map(|p| p.name.clone()).unwrap_or_default();
+            host.stderr(&plain_error(msg::CLI_NO_APPLICATION, &[("name", name)]));
+            return Err(exit::ERROR);
+        }
+        out.push(input_of(&layout, host, ids)?);
+    }
+    Ok(out)
+}
+
+/// The input a layout describes, with its files read. A layout whose
+/// manifests are broken past reading any module reports them here.
+fn input_of(layout: &crate::package::Layout, host: &mut dyn Host, ids: bool) -> Result<Input, i32> {
+    input_with_root(layout, host, ids, None)
+}
+
+/// [`input_of`], with the root module's text given rather than read (a
+/// REPL session's program, which is on no disk).
+pub(crate) fn input_with_root(
+    layout: &crate::package::Layout,
+    host: &mut dyn Host,
+    ids: bool,
+    root_text: Option<&str>,
+) -> Result<Input, i32> {
+    let Some(root) = layout.modules.first() else {
+        let mut map = sisu_diag::SourceMap::new();
+        for (n, t) in &layout.files {
+            map.add(n.clone(), t.clone());
+        }
+        let mut diags = layout.diagnostics.clone();
+        sisu_diag::diagnostic::sort(&mut diags);
+        let layout = crate::package::Layout { diagnostics: diags, ..layout.clone() };
+        if ids {
+            host.stdout(&sisu_diag::render::render_ids_with_files(&map, &layout.diagnostics));
+        } else {
+            host.stderr(&sisu_diag::render::render_human(&map, &layout.diagnostics));
+        }
+        return Err(exit::ERROR);
+    };
+    let mut files = Vec::new();
+    let mut source = String::new();
+    for (i, m) in layout.modules.iter().enumerate() {
+        if i == 0
+            && let Some(t) = root_text
+        {
+            source = t.to_string();
+            continue;
+        }
+        let text = std::fs::read_to_string(&m.disk).map_err(|e| {
+            host.stderr(&plain_error(
+                msg::CLI_CANNOT_READ,
+                &[("path", m.disk.display().to_string()), ("reason", e.to_string())],
+            ));
+            exit::ERROR
+        })?;
+        if i == 0 {
+            source = text;
+        } else {
+            files.push((m.name.clone(), text));
+        }
+    }
+    let mut program = crate::db::ProgramSource::from_layout(layout);
+    program.base = layout.base.clone();
+    let package =
+        layout.packages.first().filter(|p| !p.name.is_empty()).map(|p| (p.name.clone(), p.version.clone()));
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let shown = match layout.packages.first() {
+        Some(p) if !p.name.is_empty() => {
+            crate::package::relative(&std::fs::canonicalize(&cwd).unwrap_or(cwd), &p.dir)
+        }
+        _ => root.name.clone(),
+    };
+    Ok(Input {
+        file: root.name.clone(),
+        source,
+        program: Some((program, files)),
+        disk: root.disk.clone(),
+        package,
+        modules: layout.modules.iter().filter(|m| m.package == 0).count(),
+        shown,
+        disks: layout.modules.iter().map(|m| (m.name.clone(), m.disk.clone())).collect(),
+    })
+}
+
+/// `sisu run --watch`: the program again from its saved files, through the
+/// queries `sisu run` uses (`sisu_interp::Rebuild`).
+struct Rebuilder {
+    file: String,
+    source: String,
+    program: Option<(crate::db::ProgramSource, Vec<(String, String)>)>,
+    level: sisu_lower::ContractLevel,
+}
+
+impl Rebuilder {
+    fn of(input: &Input, level: sisu_lower::ContractLevel) -> Rebuilder {
+        Rebuilder {
+            file: input.file.clone(),
+            source: input.source.clone(),
+            program: input.program.clone(),
+            level,
+        }
+    }
+}
+
+impl sisu_interp::Rebuild for Rebuilder {
+    fn rebuild(&mut self, edits: &[(String, String)]) -> Result<sisu_sir::Program, String> {
+        for (name, text) in edits {
+            if *name == self.file {
+                self.source = text.clone();
+            } else if let Some((_, files)) = &mut self.program
+                && let Some(f) = files.iter_mut().find(|(n, _)| n == name)
+            {
+                f.1 = text.clone();
+            }
+        }
+        let input = Input { program: self.program.clone(), ..Input::single(&self.file, self.source.clone()) };
+        let mut db = Db::new();
+        db.contracts = self.level;
+        input.load(&mut db);
+        program_to_run(&mut db, &self.file)
+    }
+}
+
+/// The SIR program `sisu run` would run, or the diagnostics that stop it,
+/// rendered for a person.
+fn program_to_run(db: &mut Db, file: &str) -> Result<sisu_sir::Program, String> {
+    check_to_run(db, file, &[]).map_err(|e| match e {
+        NotRun::Diagnostics(map, diags) => sisu_diag::render::render_human(&map, &diags),
+        NotRun::Message(m) => m,
+    })
+}
+
+/// Why a program was not run: its diagnostics (with the files they point
+/// into), or a message of the driver.
+pub(crate) enum NotRun {
+    Diagnostics(sisu_diag::SourceMap, Vec<sisu_diag::Diagnostic>),
+    Message(String),
+}
+
+/// The SIR program `sisu run` would run, with these functions kept too
+/// (the compiler keeps only what `main` reaches), or why it would not run.
+pub(crate) fn check_to_run(db: &mut Db, file: &str, keep: &[&str]) -> Result<sisu_sir::Program, NotRun> {
+    let Some(c) = db.checked(file) else { return Err(NotRun::Message(String::new())) };
+    if c.diagnostics.iter().any(|d| d.is_error()) {
+        return Err(NotRun::Diagnostics(c.map.clone(), c.diagnostics.clone()));
+    }
+    let Some(lowered) = db.lowered(file) else { return Err(NotRun::Message(String::new())) };
+    if !lowered.comptime.is_empty() {
+        return Err(NotRun::Diagnostics(c.map.clone(), lowered.comptime.clone()));
+    }
+    if lowered.has_errors() {
+        return Err(NotRun::Diagnostics(c.map.clone(), lowered.diagnostics.clone()));
+    }
+    if lowered.sir.entry.is_none() {
+        return Err(NotRun::Message(plain_error(msg::CLI_NO_MAIN, &[("file", file.to_string())])));
+    }
+    let sir = if keep.is_empty() {
+        lowered.sir.clone()
+    } else {
+        match db.sir_with(file, keep) {
+            Some(p) => p,
+            None => return Err(NotRun::Message(String::new())),
+        }
+    };
+    if let Some(problem) = sisu_sir::validate(&sir).into_iter().next() {
+        return Err(NotRun::Message(plain_error(
+            msg::STAGE0_INTERNAL,
+            &[("stage", "lowering".into()), ("detail", format!("invalid SIR in {problem}"))],
+        )));
+    }
+    Ok(sir)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn command(
     cmd: &str,
     flags: &[&str],
     opts: &Opts,
-    file: &str,
-    source: &str,
+    input: &Input,
     args: Vec<String>,
     host: &mut dyn Host,
     stage: &std::cell::Cell<&'static str>,
 ) -> i32 {
+    let file = input.file.as_str();
+    let source = input.source.as_str();
     let has = |f: &str| flags.contains(&f);
     let seeds = opts.seeds;
     let level = opts.level;
@@ -619,7 +1097,7 @@ fn command(
             return exit::ERROR;
         }
         stage.set("the interpreter");
-        let mut h = WithArgs { inner: host, args };
+        let mut h = WithArgs { inner: host, args, watch: Vec::new() };
         let options = Options {
             seed: seeds.first,
             stats: has("--stats"),
@@ -630,7 +1108,14 @@ fn command(
     }
     let mut db = Db::new();
     db.contracts = level;
-    db.set_file(file, source);
+    input.load(&mut db);
+    // `sisu test --std`: the standard library's doc examples run too.
+    if cmd == "test" && has("--std") {
+        let mut program = db.program(file);
+        program.std_doc_tests = true;
+        db.set_program(file, program);
+    }
+    let multi = input.program.is_some();
     match cmd {
         "tokens" => {
             stage.set("the lexer");
@@ -658,6 +1143,19 @@ fn command(
         "parse" => {
             stage.set("the parser");
             let Some(p) = db.parsed(file) else { return exit::ERROR };
+            if has("--shape") {
+                // What formatting keeps (`sisu fmt`'s self-check).
+                return match sisu_fmt::shape(source) {
+                    Some(s) => {
+                        host.stdout(&s);
+                        exit::OK
+                    }
+                    None => {
+                        host.stderr(&sisu_diag::render::render_ids(&p.map, &p.parse.diagnostics));
+                        exit::ERROR
+                    }
+                };
+            }
             if has("--print") {
                 host.stdout(&p.parse.tree.to_source());
             } else {
@@ -680,7 +1178,9 @@ fn command(
                     let lexed = sisu_lexer::lex(p.file, source);
                     host.stdout(&crate::doc::explain(source, &lexed.tokens, &p.module, &c.program, &c.typed));
                 }
-                if has("--format=ids") {
+                if has("--format=ids") && multi {
+                    host.stdout(&sisu_diag::render::render_ids_with_files(&c.map, &all));
+                } else if has("--format=ids") {
                     host.stdout(&sisu_diag::render::render_ids(&c.map, &all));
                 } else {
                     host.stderr(&sisu_diag::render::render_human(&c.map, &all));
@@ -765,6 +1265,21 @@ fn command(
                     host.stdout(&sisu_sir::write(&prog));
                     exit::OK
                 }
+                // `sisu build` (09): the program checked, lowered and
+                // through the ownership checker, its `comptime` values
+                // computed: everything but running it. Stage 0 builds for
+                // the interpreter, so there is no artefact to write.
+                "build" => {
+                    let line = match input.package.clone() {
+                        Some((name, version)) => text_line(
+                            msg::CLI_BUILT,
+                            &[("name", name), ("version", version), ("modules", input.modules.to_string())],
+                        ),
+                        None => text_line(msg::CLI_BUILT_FILE, &[("file", file.to_string())]),
+                    };
+                    host.stdout(&line);
+                    exit::OK
+                }
                 "bench" => {
                     stage.set("the interpreter");
                     let options = Options { seed: seeds.first, ..Options::default() };
@@ -814,7 +1329,7 @@ fn command(
                         jobs: opts.jobs,
                         // The snapshots beside the program (17).
                         snapshots: std::sync::Arc::new(
-                            std::fs::read_to_string(snap_path(file))
+                            std::fs::read_to_string(snap_path(&input.disk))
                                 .map(|t| crate::snap::parse(&t))
                                 .unwrap_or_default(),
                         ),
@@ -848,7 +1363,7 @@ fn command(
                             return exit::ERROR;
                         }
                     }
-                    let hash = sisu_interp::record::content_hash(source.as_bytes());
+                    let hash = input.hash();
                     // `--replay TOKEN`: the one test, with the token's seeds
                     // and case.
                     if let Some(t) = &opts.token {
@@ -899,7 +1414,7 @@ fn command(
                         };
                         let seeds = Seeds { first: t.seed, explore: None };
                         let run = TestRun {
-                            file,
+                            file: &input.shown,
                             hash,
                             only: Some(vec![t.test]),
                             bound: opts.bound,
@@ -927,7 +1442,9 @@ fn command(
                     let which = only.clone().unwrap_or_else(|| (0..prog.tests.len()).collect());
                     // The transcripts beside the program, when every test runs.
                     let mut transcripts = Vec::new();
-                    let found = if opts.select.is_all() { crate::transcript::find(file) } else { Vec::new() };
+                    let disk = input.disk.display().to_string();
+                    let found =
+                        if opts.select.is_all() { crate::transcript::find(&disk) } else { Vec::new() };
                     if !found.is_empty() {
                         let sir = db.sir_with(file, &["transcript_world", "transcript_system"]);
                         for path in found {
@@ -939,13 +1456,20 @@ fn command(
                             transcripts.push((shown, outcome.err()));
                         }
                     }
-                    let run = TestRun { file, hash, only, bound: opts.bound, search: true, transcripts };
+                    let run = TestRun {
+                        file: &input.shown,
+                        hash,
+                        only,
+                        bound: opts.bound,
+                        search: true,
+                        transcripts,
+                    };
                     let (code, reports) = run_tests(&prog, host, &options, seeds, &run);
                     if options.update {
                         let ran: Vec<&str> =
                             which.iter().filter_map(|&k| prog.tests.get(k)).map(|t| t.0.as_str()).collect();
                         if let Err(code) =
-                            update_snapshots(file, &options.snapshots, &ran, &reports, &prog, host)
+                            update_snapshots(&input.disk, &options.snapshots, &ran, &reports, &prog, host)
                         {
                             return code;
                         }
@@ -977,7 +1501,13 @@ fn command(
                     // `sisu replay LOG`: the log stands in for the world.
                     if let Some(log) = &opts.log {
                         let mut rep = sisu_interp::record::Replayer::new(log, host);
-                        let report = sisu_interp::run_main_report(&prog, &mut rep, &options);
+                        // A run under `--watch` replays its saves too.
+                        let report = if log.header.watch {
+                            let mut rebuild = Rebuilder::of(input, level);
+                            sisu_interp::run_watch((*prog).clone(), &mut rep, &options, &mut rebuild)
+                        } else {
+                            sisu_interp::run_main_report(&prog, &mut rep, &options)
+                        };
                         let diverged = rep.divergence();
                         drop(rep);
                         if let Some(detail) = diverged {
@@ -995,8 +1525,14 @@ fn command(
                         }
                         return report.status;
                     }
-                    let mut h = WithArgs { inner: host, args };
+                    let mut h = WithArgs { inner: host, args, watch: Vec::new() };
                     let searching = matches!(opts.strategy, sisu_interp::Strategy::Exhaustive { .. });
+                    let watch = has("--watch");
+                    if watch {
+                        // Hot replacement (10): the saves of the program's
+                        // files are polled at its boundaries.
+                        h.watch = input.watched();
+                    }
                     if (seeds.explore.is_some() || searching) && !deferring {
                         return run_main_seeds(&prog, &mut h, &options, seeds, opts.bound);
                     }
@@ -1005,14 +1541,22 @@ fn command(
                         let header = sisu_interp::record::Header {
                             toolchain: crate::replay::TOOLCHAIN.into(),
                             file: file.to_string(),
-                            hash: sisu_interp::record::content_hash(source.as_bytes()),
+                            hash: input.hash(),
                             source: source.to_string(),
                             seed: seeds.first,
                             hash_key: 0,
                             contracts: level.name().into(),
+                            files: input.program.as_ref().map(|(_, f)| f.clone()).unwrap_or_default(),
+                            layout: input.program.as_ref().map(|(p, _)| p.write()),
+                            watch,
                         };
                         let mut rec = sisu_interp::record::Recorder::new(&mut h, opts.redact.clone());
-                        let report = sisu_interp::run_main_report(&prog, &mut rec, &options);
+                        let report = if watch {
+                            let mut rebuild = Rebuilder::of(input, level);
+                            sisu_interp::run_watch((*prog).clone(), &mut rec, &options, &mut rebuild)
+                        } else {
+                            sisu_interp::run_main_report(&prog, &mut rec, &options)
+                        };
                         let text = rec.finish(&header, report.status);
                         drop(rec);
                         if let Err(e) = std::fs::write(path, text) {
@@ -1024,7 +1568,12 @@ fn command(
                         }
                         return report.status;
                     }
-                    let report = sisu_interp::run_main_report(&prog, &mut h, &options);
+                    let report = if watch {
+                        let mut rebuild = Rebuilder::of(input, level);
+                        sisu_interp::run_watch((*prog).clone(), &mut h, &options, &mut rebuild)
+                    } else {
+                        sisu_interp::run_main_report(&prog, &mut h, &options)
+                    };
                     if let Some(st) = &report.stats {
                         h.stderr(st);
                     }
@@ -1320,15 +1869,15 @@ fn run_transcript(
 }
 
 /// `PROGRAM.snap`, beside `PROGRAM.sisu`.
-fn snap_path(file: &str) -> std::path::PathBuf {
-    std::path::Path::new(file).with_extension("snap")
+fn snap_path(file: &std::path::Path) -> std::path::PathBuf {
+    file.with_extension("snap")
 }
 
 /// `sisu test --update`: the snapshots the tests that ran took replace
 /// the ones they had, each change shown; the others stay. The file is
 /// written only when something changed.
 fn update_snapshots(
-    file: &str,
+    file: &std::path::Path,
     old: &std::collections::BTreeMap<String, String>,
     ran: &[&str],
     reports: &[sisu_interp::RunReport],
@@ -1398,7 +1947,7 @@ fn update_snapshots(
 }
 
 /// A catalog message as a line of output.
-fn text_line(id: sisu_diag::MsgId, params: &[(&str, String)]) -> String {
+pub(crate) fn text_line(id: sisu_diag::MsgId, params: &[(&str, String)]) -> String {
     format!("{}\n", text(id, params))
 }
 
@@ -1808,7 +2357,17 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
         ));
         return exit::ERROR;
     }
-    if sisu_interp::record::content_hash(log.header.source.as_bytes()) != log.header.hash {
+    // The hash covers every file of a program of several modules, as a
+    // replay token's does.
+    let hashed = match log.header.layout.as_deref().and_then(crate::db::ProgramSource::read) {
+        Some(program) => Input {
+            program: Some((program, log.header.files.clone())),
+            ..Input::single(&log.header.file, log.header.source.clone())
+        }
+        .hash(),
+        None => sisu_interp::record::content_hash(log.header.source.as_bytes()),
+    };
+    if hashed != log.header.hash {
         return bad_log(host, "its source does not match its content hash".into());
     }
     let Some(level) = sisu_lower::ContractLevel::parse(&log.header.contracts) else {
@@ -1832,7 +2391,190 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
     };
     let stage = std::cell::Cell::new("the front end");
     let flags: Vec<&str> = p.flags.clone();
-    command("run", &flags, &opts, &file, &source, Vec::new(), host, &stage)
+    // A program of several modules replays from the files and layout the
+    // log holds.
+    let input = match opts
+        .log
+        .as_ref()
+        .and_then(|l| l.header.layout.as_deref())
+        .and_then(crate::db::ProgramSource::read)
+    {
+        Some(program) => {
+            let files = opts.log.as_ref().map(|l| l.header.files.clone()).unwrap_or_default();
+            Input {
+                file: file.clone(),
+                source: source.clone(),
+                program: Some((program, files)),
+                disk: std::path::PathBuf::from(&file),
+                package: None,
+                modules: 0,
+                shown: ".".into(),
+                disks: Vec::new(),
+            }
+        }
+        None => Input::single(&file, source.clone()),
+    };
+    command("run", &flags, &opts, &input, Vec::new(), host, &stage)
+}
+
+/// Every `.sisu` file under `dir`, sorted, leaving out hidden directories,
+/// `target` and a case's `.files` and `.pkg` inputs only when asked.
+fn sisu_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let mut paths: Vec<std::path::PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
+    paths.sort();
+    for p in paths {
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        if name.starts_with('.') || name == "target" {
+            continue;
+        }
+        if p.is_dir() {
+            sisu_files(&p, out);
+        } else if name.ends_with(".sisu") {
+            out.push(p);
+        }
+    }
+}
+
+/// `sisu fmt [--check] [PATH...]` (10, "Formatter"): formats each file, and
+/// each `.sisu` file under each directory, in place; without a path, the
+/// package's (the files under the directory of its manifest). There are
+/// no options of style. `--check` writes nothing and reports each file
+/// that is not formatted, with what would change. A file with a syntax
+/// error is reported and left as it is.
+fn fmt(args: &[String], host: &mut dyn Host) -> i32 {
+    let (flags, paths): (Vec<&String>, Vec<&String>) = args.iter().partition(|a| a.starts_with("--"));
+    if let Some(bad) = flags.iter().find(|f| f.as_str() != "--check") {
+        host.stderr(&plain_error(
+            msg::CLI_UNKNOWN_OPTION,
+            &[("option", bad.to_string()), ("command", "fmt".into())],
+        ));
+        return EXIT_USAGE;
+    }
+    let check = !flags.is_empty();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    if paths.is_empty() {
+        match crate::package::locate(None, &cwd) {
+            Some(crate::package::Target::Package(d) | crate::package::Target::Workspace(d, _)) => {
+                sisu_files(&d, &mut files)
+            }
+            _ => {
+                host.stderr(&plain_error(
+                    msg::CLI_NO_PACKAGE,
+                    &[("dir", cwd.display().to_string()), ("command", "fmt".into())],
+                ));
+                return EXIT_USAGE;
+            }
+        }
+    }
+    for p in &paths {
+        let path = std::path::PathBuf::from(p.as_str());
+        if path.is_dir() {
+            let before = files.len();
+            sisu_files(&path, &mut files);
+            if files.len() == before {
+                host.stderr(&plain_error(msg::CLI_FMT_NOTHING, &[("path", p.to_string())]));
+            }
+        } else {
+            files.push(path);
+        }
+    }
+    let mut status = exit::OK;
+    for f in files {
+        let shown = f.display().to_string();
+        let text = match std::fs::read_to_string(&f) {
+            Ok(t) => t,
+            Err(e) => {
+                host.stderr(&plain_error(
+                    msg::CLI_CANNOT_READ,
+                    &[("path", shown), ("reason", e.to_string())],
+                ));
+                status = exit::ERROR;
+                continue;
+            }
+        };
+        match sisu_fmt::format(&text) {
+            Ok(out) if out == text => {}
+            Ok(out) => {
+                if check {
+                    let diff = sisu_interp::diff::hunks(&text, &out, 2);
+                    host.stdout(&text_line(msg::CLI_FMT_WOULD_CHANGE, &[("file", shown), ("diff", diff)]));
+                    status = exit::ERROR;
+                } else if let Err(e) = std::fs::write(&f, out) {
+                    host.stderr(&plain_error(
+                        msg::CLI_CANNOT_WRITE,
+                        &[("path", shown), ("reason", e.to_string())],
+                    ));
+                    status = exit::ERROR;
+                }
+            }
+            Err(sisu_fmt::Refusal::Syntax(diags)) => {
+                let mut map = sisu_diag::SourceMap::new();
+                map.add(shown.clone(), text.clone());
+                let mut out = sisu_diag::render::render_human(&map, &diags);
+                out.push_str(&plain_error(msg::CLI_FMT_SYNTAX, &[("file", shown)]));
+                host.stderr(&out);
+                status = exit::ERROR;
+            }
+            Err(sisu_fmt::Refusal::Changed { at }) => {
+                host.stderr(&plain_error(msg::CLI_FMT_UNSTABLE, &[("file", shown), ("at", at.to_string())]));
+                status = EXIT_ICE;
+            }
+        }
+    }
+    status
+}
+
+/// `sisu new NAME [--lib]` (10): a package in a new directory `NAME`, with
+/// its manifest and a root module, `src/main.sisu` (or `src/lib.sisu`).
+fn new_package(args: &[String], host: &mut dyn Host) -> i32 {
+    let (flags, names): (Vec<&String>, Vec<&String>) = args.iter().partition(|a| a.starts_with("--"));
+    if let Some(bad) = flags.iter().find(|f| f.as_str() != "--lib") {
+        host.stderr(&plain_error(
+            msg::CLI_UNKNOWN_OPTION,
+            &[("option", bad.to_string()), ("command", "new".into())],
+        ));
+        return EXIT_USAGE;
+    }
+    let [name] = names.as_slice() else {
+        host.stderr(&plain_error(msg::CLI_MISSING_FILE, &[("command", "new".into())]));
+        return EXIT_USAGE;
+    };
+    let lib = !flags.is_empty();
+    if !crate::manifest::is_module_name(name) || crate::manifest::RESERVED.contains(&name.as_str()) {
+        host.stderr(&plain_error(msg::CLI_BAD_PACKAGE_NAME, &[("name", name.to_string())]));
+        return EXIT_USAGE;
+    }
+    let dir = std::path::Path::new(name.as_str());
+    if dir.exists() {
+        host.stderr(&plain_error(msg::CLI_EXISTS, &[("path", name.to_string())]));
+        return exit::ERROR;
+    }
+    let manifest =
+        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2027\"\n\n[dependencies]\n");
+    let (root, text) = if lib {
+        (
+            "lib.sisu",
+            format!(
+                "##! The library `{name}`.\n\npub def hello() -> str:\n    return \"hello from {name}\"\n\ntest \"hello\":\n    assert hello() == \"hello from {name}\"\n"
+            ),
+        )
+    } else {
+        ("main.sisu", "def main():\n    print(\"Hei, maailma!\")\n".to_string())
+    };
+    let written = std::fs::create_dir_all(dir.join("src"))
+        .and_then(|_| std::fs::write(dir.join("sisu.toml"), manifest))
+        .and_then(|_| std::fs::write(dir.join("src").join(root), text));
+    if let Err(e) = written {
+        host.stderr(&plain_error(
+            msg::CLI_CANNOT_WRITE,
+            &[("path", name.to_string()), ("reason", e.to_string())],
+        ));
+        return exit::ERROR;
+    }
+    host.stdout(&text_line(msg::CLI_CREATED, &[("name", name.to_string()), ("root", format!("src/{root}"))]));
+    exit::OK
 }
 
 fn explain(args: &[String], host: &mut dyn Host) -> i32 {

@@ -1,0 +1,19 @@
+# A save that changes a type's layout restarts the program (10,
+# "Debugging and profiling"): a value made before it has the old fields.
+# The program saves `layout.files/v2.sisu`, whose `Point` has a field
+# more, at frame 1.
+
+struct Point:
+    x: int
+    y: int
+
+def show(p: Point) -> String:
+    return "({p.x}, {p.y})"
+
+def main(sys: System):
+    for frame in range(3):
+        live.boundary()
+        print(show(Point(x=frame, y=frame * 2)))
+        if frame == 1:
+            let text = sys.fs.read_to_string("v2.sisu").expect("the next version")
+            sys.fs.write_text("layout.sisu", text).expect("saved")

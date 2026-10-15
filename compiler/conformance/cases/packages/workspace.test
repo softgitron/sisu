@@ -1,0 +1,4 @@
+test "the application's own test" ... ok
+1 passed, 0 failed, 0 blocked
+test "the library's test, run from the workspace" ... ok
+1 passed, 0 failed, 0 blocked

@@ -1,0 +1,1 @@
+../c/sisu.toml:7:1-7:2 E1007 package.cycle cycle="`a` -> `b` -> `c` -> `a`"

@@ -222,6 +222,7 @@ impl Resolver<'_> {
         let parent = &self.prog.modules[module.0 as usize];
         let name = format!("{dir}/{}.sisu", parent.name);
         let is_std = parent.is_std;
+        let package = parent.package;
         // Code made from the standard library's templates is the standard
         // library's: its file is under `<std>/`, which a run's traces leave
         // out.
@@ -234,10 +235,10 @@ impl Resolver<'_> {
         self.prog.modules.push(ModuleData {
             name,
             file,
-            items: Default::default(),
-            order: Vec::new(),
             is_std,
             parent: Some(module),
+            package,
+            ..ModuleData::default()
         });
         self.declare_items(id, &ast.items, "");
         Some(id)

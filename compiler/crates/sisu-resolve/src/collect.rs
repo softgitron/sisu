@@ -21,12 +21,7 @@ pub struct Resolved {
 
 /// Type names this stage knows but does not implement, with the phase of
 /// proposal/18-next-steps.md that brings them.
-pub(crate) const LATER_TYPES: &[(&str, &str)] = &[
-    ("i128", "the 128-bit integers"),
-    ("u128", "the 128-bit integers"),
-    ("f32", "`f32`"),
-    ("Array", "`Array` and const generics"),
-];
+pub(crate) const LATER_TYPES: &[(&str, &str)] = &[("f32", "`f32`")];
 
 /// Where a method is declared, which decides the generics, bounds and
 /// `Self` of its signature.
@@ -102,6 +97,14 @@ pub(crate) struct Resolver<'a> {
     pub instance_of: HashMap<DefId, (DefId, Vec<Ty>)>,
     /// The attributes of each struct and enum, as data (`reflect.attributes_of`).
     pub attrs_of: HashMap<DefId, Vec<crate::template::Attribute>>,
+    /// While the program's own modules are declared, their imports, which
+    /// wait until every module is declared (09: the modules of a package
+    /// may name each other freely).
+    pub deferred_imports: Option<Vec<(ModuleId, ast::Item)>>,
+    /// `sisu test --std`: each std module's doc examples are tests.
+    pub std_doc_tests: bool,
+    /// The items of each std module loaded, for its doc examples.
+    pub std_items: HashMap<&'static str, std::sync::Arc<ast::Module>>,
 }
 
 /// What a type expression may mention where it is written.
@@ -125,6 +128,49 @@ impl<'g> TyCtx<'g> {
     }
 }
 
+/// A module of the program's own source (09, "Modules"): the path an
+/// import names it by, its file and its syntax, and its package.
+#[derive(Clone, Copy, Debug)]
+pub struct SourceModule<'a> {
+    /// `["weather", "parser"]` for `src/parser.sisu` of the package
+    /// `weather`, `["weather"]` for its root module; empty for a single
+    /// file, which no import names.
+    pub path: &'a [String],
+    pub file: FileId,
+    pub ast: &'a ast::Module,
+    /// An index of [`Sources::packages`].
+    pub package: usize,
+}
+
+/// A package of the program's source (09, "Package manifest").
+#[derive(Clone, Debug, Default)]
+pub struct SourcePackage {
+    /// Its `[package] name`; empty for a single file.
+    pub name: String,
+    /// The packages its imports may name, by name, as indices of
+    /// [`Sources::packages`].
+    pub deps: Vec<(String, usize)>,
+    /// `[trust] unsafe` lists it (the root package always may).
+    pub trusted: bool,
+}
+
+/// Everything the program is made of: its modules, the root module first,
+/// and its packages, the root package first.
+#[derive(Clone, Copy, Debug)]
+pub struct Sources<'a> {
+    pub modules: &'a [SourceModule<'a>],
+    pub packages: &'a [SourcePackage],
+    /// Also declare the standard library's doc examples as tests, every
+    /// std module loaded (`sisu test --std`).
+    pub std_doc_tests: bool,
+}
+
+/// The package id of [`Sources::packages`]`[k]` in the resolved program,
+/// where std is [`STD_PACKAGE`].
+fn package_id(k: usize) -> u32 {
+    if k == 0 { ROOT_PACKAGE } else { k as u32 + 1 }
+}
+
 /// Resolves a program whose root module is `root` (already parsed from
 /// `root_file`). The prelude and any imported std modules are added to
 /// `sources`.
@@ -138,6 +184,25 @@ pub fn resolve_with(
     sources: &mut SourceMap,
     root_file: FileId,
     root: &ast::Module,
+    requests: &[Request],
+    embedded: &HashMap<String, Result<String, String>>,
+) -> Resolved {
+    let modules = [SourceModule { path: &[], file: root_file, ast: root, package: 0 }];
+    let packages = [SourcePackage { name: String::new(), deps: Vec::new(), trusted: true }];
+    resolve_program(
+        sources,
+        Sources { modules: &modules, packages: &packages, std_doc_tests: false },
+        requests,
+        embedded,
+    )
+}
+
+/// Resolves a program of several modules and packages (09): every module
+/// of `program` is declared before any import is resolved, so the modules
+/// of a package may name each other in any order.
+pub fn resolve_program(
+    sources: &mut SourceMap,
+    program: Sources<'_>,
     requests: &[Request],
     embedded: &HashMap<String, Result<String, String>>,
 ) -> Resolved {
@@ -168,8 +233,26 @@ pub fn resolve_with(
         template_asts: HashMap::new(),
         instance_of: HashMap::new(),
         attrs_of: HashMap::new(),
+        deferred_imports: None,
+        std_doc_tests: false,
+        std_items: HashMap::new(),
     };
     r.prog.embedded = embedded.clone();
+    // The packages: the root package, std, then the dependencies.
+    for (k, p) in program.packages.iter().enumerate() {
+        let data = PackageData {
+            name: p.name.clone(),
+            trusted: p.trusted || k == 0,
+            deps: p.deps.iter().map(|(n, d)| (n.clone(), package_id(*d))).collect(),
+            root: None,
+        };
+        if k == 0 {
+            r.prog.packages.push(data);
+            r.prog.packages.push(PackageData { name: "std".into(), trusted: true, ..Default::default() });
+        } else {
+            r.prog.packages.push(data);
+        }
+    }
     let prelude = r.load_std("prelude", std_sources::PRELUDE);
     r.prog.prelude = prelude;
     r.fill_well_known();
@@ -189,12 +272,70 @@ pub fn resolve_with(
     }
     // The impls of the leaf types and tuples; nothing names the module.
     r.load_std("builtin_impls", std_sources::builtin_impls());
-    let root_id = r.add_module("main".into(), root_file, false);
-    r.prog.root = root_id;
-    r.prog.poisoned = root.broken_names.iter().cloned().collect();
-    r.declare_items(root_id, &root.items, "");
-    r.declare_derived(root_id, &root.items);
-    r.declare_generators(root_id, &root.items);
+    // `sisu test --std`: every std module, with its doc examples as tests.
+    if program.std_doc_tests {
+        r.std_doc_tests = true;
+        let prelude_items = r.std_items.get("prelude").cloned().unwrap_or_default();
+        r.declare_doc_tests(prelude, &prelude_items.items, "std.core");
+        for (name, source) in std_sources::DOCUMENTED {
+            // The ambient modules are loaded already.
+            match r.std_loaded.get(name).copied() {
+                Some(m) => {
+                    let items = r.std_items.get(name).cloned().unwrap_or_default();
+                    r.declare_doc_tests(m, &items.items, &std_sources::display_path(name));
+                }
+                None => {
+                    r.load_std(name, source);
+                }
+            }
+        }
+    }
+    // The program's own modules, the root module first: each is a module
+    // of its package, and a child of the module its path's prefix names.
+    let mut ids = Vec::new();
+    for (i, m) in program.modules.iter().enumerate() {
+        let name = if i == 0 { "main".to_string() } else { m.path.join(".") };
+        let id = r.add_module(name, m.file, false);
+        let data = &mut r.prog.modules[id.0 as usize];
+        data.package = package_id(m.package);
+        data.path = m.path.to_vec();
+        r.prog.user_modules.push(id);
+        ids.push(id);
+    }
+    if let Some(&root_id) = ids.first() {
+        r.prog.root = root_id;
+    }
+    if let Some(root) = program.modules.first() {
+        r.prog.poisoned = root.ast.broken_names.iter().cloned().collect();
+    }
+    for (i, m) in program.modules.iter().enumerate() {
+        r.link_module(ids[i], m);
+    }
+    // Every module's items, then the imports between them.
+    r.deferred_imports = Some(Vec::new());
+    for (i, m) in program.modules.iter().enumerate() {
+        let id = ids[i];
+        let items = r.own_items(m);
+        let prefix = r.test_prefix(m);
+        r.declare_items(id, &items, &prefix);
+        // The root package's doc examples are its tests too (10).
+        if m.package == 0 {
+            r.declare_doc_tests(id, &items, &prefix);
+        }
+    }
+    let deferred = r.deferred_imports.take().unwrap_or_default();
+    for (module, item) in deferred {
+        match &item.kind {
+            ItemKind::Import(imp) => r.import(module, imp, item.range, item.vis),
+            ItemKind::FromImport(imp) => r.import_from(module, imp, item.range, item.vis),
+            _ => {}
+        }
+    }
+    for (i, m) in program.modules.iter().enumerate() {
+        let items = r.own_items(m);
+        r.declare_derived(ids[i], &items);
+        r.declare_generators(ids[i], &items);
+    }
     r.resolve_pending();
     r.build_variant_index();
     r.check_traits();
@@ -241,12 +382,111 @@ impl Resolver<'_> {
         self.prog.modules.push(ModuleData {
             name,
             file,
-            items: HashMap::new(),
-            order: Vec::new(),
             is_std,
-            parent: None,
+            package: if is_std { STD_PACKAGE } else { ROOT_PACKAGE },
+            ..ModuleData::default()
         });
         id
+    }
+
+    /// Makes a module of the program's source the child of the module its
+    /// path's prefix names (a directory with no file of its own is a module
+    /// too, whose items are its children), and a package's root module the
+    /// one its imports name the package by.
+    fn link_module(&mut self, id: ModuleId, m: &SourceModule) {
+        let package = package_id(m.package);
+        if m.path.len() == 1 {
+            if let Some(p) = self.prog.packages.get_mut(package as usize)
+                && p.root.is_none()
+            {
+                p.root = Some(id);
+            }
+            return;
+        }
+        let Some((last, parent_path)) = m.path.split_last() else { return };
+        if parent_path.is_empty() {
+            return;
+        }
+        let parent = self.module_at(parent_path, package, m.file);
+        let def =
+            self.new_def(parent, last, TextRange::empty(0), ast::Vis::Pub, Vec::new(), DefKind::Module(id));
+        let data = &mut self.prog.modules[parent.0 as usize];
+        data.items.insert(last.clone(), def);
+    }
+
+    /// The module of the program at `path`, made (as a directory's module,
+    /// with no items but its children) when no file is.
+    fn module_at(&mut self, path: &[String], package: u32, file: FileId) -> ModuleId {
+        if let Some(&m) = self.prog.user_modules.iter().find(|m| self.prog.modules[m.0 as usize].path == path)
+        {
+            return m;
+        }
+        let id = self.add_module(path.join("."), file, false);
+        let data = &mut self.prog.modules[id.0 as usize];
+        data.package = package;
+        data.path = path.to_vec();
+        self.prog.user_modules.push(id);
+        // Linked as `link_module` would, with this package.
+        if path.len() == 1 {
+            if let Some(p) = self.prog.packages.get_mut(package as usize)
+                && p.root.is_none()
+            {
+                p.root = Some(id);
+            }
+        } else if let Some((last, parent_path)) = path.split_last() {
+            let parent = self.module_at(parent_path, package, file);
+            let def = self.new_def(
+                parent,
+                last,
+                TextRange::empty(0),
+                ast::Vis::Pub,
+                Vec::new(),
+                DefKind::Module(id),
+            );
+            self.prog.modules[parent.0 as usize].items.insert(last.clone(), def);
+        }
+        id
+    }
+
+    /// The items of a module that this build declares: a dependency's
+    /// tests and benchmarks are its own package's business (09). A
+    /// script's top-level statements are its `main` (10).
+    fn own_items(&mut self, m: &SourceModule) -> Vec<ast::Item> {
+        let dependency = m.package != 0;
+        let items: Vec<ast::Item> = m
+            .ast
+            .items
+            .iter()
+            .filter(|i| {
+                !(dependency && matches!(i.kind, ItemKind::Test(_) | ItemKind::Suite(_) | ItemKind::Bench(_)))
+            })
+            .cloned()
+            .collect();
+        let script = self.sources.get(m.file).is_some_and(|f| f.text.starts_with("#!"));
+        if !script || !items.iter().any(|i| matches!(i.kind, ItemKind::Stmt(_))) {
+            return items;
+        }
+        let own_main = items.iter().find_map(|i| match &i.kind {
+            ItemKind::Fn(f) if f.name.text == "main" => Some(f.name.range),
+            _ => None,
+        });
+        if let Some(range) = own_main {
+            let span = Span::new(m.file, range);
+            if !self.diags.iter().any(|d| d.msg == msg::RESOLVE_SCRIPT_MAIN && d.span == span) {
+                self.report(Diagnostic::new(msg::RESOLVE_SCRIPT_MAIN, span));
+            }
+            return items;
+        }
+        let mut out: Vec<ast::Item> =
+            items.iter().filter(|i| !matches!(i.kind, ItemKind::Stmt(_))).cloned().collect();
+        out.extend(script_main(&items));
+        out
+    }
+
+    /// The prefix of the names of a module's tests: its path within its
+    /// package (`parser/accepts leading zeros`); none for a root module.
+    fn test_prefix(&self, m: &SourceModule) -> String {
+        if m.path.len() <= 1 { String::new() } else { m.path[1..].join(".") }
     }
 
     fn load_std(&mut self, name: &'static str, source: &'static str) -> ModuleId {
@@ -254,14 +494,56 @@ impl Resolver<'_> {
             return m;
         }
         let file = self.sources.add(format!("<std>/{name}.sisu"), source);
-        let parse = sisu_parser::parse(file, source);
-        self.diags.extend(parse.diagnostics);
-        let ast = ast::build::module(&parse.tree);
+        let (ast, diags) = std_ast(name, source);
+        // The syntax tree has no file in it; its diagnostics name the file
+        // it was first parsed as.
+        self.diags.extend(diags.iter().cloned().map(|mut d| {
+            d.span.file = file;
+            d
+        }));
         let m = self.add_module(name.to_string(), file, true);
         self.std_loaded.insert(name, m);
         self.declare_items(m, &ast.items, "");
         self.declare_derived(m, &ast.items);
+        if self.std_doc_tests {
+            let prefix = std_sources::display_path(name);
+            self.declare_doc_tests(m, &ast.items, &prefix);
+        }
+        self.std_items.insert(name, ast);
         m
+    }
+
+    /// A module's doc examples (10, "Testing"): one test per fenced block
+    /// of its `##` comments, declared in a module of their own whose text
+    /// keeps each example where it is in the file and whose scope is the
+    /// module's.
+    pub(crate) fn declare_doc_tests(&mut self, module: ModuleId, items: &[ast::Item], prefix: &str) {
+        let file = self.file(module);
+        let Some(text) = self.sources.get(file).map(|f| f.text.clone()) else { return };
+        let starts = item_starts(items);
+        let examples = crate::doctests::examples(&text, &starts);
+        if examples.is_empty() {
+            return;
+        }
+        let generated = crate::doctests::test_module(&text, &examples);
+        // The file keeps the module's name: its lines are the module's.
+        let name = self.sources.name(file).to_string();
+        let gen_file = self.sources.add(name, generated.clone());
+        let parse = sisu_parser::parse(gen_file, &generated);
+        self.diags.extend(parse.diagnostics);
+        let ast = ast::build::module(&parse.tree);
+        let parent = &self.prog.modules[module.0 as usize];
+        let data = ModuleData {
+            name: format!("<doc>/{}.sisu", parent.name),
+            file: gen_file,
+            is_std: parent.is_std,
+            parent: Some(module),
+            package: parent.package,
+            ..ModuleData::default()
+        };
+        let id = ModuleId(self.prog.modules.len() as u32);
+        self.prog.modules.push(data);
+        self.declare_items(id, &ast.items, prefix);
     }
 
     fn fill_well_known(&mut self) {
@@ -578,8 +860,13 @@ impl Resolver<'_> {
                         attrs: item.attrs.clone(),
                     });
                 }
-                ItemKind::Import(imp) => self.import(module, imp, item.range),
-                ItemKind::FromImport(imp) => self.import_from(module, imp, item.range),
+                ItemKind::Import(_) | ItemKind::FromImport(_) if self.deferred_imports.is_some() => {
+                    if let Some(d) = self.deferred_imports.as_mut() {
+                        d.push((module, item.clone()));
+                    }
+                }
+                ItemKind::Import(imp) => self.import(module, imp, item.range, item.vis),
+                ItemKind::FromImport(imp) => self.import_from(module, imp, item.range, item.vis),
                 ItemKind::Test(t) => {
                     let name = if test_prefix.is_empty() {
                         t.name.clone()
@@ -860,11 +1147,12 @@ impl Resolver<'_> {
 
     fn declare_methods(&mut self, module: ModuleId, owner: DefId, methods: &[ast::FnDef]) {
         for m in methods {
+            let vis = if self.is_std(module) { ast::Vis::Pub } else { m.vis };
             let def = self.new_def(
                 module,
                 &m.name.text,
                 m.name.range,
-                ast::Vis::Pub,
+                vis,
                 Vec::new(),
                 DefKind::Fn(Box::new(self.placeholder_fn(module, FnKind::Method))),
             );
@@ -872,60 +1160,142 @@ impl Resolver<'_> {
         }
     }
 
-    fn import(&mut self, module: ModuleId, imp: &ast::Import, range: TextRange) {
+    /// The module an import path names (09, "Modules"): a module of the
+    /// importing package (by the package's own name), of one of its
+    /// dependencies (by the dependency's name), or of the standard library
+    /// (`std.json`, and stage 0's short names `cli`, `http`, `json`, ...).
+    /// `None` when it names none, after reporting why.
+    fn import_target(&mut self, module: ModuleId, path: &[ast::Name], at: Span) -> Option<ModuleId> {
+        let words: Vec<&str> = path.iter().map(|n| n.text.as_str()).collect();
+        let first = *words.first()?;
+        let package = self.prog.modules[module.0 as usize].package();
+        let own = self.prog.packages.get(package as usize).filter(|p| !p.name.is_empty() && p.name == first);
+        let dep = self
+            .prog
+            .packages
+            .get(package as usize)
+            .and_then(|p| p.deps.iter().find(|(n, _)| n == first).map(|(_, d)| *d));
+        let root = match (own, dep) {
+            (Some(p), _) => p.root,
+            (None, Some(d)) => self.prog.packages.get(d as usize).and_then(|p| p.root),
+            (None, None) => None,
+        };
+        let Some(mut m) = root else {
+            // A package of the program that this package does not depend on.
+            if !self.is_std(module)
+                && std_sources::module_for(&words).is_none()
+                && let Some(p) = self.prog.packages.iter().skip(2).find(|p| p.name == first)
+            {
+                let this =
+                    self.prog.packages.get(package as usize).map(|p| p.name.clone()).unwrap_or_default();
+                let name = p.name.clone();
+                self.report(
+                    Diagnostic::new(msg::RESOLVE_NOT_A_DEPENDENCY, at)
+                        .with("name", words.join("."))
+                        .with("package", name)
+                        .with("this", this),
+                );
+                return None;
+            }
+            let Some((name, source)) = std_sources::module_for(&words) else {
+                self.report(Diagnostic::new(msg::RESOLVE_IMPORT_UNKNOWN, at).with("name", words.join(".")));
+                return None;
+            };
+            return Some(self.load_std(name, source));
+        };
+        for (i, seg) in path.iter().enumerate().skip(1) {
+            let next = self.prog.lookup_in(m, &seg.text).and_then(|d| match self.prog.def(d).kind {
+                DefKind::Module(c) if !self.prog.modules[m.0 as usize].imported.contains_key(&seg.text) => {
+                    Some(c)
+                }
+                _ => None,
+            });
+            match next {
+                Some(c) => m = c,
+                None => {
+                    self.report(
+                        Diagnostic::new(msg::RESOLVE_UNKNOWN_MODULE, at).with("name", words[..=i].join(".")),
+                    );
+                    return None;
+                }
+            }
+        }
+        Some(m)
+    }
+
+    /// Records that an import bound `name` in `module`, with the import's
+    /// visibility (a `pub` import re-exports it).
+    fn bind_import(&mut self, module: ModuleId, name: &str, def: DefId, range: TextRange, vis: ast::Vis) {
+        let m_items = &self.prog.modules[module.0 as usize].items;
+        // Importing a module by the name it already has here (a child of
+        // this module, or one imported twice) binds nothing new.
+        if let Some(&old) = m_items.get(name)
+            && (old == def
+                || matches!((&self.prog.def(old).kind, &self.prog.def(def).kind),
+                    (DefKind::Module(a), DefKind::Module(b)) if a == b))
+        {
+            return;
+        }
+        if m_items.contains_key(name) {
+            // Reported as a second definition of the name.
+            self.bind(module, name, def, range);
+            return;
+        }
+        let mm = &mut self.prog.modules[module.0 as usize];
+        mm.items.insert(name.to_string(), def);
+        mm.imported.insert(name.to_string(), vis);
+    }
+
+    fn import(&mut self, module: ModuleId, imp: &ast::Import, range: TextRange, vis: ast::Vis) {
         let span = self.span(module, range);
         if imp.c_header.is_some() {
             self.unsupported(span, "a C header import", "foreign functions (Phase 8)");
             return;
         }
-        let path: Vec<&str> = imp.path.iter().map(|n| n.text.as_str()).collect();
-        let Some((name, source)) = std_sources::module_for(&path) else {
-            let at = match (imp.path.first(), imp.path.last()) {
-                (Some(a), Some(b)) => self.span(module, a.range.cover(b.range)),
-                _ => span,
-            };
-            self.report(Diagnostic::new(msg::RESOLVE_IMPORT_UNKNOWN, at).with("name", path.join(".")));
-            return;
+        let at = match (imp.path.first(), imp.path.last()) {
+            (Some(a), Some(b)) => self.span(module, a.range.cover(b.range)),
+            _ => span,
         };
-        let m = self.load_std(name, source);
+        let Some(m) = self.import_target(module, &imp.path, at) else { return };
         let bound = imp
             .alias
             .as_ref()
             .map(|a| a.text.clone())
-            .unwrap_or_else(|| path.last().map(|s| s.to_string()).unwrap_or_default());
+            .unwrap_or_else(|| imp.path.last().map(|s| s.text.clone()).unwrap_or_default());
         let range_of_name =
             imp.alias.as_ref().map(|a| a.range).or(imp.path.last().map(|n| n.range)).unwrap_or(range);
-        let def =
-            self.new_def(module, &bound, range_of_name, ast::Vis::Private, Vec::new(), DefKind::Module(m));
-        self.bind(module, &bound, def, range_of_name);
+        let def = self.new_def(module, &bound, range_of_name, vis, Vec::new(), DefKind::Module(m));
+        if self.is_std(module) {
+            self.bind(module, &bound, def, range_of_name);
+        } else {
+            self.bind_import(module, &bound, def, range_of_name, vis);
+        }
     }
 
-    fn import_from(&mut self, module: ModuleId, imp: &ast::FromImport, range: TextRange) {
-        let span = self.span(module, range);
-        let path: Vec<&str> = imp.path.iter().map(|n| n.text.as_str()).collect();
-        let Some((name, source)) = std_sources::module_for(&path) else {
-            self.report(Diagnostic::new(msg::RESOLVE_IMPORT_UNKNOWN, span).with("name", path.join(".")));
-            return;
+    fn import_from(&mut self, module: ModuleId, imp: &ast::FromImport, range: TextRange, vis: ast::Vis) {
+        let span = match (imp.path.first(), imp.path.last()) {
+            (Some(a), Some(b)) => self.span(module, a.range.cover(b.range)),
+            _ => self.span(module, range),
         };
-        let m = self.load_std(name, source);
+        let Some(m) = self.import_target(module, &imp.path, span) else { return };
+        let path: Vec<&str> = imp.path.iter().map(|n| n.text.as_str()).collect();
+        let name = self.prog.modules[m.0 as usize].name.clone();
         let prelude = self.prog.prelude;
         for (n, alias) in &imp.names {
-            let found = self.prog.lookup_in(m, &n.text).or_else(|| {
-                std_sources::reexports(name)
-                    .contains(&n.text.as_str())
-                    .then(|| self.prog.lookup_in(prelude, &n.text))
+            let found = self.prog.member(m, &n.text, module).or_else(|| {
+                let is_std = self.is_std(m);
+                (is_std && std_sources::reexports(&name).contains(&n.text.as_str()))
+                    .then(|| self.prog.lookup_in(prelude, &n.text).map(|d| (d, true)))
                     .flatten()
             });
             match found {
-                Some(d) => {
-                    let bound = alias.as_ref().unwrap_or(n);
-                    let m_items = &self.prog.modules[module.0 as usize].items;
-                    if m_items.contains_key(&bound.text) {
-                        self.bind(module, &bound.text, d, bound.range);
-                    } else {
-                        let mm = &mut self.prog.modules[module.0 as usize];
-                        mm.items.insert(bound.text.clone(), d);
+                Some((d, visible)) => {
+                    if !visible {
+                        let s = self.span(module, n.range);
+                        self.report(self.private_item(d, m, s));
                     }
+                    let bound = alias.as_ref().unwrap_or(n);
+                    self.bind_import(module, &bound.text, d, bound.range, vis);
                 }
                 None => {
                     let s = self.span(module, n.range);
@@ -937,6 +1307,12 @@ impl Resolver<'_> {
                 }
             }
         }
+    }
+
+    /// `name` of `m` is not visible where it is named: private to its
+    /// module, or `pub(package)` in another package.
+    pub fn private_item(&self, d: DefId, m: ModuleId, span: Span) -> Diagnostic {
+        self.prog.private_item(d, m, span)
     }
 
     // ---------------------------------------------------------------- pass 2
@@ -1101,6 +1477,7 @@ impl Resolver<'_> {
                         ty,
                         default: f.default.clone(),
                         span: self.span(module, f.range),
+                        vis: f.vis,
                     });
                 }
                 for (range, what) in &s.unsupported {
@@ -1352,7 +1729,7 @@ impl Resolver<'_> {
             }
             Some(Owner::Trait(t)) => {
                 let info = self.prog.trait_info(*t).cloned().unwrap_or_default();
-                let mut generics = vec![Generic { name: "Self".into(), default: None }];
+                let mut generics = vec![Generic { name: "Self".into(), default: None, is_const: false }];
                 generics.extend(info.generics.iter().cloned());
                 let names: Vec<String> = generics.iter().map(|g| g.name.clone()).collect();
                 let tr = TraitRef { def: *t, args: (1..generics.len() as u32).map(Ty::Param).collect() };
@@ -1388,7 +1765,7 @@ impl Resolver<'_> {
                 let span = self.span(module, g.name.range);
                 self.report(Diagnostic::new(msg::RESOLVE_IMPL_DEFAULT, span));
             }
-            generics.push(Generic { name: g.name.text.clone(), default: None });
+            generics.push(Generic { name: g.name.text.clone(), default: None, is_const: g.is_const });
         }
         let impl_assoc: Vec<(String, Ty)> =
             impl_def.and_then(|i| self.prog.impl_info(i)).map(|i| i.assoc.clone()).unwrap_or_default();
@@ -1657,6 +2034,7 @@ fn invariant_check_def(node: sisu_syntax::tree::NodeId, s: &ast::StructDef) -> a
         attrs: vec![ast::Attr { name: "internal".into(), args: Vec::new(), range }],
         header_broken: false,
         body_broken: false,
+        vis: ast::Vis::Private,
     }
 }
 
@@ -1714,7 +2092,152 @@ fn predicate_def(pred: &ast::Expr) -> ast::FnDef {
         attrs: Vec::new(),
         header_broken: false,
         body_broken: false,
+        vis: ast::Vis::Private,
     }
+}
+
+/// Where each item that can carry a doc comment starts, with the name its
+/// doc examples' tests are named after: a method as `Type.method`.
+fn item_starts(items: &[ast::Item]) -> Vec<(u32, String)> {
+    let mut out = Vec::new();
+    for item in items {
+        let start = item.range.start;
+        let methods = |owner: &str, ms: &[ast::FnDef], out: &mut Vec<(u32, String)>| {
+            for m in ms {
+                out.push((m.range.start, format!("{owner}.{}", m.name.text)));
+            }
+        };
+        match &item.kind {
+            ItemKind::Fn(f) => out.push((start, f.name.text.clone())),
+            ItemKind::Struct(s) => {
+                out.push((start, s.name.text.clone()));
+                methods(&s.name.text, &s.methods, &mut out);
+            }
+            ItemKind::Enum(e) | ItemKind::ErrorSet(e) => {
+                out.push((start, e.name.text.clone()));
+                methods(&e.name.text, &e.methods, &mut out);
+            }
+            ItemKind::Trait(t) => {
+                out.push((start, t.name.text.clone()));
+                methods(&t.name.text, &t.methods, &mut out);
+            }
+            ItemKind::Impl(i) => methods(&owner_name(&i.self_ty), &i.methods, &mut out),
+            ItemKind::Const(c) => out.push((start, c.name.text.clone())),
+            ItemKind::TypeAlias(a) => out.push((start, a.name.text.clone())),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The name a doc test gives the type an `impl` is for: its path, with
+/// `T?` named `Option` and `T ! E` named `Result`, as they are declared.
+fn owner_name(ty: &ast::TypeExpr) -> String {
+    match &ty.kind {
+        TypeKind::Path { segments, .. } => {
+            segments.iter().map(|s| s.text.clone()).collect::<Vec<_>>().join(".")
+        }
+        TypeKind::Option(_) => "Option".to_string(),
+        TypeKind::Result { .. } => "Result".to_string(),
+        TypeKind::Ref { inner, .. } => owner_name(inner),
+        _ => "impl".to_string(),
+    }
+}
+
+/// A standard-library module's syntax, parsed once per process: its text
+/// never changes, and every program resolves it again. The tree holds no
+/// file; the diagnostics name `FileId(0)`.
+fn std_ast(
+    name: &'static str,
+    source: &'static str,
+) -> (std::sync::Arc<ast::Module>, Vec<sisu_diag::Diagnostic>) {
+    type Parsed = (std::sync::Arc<ast::Module>, Vec<sisu_diag::Diagnostic>);
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<&'static str, Parsed>>> =
+        std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Ok(c) = cache.lock()
+        && let Some(p) = c.get(name)
+    {
+        return p.clone();
+    }
+    let parse = sisu_parser::parse(FileId(0), source);
+    let parsed: Parsed = (std::sync::Arc::new(ast::build::module(&parse.tree)), parse.diagnostics);
+    if let Ok(mut c) = cache.lock() {
+        c.insert(name, parsed.clone());
+    }
+    parsed
+}
+
+/// A script's top-level statements as the body of its `main` (10, "REPL
+/// and scripts"): `def main(sys: System) -> !:` with the statements in
+/// order and `return Ok(())` after them, so a script may use `sys` and
+/// `?` as a function may.
+fn script_main(items: &[ast::Item]) -> Option<ast::Item> {
+    let stmts: Vec<ast::Stmt> = items
+        .iter()
+        .filter_map(|i| match &i.kind {
+            ItemKind::Stmt(s) => Some(s.clone()),
+            _ => None,
+        })
+        .collect();
+    let first = stmts.first()?;
+    let last = stmts.last()?;
+    let node = first.node;
+    let at = TextRange::empty(first.range.start);
+    let end = TextRange::empty(last.range.end);
+    let name = |t: &str| ast::Name { text: t.into(), range: at };
+    let path = |t: &str| ast::TypeExpr {
+        node,
+        range: at,
+        kind: TypeKind::Path { segments: vec![name(t)], args: Vec::new() },
+    };
+    let expr = |kind: ExprKind| ast::Expr { node, range: end, kind };
+    let ok = expr(ExprKind::Call {
+        callee: Box::new(expr(ExprKind::Name("Ok".into()))),
+        args: vec![ast::Arg {
+            node,
+            range: end,
+            name: None,
+            mutable: false,
+            value: expr(ExprKind::Tuple(Vec::new())),
+        }],
+        trailing: None,
+    });
+    let mut body = stmts.clone();
+    if !matches!(last.kind, ast::StmtKind::Return(_)) {
+        body.push(ast::Stmt { node, range: end, kind: ast::StmtKind::Return(Some(ok)) });
+    }
+    let range = TextRange::new(first.range.start, last.range.end);
+    let f = ast::FnDef {
+        node,
+        range,
+        name: name("main"),
+        is_pure: false,
+        is_comptime: false,
+        generics: Vec::new(),
+        params: vec![ast::Param {
+            node,
+            range: at,
+            mode: ast::Mode::Borrow,
+            kind: ParamKind::Named { name: name("sys"), ty: path("System"), default: None },
+        }],
+        ret: Some(ast::TypeExpr { node, range: at, kind: TypeKind::Result { ok: None, err: None } }),
+        from: Vec::new(),
+        where_: Vec::new(),
+        body: Some(ast::Block { node, range, stmts: body }),
+        attrs: Vec::new(),
+        header_broken: false,
+        body_broken: false,
+        vis: ast::Vis::Private,
+    };
+    Some(ast::Item {
+        node,
+        range,
+        attrs: Vec::new(),
+        vis: ast::Vis::Private,
+        docs: Vec::new(),
+        kind: ItemKind::Fn(f),
+    })
 }
 
 /// The range `[lo, hi)` an integer refinement's predicate bounds `self`

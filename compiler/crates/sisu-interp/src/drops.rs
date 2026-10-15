@@ -90,7 +90,7 @@ impl<'p> Interp<'p, '_> {
     /// arguments filled in.
     pub(crate) fn place_type(&self, p: &sir::Place) -> Option<Type> {
         let fr = self.frames.last()?;
-        let f = self.prog.functions.get(fr.func?)?;
+        let f = self.func(fr.func?)?;
         let t = sir::types::place_ty(&|n| self.types.get(n).copied(), f, p)?;
         Some(self.concrete(&t))
     }
@@ -201,7 +201,7 @@ impl<'p> Interp<'p, '_> {
             let value = p.join(Step::MutexValue);
             let check = match self.read(&value) {
                 Ok(Value::Struct(a) | Value::Variant(a)) => {
-                    self.fns.get(format!("{}.__invariant", a.ty).as_str()).copied()
+                    self.fn_index(&format!("{}.__invariant", a.ty)).ok()
                 }
                 _ => None,
             };

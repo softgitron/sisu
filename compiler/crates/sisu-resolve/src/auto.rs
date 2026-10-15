@@ -77,6 +77,7 @@ impl Program {
             | Ty::Unit
             | Ty::Never
             | Ty::Error
+            | Ty::Const(_)
             | Ty::Var(_) => Ok(()),
             Ty::Ref(inner, mutable) => {
                 let need = if *mutable && auto == Auto::Send { Auto::Send } else { Auto::Sync };

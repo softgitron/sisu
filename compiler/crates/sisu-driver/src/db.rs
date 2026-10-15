@@ -127,9 +127,162 @@ impl Lowered {
     }
 }
 
+/// A program of several modules (09): each module's path, file and
+/// package, the packages, and the problems the manifests and module trees
+/// had, with the manifests they point into. A file without one is a
+/// program of one module.
+#[derive(Clone, Debug, Default)]
+pub struct ProgramSource {
+    /// Each module: its path, its file's name (as [`Db::set_file`] named
+    /// it) and its package (an index of `packages`). The root module first.
+    pub modules: Vec<(Vec<String>, String, usize)>,
+    pub packages: Vec<sisu_resolve::SourcePackage>,
+    /// The manifests the problems point into (`FileId(k)` is the `k`th),
+    /// as (name, text).
+    pub manifests: Vec<(String, String)>,
+    pub problems: Vec<Diagnostic>,
+    /// The root module is a script (`#!` on its first line, 10).
+    pub script: bool,
+    /// The directory the files' names are relative to (where `embed`
+    /// finds a module's files).
+    pub base: std::path::PathBuf,
+    /// `sisu test --std`: the standard library's doc examples are tests of
+    /// the program too.
+    pub std_doc_tests: bool,
+}
+
+impl ProgramSource {
+    /// The program a layout describes.
+    pub fn from_layout(l: &crate::package::Layout) -> ProgramSource {
+        ProgramSource {
+            modules: l.modules.iter().map(|m| (m.path.clone(), m.name.clone(), m.package)).collect(),
+            packages: l
+                .packages
+                .iter()
+                .map(|p| sisu_resolve::SourcePackage {
+                    name: p.name.clone(),
+                    deps: p.deps.clone(),
+                    trusted: p.trusted,
+                })
+                .collect(),
+            manifests: l.files.clone(),
+            problems: l.diagnostics.clone(),
+            script: l.script,
+            base: l.base.clone(),
+            std_doc_tests: false,
+        }
+    }
+
+    /// The layout as text (TOML), for a capability log, so a recorded run
+    /// of a package replays without its files.
+    pub fn write(&self) -> String {
+        use crate::toml::quote;
+        let mut out = format!("script = {}\n", self.script);
+        for p in &self.packages {
+            let deps: Vec<String> = p.deps.iter().map(|(n, d)| format!("[{}, {d}]", quote(n))).collect();
+            out.push_str(&format!(
+                "\n[[package]]\nname = {}\ntrusted = {}\ndeps = [{}]\n",
+                quote(&p.name),
+                p.trusted,
+                deps.join(", ")
+            ));
+        }
+        for (path, file, package) in &self.modules {
+            let path: Vec<String> = path.iter().map(|x| quote(x)).collect();
+            out.push_str(&format!(
+                "\n[[module]]\npath = [{}]\nfile = {}\npackage = {package}\n",
+                path.join(", "),
+                quote(file)
+            ));
+        }
+        out
+    }
+
+    /// Reads [`ProgramSource::write`]'s text back.
+    pub fn read(text: &str) -> Option<ProgramSource> {
+        use crate::toml::Value;
+        let doc = crate::toml::parse(text).ok()?;
+        let mut p = ProgramSource {
+            script: matches!(doc.get("script")?.value, Value::Bool(true)),
+            ..Default::default()
+        };
+        let items = |key: &str| match doc.get(key).map(|v| &v.value) {
+            Some(Value::Array(xs)) => xs.clone(),
+            _ => Vec::new(),
+        };
+        for pk in items("package") {
+            let t = pk.value.as_table()?;
+            let mut deps = Vec::new();
+            if let Some(Value::Array(ds)) = t.get("deps").map(|v| &v.value) {
+                for d in ds {
+                    let Value::Array(pair) = &d.value else { return None };
+                    let name = pair.first()?.value.as_str()?.to_string();
+                    let Value::Int(i) = pair.get(1)?.value else { return None };
+                    deps.push((name, usize::try_from(i).ok()?));
+                }
+            }
+            p.packages.push(sisu_resolve::SourcePackage {
+                name: t.get("name")?.value.as_str()?.to_string(),
+                deps,
+                trusted: matches!(t.get("trusted")?.value, Value::Bool(true)),
+            });
+        }
+        for m in items("module") {
+            let t = m.value.as_table()?;
+            let Value::Array(path) = &t.get("path")?.value else { return None };
+            let path = path.iter().filter_map(|x| x.value.as_str().map(str::to_string)).collect();
+            let Value::Int(package) = t.get("package")?.value else { return None };
+            p.modules.push((
+                path,
+                t.get("file")?.value.as_str()?.to_string(),
+                usize::try_from(package).ok()?,
+            ));
+        }
+        Some(p)
+    }
+
+    fn key(&self) -> u64 {
+        let mut h = DefaultHasher::new();
+        for (path, file, package) in &self.modules {
+            path.hash(&mut h);
+            file.hash(&mut h);
+            package.hash(&mut h);
+        }
+        for p in &self.packages {
+            p.name.hash(&mut h);
+            p.deps.hash(&mut h);
+            p.trusted.hash(&mut h);
+        }
+        for (n, t) in &self.manifests {
+            n.hash(&mut h);
+            t.hash(&mut h);
+        }
+        self.script.hash(&mut h);
+        self.std_doc_tests.hash(&mut h);
+        h.finish()
+    }
+}
+
+/// `d` with every span in file `from` moved to file `to`.
+pub fn refile(mut d: Diagnostic, from: FileId, to: FileId) -> Diagnostic {
+    let mv = |s: &mut sisu_diag::Span| {
+        if s.file == from {
+            s.file = to;
+        }
+    };
+    mv(&mut d.span);
+    d.labels.iter_mut().for_each(|l| mv(&mut l.span));
+    for f in &mut d.fixes {
+        f.edits.iter_mut().for_each(|e| mv(&mut e.span));
+    }
+    d
+}
+
 #[derive(Default)]
 pub struct Db {
     texts: HashMap<String, Rc<str>>,
+    /// The programs of several modules, by their root module's file.
+    programs: HashMap<String, ProgramSource>,
     parsed: HashMap<String, (u64, Rc<Parsed>)>,
     checked: HashMap<String, (u64, Rc<Checked>)>,
     lowered: HashMap<String, (u64, Rc<Lowered>)>,
@@ -160,14 +313,45 @@ impl Db {
         self.texts.get(name).cloned()
     }
 
+    /// Makes `root` the root module of a program of several modules; the
+    /// texts of its files are set with [`Db::set_file`].
+    pub fn set_program(&mut self, root: &str, program: ProgramSource) {
+        self.programs.insert(root.to_string(), program);
+    }
+
+    /// The program whose root module is `name`: the one set, else the file
+    /// alone.
+    pub fn program(&self, name: &str) -> ProgramSource {
+        self.programs.get(name).cloned().unwrap_or_else(|| ProgramSource {
+            modules: vec![(Vec::new(), name.to_string(), 0)],
+            packages: vec![sisu_resolve::SourcePackage {
+                name: String::new(),
+                deps: Vec::new(),
+                trusted: true,
+            }],
+            ..ProgramSource::default()
+        })
+    }
+
+    /// The text of a file and a hash of everything a query over the
+    /// program rooted at it reads: every module's text and the layout.
     fn key(&self, name: &str) -> Option<(Rc<str>, u64)> {
         let t = self.texts.get(name)?.clone();
-        let h = hash(&t);
-        Some((t, h))
+        let Some(p) = self.programs.get(name) else {
+            let h = hash(&t);
+            return Some((t, h));
+        };
+        let mut h = DefaultHasher::new();
+        p.key().hash(&mut h);
+        for (_, file, _) in &p.modules {
+            self.texts.get(file).map(|x| hash(x)).hash(&mut h);
+        }
+        Some((t, h.finish()))
     }
 
     pub fn parsed(&mut self, name: &str) -> Option<Rc<Parsed>> {
-        let (text, h) = self.key(name)?;
+        let text = self.texts.get(name)?.clone();
+        let h = hash(&text);
         if let Some((k, p)) = self.parsed.get(name)
             && *k == h
         {
@@ -190,18 +374,61 @@ impl Db {
         {
             return Some(c.clone());
         }
-        let parsed = self.parsed(name)?;
+        let program = self.program(name);
+        let mut files = Vec::new();
+        for (_, file, _) in &program.modules {
+            files.push(self.parsed(file)?);
+        }
+        let parsed = files.first()?.clone();
         self.counters.check += 1;
-        // The files `embed` names, read once, relative to the program.
-        let embedded = embedded_files(name, &parsed.module);
+        // One source map for the whole program: the modules' files first,
+        // the root module's as file 0, then the manifests.
+        let mut base_map = SourceMap::new();
+        for p in &files {
+            let f = p.map.get(p.file);
+            base_map.add(
+                f.map(|f| f.name.clone()).unwrap_or_default(),
+                f.map(|f| f.text.clone()).unwrap_or_default(),
+            );
+        }
+        let manifest_base = files.len() as u32;
+        for (n, t) in &program.manifests {
+            base_map.add(n.clone(), t.clone());
+        }
+        // The files `embed` names, read once, relative to each module's
+        // file.
+        let mut embedded = HashMap::new();
+        for ((_, file, _), p) in program.modules.iter().zip(&files) {
+            let on_disk = program.base.join(file).display().to_string();
+            for (k, v) in embedded_files(&on_disk, &p.module) {
+                embedded.entry(k).or_insert(v);
+            }
+        }
+        let modules: Vec<sisu_resolve::SourceModule> = program
+            .modules
+            .iter()
+            .zip(&files)
+            .enumerate()
+            .map(|(i, ((path, _, package), p))| sisu_resolve::SourceModule {
+                path,
+                file: FileId(i as u32),
+                ast: &p.module,
+                package: *package,
+            })
+            .collect();
+        let sources = sisu_resolve::Sources {
+            modules: &modules,
+            packages: &program.packages,
+            std_doc_tests: program.std_doc_tests,
+        };
         // The instances of templates the program needs (08, "Reflection"):
         // check, declare what the check asked for, and check again, until
         // it asks for nothing new.
         let mut requests: Vec<sisu_resolve::Request> = Vec::new();
         let mut rounds = 0;
         let (map, r, typed, mut type_diags) = loop {
-            let mut map = parsed.map.clone();
-            let r = sisu_resolve::resolve_with(&mut map, parsed.file, &parsed.module, &requests, &embedded);
+            let mut map = base_map.clone();
+            let r = sisu_resolve::resolve_program(&mut map, sources, &requests, &embedded);
             let (typed, type_diags) = sisu_typeck::check(&r.program, &map);
             let fresh: Vec<sisu_resolve::Request> =
                 typed.requests.iter().filter(|q| !requests.iter().any(|r| r.same(q))).cloned().collect();
@@ -220,13 +447,53 @@ impl Db {
                     .with("count", requests.len().to_string()),
             );
         }
-        let mut diagnostics = parsed.parse.diagnostics.clone();
+        // Each module's syntax diagnostics, in its file of the program.
+        let mut diagnostics: Vec<Diagnostic> = Vec::new();
+        for (i, p) in files.iter().enumerate() {
+            diagnostics
+                .extend(p.parse.diagnostics.iter().map(|d| refile(d.clone(), p.file, FileId(i as u32))));
+        }
         // A line with a syntax error has no reliable meaning, so name and
         // type diagnostics on it would only repeat the syntax error.
-        let broken_lines: Vec<u32> = diagnostics.iter().map(|d| map.line_col(d.span).0.line).collect();
+        let broken_lines: Vec<(FileId, u32)> =
+            diagnostics.iter().map(|d| (d.span.file, map.line_col(d.span).0.line)).collect();
         let on_broken_line = |d: &Diagnostic| {
-            d.span.file == parsed.file && broken_lines.contains(&map.line_col(d.span).0.line)
+            (d.span.file.0 as usize) < files.len()
+                && broken_lines.contains(&(d.span.file, map.line_col(d.span).0.line))
         };
+        // The manifests' and the module trees' problems, and a dependency
+        // that `[trust]` does not let use `unsafe` or `extern` (09).
+        for d in &program.problems {
+            let mut d = d.clone();
+            for k in 0..program.manifests.len() as u32 {
+                d = refile(d, FileId(k), FileId(manifest_base + k + 1000));
+            }
+            for k in 0..program.manifests.len() as u32 {
+                d = refile(d, FileId(manifest_base + k + 1000), FileId(manifest_base + k));
+            }
+            diagnostics.push(d);
+        }
+        for (i, ((_, _, package), p)) in program.modules.iter().zip(&files).enumerate() {
+            let Some(pkg) = program.packages.get(*package) else { continue };
+            if pkg.trusted || *package == 0 {
+                continue;
+            }
+            for t in p.parse.tree.tokens() {
+                let what = match t.kind {
+                    sisu_syntax::SyntaxKind::UNSAFE_KW => "`unsafe`",
+                    sisu_syntax::SyntaxKind::EXTERN_KW => "`extern`",
+                    _ => continue,
+                };
+                diagnostics.push(
+                    Diagnostic::new(
+                        sisu_diag::msg::CAP_UNTRUSTED,
+                        sisu_diag::Span::new(FileId(i as u32), t.range),
+                    )
+                    .with("package", pkg.name.clone())
+                    .with("what", what),
+                );
+            }
+        }
         diagnostics.extend(r.diagnostics.into_iter().filter(|d| !on_broken_line(d)));
         diagnostics.extend(type_diags.into_iter().filter(|d| !on_broken_line(d)));
         // The generators and contract tests the compiler writes repeat the
@@ -259,7 +526,11 @@ impl Db {
         }
         self.counters.lower += 1;
         let lowered = sisu_lower::lower_with(&c.program, &c.typed, &c.map, self.contracts);
-        let mut checked = sisu_borrowck::check(&lowered, &sisu_borrowck::Options::default());
+        // The standard library is checked once, not for every program
+        // (`sisu test --std` checks it with the program's doc examples).
+        let trust_std = !self.program(name).std_doc_tests;
+        let options = sisu_borrowck::Options { trust_std, ..Default::default() };
+        let mut checked = sisu_borrowck::check(&lowered, &options);
         let files = source_files(&c.map, &checked.program);
         let by_finding: Vec<Diagnostic> =
             checked.findings.iter().map(|f| sisu_borrowck::to_diagnostic(f, &c.map, &files)).collect();

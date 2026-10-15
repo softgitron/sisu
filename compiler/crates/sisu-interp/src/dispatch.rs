@@ -160,7 +160,7 @@ impl Interp<'_, '_> {
     /// parameter by reference; the impl of a `Copy` type takes it by
     /// value. Each such argument becomes the value it points to.
     fn adapt(&self, fi: usize, tys: &[Type], args: &mut [Value]) -> Result<(), Unwind> {
-        let f = self.prog.functions.get(fi).ok_or_else(|| ice("no such function"))?;
+        let f = self.func(fi).ok_or_else(|| ice("no such function"))?;
         for (i, a) in args.iter_mut().enumerate() {
             let Some(l) = f.locals.get(i + 1) else { continue };
             let by_value = !matches!(l.ty.subst(tys), Type::Ref(..));

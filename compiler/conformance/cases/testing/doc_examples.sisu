@@ -1,0 +1,41 @@
+# Doc examples are tests (10, "Testing"; 17): each fenced block in a `##`
+# comment is a test named after the item it documents. A failure points at
+# the example's own line.
+
+## The mean, rounded down.
+##
+## ```
+## assert mean([1, 2, 3]) == 2
+## assert mean([]) == 0
+## ```
+def mean(xs: list[int]) -> int:
+    if len(xs) == 0:
+        return 0
+    return sum(xs) // len(xs)
+
+struct Stack:
+    items: list[int]
+
+    ## ```sisu
+    ## var s = Stack(items=[])
+    ## s.push(1)
+    ## s.push(2)
+    ## assert s.items == [1, 2]
+    ## ```
+    ##
+    ## A second example of the same method, which is wrong:
+    ##
+    ## ```
+    ## var s = Stack(items=[7])
+    ## s.push(8)
+    ## assert s.items == [8, 7]
+    ## ```
+    ##
+    ## ```text
+    ## A block in another language is not a test.
+    ## ```
+    def push(mut self, x: int):
+        self.items.push(x)
+
+def main():
+    print(mean([4, 5]))

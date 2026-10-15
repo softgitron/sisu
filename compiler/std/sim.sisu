@@ -76,8 +76,13 @@ impl Sim:
         let seed = g.value.seed * 1000003 + n.index
         let net: Net = SimNet(sim=self, node=n)
         return System.assemble(
-            fs=fs, net=net, clock=Clock.fake(), rand=Rand.seeded(seed),
-            env=Env.fake(), proc=Proc.fake(), stdin=Stdin.fake(),
+            fs=fs,
+            net=net,
+            clock=Clock.fake(),
+            rand=Rand.seeded(seed),
+            env=Env.fake(),
+            proc=Proc.fake(),
+            stdin=Stdin.fake(),
         )
 
     ## A crash of the node: its file system goes back to what it synced,

@@ -380,7 +380,15 @@ impl Program {
         }
         let rec = |t: &Ty| self.structural_depth(t, tr, depth + 1);
         match ty {
-            Ty::Int | Ty::Float | Ty::Bool | Ty::Char | Ty::Str | Ty::Unit | Ty::Never | Ty::Error => true,
+            Ty::Int
+            | Ty::Float
+            | Ty::Bool
+            | Ty::Char
+            | Ty::Str
+            | Ty::Unit
+            | Ty::Never
+            | Ty::Error
+            | Ty::Const(_) => true,
             Ty::Ref(t, _) => rec(t),
             Ty::Tuple(es, _) => es.iter().all(rec),
             Ty::Fn(_) => Some(tr) == self.wk.debug,

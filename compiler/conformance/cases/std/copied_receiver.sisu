@@ -1,0 +1,5 @@
+# A method of an impl for some of a type's values is not the others':
+# `copied` is for an optional reference.
+def main():
+    let o: int? = Some(3)
+    print(o.copied())

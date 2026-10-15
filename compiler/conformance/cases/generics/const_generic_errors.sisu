@@ -1,0 +1,16 @@
+# What a const generic parameter rejects (03, "Const generics"): a type
+# where a constant goes (`E0262`), a constant where a type goes (`E0263`),
+# and an array of one length where another is expected (`E0300`). A
+# `const` parameter is an `int` in stage 0 (`E0900` for another type).
+
+struct Grid[T, const W: int]:
+    cells: Array[T, W]
+
+struct Flags[const ON: bool]:
+    count: int
+
+def main():
+    let a: Grid[int, str] = Grid(cells=Array.filled(0))
+    let b: Grid[4, 4] = Grid(cells=Array.filled(0))
+    let c: Array[int, 3] = Array.filled(0)
+    let d: Array[int, 4] = c

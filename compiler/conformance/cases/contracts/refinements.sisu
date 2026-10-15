@@ -4,18 +4,18 @@
 
 type Port = int where 1 <= self <= 65535
 type Even = int where self % 2 == 0
-type Small = Port where self < 1024          # a refinement of a refinement
+type Small = Port where self < 1024  # a refinement of a refinement
 type Word = String where len(self) > 0 and not self.contains(" ")
 type NonEmpty[T] = list[T] where not self.is_empty()
 
 def describe(p: Port) -> String:
-    let next = p + 1                         # an `int`: arithmetic leaves the refinement
+    let next = p + 1  # an `int`: arithmetic leaves the refinement
     return "port {p}, then {next}"
 
 def head[T: Copy](xs: NonEmpty[T]) -> T:
     return xs[0]
 
-def total(xs: Slice[int]) -> int:            # a `NonEmpty[int]` is a `list[int]`
+def total(xs: Slice[int]) -> int:  # a `NonEmpty[int]` is a `list[int]`
     var t = 0
     for x in xs:
         t += x
@@ -31,7 +31,7 @@ def main():
     print(Port.try_from(0))
     print(Port.try_from(70000))
     let s: Small = 22
-    print(describe(s))                        # a `Small` is a `Port`
+    print(describe(s))  # a `Small` is a `Port`
     print(Small.try_from(8080))
     print(halve(10))
     match Even.try_from(7):

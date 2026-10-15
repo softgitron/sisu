@@ -141,6 +141,8 @@ pub struct FieldInfo {
     pub ty: Ty,
     pub default: Option<ast::Expr>,
     pub span: Span,
+    /// `pub x: int` (09): who may read, write and construct with it.
+    pub vis: ast::Vis,
 }
 
 #[derive(Clone, Debug)]
@@ -182,6 +184,9 @@ pub struct Generic {
     /// `A: Allocator = Global`: the type a use site that omits it gets, in
     /// terms of the earlier parameters.
     pub default: Option<Ty>,
+    /// `const N: int` (03, "Const generics"): the argument is a constant
+    /// (`Ty::Const`), and the name is an `int` in expressions.
+    pub is_const: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -270,6 +275,9 @@ pub struct ConstInfo {
 
 #[derive(Clone, Debug, Default)]
 pub struct ModuleData {
+    /// The module's name in SIR: `main` for the root module, the import
+    /// path for the program's other modules (`weather.parser`), the std
+    /// module's name (`json`), or a generated module's (`<derive>/main.sisu`).
     pub name: String,
     pub file: FileId,
     /// Names declared in or imported into the module.
@@ -281,15 +289,51 @@ pub struct ModuleData {
     /// For the impls `@derive` writes: the module of the derived types,
     /// whose names this module sees.
     pub parent: Option<ModuleId>,
+    /// The package the module belongs to (an index of
+    /// `Program::packages`): [`ROOT_PACKAGE`] for the program's own code,
+    /// [`STD_PACKAGE`] for the standard library, and the others for the
+    /// dependencies.
+    pub package: u32,
+    /// The names an import bound here (09, "Modules"), each with the
+    /// import's visibility: only a `pub` import is seen through the
+    /// module from another (`pub from a import x` re-exports `x`).
+    pub imported: HashMap<String, ast::Vis>,
+    /// The path an import names the module by (`weather.parser`); empty
+    /// for a module no import names.
+    pub path: Vec<String>,
 }
+
+/// The program's own package: the one being built, which nothing depends
+/// on (the orphan rule's exception, D-013).
+pub const ROOT_PACKAGE: u32 = 0;
+/// The standard library, one package.
+pub const STD_PACKAGE: u32 = 1;
 
 impl ModuleData {
     /// The package the module belongs to, for the orphan rule (03,
-    /// "Coherence"): the standard library is one package and the root
-    /// module's file is the root package.
+    /// "Coherence") and `pub(package)`.
     pub fn package(&self) -> u32 {
-        if self.is_std { 1 } else { 0 }
+        if self.is_std { STD_PACKAGE } else { self.package }
     }
+}
+
+/// A package of the program (09): the root package, the standard library,
+/// or a dependency.
+#[derive(Clone, Debug, Default)]
+pub struct PackageData {
+    /// Its name as `sisu.toml` gives it (and imports name it); empty for a
+    /// single file, which is a package of its own without a name.
+    pub name: String,
+    /// `[trust] unsafe` lists it, or it is the root package or std: it may
+    /// contain `unsafe` and `extern` (09, "`[trust]` is where capabilities
+    /// become real").
+    pub trusted: bool,
+    /// The packages its imports may name, by the names they are imported
+    /// by: its own dependencies (and only those: a package sees its
+    /// dependencies' dependencies only through them).
+    pub deps: Vec<(String, u32)>,
+    /// Its root module.
+    pub root: Option<ModuleId>,
 }
 
 /// Definitions of the prelude that the checker refers to by role.
@@ -356,6 +400,12 @@ pub struct Program {
     pub modules: Vec<ModuleData>,
     pub root: ModuleId,
     pub prelude: ModuleId,
+    /// The packages, by [`ModuleData::package`]: the root package first,
+    /// then std, then the dependencies.
+    pub packages: Vec<PackageData>,
+    /// The modules of the program's own source (the root package's and its
+    /// dependencies'), the root module first, in the order they were given.
+    pub user_modules: Vec<ModuleId>,
     pub wk: WellKnown,
     /// Methods and associated functions by receiver type and name.
     pub methods: HashMap<(TyKey, String), DefId>,
@@ -621,6 +671,97 @@ impl Program {
     /// Looks a name up in one module only.
     pub fn lookup_in(&self, module: ModuleId, name: &str) -> Option<DefId> {
         self.modules.get(module.0 as usize).and_then(|m| m.items.get(name).copied())
+    }
+
+    /// Whether code in `from` may name `def`, an item of another module
+    /// (09, "Modules"): items are private to their module unless `pub`,
+    /// and `pub(package)` reaches the modules of the same package. A
+    /// module is always reachable by its path. The standard library's
+    /// items are all public in stage 0 (its `@internal` functions are
+    /// checked apart), and code the compiler writes sees what the module
+    /// it was written for sees.
+    pub fn visible_from(&self, def: DefId, from: ModuleId) -> bool {
+        let d = self.def(def);
+        self.vis_allows(d.vis, d.module, from) || matches!(d.kind, DefKind::Module(_))
+    }
+
+    /// Whether an item of `owner` with visibility `vis` may be named from
+    /// `from`.
+    pub fn vis_allows(&self, vis: ast::Vis, owner: ModuleId, from: ModuleId) -> bool {
+        let owner = self.scope_module(owner);
+        let from = self.scope_module(from);
+        if owner == from {
+            return true;
+        }
+        let (Some(o), Some(f)) = (self.modules.get(owner.0 as usize), self.modules.get(from.0 as usize))
+        else {
+            return true;
+        };
+        if o.is_std || f.is_std {
+            return true;
+        }
+        match vis {
+            ast::Vis::Pub => true,
+            ast::Vis::PubPackage => o.package() == f.package(),
+            ast::Vis::Private => false,
+        }
+    }
+
+    /// `name` in module `m` as code in `from` sees it through the module
+    /// (`m.name`, `from m import name`): the item, and whether `from` may
+    /// name it there. A name an import bound in `m` is seen only when the
+    /// import is `pub` (a re-export).
+    pub fn member(&self, m: ModuleId, name: &str, from: ModuleId) -> Option<(DefId, bool)> {
+        let data = self.modules.get(m.0 as usize)?;
+        let d = *data.items.get(name)?;
+        let ok = match data.imported.get(name) {
+            Some(vis) => self.vis_allows(*vis, m, from),
+            None => self.visible_from(d, from),
+        };
+        Some((d, ok))
+    }
+
+    /// The diagnostic for naming `d` through module `m` where it is not
+    /// visible (09): private to its module, `pub(package)` in another
+    /// package, or imported into `m` without being re-exported.
+    pub fn private_item(&self, d: DefId, m: ModuleId, span: Span) -> sisu_diag::Diagnostic {
+        use sisu_diag::{Diagnostic, msg};
+        let def = self.def(d);
+        let name = def.name.clone();
+        let data = &self.modules[m.0 as usize];
+        if data.imported.contains_key(&name) || self.scope_module(def.module) != self.scope_module(m) {
+            // Seen through a module that imported it.
+            if data.items.get(&name) == Some(&d) && data.imported.contains_key(&name) {
+                return Diagnostic::new(msg::RESOLVE_NOT_REEXPORTED, span)
+                    .with("name", name)
+                    .with("module", self.module_path(m))
+                    .with("origin", self.module_path(def.module));
+            }
+        }
+        let owner = def.module;
+        match def.vis {
+            ast::Vis::PubPackage => {
+                let package = self.modules[owner.0 as usize].package();
+                let pname = self.packages.get(package as usize).map(|p| p.name.clone()).unwrap_or_default();
+                Diagnostic::new(msg::RESOLVE_PACKAGE_ITEM, span)
+                    .with("name", name)
+                    .with("module", self.module_path(owner))
+                    .with("package", pname)
+            }
+            _ => Diagnostic::new(msg::RESOLVE_PRIVATE_ITEM, span)
+                .with("name", name)
+                .with("module", self.module_path(owner)),
+        }
+    }
+
+    /// The module's path as an import writes it, for messages: `std.json`
+    /// for a std module, `weather.parser` for a module of a package.
+    pub fn module_path(&self, m: ModuleId) -> String {
+        match self.modules.get(m.0 as usize) {
+            Some(data) if !data.path.is_empty() => data.path.join("."),
+            Some(data) => data.name.clone(),
+            None => String::new(),
+        }
     }
 
     pub fn method(&self, key: TyKey, name: &str) -> Option<DefId> {

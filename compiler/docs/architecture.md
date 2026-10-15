@@ -9,14 +9,20 @@ is written so that the stage-1 front end in Sisu
 transcription: every rule here is a rule of the language implementation,
 not of Rust.
 
-Scope: [18](../../proposal/18-next-steps.md) Phases 0 and 2, the core;
+Scope: [18](../../proposal/18-next-steps.md) Phases 0 and 2, the core,
+with Phase 2's modules and packages (the module tree under `src/`,
+`pub` and `pub(package)`, `sisu.toml` with path dependencies, `sisu.lock`,
+workspaces and scripts);
 Phase 3's ownership checker, dynamic ownership monitor, counterexample
 mode and `sisu audit --ownership`, with its library types (`Box`, `Shared`, `Weak`, `Cell`, `Mutex`,
 `Arena[T]` with generational `Key[T]`) and `own` closures; Phase 4's
-traits and impls, user generics, `dyn Trait`, the standard library's
-iterators, formatting and collection algorithms written in Sisu, drop
+traits and impls, user generics with `const` parameters, `Array[T, N]`,
+`dyn Trait`, the standard library's
+iterators, formatting, collection algorithms and text methods written in
+Sisu (a text is its UTF-8 bytes), drop
 glue as SIR functions, the comptime evaluator with derive written as
-compile-time Sisu, the sized integer types, `bytes` and `Slice`; and
+compile-time Sisu, the sized integer types from `u8` to `u128` and `i8`
+to `i128`, `bytes` and `Slice`; and
 Phase 6's tasks on a seeded cooperative scheduler (scopes, cancellation,
 shields, deadlines, races, channels, `select`, generators), `Send` and
 `Sync` checked at spawns, the `Shared` escape analysis, the capabilities
@@ -31,12 +37,13 @@ and tests in parallel; the capability log (`sisu run --record`, `sisu
 replay`) and replay tokens; PCT and bounded exhaustive scheduling and the
 `sim` profile; compile-time reflection in generic functions
 (instantiated per type), `embed` and `target`, with `std.x.cli`'s parser
-written over it. Not here: from Phase 4, `Array` and const generics,
-`f32` and the 128-bit integers; from Phase 6, `RwLock`, `Atomic`,
-`Condvar`, TLS and `sisu audit --caps`; the checked string DSLs, `@cfg`,
-foreign functions, the REPL, the language server and `sisu fmt` (Phase
-8), and a native backend. Their syntax parses, and using them is a
-diagnostic (`E0900 stage0.unsupported`).
+written over it; and the tools of 10: the formatter (`sisu fmt`), hot
+replacement in epochs (`sisu run --watch`), the REPL (`sisu repl`, with
+`:back` and `:why`), worksheets (`sisu ws`) and the language server
+(`sisu lsp`). Not here: `f32`; from Phase 6, `RwLock`, `Atomic`,
+`Condvar`, TLS and `sisu audit --caps`; the checked string DSLs, `@cfg`
+and foreign functions (Phase 8), and a native backend. Their syntax
+parses, and using them is a diagnostic (`E0900 stage0.unsupported`).
 
 ## Crate map
 
@@ -45,33 +52,36 @@ architecture"); data flows down the table.
 
 | Crate | Lines | Role |
 |---|---:|---|
-| `sisu-diag` | 821 | Spans, the source map (1-based lines, columns in characters), the message catalog, diagnostics with labels, notes and fixes, the human and `--format=ids` renderers |
-| `sisu-syntax` | 4076 | Token and node kinds, the lossless arena tree with stable node identities, and the AST built from the tree as a total function |
+| `sisu-diag` | 874 | Spans, the source map (1-based lines, columns in characters), the message catalog, diagnostics with labels, notes and fixes, the human and `--format=ids` renderers |
+| `sisu-syntax` | 4083 | Token and node kinds, the lossless arena tree with stable node identities, and the AST built from the tree as a total function |
 | `sisu-lexer` | 1188 | Scanning (every byte a token, interpolation split into tokens) and layout (Python's INDENT/DEDENT algorithm) |
-| `sisu-parser` | 3304 | Error-tolerant recursive descent that always returns a tree |
-| `sisu-resolve` | 9570 | Loads the Sisu-written std (`compiler/std/`), declares every item, resolves signatures to types, registers methods; traits, impls, coherence and the trait solver; derives (unfolding each trait's `comptime def derive`), delegation and the instances of templates; the generators and generated tests of property testing, the interceptors and fakes of the program's traits; the borrow rules about declarations |
-| `sisu-typeck` | 9625 | The bidirectional checker, with method resolution through traits and `comptime` expressions; produces the typed tree (THIR) for every body, broken or not |
-| `sisu-sir` | 2647 | SIR: the data model, the text writer and reader, the validator, the types of places |
-| `sisu-lower` | 4987 | THIR to SIR: control flow, scopes and their drops, unwind edges, closure conversion, trait calls and their static resolution, drop glue, `comptime` functions, the borrow facts of signatures |
-| `sisu-borrowck` | 4938 | The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, the task rules, escapes, must-consume, purity, `explain-borrow`, and the `Shared` escape analysis |
-| `sisu-interp` | 11320 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the task scheduler (random, PCT, bounded exhaustive) and the `sim` profile's faults, capabilities and the host's objects, the capability log, the parallel test runner, the dynamic ownership monitor, and the compile-time evaluator |
-| `sisu-driver` | 3968 | The query layer and the `sisu` command line, the counterexample mode, `audit --ownership`, `check --explain`, replay tokens, snapshot files and transcripts, the `sim` build check, and the soundness tests (fault injection, mutation fuzzing) |
-| `sisu-conformance` | 653 | The language-agnostic conformance runner |
+| `sisu-parser` | 3309 | Error-tolerant recursive descent that always returns a tree |
+| `sisu-fmt` | 1744 | The formatter: the lossless tree regrouped into logical lines, laid out by a Wadler-style group printer, with the comments and blank lines placed between them; the shape a formatted file must keep (`sisu parse --shape`) and the unused imports it removes |
+| `sisu-resolve` | 10545 | Loads the Sisu-written std (`compiler/std/`), declares every item, resolves signatures to types, registers methods; traits, impls, coherence and the trait solver; derives (unfolding each trait's `comptime def derive`), delegation and the instances of templates; the generators and generated tests of property testing, the interceptors and fakes of the program's traits; the borrow rules about declarations |
+| `sisu-typeck` | 10013 | The bidirectional checker, with method resolution through traits and `comptime` expressions; produces the typed tree (THIR) for every body, broken or not |
+| `sisu-sir` | 2654 | SIR: the data model, the text writer and reader, the validator, the types of places |
+| `sisu-lower` | 5108 | THIR to SIR: control flow, scopes and their drops, unwind edges, closure conversion, trait calls and their static resolution, drop glue, `comptime` functions, the borrow facts of signatures |
+| `sisu-borrowck` | 4948 | The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, the task rules, escapes, must-consume, purity, `explain-borrow`, and the `Shared` escape analysis |
+| `sisu-interp` | 12208 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the task scheduler (random, PCT, bounded exhaustive) and the `sim` profile's faults, capabilities and the host's objects, the capability log, hot replacement in epochs, the parallel test runner, the dynamic ownership monitor, and the compile-time evaluator |
+| `sisu-driver` | 9092 | The query layer and the `sisu` command line; manifests (a TOML reader of its own), the package layout and the lockfile; the counterexample mode, `audit --ownership`, `check --explain`, replay tokens, snapshot files and transcripts, the `sim` build check; `fmt`, the REPL and worksheets, `run --watch`'s rebuilds, and the language server with its JSON; the soundness tests (fault injection, mutation fuzzing) and the language server's protocol tests |
+| `sisu-conformance` | 1032 | The language-agnostic conformance runner |
 
 Line counts include each crate's unit tests. Besides the crates:
 `catalog/messages.catalog` (every message); the standard library, in
-Sisu: `std/prelude.sisu` (3291 lines: the builtin types, the core traits
-and their derives, iterators, formatting, collections, `Shared` and the
-other library types, tasks and channels, time, the sized integers and
-`bytes`, the capabilities and their operations traits, property testing),
-`std/cap.sisu` (947: std.cap's attenuations, caretakers, fakes,
-interceptor and the `sim` profile's file system and network),
-`std/sim.sisu` (147: nodes, partitions, `choose`, `always`),
-`std/cli.sisu` (166: std.x.cli over reflection), `std/test.sisu`
-(snapshots, benchmarks), `std/json.sisu` (`encode` over reflection),
-`std/task.sisu`,
-`std/log.sisu`, `std/net.sisu` (`Url`), `std/http.sisu` (282:
-std.x.http), `std/time.sisu` and `std/math.sisu`; and `conformance/` (the
+Sisu: `std/prelude.sisu` (3742 lines: the builtin types, the core traits
+and their derives, iterators, formatting, collections, the text methods,
+`Shared` and the other library types, tasks and channels, time, the sized
+integers and `bytes`, `Array`, the capabilities and their operations
+traits, property testing), `std/cap.sisu` (961: std.cap's attenuations,
+caretakers, fakes, interceptor and the `sim` profile's file system and
+network), `std/collections.sisu` (308: std.collections), `std/num.sisu`
+(211: std.num), `std/sim.sisu` (152: nodes, partitions, `choose`,
+`always`), `std/cli.sisu` (175: std.x.cli over reflection),
+`std/http.sisu` (299: std.x.http), `std/test.sisu` (snapshots,
+benchmarks), `std/json.sisu` (`encode` over reflection), `std/live.sisu`
+(hot replacement's boundaries), `std/task.sisu`, `std/log.sisu`,
+`std/net.sisu` (`Url`), `std/time.sisu` and `std/math.sisu`; and
+`conformance/` (the
 suite, described in its own [README](../conformance/README.md)).
 
 The workspace forbids `unsafe` and denies `unwrap`, `expect`, `panic`,
@@ -351,10 +361,11 @@ types and of tuples are generated (`<std>/builtin_impls.sisu`, from
 `Iter` whose items are `T`; a borrowed collection's items are references,
 and an item `ref T` with a `Copy` type `T` decays to `T`.
 
-Resolution (`sisu-resolve`) declares every item of the root module and of
-each std module it imports (`import cli`, `import std.math`), resolves
-every signature to a `Ty`, registers methods by receiver type and name,
-and records every variant by its unqualified name. A name in an
+Resolution (`sisu-resolve`) declares every item of every module of the
+program (next section) and of each std module they import (`import cli`,
+`import std.math`), resolves every signature to a `Ty`, registers methods
+by receiver type and name, and records every variant by its unqualified
+name. A name in an
 expression is a variant of the expected type first, then a declaration of
 that name, then a variant declared in the current module, then any
 visible variant, where two candidates are ambiguous (`E0211`); a name in a
@@ -382,6 +393,78 @@ known:
 - `@must_consume` on a struct or enum is recorded for the ownership
   checker (D-054).
 
+## Modules and packages
+
+[09](../../proposal/09-modules-packages-and-build.md). What a program is
+made of is found before anything is parsed (`sisu-driver/src/package.rs`):
+a single file; a script (a file starting `#!`, whose top-level statements
+are its `main`, with optional inline metadata between `# /// script` and
+`# ///` giving its dependencies, `E1014`); a package, the directory of a
+`sisu.toml` and its `src/` tree; or a workspace's member. Without a file,
+`sisu check`, `run`, `test` and `build` work on the package of the
+current directory or the nearest one above it (`D0064`).
+
+**The module tree mirrors `src/`.** The root module is `src/main.sisu`
+(an application, which `sisu run` runs) or `src/lib.sisu` (a library), not
+both (`E1008`, `E1009`), and is named by the package's name;
+`src/parser.sisu` is `PACKAGE.parser`, a directory `src/net/` the module
+`PACKAGE.net` whose children are its files and directories, and a file
+`src/net.sisu` beside that directory gives the module items of its own.
+A module is named in lowercase letters, digits and `_` (`E1012`). A
+module's file names it in diagnostics relative to the root package's
+directory.
+
+**Imports** name a module by its path: the importing package's own
+modules by the package's name, a dependency's by the dependency's name,
+the standard library's by `std.NAME` (and stage 0's short names `cli`,
+`http`, `json`, ...). `import a.b` binds `b`; `from a.b import x, y as z`
+binds items; an import that names nothing is `E0220` (`E0203` past
+its first word, `E0223` for an item that is not a module), and one of a
+package of the program that this one does not depend on `E0260`.
+Items are private to their module unless `pub`; `pub(package)` reaches
+the modules of the same package (`E0255`, `E0256`; fields `E0258` and
+methods `E0259` likewise). A name an import bound is visible through the
+module only when the import is `pub`, a re-export (`pub from a import
+x`; `E0257` otherwise). A module is always reachable by its path. std's
+items are all public in stage 0 (its `@internal` functions are checked
+apart).
+
+**The manifest** (`manifest.rs`, over a TOML reader of its own,
+`toml.rs`, since stage 0 takes nothing from a registry) is data (D-063):
+`[package]` with `name`, `version` (`MAJOR.MINOR.PATCH`), `edition`,
+`description` and `license` (and keys recorded for later stages);
+`[dependencies]` and `[dev-dependencies]`, each `NAME = { path = "..." }`
+with an optional `when = { os = ..., arch = ..., runtime = ... }` over the
+build target's facts (`E1011`); `[trust] unsafe = [...]`, the dependencies
+that may contain `unsafe` and `extern` (`E1015`); `[workspace] members`;
+`[features]`;
+`[profile.release] contracts`. A mistake is a diagnostic at its place in
+the file (`E1000`-`E1017`), an unknown key a warning (`W0005`). A
+dependency is a path (`E1010`: there is no registry), named by its own
+`[package] name` (`E1006`); the graph has no cycle (`E1007`), and a
+package may not take a std module's name (`E1017`).
+
+**The lockfile** `sisu.lock`, beside the root manifest or its
+workspace's, records every package the build resolved, sorted: name,
+version, `source = "path+DIR"` relative to the lockfile, and every
+dependency, active on this target or not, so it is the same on every
+target. `sisu check` and the other commands rewrite it when the
+manifests imply another; `--locked` refuses to and fails (`D0065`). A
+workspace has one lockfile for all its members, each of which must be a
+package (`E1013`).
+
+**Resolution of a program of many modules.** The driver gives the
+resolver every module of every package with its path and package
+(`sisu_resolve::SourceModule`, `SourcePackage`); the query layer's key is
+the program (its files and manifests), and diagnostics are filed against
+each module's own file. SIR names an item of a module other than the
+root by the module's path (`atlas.geo.point.origin`), and the root
+module's without one (`main`). `sisu build` checks the package and lowers
+it, printing what it built (`D0066`, `D0070`); `sisu new NAME` writes a
+manifest and a root module (`D0071`-`D0073`). A dependency the root
+package does not trust may not contain `unsafe` or `extern`
+(`E0703`).
+
 ## Traits and generics
 
 Phase 4 of 18, after [03](../../proposal/03-types-and-generics.md).
@@ -402,9 +485,10 @@ arguments) unify, which is an error at the second (`E0235`); impl
 selection then matches headers only, and `where` clauses never choose
 between impls. The orphan rule: an impl lives in the package of the
 trait or of the type, except in the root package, which nothing depends
-on (D-013, Q-11; `E0236`). Stage 0 has one user package, so a program
-may implement std's traits for std's types, and std may implement
-anything. A `@sealed` trait has only std's impls (`E0240`).
+on (D-013, Q-11; `E0236`). std is one package and may implement
+anything; a program's root package may implement std's traits for std's
+types, and a dependency only what involves its own trait or type
+(`packages/orphan`). A `@sealed` trait has only std's impls (`E0240`).
 
 **Generics.** Functions, structs, enums, traits and impls take type
 parameters with bounds (`[T: Display + Hash]`, `where` clauses,
@@ -416,8 +500,29 @@ its bounds: calling a method on a `T` needs a bound that has it, and a
 violation is reported in the body, never at a use (18, Phase 4 exit
 criterion). A call infers its type arguments by unification; a
 definition-site bound of a type (`struct Labelled[T: Display]`) is
-required where the type is written. Const generics are not here
-(`E0900`).
+required where the type is written.
+
+**Const generics** (03, "Const generics"). A parameter `const N: int`
+of a struct, enum, impl or function takes a constant: an integer literal,
+or another `const` parameter in scope (`Grid[int, 3]`; a type there is
+`E0262`, a constant where a type goes `E0263`). The constant is part of
+the type (`Ty::Const`, `sir::Type::Const`), so `Array[int, 3]` and
+`Array[int, 4]` differ (`E0300`), and unification infers it like a type
+argument (`Array.filled(0)` takes its `N` from the type expected). In the
+bodies it scopes, `N` is an `int`: lowering reads it from the frame's
+type arguments (`generic.value[$i]`), since type arguments are values at
+run time (below). A `comptime assert` over `const` parameters in a
+generic body (08) cannot be decided at the definition, so it is checked
+at each call that gives them constants, once the program is typed
+(`sisu-typeck/src/generic_asserts.rs`): its condition and message are
+folded with the call's arguments (integer and boolean arithmetic,
+comparisons, interpolation), and a false condition is the call's
+`E0602`. **`Array[T, N]`** is a builtin type of the prelude: `N` values,
+read and written by index with the bounds check of a list (`a[^1]`
+counts from the end), iterated, compared, hashed and printed as a list
+is, made by `Array.filled(value)` (`N - 1` copies and the value), with
+`len` returning `N` and `to_list` the elements; nothing adds or removes
+one. At run time it is a list of exactly `N` values.
 
 **Type arguments are values at run time** (18, Phase 4: "polymorphic
 interpretation ... no monomorphisation"). Every call of a generic SIR
@@ -1021,7 +1126,12 @@ closures). The rules, so that another front end produces the same SIR:
 - Only what the entry, the tests, the root module's functions and its
   constants reach is emitted, with the declarations of every type they
   mention and the impls of every trait they call through `call trait`
-  for the types they mention.
+  for the types they mention; only those bodies are lowered (a worklist
+  from the roots), so the standard library costs a program only what it
+  uses. The ownership checker takes std's functions as checked
+  (`Options.trust_std`): it elaborates their drops but does not analyse
+  their loans again for every program; `sisu test --std` and a test that
+  lowers every std body (`lower_every_body`) check them.
 
 ### Lowering-only intrinsics
 
@@ -1045,6 +1155,8 @@ contracts:
 | `list.slice_middle(ref xs, n, m)` | copies of the elements between the first `n` and the last `m` (a `*rest` binding) |
 | `cap.new[T, H](own v)` | a handle of type `H` on a new heap cell holding `v` as a `dyn` of type `T`, never freed (a `Coercion::ToCap`) |
 | `u64.from_bits(n)`, `u64.widen(x)` | the `u64` whose 64-bit pattern is `n`; an integer as a `u64` (a literal; a widening) |
+| `i128.widen(x)`, `u128.widen(x)`, `i128.from_text(t)`, `u128.from_text(t)` | an integer that the type holds as a value of it (a literal that `int` holds; a widening); the value the decimal text spells (a literal beyond `int`) |
+| `generic.value[$i]()` | the value of the function's `const` parameter `$i`: its type argument, an `int` |
 | `T.add(a, b)` ... `T.not(a)` for a sized integer type `T` | the operators on `T`: `add`, `sub`, `mul`, `floordiv`, `rem`, `pow` trap at `T`'s bounds (`R0003`), `wrap_*` wrap, `sat_*` saturate, `shl` and `shr` take 0 to the width less one (`R0093`), `and`, `or`, `xor`, `not` are on the bits |
 | `bytes.from_hex(text)` | the bytes the hex digits spell (a `b"..."` literal) |
 | `select.wait(kind, subject, ...)` | the index of the `select` arm to take (06, "Channels and select"; "Tasks and the scheduler") |
@@ -1333,8 +1445,9 @@ over deeply nested values. The run happens on a thread with a 256 MiB
 stack so that both are safe.
 
 **Values** are a tagged enum: `int` (and every sized integer type but
-`u64`, kept in its type's range), `u64`, `f64`, `bool`, `char`, `()`,
-`str` (an immutable shared text), `String`, `Path`, `bytes` (immutable,
+`u64`, `u128` and `i128`, kept in its type's range), `u64`, `u128`,
+`i128`, `f64`, `bool`, `char`, `()`, `str` (an immutable shared text,
+which a piece of it copies), `String` (its UTF-8 bytes), `Path`, `bytes` (immutable,
 shared by its copies), `DateTime` (nanoseconds since the Unix epoch,
 UTC), tuples, structs, enum values (with an error return trace when the
 enum is an error set), `list`, `dict` and `set` (insertion-ordered, as
@@ -1345,7 +1458,8 @@ its guard, `Arena`, iterators, dict entries, capability handles and
 `Cap`s (a heap cell nothing frees), clocks, host sockets, the task
 handles (scopes, task handles, cancellations, channel halves, timers),
 references, and `Moved`. A `Slice` is a `list` of its values (a copy,
-like `str`'s; port-debt.md).
+like `str`'s; port-debt.md), and an `Array` a `list` of exactly its
+length.
 
 **References are places**: a frame index and serial number, a local, and
 a path of steps (field, payload, list index, dict key or value position,
@@ -1435,9 +1549,11 @@ standard output and error, the arguments after the program's name,
 environment variables, the clock and real-time sleeps, file reads, writes,
 metadata, listings, removals and directories, random bits, running a
 program to its end, and TCP (connect, listen, accept, read, write and
-close, each of which reports `Wait` instead of blocking). There is no
-other I/O intrinsic: the intrinsics `host.*` behind the root objects of a
-`System` (see "Capabilities") call these and nothing else.
+close, each of which reports `Wait` instead of blocking), and, under
+`sisu run --watch`, the saves of the program's files since the last poll
+(`poll_edits`). There is no other I/O intrinsic: the intrinsics `host.*`
+behind the root objects of a `System` (see "Capabilities") call these and
+nothing else.
 
 `StdHost` is the real process; its sockets are nonblocking, and a task
 whose socket would block waits on a one-millisecond timer of the host's
@@ -2002,7 +2118,10 @@ text log: a header (`sisu-log 1`, the toolchain, the program's name and
 content hash, its source, the scheduler's seed, the hash key, the
 contract level), then one record per call (`call NAME FIELDS -> RESULT`;
 written data by its hash), `out`, `err`, `redacted CAP` (for `--redact
-fs,net,...`), the reserved `swap` (hot replacement) and `exit STATUS`.
+fs,net,...`), `edit POLL FILE TEXT` (a save a run under `--watch` saw,
+section "Hot replacement") and `exit STATUS`; a program of several
+modules adds each file's text and its layout to the header, so it too
+replays without its files.
 `sisu replay FILE` runs the logged source again on a host that answers
 each call from the log; the first call or output that differs is a
 divergence (`D0037`), reported with both, and a different exit status is
@@ -2044,22 +2163,53 @@ cannot return. A `sim` build fails to compile if reachable code calls an
 
 ## Numbers, bytes and slices
 
-**The sized integers** `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`
-are builtin types of the prelude (`i64` is an alias of `int`, `uint` of
-`u64`). A literal takes the sized type expected, or its suffix's
-(`0u32`), and must fit (`E0374`). Two operands of one sized type take
-the operators `int` takes, with the same result type (`/` is `E0301`,
-as for `int`); operands of two integer types widen the
-narrower when that loses nothing; otherwise the types mix (`E0373`).
-Where an integer type is expected, a narrower one that it holds widens
-(`Coercion::IntWiden`); every other conversion is a method: `x.to_int()`,
-`n.to_u8()` (`None` when it does not fit), and `x.into()` for each
-lossless widening (`Into[T]`). Lowering calls the typed intrinsics
-(`u8.add`, `u32.wrap_mul`, ...), which trap, wrap or saturate at the
-type's bounds, and a shift by the width or more panics (`R0093`). The
+**The sized integers** `u8`, `u16`, `u32`, `u64`, `u128`, `i8`, `i16`,
+`i32` and `i128` are builtin types of the prelude (`i64` is an alias of
+`int`, `uint` of `u64`). A literal takes the sized type expected, or its
+suffix's (`0u32`), and must fit (`E0374`). Two operands of one sized type
+take the operators `int` takes, with the same result type (`/` is
+`E0301`, as for `int`); operands of two integer types widen the narrower
+when that loses nothing; otherwise the types mix (`E0373`). Where an
+integer type is expected, a narrower one that it holds widens
+(`Coercion::IntWiden`: `u8` to `u32`, `i32` or `int`; `int` and `u64` to
+`i128`; `u64` to `u128`; a signed type never to an unsigned one); every
+other conversion is a method: `x.to_int()` (`None` for a `u64`, `u128` or
+`i128` outside `int`'s range), `n.to_u8()` (`None` when it does not fit),
+`n.truncate_to[T]()` (two's complement wrapping, through the `Integer`
+trait), and `x.into()` for each lossless widening (`Into[T]`). Lowering
+calls the typed intrinsics (`u8.add`, `u32.wrap_mul`, `i128.floordiv`,
+...), which trap, wrap or saturate at the type's bounds; `//` floors and
+`%` takes the divisor's sign, as for `int`, the least `i128` over -1
+overflows, and a shift by the width or more panics (`R0093`). The
 operator traits (`Add` ... `Neg`) and `FromLiteral[int]` are implemented
-for generic code. A `u64` is a value of its own kind; the others are
-`int` values in range.
+for generic code. A `u64`, `u128` or `i128` is a value of its own kind
+(`sisu_resolve::std_sources::own_kind`), made by an intrinsic: a `u64`
+literal from its 64 bits (`u64.from_bits`), a 128-bit one from the `int`
+it equals (`i128.widen`) or, beyond `int`, from its decimal text
+(`u128.from_text`, as a byte string travels as hex), and its literal
+patterns compare against such a value; the other sized integers are
+`int` values in range. A format spec applies to them as to `int`: the
+host gives the digits of any integer (`fmt.wide_digits`).
+
+**Text is bytes** (03, "Strings and text"). A `String` owns the bytes of
+a valid UTF-8 encoding and a `str` views them; both are host values
+(`Value::String`, `Value::Str`), and the host's operations on them are
+primitives over the encoding: `byte_len`, `byte_at(i)` (a `u8`), `bytes()`,
+`byte_slice(start, end)` (a view, at boundaries of characters, `R0115`
+otherwise, and in bounds), `chars()` and `len` (UTF-8 decoding), `cmp`
+(code points, which is the order of the bytes), `String.push` and
+`push_char` (which append a valid encoding, so the bytes stay valid),
+`to_string`, `encode` and `bytes.decode` (which validates). Every other
+text method is Sisu over those (`std/prelude.sisu`, "str and String"):
+`byte_find` (a naive search, each place the first byte matches a
+candidate), `find` (the index in characters), `contains`, `starts_with`,
+`ends_with`, `strip_prefix`, `strip_suffix`, `split`, `split_once`,
+`lines` (`\n` or `\r\n`, no empty last line), `split_whitespace`, `trim`,
+`trim_start`, `trim_end`, `replace`, `repeat`, `is_char_boundary`; their
+pieces are views of the text, collected into an `Iter`. Of Unicode's
+tables only the character classes (`char.is_whitespace` and the others)
+and the case mappings (`to_lowercase`, `to_uppercase`, which need
+`SpecialCasing`'s context for a final sigma) are the host's.
 
 **`bytes`** is an immutable owned byte sequence (03): the type of
 `b"..."` (with `\xNN` for any byte), of a file's contents and of what a
@@ -2136,44 +2286,211 @@ shortest-round-trip for the plain form) and the `strftime` text
 (`fmt.strftime`); signs, prefixes, grouping, precision of texts and
 padding are Sisu.
 
+## The formatter
+
+`sisu fmt [--check] [PATH...]` (10, "Formatter"; 02, "Formatting";
+`sisu-fmt`) has no options: four spaces, 100 columns. It formats each
+file, each `.sisu` file under each directory, or, without a path, the
+package's; `--check` writes nothing and prints each file that would
+change, as hunks of the change (`D0074`). A file with a syntax error is
+not formatted (`D0075`), and the formatter is the only writer of
+canonical text: nothing else in the toolchain rewrites source.
+
+**How.** It works on the lossless tree, so it never disagrees with the
+parser. The tree's tokens are regrouped into logical lines (what the
+lexer ends with `NEWLINE`), each laid out by a Wadler-style printer of
+groups (`doc.rs`: a group prints flat when it fits and breaks otherwise,
+as Prettier's does), and the comments and blank lines between lines are
+placed by rule. The rules are listed in `sisu-fmt/src/lines.rs` so that
+another implementation writes the same text; in short: Black's
+bracket-first splitting (a bracket's contents on their own lines, then
+one element per line with a trailing comma), a trailing comma in the
+source keeps the elements one per line (the magic trailing comma), a long
+expression breaks before its binary operators (a continuation line, 02),
+a comprehension that does not fit breaks before its clauses, a
+definition's parameters break before its return type does (the
+left-hand split), a comment at the end of a line does not count toward
+its width, every comment keeps its text and its line, one blank line
+around each top-level definition and at most one elsewhere, `Option[T]`
+written `T?` where that reads unambiguously (`Result[T, E]` is kept,
+since whether `E` is an error set is not in the syntax), and a run of
+imports sorted with the unused ones removed (`prune.rs`: an import is
+used when the file spells its name outside the imports, or in a doc
+comment, whose examples are tests; a re-export is kept).
+
+**The self-check.** The result must parse without error to the input's
+*shape*, the tree's nodes and significant tokens up to what the
+formatter changes on purpose (trailing commas, `T?` and `Option[T]`,
+unused imports, the order of imports): otherwise it is refused as an
+internal error (`D0076`) and the file left alone. `sisu parse --shape`
+prints the shape, so the conformance suite checks any implementation's
+formatter: every case that parses keeps its shape and formats to a fixed
+point (`fmt(fmt(x)) == fmt(x)`), and every case without a
+`NAME.unformatted` must already be canonical. CI runs `sisu fmt --check`
+over `compiler/std/` and those cases.
+
+## Hot replacement
+
+`sisu run --watch` (10, "Debugging and profiling"; D-053, D-068, N-35;
+`sisu-interp/src/live.rs`) runs the program once and swaps in each save
+of its files, in **epochs**. SIR names a callee, a function value and a
+closure by the function's name, never by its body, so every call
+resolves the name in the function table of the epoch the running task
+has adopted; a task adopts the newest epoch when it starts and at each
+`live.boundary()` (std `live`, ambient; `Ticker.wait` calls it), so one
+iteration of a loop never mixes an old body with a new helper, and a
+frame in flight keeps the body it started with. `live.epoch()` is the
+adopted epoch, 0 until the first swap.
+
+The interpreter polls its host for saves at each of those points (the
+host contract's `poll_edits`); the driver compiles the program again
+from the saved files through its queries (`Rebuild`), and the new SIR is
+compared with everything the run has, of every epoch:
+
+- a function whose signature changed (parameters, result, conventions,
+  purity or kind), a type whose layout changed, or a changed impl
+  restarts the program from `main`, with the reason (`R0111`, `R0112`,
+  `R0114`; a changed entry is a changed signature); values held then are
+  dropped without their `Drop`s, since their code may be gone;
+- otherwise every function whose body changed, and every new one, is
+  published as one epoch with the types and impls new to the run
+  (`R0109`, naming them); a changed `const` or `comptime` value changes
+  the bodies that read it, which are swapped with it;
+- a save that does not check publishes nothing, and the diagnostics are
+  printed (`R0110`); the run goes on in its epoch.
+
+What a save leaves out (the compiler emits only what a program reaches)
+stays in the run for the frames and values of earlier epochs. The run
+ends when the program does. Under `--record`, each save is an `edit`
+record of the capability log at the poll that saw it, so `sisu replay`
+applies the same saves at the same points and publishes the same epochs.
+`--watch` does not combine with `--sir`, `--defer-borrow`, `--explore` or
+the exhaustive scheduler (`D0078`), which run a program more than once
+or not from source. The suite's `.watch` cases save their own next versions from
+`NAME.files/`.
+
+## The REPL and worksheets
+
+`sisu repl [FILE|DIR]` (10, "REPL and scripts"; `sisu-driver/src/repl.rs`)
+is a script that grows: each input the session keeps is one more
+top-level statement or item, and an input that is an expression shows
+its `Debug` text (nothing for `()`). An input runs the whole script again
+from the top with the capability log of the run before it standing in
+for the world up to where that run ended (`record::Resume`), so the
+earlier inputs print nothing and touch nothing again and only the new
+one runs live: the session has no heap to snapshot and no hidden state,
+and it is deterministic under its seed. An input that does not check,
+panics or returns an error is not kept (`D0083`). A file argument is the
+session's first input; a package's directory (or the current one)
+loads the package, whose modules the session imports by their paths
+(`D0080`); the session sees their `pub` items.
+
+- `:back N` forgets the last N inputs (`D0084`, `D0085`): the inputs
+  before them replay against their log.
+- `:why NAME` (`D0087`-`D0090`) shows where a value came from: the input
+  that bound it with its value now, the session values that input read,
+  each explained the same way, the capability results it received, from
+  its log (`read_file "app.toml" -> ok ...  (log #2)`), and the inputs
+  that changed it since. It follows the session's bindings, not the
+  functions they call.
+- If an earlier input does not replay as it ran (the world changed under
+  a capability it read), the session says so (`D0091`).
+
+`sisu ws FILE [--run]` runs a worksheet (Q-48): the script top to bottom,
+writing after each top-level statement its value (`# => 3`, `D0092`) and
+what it printed (`# | ys is [3, 6]`, `D0093`) to standard output; the
+file is not changed. It runs against a test's fake `System` (files in
+memory, no network, the test clock, seeded random numbers) unless
+`--run` asks for the real one.
+
+## The language server
+
+`sisu lsp` (10, "Language server"; `sisu-driver/src/lsp.rs`) speaks LSP
+3.17 over standard input and output: JSON-RPC 2.0 with `Content-Length`
+framing, read and written by `json.rs` (stage 0 has no registry, so the
+small part of JSON the protocol needs is written out). Every answer comes
+from the queries of `Db`, the ones `sisu check` and `sisu run` use, so
+the three never disagree, and since the checker types broken code, hover
+and go-to-definition keep working in it. A document is analysed as part
+of its program: the package whose `src/` holds it, the open documents'
+texts standing in for the files on disk, or the file alone.
+
+It provides diagnostics on every change (each with its catalog code and
+identifier, `code` and `data`), hover (an expression's type; a
+function's signature with its inferred error set, the capabilities it
+takes and its contracts; a type's fields; the documentation),
+go-to-definition (into the standard library's source too), document
+symbols, selection ranges (the syntax tree's nodes around a position)
+and formatting (`sisu fmt`, as one edit). Documents are synchronised
+whole. Positions are UTF-16 code units unless the client offers UTF-8.
+A request it does not know is answered `MethodNotFound` (-32601).
+
+Latency, on the standard library's own modules opened as documents (a
+release build, `cargo test --release --test lsp latency -- --nocapture`):
+the diagnostics after a change take 50 to 70 ms for `std/time.sisu`,
+`std/num.sisu` and `std/collections.sisu` and about 115 ms for
+`std/json.sisu`, whose reflection needs three rounds of resolving and
+checking (port-debt.md, "Instances are found by resolving again"); a
+hover takes under a millisecond. The prelude's AST is parsed once per
+process and shared, and lowering and the ownership checker do not run
+for an answer. The tests in `sisu-driver/tests/lsp.rs` drive the server
+as an editor does, over its standard streams.
+
 ## The query layer and the driver
 
-`sisu_driver::Db` memoises `parsed`, `checked` and `lowered` (the SIR
-through the ownership checker, with its findings as diagnostics) per file
-name on a hash of the file's text, the skeleton of 18's query pipeline. It is an
-implementation detail: a test checks that unchanged text reuses every
-result and a change recomputes every step after it, and nothing depends on
-whether a result was cached. Stage 0 has one user file per program plus
-std, so a query's key is the file; per-item keys come with the language
-server.
+`sisu_driver::Db` memoises `parsed` per file and `checked` and
+`lowered` (the SIR through the ownership checker, with its findings as
+diagnostics) per program, on hashes of the texts of its files and
+manifests, the skeleton of 18's query pipeline. It is an implementation
+detail: a test checks that unchanged text reuses every result and a
+change recomputes every step after it, and nothing depends on whether a
+result was cached. `run --watch`'s rebuilds, the REPL's inputs and the
+language server's changes go through the same queries, with texts that
+stand in for the files on disk. The prelude and std modules are parsed
+once per process (`collect::std_ast`), since their text is fixed.
 
 `sisu`:
 
 ```text
-sisu run FILE [ARGS...]      check, lower and run; `--sir` runs a SIR text file,
+sisu run [FILE] [ARGS...]    check, lower and run; `--watch` swaps in each save (hot replacement),
+                             `--sir` runs a SIR text file,
                              `--monitor` runs under the ownership monitor,
                              `--defer-borrow` runs a rejected program in the counterexample mode,
                              `--contracts=off|preconditions|all` what it checks (07),
                              `--record LOG [--redact fs,net,...]` writes the capability log
 sisu replay LOG              run a recorded program again against its log (`--monitor`)
-sisu check FILE              diagnostics; `--format=ids` for the conformance form,
+sisu check [FILE]            diagnostics; `--format=ids` for the conformance form,
                              `--explain` the signatures with their contracts
-sisu sir FILE                the serialised SIR, drops placed and `comptime` values baked
+sisu build [FILE]            check and lower a package (or a file), and write its lockfile
+sisu sir [FILE]              the serialised SIR, drops placed and `comptime` values baked
                              (also for a program the ownership checker rejects)
-sisu test FILE               run the tests (and `tests/*.transcript`) under the monitor: ok,
+sisu test [FILE]             run the tests (and `tests/*.transcript`) under the monitor: ok,
                              FAILED, or blocked by a hole; `--no-monitor`, `--defer-borrow`,
                              `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`,
                              `--update` (snapshots and transcripts), `--replay TOKEN`,
-                             `--sim [--faults P]`
-sisu bench FILE              run the benchmarks; `--iterations N`
+                             `--sim [--faults P]`, `--std` (the standard library's doc examples)
+sisu bench [FILE]            run the benchmarks; `--iterations N`
                              (`run` and `test` also take `--schedule-seed N`, `--explore N`,
-                             `--scheduler random|pct|exhaustive` and `--depth N`)
+                             `--scheduler random|pct|exhaustive` and `--depth N`; `run`,
+                             `check`, `build`, `test` and `bench` take `--locked`)
+sisu fmt [PATH...]           format in place; `--check` reports what would change
+sisu repl [FILE|DIR]         a session; a package's directory loads the package
+sisu ws FILE                 run a worksheet; `--run` with the real `System`
+sisu lsp                     the language server, over standard input and output
+sisu new NAME                a package (`--lib` for a library)
 sisu tokens FILE             the token stream; `--trivia` includes trivia
-sisu parse FILE              `--tree` the syntax tree, `--print` the source again
+sisu parse FILE              `--tree` the syntax tree, `--print` the source again,
+                             `--shape` what formatting keeps
 sisu explain CODE            the catalog entry for a code or identifier
 sisu explain-borrow FILE:LINE  every borrow live on the line
 sisu audit --ownership FILE...  per file, the uses of the ownership model's escape hatches
 ```
+
+Without `FILE`, a command works on the package of the current
+directory or the nearest above it (section "Modules and packages"); in a
+workspace, `check`, `build` and `test` work on every member, and `run`,
+`sir` and `bench` on the one application among them (`D0067`
+otherwise).
 
 `sisu audit --ownership` is the corpus study's count (18, Phase 3; T1.1
 and T1.2): for each file, one line of data, the file's name and then
@@ -2420,8 +2737,8 @@ open to revision; the conformance cases pin the current choice.
 56. Impl selection matches headers only; `where` clauses never choose
     between impls (coherence leaves at most one header that matches), and
     are checked once the impl is chosen.
-57. For the orphan rule, std is one package and the program another; the
-    program is the root package, which may implement std's traits for
+57. For the orphan rule, std is one package and each package of the
+    program another; the root package may implement std's traits for
     std's types.
 58. A method call looks for the receiver type's own method first, then
     the traits it implements or (for a type parameter) is bounded by;
@@ -2737,3 +3054,86 @@ open to revision; the conformance cases pin the current choice.
 145. `Option.unwrap`, `Result.unwrap`, `Iterator.nth`, `str.parse_float`
      (decimal syntax only: no `inf` or `nan`) and `within_ulps` join the
      prelude, for the examples that use them.
+
+**Modules and packages** (09)
+
+146. A file `src/net.sisu` and a directory `src/net/` are one module: the
+     file's items and the directory's files and directories as its
+     children. The root module takes the package's name; a single file's
+     module has no path, so nothing imports it.
+147. A module is reachable by its path whatever its items' visibility; a
+     name an import bound is visible through the module only when the
+     import is `pub` (a re-export); `pub(package)` reaches every module
+     of the same package, and std's items are all public.
+148. A package may not take the name of a std module (`json`, `cli`,
+     `time`, ...), so `import json` means one thing.
+149. `sisu.lock` lists every package the build resolved, sorted, each
+     with every non-dev dependency, active on this target or not, and a
+     `path+DIR` source relative to the lockfile, so it is the same on
+     every target and machine; it is rewritten without a message when
+     the manifests imply another, and `--locked` makes that an error.
+     Only the root package's dev-dependencies are built.
+150. A dependency's `when` is a structured condition over the target's
+     facts `os`, `arch` and `runtime` (data, D-063); an unknown manifest
+     key is a warning, so a manifest written for a later toolchain still
+     builds.
+151. A script's top-level statements are its `main` (`E0261` if it
+     declares one too), and its inline metadata, between `# /// script`
+     and `# ///`, is a manifest whose paths are relative to the script.
+
+**Tools** (10)
+
+152. The formatter writes `T?` for `Option[T]` (in impl headers too:
+     `impl[T] T?`) unless `T` is optional, a result or a function type,
+     or the option is behind `ref`, where `?` would read otherwise;
+     `Result[T, E]` stays as written, since `T ! E` needs `E` to be an
+     error set, which the syntax does not show.
+153. An import is unused, and `sisu fmt` removes it, when the file spells
+     its name nowhere outside the imports, not even in a doc comment (whose
+     examples are tests); that needs no name resolution, since a method is
+     found through every trait a type implements, imported or not.
+154. A comment at the end of a line does not count toward the line's
+     width, so adding a comment never moves code; `fmt --check` prints
+     the changed lines with two lines of context.
+155. A task adopts a new epoch only when it starts and at
+     `live.boundary()`; a changed signature, layout, impl or entry
+     restarts `main` and drops the old run's values without their
+     `Drop`s; a watched run ends when its program does.
+156. A save under `--watch` is an `edit` record of the capability log, at
+     the poll that saw it, so a replay recompiles the same texts at the
+     same points.
+157. The REPL runs the whole session again for each input against the
+     log of the run before it, instead of keeping a heap: `:back N` is
+     exact, and a session is deterministic under its seed. A panic names
+     its line in the session's script (`<repl>:N:M`).
+158. A session that loads a package sees the package's `pub` items, as a
+     dependent package would; `:why` follows the session's bindings and
+     the capability results of the inputs that computed them, not the
+     functions they call.
+159. A worksheet runs against a test's fake `System` unless `--run`, so
+     code that can reach a real capability runs only when asked.
+160. The language server analyses a document as part of its package,
+     with the open documents' texts standing in for their files; a
+     diagnostic carries its catalog code as `code` and its identifier as
+     `data.id`; positions are UTF-16 code units unless the client offers
+     UTF-8.
+
+**Types** (03)
+
+161. A `const` parameter is an `int`, and its argument an integer literal
+     or a `const` parameter in scope; `Array.filled(v)` makes `N - 1`
+     copies of `v` and keeps `v` as the last element; an `Array` is a
+     list of `N` values at run time.
+162. A `comptime assert` over `const` parameters is checked at each call
+     that gives them constants, by folding integer and boolean
+     arithmetic, comparisons and interpolation; one that calls a function
+     is checked nowhere (port-debt.md).
+163. `i128` holds every `int` and `u64`, and `u128` every `u64`, so those
+     widen implicitly; a 128-bit literal beyond `int` travels in SIR as
+     its decimal text.
+164. `str.lines` breaks at `\n` and drops a `\r` only before one;
+     `split` and `replace` take the leftmost occurrences, which never
+     overlap; `find` gives an index in characters, `byte_find` one in
+     bytes. A text method's misuse (an empty separator, a negative
+     count) is a panic whose message names the method
+     (`str.split: the separator must not be empty`).

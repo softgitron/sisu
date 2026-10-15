@@ -165,6 +165,11 @@ pub enum Rule {
 #[derive(Clone, Debug, Default)]
 pub struct Options {
     pub disabled: Vec<Rule>,
+    /// The standard library's functions are taken as checked: their drops
+    /// are elaborated, but their loans are not analysed again for every
+    /// program (`sisu test --std`, and the test that checks every std
+    /// function, check them).
+    pub trust_std: bool,
 }
 
 impl Options {
@@ -208,6 +213,9 @@ pub fn check(p: &sir::Program, opts: &Options) -> Checked {
     let mut program = p.clone();
     program.functions = functions;
     for f in &program.functions {
+        if opts.trust_std && program.sources.get(f.source as usize).is_some_and(|s| s.starts_with("<std>/")) {
+            continue;
+        }
         let a = loans::Analysis::run_with(&program, f, &types, opts.on(Rule::Escapes));
         findings.extend(a.findings(&program, f, &types, opts));
         if opts.on(Rule::MustConsume) {

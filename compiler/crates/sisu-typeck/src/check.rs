@@ -43,6 +43,14 @@ pub(crate) struct Checker<'p> {
     pub env: Vec<Predicate>,
     /// The names of the function's generic parameters, for diagnostics.
     pub generic_names: Vec<String>,
+    /// Which of them are `const` (an `int` in expressions).
+    pub const_generics: Vec<bool>,
+    /// The type arguments written on the method call being checked
+    /// (`x.truncate_to[u32]()`).
+    pub explicit_method_args: Option<Vec<Ty>>,
+    /// The `comptime assert`s on `const` generic parameters, for the calls
+    /// to check (`Body::generic_asserts`).
+    pub generic_asserts: Vec<crate::thir::GenericAssert>,
     /// Values put in a `Shared`, `Cell` or `Mutex`, with the owner's name:
     /// none may be a view or must-consume (checked once types are known).
     pub owner_checks: Vec<(Ty, &'static str, Span)>,
@@ -100,6 +108,9 @@ impl<'p> Checker<'p> {
             impl_bounds: Vec::new(),
             env: Vec::new(),
             generic_names: Vec::new(),
+            const_generics: Vec::new(),
+            explicit_method_args: None,
+            generic_asserts: Vec::new(),
             owner_checks: Vec::new(),
             quiet_unknown_names: prog.fn_info(def).is_some_and(|f| f.header_broken || f.body_broken),
             in_comptime: prog.fn_info(def).is_some_and(|f| f.comptime),
@@ -395,7 +406,8 @@ impl<'p> Checker<'p> {
                 self.report(d);
                 Ty::Error
             }
-            TypeKind::ConstArg(_) | TypeKind::Unsupported(_) => {
+            TypeKind::ConstArg(n) => Ty::Const(*n),
+            TypeKind::Unsupported(_) => {
                 self.unsupported(te.range, "this type", "a later phase");
                 Ty::Error
             }
@@ -523,6 +535,26 @@ impl<'p> Checker<'p> {
                 .with("found", args.len().to_string());
             self.report(diag);
             return Ty::Adt(d, (0..generics).map(|_| Ty::Error).collect());
+        }
+        // A `const` parameter takes a constant, any other a type.
+        let gs = prog.type_generics(d);
+        for (i, a) in args.iter().enumerate() {
+            let Some(g) = gs.get(i) else { continue };
+            let wrong = if g.is_const {
+                let param_ok =
+                    matches!(a, Ty::Param(k) if self.const_generics.get(*k as usize) == Some(&true));
+                (!matches!(a, Ty::Const(_) | Ty::Error | Ty::Var(_)) && !param_ok)
+                    .then_some(msg::RESOLVE_CONST_ARGUMENT)
+            } else {
+                let const_param =
+                    matches!(a, Ty::Param(k) if self.const_generics.get(*k as usize) == Some(&true));
+                (matches!(a, Ty::Const(_)) || const_param).then_some(msg::RESOLVE_TYPE_ARGUMENT)
+            };
+            if let Some(m) = wrong {
+                let diag = self.error(m, range).with("name", name.clone()).with("param", g.name.clone());
+                self.report(diag);
+                return Ty::Adt(d, (0..generics).map(|_| Ty::Error).collect());
+            }
         }
         Ty::Adt(d, args)
     }
@@ -718,6 +750,17 @@ impl<'p> Checker<'p> {
                 out.push(Stmt::Error(span));
             }
             ast::StmtKind::Comptime(inner) => match &inner.kind {
+                // An assert on `const` generic parameters: decided at each
+                // call with constant arguments (`generic_asserts.rs`).
+                ast::StmtKind::Assert { cond, message }
+                    if self.names_const_param(cond)
+                        || message.as_ref().is_some_and(|m| self.names_const_param(m)) =>
+                {
+                    let c = self.check_condition_expr(cond);
+                    let m = message.as_ref().map(|m| self.check_expr(m, &Ty::Str));
+                    let text = self.source_text(cond.range);
+                    self.generic_asserts.push(crate::thir::GenericAssert { cond: c, message: m, text });
+                }
                 // Run at compile time; nothing is left for run time.
                 ast::StmtKind::Assert { .. } | ast::StmtKind::Expr(_) => {
                     let b =
@@ -756,6 +799,21 @@ impl<'p> Checker<'p> {
             }
             ast::StmtKind::Error => out.push(Stmt::Error(span)),
         }
+    }
+
+    /// Whether an expression names one of the function's `const` generic
+    /// parameters.
+    fn names_const_param(&self, e: &ast::Expr) -> bool {
+        let mut found = false;
+        ast::visit::expr(e, &mut |x| {
+            if let ast::ExprKind::Name(n) = &x.kind
+                && let Some(i) = self.generic_names.iter().position(|g| g == n)
+                && self.const_generics.get(i) == Some(&true)
+            {
+                found = true;
+            }
+        });
+        found
     }
 
     pub fn enter_loop(&mut self) {

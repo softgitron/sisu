@@ -1,0 +1,34 @@
+# Hot replacement (10, "Debugging and profiling"; D-053, D-068): under
+# `sisu run --watch`, a save that checks publishes every body that
+# changed as one epoch, which the running task adopts at its next
+# boundary (`Ticker.wait` is one). The program saves its own next
+# version (`swap.files/v2.sisu`) at frame 1, so frame 2 draws with the
+# new `draw`. The function value `shade` holds its slot, not a body, so
+# it calls the new `light`; `SIZE`, a constant, changed, so `draw` sees
+# the new value; `main` changed too, but its frame is in flight and keeps
+# its old body.
+from std.time import Ticker
+
+const SIZE: int = 3
+
+def draw(frame: int) -> String:
+    return "frame {frame}: a square of {SIZE}"
+
+def light(x: int) -> int:
+    return x + 100
+
+def save(sys: System, version: Path):
+    let text = sys.fs.read_to_string(version).expect("the next version")
+    sys.fs.write_text("swap.sisu", text).expect("saved")
+
+def main(sys: System) -> !:
+    let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("a time"))
+    var ticker = Ticker.every(clock, Duration.millis(16))
+    let shade = light
+    for frame in range(4):
+        ticker.wait()?
+        print("{draw(frame)}, shade {shade(frame)}, epoch {live.epoch()}")
+        print("(the main of v2, which the running frame never reaches)")
+        if frame == 1:
+            save(sys, "v2.sisu")
+    return Ok(())

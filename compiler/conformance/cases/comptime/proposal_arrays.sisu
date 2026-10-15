@@ -1,0 +1,34 @@
+# The CRC table and the ring buffer of proposal/examples/comptime.sisu,
+# each section verbatim (a test keeps them so): `Array[T, N]`, `u32`,
+# const generics, `truncate_to[u32]()`, a constant computed at compile
+# time, and a `comptime assert` on a const parameter, which each call with
+# constant arguments decides (`generic_assert` shows one failing).
+
+# An ordinary function, evaluated at compile time because `const` demands it.
+def crc32_table() -> Array[u32, 256]:
+    var t = Array.filled(0u32)
+    for i in range(256):
+        var c = i.truncate_to[u32]()
+        for _ in range(8):
+            c = if c & 1 == 1: 0xEDB88320 ^ (c >> 1) else: c >> 1
+        t[i] = c
+    return t
+
+const CRC_TABLE: Array[u32, 256] = comptime crc32_table()
+
+# A comptime-only check inside a generic type.
+struct RingBuffer[T, const N: int]:
+    items: Array[T?, N]
+    head: int
+    len: int
+
+    def empty() -> Self:
+        comptime assert N > 0 and N & (N - 1) == 0, "capacity {N} must be a power of two"
+        return Self(items=Array.filled(None), head=0, len=0)
+
+def main():
+    print("{CRC_TABLE[0]:x} {CRC_TABLE[1]:x} {CRC_TABLE[255]:x}")
+    print(CRC_TABLE.len())
+    let r = RingBuffer[String, 8].empty()
+    print("{r.items.len()} slots, {r.len} used, head at {r.head}")
+    print(r.items[0])

@@ -1,0 +1,10 @@
+# An application with dependencies by path (09; stage 0 has no registry).
+[package]
+name = "app"
+version = "1.0.0"
+
+[dependencies]
+textkit = { path = "../textkit" }
+# A structured condition over the target's facts, not a `cfg()` string
+# (D-063): stage 0 runs on the interpreter, so this one never applies.
+winonly = { path = "../winonly", when = { runtime = "native", os = ["windows"] } }

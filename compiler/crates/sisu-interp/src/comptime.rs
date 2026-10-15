@@ -368,15 +368,23 @@ impl Baker<'_> {
                 });
                 return Ok(());
             }
-            Value::U64(n) => {
-                if !self.intrinsics.contains(&"u64.from_bits") {
-                    self.intrinsics.push("u64.from_bits");
+            Value::U64(_) | Value::I128(_) | Value::U128(_) => {
+                // A value of a kind of its own: a `u64` from its bits, a
+                // 128-bit integer from its decimal text.
+                let (name, arg) = match v {
+                    Value::U64(n) => ("u64.from_bits", Const::Int(*n as i64)),
+                    Value::I128(n) => ("i128.from_text", Const::Str(n.to_string())),
+                    Value::U128(n) => ("u128.from_text", Const::Str(n.to_string())),
+                    _ => return Err("an integer of its own kind".into()),
+                };
+                if !self.intrinsics.contains(&name) {
+                    self.intrinsics.push(name);
                 }
                 self.stmts.push(Statement {
                     kind: StatementKind::Call {
                         dest,
-                        callee: Callee::Intrinsic("u64.from_bits".into(), Vec::new()),
-                        args: vec![Operand::Const(Const::Int(*n as i64))],
+                        callee: Callee::Intrinsic(name.into(), Vec::new()),
+                        args: vec![Operand::Const(arg)],
                     },
                     loc: None,
                 });

@@ -1,0 +1,13 @@
+#!/usr/bin/env sisu
+# A REPL session (10, "REPL and scripts"): `sisu repl session.sisu` loads
+# this script as the session's first input, then reads `session.stdin`.
+# An expression shows its value; an input that does not check, or panics,
+# is not kept; `:back N` forgets inputs by replaying the ones before them
+# against their log; `:why NAME` shows where a value came from, down to
+# the capability results the inputs received.
+
+def area(w: int, h: int) -> int:
+    return w * h
+
+let config = sys.fs.read_to_string("app.toml")?
+print("loaded {config.len()} bytes")

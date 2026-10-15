@@ -45,6 +45,10 @@ is compared byte for byte.
 | `NAME.sim` | `sisu test --sim ARGS NAME.sisu`, where `ARGS` (such as `--faults 0.05 --explore 5`) is given by a line `# sim ARGS` |
 | `NAME.schedule` | `sisu test ARGS NAME.sisu`, where `ARGS` (such as `--scheduler pct --depth 2 --explore 20`) is given by a line `# schedule ARGS` |
 | `NAME.select` | `sisu test ARGS NAME.sisu`, where `ARGS` (such as `--tag slow --filter x`) is given by a line `# select ARGS` |
+| `NAME.watch` | `sisu run --watch NAME.sisu ARGS...`: standard output, then `--- stderr`, standard error, and `--- status N`; the program saves new versions of its own file from `NAME.files/` to drive the swaps |
+| `NAME.repl` | `sisu repl NAME.sisu` with `NAME.stdin` as the session's inputs: standard output, then `--- stderr`, standard error, and `--- status N` |
+| `NAME.ws` | `sisu ws NAME.sisu`, the worksheet: standard output, then `--- stderr`, standard error, and `--- status N` |
+| `NAME.unformatted` | not compared: why the case is not in the form `sisu fmt` writes (its layout is what it tests, or it holds a proposal example unchanged); without it the case must be |
 
 A line `# explore N` also runs a case that runs again as `sisu run
 --explore N NAME.sisu ARGS...`: the program under the schedule seeds 0 to
@@ -56,6 +60,28 @@ Every command runs in a fresh temporary directory holding only
 `NAME.sisu` and the contents of `NAME.files/`, with an empty environment,
 and names the file by its bare name, so paths in messages are the same on
 every machine. A program that writes files writes them there.
+
+## A package case
+
+A directory `NAME.pkg/` is a package case (09): a package with its
+`sisu.toml` and `src/` tree, a workspace, or several packages beside each
+other. Every command runs in it, or in the directory `NAME.cwd` names
+(relative to `NAME.pkg/`), without naming a file, as a programmer runs
+them. The files beside it are a file case's (`NAME.diag` for `sisu check
+--format=ids`, `NAME.test`, `NAME.out`, `NAME.err`, `NAME.status`,
+`NAME.args`, `NAME.stdin`, `NAME.unformatted`, `NAME.watch` for `sisu run
+--watch`, `NAME.repl` for `sisu repl` with the package loaded), and these:
+
+| File | Compared with |
+|---|---|
+| `NAME.lock` | the `sisu.lock` that `sisu check` wrote, beside the package's manifest or its workspace's |
+| `NAME.build` | `sisu build`: standard output, then `--- stderr`, standard error, and `--- status N` |
+| `NAME.cwd` | not compared: where the commands run |
+
+The program's arguments follow `--` (`sisu run -- ARGS...`). The checks
+below apply to every `.sisu` file of the package.
+
+## Checks without an expectation file
 
 These checks apply to every case without an expectation file:
 
@@ -79,12 +105,24 @@ These checks apply to every case without an expectation file:
   that test again with the same report.
 - For a case with `.test`, `sisu test --jobs 1` (the tests on one
   thread) prints what the default, parallel run printed.
+- For a case with `.watch`, `sisu run --watch --record LOG` prints what
+  the watched run printed, and `sisu replay LOG` reproduces it, its
+  `edit` records standing in for the saves.
+- Every file that parses keeps its tree when `sisu fmt` rewrites it:
+  `sisu parse --shape` prints the same before and after (the tree's nodes
+  and significant tokens, up to what the formatter changes on purpose:
+  trailing commas, `Option[T]` written `T?`, unused imports, and the order
+  of imports), and formatting it a second time changes nothing. Unless
+  the case has a `NAME.unformatted`, `sisu fmt --check` must also accept
+  it as it is: the case is canonical text.
 
-The summary line counts the cases, the checks, the runs repeated under
-the monitor, the runs recorded and replayed, the failing tests replayed
-from their tokens, the test runs repeated on one thread, the
-counterexample runs (`.defer`), and the cases explored under several
-schedules with the number of schedules.
+The summary line counts the cases (and the package cases among them),
+the checks, the files formatted, the runs under `--watch`, the runs
+repeated under the monitor,
+the runs recorded and replayed, the failing tests replayed from their
+tokens, the test runs repeated on one thread, the counterexample runs
+(`.defer`), and the cases explored under several schedules with the
+number of schedules.
 
 ## The diagnostic form
 
@@ -114,8 +152,11 @@ parameters each identifier takes.
 - `names/` is name resolution; `types/` is the checker, including cases
   where broken code still gets a typed tree and only the first error in a
   chain is reported.
-- `run/` is the semantics: arithmetic and its traps, strings and
-  formatting (`format_specs`: the spec mini-language, written in Sisu),
+- `run/` is the semantics: arithmetic and its traps, the sized integers
+  from `u8` to `u128` (`sized_integers`, `wide_overflow`), strings and
+  their bytes (`text_bytes`: the text methods written in Sisu over the
+  bytes; `char_boundary`), formatting (`format_specs`: the spec
+  mini-language, written in Sisu),
   collections, `match`, loops, closures, errors and traces, options,
   `Drop` order on normal and unwinding paths (`drop_panic_fields`: a
   `Drop` that panics; `drop_chain`: a long chain dropped at constant
@@ -127,12 +168,15 @@ parameters each identifier takes.
   diagnostics.
 - `generics/` is user generics: functions and types with bounds checked
   at the definition, defaults, type arguments at run time, views through
-  generic parameters, and `Drop` for a generic type.
+  generic parameters, `Drop` for a generic type, and `const` parameters
+  with `Array[T, N]` (`const_generic`, `const_generic_errors`).
 - `comptime/` is compile-time evaluation: constants computed by the
   compiler (`baked` pins the SIR built from literals), `comptime assert`,
   `comptime def`, budgets, the evaluation errors, and derives written as
   compile-time Sisu, with `proposal_derive`, the user-defined derive of
-  `proposal/examples/comptime.sisu`, kept identical by a test.
+  `proposal/examples/comptime.sisu`, and `proposal_arrays`, its CRC table
+  and ring buffer, each kept identical by a test; `generic_assert` is a
+  `comptime assert` over a `const` parameter, checked at the call.
 - `reflect/` is reflection in generic functions, each made for the types
   it is called with: the `reflect` queries, attributes as data,
   `implements`, `reflect.construct` and `default_of`, promotion of generic
@@ -160,6 +204,24 @@ parameters each identifier takes.
   order, and `proposal_testing`, which starts with
   `proposal/examples/testing.sisu`.
 - `sir/` pins the serialised SIR of small programs.
+- `live/` is 10's tools that run programs: hot replacement under `sisu
+  run --watch` (`.watch`: a swap of changed bodies in epochs, a rejected
+  save, restarts for a changed signature and a changed layout, tasks
+  adopting epochs at their boundaries), a REPL session with `:back` and
+  `:why` (`.repl`), and a worksheet (`.ws`).
+- `packages/` is 09, mostly package cases: modules from the file tree
+  (a file and a directory of the same name are one module), `import` and
+  `from ... import`, `pub`, `pub(package)` and re-exports, manifests and
+  their errors, path dependencies with the lockfile, `[trust]`, the orphan
+  rule across packages, dependency cycles, a workspace with one lockfile
+  (and one whose member has no manifest), `sisu build`, a failing test
+  replayed from its token in a package, scripts (`#!/usr/bin/env sisu`,
+  top-level statements, inline metadata), and a package run under
+  `--watch` and loaded into `sisu repl`.
+- `std/` is the standard library as modules (std.collections, std.num,
+  std.time and the rest, imported by their paths), its doc examples run
+  as tests by `sisu test --std`, and the functions of the prelude that
+  must respect a program's own `Ord`.
 - `concurrency/` is tasks (18, Phase 6), most cases under several
   schedules: joins and their error sets, failures and the scope's result,
   panics in tasks, cancellation at the blocking points, shields and

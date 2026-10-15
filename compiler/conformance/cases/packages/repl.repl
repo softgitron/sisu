@@ -1,0 +1,7 @@
+sisu> sisu> sisu> 6
+sisu> 12
+sisu> 
+--- stderr
+sisu repl: each input runs as the next line of a script; `:back N` forgets the last N inputs, `:why NAME` shows where a value came from, `:quit` ends
+the package `shapes` is loaded: import its modules by their paths (`from shapes import ...`)
+--- status 0

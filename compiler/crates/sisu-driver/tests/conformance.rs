@@ -184,6 +184,38 @@ fn comptime_sections_match_the_proposal() {
     }
 }
 
+/// The CRC table and the ring buffer of proposal/examples/comptime.sisu
+/// (`Array`, `u32`, const generics) are in the case
+/// `comptime/proposal_arrays.sisu`, each kept identical.
+#[test]
+fn comptime_arrays_match_the_proposal() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let original =
+        std::fs::read_to_string(root.join("../proposal/examples/comptime.sisu")).unwrap_or_default();
+    let case = std::fs::read_to_string(root.join("conformance/cases/comptime/proposal_arrays.sisu"))
+        .unwrap_or_default();
+    let sections = [
+        (
+            "# An ordinary function, evaluated at compile time",
+            "# A comptime-only check inside a generic type.",
+        ),
+        (
+            "# A comptime-only check inside a generic type.",
+            "# Reflection: a generic JSON encoder with no macro.",
+        ),
+    ];
+    for (start, end) in sections {
+        let from = original.find(start);
+        let to = original.find(end);
+        assert!(from.is_some() && to.is_some(), "proposal/examples/comptime.sisu has no section `{start}`");
+        let section = original[from.unwrap_or(0)..to.unwrap_or(0)].trim_end();
+        assert!(
+            case.contains(section),
+            "comptime/proposal_arrays.sisu no longer holds the section `{start}`"
+        );
+    }
+}
+
 /// proposal/examples/testing.sisu runs as the case
 /// `testing/proposal_testing.sisu`: the example unchanged, then the
 /// functions and types it tests (`parse_int`, `load_config`, `Cache`,

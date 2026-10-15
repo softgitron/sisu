@@ -437,7 +437,7 @@ impl Interp<'_, '_> {
             return Ok(());
         }
         let Some(fr) = self.frames.last() else { return Ok(()) };
-        let Some(f) = fr.func.and_then(|i| self.prog.functions.get(i)) else { return Ok(()) };
+        let Some(f) = fr.func.and_then(|i| self.func(i)) else { return Ok(()) };
         // Unwinding may drop anything; glue drops the parts of a value
         // whose own drop was checked.
         if f.blocks.get(fr.bb).is_some_and(|b| b.cleanup) || f.kind == sir::FnKind::Glue {
@@ -494,7 +494,7 @@ impl Interp<'_, '_> {
             vec![render(msg::MONITOR_HEADER, &[("what", render(msg::MONITOR_SHARED_CROSSED, &[]))])];
         lines.push(format!("  cell {cell}"));
         for fr in self.frames.iter().rev() {
-            let Some(f) = fr.func.and_then(|i| self.prog.functions.get(i)) else { continue };
+            let Some(f) = fr.func.and_then(|i| self.func(i)) else { continue };
             if f.kind == sir::FnKind::Glue {
                 continue;
             }
@@ -552,7 +552,7 @@ impl Interp<'_, '_> {
     fn pointer_label_in(&self, p: &Pointer, owner: Option<usize>) -> String {
         let frame = self.frames_of(p.task).iter().find(|fr| fr.serial == p.serial);
         let f = frame.and_then(|fr| fr.func).or(owner);
-        let decl = f.and_then(|i| self.prog.functions.get(i)).and_then(|f| f.locals.get(p.local as usize));
+        let decl = f.and_then(|i| self.func(i)).and_then(|f| f.locals.get(p.local as usize));
         let mut s = decl.and_then(|l| l.name.clone()).unwrap_or_else(|| format!("_{}", p.local));
         let mut ty = decl.map(|l| l.ty.clone());
         let mut variant: Option<u32> = None;
@@ -654,7 +654,7 @@ impl Interp<'_, '_> {
     }
 
     fn site_location(&self, s: &Site) -> String {
-        let f = s.func.and_then(|i| self.prog.functions.get(i));
+        let f = s.func.and_then(|i| self.func(i));
         let file =
             f.and_then(|f| self.prog.sources.get(f.source as usize)).map(String::as_str).unwrap_or("?");
         match s.loc {
@@ -664,7 +664,7 @@ impl Interp<'_, '_> {
     }
 
     fn site_stmt(&self, s: &Site) -> String {
-        let Some(f) = s.func.and_then(|i| self.prog.functions.get(i)) else { return String::new() };
+        let Some(f) = s.func.and_then(|i| self.func(i)) else { return String::new() };
         let Some(b) = f.blocks.get(s.bb) else { return String::new() };
         match s.stmt.and_then(|i| b.stmts.get(i)) {
             Some(st) => {
@@ -679,7 +679,7 @@ impl Interp<'_, '_> {
     }
 
     fn fn_name(&self, s: &Site) -> String {
-        s.func.and_then(|i| self.prog.functions.get(i)).map(|f| f.name.clone()).unwrap_or_default()
+        s.func.and_then(|i| self.func(i)).map(|f| f.name.clone()).unwrap_or_default()
     }
 
     fn violation(&self, v: Violation) -> Unwind {
@@ -787,7 +787,7 @@ impl Interp<'_, '_> {
         }
         // The stack, innermost first, without drop glue.
         for fr in self.frames.iter().rev() {
-            let Some(f) = fr.func.and_then(|i| self.prog.functions.get(i)) else { continue };
+            let Some(f) = fr.func.and_then(|i| self.func(i)) else { continue };
             if f.kind == sir::FnKind::Glue {
                 continue;
             }
@@ -797,7 +797,7 @@ impl Interp<'_, '_> {
                 render(msg::RUN_FRAME, &[("function", f.name.clone()), ("location", self.site_location(&s))])
             ));
         }
-        if let Some(f) = used.func.and_then(|i| self.prog.functions.get(i)) {
+        if let Some(f) = used.func.and_then(|i| self.func(i)) {
             lines.push(render(msg::MONITOR_SIR_HEADER, &[("function", f.name.clone())]));
             lines.push(sir::write::function(f).trim_end().to_string());
         }

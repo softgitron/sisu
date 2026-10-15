@@ -115,10 +115,10 @@ impl Checker<'_> {
             ast::ExprKind::SelfType => self.self_ty.clone().map(StaticPath::Type),
             ast::ExprKind::Field { base, name } => match self.static_path(base)? {
                 StaticPath::Module(m) => {
-                    let Some(d) = prog.lookup_in(m, &name.text) else {
+                    let Some(d) = self.module_member(m, name) else {
                         let d = self
                             .error(msg::RESOLVE_NOT_IN_MODULE, name.range)
-                            .with("module", prog.modules[m.0 as usize].name.clone())
+                            .with("module", prog.module_path(m))
                             .with("name", name.text.clone());
                         self.report(d);
                         return Some(StaticPath::Type(Ty::Error));
@@ -152,6 +152,17 @@ impl Checker<'_> {
         }
     }
 
+    /// `m.name` as this module sees it (09): the item, reported when it is
+    /// not visible here, so that nothing cascades from it.
+    pub fn module_member(&mut self, m: sisu_resolve::ModuleId, name: &ast::Name) -> Option<DefId> {
+        let (d, visible) = self.prog.member(m, &name.text, self.module)?;
+        if !visible {
+            let diag = self.prog.private_item(d, m, self.span(name.range));
+            self.report(diag);
+        }
+        Some(d)
+    }
+
     fn classify(&mut self, d: DefId, range: TextRange) -> Option<StaticPath> {
         let prog = self.prog;
         match &prog.def(d).kind {
@@ -167,9 +178,25 @@ impl Checker<'_> {
         }
     }
 
-    /// An index argument read as a type: `Options` in `cli.parse[Options]`.
+    /// An index argument read as a type: `Options` in `cli.parse[Options]`,
+    /// or a constant for a `const` parameter: `16` in `size[16]()`.
     pub fn expr_as_type(&mut self, e: &ast::Expr) -> Ty {
         match &e.kind {
+            ast::ExprKind::Int { value: Some(v), suffix: None, .. } => match i128::try_from(*v) {
+                Ok(n) => Ty::Const(n),
+                Err(_) => Ty::Error,
+            },
+            // A `const` parameter of the function itself, passed on.
+            ast::ExprKind::Name(n)
+                if self
+                    .generic_names
+                    .iter()
+                    .position(|g| g == n)
+                    .is_some_and(|i| self.const_generics.get(i) == Some(&true)) =>
+            {
+                let i = self.generic_names.iter().position(|g| g == n).unwrap_or(0);
+                Ty::Param(i as u32)
+            }
             ast::ExprKind::Name(n) => match n.as_str() {
                 "int" => Ty::Int,
                 "f64" => Ty::Float,
@@ -221,10 +248,10 @@ impl Checker<'_> {
         let prog = self.prog;
         match path {
             StaticPath::Module(m) => {
-                let Some(d) = prog.lookup_in(m, &name.text) else {
+                let Some(d) = self.module_member(m, name) else {
                     let diag = self
                         .error(msg::RESOLVE_NOT_IN_MODULE, name.range)
-                        .with("module", prog.modules[m.0 as usize].name.clone())
+                        .with("module", prog.module_path(m))
                         .with("name", name.text.clone());
                     self.report(diag);
                     if let Some((args, _, _)) = call {
@@ -301,9 +328,13 @@ impl Checker<'_> {
                             self.check_args_loosely(args);
                             return Expr::error(span);
                         }
+                        self.check_method_vis(d, name.range);
                         self.call_fn(d, None, Some(ty), None, args, trailing, range, expected)
                     }
-                    (Some(d), None) => self.def_value(d, &name.text, range),
+                    (Some(d), None) => {
+                        self.check_method_vis(d, name.range);
+                        self.def_value(d, &name.text, range)
+                    }
                     (None, Some((args, trailing, expected)))
                         if self.trait_static(&ty, &name.text).is_some() =>
                     {
@@ -515,12 +546,30 @@ impl Checker<'_> {
                     .generator_site(callee, base, targs, Some(args), expected)
                     .unwrap_or(Expr::error(span));
             }
-            ast::ExprKind::Index { .. } => match self.static_path(callee) {
+            ast::ExprKind::Index { base: inner, args: targs } => match self.static_path(callee) {
                 Some(StaticPath::Fn(d, tys)) => {
                     return self.call_fn(d, tys, None, None, args, trailing, range, expected);
                 }
                 Some(StaticPath::Type(ty)) => return self.construct(ty, args, trailing, range, expected),
-                _ => {}
+                _ => {
+                    // `x.method[T](...)`: a method with its type arguments.
+                    if let ast::ExprKind::Field { base, name } = &inner.kind
+                        && self.static_path(base).is_none()
+                    {
+                        let tys: Vec<Ty> = targs
+                            .iter()
+                            .map(|a| match a {
+                                ast::IndexArg::Expr(e) => self.expr_as_type(e),
+                                _ => Ty::Error,
+                            })
+                            .collect();
+                        let recv = self.infer_expr(base, None);
+                        self.explicit_method_args = Some(tys);
+                        let x = self.method_call_on(recv, name, args, trailing, range, expected);
+                        self.explicit_method_args = None;
+                        return x;
+                    }
+                }
             },
             ast::ExprKind::SelfType => {
                 if let Some(t) = self.self_ty.clone() {
@@ -701,6 +750,14 @@ impl Checker<'_> {
                 .with("expected", n.to_string())
                 .with("found", (args.len() + 1).to_string());
             self.report(d);
+        }
+        // A struct of another module is built there only when every field
+        // is visible (09): one it cannot see would be left unset.
+        if let Some(i) =
+            s.fields.iter().position(|f| !prog.vis_allows(f.vis, prog.def(def).module, self.module))
+        {
+            let at = slots[i].and_then(|a| a.name.as_ref().map(|n| n.range)).unwrap_or(range);
+            self.check_field_vis(def, i, at);
         }
         let mut fields = Vec::new();
         for (i, f) in s.fields.iter().enumerate() {
@@ -929,8 +986,21 @@ impl Checker<'_> {
                 self.infer.try_unify(v, t);
             }
         }
-        if let (Some(o), Some(so)) = (&owner, &sig.owner) {
-            self.infer.try_unify(so, o);
+        // A method of an impl for some of a type's values (`impl[T: Copy]
+        // Option[ref T]`) is not one of the others.
+        if let (Some(o), Some(so)) = (&owner, &sig.owner)
+            && !self.infer.try_unify(so, o)
+            && recv.is_some()
+            && !self.infer.has_vars(o)
+            && *o != Ty::Error
+        {
+            let diag = self
+                .error(msg::TYPE_UNKNOWN_METHOD, range)
+                .with("ty", self.show(o))
+                .with("name", prog.def(d).name.clone());
+            self.report(diag);
+            self.check_args_loosely(args);
+            return Expr::error(span);
         }
         // Associated types of what is known now.
         let env = self.env.clone();
@@ -1203,6 +1273,22 @@ impl Checker<'_> {
                 {
                     let x = self.infer_expr(&a.value, None);
                     let item_ty = targs.first().cloned().unwrap_or(Ty::Error);
+                    // An `Iterable` parameter passed on as it is: the
+                    // reference to what the caller gave.
+                    if let Ty::Ref(inner, _) = self.resolved(&x.ty)
+                        && let Ty::Adt(d2, ta2) = self.resolved(&inner)
+                        && Some(d2) == prog.wk.iterable
+                    {
+                        let given = ta2.first().cloned().unwrap_or(Ty::Error);
+                        if !self.infer.try_unify(&given, &item_ty) {
+                            let d = self
+                                .error(msg::TYPE_MISMATCH, a.value.range)
+                                .with("expected", self.show(&pty))
+                                .with("found", self.show(&x.ty));
+                            self.report(d);
+                        }
+                        return Arg { expr: x, mode: ArgMode::Value };
+                    }
                     return match self.iteration_item(&x.ty, Mode::Borrow) {
                         Some((item, mode)) => {
                             let item = self.decay_ty(&item);
@@ -1428,6 +1514,7 @@ impl Checker<'_> {
             self.check_args_loosely(args);
             return Expr::error(span);
         }
+        self.check_method_vis(d, name.range);
         let Some(mode) = info.self_mode else {
             let d = self
                 .error(msg::TYPE_ASSOC_NOT_METHOD, name.range)
@@ -1453,7 +1540,8 @@ impl Checker<'_> {
             }
             Mode::Own => Arg { expr: self.check_movable(recv), mode: ArgMode::Value },
         };
-        self.call_fn(d, None, Some(base), Some(recv_arg), args, trailing, range, expected)
+        let explicit = self.explicit_method_args.take();
+        self.call_fn(d, explicit, Some(base), Some(recv_arg), args, trailing, range, expected)
     }
 
     /// A call of the trait method `m` of `tr` on `recv`, of type `self_ty`.

@@ -8,9 +8,15 @@ pub mod audit;
 pub mod cli;
 pub mod db;
 pub mod doc;
+pub mod json;
+pub mod lsp;
+pub mod manifest;
+pub mod package;
+pub mod repl;
 pub mod replay;
 pub mod sim;
 pub mod snap;
+pub mod toml;
 pub mod transcript;
 
 pub use db::Db;

@@ -32,7 +32,7 @@ pub fn place_ty<'d>(decl: &dyn Fn(&str) -> Option<&'d TypeDecl>, f: &Function, p
                 ft
             }
             Proj::Index(_) | Proj::IndexFromEnd(_) => match t {
-                Type::Named(n, args) if n == "list" => args.into_iter().next()?,
+                Type::Named(n, args) if n == "list" || n == "Array" => args.into_iter().next()?,
                 _ => return None,
             },
             Proj::Key(_) => match t {

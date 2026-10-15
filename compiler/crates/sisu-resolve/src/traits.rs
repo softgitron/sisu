@@ -146,8 +146,11 @@ impl Resolver<'_> {
                 self.report(Diagnostic::new(msg::RESOLVE_IMPL_DEFAULT, s));
             }
         }
-        let generics: Vec<Generic> =
-            names.iter().map(|n| Generic { name: n.clone(), default: None }).collect();
+        let generics: Vec<Generic> = imp
+            .generics
+            .iter()
+            .map(|g| Generic { name: g.name.text.clone(), default: None, is_const: g.is_const })
+            .collect();
         let predicates = self.resolve_bounds(module, &imp.generics, &names, 0, None);
         let ctx = TyCtx { predicates: &predicates, ..TyCtx::plain(module, &names, true) };
         let self_ty = self.resolve_ty(&imp.self_ty, &ctx);
@@ -174,11 +177,12 @@ impl Resolver<'_> {
                 }
             }
             for m in &imp.methods {
+                let vis = if self.is_std(module) { ast::Vis::Pub } else { m.vis };
                 let def = self.new_def(
                     module,
                     &m.name.text,
                     m.name.range,
-                    ast::Vis::Pub,
+                    vis,
                     Vec::new(),
                     DefKind::Fn(Box::new(self.placeholder_fn(module, FnKind::Method))),
                 );

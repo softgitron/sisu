@@ -1,0 +1,5 @@
+pub def greet(name: str) -> String:
+    return "hello, {name}"
+
+test "the library's test, run from the workspace":
+    assert greet("y") == "hello, y"
