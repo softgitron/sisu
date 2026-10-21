@@ -1,0 +1,2 @@
+5:5-5:7 E0341 type.not-mutable what="xs"
+  fix type.take-mut 4:13-4:13 "mut "

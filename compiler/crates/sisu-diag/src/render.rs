@@ -87,14 +87,27 @@ fn severity_word(s: Severity) -> &'static str {
 
 /// One source line with a span marked under it. `gutter` is the width of
 /// the line-number column, the same for every excerpt of a diagnostic.
-fn excerpt(out: &mut String, map: &SourceMap, span: Span, marker: char, text: &str, gutter: usize) {
+/// One line of source with `span` marked under it; with `shown`, the line
+/// was just shown (a label on the line of the span before it), so only the
+/// marks are added under it.
+fn excerpt(
+    out: &mut String,
+    map: &SourceMap,
+    span: Span,
+    marker: char,
+    text: &str,
+    gutter: usize,
+    shown: bool,
+) {
     let Some(file) = map.get(span.file) else {
         return;
     };
     let (a, b) = map.line_col(span);
     let line = file.line_text(a.line);
     let pad = " ".repeat(gutter);
-    out.push_str(&format!("{pad} |\n{:>gutter$} | {line}\n", a.line));
+    if !shown {
+        out.push_str(&format!("{pad} |\n{:>gutter$} | {line}\n", a.line));
+    }
     let start = a.col.saturating_sub(1) as usize;
     // A span over several lines is marked to the end of its first line.
     let width = if b.line == a.line {
@@ -110,6 +123,16 @@ fn excerpt(out: &mut String, map: &SourceMap, span: Span, marker: char, text: &s
     out.push('\n');
 }
 
+/// A fix as a person reads it: its message, then the text it writes (a
+/// deletion has none to show; its message says what goes). The language
+/// server's code actions are titled so.
+pub fn fix_text(f: &crate::Fix) -> String {
+    let edits: Vec<String> =
+        f.edits.iter().filter(|e| !e.text.is_empty()).map(|e| format!("`{}`", e.text)).collect();
+    let suffix = if edits.is_empty() { String::new() } else { format!(": {}", edits.join(", ")) };
+    format!("{}{suffix}", Catalog::builtin().render(f.msg.id(), &f.params))
+}
+
 /// The human form, modelled on rustc's multi-span layout.
 pub fn render_human(map: &SourceMap, diags: &[Diagnostic]) -> String {
     let catalog = Catalog::builtin();
@@ -123,26 +146,27 @@ pub fn render_human(map: &SourceMap, diags: &[Diagnostic]) -> String {
             .map(|s| map.line_col(s).0.line.to_string().len())
             .max()
             .unwrap_or(1);
-        excerpt(&mut out, map, d.span, '^', "", gutter);
+        excerpt(&mut out, map, d.span, '^', "", gutter, false);
         let mut file = d.span.file;
+        let mut line = a.line;
         for l in &d.labels {
             // A label in another file says which, as rustc does.
-            if l.span.file != file {
+            let moved = l.span.file != file;
+            if moved {
                 file = l.span.file;
                 let (b, _) = map.line_col(l.span);
                 out.push_str(&format!("  ::: {}:{}:{}\n", map.name(file), b.line, b.col));
             }
-            excerpt(&mut out, map, l.span, '-', &catalog.render(l.msg.id(), &l.params), gutter);
+            let at = map.line_col(l.span).0.line;
+            let shown = !moved && at == line;
+            excerpt(&mut out, map, l.span, '-', &catalog.render(l.msg.id(), &l.params), gutter, shown);
+            line = at;
         }
         for n in &d.notes {
             out.push_str(&format!("  = note: {}\n", catalog.render(n.msg.id(), &n.params)));
         }
         for f in &d.fixes {
-            // A deletion has no text to show; the fix's message says what goes.
-            let edits: Vec<String> =
-                f.edits.iter().filter(|e| !e.text.is_empty()).map(|e| format!("`{}`", e.text)).collect();
-            let suffix = if edits.is_empty() { String::new() } else { format!(": {}", edits.join(", ")) };
-            out.push_str(&format!("  = fix: {}{}\n", catalog.render(f.msg.id(), &f.params), suffix));
+            out.push_str(&format!("  = fix: {}\n", fix_text(f)));
         }
         out.push('\n');
     }

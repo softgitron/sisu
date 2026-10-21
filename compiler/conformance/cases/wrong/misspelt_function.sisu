@@ -1,0 +1,7 @@
+# A wrong program: a function's name is misspelt at its call.
+
+def greet(name: str):
+    print("hello, {name}")
+
+def main():
+    gret("Roni")

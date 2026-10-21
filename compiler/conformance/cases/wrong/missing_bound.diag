@@ -1,0 +1,2 @@
+5:12-5:17 E0368 type.not-ordered ty="T" op=">"
+  fix type.add-bound 4:13-4:13 ": PartialOrd"

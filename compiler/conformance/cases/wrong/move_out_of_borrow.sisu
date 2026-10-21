@@ -1,0 +1,12 @@
+# A wrong program: a function moves a field out of a value it only
+# borrows.
+
+struct Bag:
+    items: list[int]
+
+def take(b: Bag) -> list[int]:
+    return b.items
+
+def main():
+    let bag = Bag(items=[1, 2])
+    print(take(bag))

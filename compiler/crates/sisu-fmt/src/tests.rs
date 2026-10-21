@@ -1,4 +1,4 @@
-use crate::format;
+use crate::{format, format_with};
 
 fn fmt(s: &str) -> String {
     match format(s) {
@@ -112,6 +112,36 @@ fn option_sugar() {
     );
     // Not when it would read as `??`.
     assert_eq!(fmt("def f(x: Option[int?]):\n    pass\n"), "def f(x: Option[int?]):\n    pass\n");
+}
+
+#[test]
+fn result_sugar_for_error_sets() {
+    let sets = |t: &str| t == "E" || t == "io.Error";
+    let src = "def f(x: Result[int, E], y: Result[int, T]) -> Result[str, io.Error]:\n    pass\n";
+    assert_eq!(
+        format_with(src, &sets).as_deref(),
+        Ok("def f(x: int ! E, y: Result[int, T]) -> str ! io.Error:\n    pass\n")
+    );
+    // Not without the names, not behind `ref` or `?`, and not when the
+    // value is a function or a result itself.
+    assert_eq!(format(src).as_deref(), Ok(src));
+    for kept in [
+        "def f(x: ref Result[int, E]):\n    pass\n",
+        "def f(x: Result[(int) -> int, E]):\n    pass\n",
+        "def f(x: Result[int, E]?):\n    pass\n",
+    ] {
+        assert_eq!(format_with(kept, &sets).as_deref(), Ok(kept));
+    }
+    assert_eq!(
+        format_with("def f(x: Result[Result[int, E], E]):\n    pass\n", &sets).as_deref(),
+        Ok("def f(x: Result[int ! E, E]):\n    pass\n")
+    );
+    // An optional result keeps `Option`, since `int ! E?` would make the
+    // error optional.
+    assert_eq!(
+        format_with("def f(x: Option[Result[int, E]]):\n    pass\n", &sets).as_deref(),
+        Ok("def f(x: Option[int ! E]):\n    pass\n")
+    );
 }
 
 #[test]

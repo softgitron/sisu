@@ -18,7 +18,7 @@ pub(crate) fn cases(name: &str, t: &ast::TestDef, source: &str) -> Vec<(String, 
         let body = t.body.as_ref().map(|b| {
             let mut stmts = vec![first];
             stmts.extend(b.stmts.iter().cloned());
-            ast::Block { node: b.node, range: b.range, stmts }
+            std::sync::Arc::new(ast::Block { node: b.node, range: b.range, stmts })
         });
         (
             name,
@@ -52,7 +52,7 @@ pub(crate) fn cases(name: &str, t: &ast::TestDef, source: &str) -> Vec<(String, 
             .collect(),
         _ => {
             // `for PAT in LIST:` around the body.
-            let body = t.body.clone().unwrap_or(ast::Block {
+            let body = t.body.as_deref().cloned().unwrap_or(ast::Block {
                 node: list.node,
                 range: list.range,
                 stmts: Vec::new(),
@@ -64,7 +64,7 @@ pub(crate) fn cases(name: &str, t: &ast::TestDef, source: &str) -> Vec<(String, 
             };
             let mut one = with_body(name.to_string(), looped);
             if let Some(b) = &mut one.1.body {
-                b.stmts.truncate(1);
+                std::sync::Arc::make_mut(b).stmts.truncate(1);
             }
             vec![one]
         }

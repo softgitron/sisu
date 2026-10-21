@@ -228,9 +228,11 @@ impl Resolver<'_> {
         // out.
         let file_name = if is_std { format!("<std>/{name}") } else { name.clone() };
         let file = self.sources.add(file_name, text);
-        let parse = sisu_parser::parse(file, text);
-        self.diags.extend(parse.diagnostics);
-        let ast = ast::build::module(&parse.tree);
+        let (ast, diags) = crate::collect::parse_generated(text);
+        self.diags.extend(diags.iter().cloned().map(|mut d| {
+            d.spans_mut().for_each(|s| s.file = file);
+            d
+        }));
         let id = ModuleId(self.prog.modules.len() as u32);
         self.prog.modules.push(ModuleData {
             name,

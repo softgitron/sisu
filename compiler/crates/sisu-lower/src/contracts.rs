@@ -19,7 +19,7 @@ use sisu_typeck::thir::{self, ContractCheck, ContractKind, ExprKind, InterpPart}
 /// Which contracts a build checks (07: `contracts = "off" |
 /// "preconditions" | "all"`; debug and test builds check all). The
 /// invariant `Mutex` re-checks when unwinding drops a guard ignores it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ContractLevel {
     Off,
     Preconditions,

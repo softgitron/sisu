@@ -32,6 +32,12 @@ impl Interp<'_, '_> {
             _ => match (self.target(a)?, self.target(b)?) {
                 (Value::Int(x), Value::Int(y)) => int_op(op, *x, *y).map(Value::Int),
                 (Value::Float(x), Value::Float(y)) => Ok(Value::Float(float_op(op, *x, *y))),
+                // In `f64`, which holds every `f32` and rounds the result
+                // of `+`, `-`, `*` and `/` the same once it is rounded
+                // again to `f32` (it has more than twice the bits).
+                (Value::F32(x), Value::F32(y)) => {
+                    Ok(Value::F32(float_op(op, f64::from(*x), f64::from(*y)) as f32))
+                }
                 (x, y) => Err(ice(format!("{} on {x:?} and {y:?}", op.name()))),
             },
         }
@@ -44,6 +50,7 @@ impl Interp<'_, '_> {
                 .map(Value::Int)
                 .ok_or_else(|| panic(msg::PANIC_OVERFLOW, &[("expr", format!("-({x})"))])),
             (UnOp::Neg, Value::Float(x)) => Ok(Value::Float(-x)),
+            (UnOp::Neg, Value::F32(x)) => Ok(Value::F32(-x)),
             (UnOp::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
             (UnOp::BitNot, Value::Int(x)) => Ok(Value::Int(!x)),
             (op, x) => Err(ice(format!("{} on {x:?}", op.name()))),
@@ -61,6 +68,7 @@ impl Interp<'_, '_> {
             (Value::U128(x), Value::U128(y)) => x == y,
             (Value::Bytes(x), Value::Bytes(y)) => x == y,
             (Value::Float(x), Value::Float(y)) => x == y,
+            (Value::F32(x), Value::F32(y)) => x == y,
             (Value::Bool(x), Value::Bool(y)) => x == y,
             (Value::Char(x), Value::Char(y)) => x == y,
             (Value::Unit, Value::Unit) => true,
@@ -119,6 +127,7 @@ impl Interp<'_, '_> {
             (Value::U128(x), Value::U128(y)) => Some(x.cmp(y)),
             (Value::Bytes(x), Value::Bytes(y)) => Some(x.cmp(y)),
             (Value::Float(x), Value::Float(y)) => x.partial_cmp(y),
+            (Value::F32(x), Value::F32(y)) => x.partial_cmp(y),
             (Value::Bool(x), Value::Bool(y)) => Some(x.cmp(y)),
             (Value::Char(x), Value::Char(y)) => Some(x.cmp(y)),
             (Value::Unit, Value::Unit) => Some(Ordering::Equal),

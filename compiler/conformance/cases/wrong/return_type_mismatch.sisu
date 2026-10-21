@@ -1,0 +1,8 @@
+# A wrong program: a function returns a value of another type than it
+# declares.
+
+def count_words(text: str) -> int:
+    return text.split_whitespace()
+
+def main():
+    print(count_words("a b c"))

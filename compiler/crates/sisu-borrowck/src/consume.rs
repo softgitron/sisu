@@ -131,22 +131,26 @@ fn own_method(f: &Function, ty: &Type) -> bool {
     }
 }
 
-pub fn check(f: &Function, types: &Types) -> Vec<Finding> {
+/// The function's must-consume findings, and whether finding them read no
+/// other function's body (a generic callee given a must-consume type
+/// argument is read, instantiated).
+pub fn check(f: &Function, types: &Types) -> (Vec<Finding>, bool) {
     // Drop glue drops the parts of a value whose own drop was checked
     // where it happens.
     if f.kind == sisu_sir::FnKind::Glue {
-        return Vec::new();
+        return (Vec::new(), true);
     }
     let mut out = check_body(f, types);
-    generic_calls(f, types, &mut out, 0);
-    out
+    let alone = generic_calls(f, types, &mut out, 0);
+    (out, alone)
 }
 
 /// A call of a generic function with a must-consume type argument: the
 /// body instantiated with the call's types must consume what it is given
 /// too, or the generic function would drop it unseen (E0397). The check
 /// runs per instantiation, as 18 describes for monomorphised code.
-fn generic_calls(f: &Function, types: &Types, out: &mut Vec<Finding>, depth: u32) {
+fn generic_calls(f: &Function, types: &Types, out: &mut Vec<Finding>, depth: u32) -> bool {
+    let mut alone = true;
     for (b, block) in f.blocks.iter().enumerate() {
         for (si, s) in block.stmts.iter().enumerate() {
             let (name, tys) = match &s.kind {
@@ -168,6 +172,7 @@ fn generic_calls(f: &Function, types: &Types, out: &mut Vec<Finding>, depth: u32
                 continue;
             };
             let Some(g) = types.function(&name) else { continue };
+            alone = false;
             if instance_drops(g, &tys, types, depth) {
                 let param = g.type_params.get(i).cloned().unwrap_or_else(|| format!("${i}"));
                 out.push(
@@ -179,6 +184,7 @@ fn generic_calls(f: &Function, types: &Types, out: &mut Vec<Finding>, depth: u32
             }
         }
     }
+    alone
 }
 
 /// Whether `g` with its type parameters replaced by `tys` drops a
@@ -209,7 +215,7 @@ fn instance_drops(g: &Function, tys: &[Type], types: &Types, depth: u32) -> bool
     let init = crate::init::Analysis::run(&inst, types);
     crate::elaborate::elaborate(&mut inst, &init, types);
     let mut found = check_body(&inst, types);
-    generic_calls(&inst, types, &mut found, depth + 1);
+    let _ = generic_calls(&inst, types, &mut found, depth + 1);
     !found.is_empty()
 }
 

@@ -198,10 +198,60 @@ impl Checked {
 /// is what runs; it is complete and valid even when there are findings,
 /// so the counterexample mode can run a rejected program.
 pub fn check(p: &sir::Program, opts: &Options) -> Checked {
+    check_with(p, opts, None)
+}
+
+/// The per-function memo of the checker, kept by the query layer between
+/// checks of one program (docs/architecture.md, "The query layer"): a
+/// function the checker found nothing in, whose analysis read no other
+/// function's body, is taken as checked again while its SIR and the
+/// program's interface (`ctx`) are the same, with the drops it placed.
+#[derive(Default)]
+pub struct FnCache {
+    entries: std::collections::HashMap<String, (u64, sir::Function, sir::Function)>,
+    /// The functions the last check analysed, and the ones it reused.
+    pub checked: u32,
+    pub reused: u32,
+}
+
+impl FnCache {
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+/// [`check`], through the memo when there is one: `ctx` is a hash of
+/// everything the analysis of one function reads besides its own SIR (the
+/// interface of the program and the contract level). The result is the
+/// same as [`check`]'s.
+pub fn check_with(p: &sir::Program, opts: &Options, mut memo: Option<(&mut FnCache, u64)>) -> Checked {
     let types = types::Types::new(p);
     let mut findings = Vec::new();
     let mut functions = Vec::new();
+    // Which functions the memo answered.
+    let mut reused: Vec<bool> = Vec::new();
+    let mut kept: std::collections::HashMap<String, (u64, sir::Function, sir::Function)> =
+        std::collections::HashMap::new();
+    if let Some((cache, _)) = memo.as_mut() {
+        cache.checked = 0;
+        cache.reused = 0;
+    }
     for f in &p.functions {
+        if let Some((cache, ctx)) = memo.as_mut()
+            && let Some((c, input, output)) = cache.entries.remove(&f.name)
+            && c == *ctx
+            && input == *f
+        {
+            cache.reused += 1;
+            functions.push(output.clone());
+            kept.insert(f.name.clone(), (c, input, output));
+            reused.push(true);
+            continue;
+        }
         let mut f = f.clone();
         let init = init::Analysis::run(&f, &types);
         if opts.on(Rule::Moves) {
@@ -209,18 +259,38 @@ pub fn check(p: &sir::Program, opts: &Options) -> Checked {
         }
         elaborate::elaborate(&mut f, &init, &types);
         functions.push(f);
+        reused.push(false);
     }
     let mut program = p.clone();
     program.functions = functions;
-    for f in &program.functions {
-        if opts.trust_std && program.sources.get(f.source as usize).is_some_and(|s| s.starts_with("<std>/")) {
+    for (i, f) in program.functions.iter().enumerate() {
+        if reused[i] {
             continue;
         }
-        let a = loans::Analysis::run_with(&program, f, &types, opts.on(Rule::Escapes));
-        findings.extend(a.findings(&program, f, &types, opts));
-        if opts.on(Rule::MustConsume) {
-            findings.extend(consume::check(f, &types));
+        let trusted =
+            opts.trust_std && program.sources.get(f.source as usize).is_some_and(|s| s.starts_with("<std>/"));
+        let mut found = Vec::new();
+        let mut alone = true;
+        if !trusted {
+            let a = loans::Analysis::run_with(&program, f, &types, opts.on(Rule::Escapes));
+            found.extend(a.findings(&program, f, &types, opts));
+            if opts.on(Rule::MustConsume) {
+                let (fs, own) = consume::check(f, &types);
+                found.extend(fs);
+                alone = own;
+            }
         }
+        if let Some((cache, ctx)) = memo.as_mut() {
+            cache.checked += 1;
+            let clean = found.is_empty() && !findings.iter().any(|x: &Finding| x.function == f.name);
+            if clean && alone {
+                kept.insert(f.name.clone(), (*ctx, p.functions[i].clone(), f.clone()));
+            }
+        }
+        findings.extend(found);
+    }
+    if let Some((cache, _)) = memo.as_mut() {
+        cache.entries = kept;
     }
     findings.extend(purity::check(&program));
     dedup(&mut findings);

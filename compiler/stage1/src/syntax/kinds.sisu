@@ -1,0 +1,538 @@
+##! The kinds of tokens and nodes, and the lexical tables the lexer reads
+##! (docs/architecture.md, "Lexing" and "Parsing and the syntax tree"). The
+##! tables are data: the lexer builds its lookups from them, so a change to
+##! the language's keywords or operators is a change here only.
+
+## Every kind of token and node. A dump names a kind in upper snake case
+## (`L_PAREN`, `FN_DEF`), the names stage 0 prints.
+@derive(Eq, Hash, Debug, Copy)
+pub enum SyntaxKind:
+    # Trivia: kept in the tree, ignored by the parser.
+    Whitespace
+    Comment
+    DocComment
+    ModuleDocComment
+    # A line break that is not a NEWLINE: inside brackets, on a blank or
+    # comment-only line, or before a continuation line.
+    LineBreak
+
+    # Layout.
+    Newline
+    Indent
+    Dedent
+    Eof
+
+    # Names and literals.
+    Ident
+    IntNumber
+    FloatNumber
+    CharLit
+    StringStart
+    StringText
+    StringEnd
+    InterpStart
+    InterpEnd
+    FormatSpec
+    RawString
+    ByteString
+    ErrorToken
+
+    # Punctuation.
+    LParen
+    RParen
+    LBracket
+    RBracket
+    LBrace
+    RBrace
+    Comma
+    Colon
+    Dot
+    DotDot
+    Question
+    QuestionDot
+    QuestionQuestion
+    Arrow
+    At
+    Bang
+    Semicolon
+    Backslash
+    Walrus
+
+    # Operators.
+    Eq
+    EqEq
+    BangEq
+    Lt
+    LtEq
+    Gt
+    GtEq
+    Plus
+    Minus
+    Star
+    Slash
+    SlashSlash
+    Percent
+    StarStar
+    PlusPercent
+    MinusPercent
+    StarPercent
+    PlusPipe
+    MinusPipe
+    StarPipe
+    Shl
+    Shr
+    Amp
+    Pipe
+    Caret
+    Tilde
+    PlusEq
+    MinusEq
+    StarEq
+    SlashEq
+    SlashSlashEq
+    PercentEq
+    StarStarEq
+    AmpEq
+    PipeEq
+    CaretEq
+    ShlEq
+    ShrEq
+    PlusPercentEq
+    MinusPercentEq
+    StarPercentEq
+    PlusPipeEq
+    MinusPipeEq
+    StarPipeEq
+
+    # The 47 reserved keywords of proposal/02-syntax.md.
+    AndKw
+    AsKw
+    AssertKw
+    BreakKw
+    CaseKw
+    ComptimeKw
+    ConstKw
+    ContinueKw
+    DefKw
+    DeferKw
+    DoKw
+    DynKw
+    ElifKw
+    ElseKw
+    EnumKw
+    ErrorKw
+    ExternKw
+    ForKw
+    FromKw
+    IfKw
+    ImplKw
+    ImportKw
+    InKw
+    LetKw
+    MatchKw
+    MutKw
+    NotKw
+    OrKw
+    OwnKw
+    PassKw
+    PubKw
+    RefKw
+    ReturnKw
+    SelectKw
+    SelfKw
+    SelfTypeKw
+    StructKw
+    TestKw
+    TraitKw
+    TypeKw
+    UnsafeKw
+    VarKw
+    ViewKw
+    WhereKw
+    WhileKw
+    WithKw
+    YieldKw
+
+    # Nodes.
+    SourceFile
+    Error
+    Attribute
+    Visibility
+    FnDef
+    GenericParams
+    GenericParam
+    ParamList
+    Param
+    RetType
+    WhereClause
+    Block
+    StructDef
+    FieldDef
+    EnumDef
+    VariantDef
+    VariantField
+    ErrorDef
+    OpenMarker
+    ImplDef
+    TraitDef
+    ImportItem
+    FromImport
+    ModulePath
+    ImportName
+    TestDef
+    SuiteDef
+    BenchDef
+    ConstDef
+    TypeAlias
+    ExternBlock
+    LetStmt
+    LetElse
+    AssignStmt
+    ExprStmt
+    ReturnStmt
+    BreakStmt
+    ContinueStmt
+    PassStmt
+    IfStmt
+    ElifClause
+    ElseClause
+    Cond
+    LetCond
+    WhileStmt
+    ForStmt
+    AssertStmt
+    ExpectStmt
+    DeferStmt
+    WithStmt
+    UnsafeBlock
+    SelectStmt
+    ComptimeStmt
+    ContractStmt
+    YieldStmt
+    Literal
+    StringExpr
+    Interpolation
+    NameRef
+    ParenExpr
+    TupleExpr
+    ListExpr
+    DictExpr
+    DictEntry
+    SetExpr
+    Comprehension
+    CompFor
+    CompIf
+    BinExpr
+    CompareExpr
+    PrefixExpr
+    CallExpr
+    ArgList
+    Arg
+    DoBlock
+    FieldExpr
+    OptFieldExpr
+    IndexExpr
+    Slice
+    TryExpr
+    ClosureExpr
+    ClosureParams
+    ClosureParam
+    IfExpr
+    MatchExpr
+    MatchArmList
+    MatchArm
+    MatchGuard
+    PathType
+    GenericArgs
+    ConstArg
+    OptionType
+    ResultType
+    ErrorSetType
+    TupleType
+    TupleTypeField
+    ParenType
+    FnType
+    RefType
+    DynType
+    ImplType
+    PtrType
+    IdentPat
+    WildcardPat
+    LiteralPat
+    CtorPat
+    PatArgs
+    PatArg
+    RestPat
+    TuplePat
+    ParenPat
+    ListPat
+    StarPat
+    OrPat
+
+## The reserved keywords, in the order of proposal/02-syntax.md.
+pub const KEYWORDS: list[(str, SyntaxKind)] = [
+    ("and", SyntaxKind.AndKw),
+    ("as", SyntaxKind.AsKw),
+    ("assert", SyntaxKind.AssertKw),
+    ("break", SyntaxKind.BreakKw),
+    ("case", SyntaxKind.CaseKw),
+    ("comptime", SyntaxKind.ComptimeKw),
+    ("const", SyntaxKind.ConstKw),
+    ("continue", SyntaxKind.ContinueKw),
+    ("def", SyntaxKind.DefKw),
+    ("defer", SyntaxKind.DeferKw),
+    ("do", SyntaxKind.DoKw),
+    ("dyn", SyntaxKind.DynKw),
+    ("elif", SyntaxKind.ElifKw),
+    ("else", SyntaxKind.ElseKw),
+    ("enum", SyntaxKind.EnumKw),
+    ("error", SyntaxKind.ErrorKw),
+    ("extern", SyntaxKind.ExternKw),
+    ("for", SyntaxKind.ForKw),
+    ("from", SyntaxKind.FromKw),
+    ("if", SyntaxKind.IfKw),
+    ("impl", SyntaxKind.ImplKw),
+    ("import", SyntaxKind.ImportKw),
+    ("in", SyntaxKind.InKw),
+    ("let", SyntaxKind.LetKw),
+    ("match", SyntaxKind.MatchKw),
+    ("mut", SyntaxKind.MutKw),
+    ("not", SyntaxKind.NotKw),
+    ("or", SyntaxKind.OrKw),
+    ("own", SyntaxKind.OwnKw),
+    ("pass", SyntaxKind.PassKw),
+    ("pub", SyntaxKind.PubKw),
+    ("ref", SyntaxKind.RefKw),
+    ("return", SyntaxKind.ReturnKw),
+    ("select", SyntaxKind.SelectKw),
+    ("self", SyntaxKind.SelfKw),
+    ("Self", SyntaxKind.SelfTypeKw),
+    ("struct", SyntaxKind.StructKw),
+    ("test", SyntaxKind.TestKw),
+    ("trait", SyntaxKind.TraitKw),
+    ("type", SyntaxKind.TypeKw),
+    ("unsafe", SyntaxKind.UnsafeKw),
+    ("var", SyntaxKind.VarKw),
+    ("view", SyntaxKind.ViewKw),
+    ("where", SyntaxKind.WhereKw),
+    ("while", SyntaxKind.WhileKw),
+    ("with", SyntaxKind.WithKw),
+    ("yield", SyntaxKind.YieldKw),
+]
+
+## Contextual keywords: names that are keywords only in their position.
+pub const CONTEXTUAL_KEYWORDS: list[str] = [
+    "requires",
+    "ensures",
+    "invariant",
+    "decreases",
+    "old",
+    "result",
+    "it",
+    "bench",
+    "suite",
+    "expect",
+    "pure",
+]
+
+## Operators and punctuation, longest first, so that the first entry whose
+## text starts the rest of the line is the longest match.
+pub const PUNCTUATION: list[(str, SyntaxKind)] = [
+    ("//=", SyntaxKind.SlashSlashEq),
+    ("**=", SyntaxKind.StarStarEq),
+    ("<<=", SyntaxKind.ShlEq),
+    (">>=", SyntaxKind.ShrEq),
+    ("+%=", SyntaxKind.PlusPercentEq),
+    ("-%=", SyntaxKind.MinusPercentEq),
+    ("*%=", SyntaxKind.StarPercentEq),
+    ("+|=", SyntaxKind.PlusPipeEq),
+    ("-|=", SyntaxKind.MinusPipeEq),
+    ("*|=", SyntaxKind.StarPipeEq),
+    ("==", SyntaxKind.EqEq),
+    ("!=", SyntaxKind.BangEq),
+    ("<=", SyntaxKind.LtEq),
+    (">=", SyntaxKind.GtEq),
+    ("//", SyntaxKind.SlashSlash),
+    ("**", SyntaxKind.StarStar),
+    ("+%", SyntaxKind.PlusPercent),
+    ("-%", SyntaxKind.MinusPercent),
+    ("*%", SyntaxKind.StarPercent),
+    ("+|", SyntaxKind.PlusPipe),
+    ("-|", SyntaxKind.MinusPipe),
+    ("*|", SyntaxKind.StarPipe),
+    ("<<", SyntaxKind.Shl),
+    (">>", SyntaxKind.Shr),
+    ("+=", SyntaxKind.PlusEq),
+    ("-=", SyntaxKind.MinusEq),
+    ("*=", SyntaxKind.StarEq),
+    ("/=", SyntaxKind.SlashEq),
+    ("%=", SyntaxKind.PercentEq),
+    ("&=", SyntaxKind.AmpEq),
+    ("|=", SyntaxKind.PipeEq),
+    ("^=", SyntaxKind.CaretEq),
+    ("->", SyntaxKind.Arrow),
+    ("..", SyntaxKind.DotDot),
+    ("?.", SyntaxKind.QuestionDot),
+    ("??", SyntaxKind.QuestionQuestion),
+    (":=", SyntaxKind.Walrus),
+    ("(", SyntaxKind.LParen),
+    (")", SyntaxKind.RParen),
+    ("[", SyntaxKind.LBracket),
+    ("]", SyntaxKind.RBracket),
+    ("{{", SyntaxKind.LBrace),
+    ("}}", SyntaxKind.RBrace),
+    (",", SyntaxKind.Comma),
+    (":", SyntaxKind.Colon),
+    (".", SyntaxKind.Dot),
+    ("?", SyntaxKind.Question),
+    ("@", SyntaxKind.At),
+    ("!", SyntaxKind.Bang),
+    (";", SyntaxKind.Semicolon),
+    ("\\", SyntaxKind.Backslash),
+    ("=", SyntaxKind.Eq),
+    ("<", SyntaxKind.Lt),
+    (">", SyntaxKind.Gt),
+    ("+", SyntaxKind.Plus),
+    ("-", SyntaxKind.Minus),
+    ("*", SyntaxKind.Star),
+    ("/", SyntaxKind.Slash),
+    ("%", SyntaxKind.Percent),
+    ("&", SyntaxKind.Amp),
+    ("|", SyntaxKind.Pipe),
+    ("^", SyntaxKind.Caret),
+    ("~", SyntaxKind.Tilde),
+]
+
+impl SyntaxKind:
+    ## Spaces, comments and line breaks that are not NEWLINEs: kept in the
+    ## tree, skipped by the parser.
+    pub pure def is_trivia(self) -> bool:
+        return match self:
+            case Whitespace | Comment | DocComment | ModuleDocComment | LineBreak: True
+            case _: False
+
+    ## One of the 47 reserved keywords.
+    pub pure def is_keyword(self) -> bool:
+        return self.keyword_text() != None
+
+    ## The text of a keyword kind, or `None`.
+    pub pure def keyword_text(self) -> String?:
+        for (text, kind) in KEYWORDS:
+            if kind == self:
+                return Some(text.to_string())
+        return None
+
+    ## The text of an operator or punctuation kind, or `None`.
+    pub pure def punctuation_text(self) -> String?:
+        for (text, kind) in PUNCTUATION:
+            if kind == self:
+                return Some(text.to_string())
+        return None
+
+    pub pure def is_open_bracket(self) -> bool:
+        return match self:
+            case LParen | LBracket | LBrace | InterpStart: True
+            case _: False
+
+    pub pure def is_close_bracket(self) -> bool:
+        return match self:
+            case RParen | RBracket | RBrace | InterpEnd: True
+            case _: False
+
+    ## Whether a line whose first token has this kind continues the logical
+    ## line before it (02: "a line whose first token is a binary operator,
+    ## `.`, `?.` or `??`"). `not` continues only as part of `not in`, which
+    ## the layout checks itself.
+    pub pure def continues_line(self) -> bool:
+        return match self:
+            case Dot | QuestionDot | QuestionQuestion: True
+            case Plus | Minus | Star | Slash | SlashSlash | Percent | StarStar: True
+            case PlusPercent | MinusPercent | StarPercent | PlusPipe | MinusPipe | StarPipe: True
+            case Shl | Shr | Amp | Pipe | Caret: True
+            case EqEq | BangEq | Lt | LtEq | Gt | GtEq: True
+            case AndKw | OrKw | InKw: True
+            case _: False
+
+    ## How the kind is named in diagnostics ("expected `:`, found ...").
+    pub pure def describe(self) -> String:
+        if let Some(text) = self.keyword_text():
+            return "`{text}`"
+        if let Some(text) = self.punctuation_text():
+            return "`{text}`"
+        return match self:
+            case Newline: "the end of the line"
+            case Indent: "an indented block"
+            case Dedent: "the end of the block"
+            case Eof: "the end of the file"
+            case Ident: "a name"
+            case IntNumber: "an integer"
+            case FloatNumber: "a float"
+            case CharLit: "a character"
+            case StringStart | RawString | ByteString: "a string"
+            case ErrorToken: "an unknown character"
+            case InterpEnd: "`}}`"
+            case _: self.name()
+
+    ## The name in dumps: the variant's name in upper snake case, an
+    ## underscore before each capital but the first (`LParen` is `L_PAREN`).
+    pub pure def name(self) -> String:
+        var out = String.new()
+        var first = True
+        for c in "{self:?}".chars():
+            if c.is_uppercase() and not first:
+                out.push_char('_')
+            out.push_char(c)
+            first = False
+        return out.to_uppercase()
+
+## The kind of a reserved keyword's text.
+pub pure def keyword_kind(word: str) -> SyntaxKind?:
+    for (text, kind) in KEYWORDS:
+        if text == word:
+            return Some(kind)
+    return None
+
+## The names of kinds, computed once each: dumps name a kind per line.
+pub struct KindNames:
+    known: dict[SyntaxKind, String]
+
+    pub pure def new() -> KindNames:
+        return KindNames(known={})
+
+    ## The name of `kind`, as `SyntaxKind.name` gives it.
+    pub pure def of(mut self, kind: SyntaxKind) -> String:
+        if let Some(name) = self.known.get(kind):
+            return name.copy()
+        let name = kind.name()
+        _ = self.known.insert(kind, name.copy())
+        return name
+
+test "forty-seven keywords, each a keyword kind":
+    assert len(KEYWORDS) == 47
+    for (text, kind) in KEYWORDS:
+        assert kind.is_keyword()
+        assert keyword_kind(text) == Some(kind)
+    assert not SyntaxKind.Ident.is_keyword()
+
+test "punctuation is longest first":
+    # A shorter entry must never shadow a longer one that starts with it.
+    let table = PUNCTUATION
+    for i in range(len(table)):
+        let (a, _) = table[i]
+        for j in range(i):
+            let (b, _) = table[j]
+            assert not (a.byte_len() > b.byte_len() and a.starts_with(b))
+
+test "names are upper snake case":
+    assert SyntaxKind.LParen.name() == "L_PAREN"
+    assert SyntaxKind.SelfTypeKw.name() == "SELF_TYPE_KW"
+    assert SyntaxKind.Eof.name() == "EOF"
+    assert SyntaxKind.SourceFile.name() == "SOURCE_FILE"
+    assert SyntaxKind.Error.name() == "ERROR"
+
+test "descriptions":
+    assert SyntaxKind.Colon.describe() == "`:`"
+    assert SyntaxKind.DefKw.describe() == "`def`"
+    assert SyntaxKind.Newline.describe() == "the end of the line"
+    assert SyntaxKind.InterpEnd.describe() == "`}}`"
+    assert SyntaxKind.FnDef.describe() == "FN_DEF"

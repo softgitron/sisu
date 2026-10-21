@@ -244,7 +244,7 @@ pub struct FnInfo {
     /// it (the forwarding of lent capabilities, the assembling of a
     /// `System`).
     pub internal: bool,
-    pub body: Option<ast::Block>,
+    pub body: Option<std::sync::Arc<ast::Block>>,
     pub kind: FnKind,
     pub file: FileId,
     /// Written by the compiler from code that is checked elsewhere too (a
@@ -783,4 +783,45 @@ impl Program {
         v.sort_by_key(|d| (self.def(*d).module != self.root, *d));
         v
     }
+}
+
+/// The candidate closest to a misspelt name, if one is close enough to be
+/// the likely intent: an edit distance of at most a third of the name's
+/// length, and at least one; the first by spelling of equals.
+pub fn closest(n: &str, mut names: Vec<String>) -> Option<String> {
+    let limit = (n.chars().count() / 3).max(1);
+    names.sort();
+    names.dedup();
+    names
+        .into_iter()
+        .filter(|c| c != n)
+        .map(|c| (edit_distance(n, &c), c))
+        .filter(|(d, _)| *d <= limit)
+        .min_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)))
+        .map(|(_, c)| c)
+}
+
+/// The edit distance between two names, by characters, where swapping
+/// two adjacent characters counts as one edit (optimal string alignment).
+pub fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut d = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for (i, row) in d.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for (j, cell) in d[0].iter_mut().enumerate() {
+        *cell = j;
+    }
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            let mut v = (d[i - 1][j] + 1).min(d[i][j - 1] + 1).min(d[i - 1][j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                v = v.min(d[i - 2][j - 2] + 1);
+            }
+            d[i][j] = v;
+        }
+    }
+    d[a.len()][b.len()]
 }

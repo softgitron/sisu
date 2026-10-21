@@ -1,0 +1,408 @@
+##! Diagnostics (docs/architecture.md, "Diagnostics and the message
+##! catalog"): a message named by its catalog identifier, named parameters,
+##! a primary span and labelled secondary spans, rendered in the
+##! conformance form that `--format=ids` prints. Spans are byte ranges of
+##! one file; positions are 1-based lines and columns counted in characters.
+##!
+##! The codes, kinds and texts of messages are not written here: they are
+##! read from `catalog/messages.catalog`, the catalog stage 0 uses (D-065).
+
+from stage1.text import is_plain
+
+## A message stage 1 reports, by its catalog identifier.
+@derive(Eq, Debug, Copy)
+pub enum Msg:
+    LexTabInIndentation
+    LexInconsistentDedent
+    LexUnterminatedString
+    LexUnterminatedBlockString
+    LexUnknownCharacter
+    LexUnterminatedChar
+    LexInvalidEscape
+    LexUnmatchedClose
+    LexUnclosedBracket
+    LexMismatchedBracket
+    LexSemicolon
+    LexInvalidNumber
+    LexLoneCloseBrace
+    LexBadIndentChar
+    LexBackslashContinuation
+    LexBadCharLiteral
+    LexNewlineInInterpolation
+    LexOpenedHere
+    LexUseSpaces
+    LexCloseString
+    LexCloseBracket
+    ParseExpected
+    ParseExpectedBlock
+    ParseBlockOnSameLine
+    ParseExpectedExpression
+    ParseExpectedType
+    ParseExpectedPattern
+    ParseExpectedDeclaration
+    ParseTopLevelStatement
+    ParseMixedAndOr
+    ParseMixedBitwise
+    ParseBitwiseArithmetic
+    ParseShiftArithmetic
+    ParseNegativePower
+    ParseMixedChain
+    ParseAssignmentInExpression
+    ParseIfExpressionElse
+    ParseTrailingTokens
+    ParseArmStatement
+    ParseChainOperator
+    ParseEmptyInterpolation
+    ParseClosureParameter
+    ParseWalrus
+    ParseKeywordAsName
+    ParseUnexpectedIndent
+    ParseExpectedMember
+    ParseInsertToken
+    ResolveUndefinedName
+    ResolveUndefinedType
+    ResolveDuplicateDefinition
+    ResolveFirstDefined
+    ResolveSimilarName
+    ResolveSimilarType
+    ResolveSimilarModule
+    ResolveShadowOuter
+    ResolveImportUnknown
+    ResolveMethodSignature
+    TypeNoSelf
+
+impl Msg:
+    ## The catalog identifier.
+    pub pure def id(self) -> str:
+        return match self:
+            case LexTabInIndentation: "lex.tab-in-indentation"
+            case LexInconsistentDedent: "lex.inconsistent-dedent"
+            case LexUnterminatedString: "lex.unterminated-string"
+            case LexUnterminatedBlockString: "lex.unterminated-block-string"
+            case LexUnknownCharacter: "lex.unknown-character"
+            case LexUnterminatedChar: "lex.unterminated-char"
+            case LexInvalidEscape: "lex.invalid-escape"
+            case LexUnmatchedClose: "lex.unmatched-close"
+            case LexUnclosedBracket: "lex.unclosed-bracket"
+            case LexMismatchedBracket: "lex.mismatched-bracket"
+            case LexSemicolon: "lex.semicolon"
+            case LexInvalidNumber: "lex.invalid-number"
+            case LexLoneCloseBrace: "lex.lone-close-brace"
+            case LexBadIndentChar: "lex.bad-indent-char"
+            case LexBackslashContinuation: "lex.backslash-continuation"
+            case LexBadCharLiteral: "lex.bad-char-literal"
+            case LexNewlineInInterpolation: "lex.newline-in-interpolation"
+            case LexOpenedHere: "lex.opened-here"
+            case LexUseSpaces: "lex.use-spaces"
+            case LexCloseString: "lex.close-string"
+            case LexCloseBracket: "lex.close-bracket"
+            case ParseExpected: "parse.expected"
+            case ParseExpectedBlock: "parse.expected-block"
+            case ParseBlockOnSameLine: "parse.block-on-same-line"
+            case ParseExpectedExpression: "parse.expected-expression"
+            case ParseExpectedType: "parse.expected-type"
+            case ParseExpectedPattern: "parse.expected-pattern"
+            case ParseExpectedDeclaration: "parse.expected-declaration"
+            case ParseTopLevelStatement: "parse.top-level-statement"
+            case ParseMixedAndOr: "parse.mixed-and-or"
+            case ParseMixedBitwise: "parse.mixed-bitwise"
+            case ParseBitwiseArithmetic: "parse.bitwise-arithmetic"
+            case ParseShiftArithmetic: "parse.shift-arithmetic"
+            case ParseNegativePower: "parse.negative-power"
+            case ParseMixedChain: "parse.mixed-chain"
+            case ParseAssignmentInExpression: "parse.assignment-in-expression"
+            case ParseIfExpressionElse: "parse.if-expression-else"
+            case ParseTrailingTokens: "parse.trailing-tokens"
+            case ParseArmStatement: "parse.arm-statement"
+            case ParseChainOperator: "parse.chain-operator"
+            case ParseEmptyInterpolation: "parse.empty-interpolation"
+            case ParseClosureParameter: "parse.closure-parameter"
+            case ParseWalrus: "parse.walrus"
+            case ParseKeywordAsName: "parse.keyword-as-name"
+            case ParseUnexpectedIndent: "parse.unexpected-indent"
+            case ParseExpectedMember: "parse.expected-member"
+            case ParseInsertToken: "parse.insert-token"
+            case ResolveUndefinedName: "resolve.undefined-name"
+            case ResolveUndefinedType: "resolve.undefined-type"
+            case ResolveDuplicateDefinition: "resolve.duplicate-definition"
+            case ResolveFirstDefined: "resolve.first-defined"
+            case ResolveSimilarName: "resolve.similar-name"
+            case ResolveSimilarType: "resolve.similar-type"
+            case ResolveSimilarModule: "resolve.similar-module"
+            case ResolveShadowOuter: "resolve.shadow-outer"
+            case ResolveImportUnknown: "resolve.import-unknown"
+            case ResolveMethodSignature: "resolve.method-signature"
+            case TypeNoSelf: "type.no-self"
+
+## A named parameter of a message: `name="value"` in the rendered form.
+pub struct Param:
+    pub name: String
+    pub value: String
+
+## A secondary span with a message of its own ("opened here").
+pub struct Label:
+    pub msg: Msg
+    pub start: int
+    pub end: int
+    pub params: list[Param]
+
+## A replacement of the text from byte `start` up to `end`.
+pub struct Edit:
+    pub start: int
+    pub end: int
+    pub text: String
+
+## A suggested change: a message and the edits that make it.
+pub struct Fix:
+    pub msg: Msg
+    pub params: list[Param]
+    pub edits: list[Edit]
+
+## One diagnostic: a message, its parameters, the byte range it is about,
+## labels, fixes, and notes (which the conformance form does not print).
+pub struct Diagnostic:
+    pub msg: Msg
+    pub start: int
+    pub end: int
+    pub params: list[Param]
+    pub labels: list[Label]
+    pub fixes: list[Fix]
+    pub notes: list[Msg]
+
+impl Diagnostic:
+    pub pure def new(msg: Msg, start: int, end: int) -> Diagnostic:
+        return Diagnostic(msg=msg, start=start, end=end, params=[], labels=[], fixes=[], notes=[])
+
+    ## The diagnostic with one more parameter.
+    pub pure def with(own self, name: str, value: str) -> Diagnostic:
+        var d = self
+        d.params.push(Param(name=name.to_string(), value=value.to_string()))
+        return d
+
+    ## The diagnostic with a label at `start..end`.
+    pub pure def label(own self, msg: Msg, start: int, end: int) -> Diagnostic:
+        var d = self
+        d.labels.push(Label(msg=msg, start=start, end=end, params=[]))
+        return d
+
+    ## The diagnostic with a fix that replaces `start..end` by `text`.
+    pub pure def fix(
+        own self, msg: Msg, name: str, value: str, start: int, end: int, text: str
+    ) -> Diagnostic:
+        var d = self
+        let param = Param(name=name.to_string(), value=value.to_string())
+        let replacement = Edit(start=start, end=end, text=text.to_string())
+        d.fixes.push(Fix(msg=msg, params=[param], edits=[replacement]))
+        return d
+
+    ## The diagnostic with a fix, without parameters of its own, that
+    ## replaces `start..end` by `text`.
+    pub pure def fix_at(own self, msg: Msg, start: int, end: int, text: str) -> Diagnostic:
+        var d = self
+        let replacement = Edit(start=start, end=end, text=text.to_string())
+        d.fixes.push(Fix(msg=msg, params=[], edits=[replacement]))
+        return d
+
+    ## The diagnostic with a note.
+    pub pure def note(own self, msg: Msg) -> Diagnostic:
+        var d = self
+        d.notes.push(msg)
+        return d
+
+    ## The value of the parameter `name`, or `None`.
+    pub pure def param(self, name: str) -> String?:
+        for p in self.params:
+            if p.name == name:
+                return Some(p.value.copy())
+        return None
+
+## The message catalog: for each identifier, its code (`E0100`, or `-` for
+## a label, a note or a fix) and its kind (`error`, `label`, ...).
+pub struct Catalog:
+    codes: dict[String, String]
+    kinds: dict[String, String]
+
+impl Catalog:
+    ## Reads the catalog's line format: `CODE KIND IDENTIFIER TEMPLATE...`,
+    ## with blank lines and `#` comments. A line with fewer fields is
+    ## skipped, as is a second entry for an identifier.
+    pub pure def parse(text: str) -> Catalog:
+        var catalog = Catalog(codes={}, kinds={})
+        for raw in text.lines():
+            let line = raw.trim()
+            if line.is_empty() or line.starts_with("#"):
+                continue
+            var fields: list[String] = []
+            for word in line.split_whitespace():
+                fields.push(word.to_string())
+            if len(fields) < 4 or catalog.codes.contains(fields[2].copy()):
+                continue
+            _ = catalog.codes.insert(fields[2].copy(), fields[0].copy())
+            _ = catalog.kinds.insert(fields[2].copy(), fields[1].copy())
+        return catalog
+
+    ## Whether the catalog has an entry for `msg`.
+    pub pure def has(self, msg: Msg) -> bool:
+        return self.codes.contains(msg.id().to_string())
+
+    ## The code of a message; `E????` for one without a code of its own or
+    ## missing from the catalog, as stage 0 prints them.
+    pub pure def code(self, msg: Msg) -> String:
+        if let Some(code) = self.codes.get(msg.id().to_string()):
+            if code != "-":
+                return code.copy()
+        return "E????".to_string()
+
+    ## Whether a message is an error (its kind in the catalog is `error`).
+    pub pure def is_error(self, msg: Msg) -> bool:
+        if let Some(kind) = self.kinds.get(msg.id().to_string()):
+            return kind == "error"
+        return False
+
+## Sorts diagnostics by position, then code, keeping the order of equals
+## (stage 0 sorts stably by start, end and code).
+pub pure def sort(mut diags: list[Diagnostic], catalog: Catalog):
+    diags.sort_by((a, b) -> compare(a, b, catalog))
+
+pure def compare(a: Diagnostic, b: Diagnostic, catalog: Catalog) -> Ordering:
+    if a.start != b.start:
+        return a.start.cmp(b.start)
+    if a.end != b.end:
+        return a.end.cmp(b.end)
+    return catalog.code(a.msg).cmp(catalog.code(b.msg))
+
+## Where the lines of a text start, for positions in messages.
+pub struct Lines:
+    starts: list[int]
+
+impl Lines:
+    ## The lines of `text`: one starts at 0 and after each `\n`.
+    pub pure def of(text: str) -> Lines:
+        var starts = [0]
+        let n = text.byte_len()
+        var i = 0
+        while i < n:
+            if text.byte_at(i) == 10:
+                starts.push(i + 1)
+            i += 1
+        return Lines(starts=starts)
+
+    ## The 0-based index of the line holding byte `offset`.
+    pub pure def index(self, offset: int) -> int:
+        var lo = 0
+        var hi = len(self.starts) - 1
+        while lo < hi:
+            let mid = (lo + hi + 1) // 2
+            if self.starts[mid] <= offset:
+                lo = mid
+            else:
+                hi = mid - 1
+        return lo
+
+    ## The 1-based line and column of byte `offset` of `text`, the column
+    ## counting characters from the start of the line.
+    pub pure def line_col(self, text: str, offset: int) -> (int, int):
+        let at = min(offset, text.byte_len())
+        let line = self.index(at)
+        let start = self.starts[line]
+        var col = 1
+        var i = start
+        while i < at:
+            if not is_continuation(text.byte_at(i)):
+                col += 1
+            i += 1
+        return (line + 1, col)
+
+    ## `line:col-line:col`, the form of a span in rendered diagnostics.
+    pub pure def span(self, text: str, start: int, end: int) -> String:
+        let (l1, c1) = self.line_col(text, start)
+        let (l2, c2) = self.line_col(text, end)
+        return "{l1}:{c1}-{l2}:{c2}"
+
+## Whether `b` continues the encoding of a character rather than starting one.
+pub pure def is_continuation(b: u8) -> bool:
+    return b & 0xC0 == 0x80
+
+## A text in double quotes with `"`, `\`, and the line break and tab
+## characters escaped: how parameters and token texts are printed.
+pub pure def quote(value: str) -> String:
+    if is_plain(value):
+        return "\"{value}\""
+    var s = String.new("\"")
+    for c in value.chars():
+        match c:
+            case '"':
+                s.push("\\\"")
+            case '\\':
+                s.push("\\\\")
+            case '\n':
+                s.push("\\n")
+            case '\t':
+                s.push("\\t")
+            case '\r':
+                s.push("\\r")
+            case _:
+                s.push_char(c)
+    s.push_char('"')
+    return s
+
+## One line per diagnostic, then one indented line per label and fix,
+## naming messages by code and identifier, never by text (the conformance
+## form):
+##
+## ```text
+## 3:5-3:8 E0100 parse.expected expected="`:`" found="the end of the line"
+##   label 1:5-1:8 lex.opened-here
+## ```
+pub pure def render_ids(text: str, diags: list[Diagnostic], catalog: Catalog) -> String:
+    let lines = Lines.of(text)
+    var out = String.new()
+    for d in diags:
+        out.push("{lines.span(text, d.start, d.end)} {catalog.code(d.msg)} {d.msg.id()}")
+        for p in d.params:
+            out.push(" {p.name}={quote(p.value)}")
+        out.push("\n")
+        for l in d.labels:
+            out.push("  label {lines.span(text, l.start, l.end)} {l.msg.id()}")
+            for p in l.params:
+                out.push(" {p.name}={quote(p.value)}")
+            out.push("\n")
+        for f in d.fixes:
+            out.push("  fix {f.msg.id()}")
+            for e in f.edits:
+                out.push(" {lines.span(text, e.start, e.end)} {quote(e.text)}")
+            out.push("\n")
+    return out
+
+test "positions count characters":
+    let text = "ab\nä x\n"
+    let lines = Lines.of(text)
+    assert lines.line_col(text, 0) == (1, 1)
+    assert lines.line_col(text, 3) == (2, 1)
+    # 'ä' is two bytes; the space after it is column 2.
+    assert lines.line_col(text, 5) == (2, 2)
+    assert lines.line_col(text, 100) == (3, 1)
+
+test "quoting escapes five characters":
+    assert quote("a\"b\\c\nd\te\rf") == "\"a\\\"b\\\\c\\nd\\te\\rf\""
+    assert quote("ï€") == "\"ï€\""
+
+test "the catalog gives codes and kinds":
+    let catalog = Catalog.parse(
+        "# a comment\nE0011 error   lex.semicolon   no semicolons\n-     label   lex.opened-here   opened here\n"
+    )
+    assert catalog.code(Msg.LexSemicolon) == "E0011"
+    assert catalog.code(Msg.LexOpenedHere) == "E????"
+    assert catalog.code(Msg.ParseExpected) == "E????"
+    assert catalog.is_error(Msg.LexSemicolon)
+    assert not catalog.is_error(Msg.LexOpenedHere)
+
+test "a diagnostic renders with its parameters and labels":
+    let catalog = Catalog.parse(
+        "E0010 error lex.mismatched-bracket x\n- label lex.opened-here opened here\n"
+    )
+    let d = Diagnostic.new(Msg.LexMismatchedBracket, 8, 9).with("close", "]").with("open", "(")
+    let text = "def ((( ]] :: -> ->\n"
+    let rendered = render_ids(text, [d.label(Msg.LexOpenedHere, 6, 7)], catalog)
+    let first = "1:9-1:10 E0010 lex.mismatched-bracket close=\"]\" open=\"(\"\n"
+    assert rendered == "{first}  label 1:7-1:8 lex.opened-here\n"

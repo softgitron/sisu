@@ -1,0 +1,2 @@
+7:5-7:9 E0200 resolve.undefined-name name="gret"
+  fix resolve.similar-name 7:5-7:9 "greet"

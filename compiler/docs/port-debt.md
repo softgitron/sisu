@@ -156,13 +156,25 @@ the limits become options of `sisu run`.
 ## Shortcuts in the front end
 
 **The query layer is hand-written.** `sisu_driver::Db` memoises per
-program on hashes of its files' and manifests' texts, so every change
-re-resolves and re-checks the whole program, std's modules included
-(only their parsing is shared): the language server answers a change to
-`std/num.sisu` in about 65 ms and to `std/json.sisu`, whose reflection
-takes three rounds (below), in about 115 ms, against 10's 100 ms. *Pay*:
-per-item queries with stable node identities as keys (the tree already
-provides them).
+program on hashes of its files' and manifests' texts, and inside that per
+item (architecture.md, "The query layer"): checking, lowering and the
+ownership checker reuse what an item's text and the program's interface
+(a hash of what resolution reads, computed from the tokens) leave
+unchanged. Name resolution itself still runs again over the whole program
+for every change, std's modules included (only their parsing and the
+parsing of the text it writes are shared): 5 to 10 ms, most of the 14 ms a
+one-body re-check takes. *Pay*: per-item signature queries keyed by stable
+node identities (the tree provides them), so that resolution too redoes
+only what a changed declaration reaches; with them, std's resolution is
+done once per process.
+
+**The memo is not kept between commands.** The per-item memo lives in the
+process: the language server, `sisu run --watch` and the REPL keep it, but
+each `sisu check` starts from nothing (55 ms at the median for a
+conformance case, the process start and std's parse included). *Pay*: write the
+memo to disk keyed by the interface and the items' texts (the typed bodies
+and SIR functions it holds are plain data), or a resident server the
+command line asks.
 
 **Intrinsics get type arguments by a rule.** Generic Sisu functions get
 every type argument at run time; an intrinsic gets them only when
@@ -259,12 +271,13 @@ rather than values. *Pay*: the comptime evaluator over typed IR producing
 the impl or the instance as a value (08: "`return impl ... for T:` is an
 expression form"), with reflection as a module of values.
 
-**Instances are found by resolving again.** Which instances of templates
-a program needs is known once its calls are typed, so the driver
-resolves and checks the whole program again with the checker's requests,
-up to 32 rounds (`Db::checked`); each round repeats all the work of the
-one before. *Pay*: per-item queries, so a round re-checks only the new
-instances and their callers; with monomorphisation in the backend, the
+**A promotion resolves again.** The instances of templates a check asks
+for are declared on top of the resolution it checked, and the bodies are
+checked once per check, but a promotion (a generic function that calls a
+template with its own type parameters becomes one) changes a declaration,
+so the driver resolves the whole program again with it (`reflect/promotion`
+re-checks in 117 ms, the slowest of the suite's programs). *Pay*: per-item
+signature queries (above); with monomorphisation in the backend, the
 instances are its own.
 
 **Compile-time evaluation is incomplete.** There is no memory limit (08
@@ -356,17 +369,19 @@ elaborated but their loans are not analysed again for every program;
 body lowered) check them. *Pay*: none while std is checked whenever it
 changes; a later stage must keep that check in CI.
 
-**Hot replacement compares whole programs and keeps every epoch.** Each
-save is compiled again from the top, and the interpreter compares every
-function, type and impl of the new SIR with all the run has
-(`sisu-interp/src/live.rs`); the programs of every epoch live as long as
-the process (old frames point into them), so a long session's memory
-grows with its saves. A restart drops the old run's values without their
-`Drop`s, and there is no migration of a value whose layout changed: the
-program starts again. *Pay*: per-item queries decide what changed; a
-backend's indirection table frees an epoch's code when no frame of it is
-left; a layout change could migrate values by a `live` hook (D-068 leaves
-it open).
+**Hot replacement compares whole programs and keeps every epoch.** A save
+is compiled through the database the run was compiled with, so only the
+items it changed are checked, lowered and borrow-checked again, but the
+interpreter then compares every function, type and impl of the new SIR
+with all the run has (`sisu-interp/src/live.rs`); the programs of every
+epoch live as long as the process (old frames point into them), so a long
+session's memory grows with its saves. A restart drops the old run's
+values without their `Drop`s, and there is no migration of a value whose
+layout changed: the program starts again. *Pay*: the rebuild tells the
+interpreter which functions its per-item queries made again, so it
+compares only those; a backend's indirection table frees an epoch's code
+when no frame of it is left; a layout change could migrate values by a
+`live` hook (D-068 leaves it open).
 
 **The REPL replays its session.** Each input runs every earlier input
 again against the log of the run before it (`record::Resume`), so a
@@ -470,9 +485,6 @@ From Phase 4 (18, "Phase 4: traits, generics, std in Sisu"):
   `std.fmt` modules (std.collections and std.num re-export the
   prelude's); the host-backed collections are intrinsics with their
   contracts there.
-- **The re-check target** of 300 ms for one edited body: the language
-  server re-checks a whole std module in 50 to 115 ms (above), but the
-  query layer is per program, not per body.
 - **Reflection beyond templates** (Phase 8 in 18): `reflect`, `comptime
   for` and `x.[f]` in methods and non-generic functions, reflection over
   a trait's methods, and `comptime def` in a trait other than its derive
@@ -501,13 +513,16 @@ Sisu"):
 From Phase 8's tools (10, "Formatter", "Language server", "Debugging
 and profiling", "REPL and scripts"):
 
-- **The language server** has no completion, rename, references, fix-its
-  as code actions, inlay hints for inferred types and parameter
-  conventions, or the "explain this borrow" command (the CLI's
-  `explain-borrow` has it); documents are synchronised whole. None of the
-  four features 10 puts after 0.1 (always-on evaluation, worksheets in
-  the editor, structural editing, the stepper) is there: a worksheet runs
-  from the command line (`sisu ws`), not as the editor's virtual text.
+- **The language server** has completion, rename and references, the
+  catalog's fixes as code actions, inlay hints, "explain this borrow" and
+  worksheets as inline values, but documents are synchronised whole;
+  rename finds a type's uses in types by their spelling (a type of
+  another module with the same name would be renamed too, since types in
+  annotations are not in the typed tree); completion after `.` checks the
+  document again without the word being typed. Of the four features 10
+  puts after 0.1, worksheets in the editor are there; always-on
+  evaluation, structural editing (N-31's commands beyond the fixes) and
+  the stepper are not.
 - **The formatter** keeps `Result[T, E]` rather than writing 10's
   `T ! E`, since whether `E` is an error set is not in the syntax; with
   name resolution in the formatter's reach (the language server has it)

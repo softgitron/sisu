@@ -1,0 +1,29 @@
+# Statement-level mistakes: an assignment as a condition, the walrus, a
+# block on the line of its header, a missing block, a statement in a
+# one-line `case` arm, and an `if` expression without `else`.
+def main():
+    if x = 1:
+        pass
+    while y := next():
+        pass
+    let z := 3
+    w := 4
+    if x: return 1
+    for i in range(3):
+    let v = if a: 1
+    match v:
+        case 1: return 2
+        case 2: let q = 3
+        case _: pass
+    let u = 1 else: 2
+    let Some(t) = opt else as err: return None
+    let Some(s) = opt else:
+        return None
+    with open() as:
+        pass
+    defer cleanup()
+    defer:
+        cleanup()
+    assert x, "message {x}"
+    unsafe:
+        pass

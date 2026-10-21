@@ -1,0 +1,228 @@
+##! The stage-1 command line, run on the stage-0 interpreter from this
+##! package's directory:
+##!
+##! ```text
+##! sisu run -- tokens [--trivia] FILE          # what `sisu tokens` prints
+##! sisu run -- parse --tree [--trivia] FILE    # what `sisu parse --tree` prints
+##! sisu run -- parse --print FILE              # the source, reprinted from the tree
+##! sisu run -- batch OUT LIST                  # every file LIST names
+##! sisu run -- mutate SEED COUNT OUT LIST       # COUNT mutants of the files LIST names
+##! sisu run -- names FILE                      # the name diagnostics, as `sisu check --format=ids`
+##! sisu run -- names-batch OUT LIST            # those of every file LIST names
+##! ```
+##!
+##! `tokens` and `parse` print to standard output, and the diagnostics in
+##! the conformance form to standard error, as stage 0 does. `batch` reads
+##! a list of files, one per line, and writes for the `n`th (from 1) the
+##! files `OUT/n.tokens` and `OUT/n.tokens.err` (what `tokens --trivia`
+##! prints), `OUT/n.tree` and `OUT/n.tree.err` (what `parse --tree`
+##! prints), so that one run of the interpreter checks many files.
+##! `mutate` writes `OUT/m1.sisu` to `OUT/mCOUNT.sisu`, each a mutant of one
+##! of the files in turn (`mutants.sisu`). `names` resolves the names of one
+##! module (`resolve.sisu`) against the prelude and the std modules it
+##! imports, read from `../std/`; `names-batch` writes `OUT/n.names`.
+##! `--catalog PATH` names the message catalog, by default
+##! `../catalog/messages.catalog`.
+
+from stage1.diag import Catalog, quote, render_ids
+from stage1.lexer import Lexed, lex
+from stage1.mutants import Rng, mutate
+from stage1.parser import parse, parse_lexed
+from stage1.resolve import Environment, ModuleNames, imported_std_modules
+from stage1.syntax.kinds import KindNames
+
+error UsageError:
+    Usage(text: String)
+
+def main(sys: System) -> ! {IoError, UsageError}:
+    var args = sys.env.args()
+    var catalog_path = "../catalog/messages.catalog".to_string()
+    var rest: list[String] = []
+    var i = 0
+    while i < len(args):
+        if args[i] == "--catalog" and i + 1 < len(args):
+            catalog_path = args[i + 1].to_string()
+            i += 2
+            continue
+        rest.push(args[i].to_string())
+        i += 1
+    let catalog = Catalog.parse(sys.fs.read_to_string(Path.new(catalog_path))?)
+    if rest.is_empty():
+        return Err(Usage(text=usage()))
+    let command = rest[0].copy()
+    if command == "tokens" and len(rest) >= 2:
+        let trivia = rest.contains("--trivia")
+        let path = rest[len(rest) - 1].copy()
+        let text = sys.fs.read_to_string(Path.new(path))?
+        let (out, errs) = tokens(text, trivia, catalog)
+        emit(out, errs)
+        return Ok(())
+    if command == "parse" and len(rest) >= 2:
+        let path = rest[len(rest) - 1].copy()
+        let text = sys.fs.read_to_string(Path.new(path))?
+        let parsed = parse(text, catalog)
+        let errs = render_ids(text, parsed.diagnostics, catalog)
+        if rest.contains("--print"):
+            emit(parsed.tree.to_source(), errs)
+        else:
+            emit(parsed.tree.dump(rest.contains("--trivia")), errs)
+        return Ok(())
+    if command == "batch" and len(rest) == 3:
+        let out_dir = rest[1].copy()
+        let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
+        var n = 0
+        var bytes = 0
+        var times = Times(lex=0, parse=0, dump=0)
+        for path in list.lines():
+            if path.is_empty():
+                continue
+            n += 1
+            let text = sys.fs.read_to_string(Path.new(path))?
+            bytes += text.byte_len()
+            let t0 = now(sys)
+            let lexed = lex(text)
+            let t1 = now(sys)
+            let (out, errs) = dump_tokens(text, lexed, True, catalog)
+            let t2 = now(sys)
+            let parsed = parse_lexed(text, lexed, catalog)
+            let t3 = now(sys)
+            let tree = parsed.tree.dump(False)
+            let tree_errs = render_ids(text, parsed.diagnostics, catalog)
+            let trivia_tree = parsed.tree.dump(True)
+            let reprint = parsed.tree.to_source()
+            let t4 = now(sys)
+            times.lex += t1 - t0
+            times.parse += t3 - t2
+            times.dump += t2 - t1 + t4 - t3
+            sys.fs.write_text(Path.new("{out_dir}/{n}.tokens"), out)?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.tokens.err"), errs)?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.tree"), tree)?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.tree.err"), tree_errs)?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.trivia.tree"), trivia_tree)?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.print"), reprint)?
+        print(
+            "files {n} bytes {bytes} lex {ms(times.lex)} ms parse {ms(times.parse)} ms dump {ms(times.dump)} ms"
+        )
+        return Ok(())
+    if command == "profile" and len(rest) == 2:
+        let text = sys.fs.read_to_string(Path.new(rest[1].copy()))?
+        let t0 = now(sys)
+        let lexed = lex(text)
+        let t1 = now(sys)
+        let (out, _) = dump_tokens(text, lexed, True, catalog)
+        let t2 = now(sys)
+        let parsed = parse_lexed(text, lexed, catalog)
+        let t3 = now(sys)
+        let tree = parsed.tree.dump(False)
+        let t4 = now(sys)
+        let trivia_tree = parsed.tree.dump(True)
+        let t5 = now(sys)
+        let reprint = parsed.tree.to_source()
+        let t6 = now(sys)
+        print(
+            "lex {ms(t1 - t0)} tokens-dump {ms(t2 - t1)} parse {ms(t3 - t2)} tree-dump {ms(t4 - t3)} trivia-dump {ms(t5 - t4)} reprint {ms(t6 - t5)}"
+        )
+        print("{out.byte_len()} {tree.byte_len()} {trivia_tree.byte_len()} {reprint.byte_len()}")
+        return Ok(())
+    if command == "names" and len(rest) == 2:
+        var env = environment(sys)?
+        let text = sys.fs.read_to_string(Path.new(rest[1].copy()))?
+        let out = names(sys, text, mut env, catalog)?
+        emit(out, "")
+        return Ok(())
+    if command == "names-batch" and len(rest) == 3:
+        var env = environment(sys)?
+        let out_dir = rest[1].copy()
+        let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
+        var n = 0
+        for path in list.lines():
+            if path.is_empty():
+                continue
+            n += 1
+            let text = sys.fs.read_to_string(Path.new(path))?
+            let out = names(sys, text, mut env, catalog)?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.names"), out)?
+        return Ok(())
+    if command == "mutate" and len(rest) == 5:
+        let seed = rest[1].parse_int() ?? 1
+        let count = rest[2].parse_int() ?? 0
+        let out_dir = rest[3].copy()
+        let list = sys.fs.read_to_string(Path.new(rest[4].copy()))?
+        var files: list[String] = []
+        for path in list.lines():
+            if not path.is_empty():
+                files.push(sys.fs.read_to_string(Path.new(path))?)
+        var rng = Rng.new(seed)
+        for k in range(count):
+            let mutant = mutate(files[k % len(files)], mut rng)
+            sys.fs.write_text(Path.new("{out_dir}/m{k + 1}.sisu"), mutant)?
+        return Ok(())
+    return Err(Usage(text=usage()))
+
+## The prelude's names, with the std modules every module sees without an
+## import (stage 0's `std_sources::AMBIENT`, and `target`), whose variants
+## are visible too.
+def environment(sys: System) -> Environment ! IoError:
+    let text = sys.fs.read_to_string(Path.new("../std/prelude.sisu"))?
+    var prelude = ModuleNames.of(text, parse(text, Catalog.parse("")).tree)
+    var std: dict[String, ModuleNames] = {}
+    for module in ["task", "log", "cap", "live"]:
+        let source = sys.fs.read_to_string(Path.new("../std/{module}.sisu"))?
+        let names = ModuleNames.of(source, parse(source, Catalog.parse("")).tree)
+        for v in names.variants:
+            _ = prelude.variants.add(v.copy())
+        _ = prelude.items.add(module.to_string())
+        _ = std.insert(module.to_string(), names)
+    _ = prelude.items.add("target".to_string())
+    return Ok(Environment(prelude=prelude, std=std))
+
+## The name diagnostics of `text` in the conformance form, after loading the
+## std modules it imports into `env`.
+def names(sys: System, text: str, mut env: Environment, catalog: Catalog) -> String ! IoError:
+    let parsed = parse(text, catalog)
+    for module in imported_std_modules(text, parsed.tree):
+        if not env.std.contains(module.copy()):
+            let source = sys.fs.read_to_string(Path.new("../std/{module}.sisu"))?
+            let names = ModuleNames.of(source, parse(source, catalog).tree)
+            _ = env.std.insert(module.copy(), names)
+    let diags = resolve.resolve(text, parsed.tree, parsed.diagnostics, env, catalog)
+    return Ok(render_ids(text, diags, catalog))
+
+## Where a batch spends its time, in nanoseconds: lexing, parsing, and
+## writing the dumps.
+struct Times:
+    lex: int
+    parse: int
+    dump: int
+
+def now(sys: System) -> int:
+    return sys.clock.now().unix_nanos()
+
+pure def ms(nanos: int) -> int:
+    return nanos // 1000000
+
+pure def usage() -> String:
+    return "usage: sisu run -- tokens [--trivia] FILE | parse (--tree [--trivia] | --print) FILE | batch OUT LIST | mutate SEED COUNT OUT LIST".to_string()
+
+## Prints `out` to standard output and `errs` to standard error exactly:
+## both end in a line break, which `print` adds.
+def emit(out: str, errs: str):
+    if not out.is_empty():
+        print(out.strip_suffix("\n"))
+    if not errs.is_empty():
+        print_err(errs.strip_suffix("\n"))
+
+## What `sisu tokens` prints for `text`: one token per line as `KIND
+## start..end "text"`, the trivia only with `trivia`; and the lexer's
+## diagnostics in the conformance form, in the order it found them.
+pure def tokens(text: str, trivia: bool, catalog: Catalog) -> (String, String):
+    return dump_tokens(text, lex(text), trivia, catalog)
+
+pure def dump_tokens(text: str, lexed: Lexed, trivia: bool, catalog: Catalog) -> (String, String):
+    var names = KindNames.new()
+    var out = String.new()
+    for t in lexed.tokens:
+        if t.kind.is_trivia() and not trivia:
+            continue
+        out.push("{names.of(t.kind)} {t.start}..{t.end} {quote(text.byte_slice(t.start, t.end))}\n")
+    return (out, render_ids(text, lexed.diagnostics, catalog))

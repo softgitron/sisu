@@ -1,0 +1,9 @@
+# Stage 1 of the bootstrap (proposal/18-next-steps.md, "Bootstrapping"):
+# the front end written in Sisu, run on the stage-0 interpreter and checked
+# against the Rust front end by `check.sh`.
+[package]
+name = "stage1"
+version = "0.1.0"
+edition = "2027"
+description = "The Sisu front end in Sisu: lexer, lossless syntax tree and parser"
+license = "Apache-2.0 OR Unlicense"

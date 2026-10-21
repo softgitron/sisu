@@ -1,0 +1,6 @@
+# A wrong program: a list bound with `let` is changed.
+
+def main():
+    let xs = [1, 2]
+    xs.push(3)
+    print(xs)

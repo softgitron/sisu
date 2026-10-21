@@ -253,3 +253,11 @@ parameters each identifier takes.
   the checker still rejects them (`candidate_false_positive` and
   `untested_path` show the two other outcomes). `explain_borrow` pins
   `sisu explain-borrow`.
+- `wrong/` is the wrong-program corpus (18, Phase 2): about forty short
+  programs a newcomer might write, each with one intended mistake that its
+  first comment names (a misspelling, a missing `mut`, a use after a move,
+  a view kept in a plain struct, ...). Each `.diag` pins the one error by
+  identifier and span with its fix; a test of the driver
+  (`tests/wrong.rs`) holds every case to one error that names a fix, a
+  fix with edits or a note, and applies each fix with edits to see that
+  the program then checks.

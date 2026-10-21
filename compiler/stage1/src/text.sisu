@@ -1,0 +1,137 @@
+##! Text as bytes: decoding the character at a byte index, the character
+##! classes the lexer needs beyond the prelude's, and the quoting of texts
+##! in the stage-0 dump forms.
+
+from stage1.text.unicode import escaped, in_table, numeric
+
+## The character whose UTF-8 encoding starts at byte `i` of `text`, which
+## must be a character boundary inside the text: the lead byte gives the
+## length and the high bits of the code, each continuation byte six more.
+pub pure def char_at(text: str, i: int) -> char:
+    let lead = text.byte_at(i).to_int()
+    if lead < 0x80:
+        return char.from_code(lead) ?? '\u{FFFD}'
+    var code = lead & 0x1F
+    var more = 1
+    if lead >= 0xF0:
+        code = lead & 0x07
+        more = 3
+    elif lead >= 0xE0:
+        code = lead & 0x0F
+        more = 2
+    for k in range(1, more + 1):
+        code = (code << 6) | (text.byte_at(i + k).to_int() & 0x3F)
+    return char.from_code(code) ?? '\u{FFFD}'
+
+## Whether `c` is a letter or a number in Unicode's sense: alphabetic, or
+## of the general category `Nd`, `Nl` or `No` (Rust's `is_alphanumeric`,
+## which stage 0's lexer uses for the characters of names).
+pub pure def is_alphanumeric(c: char) -> bool:
+    return c.is_alphabetic() or is_numeric(c)
+
+## Whether `c` is a number in Unicode's sense (`Nd`, `Nl` or `No`).
+pub pure def is_numeric(c: char) -> bool:
+    let n = c.code()
+    if n < 0x80:
+        return 48 <= n <= 57
+    return in_table(numeric(), n)
+
+## The text in double quotes as stage 0's tree dump writes it (Rust's
+## `Debug` of a string): `\t`, `\r`, `\n`, `\\`, `\"` and `\0` escaped,
+## other control characters and the characters `escaped_beyond_ascii`
+## names as `\u{hex}`, everything else as it is.
+pub pure def debug_str(value: str) -> String:
+    if is_plain(value):
+        return "\"{value}\""
+    var s = String.new("\"")
+    for c in value.chars():
+        if c == '"':
+            s.push("\\\"")
+        else:
+            s.push(debug_escape(c))
+    s.push_char('"')
+    return s
+
+## Whether every byte of `value` is printable ASCII other than `"` and
+## `\`: a text that both quotings leave as it is.
+pub pure def is_plain(value: str) -> bool:
+    let n = value.byte_len()
+    var i = 0
+    while i < n:
+        let b = value.byte_at(i).to_int()
+        if b < 0x20 or b > 0x7E or b == 0x22 or b == 0x5C:
+            return False
+        i += 1
+    return True
+
+## A character in single quotes as Rust's `Debug` of a `char` writes it,
+## which stage 0 uses for a character in some messages (`'\u{c}'`).
+pub pure def debug_char(c: char) -> String:
+    if c == '\'':
+        return "'\\''"
+    if c == '"':
+        return "'\"'"
+    return "'{debug_escape(c)}'"
+
+## One character as Rust's `escape_debug` writes it inside a string,
+## except for the quote characters, which the callers handle.
+pure def debug_escape(c: char) -> String:
+    let n = c.code()
+    match c:
+        case '\t':
+            return "\\t"
+        case '\r':
+            return "\\r"
+        case '\n':
+            return "\\n"
+        case '\\':
+            return "\\\\"
+        case '\0':
+            return "\\0"
+        case _:
+            pass
+    if n < 0x20 or n == 0x7F or (n >= 0x80 and escaped_beyond_ascii(n)):
+        return "\\u{{{hex(n)}}}"
+    return "{c}"
+
+## Whether Rust's `Debug` escapes the character with code `n` (at least
+## 0x80): the characters it does not count as printable, and those that
+## extend a grapheme.
+pure def escaped_beyond_ascii(n: int) -> bool:
+    return in_table(escaped(), n)
+
+## `n` in lower-case hexadecimal without leading zeros.
+pub pure def hex(n: int) -> String:
+    if n == 0:
+        return "0".to_string()
+    let digits = "0123456789abcdef"
+    var out: list[char] = []
+    var m = n
+    while m > 0:
+        out.push(char_at(digits, m % 16))
+        m = m // 16
+    var s = String.new()
+    for i in range(len(out)):
+        s.push_char(out[len(out) - 1 - i])
+    return s
+
+test "characters decode from their bytes":
+    let t = "aï€😀"
+    assert char_at(t, 0) == 'a'
+    assert char_at(t, 1) == 'ï'
+    assert char_at(t, 3) == '€'
+    assert char_at(t, 6) == '😀'
+
+test "debug quoting as stage 0's tree dump writes it":
+    assert debug_str("a\"b\\c\nd\te\rf") == "\"a\\\"b\\\\c\\nd\\te\\rf\""
+    assert debug_str("x\u{1}\u{7f}\0") == "\"x\\u{{1}}\\u{{7f}}\\0\""
+    assert debug_str("'ï€'") == "\"'ï€'\""
+    assert debug_char('\u{c}') == "'\\u{{c}}'"
+    assert debug_char('\'') == "'\\''"
+    assert hex(0x1F600) == "1f600"
+    assert debug_str("a\u{301}\u{a0}é") == "\"a\\u{{301}}\\u{{a0}}é\""
+
+test "numbers beyond ASCII continue names":
+    assert is_alphanumeric('١')
+    assert is_alphanumeric('é')
+    assert not is_alphanumeric('€')

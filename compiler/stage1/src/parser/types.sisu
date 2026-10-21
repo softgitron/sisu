@@ -1,0 +1,171 @@
+##! Types.
+##!
+##! ```text
+##! type      := '!' error_set? | option ('!' error_set?)?
+##! error_set := '{' option (',' option)* '}' | option
+##! option    := ref_type '?'*
+##! ref_type  := 'ref' 'mut'? primary_type | primary_type
+##! primary_type := path generic_args? | 'Self' | 'pure'? '(' types? ')' ('->' type)?
+##!              | 'dyn' path | '{' option (',' option)* '}'
+##! generic_args := '[' (type | integer) (',' (type | integer))* ']'
+##! ```
+##!
+##! `ref T?` is `(ref T)?`, an optional reference (02, "Types").
+
+from stage1.diag import Msg
+from stage1.parser.state import Parser
+from stage1.syntax.kinds import SyntaxKind
+
+impl Parser:
+    pure def at_type_start(self) -> bool:
+        return match self.current():
+            case Ident | SelfTypeKw | LParen | RefKw | DynKw | LBrace | ImplKw | TypeKw: True
+            case _: False
+
+    pub(package) pure def type_(mut self):
+        let cp = self.checkpoint()
+        if not self.at(SyntaxKind.Bang):
+            self.option_type()
+        if self.at(SyntaxKind.Bang):
+            self.start_at(cp, SyntaxKind.ResultType)
+            self.bump()
+            if self.at_type_start():
+                self.error_set()
+            self.finish_node()
+
+    pure def error_set(mut self):
+        if self.at(SyntaxKind.LBrace):
+            self.start(SyntaxKind.ErrorSetType)
+            self.bump()
+            while not self.at_list_end(SyntaxKind.RBrace):
+                self.option_type()
+                if not self.eat(SyntaxKind.Comma):
+                    break
+            _ = self.expect(SyntaxKind.RBrace)
+            self.finish_node()
+        else:
+            self.option_type()
+
+    pure def option_type(mut self):
+        let cp = self.checkpoint()
+        self.ref_type()
+        while self.at(SyntaxKind.Question):
+            self.start_at(cp, SyntaxKind.OptionType)
+            self.bump()
+            self.finish_node()
+
+    pure def ref_type(mut self):
+        if self.at(SyntaxKind.RefKw):
+            self.start(SyntaxKind.RefType)
+            self.bump()
+            _ = self.eat(SyntaxKind.MutKw)
+            self.primary_type()
+            self.finish_node()
+        else:
+            self.primary_type()
+
+    pure def primary_type(mut self):
+        match self.current():
+            case LBrace:
+                # A union of error sets as a type of its own (05, "Error
+                # sets"): `type AppError = {IoError, ParseError}`.
+                self.error_set()
+            case Ident if self.current_text() == "pure" and self.nth(1) == SyntaxKind.LParen:
+                self.start(SyntaxKind.FnType)
+                self.bump()
+                _ = self.paren_types()
+                _ = self.expect(SyntaxKind.Arrow)
+                self.type_()
+                self.finish_node()
+            case Ident if self.current_text() == "ptr" and self.nth(1) == SyntaxKind.MutKw:
+                # `ptr mut T`, a raw pointer (04, "Unsafe").
+                self.start(SyntaxKind.PtrType)
+                self.bump()
+                self.bump()
+                self.primary_type()
+                self.finish_node()
+            case ImplKw:
+                # `impl Trait for T`, the result of a comptime derive.
+                self.start(SyntaxKind.ImplType)
+                self.bump()
+                self.type_()
+                if self.eat(SyntaxKind.ForKw):
+                    self.type_()
+                self.finish_node()
+            case Ident | SelfTypeKw | TypeKw:
+                self.start(SyntaxKind.PathType)
+                self.bump()
+                while self.at(SyntaxKind.Dot) and self.nth(1) == SyntaxKind.Ident:
+                    self.bump()
+                    self.bump()
+                if self.at(SyntaxKind.LBracket):
+                    self.generic_args()
+                self.finish_node()
+            case LParen:
+                let cp = self.checkpoint()
+                let (count, trailing_comma) = self.paren_types()
+                if self.at(SyntaxKind.Arrow):
+                    self.start_at(cp, SyntaxKind.FnType)
+                    self.bump()
+                    self.type_()
+                    self.finish_node()
+                else:
+                    let single = count == 1 and not trailing_comma
+                    let kind = if single: SyntaxKind.ParenType else: SyntaxKind.TupleType
+                    self.start_at(cp, kind)
+                    self.finish_node()
+            case DynKw:
+                self.start(SyntaxKind.DynType)
+                self.bump()
+                self.primary_type()
+                self.finish_node()
+            case _:
+                self.error_found(Msg.ParseExpectedType)
+                self.start(SyntaxKind.Error)
+                if not self.at_type_sync():
+                    self.bump()
+                self.finish_node()
+
+    ## Where a missing type consumes nothing.
+    pure def at_type_sync(self) -> bool:
+        return match self.current():
+            case Newline | Colon | Eq | Comma | RParen | RBracket | RBrace | Eof | Dedent | Indent: True
+            case _: False
+
+    ## `(A, b: B)`: the elements of a tuple or the parameters of a function
+    ## type. Returns the element count and whether a comma trails.
+    pure def paren_types(mut self) -> (int, bool):
+        _ = self.expect(SyntaxKind.LParen)
+        var count = 0
+        var trailing = False
+        while not self.at_list_end(SyntaxKind.RParen):
+            if self.at(SyntaxKind.Ident) and self.nth(1) == SyntaxKind.Colon:
+                self.start(SyntaxKind.TupleTypeField)
+                self.bump()
+                self.bump()
+                self.type_()
+                self.finish_node()
+            else:
+                self.type_()
+            count += 1
+            trailing = False
+            if not self.eat(SyntaxKind.Comma):
+                break
+            trailing = True
+        _ = self.expect(SyntaxKind.RParen)
+        return (count, trailing)
+
+    pure def generic_args(mut self):
+        self.start(SyntaxKind.GenericArgs)
+        self.bump()
+        while not self.at_list_end(SyntaxKind.RBracket):
+            if self.at(SyntaxKind.IntNumber):
+                self.start(SyntaxKind.ConstArg)
+                self.bump()
+                self.finish_node()
+            else:
+                self.type_()
+            if not self.eat(SyntaxKind.Comma):
+                break
+        _ = self.expect(SyntaxKind.RBracket)
+        self.finish_node()

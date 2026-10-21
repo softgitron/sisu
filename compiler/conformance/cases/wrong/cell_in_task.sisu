@@ -1,0 +1,8 @@
+# A wrong program: a task shares a `Cell`, which is not `Sync`; the
+# message names the wrapper that is.
+
+def main():
+    let hits = Cell(0)
+    task.scope do s:
+        s.spawn(() -> hits.set(hits.get() + 1))
+    print(hits.get())

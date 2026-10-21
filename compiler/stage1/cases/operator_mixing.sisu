@@ -1,0 +1,16 @@
+# The operator rules of 02 ("Operator precedence"): each line breaks one,
+# and each mistake is reported once, on its own line.
+def main():
+    let a = x and y or z
+    let b = x | y & z
+    let c = x + 1 & y
+    let d = x << 1 + 2
+    let e = -x ** 2
+    let f = a < b > c
+    let g = a in b in c
+    let h = a == b < c
+    let i = a != b
+    let j = not a in b
+    let k = x | y | z
+    let l = a < b <= c
+    let m = (x and y) or z

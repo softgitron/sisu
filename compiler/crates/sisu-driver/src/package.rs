@@ -165,6 +165,9 @@ struct Loader {
     target: Vec<(&'static str, &'static str)>,
     /// Each package's canonical directory, by index.
     dirs: Vec<PathBuf>,
+    /// For each package on the loader's stack, the dependency entry that
+    /// led to it (none for the first), to label a cycle's edges.
+    edges: Vec<Option<Span>>,
 }
 
 impl Loader {
@@ -201,7 +204,17 @@ impl Loader {
                     Some((from, dep)) => self.dep_span(from, dep),
                     None => Span::new(FileId(0), TextRange::empty(0)),
                 };
-                self.report(Diagnostic::new(msg::PACKAGE_CYCLE, span).with("cycle", cycle));
+                let mut d = Diagnostic::new(msg::PACKAGE_CYCLE, span).with("cycle", cycle);
+                // The other edges of the cycle, each where its manifest
+                // names the next package.
+                for k in pos + 1..stack.len() {
+                    if let Some(Some(at)) = self.edges.get(k) {
+                        let name = self.layout.packages[stack[k - 1]].name.clone();
+                        let dep = self.layout.packages[stack[k]].name.clone();
+                        d = d.label(*at, msg::PACKAGE_DEPENDS_HERE, vec![("name", name), ("dep", dep)]);
+                    }
+                }
+                self.report(d);
                 return None;
             }
             return Some(i);
@@ -256,6 +269,8 @@ impl Loader {
         self.dirs.push(canon.clone());
         self.modules_of(index, &canon, &info.name, file);
         stack.push(index);
+        let edge = via.map(|(from, dep)| self.dep_span(from, dep));
+        self.edges.push(edge);
         for dep in &m.dependencies {
             // A dev-dependency is the package's own tests' business: only
             // the root package's are built.
@@ -272,6 +287,7 @@ impl Loader {
             }
         }
         stack.pop();
+        self.edges.pop();
         Some(index)
     }
 
@@ -374,6 +390,7 @@ pub fn load_package(dir: &Path, base: &Path) -> Layout {
         layout: Layout { base: canonical(base), ..Layout::default() },
         target: manifest::target_facts(),
         dirs: Vec::new(),
+        edges: Vec::new(),
     };
     let mut stack = Vec::new();
     l.package(dir, &mut stack, None);
@@ -441,7 +458,9 @@ pub fn load_file(name: &str, text: &str, cwd: &Path) -> Layout {
             return layout;
         }
     };
-    let mut l = Loader { layout, target: manifest::target_facts(), dirs: vec![PathBuf::new()] };
+    // The script is the first package on the stack, reached by no edge.
+    let mut l =
+        Loader { layout, target: manifest::target_facts(), dirs: vec![PathBuf::new()], edges: vec![None] };
     l.layout.files.push((name.to_string(), meta.clone()));
     let (m, diags) = manifest::read(FileId(0), &meta);
     l.layout.diagnostics.extend(diags);

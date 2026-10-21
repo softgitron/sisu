@@ -1,0 +1,10 @@
+# A wrong program: a struct is displayed though it does not implement
+# `Display`; `{p:?}` shows its `Debug` form.
+
+struct Point:
+    x: int
+    y: int
+
+def main():
+    let p = Point(x=1, y=2)
+    print("the point is {p}")

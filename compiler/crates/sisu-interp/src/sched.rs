@@ -301,6 +301,27 @@ pub struct Stats {
     pub shared_local: u64,
     pub shared_crossing: u64,
     pub shared_crossed: u64,
+    /// `--stats stack-depth`: the calls whose frame was at a depth from
+    /// `2^k` to `2^(k+1) - 1`, by `k`; the deepest stack, and its estimated
+    /// native size.
+    pub depths: Vec<u64>,
+    pub max_depth: usize,
+    pub max_stack_bytes: u64,
+    /// `--stats shared`: each construction site that ran, by function and
+    /// location, with its tag, the cells it made and those another task
+    /// reached.
+    pub sites: Vec<SharedSite>,
+}
+
+/// A `Shared` construction site's numbers over a run.
+#[derive(Clone, Debug, Default)]
+pub struct SharedSite {
+    pub function: String,
+    pub loc: Option<sisu_sir::Loc>,
+    pub source: u32,
+    pub atomic: bool,
+    pub cells: u64,
+    pub crossed: u64,
 }
 
 pub(crate) struct Sched<'p> {
@@ -514,6 +535,7 @@ impl<'p> Interp<'p, '_> {
             after: None,
             resume_after_drops: false,
             anchor: Some(anchor),
+            stack_bytes: 0,
         }
     }
 
@@ -1912,7 +1934,11 @@ impl<'p> Interp<'p, '_> {
             return Ok(());
         }
         c.crossed = true;
+        let site = c.site;
         self.sched.stats.shared_crossed += 1;
+        if let Some(s) = site.and_then(|i| self.sched.stats.sites.get_mut(i as usize)) {
+            s.crossed += 1;
+        }
         if !c.atomic && self.monitoring() {
             return Err(self.mon_shared_crossed(cell));
         }
@@ -1926,6 +1952,117 @@ impl<'p> Interp<'p, '_> {
 
     /// The `--stats` report.
     pub(crate) fn stats_report(&self) -> String {
+        match self.stats_kind {
+            crate::StatsKind::Summary => self.stats_summary(),
+            crate::StatsKind::StackDepth => self.stats_depth(),
+            crate::StatsKind::Shared => self.stats_shared(),
+        }
+    }
+
+    /// `--stats stack-depth`: the histogram of frame depths at calls, by
+    /// powers of two, and the deepest stack with its estimated native size.
+    fn stats_depth(&self) -> String {
+        let s = &self.sched.stats;
+        let calls: u64 = s.depths.iter().sum();
+        let mut out = render(
+            msg::RUN_STATS_DEPTH,
+            &[
+                ("calls", calls.to_string()),
+                ("max", s.max_depth.to_string()),
+                ("bytes", s.max_stack_bytes.to_string()),
+            ],
+        );
+        out.push('\n');
+        for (k, n) in s.depths.iter().enumerate() {
+            if *n == 0 {
+                continue;
+            }
+            let (lo, hi) = (1u64 << k, (1u64 << (k + 1)) - 1);
+            out.push_str(&render(
+                msg::RUN_STATS_DEPTH_BUCKET,
+                &[("from", lo.to_string()), ("to", hi.to_string()), ("calls", n.to_string())],
+            ));
+            out.push('\n');
+        }
+        out
+    }
+
+    /// `--stats shared`: every `Shared` construction site of the program's
+    /// own code (not the standard library's), with the escape analysis's
+    /// tag, and the cells each made and that another task reached; the
+    /// share of the sites tagged task-local is Q-2's number. A site that
+    /// never ran is listed with no cells.
+    fn stats_shared(&self) -> String {
+        let prog = self.prog;
+        let mut sites: Vec<SharedSite> = Vec::new();
+        for f in &prog.functions {
+            let std = prog.sources.get(f.source as usize).is_some_and(|n| n.starts_with("<std>/"));
+            if std {
+                continue;
+            }
+            for b in &f.blocks {
+                for st in &b.stmts {
+                    let sisu_sir::StatementKind::Call { callee: sisu_sir::Callee::Intrinsic(n, _), .. } =
+                        &st.kind
+                    else {
+                        continue;
+                    };
+                    let atomic = match n.as_str() {
+                        "Shared.new" => false,
+                        "Shared.new_atomic" => true,
+                        _ => continue,
+                    };
+                    let ran = self
+                        .sched
+                        .stats
+                        .sites
+                        .iter()
+                        .find(|s| s.function == f.name && s.loc == st.loc && s.source == f.source);
+                    sites.push(SharedSite {
+                        function: f.name.clone(),
+                        loc: st.loc,
+                        source: f.source,
+                        atomic,
+                        cells: ran.map(|s| s.cells).unwrap_or(0),
+                        crossed: ran.map(|s| s.crossed).unwrap_or(0),
+                    });
+                }
+            }
+        }
+        sites.sort_by_key(|s| (s.source, s.loc));
+        let local = sites.iter().filter(|s| !s.atomic).count();
+        let mut out = render(
+            msg::RUN_STATS_SHARED_SITES,
+            &[
+                ("local", local.to_string()),
+                ("total", sites.len().to_string()),
+                ("crossing", (sites.len() - local).to_string()),
+            ],
+        );
+        out.push('\n');
+        for s in &sites {
+            let file = prog.sources.get(s.source as usize).cloned().unwrap_or_default();
+            let at = s.loc.map(|l| format!("{file}:{}:{}", l.line, l.col)).unwrap_or(file);
+            let tag =
+                render(if s.atomic { msg::RUN_STATS_TAG_CROSSING } else { msg::RUN_STATS_TAG_LOCAL }, &[]);
+            out.push_str(&render(
+                msg::RUN_STATS_SHARED_SITE,
+                &[
+                    ("at", at),
+                    ("function", crate::exec::display_fn_name(&s.function, prog)),
+                    ("tag", tag),
+                    ("cells", s.cells.to_string()),
+                    ("crossed", s.crossed.to_string()),
+                ],
+            ));
+            out.push('\n');
+        }
+        out
+    }
+
+    /// The summary `--stats` prints: tasks, scheduling latency, `Shared`
+    /// cells by tag.
+    fn stats_summary(&self) -> String {
         let s = &self.sched.stats;
         let pct = |v: &[u64], p: f64| -> u64 {
             if v.is_empty() {

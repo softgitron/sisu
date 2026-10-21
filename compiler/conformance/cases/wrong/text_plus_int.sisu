@@ -1,0 +1,6 @@
+# A wrong program: text and a number are added; interpolation joins them.
+
+def main():
+    let n = 3
+    let message = "n is " + n
+    print(message)

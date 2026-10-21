@@ -14,13 +14,17 @@ mod exhaustive;
 mod expr;
 mod generic_asserts;
 mod infer;
+mod memo;
 mod pat;
 pub mod purity;
+pub mod spans;
 mod tasks;
 pub mod thir;
 mod zonk;
 
 use check::{Checker, RetCtx};
+pub use memo::BodyCache;
+use memo::{Session, memo_body};
 use sisu_diag::{Diagnostic, SourceMap, msg};
 use sisu_resolve::{Answer, DefId, DefKind, Program, Ty};
 use std::collections::HashMap;
@@ -63,13 +67,14 @@ fn file_text(sources: &SourceMap, file: sisu_diag::FileId) -> &str {
     sources.get(file).map(|f| f.text.as_str()).unwrap_or("")
 }
 
-/// Checks one function body.
+/// Checks one function body: the typed body, its diagnostics, the error
+/// set its `T !` absorbed, and the inferred error sets it read.
 fn check_fn(
     prog: &Program,
     inferred: &HashMap<DefId, Vec<DefId>>,
     def: DefId,
     sources: &SourceMap,
-) -> (Body, Vec<Diagnostic>, Vec<DefId>) {
+) -> (Body, Vec<Diagnostic>, Vec<DefId>, Vec<DefId>) {
     let empty = Body {
         def,
         kind: BodyKind::Fn,
@@ -83,9 +88,10 @@ fn check_fn(
         generator: None,
         contracts: None,
         generic_asserts: Vec::new(),
+        memo: Memo::default(),
     };
-    let Some(f) = prog.fn_info(def) else { return (empty, Vec::new(), Vec::new()) };
-    let Some(body_ast) = &f.body else { return (empty, Vec::new(), Vec::new()) };
+    let Some(f) = prog.fn_info(def) else { return (empty, Vec::new(), Vec::new(), Vec::new()) };
+    let Some(body_ast) = &f.body else { return (empty, Vec::new(), Vec::new(), Vec::new()) };
     let mut c = Checker::new(prog, inferred, def, f.file, file_text(sources, f.file));
     c.self_ty = f.owner.clone();
     c.env = prog.elaborate_env(&f.predicates);
@@ -137,9 +143,22 @@ fn check_fn(
     for p in &f.params {
         let ty = param_local_ty(prog, &p.ty, p.mode, &c.env);
         if f.pure && prog.is_capability(&p.ty) {
-            let d = Diagnostic::new(msg::TYPE_IMPURE_CAPABILITY, p.span)
+            let mut d = Diagnostic::new(msg::TYPE_IMPURE_CAPABILITY, p.span)
                 .with("name", prog.def(def).name.clone())
                 .with("ty", prog.display(&p.ty));
+            // `pure ` before `def` on the header's line goes.
+            let text = file_text(sources, f.file);
+            let name_at = def_span.range.start as usize;
+            let line_start = text.get(..name_at).and_then(|t| t.rfind('\n')).map(|i| i + 1).unwrap_or(0);
+            if let Some(i) = text.get(line_start..name_at).and_then(|h| h.find("pure ")) {
+                let at = (line_start + i) as u32;
+                let span = sisu_diag::Span::new(f.file, sisu_diag::TextRange::new(at, at + 5));
+                d = d.fix(
+                    msg::TYPE_REMOVE_PURE,
+                    Vec::new(),
+                    vec![sisu_diag::Edit { span, text: String::new() }],
+                );
+            }
             c.report(d);
         }
         let l = c.new_local(&p.name, ty, false, p.span);
@@ -194,7 +213,8 @@ fn check_fn(
     if !matches!(r, Ty::Unit | Ty::Never | Ty::Error) && !f.body_broken && !c.block_diverges(&block) {
         let d = Diagnostic::new(msg::TYPE_MISSING_RETURN, def_span)
             .with("name", prog.def(def).name.clone())
-            .with("ty", prog.display(&r));
+            .with("ty", prog.display(&r))
+            .note(msg::TYPE_MISSING_RETURN_END, Vec::new());
         c.report(d);
     }
     c.decide_captures();
@@ -234,11 +254,13 @@ fn check_fn(
         generator,
         contracts,
         generic_asserts: std::mem::take(&mut c.generic_asserts),
+        memo: Memo::default(),
     };
     zonk::Zonker { prog, infer: &c.infer }.body(&mut body);
     // A pure body's calls are checked on SIR (sisu-borrowck's purity pass).
     let diags = std::mem::take(&mut c.diags);
-    (body, diags, absorbed)
+    let reads = c.inferred_reads.take();
+    (body, diags, absorbed, reads)
 }
 
 /// The `Send` and `Sync` checks of the tasks the body spawns, once types
@@ -280,11 +302,12 @@ fn check_spawns(c: &mut Checker) {
     }
 }
 
-/// The part of a type in the way of `Send` or `Sync`, as a clause: `
-/// because of `name.field`, a `Cell[int]``; empty when it is the type.
-fn obstacle_path(c: &Checker, name: &str, o: &sisu_resolve::Obstacle) -> String {
+/// The part of a type in the way of `Send` or `Sync`, as the note that
+/// names it (`because of `name.field`, a `Cell[int]``); none when it is
+/// the type itself.
+fn obstacle_note(c: &Checker, d: Diagnostic, name: &str, o: &sisu_resolve::Obstacle) -> Diagnostic {
     if o.path.is_empty() {
-        return String::new();
+        return d;
     }
     let mut p = name.to_string();
     for seg in &o.path {
@@ -297,7 +320,7 @@ fn obstacle_path(c: &Checker, name: &str, o: &sisu_resolve::Obstacle) -> String 
             p.push_str(seg);
         }
     }
-    format!(" because of `{p}`, a `{}`", c.show(&o.ty))
+    d.note(msg::TASK_FIELD_PATH, vec![("path", p), ("ty", c.show(&o.ty))])
 }
 
 /// A value made into a capability handle must be `Send` and `Sync`: the
@@ -315,8 +338,8 @@ fn check_capabilities(c: &mut Checker) {
                 let d = Diagnostic::new(msg::CAP_NOT_SHAREABLE, span)
                     .with("ty", c.show(&ty))
                     .with("cap", cap.clone())
-                    .with("auto", name)
-                    .with("path", obstacle_path(c, "", &o));
+                    .with("auto", name);
+                let d = obstacle_note(c, d, "", &o);
                 c.report(d);
                 break;
             }
@@ -335,9 +358,8 @@ fn obstacle_diag(
     o: &sisu_resolve::Obstacle,
 ) -> Diagnostic {
     let prog = c.prog;
-    let path = obstacle_path(c, name, o);
-    let mut d =
-        Diagnostic::new(m, span).with("name", name.to_string()).with("ty", c.show(ty)).with("path", path);
+    let d = Diagnostic::new(m, span).with("name", name.to_string()).with("ty", c.show(ty));
+    let mut d = obstacle_note(c, d, name, o);
     // A `Cell` shares mutation through a `Mutex` instead.
     if let Ty::Adt(cd, a) = &o.ty
         && prog.builtin(*cd) == Some("Cell")
@@ -391,9 +413,31 @@ fn check_bounds(c: &mut Checker) {
         let answer = if strict { prog.bound_holds(&t, &b, &c.env) } else { prog.implements(&t, &b, &c.env) };
         if answer == Answer::No {
             seen.push((t.clone(), b.clone()));
-            let d = Diagnostic::new(msg::TYPE_BOUND_NOT_SATISFIED, span)
+            let mut d = Diagnostic::new(msg::TYPE_BOUND_NOT_SATISFIED, span)
                 .with("ty", c.show(&t))
                 .with("bound", prog.display_trait_in(&b, &c.generic_names));
+            // Interpolated without `Display`: its `Debug` form shows it.
+            let inside = |at: usize, ch: char| c.source.get(at..at + 1) == Some(ch.encode_utf8(&mut [0; 4]));
+            if Some(b.def) == prog.wk.display
+                && span.file == c.file
+                && span.range.start > 0
+                && inside(span.range.start as usize - 1, '{')
+                && inside(span.range.end as usize, '}')
+            {
+                let at = sisu_diag::Span::new(span.file, sisu_diag::TextRange::empty(span.range.end));
+                d = d.fix(
+                    msg::TYPE_SHOW_DEBUG,
+                    Vec::new(),
+                    vec![sisu_diag::Edit { span: at, text: ":?".into() }],
+                );
+            }
+            // A type parameter without the bound: bound it.
+            if let Ty::Param(i) = t
+                && let Some((name, edit)) = c.bound_edit(i, &prog.display_trait_in(&b, &c.generic_names))
+            {
+                let bound = prog.display_trait_in(&b, &c.generic_names);
+                d = d.fix(msg::TYPE_ADD_BOUND, vec![("param", name), ("bound", bound)], vec![edit]);
+            }
             let d = c.missing_impl_fix(d, &t, &b);
             c.report(d);
         } else if Some(b.def) == prog.wk.hash && !t.has_params() {
@@ -472,11 +516,14 @@ fn check_value(
     ty: &Ty,
     file: sisu_diag::FileId,
     sources: &SourceMap,
-) -> (Body, Vec<Diagnostic>) {
+) -> (Body, Vec<Diagnostic>, Vec<DefId>) {
     let mut c = Checker::new(prog, inferred, def, file, file_text(sources, file));
     if let Some(f) = prog.fn_info(def) {
         c.env = prog.elaborate_env(&f.predicates);
         c.generic_names = f.generics.iter().map(|g| g.name.clone()).collect();
+    }
+    if let BodyKind::FieldDefault(s, _) = kind {
+        c.field_default_of = Some(s);
     }
     c.ret.push(RetCtx { ty: ty.clone(), closure: None, first_local: 0, loops: 0, captures: Vec::new() });
     let x = c.check_expr(expr, ty);
@@ -501,13 +548,29 @@ fn check_value(
         generator: None,
         contracts: None,
         generic_asserts: Vec::new(),
+        memo: Memo::default(),
     };
     zonk::Zonker { prog, infer: &c.infer }.body(&mut body);
-    (body, std::mem::take(&mut c.diags))
+    let reads = c.inferred_reads.take();
+    (body, std::mem::take(&mut c.diags), reads)
 }
 
 /// Checks every body of a resolved program.
 pub fn check(prog: &Program, sources: &SourceMap) -> (Typed, Vec<Diagnostic>) {
+    check_with(prog, sources, None)
+}
+
+/// [`check`], reusing what `memo` holds: each body is checked again only
+/// when its item's text, the program's interface (`iface`, a hash of
+/// everything resolution read) or an inferred error set it read changed
+/// (docs/architecture.md, "The query layer"). The result is the same as
+/// [`check`]'s.
+pub fn check_with(
+    prog: &Program,
+    sources: &SourceMap,
+    memo: Option<(&mut BodyCache, u64)>,
+) -> (Typed, Vec<Diagnostic>) {
+    let mut memo = memo.map(|(cache, iface)| Session { cache, iface });
     // A template is checked in its instances (08, "Reflection").
     let fns: Vec<DefId> = prog
         .functions_with_bodies()
@@ -522,7 +585,7 @@ pub fn check(prog: &Program, sources: &SourceMap) -> (Typed, Vec<Diagnostic>) {
     for _ in 0..32 {
         let mut changed = false;
         for d in &inferred_fns {
-            let (_, _, absorbed) = check_fn(prog, &inferred, *d, sources);
+            let (_, _, absorbed) = memo_body(prog, &inferred, *d, BodyKind::Fn, sources, &mut memo);
             if inferred.get(d) != Some(&absorbed) {
                 inferred.insert(*d, absorbed);
                 changed = true;
@@ -535,7 +598,7 @@ pub fn check(prog: &Program, sources: &SourceMap) -> (Typed, Vec<Diagnostic>) {
     let mut typed = Typed { bodies: Vec::new(), inferred: inferred.clone(), requests: Vec::new() };
     let mut diags = Vec::new();
     for d in &fns {
-        let (body, mut ds, _) = check_fn(prog, &inferred, *d, sources);
+        let (body, mut ds, _) = memo_body(prog, &inferred, *d, BodyKind::Fn, sources, &mut memo);
         typed.bodies.push(body);
         // A function the compiler wrote from code checked elsewhere too
         // reports nothing of its own.
@@ -546,52 +609,22 @@ pub fn check(prog: &Program, sources: &SourceMap) -> (Typed, Vec<Diagnostic>) {
     // Defaults of fields and parameters, and constants.
     for (i, def) in prog.defs.iter().enumerate() {
         let id = DefId(i as u32);
-        match &def.kind {
-            DefKind::Struct(s) => {
-                for (fi, f) in s.fields.iter().enumerate() {
-                    if let Some(e) = &f.default {
-                        let (b, mut ds) = check_value(
-                            prog,
-                            &inferred,
-                            id,
-                            BodyKind::FieldDefault(id, fi as u32),
-                            e,
-                            &f.ty,
-                            f.span.file,
-                            sources,
-                        );
-                        typed.bodies.push(b);
-                        diags.append(&mut ds);
-                    }
-                }
-            }
-            DefKind::Fn(f) => {
-                for (pi, p) in f.params.iter().enumerate() {
-                    if let Some(e) = &p.default {
-                        let (b, mut ds) = check_value(
-                            prog,
-                            &inferred,
-                            id,
-                            BodyKind::ParamDefault(id, pi as u32),
-                            e,
-                            &p.ty,
-                            f.file,
-                            sources,
-                        );
-                        typed.bodies.push(b);
-                        diags.append(&mut ds);
-                    }
-                }
-            }
-            DefKind::Const(c) => {
-                if let Some(e) = &c.value {
-                    let (b, mut ds) =
-                        check_value(prog, &inferred, id, BodyKind::Const, e, &c.ty, c.file, sources);
-                    typed.bodies.push(b);
-                    diags.append(&mut ds);
-                }
-            }
-            _ => {}
+        let kinds: Vec<BodyKind> = match &def.kind {
+            DefKind::Struct(s) => (0..s.fields.len() as u32)
+                .filter(|fi| s.fields[*fi as usize].default.is_some())
+                .map(|fi| BodyKind::FieldDefault(id, fi))
+                .collect(),
+            DefKind::Fn(f) => (0..f.params.len() as u32)
+                .filter(|pi| f.params[*pi as usize].default.is_some())
+                .map(|pi| BodyKind::ParamDefault(id, pi))
+                .collect(),
+            DefKind::Const(c) if c.value.is_some() => vec![BodyKind::Const],
+            _ => Vec::new(),
+        };
+        for kind in kinds {
+            let (b, mut ds, _) = memo_body(prog, &inferred, id, kind, sources, &mut memo);
+            typed.bodies.push(b);
+            diags.append(&mut ds);
         }
     }
     if let Some(main) = prog.main()
@@ -605,7 +638,10 @@ pub fn check(prog: &Program, sources: &SourceMap) -> (Typed, Vec<Diagnostic>) {
             || matches!(&f.ret, Ty::Adt(d, a) if Some(*d) == prog.wk.result && a.first() == Some(&Ty::Unit));
         if !params_ok || !ret_ok || f.self_mode.is_some() {
             let _ = ret;
-            diags.push(Diagnostic::new(msg::TYPE_MAIN_SIGNATURE, prog.def(main).span));
+            diags.push(
+                Diagnostic::new(msg::TYPE_MAIN_SIGNATURE, prog.def(main).span)
+                    .note(msg::TYPE_MAIN_FORMS, Vec::new()),
+            );
         }
     }
     // A test takes nothing, or the real `System`, which it then receives
@@ -632,7 +668,10 @@ pub fn check(prog: &Program, sources: &SourceMap) -> (Typed, Vec<Diagnostic>) {
 /// none yet, and the promotion of each generic function that calls one
 /// with its own type parameters. A template used as a value has no
 /// instance to be, and is reported.
-fn template_requests(prog: &Program, bodies: &[Body]) -> (Vec<sisu_resolve::Request>, Vec<Diagnostic>) {
+fn template_requests(
+    prog: &Program,
+    bodies: &[std::sync::Arc<Body>],
+) -> (Vec<sisu_resolve::Request>, Vec<Diagnostic>) {
     let mut out: Vec<sisu_resolve::Request> = Vec::new();
     let mut diags = Vec::new();
     let is_template = |d: &DefId| prog.fn_info(*d).is_some_and(|f| f.template);

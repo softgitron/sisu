@@ -30,6 +30,8 @@ pub(crate) struct Parser<'a> {
     pub(crate) quiet: u32,
     /// Every diagnostic the parser tried to report, kept or not.
     pub(crate) attempts: u32,
+    /// The range of the last expression parsed, for E0115's fix.
+    pub(crate) last_expr: Option<TextRange>,
     line_starts: Vec<u32>,
 }
 
@@ -57,6 +59,7 @@ impl<'a> Parser<'a> {
             lex_errors: Vec::new(),
             quiet: 0,
             attempts: 0,
+            last_expr: None,
             line_starts,
         }
     }
@@ -103,6 +106,11 @@ impl<'a> Parser<'a> {
         self.at(IDENT) && self.current_text() == word
     }
 
+    /// Where the last significant token consumed ends.
+    pub(crate) fn previous_end(&self) -> Option<u32> {
+        self.pos.checked_sub(1).and_then(|p| self.sig.get(p)).map(|&i| self.tokens[i].range.end)
+    }
+
     pub(crate) fn current_range(&self) -> TextRange {
         self.nth_token(0).map(|t| t.range).unwrap_or(TextRange::empty(self.text.len() as u32))
     }
@@ -110,6 +118,25 @@ impl<'a> Parser<'a> {
     /// The 1-based line of the current token.
     pub(crate) fn current_line(&self) -> u32 {
         self.line_of(self.current_range().start)
+    }
+
+    /// Where `word` is first written as a whole word on the 1-based `line`.
+    pub(crate) fn word_on_line(&self, word: &str, line: u32) -> Option<TextRange> {
+        let start = *self.line_starts.get(line.checked_sub(1)? as usize)? as usize;
+        let end = self.text[start..].find('\n').map_or(self.text.len(), |i| start + i);
+        let text = &self.text[start..end];
+        let is_word = |b: Option<&u8>| b.is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_');
+        let mut from = 0;
+        while let Some(i) = text[from..].find(word).map(|i| from + i) {
+            let after = i + word.len();
+            if !is_word(i.checked_sub(1).and_then(|j| text.as_bytes().get(j)))
+                && !is_word(text.as_bytes().get(after))
+            {
+                return Some(TextRange::new((start + i) as u32, (start + after) as u32));
+            }
+            from = after;
+        }
+        None
     }
 
     pub(crate) fn line_of(&self, offset: u32) -> u32 {
@@ -214,6 +241,18 @@ impl<'a> Parser<'a> {
         self.diags.push(diag);
     }
 
+    /// How many diagnostics were kept, so a fix can be added to one later.
+    pub(crate) fn diags_len(&self) -> usize {
+        self.diags.len()
+    }
+
+    /// Adds a fix to the diagnostic kept at `index`.
+    pub(crate) fn add_fix(&mut self, index: usize, m: MsgId, edits: Vec<sisu_diag::Edit>) {
+        if let Some(d) = self.diags.get_mut(index) {
+            d.fixes.push(sisu_diag::Fix { msg: m, params: Vec::new(), edits });
+        }
+    }
+
     /// Whether a syntax error was found before the current token.
     pub(crate) fn error_before(&self) -> bool {
         let here = self.current_range().start;
@@ -247,9 +286,19 @@ impl<'a> Parser<'a> {
         }
         let span = self.error_span();
         let found = self.found();
-        self.report(
-            Diagnostic::new(msg::PARSE_EXPECTED, span).with("expected", kind.describe()).with("found", found),
-        );
+        let mut d =
+            Diagnostic::new(msg::PARSE_EXPECTED, span).with("expected", kind.describe()).with("found", found);
+        // A punctuation token missing at the end of a line: the fix writes it.
+        if span.range.is_empty()
+            && let Some(text) = kind.punctuation_text()
+        {
+            d = d.fix(
+                msg::PARSE_INSERT_TOKEN,
+                Vec::new(),
+                vec![sisu_diag::Edit { span, text: text.to_string() }],
+            );
+        }
+        self.report(d);
         false
     }
 
@@ -305,9 +354,56 @@ impl<'a> Parser<'a> {
         if self.eat(NEWLINE) || self.at_any(&[DEDENT, EOF]) {
             return;
         }
-        let span = self.error_span();
-        let found = self.found();
-        self.report(Diagnostic::new(msg::PARSE_TRAILING_TOKENS, span).with("found", found));
+        if let Some(d) = self.python_conditional() {
+            self.report(d);
+        } else {
+            let span = self.error_span();
+            let found = self.found();
+            self.report(Diagnostic::new(msg::PARSE_TRAILING_TOKENS, span).with("found", found));
+        }
         self.recover_line();
+    }
+
+    /// `a if c else b` after a statement's expression `a` (E0115), with
+    /// the fix that writes it as `if c: a else: b`. Only looks: the tokens
+    /// are recovered as any trailing tokens are.
+    fn python_conditional(&self) -> Option<Diagnostic> {
+        if !self.at(IF_KW) {
+            return None;
+        }
+        let value = self.last_expr?;
+        let end_of = |n: usize| self.nth_token(n).map(|t| t.range.end);
+        if self.previous_end() != Some(value.end) {
+            return None;
+        }
+        // `else` at the depth of the `if`, then the line's end.
+        let mut depth = 0i32;
+        let mut else_at = None;
+        let mut i = 1;
+        loop {
+            match self.nth(i) {
+                L_PAREN | L_BRACKET | L_BRACE => depth += 1,
+                R_PAREN | R_BRACKET | R_BRACE => depth -= 1,
+                ELSE_KW if depth == 0 && else_at.is_none() => else_at = Some(i),
+                // The end of the file ends the look at any depth: an open
+                // bracket is closed only by the layout's recovery.
+                EOF => break,
+                NEWLINE | DEDENT | INDENT | COLON if depth == 0 => break,
+                _ => {}
+            }
+            i += 1;
+        }
+        let e = else_at.filter(|&e| e > 1 && i > e + 1)?;
+        let text = |from: u32, to: u32| self.text.get(from as usize..to as usize);
+        let cond = text(self.nth_token(1)?.range.start, end_of(e - 1)?)?;
+        let other = text(self.nth_token(e + 1)?.range.start, end_of(i - 1)?)?;
+        let first = text(value.start, value.end)?;
+        let whole = Span::new(self.file, TextRange::new(value.start, end_of(i - 1)?));
+        let edit = sisu_diag::Edit { span: whole, text: format!("if {cond}: {first} else: {other}") };
+        Some(Diagnostic::new(msg::PARSE_PYTHON_CONDITIONAL, whole).fix(
+            msg::PARSE_USE_IF_EXPRESSION,
+            Vec::new(),
+            vec![edit],
+        ))
     }
 }

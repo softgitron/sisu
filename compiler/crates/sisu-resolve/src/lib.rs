@@ -25,7 +25,10 @@ mod types;
 
 pub use auto::{Auto, Obstacle};
 pub use borrows::{ResultBorrows, ResultShape, SigParam};
-pub use collect::{Resolved, SourceModule, SourcePackage, Sources, resolve, resolve_program, resolve_with};
+pub use collect::{
+    Resolution, Resolved, SourceModule, SourcePackage, Sources, resolve, resolve_program, resolve_session,
+    resolve_with,
+};
 pub use program::*;
 pub use solve::{Answer, ImplSource};
 pub use ty::{AssocTy, FnTy, Ty, TyKey, is_subset, union, unsized_part};

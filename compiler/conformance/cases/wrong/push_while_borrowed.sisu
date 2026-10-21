@@ -1,0 +1,8 @@
+# A wrong program: a list is changed while a borrow of an element is
+# still used.
+
+def main():
+    var xs = [1, 2, 3]
+    let first = ref xs[0]
+    xs.push(4)
+    print(first)

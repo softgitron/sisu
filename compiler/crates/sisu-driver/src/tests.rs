@@ -9,15 +9,18 @@ fn queries_are_reused_until_the_text_changes() {
     assert!(db.sir("a.sisu").is_some());
     assert!(db.checked("a.sisu").is_some());
     assert!(db.sir("a.sisu").is_some());
-    assert_eq!(db.counters, Counters { parse: 1, check: 1, lower: 1 });
+    let steps = |c: Counters| (c.parse, c.check, c.lower);
+    assert_eq!(steps(db.counters), (1, 1, 1));
     // The same text again: nothing reruns.
     db.set_file("a.sisu", "def main():\n    print(1)\n");
     assert!(db.sir("a.sisu").is_some());
-    assert_eq!(db.counters, Counters { parse: 1, check: 1, lower: 1 });
-    // A change reruns every step after it.
+    assert_eq!(steps(db.counters), (1, 1, 1));
+    // A change reruns every step after it, each for the items it changed:
+    // `main`'s body is checked and lowered again, nothing else.
     db.set_file("a.sisu", "def main():\n    print(2)\n");
     assert!(db.sir("a.sisu").is_some());
-    assert_eq!(db.counters, Counters { parse: 2, check: 2, lower: 2 });
+    assert_eq!(steps(db.counters), (2, 2, 2));
+    assert_eq!((db.counters.bodies_checked, db.counters.bodies_lowered), (1, 1));
 }
 
 #[test]
@@ -197,4 +200,61 @@ fn audit_counts_the_escape_hatches_per_file() {
     let (code, host) = cli(&["audit", &a]);
     assert_eq!(code, 2);
     assert!(host.err.contains("error[D0022]"), "{}", host.err);
+}
+
+/// `sisu check --diary`: every diagnostic, then, once a later check no
+/// longer has it, what resolved it and the fix that was applied.
+#[test]
+fn the_diary_logs_diagnostics_and_what_resolved_them() {
+    let f = temp_file("diary.sisu", "def main():\n    let count = 3\n    print(cuont)\n");
+    let log = temp_file("diary.jsonl", "");
+    let _ = std::fs::remove_file(&log);
+    let (code, _) = cli(&["check", "--diary", &log, &f]);
+    assert_eq!(code, 1);
+    let _ = std::fs::write(&f, "def main():\n    let count = 3\n    print(count)\n");
+    let (code, host) = cli(&["check", "--diary", &log, &f]);
+    assert_eq!(code, 0, "{}", host.err);
+    let text = std::fs::read_to_string(&log).unwrap_or_default();
+    let records: Vec<crate::json::Json> = text.lines().filter_map(|l| crate::json::parse(l).ok()).collect();
+    let kinds: Vec<&str> =
+        records.iter().filter_map(|r| r.get("record").and_then(crate::json::Json::as_str)).collect();
+    assert_eq!(kinds, ["check", "diagnostic", "check", "resolved"], "{text}");
+    let d = &records[1];
+    assert_eq!(d.get("id").and_then(crate::json::Json::as_str), Some("resolve.undefined-name"));
+    assert_eq!(d.at(&["span", "start", "line"]).and_then(crate::json::Json::as_u64), Some(3));
+    assert_eq!(
+        d.get("fixes").and_then(crate::json::Json::as_array).map(<[_]>::len),
+        Some(1),
+        "the fix-its are logged: {text}"
+    );
+    let r = &records[3];
+    assert_eq!(r.get("fix").and_then(crate::json::Json::as_str), Some("resolve.similar-name"), "{text}");
+    assert_eq!(r.at(&["edit", "text"]).and_then(crate::json::Json::as_str), Some("ou"), "{text}");
+}
+
+/// `sisu run --stats stack-depth` and `--stats shared`.
+#[test]
+fn run_stats_report_depths_and_shared_sites() {
+    let f = temp_file(
+        "depth.sisu",
+        "def depth(n: int) -> int:\n    if n == 0:\n        return 0\n    return 1 + depth(n - 1)\n\ndef main():\n    print(depth(9))\n",
+    );
+    let (code, host) = cli(&["run", "--stats", "stack-depth", &f]);
+    assert_eq!(code, 0, "{}", host.err);
+    assert!(host.err.contains("the deepest stack 11 frames"), "{}", host.err);
+    assert!(host.err.contains("4 calls at a depth of 8 to 15 frames"), "{}", host.err);
+    let f = temp_file(
+        "shared.sisu",
+        "struct Count:\n    n: int\n\ndef main():\n    let s = Shared(Count(n=5))\n    let t = s.copy()\n    print(t.n + 1)\n",
+    );
+    let (code, host) = cli(&["run", "--stats", "shared", &f]);
+    assert_eq!(code, 0, "{}", host.err);
+    assert!(host.err.contains("1 of 1 `Shared` construction sites tagged task-local"), "{}", host.err);
+    assert!(
+        host.err.contains(":5:13 in `main`, task-local: 1 cells made, 0 reached by another task"),
+        "{}",
+        host.err
+    );
+    let (code, _) = cli(&["run", "--stats=nonsense", &f]);
+    assert_eq!(code, crate::cli::EXIT_USAGE);
 }

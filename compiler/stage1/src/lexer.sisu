@@ -1,0 +1,262 @@
+##! The Sisu lexer (proposal/02-syntax.md, "Lexical structure";
+##! docs/architecture.md, "Lexing"). Two passes, neither of which consults
+##! the parser: `scan` turns the text into raw tokens covering every byte,
+##! and `layout` decides logical lines and blocks. Every input produces
+##! tokens; problems are diagnostics and the token stream stays well formed.
+
+from stage1.diag import Diagnostic, Msg
+from stage1.mutants import Rng
+from stage1.syntax.kinds import SyntaxKind
+from stage1.syntax.tree import Token
+
+## The output of the lexer: tokens covering every byte, and diagnostics in
+## the order the passes found them.
+pub struct Lexed:
+    pub tokens: list[Token]
+    pub diagnostics: list[Diagnostic]
+
+## Lexes `text` completely.
+pub pure def lex(text: str) -> Lexed:
+    var diagnostics: list[Diagnostic] = []
+    let raw = scan.scan(text, mut diagnostics)
+    let tokens = layout.layout(text, raw, mut diagnostics)
+    return Lexed(tokens=tokens, diagnostics=diagnostics)
+
+# ------------------------------------------------------------------ tests
+
+## The kinds, under a short name for the tests' expected lists.
+type K = SyntaxKind
+
+# The unit tests of stage 0's lexer (`sisu-lexer/src/tests.rs`), with
+# diagnostics compared by message rather than by code.
+
+## The kinds of the significant tokens of `src`.
+pure def sig(src: str) -> list[SyntaxKind]:
+    var kinds: list[SyntaxKind] = []
+    for t in lex(src).tokens:
+        if not t.kind.is_trivia():
+            kinds.push(t.kind)
+    return kinds
+
+## The first `n` of them.
+pure def sig_prefix(src: str, n: int) -> list[SyntaxKind]:
+    var kinds = sig(src)
+    while len(kinds) > n:
+        _ = kinds.pop()
+    return kinds
+
+pure def msgs(src: str) -> list[Msg]:
+    var out: list[Msg] = []
+    for d in lex(src).diagnostics:
+        out.push(d.msg)
+    return out
+
+pure def count(kinds: list[SyntaxKind], kind: SyntaxKind) -> int:
+    var n = 0
+    for k in kinds:
+        if k == kind:
+            n += 1
+    return n
+
+## Whether the tokens of `src` cover it, in order, without gaps.
+pure def lossless(src: str) -> bool:
+    var pos = 0
+    for t in lex(src).tokens:
+        if t.start != pos:
+            return False
+        pos = t.end
+    return pos == src.byte_len()
+
+test "a function with a block":
+    let expected = [
+        K.DefKw,
+        K.Ident,
+        K.LParen,
+        K.RParen,
+        K.Colon,
+        K.Newline,
+        K.Indent,
+        K.Ident,
+        K.LParen,
+        K.StringStart,
+        K.StringText,
+        K.StringEnd,
+        K.RParen,
+        K.Newline,
+        K.Dedent,
+        K.Eof,
+    ]
+    assert sig("def main():\n    print(\"hi\")\n") == expected
+
+test "nested blocks dedent twice":
+    let k = sig("if a:\n  if b:\n    x\ny\n")
+    assert count(k, K.Dedent) == 2
+    assert count(k, K.Indent) == 2
+    assert msgs("if a:\n  if b:\n    x\ny\n").is_empty()
+
+test "blank and comment lines are ignored":
+    let k = sig("if a:\n\n    # note\n        # deeper comment\n    x\n")
+    assert k == [K.IfKw, K.Ident, K.Colon, K.Newline, K.Indent, K.Ident, K.Newline, K.Dedent, K.Eof]
+
+test "continuation rules":
+    # Inside brackets.
+    assert sig("f(a,\n      b)\n")
+        == [K.Ident, K.LParen, K.Ident, K.Comma, K.Ident, K.RParen, K.Newline, K.Eof]
+    # After a trailing comma outside brackets.
+    assert sig_prefix("if a, b,\n   c:\n  x\n", 7)
+        == [K.IfKw, K.Ident, K.Comma, K.Ident, K.Comma, K.Ident, K.Colon]
+    # Before a binary operator or a dot.
+    assert sig("x = a\n    + b\n") == [K.Ident, K.Eq, K.Ident, K.Plus, K.Ident, K.Newline, K.Eof]
+    assert sig("xs\n    .iter()\n")
+        == [K.Ident, K.Dot, K.Ident, K.LParen, K.RParen, K.Newline, K.Eof]
+    assert sig("a\n  not in b\n") == [K.Ident, K.NotKw, K.InKw, K.Ident, K.Newline, K.Eof]
+    # `not` alone starts a new line.
+    assert sig("a\nnot b\n") == [K.Ident, K.Newline, K.NotKw, K.Ident, K.Newline, K.Eof]
+
+test "tabs in indentation are errors":
+    assert msgs("if a:\n\tx\n") == [Msg.LexTabInIndentation]
+    # A tab between tokens is ordinary whitespace.
+    assert msgs("x =\t1\n").is_empty()
+
+test "an inconsistent dedent is reported once":
+    let src = "if a:\n    if b:\n        x\n  y\n  z\n"
+    let diagnostics = lex(src).diagnostics
+    assert len(diagnostics) == 1
+    assert diagnostics[0].msg == Msg.LexInconsistentDedent
+    assert diagnostics[0].param("columns") == Some("1 or 5".to_string())
+
+test "interpolation tokens":
+    let expected = [
+        K.StringStart,
+        K.StringText,
+        K.InterpStart,
+        K.Ident,
+        K.InterpEnd,
+        K.StringText,
+        K.InterpStart,
+        K.Ident,
+        K.Colon,
+        K.FormatSpec,
+        K.InterpEnd,
+        K.StringText,
+        K.InterpStart,
+        K.Ident,
+        K.Eq,
+        K.InterpEnd,
+        K.StringEnd,
+        K.Newline,
+        K.Eof,
+    ]
+    assert sig("\"a {{x}} b {{n:>8}} {{y=}}\"\n") == expected
+    # Doubled braces are text; nested brackets stay inside the interpolation.
+    assert sig_prefix("\"{{{{x}}}} {{f(a[1])}}\"\n", 4)
+        == [K.StringStart, K.StringText, K.InterpStart, K.Ident]
+
+test "keywords after a dot are names":
+    assert sig_prefix("log.error(x)\n", 3) == [K.Ident, K.Dot, K.Ident]
+    assert sig("import std.test\n") == [K.ImportKw, K.Ident, K.Dot, K.Ident, K.Newline, K.Eof]
+    assert sig_prefix("def or(x)\n", 2) == [K.DefKw, K.Ident]
+
+test "tuple fields after a dot are integers":
+    assert sig("x.0.1\n") == [K.Ident, K.Dot, K.IntNumber, K.Dot, K.IntNumber, K.Newline, K.Eof]
+    assert sig_prefix("b.1.cmp(a.1)\n", 5) == [K.Ident, K.Dot, K.IntNumber, K.Dot, K.Ident]
+
+test "numbers":
+    assert sig_prefix("0xFF 0b1010 0o17 1_000 42u8\n", 5)
+        == [K.IntNumber, K.IntNumber, K.IntNumber, K.IntNumber, K.IntNumber]
+    assert sig_prefix("1.0 2.5e-3 1.0f32 3e8\n", 4)
+        == [K.FloatNumber, K.FloatNumber, K.FloatNumber, K.FloatNumber]
+    assert msgs("0x\n") == [Msg.LexInvalidNumber]
+    assert msgs("12abc\n") == [Msg.LexInvalidNumber]
+
+test "strings and characters":
+    assert sig_prefix("r\"a\\n\" b\"x\" 'c' '\\n'\n", 4)
+        == [K.RawString, K.ByteString, K.CharLit, K.CharLit]
+    assert msgs("\"abc\n") == [Msg.LexUnterminatedString]
+    assert msgs("\"a\\q\"\n") == [Msg.LexInvalidEscape]
+    assert msgs("'ab'\n") == [Msg.LexBadCharLiteral]
+    assert msgs("\"\"\"never closed\n") == [Msg.LexUnterminatedBlockString]
+    assert msgs("\"\"\"two\nlines\"\"\"\n").is_empty()
+    assert msgs("'\\u{{1F600}}'\n").is_empty()
+    assert msgs("'\\u{{+41}}'\n") == [Msg.LexInvalidEscape, Msg.LexBadCharLiteral]
+
+test "an unclosed bracket recovers at the next declaration":
+    let src = "def f():\n    g(1,\n\ndef h():\n    pass\n"
+    assert msgs(src) == [Msg.LexUnclosedBracket]
+    let k = sig(src)
+    # `def h` starts a new logical line at the top level.
+    assert count(k, K.DefKw) == 2
+    var last_def = 0
+    for i in range(len(k)):
+        if k[i] == K.DefKw:
+            last_def = i
+    assert k[last_def - 1] == K.Dedent
+
+test "bracket errors":
+    assert msgs("x)\n") == [Msg.LexUnmatchedClose]
+    assert msgs("(x]\n") == [Msg.LexMismatchedBracket]
+    assert msgs("f(a[1)\n") == [Msg.LexMismatchedBracket]
+    assert msgs("x;\n") == [Msg.LexSemicolon]
+    assert msgs("a \\\n b\n") == [Msg.LexBackslashContinuation]
+
+test "a line without a final break still ends":
+    assert sig("x") == [K.Ident, K.Newline, K.Eof]
+    assert sig("if a:\n    x")
+        == [K.IfKw, K.Ident, K.Colon, K.Newline, K.Indent, K.Ident, K.Newline, K.Dedent, K.Eof]
+
+test "a line break in a one-line interpolation is a line break":
+    let k = sig("f(\"a{{x\nb\n")
+    assert count(k, K.ErrorToken) == 0
+    assert msgs("\"a{{x\nb\n") == [Msg.LexNewlineInInterpolation]
+
+test "every byte is covered":
+    for s in [
+        "def main():\n    print(\"Hei, maailma!\")\n",
+        "\"unterminated {{x\nnext\n",
+        "x = \"{{a:{{b}}}}\"\n",
+        "\t\t\u{a0}weird\r\n  é = 1\n",
+        "\"\"\"a {{b\nc}} d\"\"\"",
+        "'",
+        "\"{{",
+        "\"{{x",
+        "#",
+        "x.\n0.5",
+    ]:
+        assert lossless(s)
+
+test "random inputs are lossless":
+    let alphabet = "ab_ 1.0x\n\t:(){{}}[]\"'#\\,+-=<>!?%*/&|^~@é"
+    var chars: list[char] = []
+    for c in alphabet.chars():
+        chars.push(c)
+    var rng = Rng.new(0x2545F491)
+    for _ in range(300):
+        var s = String.new()
+        for _ in range(rng.below(40)):
+            s.push_char(chars[rng.below(len(chars))])
+        assert lossless(s)
+
+test "a dedent comes before the comments after its block":
+    let src = "def f():\n    pass\n\n## docs of g\ndef g():\n    pass\n# end\n"
+    var kinds: list[SyntaxKind] = []
+    for t in lex(src).tokens:
+        kinds.push(t.kind)
+    var first_dedent = -1
+    var last_dedent = -1
+    var doc = -1
+    var comment = -1
+    for i in range(len(kinds)):
+        match kinds[i]:
+            case Dedent:
+                if first_dedent < 0:
+                    first_dedent = i
+                last_dedent = i
+            case DocComment:
+                doc = i
+            case Comment:
+                comment = i
+            case _:
+                pass
+    assert first_dedent < doc
+    assert last_dedent < comment
+    assert lossless(src)

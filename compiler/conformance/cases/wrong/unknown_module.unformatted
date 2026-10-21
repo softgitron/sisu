@@ -1,0 +1,1 @@
+The misspelt import is what it tests, and `sisu fmt` removes an import whose name the module never uses (here the uses say `json`).

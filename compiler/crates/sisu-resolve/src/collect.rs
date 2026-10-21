@@ -105,6 +105,13 @@ pub(crate) struct Resolver<'a> {
     pub std_doc_tests: bool,
     /// The items of each std module loaded, for its doc examples.
     pub std_items: HashMap<&'static str, std::sync::Arc<ast::Module>>,
+    /// How many instances this resolution was asked for, made or not
+    /// (`MAX_INSTANCES` bounds it).
+    pub instances_asked: usize,
+    /// Whether it was asked for more than that, which is reported once.
+    pub instances_bounded: bool,
+    /// The definitions whose `from` clauses are checked already.
+    pub borrow_checked: usize,
 }
 
 /// What a type expression may mention where it is written.
@@ -206,6 +213,47 @@ pub fn resolve_program(
     requests: &[Request],
     embedded: &HashMap<String, Result<String, String>>,
 ) -> Resolved {
+    resolve_session(sources, program, requests, embedded).finish()
+}
+
+/// A resolution that can be given more instances of its templates (08,
+/// "Reflection"): an instance is declared after everything else, so
+/// declaring the instances a check asked for on top of the program it
+/// checked gives what resolving again with every request would, without
+/// the work (docs/architecture.md, "The query layer").
+pub struct Resolution<'a> {
+    r: Resolver<'a>,
+}
+
+impl<'a> Resolution<'a> {
+    pub fn program(&self) -> &Program {
+        &self.r.prog
+    }
+
+    pub fn sources(&self) -> &SourceMap {
+        self.r.sources
+    }
+
+    /// Declares the instances `requests` asks for that the program does
+    /// not have. A promotion makes a declared function a template, which
+    /// only resolving again with it can do: it is ignored here.
+    pub fn add_instances(&mut self, requests: &[Request]) {
+        self.r.declare_instances(requests);
+        self.r.check_borrow_signatures();
+    }
+
+    pub fn finish(self) -> Resolved {
+        Resolved { program: self.r.prog, diagnostics: self.r.diags }
+    }
+}
+
+/// [`resolve_program`], keeping the resolver for more instances.
+pub fn resolve_session<'a>(
+    sources: &'a mut SourceMap,
+    program: Sources<'_>,
+    requests: &[Request],
+    embedded: &HashMap<String, Result<String, String>>,
+) -> Resolution<'a> {
     let mut r = Resolver {
         prog: Program::default(),
         diags: Vec::new(),
@@ -236,6 +284,9 @@ pub fn resolve_program(
         deferred_imports: None,
         std_doc_tests: false,
         std_items: HashMap::new(),
+        instances_asked: 0,
+        instances_bounded: false,
+        borrow_checked: 0,
     };
     r.prog.embedded = embedded.clone();
     // The packages: the root package, std, then the dependencies.
@@ -341,7 +392,7 @@ pub fn resolve_program(
     r.check_traits();
     r.declare_instances(requests);
     r.check_borrow_signatures();
-    Resolved { program: r.prog, diagnostics: r.diags }
+    Resolution { r }
 }
 
 impl Resolver<'_> {
@@ -529,9 +580,11 @@ impl Resolver<'_> {
         // The file keeps the module's name: its lines are the module's.
         let name = self.sources.name(file).to_string();
         let gen_file = self.sources.add(name, generated.clone());
-        let parse = sisu_parser::parse(gen_file, &generated);
-        self.diags.extend(parse.diagnostics);
-        let ast = ast::build::module(&parse.tree);
+        let (ast, diags) = parse_generated(&generated);
+        self.diags.extend(diags.iter().cloned().map(|mut d| {
+            d.spans_mut().for_each(|s| s.file = gen_file);
+            d
+        }));
         let parent = &self.prog.modules[module.0 as usize];
         let data = ModuleData {
             name: format!("<doc>/{}.sisu", parent.name),
@@ -628,11 +681,12 @@ impl Resolver<'_> {
         if let Some(&prev) = m.items.get(name) {
             let first = self.prog.def(prev).span;
             let span = self.span(module, range);
-            self.report(Diagnostic::new(msg::RESOLVE_DUPLICATE_DEFINITION, span).with("name", name).label(
-                first,
-                msg::RESOLVE_FIRST_DEFINED,
-                Vec::new(),
-            ));
+            self.report(
+                Diagnostic::new(msg::RESOLVE_DUPLICATE_DEFINITION, span)
+                    .with("name", name)
+                    .label(first, msg::RESOLVE_FIRST_DEFINED, Vec::new())
+                    .note(msg::RESOLVE_RENAME_DUPLICATE, Vec::new()),
+            );
             return;
         }
         let m = &mut self.prog.modules[module.0 as usize];
@@ -1062,7 +1116,8 @@ impl Resolver<'_> {
     /// (04, "Borrowing rules in detail"), once every type is resolved.
     fn check_borrow_signatures(&mut self) {
         let mut found = Vec::new();
-        for def in self.prog.defs.iter() {
+        let from = std::mem::replace(&mut self.borrow_checked, self.prog.defs.len());
+        for def in self.prog.defs.iter().skip(from) {
             let DefKind::Fn(f) = &def.kind else { continue };
             if self.prog.modules[def.module.0 as usize].is_std || f.header_broken {
                 continue;
@@ -1198,7 +1253,21 @@ impl Resolver<'_> {
                 return None;
             }
             let Some((name, source)) = std_sources::module_for(&words) else {
-                self.report(Diagnostic::new(msg::RESOLVE_IMPORT_UNKNOWN, at).with("name", words.join(".")));
+                let written = words.join(".");
+                let mut d = Diagnostic::new(msg::RESOLVE_IMPORT_UNKNOWN, at).with("name", written.clone());
+                // The closest module a path can name: std's, or a package's.
+                let mut candidates: Vec<String> =
+                    std_sources::MODULE_PATHS.iter().map(|p| p.to_string()).collect();
+                candidates
+                    .extend(self.prog.packages.iter().filter(|p| !p.name.is_empty()).map(|p| p.name.clone()));
+                if let Some(similar) = crate::program::closest(&written, candidates) {
+                    d = d.fix(
+                        msg::RESOLVE_SIMILAR_MODULE,
+                        Vec::new(),
+                        vec![sisu_diag::Edit { span: at, text: similar }],
+                    );
+                }
+                self.report(d);
                 return None;
             };
             return Some(self.load_std(name, source));
@@ -1221,6 +1290,20 @@ impl Resolver<'_> {
             }
         }
         Some(m)
+    }
+
+    /// The name an import that failed would have bound: an undefined use
+    /// of it is not reported, since the import was. With a fix that names
+    /// a similar module, the name that module would bind is too
+    /// (`import std.jsn` and then `json.parse`).
+    fn poison_import(&mut self, name: String) {
+        if let Some(fix) = self.diags.last().and_then(|d| d.fixes.first())
+            && fix.msg == msg::RESOLVE_SIMILAR_MODULE
+            && let Some(last) = fix.edits.first().and_then(|e| e.text.rsplit('.').next())
+        {
+            self.prog.poisoned.insert(last.to_string());
+        }
+        self.prog.poisoned.insert(name);
     }
 
     /// Records that an import bound `name` in `module`, with the import's
@@ -1256,12 +1339,16 @@ impl Resolver<'_> {
             (Some(a), Some(b)) => self.span(module, a.range.cover(b.range)),
             _ => span,
         };
-        let Some(m) = self.import_target(module, &imp.path, at) else { return };
         let bound = imp
             .alias
             .as_ref()
             .map(|a| a.text.clone())
             .unwrap_or_else(|| imp.path.last().map(|s| s.text.clone()).unwrap_or_default());
+        let Some(m) = self.import_target(module, &imp.path, at) else {
+            // The import was reported; its uses are not reported again.
+            self.poison_import(bound);
+            return;
+        };
         let range_of_name =
             imp.alias.as_ref().map(|a| a.range).or(imp.path.last().map(|n| n.range)).unwrap_or(range);
         let def = self.new_def(module, &bound, range_of_name, vis, Vec::new(), DefKind::Module(m));
@@ -1277,7 +1364,12 @@ impl Resolver<'_> {
             (Some(a), Some(b)) => self.span(module, a.range.cover(b.range)),
             _ => self.span(module, range),
         };
-        let Some(m) = self.import_target(module, &imp.path, span) else { return };
+        let Some(m) = self.import_target(module, &imp.path, span) else {
+            for (n, alias) in &imp.names {
+                self.poison_import(alias.as_ref().unwrap_or(n).text.clone());
+            }
+            return;
+        };
         let path: Vec<&str> = imp.path.iter().map(|n| n.text.as_str()).collect();
         let name = self.prog.modules[m.0 as usize].name.clone();
         let prelude = self.prog.prelude;
@@ -2030,7 +2122,7 @@ fn invariant_check_def(node: sisu_syntax::tree::NodeId, s: &ast::StructDef) -> a
         ret: None,
         from: Vec::new(),
         where_: Vec::new(),
-        body: Some(ast::Block { node, range, stmts }),
+        body: Some(std::sync::Arc::new(ast::Block { node, range, stmts })),
         attrs: vec![ast::Attr { name: "internal".into(), args: Vec::new(), range }],
         header_broken: false,
         body_broken: false,
@@ -2088,7 +2180,7 @@ fn predicate_def(pred: &ast::Expr) -> ast::FnDef {
         ret: Some(ret),
         from: Vec::new(),
         where_: Vec::new(),
-        body: Some(body),
+        body: Some(std::sync::Arc::new(body)),
         attrs: Vec::new(),
         header_broken: false,
         body_broken: false,
@@ -2168,6 +2260,37 @@ fn std_ast(
     parsed
 }
 
+/// The syntax of source text the compiler wrote (a derived impl, an
+/// instance of a template, the generators and shims it writes), parsed once
+/// per process for each text: the same declarations give the same text in
+/// every resolution of every program (the per-item queries of
+/// docs/architecture.md). Its diagnostics name `FileId(0)`.
+pub(crate) fn parse_generated(text: &str) -> (std::sync::Arc<ast::Module>, Vec<sisu_diag::Diagnostic>) {
+    type Parsed = (std::sync::Arc<str>, std::sync::Arc<ast::Module>, Vec<sisu_diag::Diagnostic>);
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<u64, Parsed>>> = std::sync::OnceLock::new();
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    let key = h.finish();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Ok(c) = cache.lock()
+        && let Some((t, m, d)) = c.get(&key)
+        && **t == *text
+    {
+        return (m.clone(), d.clone());
+    }
+    let parse = sisu_parser::parse(FileId(0), text);
+    let module = std::sync::Arc::new(ast::build::module(&parse.tree));
+    if let Ok(mut c) = cache.lock() {
+        // A long session writes many texts; the oldest are not kept.
+        if c.len() > 4096 {
+            c.clear();
+        }
+        c.insert(key, (std::sync::Arc::from(text), module.clone(), parse.diagnostics.clone()));
+    }
+    (module, parse.diagnostics)
+}
+
 /// A script's top-level statements as the body of its `main` (10, "REPL
 /// and scripts"): `def main(sys: System) -> !:` with the statements in
 /// order and `return Ok(())` after them, so a script may use `sys` and
@@ -2224,7 +2347,7 @@ fn script_main(items: &[ast::Item]) -> Option<ast::Item> {
         ret: Some(ast::TypeExpr { node, range: at, kind: TypeKind::Result { ok: None, err: None } }),
         from: Vec::new(),
         where_: Vec::new(),
-        body: Some(ast::Block { node, range, stmts: body }),
+        body: Some(std::sync::Arc::new(ast::Block { node, range, stmts: body })),
         attrs: Vec::new(),
         header_broken: false,
         body_broken: false,

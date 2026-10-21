@@ -1,0 +1,2 @@
+7:11-7:17 E0308 type.missing-argument arg="b" name="add"
+  fix type.add-hole 7:16-7:16 ", todo(\"b\")"

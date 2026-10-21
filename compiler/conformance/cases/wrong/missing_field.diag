@@ -1,0 +1,2 @@
+8:13-8:23 E0337 type.missing-field field="y" ty="Point"
+  fix type.add-hole 8:22-8:22 ", y=todo(\"y\")"

@@ -1,0 +1,7 @@
+# `\u{...}` takes one to six hex digits naming a Unicode scalar value; a
+# sign is not a hex digit.
+def main():
+    let a = '\u{+41}'
+    let b = "x\u{+1F600}y"
+    let c = '\u{41}'
+    print("{a} {b} {c}")

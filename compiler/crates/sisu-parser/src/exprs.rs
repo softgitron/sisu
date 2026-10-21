@@ -21,7 +21,7 @@
 //! ```
 
 use crate::parser::Parser;
-use sisu_diag::{Diagnostic, msg};
+use sisu_diag::{Diagnostic, TextRange, msg};
 use sisu_syntax::SyntaxKind;
 use sisu_syntax::SyntaxKind::*;
 
@@ -84,11 +84,15 @@ impl Parser<'_> {
     }
 
     pub(crate) fn expr(&mut self) -> Class {
-        if self.at_closure_start() {
+        let start = self.current_range().start;
+        let class = if self.at_closure_start() {
             self.closure();
-            return Class::Closure;
-        }
-        self.coalesce()
+            Class::Closure
+        } else {
+            self.coalesce()
+        };
+        self.last_expr = self.previous_end().map(|end| TextRange::new(start, end.max(start)));
+        class
     }
 
     fn at_closure_start(&self) -> bool {
@@ -277,35 +281,73 @@ impl Parser<'_> {
         }
     }
 
+    /// Parentheses around `from..to`: the fix of an operator mixed with
+    /// others, which says how Python would group them.
+    fn parens(&self, from: u32, to: u32) -> Vec<sisu_diag::Edit> {
+        let at = |o: u32| sisu_diag::Span::new(self.file, TextRange::empty(o));
+        vec![
+            sisu_diag::Edit { span: at(from), text: "(".into() },
+            sisu_diag::Edit { span: at(to), text: ")".into() },
+        ]
+    }
+
+    /// Reports `d` with the fix that puts parentheses around `from..to`.
+    fn report_parenthesized(&mut self, d: Diagnostic, from: u32, to: u32) {
+        let edits = self.parens(from, to);
+        self.report(d.fix(msg::PARSE_PARENTHESIZE, Vec::new(), edits));
+    }
+
     fn bitwise(&mut self) -> Class {
         let cp = self.checkpoint();
+        let start = self.current_range().start;
         let mut c = self.shift();
         let mut first: Option<SyntaxKind> = None;
+        // Where the operand before the operator starts.
+        let mut operand = start;
         while self.at_any(BITWISE) {
             let op = self.current();
             let op_text = op.punctuation_text().unwrap_or("?");
+            let left_end = self.previous_end().unwrap_or(start);
+            // `a | b & c` groups as Python does, `a | (b & c)`: the fix of
+            // a mix waits for the end of the operand after the operator.
+            let mut mixed: Option<usize> = None;
             if let Some(f) = first
                 && f != op
             {
                 let span = self.error_span();
-                self.report(
-                    Diagnostic::new(msg::PARSE_MIXED_BITWISE, span)
-                        .with("first", f.punctuation_text().unwrap_or("?"))
-                        .with("second", op_text),
-                );
+                let d = Diagnostic::new(msg::PARSE_MIXED_BITWISE, span)
+                    .with("first", f.punctuation_text().unwrap_or("?"))
+                    .with("second", op_text);
+                if bit_rank(f) > bit_rank(op) {
+                    self.report_parenthesized(d, start, left_end);
+                } else {
+                    let kept = self.diags_len();
+                    self.report(d);
+                    mixed = (self.diags_len() > kept).then_some(kept);
+                }
             }
             first = Some(op);
             if is_arithmetic(c) {
                 let span = self.error_span();
-                self.report(Diagnostic::new(msg::PARSE_BITWISE_ARITHMETIC, span).with("op", op_text));
+                let d = Diagnostic::new(msg::PARSE_BITWISE_ARITHMETIC, span).with("op", op_text);
+                self.report_parenthesized(d, operand, left_end);
             }
             self.start_at(cp, BIN_EXPR);
             self.bump();
-            if is_arithmetic(self.shift()) {
+            let right = self.current_range().start;
+            let rc = self.shift();
+            let right_end = self.previous_end().unwrap_or(right);
+            if let Some(i) = mixed {
+                let edits = self.parens(operand, right_end);
+                self.add_fix(i, msg::PARSE_PARENTHESIZE, edits);
+            }
+            if is_arithmetic(rc) {
                 let span = self.error_span();
-                self.report(Diagnostic::new(msg::PARSE_BITWISE_ARITHMETIC, span).with("op", op_text));
+                let d = Diagnostic::new(msg::PARSE_BITWISE_ARITHMETIC, span).with("op", op_text);
+                self.report_parenthesized(d, right, right_end);
             }
             self.finish_node();
+            operand = right;
             c = Class::Bitwise;
         }
         c
@@ -313,15 +355,21 @@ impl Parser<'_> {
 
     fn shift(&mut self) -> Class {
         let cp = self.checkpoint();
+        let start = self.current_range().start;
         let mut c = self.additive();
         while self.at_any(&[SHL, SHR]) {
             if matches!(c, Class::Additive | Class::Multiplicative) {
-                self.error(msg::PARSE_SHIFT_ARITHMETIC);
+                let d = Diagnostic::new(msg::PARSE_SHIFT_ARITHMETIC, self.error_span());
+                let end = self.previous_end().unwrap_or(start);
+                self.report_parenthesized(d, start, end);
             }
             self.start_at(cp, BIN_EXPR);
             self.bump();
+            let right = self.current_range().start;
             if matches!(self.additive(), Class::Additive | Class::Multiplicative) {
-                self.error(msg::PARSE_SHIFT_ARITHMETIC);
+                let d = Diagnostic::new(msg::PARSE_SHIFT_ARITHMETIC, self.error_span());
+                let end = self.previous_end().unwrap_or(right);
+                self.report_parenthesized(d, right, end);
             }
             self.finish_node();
             c = Class::Shift;
@@ -361,9 +409,13 @@ impl Parser<'_> {
                 let op = self.current();
                 self.start(PREFIX_EXPR);
                 self.bump();
+                let operand = self.current_range().start;
                 let inner = self.unary();
                 if op == MINUS && inner == Class::Power {
-                    self.report_negative_power();
+                    // As Python reads it: `-(x ** y)`.
+                    let span = self.error_span();
+                    let end = self.previous_end().unwrap_or(operand);
+                    self.report_parenthesized(Diagnostic::new(msg::PARSE_NEGATIVE_POWER, span), operand, end);
                 }
                 self.finish_node();
                 Class::Unary
@@ -386,11 +438,6 @@ impl Parser<'_> {
             }
             _ => self.power(),
         }
-    }
-
-    fn report_negative_power(&mut self) {
-        let span = self.error_span();
-        self.report(Diagnostic::new(msg::PARSE_NEGATIVE_POWER, span));
     }
 
     fn power(&mut self) -> Class {
@@ -881,4 +928,13 @@ impl Parser<'_> {
 
 fn is_arithmetic(c: Class) -> bool {
     matches!(c, Class::Additive | Class::Multiplicative | Class::Shift | Class::Power)
+}
+
+/// How tightly Python binds a bitwise operator: `&` before `^` before `|`.
+fn bit_rank(op: SyntaxKind) -> u8 {
+    match op {
+        AMP => 3,
+        CARET => 2,
+        _ => 1,
+    }
 }

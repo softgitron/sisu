@@ -1,0 +1,9 @@
+# A wrong program: a struct is made without one of its fields.
+
+struct Point:
+    x: int
+    y: int
+
+def main():
+    let p = Point(x=1)
+    print(p.x)

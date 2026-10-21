@@ -1,0 +1,9 @@
+# A wrong program: a function returns a view of text it owns, which is
+# gone when it returns.
+
+def greeting(name: str) -> str:
+    let text = "hello, {name}"
+    return text
+
+def main():
+    print(greeting("Roni"))

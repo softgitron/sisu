@@ -1,0 +1,12 @@
+# A wrong program: a value is used after it was moved.
+
+struct User:
+    name: String
+
+def archive(own u: User):
+    print("archived {u.name}")
+
+def main():
+    let roni = User(name="Roni".to_string())
+    archive(roni)
+    print(roni.name)

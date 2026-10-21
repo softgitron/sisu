@@ -31,10 +31,13 @@ use std::path::{Path, PathBuf};
 /// The JSON-RPC error codes the server answers with.
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
+/// LSP's `RequestFailed`: a request that was understood but cannot be
+/// answered (a rename of something that cannot be renamed).
+const REQUEST_FAILED: i64 = -32803;
 
 /// Where the standard library's source is on disk, for go-to-definition
 /// into it.
-fn std_dir() -> PathBuf {
+pub(crate) fn std_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../std")
 }
 
@@ -72,20 +75,20 @@ pub fn path_uri(path: &Path) -> String {
 
 /// Line starts of a text, to turn byte offsets into protocol positions
 /// and back.
-struct Lines<'a> {
-    text: &'a str,
+pub(crate) struct Lines<'a> {
+    pub(crate) text: &'a str,
     starts: Vec<usize>,
     utf8: bool,
 }
 
 impl<'a> Lines<'a> {
-    fn new(text: &'a str, utf8: bool) -> Lines<'a> {
+    pub(crate) fn new(text: &'a str, utf8: bool) -> Lines<'a> {
         let mut starts = vec![0];
         starts.extend(text.match_indices('\n').map(|(i, _)| i + 1));
         Lines { text, starts, utf8 }
     }
 
-    fn position(&self, offset: usize) -> Json {
+    pub(crate) fn position(&self, offset: usize) -> Json {
         let offset = offset.min(self.text.len());
         let line = self.starts.partition_point(|&s| s <= offset).saturating_sub(1);
         let start = self.starts[line];
@@ -94,11 +97,11 @@ impl<'a> Lines<'a> {
         Json::obj(vec![("line", Json::num(line as f64)), ("character", Json::num(character as f64))])
     }
 
-    fn range(&self, start: usize, end: usize) -> Json {
+    pub(crate) fn range(&self, start: usize, end: usize) -> Json {
         Json::obj(vec![("start", self.position(start)), ("end", self.position(end))])
     }
 
-    fn offset(&self, pos: &Json) -> usize {
+    pub(crate) fn offset(&self, pos: &Json) -> usize {
         let line = pos.get("line").and_then(Json::as_u64).unwrap_or(0) as usize;
         let character = pos.get("character").and_then(Json::as_u64).unwrap_or(0) as usize;
         let Some(&start) = self.starts.get(line) else { return self.text.len() };
@@ -119,25 +122,28 @@ impl<'a> Lines<'a> {
 }
 
 /// An open document.
-struct Doc {
-    text: String,
-    version: f64,
+pub(crate) struct Doc {
+    pub(crate) text: String,
+    pub(crate) version: f64,
 }
 
 /// What a document was analysed as: its program's root module, and the
 /// document's own name among the program's files.
-struct Analysis {
-    root: String,
-    name: String,
+pub(crate) struct Analysis {
+    pub(crate) root: String,
+    pub(crate) name: String,
 }
 
 pub struct Server {
-    docs: BTreeMap<String, Doc>,
-    db: Db,
-    utf8: bool,
+    pub(crate) docs: BTreeMap<String, Doc>,
+    pub(crate) db: Db,
+    pub(crate) utf8: bool,
     shutdown: bool,
     /// Set by `exit`: the status the server ends with.
     pub exit: Option<i32>,
+    /// The inline values of the last worksheet run, by a hash of its
+    /// document and text.
+    pub(crate) sheet: Option<(u64, Json)>,
 }
 
 impl Default for Server {
@@ -146,11 +152,11 @@ impl Default for Server {
     }
 }
 
-fn respond(id: &Json, result: Json) -> Json {
+pub(crate) fn respond(id: &Json, result: Json) -> Json {
     Json::obj(vec![("jsonrpc", Json::str("2.0")), ("id", id.clone()), ("result", result)])
 }
 
-fn fail(id: &Json, code: i64, message: &str) -> Json {
+pub(crate) fn fail(id: &Json, code: i64, message: &str) -> Json {
     let error = Json::obj(vec![("code", Json::num(code as f64)), ("message", Json::str(message))]);
     Json::obj(vec![("jsonrpc", Json::str("2.0")), ("id", id.clone()), ("error", error)])
 }
@@ -159,7 +165,7 @@ fn notify(method: &str, params: Json) -> Json {
     Json::obj(vec![("jsonrpc", Json::str("2.0")), ("method", Json::str(method)), ("params", params)])
 }
 
-fn contains(span: &Span, file: FileId, offset: usize) -> bool {
+pub(crate) fn contains(span: &Span, file: FileId, offset: usize) -> bool {
     span.file == file && (span.range.start as usize) <= offset && offset <= span.range.end as usize
 }
 
@@ -177,7 +183,7 @@ fn is_capability(prog: &Program, ty: &Ty) -> bool {
 
 impl Server {
     pub fn new() -> Server {
-        Server { docs: BTreeMap::new(), db: Db::new(), utf8: false, shutdown: false, exit: None }
+        Server { docs: BTreeMap::new(), db: Db::new(), utf8: false, shutdown: false, exit: None, sheet: None }
     }
 
     /// Answers one message: its response, and the notifications it causes.
@@ -199,6 +205,29 @@ impl Server {
                     ("documentSymbolProvider", Json::Bool(true)),
                     ("selectionRangeProvider", Json::Bool(true)),
                     ("documentFormattingProvider", Json::Bool(true)),
+                    ("documentRangeFormattingProvider", Json::Bool(true)),
+                    (
+                        "completionProvider",
+                        Json::obj(vec![
+                            ("triggerCharacters", Json::Arr(vec![Json::str(".")])),
+                            ("resolveProvider", Json::Bool(false)),
+                        ]),
+                    ),
+                    ("renameProvider", Json::obj(vec![("prepareProvider", Json::Bool(true))])),
+                    ("referencesProvider", Json::Bool(true)),
+                    (
+                        "codeActionProvider",
+                        Json::obj(vec![("codeActionKinds", Json::Arr(vec![Json::str("quickfix")]))]),
+                    ),
+                    ("inlayHintProvider", Json::Bool(true)),
+                    ("inlineValueProvider", Json::Bool(true)),
+                    (
+                        "executeCommandProvider",
+                        Json::obj(vec![(
+                            "commands",
+                            Json::Arr(vec![Json::str(crate::assist::EXPLAIN_BORROW)]),
+                        )]),
+                    ),
                 ]);
                 let info = Json::obj(vec![
                     ("name", Json::str("sisu")),
@@ -258,16 +287,59 @@ impl Server {
                 let p = Json::obj(vec![("uri", Json::str(uri)), ("diagnostics", Json::Arr(Vec::new()))]);
                 vec![notify("textDocument/publishDiagnostics", p)]
             }
-            "textDocument/hover"
-            | "textDocument/definition"
-            | "textDocument/documentSymbol"
-            | "textDocument/selectionRange"
-            | "textDocument/formatting" => {
+            "workspace/executeCommand" => {
+                let Some(id) = id else { return Vec::new() };
+                let command = params.get("command").and_then(Json::as_str).unwrap_or("");
+                if command != crate::assist::EXPLAIN_BORROW {
+                    let m = crate::cli::text(
+                        sisu_diag::msg::LSP_NOT_A_COMMAND,
+                        &[("command", command.to_string())],
+                    );
+                    return vec![fail(&id, INVALID_PARAMS, &m)];
+                }
+                match self.explain_borrow(params.get("arguments").unwrap_or(&Json::Null)) {
+                    Ok(r) => vec![respond(&id, r)],
+                    Err(m) => vec![fail(&id, REQUEST_FAILED, &m)],
+                }
+            }
+            "textDocument/rename" => {
                 let Some(id) = id else { return Vec::new() };
                 let uri =
                     params.at(&["textDocument", "uri"]).and_then(Json::as_str).unwrap_or("").to_string();
                 if !self.docs.contains_key(&uri) {
-                    return vec![fail(&id, INVALID_PARAMS, "the document is not open")];
+                    return vec![fail(
+                        &id,
+                        INVALID_PARAMS,
+                        &crate::cli::text(sisu_diag::msg::LSP_NOT_OPEN, &[]),
+                    )];
+                }
+                let new_name = params.get("newName").and_then(Json::as_str).unwrap_or("").to_string();
+                match self.rename(&uri, params.get("position").unwrap_or(&Json::Null), &new_name) {
+                    Ok(r) => vec![respond(&id, r)],
+                    Err(m) => vec![fail(&id, REQUEST_FAILED, &m)],
+                }
+            }
+            "textDocument/hover"
+            | "textDocument/definition"
+            | "textDocument/documentSymbol"
+            | "textDocument/selectionRange"
+            | "textDocument/formatting"
+            | "textDocument/rangeFormatting"
+            | "textDocument/completion"
+            | "textDocument/prepareRename"
+            | "textDocument/references"
+            | "textDocument/codeAction"
+            | "textDocument/inlayHint"
+            | "textDocument/inlineValue" => {
+                let Some(id) = id else { return Vec::new() };
+                let uri =
+                    params.at(&["textDocument", "uri"]).and_then(Json::as_str).unwrap_or("").to_string();
+                if !self.docs.contains_key(&uri) {
+                    return vec![fail(
+                        &id,
+                        INVALID_PARAMS,
+                        &crate::cli::text(sisu_diag::msg::LSP_NOT_OPEN, &[]),
+                    )];
                 }
                 let result = match method {
                     "textDocument/hover" => self.hover(&uri, params.get("position").unwrap_or(&Json::Null)),
@@ -279,12 +351,35 @@ impl Server {
                         let ps = params.get("positions").and_then(Json::as_array).unwrap_or(&[]).to_vec();
                         self.selection_ranges(&uri, &ps)
                     }
+                    "textDocument/rangeFormatting" => {
+                        self.range_formatting(&uri, params.get("range").unwrap_or(&Json::Null))
+                    }
+                    "textDocument/completion" => {
+                        self.completion(&uri, params.get("position").unwrap_or(&Json::Null))
+                    }
+                    "textDocument/prepareRename" => {
+                        self.prepare_rename(&uri, params.get("position").unwrap_or(&Json::Null))
+                    }
+                    "textDocument/references" => {
+                        self.references(&uri, params.get("position").unwrap_or(&Json::Null))
+                    }
+                    "textDocument/codeAction" => {
+                        self.code_actions(&uri, params.get("range").unwrap_or(&Json::Null))
+                    }
+                    "textDocument/inlayHint" => {
+                        self.inlay_hints(&uri, params.get("range").unwrap_or(&Json::Null))
+                    }
+                    "textDocument/inlineValue" => self.inline_values(&uri),
                     _ => self.formatting(&uri),
                 };
                 vec![respond(&id, result)]
             }
             _ => match id {
-                Some(id) => vec![fail(&id, METHOD_NOT_FOUND, &format!("`{method}` is not served"))],
+                Some(id) => vec![fail(
+                    &id,
+                    METHOD_NOT_FOUND,
+                    &crate::cli::text(sisu_diag::msg::LSP_NOT_SERVED, &[("method", method.to_string())]),
+                )],
                 None => Vec::new(),
             },
         }
@@ -292,7 +387,7 @@ impl Server {
 
     /// Puts a document's program in the database and names its root
     /// module and the document's file.
-    fn analyse(&mut self, uri: &str) -> Analysis {
+    pub(crate) fn analyse(&mut self, uri: &str) -> Analysis {
         let path = uri_path(uri);
         let text = self.docs.get(uri).map(|d| d.text.clone()).unwrap_or_default();
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -356,19 +451,7 @@ impl Server {
             if Some(d.span.file) != file {
                 continue;
             }
-            let severity = match d.severity() {
-                Severity::Error => 1,
-                Severity::Warning => 2,
-                _ => 3,
-            };
-            out.push(Json::obj(vec![
-                ("range", lines.range(d.span.range.start as usize, d.span.range.end as usize)),
-                ("severity", Json::num(severity)),
-                ("code", Json::str(d.code())),
-                ("source", Json::str("sisu")),
-                ("message", Json::str(d.message())),
-                ("data", Json::obj(vec![("id", Json::str(d.msg.id()))])),
-            ]));
+            out.push(diagnostic_json(d, &lines));
         }
         notify(
             "textDocument/publishDiagnostics",
@@ -382,7 +465,7 @@ impl Server {
 
     /// What is at an offset of a document: the innermost expression of a
     /// body there, and the body.
-    fn expr_at<'t>(typed: &'t Typed, file: FileId, offset: usize) -> Option<(&'t Expr, &'t Body)> {
+    pub(crate) fn expr_at<'t>(typed: &'t Typed, file: FileId, offset: usize) -> Option<(&'t Expr, &'t Body)> {
         let mut best: Option<(&Expr, &Body)> = None;
         for body in &typed.bodies {
             if body.span.file != file {
@@ -406,7 +489,7 @@ impl Server {
     /// The definition at an offset of a document: a definition's name, or
     /// what the innermost expression there names. A local is its body's
     /// local.
-    fn target_at(&mut self, a: &Analysis, offset: usize) -> Option<Target> {
+    pub(crate) fn target_at(&mut self, a: &Analysis, offset: usize) -> Option<Target> {
         let c = self.db.checked(&a.root)?;
         let file = c.map.files().iter().find(|f| f.name == a.name)?.id;
         let prog = &c.program;
@@ -439,7 +522,7 @@ impl Server {
             }
         }
         let (e, body) = Self::expr_at(&c.typed, file, offset)?;
-        let bi = c.typed.bodies.iter().position(|b| std::ptr::eq(b, body))?;
+        let bi = c.typed.bodies.iter().position(|b| std::ptr::eq(&**b, body))?;
         Some(match &e.kind {
             ExprKind::Local(l) => Target::Local(bi, l.0 as usize),
             ExprKind::Const(d) | ExprKind::FnRef(d) => Target::Def(*d),
@@ -592,7 +675,7 @@ impl Server {
 
     fn formatting(&mut self, uri: &str) -> Json {
         let text = self.docs.get(uri).map(|d| d.text.clone()).unwrap_or_default();
-        match sisu_fmt::format(&text) {
+        match self.format_document(uri, &text) {
             Ok(out) if out != text => {
                 let lines = Lines::new(&text, self.utf8);
                 Json::Arr(vec![Json::obj(vec![
@@ -606,8 +689,42 @@ impl Server {
     }
 }
 
+impl Server {
+    /// The canonical text of a document, with the names of its program:
+    /// `T ! E` where `E` names an error set.
+    pub(crate) fn format_document(&mut self, uri: &str, text: &str) -> Result<String, sisu_fmt::Refusal> {
+        if !text.contains("Result[") {
+            return sisu_fmt::format(text);
+        }
+        let a = self.analyse(uri);
+        match self.db.checked(&a.root) {
+            Some(c) => crate::format::format_in(&c, &a.name, text),
+            None => sisu_fmt::format(text),
+        }
+    }
+}
+
+/// A diagnostic as the protocol's, with its catalog code as `code` and its
+/// identifier as `data.id`.
+pub(crate) fn diagnostic_json(d: &sisu_diag::Diagnostic, lines: &Lines) -> Json {
+    let severity = match d.severity() {
+        Severity::Error => 1,
+        Severity::Warning => 2,
+        _ => 3,
+    };
+    Json::obj(vec![
+        ("range", lines.range(d.span.range.start as usize, d.span.range.end as usize)),
+        ("severity", Json::num(severity)),
+        ("code", Json::str(d.code())),
+        ("source", Json::str("sisu")),
+        ("message", Json::str(d.message())),
+        ("data", Json::obj(vec![("id", Json::str(d.msg.id()))])),
+    ])
+}
+
 /// What a position names.
-enum Target {
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Target {
     Def(DefId),
     /// A struct's field, by index.
     Field(DefId, u32),
@@ -618,24 +735,42 @@ enum Target {
 }
 
 /// The type a reference refers to, through every `ref`.
-fn strip_refs(t: &Ty) -> &Ty {
+pub(crate) fn strip_refs(t: &Ty) -> &Ty {
     match t {
         Ty::Ref(inner, _) => strip_refs(inner),
         other => other,
     }
 }
 
-fn walk_block<'t>(b: &'t sisu_typeck::Block, f: &mut dyn FnMut(&'t Expr)) {
+pub(crate) fn walk_block<'t>(b: &'t sisu_typeck::Block, f: &mut dyn FnMut(&'t Expr)) {
     sisu_typeck::purity::visit_block(b, f);
 }
 
 /// The hover text of a definition: its signature, what the checker knows
 /// of it (the inferred error set, the capabilities it takes, its
 /// contracts), and its documentation.
-fn describe_def(prog: &Program, typed: &Typed, d: DefId) -> String {
+pub(crate) fn describe_def(prog: &Program, typed: &Typed, d: DefId) -> String {
     let def = prog.def(d);
     let mut extra: Vec<String> = Vec::new();
-    let sig = match &def.kind {
+    let sig = signature(prog, typed, d, &mut extra);
+    let mut out = format!("```sisu\n{sig}\n```");
+    for x in extra {
+        out.push_str("\n\n");
+        out.push_str(&x);
+    }
+    if !def.docs.is_empty() {
+        out.push_str("\n\n");
+        out.push_str(&def.docs.join("\n"));
+    }
+    out
+}
+
+/// A definition's signature as it would be written, and what the checker
+/// knows of it besides (its inferred error set, the capabilities it takes,
+/// its contracts) in `extra`.
+pub(crate) fn signature(prog: &Program, typed: &Typed, d: DefId, extra: &mut Vec<String>) -> String {
+    let def = prog.def(d);
+    match &def.kind {
         DefKind::Fn(f) => {
             let owner = f.owner.as_ref().map(|o| format!("{}.", prog.display(o))).unwrap_or_default();
             let mut params: Vec<String> = Vec::new();
@@ -706,17 +841,7 @@ fn describe_def(prog: &Program, typed: &Typed, d: DefId) -> String {
         DefKind::TypeAlias(t) => format!("type {} = {}", def.name, prog.display(t)),
         DefKind::Refinement(_) => format!("type {}", def.name),
         DefKind::Impl(_) | DefKind::Unsupported => def.name.clone(),
-    };
-    let mut out = format!("```sisu\n{sig}\n```");
-    for x in extra {
-        out.push_str("\n\n");
-        out.push_str(&x);
     }
-    if !def.docs.is_empty() {
-        out.push_str("\n\n");
-        out.push_str(&def.docs.join("\n"));
-    }
-    out
 }
 
 /// A document symbol of an item, with its members.

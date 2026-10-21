@@ -281,7 +281,85 @@ pub fn lower_for(
     level: ContractLevel,
     extra: &[&str],
 ) -> sir::Program {
-    lower_reaching(prog, typed, sources, level, extra, false)
+    lower_reaching(prog, typed, sources, level, extra, false, None)
+}
+
+/// [`lower_with`], reusing what `cache` holds: a body is lowered again only
+/// when its typed body changed (its [`sisu_typeck::Memo`] key) or its item
+/// moved to another line (docs/architecture.md, "The query layer"). The
+/// result is the same as [`lower_with`]'s.
+pub fn lower_cached(
+    prog: &Program,
+    typed: &Typed,
+    sources: &SourceMap,
+    level: ContractLevel,
+    cache: &mut LowerCache,
+) -> sir::Program {
+    lower_reaching(prog, typed, sources, level, &[], false, Some(cache))
+}
+
+/// The per-item memo of lowering, kept by the query layer between
+/// lowerings of one program: each body's SIR functions by the body's memo
+/// key, the line its item starts on and the contract level.
+#[derive(Default)]
+pub struct LowerCache {
+    entries: HashMap<(u64, u32, ContractLevel), (Vec<sir::Function>, u64)>,
+    generation: u64,
+    /// The bodies the last lowering lowered, and the ones it reused.
+    pub lowered: u32,
+    pub reused: u32,
+}
+
+impl LowerCache {
+    /// Drops what the last lowering did not use, and starts another.
+    fn begin(&mut self) {
+        let g = self.generation;
+        self.entries.retain(|_, (_, used)| *used == g);
+        self.generation += 1;
+        self.lowered = 0;
+        self.reused = 0;
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+/// Lowers a body, through the memo when there is one. An entry is kept
+/// only when every location in its functions lies on the lines of the
+/// body's own item, so that the same key always gives the same SIR.
+fn lower_body_memo(ctx: &mut Ctx, body: &Body, cache: &mut Option<&mut LowerCache>) -> Vec<sir::Function> {
+    let Some(cache) = cache.as_mut() else { return func::lower_body(ctx, body) };
+    let m = body.memo;
+    let Some(f) = ctx.sources.get(m.file).filter(|_| m.key != 0) else {
+        cache.lowered += 1;
+        return func::lower_body(ctx, body);
+    };
+    let (first, last) = (f.line_col(m.start).line, f.line_col(m.end).line);
+    let key = (m.key, first, ctx.level);
+    let generation = cache.generation;
+    if let Some((fs, used)) = cache.entries.get_mut(&key) {
+        *used = generation;
+        cache.reused += 1;
+        return fs.clone();
+    }
+    cache.lowered += 1;
+    let fs = func::lower_body(ctx, body);
+    let inside =
+        |l: &Option<sir::Loc>| l.is_none_or(|l| first <= l.line && l.line <= last && l.end_line <= last);
+    let keep = fs.iter().all(|f| {
+        inside(&f.loc)
+            && f.locals.iter().all(|l| inside(&l.loc))
+            && f.blocks.iter().all(|b| inside(&b.loc) && b.stmts.iter().all(|s| inside(&s.loc)))
+    });
+    if keep {
+        cache.entries.insert(key, (fs.clone(), generation));
+    }
+    fs
 }
 
 /// Every body lowered, whether the program reaches it or not: what the
@@ -293,7 +371,7 @@ pub fn lower_every_body(
     sources: &SourceMap,
     level: ContractLevel,
 ) -> sir::Program {
-    lower_reaching(prog, typed, sources, level, &[], true)
+    lower_reaching(prog, typed, sources, level, &[], true, None)
 }
 
 fn lower_reaching(
@@ -303,7 +381,11 @@ fn lower_reaching(
     level: ContractLevel,
     extra: &[&str],
     every_body: bool,
+    mut cache: Option<&mut LowerCache>,
 ) -> sir::Program {
+    if let Some(c) = cache.as_mut() {
+        c.begin();
+    }
     let mut ctx = Ctx {
         prog,
         sources,
@@ -382,7 +464,7 @@ fn lower_reaching(
         all.sort();
         roots.extend(all);
     }
-    let mut functions = lower_reached(&mut ctx, typed, &bodies, &roots);
+    let mut functions = lower_reached(&mut ctx, typed, &bodies, &roots, &mut cache);
     let types = collect_types(&ctx, &functions);
     functions.extend(glue::glue_functions(&types));
     let intrinsics = intrinsic_decls(prog, &functions);
@@ -645,6 +727,7 @@ fn lower_reached(
     typed: &Typed,
     bodies: &HashMap<String, usize>,
     roots: &[String],
+    cache: &mut Option<&mut LowerCache>,
 ) -> Vec<sir::Function> {
     let prog = ctx.prog;
     let mut lowered: HashMap<usize, Vec<sir::Function>> = HashMap::new();
@@ -664,7 +747,7 @@ fn lower_reached(
                 && let Some(b) = owner_body(&n, bodies)
                 && !lowered.contains_key(&b)
             {
-                let fs = func::lower_body(ctx, &typed.bodies[b]);
+                let fs = lower_body_memo(ctx, &typed.bodies[b], cache);
                 for f in &fs {
                     where_is.insert(f.name.clone(), b);
                 }

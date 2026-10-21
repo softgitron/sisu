@@ -6,10 +6,13 @@
 //! SIR is the one that runs, even when it reports errors, so that the
 //! counterexample mode can run a rejected program.
 //!
-//! Stage 0 has one user file per program, so a query's key is the file's
-//! name and its input is the file's text; the standard library is fixed
-//! for the life of the process. A later stage keys per item and reuses
-//! more (the language server will need that), without changing callers.
+//! A program's query is keyed by the texts of its files; inside it, the
+//! checker, lowering and the ownership checker are memoised per item
+//! (docs/architecture.md, "The query layer"): resolution runs again, and
+//! gives the same definitions as long as the program's interface (a hash
+//! of what it reads, `items.rs`) is the same, so a body whose item's text
+//! did not change is not checked, lowered or borrow-checked again. The
+//! standard library is fixed for the life of the process.
 
 use sisu_diag::{Diagnostic, FileId, SourceMap};
 use sisu_parser::Parse;
@@ -19,7 +22,7 @@ use sisu_syntax::ast;
 use sisu_typeck::Typed;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// A parsed file.
 pub struct Parsed {
@@ -27,6 +30,8 @@ pub struct Parsed {
     pub file: FileId,
     pub parse: Parse,
     pub module: ast::Module,
+    /// What resolution reads of it (`items::interface_hash`).
+    pub iface: u64,
 }
 
 /// A resolved and type-checked program, with every diagnostic so far.
@@ -37,6 +42,9 @@ pub struct Checked {
     pub typed: Typed,
     /// Syntax, name and type diagnostics, in source order.
     pub diagnostics: Vec<Diagnostic>,
+    /// The program's interface as the last resolution saw it: the key of
+    /// the per-item queries after this one.
+    pub iface: u64,
 }
 
 impl Checked {
@@ -97,12 +105,31 @@ pub fn is_ownership_rule(d: &Diagnostic) -> bool {
     d.code().starts_with("E04")
 }
 
-/// How many times each query ran (not counting cache hits).
+/// How many times each query ran (not counting cache hits), and, for the
+/// per-item queries, how many items the last run of each did and reused.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Counters {
     pub parse: u32,
     pub check: u32,
     pub lower: u32,
+    /// Bodies the last `checked` checked (in all its rounds), and reused.
+    pub bodies_checked: u32,
+    pub bodies_reused: u32,
+    /// Bodies the last `lowered` lowered, and reused.
+    pub bodies_lowered: u32,
+    pub lowered_reused: u32,
+    /// Functions the last `lowered` put through the ownership checker's
+    /// analyses, and the ones it took as checked.
+    pub functions_checked: u32,
+    pub functions_reused: u32,
+}
+
+/// The per-item memos of one program.
+#[derive(Default)]
+struct Memos {
+    bodies: sisu_typeck::BodyCache,
+    lower: sisu_lower::LowerCache,
+    borrow: sisu_borrowck::FnCache,
 }
 
 /// A program without front-end errors, lowered and through the
@@ -280,12 +307,14 @@ pub fn refile(mut d: Diagnostic, from: FileId, to: FileId) -> Diagnostic {
 
 #[derive(Default)]
 pub struct Db {
-    texts: HashMap<String, Rc<str>>,
+    texts: HashMap<String, Arc<str>>,
     /// The programs of several modules, by their root module's file.
     programs: HashMap<String, ProgramSource>,
-    parsed: HashMap<String, (u64, Rc<Parsed>)>,
-    checked: HashMap<String, (u64, Rc<Checked>)>,
-    lowered: HashMap<String, (u64, Rc<Lowered>)>,
+    parsed: HashMap<String, (u64, Arc<Parsed>)>,
+    checked: HashMap<String, (u64, Arc<Checked>)>,
+    lowered: HashMap<String, (u64, Arc<Lowered>)>,
+    /// The per-item memos, by the program's root module.
+    memos: HashMap<String, Memos>,
     pub counters: Counters,
     /// Which contracts the lowered program checks (07); part of the
     /// lowered query's key.
@@ -306,10 +335,10 @@ impl Db {
     /// Sets a file's text; queries over it recompute on next use if the
     /// text changed.
     pub fn set_file(&mut self, name: &str, text: &str) {
-        self.texts.insert(name.to_string(), Rc::from(text));
+        self.texts.insert(name.to_string(), Arc::from(text));
     }
 
-    pub fn text(&self, name: &str) -> Option<Rc<str>> {
+    pub fn text(&self, name: &str) -> Option<Arc<str>> {
         self.texts.get(name).cloned()
     }
 
@@ -335,7 +364,7 @@ impl Db {
 
     /// The text of a file and a hash of everything a query over the
     /// program rooted at it reads: every module's text and the layout.
-    fn key(&self, name: &str) -> Option<(Rc<str>, u64)> {
+    fn key(&self, name: &str) -> Option<(Arc<str>, u64)> {
         let t = self.texts.get(name)?.clone();
         let Some(p) = self.programs.get(name) else {
             let h = hash(&t);
@@ -349,7 +378,7 @@ impl Db {
         Some((t, h.finish()))
     }
 
-    pub fn parsed(&mut self, name: &str) -> Option<Rc<Parsed>> {
+    pub fn parsed(&mut self, name: &str) -> Option<Arc<Parsed>> {
         let text = self.texts.get(name)?.clone();
         let h = hash(&text);
         if let Some((k, p)) = self.parsed.get(name)
@@ -362,12 +391,13 @@ impl Db {
         let file = map.add(name, &*text);
         let parse = sisu_parser::parse(file, &text);
         let module = ast::build::module(&parse.tree);
-        let p = Rc::new(Parsed { map, file, parse, module });
+        let iface = crate::items::interface_hash(&parse.tree, &module);
+        let p = Arc::new(Parsed { map, file, parse, module, iface });
         self.parsed.insert(name.to_string(), (h, p.clone()));
         Some(p)
     }
 
-    pub fn checked(&mut self, name: &str) -> Option<Rc<Checked>> {
+    pub fn checked(&mut self, name: &str) -> Option<Arc<Checked>> {
         let (_, h) = self.key(name)?;
         if let Some((k, c)) = self.checked.get(name)
             && *k == h
@@ -421,23 +451,79 @@ impl Db {
             packages: &program.packages,
             std_doc_tests: program.std_doc_tests,
         };
+        // The program's interface: everything resolution reads (the
+        // layout, each module's interface, the files `embed` names), and
+        // in each round the instances asked for.
+        let mut base = DefaultHasher::new();
+        program.key().hash(&mut base);
+        for p in &files {
+            p.iface.hash(&mut base);
+        }
+        let mut embeds: Vec<(&String, &Result<String, String>)> = embedded.iter().collect();
+        embeds.sort();
+        embeds.hash(&mut base);
+        let memos = self.memos.entry(name.to_string()).or_default();
+        memos.bodies.begin();
         // The instances of templates the program needs (08, "Reflection"):
         // check, declare what the check asked for, and check again, until
-        // it asks for nothing new.
+        // it asks for nothing new. An instance is declared after everything
+        // else, so the resolution of one round takes the next round's
+        // instances, and the bodies checked are checked once; a promotion
+        // (a generic function that calls a template with its own type
+        // parameters becomes one) changes a declaration, and resolves again.
         let mut requests: Vec<sisu_resolve::Request> = Vec::new();
         let mut rounds = 0;
-        let (map, r, typed, mut type_diags) = loop {
+        let (map, r, typed, mut type_diags, iface) = loop {
             let mut map = base_map.clone();
-            let r = sisu_resolve::resolve_program(&mut map, sources, &requests, &embedded);
-            let (typed, type_diags) = sisu_typeck::check(&r.program, &map);
-            let fresh: Vec<sisu_resolve::Request> =
-                typed.requests.iter().filter(|q| !requests.iter().any(|r| r.same(q))).cloned().collect();
-            rounds += 1;
-            if fresh.is_empty() || rounds > MAX_ROUNDS {
-                break (map, r, typed, type_diags);
+            let mut h = base.clone();
+            for q in &requests {
+                if let sisu_resolve::Request::Promote(def) = q {
+                    def.hash(&mut h);
+                }
             }
-            requests.extend(fresh);
+            let iface = h.finish();
+            let outcome = {
+                let mut session = sisu_resolve::resolve_session(&mut map, sources, &requests, &embedded);
+                loop {
+                    let (typed, type_diags) = sisu_typeck::check_with(
+                        session.program(),
+                        session.sources(),
+                        Some((&mut memos.bodies, iface)),
+                    );
+                    let fresh: Vec<sisu_resolve::Request> = typed
+                        .requests
+                        .iter()
+                        .filter(|q| !requests.iter().any(|r| r.same(q)))
+                        .cloned()
+                        .collect();
+                    rounds += 1;
+                    if fresh.is_empty() || rounds > MAX_ROUNDS {
+                        break Some((session.finish(), typed, type_diags));
+                    }
+                    let promotes = fresh.iter().any(|q| matches!(q, sisu_resolve::Request::Promote(_)));
+                    requests.extend(fresh.iter().cloned());
+                    if promotes {
+                        break None;
+                    }
+                    session.add_instances(&fresh);
+                }
+            };
+            if let Some((r, typed, type_diags)) = outcome {
+                // What lowering and the ownership checker key on: the
+                // interface with every instance.
+                let mut h = DefaultHasher::new();
+                iface.hash(&mut h);
+                for q in &requests {
+                    if let sisu_resolve::Request::Instance { def, args, .. } = q {
+                        (def, args).hash(&mut h);
+                    }
+                }
+                break (map, r, typed, type_diags, h.finish());
+            }
         };
+        memos.bodies.sweep();
+        self.counters.bodies_checked = memos.bodies.checked;
+        self.counters.bodies_reused = memos.bodies.reused;
         if let Some(sisu_resolve::Request::Instance { def, .. } | sisu_resolve::Request::Promote(def)) =
             typed.requests.iter().find(|q| !requests.iter().any(|r| r.same(q)))
         {
@@ -504,7 +590,7 @@ impl Db {
             diagnostics.retain(|d| !generated(d));
         }
         sisu_diag::diagnostic::sort(&mut diagnostics);
-        let c = Rc::new(Checked { map, file: parsed.file, program: r.program, typed, diagnostics });
+        let c = Arc::new(Checked { map, file: parsed.file, program: r.program, typed, diagnostics, iface });
         self.checked.insert(name.to_string(), (h, c.clone()));
         Some(c)
     }
@@ -512,7 +598,7 @@ impl Db {
     /// The lowered and ownership-checked program, for a program whose
     /// front end found no error, or only ownership errors about
     /// declarations.
-    pub fn lowered(&mut self, name: &str) -> Option<Rc<Lowered>> {
+    pub fn lowered(&mut self, name: &str) -> Option<Arc<Lowered>> {
         let (_, h) = self.key(name)?;
         let h = h ^ (self.contracts as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
         if let Some((k, s)) = self.lowered.get(name)
@@ -525,15 +611,27 @@ impl Db {
             return None;
         }
         self.counters.lower += 1;
-        let lowered = sisu_lower::lower_with(&c.program, &c.typed, &c.map, self.contracts);
         // The standard library is checked once, not for every program
         // (`sisu test --std` checks it with the program's doc examples).
         let trust_std = !self.program(name).std_doc_tests;
+        let memos = self.memos.entry(name.to_string()).or_default();
+        let lowered =
+            sisu_lower::lower_cached(&c.program, &c.typed, &c.map, self.contracts, &mut memos.lower);
         let options = sisu_borrowck::Options { trust_std, ..Default::default() };
-        let mut checked = sisu_borrowck::check(&lowered, &options);
+        let mut ctx = DefaultHasher::new();
+        (c.iface, self.contracts, trust_std).hash(&mut ctx);
+        let mut checked =
+            sisu_borrowck::check_with(&lowered, &options, Some((&mut memos.borrow, ctx.finish())));
+        self.counters.bodies_lowered = memos.lower.lowered;
+        self.counters.lowered_reused = memos.lower.reused;
+        self.counters.functions_checked = memos.borrow.checked;
+        self.counters.functions_reused = memos.borrow.reused;
         let files = source_files(&c.map, &checked.program);
-        let by_finding: Vec<Diagnostic> =
-            checked.findings.iter().map(|f| sisu_borrowck::to_diagnostic(f, &c.map, &files)).collect();
+        let by_finding: Vec<Diagnostic> = checked
+            .findings
+            .iter()
+            .map(|f| consume_note(sisu_borrowck::to_diagnostic(f, &c.map, &files), &c.program))
+            .collect();
         // The compiler runs the `comptime` expressions of a program the
         // ownership checker accepts (08).
         let comptime = if checked.findings.is_empty() {
@@ -545,7 +643,7 @@ impl Db {
         let mut diagnostics = by_finding.clone();
         diagnostics.extend(comptime.iter().cloned());
         sisu_diag::diagnostic::sort(&mut diagnostics);
-        let l = Rc::new(Lowered {
+        let l = Arc::new(Lowered {
             sir: checked.program,
             findings: checked.findings,
             diagnostics_by_finding: by_finding,
@@ -573,8 +671,8 @@ impl Db {
     }
 
     /// The SIR of a program without front-end errors, drops placed.
-    pub fn sir(&mut self, name: &str) -> Option<Rc<sir::Program>> {
-        self.lowered(name).map(|l| Rc::new(l.sir.clone()))
+    pub fn sir(&mut self, name: &str) -> Option<Arc<sir::Program>> {
+        self.lowered(name).map(|l| Arc::new(l.sir.clone()))
     }
 
     /// Every diagnostic of a file: the front end's, then, when it found no
@@ -590,6 +688,40 @@ impl Db {
         }
         all
     }
+}
+
+/// A must-consume value dropped: the note names the methods of its type
+/// that consume it (those taking `own self`), which SIR does not keep
+/// unless they are called.
+fn consume_note(d: Diagnostic, prog: &sisu_resolve::Program) -> Diagnostic {
+    use sisu_diag::msg;
+    if !matches!(d.msg, m if m == msg::BORROW_MUST_CONSUME || m == msg::BORROW_MUST_CONSUME_EXIT)
+        || !d.notes.is_empty()
+    {
+        return d;
+    }
+    let Some(ty) = d.param("ty").map(str::to_string) else { return d };
+    let base = ty.split('[').next().unwrap_or(&ty).to_string();
+    let Some(def) = (0..prog.defs.len() as u32).map(sisu_resolve::DefId).find(|x| {
+        prog.def(*x).name == base
+            && matches!(prog.def(*x).kind, sisu_resolve::DefKind::Struct(_) | sisu_resolve::DefKind::Enum(_))
+    }) else {
+        return d;
+    };
+    let mut names: Vec<String> = prog
+        .methods
+        .iter()
+        .filter(|((k, _), m)| {
+            *k == sisu_resolve::TyKey::Adt(def)
+                && prog.fn_info(**m).is_some_and(|f| f.self_mode == Some(sisu_syntax::ast::Mode::Own))
+        })
+        .map(|((_, n), _)| format!("`{n}`"))
+        .collect();
+    names.sort();
+    if names.is_empty() {
+        return d;
+    }
+    d.note(msg::BORROW_CONSUME_WITH, vec![("methods", names.join(", "))])
 }
 
 /// A failed `comptime` expression as a diagnostic at the expression.

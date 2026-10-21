@@ -306,24 +306,390 @@ fn symbols_selection_ranges_and_formatting() {
     c.stop();
 }
 
-/// The answers on the standard library's modules, opened as documents:
-/// the diagnostics after a change and a hover, each against the 100 ms an
-/// editor allows. The numbers are printed (`cargo test -- --nocapture`);
-/// the test fails only past ten times that, since a debug build on a busy
-/// machine is not the measure.
+fn labels(r: &Json) -> Vec<String> {
+    r.get("items")
+        .and_then(Json::as_array)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|i| i.get("label").and_then(Json::as_str).map(str::to_string))
+        .collect()
+}
+
+fn insert_text(r: &Json, label: &str) -> Option<String> {
+    r.get("items")
+        .and_then(Json::as_array)
+        .unwrap_or(&[])
+        .iter()
+        .find(|i| i.get("label").and_then(Json::as_str) == Some(label))
+        .and_then(|i| i.get("insertText").and_then(Json::as_str).map(str::to_string))
+}
+
+const SHAPES: &str = "\
+struct Point:
+    x: int
+    y: int
+
+    def norm(self) -> int:
+        return self.x * self.x + self.y * self.y
+
+def area(w: int, h: int) -> int:
+    return w * h
+
+def main():
+    let p = Point(x=1, y=2)
+    let total = area(p.x, p.y)
+    print(total)
+";
+
+#[test]
+fn completion_offers_members_and_names_in_scope() {
+    let mut c = Client::start();
+    let text = format!("{SHAPES}    print(p.)\n");
+    let (uri, _dir) = document("complete.sisu", &text);
+    c.open(&uri, &text);
+    // After `p.`: the fields and methods of a `Point`, as snippets.
+    let r = c.at("textDocument/completion", &uri, 14, 12);
+    let names = labels(&r);
+    assert!(names.contains(&"x".to_string()) && names.contains(&"y".to_string()), "{names:?}");
+    assert_eq!(insert_text(&r, "norm").as_deref(), Some("norm()"), "{}", r.write());
+    assert!(!names.contains(&"area".to_string()), "{names:?}");
+    // At the start of a word: the names in scope that start with it.
+    let text = format!("{SHAPES}    to\n    ar\n");
+    c.change(&uri, 2, &text);
+    let r = c.at("textDocument/completion", &uri, 14, 6);
+    assert!(labels(&r).contains(&"total".to_string()), "{}", r.write());
+    let r = c.at("textDocument/completion", &uri, 15, 6);
+    assert_eq!(insert_text(&r, "area").as_deref(), Some("area(${1:w}, ${2:h})"), "{}", r.write());
+    c.stop();
+}
+
+#[test]
+fn rename_changes_every_use() {
+    let mut c = Client::start();
+    let (uri, _dir) = document("rename.sisu", SHAPES);
+    c.open(&uri, SHAPES);
+    let edits_of = |r: &Json| -> Vec<(u64, u64, String)> {
+        r.at(&["changes", &uri])
+            .and_then(Json::as_array)
+            .unwrap_or(&[])
+            .iter()
+            .map(|e| {
+                (
+                    e.at(&["range", "start", "line"]).and_then(Json::as_u64).unwrap_or(0),
+                    e.at(&["range", "start", "character"]).and_then(Json::as_u64).unwrap_or(0),
+                    e.get("newText").and_then(Json::as_str).unwrap_or("").to_string(),
+                )
+            })
+            .collect()
+    };
+    // A local: its declaration and its use.
+    let pos = |line: u32, ch: u32| Json::obj(vec![("line", Json::num(line)), ("character", Json::num(ch))]);
+    let prep = c.request(
+        "textDocument/prepareRename",
+        Json::obj(vec![
+            ("textDocument", Json::obj(vec![("uri", Json::str(&uri))])),
+            ("position", pos(12, 9)),
+        ]),
+    );
+    assert_eq!(prep.get("placeholder").and_then(Json::as_str), Some("total"), "{}", prep.write());
+    let r = c.request(
+        "textDocument/rename",
+        Json::obj(vec![
+            ("textDocument", Json::obj(vec![("uri", Json::str(&uri))])),
+            ("position", pos(12, 9)),
+            ("newName", Json::str("sum")),
+        ]),
+    );
+    assert_eq!(edits_of(&r), vec![(12, 8, "sum".to_string()), (13, 10, "sum".to_string())], "{}", r.write());
+    // A function: its definition and its call.
+    let r = c.request(
+        "textDocument/rename",
+        Json::obj(vec![
+            ("textDocument", Json::obj(vec![("uri", Json::str(&uri))])),
+            ("position", pos(7, 5)),
+            ("newName", Json::str("surface")),
+        ]),
+    );
+    assert_eq!(
+        edits_of(&r),
+        vec![(7, 4, "surface".to_string()), (12, 16, "surface".to_string())],
+        "{}",
+        r.write()
+    );
+    // A field: its declaration, the construction and the reads.
+    let r = c.request(
+        "textDocument/rename",
+        Json::obj(vec![
+            ("textDocument", Json::obj(vec![("uri", Json::str(&uri))])),
+            ("position", pos(1, 4)),
+            ("newName", Json::str("left")),
+        ]),
+    );
+    let lines: Vec<u64> = edits_of(&r).iter().map(|e| e.0).collect();
+    assert_eq!(lines, vec![1, 5, 5, 11, 12], "{}", r.write());
+    // The references of `area`: its definition and its call.
+    let r = c.request(
+        "textDocument/references",
+        Json::obj(vec![
+            ("textDocument", Json::obj(vec![("uri", Json::str(&uri))])),
+            ("position", pos(12, 17)),
+            ("context", Json::obj(vec![("includeDeclaration", Json::Bool(true))])),
+        ]),
+    );
+    let at: Vec<u64> = r
+        .as_array()
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|l| l.at(&["range", "start", "line"]).and_then(Json::as_u64))
+        .collect();
+    assert_eq!(at, vec![7, 12], "{}", r.write());
+    // The standard library's `print` is not the program's to rename.
+    let prep = c.request(
+        "textDocument/prepareRename",
+        Json::obj(vec![
+            ("textDocument", Json::obj(vec![("uri", Json::str(&uri))])),
+            ("position", pos(13, 5)),
+        ]),
+    );
+    assert_eq!(prep, Json::Null);
+    c.stop();
+}
+
+#[test]
+fn code_actions_carry_the_catalogs_fixes() {
+    let mut c = Client::start();
+    let text = "def main():\n    let count = 3\n    print(cuont)\n";
+    let (uri, _dir) = document("fix.sisu", text);
+    c.open(&uri, text);
+    let range = Json::obj(vec![
+        ("start", Json::obj(vec![("line", Json::num(2)), ("character", Json::num(10))])),
+        ("end", Json::obj(vec![("line", Json::num(2)), ("character", Json::num(15))])),
+    ]);
+    let r = c.request(
+        "textDocument/codeAction",
+        Json::obj(vec![
+            ("textDocument", Json::obj(vec![("uri", Json::str(&uri))])),
+            ("range", range),
+            ("context", Json::obj(vec![("diagnostics", Json::Arr(Vec::new()))])),
+        ]),
+    );
+    let action = r.as_array().and_then(|a| a.first()).cloned().unwrap_or(Json::Null);
+    assert_eq!(action.get("kind").and_then(Json::as_str), Some("quickfix"), "{}", r.write());
+    assert!(action.get("title").and_then(Json::as_str).is_some_and(|t| t.contains("count")), "{}", r.write());
+    let edit =
+        action.at(&["edit", "changes", &uri]).and_then(Json::as_array).and_then(|a| a.first()).cloned();
+    let edit = edit.unwrap_or(Json::Null);
+    assert_eq!(edit.get("newText").and_then(Json::as_str), Some("count"), "{}", r.write());
+    assert_eq!(edit.at(&["range", "start", "character"]).and_then(Json::as_u64), Some(10));
+    c.stop();
+}
+
+#[test]
+fn inlay_hints_show_types_error_sets_and_conventions() {
+    let mut c = Client::start();
+    let text = "\
+error Missing:
+    Gone
+
+def load(fs: Fs, name: Path) -> int !:
+    let text = fs.read_to_string(name)?
+    if text.is_empty():
+        return Err(Gone)
+    return Ok(len(text))
+
+def bump(mut xs: list[int]):
+    xs.append(1)
+
+def main():
+    var xs = [1, 2]
+    bump(xs)
+    let n = len(xs)
+    print(n)
+";
+    let (uri, _dir) = document("hints.sisu", text);
+    c.open(&uri, text);
+    let range = Json::obj(vec![
+        ("start", Json::obj(vec![("line", Json::num(0)), ("character", Json::num(0))])),
+        ("end", Json::obj(vec![("line", Json::num(17)), ("character", Json::num(0))])),
+    ]);
+    let r = c.request(
+        "textDocument/inlayHint",
+        Json::obj(vec![("textDocument", Json::obj(vec![("uri", Json::str(&uri))])), ("range", range)]),
+    );
+    let hints: Vec<(u64, String)> = r
+        .as_array()
+        .unwrap_or(&[])
+        .iter()
+        .map(|h| {
+            (
+                h.at(&["position", "line"]).and_then(Json::as_u64).unwrap_or(0),
+                h.get("label").and_then(Json::as_str).unwrap_or("").to_string(),
+            )
+        })
+        .collect();
+    assert!(hints.contains(&(4, ": String".to_string())), "{hints:?}");
+    assert!(
+        hints.contains(&(3, "{IoError, Missing}".to_string()))
+            || hints.contains(&(3, "{Missing, IoError}".to_string())),
+        "{hints:?}"
+    );
+    assert!(hints.contains(&(14, "mut".to_string())), "{hints:?}");
+    assert!(hints.contains(&(15, ": int".to_string())), "{hints:?}");
+    c.stop();
+}
+
+#[test]
+fn explain_borrow_is_a_command() {
+    let mut c = Client::start();
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/cases/ownership/explain_borrow.sisu");
+    let text = std::fs::read_to_string(&path).expect("the case");
+    let (uri, _dir) = document("explain.sisu", &text);
+    c.open(&uri, &text);
+    let r = c.request(
+        "workspace/executeCommand",
+        Json::obj(vec![
+            ("command", Json::str("sisu.explainBorrow")),
+            (
+                "arguments",
+                Json::Arr(vec![Json::obj(vec![
+                    ("textDocument", Json::obj(vec![("uri", Json::str(&uri))])),
+                    ("position", Json::obj(vec![("line", Json::num(15)), ("character", Json::num(4))])),
+                ])]),
+            ),
+        ]),
+    );
+    assert_eq!(r.get("line").and_then(Json::as_u64), Some(16), "{}", r.write());
+    let loans = r.get("loans").and_then(Json::as_array).unwrap_or(&[]).to_vec();
+    assert_eq!(loans.len(), 2, "{}", r.write());
+    assert_eq!(loans[0].get("place").and_then(Json::as_str), Some("text"));
+    assert_eq!(
+        loans[0].get("message").and_then(Json::as_str),
+        Some("a shared borrow of `text` from 15:29, held by `best`, `words`, used until 18:15")
+    );
+    // Where it starts, as a range of the document (line 15, column 29).
+    assert_eq!(loans[0].at(&["start", "start", "line"]).and_then(Json::as_u64), Some(14));
+    assert_eq!(loans[0].at(&["start", "start", "character"]).and_then(Json::as_u64), Some(28));
+    c.stop();
+}
+
+#[test]
+fn range_formatting_and_worksheet_values() {
+    let mut c = Client::start();
+    let messy = "def a( ):\n    print( 1+2 )\n\ndef b( ):\n    print( 3+4 )\n";
+    let (uri, _dir) = document("range.sisu", messy);
+    c.open(&uri, messy);
+    let range = Json::obj(vec![
+        ("start", Json::obj(vec![("line", Json::num(3)), ("character", Json::num(0))])),
+        ("end", Json::obj(vec![("line", Json::num(4)), ("character", Json::num(0))])),
+    ]);
+    let r = c.request(
+        "textDocument/rangeFormatting",
+        Json::obj(vec![
+            ("textDocument", Json::obj(vec![("uri", Json::str(&uri))])),
+            ("range", range),
+            ("options", Json::obj(vec![("tabSize", Json::num(4)), ("insertSpaces", Json::Bool(true))])),
+        ]),
+    );
+    let edits = r.as_array().unwrap_or(&[]).to_vec();
+    assert_eq!(edits.len(), 1, "{}", r.write());
+    assert_eq!(edits[0].at(&["range", "start", "line"]).and_then(Json::as_u64), Some(3));
+    assert_eq!(edits[0].get("newText").and_then(Json::as_str), Some("def b():\n    print(3 + 4)\n"));
+    // A worksheet's values, at the ends of their statements' lines.
+    let sheet = "let x = 1 + 2\nprint(\"x is {x}\")\nx * 2\n";
+    let (uri, _dir2) = document("sheet.sisu", sheet);
+    c.open(&uri, sheet);
+    let r = c.request(
+        "textDocument/inlineValue",
+        Json::obj(vec![
+            ("textDocument", Json::obj(vec![("uri", Json::str(&uri))])),
+            (
+                "range",
+                Json::obj(vec![
+                    ("start", Json::obj(vec![("line", Json::num(0)), ("character", Json::num(0))])),
+                    ("end", Json::obj(vec![("line", Json::num(3)), ("character", Json::num(0))])),
+                ]),
+            ),
+            ("context", Json::obj(vec![("frameId", Json::num(0))])),
+        ]),
+    );
+    let values: Vec<(u64, String)> = r
+        .as_array()
+        .unwrap_or(&[])
+        .iter()
+        .map(|v| {
+            (
+                v.at(&["range", "start", "line"]).and_then(Json::as_u64).unwrap_or(99),
+                v.get("text").and_then(Json::as_str).unwrap_or("").to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        values,
+        vec![(0, "# => 3".to_string()), (1, "# | x is 3".to_string()), (2, "# => 6".to_string())],
+        "{}",
+        r.write()
+    );
+    c.stop();
+}
+
+/// Where a body in the middle of a file starts: its first statement.
+fn middle_body(text: &str) -> Option<usize> {
+    let parse = sisu_parser::parse(sisu_diag::FileId(0), text);
+    let module = sisu_syntax::ast::build::module(&parse.tree);
+    let mut starts: Vec<usize> = Vec::new();
+    for item in &module.items {
+        let fns: Vec<&sisu_syntax::ast::FnDef> = match &item.kind {
+            sisu_syntax::ast::ItemKind::Fn(f) => vec![f],
+            sisu_syntax::ast::ItemKind::Struct(s) => s.methods.iter().collect(),
+            sisu_syntax::ast::ItemKind::Impl(i) => i.methods.iter().collect(),
+            _ => Vec::new(),
+        };
+        for f in fns {
+            if f.generics.is_empty()
+                && let Some(s) = f.body.as_ref().and_then(|b| b.stmts.first())
+            {
+                starts.push(s.range.start as usize);
+            }
+        }
+    }
+    starts.sort();
+    starts.get(starts.len() / 2).copied()
+}
+
+/// The answers on every module of the standard library, opened as a
+/// document: the diagnostics after an edit of one function body (a `pass`
+/// line in a body in the middle of the file) and a hover, each against the
+/// 100 ms an editor allows (10, "Compile speed as a requirement"). The
+/// numbers are printed (`cargo test --release --test lsp latency --
+/// --nocapture`); the test fails only past ten times that, since a debug
+/// build on a busy machine is not the measure.
 #[test]
 fn latency() {
     let mut c = Client::start();
     let std_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../std");
-    for name in ["num.sisu", "collections.sisu", "time.sisu", "json.sisu"] {
-        let path = std_dir.join(name);
+    let mut names: Vec<PathBuf> = std::fs::read_dir(&std_dir)
+        .expect("std")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e == "sisu"))
+        .collect();
+    names.sort();
+    let mut worst = (0u128, String::new());
+    for path in names {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
         let text = std::fs::read_to_string(&path).expect("a std module");
         let uri = path_uri(&std::fs::canonicalize(&path).expect("a path"));
         let start = std::time::Instant::now();
         c.open(&uri, &text);
         let open = start.elapsed();
+        let changed = match middle_body(&text) {
+            Some(at) => {
+                let line_start = text[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
+                format!("{}{}pass\n{}", &text[..line_start], &text[line_start..at], &text[line_start..])
+            }
+            None => format!("{text}\n"),
+        };
         let start = std::time::Instant::now();
-        let changed = format!("{text}\n");
         c.change(&uri, 2, &changed);
         let change = start.elapsed();
         // A hover in the middle of the file.
@@ -337,7 +703,18 @@ fn latency() {
             change.as_millis(),
             hover.as_millis()
         );
+        if change.as_millis() > worst.0 {
+            worst = (change.as_millis(), name.clone());
+        }
         assert!(change.as_millis() < 1000 && hover.as_millis() < 1000, "{name}: too slow");
+        c.notify(
+            "textDocument/didClose",
+            Json::obj(vec![("textDocument", Json::obj(vec![("uri", Json::str(&uri))]))]),
+        );
+        // Closing clears the document's diagnostics.
+        let cleared = c.notification("textDocument/publishDiagnostics");
+        assert_eq!(cleared.get("uri").and_then(Json::as_str), Some(uri.as_str()));
     }
+    println!("slowest change: std/{} in {} ms", worst.1, worst.0);
     c.stop();
 }

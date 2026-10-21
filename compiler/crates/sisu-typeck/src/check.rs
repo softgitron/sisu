@@ -58,6 +58,16 @@ pub(crate) struct Checker<'p> {
     /// find is most likely a parameter or binding lost in that error, so it
     /// is not reported.
     pub quiet_unknown_names: bool,
+    /// While a later branch of an `if` or `match` with no expected type is
+    /// converted to the type of the first: the keyword and the first
+    /// branch, for E0365 instead of a plain mismatch.
+    pub branch: Option<(&'static str, TextRange)>,
+    /// While a value is converted to a type written in the source (a
+    /// `let`'s annotation): where, for the mismatch's label.
+    pub because: Option<TextRange>,
+    /// While a field's default is checked: the struct, whose other fields
+    /// the default cannot use (E0221).
+    pub field_default_of: Option<DefId>,
     /// Checking code that runs at compile time: the body of a `comptime def`
     /// or a `comptime` expression, where a `comptime def` may be called.
     pub in_comptime: bool,
@@ -79,6 +89,9 @@ pub(crate) struct Checker<'p> {
     /// While `ensures` clauses are checked: `result`'s scope and the
     /// values `old(...)` saves on entry.
     pub ensures: Option<crate::contracts::EnsuresCtx>,
+    /// The `T !` functions whose inferred error set the body read: what
+    /// the per-item query of the body depends on besides the interface.
+    pub inferred_reads: std::cell::RefCell<Vec<DefId>>,
 }
 
 impl<'p> Checker<'p> {
@@ -113,6 +126,9 @@ impl<'p> Checker<'p> {
             generic_asserts: Vec::new(),
             owner_checks: Vec::new(),
             quiet_unknown_names: prog.fn_info(def).is_some_and(|f| f.header_broken || f.body_broken),
+            branch: None,
+            because: None,
+            field_default_of: None,
             in_comptime: prog.fn_info(def).is_some_and(|f| f.comptime),
             comptime_sites: Vec::new(),
             spawn_sites: Vec::new(),
@@ -121,6 +137,7 @@ impl<'p> Checker<'p> {
             generator: None,
             cap_checks: Vec::new(),
             ensures: None,
+            inferred_reads: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -611,6 +628,11 @@ impl<'p> Checker<'p> {
         self.is_builtin(ty, "String")
     }
 
+    /// Whether a type is an option (`T?`).
+    pub fn is_option(&self, ty: &Ty) -> bool {
+        matches!(ty, Ty::Adt(d, _) if Some(*d) == self.prog.wk.option)
+    }
+
     // ---------------------------------------------------------------- blocks and statements
 
     pub fn check_block(&mut self, b: &ast::Block) -> Block {
@@ -655,7 +677,9 @@ impl<'p> Checker<'p> {
                 if self.ret.last().is_some_and(|r| r.loops > 0) {
                     out.push(Stmt::Break(span));
                 } else {
-                    let d = self.error(msg::TYPE_BREAK_OUTSIDE_LOOP, s.range);
+                    let d = self
+                        .error(msg::TYPE_BREAK_OUTSIDE_LOOP, s.range)
+                        .note(msg::TYPE_BREAK_USE_RETURN, Vec::new());
                     self.report(d);
                     out.push(Stmt::Error(span));
                 }
@@ -703,7 +727,7 @@ impl<'p> Checker<'p> {
             }
             ast::StmtKind::Assert { cond, message } => {
                 let c = self.check_condition_expr(cond);
-                let m = message.as_ref().map(|m| self.check_expr(m, &Ty::Str));
+                let m = message.as_ref().map(|m| self.assert_message(m));
                 let text = self.source_text(cond.range);
                 let replay = self.only_reads(&c, false);
                 out.push(Stmt::Assert { cond: c, message: m, text, span, replay });
@@ -916,9 +940,10 @@ impl<'p> Checker<'p> {
                 out.push(Stmt::Let { pat: p, init: Some(value), unwrap: None, else_: Some(else_), span });
             }
             None => {
-                let value = match &declared {
-                    Some(t) => self.check_expr(init, t),
-                    None => {
+                let value = match (&declared, ty) {
+                    (Some(t), Some(written)) => self.check_expr_because(init, t, written.range),
+                    (Some(t), None) => self.check_expr(init, t),
+                    (None, _) => {
                         let v = self.infer_expr(init, None);
                         self.decay(v)
                     }
@@ -1087,21 +1112,54 @@ impl<'p> Checker<'p> {
                     } else {
                         self.source_text(range)
                     };
-                    let d = self
-                        .error(m, range)
-                        .with("name", name.clone())
-                        .with("what", what)
-                        .fix(msg::TYPE_DECLARE_VAR, vec![("name", name)], Vec::new())
-                        .label(
-                            decl,
-                            msg::RESOLVE_DEFINED_HERE,
-                            vec![("name", self.locals[l.0 as usize].name.clone())],
-                        );
+                    // A borrowed parameter is changed by taking it with
+                    // `mut`; a local by declaring it with `var`.
+                    let param = self.prog.fn_info(self.def).and_then(|f| {
+                        f.params.iter().find(|p| p.span == decl && p.mode == ast::Mode::Borrow).cloned()
+                    });
+                    let d = self.error(m, range).with("name", name.clone()).with("what", what);
+                    let d = match param {
+                        Some(p) => d.fix(
+                            msg::TYPE_TAKE_MUT,
+                            vec![("name", p.name.clone())],
+                            vec![sisu_diag::Edit {
+                                span: Span::new(p.span.file, TextRange::empty(p.span.range.start)),
+                                text: "mut ".into(),
+                            }],
+                        ),
+                        None => d.fix(msg::TYPE_DECLARE_VAR, vec![("name", name)], Vec::new()),
+                    };
+                    let d = d.label(
+                        decl,
+                        msg::RESOLVE_DEFINED_HERE,
+                        vec![("name", self.locals[l.0 as usize].name.clone())],
+                    );
                     self.report(d);
                 }
                 Problem::BehindSharedRef => {
                     let what = self.source_text(range);
-                    let d = self.error(msg::TYPE_NOT_MUTABLE, range).with("what", what);
+                    let mut d = self.error(msg::TYPE_NOT_MUTABLE, range).with("what", what);
+                    // A borrowed parameter: taking it with `mut` lets the
+                    // function change what the caller lends.
+                    // Through the reference the parameter is.
+                    let mut base = e;
+                    while let ExprKind::Deref(inner) | ExprKind::Field { base: inner, .. } = &base.kind {
+                        base = inner;
+                    }
+                    if let Some(root) = base.place_root()
+                        && let Some(p) = self.prog.fn_info(self.def).and_then(|f| {
+                            f.params.iter().find(|p| {
+                                p.span == self.locals[root.0 as usize].span && p.mode == ast::Mode::Borrow
+                            })
+                        })
+                    {
+                        let at = Span::new(p.span.file, TextRange::empty(p.span.range.start));
+                        d = d.fix(
+                            msg::TYPE_TAKE_MUT,
+                            vec![("name", p.name.clone())],
+                            vec![sisu_diag::Edit { span: at, text: "mut ".into() }],
+                        );
+                    }
                     self.report(d);
                 }
             }
@@ -1160,6 +1218,29 @@ impl<'p> Checker<'p> {
         Stmt::Expr(x)
     }
 
+    /// The message of an `assert`: a string (E0379), or with the fix that
+    /// writes the value into one.
+    fn assert_message(&mut self, m: &ast::Expr) -> Expr {
+        let x = self.infer_expr(m, Some(&Ty::Str));
+        let t = self.resolved(&x.ty);
+        if matches!(t, Ty::Str | Ty::Error | Ty::Never | Ty::Var(_)) || self.is_string(&t) {
+            return self.coerce(x, &Ty::Str);
+        }
+        let mut d = self.error(msg::TYPE_ASSERT_MESSAGE, m.range);
+        if let Some(text) = self.source.get(m.range.start as usize..m.range.end as usize)
+            && !text.contains(['"', '\n'])
+        {
+            let edit = sisu_diag::Edit { span: self.span(m.range), text: format!("\"{{{text}}}\"") };
+            d = d.fix(msg::TYPE_INTERPOLATE, Vec::new(), vec![edit]);
+        }
+        self.report(d);
+        Expr::new(
+            ExprKind::Coerce { expr: Box::new(x), kind: Coercion::Mismatch },
+            Ty::Str,
+            self.span(m.range),
+        )
+    }
+
     fn check_return(&mut self, v: Option<&ast::Expr>, range: TextRange) -> Stmt {
         let span = self.span(range);
         let ret = self.ret.last().map(|r| r.ty.clone()).unwrap_or(Ty::Unit);
@@ -1178,7 +1259,26 @@ impl<'p> Checker<'p> {
             }
             Some(e) => {
                 if self.resolved(&ret) == Ty::Unit && self.current_closure().is_none() {
-                    let d = self.error(msg::TYPE_RETURN_VALUE_IN_UNIT, e.range).with("name", fn_name);
+                    let is_test = self
+                        .prog
+                        .fn_info(self.def)
+                        .is_some_and(|f| matches!(f.kind, sisu_resolve::FnKind::Test(_)));
+                    let d = if is_test {
+                        self.error(msg::TYPE_RETURN_IN_TEST, e.range)
+                    } else {
+                        self.error(msg::TYPE_RETURN_VALUE_IN_UNIT, e.range).with("name", fn_name)
+                    };
+                    // The fix keeps the `return` and drops its value.
+                    let keyword_end = range.start + "return".len() as u32;
+                    let d = if self.source.get(range.start as usize..keyword_end as usize) == Some("return") {
+                        let edit = sisu_diag::Edit {
+                            span: self.span(TextRange::new(keyword_end, e.range.end)),
+                            text: String::new(),
+                        };
+                        d.fix(msg::TYPE_DROP_RETURN_VALUE, Vec::new(), vec![edit])
+                    } else {
+                        d
+                    };
                     self.report(d);
                     let x = self.infer_expr(e, None);
                     return Stmt::Return { value: Some(x), span };

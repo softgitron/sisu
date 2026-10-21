@@ -83,6 +83,9 @@ impl<'p> Interp<'p, '_> {
         if let Some(r) = self.sized_intrinsic(name, &args) {
             return r;
         }
+        if let Some(r) = self.f32_intrinsic(name, &args) {
+            return r;
+        }
         if let Some(r) = self.bytes_intrinsic(name, &args) {
             return r;
         }
@@ -1164,6 +1167,38 @@ impl Interp<'_, '_> {
                 } else {
                     self.sched.stats.shared_local += 1;
                 }
+                // The construction site, for `--stats shared`.
+                let site = if self.stats_kind == crate::StatsKind::Shared && self.sched.keep_stats {
+                    let (function, source) = self
+                        .frames
+                        .last()
+                        .and_then(|f| f.func)
+                        .and_then(|fi| self.func(fi))
+                        .map(|f| (f.name.clone(), f.source))
+                        .unwrap_or_default();
+                    let loc = self.frames.last().and_then(|f| f.loc);
+                    let sites = &mut self.sched.stats.sites;
+                    let i = match sites
+                        .iter()
+                        .position(|s| s.function == function && s.loc == loc && s.source == source)
+                    {
+                        Some(i) => i,
+                        None => {
+                            sites.push(crate::sched::SharedSite {
+                                function,
+                                loc,
+                                source,
+                                atomic,
+                                ..Default::default()
+                            });
+                            sites.len() - 1
+                        }
+                    };
+                    sites[i].cells += 1;
+                    Some(i as u32)
+                } else {
+                    None
+                };
                 self.heap.push(crate::value::HeapCell {
                     value,
                     strong: 1,
@@ -1173,6 +1208,7 @@ impl Interp<'_, '_> {
                     creator: self.sched.cur,
                     crossed: false,
                     label: None,
+                    site,
                 });
                 Ok(Value::Shared(id))
             }

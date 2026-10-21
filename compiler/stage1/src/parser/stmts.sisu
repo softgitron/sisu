@@ -1,0 +1,417 @@
+##! Statements and blocks.
+##!
+##! ```text
+##! block     := NEWLINE INDENT stmt+ DEDENT
+##! stmt      := let_stmt | return_stmt | 'break' | 'continue' | 'pass' | if_stmt
+##!              | while_stmt | for_stmt | assert_stmt | defer_stmt | with_stmt
+##!              | item | expr_stmt | assign_stmt
+##! let_stmt  := ('let' | 'var') patterns (':' type)? ('=' exprs let_else?)? NEWLINE
+##! let_else  := 'else' ('as' name)? ':' (block | expr | return_stmt | 'break' | 'continue')
+##! if_stmt   := 'if' cond ':' block ('elif' cond ':' block)* ('else' ':' block)?
+##! cond      := cond_part (',' cond_part)*      cond_part := 'let' pattern '=' expr | expr
+##! while_stmt:= 'while' cond ':' block
+##! for_stmt  := 'for' patterns 'in' ('mut' | 'own')? expr ':' block
+##! assign_stmt := exprs ('=' | '+=' | ...) exprs NEWLINE
+##! ```
+
+from stage1.diag import Diagnostic, Msg
+from stage1.parser.state import Parser
+from stage1.syntax.kinds import SyntaxKind
+
+## The augmented assignment operators.
+pure def is_aug_assign(kind: SyntaxKind) -> bool:
+    return match kind:
+        case PlusEq | MinusEq | StarEq | SlashEq | SlashSlashEq | PercentEq | StarStarEq: True
+        case AmpEq | PipeEq | CaretEq | ShlEq | ShrEq: True
+        case PlusPercentEq | MinusPercentEq | StarPercentEq | PlusPipeEq | MinusPipeEq | StarPipeEq: True
+        case _: False
+
+## Keywords that start a statement; after `:` on the same line they mean a
+## block was written inline.
+pure def is_statement_keyword(kind: SyntaxKind) -> bool:
+    return match kind:
+        case ReturnKw | BreakKw | ContinueKw | PassKw | LetKw | VarKw | AssertKw: True
+        case ForKw | WhileKw | DeferKw | WithKw: True
+        case _: False
+
+impl Parser:
+    ## A statement block after `:`. `keyword` and `line` name the opener
+    ## for "expected an indented block after `if` on line 12".
+    pub(package) pure def block(mut self, keyword: str, line: int):
+        self.start(SyntaxKind.Block)
+        if self.at(SyntaxKind.Newline):
+            self.bump()
+            if self.at(SyntaxKind.Indent):
+                self.bump()
+                self.statements()
+            else:
+                self.expected_block(keyword, line)
+                self.start(SyntaxKind.Error)
+                self.finish_node()
+        elif self.at_block_end():
+            self.expected_block(keyword, line)
+            self.start(SyntaxKind.Error)
+            self.finish_node()
+        else:
+            # `if x: return 1`: report once, keep the statement.
+            let (start, end) = self.error_span()
+            self.report(Diagnostic.new(Msg.ParseBlockOnSameLine, start, end))
+            self.statement()
+        self.finish_node()
+
+    ## The statements of a block after its INDENT, and its DEDENT.
+    pure def statements(mut self):
+        while not self.at_block_end():
+            let before = self.pos_marker()
+            self.statement()
+            if self.pos_marker() == before:
+                self.bump_error()
+        _ = self.eat(SyntaxKind.Dedent)
+        self.ended_with_block = True
+
+    ## A block whose NEWLINE recovery already consumed.
+    pub(package) pure def block_after_newline(mut self, keyword: str, line: int):
+        self.start(SyntaxKind.Block)
+        if self.at(SyntaxKind.Indent):
+            self.bump()
+            self.statements()
+        else:
+            self.expected_block(keyword, line)
+        self.finish_node()
+
+    pub(package) pure def statement(mut self):
+        match self.current():
+            case LetKw | VarKw:
+                self.let_stmt()
+            case ReturnKw:
+                self.return_stmt()
+            case BreakKw:
+                self.keyword_stmt(SyntaxKind.BreakStmt)
+            case ContinueKw:
+                self.keyword_stmt(SyntaxKind.ContinueStmt)
+            case PassKw:
+                self.keyword_stmt(SyntaxKind.PassStmt)
+            case IfKw if self.if_is_statement():
+                self.if_stmt()
+            case WhileKw:
+                self.while_stmt()
+            case ForKw:
+                self.for_stmt()
+            case AssertKw:
+                self.assert_stmt()
+            case DeferKw:
+                self.defer_stmt()
+            case WithKw:
+                self.with_stmt()
+            case UnsafeKw if self.nth(1) == SyntaxKind.Colon:
+                self.start(SyntaxKind.UnsafeBlock)
+                let line = self.current_line()
+                self.bump()
+                self.bump()
+                self.block("unsafe", line)
+                self.finish_node()
+            case Indent:
+                self.unexpected_indent_block(False)
+            case YieldKw:
+                self.start(SyntaxKind.YieldStmt)
+                self.bump()
+                if not self.at_line_end():
+                    _ = self.expr()
+                self.end_stmt()
+                self.finish_node()
+            case SelectKw:
+                self.select_stmt()
+            case ComptimeKw if self.nth(1) != SyntaxKind.DefKw:
+                # `comptime for`, `comptime if`, `comptime assert`, `comptime e`.
+                self.start(SyntaxKind.ComptimeStmt)
+                self.bump()
+                self.statement()
+                self.finish_node()
+            case Ident if self.at_contract():
+                # `requires e`, `ensures e`, `invariant e`, `decreases e`.
+                self.start(SyntaxKind.ContractStmt)
+                self.bump()
+                _ = self.expr()
+                self.end_stmt()
+                self.finish_node()
+            case Ident if self.current_text() == "expect" and self.expect_stmt_follows():
+                self.start(SyntaxKind.ExpectStmt)
+                self.bump()
+                _ = self.expr()
+                self.end_stmt()
+                self.finish_node()
+            case _ if self.at_item_start():
+                self.item()
+            case _:
+                self.expr_or_assign()
+
+    pub(package) pure def at_contract(self) -> bool:
+        let word = self.current_text()
+        if word != "requires" and word != "ensures" and word != "invariant" and word != "decreases":
+            return False
+        let next = self.nth(1)
+        return match next:
+            case Eq | Dot | Comma | Newline | LBracket | QuestionDot | Eof: False
+            case _: not is_aug_assign(next)
+
+    ## `expect cond` is a statement when an expression follows on the line.
+    pure def expect_stmt_follows(self) -> bool:
+        return match self.nth(1):
+            case Ident | IntNumber | FloatNumber | StringStart | NotKw | Minus | SelfKw | LBracket | CharLit: True
+            case _: False
+
+    ## `select:` and arms `case pattern = operation:` with blocks.
+    pure def select_stmt(mut self):
+        self.start(SyntaxKind.SelectStmt)
+        let line = self.current_line()
+        self.bump()
+        if self.expect(SyntaxKind.Colon):
+            self.start(SyntaxKind.MatchArmList)
+            if self.eat(SyntaxKind.Newline) and self.eat(SyntaxKind.Indent):
+                while not self.at_block_end():
+                    if not self.at(SyntaxKind.CaseKw):
+                        let before = self.pos_marker()
+                        _ = self.expect(SyntaxKind.CaseKw)
+                        self.recover_line()
+                        if self.pos_marker() == before:
+                            # An indented block where a `case` belongs.
+                            self.bump_error()
+                        continue
+                    self.start(SyntaxKind.MatchArm)
+                    let arm_line = self.current_line()
+                    self.bump()
+                    self.pattern()
+                    _ = self.expect(SyntaxKind.Eq)
+                    _ = self.expr()
+                    self.colon_block("case", arm_line)
+                    self.finish_node()
+                _ = self.eat(SyntaxKind.Dedent)
+                self.ended_with_block = True
+            else:
+                self.expected_block("select", line)
+            self.finish_node()
+        self.finish_node()
+
+    pure def keyword_stmt(mut self, kind: SyntaxKind):
+        self.start(kind)
+        self.bump()
+        self.end_stmt()
+        self.finish_node()
+
+    ## `return [exprs]`.
+    pub(package) pure def return_stmt(mut self):
+        self.start(SyntaxKind.ReturnStmt)
+        self.bump()
+        if self.at(SyntaxKind.ImplKw):
+            # `return impl Trait for T:` inside a `comptime def` (08).
+            let cp = self.checkpoint()
+            self.impl_def(cp)
+        elif not self.at_line_end():
+            self.expr_list()
+        self.end_stmt()
+        self.finish_node()
+
+    pure def let_stmt(mut self):
+        self.start(SyntaxKind.LetStmt)
+        self.bump()
+        self.pattern_list()
+        if self.eat(SyntaxKind.Colon):
+            self.type_()
+        if self.at(SyntaxKind.Walrus):
+            self.error(Msg.ParseWalrus)
+            self.bump()
+            self.expr_list()
+        elif self.eat(SyntaxKind.Eq):
+            self.expr_list()
+            if self.at(SyntaxKind.ElseKw):
+                self.let_else()
+        self.end_stmt()
+        self.finish_node()
+
+    pure def let_else(mut self):
+        self.start(SyntaxKind.LetElse)
+        let line = self.current_line()
+        self.bump()
+        if self.eat(SyntaxKind.AsKw):
+            _ = self.expect_name()
+        if self.expect(SyntaxKind.Colon):
+            if self.at(SyntaxKind.Newline):
+                self.block("else", line)
+            else:
+                match self.current():
+                    case ReturnKw:
+                        self.start(SyntaxKind.ReturnStmt)
+                        self.bump()
+                        if not self.at_line_end():
+                            self.expr_list()
+                        self.finish_node()
+                    case BreakKw:
+                        self.start(SyntaxKind.BreakStmt)
+                        self.bump()
+                        self.finish_node()
+                    case ContinueKw:
+                        self.start(SyntaxKind.ContinueStmt)
+                        self.bump()
+                        self.finish_node()
+                    case _:
+                        _ = self.expr()
+        self.finish_node()
+
+    ## Whether `if` at the start of a statement is the statement form: the
+    ## first `:` outside brackets ends the line, or a statement keyword
+    ## follows it (an inline block, which `block` reports).
+    pure def if_is_statement(self) -> bool:
+        var depth = 0
+        var i = 1
+        while True:
+            match self.nth(i):
+                case Newline | Eof | Dedent | Indent:
+                    return True
+                case LParen | LBracket | LBrace | InterpStart:
+                    depth += 1
+                case RParen | RBracket | RBrace | InterpEnd:
+                    depth -= 1
+                case Colon if depth <= 0:
+                    let next = self.nth(i + 1)
+                    return match next:
+                        case Newline | Eof | Dedent: True
+                        case _: is_statement_keyword(next)
+                case _:
+                    pass
+            i += 1
+
+    pure def if_stmt(mut self):
+        self.start(SyntaxKind.IfStmt)
+        let line = self.current_line()
+        self.bump()
+        self.cond()
+        self.colon_block("if", line)
+        while self.at(SyntaxKind.ElifKw):
+            self.start(SyntaxKind.ElifClause)
+            let elif_line = self.current_line()
+            self.bump()
+            self.cond()
+            self.colon_block("elif", elif_line)
+            self.finish_node()
+        if self.at(SyntaxKind.ElseKw):
+            self.start(SyntaxKind.ElseClause)
+            let else_line = self.current_line()
+            self.bump()
+            self.colon_block("else", else_line)
+            self.finish_node()
+        self.finish_node()
+
+    ## A condition: boolean tests and `let` bindings separated by commas.
+    pub(package) pure def cond(mut self):
+        self.start(SyntaxKind.Cond)
+        var more = True
+        while more:
+            if self.at(SyntaxKind.LetKw):
+                self.start(SyntaxKind.LetCond)
+                self.bump()
+                self.pattern()
+                _ = self.expect(SyntaxKind.Eq)
+                _ = self.expr()
+                self.finish_node()
+            else:
+                _ = self.expr()
+            if self.at(SyntaxKind.Eq):
+                self.error(Msg.ParseAssignmentInExpression)
+                self.bump()
+                _ = self.expr()
+            elif self.at(SyntaxKind.Walrus):
+                self.error(Msg.ParseWalrus)
+                self.bump()
+                _ = self.expr()
+            more = self.eat(SyntaxKind.Comma)
+        self.finish_node()
+
+    pure def while_stmt(mut self):
+        self.start(SyntaxKind.WhileStmt)
+        let line = self.current_line()
+        self.bump()
+        self.cond()
+        self.colon_block("while", line)
+        self.finish_node()
+
+    pure def for_stmt(mut self):
+        self.start(SyntaxKind.ForStmt)
+        let line = self.current_line()
+        self.bump()
+        self.pattern_list()
+        _ = self.expect(SyntaxKind.InKw)
+        if self.at(SyntaxKind.MutKw) or self.at(SyntaxKind.OwnKw):
+            self.bump()
+        _ = self.expr()
+        self.colon_block("for", line)
+        self.finish_node()
+
+    pure def assert_stmt(mut self):
+        self.start(SyntaxKind.AssertStmt)
+        self.bump()
+        _ = self.expr()
+        if self.eat(SyntaxKind.Comma):
+            _ = self.expr()
+        self.end_stmt()
+        self.finish_node()
+
+    pure def defer_stmt(mut self):
+        self.start(SyntaxKind.DeferStmt)
+        let line = self.current_line()
+        self.bump()
+        if self.eat(SyntaxKind.Colon):
+            self.block("defer", line)
+        else:
+            self.statement()
+        self.finish_node()
+
+    pure def with_stmt(mut self):
+        self.start(SyntaxKind.WithStmt)
+        let line = self.current_line()
+        self.bump()
+        _ = self.expr()
+        if self.expect(SyntaxKind.AsKw):
+            _ = self.expect_name()
+        self.colon_block("with", line)
+        self.finish_node()
+
+    pure def expr_or_assign(mut self):
+        let cp = self.checkpoint()
+        let before = self.pos_marker()
+        self.expr_list()
+        if self.pos_marker() == before:
+            # Nothing could start an expression here: skip the line.
+            self.start_at(cp, SyntaxKind.Error)
+            self.recover_line()
+            self.finish_node()
+            return
+        if self.at(SyntaxKind.Eq) or is_aug_assign(self.current()):
+            self.start_at(cp, SyntaxKind.AssignStmt)
+            self.bump()
+            self.expr_list()
+            self.end_stmt()
+            self.finish_node()
+        elif self.at(SyntaxKind.Walrus):
+            self.start_at(cp, SyntaxKind.AssignStmt)
+            self.error(Msg.ParseWalrus)
+            self.bump()
+            self.expr_list()
+            self.end_stmt()
+            self.finish_node()
+        else:
+            self.start_at(cp, SyntaxKind.ExprStmt)
+            self.end_stmt()
+            self.finish_node()
+
+    ## One expression, or a bare tuple `a, b` where a statement allows one.
+    pub(package) pure def expr_list(mut self):
+        let cp = self.checkpoint()
+        _ = self.expr()
+        if self.at(SyntaxKind.Comma):
+            self.start_at(cp, SyntaxKind.TupleExpr)
+            while self.eat(SyntaxKind.Comma):
+                if self.at_expr_start():
+                    _ = self.expr()
+                else:
+                    break
+            self.finish_node()

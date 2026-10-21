@@ -1,0 +1,347 @@
+##! The layout pass (docs/architecture.md, "Lexing"): logical lines, INDENT
+##! and DEDENT, by Python's algorithm. A stack of indentation widths starts
+##! at 0; at the start of each logical line outside brackets, a wider line
+##! pushes its width and emits INDENT, a narrower one pops and emits one
+##! DEDENT per popped width. Blank and comment-only lines are trivia. A line
+##! break ends a logical line (becomes NEWLINE) unless it is inside
+##! brackets, follows a trailing comma, or the next line with tokens starts
+##! with a continuation operator.
+##!
+##! Recovery: a dedent that matches no level is reported once and pushed as
+##! a phantom level that emits no tokens, so the rest of the block keeps its
+##! structure; a bracket left open when a line starting with a declaration
+##! or statement keyword appears at or left of the bracket's line is
+##! reported and closed there, so one missing `)` does not swallow the
+##! file, and so is a bracket left open by a block header followed by an
+##! indented line.
+
+from stage1.diag import Diagnostic, Msg
+from stage1.syntax.kinds import SyntaxKind
+from stage1.syntax.tree import Token
+from stage1.text import char_at, debug_char
+
+## A physical line: the raw tokens `start` up to `end`, the last of them
+## its line break when `has_break`.
+@derive(Copy)
+struct Line:
+    start: int
+    end: int
+    has_break: bool
+
+## A level of the indentation stack; a phantom level (`real` false) was
+## pushed by error recovery and emits no tokens.
+@derive(Copy)
+struct Level:
+    width: int
+    real: bool
+
+## An open bracket, and the indentation of the logical line it is on.
+@derive(Copy)
+struct Open:
+    kind: SyntaxKind
+    start: int
+    end: int
+    line_width: int
+
+## Decides logical lines and blocks for the raw tokens of `text`, appending
+## its diagnostics to `diags`.
+pub pure def layout(text: str, raw: list[Token], mut diags: list[Diagnostic]) -> list[Token]:
+    let lines = split_lines(raw)
+    var out: list[Token] = []
+    var levels = [Level(width=0, real=True)]
+    var brackets: list[Open] = []
+    var continuing = False
+    # Whether the current logical line has significant tokens.
+    var line_has_content = False
+    # Index in `out` of the line break that ended the last line with content.
+    var last_break: int? = None
+    # Index in `out` of the last NEWLINE.
+    var last_newline: int? = None
+    var logical_width = 0
+    # The first significant token of the current logical line.
+    var logical_first: SyntaxKind? = None
+    for li in range(len(lines)):
+        let line = lines[li]
+        let first_idx = first_significant(raw, line) else:
+            # Blank or comment-only: all trivia.
+            for i in range(line.start, line.end):
+                out.push(raw[i])
+            continue
+        let first = raw[first_idx]
+        let width = indentation_width(text, raw, line, first_idx, mut diags)
+
+        # Recovery for a bracket that was never closed.
+        if continuing and not brackets.is_empty():
+            let outer = brackets[0]
+            if is_statement_keyword(first.kind) and width <= outer.line_width:
+                diags.push(unclosed(text, outer))
+                brackets.clear()
+                continuing = False
+                if let Some(i) = last_break:
+                    out[i].kind = SyntaxKind.Newline
+                    last_newline = Some(i)
+                line_has_content = False
+
+        var idx = line.start
+        if not continuing:
+            # Leading whitespace is trivia before the layout tokens.
+            while idx < first_idx:
+                out.push(raw[idx])
+                idx += 1
+            let at = first.start
+            let top = levels[len(levels) - 1].width
+            if width > top:
+                levels.push(Level(width=width, real=True))
+                out.push(Token(kind=SyntaxKind.Indent, start=at, end=at))
+            elif width < top:
+                var candidates: list[String] = []
+                for l in levels:
+                    if l.real and l.width < top:
+                        candidates.push("{l.width + 1}")
+                # DEDENTs go right after the NEWLINE that ended the block, so
+                # blank lines and comments before this line (a doc comment of
+                # the next item, say) belong to the enclosing level.
+                var insert_at = len(out)
+                var dedent_at = at
+                if let Some(i) = last_newline:
+                    insert_at = i + 1
+                    dedent_at = out[i].end
+                var count = 0
+                while levels[len(levels) - 1].width > width:
+                    let popped = levels.pop().expect("a level")
+                    if popped.real:
+                        count += 1
+                    if levels.is_empty():
+                        break
+                let dedent = Token(kind=SyntaxKind.Dedent, start=dedent_at, end=dedent_at)
+                for _ in range(count):
+                    out.insert(insert_at, dedent)
+                let new_top = if levels.is_empty(): 0 else: levels[len(levels) - 1].width
+                if new_top != width:
+                    let indent_start = first.start - min(width, first.start)
+                    let d = Diagnostic.new(Msg.LexInconsistentDedent, indent_start, first.start)
+                    diags.push(d.with("columns", candidates.join(" or ")))
+                    levels.push(Level(width=width, real=False))
+            logical_width = width
+            logical_first = Some(first.kind)
+
+        # The content of the line.
+        let end = if line.has_break: line.end - 1 else: line.end
+        var last_sig: Token? = None
+        while idx < end:
+            let t = raw[idx]
+            idx += 1
+            if not t.kind.is_trivia():
+                last_sig = Some(t)
+                line_has_content = True
+            if t.kind.is_open_bracket():
+                brackets.push(Open(kind=t.kind, start=t.start, end=t.end, line_width=logical_width))
+            elif t.kind.is_close_bracket():
+                close_bracket(mut brackets, t, mut diags)
+            out.push(t)
+
+        let ends_in_colon = match last_sig:
+            case Some(t): t.kind == SyntaxKind.Colon
+            case None: False
+        let ends_in_comma = match last_sig:
+            case Some(t): t.kind == SyntaxKind.Comma
+            case None: False
+        # A block header (`def f(x: int -> int:`) that ends in `:` with a
+        # bracket still open, followed by an indented line: the bracket was
+        # never closed, and the indented lines are the block.
+        if not brackets.is_empty() and ends_in_colon and opens_block(logical_first):
+            if let Some(next) = next_indentation(raw, lines, li + 1), next > logical_width:
+                diags.push(unclosed(text, brackets[0]))
+                brackets.clear()
+
+        # Does the next logical line continue this one?
+        let next_continues = not brackets.is_empty()
+            or ends_in_comma
+            or next_line_continues(raw, lines, li + 1)
+        continuing = next_continues
+        if line.has_break:
+            var brk = raw[line.end - 1]
+            if not next_continues and line_has_content:
+                brk.kind = SyntaxKind.Newline
+                line_has_content = False
+                last_newline = Some(len(out))
+            last_break = Some(len(out))
+            out.push(brk)
+        elif not next_continues and line_has_content:
+            last_newline = Some(len(out))
+            out.push(Token(kind=SyntaxKind.Newline, start=text.byte_len(), end=text.byte_len()))
+            line_has_content = False
+
+    let eof = text.byte_len()
+    if not brackets.is_empty():
+        diags.push(unclosed(text, brackets[0]))
+    if line_has_content:
+        last_newline = Some(len(out))
+        out.push(Token(kind=SyntaxKind.Newline, start=eof, end=eof))
+    var insert_at = len(out)
+    var dedent_at = eof
+    if let Some(i) = last_newline:
+        insert_at = i + 1
+        dedent_at = out[i].end
+    while not levels.is_empty():
+        let l = levels.pop().expect("a level")
+        if l.real and l.width > 0:
+            out.insert(insert_at, Token(kind=SyntaxKind.Dedent, start=dedent_at, end=dedent_at))
+    out.push(Token(kind=SyntaxKind.Eof, start=eof, end=eof))
+    return out
+
+pure def split_lines(raw: list[Token]) -> list[Line]:
+    var lines: list[Line] = []
+    var start = 0
+    for i in range(len(raw)):
+        if raw[i].kind == SyntaxKind.LineBreak:
+            lines.push(Line(start=start, end=i + 1, has_break=True))
+            start = i + 1
+    if start < len(raw):
+        lines.push(Line(start=start, end=len(raw), has_break=False))
+    return lines
+
+## The index in `raw` of the line's first significant token.
+pure def first_significant(raw: list[Token], line: Line) -> int?:
+    for i in range(line.start, line.end):
+        if not raw[i].kind.is_trivia():
+            return Some(i)
+    return None
+
+pure def closes(open: SyntaxKind, close: SyntaxKind) -> bool:
+    return match open:
+        case LParen: close == SyntaxKind.RParen
+        case LBracket: close == SyntaxKind.RBracket
+        case LBrace: close == SyntaxKind.RBrace
+        case InterpStart: close == SyntaxKind.InterpEnd
+        case _: False
+
+pure def bracket_text(kind: SyntaxKind) -> str:
+    return match kind:
+        case LParen: "("
+        case RParen: ")"
+        case LBracket: "["
+        case RBracket: "]"
+        case LBrace | InterpStart: "{{"
+        case RBrace | InterpEnd: "}}"
+        case _: "?"
+
+## Keywords that start a declaration or statement and can never appear
+## inside brackets; seeing one at the start of a line while a bracket is
+## open means the bracket was never closed.
+pure def is_statement_keyword(kind: SyntaxKind) -> bool:
+    return match kind:
+        case DefKw | StructKw | EnumKw | ErrorKw | ImplKw | TraitKw | LetKw | VarKw: True
+        case ReturnKw | WhileKw | ImportKw | TestKw | ConstKw | BreakKw | ContinueKw: True
+        case PassKw | AssertKw | DeferKw | WithKw | CaseKw | ElifKw: True
+        case _: False
+
+## Whether a logical line starting with `first` is a block header: one
+## that starts with a keyword like these and ends in `:`.
+pure def opens_block(first: SyntaxKind?) -> bool:
+    return match first:
+        case Some(DefKw | IfKw | ElifKw | ElseKw | WhileKw | ForKw | WithKw | MatchKw): True
+        case Some(CaseKw | StructKw | EnumKw | ErrorKw | ImplKw | TraitKw | TestKw): True
+        case _: False
+
+## A bracket never closed, with the fix that closes it at the end of the
+## line it opens on (before the line's comment). On a block header the
+## bracket closes before the `:`, and a parenthesis before the `->` of a
+## return type: `def f(x: int -> int:` becomes `def f(x: int) -> int:`.
+pure def unclosed(text: str, open: Open) -> Diagnostic:
+    let n = text.byte_len()
+    let rest = min(open.end, n)
+    var line_end = n
+    if let Some(i) = text.byte_find("\n", rest):
+        line_end = i
+    let line = text.byte_slice(rest, line_end)
+    # A comment is a `#` outside a string; good enough for where to close.
+    var code = line
+    if let Some(i) = line.byte_find(" #"):
+        if not line.byte_slice(0, i).contains("\""):
+            code = line.byte_slice(0, i)
+    code = code.trim_end()
+    if code.ends_with(":"):
+        code = code.byte_slice(0, code.byte_len() - 1).trim_end()
+        if open.kind == SyntaxKind.LParen:
+            if let Some(i) = code.byte_find(" ->"):
+                code = code.byte_slice(0, i).trim_end()
+    let at = rest + code.byte_len()
+    let closer = match open.kind:
+        case LParen: ")"
+        case LBracket: "]"
+        case _: "}}"
+    let d = Diagnostic.new(Msg.LexUnclosedBracket, open.start, open.end)
+    return d.with("open", bracket_text(open.kind)).fix_at(Msg.LexCloseBracket, at, at, closer)
+
+## The indentation (in bytes) of the first line from `after` on that has
+## significant tokens.
+pure def next_indentation(raw: list[Token], lines: list[Line], after: int) -> int?:
+    for li in range(after, len(lines)):
+        let line = lines[li]
+        if let Some(first) = first_significant(raw, line):
+            return Some(raw[first].start - raw[line.start].start)
+    return None
+
+## The width of the line's indentation in characters, reporting a tab or
+## any other character than a space.
+pure def indentation_width(
+    text: str, raw: list[Token], line: Line, first_idx: int, mut diags: list[Diagnostic]
+) -> int:
+    var width = 0
+    for i in range(line.start, first_idx):
+        let t = raw[i]
+        if t.kind != SyntaxKind.Whitespace:
+            continue
+        var at = t.start
+        while at < t.end:
+            let c = char_at(text, at)
+            width += 1
+            if c == '\t':
+                let tab = Diagnostic.new(Msg.LexTabInIndentation, at, at + 1)
+                diags.push(tab.note(Msg.LexUseSpaces))
+            elif c != ' ':
+                let bad = Diagnostic.new(Msg.LexBadIndentChar, at, at + c.len_utf8())
+                diags.push(bad.with("char", debug_char(c)))
+            at += c.len_utf8()
+    return width
+
+## Whether the next line with significant tokens, from `after` on, starts
+## with a continuation operator, or with `not in`.
+pure def next_line_continues(raw: list[Token], lines: list[Line], after: int) -> bool:
+    for li in range(after, len(lines)):
+        let line = lines[li]
+        let first = first_significant(raw, line) else:
+            continue
+        let kind = raw[first].kind
+        if kind.continues_line():
+            return True
+        if kind == SyntaxKind.NotKw:
+            for i in range(first + 1, line.end):
+                if not raw[i].kind.is_trivia():
+                    return raw[i].kind == SyntaxKind.InKw
+            return False
+        return False
+    return False
+
+pure def close_bracket(mut brackets: list[Open], t: Token, mut diags: list[Diagnostic]):
+    if brackets.is_empty():
+        let d = Diagnostic.new(Msg.LexUnmatchedClose, t.start, t.end)
+        diags.push(d.with("close", bracket_text(t.kind)))
+        return
+    let top = brackets[len(brackets) - 1]
+    if closes(top.kind, t.kind):
+        _ = brackets.pop()
+        return
+    var d = Diagnostic.new(Msg.LexMismatchedBracket, t.start, t.end)
+    d = d.with("close", bracket_text(t.kind)).with("open", bracket_text(top.kind))
+    diags.push(d.label(Msg.LexOpenedHere, top.start, top.end))
+    # Close up to the deepest bracket this one closes; if none does, treat
+    # the innermost as closed, which keeps the mismatch to one error.
+    var pos = len(brackets) - 1
+    while pos >= 0 and not closes(brackets[pos].kind, t.kind):
+        pos -= 1
+    if pos < 0:
+        pos = len(brackets) - 1
+    while len(brackets) > pos:
+        _ = brackets.pop()

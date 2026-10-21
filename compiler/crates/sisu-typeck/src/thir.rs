@@ -32,7 +32,7 @@ pub struct Local {
     pub closure: Option<ClosureId>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BodyKind {
     Fn,
     /// The default value of a struct field, `(struct, field index)`.
@@ -65,6 +65,21 @@ pub struct Body {
     /// a call with constant arguments can decide: each is checked at every
     /// such call, once the program is typed (`generic_asserts.rs`).
     pub generic_asserts: Vec<GenericAssert>,
+    /// What the per-item queries know of the body (docs/architecture.md,
+    /// "The query layer").
+    pub memo: Memo,
+}
+
+/// A body's identity for the per-item queries: `key` is the same for two
+/// checks exactly when they give the same typed body up to where its item
+/// is, which is `file` from byte `start` (the start of the line its name is
+/// on) to `end`. A key of 0 is a body no later query may reuse.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Memo {
+    pub key: u64,
+    pub file: sisu_diag::FileId,
+    pub start: u32,
+    pub end: u32,
 }
 
 /// A `comptime assert` on `const` generic parameters: its condition, its
@@ -722,7 +737,8 @@ impl Block {
 /// The checker's result for a whole program.
 #[derive(Clone, Debug, Default)]
 pub struct Typed {
-    pub bodies: Vec<Body>,
+    /// Shared with the per-item memo, which keeps the bodies it reuses.
+    pub bodies: Vec<std::sync::Arc<Body>>,
     /// The inferred error set of each `T !` function.
     pub inferred: std::collections::HashMap<DefId, Vec<DefId>>,
     /// The instances of templates the checked bodies call without one yet,
@@ -733,6 +749,6 @@ pub struct Typed {
 
 impl Typed {
     pub fn body_of(&self, def: DefId, kind: &BodyKind) -> Option<&Body> {
-        self.bodies.iter().find(|b| b.def == def && b.kind == *kind)
+        self.bodies.iter().find(|b| b.def == def && b.kind == *kind).map(|b| &**b)
     }
 }

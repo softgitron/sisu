@@ -1,0 +1,9 @@
+# A wrong program: a field's name is misspelt.
+
+struct Rect:
+    width: int
+    height: int
+
+def main():
+    let r = Rect(width=3, height=4)
+    print(r.widht * r.height)

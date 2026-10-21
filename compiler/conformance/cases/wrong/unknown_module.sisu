@@ -1,0 +1,7 @@
+# A wrong program: an import names a module that does not exist, a
+# misspelling of `std.json`; the uses of the module are not reported again.
+
+import std.jsn
+
+def main():
+    print(json.encode([1, 2, 3]))

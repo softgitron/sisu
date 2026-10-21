@@ -97,6 +97,9 @@ pub struct HeapCell {
     pub crossed: bool,
     /// For a capability's cell, the handle type's name (`Fs`, `Cap`).
     pub label: Option<Rc<str>>,
+    /// For a `Shared` cell under `--stats shared`, its construction site
+    /// (an index of the run's sites).
+    pub site: Option<u32>,
 }
 
 /// A struct or enum value; `variant` is 0 for a struct. `trace` is the
@@ -281,6 +284,8 @@ pub enum Value {
     I128(i128),
     U128(u128),
     Float(f64),
+    /// An `f32`, a kind of its own so that it prints as the `f32` it is.
+    F32(f32),
     Bool(bool),
     Char(char),
     /// A `str`: an immutable view, shared, and under the ownership monitor

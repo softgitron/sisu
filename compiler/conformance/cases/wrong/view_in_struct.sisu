@@ -1,0 +1,8 @@
+# A wrong program: a plain struct holds a view; only a `view struct` may.
+
+struct Name:
+    text: str
+
+def main():
+    let n = Name(text="Roni")
+    print(n.text)

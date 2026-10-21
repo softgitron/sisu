@@ -4,10 +4,14 @@
 //! `sisu check --explain` ([`doc`]) and the replay tokens of failing tests
 //! ([`replay`]).
 
+pub mod assist;
 pub mod audit;
 pub mod cli;
 pub mod db;
+pub mod diary;
 pub mod doc;
+pub mod format;
+pub mod items;
 pub mod json;
 pub mod lsp;
 pub mod manifest;

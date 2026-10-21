@@ -186,9 +186,10 @@ impl Resolver<'_> {
             let Some(d) = found else {
                 if i == 0 {
                     if !self.prog.poisoned.contains(&seg.text) {
-                        self.report(
-                            Diagnostic::new(msg::RESOLVE_UNDEFINED_TYPE, span).with("name", seg.text.clone()),
-                        );
+                        let d =
+                            Diagnostic::new(msg::RESOLVE_UNDEFINED_TYPE, span).with("name", seg.text.clone());
+                        let d = self.similar_type_fix(d, ctx.module, &seg.text, span);
+                        self.report(d);
                     }
                 } else {
                     let mname = self.prog.modules[module.0 as usize].name.clone();
@@ -466,7 +467,9 @@ impl Resolver<'_> {
                 return Ty::Error;
             }
             if !self.prog.poisoned.contains(name) {
-                self.report(Diagnostic::new(msg::RESOLVE_UNDEFINED_TYPE, span).with("name", name));
+                let d = Diagnostic::new(msg::RESOLVE_UNDEFINED_TYPE, span).with("name", name);
+                let d = self.similar_type_fix(d, ctx.module, name, span);
+                self.report(d);
             }
             return Ty::Error;
         }
@@ -621,6 +624,55 @@ impl Resolver<'_> {
             DefKind::Struct(s) => Some(s.generics.len()),
             DefKind::Enum(e) => Some(e.generics.len()),
             _ => None,
+        }
+    }
+}
+
+impl Resolver<'_> {
+    /// The fix of a misspelt type's name: the closest type in scope (the
+    /// module's, the prelude's, the builtin scalars), by the rule of
+    /// `closest`.
+    pub(crate) fn similar_type_fix(
+        &self,
+        d: Diagnostic,
+        module: crate::program::ModuleId,
+        name: &str,
+        span: sisu_diag::Span,
+    ) -> Diagnostic {
+        let prog = &self.prog;
+        let is_type = |def: crate::program::DefId| {
+            matches!(
+                prog.def(def).kind,
+                DefKind::Struct(_)
+                    | DefKind::Enum(_)
+                    | DefKind::ErrorSet(_)
+                    | DefKind::TypeAlias(_)
+                    | DefKind::Refinement(_)
+                    | DefKind::Trait(_)
+            )
+        };
+        let mut names: Vec<String> = [
+            "int", "f64", "bool", "char", "str", "u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32",
+            "i64", "i128",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        for m in [module, prog.prelude] {
+            if let Some(md) = prog.modules.get(m.0 as usize) {
+                names.extend(
+                    md.items
+                        .iter()
+                        .filter(|(k, d)| !k.starts_with('_') && is_type(**d))
+                        .map(|(k, _)| k.clone()),
+                );
+            }
+        }
+        match crate::program::closest(name, names) {
+            Some(similar) => {
+                d.fix(msg::RESOLVE_SIMILAR_TYPE, Vec::new(), vec![sisu_diag::Edit { span, text: similar }])
+            }
+            None => d,
         }
     }
 }

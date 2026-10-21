@@ -473,7 +473,7 @@ impl B<'_> {
             ret,
             from,
             where_: self.where_preds(n),
-            body: self.child(n, BLOCK).map(|b| self.block(b)),
+            body: self.child(n, BLOCK).map(|b| std::sync::Arc::new(self.block(b))),
             attrs: self.attrs(n),
             header_broken: self.error_outside_block(n),
             body_broken: self.child(n, BLOCK).is_some_and(|b| self.has_error(b)),
@@ -763,7 +763,7 @@ impl B<'_> {
             name_range,
             cases,
             params: self.child(n, PARAM_LIST).map(|p| self.params(p)).unwrap_or_default(),
-            body: self.child(n, BLOCK).map(|b| self.block(b)),
+            body: self.child(n, BLOCK).map(|b| std::sync::Arc::new(self.block(b))),
         }
     }
 

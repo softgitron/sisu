@@ -1,0 +1,1 @@
+7:1-7:23 E0232 resolve.missing-trait-method trait="Display" ty="Point" methods="`fmt`"

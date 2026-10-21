@@ -66,6 +66,43 @@ fn closes(open: SyntaxKind, close: SyntaxKind) -> bool {
     )
 }
 
+/// A bracket never closed, with the fix that closes it at the end of the
+/// line it opens on (before the line's comment). On a block header the
+/// bracket closes before the `:`, and a parenthesis before the `->` of a
+/// return type: `def f(x: int -> int:` becomes `def f(x: int) -> int:`.
+fn unclosed(text: &str, file: FileId, open: &Open) -> Diagnostic {
+    let from = open.range.end as usize;
+    let line_end = text[from.min(text.len())..].find('\n').map(|i| from + i).unwrap_or(text.len());
+    let line = &text[from.min(line_end)..line_end];
+    // A comment is a `#` outside a string; good enough for where to close.
+    let mut code = match line.find(" #") {
+        Some(i) if !line[..i].contains('"') => &line[..i],
+        _ => line,
+    }
+    .trim_end();
+    if let Some(head) = code.strip_suffix(':') {
+        code = head.trim_end();
+        if open.kind == L_PAREN
+            && let Some(i) = code.find(" ->")
+        {
+            code = code[..i].trim_end();
+        }
+    }
+    let at = (from + code.len()) as u32;
+    let closer = match open.kind {
+        L_PAREN => ")",
+        L_BRACKET => "]",
+        _ => "}",
+    };
+    Diagnostic::new(msg::LEX_UNCLOSED_BRACKET, Span::new(file, open.range))
+        .with("open", bracket_text(open.kind))
+        .fix(
+            msg::LEX_CLOSE_BRACKET,
+            Vec::new(),
+            vec![sisu_diag::Edit { span: Span::new(file, TextRange::empty(at)), text: closer.to_string() }],
+        )
+}
+
 fn bracket_text(kind: SyntaxKind) -> &'static str {
     match kind {
         L_PAREN => "(",
@@ -149,10 +186,7 @@ pub fn layout(file: FileId, text: &str, raw: Vec<Token>, diags: &mut Vec<Diagnos
         if continuing && !brackets.is_empty() {
             let outer = brackets[0];
             if STATEMENT_KEYWORDS.contains(&first.kind) && width <= outer.line_width {
-                diags.push(
-                    Diagnostic::new(msg::LEX_UNCLOSED_BRACKET, span(outer.range))
-                        .with("open", bracket_text(outer.kind)),
-                );
+                diags.push(unclosed(text, file, &outer));
                 brackets.clear();
                 continuing = false;
                 if let Some(i) = last_break {
@@ -245,10 +279,7 @@ pub fn layout(file: FileId, text: &str, raw: Vec<Token>, diags: &mut Vec<Diagnos
             && next_indentation(&lines[li + 1..]).is_some_and(|w| w > logical_width)
         {
             let outer = brackets[0];
-            diags.push(
-                Diagnostic::new(msg::LEX_UNCLOSED_BRACKET, span(outer.range))
-                    .with("open", bracket_text(outer.kind)),
-            );
+            diags.push(unclosed(text, file, &outer));
             brackets.clear();
         }
 
@@ -275,10 +306,7 @@ pub fn layout(file: FileId, text: &str, raw: Vec<Token>, diags: &mut Vec<Diagnos
 
     let eof = TextRange::empty(text.len() as u32);
     if let Some(open) = brackets.first() {
-        diags.push(
-            Diagnostic::new(msg::LEX_UNCLOSED_BRACKET, span(open.range))
-                .with("open", bracket_text(open.kind)),
-        );
+        diags.push(unclosed(text, file, open));
     }
     if line_has_content {
         last_newline = Some(out.len());

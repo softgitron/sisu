@@ -1,0 +1,42 @@
+# Mistakes in declarations: names that are keywords, a parameter without
+# a type, a missing return type, attributes and visibility before
+# nothing, a struct body with statements, an enum with a bad member, an
+# impl with a field, a trait with a supertrait list, a broken import.
+def match(x: int) -> int:
+    return x
+
+def f(x, y: int) -> :
+    pass
+
+@inline
+pub
+
+struct S:
+    x: int
+    pass
+    y = 3
+    print(x)
+    def m(self):
+        pass
+
+enum E:
+    A
+    B(int, x: str)
+    3
+    def n(self):
+        pass
+
+impl S:
+    x: int
+    def o(self):
+        pass
+
+trait T(A, B[C]):
+    type Item
+    def p(self) -> Item
+
+from a.b import (c as d, e,)
+import c "zlib.h" as zlib with link="z"
+from x import
+const N: int =
+type Port = int where 1 <= self <= 65535

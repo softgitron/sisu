@@ -442,8 +442,31 @@ impl Scanner<'_> {
             }
             Some('\n' | '\r') => {
                 // An unterminated one-line string: close it before the line
-                // break, and report it from its opening quote.
-                self.error(msg::LEX_UNTERMINATED_STRING, opened, here);
+                // break, and report it from its opening quote. Brackets
+                // left open before the quote and closed at the end of the
+                // text were meant to follow it: `print("no end)` closes as
+                // `print("no end")`.
+                let line = self.text[..opened].rfind('\n').map_or(0, |i| i + 1);
+                let mut open = 0i32;
+                for b in self.text[line..opened].bytes() {
+                    match b {
+                        b'(' | b'[' => open += 1,
+                        b')' | b']' => open -= 1,
+                        _ => {}
+                    }
+                }
+                let mut end = here;
+                while open > 0 && end > start && matches!(self.text.as_bytes()[end - 1], b')' | b']') {
+                    end -= 1;
+                    open -= 1;
+                }
+                let at = self.span(end, end);
+                let d = Diagnostic::new(msg::LEX_UNTERMINATED_STRING, self.span(opened, here)).fix(
+                    msg::LEX_CLOSE_STRING,
+                    Vec::new(),
+                    vec![sisu_diag::Edit { span: at, text: "\"".into() }],
+                );
+                self.diags.push(d);
                 self.push(STRING_END, here);
                 self.modes.pop();
             }

@@ -1,0 +1,20 @@
+# Lexical mistakes: numbers, escapes, character literals, braces in
+# strings, a backslash continuation, unknown characters and a semicolon.
+def main():
+    let a = 0x
+    let b = 0b102
+    let c = 1u7
+    let d = 0xf32
+    let e = 1e
+    let f = 1.5f32 + 2e-3 + 0o17 + 1_000u8 + 0b1010
+    let g = "bad \q escape \u{110000} \u{D800} \u{} \u{1234567}"
+    let h = 'ab'
+    let i = ''
+    let j = 'x
+    let k = "a } b }} c {{ d"
+    let l = 1 + \
+        2
+    let m = 1 $ 2
+    let n = 1; let o = 2
+    let p = b"\x41\xZZ\n" + r"raw \q {x}"
+    let q = "{x:>{width}}"

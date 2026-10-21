@@ -1,0 +1,16 @@
+# A wrong program: a `match` misses a variant.
+
+enum Light:
+    Red
+    Amber
+    Green
+
+def next(l: Light) -> Light:
+    match l:
+        case Red:
+            return Green
+        case Green:
+            return Amber
+
+def main():
+    print("{next(Red):?}")

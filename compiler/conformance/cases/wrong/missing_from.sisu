@@ -1,0 +1,10 @@
+# A wrong program: a result that borrows from one of two parameters does
+# not say which.
+
+def longer(a: str, b: str) -> str:
+    if len(a) >= len(b):
+        return a
+    return b
+
+def main():
+    print(longer("ab", "c"))

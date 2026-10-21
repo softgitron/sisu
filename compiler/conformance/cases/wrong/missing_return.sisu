@@ -1,0 +1,10 @@
+# A wrong program: a path through a function returns nothing.
+
+def sign(x: int) -> int:
+    if x > 0:
+        return 1
+    elif x < 0:
+        return -1
+
+def main():
+    print(sign(5))

@@ -1,0 +1,757 @@
+##! Expressions, by precedence from lowest to highest (02, "Operator
+##! precedence"):
+##!
+##! ```text
+##! expr      := closure | coalesce
+##! closure   := 'own'? (name | '(' params ')') '->' expr
+##! coalesce  := or ('??' coalesce)?
+##! or        := and ('or' and)*            -- mixing with `and` needs parentheses
+##! and       := not ('and' not)*
+##! not       := 'not' not | compare
+##! compare   := bitwise (cmp_op bitwise)*  -- chains point one way
+##! bitwise   := shift (('&' | '^' | '|') shift)*   -- one operator, no arithmetic
+##! shift     := additive (('<<' | '>>') additive)*  -- no arithmetic operands
+##! additive  := mult (('+' | '-' | '+%' | '-%' | '+|' | '-|') mult)*
+##! mult      := unary (('*' | '/' | '//' | '%' | '*%' | '*|') unary)*
+##! unary     := ('-' | '~' | 'ref' 'mut'? | '^') unary | power
+##! power     := postfix ('**' unary)?      -- `-x ** y` needs parentheses
+##! postfix   := primary (call | index | '.' name | '?.' name | '?' | do_block)*
+##! primary   := literal | string | name | '(' ... ')' | '[' ... ']' | '{' ... '}'
+##!              | if_expr | match_expr
+##! ```
+
+from stage1.diag import Diagnostic, Msg
+from stage1.parser.state import Parser
+from stage1.syntax.kinds import SyntaxKind
+
+## The outermost operator of an expression without parentheses, for the
+## mixing rules.
+@derive(Eq, Debug, Copy)
+pub(package) enum Class:
+    Atom
+    Closure
+    Coalesce
+    Or
+    And
+    Not
+    Compare
+    Bitwise
+    Shift
+    Additive
+    Multiplicative
+    Unary
+    Power
+
+pure def is_additive(kind: SyntaxKind) -> bool:
+    return match kind:
+        case Plus | Minus | PlusPercent | MinusPercent | PlusPipe | MinusPipe: True
+        case _: False
+
+pure def is_multiplicative(kind: SyntaxKind) -> bool:
+    return match kind:
+        case Star | Slash | SlashSlash | Percent | StarPercent | StarPipe: True
+        case _: False
+
+pure def is_bitwise(kind: SyntaxKind) -> bool:
+    return match kind:
+        case Amp | Pipe | Caret: True
+        case _: False
+
+## Tokens that never start an expression, where a missing expression
+## consumes nothing.
+pure def is_expr_sync(kind: SyntaxKind) -> bool:
+    return match kind:
+        case Newline | Dedent | Indent | Eof | Colon | RParen | RBracket | RBrace | Comma | Eq: True
+        case InterpEnd | ElseKw | ElifKw | CaseKw | StringEnd | Arrow: True
+        case _: False
+
+pure def is_arithmetic(c: Class) -> bool:
+    return match c:
+        case Additive | Multiplicative | Shift | Power: True
+        case _: False
+
+## The direction a comparison operator points in a chain: 1 for `<` and
+## `<=`, -1 for `>` and `>=`, 0 for `==`; `None` for one that cannot chain.
+pure def direction(kind: SyntaxKind) -> int?:
+    return match kind:
+        case Lt | LtEq: Some(1)
+        case Gt | GtEq: Some(-1)
+        case EqEq: Some(0)
+        case _: None
+
+## The text of a comparison operator in messages.
+pure def operator_text(kind: SyntaxKind) -> String:
+    if kind == SyntaxKind.NotKw:
+        return "not in".to_string()
+    if let Some(text) = kind.punctuation_text():
+        return text
+    if let Some(text) = kind.keyword_text():
+        return text
+    return "?".to_string()
+
+impl Parser:
+    pub(package) pure def at_expr_start(self) -> bool:
+        return match self.current():
+            case Ident | SelfKw | SelfTypeKw | IntNumber | FloatNumber | CharLit | StringStart: True
+            case RawString | ByteString | LParen | LBracket | LBrace | Minus | Tilde | NotKw: True
+            case RefKw | IfKw | MatchKw | OwnKw | Caret | ComptimeKw: True
+            case _: False
+
+    pub(package) pure def expr(mut self) -> Class:
+        if self.at_closure_start():
+            self.closure()
+            return Class.Closure
+        return self.coalesce()
+
+    pure def at_closure_start(self) -> bool:
+        match self.current():
+            case OwnKw:
+                return True
+            case Ident:
+                return self.nth(1) == SyntaxKind.Arrow
+            case LParen:
+                var depth = 0
+                var i = 0
+                while True:
+                    match self.nth(i):
+                        case LParen | LBracket | LBrace:
+                            depth += 1
+                        case RParen | RBracket | RBrace:
+                            depth -= 1
+                            if depth == 0:
+                                return self.nth(i + 1) == SyntaxKind.Arrow
+                        case Newline | Eof | Dedent | Indent:
+                            return False
+                        case _:
+                            pass
+                    i += 1
+            case _:
+                return False
+
+    pure def closure(mut self):
+        self.start(SyntaxKind.ClosureExpr)
+        _ = self.eat(SyntaxKind.OwnKw)
+        self.closure_params()
+        _ = self.expect(SyntaxKind.Arrow)
+        _ = self.expr()
+        self.finish_node()
+
+    ## `x`, `(a, b)` or `(a: int, b: int)`.
+    pub(package) pure def closure_params(mut self):
+        self.start(SyntaxKind.ClosureParams)
+        if self.at(SyntaxKind.Ident):
+            self.start(SyntaxKind.ClosureParam)
+            self.bump()
+            self.finish_node()
+            # `do acc, x:` lists parameters without parentheses.
+            while self.at(SyntaxKind.Comma) and self.nth(1) == SyntaxKind.Ident:
+                self.bump()
+                self.start(SyntaxKind.ClosureParam)
+                self.bump()
+                self.finish_node()
+        elif self.eat(SyntaxKind.LParen):
+            while not self.at_list_end(SyntaxKind.RParen):
+                self.start(SyntaxKind.ClosureParam)
+                if not self.eat(SyntaxKind.Ident):
+                    self.error_found(Msg.ParseClosureParameter)
+                    if not is_expr_sync(self.current()):
+                        self.bump()
+                if self.eat(SyntaxKind.Colon):
+                    self.type_()
+                self.finish_node()
+                if not self.eat(SyntaxKind.Comma):
+                    break
+            _ = self.expect(SyntaxKind.RParen)
+        else:
+            self.error_found(Msg.ParseClosureParameter)
+        self.finish_node()
+
+    pure def coalesce(mut self) -> Class:
+        let cp = self.checkpoint()
+        let c = self.or_expr()
+        if self.at(SyntaxKind.QuestionQuestion):
+            self.start_at(cp, SyntaxKind.BinExpr)
+            self.bump()
+            _ = self.coalesce()
+            self.finish_node()
+            return Class.Coalesce
+        return c
+
+    pub(package) pure def or_expr(mut self) -> Class:
+        let cp = self.checkpoint()
+        var c = self.and_expr()
+        while self.at(SyntaxKind.OrKw):
+            if c == Class.And:
+                self.error(Msg.ParseMixedAndOr)
+            self.start_at(cp, SyntaxKind.BinExpr)
+            self.bump()
+            if self.and_expr() == Class.And:
+                self.error(Msg.ParseMixedAndOr)
+            self.finish_node()
+            c = Class.Or
+        return c
+
+    pure def and_expr(mut self) -> Class:
+        let cp = self.checkpoint()
+        var c = self.not_expr()
+        while self.at(SyntaxKind.AndKw):
+            self.start_at(cp, SyntaxKind.BinExpr)
+            self.bump()
+            _ = self.not_expr()
+            self.finish_node()
+            c = Class.And
+        return c
+
+    pure def not_expr(mut self) -> Class:
+        if self.at(SyntaxKind.NotKw) and self.nth(1) != SyntaxKind.InKw:
+            self.start(SyntaxKind.PrefixExpr)
+            self.bump()
+            _ = self.not_expr()
+            self.finish_node()
+            return Class.Not
+        return self.compare()
+
+    ## The comparison operator at the current token (`not in` as `not`),
+    ## and how many tokens it takes.
+    pure def at_compare_op(self) -> (SyntaxKind, int)?:
+        let k = self.current()
+        return match k:
+            case EqEq | BangEq | Lt | LtEq | Gt | GtEq | InKw: Some((k, 1))
+            case NotKw if self.nth(1) == SyntaxKind.InKw: Some((k, 2))
+            case _: None
+
+    pure def compare(mut self) -> Class:
+        let cp = self.checkpoint()
+        let c = self.bitwise()
+        if self.at_compare_op() == None:
+            return c
+        self.start_at(cp, SyntaxKind.CompareExpr)
+        var previous: SyntaxKind? = None
+        while let Some((op, n)) = self.at_compare_op():
+            if let Some(prev) = previous:
+                self.check_chain(prev, op)
+            previous = Some(op)
+            for _ in range(n):
+                self.bump()
+            _ = self.bitwise()
+        self.finish_node()
+        return Class.Compare
+
+    pure def check_chain(mut self, prev: SyntaxKind, op: SyntaxKind):
+        let a = direction(prev)
+        let b = direction(op)
+        if a != None and b != None:
+            if a != b:
+                let (start, end) = self.error_span()
+                let d = Diagnostic.new(Msg.ParseMixedChain, start, end)
+                self.report(d.with("first", operator_text(prev)).with("second", operator_text(op)))
+            return
+        let bad = if a == None: prev else: op
+        let (start, end) = self.error_span()
+        let d = Diagnostic.new(Msg.ParseChainOperator, start, end)
+        self.report(d.with("op", operator_text(bad)))
+
+    pure def bitwise(mut self) -> Class:
+        let cp = self.checkpoint()
+        var c = self.shift()
+        var first: SyntaxKind? = None
+        while is_bitwise(self.current()):
+            let op = self.current()
+            let op_text = operator_text(op)
+            if let Some(f) = first:
+                if f != op:
+                    let (start, end) = self.error_span()
+                    let d = Diagnostic.new(Msg.ParseMixedBitwise, start, end)
+                    self.report(d.with("first", operator_text(f)).with("second", op_text))
+            first = Some(op)
+            if is_arithmetic(c):
+                self.report_bitwise_arithmetic(op_text)
+            self.start_at(cp, SyntaxKind.BinExpr)
+            self.bump()
+            if is_arithmetic(self.shift()):
+                self.report_bitwise_arithmetic(op_text)
+            self.finish_node()
+            c = Class.Bitwise
+        return c
+
+    pure def report_bitwise_arithmetic(mut self, op_text: str):
+        let (start, end) = self.error_span()
+        self.report(Diagnostic.new(Msg.ParseBitwiseArithmetic, start, end).with("op", op_text))
+
+    pure def shift(mut self) -> Class:
+        let cp = self.checkpoint()
+        var c = self.additive()
+        while self.at(SyntaxKind.Shl) or self.at(SyntaxKind.Shr):
+            if c == Class.Additive or c == Class.Multiplicative:
+                self.error(Msg.ParseShiftArithmetic)
+            self.start_at(cp, SyntaxKind.BinExpr)
+            self.bump()
+            let right = self.additive()
+            if right == Class.Additive or right == Class.Multiplicative:
+                self.error(Msg.ParseShiftArithmetic)
+            self.finish_node()
+            c = Class.Shift
+        return c
+
+    pure def additive(mut self) -> Class:
+        let cp = self.checkpoint()
+        var c = self.multiplicative()
+        while is_additive(self.current()):
+            self.start_at(cp, SyntaxKind.BinExpr)
+            self.bump()
+            _ = self.multiplicative()
+            self.finish_node()
+            c = Class.Additive
+        return c
+
+    pure def multiplicative(mut self) -> Class:
+        let cp = self.checkpoint()
+        var c = self.unary()
+        while is_multiplicative(self.current()):
+            self.start_at(cp, SyntaxKind.BinExpr)
+            self.bump()
+            _ = self.unary()
+            self.finish_node()
+            c = Class.Multiplicative
+        return c
+
+    pure def unary(mut self) -> Class:
+        match self.current():
+            case Minus | Tilde | Caret:
+                let op = self.current()
+                self.start(SyntaxKind.PrefixExpr)
+                self.bump()
+                let inner = self.unary()
+                if op == SyntaxKind.Minus and inner == Class.Power:
+                    self.error(Msg.ParseNegativePower)
+                self.finish_node()
+                return Class.Unary
+            case RefKw:
+                self.start(SyntaxKind.PrefixExpr)
+                self.bump()
+                _ = self.eat(SyntaxKind.MutKw)
+                _ = self.unary()
+                self.finish_node()
+                return Class.Unary
+            case ComptimeKw | UnsafeKw:
+                # `comptime e` and `unsafe e` mark one expression.
+                self.start(SyntaxKind.PrefixExpr)
+                self.bump()
+                _ = self.unary()
+                self.finish_node()
+                return Class.Unary
+            case _:
+                return self.power()
+
+    pure def power(mut self) -> Class:
+        let cp = self.checkpoint()
+        let c = self.postfix()
+        if self.at(SyntaxKind.StarStar):
+            self.start_at(cp, SyntaxKind.BinExpr)
+            self.bump()
+            _ = self.unary()
+            self.finish_node()
+            return Class.Power
+        return c
+
+    pure def postfix(mut self) -> Class:
+        let cp = self.checkpoint()
+        var c = self.primary()
+        while True:
+            match self.current():
+                case LParen:
+                    self.start_at(cp, SyntaxKind.CallExpr)
+                    self.arg_list()
+                    let ended = self.at(SyntaxKind.DoKw)
+                    if ended:
+                        self.do_block()
+                    self.finish_node()
+                    if ended:
+                        return Class.Atom
+                case LBracket:
+                    self.start_at(cp, SyntaxKind.IndexExpr)
+                    self.index_args()
+                    self.finish_node()
+                case Dot:
+                    self.start_at(cp, SyntaxKind.FieldExpr)
+                    self.bump()
+                    if self.eat(SyntaxKind.LBracket):
+                        # `x.[f]`: a field named by a compile-time value.
+                        _ = self.expr()
+                        _ = self.expect(SyntaxKind.RBracket)
+                    elif not self.eat(SyntaxKind.IntNumber):
+                        _ = self.expect_name()
+                    self.finish_node()
+                case QuestionDot:
+                    self.start_at(cp, SyntaxKind.OptFieldExpr)
+                    self.bump()
+                    _ = self.expect_name()
+                    self.finish_node()
+                case Question:
+                    self.start_at(cp, SyntaxKind.TryExpr)
+                    self.bump()
+                    self.finish_node()
+                case DoKw:
+                    self.start_at(cp, SyntaxKind.CallExpr)
+                    self.do_block()
+                    self.finish_node()
+                    return Class.Atom
+                case _:
+                    return c
+            c = Class.Atom
+
+    pub(package) pure def arg_list(mut self):
+        self.start(SyntaxKind.ArgList)
+        self.bump()
+        while not self.at_list_end(SyntaxKind.RParen) and not self.at(SyntaxKind.Dedent):
+            self.start(SyntaxKind.Arg)
+            if self.at(SyntaxKind.Ident) and self.nth(1) == SyntaxKind.Eq:
+                self.bump()
+                self.bump()
+            _ = self.eat(SyntaxKind.MutKw)
+            _ = self.expr()
+            self.finish_node()
+            if not self.eat(SyntaxKind.Comma):
+                break
+        _ = self.expect(SyntaxKind.RParen)
+        self.finish_node()
+
+    pure def index_args(mut self):
+        self.bump()
+        while not self.at_list_end(SyntaxKind.RBracket):
+            let cp = self.checkpoint()
+            if self.at(SyntaxKind.Colon):
+                self.start_at(cp, SyntaxKind.Slice)
+                self.bump()
+                if not self.at(SyntaxKind.RBracket) and not self.at(SyntaxKind.Comma):
+                    _ = self.expr()
+                self.finish_node()
+            else:
+                _ = self.expr()
+                if self.at(SyntaxKind.Colon):
+                    self.start_at(cp, SyntaxKind.Slice)
+                    self.bump()
+                    if not self.at(SyntaxKind.RBracket) and not self.at(SyntaxKind.Comma):
+                        _ = self.expr()
+                    self.finish_node()
+            if not self.eat(SyntaxKind.Comma):
+                break
+        _ = self.expect(SyntaxKind.RBracket)
+
+    ## `do [own] [params]:` and an indented body: a closure bound to the
+    ## call's last function-typed parameter.
+    pure def do_block(mut self):
+        self.start(SyntaxKind.DoBlock)
+        let line = self.current_line()
+        self.bump()
+        _ = self.eat(SyntaxKind.OwnKw)
+        if not self.at(SyntaxKind.Colon):
+            self.closure_params()
+        if self.expect(SyntaxKind.Colon):
+            self.block("do", line)
+        self.finish_node()
+
+    pure def primary(mut self) -> Class:
+        let k = self.current()
+        match k:
+            case IntNumber | FloatNumber | CharLit | RawString | ByteString:
+                self.start(SyntaxKind.Literal)
+                self.bump()
+                self.finish_node()
+            case StringStart:
+                self.string_expr()
+            case Ident | SelfKw | SelfTypeKw:
+                self.start(SyntaxKind.NameRef)
+                self.bump()
+                self.finish_node()
+            case LParen:
+                self.paren_or_tuple()
+            case LBracket:
+                self.list_or_comprehension()
+            case LBrace:
+                self.dict_or_set()
+            case IfKw:
+                self.if_expr()
+            case MatchKw:
+                self.match_expr()
+            case _ if self.in_attribute and k.is_keyword():
+                self.start(SyntaxKind.NameRef)
+                self.bump()
+                self.finish_node()
+            case _:
+                self.error_found(Msg.ParseExpectedExpression)
+                self.start(SyntaxKind.Error)
+                if not is_expr_sync(k) and not k.is_keyword():
+                    self.bump()
+                self.finish_node()
+        return Class.Atom
+
+    pub(package) pure def string_expr(mut self):
+        self.start(SyntaxKind.StringExpr)
+        self.bump()
+        while True:
+            match self.current():
+                case StringText:
+                    self.bump()
+                case InterpStart:
+                    self.interpolation()
+                case StringEnd:
+                    self.bump()
+                    break
+                case _:
+                    break
+        self.finish_node()
+
+    pure def interpolation(mut self):
+        self.start(SyntaxKind.Interpolation)
+        self.bump()
+        if self.at(SyntaxKind.InterpEnd) or self.at(SyntaxKind.Colon):
+            self.error(Msg.ParseEmptyInterpolation)
+        else:
+            _ = self.expr()
+        _ = self.eat(SyntaxKind.Eq)
+        if self.eat(SyntaxKind.Colon):
+            _ = self.eat(SyntaxKind.FormatSpec)
+        if not self.at(SyntaxKind.InterpEnd):
+            self.error_found(Msg.ParseExpectedExpression)
+            self.start(SyntaxKind.Error)
+            while not self.at_interpolation_end():
+                self.bump()
+            self.finish_node()
+        _ = self.eat(SyntaxKind.InterpEnd)
+        self.finish_node()
+
+    pure def paren_or_tuple(mut self):
+        let cp = self.checkpoint()
+        self.bump()
+        if self.at(SyntaxKind.RParen):
+            self.start_at(cp, SyntaxKind.TupleExpr)
+            self.bump()
+            self.finish_node()
+            return
+        _ = self.expr()
+        var kind = SyntaxKind.ParenExpr
+        if self.at(SyntaxKind.ForKw):
+            self.comp_clauses()
+            kind = SyntaxKind.Comprehension
+        elif self.at(SyntaxKind.Comma):
+            while self.eat(SyntaxKind.Comma):
+                if self.at(SyntaxKind.RParen):
+                    break
+                _ = self.expr()
+            kind = SyntaxKind.TupleExpr
+        self.start_at(cp, kind)
+        _ = self.expect(SyntaxKind.RParen)
+        self.finish_node()
+
+    pure def list_or_comprehension(mut self):
+        let cp = self.checkpoint()
+        self.bump()
+        var kind = SyntaxKind.ListExpr
+        if not self.at(SyntaxKind.RBracket):
+            _ = self.expr()
+            if self.at(SyntaxKind.ForKw):
+                self.comp_clauses()
+                kind = SyntaxKind.Comprehension
+            else:
+                while self.eat(SyntaxKind.Comma):
+                    if self.at(SyntaxKind.RBracket):
+                        break
+                    _ = self.expr()
+        self.start_at(cp, kind)
+        _ = self.expect(SyntaxKind.RBracket)
+        self.finish_node()
+
+    pure def dict_or_set(mut self):
+        let cp = self.checkpoint()
+        self.bump()
+        var kind = SyntaxKind.DictExpr
+        if not self.at(SyntaxKind.RBrace):
+            let is_dict = self.dict_or_set_element(None)
+            kind = if is_dict: SyntaxKind.DictExpr else: SyntaxKind.SetExpr
+            if self.at(SyntaxKind.ForKw):
+                self.comp_clauses()
+                kind = SyntaxKind.Comprehension
+            else:
+                while self.eat(SyntaxKind.Comma):
+                    if self.at(SyntaxKind.RBrace):
+                        break
+                    _ = self.dict_or_set_element(Some(is_dict))
+        self.start_at(cp, kind)
+        _ = self.expect(SyntaxKind.RBrace)
+        self.finish_node()
+
+    ## One element of a `{...}` literal; returns whether it was `k: v`.
+    pure def dict_or_set_element(mut self, dict: bool?) -> bool:
+        let cp = self.checkpoint()
+        _ = self.expr()
+        if self.at(SyntaxKind.Colon):
+            self.start_at(cp, SyntaxKind.DictEntry)
+            self.bump()
+            _ = self.expr()
+            self.finish_node()
+            if dict == Some(False):
+                self.error_found(Msg.ParseExpectedExpression)
+            return True
+        if dict == Some(True):
+            _ = self.expect(SyntaxKind.Colon)
+        return False
+
+    pure def comp_clauses(mut self):
+        while self.at(SyntaxKind.ForKw) or self.at(SyntaxKind.IfKw):
+            if self.at(SyntaxKind.ForKw):
+                self.start(SyntaxKind.CompFor)
+                self.bump()
+                self.pattern_list()
+                _ = self.expect(SyntaxKind.InKw)
+                _ = self.or_expr()
+                self.finish_node()
+            else:
+                self.start(SyntaxKind.CompIf)
+                self.bump()
+                _ = self.or_expr()
+                self.finish_node()
+
+    ## `if c: a elif d: b else: e` on one line.
+    pure def if_expr(mut self):
+        self.start(SyntaxKind.IfExpr)
+        self.bump()
+        _ = self.expr()
+        _ = self.expect(SyntaxKind.Colon)
+        _ = self.expr()
+        while self.at(SyntaxKind.ElifKw):
+            self.bump()
+            _ = self.expr()
+            _ = self.expect(SyntaxKind.Colon)
+            _ = self.expr()
+        if self.eat(SyntaxKind.ElseKw):
+            _ = self.expect(SyntaxKind.Colon)
+            _ = self.expr()
+        else:
+            self.error(Msg.ParseIfExpressionElse)
+        self.finish_node()
+
+    ## `match e:` and an indented list of `case` arms. In statement
+    ## position the arms may hold blocks; in an expression each arm is one
+    ## expression (checked later).
+    pub(package) pure def match_expr(mut self):
+        self.start(SyntaxKind.MatchExpr)
+        let line = self.current_line()
+        self.bump()
+        _ = self.expr()
+        if self.expect(SyntaxKind.Colon):
+            self.start(SyntaxKind.MatchArmList)
+            if self.at(SyntaxKind.Newline):
+                self.bump()
+                if self.at(SyntaxKind.Indent):
+                    self.bump()
+                    self.arms()
+                else:
+                    self.expected_block("match", line)
+            else:
+                let (start, end) = self.error_span()
+                self.report(Diagnostic.new(Msg.ParseBlockOnSameLine, start, end))
+            self.finish_node()
+        self.finish_node()
+
+    ## The arms of an arm list after its INDENT, and its DEDENT.
+    pure def arms(mut self):
+        while not self.at_block_end():
+            let before = self.pos_marker()
+            self.arm_or_comptime_arms()
+            if self.pos_marker() == before:
+                self.bump_error()
+        _ = self.eat(SyntaxKind.Dedent)
+        self.ended_with_block = True
+
+    pure def arm_or_comptime_arms(mut self):
+        let arms = self.nth(1) == SyntaxKind.ForKw or self.nth(1) == SyntaxKind.IfKw
+        if self.at(SyntaxKind.ComptimeKw) and arms:
+            self.comptime_arms()
+        else:
+            self.match_arm()
+
+    ## `comptime for p in e:` or `comptime if e:` (and `else:`) among the
+    ## arms of a `match`, each with an indented list of arms (08: a
+    ## derive's template makes an arm for each variant).
+    pure def comptime_arms(mut self):
+        self.start(SyntaxKind.ComptimeStmt)
+        self.bump()
+        let line = self.current_line()
+        if self.at(SyntaxKind.ForKw):
+            self.start(SyntaxKind.ForStmt)
+            self.bump()
+            self.pattern_list()
+            _ = self.expect(SyntaxKind.InKw)
+            _ = self.expr()
+            self.arm_list("for", line)
+        else:
+            self.start(SyntaxKind.IfStmt)
+            self.bump()
+            self.cond()
+            self.arm_list("if", line)
+            if self.at(SyntaxKind.ElseKw):
+                self.start(SyntaxKind.ElseClause)
+                let else_line = self.current_line()
+                self.bump()
+                self.arm_list("else", else_line)
+                self.finish_node()
+        self.finish_node()
+        self.finish_node()
+
+    ## `:` and an indented list of arms.
+    pure def arm_list(mut self, keyword: str, line: int):
+        if not self.expect(SyntaxKind.Colon):
+            self.recover_line()
+            return
+        self.start(SyntaxKind.MatchArmList)
+        if self.at(SyntaxKind.Newline) and self.nth(1) == SyntaxKind.Indent:
+            self.bump()
+            self.bump()
+            self.arms()
+        else:
+            self.expected_block(keyword, line)
+        self.finish_node()
+
+    pure def match_arm(mut self):
+        if not self.at(SyntaxKind.CaseKw):
+            self.start(SyntaxKind.Error)
+            _ = self.expect(SyntaxKind.CaseKw)
+            self.recover_line()
+            self.finish_node()
+            return
+        self.start(SyntaxKind.MatchArm)
+        let line = self.current_line()
+        self.bump()
+        self.pattern()
+        if self.at(SyntaxKind.IfKw):
+            self.start(SyntaxKind.MatchGuard)
+            self.bump()
+            _ = self.expr()
+            self.finish_node()
+        if self.expect(SyntaxKind.Colon):
+            if self.at(SyntaxKind.Newline):
+                self.block("case", line)
+            elif self.at_arm_statement():
+                self.error(Msg.ParseArmStatement)
+                self.start(SyntaxKind.Block)
+                self.statement()
+                self.finish_node()
+            else:
+                _ = self.expr()
+                self.end_stmt()
+        else:
+            self.recover_line()
+        self.finish_node()
+
+    ## Where the tokens of a broken interpolation stop.
+    pure def at_interpolation_end(self) -> bool:
+        return match self.current():
+            case InterpEnd | StringEnd | Eof | Newline: True
+            case _: False
+
+    ## A statement keyword after `case pattern:` on the same line.
+    pure def at_arm_statement(self) -> bool:
+        return match self.current():
+            case ReturnKw | BreakKw | ContinueKw | PassKw | LetKw | VarKw: True
+            case _: False

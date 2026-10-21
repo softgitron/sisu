@@ -56,6 +56,7 @@ impl Interp<'_, '_> {
             Value::I128(i) => out.push_str(&i.to_string()),
             Value::U128(i) => out.push_str(&i.to_string()),
             Value::Float(f) => out.push_str(&float_repr(*f)),
+            Value::F32(f) => out.push_str(&format!("{f:?}")),
             Value::Bool(b) => out.push_str(if *b { "True" } else { "False" }),
             Value::Char(c) => out.push_str(&quote_char(*c)),
             Value::Str(s, _) | Value::Path(s) => out.push_str(&quote_str(s)),

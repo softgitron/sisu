@@ -1,0 +1,5 @@
+# A wrong program (18, Phase 2): the colon after a definition's header
+# is missing.
+
+def main()
+    print("hello")

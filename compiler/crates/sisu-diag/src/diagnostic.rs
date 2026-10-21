@@ -100,6 +100,13 @@ impl Diagnostic {
     pub fn param(&self, name: &str) -> Option<&str> {
         self.params.iter().find(|(k, _)| *k == name).map(|(_, v)| v.as_str())
     }
+
+    /// Every span of the diagnostic: its own, its labels' and its edits'.
+    pub fn spans_mut(&mut self) -> impl Iterator<Item = &mut Span> {
+        std::iter::once(&mut self.span)
+            .chain(self.labels.iter_mut().map(|l| &mut l.span))
+            .chain(self.fixes.iter_mut().flat_map(|f| f.edits.iter_mut().map(|e| &mut e.span)))
+    }
 }
 
 /// Sorts diagnostics by position, then code, for stable output.

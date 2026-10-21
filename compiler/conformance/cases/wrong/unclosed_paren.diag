@@ -1,0 +1,2 @@
+8:10-8:11 E0009 lex.unclosed-bracket open="("
+  fix lex.close-bracket 8:20-8:20 ")"

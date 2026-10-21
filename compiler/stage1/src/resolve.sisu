@@ -1,0 +1,1848 @@
+##! Name resolution for one module (docs/architecture.md, "Names and the
+##! standard library"): every name the module writes is found among the
+##! scopes of its bodies, the module's declarations, the prelude's, or the
+##! variants they declare, or it is reported. Stage 0 splits this work
+##! between `sisu-resolve` (declarations, imports, the names in signatures)
+##! and `sisu-typeck` (the names in bodies); stage 1 does it over the syntax
+##! tree, without types, and reports the diagnostics of names:
+##!
+##! - `E0202` a second declaration of a name in the module, labelled with
+##!   the first;
+##! - `E0220` an import of a module that does not exist;
+##! - `E0201` a type name that names nothing;
+##! - `E0200` a value name that names nothing, with the closest name in
+##!   scope as a fix when one is close enough;
+##! - `W0002` a `let` that shadows a name of an enclosing scope;
+##! - `E0389` `self` outside a method;
+##! - `E0234` a method of a trait's impl whose signature differs from the
+##!   trait's in its shape: the receiver, the number of parameters, their
+##!   modes or the number of its own generic parameters (a difference of
+##!   types needs the type checker).
+##!
+##! The error-tolerance rules of names hold: a function whose header or
+##! body has a syntax error reports no unknown names, names written in
+##! top-level code that did not parse as a declaration are never reported,
+##! and no diagnostic is kept on a line that has a syntax error.
+
+from stage1.diag import Catalog, Diagnostic, Lines, Msg, sort
+from stage1.syntax.kinds import SyntaxKind
+from stage1.syntax.tree import Element, Tree, is_item
+
+## A method's signature as written: what `E0234` compares and prints.
+pub struct Signature:
+    pub pure: bool
+    ## `""`, `"mut "` or `"own "` before `self`; none without `self`.
+    pub receiver: String?
+    ## Each parameter's mode (`""`, `"mut "`, `"own "`), name and type.
+    pub params: list[(String, String, String)]
+    ## The result type, none for `()`.
+    pub result: String?
+    pub generics: int
+
+## The names of a module that other code can see: its declarations and the
+## variants of its enums and error sets; and its traits' methods.
+pub struct ModuleNames:
+    pub items: set[String]
+    ## The declarations that are types: structs, enums, error sets, type
+    ## aliases and traits.
+    pub types: set[String]
+    pub variants: set[String]
+    pub traits: dict[String, dict[String, Signature]]
+
+impl ModuleNames:
+    ## The names `tree`, the tree of `text`, declares at its top level.
+    pub pure def of(text: str, tree: Tree) -> ModuleNames:
+        var names = ModuleNames(items=set(), types=set(), variants=set(), traits={})
+        for n in child_nodes(tree, tree.root):
+            names.add_item(text, tree, n)
+        return names
+
+    pure def add_item(mut self, text: str, tree: Tree, n: int):
+        let kind = tree.nodes[n].kind
+        if kind == SyntaxKind.Block:
+            # An unexpectedly indented block: what is in it counts.
+            for m in child_nodes(tree, n):
+                self.add_item(text, tree, m)
+            return
+        if kind == SyntaxKind.SuiteDef:
+            for b in child_nodes(tree, n):
+                if tree.nodes[b].kind == SyntaxKind.Block:
+                    for m in child_nodes(tree, b):
+                        self.add_item(text, tree, m)
+            return
+        if not declares_name(kind):
+            return
+        if let Some((start, end)) = item_name(tree, n):
+            let name = text.byte_slice(start, end).to_string()
+            if declares_type(kind):
+                _ = self.types.add(name.copy())
+            if kind == SyntaxKind.TraitDef:
+                _ = self.traits.insert(name.copy(), trait_methods(text, tree, n))
+            _ = self.items.add(name)
+        if kind == SyntaxKind.EnumDef or kind == SyntaxKind.ErrorDef:
+            for b in child_nodes(tree, n):
+                if tree.nodes[b].kind == SyntaxKind.Block:
+                    for v in child_nodes(tree, b):
+                        if tree.nodes[v].kind == SyntaxKind.VariantDef:
+                            if let Some(t) = first_token(tree, v, SyntaxKind.Ident):
+                                _ = self.variants.add(token_text(text, tree, t).to_string())
+
+## What every module sees besides its own declarations: the prelude, and
+## the std modules an import may name, by the name they are loaded under.
+pub struct Environment:
+    pub prelude: ModuleNames
+    pub std: dict[String, ModuleNames]
+
+## The module of the standard library an import path names, as stage 0's
+## `std_sources::module_for` maps them (`std.json`, and the short `json`).
+pub pure def std_module(path: str) -> String?:
+    let name = match path:
+        case "cli" | "std.x.cli": "cli"
+        case "std.math" | "math": "math"
+        case "std.task" | "task": "task"
+        case "std.log" | "log": "log"
+        case "std.cap" | "cap": "cap"
+        case "std.net" | "net": "net"
+        case "std.time" | "time": "time"
+        case "std.x.http" | "http": "http"
+        case "std.sim" | "sim": "sim"
+        case "std.json" | "json": "json"
+        case "std.test": "test"
+        case "std.collections": "collections"
+        case "std.num": "num"
+        case "std.live": "live"
+        case _: ""
+    if name.is_empty():
+        return None
+    return Some(name.to_string())
+
+## The std modules a module's imports name, by the names they load under.
+pub pure def imported_std_modules(text: str, tree: Tree) -> list[String]:
+    var out: list[String] = []
+    for n in child_nodes(tree, tree.root):
+        let kind = tree.nodes[n].kind
+        if kind != SyntaxKind.ImportItem and kind != SyntaxKind.FromImport:
+            continue
+        let path = first_child(tree, n, SyntaxKind.ModulePath) else:
+            continue
+        var words = String.new()
+        for e in tree.nodes[path].children:
+            if let Leaf(t) = e:
+                let k = tree.tokens[t].kind
+                if k != SyntaxKind.Dot and not k.is_trivia():
+                    if not words.is_empty():
+                        words.push(".")
+                    words.push(token_text(text, tree, t))
+        if let Some(m) = std_module(words):
+            out.push(m)
+    return out
+
+## The names the module's code resolves against: the prelude's
+## declarations and variants, the module's own, and what it imports.
+struct Scope:
+    ## The module's declarations, and where each one's name is written.
+    items: dict[String, (int, int)]
+    ## The variants every module of the program declares.
+    variants: set[String]
+    ## Names written in top-level code that did not parse as a declaration.
+    poisoned: set[String]
+    ## The refinement types the module declares (`type Port = int where ...`).
+    refinements: set[String]
+    ## The declarations of the module that are types, and the types it
+    ## imports by name.
+    types: set[String]
+    ## The std module each `import` binds a name to (`json` to `json`).
+    imports: dict[String, String]
+
+view struct Resolver:
+    text: str
+    tree: ref Tree
+    env: ref Environment
+    module: Scope
+    ## The scopes of locals, innermost last.
+    locals: list[list[String]]
+    ## The generic parameters in scope.
+    generics: list[String]
+    ## The associated types of the trait being resolved, named bare in it.
+    assoc: list[String]
+    ## Whether `self` is a parameter here.
+    has_self: bool
+    ## Whether unknown names go unreported (a broken header or body).
+    quiet: bool
+    ## Set before a `for` that `comptime` marks.
+    comptime_for: bool
+    ## The labels of the result of the function being resolved, which an
+    ## `ensures` names besides `result`.
+    result_labels: list[String]
+    ## The module's own traits' methods.
+    local_traits: dict[String, dict[String, Signature]]
+    diags: list[Diagnostic]
+
+## The name diagnostics of the module whose tree is `tree`, sorted, without
+## those on a line that has one of the syntax diagnostics `syntax`.
+pub pure def resolve(
+    text: str, tree: Tree, syntax: list[Diagnostic], env: Environment, catalog: Catalog
+) -> list[Diagnostic]:
+    var r = Resolver(
+        text=text,
+        tree=tree,
+        env=env,
+        module=Scope(
+            items={}, variants=set(), poisoned=set(), refinements=set(), types=set(), imports={}
+        ),
+        locals=[],
+        generics=[],
+        assoc=[],
+        has_self=False,
+        quiet=False,
+        comptime_for=False,
+        result_labels=[],
+        local_traits=ModuleNames.of(text, tree).traits,
+        diags=[],
+    )
+    r.declare_module()
+    r.check_module()
+    let lines = Lines.of(text)
+    var broken: set[int] = set()
+    for d in syntax:
+        _ = broken.add(lines.index(d.start))
+    var kept: list[Diagnostic] = []
+    for d in own r.diags:
+        if not broken.contains(lines.index(d.start)):
+            kept.push(d)
+    sort(mut kept, catalog)
+    return kept
+
+# ------------------------------------------------------------------ the tree
+
+pure def child_nodes(tree: Tree, n: int) -> list[int]:
+    var out: list[int] = []
+    for e in tree.nodes[n].children:
+        if let Node(c) = e:
+            out.push(c)
+    return out
+
+## The first significant token of kind `kind` among the children of `n`.
+pure def first_token(tree: Tree, n: int, kind: SyntaxKind) -> int?:
+    for e in tree.nodes[n].children:
+        if let Leaf(t) = e:
+            if tree.tokens[t].kind == kind:
+                return Some(t)
+    return None
+
+pure def first_child(tree: Tree, n: int, kind: SyntaxKind) -> int?:
+    for e in tree.nodes[n].children:
+        if let Node(c) = e:
+            if tree.nodes[c].kind == kind:
+                return Some(c)
+    return None
+
+pure def token_text(text: str, tree: Tree, t: int) -> str from text:
+    return text.byte_slice(tree.tokens[t].start, tree.tokens[t].end)
+
+## Whether `n`'s subtree has an `ERROR` node.
+pure def has_error(tree: Tree, n: int) -> bool:
+    for c in child_nodes(tree, n):
+        if tree.nodes[c].kind == SyntaxKind.Error or has_error(tree, c):
+            return True
+    return False
+
+## Whether `n`'s subtree has an `ERROR` node outside its blocks: a
+## declaration whose header did not parse.
+pure def error_outside_block(tree: Tree, n: int) -> bool:
+    for c in child_nodes(tree, n):
+        match tree.nodes[c].kind:
+            case Error:
+                return True
+            case Block:
+                pass
+            case _:
+                if error_outside_block(tree, c):
+                    return True
+    return False
+
+## Whether a declaration of this kind declares a type.
+pure def declares_type(kind: SyntaxKind) -> bool:
+    return match kind:
+        case StructDef | EnumDef | ErrorDef | TraitDef | TypeAlias: True
+        case _: False
+
+## The paths an import may name a std module by, for the fix of a
+## misspelt one (stage 0's `std_sources::MODULE_PATHS`).
+const MODULE_PATHS: list[str] = [
+    "std.x.cli",
+    "std.math",
+    "std.task",
+    "std.log",
+    "std.cap",
+    "std.net",
+    "std.time",
+    "std.x.http",
+    "std.sim",
+    "std.json",
+    "std.test",
+    "std.collections",
+    "std.num",
+    "std.live",
+]
+
+## The scalar types a misspelt type name is compared with.
+const SCALARS: list[str] = [
+    "int",
+    "f64",
+    "bool",
+    "char",
+    "str",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "u128",
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "i128",
+]
+
+## The name of `candidates` closest to a misspelt `name`, if one is close
+## enough to be the likely intent: an edit distance of at most a third of
+## its length, and at least one; the nearest, then the first in order.
+pub pure def closest(name: str, candidates: list[String]) -> String?:
+    let limit = max(len(name) // 3, 1)
+    var best: String? = None
+    var best_distance = limit + 1
+    for candidate in candidates:
+        if candidate == name:
+            continue
+        let d = edit_distance(name, candidate)
+        if d > limit:
+            continue
+        let better = match best:
+            case Some(b): d < best_distance or (d == best_distance and candidate < b)
+            case None: True
+        if better:
+            best = Some(candidate.copy())
+            best_distance = d
+    return best
+
+## Whether a declaration of this kind binds its name in its module.
+pure def declares_name(kind: SyntaxKind) -> bool:
+    return match kind:
+        case FnDef | StructDef | EnumDef | ErrorDef | TraitDef | ConstDef | TypeAlias: True
+        case _: False
+
+## The byte range of an item's name: the first name after its keyword.
+pure def item_name(tree: Tree, n: int) -> (int, int)?:
+    var seen_keyword = False
+    for e in tree.nodes[n].children:
+        if let Leaf(t) = e:
+            let kind = tree.tokens[t].kind
+            if kind.is_keyword():
+                seen_keyword = True
+            elif kind == SyntaxKind.Ident and seen_keyword:
+                return Some((tree.tokens[t].start, tree.tokens[t].end))
+    return None
+
+## The signatures of a trait's methods, by name.
+pub pure def trait_methods(text: str, tree: Tree, n: int) -> dict[String, Signature]:
+    var out: dict[String, Signature] = {}
+    if let Some(b) = first_child(tree, n, SyntaxKind.Block):
+        for m in child_nodes(tree, b):
+            if tree.nodes[m].kind == SyntaxKind.FnDef:
+                if let Some((start, end)) = item_name(tree, m):
+                    let name = text.byte_slice(start, end).to_string()
+                    _ = out.insert(name, signature(text, tree, m))
+    return out
+
+## A function's signature as written.
+pub pure def signature(text: str, tree: Tree, n: int) -> Signature:
+    var sig = Signature(pure=False, receiver=None, params=[], result=None, generics=0)
+    for e in tree.nodes[n].children:
+        if let Leaf(t) = e:
+            if tree.tokens[t].kind == SyntaxKind.Ident and token_text(text, tree, t) == "pure":
+                sig.pure = True
+            if tree.tokens[t].kind == SyntaxKind.DefKw:
+                break
+    if let Some(g) = first_child(tree, n, SyntaxKind.GenericParams):
+        for p in child_nodes(tree, g):
+            if tree.nodes[p].kind == SyntaxKind.GenericParam:
+                sig.generics += 1
+    if let Some(list) = first_child(tree, n, SyntaxKind.ParamList):
+        for p in child_nodes(tree, list):
+            if tree.nodes[p].kind != SyntaxKind.Param:
+                continue
+            var mode = ""
+            if first_token(tree, p, SyntaxKind.MutKw) != None:
+                mode = "mut "
+            elif first_token(tree, p, SyntaxKind.OwnKw) != None:
+                mode = "own "
+            if first_token(tree, p, SyntaxKind.SelfKw) != None:
+                sig.receiver = Some(mode.to_string())
+                continue
+            var name = String.new()
+            if let Some(t) = first_token(tree, p, SyntaxKind.Ident):
+                name = token_text(text, tree, t).to_string()
+            var ty = String.new()
+            for c in child_nodes(tree, p):
+                if is_type_kind(tree.nodes[c].kind):
+                    ty = type_text(text, tree, c)
+            sig.params.push((mode.to_string(), name, ty))
+    if let Some(ret) = first_child(tree, n, SyntaxKind.RetType):
+        for c in child_nodes(tree, ret):
+            if is_type_kind(tree.nodes[c].kind):
+                let ty = type_text(text, tree, c)
+                if ty != "()":
+                    sig.result = Some(ty)
+    return sig
+
+## Whether an impl's method is shaped as the trait's: the same receiver,
+## own generic parameters, and number and modes of parameters.
+pure def same_shape(expected: Signature, found: Signature) -> bool:
+    if expected.receiver != found.receiver or expected.generics != found.generics:
+        return False
+    if len(expected.params) != len(found.params):
+        return False
+    for i in range(len(expected.params)):
+        if expected.params[i].0 != found.params[i].0:
+            return False
+    return True
+
+## A type's text: its significant tokens, spaced as `sisu fmt` writes them.
+pure def type_text(text: str, tree: Tree, n: int) -> String:
+    var out = String.new()
+    var previous: SyntaxKind? = None
+    for t in node_tokens(tree, n):
+        let kind = tree.tokens[t].kind
+        if let Some(p) = previous:
+            if spaced(p, kind):
+                out.push(" ")
+        out.push(token_text(text, tree, t))
+        previous = Some(kind)
+    return out
+
+## Whether a space separates two tokens of a type.
+pure def spaced(before: SyntaxKind, after: SyntaxKind) -> bool:
+    match after:
+        case Comma | RBracket | RParen | Question | Dot:
+            return False
+        case Bang | Arrow:
+            return True
+        case _:
+            pass
+    return match before:
+        case LBracket | LParen | Dot: False
+        case Comma | Colon | Bang | Arrow | RefKw | MutKw | DynKw | ImplKw | ForKw: True
+        case _: False
+
+## The significant tokens of `n`'s subtree, in order.
+pure def node_tokens(tree: Tree, n: int) -> list[int]:
+    var out: list[int] = []
+    for e in tree.nodes[n].children:
+        match e:
+            case Leaf(t):
+                if not tree.tokens[t].kind.is_trivia():
+                    out.push(t)
+            case Node(c):
+                out.extend(node_tokens(tree, c))
+    return out
+
+## A signature as stage 0 prints it in `E0234`: `pure def name(mut self,
+## x: T) -> R`, with `Self` replaced by `self_type` when one is given.
+pub pure def signature_text(name: str, sig: Signature, self_type: str?) -> String:
+    var parts: list[String] = []
+    if let Some(mode) = sig.receiver:
+        parts.push("{mode}self")
+    for (mode, param, ty) in sig.params:
+        parts.push("{mode}{param}: {replace_self(ty, self_type)}")
+    var out = String.new()
+    if sig.pure:
+        out.push("pure ")
+    out.push("def {name}({parts.join(", ")})")
+    if let Some(r) = sig.result:
+        out.push(" -> {replace_self(r, self_type)}")
+    return out
+
+## `ty` with the word `Self` replaced by `self_type`.
+pure def replace_self(ty: str, self_type: str?) -> String:
+    let replacement = self_type else:
+        return ty.to_string()
+    var out = String.new()
+    var word = String.new()
+    for c in ty.chars():
+        if c.is_alphabetic() or c.is_digit() or c == '_':
+            word.push_char(c)
+        else:
+            out.push(if word == "Self": replacement else: word)
+            word = String.new()
+            out.push_char(c)
+    out.push(if word == "Self": replacement else: word)
+    return out
+
+## The optimal string alignment distance of two names: insertions,
+## deletions, substitutions and swaps of neighbours, each costing one.
+pub pure def edit_distance(a: str, b: str) -> int:
+    var xs: list[char] = []
+    for c in a.chars():
+        xs.push(c)
+    var ys: list[char] = []
+    for c in b.chars():
+        ys.push(c)
+    let n = len(xs)
+    let m = len(ys)
+    var d: list[list[int]] = []
+    for i in range(n + 1):
+        var row: list[int] = []
+        for j in range(m + 1):
+            row.push(if i == 0: j else: if j == 0: i else: 0)
+        d.push(row)
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            let cost = if xs[i - 1] == ys[j - 1]: 0 else: 1
+            var v = min(min(d[i - 1][j] + 1, d[i][j - 1] + 1), d[i - 1][j - 1] + cost)
+            if i > 1 and j > 1 and xs[i - 1] == ys[j - 2] and xs[i - 2] == ys[j - 1]:
+                v = min(v, d[i - 2][j - 2] + 1)
+            d[i][j] = v
+    return d[n][m]
+
+## The types every program can name without declaring them.
+pure def is_primitive(name: str) -> bool:
+    return match name:
+        case "int" | "f64" | "bool" | "char" | "str" | "Never": True
+        case _: False
+
+# ------------------------------------------------------------------ declarations
+
+impl Resolver:
+    pure def kind(self, n: int) -> SyntaxKind:
+        return self.tree.nodes[n].kind
+
+    ## The text of token `t`, owned, so that it outlives changes to the
+    ## resolver.
+    pure def text_of(self, t: int) -> String:
+        return token_text(self.text, self.tree, t).to_string()
+
+    ## The children of `n`, copied, for loops that change the resolver.
+    pure def elements(self, n: int) -> list[Element]:
+        var out: list[Element] = []
+        for e in self.tree.nodes[n].children:
+            out.push(e)
+        return out
+
+    pure def report(mut self, own d: Diagnostic):
+        self.diags.push(d)
+
+    ## Declares every item of the module, as stage 0's `declare_items`,
+    ## and the names of top-level code that did not parse as a declaration.
+    pure def declare_module(mut self):
+        let script = self.text.starts_with("#!")
+        for n in child_nodes(self.tree, self.tree.root):
+            let kind = self.kind(n)
+            if not script and not is_item(kind):
+                self.poison(n)
+            self.declare(n)
+
+    ## Every name in `n`'s subtree becomes poisoned.
+    pure def poison(mut self, n: int):
+        for e in self.elements(n):
+            match e:
+                case Leaf(t):
+                    if self.tree.tokens[t].kind == SyntaxKind.Ident:
+                        _ = self.module.poisoned.add(self.text_of(t))
+                case Node(c):
+                    self.poison(c)
+
+    pure def declare(mut self, n: int):
+        let kind = self.kind(n)
+        match kind:
+            case Block:
+                # An unexpectedly indented block: its declarations are the
+                # module's (and its names were poisoned above).
+                for m in child_nodes(self.tree, n):
+                    self.declare(m)
+            case SuiteDef:
+                if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
+                    for m in child_nodes(self.tree, b):
+                        self.declare(m)
+            case ImportItem:
+                self.import(n)
+            case FromImport:
+                self.import_from(n)
+            case EnumDef | ErrorDef:
+                self.bind_item(n)
+                if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
+                    for v in child_nodes(self.tree, b):
+                        if self.kind(v) == SyntaxKind.VariantDef:
+                            if let Some(t) = first_token(self.tree, v, SyntaxKind.Ident):
+                                _ = self.module.variants.add(self.text_of(t))
+            case TypeAlias:
+                self.bind_item(n)
+                if first_token(self.tree, n, SyntaxKind.WhereKw) != None:
+                    if let Some((start, end)) = item_name(self.tree, n):
+                        let name = self.text.byte_slice(start, end).to_string()
+                        _ = self.module.refinements.add(name)
+            case _ if declares_name(kind):
+                self.bind_item(n)
+            case _:
+                pass
+
+    pure def bind_item(mut self, n: int):
+        if let Some((start, end)) = item_name(self.tree, n):
+            if declares_type(self.kind(n)):
+                _ = self.module.types.add(self.text.byte_slice(start, end).to_string())
+            self.bind(self.text.byte_slice(start, end).to_string(), start, end)
+
+    ## Declares `name`, reporting a second declaration of it.
+    pure def bind(mut self, own name: String, start: int, end: int):
+        if name.is_empty():
+            return
+        if let Some((first_start, first_end)) = self.module.items.get(name.copy()):
+            let d = Diagnostic.new(Msg.ResolveDuplicateDefinition, start, end).with("name", name)
+            self.report(d.label(Msg.ResolveFirstDefined, first_start, first_end))
+            return
+        _ = self.module.items.insert(name, (start, end))
+
+    ## The words of a module path and its byte range.
+    pure def module_path(self, n: int) -> (String, int, int):
+        var words = String.new()
+        for e in self.tree.nodes[n].children:
+            if let Leaf(t) = e:
+                let kind = self.tree.tokens[t].kind
+                if kind != SyntaxKind.Dot and not kind.is_trivia():
+                    if not words.is_empty():
+                        words.push(".")
+                    words.push(self.text_of(t))
+        return (words, self.tree.nodes[n].start, self.tree.nodes[n].end)
+
+    ## `import a.b` binds `b`, `import a.b as c` binds `c`; a path that names
+    ## no module is reported.
+    pure def import(mut self, n: int):
+        let path = first_child(self.tree, n, SyntaxKind.ModulePath) else:
+            return
+        let (words, start, end) = self.module_path(path)
+        var bound: int? = None
+        var after_as = False
+        for e in self.tree.nodes[n].children:
+            if let Leaf(t) = e:
+                let kind = self.tree.tokens[t].kind
+                if kind == SyntaxKind.AsKw:
+                    after_as = True
+                elif kind == SyntaxKind.Ident and after_as:
+                    bound = Some(t)
+        if bound == None:
+            # The last word of the path, written at its end.
+            for e in self.tree.nodes[path].children:
+                if let Leaf(t) = e:
+                    if self.tree.tokens[t].kind == SyntaxKind.Ident:
+                        bound = Some(t)
+        let module = std_module(words) else:
+            let similar = self.unknown_import(words, start, end)
+            if let Some(t) = bound:
+                self.poison_import(self.text_of(t), similar)
+            return
+        self.load(module)
+        if let Some(t) = bound:
+            _ = self.module.imports.insert(self.text_of(t), module.copy())
+            self.bind(self.text_of(t), self.tree.tokens[t].start, self.tree.tokens[t].end)
+
+    ## `from a.b import c, d as e` binds `c` and `e`.
+    pure def import_from(mut self, n: int):
+        let path = first_child(self.tree, n, SyntaxKind.ModulePath) else:
+            return
+        let (words, start, end) = self.module_path(path)
+        let module = std_module(words) else:
+            let similar = self.unknown_import(words, start, end)
+            for name in child_nodes(self.tree, n):
+                if self.kind(name) != SyntaxKind.ImportName:
+                    continue
+                var bound: int? = None
+                for e in self.tree.nodes[name].children:
+                    if let Leaf(t) = e:
+                        if self.tree.tokens[t].kind == SyntaxKind.Ident:
+                            bound = Some(t)
+                if let Some(t) = bound:
+                    self.poison_import(self.text_of(t), similar.copy())
+            return
+        self.load(module)
+        for imported in child_nodes(self.tree, n):
+            if self.kind(imported) != SyntaxKind.ImportName:
+                continue
+            var bound: int? = None
+            for e in self.tree.nodes[imported].children:
+                if let Leaf(t) = e:
+                    if self.tree.tokens[t].kind == SyntaxKind.Ident:
+                        bound = Some(t)
+            if let Some(t) = bound:
+                let name = self.text_of(t)
+                if self.std_declares_type(module, name):
+                    _ = self.module.types.add(name.copy())
+                self.bind(name, self.tree.tokens[t].start, self.tree.tokens[t].end)
+
+    ## Whether the std module `module` declares a type `name`.
+    pure def std_declares_type(self, module: str, name: str) -> bool:
+        if let Some(names) = self.env.std.get(module.to_string()):
+            return names.types.contains(name.to_string())
+        return False
+
+    ## Reports an import of a module that does not exist, with the closest
+    ## module path as a fix; returns that path.
+    pure def unknown_import(mut self, words: str, start: int, end: int) -> String?:
+        var candidates: list[String] = []
+        for p in MODULE_PATHS:
+            candidates.push(p.to_string())
+        # The packages of the program: a program of one file has only std.
+        candidates.push("std".to_string())
+        let similar = closest(words, candidates)
+        var d = Diagnostic.new(Msg.ResolveImportUnknown, start, end).with("name", words)
+        if let Some(path) = similar.copy():
+            d = d.fix_at(Msg.ResolveSimilarModule, start, end, path)
+        self.report(d)
+        return similar
+
+    ## The name an import that failed would have bound: a use of it is not
+    ## reported, since the import was; nor is the name the similar module
+    ## would bind (`import std.jsn` and then `json.parse`).
+    pure def poison_import(mut self, own name: String, similar: String?):
+        if let Some(path) = similar:
+            # The path's last word.
+            var dot = path.byte_len()
+            while dot > 0 and path.byte_at(dot - 1) != 46:
+                dot -= 1
+            _ = self.module.poisoned.add(path.byte_slice(dot, path.byte_len()).to_string())
+        _ = self.module.poisoned.add(name)
+
+    ## The variants of a std module the program imports become visible.
+    pure def load(mut self, module: str):
+        if let Some(names) = self.env.std.get(module.to_string()):
+            for v in names.variants:
+                _ = self.module.variants.add(v.copy())
+
+    # ------------------------------------------------------------------ lookups
+
+    pure def push_scope(mut self):
+        self.locals.push([])
+
+    pure def pop_scope(mut self):
+        _ = self.locals.pop()
+
+    pure def is_local(self, name: str) -> bool:
+        for scope in self.locals:
+            for l in scope:
+                if l == name:
+                    return True
+        return False
+
+    ## Declares a local in the innermost scope. Rebinding in the same scope
+    ## is allowed; a `let` that shadows a name of an enclosing scope warns
+    ## (D-024).
+    pure def declare_local(mut self, t: int, warn: bool):
+        let name = self.text_of(t)
+        if name.is_empty() or name == "_" or self.locals.is_empty():
+            return
+        let depth = len(self.locals)
+        if warn:
+            var outer = False
+            for i in range(depth - 1):
+                if self.locals[i].contains(name.to_string()):
+                    outer = True
+            if outer and not self.locals[depth - 1].contains(name.to_string()):
+                let token = self.tree.tokens[t]
+                let d = Diagnostic.new(Msg.ResolveShadowOuter, token.start, token.end)
+                self.report(d.with("name", name))
+        self.locals[depth - 1].push(name.to_string())
+
+    ## Whether a value name is known: a local, a generic parameter, a
+    ## declaration of the module or of the prelude, or a variant.
+    pure def knows_value(self, name: str) -> bool:
+        if self.is_local(name) or self.generics.contains(name.to_string()):
+            return True
+        let key = name.to_string()
+        if self.module.items.contains(key.copy()) or self.env.prelude.items.contains(key.copy()):
+            return True
+        if self.module.variants.contains(key.copy())
+                or self.env.prelude.variants.contains(key.copy()):
+            return True
+        # `_` discards, and `reflect` is compile-time code's (stage 0
+        # reports it elsewhere as a later phase's). A scalar type is a value
+        # only before a dot (`int.parse`, see `names_scalar`).
+        return match name:
+            case "_" | "True" | "False" | "it" | "reflect": True
+            case _: False
+
+    ## Whether a type name is known.
+    pure def knows_type(self, name: str) -> bool:
+        if self.generics.contains(name.to_string()) or is_primitive(name) or name == "Self":
+            return True
+        if self.assoc.contains(name.to_string()) or name == "f32":
+            return True
+        let key = name.to_string()
+        return self.module.items.contains(key.copy()) or self.env.prelude.items.contains(key)
+
+    ## A value name at token `t`, reported when nothing declares it.
+    pure def use_name(mut self, t: int):
+        let name = self.text_of(t)
+        if self.knows_value(name) or self.quiet or self.module.poisoned.contains(name.to_string()):
+            return
+        let token = self.tree.tokens[t]
+        var d = Diagnostic.new(Msg.ResolveUndefinedName, token.start, token.end).with("name", name)
+        if let Some(similar) = self.similar_name(name):
+            d = d.fix(Msg.ResolveSimilarName, "name", similar, token.start, token.end, similar)
+        self.report(d)
+
+    ## The local or declared name closest to a misspelt one, if one is close
+    ## enough to be the likely intent: an edit distance of at most a third
+    ## of its length, and at least one; the nearest, then the first in order.
+    pure def similar_name(self, name: str) -> String?:
+        let limit = max(len(name) // 3, 1)
+        var best: String? = None
+        var best_distance = limit + 1
+        for candidate in self.candidates():
+            if candidate == name:
+                continue
+            let d = edit_distance(name, candidate)
+            if d > limit:
+                continue
+            let better = match best:
+                case Some(b): d < best_distance or (d == best_distance and candidate < b)
+                case None: True
+            if better:
+                best = Some(candidate.copy())
+                best_distance = d
+        return best
+
+    ## The names a misspelling is compared with: the locals in scope (a
+    ## method's `self` among them), the module's declarations, the
+    ## prelude's (but those starting with `_`), and `True` and `False`,
+    ## which `true` and `false` mean.
+    pure def candidates(self) -> list[String]:
+        var out: list[String] = ["True".to_string(), "False".to_string()]
+        if self.has_self:
+            out.push("self".to_string())
+        for scope in self.locals:
+            for l in scope:
+                out.push(l.copy())
+        for name in self.module.items.keys():
+            out.push(name.copy())
+        for name in self.env.prelude.items:
+            if not name.starts_with("_"):
+                out.push(name.copy())
+        return out
+
+# ------------------------------------------------------------------ signatures and bodies
+
+impl Resolver:
+    pure def check_module(mut self):
+        let script = self.text.starts_with("#!")
+        if script:
+            # A script's top-level statements are its `main` (10), which
+            # takes `sys`.
+            self.push_scope()
+            self.locals[0].push("sys".to_string())
+        # A script with its own `main` has no top-level statements to run;
+        # stage 0 reports them (`E0261`) and checks nothing in them.
+        let statements = script and not self.declares_main()
+        for n in child_nodes(self.tree, self.tree.root):
+            self.top_level(n, statements)
+        if script:
+            self.pop_scope()
+
+    ## A node of the module's top level: a declaration; an unexpectedly
+    ## indented block, whose declarations (and statements) count as
+    ## top-level ones; or a statement of a script.
+    pure def top_level(mut self, n: int, statements: bool):
+        let kind = self.kind(n)
+        if is_item(kind):
+            self.item(n)
+        elif kind == SyntaxKind.Block:
+            for c in child_nodes(self.tree, n):
+                self.top_level(c, statements)
+        elif statements:
+            self.statement(n)
+
+    ## Whether the module declares a function `main` at its top level.
+    pure def declares_main(self) -> bool:
+        var nodes = child_nodes(self.tree, self.tree.root)
+        while not nodes.is_empty():
+            let n = nodes.pop() ?? 0
+            match self.kind(n):
+                case Block:
+                    nodes.extend(child_nodes(self.tree, n))
+                case FnDef:
+                    if let Some((start, end)) = item_name(self.tree, n):
+                        if self.text.byte_slice(start, end) == "main":
+                            return True
+                case _:
+                    pass
+        return False
+
+    ## The generic parameters a node declares, in scope from now on.
+    pure def add_generics(mut self, n: int):
+        if let Some(g) = first_child(self.tree, n, SyntaxKind.GenericParams):
+            for p in child_nodes(self.tree, g):
+                if self.kind(p) == SyntaxKind.GenericParam:
+                    if let Some(t) = first_token(self.tree, p, SyntaxKind.Ident):
+                        self.generics.push(self.text_of(t))
+            for p in child_nodes(self.tree, g):
+                if self.kind(p) == SyntaxKind.GenericParam:
+                    self.bounds(p)
+
+    ## The types among `n`'s children: those after `:` and `+` are trait
+    ## references (bounds), the others types.
+    pure def bounds(mut self, n: int):
+        var bound = False
+        for e in self.elements(n):
+            match e:
+                case Leaf(t):
+                    match self.tree.tokens[t].kind:
+                        case Colon | Plus:
+                            bound = True
+                        case Eq | Comma | WhereKw:
+                            bound = False
+                        case _:
+                            pass
+                case Node(c):
+                    if bound and is_type_kind(self.kind(c)):
+                        self.trait_ref(c)
+                    elif is_type_kind(self.kind(c)):
+                        self.type_(c)
+
+    ## Reports a type name that names nothing, with the closest type in
+    ## scope as a fix: a scalar, or a type the module or the prelude
+    ## declares.
+    pure def undefined_type(mut self, n: int, name: str):
+        let node = ref self.tree.nodes[n]
+        let (start, end) = (node.start, node.end)
+        var candidates: list[String] = []
+        for s in SCALARS:
+            candidates.push(s.to_string())
+        for t in self.module.types:
+            if not t.starts_with("_"):
+                candidates.push(t.copy())
+        for t in self.env.prelude.types:
+            if not t.starts_with("_"):
+                candidates.push(t.copy())
+        var d = Diagnostic.new(Msg.ResolveUndefinedType, start, end).with("name", name)
+        if let Some(similar) = closest(name, candidates):
+            d = d.fix_at(Msg.ResolveSimilarType, start, end, similar)
+        self.report(d)
+
+    ## A trait reference: its arguments are resolved only once the trait is
+    ## found.
+    pure def trait_ref(mut self, n: int):
+        if self.kind(n) == SyntaxKind.PathType:
+            if let Some(t) = first_token(self.tree, n, SyntaxKind.Ident):
+                let name = self.text_of(t)
+                if not self.knows_type(name):
+                    if not self.module.poisoned.contains(name.copy()):
+                        self.undefined_type(n, name)
+                    return
+        self.type_(n)
+
+    ## Every type written among the children of `n`.
+    pure def types_in(mut self, n: int):
+        for c in child_nodes(self.tree, n):
+            if is_type_kind(self.kind(c)):
+                self.type_(c)
+
+    pure def item(mut self, n: int):
+        let saved_generics = len(self.generics)
+        match self.kind(n):
+            case FnDef:
+                self.function(n, False)
+            case StructDef:
+                self.add_generics(n)
+                self.members(n)
+            case EnumDef | ErrorDef:
+                self.add_generics(n)
+                if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
+                    for v in child_nodes(self.tree, b):
+                        match self.kind(v):
+                            case VariantDef:
+                                for f in child_nodes(self.tree, v):
+                                    if self.kind(f) == SyntaxKind.VariantField:
+                                        self.types_in(f)
+                            case FnDef:
+                                self.function(v, True)
+                            case _:
+                                pass
+            case ImplDef if self.implements_refinement(n):
+                # An impl of a refinement type's own is rejected as a whole
+                # (`E0813`); its methods are not resolved.
+                pass
+            case ImplDef:
+                self.add_generics(n)
+                let has_for = first_token(self.tree, n, SyntaxKind.ForKw) != None
+                var first = True
+                for c in child_nodes(self.tree, n):
+                    if is_type_kind(self.kind(c)):
+                        if first and has_for:
+                            self.trait_ref(c)
+                        else:
+                            self.type_(c)
+                        first = False
+                self.check_impl_signatures(n)
+                if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
+                    for m in child_nodes(self.tree, b):
+                        if self.kind(m) == SyntaxKind.FnDef:
+                            self.function(m, True)
+            case TraitDef:
+                self.add_generics(n)
+                # The supertraits, `trait Container(Len):`.
+                for c in child_nodes(self.tree, n):
+                    if is_type_kind(self.kind(c)):
+                        self.trait_ref(c)
+                if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
+                    for m in child_nodes(self.tree, b):
+                        if self.kind(m) == SyntaxKind.TypeAlias:
+                            if let Some((start, end)) = item_name(self.tree, m):
+                                self.assoc.push(self.text.byte_slice(start, end).to_string())
+                    for m in child_nodes(self.tree, b):
+                        if self.kind(m) == SyntaxKind.FnDef and not self.is_derive_template(m):
+                            self.function(m, True)
+                self.assoc.clear()
+            case ConstDef:
+                self.types_in(n)
+                self.push_scope()
+                self.exprs_in(n)
+                self.pop_scope()
+            case TypeAlias:
+                self.add_generics(n)
+                self.types_in(n)
+                # A refinement's predicate names the value as `self`.
+                self.push_scope()
+                let saved_self = self.has_self
+                self.has_self = True
+                self.exprs_in(n)
+                self.has_self = saved_self
+                self.pop_scope()
+            case TestDef | BenchDef:
+                self.test(n)
+            case SuiteDef:
+                if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
+                    for m in child_nodes(self.tree, b):
+                        if is_item(self.kind(m)):
+                            self.item(m)
+            case _:
+                pass
+        while len(self.generics) > saved_generics:
+            _ = self.generics.pop()
+
+    ## Each method of `impl Trait for Type` against the trait's: a method
+    ## whose shape differs is reported (`E0234`), with both signatures.
+    pure def check_impl_signatures(mut self, n: int):
+        var types: list[int] = []
+        var has_for = False
+        for e in self.tree.nodes[n].children:
+            match e:
+                case Leaf(t):
+                    if self.tree.tokens[t].kind == SyntaxKind.ForKw:
+                        has_for = True
+                case Node(c):
+                    if is_type_kind(self.kind(c)):
+                        types.push(c)
+        if not has_for or len(types) < 2:
+            return
+        let trait_name_token = first_token(self.tree, types[0], SyntaxKind.Ident) else:
+            return
+        let trait_name = self.text_of(trait_name_token)
+        let self_type = type_text(self.text, self.tree, types[1])
+        let methods = self.trait_signatures(trait_name) else:
+            return
+        let b = first_child(self.tree, n, SyntaxKind.Block) else:
+            return
+        for m in child_nodes(self.tree, b):
+            if self.kind(m) != SyntaxKind.FnDef or error_outside_block(self.tree, m):
+                continue
+            let (start, end) = item_name(self.tree, m) else:
+                continue
+            let name = self.text.byte_slice(start, end).to_string()
+            let expected = methods.get(name.copy()) else:
+                continue
+            let found = signature(self.text, self.tree, m)
+            if same_shape(expected, found):
+                continue
+            let expected_text = signature_text(name, expected, Some(self_type))
+            let found_text = signature_text(name, found, None)
+            var d = Diagnostic.new(Msg.ResolveMethodSignature, start, end).with("name", name)
+            d = d.with("trait", trait_name).with("expected", expected_text)
+            self.report(d.with("found", found_text))
+
+    ## The methods of the trait `name`: the module's own, or the prelude's.
+    pure def trait_signatures(self, name: str) -> dict[String, Signature]?:
+        if let Some(methods) = self.local_traits.get(name.to_string()):
+            return Some(methods.copy())
+        if self.module.items.contains(name.to_string()):
+            return None
+        if let Some(methods) = self.env.prelude.traits.get(name.to_string()):
+            return Some(methods.copy())
+        return None
+
+    ## Whether a trait's method is its `comptime def derive`, a template the
+    ## compiler unfolds into source when a type derives the trait (08); it
+    ## is not resolved as code.
+    pure def is_derive_template(self, m: int) -> bool:
+        if first_token(self.tree, m, SyntaxKind.ComptimeKw) == None:
+            return False
+        let (start, end) = item_name(self.tree, m) else:
+            return False
+        return self.text.byte_slice(start, end) == "derive"
+
+    ## Whether an impl is for a refinement type the module declares.
+    pure def implements_refinement(self, n: int) -> bool:
+        var target: int? = None
+        for c in child_nodes(self.tree, n):
+            if self.kind(c) == SyntaxKind.PathType:
+                target = Some(c)
+        let t = target else:
+            return False
+        if let Some(name) = first_token(self.tree, t, SyntaxKind.Ident):
+            return self.module.refinements.contains(self.text_of(name))
+        return False
+
+    ## A struct's fields and methods.
+    pure def members(mut self, n: int):
+        let b = first_child(self.tree, n, SyntaxKind.Block) else:
+            return
+        for m in child_nodes(self.tree, b):
+            match self.kind(m):
+                case FieldDef:
+                    self.types_in(m)
+                    self.push_scope()
+                    self.exprs_in(m)
+                    self.pop_scope()
+                case FnDef:
+                    self.function(m, True)
+                case ContractStmt:
+                    # `invariant e` is checked as a method of the struct.
+                    self.push_scope()
+                    let saved_self = self.has_self
+                    self.has_self = True
+                    self.exprs_in(m)
+                    self.has_self = saved_self
+                    self.pop_scope()
+                case _:
+                    pass
+
+    ## A function: its generic parameters, parameters and result type are
+    ## in scope in its body. A header or body with a syntax error reports
+    ## no unknown names in the body.
+    pure def function(mut self, n: int, method: bool):
+        let saved_generics = len(self.generics)
+        let saved_self = self.has_self
+        let saved_quiet = self.quiet
+        self.add_generics(n)
+        self.push_scope()
+        self.has_self = False
+        let header_broken = error_outside_block(self.tree, n)
+        if let Some(params) = first_child(self.tree, n, SyntaxKind.ParamList):
+            self.type_params(params)
+        if let Some(params) = first_child(self.tree, n, SyntaxKind.ParamList):
+            self.params(params, method)
+        let saved_labels = self.result_labels.copy()
+        self.result_labels.clear()
+        for c in child_nodes(self.tree, n):
+            match self.kind(c):
+                case RetType:
+                    self.types_in(c)
+                    self.labels_of(c)
+                case WhereClause:
+                    self.bounds(c)
+                case _:
+                    pass
+        if let Some(body) = first_child(self.tree, n, SyntaxKind.Block):
+            self.quiet = saved_quiet or header_broken or has_error(self.tree, body)
+            # The body shares the parameters' scope: a `let` there that
+            # rebinds a parameter does not shadow it.
+            self.statements_of(body)
+        self.pop_scope()
+        self.result_labels = saved_labels
+        self.quiet = saved_quiet
+        self.has_self = saved_self
+        while len(self.generics) > saved_generics:
+            _ = self.generics.pop()
+
+    ## The labels of a labelled tuple result, `-> (q: int, r: int)`.
+    pure def labels_of(mut self, ret: int):
+        for t in child_nodes(self.tree, ret):
+            if self.kind(t) == SyntaxKind.TupleType:
+                for f in child_nodes(self.tree, t):
+                    if self.kind(f) == SyntaxKind.TupleTypeField:
+                        if let Some(name) = first_token(self.tree, f, SyntaxKind.Ident):
+                            self.result_labels.push(self.text_of(name))
+
+    ## A parameter of type `type` (a `comptime def`'s) names a type in the
+    ## rest of the signature and in the body.
+    pure def type_params(mut self, list: int):
+        for p in child_nodes(self.tree, list):
+            if self.kind(p) != SyntaxKind.Param:
+                continue
+            let t = first_child(self.tree, p, SyntaxKind.PathType) else:
+                continue
+            if first_token(self.tree, t, SyntaxKind.TypeKw) == None:
+                continue
+            if let Some(name) = first_token(self.tree, p, SyntaxKind.Ident):
+                self.generics.push(self.text_of(name))
+
+    ## The parameters of a function or test, declared in the current scope.
+    ## `self` is the receiver only as the first parameter of a method;
+    ## anywhere else stage 0 reports it (`E0215`, `E0218`) and the body
+    ## has no `self`.
+    pure def params(mut self, list: int, method: bool):
+        var index = 0
+        for p in child_nodes(self.tree, list):
+            if self.kind(p) != SyntaxKind.Param:
+                continue
+            self.types_in(p)
+            for c in child_nodes(self.tree, p):
+                if not is_type_kind(self.kind(c)):
+                    self.expr(c)
+            if first_token(self.tree, p, SyntaxKind.SelfKw) != None:
+                if method and index == 0:
+                    self.has_self = True
+            elif let Some(t) = first_token(self.tree, p, SyntaxKind.Ident):
+                self.declare_local(t, False)
+            index += 1
+
+    ## `test "name" [for patterns in cases] [(params)]: body`.
+    pure def test(mut self, n: int):
+        self.push_scope()
+        var after_in = False
+        var pattern: int? = None
+        for e in self.elements(n):
+            match e:
+                case Leaf(t):
+                    if self.tree.tokens[t].kind == SyntaxKind.InKw:
+                        after_in = True
+                case Node(c):
+                    let kind = self.kind(c)
+                    if after_in and kind != SyntaxKind.ParamList and kind != SyntaxKind.Block:
+                        self.expr(c)
+                        after_in = False
+                    elif is_pattern_kind(kind):
+                        pattern = Some(c)
+        if let Some(p) = pattern:
+            self.pattern(p, False)
+        if let Some(params) = first_child(self.tree, n, SyntaxKind.ParamList):
+            self.params(params, False)
+        if let Some(body) = first_child(self.tree, n, SyntaxKind.Block):
+            let saved_quiet = self.quiet
+            self.quiet = saved_quiet
+                or error_outside_block(self.tree, n)
+                or has_error(self.tree, body)
+            self.statements_of(body)
+            self.quiet = saved_quiet
+        self.pop_scope()
+
+    # ------------------------------------------------------------------ statements
+
+    ## A block: a scope of its own.
+    pure def block(mut self, n: int):
+        self.push_scope()
+        self.statements_of(n)
+        self.pop_scope()
+
+    ## The statements of a block, in the current scope: that of a
+    ## function's or a closure's parameters, for its body.
+    pure def statements_of(mut self, n: int):
+        for s in child_nodes(self.tree, n):
+            self.statement(s)
+
+    pure def statement(mut self, n: int):
+        match self.kind(n):
+            case LetStmt:
+                self.let_stmt(n)
+            case IfStmt:
+                self.if_stmt(n)
+            case WhileStmt:
+                self.push_scope()
+                for c in child_nodes(self.tree, n):
+                    match self.kind(c):
+                        case Cond:
+                            self.cond(c)
+                        case Block:
+                            self.block(c)
+                        case _:
+                            pass
+                self.pop_scope()
+            case ForStmt:
+                self.for_stmt(n)
+            case WithStmt:
+                self.push_scope()
+                for c in child_nodes(self.tree, n):
+                    if self.kind(c) != SyntaxKind.Block:
+                        self.expr(c)
+                var after_as = False
+                for e in self.elements(n):
+                    if let Leaf(t) = e:
+                        let kind = self.tree.tokens[t].kind
+                        if kind == SyntaxKind.AsKw:
+                            after_as = True
+                        elif kind == SyntaxKind.Ident and after_as:
+                            self.declare_local(t, False)
+                if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
+                    self.block(b)
+                self.pop_scope()
+            case ComptimeStmt:
+                for c in child_nodes(self.tree, n):
+                    if self.kind(c) == SyntaxKind.ForStmt:
+                        # `comptime for V in ...` binds compile-time values,
+                        # capitalised ones too.
+                        self.comptime_for = True
+                        self.for_stmt(c)
+                    else:
+                        self.statement(c)
+            case UnsafeBlock:
+                # Foreign code is a later phase's (`E0900`), not resolved.
+                pass
+            case DeferStmt:
+                for c in child_nodes(self.tree, n):
+                    if self.kind(c) == SyntaxKind.Block:
+                        self.block(c)
+                    else:
+                        self.statement(c)
+            case SelectStmt:
+                self.select(n)
+            case ContractStmt:
+                self.contract(n)
+            case Block:
+                self.block(n)
+            case Error:
+                pass
+            case k if is_item(k):
+                # A nested declaration is a later phase's (`E0900`).
+                pass
+            case _:
+                self.expr(n)
+
+    ## `let pattern [: type] [= value [else ...]]`: the type and the value
+    ## first, then the `else`, then the pattern's bindings, which warn when
+    ## they shadow.
+    pure def let_stmt(mut self, n: int):
+        var pattern: int? = None
+        var else_part: int? = None
+        for c in child_nodes(self.tree, n):
+            let kind = self.kind(c)
+            if pattern == None and is_pattern_kind(kind):
+                pattern = Some(c)
+            elif is_type_kind(kind):
+                self.type_(c)
+            elif kind == SyntaxKind.LetElse:
+                else_part = Some(c)
+            else:
+                self.expr(c)
+        if let Some(e) = else_part:
+            self.push_scope()
+            var after_as = False
+            for x in self.elements(e):
+                if let Leaf(t) = x:
+                    let kind = self.tree.tokens[t].kind
+                    if kind == SyntaxKind.AsKw:
+                        after_as = True
+                    elif kind == SyntaxKind.Ident and after_as:
+                        self.declare_local(t, False)
+                        after_as = False
+            for c in child_nodes(self.tree, e):
+                self.statement(c)
+            self.pop_scope()
+        if let Some(p) = pattern:
+            self.pattern(p, True)
+
+    pure def if_stmt(mut self, n: int):
+        self.branch(n)
+        for c in child_nodes(self.tree, n):
+            match self.kind(c):
+                case ElifClause:
+                    self.branch(c)
+                case ElseClause:
+                    if let Some(b) = first_child(self.tree, c, SyntaxKind.Block):
+                        self.block(b)
+                case _:
+                    pass
+
+    ## A condition and its block, in a scope of their own.
+    pure def branch(mut self, n: int):
+        self.push_scope()
+        if let Some(c) = first_child(self.tree, n, SyntaxKind.Cond):
+            self.cond(c)
+        if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
+            self.block(b)
+        self.pop_scope()
+
+    ## The parts of a condition, left to right: a `let` part binds for the
+    ## parts after it and for the block.
+    pure def cond(mut self, n: int):
+        for c in child_nodes(self.tree, n):
+            if self.kind(c) == SyntaxKind.LetCond:
+                var pattern: int? = None
+                for x in child_nodes(self.tree, c):
+                    if pattern == None and is_pattern_kind(self.kind(x)):
+                        pattern = Some(x)
+                    else:
+                        self.expr(x)
+                if let Some(p) = pattern:
+                    self.pattern(p, False)
+            else:
+                self.expr(c)
+
+    pure def for_stmt(mut self, n: int):
+        let at_compile_time = self.comptime_for
+        self.comptime_for = False
+        self.push_scope()
+        var pattern: int? = None
+        for c in child_nodes(self.tree, n):
+            let kind = self.kind(c)
+            if pattern == None and is_pattern_kind(kind):
+                pattern = Some(c)
+            elif kind == SyntaxKind.MatchArmList:
+                # `comptime for` among the arms of a `match`.
+                if let Some(p) = pattern:
+                    self.loop_pattern(p, at_compile_time)
+                    pattern = None
+                self.arms(c)
+            elif kind != SyntaxKind.Block:
+                self.expr(c)
+        if let Some(p) = pattern:
+            self.loop_pattern(p, at_compile_time)
+        if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
+            self.block(b)
+        self.pop_scope()
+
+    ## The pattern of a `for`; a `comptime for`'s binds a capitalised name.
+    pure def loop_pattern(mut self, p: int, at_compile_time: bool):
+        if at_compile_time
+                and self.kind(p) == SyntaxKind.CtorPat
+                and first_child(self.tree, p, SyntaxKind.PatArgs) == None:
+            if let Some(t) = first_token(self.tree, p, SyntaxKind.Ident):
+                self.declare_local(t, False)
+                return
+        self.pattern(p, False)
+
+    ## `select:` and its arms `case pattern = operation:`.
+    pure def select(mut self, n: int):
+        let list = first_child(self.tree, n, SyntaxKind.MatchArmList) else:
+            return
+        for arm in child_nodes(self.tree, list):
+            if self.kind(arm) != SyntaxKind.MatchArm:
+                continue
+            self.push_scope()
+            var pattern: int? = None
+            for c in child_nodes(self.tree, arm):
+                let kind = self.kind(c)
+                if pattern == None and is_pattern_kind(kind):
+                    pattern = Some(c)
+                elif kind != SyntaxKind.Block:
+                    self.expr(c)
+            if let Some(p) = pattern:
+                self.pattern(p, False)
+            if let Some(b) = first_child(self.tree, arm, SyntaxKind.Block):
+                self.block(b)
+            self.pop_scope()
+
+    ## `requires e`, `ensures e` (where `result` and `old` name the result
+    ## and the values on entry), `invariant e`, `decreases e`.
+    pure def contract(mut self, n: int):
+        self.push_scope()
+        if let Some(t) = first_token(self.tree, n, SyntaxKind.Ident):
+            if self.text_of(t) == "ensures":
+                let depth = len(self.locals)
+                self.locals[depth - 1].push("result".to_string())
+                for label in self.result_labels.copy():
+                    self.locals[depth - 1].push(label.copy())
+        for c in child_nodes(self.tree, n):
+            self.expr(c)
+        self.pop_scope()
+
+    # ------------------------------------------------------------------ expressions
+
+    pure def exprs_in(mut self, n: int):
+        for c in child_nodes(self.tree, n):
+            if not is_type_kind(self.kind(c)):
+                self.expr(c)
+
+    pure def expr(mut self, n: int):
+        match self.kind(n):
+            case NameRef:
+                for e in self.elements(n):
+                    if let Leaf(t) = e:
+                        match self.tree.tokens[t].kind:
+                            case Ident:
+                                self.use_name(t)
+                            case SelfKw:
+                                self.use_self(t)
+                            case _:
+                                pass
+            case FieldExpr:
+                # The receiver, which may name a scalar type (`int.parse`),
+                # and a field named by a compile-time value (`x.[f]`).
+                let parts = child_nodes(self.tree, n)
+                for i in range(len(parts)):
+                    if i > 0 or not self.names_scalar(parts[i]):
+                        self.expr(parts[i])
+            case OptFieldExpr:
+                for c in child_nodes(self.tree, n):
+                    self.expr(c)
+            case Arg:
+                for c in child_nodes(self.tree, n):
+                    self.expr(c)
+            case ClosureExpr | DoBlock:
+                # The parameters, then the body in their scope.
+                self.push_scope()
+                for c in child_nodes(self.tree, n):
+                    match self.kind(c):
+                        case ClosureParams:
+                            self.closure_params(c)
+                        case Block:
+                            self.statements_of(c)
+                        case _:
+                            self.expr(c)
+                self.pop_scope()
+            case Comprehension:
+                self.comprehension(n)
+            case MatchExpr:
+                for c in child_nodes(self.tree, n):
+                    if self.kind(c) == SyntaxKind.MatchArmList:
+                        self.arms(c)
+                    else:
+                        self.expr(c)
+            case IfExpr:
+                for c in child_nodes(self.tree, n):
+                    self.expr(c)
+            case PrefixExpr if first_token(self.tree, n, SyntaxKind.UnsafeKw) != None:
+                # `unsafe e` is a later phase's (`E0900`), not resolved.
+                pass
+            case CallExpr:
+                self.call(n)
+            case LiteralPat | Literal | Error:
+                pass
+            case k if is_type_kind(k):
+                self.type_(n)
+            case k if is_pattern_kind(k):
+                pass
+            case k if is_item(k):
+                pass
+            case Block:
+                self.block(n)
+            case ReturnStmt if first_child(self.tree, n, SyntaxKind.ImplDef) != None:
+                # `return impl Trait for T:` outside a derive is a later
+                # phase's (`E0900`), not resolved.
+                pass
+            case ReturnStmt | YieldStmt | ExprStmt | AssignStmt | AssertStmt | ExpectStmt | BreakStmt | ContinueStmt | PassStmt:
+                for c in child_nodes(self.tree, n):
+                    self.expr(c)
+            case _:
+                for c in child_nodes(self.tree, n):
+                    self.expr(c)
+
+    ## A call. `old(e)` is a contract's value of `e` on entry, unless `old`
+    ## names something; the index arguments of a generic function or a
+    ## type, `cli.parse[Options](args)`, are types.
+    pure def call(mut self, n: int):
+        let kids = child_nodes(self.tree, n)
+        if kids.is_empty():
+            return
+        let callee = kids[0]
+        if self.kind(callee) == SyntaxKind.NameRef:
+            if let Some(t) = first_token(self.tree, callee, SyntaxKind.Ident):
+                if self.text_of(t) == "old" and not self.knows_value("old"):
+                    for i in range(1, len(kids)):
+                        self.expr(kids[i])
+                    return
+        if self.kind(callee) == SyntaxKind.IndexExpr and self.has_type_arguments(callee):
+            let parts = child_nodes(self.tree, callee)
+            self.expr(parts[0])
+            for i in range(1, len(parts)):
+                self.type_argument(parts[i])
+        else:
+            self.expr(callee)
+        for i in range(1, len(kids)):
+            self.expr(kids[i])
+
+    ## Whether the index arguments of `f[...]` are types: when `f` is a
+    ## method, or a name that is not a local and names something (a
+    ## generic function, a type, a type parameter or a scalar type). The
+    ## arguments after an unknown name are values, as stage 0 reads them.
+    pure def has_type_arguments(self, index: int) -> bool:
+        let parts = child_nodes(self.tree, index)
+        if parts.is_empty():
+            return False
+        let base = parts[0]
+        match self.kind(base):
+            case FieldExpr:
+                return True
+            case NameRef:
+                let t = first_token(self.tree, base, SyntaxKind.Ident) else:
+                    return True
+                let name = self.text_of(t)
+                if self.is_local(name) or name == "it":
+                    return False
+                if self.generics.contains(name.copy()) or is_primitive(name):
+                    return True
+                return self.module.items.contains(name.copy())
+                    or self.env.prelude.items.contains(name.copy())
+            case _:
+                return False
+
+    ## An index argument read as a type, as stage 0's type checker reads
+    ## one (`expr_as_type`): a name must name a type parameter, a scalar or
+    ## a type, and is reported without a fix, poisoned or not.
+    pure def type_argument(mut self, n: int):
+        match self.kind(n):
+            case NameRef:
+                let t = first_token(self.tree, n, SyntaxKind.Ident) else:
+                    return
+                let name = self.text_of(t)
+                if self.names_type(name):
+                    return
+                let node = ref self.tree.nodes[n]
+                let d = Diagnostic.new(Msg.ResolveUndefinedType, node.start, node.end)
+                self.report(d.with("name", name))
+            case IndexExpr:
+                # `list[T]`: the arguments are types once the base names
+                # one; an unknown base is a different error.
+                let parts = child_nodes(self.tree, n)
+                if parts.is_empty() or not self.names_static_path(parts[0]):
+                    return
+                for i in range(1, len(parts)):
+                    self.type_argument(parts[i])
+            case TupleExpr | ParenExpr:
+                for c in child_nodes(self.tree, n):
+                    self.type_argument(c)
+            case _:
+                # A number is a `const` argument; a path is looked up as a
+                # module's member, and anything else is not a type (other
+                # diagnostics than names').
+                pass
+
+    ## Whether an index argument's name names a type: a type parameter, a
+    ## scalar, or a type the module or the prelude declares (not a local,
+    ## which stage 0 reads as a value, nor a trait).
+    pure def names_type(self, name: str) -> bool:
+        if self.is_local(name) or name == "it":
+            return False
+        if self.generics.contains(name.to_string()) or is_primitive(name):
+            return True
+        let key = name.to_string()
+        if self.module.items.contains(key.copy()):
+            return self.module.types.contains(key.copy()) and not self.local_traits.contains(key)
+        return self.env.prelude.types.contains(key.copy()) and not self.env.prelude.traits.contains(key)
+
+    ## Whether the base of `base[...]` in a type argument is a static path
+    ## whose arguments are types: a name of a type, a type parameter, a
+    ## scalar, or a declaration.
+    pure def names_static_path(self, base: int) -> bool:
+        match self.kind(base):
+            case NameRef:
+                let t = first_token(self.tree, base, SyntaxKind.Ident) else:
+                    return False
+                let name = self.text_of(t)
+                if self.is_local(name) or name == "it":
+                    return False
+                if self.generics.contains(name.copy()) or is_primitive(name):
+                    return True
+                return self.module.items.contains(name.copy())
+                    or self.env.prelude.items.contains(name.copy())
+            case FieldExpr | IndexExpr:
+                return True
+            case _:
+                return False
+
+    ## Whether `n` is a bare scalar type name before a dot (`int.parse`),
+    ## which stage 0 reads as the type.
+    pure def names_scalar(self, n: int) -> bool:
+        if self.kind(n) != SyntaxKind.NameRef:
+            return False
+        let t = first_token(self.tree, n, SyntaxKind.Ident) else:
+            return False
+        let name = self.text_of(t)
+        return is_primitive(name) and not self.is_local(name)
+
+    ## `self` names the receiver of a method, and nothing elsewhere.
+    pure def use_self(mut self, t: int):
+        if self.has_self or self.quiet:
+            return
+        let token = self.tree.tokens[t]
+        self.report(Diagnostic.new(Msg.TypeNoSelf, token.start, token.end))
+
+    pure def closure_params(mut self, n: int):
+        for p in child_nodes(self.tree, n):
+            if self.kind(p) == SyntaxKind.ClosureParam:
+                for c in child_nodes(self.tree, p):
+                    if is_type_kind(self.kind(c)):
+                        self.type_(c)
+                if let Some(t) = first_token(self.tree, p, SyntaxKind.Ident):
+                    self.declare_local(t, False)
+
+    ## `[element for pattern in iterable if test ...]`: the clauses in order,
+    ## then the element, which sees every binding.
+    pure def comprehension(mut self, n: int):
+        self.push_scope()
+        var element: int? = None
+        for c in child_nodes(self.tree, n):
+            match self.kind(c):
+                case CompFor:
+                    var pattern: int? = None
+                    for x in child_nodes(self.tree, c):
+                        if pattern == None and is_pattern_kind(self.kind(x)):
+                            pattern = Some(x)
+                        else:
+                            self.expr(x)
+                    if let Some(p) = pattern:
+                        self.pattern(p, False)
+                case CompIf:
+                    for x in child_nodes(self.tree, c):
+                        self.expr(x)
+                case _:
+                    if element == None:
+                        element = Some(c)
+                    else:
+                        self.expr(c)
+        if let Some(e) = element:
+            self.expr(e)
+        self.pop_scope()
+
+    ## The arms of a `match`, each a scope: the pattern's bindings, the
+    ## guard and the body.
+    pure def arms(mut self, list: int):
+        for arm in child_nodes(self.tree, list):
+            match self.kind(arm):
+                case MatchArm:
+                    self.push_scope()
+                    for c in child_nodes(self.tree, arm):
+                        let kind = self.kind(c)
+                        if is_pattern_kind(kind):
+                            self.pattern(c, False)
+                        elif kind == SyntaxKind.Block:
+                            self.block(c)
+                        else:
+                            self.expr(c)
+                    self.pop_scope()
+                case ComptimeStmt:
+                    for c in child_nodes(self.tree, arm):
+                        match self.kind(c):
+                            case ForStmt:
+                                self.comptime_for = True
+                                self.for_stmt(c)
+                            case IfStmt:
+                                self.comptime_if_arms(c)
+                            case _:
+                                pass
+                case _:
+                    pass
+
+    ## `comptime if c:` among the arms of a `match`, with `else:`.
+    pure def comptime_if_arms(mut self, n: int):
+        for c in child_nodes(self.tree, n):
+            match self.kind(c):
+                case Cond:
+                    self.cond(c)
+                case MatchArmList:
+                    self.arms(c)
+                case ElseClause:
+                    if let Some(list) = first_child(self.tree, c, SyntaxKind.MatchArmList):
+                        self.arms(list)
+                case _:
+                    pass
+
+    # ------------------------------------------------------------------ patterns and types
+
+    ## Declares the names a pattern binds; a lowercase name binds and a
+    ## capitalised one names a variant or a constant, which is not looked
+    ## up here.
+    pure def pattern(mut self, n: int, warn: bool):
+        match self.kind(n):
+            case IdentPat:
+                if let Some(t) = first_token(self.tree, n, SyntaxKind.Ident):
+                    self.declare_local(t, warn)
+            case StarPat:
+                if let Some(t) = first_token(self.tree, n, SyntaxKind.Ident):
+                    self.declare_local(t, warn)
+            case CtorPat:
+                if let Some(args) = first_child(self.tree, n, SyntaxKind.PatArgs):
+                    for a in child_nodes(self.tree, args):
+                        for p in child_nodes(self.tree, a):
+                            self.pattern(p, warn)
+            case TuplePat | ParenPat | ListPat | OrPat:
+                for c in child_nodes(self.tree, n):
+                    self.pattern(c, warn)
+            case _:
+                pass
+
+    ## A type: its first name must name a type, unless it is a module the
+    ## program imports or a generic parameter whose associated type follows.
+    pure def type_(mut self, n: int):
+        if self.kind(n) == SyntaxKind.PtrType or self.kind(n) == SyntaxKind.ImplType:
+            # A raw pointer and `impl Trait for T` are later phases' (`E0900`),
+            # not resolved.
+            return
+        if self.kind(n) == SyntaxKind.PathType:
+            var first: int? = None
+            var segments = 0
+            for e in self.tree.nodes[n].children:
+                if let Leaf(t) = e:
+                    let kind = self.tree.tokens[t].kind
+                    if kind == SyntaxKind.Ident
+                            or kind == SyntaxKind.SelfTypeKw
+                            or kind == SyntaxKind.TypeKw:
+                        segments += 1
+                        if first == None:
+                            first = Some(t)
+            if let Some(t) = first:
+                let name = self.text_of(t)
+                let known = if segments > 1: self.knows_value(name)
+                    or self.knows_type(name) else: self.knows_type(name)
+                if not known and not self.module.poisoned.contains(name.to_string()):
+                    self.undefined_type(n, name)
+        for c in child_nodes(self.tree, n):
+            let kind = self.kind(c)
+            if is_type_kind(kind):
+                self.type_(c)
+            elif kind == SyntaxKind.GenericArgs or kind == SyntaxKind.TupleTypeField:
+                self.types_in(c)
+
+## Whether a node of this kind is a type.
+pure def is_type_kind(kind: SyntaxKind) -> bool:
+    return match kind:
+        case PathType | OptionType | ResultType | ErrorSetType | TupleType | ParenType | FnType: True
+        case RefType | DynType | ImplType | PtrType: True
+        case _: False
+
+## Whether a node of this kind is a pattern.
+pure def is_pattern_kind(kind: SyntaxKind) -> bool:
+    return match kind:
+        case IdentPat | WildcardPat | LiteralPat | CtorPat | RestPat | TuplePat | ParenPat | ListPat: True
+        case StarPat | OrPat: True
+        case _: False
+
+# ------------------------------------------------------------------ tests
+
+test "the edit distance counts a swap of neighbours as one edit":
+    assert edit_distance("count", "cuont") == 1
+    assert edit_distance("count", "count") == 0
+    assert edit_distance("abc", "") == 3
+    assert edit_distance("kitten", "sitting") == 3
+
+test "the closest name is the nearest, then the first in order":
+    assert closest("cuont", ["count".to_string(), "mount".to_string()]) == Some("count".to_string())
+    assert closest("ab", ["ac".to_string(), "aa".to_string()]) == Some("aa".to_string())
+    # At most a third of the length, and at least one edit.
+    assert closest("abcdef", ["abxxef".to_string()]) == Some("abxxef".to_string())
+    assert closest("abcdef", ["axxxef".to_string()]) == None
+
+test "std modules by the paths that name them":
+    assert std_module("std.json") == Some("json".to_string())
+    assert std_module("json") == Some("json".to_string())
+    assert std_module("std.x.http") == Some("http".to_string())
+    assert std_module("std.test") == Some("test".to_string())
+    assert std_module("test") == None
+    assert std_module("std.nonexistent") == None
+
+test "a signature prints as stage 0 prints it in E0234":
+    let sig = Signature(
+        pure=True,
+        receiver=Some("".to_string()),
+        params=[("mut ".to_string(), "f".to_string(), "Formatter".to_string())],
+        result=None,
+        generics=0,
+    )
+    assert signature_text("fmt", sig, None) == "pure def fmt(self, mut f: Formatter)"
+    assert replace_self("list[Self]?", Some("Plant")) == "list[Plant]?"

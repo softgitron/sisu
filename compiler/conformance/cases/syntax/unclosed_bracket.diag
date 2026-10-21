@@ -1,1 +1,2 @@
 2:14-2:15 E0009 lex.unclosed-bracket open="["
+  fix lex.close-bracket 2:22-2:22 "]"

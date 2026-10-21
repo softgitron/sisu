@@ -1,0 +1,612 @@
+##! Declarations.
+##!
+##! ```text
+##! file      := item* EOF
+##! item      := attribute* visibility? (fn_def | struct_def | enum_def | error_def
+##!              | impl_def | trait_def | import | from_import | test_def | suite_def
+##!              | bench_def | const_def | type_alias | extern_block)
+##! attribute := '@' name ('(' args ')')? NEWLINE
+##! fn_def    := ('pure' | 'comptime')? 'def' name generic_params? params ('->' type)?
+##!              where_clause? (':' block | NEWLINE)
+##! struct_def:= 'view'? 'struct' name generic_params? ':' INDENT (field | fn_def | 'pass')+ DEDENT
+##! field     := visibility? name ':' type ('=' expr)? NEWLINE
+##! enum_def  := 'enum' name generic_params? ':' INDENT (variant | fn_def)+ DEDENT
+##! error_def := 'error' name ':' INDENT (variant | '..' NEWLINE)+ DEDENT
+##! variant   := name ('(' (name ':')? type (',' (name ':')? type)* ')')? NEWLINE
+##! impl_def  := 'impl' generic_params? type ('for' type)? ':' INDENT fn_def+ DEDENT
+##! import    := 'import' path ('as' name)? NEWLINE
+##! from_import := 'from' path 'import' name ('as' name)? (',' name ('as' name)?)* NEWLINE
+##! test_def  := 'test' string ('for' patterns 'in' expr)? params? ':' block
+##! const_def := 'const' name ':' type '=' expr NEWLINE
+##! type_alias:= 'type' name generic_params? ('=' type ('where' expr)?)? NEWLINE
+##! ```
+
+from stage1.diag import Diagnostic, Msg
+from stage1.parser.state import Parser
+from stage1.syntax.kinds import SyntaxKind
+
+## The members a declaration's body holds.
+@derive(Eq, Copy)
+pub(package) enum Members:
+    ## Fields, methods and `pass`.
+    StructMembers
+    ## Variants, `..` and methods.
+    Variants
+    ## Methods, of an impl, a trait or an extern block.
+    Methods
+    ## Declarations, of a suite.
+    Items
+
+impl Parser:
+    pub(package) pure def source_file(mut self):
+        self.start_root(SyntaxKind.SourceFile)
+        while not self.at(SyntaxKind.Eof):
+            match self.current():
+                case Newline | Dedent:
+                    self.bump_error()
+                case Indent:
+                    self.unexpected_indent_block(True)
+                case _:
+                    self.item()
+        self.bump_eof()
+        self.finish_node()
+
+    ## Reports an unexpected INDENT and parses the indented lines as a
+    ## nested block, keeping their structure. After an earlier syntax
+    ## error, an unexpected block is almost always a consequence of it (the
+    ## body of a declaration that failed to parse), so neither it nor
+    ## anything inside it is reported.
+    pub(package) pure def unexpected_indent_block(mut self, items: bool):
+        var (start, end) = self.current_range()
+        if self.pos + 1 < len(self.sig):
+            start = self.sig[self.pos + 1].start
+            end = self.sig[self.pos + 1].end
+        let quiet = self.error_before()
+        if quiet:
+            self.quiet += 1
+        self.report(Diagnostic.new(Msg.ParseUnexpectedIndent, start, end))
+        self.start(SyntaxKind.Block)
+        self.bump()
+        while not self.at_block_end():
+            let before = self.pos_marker()
+            if items and self.at_item_start():
+                self.item()
+            else:
+                self.statement()
+            if self.pos_marker() == before:
+                self.bump_error()
+        _ = self.eat(SyntaxKind.Dedent)
+        self.finish_node()
+        if quiet:
+            self.quiet -= 1
+
+    pub(package) pure def at_item_start(self) -> bool:
+        match self.current():
+            case At | PubKw | DefKw | StructKw | ViewKw | EnumKw | ErrorKw | ImplKw | TraitKw:
+                return True
+            case ImportKw | FromKw | TestKw | ConstKw | TypeKw | ExternKw:
+                return True
+            case ComptimeKw:
+                return self.nth(1) == SyntaxKind.DefKw
+            case Ident:
+                let word = self.current_text()
+                if word == "pure":
+                    return self.nth(1) == SyntaxKind.DefKw
+                return (word == "suite" or word == "bench")
+                    and self.nth(1) == SyntaxKind.StringStart
+            case _:
+                return False
+
+    ## One declaration; anything else is a top-level statement, reported.
+    pub(package) pure def item(mut self):
+        let cp = self.checkpoint()
+        var prefixed = False
+        while self.at(SyntaxKind.At):
+            self.attribute()
+            prefixed = True
+        if self.at(SyntaxKind.PubKw):
+            self.visibility()
+            prefixed = True
+        if self.item_body(cp):
+            return
+        if prefixed:
+            self.error_found(Msg.ParseExpectedDeclaration)
+            self.start_at(cp, SyntaxKind.Error)
+            self.recover_line()
+            self.finish_node()
+        else:
+            let (start, end) = self.error_span()
+            self.report(Diagnostic.new(Msg.ParseTopLevelStatement, start, end))
+            self.statement()
+
+    ## Parses the declaration at the current token, wrapping everything
+    ## since `cp` (attributes, visibility). Returns False if there is none.
+    pub(package) pure def item_body(mut self, cp: int) -> bool:
+        match self.current():
+            case DefKw:
+                self.fn_def(cp)
+            case ComptimeKw if self.nth(1) == SyntaxKind.DefKw:
+                self.fn_def(cp)
+            case Ident if self.current_text() == "pure" and self.nth(1) == SyntaxKind.DefKw:
+                self.fn_def(cp)
+            case StructKw | ViewKw:
+                self.struct_def(cp)
+            case EnumKw:
+                self.enum_like(cp, SyntaxKind.EnumDef)
+            case ErrorKw:
+                self.enum_like(cp, SyntaxKind.ErrorDef)
+            case ImplKw:
+                self.impl_def(cp)
+            case TraitKw:
+                self.trait_def(cp)
+            case ImportKw:
+                self.import(cp)
+            case FromKw:
+                self.import_from(cp)
+            case TestKw:
+                self.test_def(cp, SyntaxKind.TestDef)
+            case Ident if self.current_text() == "bench" and self.nth(1) == SyntaxKind.StringStart:
+                self.test_def(cp, SyntaxKind.BenchDef)
+            case Ident if self.current_text() == "suite" and self.nth(1) == SyntaxKind.StringStart:
+                self.suite_def(cp)
+            case ConstKw:
+                self.const_def(cp)
+            case TypeKw:
+                self.type_alias(cp)
+            case ExternKw:
+                self.extern_block(cp)
+            case _:
+                return False
+        return True
+
+    pure def attribute(mut self):
+        self.start(SyntaxKind.Attribute)
+        self.bump()
+        _ = self.expect_name()
+        while self.at(SyntaxKind.Dot):
+            self.bump()
+            _ = self.expect_name()
+        if self.at(SyntaxKind.LParen):
+            self.in_attribute = True
+            self.arg_list()
+            self.in_attribute = False
+        self.end_stmt()
+        self.finish_node()
+
+    pure def visibility(mut self):
+        self.start(SyntaxKind.Visibility)
+        self.bump()
+        if self.at(SyntaxKind.LParen):
+            self.bump()
+            _ = self.expect_name()
+            _ = self.expect(SyntaxKind.RParen)
+        self.finish_node()
+
+    pub(package) pure def fn_def(mut self, cp: int):
+        self.start_at(cp, SyntaxKind.FnDef)
+        let line = self.current_line()
+        let attempts = self.attempts
+        let (header_start, _) = self.current_range()
+        if self.at_contextual("pure") or self.at(SyntaxKind.ComptimeKw):
+            self.bump()
+        _ = self.expect(SyntaxKind.DefKw)
+        _ = self.expect_name()
+        if self.at(SyntaxKind.LBracket):
+            self.generic_params()
+        if self.at(SyntaxKind.LParen):
+            self.param_list()
+        else:
+            _ = self.expect(SyntaxKind.LParen)
+        if self.at(SyntaxKind.Arrow):
+            self.start(SyntaxKind.RetType)
+            self.bump()
+            self.type_()
+            if self.eat(SyntaxKind.FromKw):
+                # `-> ref str from a, b`: which parameters a borrow comes
+                # from; `self` may be one of them.
+                if not self.eat(SyntaxKind.SelfKw):
+                    _ = self.expect_name()
+                while self.eat(SyntaxKind.Comma):
+                    if not self.eat(SyntaxKind.SelfKw):
+                        _ = self.expect_name()
+            self.finish_node()
+        if self.at(SyntaxKind.WhereKw):
+            self.where_clause()
+        # A header with a mistake in it (including a missing `:`) gets an
+        # empty ERROR node, so the tree says the signature is unreliable
+        # even when recovery left no other trace of the mistake.
+        let (here, _) = self.current_range()
+        let bodiless = self.at(SyntaxKind.Newline) and self.nth(1) != SyntaxKind.Indent
+        let colon_missing = not self.at(SyntaxKind.Colon) and not bodiless
+        var lexical = False
+        for e in self.lex_errors:
+            if header_start <= e < here:
+                lexical = True
+        if self.attempts > attempts or colon_missing or lexical:
+            self.start(SyntaxKind.Error)
+            self.finish_node()
+        if bodiless:
+            # A signature without a body: an intrinsic or a required method.
+            self.bump()
+        else:
+            self.colon_block("def", line)
+        self.finish_node()
+
+    ## `where T: Bound + Other, U: Bound`, before the `:` of the body.
+    pure def where_clause(mut self):
+        self.start(SyntaxKind.WhereClause)
+        self.bump()
+        var more = True
+        while more:
+            self.type_()
+            _ = self.expect(SyntaxKind.Colon)
+            self.type_()
+            while self.eat(SyntaxKind.Plus):
+                self.type_()
+            more = self.eat(SyntaxKind.Comma)
+        self.finish_node()
+
+    ## `:` and a block. A missing `:` before an indented block is reported
+    ## and the block is still parsed, so its statements keep their place.
+    pub(package) pure def colon_block(mut self, keyword: str, line: int):
+        if self.eat(SyntaxKind.Colon):
+            self.block(keyword, line)
+        elif self.at(SyntaxKind.Newline) and self.nth(1) == SyntaxKind.Indent:
+            _ = self.expect(SyntaxKind.Colon)
+            self.block(keyword, line)
+        else:
+            _ = self.expect(SyntaxKind.Colon)
+            self.recover_line()
+            if self.at(SyntaxKind.Indent):
+                self.block_after_newline(keyword, line)
+
+    ## The colon form for declaration bodies.
+    pure def colon_members(mut self, keyword: str, line: int, members: Members):
+        if self.eat(SyntaxKind.Colon):
+            self.member_block(keyword, line, members)
+        elif self.at(SyntaxKind.Newline) and self.nth(1) == SyntaxKind.Indent:
+            _ = self.expect(SyntaxKind.Colon)
+            self.member_block(keyword, line, members)
+        else:
+            _ = self.expect(SyntaxKind.Colon)
+            self.recover_line()
+
+    pub(package) pure def generic_params(mut self):
+        self.start(SyntaxKind.GenericParams)
+        self.bump()
+        while not self.at_list_end(SyntaxKind.RBracket) and not self.at(SyntaxKind.Colon):
+            self.start(SyntaxKind.GenericParam)
+            _ = self.eat(SyntaxKind.ConstKw)
+            _ = self.expect_name()
+            if self.eat(SyntaxKind.Colon):
+                self.type_()
+                while self.eat(SyntaxKind.Plus):
+                    self.type_()
+            if self.eat(SyntaxKind.Eq):
+                self.type_()
+            self.finish_node()
+            if not self.eat(SyntaxKind.Comma):
+                break
+        _ = self.expect(SyntaxKind.RBracket)
+        self.finish_node()
+
+    pub(package) pure def param_list(mut self):
+        self.start(SyntaxKind.ParamList)
+        self.bump()
+        while not self.at_param_list_end():
+            self.param()
+            if not self.eat(SyntaxKind.Comma):
+                break
+        _ = self.expect(SyntaxKind.RParen)
+        self.finish_node()
+
+    ## Where a parameter list stops: its `)`, the end of the line, or the
+    ## `:` or DEDENT that a list missing its `)` runs into.
+    pure def at_param_list_end(self) -> bool:
+        return match self.current():
+            case RParen | Newline | Eof | Colon | Dedent: True
+            case _: False
+
+    pure def param(mut self):
+        self.start(SyntaxKind.Param)
+        if self.at(SyntaxKind.MutKw) or self.at(SyntaxKind.OwnKw):
+            self.bump()
+        if self.at(SyntaxKind.SelfKw) or self.at(SyntaxKind.Star) or self.at(SyntaxKind.Slash):
+            self.bump()
+            if self.at(SyntaxKind.Ident) and self.nth(1) == SyntaxKind.Colon:
+                # `*xs: T` variadics.
+                self.bump()
+            if self.eat(SyntaxKind.Colon):
+                self.type_()
+        else:
+            _ = self.expect_name()
+            if self.expect(SyntaxKind.Colon):
+                self.type_()
+            if self.eat(SyntaxKind.Eq):
+                _ = self.expr()
+        self.finish_node()
+
+    ## A block of declarations: struct, enum, impl and trait bodies.
+    pure def member_block(mut self, keyword: str, line: int, members: Members):
+        self.start(SyntaxKind.Block)
+        if self.at(SyntaxKind.Newline):
+            self.bump()
+            if self.at(SyntaxKind.Indent):
+                self.bump()
+                while not self.at_block_end():
+                    let before = self.pos_marker()
+                    self.member(members)
+                    if self.pos_marker() == before:
+                        self.bump_error()
+                _ = self.eat(SyntaxKind.Dedent)
+                self.ended_with_block = True
+            else:
+                self.expected_block(keyword, line)
+        else:
+            let (start, end) = self.error_span()
+            self.report(Diagnostic.new(Msg.ParseBlockOnSameLine, start, end))
+            self.recover_line()
+        self.finish_node()
+
+    pure def member(mut self, members: Members):
+        match members:
+            case StructMembers:
+                self.struct_member()
+            case Variants:
+                self.variant_member()
+            case Methods:
+                self.impl_member()
+            case Items:
+                self.item()
+
+    pub(package) pure def expected_block(mut self, keyword: str, line: int):
+        let (start, end) = self.error_span()
+        let d = Diagnostic.new(Msg.ParseExpectedBlock, start, end).with("keyword", keyword)
+        self.report(d.with("line", "{line}"))
+
+    pure def struct_def(mut self, cp: int):
+        self.start_at(cp, SyntaxKind.StructDef)
+        let line = self.current_line()
+        _ = self.eat(SyntaxKind.ViewKw)
+        _ = self.expect(SyntaxKind.StructKw)
+        _ = self.expect_name()
+        if self.at(SyntaxKind.LBracket):
+            self.generic_params()
+        # Once per body: a struct declared inside another one has a body of
+        # its own, and the outer body's report stands after it.
+        let outer_reported = self.bad_member_reported
+        self.bad_member_reported = False
+        self.colon_members("struct", line, Members.StructMembers)
+        self.bad_member_reported = outer_reported
+        self.finish_node()
+
+    pure def struct_member(mut self):
+        let cp = self.checkpoint()
+        while self.at(SyntaxKind.At):
+            self.attribute()
+        if self.at(SyntaxKind.PubKw):
+            self.visibility()
+        if self.at(SyntaxKind.PassKw):
+            self.start_at(cp, SyntaxKind.PassStmt)
+            self.bump()
+            self.end_stmt()
+            self.finish_node()
+        elif self.at(SyntaxKind.Ident) and self.nth(1) == SyntaxKind.Colon:
+            self.start_at(cp, SyntaxKind.FieldDef)
+            self.bump()
+            self.bump()
+            self.type_()
+            if self.eat(SyntaxKind.Eq):
+                _ = self.expr()
+            self.end_stmt()
+            self.finish_node()
+        elif not self.item_body(cp):
+            # `invariant ...` is a contract (Phase 8); any other line is a
+            # mistake, reported once per body and kept as a statement.
+            if not self.at_contract() and not self.bad_member_reported:
+                self.bad_member_reported = True
+                let (start, end) = self.error_span()
+                self.report(Diagnostic.new(Msg.ParseExpectedMember, start, end))
+            self.statement()
+
+    pure def enum_like(mut self, cp: int, kind: SyntaxKind):
+        self.start_at(cp, kind)
+        let line = self.current_line()
+        let keyword = if kind == SyntaxKind.ErrorDef: "error" else: "enum"
+        self.bump()
+        _ = self.expect_name()
+        if self.at(SyntaxKind.LBracket):
+            self.generic_params()
+        self.colon_members(keyword, line, Members.Variants)
+        self.finish_node()
+
+    pure def variant_member(mut self):
+        let cp = self.checkpoint()
+        while self.at(SyntaxKind.At):
+            self.attribute()
+        if self.at(SyntaxKind.DotDot):
+            self.start_at(cp, SyntaxKind.OpenMarker)
+            self.bump()
+            self.end_stmt()
+            self.finish_node()
+        elif self.at(SyntaxKind.PassKw):
+            self.start_at(cp, SyntaxKind.PassStmt)
+            self.bump()
+            self.end_stmt()
+            self.finish_node()
+        elif self.at(SyntaxKind.Ident):
+            self.start_at(cp, SyntaxKind.VariantDef)
+            self.bump()
+            if self.at(SyntaxKind.LParen):
+                self.bump()
+                while not self.at_list_end(SyntaxKind.RParen):
+                    self.start(SyntaxKind.VariantField)
+                    if self.at(SyntaxKind.Ident) and self.nth(1) == SyntaxKind.Colon:
+                        self.bump()
+                        self.bump()
+                    self.type_()
+                    self.finish_node()
+                    if not self.eat(SyntaxKind.Comma):
+                        break
+                _ = self.expect(SyntaxKind.RParen)
+            self.end_stmt()
+            self.finish_node()
+        elif not self.item_body(cp):
+            self.error_found(Msg.ParseExpectedDeclaration)
+            self.recover_line()
+
+    pub(package) pure def impl_def(mut self, cp: int):
+        self.start_at(cp, SyntaxKind.ImplDef)
+        let line = self.current_line()
+        self.bump()
+        if self.at(SyntaxKind.LBracket):
+            self.generic_params()
+        self.type_()
+        if self.eat(SyntaxKind.ForKw):
+            self.type_()
+        self.colon_members("impl", line, Members.Methods)
+        self.finish_node()
+
+    pure def impl_member(mut self):
+        let cp = self.checkpoint()
+        while self.at(SyntaxKind.At):
+            self.attribute()
+        if self.at(SyntaxKind.PubKw):
+            self.visibility()
+        if self.at(SyntaxKind.PassKw):
+            self.start_at(cp, SyntaxKind.PassStmt)
+            self.bump()
+            self.end_stmt()
+            self.finish_node()
+        elif not self.item_body(cp):
+            self.error_found(Msg.ParseExpectedDeclaration)
+            self.recover_line()
+
+    pure def trait_def(mut self, cp: int):
+        self.start_at(cp, SyntaxKind.TraitDef)
+        let line = self.current_line()
+        self.bump()
+        _ = self.expect_name()
+        if self.at(SyntaxKind.LBracket):
+            self.generic_params()
+        if self.at(SyntaxKind.LParen):
+            self.bump()
+            while not self.at_list_end(SyntaxKind.RParen):
+                self.type_()
+                if not self.eat(SyntaxKind.Comma):
+                    break
+            _ = self.expect(SyntaxKind.RParen)
+        self.colon_members("trait", line, Members.Methods)
+        self.finish_node()
+
+    pure def module_path(mut self):
+        self.start(SyntaxKind.ModulePath)
+        _ = self.expect_name()
+        while self.at(SyntaxKind.Dot):
+            self.bump()
+            _ = self.expect_name()
+        self.finish_node()
+
+    pure def import(mut self, cp: int):
+        self.start_at(cp, SyntaxKind.ImportItem)
+        self.bump()
+        if self.at_contextual("c") and self.nth(1) == SyntaxKind.StringStart:
+            # `import c "zlib.h" as zlib with link="z"` (12).
+            self.bump()
+            self.string_expr()
+        else:
+            self.module_path()
+        if self.eat(SyntaxKind.AsKw):
+            _ = self.expect_name()
+        if self.eat(SyntaxKind.WithKw):
+            var more = True
+            while more:
+                self.start(SyntaxKind.Arg)
+                _ = self.expect_name()
+                if self.expect(SyntaxKind.Eq):
+                    _ = self.expr()
+                self.finish_node()
+                more = self.eat(SyntaxKind.Comma)
+        self.end_stmt()
+        self.finish_node()
+
+    pure def import_from(mut self, cp: int):
+        self.start_at(cp, SyntaxKind.FromImport)
+        self.bump()
+        self.module_path()
+        _ = self.expect(SyntaxKind.ImportKw)
+        let parens = self.eat(SyntaxKind.LParen)
+        var more = True
+        while more:
+            self.start(SyntaxKind.ImportName)
+            _ = self.expect_name()
+            if self.eat(SyntaxKind.AsKw):
+                _ = self.expect_name()
+            self.finish_node()
+            more = self.eat(SyntaxKind.Comma)
+                and not self.at(SyntaxKind.RParen)
+                and not self.at(SyntaxKind.Newline)
+        if parens:
+            _ = self.expect(SyntaxKind.RParen)
+        self.end_stmt()
+        self.finish_node()
+
+    pure def test_def(mut self, cp: int, kind: SyntaxKind):
+        self.start_at(cp, kind)
+        let line = self.current_line()
+        let keyword = if kind == SyntaxKind.BenchDef: "bench" else: "test"
+        self.bump()
+        if self.at(SyntaxKind.StringStart):
+            self.string_expr()
+        else:
+            _ = self.expect(SyntaxKind.StringStart)
+        if self.eat(SyntaxKind.ForKw):
+            self.pattern_list()
+            _ = self.expect(SyntaxKind.InKw)
+            _ = self.expr()
+        if self.at(SyntaxKind.LParen):
+            self.param_list()
+        self.colon_block(keyword, line)
+        self.finish_node()
+
+    pure def suite_def(mut self, cp: int):
+        self.start_at(cp, SyntaxKind.SuiteDef)
+        let line = self.current_line()
+        self.bump()
+        self.string_expr()
+        self.colon_members("suite", line, Members.Items)
+        self.finish_node()
+
+    pub(package) pure def const_def(mut self, cp: int):
+        self.start_at(cp, SyntaxKind.ConstDef)
+        self.bump()
+        _ = self.expect_name()
+        if self.eat(SyntaxKind.Colon):
+            self.type_()
+        if self.expect(SyntaxKind.Eq):
+            _ = self.expr()
+        self.end_stmt()
+        self.finish_node()
+
+    pure def type_alias(mut self, cp: int):
+        self.start_at(cp, SyntaxKind.TypeAlias)
+        self.bump()
+        _ = self.expect_name()
+        if self.at(SyntaxKind.LBracket):
+            self.generic_params()
+        # An associated type in a trait has no `=`.
+        if self.eat(SyntaxKind.Eq):
+            self.type_()
+        if self.eat(SyntaxKind.WhereKw):
+            _ = self.expr()
+        self.end_stmt()
+        self.finish_node()
+
+    pure def extern_block(mut self, cp: int):
+        self.start_at(cp, SyntaxKind.ExternBlock)
+        let line = self.current_line()
+        self.bump()
+        if self.at(SyntaxKind.StringStart):
+            self.string_expr()
+        self.colon_members("extern", line, Members.Methods)
+        self.finish_node()

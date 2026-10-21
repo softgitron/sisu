@@ -2420,34 +2420,158 @@ identifier, `code` and `data`), hover (an expression's type; a
 function's signature with its inferred error set, the capabilities it
 takes and its contracts; a type's fields; the documentation),
 go-to-definition (into the standard library's source too), document
-symbols, selection ranges (the syntax tree's nodes around a position)
-and formatting (`sisu fmt`, as one edit). Documents are synchronised
-whole. Positions are UTF-16 code units unless the client offers UTF-8.
-A request it does not know is answered `MethodNotFound` (-32601).
+symbols, selection ranges (the syntax tree's nodes around a position),
+formatting (`sisu fmt`, as one edit) and range formatting, and the
+features `assist.rs` writes:
 
-Latency, on the standard library's own modules opened as documents (a
+- **Completion** (`.` triggers it): after a `.`, the members of the value
+  before it (its fields, its type's methods and the methods of every trait
+  without parameters of its own that it implements). The value is found by
+  checking the document with the `.` and the word being typed removed, so
+  that it is an expression of its own, and taking the expression that
+  spans the postfix chain before the `.`. Elsewhere, the names in scope:
+  the locals of the innermost body declared before the position, the
+  module's items, the prelude's public ones, the program's variants and
+  the keywords. A callable is a snippet with a hole for each required
+  argument (`area(${1:w}, ${2:h})`, N-31); a struct a constructor with a
+  hole for each field without a default.
+- **Rename** (with `prepareRename`) and **references**: a local (its declaration and every
+  use in its body and closures), a definition of the program's own (each
+  token of the program's files spelling it that means it where it is
+  written, or, for a type, that is written in a type) or a struct's field
+  (its declaration, the reads, and the constructions' keywords), as one
+  workspace edit over the program's files (references are the same
+  occurrences, as locations). The standard library's items
+  are not the program's to rename; a new name must be a name and not a
+  keyword (`RequestFailed`, -32803, otherwise).
+- **Code actions**: the fixes of the diagnostics over the range, each a
+  `quickfix` titled as the human renderer writes the fix (its catalog
+  message, then the text it writes), the first preferred.
+- **Inlay hints**: the type of each local whose declaration does not write
+  one (`let n = len(xs)` shows `: int`; patterns and closure parameters
+  too), the error set each `T !` function infers (after the `!`), and
+  `mut` or `own` before an argument passed to such a parameter (10's
+  parameter conventions at call sites).
+- **Explain this borrow**, the command `sisu.explainBorrow` (taking a
+  document and a position): every loan live on the position's line, each
+  with whether it is `mut`, the place it borrows, the ranges where it
+  starts and is last used, the locals that hold it, and the line `sisu
+  explain-borrow` prints for it: the data N-28's permissions overlay reads,
+  when the bet-1 verdict lets it be shown. A program the front end rejects
+  has no loans to show (`RequestFailed`).
+- **Worksheets** as inline values (`textDocument/inlineValue`, Q-48): for
+  a document that is a script, each top-level statement's value and what it
+  printed, at the end of its last line, as `sisu ws` writes them; the
+  worksheet runs against a test's fake `System`, with a budget of 10
+  million statements, so nothing reaches the world and a loop cannot hold
+  the server. The result is kept until the document's text changes.
+
+Documents are synchronised whole. Positions are UTF-16 code units unless
+the client offers UTF-8. A request it does not know is answered
+`MethodNotFound` (-32601).
+
+Latency, on every module of the standard library opened as a document (a
 release build, `cargo test --release --test lsp latency -- --nocapture`):
-the diagnostics after a change take 50 to 70 ms for `std/time.sisu`,
-`std/num.sisu` and `std/collections.sisu` and about 115 ms for
-`std/json.sisu`, whose reflection needs three rounds of resolving and
-checking (port-debt.md, "Instances are found by resolving again"); a
-hover takes under a millisecond. The prelude's AST is parsed once per
-process and shared, and lowering and the ownership checker do not run
-for an answer. The tests in `sisu-driver/tests/lsp.rs` drive the server
-as an editor does, over its standard streams.
+the diagnostics after an edit of one function body (a `pass` line in a
+body in the middle of the file) take 11 to 51 ms (`std/cap.sisu` the
+slowest, `std/prelude.sisu` 43 ms, `std/json.sisu`, whose reflection needs
+instances, 19 ms), against 10's 100 ms, since the queries reuse every item
+the edit left alone (next section); opening one, which checks it from
+nothing but std's parse, takes 23 to 101 ms; a hover takes under 2 ms. The
+tests in `sisu-driver/tests/lsp.rs` drive the server as an editor does,
+over its standard streams, one per feature.
 
 ## The query layer and the driver
 
-`sisu_driver::Db` memoises `parsed` per file and `checked` and
-`lowered` (the SIR through the ownership checker, with its findings as
-diagnostics) per program, on hashes of the texts of its files and
-manifests, the skeleton of 18's query pipeline. It is an implementation
-detail: a test checks that unchanged text reuses every result and a
-change recomputes every step after it, and nothing depends on whether a
-result was cached. `run --watch`'s rebuilds, the REPL's inputs and the
-language server's changes go through the same queries, with texts that
-stand in for the files on disk. The prelude and std modules are parsed
-once per process (`collect::std_ast`), since their text is fixed.
+`sisu_driver::Db` memoises `parsed` per file and `checked` and `lowered`
+(the SIR through the ownership checker, with its findings as diagnostics)
+per program, on hashes of the texts of its files and manifests, the
+skeleton of 18's query pipeline; inside a program's query, checking,
+lowering and the ownership checker are memoised **per item** (10,
+"Compile speed as a requirement": a body edit never invalidates what does
+not depend on it). Nothing depends on whether a result was cached:
+`tests/incremental.rs` edits a function body of every std module and
+conformance case (a line inserted before its first statement, a space
+added at the end of that statement's line, in three bodies of each) and
+checks that the database that saw the program before gives the
+diagnostics and the SIR a fresh one gives; `Counters` show what each query
+did (bodies checked and reused, lowered and reused, functions put through
+the ownership analyses and taken as checked).
+
+- **The interface.** `items::interface_hash` hashes what name resolution
+  reads of a module: its tokens other than spaces, line breaks and plain
+  comments (doc comments hold doc tests), with the statements of each
+  function body replaced by a marker, except where resolution reads them:
+  the body of a generic or `comptime` function (a generic function that
+  reflects is a template, 08), a body's leading contract clauses (the
+  compiler writes property tests from them, 07), and a body that names
+  `arbitrary`, `exhaustive`, `Wrap`, `Fake` or `reflect` (the generators,
+  interceptors and fakes the resolver writes for what a program names).
+  The program's interface hashes its modules' interfaces with the layout,
+  the files `embed` names and the generic functions promoted to templates.
+  Resolution is deterministic, so two programs with one interface have the
+  same definitions, with the same `DefId`s and signatures; only positions
+  and the bodies left out differ.
+- **Resolution** runs again for every change of the program's text, which
+  costs 5 to 10 ms for a program over the prelude: the text it writes
+  (derived impls, instances of templates, generators, shims, doc tests) is
+  parsed once per process per text (`collect::parse_generated`), function
+  bodies are shared between the syntax tree and the resolver's records
+  (`Arc`), and coherence compares an impl only with the earlier impls of
+  its trait whose self type can unify with its own (the same outermost
+  constructor, or a parameter). The instances a check asks for are
+  declared on top of the resolution that was checked
+  (`sisu_resolve::Resolution::add_instances`), since an instance is
+  declared after everything else and changes nothing declared before it:
+  the rounds of the fixpoint resolve once, and only a promotion resolves
+  again.
+- **Checking** (`sisu_typeck::check_with`, `memo.rs`): a body is keyed by
+  the interface, its definition, and the text of its item, from the start
+  of the line its name is on to its end (for an instance, also what it
+  instantiates, since two instances can unfold to one text); it records
+  the inferred error sets it read (of the `T !` functions it calls). A key
+  that matches with the same sets gives the typed body and its diagnostics
+  again, every span moved by as many bytes as the item moved. A body with a
+  span outside its item (a label at another definition) is not kept. The
+  rounds of a check share the memo, so the bodies are checked once per
+  check, not once per round.
+- **Lowering** (`sisu_lower::lower_cached`): a body's SIR functions by its
+  checking key, the line its item starts on and the contract level. SIR's
+  locations are lines and columns, so a body that moved to another line is
+  lowered again and one that moved along its own line is not; an entry is
+  kept only when every location in it lies on its item's lines.
+- **The ownership checker** (`sisu_borrowck::check_with`): a function the
+  checker found nothing in, and whose analysis read no other function's
+  body (a generic callee given a must-consume type argument is read), is
+  taken as checked while its SIR, the program's interface with its
+  instances and the contract level are the same, with the drops it placed;
+  purity, the `Shared` escape analysis and the compile-time evaluation run
+  over the whole program.
+
+Each memo belongs to one program and keeps what the last query of the
+program used. `run --watch`'s rebuilds keep the database the run was
+compiled with, so a save checks, lowers and borrow-checks again only the
+items it changed; the REPL's inputs and the language server's changes go
+through the same queries, with texts that stand in for the files on disk.
+The prelude and std modules are parsed once per process
+(`collect::std_ast`), since their text is fixed.
+
+**Measured** (a release build, on the machine of the conformance runs):
+over the 15 std modules and the 305 single-file conformance cases, each
+opened as a program, 1872 edits of a function body re-check (diagnostics
+and SIR) in 14 ms at the median and 117 ms at worst (`reflect/promotion`,
+whose promotions resolve again), against 27 ms at the median for the same
+program from nothing (`SISU_INCREMENTAL_ALL=1 cargo test --release --test
+incremental -- --nocapture`): within 10's 300 ms for one edited body. The
+language server's diagnostics after a one-body edit of each std module,
+opened as a document, take 11 to 51 ms (`std/cap.sisu` the slowest,
+`std/prelude.sisu` 43 ms; `cargo test --release --test lsp latency --
+--nocapture`), within 10's 100 ms. A `sisu check` of a conformance case from
+the command line takes 55 ms at the median (34 cases of `run/`, 42 to 79
+ms), the process start and std's parse included; the memo lives as long as
+the process (language server, `--watch`, REPL), so the command line checks
+from nothing each time (port-debt.md, "The memo is not kept between
+commands").
 
 `sisu`:
 

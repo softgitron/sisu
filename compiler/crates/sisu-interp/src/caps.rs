@@ -27,6 +27,7 @@ impl Interp<'_, '_> {
             creator: self.sched.cur,
             crossed: false,
             label: Some(Rc::from(label)),
+            site: None,
         });
         id
     }

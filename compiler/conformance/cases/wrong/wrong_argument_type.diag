@@ -1,0 +1,2 @@
+7:18-7:21 E0300 type.mismatch expected="int" found="str"
+  fix type.unquote 7:18-7:21 "2"

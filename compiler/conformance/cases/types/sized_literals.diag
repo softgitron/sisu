@@ -4,3 +4,4 @@
 8:19-8:59 E0374 type.literal-out-of-range text="-170141183460469231731687303715884105729" ty="i128"
 10:13-10:26 E0310 type.binary-operator op="+" lhs="i128" rhs="u128"
 13:19-13:25 E0300 type.mismatch expected="u128" found="i128"
+  label 13:12-13:16 type.expected-because

@@ -74,8 +74,13 @@ impl Resolver<'_> {
             if !info.template || info.generics.len() != args.len() {
                 continue;
             }
-            made += 1;
-            if made > MAX_INSTANCES {
+            // Counted over the whole resolution, however many times it is
+            // given more; reported once.
+            if self.instances_asked >= MAX_INSTANCES {
+                if self.instances_bounded {
+                    break;
+                }
+                self.instances_bounded = true;
                 let span = self.prog.def(*def).span;
                 self.report(
                     Diagnostic::new(msg::COMPTIME_INSTANCES_UNBOUNDED, span)
@@ -84,6 +89,8 @@ impl Resolver<'_> {
                 );
                 break;
             }
+            self.instances_asked += 1;
+            made += 1;
             self.declare_instance(*def, &info, args, *site);
         }
         if made > 0 {

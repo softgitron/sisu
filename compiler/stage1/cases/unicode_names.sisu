@@ -1,0 +1,9 @@
+# Characters beyond ASCII that the two front ends must treat alike:
+# digits of other scripts continue a name, and the tree dump escapes
+# what Rust's `Debug` escapes (combining marks, no-break spaces, soft
+# hyphens, C1 controls) and keeps every other character.
+def main():
+    let x١٢ = 12
+    let café = "é   ­  é € 😀 ​"
+    let c = '́'
+    print("{x١٢} {café} {c}")

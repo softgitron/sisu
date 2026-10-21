@@ -635,15 +635,64 @@ pub(crate) fn worksheet(args: &[String], host: &mut dyn Host) -> i32 {
             return exit::ERROR;
         }
     };
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let sheet = match evaluate_sheet(&file, &source, &cwd, real, None, host) {
+        Ok(s) => s,
+        Err(e) => {
+            host.stderr(&e);
+            return exit::ERROR;
+        }
+    };
+    let mut shown = String::new();
+    for (i, l) in source.lines().enumerate() {
+        let n = i + 1;
+        shown.push_str(l);
+        if let Some(vs) = sheet.values.get(&n) {
+            shown.push_str("  ");
+            shown.push_str(&text(msg::CLI_WS_VALUE, &[("value", vs.join(", "))]));
+        }
+        shown.push('\n');
+        for o in sheet.outputs.get(&n).into_iter().flatten() {
+            shown.push_str(&line(msg::CLI_WS_OUTPUT, &[("text", o.clone())]));
+        }
+    }
+    host.stdout(&shown);
+    if !sheet.errors.is_empty() {
+        host.stderr(&sheet.errors);
+    }
+    sheet.status
+}
+
+/// A worksheet's run: the values of each top-level statement and what it
+/// printed, by the last line of the statement in the file as written
+/// (1-based), with the run's standard error and exit status. The language
+/// server shows them as inline values (10, "Worksheets").
+pub(crate) struct Sheet {
+    pub values: std::collections::BTreeMap<usize, Vec<String>>,
+    pub outputs: std::collections::BTreeMap<usize, Vec<String>>,
+    pub errors: String,
+    pub status: i32,
+}
+
+/// Runs a worksheet (Q-48) against a test's fake `System`, or the real one
+/// when `real`, for at most `fuel` statements when given: its text must
+/// check, or the diagnostics are the error.
+pub(crate) fn evaluate_sheet(
+    file: &str,
+    source: &str,
+    cwd: &std::path::Path,
+    real: bool,
+    fuel: Option<u64>,
+    host: &mut dyn Host,
+) -> Result<Sheet, String> {
     // A worksheet is a script; one without its `#!` line gets one.
     let (sheet, shift) = if source.starts_with("#!") {
-        (source.clone(), 0)
+        (source.to_string(), 0)
     } else {
         (format!("#!/usr/bin/env sisu\n{source}"), 1)
     };
-    let cwd = std::env::current_dir().unwrap_or_default();
     let compile = |text: &str, keep: &[&str], host: &mut dyn Host| -> Result<sisu_sir::Program, NotRun> {
-        let layout = crate::package::load_file(&file, text, &cwd);
+        let layout = crate::package::load_file(file, text, cwd);
         if layout.has_errors() {
             let mut map = SourceMap::new();
             for (n, t) in &layout.files {
@@ -652,23 +701,20 @@ pub(crate) fn worksheet(args: &[String], host: &mut dyn Host) -> i32 {
             return Err(NotRun::Diagnostics(map, layout.diagnostics.clone()));
         }
         let input = if layout.packages.len() == 1 {
-            Input::single(&file, text.to_string())
+            Input::single(file, text.to_string())
         } else {
             input_with_root(&layout, host, false, Some(text)).map_err(|_| NotRun::Message(String::new()))?
         };
         let mut db = Db::new();
         input.load(&mut db);
-        check_to_run(&mut db, &file, keep)
+        check_to_run(&mut db, file, keep)
     };
     let show = |e: NotRun| match e {
         NotRun::Diagnostics(map, diags) => sisu_diag::render::render_human(&map, &diags),
         NotRun::Message(m) => m,
     };
     // The worksheet as written must check; its instrumented form then does.
-    if let Err(e) = compile(&sheet, &[], host) {
-        host.stderr(&show(e));
-        return exit::ERROR;
-    }
+    compile(&sheet, &[], host).map_err(show)?;
     let parse = sisu_parser::parse(FileId(0), &sheet);
     let tree = &parse.tree;
     let line_of = |pos: u32| sheet[..pos as usize].matches('\n').count() + 1;
@@ -707,20 +753,15 @@ pub(crate) fn worksheet(args: &[String], host: &mut dyn Host) -> i32 {
     }
     out.push_str(&sheet[last..]);
     out.push_str(WS_HELPERS);
-    let prog = match compile(&out, &["System.fake"], host) {
-        Ok(p) => p,
-        Err(e) => {
-            host.stderr(&show(e));
-            return exit::ERROR;
-        }
-    };
+    let prog = compile(&out, &["System.fake"], host).map_err(show)?;
     let mut cap = Captured { inner: &mut *host, out: String::new(), err: String::new() };
     let report = {
         let mut live = WithArgs { inner: &mut cap, args: Vec::new(), watch: Vec::new() };
+        let options = Options { fuel, ..Options::default() };
         if real {
-            sisu_interp::run_main_report(&prog, &mut live, &Options::default())
+            sisu_interp::run_main_report(&prog, &mut live, &options)
         } else {
-            sisu_interp::run_main_faked(&prog, &mut live, &Options::default())
+            sisu_interp::run_main_faked(&prog, &mut live, &options)
         }
     };
     let (printed, errors) = (cap.out, cap.err);
@@ -738,27 +779,17 @@ pub(crate) fn worksheet(args: &[String], host: &mut dyn Host) -> i32 {
             outputs.entry(current).or_default().push(l.to_string());
         }
     }
-    let mut shown = String::new();
-    for (i, l) in source.lines().enumerate() {
-        let n = i + 1 + shift;
-        shown.push_str(l);
-        let ends: Vec<usize> = spans.iter().filter(|(_, e)| *e == n).map(|(s, _)| *s).collect();
-        for s in &ends {
-            if let Some(vs) = values.get(s) {
-                shown.push_str("  ");
-                shown.push_str(&text(msg::CLI_WS_VALUE, &[("value", vs.join(", "))]));
-            }
+    // By each statement's last line, in the file as written.
+    let mut sheet_out =
+        Sheet { values: Default::default(), outputs: Default::default(), errors, status: report.status };
+    for (first, end) in spans {
+        let Some(at) = end.checked_sub(shift).filter(|n| *n > 0) else { continue };
+        if let Some(vs) = values.remove(&first) {
+            sheet_out.values.entry(at).or_default().extend(vs);
         }
-        shown.push('\n');
-        for s in &ends {
-            for o in outputs.get(s).into_iter().flatten() {
-                shown.push_str(&line(msg::CLI_WS_OUTPUT, &[("text", o.clone())]));
-            }
+        if let Some(os) = outputs.remove(&first) {
+            sheet_out.outputs.entry(at).or_default().extend(os);
         }
     }
-    host.stdout(&shown);
-    if !errors.is_empty() {
-        host.stderr(&errors);
-    }
-    report.status
+    Ok(sheet_out)
 }

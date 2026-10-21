@@ -1,0 +1,2 @@
+9:13-9:18 E0303 type.unknown-field ty="Rect" name="widht"
+  fix type.similar-member 9:13-9:18 "width"

@@ -41,6 +41,25 @@ pub fn target() -> &'static str {
 /// attenuations and interceptors work on capabilities they are given.
 pub const AMBIENT: &[(&str, &str)] = &[("task", TASK), ("log", LOG), ("cap", CAP), ("live", LIVE)];
 
+/// The paths an import may name a std module by, for the fix of a
+/// misspelt one.
+pub const MODULE_PATHS: &[&str] = &[
+    "std.x.cli",
+    "std.math",
+    "std.task",
+    "std.log",
+    "std.cap",
+    "std.net",
+    "std.time",
+    "std.x.http",
+    "std.sim",
+    "std.json",
+    "std.test",
+    "std.collections",
+    "std.num",
+    "std.live",
+];
+
 /// The std module an import path names, as (module name, source).
 pub fn module_for(path: &[&str]) -> Option<(&'static str, &'static str)> {
     match path {

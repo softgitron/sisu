@@ -1,0 +1,109 @@
+##! Mutated programs, to compare the two front ends where they recover from
+##! mistakes: the mutations a typing hand makes (deleted, inserted and
+##! swapped characters), as stage 0's own robustness test makes them,
+##! chosen by a seeded generator so that a run is reproducible.
+
+## What an insertion inserts.
+const PIECES: list[str] = [
+    "(",
+    ")",
+    "[",
+    "]",
+    "{{",
+    "}}",
+    ":",
+    "\n",
+    "    ",
+    "\t",
+    "\"",
+    "'",
+    "?",
+    "->",
+    "=",
+    "def ",
+    "if ",
+    "case ",
+    "*",
+    "|",
+    "#",
+    "\r",
+    ";",
+    ",",
+    "é",
+    "{{x}}",
+    "\"\"\"",
+    "\\",
+    "else:",
+    "let ",
+    "@",
+    "..",
+    "0x",
+    "1e",
+    "\n    ",
+    "\n  ",
+    "and ",
+    "or ",
+    "not ",
+    "do ",
+    "match x:",
+    "r\"",
+    "b\"",
+]
+
+## A deterministic generator: a linear congruential one modulo 2**31,
+## which stays well inside `int`.
+pub struct Rng:
+    state: int
+
+impl Rng:
+    pub pure def new(seed: int) -> Rng:
+        return Rng(state=seed % 2147483648)
+
+    ## A number from 0 below `n`.
+    pub pure def below(mut self, n: int) -> int:
+        self.state = (self.state * 1103515245 + 12345) % 2147483648
+        return (self.state // 65536) % max(n, 1)
+
+## `text` with one to three mutations.
+pub pure def mutate(text: str, mut rng: Rng) -> String:
+    var chars: list[char] = []
+    for c in text.chars():
+        chars.push(c)
+    let pieces = PIECES
+    for _ in range(1 + rng.below(3)):
+        if chars.is_empty():
+            break
+        let i = rng.below(len(chars))
+        match rng.below(3):
+            case 0:
+                let n = 1 + rng.below(4)
+                var k = 0
+                while k < n and i < len(chars):
+                    _ = chars.remove(i)
+                    k += 1
+            case 1:
+                let piece = pieces[rng.below(len(pieces))]
+                var at = i
+                for c in piece.chars():
+                    chars.insert(at, c)
+                    at += 1
+            case _:
+                chars.swap(i, rng.below(len(chars)))
+    var out = String.new()
+    for c in chars:
+        out.push_char(c)
+    return out
+
+test "mutation is deterministic and changes the text":
+    var a = Rng.new(7)
+    var b = Rng.new(7)
+    let text = "def main():\n    print(\"hello\")\n"
+    let m1 = mutate(text, mut a)
+    let m2 = mutate(text, mut b)
+    assert m1 == m2
+    var changed = False
+    var r = Rng.new(1)
+    for _ in range(5):
+        if mutate(text, mut r) != text:
+            changed = True
+    assert changed

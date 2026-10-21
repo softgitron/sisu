@@ -27,6 +27,7 @@ pub mod diff;
 mod dispatch;
 mod drops;
 mod exec;
+mod float32;
 mod format;
 mod host;
 mod intrinsics;
@@ -93,8 +94,10 @@ pub struct Options {
     pub coverage: bool,
     /// The seed of the scheduler's choices (`--schedule-seed`).
     pub seed: u64,
-    /// Keep the scheduling numbers of `--stats`.
+    /// Keep the numbers of `--stats`, and which: the scheduler's summary,
+    /// the frame depths of the run, or each `Shared` construction site.
     pub stats: bool,
+    pub stats_kind: StatsKind,
     /// The seed of a property's random cases (`check`), per test.
     pub case_seed: u64,
     /// The choices of the case a replay token names: `check` runs it first.
@@ -114,6 +117,23 @@ pub struct Options {
     /// as the new one (`sisu test --update`).
     pub snapshots: std::sync::Arc<std::collections::BTreeMap<String, String>>,
     pub update: bool,
+}
+
+/// What `--stats` reports (18, Phases 5 and 6; 20, I-9).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StatsKind {
+    /// Tasks, scheduling latency (Q-34) and `Shared` cells by tag.
+    #[default]
+    Summary,
+    /// `--stats stack-depth`: a histogram of the frame depth at every call
+    /// over the run, the deepest stack, and an estimate of the native stack
+    /// it would take (16 bytes per SIR local and 64 per frame, 20's
+    /// measure of stack exhaustion).
+    StackDepth,
+    /// `--stats shared`: each `Shared` construction site of the program,
+    /// with the escape analysis's tag and the cells it made and that
+    /// another task reached (Q-2; the monitor checks the tags).
+    Shared,
 }
 
 /// The key of a test's `k`-th snapshot (from 1): the test's name, then
@@ -211,6 +231,9 @@ pub(crate) struct Frame<'p> {
     pub tys: Vec<sir::Type>,
     /// Values to drop before the next statement, the next one last.
     pub drops: Vec<drops::PendingDrop>,
+    /// The estimated native stack this frame and the frames under it
+    /// take (`--stats stack-depth`).
+    pub stack_bytes: u64,
     /// For a frame the run time pushed (an `invariant` check), what to do
     /// with its result.
     pub after: Option<drops::After>,
@@ -270,6 +293,8 @@ pub struct Interp<'p, 'h> {
     /// million, and the seeded stream that decides each fault.
     pub(crate) sim: Option<u32>,
     pub(crate) fault_rng: sched::Rng,
+    /// What `--stats` reports.
+    pub(crate) stats_kind: StatsKind,
 }
 
 impl<'p, 'h> Interp<'p, 'h> {
@@ -340,6 +365,7 @@ impl<'p, 'h> Interp<'p, 'h> {
             case_ends: Vec::new(),
             sim: options.sim,
             fault_rng: sched::Rng::new(options.seed ^ 0x5157_FA17),
+            stats_kind: options.stats_kind,
         }
     }
 

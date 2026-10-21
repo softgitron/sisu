@@ -1,0 +1,12 @@
+# A wrong program: a value that must be consumed is dropped instead.
+
+@must_consume
+struct Transaction:
+    id: int
+
+    def commit(own self):
+        print("committed {self.id}")
+
+def main():
+    let t = Transaction(id=1)
+    print("started {t.id}")

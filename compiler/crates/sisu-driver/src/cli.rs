@@ -142,7 +142,13 @@ struct Parsed<'a> {
     values: Vec<(&'a str, &'a str)>,
     file: Option<&'a str>,
     rest: Vec<String>,
+    /// `--stats stack-depth` or `--stats shared`: which numbers `--stats`
+    /// reports (a bare `--stats` reports the scheduler's).
+    stats: Option<&'a str>,
 }
+
+/// What `--stats` may be followed by.
+const STATS_KINDS: &[&str] = &["stack-depth", "shared"];
 
 /// The flags that take a value.
 const VALUE_FLAGS: &[&str] = &[
@@ -160,6 +166,7 @@ const VALUE_FLAGS: &[&str] = &[
     "--tag",
     "--skip-tag",
     "--iterations",
+    "--diary",
 ];
 
 /// The most schedules a bounded exhaustive search runs of one test (or of
@@ -198,6 +205,10 @@ struct Opts {
     select: Select,
     /// `sisu bench --iterations N`: how often each benchmark's loop runs.
     iterations: u64,
+    /// What `--stats` reports.
+    stats: sisu_interp::StatsKind,
+    /// `sisu check --diary PATH`: the log the check appends to.
+    diary: Option<String>,
 }
 
 /// What a command works on, read from disk (09): a file, or the root
@@ -312,13 +323,25 @@ impl Select {
 fn split_args(args: &[String]) -> Parsed<'_> {
     let mut flags = Vec::new();
     let mut values = Vec::new();
+    let mut stats = None;
     let mut i = 0;
     while i < args.len() && args[i].starts_with("--") {
         let a = args[i].as_str();
         // `--` ends the flags; what follows is the program's (`sisu run --
         // ARGS` on a package).
         if a == "--" {
-            return Parsed { flags, values, file: None, rest: args[i + 1..].to_vec() };
+            return Parsed { flags, values, file: None, rest: args[i + 1..].to_vec(), stats };
+        }
+        if a == "--stats" || a.starts_with("--stats=") {
+            flags.push("--stats");
+            if let Some(k) = a.strip_prefix("--stats=") {
+                stats = Some(k);
+            } else if let Some(k) = args.get(i + 1).map(String::as_str).filter(|k| STATS_KINDS.contains(k)) {
+                stats = Some(k);
+                i += 1;
+            }
+            i += 1;
+            continue;
         }
         if let Some((k, v)) = a.split_once('=')
             && VALUE_FLAGS.contains(&k)
@@ -334,7 +357,7 @@ fn split_args(args: &[String]) -> Parsed<'_> {
     }
     let file = args.get(i).map(String::as_str);
     let rest = args.iter().skip(i + 1).cloned().collect();
-    Parsed { flags, values, file, rest }
+    Parsed { flags, values, file, rest, stats }
 }
 
 /// How the scheduler is seeded: one seed, or `--explore N` seeds from the
@@ -492,7 +515,9 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 return EXIT_USAGE;
             }
             if let Some((bad, _)) = p.values.iter().find(|(k, _)| {
-                !matches!(cmd.as_str(), "run" | "test" | "bench") && !(*k == "--contracts" && cmd == "sir")
+                !matches!(cmd.as_str(), "run" | "test" | "bench")
+                    && !(*k == "--contracts" && cmd == "sir")
+                    && !(*k == "--diary" && cmd == "check")
             }) {
                 host.stderr(&plain_error(
                     msg::CLI_UNKNOWN_OPTION,
@@ -500,6 +525,15 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 ));
                 return EXIT_USAGE;
             }
+            let stats = match p.stats {
+                None => sisu_interp::StatsKind::Summary,
+                Some("stack-depth") => sisu_interp::StatsKind::StackDepth,
+                Some("shared") => sisu_interp::StatsKind::Shared,
+                Some(other) => {
+                    host.stderr(&plain_error(msg::CLI_BAD_STATS, &[("value", other.to_string())]));
+                    return EXIT_USAGE;
+                }
+            };
             let mut seeds = Seeds { first: 0, explore: None };
             // `--contracts=off|preconditions|all` (07): what a run checks;
             // a test checks everything.
@@ -509,11 +543,13 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
             let mut jobs = 0;
             let mut iterations = 100;
             let mut select = Select::default();
+            let mut diary = None;
             for (k, v) in &p.values {
                 let only = match *k {
                     "--record" | "--redact" => Some("run"),
                     "--replay" | "--faults" | "--jobs" | "--filter" | "--tag" | "--skip-tag" => Some("test"),
                     "--iterations" => Some("bench"),
+                    "--diary" => Some("check"),
                     _ => None,
                 };
                 if let Some(c) = only
@@ -528,6 +564,10 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 match *k {
                     "--record" => {
                         record = Some(v.to_string());
+                        continue;
+                    }
+                    "--diary" => {
+                        diary = Some(v.to_string());
                         continue;
                     }
                     "--redact" => {
@@ -678,6 +718,8 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 jobs,
                 select,
                 iterations,
+                stats,
+                diary,
             };
             // Each member of a workspace in turn (09); the worst status wins.
             let mut status = exit::OK;
@@ -975,21 +1017,23 @@ pub(crate) fn input_with_root(
 }
 
 /// `sisu run --watch`: the program again from its saved files, through the
-/// queries `sisu run` uses (`sisu_interp::Rebuild`).
+/// queries `sisu run` uses (`sisu_interp::Rebuild`). It keeps the query
+/// database the run was compiled with, so a save checks, lowers and
+/// borrow-checks again only the items it changed (the per-item queries).
 struct Rebuilder {
     file: String,
     source: String,
     program: Option<(crate::db::ProgramSource, Vec<(String, String)>)>,
-    level: sisu_lower::ContractLevel,
+    db: Db,
 }
 
 impl Rebuilder {
-    fn of(input: &Input, level: sisu_lower::ContractLevel) -> Rebuilder {
+    fn of(input: &Input, db: Db) -> Rebuilder {
         Rebuilder {
             file: input.file.clone(),
             source: input.source.clone(),
             program: input.program.clone(),
-            level,
+            db,
         }
     }
 }
@@ -1006,10 +1050,8 @@ impl sisu_interp::Rebuild for Rebuilder {
             }
         }
         let input = Input { program: self.program.clone(), ..Input::single(&self.file, self.source.clone()) };
-        let mut db = Db::new();
-        db.contracts = self.level;
-        input.load(&mut db);
-        program_to_run(&mut db, &self.file)
+        input.load(&mut self.db);
+        program_to_run(&mut self.db, &self.file)
     }
 }
 
@@ -1101,6 +1143,7 @@ fn command(
         let options = Options {
             seed: seeds.first,
             stats: has("--stats"),
+            stats_kind: opts.stats,
             strategy: opts.strategy.clone(),
             ..Options::default()
         };
@@ -1177,6 +1220,18 @@ fn command(
                     let Some(p) = db.parsed(file) else { return exit::ERROR };
                     let lexed = sisu_lexer::lex(p.file, source);
                     host.stdout(&crate::doc::explain(source, &lexed.tokens, &p.module, &c.program, &c.typed));
+                }
+                // `--diary PATH` (18, Phase 3): every diagnostic, and what
+                // resolved the last check's, appended to the log.
+                if let Some(path) = &opts.diary {
+                    let files = crate::diary::own_files(&c.map, input.modules.max(1));
+                    if let Err(reason) = crate::diary::append(path, host.now(), &files, &c.map, &all) {
+                        host.stderr(&plain_error(
+                            msg::CLI_CANNOT_WRITE,
+                            &[("path", path.clone()), ("reason", reason)],
+                        ));
+                        return exit::ERROR;
+                    }
                 }
                 if has("--format=ids") && multi {
                     host.stdout(&sisu_diag::render::render_ids_with_files(&c.map, &all));
@@ -1492,6 +1547,7 @@ fn command(
                         coverage: deferring,
                         seed: seeds.first,
                         stats: has("--stats"),
+                        stats_kind: opts.stats,
                         strategy: opts.strategy.clone(),
                         ..Options::default()
                     };
@@ -1503,7 +1559,7 @@ fn command(
                         let mut rep = sisu_interp::record::Replayer::new(log, host);
                         // A run under `--watch` replays its saves too.
                         let report = if log.header.watch {
-                            let mut rebuild = Rebuilder::of(input, level);
+                            let mut rebuild = Rebuilder::of(input, std::mem::take(&mut db));
                             sisu_interp::run_watch((*prog).clone(), &mut rep, &options, &mut rebuild)
                         } else {
                             sisu_interp::run_main_report(&prog, &mut rep, &options)
@@ -1552,7 +1608,7 @@ fn command(
                         };
                         let mut rec = sisu_interp::record::Recorder::new(&mut h, opts.redact.clone());
                         let report = if watch {
-                            let mut rebuild = Rebuilder::of(input, level);
+                            let mut rebuild = Rebuilder::of(input, std::mem::take(&mut db));
                             sisu_interp::run_watch((*prog).clone(), &mut rec, &options, &mut rebuild)
                         } else {
                             sisu_interp::run_main_report(&prog, &mut rec, &options)
@@ -1569,7 +1625,7 @@ fn command(
                         return report.status;
                     }
                     let report = if watch {
-                        let mut rebuild = Rebuilder::of(input, level);
+                        let mut rebuild = Rebuilder::of(input, std::mem::take(&mut db));
                         sisu_interp::run_watch((*prog).clone(), &mut h, &options, &mut rebuild)
                     } else {
                         sisu_interp::run_main_report(&prog, &mut h, &options)
@@ -2388,6 +2444,8 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
         jobs: 0,
         select: Select::default(),
         iterations: 0,
+        stats: sisu_interp::StatsKind::Summary,
+        diary: None,
     };
     let stage = std::cell::Cell::new("the front end");
     let flags: Vec<&str> = p.flags.clone();
@@ -2494,7 +2552,7 @@ fn fmt(args: &[String], host: &mut dyn Host) -> i32 {
                 continue;
             }
         };
-        match sisu_fmt::format(&text) {
+        match crate::format::format_file(&shown, &text) {
             Ok(out) if out == text => {}
             Ok(out) => {
                 if check {

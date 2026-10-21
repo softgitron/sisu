@@ -176,12 +176,28 @@ impl<'p> Interp<'p, '_> {
             after: None,
             resume_after_drops: false,
             anchor: None,
+            stack_bytes: 0,
         })
     }
 
-    pub(crate) fn push_built(&mut self, fr: Frame<'p>) -> Result<(), Unwind> {
+    pub(crate) fn push_built(&mut self, mut fr: Frame<'p>) -> Result<(), Unwind> {
         if self.frames.len() >= MAX_DEPTH {
             return Err(panic(msg::PANIC_STACK_OVERFLOW, &[("depth", MAX_DEPTH.to_string())]));
+        }
+        if self.stats_kind == crate::StatsKind::StackDepth && self.sched.keep_stats {
+            fr.stack_bytes =
+                self.frames.last().map(|f| f.stack_bytes).unwrap_or(0) + 16 * fr.locals.len() as u64 + 64;
+            let depth = self.frames.len() + 1;
+            let s = &mut self.sched.stats;
+            let bucket = (usize::BITS - depth.leading_zeros()) as usize - 1;
+            if s.depths.len() <= bucket {
+                s.depths.resize(bucket + 1, 0);
+            }
+            s.depths[bucket] += 1;
+            if depth > s.max_depth {
+                s.max_depth = depth;
+                s.max_stack_bytes = fr.stack_bytes;
+            }
         }
         self.frames.push(fr);
         Ok(())

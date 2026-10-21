@@ -726,8 +726,20 @@ impl Checker<'_> {
                 }
                 None => {
                     if seen_kw {
-                        let d = self.error(msg::TYPE_POSITIONAL_AFTER_KEYWORD, a.range);
-                        self.report(d);
+                        // Bound to the first field still unset that no
+                        // keyword names, as the fix would name it.
+                        let free = (0..n).find(|&i| {
+                            slots[i].is_none()
+                                && !args
+                                    .iter()
+                                    .any(|b| b.name.as_ref().is_some_and(|k| k.text == s.fields[i].name))
+                        });
+                        self.positional_after_keyword(a, free.map(|i| s.fields[i].name.as_str()));
+                        if let Some(i) = free {
+                            slots[i] = Some(a);
+                        }
+                        pos += 1;
+                        continue;
                     }
                     if pos < n {
                         slots[pos] = Some(a);
@@ -769,10 +781,13 @@ impl Checker<'_> {
                 }
                 None if f.default.is_some() => fields.push(FieldInit::Default(i as u32)),
                 None => {
-                    let d = self
+                    let mut d = self
                         .error(msg::TYPE_MISSING_FIELD, range)
                         .with("field", f.name.clone())
                         .with("ty", tyname.clone());
+                    if let Some(edit) = self.hole_edit(range, &format!("{}=todo(\"{}\")", f.name, f.name)) {
+                        d = d.fix(msg::TYPE_ADD_HOLE, vec![("name", f.name.clone())], vec![edit]);
+                    }
                     self.report(d);
                     fields.push(FieldInit::Value(Expr::error(span)));
                 }
@@ -1076,6 +1091,32 @@ impl Checker<'_> {
         )
     }
 
+    /// A positional argument after a keyword one (E0376), with the fix that
+    /// names it as `name`, the parameter or field it is taken for.
+    fn positional_after_keyword(&mut self, a: &ast::Arg, name: Option<&str>) {
+        let mut d = self.error(msg::TYPE_POSITIONAL_AFTER_KEYWORD, a.range);
+        if let Some(name) = name.filter(|n| !n.is_empty()) {
+            let edit = Edit { span: self.span(TextRange::empty(a.range.start)), text: format!("{name}=") };
+            d = d.fix(msg::TYPE_NAME_ARGUMENT, vec![("name", name.to_string())], vec![edit]);
+        }
+        self.report(d);
+    }
+
+    /// The edit that adds an argument (`todo("b")`, `y=todo("y")`) at the end
+    /// of the call or construction written at `range`, before its `)`.
+    pub fn hole_edit(&self, range: TextRange, arg: &str) -> Option<sisu_diag::Edit> {
+        let text = self.source.get(range.start as usize..range.end as usize)?;
+        let trimmed = text.trim_end();
+        if !trimmed.ends_with(')') {
+            return None;
+        }
+        let close = range.start as usize + trimmed.len() - 1;
+        let before = self.source.get(range.start as usize..close)?.trim_end();
+        let text = if before.ends_with('(') { arg.to_string() } else { format!(", {arg}") };
+        let at = (range.start as usize + before.len()) as u32;
+        Some(sisu_diag::Edit { span: self.span(TextRange::empty(at)), text })
+    }
+
     /// Matches arguments to parameters and checks each.
     pub fn check_args(
         &mut self,
@@ -1118,8 +1159,24 @@ impl Checker<'_> {
                 }
                 None => {
                     if seen_kw {
-                        let d = self.error(msg::TYPE_POSITIONAL_AFTER_KEYWORD, a.range);
-                        self.report(d);
+                        // Bound to the first parameter still unset that a
+                        // keyword may name and none does, as the fix would
+                        // name it.
+                        let free = (sig.positional_only_until..n).find(|&i| {
+                            slots[i].is_none()
+                                && !args
+                                    .iter()
+                                    .any(|b| b.name.as_ref().is_some_and(|k| k.text == sig.params[i].name))
+                        });
+                        self.positional_after_keyword(a, free.map(|i| sig.params[i].name.as_str()));
+                        match free {
+                            Some(i) => slots[i] = Some(a.clone()),
+                            None => {
+                                let _ = self.infer_expr(&a.value, None);
+                            }
+                        }
+                        pos += 1;
+                        continue;
                     }
                     if pos < kw_from && pos < n {
                         slots[pos] = Some(a.clone());
@@ -1182,10 +1239,24 @@ impl Checker<'_> {
                 }
                 None => {
                     if !extra {
-                        let d = self
+                        let mut d = self
                             .error(msg::TYPE_MISSING_ARGUMENT, range)
                             .with("arg", p.name.clone())
                             .with("name", sig.name.clone());
+                        // A hole for the argument, by name after one named
+                        // or keyword-only: its type is what the hole reports.
+                        let keyword = sig.keyword_only_from.is_some_and(|k| i >= k)
+                            || args.iter().any(|a| a.name.is_some());
+                        let hole = if keyword {
+                            format!("{}=todo(\"{}\")", p.name, p.name)
+                        } else {
+                            format!("todo(\"{}\")", p.name)
+                        };
+                        if !p.name.is_empty()
+                            && let Some(edit) = self.hole_edit(range, &hole)
+                        {
+                            d = d.fix(msg::TYPE_ADD_HOLE, vec![("name", p.name.clone())], vec![edit]);
+                        }
                         self.report(d);
                     }
                     out.push(Arg { expr: Expr::error(span), mode: ArgMode::Value });
@@ -1461,10 +1532,14 @@ impl Checker<'_> {
                 let f = self.field_of(recv, name, range);
                 return self.call_value(f, args, trailing, range);
             }
-            let d = self
+            let mut d = self
                 .error(msg::TYPE_UNKNOWN_METHOD, name.range)
                 .with("ty", self.show(&base))
                 .with("name", name.text.clone());
+            if let Some(similar) = self.similar_member(&base, &name.text) {
+                let edit = sisu_diag::Edit { span: self.span(name.range), text: similar };
+                d = d.fix(msg::TYPE_SIMILAR_MEMBER, Vec::new(), vec![edit]);
+            }
             let d = self.unknown_method_note(d, &name.text);
             self.report(d);
             self.check_args_loosely(args);

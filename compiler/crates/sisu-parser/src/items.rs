@@ -373,11 +373,17 @@ impl Parser<'_> {
 
     pub(crate) fn expected_block(&mut self, keyword: &str, line: u32) {
         let span = self.error_span();
-        self.report(
-            Diagnostic::new(msg::PARSE_EXPECTED_BLOCK, span)
-                .with("keyword", keyword.to_string())
-                .with("line", line.to_string()),
-        );
+        let mut d = Diagnostic::new(msg::PARSE_EXPECTED_BLOCK, span)
+            .with("keyword", keyword.to_string())
+            .with("line", line.to_string());
+        if let Some(at) = self.word_on_line(keyword, line) {
+            d = d.label(
+                sisu_diag::Span::new(self.file, at),
+                msg::PARSE_OPENED_HERE,
+                vec![("keyword", keyword.to_string())],
+            );
+        }
+        self.report(d);
     }
 
     fn struct_def(&mut self, cp: Checkpoint) {

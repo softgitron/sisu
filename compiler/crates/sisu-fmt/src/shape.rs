@@ -1,7 +1,8 @@
 //! The shape of a tree: what formatting must keep. Its nodes and their
 //! significant tokens, with what the formatter changes on purpose made
-//! equal: trailing commas, `T?` and `Option[T]`, unused imports, and the
-//! order of a run of imports and of the names a `from` imports. `sisu fmt`
+//! equal: trailing commas, `T?` and `Option[T]`, `T ! E` and
+//! `Result[T, E]`, unused imports, and the order of a run of imports and
+//! of the names a `from` imports. `sisu fmt`
 //! checks that its output has the input's shape, and `sisu parse --shape`
 //! prints it, so the conformance runner can check any implementation's
 //! formatter.
@@ -36,6 +37,14 @@ fn node(tree: &Tree, n: NodeId, depth: usize, pruned: &HashSet<NodeId>, out: &mu
     let pad = "  ".repeat(depth);
     if kind == STRING_EXPR {
         out.push_str(&format!("{pad}STRING {:?}\n", tree.node_text(n)));
+        return;
+    }
+    // `Result[T, E]` and `T ! E` are one shape.
+    if let Some((t, e)) = crate::lines::result_parts(tree, n) {
+        out.push_str(&format!("{pad}RESULT_TYPE\n"));
+        node(tree, t, depth + 1, pruned, out);
+        out.push_str(&format!("{pad}  BANG\n"));
+        node(tree, e, depth + 1, pruned, out);
         return;
     }
     // `Option[T]` and `T?` are one shape.

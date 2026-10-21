@@ -2,3 +2,4 @@
 13:12-13:26 E0262 resolve.const-argument name="Grid" param="W"
 14:12-14:22 E0263 resolve.type-argument name="Grid" param="T"
 16:28-16:29 E0300 type.mismatch expected="Array[int, 4]" found="Array[int, 3]"
+  label 16:12-16:25 type.expected-because

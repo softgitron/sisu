@@ -1,0 +1,14 @@
+# A wrong program: a result that may be an error is neither used nor
+# discarded.
+
+error Invalid:
+    Negative
+
+def check(n: int) -> int ! Invalid:
+    if n < 0:
+        return Err(Negative)
+    return Ok(n)
+
+def main():
+    check(5)
+    print("checked")

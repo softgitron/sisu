@@ -90,8 +90,10 @@ pub struct FnDef {
     pub from: Vec<Name>,
     /// `where T: Display + Hash, C.Item: Display`.
     pub where_: Vec<WherePred>,
-    /// `None` for a signature without a body (an intrinsic).
-    pub body: Option<Block>,
+    /// `None` for a signature without a body (an intrinsic). Shared, so
+    /// that the declarations holding a function (its item, the resolver's
+    /// records of it) do not copy its statements.
+    pub body: Option<std::sync::Arc<Block>>,
     pub attrs: Vec<Attr>,
     /// The header (name, parameters, result) has a syntax error, so the
     /// signature is not reliable; checking treats it as unknown.
@@ -260,7 +262,7 @@ pub struct TestDef {
     pub name_range: TextRange,
     pub cases: Option<(Pattern, Expr)>,
     pub params: Vec<Param>,
-    pub body: Option<Block>,
+    pub body: Option<std::sync::Arc<Block>>,
 }
 
 #[derive(Clone, Debug)]

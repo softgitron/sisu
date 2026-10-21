@@ -1,0 +1,2 @@
+4:8-4:15 E0220 resolve.import-unknown name="std.jsn"
+  fix resolve.similar-module 4:8-4:15 "std.json"

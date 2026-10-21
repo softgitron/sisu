@@ -25,8 +25,12 @@
 //! - Strings are written as they are.
 //! - `Option[T]` is written `T?`, unless `T` is itself optional (`T??`
 //!   would read as `??`), a result or a function type, or the option is
-//!   behind `ref` or optional itself. `Result[T, E]` is kept: whether `E`
-//!   is an error set, which `!` needs, is not in the syntax.
+//!   behind `ref` or optional itself.
+//! - `Result[T, E]` is written `T ! E` when `E` is a name of an error set
+//!   (which the caller says: it is not in the syntax), unless `T` is a
+//!   result or a function type (`(int) -> int ! E` returns the result),
+//!   or the result is behind `ref` or optional (`int ! E?` would make `E`
+//!   optional).
 //! - A comment keeps its text. One after code stays after it, two spaces
 //!   away; one on a line of its own stays on a line of its own, at the
 //!   level of the line after it, or of an enclosing block whose
@@ -116,6 +120,8 @@ struct Walker<'t> {
     tail: Vec<CommentLine>,
     /// The unused imports, left out.
     pruned: HashSet<NodeId>,
+    /// Whether a type written so names an error set.
+    error_set: &'t dyn Fn(&str) -> bool,
 }
 
 fn col_of(text: &str, pos: usize) -> usize {
@@ -144,6 +150,55 @@ fn is_type(k: SyntaxKind) -> bool {
     )
 }
 
+/// Whether a node has a comment among its own tokens, which a rewrite
+/// would have nowhere to put.
+fn has_comment(tree: &Tree, n: NodeId) -> bool {
+    tree.children(n).iter().any(
+        |e| matches!(e, Element::Token(t) if matches!(tree.token_kind(*t), COMMENT | DOC_COMMENT | MODULE_DOC_COMMENT)),
+    )
+}
+
+/// `Result[T, E]`'s `T` and `E`, written with nothing else between its
+/// brackets: the type `T ! E` would be, whatever `E` is.
+pub(crate) fn result_parts(tree: &Tree, n: NodeId) -> Option<(NodeId, NodeId)> {
+    if tree.kind(n) != PATH_TYPE {
+        return None;
+    }
+    let idents: Vec<_> = tree.child_tokens(n).collect();
+    if idents.len() != 1 || tree.token_text(idents[0]) != "Result" {
+        return None;
+    }
+    let args = tree.first_child(n, GENERIC_ARGS)?;
+    let ts = type_children(tree, args);
+    // `[`, `,` and `]`, and no trailing comma.
+    let tokens = tree.child_tokens(args).filter(|t| !tree.token_kind(*t).is_trivia()).count();
+    if ts.len() != 2 || tokens != 3 || has_comment(tree, n) || has_comment(tree, args) {
+        return None;
+    }
+    Some((ts[0], ts[1]))
+}
+
+/// `Result[T, E]`'s `T` and `E`, when the formatter writes it `T ! E`.
+fn result_sugar(tree: &Tree, n: NodeId, error_set: &dyn Fn(&str) -> bool) -> Option<(NodeId, NodeId)> {
+    let (t, e) = result_parts(tree, n)?;
+    if tree.kind(e) != PATH_TYPE
+        || tree.first_child(e, GENERIC_ARGS).is_some()
+        || !error_set(tree.node_text(e).trim())
+    {
+        return None;
+    }
+    if result_parts(tree, t).is_some()
+        || !matches!(tree.kind(t), PATH_TYPE | TUPLE_TYPE | PAREN_TYPE | REF_TYPE | DYN_TYPE | OPTION_TYPE)
+    {
+        return None;
+    }
+    let parent = tree.parent(n).map(|p| tree.kind(p));
+    if matches!(parent, Some(REF_TYPE | OPTION_TYPE)) {
+        return None;
+    }
+    Some((t, e))
+}
+
 /// `Option[T]`'s `T`, when the formatter writes it `T?`.
 pub(crate) fn option_sugar(tree: &Tree, n: NodeId) -> Option<NodeId> {
     if tree.kind(n) != PATH_TYPE {
@@ -168,7 +223,14 @@ pub(crate) fn option_sugar(tree: &Tree, n: NodeId) -> Option<NodeId> {
     {
         return None;
     }
-    let arg_kind = if option_sugar(tree, arg).is_some() { OPTION_TYPE } else { tree.kind(arg) };
+    let arg_kind = if option_sugar(tree, arg).is_some() {
+        OPTION_TYPE
+    } else if result_parts(tree, arg).is_some() {
+        // `Result[T, E]?` would read `T ! E?` once written with `!`.
+        RESULT_TYPE
+    } else {
+        tree.kind(arg)
+    };
     if !matches!(arg_kind, PATH_TYPE | TUPLE_TYPE | REF_TYPE | DYN_TYPE | PAREN_TYPE) {
         return None;
     }
@@ -200,6 +262,19 @@ impl<'t> Walker<'t> {
                 pos: r.start,
                 ..Tok::default()
             });
+            return;
+        }
+        if let Some((t, e)) = result_sugar(self.tree, n, self.error_set) {
+            self.node(t);
+            self.push(Tok {
+                kind: BANG,
+                text: "!".into(),
+                parent: RESULT_TYPE,
+                node: Some(n),
+                pos: self.tree.range(e).start,
+                ..Tok::default()
+            });
+            self.node(e);
             return;
         }
         if let Some(arg) = option_sugar(self.tree, n) {
@@ -844,7 +919,7 @@ fn sort_imports(lines: &mut [Line]) {
 }
 
 /// The formatted text of a parsed file.
-pub fn format_tree(tree: &Tree) -> String {
+pub fn format_tree(tree: &Tree, error_set: &dyn Fn(&str) -> bool) -> String {
     let mut w = Walker {
         tree,
         text: tree.text(),
@@ -857,6 +932,7 @@ pub fn format_tree(tree: &Tree) -> String {
         pending: Vec::new(),
         tail: Vec::new(),
         pruned: crate::prune::unused(tree),
+        error_set,
     };
     w.node(tree.root());
     w.tail = std::mem::take(&mut w.pending);

@@ -413,7 +413,7 @@ impl Resolver<'_> {
                 f.pure = true;
             }
         }
-        let missing: Vec<String> = tinfo
+        let missing_defs: Vec<DefId> = tinfo
             .methods
             .iter()
             .filter(|m| {
@@ -421,15 +421,28 @@ impl Resolver<'_> {
                 f.is_some_and(|f| f.body.is_none() && f.intrinsic.is_none() && !f.header_broken)
                     && !info.methods.iter().any(|(n, _)| *n == self.prog.def(**m).name)
             })
-            .map(|m| format!("`{}`", self.prog.def(*m).name))
+            .copied()
             .collect();
+        let missing: Vec<String> =
+            missing_defs.iter().map(|m| format!("`{}`", self.prog.def(*m).name)).collect();
         if !missing.is_empty() {
-            self.report(
-                Diagnostic::new(msg::RESOLVE_MISSING_TRAIT_METHOD, span)
-                    .with("trait", trait_name.clone())
-                    .with("ty", ty_name.clone())
-                    .with("methods", missing.join(", ")),
-            );
+            let mut d = Diagnostic::new(msg::RESOLVE_MISSING_TRAIT_METHOD, span)
+                .with("trait", trait_name.clone())
+                .with("ty", ty_name.clone())
+                .with("methods", missing.join(", "));
+            // Each with the signature the impl must write.
+            for m in &missing_defs {
+                if let Some(f) = self.prog.fn_info(*m).map(Sig::of) {
+                    let name = self.prog.def(*m).name.clone();
+                    let mut args = targs.clone();
+                    for k in 0..f.generics.len().saturating_sub(f.impl_generics) {
+                        args.push(Ty::Param((info.generics.len() + k) as u32));
+                    }
+                    let signature = self.signature_text(&name, &f, Some(&args), &env, &names);
+                    d = d.note(msg::RESOLVE_WRITE_TRAIT_METHOD, vec![("signature", signature)]);
+                }
+            }
+            self.report(d);
         }
         // Associated types: each one the trait declares, bound (one the
         // trait does not declare is reported where the impl binds it).
@@ -475,7 +488,8 @@ impl Resolver<'_> {
         env: &[Predicate],
         trait_name: &str,
     ) {
-        let (Some(t), Some(f)) = (self.prog.fn_info(tm).cloned(), self.prog.fn_info(im).cloned()) else {
+        let (Some(t), Some(f)) = (self.prog.fn_info(tm).map(Sig::of), self.prog.fn_info(im).map(Sig::of))
+        else {
             return;
         };
         if t.header_broken || f.header_broken {
@@ -494,7 +508,7 @@ impl Resolver<'_> {
         let mut ok = own_t == own_f && t.self_mode == f.self_mode && t.params.len() == f.params.len();
         if ok {
             for (a, b) in t.params.iter().zip(&f.params) {
-                if a.mode != b.mode || norm(&self.prog, &a.ty) != self.prog.normalize(&b.ty, env) {
+                if a.1 != b.1 || norm(&self.prog, &a.2) != self.prog.normalize(&b.2, env) {
                     ok = false;
                 }
             }
@@ -503,7 +517,7 @@ impl Resolver<'_> {
             }
         }
         if !ok {
-            let names: Vec<String> = f.generics.iter().map(|g| g.name.clone()).collect();
+            let names: Vec<String> = f.generics.clone();
             let expected = self.signature_text(&name, &t, Some(&args), env, &names);
             let found = self.signature_text(&name, &f, None, env, &names);
             self.report(
@@ -520,7 +534,7 @@ impl Resolver<'_> {
     fn signature_text(
         &self,
         name: &str,
-        f: &FnInfo,
+        f: &Sig,
         args: Option<&[Ty]>,
         env: &[Predicate],
         names: &[String],
@@ -541,39 +555,50 @@ impl Resolver<'_> {
         if let Some(m) = f.self_mode {
             parts.push(format!("{}self", mode(m)));
         }
-        for p in &f.params {
-            parts.push(format!("{}{}: {}", mode(p.mode), p.name, ty(&p.ty)));
+        for (pname, pmode, pty) in &f.params {
+            parts.push(format!("{}{}: {}", mode(*pmode), pname, ty(pty)));
         }
         let ret = if f.ret == Ty::Unit { String::new() } else { format!(" -> {}", ty(&f.ret)) };
         format!("{}def {name}({}){ret}", if f.pure { "pure " } else { "" }, parts.join(", "))
     }
 
-    /// At most one impl of a trait for any type (D-013).
+    /// At most one impl of a trait for any type (D-013): each impl's header
+    /// against the earlier ones of its trait, the first that overlaps it
+    /// reported. Two headers whose self types have different outermost
+    /// constructors cannot overlap, so only the others are unified.
     fn check_coherence(&mut self, impls: &[DefId]) {
-        for (k, &a) in impls.iter().enumerate() {
-            for &b in &impls[..k] {
-                let (Some(ia), Some(ib)) = (self.prog.impl_info(a), self.prog.impl_info(b)) else { continue };
-                if ia.trait_ref.def != ib.trait_ref.def {
+        type Header = (DefId, Ty, usize, Option<(u8, u64)>);
+        let mut by_trait: std::collections::HashMap<DefId, Vec<Header>> = std::collections::HashMap::new();
+        let mut found: Vec<(DefId, DefId)> = Vec::new();
+        for &a in impls {
+            let Some(ia) = self.prog.impl_info(a) else { continue };
+            let ta = Ty::Tuple(
+                std::iter::once(ia.self_ty.clone()).chain(ia.trait_ref.args.iter().cloned()).collect(),
+                Vec::new(),
+            );
+            let head = outermost(&ia.self_ty);
+            let earlier = by_trait.entry(ia.trait_ref.def).or_default();
+            for (b, tb, nb, hb) in earlier.iter() {
+                if let (Some(x), Some(y)) = (&head, hb)
+                    && x != y
+                {
                     continue;
                 }
-                let ta = Ty::Tuple(
-                    std::iter::once(ia.self_ty.clone()).chain(ia.trait_ref.args.iter().cloned()).collect(),
-                    Vec::new(),
-                );
-                let tb = Ty::Tuple(
-                    std::iter::once(ib.self_ty.clone()).chain(ib.trait_ref.args.iter().cloned()).collect(),
-                    Vec::new(),
-                );
-                if headers_overlap(&ta, ia.generics.len(), &tb, ib.generics.len()) {
-                    let names: Vec<String> = ia.generics.iter().map(|g| g.name.clone()).collect();
-                    let d = Diagnostic::new(msg::RESOLVE_OVERLAPPING_IMPL, self.prog.def(a).span)
-                        .with("trait", self.prog.display_trait_in(&ia.trait_ref, &names))
-                        .with("ty", self.prog.display_in(&ia.self_ty, &names))
-                        .label(self.prog.def(b).span, msg::RESOLVE_FIRST_IMPL, Vec::new());
-                    self.report(d);
+                if headers_overlap(&ta, ia.generics.len(), tb, *nb) {
+                    found.push((a, *b));
                     break;
                 }
             }
+            earlier.push((a, ta, ia.generics.len(), head));
+        }
+        for (a, b) in found {
+            let Some(ia) = self.prog.impl_info(a) else { continue };
+            let names: Vec<String> = ia.generics.iter().map(|g| g.name.clone()).collect();
+            let d = Diagnostic::new(msg::RESOLVE_OVERLAPPING_IMPL, self.prog.def(a).span)
+                .with("trait", self.prog.display_trait_in(&ia.trait_ref, &names))
+                .with("ty", self.prog.display_in(&ia.self_ty, &names))
+                .label(self.prog.def(b).span, msg::RESOLVE_FIRST_IMPL, Vec::new());
+            self.report(d);
         }
     }
 
@@ -622,6 +647,54 @@ impl Resolver<'_> {
                         .with("reason", reason),
                 );
             }
+        }
+    }
+}
+
+/// A type's outermost constructor, for telling impl headers apart without
+/// unifying them; `None` for what unifies with anything (a parameter, an
+/// associated type).
+fn outermost(t: &Ty) -> Option<(u8, u64)> {
+    Some(match t {
+        Ty::Param(_) | Ty::Assoc(_) | Ty::Var(_) | Ty::Error | Ty::ErrSet(_) => return None,
+        Ty::Int => (0, 0),
+        Ty::Float => (1, 0),
+        Ty::Bool => (2, 0),
+        Ty::Char => (3, 0),
+        Ty::Str => (4, 0),
+        Ty::Unit => (5, 0),
+        Ty::Never => (6, 0),
+        Ty::Adt(d, _) => (7, u64::from(d.0)),
+        Ty::Tuple(e, _) => (8, e.len() as u64),
+        Ty::Fn(f) => (9, f.params.len() as u64),
+        Ty::Ref(_, m) => (10, u64::from(*m)),
+        Ty::Dyn(tr) => (11, u64::from(tr.def.0)),
+        Ty::Const(c) => (12, *c as u64),
+    })
+}
+
+/// What checking a method's signature against its trait's reads of a
+/// function: its signature without its body.
+struct Sig {
+    generics: Vec<String>,
+    impl_generics: usize,
+    self_mode: Option<Mode>,
+    params: Vec<(String, Mode, Ty)>,
+    ret: Ty,
+    pure: bool,
+    header_broken: bool,
+}
+
+impl Sig {
+    fn of(f: &FnInfo) -> Sig {
+        Sig {
+            generics: f.generics.iter().map(|g| g.name.clone()).collect(),
+            impl_generics: f.impl_generics,
+            self_mode: f.self_mode,
+            params: f.params.iter().map(|p| (p.name.clone(), p.mode, p.ty.clone())).collect(),
+            ret: f.ret.clone(),
+            pure: f.pure,
+            header_broken: f.header_broken,
         }
     }
 }

@@ -1,0 +1,17 @@
+# Block structure: an unexpected indented block first (reported), a
+# statement at the top level, a dedent to no enclosing level, and blocks
+# whose header did not parse.
+    print("indented at the top")
+print("top level")
+
+def main():
+    if x:
+            a()
+          b()
+        c()
+    d()
+
+def broken(:
+    e()
+stru ct Log:
+    name: str

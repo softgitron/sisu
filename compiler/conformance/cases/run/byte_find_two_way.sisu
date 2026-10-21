@@ -1,0 +1,46 @@
+# `str.byte_find` is Two-Way (Crochemore and Perrin), linear in the text
+# and the part: it agrees with the naive search over random texts and
+# parts of small alphabets, where periodic parts and near misses are
+# common, and it finds a part the naive search would compare 200 times
+# at each of 20000 places.
+
+def naive(text: str, part: str, start: int) -> int?:
+    let last = text.byte_len() - part.byte_len()
+    var i = start
+    while i <= last:
+        var ok = True
+        for k in range(part.byte_len()):
+            if text.byte_at(i + k) != part.byte_at(k):
+                ok = False
+                break
+        if ok:
+            return Some(i)
+        i += 1
+    return None
+
+def word(seed: int, n: int, letters: list[str]) -> String:
+    var out = String.new()
+    var s = seed
+    for _ in range(n):
+        s = (s * 1103515245 + 12345) % 2147483648
+        out.push(letters[(s // 65536) % len(letters)])
+    return out
+
+def main():
+    let alphabets = [["a", "b"], ["a", "b", "c"], ["a", "é"]]
+    var checked = 0
+    for t in range(120):
+        let letters = alphabets[t % 3].copy()
+        let text = word(t * 7 + 1, 5 + t % 40, letters)
+        for p in range(5):
+            let part = word(t * 13 + p, 1 + (t + p) % 7, letters)
+            for start in [0, 3]:
+                let found = text.byte_find(part, start)
+                if found != naive(text, part, start):
+                    print("differ: {text:?} {part:?} {start}: {found:?}")
+                checked += 1
+    print("agreed {checked} times")
+    print("aaaaaaaab".byte_find("aaab"))
+    print("abababab".byte_find("abab", 1))
+    let text = "{"a".repeat(20000)}b"
+    print(text.byte_find("{"a".repeat(200)}b"))

@@ -1,0 +1,338 @@
+##! The lossless syntax tree (docs/architecture.md, "Parsing and the syntax
+##! tree"): every byte of the source belongs to exactly one token and every
+##! token to exactly one node, so the tokens in tree order reproduce the
+##! input byte for byte (`to_source`). Layout tokens (INDENT, DEDENT, EOF)
+##! are zero-width. The tree is an arena: nodes and tokens are addressed by
+##! their indices, which keeps it free of shared pointers.
+
+from stage1.syntax.kinds import KindNames, SyntaxKind
+from stage1.text import debug_str
+
+## A token as the lexer produces it: a kind and a byte range.
+@derive(Eq, Debug, Copy)
+pub struct Token:
+    pub kind: SyntaxKind
+    pub start: int
+    pub end: int
+
+## A child of a node: a node or a token, by its index in the tree.
+@derive(Eq, Debug, Copy)
+pub enum Element:
+    Node(int)
+    Leaf(int)
+
+## A node: its kind, the byte range its children cover, its parent (none
+## for the root) and its children in order.
+pub struct NodeData:
+    pub kind: SyntaxKind
+    pub start: int
+    pub end: int
+    pub parent: int?
+    pub children: list[Element]
+
+pub struct Tree:
+    pub text: String
+    pub nodes: list[NodeData]
+    pub tokens: list[Token]
+    ## The node each token belongs to.
+    pub token_parents: list[int?]
+    pub root: int
+
+impl Tree:
+    ## Reprints the source from the tree: the tokens in tree order.
+    pub pure def to_source(self) -> String:
+        var out = String.new()
+        # One view of the text for the whole walk: a view of a `String` is
+        # a copy of it in stage 0.
+        let text: str = self.text
+        self.write_source(text, self.root, mut out)
+        return out
+
+    pure def write_source(self, text: str, node: int, mut out: String):
+        for e in self.nodes[node].children:
+            match e:
+                case Node(n):
+                    self.write_source(text, n, mut out)
+                case Leaf(t):
+                    out.push(text.byte_slice(self.tokens[t].start, self.tokens[t].end))
+
+    ## An indented dump, one line per node and token with its byte range,
+    ## what `sisu parse --tree` prints; the trivia only with `with_trivia`.
+    pub pure def dump(self, with_trivia: bool) -> String:
+        var out = String.new()
+        var names = KindNames.new()
+        let text: str = self.text
+        self.dump_node(text, self.root, 0, with_trivia, mut out, mut names)
+        return out
+
+    pure def dump_node(
+        self,
+        text: str,
+        node: int,
+        depth: int,
+        with_trivia: bool,
+        mut out: String,
+        mut names: KindNames,
+    ):
+        let data = ref self.nodes[node]
+        let indent = "  ".repeat(depth)
+        out.push(indent)
+        out.push(names.of(data.kind))
+        out.push(" {data.start}..{data.end}\n")
+        for e in data.children:
+            match e:
+                case Node(n):
+                    self.dump_node(text, n, depth + 1, with_trivia, mut out, mut names)
+                case Leaf(t):
+                    let token = self.tokens[t]
+                    if token.kind.is_trivia() and not with_trivia:
+                        continue
+                    out.push(indent)
+                    out.push("  ")
+                    out.push(names.of(token.kind))
+                    out.push(" {token.start}..{token.end} ")
+                    out.push(debug_str(text.byte_slice(token.start, token.end)))
+                    out.push("\n")
+
+## A name for a node that survives edits outside the node's item: the path
+## of the enclosing items, outermost first, as `KIND:name#ordinal` (the
+## ordinal counts earlier siblings of the same kind and name), and the
+## node's index in the pre-order of the innermost item.
+@derive(Eq, Debug)
+pub struct StableId:
+    pub item: list[String]
+    pub local: int
+
+impl Tree:
+    ## The nodes of the subtree of `node` in pre-order, `node` first.
+    pub pure def preorder(self, node: int) -> list[int]:
+        var out: list[int] = []
+        var stack = [node]
+        while let Some(n) = stack.pop():
+            out.push(n)
+            var kids: list[int] = []
+            for e in self.nodes[n].children:
+                if let Node(k) = e:
+                    kids.push(k)
+            kids.reverse()
+            stack.extend(kids)
+        return out
+
+    ## The stable identity of a node.
+    pub pure def stable_id(self, node: int) -> StableId:
+        # The innermost item containing the node.
+        var cur: int? = Some(node)
+        while let Some(n) = cur:
+            if is_item(self.nodes[n].kind):
+                return StableId(item=self.item_path(n), local=index_of(self.preorder(n), node))
+            cur = self.nodes[n].parent
+        return StableId(item=[], local=index_of(self.preorder(self.root), node))
+
+    pure def item_path(self, item: int) -> list[String]:
+        var path: list[String] = []
+        var cur: int? = Some(item)
+        while let Some(n) = cur:
+            let kind = self.nodes[n].kind
+            if is_item(kind):
+                let name = self.item_name(n)
+                # The ordinal among earlier siblings with the same kind and name.
+                var ordinal = 0
+                if let Some(parent) = self.nodes[n].parent:
+                    for e in self.nodes[parent].children:
+                        if let Node(s) = e:
+                            if s == n:
+                                break
+                            if self.nodes[s].kind == kind and self.item_name(s) == name:
+                                ordinal += 1
+                path.push("{kind.name()}:{name}#{ordinal}")
+            cur = self.nodes[n].parent
+        path.reverse()
+        return path
+
+    ## The name of an item node: the first name after the item's keyword,
+    ## the string of a test, or the path of an impl or an import.
+    pure def item_name(self, node: int) -> String:
+        let text: str = self.text
+        var seen_keyword = False
+        for e in self.nodes[node].children:
+            match e:
+                case Leaf(t):
+                    let token = self.tokens[t]
+                    if token.kind.is_keyword():
+                        seen_keyword = True
+                    elif token.kind == SyntaxKind.Ident and seen_keyword:
+                        return text.byte_slice(token.start, token.end).to_string()
+                case Node(n):
+                    let kind = self.nodes[n].kind
+                    let span = text.byte_slice(self.nodes[n].start, self.nodes[n].end)
+                    if seen_keyword and kind == SyntaxKind.StringExpr:
+                        return span.to_string()
+                    if kind == SyntaxKind.PathType or kind == SyntaxKind.ModulePath:
+                        return span.to_string()
+        return String.new()
+
+## Whether a node of this kind is a declaration.
+pub pure def is_item(kind: SyntaxKind) -> bool:
+    return match kind:
+        case FnDef | StructDef | EnumDef | ErrorDef | ImplDef | TraitDef | ImportItem | FromImport: True
+        case TestDef | SuiteDef | BenchDef | ConstDef | TypeAlias | ExternBlock: True
+        case _: False
+
+pure def index_of(nodes: list[int], node: int) -> int:
+    for i in range(len(nodes)):
+        if nodes[i] == node:
+            return i
+    return 0
+
+## Builds a `Tree` from the lexer's tokens. The parser attaches tokens in
+## order and opens and closes nodes; `checkpoint` and `start_node_at` wrap
+## children already attached, which is how left-recursive expressions are
+## built without backtracking.
+pub struct TreeBuilder:
+    text: String
+    tokens: list[Token]
+    token_parents: list[int?]
+    nodes: list[NodeData]
+    ## The open nodes: each one's kind and where its children start in
+    ## `children`.
+    stack: list[(SyntaxKind, int)]
+    ## The children of the open nodes, innermost last.
+    children: list[Element]
+    next_token: int
+    ## The end of the last token attached.
+    pos: int
+
+impl TreeBuilder:
+    pub pure def new(text: str, own tokens: list[Token]) -> TreeBuilder:
+        var token_parents: list[int?] = []
+        for _ in tokens:
+            token_parents.push(None)
+        return TreeBuilder(
+            text=text.to_string(),
+            tokens=tokens,
+            token_parents=token_parents,
+            nodes=[],
+            stack=[],
+            children=[],
+            next_token=0,
+            pos=0,
+        )
+
+    pub pure def start_node(mut self, kind: SyntaxKind):
+        self.stack.push((kind, len(self.children)))
+
+    ## A place to wrap later: what `start_node_at` with it covers.
+    pub pure def checkpoint(self) -> int:
+        return len(self.children)
+
+    ## Opens a node whose children start at `checkpoint`, wrapping what
+    ## was attached since, but never what belongs to an enclosing node.
+    pub pure def start_node_at(mut self, checkpoint: int, kind: SyntaxKind):
+        var floor = 0
+        if let Some((_, start)) = self.stack.last():
+            floor = start
+        self.stack.push((kind, min(max(checkpoint, floor), len(self.children))))
+
+    ## Attaches the next lexer token.
+    pub pure def token(mut self):
+        if self.next_token >= len(self.tokens):
+            return
+        self.pos = self.tokens[self.next_token].end
+        self.children.push(Element.Leaf(self.next_token))
+        self.next_token += 1
+
+    ## The number of tokens attached so far.
+    pub pure def tokens_attached(self) -> int:
+        return self.next_token
+
+    pub pure def finish_node(mut self):
+        let (kind, start) = self.stack.pop() else:
+            return
+        var kids: list[Element] = []
+        for i in range(start, len(self.children)):
+            kids.push(self.children[i])
+        while len(self.children) > start:
+            _ = self.children.pop()
+        let id = len(self.nodes)
+        var lo = -1
+        var hi = -1
+        for e in kids:
+            var s = 0
+            var t = 0
+            match e:
+                case Node(n):
+                    s = self.nodes[n].start
+                    t = self.nodes[n].end
+                    self.nodes[n].parent = Some(id)
+                case Leaf(k):
+                    s = self.tokens[k].start
+                    t = self.tokens[k].end
+                    self.token_parents[k] = Some(id)
+            if lo < 0 or s < lo:
+                lo = s
+            if hi < 0 or t > hi:
+                hi = t
+        if lo < 0:
+            lo = self.pos
+            hi = self.pos
+        self.nodes.push(NodeData(kind=kind, start=lo, end=hi, parent=None, children=kids))
+        self.children.push(Element.Node(id))
+
+    ## Attaches any remaining tokens and closes every open node; the
+    ## outermost node becomes the root.
+    pub pure def finish(own self) -> Tree:
+        var b = self
+        while b.next_token < len(b.tokens):
+            b.token()
+        while not b.stack.is_empty():
+            b.finish_node()
+        let wrapped = match b.children.first():
+            case Some(Node(_)): len(b.children) == 1
+            case _: False
+        if not wrapped:
+            # Wrap whatever is left in a root node, so the tree is always well formed.
+            b.stack.push((SyntaxKind.SourceFile, 0))
+            b.finish_node()
+        var root = 0
+        if let Some(Node(n)) = b.children.first():
+            root = n
+        return Tree(
+            text=b.text, nodes=b.nodes, tokens=b.tokens, token_parents=b.token_parents, root=root
+        )
+
+test "a tree builds, wraps and reprints":
+    let text = "a + b"
+    let tokens = [
+        Token(kind=SyntaxKind.Ident, start=0, end=1),
+        Token(kind=SyntaxKind.Whitespace, start=1, end=2),
+        Token(kind=SyntaxKind.Plus, start=2, end=3),
+        Token(kind=SyntaxKind.Whitespace, start=3, end=4),
+        Token(kind=SyntaxKind.Ident, start=4, end=5),
+    ]
+    var b = TreeBuilder.new(text, tokens)
+    b.start_node(SyntaxKind.SourceFile)
+    let cp = b.checkpoint()
+    b.start_node(SyntaxKind.NameRef)
+    b.token()
+    b.finish_node()
+    b.start_node_at(cp, SyntaxKind.BinExpr)
+    b.token()
+    b.token()
+    b.token()
+    b.start_node(SyntaxKind.NameRef)
+    b.token()
+    b.finish_node()
+    b.finish_node()
+    b.finish_node()
+    let tree = b.finish()
+    assert tree.to_source() == text
+    assert tree.nodes[tree.root].kind == SyntaxKind.SourceFile
+    let dump = tree.dump(False)
+    assert dump.contains("\n  BIN_EXPR 0..5\n")
+    assert dump.contains("\n    PLUS 2..3 \"+\"\n")
+
+test "leftover tokens are wrapped in a root":
+    let tokens = [Token(kind=SyntaxKind.Ident, start=0, end=1)]
+    let tree = TreeBuilder.new("x", tokens).finish()
+    assert tree.to_source() == "x"
+    assert tree.nodes[tree.root].kind == SyntaxKind.SourceFile

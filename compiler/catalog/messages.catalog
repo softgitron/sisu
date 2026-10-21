@@ -17,6 +17,8 @@
 E0001 error   lex.tab-in-indentation      a tab in indentation; Sisu indents with spaces only
 E0002 error   lex.inconsistent-dedent     this line's indentation matches no enclosing block; the enclosing blocks start at column {columns}
 E0003 error   lex.unterminated-string     this string literal is not closed before the end of the line
+-     fix     lex.close-string            close it on its line
+-     fix     lex.close-bracket           close it on the line that opens it
 E0004 error   lex.unterminated-block-string  this multi-line string literal is never closed
 E0005 error   lex.unknown-character       `{char}` cannot appear in Sisu source outside a string or comment
 E0006 error   lex.unterminated-char       this character literal is not closed
@@ -36,6 +38,7 @@ E0018 error   lex.newline-in-interpolation  an interpolation in a one-line strin
 
 # ---------------------------------------------------------------- parser
 E0100 error   parse.expected              expected {expected}, found {found}
+-     fix     parse.insert-token          write the missing token
 E0101 error   parse.expected-block        expected an indented block after `{keyword}` on line {line}
 E0102 error   parse.block-on-same-line    a block starts on the next line, indented; nothing may follow `:` on the line that opens it
 E0103 error   parse.expected-expression   expected an expression, found {found}
@@ -55,7 +58,9 @@ E0116 error   parse.if-expression-else    an `if` expression needs an `else` bra
 E0117 error   parse.trailing-tokens       unexpected {found} after the end of the statement
 E0118 error   parse.arm-statement         a `case` arm on one line holds a single expression; put statements in an indented block
 E0119 error   parse.chain-operator        `{op}` cannot be chained; use parentheses or `and`
-E0120 error   parse.keyword-argument-order  a positional argument cannot follow a keyword argument
+# E0120 is retired: the parser takes arguments in any order, so the tree
+# stays whole, and the checker reports a positional argument after a
+# keyword one as E0376, with the fix that names it.
 E0121 error   parse.empty-interpolation   an interpolation needs an expression between `{{` and `}}`
 E0122 error   parse.closure-parameter     a closure parameter must be a name
 E0123 error   parse.walrus                Sisu has no `:=`; bind with `let` or use `if let`
@@ -87,6 +92,7 @@ E0218 error   resolve.self-not-first      `self` must be the first parameter
 E0219 error   resolve.const-type-required  a `const` needs a type: `const {name}: T = ...`
 E0220 error   resolve.import-unknown      cannot import `{name}`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
 E0221 error   resolve.field-default-order  a field with a default must not use the value of another field
+-     note    resolve.default-in-function  a default is computed before the other fields have values; build the value in a function that takes `{name}` instead
 E0222 error   resolve.parameter-default-order  a parameter without a default cannot follow one with a default
 E0223 error   resolve.not-a-module        `{name}` is not a module
 E0224 error   resolve.missing-body        `{name}` has no body; only standard-library intrinsics are declared without one
@@ -135,6 +141,11 @@ E0263 error   resolve.type-argument       `{param}` is a type parameter of `{nam
 -     label   resolve.first-defined       first defined here
 -     label   resolve.defined-here        `{name}` is defined here
 -     fix     resolve.similar-name        a similar name is in scope
+-     fix     resolve.similar-type        a type with a similar name is in scope
+-     fix     resolve.similar-module      a module with a similar name exists
+-     note    resolve.rename-duplicate    rename one of them, or remove the one not wanted
+-     note    resolve.write-trait-method  write `{signature}` in the impl
+-     note    borrow.consume-with         consume it with one of its methods that take `own self`: {methods}
 
 # ---------------------------------------------------------------- types
 E0300 error   type.mismatch               expected `{expected}`, found `{found}`
@@ -205,7 +216,8 @@ E0373 error   type.mixed-numbers          `{op}` cannot mix `{lhs}` and `{rhs}`;
 E0374 error   type.literal-out-of-range   `{text}` does not fit in `{ty}`
 E0375 error   type.type-arguments-needed  `{name}` needs a type argument, as in `{name}[T]`
 E0376 error   type.positional-after-keyword  a positional argument cannot follow a keyword argument
-E0377 error   type.default-needs-value    the parameter `{name}` has no default, so it must be given
+# E0377 is retired: a call that leaves out a parameter without a default
+# is E0308, with the fix that passes a hole.
 E0378 error   type.main-signature         `main` must take nothing or one `System` parameter, and return nothing or `! E`
 E0702 error   type.test-signature         a test takes nothing, or the real `System` as its one parameter: `test "name"(sys: System):`
 E0379 error   type.assert-message         the message of `assert` must be a string
@@ -239,6 +251,24 @@ E0399 error   type.bad-format-spec        `{spec}` is not a format spec; it is `
 -     fix     type.from-end-index         count from the end with `^`
 -     fix     type.add-error-set          add `{set}` to the function's error set
 -     fix     type.add-copy               copy it with `.copy()`
+-     fix     type.convert-to-float       make the `int` an `f64`
+-     fix     type.interpolate            write the value into the text
+-     note    type.option-not-value       the value may be missing: give a default with `??`, or take it apart with `if let` or `match`
+-     fix     type.similar-member         the type has a member with a similar name
+-     fix     type.take-mut               take `{name}` with `mut`
+-     fix     type.remove-pure            remove `pure`
+-     fix     type.show-debug             show its `Debug` form
+-     fix     type.add-bound              bound `{param}` by `{bound}`
+-     fix     type.add-hole               pass `{name}` as a hole to fill
+-     fix     type.unquote                write the number without quotes
+-     fix     type.call-conversion        call `{method}`, which gives the type expected
+-     fix     type.name-argument          name it `{name}`
+-     fix     type.drop-return-value      return without the value
+-     note    type.spec-letters           `d`, `x`, `X`, `o` and `b` format integers, `e`, `E`, `f`, `F` and `%` format numbers, and text takes none of them
+-     note    type.break-use-return       `return` leaves the function; `break` leaves only a loop
+-     note    type.int-range              `{ty}` holds {min} to {max}
+-     note    type.missing-return-end     return a value on that path too, or end the body with a `return`
+-     note    type.main-forms             write `def main():` or `def main(sys: System):`, returning nothing or `!`
 -     fix     type.add-mut                write `mut` before the argument
 -     fix     type.remove-mut             remove `mut`
 -     fix     type.add-impl               `{ty}` has every method of `{trait}`; add `impl {trait} for {ty}`
@@ -273,28 +303,27 @@ E0422 error   borrow.must-consume-in-owner  `{ty}` is must-consume, so it cannot
 E0423 error   type.own-closure-capture    an `own` closure keeps a copy of `{name}`, and `{ty}` is not `Copy`; stage 0 copies captures (a capture by move arrives with tasks)
 E0424 error   type.own-closure-changes    an `own` closure keeps a copy of `{name}` and cannot change it; borrow it with a plain closure instead
 E0425 error   task.closure-literal        `{function}` takes a closure written at the call (or a `do` block), so that what it captures can be checked; a function value is not one
-E0426 error   task.not-send               `{name}` moves into the task, but `{ty}` is not `Send`{path}
-E0427 error   task.not-sync               `{name}` is shared with the task by reference, but `{ty}` is not `Sync`{path}
+E0426 error   task.not-send               `{name}` moves into the task, but `{ty}` is not `Send`
+E0427 error   task.not-sync               `{name}` is shared with the task by reference, but `{ty}` is not `Sync`
 E0428 error   task.borrows-body-local     the task borrows `{name}`, which belongs to the scope's body: the body ends before the scope joins its tasks
 E0429 error   task.borrows-elsewhere      the task borrows `{name}`, but only a task spawned on a scope in that scope's body may borrow, and only what the body's environment borrows
 E0430 error   task.scope-escapes          a scope's body cannot return `{ty}`: a scope and the handles of its tasks end with the scope
 E0431 error   task.race-types             the tasks of a race return one type: this one returns `{found}`, an earlier one `{expected}`
 E0432 error   task.result-unknown         the type of the task's result must be known where it is joined
-E0433 error   task.result-not-send        the task returns `{ty}`, which is not `Send`{path}, so it cannot cross back to the task that joins it
+E0433 error   task.result-not-send        the task returns `{ty}`, which is not `Send`, so it cannot cross back to the task that joins it
 E0434 error   task.select-arm             a `select` arm waits for a `recv`, `send` or `join` call, a `Timer` or a `Cancellation`, not `{ty}`
-E0437 error   task.not-send-mut           `{name}` is changed by the task through a reference, but `{ty}` is not `Send`{path}
+E0437 error   task.not-send-mut           `{name}` is changed by the task through a reference, but `{ty}` is not `Send`
 E0435 error   type.yield-outside-generator  `yield` belongs in the body of a generator, a function that returns `Iter[T]` (not in a closure)
 E0436 error   type.generator-result       `{name}` yields, so it must return `Iter[T]`, not `{ty}`
 -     help    task.wrap-mutex             wrap it: `Mutex[{ty}]` shares mutation between tasks; or move the value with an `own` task
 -     help    task.use-own                move it into the task instead: write `own () -> ...` (or `do own:`), or copy what the task needs into a local before the `spawn`
--     note    task.field-path             through {path}
+-     note    task.field-path             because of `{path}`, a `{ty}`
 -     label   borrow.moved-here           `{name}` is moved here
 -     label   borrow.moved-in-loop        `{name}` is moved here, in an earlier iteration of the loop
 -     label   borrow.borrowed-by          borrowed here by `{borrower}`
 -     label   borrow.borrowed-here        borrowed here
 -     label   borrow.later-used           the borrow is still used here
 -     label   borrow.declared-here        `{name}` is declared here
--     label   borrow.gone-here            `{name}` is gone here
 -     label   borrow.assigned-here        `{name}` is assigned here first
 -     note    borrow.move-after           move this after line {end}, where the borrow ends, or work on a copy made with `.copy()`
 -     note    borrow.copy-before-move     copy it with `.copy()` before it is moved, or move it later
@@ -340,7 +369,7 @@ E0613 error   comptime.embed-path         `embed` takes the path of a file as a 
 E0614 error   comptime.no-fake            `cap.Fake[{name}]` needs a trait of the program whose methods can all be forwarded: a `self` or `mut self` receiver, no type parameters, and no borrow or `Self` in a signature
 
 # ---------------------------------------------------------------- capabilities
-E0700 error   cap.not-shareable          `{ty}` cannot become `{cap}`: a capability may reach every task, and `{ty}` is not `{auto}`{path}
+E0700 error   cap.not-shareable          `{ty}` cannot become `{cap}`: a capability may reach every task, and `{ty}` is not `{auto}`
 E0701 error   cap.internal               `{name}` is internal to the standard library; a program reaches the world only through the capabilities it is given
 E0703 error   cap.untrusted              the package `{package}` is not trusted with {what}; a dependency may contain `unsafe` and `extern` only when `[trust] unsafe` in the root package's `sisu.toml` lists it
 
@@ -470,7 +499,8 @@ R0071 runtime monitor.op-return           the return from the frame
 R0072 runtime panic.stale-key             stale arena key: slot {index}, generation {generation}, no longer holds its value
 R0073 runtime panic.mutex-held            the mutex is already locked by this task, which would wait for itself forever
 R0074 runtime panic.mutex-poisoned        the mutex is poisoned: a task panicked holding it and left its value's invariant broken
-R0075 runtime panic.cell-in-use           a `Cell` was replaced while its value was being replaced
+# R0075 is retired: `Cell.set` and `Cell.replace` swap the value before the
+# old one's `Drop` runs, so no `Drop` finds a cell half replaced.
 R0076 runtime panic.scope-ended           a task was spawned on a scope that has ended
 R0077 runtime panic.joined-twice          the task was joined already: its result was taken by an earlier `join`
 R0078 runtime panic.empty-race            a race whose body spawned no task has no winner
@@ -506,11 +536,17 @@ R0111 runtime run.live-restart-signature  watch: the signature of `{function}` c
 R0112 runtime run.live-restart-layout     watch: the layout of `{ty}` changed, so the program starts again
 R0114 runtime run.live-restart-impls      watch: the impls of `{trait}` changed, so the program starts again
 R0115 runtime panic.char-boundary         the byte index {index} is inside a character of the text
+R0116 runtime run.stats-depth             stats stack-depth: {calls} calls, the deepest stack {max} frames, about {bytes} bytes of native stack there (16 per SIR local and 64 per frame)
+R0117 runtime run.stats-depth-bucket      stats stack-depth: {calls} calls at a depth of {from} to {to} frames
+R0118 runtime run.stats-shared-sites      stats shared: {local} of {total} `Shared` construction sites tagged task-local, {crossing} may-cross
+R0119 runtime run.stats-shared-site       stats shared: {at} in `{function}`, {tag}: {cells} cells made, {crossed} reached by another task
+R0120 runtime run.stats-tag-local         task-local
+R0121 runtime run.stats-tag-crossing      may-cross
 
 # ---------------------------------------------------------------- driver
 
 D0001 cli     cli.cannot-read             cannot read `{path}`: {reason}
-D0002 cli     cli.usage                   usage: sisu <command> [options] [<file>]\n\nWithout a file, a command works on the package of the current directory (`sisu.toml`).\n\ncommands:\n  run [<file>] [args...]  check and run a program (`--watch` swaps in each save, `--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor, `--contracts=off|preconditions|all` sets what it checks, `--record LOG` writes its capability log, `--stats` reports the scheduler's numbers)\n  check [<file>]         report diagnostics (`--format=ids` for the conformance form, `--explain` for the signatures with their contracts)\n  build [<file>]         check and lower a package, writing its lockfile\n  test [<file>]          run the tests and transcripts under the ownership monitor (`--no-monitor` without it, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`, `--update` for snapshots and transcripts, `--replay TOKEN`, `--sim` with `--faults P`, `--std` for the standard library's doc examples)\n  bench [<file>]         run the benchmarks (`--iterations N`)\n  replay <log>           run a recorded program again against its capability log\n  fmt [<path>...]        format files in place (`--check` reports what would change)\n  repl [<file>|<dir>]    an interactive session, with a package loaded from its directory\n  ws <file>              run a worksheet, showing each statement's value (`--run` with the real `System`)\n  lsp                    the language server, over standard input and output\n  new <name>             create a package (`--lib` for a library)\n  sir [<file>]           print the serialised SIR\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--print` reprints the source, `--shape` prints what formatting keeps\n  explain <code>         describe a diagnostic code\n  explain-borrow <file>:<line>  show every borrow live on a line\n  audit --ownership <file>...  count the uses of `Shared`, `Weak`, `Cell`, `Arena`, `Key`, `.copy()` and `unsafe` in each file\n\n`run`, `check`, `build`, `test` and `bench` take `--locked`, which keeps `sisu.lock` as it is. `run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
+D0002 cli     cli.usage                   usage: sisu <command> [options] [<file>]\n\nWithout a file, a command works on the package of the current directory (`sisu.toml`).\n\ncommands:\n  run [<file>] [args...]  check and run a program (`--watch` swaps in each save, `--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor, `--contracts=off|preconditions|all` sets what it checks, `--record LOG` writes its capability log, `--stats` reports the scheduler's numbers, `--stats stack-depth` a histogram of the frame depths, `--stats shared` each `Shared` construction site)\n  check [<file>]         report diagnostics (`--format=ids` for the conformance form, `--explain` for the signatures with their contracts, `--diary LOG` appends them and what resolved the last check's to a JSONL log)\n  build [<file>]         check and lower a package, writing its lockfile\n  test [<file>]          run the tests and transcripts under the ownership monitor (`--no-monitor` without it, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`, `--update` for snapshots and transcripts, `--replay TOKEN`, `--sim` with `--faults P`, `--std` for the standard library's doc examples)\n  bench [<file>]         run the benchmarks (`--iterations N`)\n  replay <log>           run a recorded program again against its capability log\n  fmt [<path>...]        format files in place (`--check` reports what would change)\n  repl [<file>|<dir>]    an interactive session, with a package loaded from its directory\n  ws <file>              run a worksheet, showing each statement's value (`--run` with the real `System`)\n  lsp                    the language server, over standard input and output\n  new <name>             create a package (`--lib` for a library)\n  sir [<file>]           print the serialised SIR\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--print` reprints the source, `--shape` prints what formatting keeps\n  explain <code>         describe a diagnostic code\n  explain-borrow <file>:<line>  show every borrow live on a line\n  audit --ownership <file>...  count the uses of `Shared`, `Weak`, `Cell`, `Arena`, `Key`, `.copy()` and `unsafe` in each file\n\n`run`, `check`, `build`, `test` and `bench` take `--locked`, which keeps `sisu.lock` as it is. `run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
 D0003 cli     cli.unknown-command         unknown command `{command}`; run `sisu help`
 D0004 cli     cli.missing-file            `sisu {command}` needs a file
 D0005 cli     cli.no-main                 `{file}` has no `main` function
@@ -600,4 +636,13 @@ D0090 cli     cli.repl-why-unbound        no input of the session binds `{name}`
 D0091 cli     cli.repl-diverged           the session's earlier inputs did not replay as they ran ({detail}); its values may differ from what they were
 D0092 cli     cli.ws-value                # => {value}
 D0093 cli     cli.ws-output               # | {text}
+D0094 cli     cli.bad-stats               `--stats` takes `stack-depth` or `shared` (or nothing, for the scheduler's numbers), not `{value}`
+D0095 cli     lsp.not-open                the document is not open
+D0096 cli     lsp.not-served              `{method}` is not served
+D0097 cli     lsp.not-a-command           `{command}` is not a command of this server
+D0098 cli     lsp.not-a-name              `{name}` is not a name
+D0099 cli     lsp.cannot-rename           nothing here can be renamed: a local, or a definition of the program's own
+D0100 cli     lsp.not-analysed            the document is not analysed
+D0101 cli     lsp.has-errors              the program has errors: fix them to see its borrows
+D0102 cli     lsp.keyword                 keyword
 D0069 cli     cli.no-application          the package `{name}` is a library (`src/lib.sisu`); `sisu run` runs an application, whose root module is `src/main.sisu`

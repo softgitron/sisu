@@ -1,0 +1,3 @@
+5:5-5:7 E0341 type.not-mutable name="xs" what="xs"
+  label 4:9-4:11 resolve.defined-here name="xs"
+  fix type.declare-var

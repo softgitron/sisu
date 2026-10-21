@@ -25,6 +25,19 @@ impl Checker<'_> {
         self.coerce(x, ty)
     }
 
+    /// `check_expr` against a type written at `because` (a `let`'s
+    /// annotation), which a mismatch points at.
+    pub fn check_expr_because(&mut self, e: &ast::Expr, ty: &Ty, because: TextRange) -> Expr {
+        if self.refinement_of(ty).is_some() && crate::contracts::is_constant(self, e) {
+            return self.check_expr(e, ty);
+        }
+        let x = self.infer_expr(e, Some(ty));
+        self.because = Some(because);
+        let x = self.coerce(x, ty);
+        self.because = None;
+        x
+    }
+
     /// Wraps an expression in a coercion node.
     fn wrap(&self, x: Expr, kind: Coercion, ty: Ty) -> Expr {
         let span = x.span;
@@ -33,6 +46,8 @@ impl Checker<'_> {
 
     /// Converts `x` to `expected`, or reports a mismatch.
     pub fn coerce(&mut self, x: Expr, expected: &Ty) -> Expr {
+        let branch = self.branch.take();
+        let because = self.because.take();
         let actual = self.resolved(&x.ty);
         let exp = self.resolved(expected);
         if actual == Ty::Error || exp == Ty::Error {
@@ -251,18 +266,143 @@ impl Checker<'_> {
         }
         let expected_s = self.show(&exp);
         let found_s = self.show(&actual);
-        let mut d = self
-            .error(msg::TYPE_MISMATCH, self.range_of(&x))
-            .with("expected", expected_s)
-            .with("found", found_s.clone());
+        let mut d = match branch {
+            // Two branches that disagree, where nothing else asked for a
+            // type: neither is the one expected.
+            Some((keyword, first)) => self
+                .error(msg::TYPE_IF_BRANCHES, self.range_of(&x))
+                .with("keyword", keyword)
+                .with("first", expected_s.clone())
+                .with("second", found_s.clone())
+                .label(self.span(first), msg::TYPE_FOUND_HERE, vec![("ty", expected_s)]),
+            None => {
+                let d = self
+                    .error(msg::TYPE_MISMATCH, self.range_of(&x))
+                    .with("expected", expected_s)
+                    .with("found", found_s.clone());
+                match because {
+                    Some(r) => d.label(self.span(r), msg::TYPE_EXPECTED_BECAUSE, Vec::new()),
+                    None => d,
+                }
+            }
+        };
         if matches!(actual, Ty::Int) && matches!(exp, Ty::Float) {
             d = d.note(
                 msg::TYPE_MIXED_NUMBERS,
                 vec![("op", "=".into()), ("lhs", "f64".into()), ("rhs", "int".into())],
             );
         }
+        d = self.mismatch_fix(d, &x, &actual, &exp);
         self.report(d);
         self.wrap(x, Coercion::Mismatch, exp)
+    }
+
+    /// The fix of a value of the wrong type, where one is plain: a number
+    /// written as text loses its quotes; a value whose type has a method of
+    /// no arguments giving the type expected gets the call (`.count()` of
+    /// an `Iter` where an `int` is expected), the first by name.
+    fn mismatch_fix(
+        &self,
+        d: sisu_diag::Diagnostic,
+        x: &Expr,
+        actual: &Ty,
+        exp: &Ty,
+    ) -> sisu_diag::Diagnostic {
+        let r = x.span.range;
+        let Some(text) = self.source.get(r.start as usize..r.end as usize) else { return d };
+        if let ExprKind::Str(s) = &x.kind
+            && text.starts_with('"')
+        {
+            let number = match exp {
+                Ty::Int => s.parse::<i64>().is_ok(),
+                Ty::Float => s.parse::<f64>().is_ok() && s.contains('.'),
+                t => self.int_kind(t).is_some() && s.parse::<i128>().is_ok(),
+            };
+            if number && !s.is_empty() {
+                let edit = sisu_diag::Edit { span: x.span, text: s.clone() };
+                return d.fix(msg::TYPE_UNQUOTE, Vec::new(), vec![edit]);
+            }
+        }
+        // A literal wants another literal, not a call on it: no
+        // `"text".byte_len()` where an `int` is expected.
+        let literal = matches!(
+            x.kind,
+            ExprKind::Int(_)
+                | ExprKind::WideInt(_)
+                | ExprKind::Float(_)
+                | ExprKind::Bool(_)
+                | ExprKind::Char(_)
+                | ExprKind::Str(_)
+                | ExprKind::Bytes(_)
+                | ExprKind::Interp(_)
+                | ExprKind::List(_)
+                | ExprKind::Tuple(_)
+                | ExprKind::Unit
+        );
+        if literal {
+            return d;
+        }
+        let prog = self.prog;
+        let mut keys: Vec<sisu_resolve::TyKey> = actual.key().into_iter().collect();
+        if self.is_string(actual) {
+            keys.push(sisu_resolve::TyKey::Str);
+        }
+        let gives = |f: &sisu_resolve::FnInfo| {
+            matches!(f.self_mode, Some(ast::Mode::Borrow | ast::Mode::Own))
+                && f.params.is_empty()
+                && f.generics.len() == f.impl_generics
+                && !f.err_inferred
+                && f.ret == *exp
+        };
+        let mut found: Vec<&String> = prog
+            .methods
+            .iter()
+            .filter(|((k, m), def)| {
+                keys.contains(k) && !m.starts_with('_') && prog.fn_info(**def).is_some_and(gives)
+            })
+            .map(|((_, m), _)| m)
+            .collect();
+        // The methods of the traits it implements (without parameters of
+        // their own): `count` of an `Iter`.
+        for (i, def) in prog.defs.iter().enumerate() {
+            let DefKind::Trait(info) = &def.kind else { continue };
+            if !info.generics.is_empty() {
+                continue;
+            }
+            let wanted: Vec<&String> = info
+                .methods
+                .iter()
+                .filter(|m| prog.fn_info(**m).is_some_and(gives))
+                .map(|m| &prog.def(*m).name)
+                .collect();
+            if wanted.is_empty() {
+                continue;
+            }
+            let tr = sisu_resolve::TraitRef { def: DefId(i as u32), args: Vec::new() };
+            if prog.implements(actual, &tr, &self.env).holds() {
+                found.extend(wanted);
+            }
+        }
+        found.sort();
+        let Some(m) = found.first() else { return d };
+        let simple = text.bytes().all(|b| {
+            b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'(' | b')' | b'[' | b']' | b'"')
+        }) && !text.is_empty();
+        let edits = if simple {
+            vec![sisu_diag::Edit {
+                span: Span::new(self.file, TextRange::empty(r.end)),
+                text: format!(".{m}()"),
+            }]
+        } else {
+            vec![
+                sisu_diag::Edit { span: Span::new(self.file, TextRange::empty(r.start)), text: "(".into() },
+                sisu_diag::Edit {
+                    span: Span::new(self.file, TextRange::empty(r.end)),
+                    text: format!(").{m}()"),
+                },
+            ]
+        };
+        d.fix(msg::TYPE_CALL_CONVERSION, vec![("method", m.to_string())], edits)
     }
 
     pub fn range_of(&self, x: &Expr) -> TextRange {
@@ -621,7 +761,15 @@ impl Checker<'_> {
             }
             _ => {
                 let t = if negative { format!("-{text}") } else { text.to_string() };
-                let d = self.error(msg::TYPE_LITERAL_OUT_OF_RANGE, range).with("text", t).with("ty", "int");
+                let d =
+                    self.error(msg::TYPE_LITERAL_OUT_OF_RANGE, range).with("text", t).with("ty", "int").note(
+                        msg::TYPE_INT_RANGE,
+                        vec![
+                            ("ty", "int".into()),
+                            ("min", i64::MIN.to_string()),
+                            ("max", i64::MAX.to_string()),
+                        ],
+                    );
                 self.report(d);
                 Expr::error(span)
             }
@@ -650,7 +798,11 @@ impl Checker<'_> {
         };
         if !fits {
             let t = if negative { format!("-{text}") } else { text.to_string() };
-            let d = self.error(msg::TYPE_LITERAL_OUT_OF_RANGE, range).with("text", t).with("ty", k);
+            let min = if signed { format!("-{}", max + 1) } else { "0".to_string() };
+            let d = self.error(msg::TYPE_LITERAL_OUT_OF_RANGE, range).with("text", t).with("ty", k).note(
+                msg::TYPE_INT_RANGE,
+                vec![("ty", k.to_string()), ("min", min), ("max", max.to_string())],
+            );
             self.report(d);
             return Expr::error(span);
         }
@@ -776,6 +928,28 @@ impl Checker<'_> {
                     if !spec.is_empty() && !is_time && !is_format_spec(&spec) {
                         let d = self.error(msg::TYPE_BAD_FORMAT_SPEC, expr.range).with("spec", spec.clone());
                         self.report(d);
+                    } else if !is_time
+                        && let Some(letter) = spec.chars().last().filter(|c| "boxXdeEfF%".contains(*c))
+                    {
+                        // The spec's letter must fit a value whose rendering
+                        // the compiler knows (E0380): `x` is for integers,
+                        // `f` for numbers, and text takes neither. A type of
+                        // the program's own applies its spec in its impl.
+                        let t = self.resolved(x.ty.strip_ref());
+                        let integers_only = "boxXd".contains(letter);
+                        let wrong = match &t {
+                            Ty::Float => integers_only,
+                            Ty::Bool | Ty::Char | Ty::Str => true,
+                            t => self.is_string(t),
+                        };
+                        if wrong {
+                            let d = self
+                                .error(msg::TYPE_NO_DISPLAY, expr.range)
+                                .with("ty", self.show(&t))
+                                .with("spec", spec.clone())
+                                .note(msg::TYPE_SPEC_LETTERS, Vec::new());
+                            self.report(d);
+                        }
                     }
                     out.push(InterpPart::Value { expr: x, debug: debug.clone(), spec });
                 }
@@ -895,6 +1069,17 @@ impl Checker<'_> {
             }
             _ => {}
         }
+        // Another field of the struct whose default this is (E0221).
+        if let Some(s) = self.field_default_of
+            && let DefKind::Struct(info) = &self.prog.def(s).kind
+            && info.fields.iter().any(|f| f.name == n)
+        {
+            let d = self
+                .error(msg::RESOLVE_FIELD_DEFAULT_ORDER, range)
+                .note(msg::RESOLVE_DEFAULT_IN_FUNCTION, vec![("name", n.to_string())]);
+            self.report(d);
+            return Expr::error(span);
+        }
         let mut d = self.error(msg::RESOLVE_UNDEFINED_NAME, range).with("name", n);
         if let Some(similar) = self.similar_name(n) {
             let edit = sisu_diag::Edit { span, text: similar.clone() };
@@ -909,7 +1094,6 @@ impl Checker<'_> {
     /// third of the length, and at least one).
     pub fn similar_name(&self, n: &str) -> Option<String> {
         let prog = self.prog;
-        let limit = (n.chars().count() / 3).max(1);
         let mut names: Vec<String> = self.scopes.iter().flatten().map(|(name, _)| name.clone()).collect();
         if let Some(m) = prog.modules.get(self.module.0 as usize) {
             names.extend(m.items.keys().cloned());
@@ -917,15 +1101,9 @@ impl Checker<'_> {
         if let Some(m) = prog.modules.get(prog.prelude.0 as usize) {
             names.extend(m.items.keys().filter(|k| !k.starts_with('_')).cloned());
         }
-        names.sort();
-        names.dedup();
-        names
-            .into_iter()
-            .filter(|c| c != n)
-            .map(|c| (edit_distance(n, &c), c))
-            .filter(|(d, _)| *d <= limit)
-            .min_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)))
-            .map(|(_, c)| c)
+        // The literals spelt as keywords: `true` is `True`.
+        names.extend(["True", "False"].map(String::from));
+        closest(n, names)
     }
 
     /// A declaration used as a value.
@@ -983,6 +1161,11 @@ impl Checker<'_> {
             }
         {
             let set = self.inferred.get(&d).cloned().unwrap_or_default();
+            let mut reads = self.inferred_reads.borrow_mut();
+            if !reads.contains(&d) {
+                reads.push(d);
+            }
+            drop(reads);
             return self.prog.wk.result.map(|r| Ty::Adt(r, vec![ok, Ty::ErrSet(set)])).unwrap_or(Ty::Error);
         }
         f.ret.clone()
@@ -1310,11 +1493,15 @@ impl Checker<'_> {
             ) => Some(Ty::Float),
             (BinOp::Add, a, b) if is_text(self, a) && is_text(self, b) => Some(self.string_ty()),
             (_, Ty::Int, Ty::Float) | (_, Ty::Float, Ty::Int) => {
+                // The fix converts the `int` side: a literal gets its `.0`,
+                // anything else `.to_f64()`.
+                let int_side = if lt == Ty::Int { l } else { r };
                 let d = self
                     .error(msg::TYPE_MIXED_NUMBERS, range)
                     .with("op", op.text())
                     .with("lhs", self.show(&lt))
-                    .with("rhs", self.show(&rt));
+                    .with("rhs", self.show(&rt))
+                    .fix(msg::TYPE_CONVERT_TO_FLOAT, Vec::new(), self.to_float_edits(int_side));
                 self.report(d);
                 return (Ty::Error, false);
             }
@@ -1323,14 +1510,69 @@ impl Checker<'_> {
         match result {
             Some(t) => (t, true),
             None => {
-                let d = self
+                let mut d = self
                     .error(msg::TYPE_BINARY_OPERATOR, range)
                     .with("op", op.text())
                     .with("lhs", self.show(&lt))
                     .with("rhs", self.show(&rt));
+                // Text and a number, a `bool` or a `char` joined by `+`:
+                // interpolation writes the value into the text.
+                let shown = |t: &Ty| {
+                    matches!(t, Ty::Int | Ty::Float | Ty::Bool | Ty::Char) || self.int_kind(t).is_some()
+                };
+                if op == BinOp::Add
+                    && ((is_text(self, &lt) && shown(&rt)) || (shown(&lt) && is_text(self, &rt)))
+                    && let Some(text) = self.interpolated(l, r)
+                {
+                    let edit = Edit { span: self.span(range), text };
+                    d = d.fix(msg::TYPE_INTERPOLATE, Vec::new(), vec![edit]);
+                }
+                // An optional value used as the value it may hold.
+                if self.is_option(&lt) || self.is_option(&rt) {
+                    d = d.note(msg::TYPE_OPTION_NOT_VALUE, Vec::new());
+                }
                 self.report(d);
                 (Ty::Error, false)
             }
+        }
+    }
+
+    /// The edits that make an `int` operand an `f64`: `2` becomes `2.0`, a
+    /// name or a call gets `.to_f64()`, anything else is parenthesised
+    /// first.
+    fn to_float_edits(&self, x: &Expr) -> Vec<Edit> {
+        let r = x.span.range;
+        let text = self.source.get(r.start as usize..r.end as usize).unwrap_or("");
+        if !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit() || b == b'_') {
+            return vec![Edit { span: Span::new(self.file, TextRange::empty(r.end)), text: ".0".into() }];
+        }
+        let simple = text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'(' | b')' | b'[' | b']'))
+            && text.bytes().next().is_some_and(|b| b.is_ascii_alphabetic() || b == b'_');
+        if simple {
+            vec![Edit { span: Span::new(self.file, TextRange::empty(r.end)), text: ".to_f64()".into() }]
+        } else {
+            vec![
+                Edit { span: Span::new(self.file, TextRange::empty(r.start)), text: "(".into() },
+                Edit { span: Span::new(self.file, TextRange::empty(r.end)), text: ").to_f64()".into() },
+            ]
+        }
+    }
+
+    /// `"text" + x` (or `x + "text"`) as one interpolated string, when the
+    /// text side is a plain string literal.
+    fn interpolated(&self, l: &Expr, r: &Expr) -> Option<String> {
+        let src = |x: &Expr| self.source.get(x.span.range.start as usize..x.span.range.end as usize);
+        let literal = |t: &str| -> Option<String> {
+            let inner = t.strip_prefix('"')?.strip_suffix('"')?;
+            (!inner.contains('"') && !inner.contains('{')).then(|| inner.to_string())
+        };
+        let (a, b) = (src(l)?, src(r)?);
+        match (literal(a), literal(b)) {
+            (Some(text), None) => Some(format!("\"{text}{{{b}}}\"")),
+            (None, Some(text)) => Some(format!("\"{{{a}}}{text}\"")),
+            _ => None,
         }
     }
 
@@ -1485,10 +1727,19 @@ impl Checker<'_> {
                         None => true,
                     };
                     if !ordered {
-                        let d = self
+                        let mut d = self
                             .error(msg::TYPE_NOT_ORDERED, range)
                             .with("ty", self.show(&t))
                             .with("op", op.text());
+                        if let Ty::Param(i) = t
+                            && let Some((name, edit)) = self.bound_edit(i, "PartialOrd")
+                        {
+                            d = d.fix(
+                                msg::TYPE_ADD_BOUND,
+                                vec![("param", name), ("bound", "PartialOrd".into())],
+                                vec![edit],
+                            );
+                        }
                         self.report(d);
                     }
                 } else if matches!(self.resolved(&a), Ty::Fn(_)) {
@@ -1731,6 +1982,18 @@ impl Checker<'_> {
 
     // ---------------------------------------------------------------- if and match expressions
 
+    /// A later branch of an `if` or `match`, checked against `ty`: the type
+    /// expected of the whole, or with `first` the type of the first
+    /// branch, which a mismatch reports as two branches that disagree.
+    fn branch_expr(&mut self, e: &ast::Expr, ty: &Ty, first: Option<(&'static str, TextRange)>) -> Expr {
+        let Some(first) = first else { return self.check_expr(e, ty) };
+        let x = self.infer_expr(e, Some(ty));
+        self.branch = Some(first);
+        let x = self.coerce(x, ty);
+        self.branch = None;
+        x
+    }
+
     fn if_expr(
         &mut self,
         branches: &[(ast::Expr, ast::Expr)],
@@ -1746,17 +2009,21 @@ impl Checker<'_> {
         for (c, _) in branches {
             conds.push(self.check_condition_expr(c));
         }
+        // The branch whose type the later ones must have, when no type
+        // is expected.
+        let mut first: Option<TextRange> = None;
         for v in all {
             let x = match &target {
                 Some(t) => {
                     let t = t.clone();
-                    self.check_expr(v, &t)
+                    self.branch_expr(v, &t, first.map(|r| ("if", r)))
                 }
                 None => {
                     let x = self.infer_expr(v, None);
                     let x = self.decay(x);
                     if self.resolved(&x.ty) != Ty::Never {
                         target = Some(x.ty.clone());
+                        first = Some(v.range);
                     }
                     x
                 }
@@ -1791,6 +2058,7 @@ impl Checker<'_> {
         let by_ref = self.scrutinee_by_ref(&s);
         let sty = s.ty.clone();
         let mut target = expected.cloned();
+        let mut first: Option<TextRange> = None;
         let mut out = Vec::new();
         for a in arms {
             if self.arm_made_at_compile_time(a) {
@@ -1804,13 +2072,14 @@ impl Checker<'_> {
                     let x = match &target {
                         Some(t) => {
                             let t = t.clone();
-                            self.check_expr(e, &t)
+                            self.branch_expr(e, &t, first.map(|r| ("match", r)))
                         }
                         None => {
                             let x = self.infer_expr(e, None);
                             let x = self.decay(x);
                             if self.resolved(&x.ty) != Ty::Never {
                                 target = Some(x.ty.clone());
+                                first = Some(e.range);
                             }
                             x
                         }
@@ -2317,12 +2586,105 @@ impl Checker<'_> {
             self.report(d);
             return Expr::error(span);
         }
-        let d = self
+        let mut d = self
             .error(msg::TYPE_UNKNOWN_FIELD, name.range)
             .with("ty", self.show(&t))
             .with("name", name.text.clone());
+        if let Some(similar) = self.similar_member(&t, &name.text) {
+            let edit = sisu_diag::Edit { span: self.span(name.range), text: similar };
+            d = d.fix(msg::TYPE_SIMILAR_MEMBER, Vec::new(), vec![edit]);
+        }
         self.report(d);
         Expr::error(span)
+    }
+
+    /// The edit that bounds the function's own type parameter `i` by
+    /// `bound` in its header (`[T]` becomes `[T: Ord]`, `[T: Hash]`
+    /// becomes `[T: Hash + Ord]`), with the parameter's name; `None` for an
+    /// impl's parameter or a header that does not read as expected.
+    pub fn bound_edit(&self, i: u32, bound: &str) -> Option<(String, sisu_diag::Edit)> {
+        let f = self.prog.fn_info(self.def)?;
+        if (i as usize) < f.impl_generics {
+            return None;
+        }
+        let name = f.generics.get(i as usize)?.name.clone();
+        let after = self.prog.def(self.def).span.range.end as usize;
+        let rest = self.source.get(after..)?;
+        if !rest.starts_with('[') {
+            return None;
+        }
+        // The parameter list, split at its top-level commas.
+        let mut depth = 0i32;
+        let mut seg_start = after + 1;
+        let mut segments: Vec<(usize, usize)> = Vec::new();
+        for (k, c) in rest.char_indices() {
+            match c {
+                '[' | '(' => depth += 1,
+                ']' | ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        segments.push((seg_start, after + k));
+                        break;
+                    }
+                }
+                ',' if depth == 1 => {
+                    segments.push((seg_start, after + k));
+                    seg_start = after + k + 1;
+                }
+                _ => {}
+            }
+        }
+        for (a, b) in segments {
+            let seg = self.source.get(a..b)?;
+            let lead = seg.len() - seg.trim_start().len();
+            let word: String =
+                seg.trim_start().chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+            if word != name {
+                continue;
+            }
+            let name_end = (a + lead + word.len()) as u32;
+            let edit = match seg.find(':') {
+                None => sisu_diag::Edit {
+                    span: Span::new(self.file, TextRange::empty(name_end)),
+                    text: format!(": {bound}"),
+                },
+                Some(_) => {
+                    // After the last bound, before a default.
+                    let end = seg.find('=').map(|e| a + e).unwrap_or(b);
+                    let text = self.source.get(a..end)?;
+                    let at = (a + text.trim_end().len()) as u32;
+                    sisu_diag::Edit {
+                        span: Span::new(self.file, TextRange::empty(at)),
+                        text: format!(" + {bound}"),
+                    }
+                }
+            };
+            return Some((name, edit));
+        }
+        None
+    }
+
+    /// The field or method of a type closest to a misspelt one, by the
+    /// rule of [`Checker::similar_name`].
+    pub fn similar_member(&self, t: &Ty, n: &str) -> Option<String> {
+        let prog = self.prog;
+        let mut names: Vec<String> = Vec::new();
+        if let Ty::Adt(d, _) = t
+            && let Some(s) = prog.struct_info(*d)
+        {
+            names.extend(s.fields.iter().map(|f| f.name.clone()));
+        }
+        let mut keys: Vec<sisu_resolve::TyKey> = t.key().into_iter().collect();
+        if self.is_string(t) {
+            keys.push(sisu_resolve::TyKey::Str);
+        }
+        names.extend(
+            prog.methods
+                .keys()
+                .filter(|(k, m)| keys.contains(k) && !m.starts_with('_'))
+                .map(|(_, m)| m.clone()),
+        );
+        closest(n, names)
     }
 
     /// A field of a struct of another module is reached only when it is
@@ -2520,30 +2882,7 @@ pub fn mentions_it(e: &ast::Expr) -> bool {
     }
 }
 
-/// The edit distance between two names, by characters, where swapping
-/// two adjacent characters counts as one edit (optimal string alignment).
-pub fn edit_distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut d = vec![vec![0usize; b.len() + 1]; a.len() + 1];
-    for (i, row) in d.iter_mut().enumerate() {
-        row[0] = i;
-    }
-    for (j, cell) in d[0].iter_mut().enumerate() {
-        *cell = j;
-    }
-    for i in 1..=a.len() {
-        for j in 1..=b.len() {
-            let cost = usize::from(a[i - 1] != b[j - 1]);
-            let mut v = (d[i - 1][j] + 1).min(d[i][j - 1] + 1).min(d[i - 1][j - 1] + cost);
-            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
-                v = v.min(d[i - 2][j - 2] + 1);
-            }
-            d[i][j] = v;
-        }
-    }
-    d[a.len()][b.len()]
-}
+use sisu_resolve::closest;
 
 /// Whether `spec` is a format spec (03, "Strings"):
 /// `[[fill]align][sign][#][0][width][,|_][.precision][type]`, the grammar

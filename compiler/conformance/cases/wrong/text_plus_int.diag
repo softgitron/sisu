@@ -1,0 +1,2 @@
+5:19-5:30 E0310 type.binary-operator op="+" lhs="str" rhs="int"
+  fix type.interpolate 5:19-5:30 "\"n is {n}\""
