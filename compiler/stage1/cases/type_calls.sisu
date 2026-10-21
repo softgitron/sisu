@@ -1,0 +1,24 @@
+# Calls: keyword arguments, defaults, positional-only and keyword-only
+# parameters, and `mut` at the call site.
+def area(width: int, height: int = 1) -> int:
+    return width * height
+
+def scale(x: int, /, *, by: int) -> int:
+    return x * by
+
+def grow(mut xs: list[int], n: int):
+    xs.push(n)
+
+def main():
+    print(area(2, height=3))
+    print(area(width=2, 3))
+    print(area(2, 3, 4))
+    print(area(2, height=3, height=4))
+    print(scale(x=2, by=3))
+    print(scale(2, 3))
+    print(scale(2))
+    var xs = [1]
+    grow(xs, 2)
+    grow(mut xs, mut 3)
+    print(area(2, height="3"))
+    print(area(2, height="three"))

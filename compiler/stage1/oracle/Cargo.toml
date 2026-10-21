@@ -1,0 +1,15 @@
+# What stage 0 makes of a file where no `sisu` command prints it, for
+# `../check.sh` to compare with stage 1: the AST of `ast::build::module` in
+# Rust's `Debug` notation. A workspace of its own, built by `check.sh`.
+[package]
+name = "stage1-oracle"
+version = "0.0.1"
+edition = "2024"
+publish = false
+
+[dependencies]
+sisu-diag = { path = "../../crates/sisu-diag" }
+sisu-parser = { path = "../../crates/sisu-parser" }
+sisu-syntax = { path = "../../crates/sisu-syntax" }
+
+[workspace]

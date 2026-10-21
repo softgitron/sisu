@@ -1,0 +1,1321 @@
+##! The AST in the notation of Rust's `Debug` (`{:?}`), field for field in
+##! the order of stage 0's `sisu-syntax/src/ast/mod.rs`, so that stage 1's
+##! AST can be compared with what stage 0's `ast::build::module` makes:
+##! `docs`, `broken` and then one line per item.
+
+from stage1.diag import TextRange
+from stage1.syntax.ast import (
+    Arg,
+    Arm,
+    ArmBody,
+    ArmGen,
+    AssocTypeDef,
+    Ast,
+    Attr,
+    Block,
+    Closure,
+    ClosureBody,
+    CompClause,
+    Cond,
+    CondPart,
+    ConstDef,
+    Contract,
+    ElseBody,
+    EnumDef,
+    Expr,
+    ExprId,
+    ExprKind,
+    FieldDef,
+    FnDef,
+    GenericParam,
+    ImplDef,
+    IndexArg,
+    Item,
+    ItemId,
+    ItemKind,
+    LetElse,
+    Mode,
+    Module,
+    Name,
+    Param,
+    PatArg,
+    PatKind,
+    PatternId,
+    SelectArm,
+    Stmt,
+    StmtId,
+    StmtKind,
+    StrPart,
+    TestDef,
+    TypeExprId,
+    TypeKind,
+    VariantDef,
+    Vis,
+    WherePred,
+)
+from stage1.text import debug_char, debug_str
+
+## The lines of a module: its docs, its broken names, and each item.
+pub pure def module_lines(m: Module) -> String:
+    var out = String.new("docs ")
+    strings(mut out, m.docs)
+    out.push("\nbroken ")
+    strings(mut out, m.broken_names)
+    out.push("\n")
+    let d = D(ast=ref m.ast)
+    for i in m.items:
+        d.item(mut out, i)
+        out.push("\n")
+    return out
+
+pure def strings(mut out: String, xs: list[String]):
+    out.push("[")
+    var first = True
+    for x in xs:
+        if not first:
+            out.push(", ")
+        first = False
+        out.push(debug_str(x))
+    out.push("]")
+
+pure def bool_(mut out: String, b: bool):
+    out.push(if b: "true" else: "false")
+
+pure def range_(mut out: String, r: TextRange):
+    out.push("TextRange {{ start: {r.start}, end: {r.end} }}")
+
+pure def node_id(mut out: String, n: int):
+    out.push("NodeId({n})")
+
+pure def name(mut out: String, n: Name):
+    out.push("Name {{ text: ")
+    out.push(debug_str(n.text))
+    out.push(", range: ")
+    range_(mut out, n.range)
+    out.push(" }}")
+
+pure def opt_name(mut out: String, n: Name?):
+    match n:
+        case Some(x):
+            out.push("Some(")
+            name(mut out, x)
+            out.push(")")
+        case None:
+            out.push("None")
+
+pure def names(mut out: String, xs: list[Name]):
+    out.push("[")
+    var first = True
+    for x in xs:
+        if not first:
+            out.push(", ")
+        first = False
+        name(mut out, x)
+    out.push("]")
+
+pure def opt_string(mut out: String, s: String?):
+    match s:
+        case Some(x):
+            out.push("Some(")
+            out.push(debug_str(x))
+            out.push(")")
+        case None:
+            out.push("None")
+
+## `node: NodeId(n), range: TextRange { ... }`, the head of most records.
+pure def head(mut out: String, n: int, r: TextRange):
+    out.push("node: ")
+    node_id(mut out, n)
+    out.push(", range: ")
+    range_(mut out, r)
+
+pure def vis(mut out: String, v: Vis):
+    out.push("{v:?}")
+
+## The printer, over the arena of the AST it prints.
+view struct D:
+    ast: ref Ast
+
+impl D:
+    pure def item(self, mut out: String, id: ItemId):
+        let x = self.ast.item(id)
+        out.push("Item {{ ")
+        head(mut out, x.node, x.range)
+        out.push(", attrs: ")
+        self.attrs(mut out, x.attrs)
+        out.push(", vis: ")
+        vis(mut out, x.vis)
+        out.push(", docs: ")
+        strings(mut out, x.docs)
+        out.push(", kind: ")
+        self.item_kind(mut out, x.kind)
+        out.push(" }}")
+
+    pure def items(self, mut out: String, xs: list[ItemId]):
+        out.push("[")
+        var first = True
+        for x in xs:
+            if not first:
+                out.push(", ")
+            first = False
+            self.item(mut out, x)
+        out.push("]")
+
+    pure def attrs(self, mut out: String, xs: list[Attr]):
+        out.push("[")
+        var first = True
+        for a in xs:
+            if not first:
+                out.push(", ")
+            first = False
+            out.push("Attr {{ name: ")
+            out.push(debug_str(a.name))
+            out.push(", args: ")
+            self.args(mut out, a.args)
+            out.push(", range: ")
+            range_(mut out, a.range)
+            out.push(" }}")
+        out.push("]")
+
+    pure def item_kind(self, mut out: String, k: ItemKind):
+        match k:
+            case Fn(f):
+                out.push("Fn(")
+                self.fn_def(mut out, f)
+                out.push(")")
+            case Struct(s):
+                out.push("Struct(StructDef {{ name: ")
+                name(mut out, s.name)
+                out.push(", generics: ")
+                self.generics(mut out, s.generics)
+                out.push(", is_view: ")
+                bool_(mut out, s.is_view)
+                out.push(", fields: [")
+                var first = True
+                for f in s.fields:
+                    if not first:
+                        out.push(", ")
+                    first = False
+                    self.field_def(mut out, f)
+                out.push("], methods: ")
+                self.fn_defs(mut out, s.methods)
+                out.push(", invariants: [")
+                first = True
+                for c in s.invariants:
+                    if not first:
+                        out.push(", ")
+                    first = False
+                    self.contract(mut out, c)
+                out.push("], consts: [")
+                first = True
+                for c in s.consts:
+                    if not first:
+                        out.push(", ")
+                    first = False
+                    self.const_def(mut out, c)
+                out.push("], unsupported: [")
+                first = True
+                for (r, what) in s.unsupported:
+                    if not first:
+                        out.push(", ")
+                    first = False
+                    out.push("(")
+                    range_(mut out, r)
+                    out.push(", ")
+                    out.push(debug_str(what))
+                    out.push(")")
+                out.push("] }})")
+            case Enum(e):
+                out.push("Enum(")
+                self.enum_def(mut out, e)
+                out.push(")")
+            case ErrorSet(e):
+                out.push("ErrorSet(")
+                self.enum_def(mut out, e)
+                out.push(")")
+            case Impl(i):
+                out.push("Impl(")
+                self.impl_def(mut out, i)
+                out.push(")")
+            case Trait(t):
+                out.push("Trait(TraitDef {{ name: ")
+                name(mut out, t.name)
+                out.push(", generics: ")
+                self.generics(mut out, t.generics)
+                out.push(", supertraits: ")
+                self.type_exprs(mut out, t.supertraits)
+                out.push(", methods: ")
+                self.fn_defs(mut out, t.methods)
+                out.push(", assoc_types: ")
+                self.assoc_types(mut out, t.assoc_types)
+                out.push(" }})")
+            case Import(i):
+                out.push("Import(Import {{ path: ")
+                names(mut out, i.path)
+                out.push(", alias: ")
+                opt_name(mut out, i.alias)
+                out.push(", c_header: ")
+                opt_string(mut out, i.c_header)
+                out.push(" }})")
+            case FromImport(f):
+                out.push("FromImport(FromImport {{ path: ")
+                names(mut out, f.path)
+                out.push(", names: [")
+                var first = True
+                for (a, b) in f.names:
+                    if not first:
+                        out.push(", ")
+                    first = False
+                    out.push("(")
+                    name(mut out, a)
+                    out.push(", ")
+                    opt_name(mut out, b)
+                    out.push(")")
+                out.push("] }})")
+            case Test(t):
+                out.push("Test(")
+                self.test_def(mut out, t)
+                out.push(")")
+            case Suite(s):
+                out.push("Suite(SuiteDef {{ name: ")
+                out.push(debug_str(s.name))
+                out.push(", items: ")
+                self.items(mut out, s.items)
+                out.push(" }})")
+            case Bench(t):
+                out.push("Bench(")
+                self.test_def(mut out, t)
+                out.push(")")
+            case Const(c):
+                out.push("Const(")
+                self.const_def(mut out, c)
+                out.push(")")
+            case TypeAlias(a):
+                out.push("TypeAlias(TypeAlias {{ name: ")
+                name(mut out, a.name)
+                out.push(", generics: ")
+                self.generics(mut out, a.generics)
+                out.push(", ty: ")
+                self.opt_type(mut out, a.ty)
+                out.push(", refinement: ")
+                bool_(mut out, a.refinement)
+                out.push(", predicate: ")
+                self.opt_expr(mut out, a.predicate)
+                out.push(" }})")
+            case Extern(xs):
+                out.push("Extern(")
+                self.items(mut out, xs)
+                out.push(")")
+            case Stmt(s):
+                out.push("Stmt(")
+                self.stmt(mut out, s)
+                out.push(")")
+            case Error:
+                out.push("Error")
+
+    pure def fn_def(self, mut out: String, f: FnDef):
+        out.push("FnDef {{ ")
+        head(mut out, f.node, f.range)
+        out.push(", name: ")
+        name(mut out, f.name)
+        out.push(", is_pure: ")
+        bool_(mut out, f.is_pure)
+        out.push(", is_comptime: ")
+        bool_(mut out, f.is_comptime)
+        out.push(", generics: ")
+        self.generics(mut out, f.generics)
+        out.push(", params: ")
+        self.params(mut out, f.params)
+        out.push(", ret: ")
+        self.opt_type(mut out, f.ret)
+        out.push(", from: ")
+        names(mut out, f.from_)
+        out.push(", where_: [")
+        var first = True
+        for w in f.where_:
+            if not first:
+                out.push(", ")
+            first = False
+            self.where_pred(mut out, w)
+        out.push("], body: ")
+        self.opt_block(mut out, f.body)
+        out.push(", attrs: ")
+        self.attrs(mut out, f.attrs)
+        out.push(", header_broken: ")
+        bool_(mut out, f.header_broken)
+        out.push(", body_broken: ")
+        bool_(mut out, f.body_broken)
+        out.push(", vis: ")
+        vis(mut out, f.vis)
+        out.push(" }}")
+
+    pure def fn_defs(self, mut out: String, xs: list[FnDef]):
+        out.push("[")
+        var first = True
+        for f in xs:
+            if not first:
+                out.push(", ")
+            first = False
+            self.fn_def(mut out, f)
+        out.push("]")
+
+    pure def where_pred(self, mut out: String, w: WherePred):
+        out.push("WherePred {{ ty: ")
+        self.type_expr(mut out, w.ty)
+        out.push(", bounds: ")
+        self.type_exprs(mut out, w.bounds)
+        out.push(", range: ")
+        range_(mut out, w.range)
+        out.push(" }}")
+
+    pure def generics(self, mut out: String, xs: list[GenericParam]):
+        out.push("[")
+        var first = True
+        for g in xs:
+            if not first:
+                out.push(", ")
+            first = False
+            out.push("GenericParam {{ name: ")
+            name(mut out, g.name)
+            out.push(", bounds: ")
+            self.type_exprs(mut out, g.bounds)
+            out.push(", default: ")
+            self.opt_type(mut out, g.default)
+            out.push(", is_const: ")
+            bool_(mut out, g.is_const)
+            out.push(" }}")
+        out.push("]")
+
+    pure def assoc_types(self, mut out: String, xs: list[AssocTypeDef]):
+        out.push("[")
+        var first = True
+        for a in xs:
+            if not first:
+                out.push(", ")
+            first = False
+            out.push("AssocTypeDef {{ name: ")
+            name(mut out, a.name)
+            out.push(", ty: ")
+            self.opt_type(mut out, a.ty)
+            out.push(", range: ")
+            range_(mut out, a.range)
+            out.push(" }}")
+        out.push("]")
+
+    pure def mode(self, mut out: String, m: Mode):
+        out.push("{m:?}")
+
+    pure def params(self, mut out: String, xs: list[Param]):
+        out.push("[")
+        var first = True
+        for p in xs:
+            if not first:
+                out.push(", ")
+            first = False
+            out.push("Param {{ ")
+            head(mut out, p.node, p.range)
+            out.push(", mode: ")
+            self.mode(mut out, p.mode)
+            out.push(", kind: ")
+            match p.kind:
+                case SelfParam:
+                    out.push("SelfParam")
+                case Named(n, ty, default):
+                    out.push("Named {{ name: ")
+                    name(mut out, n)
+                    out.push(", ty: ")
+                    self.type_expr(mut out, ty)
+                    out.push(", default: ")
+                    self.opt_expr(mut out, default)
+                    out.push(" }}")
+                case KeywordOnly:
+                    out.push("KeywordOnly")
+                case PositionalOnly:
+                    out.push("PositionalOnly")
+                case Variadic(n, ty):
+                    out.push("Variadic {{ name: ")
+                    name(mut out, n)
+                    out.push(", ty: ")
+                    self.opt_type(mut out, ty)
+                    out.push(" }}")
+                case Error:
+                    out.push("Error")
+            out.push(" }}")
+        out.push("]")
+
+    pure def field_def(self, mut out: String, f: FieldDef):
+        out.push("FieldDef {{ ")
+        head(mut out, f.node, f.range)
+        out.push(", name: ")
+        name(mut out, f.name)
+        out.push(", ty: ")
+        self.type_expr(mut out, f.ty)
+        out.push(", default: ")
+        self.opt_expr(mut out, f.default)
+        out.push(", vis: ")
+        vis(mut out, f.vis)
+        out.push(" }}")
+
+    pure def enum_def(self, mut out: String, e: EnumDef):
+        out.push("EnumDef {{ name: ")
+        name(mut out, e.name)
+        out.push(", generics: ")
+        self.generics(mut out, e.generics)
+        out.push(", variants: [")
+        var first = True
+        for v in e.variants:
+            if not first:
+                out.push(", ")
+            first = False
+            self.variant_def(mut out, v)
+        out.push("], methods: ")
+        self.fn_defs(mut out, e.methods)
+        out.push(", open: ")
+        bool_(mut out, e.open)
+        out.push(" }}")
+
+    pure def variant_def(self, mut out: String, v: VariantDef):
+        out.push("VariantDef {{ ")
+        head(mut out, v.node, v.range)
+        out.push(", name: ")
+        name(mut out, v.name)
+        out.push(", fields: [")
+        var first = True
+        for f in v.fields:
+            if not first:
+                out.push(", ")
+            first = False
+            out.push("VariantField {{ name: ")
+            opt_name(mut out, f.name)
+            out.push(", ty: ")
+            self.type_expr(mut out, f.ty)
+            out.push(", range: ")
+            range_(mut out, f.range)
+            out.push(" }}")
+        out.push("] }}")
+
+    pure def impl_def(self, mut out: String, i: ImplDef):
+        out.push("ImplDef {{ generics: ")
+        self.generics(mut out, i.generics)
+        out.push(", trait_ty: ")
+        self.opt_type(mut out, i.trait_ty)
+        out.push(", self_ty: ")
+        self.type_expr(mut out, i.self_ty)
+        out.push(", methods: ")
+        self.fn_defs(mut out, i.methods)
+        out.push(", assoc_types: ")
+        self.assoc_types(mut out, i.assoc_types)
+        out.push(", consts: [")
+        var first = True
+        for c in i.consts:
+            if not first:
+                out.push(", ")
+            first = False
+            self.const_def(mut out, c)
+        out.push("] }}")
+
+    pure def test_def(self, mut out: String, t: TestDef):
+        out.push("TestDef {{ name: ")
+        out.push(debug_str(t.name))
+        out.push(", name_range: ")
+        range_(mut out, t.name_range)
+        out.push(", cases: ")
+        match t.cases:
+            case Some((p, e)):
+                out.push("Some((")
+                self.pattern(mut out, p)
+                out.push(", ")
+                self.expr(mut out, e)
+                out.push("))")
+            case None:
+                out.push("None")
+        out.push(", params: ")
+        self.params(mut out, t.params)
+        out.push(", body: ")
+        self.opt_block(mut out, t.body)
+        out.push(" }}")
+
+    pure def const_def(self, mut out: String, c: ConstDef):
+        out.push("ConstDef {{ name: ")
+        name(mut out, c.name)
+        out.push(", ty: ")
+        self.opt_type(mut out, c.ty)
+        out.push(", value: ")
+        self.opt_expr(mut out, c.value)
+        out.push(" }}")
+
+    pure def block(self, mut out: String, b: Block):
+        out.push("Block {{ ")
+        head(mut out, b.node, b.range)
+        out.push(", stmts: [")
+        var first = True
+        for s in b.stmts:
+            if not first:
+                out.push(", ")
+            first = False
+            self.stmt(mut out, s)
+        out.push("] }}")
+
+    pure def opt_block(self, mut out: String, b: Block?):
+        match b:
+            case Some(x):
+                out.push("Some(")
+                self.block(mut out, x)
+                out.push(")")
+            case None:
+                out.push("None")
+
+    pure def stmt(self, mut out: String, id: StmtId):
+        let s = self.ast.stmt(id)
+        out.push("Stmt {{ ")
+        head(mut out, s.node, s.range)
+        out.push(", kind: ")
+        self.stmt_kind(mut out, s.kind)
+        out.push(" }}")
+
+    pure def stmt_kind(self, mut out: String, k: StmtKind):
+        match k:
+            case Let(mutable, pat, ty, init, else_):
+                out.push("Let {{ mutable: ")
+                bool_(mut out, mutable)
+                out.push(", pat: ")
+                self.pattern(mut out, pat)
+                out.push(", ty: ")
+                self.opt_type(mut out, ty)
+                out.push(", init: ")
+                self.opt_expr(mut out, init)
+                out.push(", else_: ")
+                match else_:
+                    case Some(e):
+                        out.push("Some(")
+                        self.let_else(mut out, e)
+                        out.push(")")
+                    case None:
+                        out.push("None")
+                out.push(" }}")
+            case Assign(target, op, value):
+                out.push("Assign {{ target: ")
+                self.expr(mut out, target)
+                out.push(", op: ")
+                match op:
+                    case Some(o):
+                        out.push("Some({o:?})")
+                    case None:
+                        out.push("None")
+                out.push(", value: ")
+                self.expr(mut out, value)
+                out.push(" }}")
+            case StmtKind.Expr(e):
+                out.push("Expr(")
+                self.expr(mut out, e)
+                out.push(")")
+            case Return(e):
+                out.push("Return(")
+                self.opt_expr(mut out, e)
+                out.push(")")
+            case Break:
+                out.push("Break")
+            case Continue:
+                out.push("Continue")
+            case Pass:
+                out.push("Pass")
+            case If(branches, else_block):
+                out.push("If {{ branches: [")
+                var first = True
+                for (c, b) in branches:
+                    if not first:
+                        out.push(", ")
+                    first = False
+                    out.push("(")
+                    self.cond(mut out, c)
+                    out.push(", ")
+                    self.block(mut out, b)
+                    out.push(")")
+                out.push("], else_block: ")
+                self.opt_block(mut out, else_block)
+                out.push(" }}")
+            case While(c, body):
+                out.push("While {{ cond: ")
+                self.cond(mut out, c)
+                out.push(", body: ")
+                self.block(mut out, body)
+                out.push(" }}")
+            case For(pat, m, iter, body):
+                out.push("For {{ pat: ")
+                self.pattern(mut out, pat)
+                out.push(", mode: ")
+                self.mode(mut out, m)
+                out.push(", iter: ")
+                self.expr(mut out, iter)
+                out.push(", body: ")
+                self.block(mut out, body)
+                out.push(" }}")
+            case Assert(c, message):
+                out.push("Assert {{ cond: ")
+                self.expr(mut out, c)
+                out.push(", message: ")
+                self.opt_expr(mut out, message)
+                out.push(" }}")
+            case Expect(e):
+                out.push("Expect(")
+                self.expr(mut out, e)
+                out.push(")")
+            case Defer(b):
+                out.push("Defer(")
+                self.block(mut out, b)
+                out.push(")")
+            case With(value, n, body):
+                out.push("With {{ value: ")
+                self.expr(mut out, value)
+                out.push(", name: ")
+                name(mut out, n)
+                out.push(", body: ")
+                self.block(mut out, body)
+                out.push(" }}")
+            case StmtKind.Item(i):
+                out.push("Item(")
+                self.item(mut out, i)
+                out.push(")")
+            case Comptime(s):
+                out.push("Comptime(")
+                self.stmt(mut out, s)
+                out.push(")")
+            case ReturnImpl(i):
+                out.push("ReturnImpl(")
+                self.impl_def(mut out, i)
+                out.push(")")
+            case Select(arms):
+                out.push("Select([")
+                var first = True
+                for a in arms:
+                    if not first:
+                        out.push(", ")
+                    first = False
+                    self.select_arm(mut out, a)
+                out.push("])")
+            case Yield(e):
+                out.push("Yield(")
+                self.opt_expr(mut out, e)
+                out.push(")")
+            case StmtKind.Contract(c):
+                out.push("Contract(")
+                self.contract(mut out, c)
+                out.push(")")
+            case Unsupported(what):
+                out.push("Unsupported(")
+                out.push(debug_str(what))
+                out.push(")")
+            case Error:
+                out.push("Error")
+
+    pure def contract(self, mut out: String, c: Contract):
+        out.push("Contract {{ kind: {c.kind:?}, expr: ")
+        self.expr(mut out, c.expr)
+        out.push(", range: ")
+        range_(mut out, c.range)
+        out.push(" }}")
+
+    pure def select_arm(self, mut out: String, a: SelectArm):
+        out.push("SelectArm {{ ")
+        head(mut out, a.node, a.range)
+        out.push(", pat: ")
+        self.pattern(mut out, a.pat)
+        out.push(", op: ")
+        self.expr(mut out, a.op)
+        out.push(", body: ")
+        self.block(mut out, a.body)
+        out.push(" }}")
+
+    pure def let_else(self, mut out: String, e: LetElse):
+        out.push("LetElse {{ range: ")
+        range_(mut out, e.range)
+        out.push(", binding: ")
+        opt_name(mut out, e.binding)
+        out.push(", body: ")
+        match e.body:
+            case ElseBody.Expr(x):
+                out.push("Expr(")
+                self.expr(mut out, x)
+                out.push(")")
+            case Diverge(s):
+                out.push("Diverge(")
+                self.stmt(mut out, s)
+                out.push(")")
+            case ElseBody.Block(b):
+                out.push("Block(")
+                self.block(mut out, b)
+                out.push(")")
+        out.push(" }}")
+
+    pure def cond(self, mut out: String, c: Cond):
+        out.push("Cond {{ range: ")
+        range_(mut out, c.range)
+        out.push(", parts: [")
+        var first = True
+        for p in c.parts:
+            if not first:
+                out.push(", ")
+            first = False
+            match p:
+                case CondPart.Expr(e):
+                    out.push("Expr(")
+                    self.expr(mut out, e)
+                    out.push(")")
+                case Let(pat, value):
+                    out.push("Let {{ pat: ")
+                    self.pattern(mut out, pat)
+                    out.push(", value: ")
+                    self.expr(mut out, value)
+                    out.push(" }}")
+        out.push("] }}")
+
+    pure def opt_expr(self, mut out: String, e: ExprId?):
+        match e:
+            case Some(x):
+                out.push("Some(")
+                self.expr(mut out, x)
+                out.push(")")
+            case None:
+                out.push("None")
+
+    pure def exprs(self, mut out: String, xs: list[ExprId]):
+        out.push("[")
+        var first = True
+        for x in xs:
+            if not first:
+                out.push(", ")
+            first = False
+            self.expr(mut out, x)
+        out.push("]")
+
+    pure def expr(self, mut out: String, id: ExprId):
+        let e = self.ast.expr(id)
+        out.push("Expr {{ ")
+        head(mut out, e.node, e.range)
+        out.push(", kind: ")
+        self.expr_kind(mut out, e.kind)
+        out.push(" }}")
+
+    pure def expr_kind(self, mut out: String, k: ExprKind):
+        match k:
+            case Int(text, value, suffix):
+                out.push("Int {{ text: ")
+                out.push(debug_str(text))
+                out.push(", value: ")
+                match value:
+                    case Some(v):
+                        out.push("Some({v})")
+                    case None:
+                        out.push("None")
+                out.push(", suffix: ")
+                opt_string(mut out, suffix)
+                out.push(" }}")
+            case Float(text, value, suffix):
+                out.push("Float {{ text: ")
+                out.push(debug_str(text))
+                out.push(", value: {value}, suffix: ")
+                opt_string(mut out, suffix)
+                out.push(" }}")
+            case Char(c):
+                out.push("Char(")
+                out.push(debug_char(c))
+                out.push(")")
+            case Str(parts):
+                out.push("Str(")
+                self.str_parts(mut out, parts)
+                out.push(")")
+            case RawStr(s):
+                out.push("RawStr(")
+                out.push(debug_str(s))
+                out.push(")")
+            case ByteStr(bytes):
+                out.push("ByteStr([")
+                var first = True
+                for b in bytes:
+                    if not first:
+                        out.push(", ")
+                    first = False
+                    out.push("{b}")
+                out.push("])")
+            case ExprKind.Name(n):
+                out.push("Name(")
+                out.push(debug_str(n))
+                out.push(")")
+            case SelfValue:
+                out.push("SelfValue")
+            case SelfType:
+                out.push("SelfType")
+            case Paren(inner):
+                out.push("Paren(")
+                self.expr(mut out, inner)
+                out.push(")")
+            case ExprKind.Tuple(xs):
+                out.push("Tuple(")
+                self.exprs(mut out, xs)
+                out.push(")")
+            case ExprKind.List(xs):
+                out.push("List(")
+                self.exprs(mut out, xs)
+                out.push(")")
+            case ExprKind.Dict(entries):
+                out.push("Dict([")
+                var first = True
+                for (a, b) in entries:
+                    if not first:
+                        out.push(", ")
+                    first = False
+                    out.push("(")
+                    self.expr(mut out, a)
+                    out.push(", ")
+                    self.expr(mut out, b)
+                    out.push(")")
+                out.push("])")
+            case ExprKind.Set(xs):
+                out.push("Set(")
+                self.exprs(mut out, xs)
+                out.push(")")
+            case Comprehension(kind, elem, value, clauses):
+                out.push("Comprehension {{ kind: {kind:?}, elem: ")
+                self.expr(mut out, elem)
+                out.push(", value: ")
+                match value:
+                    case Some(v):
+                        out.push("Some(")
+                        self.expr(mut out, v)
+                        out.push(")")
+                    case None:
+                        out.push("None")
+                out.push(", clauses: [")
+                var first = True
+                for c in clauses:
+                    if not first:
+                        out.push(", ")
+                    first = False
+                    match c:
+                        case CompClause.For(pat, iter):
+                            out.push("For {{ pat: ")
+                            self.pattern(mut out, pat)
+                            out.push(", iter: ")
+                            self.expr(mut out, iter)
+                            out.push(" }}")
+                        case CompClause.If(e):
+                            out.push("If(")
+                            self.expr(mut out, e)
+                            out.push(")")
+                out.push("] }}")
+            case Binary(op, lhs, rhs):
+                out.push("Binary {{ op: {op:?}, lhs: ")
+                self.expr(mut out, lhs)
+                out.push(", rhs: ")
+                self.expr(mut out, rhs)
+                out.push(" }}")
+            case Compare(first_, rest):
+                out.push("Compare {{ first: ")
+                self.expr(mut out, first_)
+                out.push(", rest: [")
+                var first = True
+                for (op, e) in rest:
+                    if not first:
+                        out.push(", ")
+                    first = False
+                    out.push("({op:?}, ")
+                    self.expr(mut out, e)
+                    out.push(")")
+                out.push("] }}")
+            case Unary(op, inner):
+                out.push("Unary {{ op: {op:?}, expr: ")
+                self.expr(mut out, inner)
+                out.push(" }}")
+            case ExprKind.Ref(mutable, inner):
+                out.push("Ref {{ mutable: ")
+                bool_(mut out, mutable)
+                out.push(", expr: ")
+                self.expr(mut out, inner)
+                out.push(" }}")
+            case FromEnd(inner):
+                out.push("FromEnd(")
+                self.expr(mut out, inner)
+                out.push(")")
+            case Call(callee, call_args, trailing):
+                out.push("Call {{ callee: ")
+                self.expr(mut out, callee)
+                out.push(", args: ")
+                self.args(mut out, call_args)
+                out.push(", trailing: ")
+                match trailing:
+                    case Some(c):
+                        out.push("Some(")
+                        self.closure(mut out, c)
+                        out.push(")")
+                    case None:
+                        out.push("None")
+                out.push(" }}")
+            case Field(base, n):
+                out.push("Field {{ base: ")
+                self.expr(mut out, base)
+                out.push(", name: ")
+                name(mut out, n)
+                out.push(" }}")
+            case OptField(base, n):
+                out.push("OptField {{ base: ")
+                self.expr(mut out, base)
+                out.push(", name: ")
+                name(mut out, n)
+                out.push(" }}")
+            case Index(base, index_args):
+                out.push("Index {{ base: ")
+                self.expr(mut out, base)
+                out.push(", args: [")
+                var first = True
+                for a in index_args:
+                    if not first:
+                        out.push(", ")
+                    first = False
+                    match a:
+                        case IndexArg.Expr(e):
+                            out.push("Expr(")
+                            self.expr(mut out, e)
+                            out.push(")")
+                        case Slice(lo, hi):
+                            out.push("Slice {{ lo: ")
+                            self.opt_expr(mut out, lo)
+                            out.push(", hi: ")
+                            self.opt_expr(mut out, hi)
+                            out.push(" }}")
+                out.push("] }}")
+            case Try(inner):
+                out.push("Try(")
+                self.expr(mut out, inner)
+                out.push(")")
+            case ExprKind.Closure(c):
+                out.push("Closure(")
+                self.closure(mut out, c)
+                out.push(")")
+            case ExprKind.If(branches, else_):
+                out.push("If {{ branches: [")
+                var first = True
+                for (c, v) in branches:
+                    if not first:
+                        out.push(", ")
+                    first = False
+                    out.push("(")
+                    self.expr(mut out, c)
+                    out.push(", ")
+                    self.expr(mut out, v)
+                    out.push(")")
+                out.push("], else_: ")
+                match else_:
+                    case Some(e):
+                        out.push("Some(")
+                        self.expr(mut out, e)
+                        out.push(")")
+                    case None:
+                        out.push("None")
+                out.push(" }}")
+            case Match(scrutinee, match_arms):
+                out.push("Match {{ scrutinee: ")
+                self.expr(mut out, scrutinee)
+                out.push(", arms: ")
+                self.arms(mut out, match_arms)
+                out.push(" }}")
+            case ExprKind.Comptime(inner):
+                out.push("Comptime(")
+                self.expr(mut out, inner)
+                out.push(")")
+            case FieldOf(base, field):
+                out.push("FieldOf {{ base: ")
+                self.expr(mut out, base)
+                out.push(", field: ")
+                self.expr(mut out, field)
+                out.push(" }}")
+            case ExprKind.Unsupported(what):
+                out.push("Unsupported(")
+                out.push(debug_str(what))
+                out.push(")")
+            case ExprKind.Error:
+                out.push("Error")
+
+    pure def str_parts(self, mut out: String, parts: list[StrPart]):
+        out.push("[")
+        var first = True
+        for p in parts:
+            if not first:
+                out.push(", ")
+            first = False
+            match p:
+                case Text(t):
+                    out.push("Text(")
+                    out.push(debug_str(t))
+                    out.push(")")
+                case Interp(e, debug, spec, r):
+                    out.push("Interp {{ expr: ")
+                    self.expr(mut out, e)
+                    out.push(", debug: ")
+                    opt_string(mut out, debug)
+                    out.push(", spec: ")
+                    opt_string(mut out, spec)
+                    out.push(", range: ")
+                    range_(mut out, r)
+                    out.push(" }}")
+        out.push("]")
+
+    pure def args(self, mut out: String, xs: list[Arg]):
+        out.push("[")
+        var first = True
+        for a in xs:
+            if not first:
+                out.push(", ")
+            first = False
+            out.push("Arg {{ ")
+            head(mut out, a.node, a.range)
+            out.push(", name: ")
+            opt_name(mut out, a.name)
+            out.push(", mutable: ")
+            bool_(mut out, a.mutable)
+            out.push(", value: ")
+            self.expr(mut out, a.value)
+            out.push(" }}")
+        out.push("]")
+
+    pure def closure(self, mut out: String, c: Closure):
+        out.push("Closure {{ ")
+        head(mut out, c.node, c.range)
+        out.push(", own: ")
+        bool_(mut out, c.own_)
+        out.push(", params: [")
+        var first = True
+        for p in c.params:
+            if not first:
+                out.push(", ")
+            first = False
+            out.push("ClosureParam {{ name: ")
+            name(mut out, p.name)
+            out.push(", ty: ")
+            self.opt_type(mut out, p.ty)
+            out.push(" }}")
+        out.push("], implicit_param: ")
+        bool_(mut out, c.implicit_param)
+        out.push(", body: ")
+        match c.body:
+            case ClosureBody.Expr(e):
+                out.push("Expr(")
+                self.expr(mut out, e)
+                out.push(")")
+            case ClosureBody.Block(b):
+                out.push("Block(")
+                self.block(mut out, b)
+                out.push(")")
+        out.push(" }}")
+
+    pure def arms(self, mut out: String, xs: list[Arm]):
+        out.push("[")
+        var first = True
+        for a in xs:
+            if not first:
+                out.push(", ")
+            first = False
+            out.push("Arm {{ ")
+            head(mut out, a.node, a.range)
+            out.push(", pat: ")
+            self.pattern(mut out, a.pat)
+            out.push(", guard: ")
+            self.opt_expr(mut out, a.guard)
+            out.push(", body: ")
+            match a.body:
+                case ArmBody.Expr(e):
+                    out.push("Expr(")
+                    self.expr(mut out, e)
+                    out.push(")")
+                case ArmBody.Block(b):
+                    out.push("Block(")
+                    self.block(mut out, b)
+                    out.push(")")
+            out.push(", generated: ")
+            match a.generated:
+                case Some(g):
+                    out.push("Some(")
+                    match self.ast.arm_gen(g):
+                        case ArmGen.For(pat, iter, made):
+                            out.push("For {{ pat: ")
+                            self.pattern(mut out, pat)
+                            out.push(", iter: ")
+                            self.expr(mut out, iter)
+                            out.push(", arms: ")
+                            self.arms(mut out, made)
+                            out.push(" }}")
+                        case ArmGen.If(c, then, else_):
+                            out.push("If {{ cond: ")
+                            self.expr(mut out, c)
+                            out.push(", then: ")
+                            self.arms(mut out, then)
+                            out.push(", else_: ")
+                            self.arms(mut out, else_)
+                            out.push(" }}")
+                    out.push(")")
+                case None:
+                    out.push("None")
+            out.push(" }}")
+        out.push("]")
+
+    pure def type_expr(self, mut out: String, id: TypeExprId):
+        let t = self.ast.type_expr(id)
+        out.push("TypeExpr {{ ")
+        head(mut out, t.node, t.range)
+        out.push(", kind: ")
+        match t.kind:
+            case Path(segments, type_args):
+                out.push("Path {{ segments: ")
+                names(mut out, segments)
+                out.push(", args: ")
+                self.type_exprs(mut out, type_args)
+                out.push(" }}")
+            case TypeKind.Option(inner):
+                out.push("Option(")
+                self.type_expr(mut out, inner)
+                out.push(")")
+            case TypeKind.Result(ok, err):
+                out.push("Result {{ ok: ")
+                self.opt_type(mut out, ok)
+                out.push(", err: ")
+                self.opt_type(mut out, err)
+                out.push(" }}")
+            case Union(xs):
+                out.push("Union(")
+                self.type_exprs(mut out, xs)
+                out.push(")")
+            case TypeKind.Tuple(fields):
+                out.push("Tuple([")
+                var first = True
+                for (n, ty) in fields:
+                    if not first:
+                        out.push(", ")
+                    first = False
+                    out.push("(")
+                    opt_name(mut out, n)
+                    out.push(", ")
+                    self.type_expr(mut out, ty)
+                    out.push(")")
+                out.push("])")
+            case TypeKind.Fn(pure, fn_params, ret):
+                out.push("Fn {{ pure: ")
+                bool_(mut out, pure)
+                out.push(", params: ")
+                self.type_exprs(mut out, fn_params)
+                out.push(", ret: ")
+                self.type_expr(mut out, ret)
+                out.push(" }}")
+            case TypeKind.Ref(mutable, inner):
+                out.push("Ref {{ mutable: ")
+                bool_(mut out, mutable)
+                out.push(", inner: ")
+                self.type_expr(mut out, inner)
+                out.push(" }}")
+            case ConstArg(n):
+                out.push("ConstArg({n})")
+            case Dyn(inner):
+                out.push("Dyn(")
+                self.type_expr(mut out, inner)
+                out.push(")")
+            case TypeKind.Unsupported(what):
+                out.push("Unsupported(")
+                out.push(debug_str(what))
+                out.push(")")
+            case TypeKind.Error:
+                out.push("Error")
+        out.push(" }}")
+
+    pure def opt_type(self, mut out: String, t: TypeExprId?):
+        match t:
+            case Some(x):
+                out.push("Some(")
+                self.type_expr(mut out, x)
+                out.push(")")
+            case None:
+                out.push("None")
+
+    pure def type_exprs(self, mut out: String, xs: list[TypeExprId]):
+        out.push("[")
+        var first = True
+        for x in xs:
+            if not first:
+                out.push(", ")
+            first = False
+            self.type_expr(mut out, x)
+        out.push("]")
+
+    pure def pattern(self, mut out: String, id: PatternId):
+        let p = self.ast.pattern(id)
+        out.push("Pattern {{ ")
+        head(mut out, p.node, p.range)
+        out.push(", kind: ")
+        match p.kind:
+            case Wildcard:
+                out.push("Wildcard")
+            case Bind(n):
+                out.push("Bind(")
+                name(mut out, n)
+                out.push(")")
+            case PatKind.Literal(e):
+                out.push("Literal(")
+                self.expr(mut out, e)
+                out.push(")")
+            case Ctor(path, pat_args):
+                out.push("Ctor {{ path: ")
+                names(mut out, path)
+                out.push(", args: ")
+                match pat_args:
+                    case Some(xs):
+                        out.push("Some([")
+                        var first = True
+                        for a in xs:
+                            if not first:
+                                out.push(", ")
+                            first = False
+                            match a:
+                                case Positional(q):
+                                    out.push("Positional(")
+                                    self.pattern(mut out, q)
+                                    out.push(")")
+                                case Keyword(n, q):
+                                    out.push("Keyword(")
+                                    name(mut out, n)
+                                    out.push(", ")
+                                    self.pattern(mut out, q)
+                                    out.push(")")
+                                case PatArg.Rest:
+                                    out.push("Rest")
+                        out.push("])")
+                    case None:
+                        out.push("None")
+                out.push(" }}")
+            case PatKind.Tuple(xs):
+                out.push("Tuple(")
+                self.patterns(mut out, xs)
+                out.push(")")
+            case PatKind.List(xs):
+                out.push("List(")
+                self.patterns(mut out, xs)
+                out.push(")")
+            case Star(n):
+                out.push("Star(")
+                opt_name(mut out, n)
+                out.push(")")
+            case PatKind.Rest:
+                out.push("Rest")
+            case Or(xs):
+                out.push("Or(")
+                self.patterns(mut out, xs)
+                out.push(")")
+            case PatKind.Error:
+                out.push("Error")
+        out.push(" }}")
+
+    pure def patterns(self, mut out: String, xs: list[PatternId]):
+        out.push("[")
+        var first = True
+        for x in xs:
+            if not first:
+                out.push(", ")
+            first = False
+            self.pattern(mut out, x)
+        out.push("]")

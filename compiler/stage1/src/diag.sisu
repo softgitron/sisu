@@ -58,7 +58,11 @@ pub enum Msg:
     ParseKeywordAsName
     ParseUnexpectedIndent
     ParseExpectedMember
+    ParsePythonConditional
     ParseInsertToken
+    ParseOpenedHere
+    ParseUseIfExpression
+    ParseParenthesize
     ResolveUndefinedName
     ResolveUndefinedType
     ResolveDuplicateDefinition
@@ -70,6 +74,94 @@ pub enum Msg:
     ResolveImportUnknown
     ResolveMethodSignature
     TypeNoSelf
+    TypeMismatch
+    TypeExpectedBecause
+    TypeIfBranches
+    TypeFoundHere
+    TypeUnquote
+    TypeCallConversion
+    TypeIntegerDivision
+    TypeUseFloorDivision
+    TypeFloatFloorDivision
+    TypeMixedNumbers
+    TypeConvertToFloat
+    TypeBinaryOperator
+    TypeInterpolate
+    TypeUnaryOperator
+    TypeNotBool
+    TypeUnknownField
+    TypeUnknownMethod
+    TypeSimilarMember
+    TypeArgumentCount
+    TypeUnknownKeyword
+    TypeDuplicateArgument
+    TypeMissingArgument
+    TypeAddHole
+    TypeNotCallable
+    TypeAssignImmutable
+    TypeNotMutable
+    TypeDeclareVar
+    TypeTakeMut
+    ResolveDefinedHere
+    TypeNotAPlace
+    TypeMissingReturn
+    TypeReturnValueInUnit
+    TypeDropReturnValue
+    TypeReturnInTest
+    TypeReturnNeedsValue
+    TypeUnusedResult
+    TypeDiscard
+    TypeTryNeedsFallible
+    TypeTryContext
+    TypeErrorNotInSet
+    TypeAddErrorSet
+    TypeBreakOutsideLoop
+    TypeContinueOutsideLoop
+    TypeCannotInfer
+    TypeHole
+    TypeUnreachableCode
+    TypeMoveOutOfBorrow
+    TypeAddCopy
+    TypeMutArgumentMissing
+    TypeAddMut
+    TypeMutArgumentUnexpected
+    TypeRemoveMut
+    TypeNotGeneric
+    TypeTypeArgumentsNeeded
+    TypeNotAValue
+    TypeMethodNeedsReceiver
+    TypeAssocNotMethod
+    TypeTupleIndex
+    TypeComparisonTypes
+    TypeNotOrdered
+    TypeLiteralOutOfRange
+    TypePositionalAfterKeyword
+    TypeNameArgument
+    TypeMainSignature
+    TypeTestSignature
+    TypeAssertMessage
+    TypeUnsizedDyn
+    TypeBoundNotSatisfied
+    TypeShowDebug
+    TypeAddBound
+    TypeLetNeedsType
+    TypeRefutableLet
+    TypeVariantNeedsFields
+    TypeElseNotFallible
+    TypeElseMustDiverge
+    TypeBadFormatSpec
+    TypeNoDisplay
+    TypeImpureArgument
+    TypeFromEndOutsideIndex
+    TypeAddImpl
+    TypeImpureCapability
+    TypeConstantNegativeIndex
+    TypeFromEndIndex
+    TypeStrNotIndexable
+    TypeNotIndexable
+    TypeMissingField
+    TypeNoConstructor
+    TypeUnknownAssociated
 
 impl Msg:
     ## The catalog identifier.
@@ -121,7 +213,11 @@ impl Msg:
             case ParseKeywordAsName: "parse.keyword-as-name"
             case ParseUnexpectedIndent: "parse.unexpected-indent"
             case ParseExpectedMember: "parse.expected-member"
+            case ParsePythonConditional: "parse.python-conditional"
             case ParseInsertToken: "parse.insert-token"
+            case ParseOpenedHere: "parse.opened-here"
+            case ParseUseIfExpression: "parse.use-if-expression"
+            case ParseParenthesize: "parse.parenthesize"
             case ResolveUndefinedName: "resolve.undefined-name"
             case ResolveUndefinedType: "resolve.undefined-type"
             case ResolveDuplicateDefinition: "resolve.duplicate-definition"
@@ -133,6 +229,118 @@ impl Msg:
             case ResolveImportUnknown: "resolve.import-unknown"
             case ResolveMethodSignature: "resolve.method-signature"
             case TypeNoSelf: "type.no-self"
+            case TypeMismatch: "type.mismatch"
+            case TypeExpectedBecause: "type.expected-because"
+            case TypeIfBranches: "type.if-branches"
+            case TypeFoundHere: "type.found-here"
+            case TypeUnquote: "type.unquote"
+            case TypeCallConversion: "type.call-conversion"
+            case TypeIntegerDivision: "type.integer-division"
+            case TypeUseFloorDivision: "type.use-floor-division"
+            case TypeFloatFloorDivision: "type.float-floor-division"
+            case TypeMixedNumbers: "type.mixed-numbers"
+            case TypeConvertToFloat: "type.convert-to-float"
+            case TypeBinaryOperator: "type.binary-operator"
+            case TypeInterpolate: "type.interpolate"
+            case TypeUnaryOperator: "type.unary-operator"
+            case TypeNotBool: "type.not-bool"
+            case TypeUnknownField: "type.unknown-field"
+            case TypeUnknownMethod: "type.unknown-method"
+            case TypeSimilarMember: "type.similar-member"
+            case TypeArgumentCount: "type.argument-count"
+            case TypeUnknownKeyword: "type.unknown-keyword"
+            case TypeDuplicateArgument: "type.duplicate-argument"
+            case TypeMissingArgument: "type.missing-argument"
+            case TypeAddHole: "type.add-hole"
+            case TypeNotCallable: "type.not-callable"
+            case TypeAssignImmutable: "type.assign-immutable"
+            case TypeNotMutable: "type.not-mutable"
+            case TypeDeclareVar: "type.declare-var"
+            case TypeTakeMut: "type.take-mut"
+            case ResolveDefinedHere: "resolve.defined-here"
+            case TypeNotAPlace: "type.not-a-place"
+            case TypeMissingReturn: "type.missing-return"
+            case TypeReturnValueInUnit: "type.return-value-in-unit"
+            case TypeDropReturnValue: "type.drop-return-value"
+            case TypeReturnInTest: "type.return-in-test"
+            case TypeReturnNeedsValue: "type.return-needs-value"
+            case TypeUnusedResult: "type.unused-result"
+            case TypeDiscard: "type.discard"
+            case TypeTryNeedsFallible: "type.try-needs-fallible"
+            case TypeTryContext: "type.try-context"
+            case TypeErrorNotInSet: "type.error-not-in-set"
+            case TypeAddErrorSet: "type.add-error-set"
+            case TypeBreakOutsideLoop: "type.break-outside-loop"
+            case TypeContinueOutsideLoop: "type.continue-outside-loop"
+            case TypeCannotInfer: "type.cannot-infer"
+            case TypeHole: "type.hole"
+            case TypeUnreachableCode: "type.unreachable-code"
+            case TypeMoveOutOfBorrow: "type.move-out-of-borrow"
+            case TypeAddCopy: "type.add-copy"
+            case TypeMutArgumentMissing: "type.mut-argument-missing"
+            case TypeAddMut: "type.add-mut"
+            case TypeMutArgumentUnexpected: "type.mut-argument-unexpected"
+            case TypeRemoveMut: "type.remove-mut"
+            case TypeNotGeneric: "type.not-generic"
+            case TypeTypeArgumentsNeeded: "type.type-arguments-needed"
+            case TypeNotAValue: "type.not-a-value"
+            case TypeMethodNeedsReceiver: "type.method-needs-receiver"
+            case TypeAssocNotMethod: "type.assoc-not-method"
+            case TypeTupleIndex: "type.tuple-index"
+            case TypeComparisonTypes: "type.comparison-types"
+            case TypeNotOrdered: "type.not-ordered"
+            case TypeLiteralOutOfRange: "type.literal-out-of-range"
+            case TypePositionalAfterKeyword: "type.positional-after-keyword"
+            case TypeNameArgument: "type.name-argument"
+            case TypeMainSignature: "type.main-signature"
+            case TypeTestSignature: "type.test-signature"
+            case TypeAssertMessage: "type.assert-message"
+            case TypeUnsizedDyn: "type.unsized-dyn"
+            case TypeBoundNotSatisfied: "type.bound-not-satisfied"
+            case TypeShowDebug: "type.show-debug"
+            case TypeAddBound: "type.add-bound"
+            case TypeLetNeedsType: "type.let-needs-type"
+            case TypeRefutableLet: "type.refutable-let"
+            case TypeVariantNeedsFields: "type.variant-needs-fields"
+            case TypeElseNotFallible: "type.else-not-fallible"
+            case TypeElseMustDiverge: "type.else-must-diverge"
+            case TypeBadFormatSpec: "type.bad-format-spec"
+            case TypeNoDisplay: "type.no-display"
+            case TypeImpureArgument: "type.impure-argument"
+            case TypeFromEndOutsideIndex: "type.from-end-outside-index"
+            case TypeAddImpl: "type.add-impl"
+            case TypeImpureCapability: "type.impure-capability"
+            case TypeConstantNegativeIndex: "type.constant-negative-index"
+            case TypeFromEndIndex: "type.from-end-index"
+            case TypeStrNotIndexable: "type.str-not-indexable"
+            case TypeNotIndexable: "type.not-indexable"
+            case TypeMissingField: "type.missing-field"
+            case TypeNoConstructor: "type.no-constructor"
+            case TypeUnknownAssociated: "type.unknown-associated"
+
+## A byte range of a text: from `start` up to, not including, `end`.
+@derive(Eq, Hash, Debug, Copy)
+pub struct TextRange:
+    pub start: int
+    pub end: int
+
+impl TextRange:
+    ## The range between two offsets, in either order.
+    pub pure def new(start: int, end: int) -> TextRange:
+        if end < start:
+            return TextRange(start=end, end=start)
+        return TextRange(start=start, end=end)
+
+    ## The smallest range holding both.
+    pub pure def cover(self, other: TextRange) -> TextRange:
+        return TextRange(start=min(self.start, other.start), end=max(self.end, other.end))
+
+    ## The empty range at `at`.
+    pub pure def empty(at: int) -> TextRange:
+        return TextRange(start=at, end=at)
+
+    pub pure def is_empty(self) -> bool:
+        return self.start == self.end
 
 ## A named parameter of a message: `name="value"` in the rendered form.
 pub struct Param:
@@ -185,6 +393,15 @@ impl Diagnostic:
         d.labels.push(Label(msg=msg, start=start, end=end, params=[]))
         return d
 
+    ## The diagnostic with a label at `start..end` that has one parameter.
+    pub pure def label_with(
+        own self, msg: Msg, start: int, end: int, name: str, value: str
+    ) -> Diagnostic:
+        var d = self
+        let param = Param(name=name.to_string(), value=value.to_string())
+        d.labels.push(Label(msg=msg, start=start, end=end, params=[param]))
+        return d
+
     ## The diagnostic with a fix that replaces `start..end` by `text`.
     pub pure def fix(
         own self, msg: Msg, name: str, value: str, start: int, end: int, text: str
@@ -201,6 +418,13 @@ impl Diagnostic:
         var d = self
         let replacement = Edit(start=start, end=end, text=text.to_string())
         d.fixes.push(Fix(msg=msg, params=[], edits=[replacement]))
+        return d
+
+    ## The diagnostic with a fix, without parameters of its own, made of
+    ## several edits.
+    pub pure def fix_edits(own self, msg: Msg, own edits: list[Edit]) -> Diagnostic:
+        var d = self
+        d.fixes.push(Fix(msg=msg, params=[], edits=edits))
         return d
 
     ## The diagnostic with a note.
@@ -286,6 +510,13 @@ impl Lines:
                 starts.push(i + 1)
             i += 1
         return Lines(starts=starts)
+
+    ## Where the line of 0-based index `index` starts, or `None` past the
+    ## last line.
+    pub pure def start_of(self, index: int) -> int?:
+        if index < 0 or index >= len(self.starts):
+            return None
+        return Some(self.starts[index])
 
     ## The 0-based index of the line holding byte `offset`.
     pub pure def index(self, offset: int) -> int:

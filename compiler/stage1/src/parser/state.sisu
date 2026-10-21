@@ -2,7 +2,7 @@
 ##! significant tokens, attaching tokens (with the trivia before them) to
 ##! the tree, and reporting at most one diagnostic per token.
 
-from stage1.diag import Diagnostic, Lines, Msg
+from stage1.diag import Diagnostic, Edit, Fix, Lines, Msg
 from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Token, Tree, TreeBuilder
 
@@ -34,6 +34,8 @@ pub view struct Parser:
     pub(package) quiet: int
     ## Every diagnostic the parser tried to report, kept or not.
     pub(package) attempts: int
+    ## The byte range of the last expression parsed, for E0115's fix.
+    pub(package) last_expr: (int, int)?
     pub(package) lines: Lines
 
 impl Parser:
@@ -60,6 +62,7 @@ impl Parser:
             lex_errors=lex_errors,
             quiet=0,
             attempts=0,
+            last_expr=None,
             lines=Lines.of(text),
         )
 
@@ -108,6 +111,20 @@ impl Parser:
     pub(package) pure def at_contextual(self, word: str) -> bool:
         return self.at(SyntaxKind.Ident) and self.current_text() == word
 
+    ## Where the last significant token consumed ends.
+    pub(package) pure def previous_end(self) -> int?:
+        if self.pos >= 1 and self.pos - 1 < len(self.sig):
+            return Some(self.sig[self.pos - 1].end)
+        return None
+
+    ## The byte range of the `n`th significant token from here, `None` past
+    ## the end.
+    pub(package) pure def nth_range(self, n: int) -> (int, int)?:
+        let i = self.pos + n
+        if i < len(self.sig):
+            return Some((self.sig[i].start, self.sig[i].end))
+        return None
+
     ## The byte range of the current token, empty at the end of the text
     ## past the last.
     pub(package) pure def current_range(self) -> (int, int):
@@ -120,6 +137,26 @@ impl Parser:
     pub(package) pure def current_line(self) -> int:
         let (start, _) = self.current_range()
         return self.line_of(start)
+
+    ## Where `word` is first written as a whole word on the 1-based `line`.
+    pub(package) pure def word_on_line(self, word: str, line: int) -> (int, int)?:
+        let start = self.lines.start_of(line - 1) else:
+            return None
+        let end = self.text.byte_find("\n", start) ?? self.text.byte_len()
+        # A word is never empty; an empty one would match everywhere.
+        if word.is_empty():
+            return None
+        var at = start
+        while let Some(i) = self.text.byte_find(word, at):
+            let after = i + word.byte_len()
+            if after > end:
+                return None
+            let before_word = i > start and is_word_byte(self.text.byte_at(i - 1))
+            let after_word = after < end and is_word_byte(self.text.byte_at(after))
+            if not before_word and not after_word:
+                return Some((i, after))
+            at = after
+        return None
 
     pub(package) pure def line_of(self, offset: int) -> int:
         return self.lines.index(offset) + 1
@@ -208,6 +245,15 @@ impl Parser:
         self.last_error_at = Some(self.pos)
         self.diags.push(diag)
 
+    ## How many diagnostics were kept, so a fix can be added to one later.
+    pub(package) pure def diags_len(self) -> int:
+        return len(self.diags)
+
+    ## Adds a fix to the diagnostic kept at `index`.
+    pub(package) pure def add_fix(mut self, index: int, msg: Msg, own edits: list[Edit]):
+        if index >= 0 and index < len(self.diags):
+            self.diags[index].fixes.push(Fix(msg=msg, params=[], edits=edits))
+
     ## Whether a syntax error was found before the current token.
     pub(package) pure def error_before(self) -> bool:
         if not self.diags.is_empty():
@@ -292,7 +338,66 @@ impl Parser:
             return
         if self.eat(SyntaxKind.Newline) or self.at_block_end():
             return
-        let (start, end) = self.error_span()
-        let found = self.found()
-        self.report(Diagnostic.new(Msg.ParseTrailingTokens, start, end).with("found", found))
+        if let Some(d) = self.python_conditional():
+            self.report(d)
+        else:
+            let (start, end) = self.error_span()
+            let found = self.found()
+            self.report(Diagnostic.new(Msg.ParseTrailingTokens, start, end).with("found", found))
         self.recover_line()
+
+    ## `a if c else b` after a statement's expression `a` (E0115), with
+    ## the fix that writes it as `if c: a else: b`. Only looks: the tokens
+    ## are recovered as any trailing tokens are.
+    pure def python_conditional(self) -> Diagnostic?:
+        if not self.at(SyntaxKind.IfKw):
+            return None
+        let (value_start, value_end) = self.last_expr else:
+            return None
+        if self.previous_end() != Some(value_end):
+            return None
+        # `else` at the depth of the `if`, then the line's end.
+        var depth = 0
+        var else_at: int? = None
+        var i = 1
+        while True:
+            match self.nth(i):
+                case LParen | LBracket | LBrace:
+                    depth += 1
+                case RParen | RBracket | RBrace:
+                    depth -= 1
+                case ElseKw if depth == 0 and else_at == None:
+                    else_at = Some(i)
+                # The end of the file ends the look at any depth: an open
+                # bracket is closed only by the layout's recovery.
+                case Eof:
+                    break
+                case Newline | Dedent | Indent | Colon if depth == 0:
+                    break
+                case _:
+                    pass
+            i += 1
+        let e = else_at else:
+            return None
+        if e <= 1 or i <= e + 1:
+            return None
+        let (cond_start, _) = self.nth_range(1) else:
+            return None
+        let (_, cond_end) = self.nth_range(e - 1) else:
+            return None
+        let (other_start, _) = self.nth_range(e + 1) else:
+            return None
+        let (_, end) = self.nth_range(i - 1) else:
+            return None
+        if cond_start > cond_end or other_start > end or value_start > end:
+            return None
+        let cond = self.text.byte_slice(cond_start, cond_end)
+        let other = self.text.byte_slice(other_start, end)
+        let first = self.text.byte_slice(value_start, value_end)
+        let text = "if {cond}: {first} else: {other}"
+        let d = Diagnostic.new(Msg.ParsePythonConditional, value_start, end)
+        return Some(d.fix_at(Msg.ParseUseIfExpression, value_start, end, text))
+
+## Whether a byte belongs to a word: an ASCII letter or digit, or `_`.
+pure def is_word_byte(b: u8) -> bool:
+    return (b >= 48 and b <= 57) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or b == 95

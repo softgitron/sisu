@@ -1,0 +1,30 @@
+# A punctuation token missing at the end of a line (E0100) comes with the
+# fix that writes it there (`parse.insert-token`); one missing inside a
+# line, or a missing keyword or name, has no fix.
+def half(x: int) -> int
+    return x // 2
+
+def main()
+    match x
+        case 1
+            pass
+        case _:
+            pass
+    for i in xs
+        print(i)
+    while i < 3
+        i += 1
+    let y = f(x) else
+        return
+    let z = f(x) else as
+        return
+    for j xs:
+        pass
+    print(x y)
+
+const LIMIT: int
+const OTHER: int 5
+
+struct Pair
+    a: int
+    b: int

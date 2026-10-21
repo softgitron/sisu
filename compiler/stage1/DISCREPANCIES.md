@@ -1,25 +1,26 @@
 # Where stage 1 and stage 0 differ
 
 Stage 1 transcribes the Rust front end (`sisu-lexer`, `sisu-syntax`,
-`sisu-parser`) rule for rule. Where the Rust behaviour is an accident
-rather than a rule, stage 1 does what the documents say instead, and the
-difference is listed here, with the file that shows it, both outputs, and
-the documents that decide. The coordinator decides which side changes; until
-then `check.sh` accepts exactly the differences listed under **Differs** and
-fails on any other.
+`sisu-parser`, and in part `sisu-resolve` and `sisu-typeck`) rule for
+rule. Where the Rust behaviour is an accident rather than a rule, stage 1
+does what the documents say instead, and the difference is listed here,
+with the file that shows it, both outputs, and the documents that decide.
+The coordinator decides which side changes; until then `check.sh` accepts
+exactly the differences listed under **Differs** and fails on any other.
 
 None of D1 to D3 occurs in the conformance suite, `compiler/std/` or
-`proposal/examples/`: every one of those 370 files gives identical tokens,
-trees and reprints. D4 is a difference of name resolution, the stage-1
-resolver's, and shows in `proposal/examples/testing.sisu`. The other files
-below are stage 1's own cases (`compiler/stage1/cases/`).
+`proposal/examples/`: every one of those 412 files gives identical tokens,
+trees, reprints and ASTs. D4 is a difference of name resolution, the stage-1
+resolver's, and shows in `proposal/examples/testing.sisu`. D5 is a
+difference of the type checker's and shows in no file of the corpus. The
+other files below are stage 1's own cases (`compiler/stage1/cases/`).
 
 The **Differs** lines are read by `check.sh`: a path from the repository
 root, then the outputs that differ (`tokens` is `sisu tokens --trivia` with
 its diagnostics, `tree` is `sisu parse --tree` with its diagnostics,
-`trivia-tree` is `sisu parse --tree --trivia`, and `names` is the name
+`trivia-tree` is `sisu parse --tree --trivia`, `names` is the name
 diagnostics of `sisu check --format=ids`, those stage 1's resolver
-reports).
+reports, and `types` the type checker's diagnostics of the same command).
 
 ## D1. A line break inside a one-line interpolation becomes an error token
 
@@ -176,6 +177,42 @@ producing many messages", and the conformance README compares diagnostics
 "by catalog identifier" as a set of mistakes. Stage 0 can check the body of
 a parametrised test once and expand the cases after, or drop diagnostics
 that repeat one at the same span.
+
+## D5. Too many positional arguments for keyword-only parameters
+
+- Differs: `compiler/stage1/cases/type_calls.sisu`: types
+
+```sisu
+def scale(x: int, /, *, by: int) -> int:
+    return x * by
+
+def main():
+    print(scale(2, 3))
+```
+
+`check_args` (`sisu-typeck/src/call.rs`) finds the `3` too many because it
+comes after the last positional parameter, then reports the count of every
+parameter against the count of every argument, which are equal here:
+
+Stage 0 (`sisu check --format=ids`):
+
+```text
+18:11-18:22 E0305 type.argument-count name="scale" expected="2" found="2"
+```
+
+Stage 1:
+
+```text
+18:11-18:22 E0305 type.argument-count name="scale" expected="1" found="2"
+```
+
+**The documents support stage 1.** The message is "wrong number of
+arguments to `scale`: expected 2, found 2", which contradicts itself;
+proposal/02-syntax.md makes the parameters after a bare `*` keyword-only
+"(PEP 3102)", whose rule counts the positional parameters against the
+positional arguments ("takes 1 positional argument but 2 were given").
+Stage 1 does so when the function has keyword-only parameters; stage 0
+can count `kw_from` and the arguments without a name in that case.
 
 ## Not discrepancies, but found on the way
 

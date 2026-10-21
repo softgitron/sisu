@@ -153,6 +153,9 @@ struct Scope:
     types: set[String]
     ## The std module each `import` binds a name to (`json` to `json`).
     imports: dict[String, String]
+    ## What each name a `from` import binds names, as `module.name`
+    ## (`test.arbitrary` for `from std.test import arbitrary`).
+    from_imports: dict[String, String]
 
 view struct Resolver:
     text: str
@@ -188,7 +191,13 @@ pub pure def resolve(
         tree=tree,
         env=env,
         module=Scope(
-            items={}, variants=set(), poisoned=set(), refinements=set(), types=set(), imports={}
+            items={},
+            variants=set(),
+            poisoned=set(),
+            refinements=set(),
+            types=set(),
+            imports={},
+            from_imports={},
         ),
         locals=[],
         generics=[],
@@ -667,15 +676,20 @@ impl Resolver:
         for imported in child_nodes(self.tree, n):
             if self.kind(imported) != SyntaxKind.ImportName:
                 continue
+            var first: int? = None
             var bound: int? = None
             for e in self.tree.nodes[imported].children:
                 if let Leaf(t) = e:
                     if self.tree.tokens[t].kind == SyntaxKind.Ident:
+                        if first == None:
+                            first = Some(t)
                         bound = Some(t)
             if let Some(t) = bound:
                 let name = self.text_of(t)
                 if self.std_declares_type(module, name):
                     _ = self.module.types.add(name.copy())
+                if let Some(f) = first:
+                    _ = self.module.from_imports.insert(name.copy(), "{module}.{self.text_of(f)}")
                 self.bind(name, self.tree.tokens[t].start, self.tree.tokens[t].end)
 
     ## Whether the std module `module` declares a type `name`.
@@ -1472,12 +1486,24 @@ impl Resolver:
                             case _:
                                 pass
             case FieldExpr:
-                # The receiver, which may name a scalar type (`int.parse`),
-                # and a field named by a compile-time value (`x.[f]`).
+                # The receiver, which may name a scalar type (`int.parse`)
+                # or a type with its arguments (`NonEmpty[int].try_from`,
+                # stage 0's `static_path`; a module's member with
+                # arguments, `cap.Fake[Trait]`, is read as before), and a
+                # field named by a compile-time value (`x.[f]`).
                 let parts = child_nodes(self.tree, n)
                 for i in range(len(parts)):
-                    if i > 0 or not self.names_scalar(parts[i]):
-                        self.expr(parts[i])
+                    if i == 0 and self.names_scalar(parts[i]):
+                        continue
+                    if i == 0 and self.is_named_type_with_arguments(parts[i]):
+                        self.with_type_arguments(parts[i])
+                        continue
+                    self.expr(parts[i])
+            case IndexExpr if self.is_generator_site(n):
+                # `arbitrary[T]` and `exhaustive[T]`: the compiler writes the
+                # generator from the type's text, whose names are not
+                # resolved here.
+                pass
             case OptFieldExpr:
                 for c in child_nodes(self.tree, n):
                     self.expr(c)
@@ -1547,15 +1573,53 @@ impl Resolver:
                     for i in range(1, len(kids)):
                         self.expr(kids[i])
                     return
-        if self.kind(callee) == SyntaxKind.IndexExpr and self.has_type_arguments(callee):
-            let parts = child_nodes(self.tree, callee)
-            self.expr(parts[0])
-            for i in range(1, len(parts)):
-                self.type_argument(parts[i])
+        if self.kind(callee) == SyntaxKind.IndexExpr and self.is_generator_site(callee):
+            pass
+        elif self.kind(callee) == SyntaxKind.IndexExpr and self.has_type_arguments(callee):
+            self.with_type_arguments(callee)
         else:
             self.expr(callee)
         for i in range(1, len(kids)):
             self.expr(kids[i])
+
+    ## `base[args]` whose arguments are types: the base as an expression,
+    ## each argument as a type.
+    pure def with_type_arguments(mut self, index: int):
+        let parts = child_nodes(self.tree, index)
+        if parts.is_empty():
+            return
+        self.expr(parts[0])
+        for i in range(1, len(parts)):
+            self.type_argument(parts[i])
+
+    ## Whether `n` is `name[args]` whose arguments are types, `name` a
+    ## plain name (not a module's member).
+    pure def is_named_type_with_arguments(self, n: int) -> bool:
+        if self.kind(n) != SyntaxKind.IndexExpr:
+            return False
+        let parts = child_nodes(self.tree, n)
+        if parts.is_empty() or self.kind(parts[0]) != SyntaxKind.NameRef:
+            return False
+        return self.has_type_arguments(n)
+
+    ## Whether `base[...]` makes a generator (stage 0's `generator_kind`):
+    ## `base` names the prelude's `arbitrary` or `exhaustive`, which
+    ## `std.test` re-exports; not a local nor another declaration.
+    pure def is_generator_site(self, index: int) -> bool:
+        let parts = child_nodes(self.tree, index)
+        if parts.is_empty() or self.kind(parts[0]) != SyntaxKind.NameRef:
+            return False
+        let t = first_token(self.tree, parts[0], SyntaxKind.Ident) else:
+            return False
+        let name = self.text_of(t)
+        if self.is_local(name):
+            return False
+        if let Some(source) = self.module.from_imports.get(name.copy()):
+            return source == "test.arbitrary" or source == "test.exhaustive"
+        if self.module.items.contains(name.copy()):
+            return False
+        let generator = name == "arbitrary" or name == "exhaustive"
+        return generator and self.env.prelude.items.contains(name)
 
     ## Whether the index arguments of `f[...]` are types: when `f` is a
     ## method, or a name that is not a local and names something (a
@@ -1624,7 +1688,8 @@ impl Resolver:
         let key = name.to_string()
         if self.module.items.contains(key.copy()):
             return self.module.types.contains(key.copy()) and not self.local_traits.contains(key)
-        return self.env.prelude.types.contains(key.copy()) and not self.env.prelude.traits.contains(key)
+        return self.env.prelude.types.contains(key.copy())
+            and not self.env.prelude.traits.contains(key)
 
     ## Whether the base of `base[...]` in a type argument is a static path
     ## whose arguments are types: a name of a type, a type parameter, a

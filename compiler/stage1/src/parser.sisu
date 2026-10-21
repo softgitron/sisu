@@ -10,7 +10,7 @@
 ##! afterwards, the most likely cause (docs/architecture.md, "Error
 ##! tolerance").
 
-from stage1.diag import Catalog, Diagnostic, Lines, Msg, sort
+from stage1.diag import Catalog, Diagnostic, Lines, Msg, render_ids, sort
 from stage1.lexer import Lexed, lex
 from stage1.mutants import Rng
 from stage1.parser.state import Parser
@@ -437,3 +437,81 @@ test "recovery always makes progress"(sys: System):
 test "a struct body's bad line is reported once per body"(sys: System):
     let src = "struct A:\n    print(1)\n    struct B:\n        x: int\n    print(2)\n"
     assert codes(src, test_catalog(sys)) == ["E0126"]
+
+## The diagnostics of `def f():` with `line` as its body, in the
+## conformance form.
+pure def body_diagnostics(line: str, catalog: Catalog) -> String:
+    let src = "def f():\n    {line}\n"
+    return render_ids(src, checked(src, catalog).diagnostics, catalog)
+
+## A diagnostic's line in the conformance form, then its fix that puts
+## parentheses at `open` and `close`.
+pure def with_parens(diagnostic: str, open: str, close: str) -> String:
+    return "{diagnostic}\n  fix parse.parenthesize {open}-{open} \"(\" {close}-{close} \")\"\n"
+
+test "a mix of operators is fixed with Python's grouping"(sys: System):
+    let c = test_catalog(sys)
+    let mixed = "E0109 parse.mixed-bitwise"
+    # `&` binds tighter than `|` on either side of it; on the right, the fix
+    # waits for the end of the operand.
+    let left = with_parens("2:15-2:16 {mixed} first=\"&\" second=\"|\"", "2:9", "2:14")
+    assert body_diagnostics("x = a & b | c", c) == left
+    let right = with_parens("2:15-2:16 {mixed} first=\"|\" second=\"&\"", "2:13", "2:18")
+    assert body_diagnostics("x = a | b & c", c) == right
+    # Arithmetic beside a bitwise operator or a shift is grouped on its side.
+    let arithmetic = "E0110 parse.bitwise-arithmetic op=\"&\""
+    let before = with_parens("2:15-2:16 {arithmetic}", "2:9", "2:14")
+    assert body_diagnostics("x = a + 1 & b", c) == before
+    let after = with_parens("2:18-2:18 {arithmetic}", "2:13", "2:18")
+    assert body_diagnostics("x = a & b + 1", c) == after
+    let shift = "E0111 parse.shift-arithmetic"
+    let shifted = with_parens("2:19-2:19 {shift}", "2:14", "2:19")
+    assert body_diagnostics("x = a << b + c", c) == shifted
+    let shifting = with_parens("2:15-2:17 {shift}", "2:9", "2:14")
+    assert body_diagnostics("x = a - 1 >> b", c) == shifting
+    # `-x ** y` is `-(x ** y)`, as Python reads it.
+    let power = with_parens("2:16-2:16 E0112 parse.negative-power", "2:10", "2:16")
+    assert body_diagnostics("x = -a ** 2", c) == power
+    # A mix reported at a token that already has a report is dropped, and
+    # so is its fix.
+    let first = with_parens("2:19-2:20 E0110 parse.bitwise-arithmetic op=\"|\"", "2:13", "2:18")
+    assert body_diagnostics("x = a | b + 1 & c", c) == first
+
+test "a Python conditional is rewritten as an if expression"(sys: System):
+    let c = test_catalog(sys)
+    let conditional = "E0115 parse.python-conditional"
+    let simple = "2:13-2:26 {conditional}\n  fix parse.use-if-expression 2:13-2:26 \"if c: x else: y\"\n"
+    assert body_diagnostics("let a = x if c else y", c) == simple
+    # The `else` is the first outside brackets.
+    let nested = "2:13-2:36 {conditional}\n  fix parse.use-if-expression 2:13-2:36 \"if f(c else d): x else: y\"\n"
+    assert body_diagnostics("let a = x if f(c else d) else y", c) == nested
+    # Without an `else`, the tokens trail the statement.
+    let trailing = "2:15-2:17 E0117 parse.trailing-tokens found=\"`if`\"\n"
+    assert body_diagnostics("let a = x if c", c) == trailing
+    # The look ends at the end of the file inside an open bracket, where
+    # the bracket's report is the line's.
+    assert codes("def f():\n    let m = x if c else f(y\n", c) == ["E0009"]
+
+test "an expected block is labelled at its keyword"(sys: System):
+    let c = test_catalog(sys)
+    let src = "def f():\n    let matches = match x:\n    pass\n"
+    let expected = "3:5-3:9 E0101 parse.expected-block keyword=\"match\" line=\"2\"\n  label 2:19-2:24 parse.opened-here keyword=\"match\"\n"
+    assert render_ids(src, checked(src, c).diagnostics, c) == expected
+    # The first whole word on the line, wherever it is written.
+    let text = "for for_each in xs: \"for\"\n"
+    let p = Parser.new(text, lex(text).tokens, [])
+    assert p.word_on_line("for", 1) == Some((0, 3))
+    assert p.word_on_line("each", 1) == None
+    assert p.word_on_line("in", 1) == Some((13, 15))
+    assert p.word_on_line("for", 2) == None
+    assert p.word_on_line("for", 3) == None
+
+test "a punctuation token missing at the end of a line is written by the fix"(sys: System):
+    let c = test_catalog(sys)
+    let colon = "1:8-1:8 E0100 parse.expected expected=\"`:`\" found=\"the end of the line\"\n"
+    let src = "def f()\n    pass\n"
+    let fixed = "{colon}  fix parse.insert-token 1:8-1:8 \":\"\n"
+    assert render_ids(src, checked(src, c).diagnostics, c) == fixed
+    # One missing inside a line has no fix.
+    let inside = "2:13-2:14 E0100 parse.expected expected=\"`)`\" found=\"`y`\"\n"
+    assert body_diagnostics("print(x y)", c) == inside

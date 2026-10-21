@@ -1,0 +1,1048 @@
+##! The body checker (stage 0's `sisu-typeck/src/check.rs`): state,
+##! scopes, locals, annotations, blocks and statements. Expressions are in
+##! `expr.sisu`, calls in `call.sisu`.
+##!
+##! The program, the module's syntax and its text are given to every
+##! method as `cx` rather than held by the checker: what a method reads
+##! from them stays readable while the checker changes its own state.
+##!
+##! The checker covers a slice of the language. Where a body uses
+##! something outside it, the checker notes why (`go_beyond`), gives what
+##! it cannot type the type `Error` and checks on; the driver then drops
+##! that body's diagnostics, so stage 1 reports a subset of stage 0's.
+
+from stage1.diag import Diagnostic, Msg, TextRange
+from stage1.syntax.ast import (
+    Ast,
+    BinOp,
+    Block,
+    Cond,
+    CondPart,
+    ExprId,
+    ExprKind,
+    LetElse,
+    Mode,
+    Name,
+    PatKind,
+    PatternId,
+    StmtId,
+    StmtKind,
+    TypeExprId,
+    TypeKind,
+)
+from stage1.typeck.infer import InferTable
+from stage1.typeck.program import DefKind, FnKind, ModuleId, Predicate, Program
+from stage1.typeck.thir import BlockId, Coercion, Local, TBlock, TExpr, TExprId, TExprKind, TStmt
+from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, Types
+
+## What the checker reads and does not change: the program, the syntax of
+## the module whose bodies it checks, and that module's text.
+pub view struct Cx:
+    pub prog: ref Program
+    pub ast: ref Ast
+    pub source: str
+
+## What a `return` (or `?`) in the current function targets.
+pub struct RetCtx:
+    pub ty: Ty
+    pub loops: int
+
+## Why a place cannot be written.
+pub enum Problem:
+    Immutable(int)
+    BehindSharedRef
+
+## What checking a body leaves: the table of types, the diagnostics, and
+## why the body is beyond the slice, if it is.
+pub struct Finished:
+    pub types: Types
+    pub diags: list[Diagnostic]
+    pub beyond: String?
+
+pub struct Checker:
+    pub types: Types
+    pub module: ModuleId
+    pub def_: DefId
+    pub infer: InferTable
+    pub locals: list[Local]
+    pub scopes: list[list[(String, int)]]
+    pub diags: list[Diagnostic]
+    pub ret: list[RetCtx]
+    pub self_ty: Ty?
+    ## Bounds to check once inference is done: (type, bound, span).
+    pub bounds: list[(Ty, TraitRef, TextRange)]
+    ## The impls a call of a trait method asks for.
+    pub impl_bounds: list[(Ty, TraitRef, TextRange)]
+    ## The bounds in scope: the function's own, elaborated.
+    pub env: list[Predicate]
+    ## The names of the function's generic parameters, for diagnostics.
+    pub generic_names: list[String]
+    ## Which of them are `const`.
+    pub const_generics: list[bool]
+    ## The function's header or body did not parse.
+    pub quiet_unknown_names: bool
+    ## While a later branch of an `if` with no expected type is converted
+    ## to the type of the first: the keyword and the first branch.
+    pub branch: (String, TextRange)?
+    ## While a value is converted to a type written in the source: where.
+    pub because: TextRange?
+    pub in_comptime: bool
+    ## Why the body is beyond the slice of the language stage 1 checks.
+    pub beyond: String?
+    pub exprs: list[TExpr]
+    pub blocks: list[TBlock]
+
+impl Checker:
+    pub pure def new(cx: Cx, own types: Types, def_: DefId) -> Checker:
+        let module = cx.prog.defs[def_.index].module
+        var quiet = False
+        var in_comptime = False
+        if let Some(f) = cx.prog.fn_info(def_):
+            quiet = f.header_broken or f.body_broken
+            in_comptime = f.comptime_
+        return Checker(
+            types=types,
+            module=module,
+            def_=def_,
+            infer=InferTable.new(),
+            locals=[],
+            scopes=[[]],
+            diags=[],
+            ret=[],
+            self_ty=None,
+            bounds=[],
+            impl_bounds=[],
+            env=[],
+            generic_names=[],
+            const_generics=[],
+            quiet_unknown_names=quiet,
+            branch=None,
+            because=None,
+            in_comptime=in_comptime,
+            beyond=None,
+            exprs=[],
+            blocks=[],
+        )
+
+    pub pure def finish(own self) -> Finished:
+        return Finished(types=self.types, diags=self.diags, beyond=self.beyond)
+
+    ## Notes that the body uses `why`, which the slice does not cover.
+    pub pure def go_beyond(mut self, why: str):
+        if self.beyond.is_none():
+            self.beyond = Some(why.to_string())
+
+    # ---------------------------------------------------------------- diagnostics
+
+    pub pure def report(mut self, own d: Diagnostic):
+        self.diags.push(d)
+
+    ## A diagnostic at `range`, without the line breaks and indentation a
+    ## statement's range ends with.
+    pub pure def error(self, cx: Cx, m: Msg, range: TextRange) -> Diagnostic:
+        var end = range.end
+        while end > range.start and is_space(cx.source.byte_at(end - 1)):
+            end -= 1
+        return Diagnostic.new(m, range.start, end)
+
+    ## The display form of a type, with variables resolved as far as known.
+    pub pure def show(mut self, cx: Cx, ty: Ty) -> String:
+        let z = self.infer.zonk(mut self.types, ty)
+        return cx.prog.display_in(self.types, z, self.generic_names)
+
+    ## Requires `ty` to implement the trait `tr` (a well-known one; when the
+    ## prelude lacks it nothing is required).
+    pub pure def require(mut self, ty: Ty, tr: DefId?, span: TextRange):
+        if let Some(d) = tr:
+            self.bounds.push((ty, TraitRef(def_=d, args=[]), span))
+
+    pub pure def source_text(self, cx: Cx, range: TextRange) -> String:
+        return cx.source.byte_slice(range.start, range.end).to_string()
+
+    # ---------------------------------------------------------------- the typed tree
+
+    pub pure def add(mut self, own kind: TExprKind, ty: Ty, span: TextRange) -> TExprId:
+        self.exprs.push(TExpr(kind=kind, ty=ty, span=span))
+        return TExprId(index=len(self.exprs) - 1)
+
+    pub pure def error_expr(mut self, span: TextRange) -> TExprId:
+        return self.add(TExprKind.Error, Ty.error(), span)
+
+    pub pure def ty_of(self, x: TExprId) -> Ty:
+        return self.exprs[x.index].ty
+
+    pub pure def span_of(self, x: TExprId) -> TextRange:
+        return self.exprs[x.index].span
+
+    pub pure def set_span(mut self, x: TExprId, span: TextRange):
+        self.exprs[x.index].span = span
+
+    ## Whether the expression denotes a place (a local, a field or element
+    ## of a place, or the target of a reference) rather than a temporary.
+    pub pure def is_place(self, x: TExprId) -> bool:
+        return match self.exprs[x.index].kind:
+            case TExprKind.Local(_) | TExprKind.Deref(_) | TExprKind.Index(_): True
+            case TExprKind.Field(base, _): self.is_place(base)
+            case _: False
+
+    ## Whether the place is reached through a reference or an index, from
+    ## which a value cannot be moved out.
+    pub pure def is_behind_ref(self, x: TExprId) -> bool:
+        return match self.exprs[x.index].kind:
+            case TExprKind.Deref(_) | TExprKind.Index(_): True
+            case TExprKind.Field(base, _): self.is_behind_ref(base)
+            case _: False
+
+    ## The local at the root of a place, if any.
+    pub pure def place_root(self, x: TExprId) -> int?:
+        return match self.exprs[x.index].kind:
+            case TExprKind.Local(l): Some(l)
+            case TExprKind.Field(base, _): self.place_root(base)
+            case TExprKind.Index(base): self.place_root(base)
+            case _: None
+
+    ## Wraps an expression in a coercion node.
+    pub pure def wrap(mut self, x: TExprId, kind: Coercion, ty: Ty) -> TExprId:
+        let span = self.span_of(x)
+        return self.add(TExprKind.Coerce(expr=x, kind=kind), ty, span)
+
+    # ---------------------------------------------------------------- scopes and locals
+
+    pub pure def push_scope(mut self):
+        self.scopes.push([])
+
+    pub pure def pop_scope(mut self):
+        _ = self.scopes.pop()
+
+    pub pure def new_local(mut self, name: str, ty: Ty, mutable: bool, span: TextRange) -> int:
+        self.locals.push(
+            Local(name=name.to_string(), ty=ty, mutable=mutable, once=False, span=span)
+        )
+        return len(self.locals) - 1
+
+    ## Declares a name in the innermost scope (shadowing an enclosing
+    ## scope's name is the name pass's warning).
+    pub pure def declare(mut self, name: str, local: int):
+        if name.is_empty() or name == "_":
+            return
+        let last = len(self.scopes) - 1
+        self.scopes[last].push((name.to_string(), local))
+
+    pub pure def lookup_local(self, name: str) -> int?:
+        var i = len(self.scopes) - 1
+        while i >= 0:
+            let scope = ref self.scopes[i]
+            var j = len(scope) - 1
+            while j >= 0:
+                if scope[j].0 == name:
+                    return Some(scope[j].1)
+                j -= 1
+            i -= 1
+        return None
+
+    pub pure def local_ty(self, l: int) -> Ty:
+        if l < len(self.locals):
+            return self.locals[l].ty
+        return Ty.error()
+
+    # ---------------------------------------------------------------- annotations
+
+    ## Resolves a type written inside a body (`let x: T`).
+    pub pure def resolve_ty(mut self, cx: Cx, te: TypeExprId) -> Ty:
+        let written = cx.ast.type_expr(te)
+        match written.kind:
+            case TypeKind.Error:
+                return Ty.error()
+            case TypeKind.Path(segments, args):
+                var names: list[String] = []
+                for s in segments:
+                    names.push(s.text.copy())
+                var targs: list[Ty] = []
+                for a in args:
+                    targs.push(self.resolve_ty(cx, a))
+                if len(names) == 1:
+                    for i in range(len(self.generic_names)):
+                        if self.generic_names[i] == names[0]:
+                            return self.types.param(i)
+                if len(names) == 2:
+                    var subject = False
+                    for g in self.generic_names:
+                        if g == names[0]:
+                            subject = True
+                    if subject or names[0] == "Self":
+                        self.go_beyond("an associated type")
+                        return Ty.error()
+                if len(names) == 1:
+                    if let Some(p) = primitive(names[0]):
+                        return p
+                    if names[0] == "Self":
+                        return self.self_ty ?? Ty.error()
+                let found = self.lookup_type_path(cx, names) else:
+                    return Ty.error()
+                return self.def_type(cx, found, targs, written.range)
+            case TypeKind.Option(inner):
+                let t = self.resolve_ty(cx, inner)
+                return self.option_of(cx, t)
+            case TypeKind.Result(ok, err):
+                var ok_ty = Ty.unit()
+                if let Some(o) = ok:
+                    ok_ty = self.resolve_ty(cx, o)
+                var err_ty = Ty.error()
+                if let Some(e) = err:
+                    err_ty = self.resolve_err_set(cx, e)
+                let r = cx.prog.wk.result else:
+                    return Ty.error()
+                return self.types.adt(r, [ok_ty, err_ty])
+            case TypeKind.Tuple(elems):
+                var tys: list[Ty] = []
+                for (_, t) in elems:
+                    tys.push(self.resolve_ty(cx, t))
+                if tys.is_empty():
+                    return Ty.unit()
+                return self.types.tuple(tys)
+            case TypeKind.Fn(pure, params, ret):
+                var ps: list[Ty] = []
+                for p in params:
+                    ps.push(self.resolve_ty(cx, p))
+                let r = self.resolve_ty(cx, ret)
+                return self.types.fn_(ps, r, pure)
+            case TypeKind.Ref(mutable, inner):
+                let t = self.resolve_ty(cx, inner)
+                return self.types.ref_(t, mutable)
+            case TypeKind.ConstArg(n):
+                return self.types.intern(TyData.Const(n))
+            case _:
+                self.go_beyond("a type of this form in a body")
+                return Ty.error()
+
+    pure def resolve_err_set(mut self, cx: Cx, te: TypeExprId) -> Ty:
+        var parts: list[TypeExprId] = []
+        if let TypeKind.Union(list) = cx.ast.type_expr(te).kind:
+            parts = list.copy()
+        else:
+            parts = [te]
+        var members: list[int] = []
+        for p in parts:
+            let t = self.resolve_ty(cx, p)
+            match self.types.data(t):
+                case TyData.ErrSet(m):
+                    for d in m:
+                        members.push(d.index)
+                case _:
+                    if t != Ty.error():
+                        self.go_beyond("a type that is not an error set after `!`")
+                    return Ty.error()
+        members.sort()
+        var out: list[DefId] = []
+        for i in members:
+            if out.is_empty() or out[len(out) - 1].index != i:
+                out.push(DefId(index=i))
+        return self.types.err_set(out)
+
+    pub pure def lookup_type_path(self, cx: Cx, names: list[String]) -> DefId?:
+        let first = names.first() else:
+            return None
+        var d = cx.prog.lookup(self.module, first) else:
+            return None
+        for i in range(1, len(names)):
+            match cx.prog.defs[d.index].kind:
+                case DefKind.Module(m):
+                    let next = cx.prog.lookup_in(m, names[i]) else:
+                        return None
+                    d = next
+                case _:
+                    return None
+        return Some(d)
+
+    pub pure def def_type(mut self, cx: Cx, d: DefId, args: list[Ty], at: TextRange) -> Ty:
+        var generics = 0
+        match cx.prog.defs[d.index].kind:
+            case DefKind.Struct(s):
+                generics = len(s.generics)
+            case DefKind.Enum(e):
+                generics = len(e.generics)
+            case DefKind.Refinement(r):
+                generics = len(r.generics)
+            case DefKind.ErrorSet(_):
+                return self.types.err_set([d])
+            case DefKind.TypeAlias(t):
+                return self.types.subst(t, args)
+            case _:
+                # A trait or a declaration that is no type: the name pass's
+                # and the resolver's to report.
+                self.go_beyond("a name that is not a type, as a type")
+                return Ty.error()
+        var targs = args.copy()
+        # Omitted trailing arguments take their defaults (D-060).
+        if not targs.is_empty() and len(targs) < generics:
+            let gs = cx.prog.type_generics(d)
+            while len(targs) < generics:
+                let default = gs[len(targs)].default else:
+                    break
+                let t = self.types.subst(default, targs)
+                targs.push(t)
+        if len(targs) != generics:
+            if targs.is_empty():
+                # `list` in a body annotation: the arguments are inferred.
+                var vars: list[Ty] = []
+                for _ in range(generics):
+                    vars.push(self.infer.fresh(mut self.types))
+                return self.types.adt(d, vars)
+            self.go_beyond("a wrong number of type arguments")
+            return Ty.error()
+        # A `const` parameter takes a constant, any other a type; a wrong
+        # one is the resolver's to report, and the type is unknown.
+        let gs = cx.prog.type_generics(d)
+        for i in range(len(targs)):
+            if i >= len(gs):
+                continue
+            var const_param = False
+            if let TyData.Param(k) = self.types.data(targs[i]):
+                const_param = k < len(self.const_generics) and self.const_generics[k]
+            var wrong = False
+            match self.types.data(targs[i]):
+                case TyData.Const(_):
+                    wrong = not gs[i].is_const
+                case TyData.Error | TyData.Var(_):
+                    wrong = False
+                case _:
+                    wrong = gs[i].is_const != const_param
+            if wrong:
+                var errors: list[Ty] = []
+                for _ in range(generics):
+                    errors.push(Ty.error())
+                return self.types.adt(d, errors)
+        return self.types.adt(d, targs)
+
+    # ---------------------------------------------------------------- helpers on types
+
+    pub pure def resolved(self, ty: Ty) -> Ty:
+        return self.infer.resolve(self.types, ty)
+
+    pub pure def data(self, ty: Ty) -> TyData:
+        return self.types.data(self.resolved(ty)).copy()
+
+    pub pure def is_copy(mut self, cx: Cx, ty: Ty) -> bool:
+        let t = self.infer.zonk(mut self.types, ty)
+        return cx.prog.is_copy_in(mut self.types, t, self.env)
+
+    pub pure def option_of(mut self, cx: Cx, t: Ty) -> Ty:
+        let o = cx.prog.wk.option else:
+            return Ty.error()
+        return self.types.adt(o, [t])
+
+    pub pure def list_of(mut self, cx: Cx, t: Ty) -> Ty:
+        let l = cx.prog.wk.list else:
+            return Ty.error()
+        return self.types.adt(l, [t])
+
+    pub pure def string_ty(mut self, cx: Cx) -> Ty:
+        let s = cx.prog.wk.string else:
+            return Ty.error()
+        return self.types.adt(s, [])
+
+    ## `Some(T)` when the type is `T?`.
+    pub pure def as_option(self, cx: Cx, ty: Ty) -> Ty?:
+        if let TyData.Adt(d, a) = self.data(ty):
+            if Some(d) == cx.prog.wk.option:
+                return first_of(a)
+        return None
+
+    ## `Some((T, E))` when the type is `T ! E`.
+    pub pure def as_result(self, cx: Cx, ty: Ty) -> (Ty, Ty)?:
+        if let TyData.Adt(d, a) = self.data(ty):
+            if Some(d) == cx.prog.wk.result and len(a) == 2:
+                return Some((a[0], a[1]))
+        return None
+
+    pub pure def is_builtin(self, cx: Cx, ty: Ty, name: str) -> bool:
+        if let TyData.Adt(d, _) = self.data(ty):
+            return cx.prog.is_builtin(d, name)
+        return False
+
+    pub pure def is_string(self, cx: Cx, ty: Ty) -> bool:
+        return self.is_builtin(cx, ty, "String")
+
+    ## Whether a type is an option (`T?`), unresolved.
+    pub pure def is_option(self, cx: Cx, ty: Ty) -> bool:
+        if let TyData.Adt(d, _) = self.types.data(ty):
+            return Some(d) == cx.prog.wk.option
+        return False
+
+    # ---------------------------------------------------------------- blocks and statements
+
+    pub pure def new_block(mut self, own stmts: list[TStmt]) -> BlockId:
+        self.blocks.push(TBlock(stmts=stmts))
+        return BlockId(index=len(self.blocks) - 1)
+
+    pub pure def check_block(mut self, cx: Cx, b: Block) -> BlockId:
+        self.push_scope()
+        let block = self.check_block_in_scope(cx, b)
+        self.pop_scope()
+        return block
+
+    ## Checks a block's statements in the current scope.
+    pub pure def check_block_in_scope(mut self, cx: Cx, b: Block) -> BlockId:
+        var stmts: list[TStmt] = []
+        var diverged = False
+        var warned = False
+        for s in b.stmts:
+            let stmt = cx.ast.stmt(s)
+            var quiet = False
+            match stmt.kind:
+                case StmtKind.Pass | StmtKind.Error:
+                    quiet = True
+                case _:
+                    pass
+            if diverged and not warned and not quiet:
+                let d = self.error(cx, Msg.TypeUnreachableCode, stmt.range)
+                self.report(d)
+                warned = True
+            let before = len(stmts)
+            self.check_stmt(cx, s, mut stmts)
+            for i in range(before, len(stmts)):
+                if self.stmt_diverges(stmts[i]):
+                    diverged = True
+        return self.new_block(stmts)
+
+    pub pure def check_stmt(mut self, cx: Cx, id: StmtId, mut out: list[TStmt]):
+        let s = cx.ast.stmt(id)
+        match s.kind:
+            case StmtKind.Let(mutable, pat, ty, init, else_):
+                self.check_let(cx, mutable, pat, ty, init, else_, s.range, mut out)
+            case StmtKind.Assign(target, op, value):
+                out.push(self.check_assign(cx, target, op, value, s.range))
+            case StmtKind.Expr(e):
+                out.push(self.check_expr_stmt(cx, e))
+            case StmtKind.Return(v):
+                out.push(self.check_return(cx, v, s.range))
+            case StmtKind.Break:
+                if self.loops() > 0:
+                    out.push(TStmt.Break)
+                else:
+                    let d = self.error(cx, Msg.TypeBreakOutsideLoop, s.range)
+                    self.report(d)
+                    out.push(TStmt.Other)
+            case StmtKind.Continue:
+                if self.loops() > 0:
+                    out.push(TStmt.Continue)
+                else:
+                    let d = self.error(cx, Msg.TypeContinueOutsideLoop, s.range)
+                    self.report(d)
+                    out.push(TStmt.Other)
+            case StmtKind.Pass:
+                pass
+            case StmtKind.If(branches, else_block):
+                var bs: list[(bool, BlockId)] = []
+                for (cond, block) in branches:
+                    self.push_scope()
+                    let empty = self.check_cond(cx, cond)
+                    let b = self.check_block(cx, block)
+                    self.pop_scope()
+                    bs.push((empty, b))
+                var e: BlockId? = None
+                if let Some(b) = else_block:
+                    e = Some(self.check_block(cx, b))
+                out.push(TStmt.If(branches=bs, else_=e))
+            case StmtKind.While(cond, body):
+                self.push_scope()
+                _ = self.check_cond(cx, cond)
+                var infinite = False
+                if len(cond.parts) == 1:
+                    if let CondPart.Expr(e) = cond.parts[0]:
+                        if let ExprKind.Name(n) = cx.ast.expr(e).kind:
+                            infinite = n == "True" and self.lookup_local("True").is_none()
+                self.enter_loop()
+                let b = self.check_block(cx, body)
+                self.exit_loop()
+                self.pop_scope()
+                out.push(TStmt.While(infinite=infinite, body=b))
+            case StmtKind.For(pat, mode, iter, body):
+                self.push_scope()
+                let item = self.check_iterable(cx, iter, mode)
+                self.check_pat(cx, pat, item, None)
+                self.enter_loop()
+                let b = self.check_block(cx, body)
+                self.exit_loop()
+                self.pop_scope()
+                out.push(TStmt.Other)
+                _ = b
+            case StmtKind.Assert(cond, message):
+                _ = self.check_condition_expr(cx, cond)
+                if let Some(m) = message:
+                    _ = self.assert_message(cx, m)
+                out.push(TStmt.Other)
+            case StmtKind.Expect(cond):
+                _ = self.check_condition_expr(cx, cond)
+                out.push(TStmt.Other)
+            case StmtKind.Defer(block):
+                let b = self.check_block(cx, block)
+                out.push(TStmt.Block(b))
+            case StmtKind.Contract(_):
+                self.go_beyond("a contract")
+                out.push(TStmt.Other)
+            case StmtKind.Error:
+                out.push(TStmt.Other)
+            case other:
+                self.go_beyond(stmt_form(other))
+                out.push(TStmt.Other)
+
+    ## The type a `return` here gives.
+    pub pure def ret_ty(self) -> Ty:
+        if let Some(r) = self.ret.last():
+            return r.ty
+        return Ty.unit()
+
+    pure def loops(self) -> int:
+        if let Some(r) = self.ret.last():
+            return r.loops
+        return 0
+
+    pub pure def enter_loop(mut self):
+        let n = len(self.ret)
+        if n > 0:
+            self.ret[n - 1].loops += 1
+
+    pub pure def exit_loop(mut self):
+        let n = len(self.ret)
+        if n > 0 and self.ret[n - 1].loops > 0:
+            self.ret[n - 1].loops -= 1
+
+    pure def check_let(
+        mut self,
+        cx: Cx,
+        mutable: bool,
+        pat: PatternId,
+        ty: TypeExprId?,
+        init: ExprId?,
+        else_: LetElse?,
+        range: TextRange,
+        mut out: list[TStmt],
+    ):
+        var declared: Ty? = None
+        if let Some(t) = ty:
+            let d = self.resolve_ty(cx, t)
+            if cx.prog.unsized_part(self.types, d).is_some():
+                self.go_beyond("a `dyn` type held by value")
+            declared = Some(d)
+        let value_expr = init else:
+            # `let x: T`: declared now, assigned later; stage 0's ownership
+            # checker finds a use before the assignment and a second
+            # assignment (E0366, E0367).
+            self.go_beyond("a `let` without a value")
+            var t = Ty.error()
+            match declared:
+                case Some(d):
+                    t = d
+                case None:
+                    let name = match cx.ast.pattern(pat).kind:
+                        case PatKind.Bind(n): n.text.copy()
+                        case _: String.new()
+                    var d = self.error(cx, Msg.TypeLetNeedsType, cx.ast.pattern(pat).range)
+                    d = d.with("name", name)
+                    self.report(d)
+            self.bind_simple(cx, pat, t, True, not mutable)
+            out.push(TStmt.Let(init=None, has_else=False))
+            return
+        if else_.is_some():
+            self.go_beyond("`let ... else`")
+            let v = self.infer_expr(cx, value_expr, None)
+            out.push(TStmt.Let(init=Some(self.ty_of(v)), has_else=True))
+            return
+        let refutable = self.pattern_is_refutable(cx, pat)
+        var value = TExprId(index=0)
+        match declared:
+            case Some(t):
+                let written = ty ?? TypeExprId(index=0)
+                value = self.check_expr_because(cx, value_expr, t, cx.ast.type_expr(written).range)
+            case None:
+                let v = self.infer_expr(cx, value_expr, None)
+                value = self.decay(cx, v)
+        value = self.check_movable(cx, value)
+        if refutable:
+            let d = self.error(cx, Msg.TypeRefutableLet, cx.ast.pattern(pat).range)
+            self.report(d)
+        let vty = declared ?? self.ty_of(value)
+        self.check_pat_with(cx, pat, vty, None, mutable)
+        out.push(TStmt.Let(init=Some(self.ty_of(value)), has_else=False))
+
+    ## A simple binding pattern for `let x: T` without a value.
+    pure def bind_simple(mut self, cx: Cx, pat: PatternId, ty: Ty, mutable: bool, once: bool):
+        match cx.ast.pattern(pat).kind:
+            case PatKind.Bind(n):
+                let l = self.new_local(n.text, ty, mutable, n.range)
+                self.locals[l].once = once
+                self.declare(n.text, l)
+            case _:
+                self.check_pat_with(cx, pat, ty, None, mutable)
+
+    ## A pattern's bindings, for a value of type `ty`: a name binds it, `_`
+    ## ignores it; any other pattern is beyond the slice.
+    pub pure def check_pat(mut self, cx: Cx, p: PatternId, ty: Ty, by_ref: bool?):
+        self.check_pat_with(cx, p, ty, by_ref, False)
+
+    pub pure def check_pat_with(
+        mut self, cx: Cx, p: PatternId, ty: Ty, by_ref: bool?, mutable: bool
+    ):
+        let t = self.resolved(ty)
+        match cx.ast.pattern(p).kind:
+            case PatKind.Wildcard | PatKind.Error:
+                pass
+            case PatKind.Bind(n):
+                var lty = t
+                if let Some(m) = by_ref:
+                    if not self.is_copy(cx, t):
+                        lty = self.types.ref_(t, m)
+                let l = self.new_local(n.text, lty, mutable, n.range)
+                self.declare(n.text, l)
+            case _:
+                self.go_beyond("a pattern other than a name")
+
+    ## Whether a pattern can fail to match (anything but names, `_` and
+    ## tuples of those).
+    pub pure def pattern_is_refutable(self, cx: Cx, p: PatternId) -> bool:
+        match cx.ast.pattern(p).kind:
+            case PatKind.Wildcard | PatKind.Bind(_) | PatKind.Error:
+                return False
+            case PatKind.Tuple(ps):
+                for x in ps:
+                    if self.pattern_is_refutable(cx, x):
+                        return True
+                return False
+            case _:
+                return True
+
+    pure def check_assign(
+        mut self, cx: Cx, target: ExprId, op: BinOp?, value: ExprId, range: TextRange
+    ) -> TStmt:
+        if op.is_none():
+            match cx.ast.expr(target).kind:
+                case ExprKind.Name(n):
+                    if n == "_":
+                        _ = self.infer_expr(cx, value, None)
+                        return TStmt.Other
+                case ExprKind.Tuple(_):
+                    self.go_beyond("an assignment to a tuple of places")
+                    _ = self.infer_expr(cx, value, None)
+                    return TStmt.Other
+                case _:
+                    pass
+        let place = self.check_place(cx, target, True)
+        match op:
+            case None:
+                let pty = self.ty_of(place)
+                let v = self.check_expr(cx, value, pty)
+                _ = self.check_movable(cx, v)
+                return TStmt.Other
+            case Some(o):
+                let pty = self.decay_ty(cx, self.ty_of(place))
+                let v0 = self.infer_expr(cx, value, Some(pty))
+                let v = self.decay(cx, v0)
+                # On a type with an operator trait, `x -= y` is `x = x - y`
+                # through the trait (D-022).
+                let read = self.decay(cx, place)
+                if self.operator_call(cx, o, read, Some(v), range).is_some():
+                    return TStmt.Other
+                let lhs = self.add(TExprKind.Error, pty, self.span_of(place))
+                let (result, _) = self.binary_result(cx, o, lhs, v, range)
+                if result != Ty.error():
+                    let shown_place = self.show(cx, pty)
+                    let shown_result = self.show(cx, result)
+                    if not self.infer.try_unify(self.types, result, pty):
+                        let d = self.error(cx, Msg.TypeMismatch, cx.ast.expr(value).range)
+                        self.report(d.with("expected", shown_place).with("found", shown_result))
+                return TStmt.Other
+
+    ## An expression used as an assignment target: a mutable place.
+    pub pure def check_place(mut self, cx: Cx, target: ExprId, for_write: bool) -> TExprId:
+        var e = self.infer_expr(cx, target, None)
+        # A call returning `ref mut T` is a place too.
+        if let TyData.Ref(inner, True) = self.data(self.ty_of(e)):
+            var local = False
+            if let TExprKind.Local(_) = self.exprs[e.index].kind:
+                local = True
+            if not self.is_place(e) or local:
+                let span = self.span_of(e)
+                e = self.add(TExprKind.Deref(e), inner, span)
+        if self.ty_of(e) == Ty.error():
+            return e
+        if not self.is_place(e):
+            let d = self.error(cx, Msg.TypeNotAPlace, cx.ast.expr(target).range)
+            self.report(d)
+            return e
+        if for_write:
+            self.require_mutable_as(cx, e, cx.ast.expr(target).range, True)
+        return e
+
+    ## Reports an assignment to, or a `mut` borrow of, an immutable place.
+    pub pure def require_mutable(mut self, cx: Cx, e: TExprId, range: TextRange):
+        self.require_mutable_as(cx, e, range, False)
+
+    ## `assign` distinguishes `x = v` (E0312) from a `mut` borrow (E0341).
+    pub pure def require_mutable_as(mut self, cx: Cx, e: TExprId, range: TextRange, assign: bool):
+        let root = self.mutable_root_problem(e) else:
+            return
+        var is_local = False
+        if let TExprKind.Local(_) = self.exprs[e.index].kind:
+            is_local = True
+        match root:
+            case Problem.Immutable(l):
+                let name = self.locals[l].name.copy()
+                let decl = self.locals[l].span
+                let m = if assign and is_local: Msg.TypeAssignImmutable else: Msg.TypeNotMutable
+                let what = if is_local: name.copy() else: self.source_text(cx, range)
+                # A borrowed parameter is changed by taking it with `mut`; a
+                # local by declaring it with `var`.
+                var param: TextRange? = None
+                if let Some(f) = cx.prog.fn_info(self.def_):
+                    for p in f.params:
+                        if p.span == decl and p.mode == Mode.Borrow and param.is_none():
+                            param = Some(p.span)
+                var d = self.error(cx, m, range).with("name", name).with("what", what)
+                match param:
+                    case Some(at):
+                        d = d.fix_at(Msg.TypeTakeMut, at.start, at.start, "mut ")
+                    case None:
+                        d = d.fix_edits(Msg.TypeDeclareVar, [])
+                let local_name = self.locals[l].name.copy()
+                d = d.label_with(Msg.ResolveDefinedHere, decl.start, decl.end, "name", local_name)
+                self.report(d)
+            case Problem.BehindSharedRef:
+                self.go_beyond("a change through a shared reference")
+
+    ## Why a place cannot be written, if it cannot.
+    pub pure def mutable_root_problem(self, e: TExprId) -> Problem?:
+        match self.exprs[e.index].kind:
+            case TExprKind.Local(l):
+                if l >= len(self.locals):
+                    return None
+                let local = ref self.locals[l]
+                if local.mutable:
+                    return None
+                if let TyData.Ref(_, True) = self.data(local.ty):
+                    return None
+                return Some(Problem.Immutable(l))
+            case TExprKind.Field(base, _):
+                return self.mutable_root_problem(base)
+            case TExprKind.Index(base):
+                return self.mutable_root_problem(base)
+            case TExprKind.Deref(inner):
+                match self.data(self.ty_of(inner)):
+                    case TyData.Ref(_, m):
+                        if m:
+                            return None
+                        return Some(Problem.BehindSharedRef)
+                    case _:
+                        return None
+            case _:
+                return None
+
+    pure def check_expr_stmt(mut self, cx: Cx, e: ExprId) -> TStmt:
+        let range = cx.ast.expr(e).range
+        match cx.ast.expr(e).kind:
+            case ExprKind.Match(_, _):
+                self.go_beyond("`match`")
+                return TStmt.Other
+            case ExprKind.If(branches, else_):
+                # An inline `if` in statement position: its values are
+                # discarded.
+                var bs: list[(bool, BlockId)] = []
+                for (c, v) in branches:
+                    _ = self.check_condition_expr(cx, c)
+                    let value = self.infer_expr(cx, v, None)
+                    let b = self.new_block([TStmt.Expr(self.ty_of(value))])
+                    bs.push((False, b))
+                var el: BlockId? = None
+                if let Some(v) = else_:
+                    let value = self.infer_expr(cx, v, None)
+                    el = Some(self.new_block([TStmt.Expr(self.ty_of(value))]))
+                return TStmt.If(branches=bs, else_=el)
+            case _:
+                pass
+        let x = self.infer_expr(cx, e, None)
+        let ty = self.resolved(self.ty_of(x))
+        var unused = False
+        if let TyData.Adt(d, _) = self.types.data(ty):
+            unused = Some(d) == cx.prog.wk.option or Some(d) == cx.prog.wk.result
+        if unused:
+            let shown = self.show(cx, ty)
+            let d = self.error(cx, Msg.TypeUnusedResult, range).with("ty", shown)
+            self.report(d.fix_at(Msg.TypeDiscard, range.start, range.start, "_ = "))
+        return TStmt.Expr(self.ty_of(x))
+
+    ## The message of an `assert`: a string (E0379).
+    pure def assert_message(mut self, cx: Cx, m: ExprId) -> TExprId:
+        let x = self.infer_expr(cx, m, Some(Ty.str()))
+        let t = self.resolved(self.ty_of(x))
+        var fine = self.is_string(cx, t)
+        match self.types.data(t):
+            case TyData.Str | TyData.Error | TyData.Never | TyData.Var(_):
+                fine = True
+            case _:
+                pass
+        if fine:
+            return self.coerce(cx, x, Ty.str())
+        let range = cx.ast.expr(m).range
+        var d = self.error(cx, Msg.TypeAssertMessage, range)
+        let text = cx.source.byte_slice(range.start, range.end)
+        if not text.contains("\"") and not text.contains("\n"):
+            d = d.fix_at(Msg.TypeInterpolate, range.start, range.end, "\"{{{text}}}\"")
+        self.report(d)
+        return self.wrap(x, Coercion.Mismatch, Ty.str())
+
+    pure def check_return(mut self, cx: Cx, v: ExprId?, range: TextRange) -> TStmt:
+        let ret = self.ret_ty()
+        let fn_name = cx.prog.defs[self.def_.index].name.copy()
+        let value = v else:
+            let r = self.resolved(ret)
+            if let TyData.Var(_) = self.types.data(r):
+                _ = self.infer.unify(self.types, r, Ty.unit())
+            elif r != Ty.unit() and r != Ty.error():
+                let shown = self.show(cx, r)
+                let d = self.error(cx, Msg.TypeReturnNeedsValue, range).with("ty", shown)
+                self.report(d)
+            return TStmt.Return
+        let e_range = cx.ast.expr(value).range
+        if self.resolved(ret) == Ty.unit():
+            var is_test = False
+            if let Some(f) = cx.prog.fn_info(self.def_):
+                if let FnKind.Test(_) = f.kind:
+                    is_test = True
+            var d = self.error(cx, Msg.TypeReturnInTest, e_range)
+            if not is_test:
+                d = self.error(cx, Msg.TypeReturnValueInUnit, e_range).with("name", fn_name)
+            # The fix keeps the `return` and drops its value.
+            let keyword_end = range.start + 6
+            if keyword_end <= cx.source.byte_len()
+                    and cx.source.byte_slice(range.start, keyword_end) == "return":
+                d = d.fix_at(Msg.TypeDropReturnValue, keyword_end, e_range.end, "")
+            self.report(d)
+            _ = self.infer_expr(cx, value, None)
+            return TStmt.Return
+        let x = self.check_expr(cx, value, ret)
+        _ = self.check_movable(cx, x)
+        return TStmt.Return
+
+    # ---------------------------------------------------------------- conditions
+
+    pub pure def check_condition_expr(mut self, cx: Cx, e: ExprId) -> TExprId:
+        if let ExprKind.Comptime(_) = cx.ast.expr(e).kind:
+            self.go_beyond("`comptime`")
+        let x0 = self.infer_expr(cx, e, Some(Ty.bool()))
+        let x = self.decay(cx, x0)
+        let t = self.resolved(self.ty_of(x))
+        match self.types.data(t):
+            case TyData.Bool | TyData.Error | TyData.Never:
+                return x
+            case TyData.Var(_):
+                _ = self.infer.unify(self.types, t, Ty.bool())
+                return x
+            case _:
+                let shown = self.show(cx, t)
+                let d = self.error(cx, Msg.TypeNotBool, cx.ast.expr(e).range).with("found", shown)
+                self.report(d)
+                return self.wrap(x, Coercion.Mismatch, Ty.bool())
+
+    ## A condition chain; its bindings are declared in the current scope,
+    ## which the caller opens around the guarded block. Whether it has no
+    ## parts.
+    pub pure def check_cond(mut self, cx: Cx, c: Cond) -> bool:
+        for p in c.parts:
+            match p:
+                case CondPart.Expr(e):
+                    _ = self.check_condition_expr(cx, e)
+                case CondPart.Let(_, value):
+                    self.go_beyond("`if let`")
+                    _ = self.infer_expr(cx, value, None)
+        return c.parts.is_empty()
+
+    # ---------------------------------------------------------------- divergence
+
+    pub pure def block_diverges(self, b: BlockId) -> bool:
+        for s in self.blocks[b.index].stmts:
+            if self.stmt_diverges(s):
+                return True
+        return False
+
+    pub pure def stmt_diverges(self, s: TStmt) -> bool:
+        match s:
+            case TStmt.Return | TStmt.Break | TStmt.Continue:
+                return True
+            case TStmt.Expr(t):
+                return self.resolved(t) == Ty.never()
+            case TStmt.Let(init, has_else):
+                if let Some(t) = init:
+                    return not has_else and self.resolved(t) == Ty.never()
+                return False
+            case TStmt.If(branches, else_):
+                match else_:
+                    case Some(e):
+                        for (_, b) in branches:
+                            if not self.block_diverges(b):
+                                return False
+                        return self.block_diverges(e)
+                    case None:
+                        return len(branches) == 1
+                            and branches[0].0
+                            and self.block_diverges(branches[0].1)
+            case TStmt.Block(b):
+                return self.block_diverges(b)
+            case TStmt.While(infinite, body):
+                return infinite and not self.block_breaks(body)
+            case TStmt.Other:
+                return False
+
+    ## Whether a block contains a `break` of the loop it is the body of.
+    pure def block_breaks(self, b: BlockId) -> bool:
+        for s in self.blocks[b.index].stmts:
+            if self.stmt_breaks(s):
+                return True
+        return False
+
+    pure def stmt_breaks(self, s: TStmt) -> bool:
+        match s:
+            case TStmt.Break:
+                return True
+            case TStmt.If(branches, else_):
+                for (_, b) in branches:
+                    if self.block_breaks(b):
+                        return True
+                if let Some(e) = else_:
+                    return self.block_breaks(e)
+                return False
+            case TStmt.Block(b):
+                return self.block_breaks(b)
+            case _:
+                return False
+
+## What a statement beyond the slice is, for saying why.
+pure def stmt_form(kind: StmtKind) -> str:
+    return match kind:
+        case StmtKind.With(_, _, _): "`with`"
+        case StmtKind.Item(_): "a nested declaration"
+        case StmtKind.Comptime(_): "`comptime`"
+        case StmtKind.ReturnImpl(_): "`return impl`"
+        case StmtKind.Select(_): "`select`"
+        case StmtKind.Yield(_): "`yield`"
+        case _: "a construct of a later phase"
+
+## The first of a list of types.
+pub pure def first_of(ts: list[Ty]) -> Ty?:
+    if ts.is_empty():
+        return None
+    return Some(ts[0])
+
+## Whether a byte is ASCII white space.
+pure def is_space(b: u8) -> bool:
+    return b == 32 or b == 10 or b == 9 or b == 13 or b == 12
+
+## The type a primitive name stands for.
+pub pure def primitive(name: str) -> Ty?:
+    return match name:
+        case "int": Some(Ty.int())
+        case "f64": Some(Ty.float())
+        case "bool": Some(Ty.bool())
+        case "char": Some(Ty.char())
+        case "str": Some(Ty.str())
+        case "Never": Some(Ty.never())
+        case _: None

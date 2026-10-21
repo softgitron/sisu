@@ -1,0 +1,26 @@
+# Conversions a mismatch suggests, and the operators on numbers and text.
+def count_words(text: str) -> int:
+    return text.split_whitespace()
+
+def first_word(text: str) -> int:
+    return (text.trim()).split_whitespace()
+
+def mean(total: int, n: int) -> f64:
+    return (total + 1) / 2.5
+
+def label(n: int) -> str:
+    let s = n + " items"
+    return "count: " + n.to_string()
+
+def main():
+    let x = 7
+    let y = x // 2.0
+    let z = -"text"
+    let ok = not 3
+    print(count_words("a b"))
+    print(first_word("a b"))
+    print(mean(3, 2))
+    print(label(2))
+    print(y)
+    print(z)
+    print(ok)

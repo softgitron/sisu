@@ -361,8 +361,11 @@ impl Parser:
 
     pub(package) pure def expected_block(mut self, keyword: str, line: int):
         let (start, end) = self.error_span()
-        let d = Diagnostic.new(Msg.ParseExpectedBlock, start, end).with("keyword", keyword)
-        self.report(d.with("line", "{line}"))
+        var d = Diagnostic.new(Msg.ParseExpectedBlock, start, end).with("keyword", keyword)
+        d = d.with("line", "{line}")
+        if let Some((at, at_end)) = self.word_on_line(keyword, line):
+            d = d.label_with(Msg.ParseOpenedHere, at, at_end, "keyword", keyword)
+        self.report(d)
 
     pure def struct_def(mut self, cp: int):
         self.start_at(cp, SyntaxKind.StructDef)

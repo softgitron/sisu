@@ -1,0 +1,90 @@
+##! The typed tree as far as the checker's slice reads it (stage 0's
+##! `sisu-typeck/src/thir.rs`): each expression with its type and span,
+##! and the statements as much as the rules of divergence need. Stage 0's
+##! tree is what lowering consumes; here only the checker reads it, so a
+##! node keeps no more than the rules ask of it (`Other` for the rest).
+##! Expressions, statements and blocks live in arenas of the checker and
+##! refer to each other by index.
+
+from stage1.diag import TextRange
+from stage1.typeck.ty import DefId, Ty
+
+@derive(Eq, Hash, Debug, Copy)
+pub struct TExprId:
+    pub index: int
+
+## How a value was converted to the type expected of it.
+@derive(Eq, Debug, Copy)
+pub enum Coercion:
+    NeverToAny
+    StrView
+    RefStrView
+    MutToShared
+    Widen
+    DerefCopy
+    IntWiden
+    Mismatch
+
+pub struct TExpr:
+    pub kind: TExprKind
+    pub ty: Ty
+    pub span: TextRange
+
+pub enum TExprKind:
+    Int(int)
+    Float(f64)
+    Bool(bool)
+    Char(char)
+    Str(String)
+    Interp
+    List
+    Tuple
+    Unit
+    Local(int)
+    Field(base: TExprId, index: int)
+    ## An element of a list, an array or a `dict`.
+    Index(base: TExprId)
+    Deref(TExprId)
+    Borrow(place: TExprId, mutable: bool)
+    Coerce(expr: TExprId, kind: Coercion)
+    ## A call of a function, with its arguments.
+    Call(def_: DefId, args: list[TExprId])
+    FnRef(DefId)
+    Const(DefId)
+    CopyOf(TExprId)
+    Error
+    ## Anything whose parts no rule of the slice reads.
+    Other
+
+## A local variable of the body (or a parameter).
+pub struct Local:
+    pub name: String
+    pub ty: Ty
+    pub mutable: bool
+    ## Declared by `let x: T` without a value: assigned once, later.
+    pub once: bool
+    pub span: TextRange
+
+@derive(Eq, Hash, Debug, Copy)
+pub struct BlockId:
+    pub index: int
+
+## A statement, as far as divergence reads it.
+pub enum TStmt:
+    Return
+    Break
+    Continue
+    ## An expression statement, of this type.
+    Expr(Ty)
+    ## A `let` with a value of this type, and whether it has `else`.
+    Let(init: Ty?, has_else: bool)
+    ## Each branch's condition (whether it has parts) and block, and the
+    ## `else` block.
+    If(branches: list[(bool, BlockId)], else_: BlockId?)
+    ## Whether the condition is the literal `True`, and the body.
+    While(infinite: bool, body: BlockId)
+    Block(BlockId)
+    Other
+
+pub struct TBlock:
+    pub stmts: list[TStmt]

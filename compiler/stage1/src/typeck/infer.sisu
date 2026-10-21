@@ -1,0 +1,269 @@
+##! The inference table of one body (stage 0's `sisu-typeck/src/infer.rs`):
+##! variables, unification and the absorbing error-set variable of a
+##! function whose set is inferred. A variable is the type `Var(i)` of the
+##! table of types; the inference table holds what each is bound to.
+
+from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, Types, sorted_defs
+
+pub struct InferTable:
+    vars: list[Ty?]
+    ## The variable standing for an inferred error set (`T !`): unifying it
+    ## with an error set adds the set's members instead of binding it.
+    absorbing: int?
+    absorbed_sets: list[DefId]
+
+pub struct Snapshot:
+    vars: list[Ty?]
+    absorbed_sets: list[DefId]
+
+impl InferTable:
+    pub pure def new() -> InferTable:
+        return InferTable(vars=[], absorbing=None, absorbed_sets=[])
+
+    pub pure def fresh(mut self, mut types: Types) -> Ty:
+        self.vars.push(None)
+        return types.var(len(self.vars) - 1)
+
+    ## A fresh variable that absorbs error sets.
+    pub pure def fresh_absorbing(mut self, mut types: Types) -> Ty:
+        let v = self.fresh(mut types)
+        self.absorbing = Some(len(self.vars) - 1)
+        return v
+
+    pub pure def absorbed(self) -> list[DefId]:
+        return sorted_defs(self.absorbed_sets.copy())
+
+    pub pure def is_absorbing(self, types: Types, t: Ty) -> bool:
+        if let TyData.Var(i) = types.data(self.resolve(types, t)):
+            return Some(i) == self.absorbing
+        return False
+
+    pub pure def snapshot(self) -> Snapshot:
+        return Snapshot(vars=self.vars.copy(), absorbed_sets=self.absorbed_sets.copy())
+
+    pub pure def rollback(mut self, own s: Snapshot):
+        self.vars = s.vars
+        self.absorbed_sets = s.absorbed_sets
+
+    ## Follows variable bindings at the top of a type.
+    pub pure def resolve(self, types: Types, t: Ty) -> Ty:
+        var cur = t
+        while True:
+            let TyData.Var(i) = types.data(cur) else:
+                return cur
+            if i >= len(self.vars):
+                return cur
+            match self.vars[i]:
+                case Some(bound):
+                    cur = bound
+                case None:
+                    return cur
+
+    ## Resolves every variable inside a type. The absorbing variable becomes
+    ## the set absorbed so far; an unbound one stays a variable.
+    pub pure def zonk(self, mut types: Types, t: Ty) -> Ty:
+        let r = self.resolve(types, t)
+        match types.data(r).copy():
+            case TyData.Var(i):
+                if Some(i) == self.absorbing:
+                    return types.err_set(self.absorbed())
+                return r
+            case TyData.Adt(d, a):
+                let args = self.zonk_all(mut types, a)
+                return types.adt(d, args)
+            case TyData.Tuple(e, l):
+                let elems = self.zonk_all(mut types, e)
+                return types.intern(TyData.Tuple(elems=elems, labels=l))
+            case TyData.Fn(ps, ret, pure):
+                let params = self.zonk_all(mut types, ps)
+                let r2 = self.zonk(mut types, ret)
+                return types.fn_(params, r2, pure)
+            case TyData.Ref(inner, m):
+                let x = self.zonk(mut types, inner)
+                return types.ref_(x, m)
+            case TyData.Dyn(tr):
+                let args = self.zonk_all(mut types, tr.args)
+                return types.intern(TyData.Dyn(TraitRef(def_=tr.def_, args=args)))
+            case TyData.Assoc(s, tr, name):
+                let self_ty = self.zonk(mut types, s)
+                let args = self.zonk_all(mut types, tr.args)
+                return types.intern(
+                    TyData.Assoc(
+                        self_ty=self_ty, trait_=TraitRef(def_=tr.def_, args=args), name=name
+                    )
+                )
+            case _:
+                return r
+
+    pure def zonk_all(self, mut types: Types, ts: list[Ty]) -> list[Ty]:
+        var out: list[Ty] = []
+        for t in ts:
+            out.push(self.zonk(mut types, t))
+        return out
+
+    pub pure def zonk_trait(self, mut types: Types, tr: TraitRef) -> TraitRef:
+        return TraitRef(def_=tr.def_, args=self.zonk_all(mut types, tr.args))
+
+    ## Whether a type still has variables once the known ones are resolved.
+    pub pure def has_vars(self, mut types: Types, t: Ty) -> bool:
+        let z = self.zonk(mut types, t)
+        for x in types.walk(z):
+            if let TyData.Var(_) = types.data(x):
+                return True
+        return False
+
+    pure def occurs(self, types: Types, v: int, t: Ty) -> bool:
+        let r = self.resolve(types, t)
+        match types.data(r):
+            case TyData.Var(i):
+                return i == v
+            case TyData.Adt(_, a):
+                return self.occurs_any(types, v, a)
+            case TyData.Tuple(e, _):
+                return self.occurs_any(types, v, e)
+            case TyData.Fn(ps, ret, _):
+                return self.occurs_any(types, v, ps) or self.occurs(types, v, ret)
+            case TyData.Ref(inner, _):
+                return self.occurs(types, v, inner)
+            case TyData.Dyn(tr):
+                return self.occurs_any(types, v, tr.args)
+            case TyData.Assoc(s, tr, _):
+                return self.occurs(types, v, s) or self.occurs_any(types, v, tr.args)
+            case _:
+                return False
+
+    pure def occurs_any(self, types: Types, v: int, ts: list[Ty]) -> bool:
+        for t in ts:
+            if self.occurs(types, v, t):
+                return True
+        return False
+
+    ## Makes two types equal, binding variables. `False` (possibly having
+    ## bound some variables; callers that need atomicity snapshot) when they
+    ## cannot be.
+    pub pure def unify(mut self, types: Types, a_in: Ty, b_in: Ty) -> bool:
+        let a = self.resolve(types, a_in)
+        let b = self.resolve(types, b_in)
+        let ad = types.data(a).copy()
+        let bd = types.data(b).copy()
+        if let TyData.Var(x) = ad:
+            if let TyData.Var(y) = bd:
+                if x == y:
+                    return True
+        # The absorbing variable on either side.
+        if let TyData.Var(x) = ad:
+            if Some(x) == self.absorbing:
+                return self.absorb(types, x, b)
+        if let TyData.Var(x) = bd:
+            if Some(x) == self.absorbing:
+                return self.absorb(types, x, a)
+        if let TyData.Var(x) = ad:
+            return self.bind(types, x, b)
+        if let TyData.Var(x) = bd:
+            return self.bind(types, x, a)
+        if a == Ty.error() or b == Ty.error():
+            return True
+        match ad:
+            case TyData.Adt(d1, a1):
+                if let TyData.Adt(d2, a2) = bd:
+                    return d1 == d2 and len(a1) == len(a2) and self.unify_all(types, a1, a2)
+                return False
+            case TyData.Tuple(e1, _):
+                if let TyData.Tuple(e2, _) = bd:
+                    return len(e1) == len(e2) and self.unify_all(types, e1, e2)
+                return False
+            case TyData.ErrSet(m1):
+                if let TyData.ErrSet(m2) = bd:
+                    return m1 == m2
+                return False
+            case TyData.Fn(p1, r1, _):
+                if let TyData.Fn(p2, r2, _) = bd:
+                    return len(p1) == len(p2)
+                        and self.unify_all(types, p1, p2)
+                        and self.unify(types, r1, r2)
+                return False
+            case TyData.Ref(t1, m1):
+                if let TyData.Ref(t2, m2) = bd:
+                    return m1 == m2 and self.unify(types, t1, t2)
+                return False
+            case TyData.Dyn(t1):
+                if let TyData.Dyn(t2) = bd:
+                    return t1.def_ == t2.def_
+                        and len(t1.args) == len(t2.args)
+                        and self.unify_all(types, t1.args, t2.args)
+                return False
+            case TyData.Assoc(s1, tr1, n1):
+                if let TyData.Assoc(s2, tr2, n2) = bd:
+                    if n1 != n2 or tr1.def_ != tr2.def_ or len(tr1.args) != len(tr2.args):
+                        return False
+                    return self.unify(types, s1, s2) and self.unify_all(types, tr1.args, tr2.args)
+                return False
+            case _:
+                return a == b
+
+    pure def unify_all(mut self, types: Types, xs: list[Ty], ys: list[Ty]) -> bool:
+        for i in range(len(xs)):
+            if not self.unify(types, xs[i], ys[i]):
+                return False
+        return True
+
+    ## The absorbing variable `x` against `other`: an error set's members
+    ## are absorbed; another variable is bound to it.
+    pure def absorb(mut self, types: Types, x: int, other: Ty) -> bool:
+        match types.data(other):
+            case TyData.ErrSet(m):
+                for d in m:
+                    self.absorbed_sets.push(d)
+                return True
+            case TyData.Var(y):
+                if y < len(self.vars):
+                    self.vars[y] = Some(types.var_of(x))
+                return True
+            case TyData.Error:
+                return True
+            case _:
+                return False
+
+    pure def bind(mut self, types: Types, x: int, other: Ty) -> bool:
+        if self.occurs(types, x, other):
+            return False
+        if x < len(self.vars):
+            self.vars[x] = Some(other)
+        return True
+
+    ## Unifies atomically: on failure nothing is bound.
+    pub pure def try_unify(mut self, types: Types, a: Ty, b: Ty) -> bool:
+        let snap = self.snapshot()
+        if self.unify(types, a, b):
+            return True
+        self.rollback(snap)
+        return False
+
+test "unification binds variables, and a failed attempt binds nothing":
+    var types = Types.new()
+    var t = InferTable.new()
+    let v = t.fresh(mut types)
+    let list = types.adt(DefId(index=1), [v])
+    let ints = types.adt(DefId(index=1), [Ty.int()])
+    assert t.unify(types, list, ints)
+    assert t.zonk(mut types, v) == Ty.int()
+    assert not t.try_unify(types, v, Ty.bool())
+    assert t.zonk(mut types, v) == Ty.int()
+
+test "a variable does not unify with a type that holds it":
+    var types = Types.new()
+    var t = InferTable.new()
+    let v = t.fresh(mut types)
+    let holder = types.adt(DefId(index=1), [v])
+    assert not t.unify(types, v, holder)
+
+test "the absorbing variable collects error sets":
+    var types = Types.new()
+    var t = InferTable.new()
+    let e = t.fresh_absorbing(mut types)
+    let five = types.err_set([DefId(index=5)])
+    let three_five = types.err_set([DefId(index=3), DefId(index=5)])
+    assert t.unify(types, e, five)
+    assert t.unify(types, three_five, e)
+    assert t.zonk(mut types, e) == three_five
+    assert not t.try_unify(types, e, Ty.int())

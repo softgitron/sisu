@@ -1,0 +1,37 @@
+# The fixes of the operator rules of 02 ("Operator precedence"): each adds
+# the parentheses that say how Python groups the operators. A mix of
+# bitwise operators groups the tighter one, `&` before `^` before `|`,
+# whichever side it is on; arithmetic beside a bitwise operator or a shift
+# is grouped on its own side; `-x ** y` reads as `-(x ** y)`.
+def main():
+    let a = x & y | z
+    let b = x | y & z
+    let c = x ^ y & z
+    let d = x & y ^ z
+    let e = x | y ^ z
+    let f = x + 1 & y
+    let g = x & y + 1
+    let h = x * 2 | y
+    let i = x | y ** 2
+    let j = x << 1 + 2
+    let k = x - 1 >> 2
+    let l = x << y * z
+    let m = -x ** 2
+    let n = -(x ** 2)
+    let o = -f(x) ** g(y)
+    let p = (x | y
+        & z)
+    let q = (x & y
+        | z
+        ^ w)
+    let r = (x
+        | y + 1
+        & z)
+    let s = x | y + 1 & z
+    let t = (x + 1
+        << 2)
+    let u = (x
+        << y - 1)
+    let v = a.b[0] & c(d) | e.f
+    let w = (-x
+        ** 2)

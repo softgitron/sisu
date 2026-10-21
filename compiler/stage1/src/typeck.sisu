@@ -1,0 +1,440 @@
+##! The type checker's first slice (stage 0's `sisu-typeck/src/lib.rs`):
+##! the declarations of a file resolved against the prelude
+##! (`typeck.collect`), then each body of its root module checked
+##! (`typeck.check`, `typeck.expr`, `typeck.call`), with the checks of the
+##! bounds the bodies required, of `main`'s and the tests' signatures,
+##! and of parameter defaults and constants.
+##!
+##! It reports the type checker's own messages (the identifiers that begin
+##! with `type.`), as `sisu check --format=ids` writes them, in the order
+##! stage 0 sorts them. A body that uses something beyond the slice reports
+##! nothing; `Checked.beyond` says why, so that a file with nothing beyond
+##! the slice must match stage 0 exactly and any other a subset.
+
+import stage1.typeck.call
+import stage1.typeck.expr
+from stage1.diag import Catalog, Diagnostic, Lines, Msg, TextRange, render_ids, sort
+from stage1.parser import parse
+from stage1.syntax.ast import ExprId, Mode
+from stage1.syntax.ast import build
+from stage1.typeck.check import Checker, Cx, RetCtx
+from stage1.typeck.collect import Resolver
+from stage1.typeck.program import Answer, DefKind, ModuleId, ParamInfo, Program
+from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, Types
+
+## The type diagnostics of one file, and why parts of it are beyond the
+## slice (empty when the whole file is within it).
+pub struct Checked:
+    pub diagnostics: list[Diagnostic]
+    pub beyond: list[String]
+
+## The prelude and the std modules every file sees, resolved once: `texts`
+## gives the source of `prelude`, `task`, `log`, `cap` and `live`.
+pub pure def base(texts: dict[String, String]) -> Resolver:
+    return Resolver.base(texts)
+
+## The type diagnostics of `text`, a file checked as a program's root
+## module, rendered as `sisu check --format=ids` writes them.
+pub pure def render(text: str, checked: Checked, catalog: Catalog) -> String:
+    return render_ids(text, checked.diagnostics, catalog)
+
+## Checks one file against the resolved prelude.
+pub pure def check_file(base: Resolver, text: str, catalog: Catalog) -> Checked:
+    let parsed = parse(text, catalog)
+    let module = build.module(parsed.tree)
+    var beyond: list[String] = []
+    if has_doc_examples(text):
+        beyond.push("a doc example, which stage 0 checks as a test".to_string())
+    var r = base.copy()
+    r.add_root(module, text.starts_with("#!"))
+    # A declaration beyond the slice changes how the bodies type: none of
+    # them is checked.
+    if let Some(why) = r.beyond:
+        beyond.push(why.copy())
+        return Checked(diagnostics=[], beyond=beyond)
+    let root_id = r.prog.root
+    var diags: list[Diagnostic] = []
+    for (m, d) in r.diags:
+        if m == root_id:
+            diags.push(d.copy())
+    let (prog, types0, root) = r.into_parts()
+    let cx = Cx(prog=ref prog, ast=ref root.ast, source=text)
+    var types = types0
+    # Every function with a body, in order of definition.
+    for i in range(len(prog.defs)):
+        let d = DefId(index=i)
+        if prog.defs[i].module != root_id:
+            continue
+        let f = prog.fn_info(d) else:
+            continue
+        if f.body.is_none():
+            continue
+        if f.err_inferred:
+            beyond.push("a function whose error set is inferred".to_string())
+            continue
+        if f.contracts:
+            beyond.push("a contract".to_string())
+            continue
+        var c = Checker.new(cx, types, d)
+        c.check_fn(cx)
+        let done = c.finish()
+        types = done.types
+        match done.beyond:
+            case Some(why):
+                beyond.push(why.copy())
+            case None:
+                for x in done.diags:
+                    diags.push(x.copy())
+    # Defaults of fields and parameters, and constants.
+    for i in range(len(prog.defs)):
+        let d = DefId(index=i)
+        if prog.defs[i].module != root_id:
+            continue
+        var values: list[(ExprId, Ty)] = []
+        match prog.defs[i].kind:
+            case DefKind.Struct(s):
+                for f in s.fields:
+                    if let Some(e) = f.default:
+                        values.push((e, f.ty))
+            case DefKind.Fn(f):
+                for p in f.params:
+                    if let Some(e) = p.default:
+                        values.push((e, p.ty))
+            case DefKind.Const(c):
+                if let Some(e) = c.value:
+                    values.push((e, c.ty))
+            case _:
+                pass
+        for (e, ty) in values:
+            var c = Checker.new(cx, types, d)
+            c.check_value(cx, e, ty)
+            let done = c.finish()
+            types = done.types
+            match done.beyond:
+                case Some(why):
+                    beyond.push(why.copy())
+                case None:
+                    for x in done.diags:
+                        diags.push(x.copy())
+    # `main` takes nothing or one `System`, and returns nothing or `! E`.
+    if let Some(main) = prog.main():
+        if let Some(f) = prog.fn_info(main):
+            let params_ok = takes_system(prog, types, f.params)
+            var ret_ok = f.ret == Ty.unit()
+            if let TyData.Adt(d, a) = types.data(f.ret):
+                if Some(d) == prog.wk.result and not a.is_empty() and a[0] == Ty.unit():
+                    ret_ok = True
+            if not params_ok or not ret_ok or f.self_mode.is_some():
+                let span = prog.defs[main.index].span
+                diags.push(Diagnostic.new(Msg.TypeMainSignature, span.start, span.end))
+    # A test takes nothing, or the real `System`.
+    for t in prog.tests:
+        if prog.defs[t.index].module != root_id:
+            continue
+        let f = prog.fn_info(t) else:
+            continue
+        let ok = takes_system(prog, types, f.params)
+        if not ok and not f.header_broken:
+            var span = prog.defs[t.index].span
+            if let Some(p) = f.params.first():
+                span = p.span
+            diags.push(Diagnostic.new(Msg.TypeTestSignature, span.start, span.end))
+    # A line with a syntax error has no reliable meaning.
+    let lines = Lines.of(text)
+    var broken: set[int] = set()
+    for d in parsed.diagnostics:
+        _ = broken.add(lines.index(d.start))
+    var kept: list[Diagnostic] = []
+    for d in diags:
+        if not broken.contains(lines.index(d.start)):
+            kept.push(d.copy())
+    sort(mut kept, catalog)
+    return Checked(diagnostics=kept, beyond=beyond)
+
+## Whether a module implements `Drop` for a type of its own.
+pure def has_drop_impl(prog: Program, module: ModuleId) -> bool:
+    for i in prog.impls:
+        if prog.defs[i.index].module != module:
+            continue
+        if let Some(info) = prog.impl_info(i):
+            if Some(info.trait_ref.def_) == prog.wk.drop:
+                return True
+    return False
+
+## Whether parameters are none, or one `System`.
+pure def takes_system(prog: Program, types: Types, params: list[ParamInfo]) -> bool:
+    if params.is_empty():
+        return True
+    return len(params) == 1 and is_system(prog, types, params[0].ty)
+
+## Whether a type is the prelude's `System`.
+pure def is_system(prog: Program, types: Types, t: Ty) -> bool:
+    if let TyData.Adt(d, _) = types.data(t):
+        return Some(d) == prog.wk.system
+    return False
+
+## Whether the file has a fenced example in a `##` comment, which stage 0
+## declares as a test of its own module.
+pure def has_doc_examples(text: str) -> bool:
+    var in_doc = False
+    for line in text.lines():
+        let t = line.trim()
+        if t.starts_with("##") and t.contains("```"):
+            return True
+    _ = in_doc
+    return False
+
+impl Checker:
+    ## Checks one function body.
+    pub pure def check_fn(mut self, cx: Cx):
+        let f = cx.prog.fn_info(self.def_) else:
+            return
+        let body = f.body.copy() else:
+            return
+        self.self_ty = f.owner
+        self.env = cx.prog.elaborate_env(mut self.types, f.predicates)
+        for g in f.generics:
+            self.generic_names.push(g.name.copy())
+            self.const_generics.push(g.is_const)
+        let ret = self.fn_ret(cx, self.def_)
+        self.ret.push(RetCtx(ty=ret, loops=0))
+        let def_span = cx.prog.defs[self.def_.index].span
+        if let Some(mode) = f.self_mode:
+            let owner = f.owner ?? Ty.error()
+            let ty = self.param_local_ty(cx, owner, mode)
+            let l = self.new_local("self", ty, False, def_span)
+            self.declare("self", l)
+        for p in f.params:
+            let ty = self.param_local_ty(cx, p.ty, p.mode)
+            if f.pure and cx.prog.is_capability(self.types, p.ty):
+                self.go_beyond("a capability of a pure function")
+            let l = self.new_local(p.name, ty, False, p.span)
+            self.declare(p.name, l)
+        # The values a pure body drops run their types' `Drop`, which stage
+        # 0's ownership checker requires to be pure (E0393).
+        if self.body_is_pure(cx) and has_drop_impl(cx.prog, self.module):
+            self.go_beyond("the drops of a pure function")
+        let block = self.check_block_in_scope(cx, body)
+        let r = self.infer.zonk(mut self.types, ret)
+        let ends = r == Ty.unit() or r == Ty.never() or r == Ty.error()
+        if not ends and not f.body_broken and not self.block_diverges(block):
+            let name = cx.prog.defs[self.def_.index].name.copy()
+            let shown = cx.prog.display(self.types, r)
+            var d = Diagnostic.new(Msg.TypeMissingReturn, def_span.start, def_span.end)
+            d = d.with("name", name).with("ty", shown)
+            self.report(d)
+        self.check_bounds(cx)
+        self.report_uninferred(cx)
+
+    ## Checks a default value or a constant as a body returning it.
+    pub pure def check_value(mut self, cx: Cx, e: ExprId, ty: Ty):
+        if let Some(f) = cx.prog.fn_info(self.def_):
+            self.env = cx.prog.elaborate_env(mut self.types, f.predicates)
+            for g in f.generics:
+                self.generic_names.push(g.name.copy())
+        self.ret.push(RetCtx(ty=ty, loops=0))
+        _ = self.check_expr(cx, e, ty)
+        self.check_bounds(cx)
+
+    ## The type of a parameter as a local of its function: a borrowed
+    ## parameter is a `ref T` unless `T` is `Copy` (04, rule 2).
+    pub pure def param_local_ty(mut self, cx: Cx, ty: Ty, mode: Mode) -> Ty:
+        match mode:
+            case Mode.Own:
+                return ty
+            case Mode.Mut:
+                return self.types.ref_(ty, True)
+            case Mode.Borrow:
+                var opaque = False
+                match self.types.data(ty):
+                    case TyData.Param(_) | TyData.Assoc(_, _, _):
+                        opaque = True
+                    case _:
+                        pass
+                var copy = False
+                if opaque:
+                    copy = cx.prog.is_copy_in(mut self.types, ty, self.env)
+                else:
+                    copy = cx.prog.is_copy(mut self.types, ty)
+                if copy:
+                    return ty
+                return self.types.ref_(ty, False)
+
+    ## Checks the bounds the body's calls required, once inference is done:
+    ## each type must implement its trait. A bound stage 1 cannot decide
+    ## puts the body beyond the slice.
+    pub pure def check_bounds(mut self, cx: Cx):
+        var seen: list[(Ty, TraitRef)] = []
+        var all: list[(Ty, TraitRef, TextRange, bool)] = []
+        for (t, b, s) in self.bounds:
+            all.push((t, b.copy(), s, True))
+        for (t, b, s) in self.impl_bounds:
+            all.push((t, b.copy(), s, False))
+        for (ty, bound, span, strict) in all:
+            let z = self.infer.zonk(mut self.types, ty)
+            let t = cx.prog.normalize(mut self.types, z, self.env)
+            var args: list[Ty] = []
+            var arg_error = False
+            for a in bound.args:
+                let za = self.infer.zonk(mut self.types, a)
+                let n = cx.prog.normalize(mut self.types, za, self.env)
+                if self.types.contains_error(n):
+                    arg_error = True
+                args.push(n)
+            let b = TraitRef(def_=bound.def_, args=args)
+            if self.infer.has_vars(mut self.types, t) or self.types.contains_error(t) or arg_error:
+                continue
+            var dup = False
+            for (st, sb) in seen:
+                if st == t and sb == b:
+                    dup = True
+            if dup:
+                continue
+            var answer = Answer.Unknown
+            if strict:
+                answer = cx.prog.bound_holds(mut self.types, t, b, self.env)
+            else:
+                answer = cx.prog.implements(mut self.types, t, b, self.env)
+            match answer:
+                case Answer.No:
+                    seen.push((t, b.copy()))
+                    self.bound_not_satisfied(cx, t, b, span)
+                case Answer.Unknown:
+                    self.go_beyond("a bound stage 1 cannot decide")
+                case Answer.Yes(_):
+                    if Some(b.def_) == cx.prog.wk.hash and not self.types.has_params(t):
+                        if not self.is_leaf(t):
+                            self.go_beyond("a key hashed structurally")
+
+    ## Whether a type is one the host compares, orders, hashes and prints
+    ## structurally by its own rules: the numbers, text and characters,
+    ## and tuples and references of those.
+    pure def is_leaf(self, t: Ty) -> bool:
+        match self.types.data(t):
+            case TyData.Int | TyData.Float | TyData.Bool | TyData.Char | TyData.Str | TyData.Unit:
+                return True
+            case TyData.Ref(inner, _):
+                return self.is_leaf(inner)
+            case TyData.Tuple(es, _):
+                for e in es:
+                    if not self.is_leaf(e):
+                        return False
+                return True
+            case _:
+                return False
+
+    pure def bound_not_satisfied(mut self, cx: Cx, t: Ty, b: TraitRef, span: TextRange):
+        if let TyData.Param(_) = self.types.data(t):
+            self.go_beyond("the bound fix of a type parameter")
+        let shown = self.show(cx, t)
+        let bound = cx.prog.display_trait_in(self.types, b, self.generic_names)
+        var d = Diagnostic.new(Msg.TypeBoundNotSatisfied, span.start, span.end)
+        d = d.with("ty", shown).with("bound", bound)
+        # Interpolated without `Display`: its `Debug` form shows it.
+        if Some(b.def_) == cx.prog.wk.display
+                and span.start > 0
+                and span.end < cx.source.byte_len():
+            let before = cx.source.byte_slice(span.start - 1, span.start)
+            let after = cx.source.byte_slice(span.end, span.end + 1)
+            if before == "{{" and after == "}}":
+                d = d.fix_at(Msg.TypeShowDebug, span.end, span.end, ":?")
+        # The type has every method of the trait as its own: adding the
+        # impl is enough.
+        if let Some(info) = cx.prog.trait_info(b.def_):
+            if let Some(key) = self.types.key(t):
+                if not info.methods.is_empty():
+                    var all = True
+                    for m in info.methods:
+                        if cx.prog.method(key, cx.prog.defs[m.index].name).is_none():
+                            all = False
+                    if all:
+                        d = d.fix_edits(Msg.TypeAddImpl, [])
+        self.report(d)
+
+    ## Reports the first local whose type inference left open, when the
+    ## body has no error.
+    pub pure def report_uninferred(mut self, cx: Cx):
+        for d in self.diags:
+            if not is_warning(d.msg):
+                return
+        for i in range(len(self.locals)):
+            let name = self.locals[i].name.copy()
+            if name == "?" or name.is_empty():
+                continue
+            if self.infer.has_vars(mut self.types, self.locals[i].ty):
+                let span = self.locals[i].span
+                let d = Diagnostic.new(Msg.TypeCannotInfer, span.start, span.end).with("name", name)
+                self.report(d)
+                return
+        _ = cx
+
+## The type checker's messages that are warnings.
+pure def is_warning(m: Msg) -> bool:
+    return m == Msg.TypeHole or m == Msg.TypeUnreachableCode
+
+## The type checker's messages of a program, in order.
+pure def messages(base: Resolver, text: str, catalog: Catalog) -> list[Msg]:
+    var out: list[Msg] = []
+    for d in check_file(base, text, catalog).diagnostics:
+        out.push(d.msg)
+    return out
+
+## A prelude with what the tests below use.
+pure def test_prelude() -> String:
+    var p = String.new()
+    p.push("@builtin(\"String\")\nstruct String:\n    pass\n\n")
+    p.push("@builtin(\"list\")\nstruct list[T]:\n    pass\n\n")
+    p.push("trait Display:\n    def fmt(self)\n\n")
+    p.push("enum Option[T]:\n    Some(T)\n    None\n\n")
+    p.push("enum Result[T, E]:\n    Ok(T)\n    Err(E)\n\n")
+    p.push("impl Display for int:\n    def fmt(self):\n        pass\n\n")
+    p.push("impl[T] list[T]:\n    @intrinsic(\"list.push\")\n    def push(mut self, own x: T)\n\n")
+    p.push("@intrinsic(\"print\")\ndef print[T: Display](x: T)\n\n")
+    p.push("@intrinsic(\"todo\")\npure def todo[T](name: str = \"\") -> T\n")
+    return p
+
+test "stage 0's type errors have their messages":
+    let catalog = Catalog.parse("")
+    let r = Resolver.base_from(test_prelude())
+    # The cases of `type_errors_have_codes` in sisu-typeck's tests that are
+    # within the slice.
+    let cases = [
+        ("def f() -> int:\n    return 1 / 2\n", Msg.TypeIntegerDivision),
+        ("def f():\n    if 1:\n        pass\n", Msg.TypeNotBool),
+        ("def f() -> int:\n    return \"x\"\n", Msg.TypeMismatch),
+        ("def f():\n    let x = 1\n    x = 2\n", Msg.TypeAssignImmutable),
+        ("def f() -> int:\n    let x = 1\n", Msg.TypeMissingReturn),
+        ("def g() -> int?:\n    return None\ndef f():\n    g()\n", Msg.TypeUnusedResult),
+        ("def f(xs: list[int]) -> int:\n    return xs[-1]\n", Msg.TypeConstantNegativeIndex),
+        ("def f(x: int):\n    let y = x.nope()\n", Msg.TypeUnknownMethod),
+        ("def f():\n    break\n", Msg.TypeBreakOutsideLoop),
+        ("def f():\n    let xs = [1]\n    xs.push(2)\n", Msg.TypeNotMutable),
+        ("def f(x: int) -> int:\n    return x + 1.5\n", Msg.TypeMixedNumbers),
+        ("def f() -> f64:\n    return 7.0 // 2.0\n", Msg.TypeFloatFloorDivision),
+        ("def f() -> int:\n    return todo(\"later\")\n", Msg.TypeHole),
+    ]
+    for (program, m) in cases:
+        assert messages(r, program, catalog) == [m]
+    var sets: String = "error A:\n    X\nerror B:\n    Y\n"
+    sets.push("def a() -> int ! A:\n    return Err(X)\ndef f() -> int ! B:\n    return Ok(a()?)\n")
+    assert messages(r, sets, catalog) == [Msg.TypeErrorNotInSet]
+    var mut_arg: String = "def g(mut xs: list[int]):\n    xs.push(1)\n"
+    mut_arg.push("def f():\n    var xs = [1]\n    g(xs)\n")
+    assert messages(r, mut_arg, catalog) == [Msg.TypeMutArgumentMissing]
+    let outside = "error A:\n    X\nerror B:\n    Y\ndef f() -> int ! A:\n    return Err(Y)\n"
+    assert messages(r, outside, catalog) == [Msg.TypeErrorNotInSet]
+    # A move out of a borrowed parameter's field, and its copy.
+    let moved = "struct U:\n    name: String\ndef f(u: U) -> String:\n    return u.name\n"
+    assert messages(r, moved, catalog) == [Msg.TypeMoveOutOfBorrow]
+    let copied = "struct U:\n    name: String\ndef f(u: U) -> String:\n    return u.name.copy()\n"
+    assert messages(r, copied, catalog).is_empty()
+    # A broken header does not cascade: its body reports nothing more.
+    var broken: String = "def f(x int) -> int:\n    let y = x + 1\n    return y\n"
+    broken.push("def main():\n    print(f(1))\n")
+    assert messages(r, broken, catalog).is_empty()
+    # A body beyond the slice reports nothing, and says why.
+    var beyond: String = "def f(x: int) -> int:\n    return match x:\n"
+    beyond.push("        case 1: \"one\"\n        case _: 2\n")
+    let checked = check_file(r, beyond, catalog)
+    assert checked.diagnostics.is_empty()
+    assert checked.beyond == ["`match`"]

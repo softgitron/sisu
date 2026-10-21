@@ -9,6 +9,10 @@
 ##! sisu run -- mutate SEED COUNT OUT LIST       # COUNT mutants of the files LIST names
 ##! sisu run -- names FILE                      # the name diagnostics, as `sisu check --format=ids`
 ##! sisu run -- names-batch OUT LIST            # those of every file LIST names
+##! sisu run -- ast FILE                        # the AST, in the notation of Rust's `Debug`
+##! sisu run -- ast-batch OUT LIST              # that of every file LIST names
+##! sisu run -- types FILE                    # the type diagnostics, as `sisu check --format=ids`
+##! sisu run -- types-batch OUT LIST          # those of every file LIST names
 ##! ```
 ##!
 ##! `tokens` and `parse` print to standard output, and the diagnostics in
@@ -16,19 +20,30 @@
 ##! a list of files, one per line, and writes for the `n`th (from 1) the
 ##! files `OUT/n.tokens` and `OUT/n.tokens.err` (what `tokens --trivia`
 ##! prints), `OUT/n.tree` and `OUT/n.tree.err` (what `parse --tree`
-##! prints), so that one run of the interpreter checks many files.
+##! prints), `OUT/n.trivia.tree`, `OUT/n.print` (the reprint) and `OUT/n.ast`
+##! (what `ast` prints), so that one run of the interpreter checks many
+##! files.
 ##! `mutate` writes `OUT/m1.sisu` to `OUT/mCOUNT.sisu`, each a mutant of one
 ##! of the files in turn (`mutants.sisu`). `names` resolves the names of one
 ##! module (`resolve.sisu`) against the prelude and the std modules it
 ##! imports, read from `../std/`; `names-batch` writes `OUT/n.names`.
+##! `ast` prints the AST of a file (`syntax.ast.build`) as `syntax.ast.dump`
+##! writes it, one line per item; `ast-batch` writes `OUT/n.ast`. `types`
+##! checks a file's bodies against the prelude (`typeck.sisu`) and prints
+##! the type checker's diagnostics, then on standard error why parts of the
+##! file are beyond the slice it checks; `types-batch` resolves the prelude
+##! once and writes `OUT/n.types` and `OUT/n.beyond`.
 ##! `--catalog PATH` names the message catalog, by default
 ##! `../catalog/messages.catalog`.
 
+import stage1.typeck
 from stage1.diag import Catalog, quote, render_ids
 from stage1.lexer import Lexed, lex
 from stage1.mutants import Rng, mutate
 from stage1.parser import parse, parse_lexed
 from stage1.resolve import Environment, ModuleNames, imported_std_modules
+from stage1.syntax.ast import build
+from stage1.syntax.ast.dump import module_lines
 from stage1.syntax.kinds import KindNames
 
 error UsageError:
@@ -72,7 +87,7 @@ def main(sys: System) -> ! {IoError, UsageError}:
         let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
         var n = 0
         var bytes = 0
-        var times = Times(lex=0, parse=0, dump=0)
+        var times = Times(lex=0, parse=0, dump=0, ast=0)
         for path in list.lines():
             if path.is_empty():
                 continue
@@ -91,18 +106,21 @@ def main(sys: System) -> ! {IoError, UsageError}:
             let trivia_tree = parsed.tree.dump(True)
             let reprint = parsed.tree.to_source()
             let t4 = now(sys)
+            let ast = module_lines(build.module(parsed.tree))
+            let t5 = now(sys)
             times.lex += t1 - t0
             times.parse += t3 - t2
             times.dump += t2 - t1 + t4 - t3
+            times.ast += t5 - t4
             sys.fs.write_text(Path.new("{out_dir}/{n}.tokens"), out)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.tokens.err"), errs)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.tree"), tree)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.tree.err"), tree_errs)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.trivia.tree"), trivia_tree)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.print"), reprint)?
-        print(
-            "files {n} bytes {bytes} lex {ms(times.lex)} ms parse {ms(times.parse)} ms dump {ms(times.dump)} ms"
-        )
+            sys.fs.write_text(Path.new("{out_dir}/{n}.ast"), ast)?
+        let phases = "lex {ms(times.lex)} ms parse {ms(times.parse)} ms dump {ms(times.dump)} ms"
+        print("files {n} bytes {bytes} {phases} ast {ms(times.ast)} ms")
         return Ok(())
     if command == "profile" and len(rest) == 2:
         let text = sys.fs.read_to_string(Path.new(rest[1].copy()))?
@@ -143,6 +161,52 @@ def main(sys: System) -> ! {IoError, UsageError}:
             let out = names(sys, text, mut env, catalog)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.names"), out)?
         return Ok(())
+    if command == "ast" and len(rest) == 2:
+        let text = sys.fs.read_to_string(Path.new(rest[1].copy()))?
+        let parsed = parse(text, catalog)
+        emit(module_lines(build.module(parsed.tree)), "")
+        return Ok(())
+    if command == "ast-batch" and len(rest) == 3:
+        let out_dir = rest[1].copy()
+        let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
+        var n = 0
+        for path in list.lines():
+            if path.is_empty():
+                continue
+            n += 1
+            let text = sys.fs.read_to_string(Path.new(path))?
+            let parsed = parse(text, catalog)
+            let lines = module_lines(build.module(parsed.tree))
+            sys.fs.write_text(Path.new("{out_dir}/{n}.ast"), lines)?
+        return Ok(())
+    if command == "types" and len(rest) == 2:
+        let base = typeck.base(std_texts(sys)?)
+        let text = sys.fs.read_to_string(Path.new(rest[1].copy()))?
+        let checked = typeck.check_file(base, text, catalog)
+        var why = String.new()
+        for b in checked.beyond:
+            why.push("beyond the slice: {b}\n")
+        emit(typeck.render(text, checked, catalog), why)
+        return Ok(())
+    if command == "types-batch" and len(rest) == 3:
+        let base = typeck.base(std_texts(sys)?)
+        let out_dir = rest[1].copy()
+        let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
+        var n = 0
+        for path in list.lines():
+            if path.is_empty():
+                continue
+            n += 1
+            let text = sys.fs.read_to_string(Path.new(path))?
+            let checked = typeck.check_file(base, text, catalog)
+            var why = String.new()
+            for b in checked.beyond:
+                why.push("{b}\n")
+            sys.fs.write_text(
+                Path.new("{out_dir}/{n}.types"), typeck.render(text, checked, catalog)
+            )?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.beyond"), why)?
+        return Ok(())
     if command == "mutate" and len(rest) == 5:
         let seed = rest[1].parse_int() ?? 1
         let count = rest[2].parse_int() ?? 0
@@ -176,6 +240,13 @@ def environment(sys: System) -> Environment ! IoError:
     _ = prelude.items.add("target".to_string())
     return Ok(Environment(prelude=prelude, std=std))
 
+## The sources of the prelude and the ambient std modules, by name.
+def std_texts(sys: System) -> dict[String, String] ! IoError:
+    var texts: dict[String, String] = {}
+    for name in ["prelude", "task", "log", "cap", "live"]:
+        _ = texts.insert(name.to_string(), sys.fs.read_to_string(Path.new("../std/{name}.sisu"))?)
+    return Ok(texts)
+
 ## The name diagnostics of `text` in the conformance form, after loading the
 ## std modules it imports into `env`.
 def names(sys: System, text: str, mut env: Environment, catalog: Catalog) -> String ! IoError:
@@ -188,12 +259,13 @@ def names(sys: System, text: str, mut env: Environment, catalog: Catalog) -> Str
     let diags = resolve.resolve(text, parsed.tree, parsed.diagnostics, env, catalog)
     return Ok(render_ids(text, diags, catalog))
 
-## Where a batch spends its time, in nanoseconds: lexing, parsing, and
-## writing the dumps.
+## Where a batch spends its time, in nanoseconds: lexing, parsing,
+## writing the dumps, and building and writing the AST.
 struct Times:
     lex: int
     parse: int
     dump: int
+    ast: int
 
 def now(sys: System) -> int:
     return sys.clock.now().unix_nanos()
@@ -202,7 +274,7 @@ pure def ms(nanos: int) -> int:
     return nanos // 1000000
 
 pure def usage() -> String:
-    return "usage: sisu run -- tokens [--trivia] FILE | parse (--tree [--trivia] | --print) FILE | batch OUT LIST | mutate SEED COUNT OUT LIST".to_string()
+    return "usage: sisu run -- tokens [--trivia] FILE | parse (--tree [--trivia] | --print) FILE | batch OUT LIST | mutate SEED COUNT OUT LIST | names FILE | ast FILE | types FILE | types-batch OUT LIST".to_string()
 
 ## Prints `out` to standard output and `errs` to standard error exactly:
 ## both end in a line break, which `print` adds.

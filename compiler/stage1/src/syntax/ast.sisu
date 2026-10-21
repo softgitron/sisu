@@ -1,0 +1,745 @@
+##! The abstract syntax that later stages consume (stage 0's
+##! `sisu-syntax/src/ast/mod.rs`).
+##!
+##! The AST is built from the lossless tree by `build.module`, a total
+##! function: every tree yields an AST, and wherever the tree has an `ERROR`
+##! node or a missing piece the AST has an `Error` variant or `None`. Every
+##! AST node records the syntax node it came from (`node`, its index in the
+##! tree) and its byte range, so diagnostics can map back.
+##!
+##! The AST is an arena, as the tree is: the items, statements,
+##! expressions, types, patterns and the arms made at compile time live in
+##! the lists of an `Ast`, and a node refers to another by its index there
+##! (`ExprId`, ...) where the Rust boxes it or holds it by value. Stage 0's
+##! ownership checker explores a recursive type's fields without memory of
+##! the types it has seen (`must_consume_depth` in `sisu-borrowck`), so a
+##! type that holds itself through many paths, as a boxed AST does, takes
+##! it exponential time; types of indices hold nothing recursive.
+
+from stage1.diag import TextRange
+
+## A node of the arena, by its index in its list.
+@derive(Eq, Hash, Debug, Copy)
+pub struct ItemId:
+    pub index: int
+
+@derive(Eq, Hash, Debug, Copy)
+pub struct StmtId:
+    pub index: int
+
+@derive(Eq, Hash, Debug, Copy)
+pub struct ExprId:
+    pub index: int
+
+@derive(Eq, Hash, Debug, Copy)
+pub struct TypeExprId:
+    pub index: int
+
+@derive(Eq, Hash, Debug, Copy)
+pub struct PatternId:
+    pub index: int
+
+@derive(Eq, Hash, Debug, Copy)
+pub struct ArmGenId:
+    pub index: int
+
+## The nodes of one module's AST.
+pub struct Ast:
+    pub items: list[Item]
+    pub stmts: list[Stmt]
+    pub exprs: list[Expr]
+    pub types: list[TypeExpr]
+    pub patterns: list[Pattern]
+    pub arm_gens: list[ArmGen]
+
+impl Ast:
+    pub pure def new() -> Ast:
+        return Ast(items=[], stmts=[], exprs=[], types=[], patterns=[], arm_gens=[])
+
+    pub pure def add_item(mut self, own x: Item) -> ItemId:
+        self.items.push(x)
+        return ItemId(index=len(self.items) - 1)
+
+    pub pure def add_stmt(mut self, own x: Stmt) -> StmtId:
+        self.stmts.push(x)
+        return StmtId(index=len(self.stmts) - 1)
+
+    pub pure def add_expr(mut self, own x: Expr) -> ExprId:
+        self.exprs.push(x)
+        return ExprId(index=len(self.exprs) - 1)
+
+    pub pure def add_type(mut self, own x: TypeExpr) -> TypeExprId:
+        self.types.push(x)
+        return TypeExprId(index=len(self.types) - 1)
+
+    pub pure def add_pattern(mut self, own x: Pattern) -> PatternId:
+        self.patterns.push(x)
+        return PatternId(index=len(self.patterns) - 1)
+
+    pub pure def add_arm_gen(mut self, own x: ArmGen) -> ArmGenId:
+        self.arm_gens.push(x)
+        return ArmGenId(index=len(self.arm_gens) - 1)
+
+    pub pure def item(self, id: ItemId) -> ref Item:
+        return ref self.items[id.index]
+
+    pub pure def stmt(self, id: StmtId) -> ref Stmt:
+        return ref self.stmts[id.index]
+
+    pub pure def expr(self, id: ExprId) -> ref Expr:
+        return ref self.exprs[id.index]
+
+    pub pure def type_expr(self, id: TypeExprId) -> ref TypeExpr:
+        return ref self.types[id.index]
+
+    pub pure def pattern(self, id: PatternId) -> ref Pattern:
+        return ref self.patterns[id.index]
+
+    pub pure def arm_gen(self, id: ArmGenId) -> ref ArmGen:
+        return ref self.arm_gens[id.index]
+
+@derive(Eq, Debug)
+pub struct Name:
+    pub text: String
+    pub range: TextRange
+
+@derive(Debug)
+pub struct Module:
+    ## The nodes.
+    pub ast: Ast
+    ## The items at the top level.
+    pub items: list[ItemId]
+    ## `##!` lines.
+    pub docs: list[String]
+    ## Names written inside top-level code that did not parse as a
+    ## declaration (`stru ct Log:`): a later use of one of them most likely
+    ## refers to the declaration that failed, so it is not reported as
+    ## undefined.
+    pub broken_names: list[String]
+
+@derive(Debug)
+pub struct Attr:
+    pub name: String
+    pub args: list[Arg]
+    pub range: TextRange
+
+@derive(Eq, Debug, Copy)
+pub enum Vis:
+    Private
+    Pub
+    PubPackage
+
+@derive(Debug)
+pub struct Item:
+    pub node: int
+    pub range: TextRange
+    pub attrs: list[Attr]
+    pub vis: Vis
+    ## `##` lines before the item.
+    pub docs: list[String]
+    pub kind: ItemKind
+
+@derive(Debug)
+pub enum ItemKind:
+    Fn(FnDef)
+    Struct(StructDef)
+    Enum(EnumDef)
+    ErrorSet(EnumDef)
+    Impl(ImplDef)
+    Trait(TraitDef)
+    Import(Import)
+    FromImport(FromImport)
+    Test(TestDef)
+    Suite(SuiteDef)
+    Bench(TestDef)
+    Const(ConstDef)
+    TypeAlias(TypeAlias)
+    Extern(list[ItemId])
+    ## A statement at the top level (reported by the parser).
+    Stmt(StmtId)
+    Error
+
+@derive(Debug)
+pub struct FnDef:
+    pub node: int
+    pub range: TextRange
+    pub name: Name
+    pub is_pure: bool
+    pub is_comptime: bool
+    pub generics: list[GenericParam]
+    pub params: list[Param]
+    pub ret: TypeExprId?
+    ## `-> ref T from a, b`.
+    pub from_: list[Name]
+    ## `where T: Display + Hash, C.Item: Display`.
+    pub where_: list[WherePred]
+    ## `None` for a signature without a body (an intrinsic).
+    pub body: Block?
+    pub attrs: list[Attr]
+    ## The header (name, parameters, result) has a syntax error, so the
+    ## signature is not reliable; checking treats it as unknown.
+    pub header_broken: bool
+    ## The body has a syntax error, so a binding it meant to make may be
+    ## missing.
+    pub body_broken: bool
+    ## `pub` or `pub(package)` before `def` (09, "Modules"); a method's
+    ## own, since a struct's or impl's methods are items too.
+    pub vis: Vis
+
+@derive(Debug)
+pub struct GenericParam:
+    pub name: Name
+    pub bounds: list[TypeExprId]
+    ## `A: Allocator = Global`: the type a use site that omits it gets.
+    pub default: TypeExprId?
+    pub is_const: bool
+
+## One predicate of a `where` clause: a type and the traits it must
+## implement.
+@derive(Debug)
+pub struct WherePred:
+    pub ty: TypeExprId
+    pub bounds: list[TypeExprId]
+    pub range: TextRange
+
+## `type Item` in a trait (an associated type, with an optional default),
+## or `type Item = T` in an impl (its binding).
+@derive(Debug)
+pub struct AssocTypeDef:
+    pub name: Name
+    pub ty: TypeExprId?
+    pub range: TextRange
+
+## A parameter or argument convention (04, "The decision").
+@derive(Eq, Hash, Debug, Copy)
+pub enum Mode:
+    Borrow
+    Mut
+    Own
+
+@derive(Debug)
+pub struct Param:
+    pub node: int
+    pub range: TextRange
+    pub mode: Mode
+    pub kind: ParamKind
+
+@derive(Debug)
+pub enum ParamKind:
+    SelfParam
+    Named(name: Name, ty: TypeExprId, default: ExprId?)
+    ## A bare `*`: the parameters after it are keyword-only.
+    KeywordOnly
+    ## A bare `/`: the parameters before it are positional-only.
+    PositionalOnly
+    Variadic(name: Name, ty: TypeExprId?)
+    Error
+
+@derive(Debug)
+pub struct StructDef:
+    pub name: Name
+    pub generics: list[GenericParam]
+    pub is_view: bool
+    pub fields: list[FieldDef]
+    pub methods: list[FnDef]
+    ## `invariant e` lines (07): what every value of the type satisfies.
+    pub invariants: list[Contract]
+    ## Associated constants (`const ZERO: Money = ...`), named `T.NAME`.
+    pub consts: list[ConstDef]
+    ## Other members (a contract other than `invariant`, a nested type),
+    ## by range and kind.
+    pub unsupported: list[(TextRange, String)]
+
+@derive(Debug)
+pub struct FieldDef:
+    pub node: int
+    pub range: TextRange
+    pub name: Name
+    pub ty: TypeExprId
+    pub default: ExprId?
+    pub vis: Vis
+
+@derive(Debug)
+pub struct EnumDef:
+    pub name: Name
+    pub generics: list[GenericParam]
+    pub variants: list[VariantDef]
+    pub methods: list[FnDef]
+    ## A trailing `..` line (05, open error sets).
+    pub open: bool
+
+@derive(Debug)
+pub struct VariantDef:
+    pub node: int
+    pub range: TextRange
+    pub name: Name
+    pub fields: list[VariantField]
+
+@derive(Debug)
+pub struct VariantField:
+    pub name: Name?
+    pub ty: TypeExprId
+    pub range: TextRange
+
+@derive(Debug)
+pub struct ImplDef:
+    pub generics: list[GenericParam]
+    pub trait_ty: TypeExprId?
+    pub self_ty: TypeExprId
+    pub methods: list[FnDef]
+    ## `type Item = T` lines.
+    pub assoc_types: list[AssocTypeDef]
+    ## Associated constants of an inherent impl (03, "Traits").
+    pub consts: list[ConstDef]
+
+@derive(Debug)
+pub struct TraitDef:
+    pub name: Name
+    pub generics: list[GenericParam]
+    ## `trait Container(Len)`: traits every implementer must implement too.
+    pub supertraits: list[TypeExprId]
+    ## Required (no body) and provided methods.
+    pub methods: list[FnDef]
+    pub assoc_types: list[AssocTypeDef]
+
+@derive(Debug)
+pub struct Import:
+    pub path: list[Name]
+    pub alias: Name?
+    ## `import c "zlib.h"`.
+    pub c_header: String?
+
+@derive(Debug)
+pub struct FromImport:
+    pub path: list[Name]
+    pub names: list[(Name, Name?)]
+
+@derive(Debug)
+pub struct TestDef:
+    pub name: String
+    pub name_range: TextRange
+    pub cases: (PatternId, ExprId)?
+    pub params: list[Param]
+    pub body: Block?
+
+@derive(Debug)
+pub struct SuiteDef:
+    pub name: String
+    pub items: list[ItemId]
+
+@derive(Debug)
+pub struct ConstDef:
+    pub name: Name
+    pub ty: TypeExprId?
+    pub value: ExprId?
+
+@derive(Debug)
+pub struct TypeAlias:
+    pub name: Name
+    ## `type NonEmpty[T] = ...`.
+    pub generics: list[GenericParam]
+    pub ty: TypeExprId?
+    ## Written with `where`: a refinement type (07).
+    pub refinement: bool
+    ## The predicate after `where`, over `self`.
+    pub predicate: ExprId?
+
+@derive(Debug)
+pub struct Block:
+    pub node: int
+    pub range: TextRange
+    pub stmts: list[StmtId]
+
+@derive(Debug)
+pub struct Stmt:
+    pub node: int
+    pub range: TextRange
+    pub kind: StmtKind
+
+@derive(Debug)
+pub enum StmtKind:
+    Let(mutable: bool, pat: PatternId, ty: TypeExprId?, init: ExprId?, else_: LetElse?)
+    ## `op` is set for augmented assignment.
+    Assign(target: ExprId, op: BinOp?, value: ExprId)
+    Expr(ExprId)
+    Return(ExprId?)
+    Break
+    Continue
+    Pass
+    If(branches: list[(Cond, Block)], else_block: Block?)
+    While(cond: Cond, body: Block)
+    For(pat: PatternId, mode: Mode, iter: ExprId, body: Block)
+    Assert(cond: ExprId, message: ExprId?)
+    Expect(ExprId)
+    Defer(Block)
+    With(value: ExprId, name: Name, body: Block)
+    ## A nested declaration (`def`, `const`, ...).
+    Item(ItemId)
+    ## `comptime for`, `comptime if`, `comptime assert` and `comptime e`
+    ## (08): the statement runs at compile time.
+    Comptime(StmtId)
+    ## `return impl Trait for T:` in a trait's `comptime def derive` (08,
+    ## "Derive"): the impl the derive makes.
+    ReturnImpl(ImplDef)
+    ## `select:` with its arms (06, "Channels and select").
+    Select(list[SelectArm])
+    ## `yield e` in a generator.
+    Yield(ExprId?)
+    ## `requires e`, `ensures e`, `invariant e` or `decreases e` (07).
+    Contract(Contract)
+    ## A construct this stage parses but does not implement.
+    Unsupported(String)
+    Error
+
+## A contract clause (07): `requires e` and `ensures e` are the first
+## lines of a function's body, `invariant e` a line of a struct (and,
+## with `decreases e`, of a loop, where neither has a meaning yet).
+@derive(Debug)
+pub struct Contract:
+    pub kind: ContractKind
+    pub expr: ExprId
+    ## The whole clause, its keyword included.
+    pub range: TextRange
+
+@derive(Eq, Debug, Copy)
+pub enum ContractKind:
+    Requires
+    Ensures
+    Invariant
+    Decreases
+
+impl ContractKind:
+    pub pure def keyword(self) -> str:
+        return match self:
+            case Requires: "requires"
+            case Ensures: "ensures"
+            case Invariant: "invariant"
+            case Decreases: "decreases"
+
+impl FnDef:
+    ## The `requires` and `ensures` clauses the body starts with (07:
+    ## "Contract clauses are the first lines of a body, before any
+    ## statement").
+    pub pure def contracts(self, ast: Ast) -> list[Contract]:
+        var out: list[Contract] = []
+        if let Some(body) = self.body:
+            for s in body.stmts:
+                match ast.stmt(s).kind:
+                    case StmtKind.Contract(c) if c.kind == ContractKind.Requires
+                            or c.kind == ContractKind.Ensures:
+                        out.push(c.copy())
+                    case _:
+                        return out
+        return out
+
+    ## Whether the body holds nothing but contract clauses: a trait's
+    ## required method that states its contract.
+    pub pure def only_contracts(self, ast: Ast) -> bool:
+        if let Some(body) = self.body:
+            if body.stmts.is_empty():
+                return False
+            for s in body.stmts:
+                if not ast.stmt(s).kind.is_contract():
+                    return False
+            return True
+        return False
+
+impl StmtKind:
+    pub pure def is_contract(self) -> bool:
+        return match self:
+            case StmtKind.Contract(_): True
+            case _: False
+
+## `case pattern = operation:` and its block.
+@derive(Debug)
+pub struct SelectArm:
+    pub node: int
+    pub range: TextRange
+    pub pat: PatternId
+    pub op: ExprId
+    pub body: Block
+
+@derive(Debug)
+pub struct LetElse:
+    pub range: TextRange
+    pub binding: Name?
+    pub body: ElseBody
+
+@derive(Debug)
+pub enum ElseBody:
+    Expr(ExprId)
+    ## `else: return x`, `else: break`, `else: continue`.
+    Diverge(StmtId)
+    Block(Block)
+
+@derive(Debug)
+pub struct Cond:
+    pub range: TextRange
+    pub parts: list[CondPart]
+
+@derive(Debug)
+pub enum CondPart:
+    Expr(ExprId)
+    Let(pat: PatternId, value: ExprId)
+
+@derive(Debug)
+pub struct Expr:
+    pub node: int
+    pub range: TextRange
+    pub kind: ExprKind
+
+@derive(Debug)
+pub enum ExprKind:
+    ## `value` is `None` when the literal does not fit in 128 bits.
+    Int(text: String, value: u128?, suffix: String?)
+    Float(text: String, value: f64, suffix: String?)
+    Char(char)
+    ## A string literal; plain when it has no interpolation.
+    Str(list[StrPart])
+    RawStr(String)
+    ByteStr(list[int])
+    Name(String)
+    SelfValue
+    SelfType
+    Paren(ExprId)
+    Tuple(list[ExprId])
+    List(list[ExprId])
+    Dict(list[(ExprId, ExprId)])
+    Set(list[ExprId])
+    Comprehension(kind: CompKind, elem: ExprId, value: ExprId?, clauses: list[CompClause])
+    Binary(op: BinOp, lhs: ExprId, rhs: ExprId)
+    ## A comparison or a chain of them.
+    Compare(first: ExprId, rest: list[(CmpOp, ExprId)])
+    Unary(op: UnOp, expr: ExprId)
+    Ref(mutable: bool, expr: ExprId)
+    ## `^e` inside an index: counted from the end.
+    FromEnd(ExprId)
+    Call(callee: ExprId, args: list[Arg], trailing: Closure?)
+    Field(base: ExprId, name: Name)
+    OptField(base: ExprId, name: Name)
+    Index(base: ExprId, args: list[IndexArg])
+    Try(ExprId)
+    Closure(Closure)
+    If(branches: list[(ExprId, ExprId)], else_: ExprId?)
+    Match(scrutinee: ExprId, arms: list[Arm])
+    ## `comptime e` (08): evaluated by the compiler.
+    Comptime(ExprId)
+    ## `x.[f]`: the field that the compile-time value `f` names (08,
+    ## "Reflection").
+    FieldOf(base: ExprId, field: ExprId)
+    Unsupported(String)
+    Error
+
+@derive(Debug)
+pub enum StrPart:
+    Text(String)
+    ## `debug` is, for `{expr=}`, the expression's source text.
+    Interp(expr: ExprId, debug: String?, spec: String?, range: TextRange)
+
+@derive(Debug)
+pub enum IndexArg:
+    Expr(ExprId)
+    Slice(lo: ExprId?, hi: ExprId?)
+
+@derive(Debug)
+pub struct Arg:
+    pub node: int
+    pub range: TextRange
+    pub name: Name?
+    ## `mut` written before the argument.
+    pub mutable: bool
+    pub value: ExprId
+
+@derive(Debug)
+pub struct Closure:
+    pub node: int
+    pub range: TextRange
+    ## `own` before the parameters (Rust's `own`, a keyword here).
+    pub own_: bool
+    pub params: list[ClosureParam]
+    ## A `do` block with no parameter list (`do:`), which uses `it`.
+    pub implicit_param: bool
+    pub body: ClosureBody
+
+@derive(Debug)
+pub struct ClosureParam:
+    pub name: Name
+    pub ty: TypeExprId?
+
+@derive(Debug)
+pub enum ClosureBody:
+    Expr(ExprId)
+    Block(Block)
+
+@derive(Debug)
+pub struct Arm:
+    pub node: int
+    pub range: TextRange
+    pub pat: PatternId
+    pub guard: ExprId?
+    pub body: ArmBody
+    ## Set for `comptime for` or `comptime if` among the arms: the arms it
+    ## makes stand in for this one (whose pattern and body are empty).
+    pub generated: ArmGenId?
+
+## Arms made at compile time (08): in a derive's template, the arms of a
+## `match` for each variant of the type.
+@derive(Debug)
+pub enum ArmGen:
+    ## `comptime for pat in iter:` and arms.
+    For(pat: PatternId, iter: ExprId, arms: list[Arm])
+    ## `comptime if cond:` and arms, and the arms of its `else:`.
+    If(cond: ExprId, then: list[Arm], else_: list[Arm])
+
+@derive(Debug)
+pub enum ArmBody:
+    Expr(ExprId)
+    Block(Block)
+
+@derive(Eq, Debug, Copy)
+pub enum CompKind:
+    List
+    Dict
+    Set
+    Gen
+
+@derive(Debug)
+pub enum CompClause:
+    For(pat: PatternId, iter: ExprId)
+    If(ExprId)
+
+@derive(Eq, Hash, Debug, Copy)
+pub enum BinOp:
+    Add
+    Sub
+    Mul
+    Div
+    FloorDiv
+    Mod
+    Pow
+    WrapAdd
+    WrapSub
+    WrapMul
+    SatAdd
+    SatSub
+    SatMul
+    Shl
+    Shr
+    BitAnd
+    BitOr
+    BitXor
+    And
+    Or
+    Coalesce
+
+impl BinOp:
+    pub pure def text(self) -> str:
+        return match self:
+            case Add: "+"
+            case Sub: "-"
+            case Mul: "*"
+            case Div: "/"
+            case FloorDiv: "//"
+            case Mod: "%"
+            case Pow: "**"
+            case WrapAdd: "+%"
+            case WrapSub: "-%"
+            case WrapMul: "*%"
+            case SatAdd: "+|"
+            case SatSub: "-|"
+            case SatMul: "*|"
+            case Shl: "<<"
+            case Shr: ">>"
+            case BitAnd: "&"
+            case BitOr: "|"
+            case BitXor: "^"
+            case And: "and"
+            case Or: "or"
+            case Coalesce: "??"
+
+@derive(Eq, Hash, Debug, Copy)
+pub enum CmpOp:
+    Eq
+    Ne
+    Lt
+    Le
+    Gt
+    Ge
+    In
+    NotIn
+
+impl CmpOp:
+    pub pure def text(self) -> str:
+        return match self:
+            case Eq: "=="
+            case Ne: "!="
+            case Lt: "<"
+            case Le: "<="
+            case Gt: ">"
+            case Ge: ">="
+            case In: "in"
+            case NotIn: "not in"
+
+@derive(Eq, Hash, Debug, Copy)
+pub enum UnOp:
+    Neg
+    BitNot
+    Not
+
+impl UnOp:
+    pub pure def text(self) -> str:
+        return match self:
+            case Neg: "-"
+            case BitNot: "~"
+            case Not: "not"
+
+@derive(Debug)
+pub struct TypeExpr:
+    pub node: int
+    pub range: TextRange
+    pub kind: TypeKind
+
+@derive(Debug)
+pub enum TypeKind:
+    ## A name with optional arguments: `int`, `list[T]`, `cli.Error`, `Self`.
+    Path(segments: list[Name], args: list[TypeExprId])
+    Option(TypeExprId)
+    ## `T ! E`, `T !` (inferred set), `! E` (unit result).
+    Result(ok: TypeExprId?, err: TypeExprId?)
+    ## `{A, B}` after `!`.
+    Union(list[TypeExprId])
+    Tuple(list[(Name?, TypeExprId)])
+    Fn(pure: bool, params: list[TypeExprId], ret: TypeExprId)
+    Ref(mutable: bool, inner: TypeExprId)
+    ConstArg(int)
+    ## `dyn Trait`: the inner type is the trait's path.
+    Dyn(TypeExprId)
+    Unsupported(String)
+    Error
+
+@derive(Debug)
+pub struct Pattern:
+    pub node: int
+    pub range: TextRange
+    pub kind: PatKind
+
+@derive(Debug)
+pub enum PatKind:
+    Wildcard
+    Bind(Name)
+    ## A literal, possibly negated.
+    Literal(ExprId)
+    ## A variant or constant, with arguments when written with parentheses.
+    Ctor(path: list[Name], args: list[PatArg]?)
+    Tuple(list[PatternId])
+    List(list[PatternId])
+    Star(Name?)
+    Rest
+    Or(list[PatternId])
+    Error
+
+@derive(Debug)
+pub enum PatArg:
+    Positional(PatternId)
+    Keyword(Name, PatternId)
+    Rest

@@ -20,7 +20,7 @@
 ##!              | if_expr | match_expr
 ##! ```
 
-from stage1.diag import Diagnostic, Msg
+from stage1.diag import Diagnostic, Edit, Msg
 from stage1.parser.state import Parser
 from stage1.syntax.kinds import SyntaxKind
 
@@ -70,6 +70,19 @@ pure def is_arithmetic(c: Class) -> bool:
         case Additive | Multiplicative | Shift | Power: True
         case _: False
 
+## How tightly Python binds a bitwise operator: `&` before `^` before `|`.
+pure def bit_rank(op: SyntaxKind) -> int:
+    return match op:
+        case Amp: 3
+        case Caret: 2
+        case _: 1
+
+## Parentheses around `start..end`: the fix of an operator mixed with
+## others, which says how Python would group them.
+pure def parens(start: int, end: int) -> list[Edit]:
+    let open = Edit(start=start, end=start, text="(".to_string())
+    return [open, Edit(start=end, end=end, text=")".to_string())]
+
 ## The direction a comparison operator points in a chain: 1 for `<` and
 ## `<=`, -1 for `>` and `>=`, 0 for `==`; `None` for one that cannot chain.
 pure def direction(kind: SyntaxKind) -> int?:
@@ -98,10 +111,16 @@ impl Parser:
             case _: False
 
     pub(package) pure def expr(mut self) -> Class:
+        let (start, _) = self.current_range()
+        var class = Class.Closure
         if self.at_closure_start():
             self.closure()
-            return Class.Closure
-        return self.coalesce()
+        else:
+            class = self.coalesce()
+        self.last_expr = match self.previous_end():
+            case Some(end): Some((start, max(end, start)))
+            case None: None
+        return class
 
     pure def at_closure_start(self) -> bool:
         match self.current():
@@ -251,44 +270,74 @@ impl Parser:
         let d = Diagnostic.new(Msg.ParseChainOperator, start, end)
         self.report(d.with("op", operator_text(bad)))
 
+    ## Reports `d` with the fix that puts parentheses around `start..end`.
+    pure def report_parenthesized(mut self, own d: Diagnostic, start: int, end: int):
+        self.report(d.fix_edits(Msg.ParseParenthesize, parens(start, end)))
+
     pure def bitwise(mut self) -> Class:
         let cp = self.checkpoint()
+        let (start, _) = self.current_range()
         var c = self.shift()
         var first: SyntaxKind? = None
+        # Where the operand before the operator starts.
+        var operand = start
         while is_bitwise(self.current()):
             let op = self.current()
             let op_text = operator_text(op)
+            let left_end = self.previous_end() ?? start
+            # `a | b & c` groups as Python does, `a | (b & c)`: the fix of a
+            # mix waits for the end of the operand after the operator.
+            var mixed: int? = None
             if let Some(f) = first:
                 if f != op:
-                    let (start, end) = self.error_span()
-                    let d = Diagnostic.new(Msg.ParseMixedBitwise, start, end)
-                    self.report(d.with("first", operator_text(f)).with("second", op_text))
+                    let (at, end) = self.error_span()
+                    var d = Diagnostic.new(Msg.ParseMixedBitwise, at, end)
+                    d = d.with("first", operator_text(f)).with("second", op_text)
+                    if bit_rank(f) > bit_rank(op):
+                        self.report_parenthesized(d, start, left_end)
+                    else:
+                        let kept = self.diags_len()
+                        self.report(d)
+                        if self.diags_len() > kept:
+                            mixed = Some(kept)
             first = Some(op)
             if is_arithmetic(c):
-                self.report_bitwise_arithmetic(op_text)
+                let (at, end) = self.error_span()
+                let d = Diagnostic.new(Msg.ParseBitwiseArithmetic, at, end).with("op", op_text)
+                self.report_parenthesized(d, operand, left_end)
             self.start_at(cp, SyntaxKind.BinExpr)
             self.bump()
-            if is_arithmetic(self.shift()):
-                self.report_bitwise_arithmetic(op_text)
+            let (right, _) = self.current_range()
+            let rc = self.shift()
+            let right_end = self.previous_end() ?? right
+            if let Some(i) = mixed:
+                self.add_fix(i, Msg.ParseParenthesize, parens(operand, right_end))
+            if is_arithmetic(rc):
+                let (at, end) = self.error_span()
+                let d = Diagnostic.new(Msg.ParseBitwiseArithmetic, at, end).with("op", op_text)
+                self.report_parenthesized(d, right, right_end)
             self.finish_node()
+            operand = right
             c = Class.Bitwise
         return c
 
-    pure def report_bitwise_arithmetic(mut self, op_text: str):
-        let (start, end) = self.error_span()
-        self.report(Diagnostic.new(Msg.ParseBitwiseArithmetic, start, end).with("op", op_text))
-
     pure def shift(mut self) -> Class:
         let cp = self.checkpoint()
+        let (start, _) = self.current_range()
         var c = self.additive()
         while self.at(SyntaxKind.Shl) or self.at(SyntaxKind.Shr):
             if c == Class.Additive or c == Class.Multiplicative:
-                self.error(Msg.ParseShiftArithmetic)
+                let (at, end) = self.error_span()
+                let d = Diagnostic.new(Msg.ParseShiftArithmetic, at, end)
+                self.report_parenthesized(d, start, self.previous_end() ?? start)
             self.start_at(cp, SyntaxKind.BinExpr)
             self.bump()
-            let right = self.additive()
-            if right == Class.Additive or right == Class.Multiplicative:
-                self.error(Msg.ParseShiftArithmetic)
+            let (right, _) = self.current_range()
+            let rc = self.additive()
+            if rc == Class.Additive or rc == Class.Multiplicative:
+                let (at, end) = self.error_span()
+                let d = Diagnostic.new(Msg.ParseShiftArithmetic, at, end)
+                self.report_parenthesized(d, right, self.previous_end() ?? right)
             self.finish_node()
             c = Class.Shift
         return c
@@ -321,9 +370,13 @@ impl Parser:
                 let op = self.current()
                 self.start(SyntaxKind.PrefixExpr)
                 self.bump()
+                let (operand, _) = self.current_range()
                 let inner = self.unary()
                 if op == SyntaxKind.Minus and inner == Class.Power:
-                    self.error(Msg.ParseNegativePower)
+                    # As Python reads it: `-(x ** y)`.
+                    let (at, end) = self.error_span()
+                    let d = Diagnostic.new(Msg.ParseNegativePower, at, end)
+                    self.report_parenthesized(d, operand, self.previous_end() ?? operand)
                 self.finish_node()
                 return Class.Unary
             case RefKw:

@@ -1,0 +1,17 @@
+# Index arguments that are types where an expression is written: a type
+# with its arguments before a member (`NonEmpty[int].try_from`), and the
+# generators `arbitrary[T]` and `exhaustive[T]`, whose type the compiler
+# reads from its text, so that a name in it is not looked up here.
+from std.test import arbitrary as any_of, check
+
+type NonEmpty[T] = list[T] where len(self) > 0
+
+test "values of types":
+    check(arbitrary[list[int]]) do xs:
+        assert len(xs) >= 0
+    check(any_of[dict[String, bool]]) do d:
+        assert len(d) >= 0
+    print(NonEmpty[int].try_from([1]))
+    print(NonEmpty[Missing].try_from([1]))
+    print(list[int].new())
+    print(arbitray[int])

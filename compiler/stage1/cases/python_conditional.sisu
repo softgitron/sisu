@@ -1,0 +1,23 @@
+# Python's conditional expression, `a if c else b`, after a statement's
+# expression (E0115): the fix writes it as Sisu's `if c: a else: b`. The
+# `else` is the first at the depth of the `if`; without one, or with
+# nothing between `if` and `else` or after `else`, or when the `if` does
+# not follow the expression, the tokens are trailing tokens (E0117).
+def main():
+    let a = x if ready else y
+    let b = f(x, y) if g(x) > 0 else h(y)
+    let c = [1, 2] if xs.is_empty() else [x for x in xs if x > 0]
+    let d = x if f(1 if y else 2) else z
+    b = x if ready else y
+    print(x) if ready else print(y)
+    let e = x if ready
+    let f = x if else y
+    let g = x if ready else
+    let h: int if ready else y
+    let i = x, y if ready else z
+    let j = x if ready else y: z
+    let k = x if {a: b} else {b: a}
+    return x if ready else None
+
+def tail():
+    let m = x if ready else f(y

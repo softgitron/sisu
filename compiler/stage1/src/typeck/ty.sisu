@@ -1,0 +1,349 @@
+##! Types as the checker sees them (stage 0's `sisu-resolve/src/ty.rs`).
+##!
+##! A type is interned: `Ty` is its index in the program's table of types,
+##! `Types`, which holds each distinct type once, so two types are equal
+##! exactly when their indices are, as Rust's derived `PartialEq` on `Ty`
+##! compares them. The table, not the type, holds the structure
+##! (`TyData`), whose parts are `Ty`s again: a recursive type would cost
+##! stage 0's ownership checker exponential time (`syntax.ast` says why).
+
+## A definition of the program, by its index in `Program.defs`.
+@derive(Eq, Hash, Debug, Copy)
+pub struct DefId:
+    pub index: int
+
+## A type, by its index in the table of types.
+@derive(Eq, Hash, Debug, Copy)
+pub struct Ty:
+    pub index: int
+
+impl Ty:
+    ## The types every table holds first, at fixed indices.
+    pub pure def int() -> Ty:
+        return Ty(index=0)
+
+    pub pure def float() -> Ty:
+        return Ty(index=1)
+
+    pub pure def bool() -> Ty:
+        return Ty(index=2)
+
+    pub pure def char() -> Ty:
+        return Ty(index=3)
+
+    pub pure def str() -> Ty:
+        return Ty(index=4)
+
+    pub pure def unit() -> Ty:
+        return Ty(index=5)
+
+    pub pure def never() -> Ty:
+        return Ty(index=6)
+
+    ## A type that could not be determined; it unifies with everything, so
+    ## one mistake is reported once (a poisoned type).
+    pub pure def error() -> Ty:
+        return Ty(index=7)
+
+## A trait with its type arguments, `Self` not among them: `Add[int]`.
+@derive(Eq, Hash, Debug)
+pub struct TraitRef:
+    ## Rust's `def` (a keyword here).
+    pub def_: DefId
+    pub args: list[Ty]
+
+## The structure of a type.
+@derive(Eq, Hash, Debug)
+pub enum TyData:
+    Int
+    Float
+    Bool
+    Char
+    Str
+    Unit
+    Never
+    ## A struct, enum or builtin type with its type arguments.
+    Adt(def_: DefId, args: list[Ty])
+    ## Element types and, for a labelled tuple, the labels.
+    Tuple(elems: list[Ty], labels: list[String])
+    ## A union of error sets, as the sorted list of the `error` declarations.
+    ErrSet(list[DefId])
+    Fn(params: list[Ty], ret: Ty, pure: bool)
+    ## `ref T` (`False`) or `ref mut T` (`True`).
+    Ref(inner: Ty, mutable: bool)
+    ## A generic parameter of the declaration being instantiated.
+    Param(int)
+    ## `dyn Trait`: a value of some type implementing the trait.
+    Dyn(TraitRef)
+    ## `self_ty.name`, the associated type `name` of `trait_` for `self_ty`.
+    Assoc(self_ty: Ty, trait_: TraitRef, name: String)
+    ## A constant argument of a `const` generic parameter.
+    Const(int)
+    ## An inference variable of the body being checked.
+    Var(int)
+    Error
+
+## The key under which methods are registered.
+@derive(Eq, Hash, Debug, Copy)
+pub enum TyKey:
+    Int
+    Float
+    Bool
+    Char
+    Str
+    Adt(DefId)
+
+## The table of the types of a program. The index of a structure is found
+## by its key, a text: stage 0's interpreter hashes no list.
+pub struct Types:
+    data: list[TyData]
+    ids: dict[String, int]
+
+impl Types:
+    pub pure def new() -> Types:
+        var t = Types(data=[], ids={})
+        # The fixed indices of `Ty.int()` to `Ty.error()`.
+        _ = t.intern(TyData.Int)
+        _ = t.intern(TyData.Float)
+        _ = t.intern(TyData.Bool)
+        _ = t.intern(TyData.Char)
+        _ = t.intern(TyData.Str)
+        _ = t.intern(TyData.Unit)
+        _ = t.intern(TyData.Never)
+        _ = t.intern(TyData.Error)
+        return t
+
+    ## The type of this structure, made once.
+    pub pure def intern(mut self, own d: TyData) -> Ty:
+        let k = key_text(d)
+        if let Some(i) = self.ids.get(k):
+            return Ty(index=i)
+        let i = len(self.data)
+        _ = self.ids.insert(k, i)
+        self.data.push(d)
+        return Ty(index=i)
+
+    ## How many types the table holds.
+    pub pure def count(self) -> int:
+        return len(self.data)
+
+    ## The structure of a type.
+    pub pure def data(self, t: Ty) -> ref TyData:
+        return ref self.data[t.index]
+
+    pub pure def adt(mut self, d: DefId, own args: list[Ty]) -> Ty:
+        return self.intern(TyData.Adt(def_=d, args=args))
+
+    pub pure def tuple(mut self, own elems: list[Ty]) -> Ty:
+        return self.intern(TyData.Tuple(elems=elems, labels=[]))
+
+    pub pure def err_set(mut self, own members: list[DefId]) -> Ty:
+        return self.intern(TyData.ErrSet(members))
+
+    pub pure def ref_(mut self, inner: Ty, mutable: bool) -> Ty:
+        return self.intern(TyData.Ref(inner=inner, mutable=mutable))
+
+    pub pure def param(mut self, i: int) -> Ty:
+        return self.intern(TyData.Param(i))
+
+    pub pure def var(mut self, i: int) -> Ty:
+        return self.intern(TyData.Var(i))
+
+    ## The variable `Var(i)`, which `var` made already.
+    pub pure def var_of(self, i: int) -> Ty:
+        if let Some(x) = self.ids.get("V{i}"):
+            return Ty(index=x)
+        return Ty.error()
+
+    pub pure def fn_(mut self, own params: list[Ty], ret: Ty, pure: bool) -> Ty:
+        return self.intern(TyData.Fn(params=params, ret=ret, pure=pure))
+
+    ## The key a type's methods are registered under, for the types that
+    ## have one.
+    pub pure def key(self, t: Ty) -> TyKey?:
+        return match self.data(t):
+            case TyData.Int: Some(TyKey.Int)
+            case TyData.Float: Some(TyKey.Float)
+            case TyData.Bool: Some(TyKey.Bool)
+            case TyData.Char: Some(TyKey.Char)
+            case TyData.Str: Some(TyKey.Str)
+            case TyData.Adt(d, _): Some(TyKey.Adt(d))
+            case _: None
+
+    ## Replaces `Param(i)` by `args[i]`.
+    pub pure def subst(mut self, t: Ty, args: list[Ty]) -> Ty:
+        match self.data(t).copy():
+            case TyData.Param(i):
+                if i < len(args):
+                    return args[i]
+                return Ty.error()
+            case TyData.Adt(d, a):
+                let new = self.subst_all(a, args)
+                return self.adt(d, new)
+            case TyData.Tuple(e, l):
+                return self.subst_tuple(e, l, args)
+            case TyData.Fn(ps, r, pure):
+                let params = self.subst_all(ps, args)
+                let ret = self.subst(r, args)
+                return self.fn_(params, ret, pure)
+            case TyData.Ref(inner, m):
+                let new = self.subst(inner, args)
+                return self.ref_(new, m)
+            case TyData.Dyn(tr):
+                let new = self.subst_trait(tr, args)
+                return self.intern(TyData.Dyn(new))
+            case TyData.Assoc(s, tr, name):
+                return self.subst_assoc(s, tr, name, args)
+            case _:
+                return t
+
+    pure def subst_tuple(mut self, elems: list[Ty], labels: list[String], args: list[Ty]) -> Ty:
+        let e = self.subst_all(elems, args)
+        return self.intern(TyData.Tuple(elems=e, labels=labels.copy()))
+
+    pure def subst_assoc(mut self, s: Ty, tr: TraitRef, name: String, args: list[Ty]) -> Ty:
+        let self_ty = self.subst(s, args)
+        let trait_ = self.subst_trait(tr, args)
+        return self.intern(TyData.Assoc(self_ty=self_ty, trait_=trait_, name=name.copy()))
+
+    pub pure def subst_all(mut self, ts: list[Ty], args: list[Ty]) -> list[Ty]:
+        var out: list[Ty] = []
+        for t in ts:
+            out.push(self.subst(t, args))
+        return out
+
+    pub pure def subst_trait(mut self, tr: TraitRef, args: list[Ty]) -> TraitRef:
+        return TraitRef(def_=tr.def_, args=self.subst_all(tr.args, args))
+
+    ## The types inside `t`, `t` first, in the order Rust's `walk` visits
+    ## them.
+    pub pure def walk(self, t: Ty) -> list[Ty]:
+        var out: list[Ty] = []
+        self.walk_into(t, mut out)
+        return out
+
+    pure def walk_into(self, t: Ty, mut out: list[Ty]):
+        out.push(t)
+        match self.data(t):
+            case TyData.Adt(_, a):
+                for x in a:
+                    self.walk_into(x, mut out)
+            case TyData.Tuple(e, _):
+                for x in e:
+                    self.walk_into(x, mut out)
+            case TyData.Fn(ps, r, _):
+                for x in ps:
+                    self.walk_into(x, mut out)
+                self.walk_into(r, mut out)
+            case TyData.Ref(inner, _):
+                self.walk_into(inner, mut out)
+            case TyData.Dyn(tr):
+                for x in tr.args:
+                    self.walk_into(x, mut out)
+            case TyData.Assoc(s, tr, _):
+                self.walk_into(s, mut out)
+                for x in tr.args:
+                    self.walk_into(x, mut out)
+            case _:
+                pass
+
+    ## Whether the type mentions a generic parameter or an associated type
+    ## of one: its meaning depends on the type arguments.
+    pub pure def has_params(self, t: Ty) -> bool:
+        for x in self.walk(t):
+            match self.data(x):
+                case TyData.Param(_) | TyData.Assoc(_, _, _):
+                    return True
+                case _:
+                    pass
+        return False
+
+    pub pure def contains_error(self, t: Ty) -> bool:
+        for x in self.walk(t):
+            if x == Ty.error():
+                return True
+        return False
+
+    pub pure def strip_ref(self, t: Ty) -> Ty:
+        var cur = t
+        while let TyData.Ref(inner, _) = self.data(cur):
+            cur = inner
+        return cur
+
+## A text that names a structure, its parts by their indices: equal
+## exactly when the structures are.
+pure def key_text(d: TyData) -> String:
+    return match d:
+        case TyData.Int: "i".to_string()
+        case TyData.Float: "f".to_string()
+        case TyData.Bool: "b".to_string()
+        case TyData.Char: "c".to_string()
+        case TyData.Str: "s".to_string()
+        case TyData.Unit: "u".to_string()
+        case TyData.Never: "n".to_string()
+        case TyData.Error: "x".to_string()
+        case TyData.Adt(def_, args): "A{def_.index}{indices(args)}"
+        case TyData.Tuple(elems, labels): "T{indices(elems)}{labels.join(",")}"
+        case TyData.ErrSet(members): "E{def_indices(members)}"
+        case TyData.Fn(params, ret, pure): "F{pure}{indices(params)}{ret.index}"
+        case TyData.Ref(inner, mutable): "R{mutable}{inner.index}"
+        case TyData.Param(i): "P{i}"
+        case TyData.Dyn(tr): "D{tr.def_.index}{indices(tr.args)}"
+        case TyData.Assoc(s, tr, name): "S{s.index}:{tr.def_.index}{indices(tr.args)}{name}"
+        case TyData.Const(n): "C{n}"
+        case TyData.Var(i): "V{i}"
+
+pure def indices(ts: list[Ty]) -> String:
+    var out = String.new("[")
+    for t in ts:
+        out.push("{t.index},")
+    out.push("]")
+    return out
+
+pure def def_indices(ds: list[DefId]) -> String:
+    var out = String.new("[")
+    for d in ds:
+        out.push("{d.index},")
+    out.push("]")
+    return out
+
+## The union of two error sets.
+pub pure def union(a: list[DefId], b: list[DefId]) -> list[DefId]:
+    var v: list[DefId] = []
+    for d in a:
+        v.push(d)
+    for d in b:
+        v.push(d)
+    return sorted_defs(v)
+
+## Error set members in order of definition, each once.
+pub pure def sorted_defs(own v: list[DefId]) -> list[DefId]:
+    var ints: list[int] = []
+    for d in v:
+        ints.push(d.index)
+    ints.sort()
+    var out: list[DefId] = []
+    for i in ints:
+        if let Some(last) = out.last():
+            if last.index == i:
+                continue
+        out.push(DefId(index=i))
+    return out
+
+## Whether every member of `sub` is in `sup` (05, error-set subtyping).
+pub pure def is_subset(sub: list[DefId], sup: list[DefId]) -> bool:
+    for d in sub:
+        if not sup.contains(d):
+            return False
+    return True
+
+test "a type is made once, and substitution makes the same type again":
+    var types = Types.new()
+    let p = types.param(0)
+    let a = types.adt(DefId(index=2), [p])
+    let b = types.adt(DefId(index=2), [Ty.int()])
+    assert types.subst(a, [Ty.int()]) == b
+    assert types.adt(DefId(index=2), [Ty.int()]) == b
+    assert types.has_params(a) and not types.has_params(b)
+    let r = types.ref_(b, False)
+    assert types.strip_ref(r) == b

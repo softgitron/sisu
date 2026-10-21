@@ -1,0 +1,308 @@
+##! The standard-library sources stage 0 writes itself (its
+##! `sisu-resolve/src/std_sources.rs`): `target`, the build target's facts,
+##! and `builtin_impls`, the impls of the leaf types and of tuples, which
+##! are the same text for each type and so are written by a loop. The std
+##! modules on disk are read from `../std/`.
+
+## The std modules every module sees by name without an import.
+pub pure def ambient() -> list[str]:
+    return ["task", "log", "cap", "live"]
+
+## The sized integer types (03, "Numbers"), narrowest first in each kind.
+pub pure def sized() -> list[str]:
+    return ["u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32", "i128"]
+
+## The sized integer types some of whose values `int` cannot hold.
+pub pure def own_kind(ty: str) -> bool:
+    return ty == "u64" or ty == "u128" or ty == "i128"
+
+## The bits of a sized integer type and whether it is signed; `int` is
+## `i64`.
+pub pure def int_width(ty: str) -> (int, bool)?:
+    return match ty:
+        case "u8": Some((8, False))
+        case "u16": Some((16, False))
+        case "u32": Some((32, False))
+        case "u64": Some((64, False))
+        case "u128": Some((128, False))
+        case "i8": Some((8, True))
+        case "i16": Some((16, True))
+        case "i32": Some((32, True))
+        case "i128": Some((128, True))
+        case "int": Some((64, True))
+        case _: None
+
+## Whether every value of integer type `from_` is one of `to` (the
+## implicit widening of 03).
+pub pure def widens(from_: str, to: str) -> bool:
+    let (fw, fs) = int_width(from_) else:
+        return False
+    let (tw, ts) = int_width(to) else:
+        return False
+    if from_ == to:
+        return False
+    if fs == ts:
+        return tw >= fw
+    return not fs and ts and tw > fw
+
+## `target` (08, "Conditional compilation"): stage 0's target is the
+## interpreter on the host. Stage 1 writes `linux` and `x86_64`, the
+## values only `if comptime` reads.
+pub pure def target() -> String:
+    var s: String = "##! The build target (08, \"Conditional compilation\").\n\n"
+    s.push("## The operating system: `linux`, `macos`, `windows`, ...\n")
+    s.push("const os: str = \"linux\"\n\n")
+    s.push("## The processor: `x86_64`, `aarch64`, ...\n")
+    s.push("const arch: str = \"x86_64\"\n\n")
+    s.push("## How the target runs a program: `interpreter` in stage 0.\n")
+    s.push("const runtime: str = \"interpreter\"\n")
+    return s
+
+## The leaf types and the traits each implements structurally.
+pure def leaves() -> list[(str, list[str])]:
+    let all = ["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]
+    let text = ["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash", "Len"]
+    let shown = ["Display", "Debug"]
+    return [
+        ("int", all.copy()),
+        ("f64", ["Display", "Debug", "Eq", "PartialOrd"]),
+        ("bool", all.copy()),
+        ("char", all.copy()),
+        ("str", text.copy()),
+        ("String", text.copy()),
+        ("Path", all.copy()),
+        ("DateTime", all.copy()),
+        ("()", all.copy()),
+        ("bytes", all.copy()),
+        ("u8", all.copy()),
+        ("u16", all.copy()),
+        ("u32", all.copy()),
+        ("u64", all.copy()),
+        ("i8", all.copy()),
+        ("i16", all.copy()),
+        ("i32", all.copy()),
+        ("u128", all.copy()),
+        ("i128", all.copy()),
+        ("Fs", shown.copy()),
+        ("Net", shown.copy()),
+        ("Clock", shown.copy()),
+        ("Rand", shown.copy()),
+        ("Env", shown.copy()),
+        ("Proc", shown.copy()),
+        ("Stdin", shown.copy()),
+        ("System", shown.copy()),
+        ("TestClock", shown.copy()),
+        ("HostFs", ["Debug"]),
+        ("HostNet", ["Debug"]),
+        ("HostClock", ["Debug"]),
+        ("HostRand", ["Debug"]),
+        ("HostEnv", ["Debug"]),
+        ("HostProc", ["Debug"]),
+        ("HostStdin", ["Debug"]),
+    ]
+
+## The largest tuple the generated impls cover.
+pub pure def tuple_arity() -> int:
+    return 6
+
+## `<std>/builtin_impls.sisu`: the impls of the leaf types and of tuples
+## of up to six elements.
+pub pure def builtin_impls() -> String:
+    var s = String.new()
+    s.push("##! Generated: the impls of the leaf types and of tuples of up to six elements.\n")
+    for (ty, traits) in leaves():
+        for t in traits:
+            s.push("\nimpl {t} for {ty}:\n")
+            if let Some(body) = leaf_format(t, ty):
+                s.push(body)
+                continue
+            let (name, sig) = leaf_method(t, ty)
+            s.push("    @intrinsic(\"{name}\")\n    pure def {sig}\n")
+    sized_impls(mut s)
+    # The operators of the numbers, as traits for generic code.
+    for ty in ["int", "f64"]:
+        for (t, m) in [
+            ("Add", "add"), ("Sub", "sub"), ("Mul", "mul"), ("Div", "div"), ("Rem", "rem")
+        ]:
+            s.push("\nimpl {t} for {ty}:\n")
+            s.push("    @intrinsic(\"op.{m}\")\n    pure def {m}(self, other: {ty}) -> {ty}\n")
+        s.push("\nimpl Neg for {ty}:\n")
+        s.push("    @intrinsic(\"op.neg\")\n    pure def neg(self) -> {ty}\n")
+    for n in range(1, tuple_arity() + 1):
+        tuple_impls(mut s, n)
+    return s
+
+## The capability handles and host objects among the leaves.
+pure def is_handle(ty: str) -> bool:
+    return match ty:
+        case "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "System" | "TestClock": True
+        case "HostFs" | "HostNet" | "HostClock" | "HostRand" | "HostEnv" | "HostProc" | "HostStdin": True
+        case _: False
+
+## `Display` and `Debug` of the values a format spec applies to.
+pure def leaf_format(t: str, ty: str) -> String?:
+    if is_handle(ty):
+        return None
+    var sig = ""
+    var plain = ""
+    var with_spec = String.new()
+    if t == "Display" and ty == "DateTime":
+        var b: String = "    pure def fmt(self, mut f: Formatter):\n"
+        b.push("        if f.depth > 0 or f.spec.is_empty():\n")
+        b.push("            f.write(\"{{self}}\")\n        else:\n")
+        b.push("            let pattern = f.spec.to_string()\n")
+        b.push("            f.spec = String.new(\"\")\n")
+        b.push("            f.write(Spec.strftime(self, pattern))\n")
+        return Some(b)
+    if t == "Display" and ty == "int":
+        sig = "fmt"
+        plain = "\"{{self}}\""
+        with_spec = "f.write(s.int(self))".to_string()
+    elif t == "Display" and (ty == "u64" or ty == "u128" or ty == "i128"):
+        sig = "fmt"
+        plain = "\"{{self}}\""
+        let negative = if ty == "i128": "self < 0" else: "False"
+        with_spec = "match self.to_int():\n                    case Some(n):\n                        f.write(s.int(n))\n                    case None:\n                        f.write(s.wide(self, {negative}))"
+    elif t == "Display" and sized().contains(ty):
+        sig = "fmt"
+        plain = "\"{{self}}\""
+        with_spec = "f.write(s.int(self.to_int()))".to_string()
+    elif t == "Display" and ty == "f64":
+        sig = "fmt"
+        plain = "\"{{self}}\""
+        with_spec = "f.write(s.float(self))".to_string()
+    elif t == "Display":
+        sig = "fmt"
+        plain = "\"{{self}}\""
+        with_spec = "if s.kind == Some('?'):\n                    f.write(s.pad(\"{{self:?}}\"))\n                else:\n                    f.write(s.text(\"{{self}}\"))".to_string()
+    elif t == "Debug":
+        sig = "fmt_debug"
+        plain = "\"{{self:?}}\""
+        with_spec = "f.write(s.pad(\"{{self:?}}\"))".to_string()
+    else:
+        return None
+    var b: String = "    pure def {sig}(self, mut f: Formatter):\n"
+    b.push("        match f.take_spec():\n            case Some(s):\n")
+    b.push("                {with_spec}\n")
+    b.push("            case None:\n                f.write({plain})\n")
+    return Some(b)
+
+pure def leaf_method(t: str, ty: str) -> (String, String):
+    return match t:
+        case "Display": pair("structural.display", "fmt(self, mut f: Formatter)")
+        case "Debug": pair("structural.debug", "fmt_debug(self, mut f: Formatter)")
+        case "Eq": pair("structural.eq", "eq(self, other: {ty}) -> bool")
+        case "PartialOrd": pair(
+            "structural.partial_cmp", "partial_cmp(self, other: {ty}) -> Ordering?"
+        )
+        case "Ord": pair("structural.cmp", "cmp(self, other: {ty}) -> Ordering")
+        case "Hash": pair("structural.hash", "hash(self, mut h: Hasher)")
+        case _: pair("len", "len(self) -> int")
+
+pure def pair(a: str, b: str) -> (String, String):
+    return (a.to_string(), b.to_string())
+
+pure def tuple_impls(mut s: String, n: int):
+    var names: list[String] = []
+    for i in range(n):
+        names.push("T{i}")
+    let ty = if n == 1: "({names[0]},)" else: "({names.join(", ")})"
+    s.push("\nimpl[{params(names, "Debug")}] Debug for {ty}:\n")
+    s.push("    pure def fmt_debug(self, mut f: Formatter):\n")
+    s.push("        f.write(\"(\")\n")
+    s.push("        f.depth += 1\n")
+    for i in range(n):
+        if i > 0:
+            s.push("        f.write(\", \")\n")
+        s.push("        self.{i}.fmt_debug(mut f)\n")
+    s.push("        f.depth -= 1\n")
+    let close = if n == 1: "," else: ""
+    s.push("        f.write(\"{close})\")\n")
+    s.push("\nimpl[{params(names, "Debug")}] Display for {ty}:\n")
+    s.push("    pure def fmt(self, mut f: Formatter):\n")
+    s.push("        self.fmt_debug(mut f)\n")
+    s.push("\nimpl[{params(names, "Eq")}] Eq for {ty}:\n")
+    s.push("    pure def eq(self, other: {ty}) -> bool:\n")
+    var parts: list[String] = []
+    for i in range(n):
+        parts.push("self.{i} == other.{i}")
+    s.push("        return {parts.join(" and ")}\n")
+    for (tr, method, eq, wrap) in [
+        ("PartialOrd", "partial_cmp", "Some(Equal)", "Ordering?"),
+        ("Ord", "cmp", "Equal", "Ordering"),
+    ]:
+        s.push("\nimpl[{params(names, tr)}] {tr} for {ty}:\n")
+        s.push("    pure def {method}(self, other: {ty}) -> {wrap}:\n")
+        for i in range(n):
+            if i + 1 == n:
+                s.push("        return self.{i}.{method}(other.{i})\n")
+            else:
+                s.push("        let c{i} = self.{i}.{method}(other.{i})\n")
+                s.push("        if c{i} != {eq}:\n")
+                s.push("            return c{i}\n")
+    s.push("\nimpl[{params(names, "Hash")}] Hash for {ty}:\n")
+    s.push("    pure def hash(self, mut h: Hasher):\n")
+    for i in range(n):
+        s.push("        self.{i}.hash(mut h)\n")
+
+pure def params(names: list[String], bound: str) -> String:
+    var out: list[String] = []
+    for x in names:
+        out.push("{x}: {bound}")
+    return out.join(", ")
+
+## The arithmetic of the sized integers: the operator traits for generic
+## code, the conversions to and from `int`, and `Into` for each widening.
+pure def sized_impls(mut s: String):
+    for ty in sized():
+        var signed = False
+        if let Some((_, sg)) = int_width(ty):
+            signed = sg
+        for (t, m) in [("Add", "add"), ("Sub", "sub"), ("Mul", "mul"), ("Rem", "rem")]:
+            s.push("\nimpl {t} for {ty}:\n")
+            s.push("    @intrinsic(\"{ty}.{m}\")\n    pure def {m}(self, other: {ty}) -> {ty}\n")
+        if signed:
+            s.push("\nimpl Neg for {ty}:\n")
+            s.push("    @intrinsic(\"{ty}.neg\")\n    pure def neg(self) -> {ty}\n")
+        s.push("\nimpl {ty}:\n")
+        if own_kind(ty):
+            s.push("    ## The value as an `int`, or `None` outside `int`'s range.\n")
+            s.push("    @intrinsic(\"{ty}.to_int\")\n    pure def to_int(self) -> int?\n")
+        else:
+            s.push("    ## The value as an `int`, which holds every one.\n")
+            s.push("    @intrinsic(\"{ty}.to_int\")\n    pure def to_int(self) -> int\n")
+        s.push("    @intrinsic(\"{ty}.cmp\")\n    pure def cmp(self, other: {ty}) -> Ordering\n")
+        s.push("\nimpl Integer for {ty}:\n")
+        s.push("    @intrinsic(\"{ty}.wrapping_from\")\n")
+        s.push("    pure def wrapping_from(n: int) -> {ty}\n")
+        s.push("\nimpl FromLiteral[int] for {ty}:\n")
+        s.push("    @intrinsic(\"{ty}.from_literal\")\n")
+        s.push("    pure def from_literal(literal: int) -> {ty}\n")
+        var targets = sized()
+        targets.push("int")
+        for to in targets:
+            if widens(ty, to):
+                s.push("\nimpl Into[{to}] for {ty}:\n")
+                s.push("    @intrinsic(\"{to}.widen\")\n    pure def into(self) -> {to}\n")
+    s.push("\nimpl Integer for int:\n")
+    s.push("    pure def wrapping_from(n: int) -> int:\n        return n\n")
+    s.push("\nimpl int:\n")
+    s.push("    ## The value reduced to `T`'s width, as two's complement wrapping does.\n")
+    s.push("    pure def truncate_to[T: Integer](self) -> T:\n")
+    s.push("        return T.wrapping_from(self)\n")
+    for ty in sized():
+        s.push("    ## The value as a `{ty}`, or `None` if it does not fit.\n")
+        s.push("    @intrinsic(\"int.to_{ty}\")\n    pure def to_{ty}(self) -> {ty}?\n")
+
+test "widening keeps every value":
+    assert widens("u8", "int")
+    assert widens("i8", "i32")
+    assert not widens("int", "u8")
+    assert not widens("u64", "int")
+    assert not widens("int", "int")
+
+test "the leaf impls are written as stage 0 writes them":
+    let text = builtin_impls()
+    assert text.contains("\nimpl Display for int:\n")
+    assert text.contains("\nimpl[T0: Eq, T1: Eq] Eq for (T0, T1):\n")
+    assert text.contains("\nimpl Into[int] for u8:\n")
