@@ -1,0 +1,60 @@
+# The order of the output is the schedule: tasks print as they go.
+struct Noisy:
+    name: String
+
+impl Drop for Noisy:
+    def drop(mut self):
+        print("drop {self.name}")
+
+def work(name: str, n: int) -> int:
+    var total = 0
+    for i in range(n):
+        total += step(i)
+        if i % 3 == 0:
+            print("{name} {i}")
+    return total
+
+def step(i: int) -> int:
+    return i * 2
+
+def producer(tx: Sender[int], n: int) -> ! {ChannelError, TaskError}:
+    for i in range(n):
+        tx.send(i)?
+        print("sent {i}")
+    tx.close()
+    return Ok(())
+
+def gen(n: int) -> Iter[int]:
+    var i = 0
+    while i < n:
+        print("gen {i}")
+        yield i * i
+        i += 1
+
+def main():
+    task.scope do s:
+        let a = s.spawn(() -> work("a", 10))
+        let b = s.spawn(() -> work("b", 7))
+        s.spawn do:
+            let g = Noisy(name="c's")
+            for x in gen(4):
+                print("c got {x}")
+            task.yield_now()
+            print("c done")
+        print("joined {a.join()} {b.join()}")
+    let tx, rx = channel[int](capacity=1)
+    let m = Mutex(0)
+    task.scope do s:
+        s.spawn(() -> producer(tx, 5))
+        for k in range(3):
+            s.spawn do:
+                for v in rx:
+                    var g = m.lock()
+                    let seen = g.value
+                    task.yield_now()
+                    g.value = seen + v
+                    print("worker {k} took {v}")
+        task.scope do inner:
+            inner.spawn(() -> work("inner", 4))
+            print("inner body")
+    print("total {m.into_inner()}")

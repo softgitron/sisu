@@ -16,6 +16,7 @@
 
 mod func;
 mod layout;
+mod workers;
 
 use cranelift_codegen::ir::MemFlags;
 use cranelift_codegen::ir::{self, AbiParam, InstBuilder, types};
@@ -114,15 +115,49 @@ fn compile_with(prog: &sir::Program, survey: bool) -> Result<(Compiled, Vec<(Str
     };
     let mut cg = Codegen::new(prog)?;
     cg.survey = survey;
-    let main_id = cg.instance(&entry.function, Vec::new())?;
-    cg.complete()?;
-    let ret = prog.function(&entry.function).map(|f| f.ret().clone()).unwrap_or(Type::Unit);
-    let ret_ty = cg.types.id(&cg.concrete(&ret, &[])?)?;
-    cg.complete()?;
-    let mut flags = if entry.returns_result { abi::ENTRY_RESULT } else { 0 };
-    if entry.takes_system {
-        flags |= abi::ENTRY_SYSTEM;
-    }
+    let threads = workers::count();
+    let (main_id, flags, ret_ty) = if threads > 1 {
+        let workers::Channels { jobs, queue, results, done } = workers::Channels::new();
+        // A thread fewer than the machine runs while this one writes the
+        // IR; then it compiles too.
+        let senders: Vec<_> = (1..threads).map(|_| results.clone()).collect();
+        let isa = cg.isa.clone();
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        cg.jobs = Some(jobs);
+        std::thread::scope(|s| {
+            // A thread that cannot be made leaves its share to the others,
+            // and to this one.
+            let handles: Vec<_> = senders
+                .into_iter()
+                .filter_map(|r| {
+                    let (isa, queue, stop) = (&isa, &queue, &stop);
+                    std::thread::Builder::new()
+                        .spawn_scoped(s, move || workers::work(&**isa, queue, &r, stop))
+                        .ok()
+                })
+                .collect();
+            let generated = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cg.generate(entry)));
+            // Closing the queue lets the threads finish what is in it; a
+            // failure stops them, since nothing they compile will be used.
+            cg.jobs = None;
+            if matches!(generated, Ok(Ok(_))) {
+                workers::work(&*isa, &queue, &results, &stop);
+            } else {
+                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            drop(results);
+            for h in handles {
+                if let Err(e) = h.join() {
+                    std::panic::resume_unwind(e);
+                }
+            }
+            let main = generated.unwrap_or_else(|e| std::panic::resume_unwind(e))?;
+            cg.place(done.try_iter().collect())?;
+            Ok::<_, Error>(main)
+        })?
+    } else {
+        cg.generate(entry)?
+    };
     cg.define_main(main_id, flags, ret_ty)?;
     let functions = cg.compiled;
     let statements = cg.statements;
@@ -217,6 +252,14 @@ pub(crate) struct Codegen<'p> {
     /// The runtime's entry points, declared once.
     runtime: HashMap<&'static str, FuncId>,
     pub depth: DataId,
+    /// The scheduler's budget, the running task's stack limits, and the
+    /// site of the last call that may wait (`sisu_rt::abi::sym`).
+    pub budget: DataId,
+    pub stack: DataId,
+    pub site: DataId,
+    /// The largest frame of a compiled function, in bytes: the probe
+    /// reserve of a task's stack holds it (decision 203).
+    max_frame: u32,
     /// Texts and call descriptors in the read-only data, by content.
     texts: HashMap<Vec<u8>, DataId>,
     descs: HashMap<Vec<u32>, DataId>,
@@ -232,6 +275,15 @@ pub(crate) struct Codegen<'p> {
     /// way a closure is.
     thunks: HashMap<String, (FuncId, Type)>,
     fbctx: FunctionBuilderContext,
+    /// The target, which the threads that compile share (decision 219).
+    isa: cranelift_codegen::isa::OwnedTargetIsa,
+    /// Where the functions go to be compiled on those threads; none when
+    /// each is compiled as it is made.
+    jobs: Option<std::sync::mpsc::Sender<workers::Job>>,
+    /// The functions handed to the threads, in the order they were made:
+    /// each one's id, what an error in it is called, and whether its frame
+    /// counts towards `max_frame`.
+    handed: Vec<(FuncId, String, bool)>,
     /// Surveying (`survey`): a function with a construct the backend does
     /// not compile is recorded in `missing` and given a body that stops.
     survey: bool,
@@ -250,6 +302,11 @@ pub(crate) struct Codegen<'p> {
     pub compiled: usize,
     pub statements: usize,
 }
+
+/// What a call adds to the callee's frame beyond what Cranelift reports
+/// as its size: the return address, the saved frame pointer, and the
+/// arguments passed on the stack.
+const FRAME_EXTRA: i64 = 256;
 
 /// The `Sisu` signature: the result's address and each argument's, and
 /// the status.
@@ -296,12 +353,19 @@ impl<'p> Codegen<'p> {
             .finish(settings::Flags::new(flags))
             .map_err(|e| Error::internal(format!("this machine: {e}")))?;
         let call_conv = isa.default_call_conv();
+        let shared = isa.clone();
         let builder = ObjectBuilder::new(isa, "sisu_program", cranelift_module::default_libcall_names())
             .map_err(|e| Error::internal(format!("the object file: {e}")))?;
         let mut module = ObjectModule::new(builder);
-        let depth = module
-            .declare_data(sym::DEPTH, Linkage::Import, true, false)
-            .map_err(|e| Error::internal(e.to_string()))?;
+        let mut import = |name: &str| {
+            module
+                .declare_data(name, Linkage::Import, true, false)
+                .map_err(|e| Error::internal(e.to_string()))
+        };
+        let depth = import(sym::DEPTH)?;
+        let budget = import(sym::BUDGET)?;
+        let stack = import(sym::STACK)?;
+        let site = import(sym::SITE)?;
         Ok(Codegen {
             prog,
             module,
@@ -311,12 +375,19 @@ impl<'p> Codegen<'p> {
             queue: VecDeque::new(),
             runtime: HashMap::new(),
             depth,
+            budget,
+            stack,
+            site,
+            max_frame: 0,
             texts: HashMap::new(),
             descs: HashMap::new(),
             glue_ids: Vec::new(),
             thunks: HashMap::new(),
             foreign: foreign_objects(prog, &reachable(prog)),
             fbctx: FunctionBuilderContext::new(),
+            isa: shared,
+            jobs: None,
+            handed: Vec::new(),
             survey: false,
             missing: Vec::new(),
             carried: HashMap::new(),
@@ -363,6 +434,30 @@ impl<'p> Codegen<'p> {
             held.push(value_ty.clone());
         }
         Ok(())
+    }
+
+    /// What a call of the intrinsic `name` tells the dispatchers (decision
+    /// 209): a handle made on an object may hold it, and the host's
+    /// sockets are what the network's `dyn`s hold.
+    pub(crate) fn note_intrinsic(&mut self, name: &str, targs: &[Type]) -> Result<(), Error> {
+        let dyn_of = |t: &str| Type::Dyn(t.to_string(), Vec::new());
+        let named = |t: &str| Type::Named(t.to_string(), Vec::new());
+        match name {
+            "cap.new" => match targs {
+                [object, handle @ Type::Named(..)] => self.carry(handle, object),
+                _ => Err(Error::internal("`cap.new` without its object's and handle's types")),
+            },
+            // The runtime finds the sockets' types by name in the table.
+            "host.net.connect" | "host.net.accept" => {
+                self.types.id(&named("HostStream"))?;
+                self.carry(&dyn_of("Stream"), &named("HostStream"))
+            }
+            "host.net.listen" => {
+                self.types.id(&named("HostListener"))?;
+                self.carry(&dyn_of("Accept"), &named("HostListener"))
+            }
+            _ => Ok(()),
+        }
     }
 
     /// The dispatcher of `name` (a trait's method) for these type
@@ -424,7 +519,7 @@ impl<'p> Codegen<'p> {
                         Target::Fn(f, targs) => {
                             self.instance(f, targs.clone())?;
                         }
-                        Target::Intrinsic(..) => {}
+                        Target::Intrinsic(i, targs) => self.note_intrinsic(i, targs)?,
                         Target::Dyn(..) => return Err(Error::unsupported("a `dyn` that holds a `dyn`")),
                     }
                     let number = self.types.id(&value_ty)?;
@@ -578,9 +673,71 @@ impl<'p> Codegen<'p> {
             b.finalize();
         }
         self.fbctx = fbctx;
-        self.module
-            .define_function(id, &mut ctx)
-            .map_err(|e| Error::internal(format!("the dispatcher of `{}`: {e:?}", self.dispatchers[i].name)))
+        let what = format!("the dispatcher of `{}`", self.dispatchers[i].name);
+        self.define(id, ctx, what, true)
+    }
+
+    /// Defines function `id` with the body in `ctx`: compiled here, or
+    /// handed to the threads that compile (decision 219), whose code
+    /// [`Codegen::place`] defines. `what` names the function in an error;
+    /// `frame`: whether its frame counts towards `max_frame` (a task may
+    /// run it).
+    fn define(&mut self, id: FuncId, mut ctx: Context, what: String, frame: bool) -> Result<(), Error> {
+        if let Some(jobs) = &self.jobs {
+            let job = workers::Job { order: self.handed.len(), id, func: ctx.func };
+            if jobs.send(job).is_err() {
+                return Err(Error::internal(format!("{what}: the threads that compile stopped")));
+            }
+            self.handed.push((id, what, frame));
+            return Ok(());
+        }
+        self.module.define_function(id, &mut ctx).map_err(|e| Error::internal(format!("{what}: {e:?}")))?;
+        if frame && let Some(code) = ctx.compiled_code() {
+            self.max_frame = self.max_frame.max(code.frame_size);
+        }
+        Ok(())
+    }
+
+    /// Defines the functions the threads compiled, in the order they were
+    /// made, so the object file is the same however the threads ran.
+    fn place(&mut self, done: Vec<(usize, Result<workers::Code, String>)>) -> Result<(), Error> {
+        let mut codes: Vec<Option<Result<workers::Code, String>>> =
+            std::iter::repeat_with(|| None).take(self.handed.len()).collect();
+        for (order, code) in done {
+            if let Some(c) = codes.get_mut(order) {
+                *c = Some(code);
+            }
+        }
+        for ((id, what, frame), code) in std::mem::take(&mut self.handed).into_iter().zip(codes) {
+            let code = match code {
+                Some(Ok(code)) => code,
+                Some(Err(e)) => return Err(Error::internal(format!("{what}: {e}"))),
+                None => return Err(Error::internal(format!("{what}: no code came back"))),
+            };
+            self.module
+                .define_function_bytes(id, code.alignment, &code.bytes, &code.relocs)
+                .map_err(|e| Error::internal(format!("{what}: {e:?}")))?;
+            if frame {
+                self.max_frame = self.max_frame.max(code.frame_size);
+            }
+        }
+        Ok(())
+    }
+
+    /// Everything but `main`: the instances the entry reaches, the
+    /// dispatchers and the drop glue; the entry's id, `main`'s flags and
+    /// the number of the entry's result type.
+    fn generate(&mut self, entry: &sir::Entry) -> Result<(FuncId, u32, u32), Error> {
+        let main_id = self.instance(&entry.function, Vec::new())?;
+        self.complete()?;
+        let ret = self.prog.function(&entry.function).map(|f| f.ret().clone()).unwrap_or(Type::Unit);
+        let ret_ty = self.types.id(&self.concrete(&ret, &[])?)?;
+        self.complete()?;
+        let mut flags = if entry.returns_result { abi::ENTRY_RESULT } else { 0 };
+        if entry.takes_system {
+            flags |= abi::ENTRY_SYSTEM;
+        }
+        Ok((main_id, flags, ret_ty))
     }
 
     /// Compiles every queued instance, and the drop glue the type table
@@ -624,9 +781,7 @@ impl<'p> Codegen<'p> {
         // in use: the next function starts from a fresh one.
         self.fbctx = if result.is_ok() { fbctx } else { FunctionBuilderContext::new() };
         result?;
-        self.module
-            .define_function(id, &mut ctx)
-            .map_err(|e| Error::internal(format!("Cranelift rejected `{name}`: {e:?}")))?;
+        self.define(id, ctx, format!("Cranelift rejected `{name}`"), true)?;
         self.compiled += 1;
         Ok(())
     }
@@ -679,9 +834,7 @@ impl<'p> Codegen<'p> {
             b.finalize();
         }
         self.fbctx = fbctx;
-        self.module
-            .define_function(id, &mut ctx)
-            .map_err(|e| Error::internal(format!("{name} as a value: {e:?}")))?;
+        self.define(id, ctx, format!("{name} as a value"), true)?;
         self.thunks.insert(name.to_string(), (id, ty.clone()));
         Ok((id, ty))
     }
@@ -703,7 +856,7 @@ impl<'p> Codegen<'p> {
             b.finalize();
         }
         self.fbctx = fbctx;
-        self.module.define_function(id, &mut ctx).map_err(|e| Error::internal(format!("{name}: {e:?}")))
+        self.define(id, ctx, name.to_string(), false)
     }
 
     /// A runtime entry point, declared once with its signature.
@@ -713,7 +866,10 @@ impl<'p> Codegen<'p> {
         }
         let (i64_, i32_, i8_, f64_) = (types::I64, types::I32, types::I8, types::F64);
         let (params, returns): (&[ir::Type], &[ir::Type]) = match name {
-            sym::START => (&[i32_, i64_, i64_, i32_, i32_, i64_, i64_, i64_, i64_], &[i32_]),
+            sym::START => (&[i32_, i64_, i64_, i32_, i32_, i64_, i64_, i64_, i64_, i64_], &[i32_]),
+            sym::YIELD => (&[], &[]),
+            sym::ARENA_SLOT => (&[i64_, i64_, i32_, i64_], &[i8_]),
+            sym::SHARED_TOUCH => (&[i64_], &[]),
             sym::FRAME => (&[i64_, i64_, i64_, i64_, i64_, i64_], &[]),
             sym::ABORT_UNWIND => (&[], &[]),
             sym::PANIC_OVERFLOW => (&[i32_, i64_, i64_], &[i8_]),
@@ -722,6 +878,7 @@ impl<'p> Codegen<'p> {
             sym::INT_OP => (&[i32_, i64_, i64_, i64_], &[i8_]),
             sym::FLOAT_OP => (&[i32_, f64_, f64_], &[f64_]),
             sym::ALLOC => (&[i64_], &[i64_]),
+            sym::FREE | sym::TRACE_RELEASE => (&[i64_], &[]),
             sym::DROP => (&[i64_, i32_], &[i8_]),
             sym::COPY => (&[i64_, i64_, i32_], &[]),
             sym::BINARY => (&[i32_, i64_, i64_, i32_, i64_, i32_], &[i8_]),
@@ -824,8 +981,12 @@ impl<'p> Codegen<'p> {
     }
 
     /// A call through a capability handle (`cap.forward`): the operation
-    /// of the host's object behind it. Every handle of the type must be on
-    /// the host's object, so the program may make no other.
+    /// of the object behind it. A handle of a type the program makes no
+    /// other objects for is on the host's object, whose operation is called
+    /// directly (decision 194); one that may hold another object is the
+    /// address of a cell holding the object as a `dyn` holds its value,
+    /// and the call is dispatched on the object's type (decision 209). A
+    /// `Lent` is its handle.
     pub(crate) fn forward(
         &mut self,
         name: &str,
@@ -833,18 +994,33 @@ impl<'p> Codegen<'p> {
         mut tys: Vec<Type>,
         derefs: usize,
     ) -> Result<(Target, usize), Error> {
-        let Type::Named(h, _) = handle else {
+        if let Type::Named(n, a) = handle
+            && n == "Lent"
+            && let [inner] = a.as_slice()
+        {
+            if let Some(t) = tys.first_mut() {
+                *t = inner.clone();
+            }
+            let (target, more) = self.resolve_trait(name, tys)?;
+            return Ok((target, derefs + more));
+        }
+        let host = match handle {
+            Type::Named(h, a) if a.is_empty() => {
+                abi::CAPABILITIES.iter().find(|(c, _)| c == h).map(|(_, o)| *o)
+            }
+            _ => None,
+        };
+        let (Some(host), Type::Named(h, _)) = (host, handle) else {
             return Err(Error::unsupported(format!(
                 "a call of `{name}` through a `{}`",
                 sir::write::ty(handle)
             )));
         };
-        let host = abi::CAPABILITIES.iter().find(|(c, _)| c == h).map(|(_, o)| *o);
-        let Some(host) = host.filter(|_| !self.foreign.contains(h)) else {
-            return Err(Error::unsupported(format!(
-                "a call of `{name}` on a `{h}` that may not be the host's"
-            )));
-        };
+        if self.foreign.contains(h) {
+            // The root handles of `main`'s `System` hold the host's objects.
+            self.carry(handle, &Type::Named(host.to_string(), Vec::new()))?;
+            return Ok((Target::Dyn(name.to_string(), tys), derefs));
+        }
         if let Some(t) = tys.first_mut() {
             *t = Type::Named(host.to_string(), Vec::new());
         }
@@ -966,9 +1142,13 @@ impl<'p> Codegen<'p> {
             let ret_ty = b.ins().iconst(types::I32, i64::from(ret_ty));
             let types_len = b.ins().iconst(types::I64, table.len() as i64);
             let fns_len = b.ins().iconst(types::I64, n as i64);
+            // The largest frame, and room for what a call adds to it (the
+            // return address, the saved frame pointer, arguments on the
+            // stack).
+            let max_frame = b.ins().iconst(types::I64, i64::from(self.max_frame) + FRAME_EXTRA);
             let call = b.ins().call(
                 start_ref,
-                &[argc, argv, entry_addr, flags, ret_ty, types_addr, types_len, fns_addr, fns_len],
+                &[argc, argv, entry_addr, flags, ret_ty, types_addr, types_len, fns_addr, fns_len, max_frame],
             );
             let code = b.inst_results(call)[0];
             b.ins().return_(&[code]);
@@ -976,8 +1156,7 @@ impl<'p> Codegen<'p> {
             b.finalize();
         }
         self.fbctx = fbctx;
-        self.module.define_function(main, &mut ctx).map_err(|e| Error::internal(format!("main: {e:?}")))?;
-        Ok(())
+        self.define(main, ctx, "main".to_string(), false)
     }
 }
 
@@ -1039,8 +1218,15 @@ fn reachable(prog: &sir::Program) -> std::collections::HashSet<String> {
                                 sir::Callee::Trait(n, tys) => {
                                     let (tr, method) = n.rsplit_once('.').unwrap_or((n, ""));
                                     let mut self_ty = tys.first().cloned().unwrap_or(Type::Unit);
-                                    while let Type::Ref(inner, _) = self_ty {
-                                        self_ty = *inner;
+                                    loop {
+                                        match &self_ty {
+                                            Type::Ref(inner, _) => self_ty = (**inner).clone(),
+                                            // A lent capability is its handle.
+                                            Type::Named(n, a) if n == "Lent" && a.len() == 1 => {
+                                                self_ty = a[0].clone()
+                                            }
+                                            _ => break,
+                                        }
                                     }
                                     let handle = match &self_ty {
                                         Type::Named(h, a) if a.is_empty() => objects.get(h).cloned(),
@@ -1108,8 +1294,8 @@ fn reachable(prog: &sir::Program) -> std::collections::HashSet<String> {
 }
 
 /// The capability handle types the program makes objects of, besides the
-/// host's: every `cap.new[T, H]` makes an `H` on another object, and
-/// `Clock.fake` a test clock (in the functions `main` may reach).
+/// host's: every `cap.new[T, H]` makes an `H` on another object (in the
+/// functions `main` may reach); a test clock becomes a `Clock` that way.
 fn foreign_objects(
     prog: &sir::Program,
     reached: &std::collections::HashSet<String>,
@@ -1118,27 +1304,19 @@ fn foreign_objects(
     for f in prog.functions.iter().filter(|f| reached.contains(&f.name)) {
         for b in &f.blocks {
             for s in &b.stmts {
-                if let sir::StatementKind::Call { callee: sir::Callee::Intrinsic(name, tys), .. } = &s.kind {
-                    match name.as_str() {
-                        "cap.new" => match tys.get(1) {
-                            Some(Type::Named(h, _)) => {
-                                out.insert(h.clone());
-                            }
-                            _ => {
-                                // A handle type the call does not say: any.
-                                for (h, _) in abi::CAPABILITIES {
-                                    out.insert(h.to_string());
-                                }
-                            }
-                        },
-                        "Clock.fake" | "cap.lend" => {
+                if let sir::StatementKind::Call { callee: sir::Callee::Intrinsic(name, tys), .. } = &s.kind
+                    && name == "cap.new"
+                {
+                    match tys.get(1) {
+                        Some(Type::Named(h, _)) => {
+                            out.insert(h.clone());
+                        }
+                        _ => {
+                            // A handle type the call does not say: any.
                             for (h, _) in abi::CAPABILITIES {
-                                if name == "cap.lend" || h == "Clock" {
-                                    out.insert(h.to_string());
-                                }
+                                out.insert(h.to_string());
                             }
                         }
-                        _ => {}
                     }
                 }
             }

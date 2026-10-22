@@ -18,6 +18,7 @@
 //! `std/prelude.sisu`).
 
 use sisu_sir as sir;
+use sisu_sir::types::drops_something;
 use sisu_sir::{
     BasicBlock, BlockId, Callee, FnKind, Function, LocalDecl, LocalId, Operand, Place, Proj, Rvalue,
     Statement, StatementKind, Terminator, Type, TypeDecl,
@@ -62,30 +63,6 @@ fn needs_glue(types: &[TypeDecl]) -> HashMap<&str, bool> {
         if !changed {
             return needs;
         }
-    }
-}
-
-/// Whether dropping a value of the type can do anything: run a `Drop`,
-/// change a count, unlock a mutex.
-pub fn drops_something(t: &Type, needs: &HashMap<&str, bool>) -> bool {
-    match t {
-        Type::Int | Type::Float | Type::Bool | Type::Char | Type::Str | Type::Unit | Type::Never => false,
-        // A reference owns nothing; a closure holds references, or copies
-        // of `Copy` values (an `own` closure).
-        Type::Ref(..) | Type::Fn(..) | Type::Const(_) | Type::ConstOp(..) => false,
-        Type::Tuple(es) => es.iter().any(|e| drops_something(e, needs)),
-        Type::Param(_) | Type::Assoc(..) | Type::Dyn(..) => true,
-        Type::ErrSet(ms) => ms.iter().any(|m| needs.get(m.as_str()).copied().unwrap_or(true)),
-        Type::Named(n, args) => match n.as_str() {
-            "Shared" | "Weak" | "MutexGuard" => true,
-            "String" | "Path" | "DateTime" | "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin"
-            | "System" | "HostFs" | "HostNet" | "HostClock" | "HostRand" | "HostEnv" | "HostProc"
-            | "HostStdin" | "TestClock" | "Cap" | "Lent" | "f32" | "u8" | "u16" | "u32" | "u64" | "u128"
-            | "i8" | "i16" | "i32" | "i128" | "bytes" | "Slice" => false,
-            "list" | "Array" | "dict" | "set" | "Iter" | "Entry" | "Iterable" | "Option" | "Result"
-            | "Cell" | "Mutex" | "Arena" => args.iter().any(|a| drops_something(a, needs)),
-            other => needs.get(other).copied().unwrap_or(true),
-        },
     }
 }
 

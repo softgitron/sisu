@@ -135,6 +135,10 @@ jobs:
         run: cargo build
       - name: Native conformance (conformance/native.list)
         run: ./target/debug/sisu-conformance --sisu target/debug/sisu --native conformance/native.list
+      - name: Native conformance from serialised SIR (`--from-sir`)
+        # The path a self-hosted front end takes (decision 212): each case
+        # built from its own `.sir`, else from what `sisu sir` prints.
+        run: ./target/debug/sisu-conformance --sisu target/debug/sisu --native-from-sir conformance/native.list
       - name: Stage 1 compiled natively (informational, never fails)
         # The bootstrap path: stage 1 built by the backend, its token
         # stream and tree of the prelude against stage 0's.

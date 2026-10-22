@@ -1,0 +1,35 @@
+# Tasks that wait deep in a recursion, then shallower, then deeper than
+# before: the pages below a parked task's stack pointer are given back and
+# its frames above must survive (decommit on park, the watermark), whatever
+# the schedule.
+
+def deep(n: int, name: str, rx: Receiver[int]) -> int:
+    let here = n * 7 + len(name)
+    if n == 0:
+        match rx.recv():
+            case Ok(v):
+                print("{name} got {v}")
+                return v
+            case Err(_):
+                return -1
+    let below = deep(n - 1, name, rx)
+    return below + here
+
+def worker(depths: list[int], name: str, rx: Receiver[int]) -> int:
+    var total = 0
+    for d in depths:
+        total += deep(d, name, rx)
+    return total
+
+def main():
+    let tx, rx = channel[int](capacity=1)
+    let tx2, rx2 = channel[int](capacity=1)
+    let r = task.scope do s:
+        let a = s.spawn(() -> worker([200, 20, 600], "a", rx))
+        let b = s.spawn(() -> worker([40, 5, 80, 2], "bb", rx2))
+        for round in range(4):
+            if round < 3:
+                _ = tx.send(round)
+            _ = tx2.send(round * 10)
+        return (a.join(), b.join())
+    print(r)

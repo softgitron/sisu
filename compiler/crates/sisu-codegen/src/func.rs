@@ -71,6 +71,8 @@ struct Cx<'a, 'p> {
     /// The function's name and file for its stack trace lines; `None` for
     /// drop glue and the standard library, which traces leave out.
     trace: Option<(DataId, usize, DataId, usize)>,
+    /// The function's file, for the site of a call that may wait.
+    file: (DataId, usize),
     glue: bool,
     /// The SIR block being translated.
     cur: usize,
@@ -93,6 +95,15 @@ fn scalar_kind(t: &Type) -> Option<Scalar> {
         },
         _ => None,
     }
+}
+
+/// Whether a closure's environment of `size` bytes is passed as its one
+/// word rather than its address (decision 213): an environment of one word
+/// is copied with the function value, so it needs no cell, which nothing
+/// could free (function values are `Copy` and never dropped). A task's
+/// keeps its cell, which the runtime frees when the task ends.
+fn inline_env(kind: sir::FnKind, size: u32) -> bool {
+    size == 8 && matches!(kind, sir::FnKind::Closure(role) if role != sir::ClosureRole::Task)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,7 +131,13 @@ impl<'a, 'p> Cx<'a, 'p> {
         let mut locals = Vec::new();
         for (i, l) in f.locals.iter().enumerate() {
             let ty = cg.concrete(&l.ty, targs)?;
-            let storage = if i <= f.param_count as usize {
+            let storage = if i == 1 && inline_env(f.kind, cg.types.size(&ty)?) {
+                // The environment came as its one word (decision 213): it
+                // gets a slot, as an argument has memory of its own.
+                let slot = b.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3));
+                b.ins().stack_store(params[1], slot, 0);
+                Storage::Slot(slot)
+            } else if i <= f.param_count as usize {
                 Storage::Param(params[i])
             } else {
                 let size = cg.types.size(&ty)?.max(8);
@@ -143,13 +160,13 @@ impl<'a, 'p> Cx<'a, 'p> {
         let glue = f.kind == sir::FnKind::Glue;
         let file = cg.prog.sources.get(f.source as usize).cloned().unwrap_or_default();
         let std = file.starts_with("<std>/") || file.starts_with("<shims>/");
+        let file_text = (cg.text(file.as_bytes())?, file.len());
         let trace = if glue || std {
             None
         } else {
             let name = display_fn_name(&f.name, cg.prog);
             let n = cg.text(name.as_bytes())?;
-            let fl = cg.text(file.as_bytes())?;
-            Some((n, name.len(), fl, file.len()))
+            Some((n, name.len(), file_text.0, file.len()))
         };
         let fails = vec![None; f.blocks.len()];
         let mut cx = Cx {
@@ -165,6 +182,7 @@ impl<'a, 'p> Cx<'a, 'p> {
             funcs: HashMap::new(),
             data: HashMap::new(),
             trace,
+            file: file_text,
             glue,
             cur: 0,
         };
@@ -244,7 +262,7 @@ impl<'a, 'p> Cx<'a, 'p> {
     /// `dyn`'s own two words, in place.
     fn through(&mut self, addr: Value, ty: &Type) -> Value {
         match ty {
-            Type::Ref(inner, _) if matches!(**inner, Type::Dyn(..)) => addr,
+            Type::Ref(inner, _) if crate::layout::fat(inner) => addr,
             _ => self.load(addr, 0),
         }
     }
@@ -335,9 +353,12 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.data_addr(id)
     }
 
-    /// Counts the frame, and panics past the limit of nested calls (as the
-    /// interpreter's frame limit does; drop glue is not counted).
+    /// The entry of the function: the stack probe; then, but for drop
+    /// glue, the count of the frame, which panics past the limit of nested
+    /// calls (as the interpreter's frame limit does), and the yield point
+    /// of a call (decision 85: the interpreter's calls of Sisu functions).
     fn prologue(&mut self) -> Result<(), Error> {
+        self.probe();
         if self.glue {
             let first = self.blocks[0];
             self.b.ins().jump(first, &[]);
@@ -349,13 +370,93 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.store_word(d1, a, 0);
         let over = self.b.ins().icmp_imm(IntCC::SignedGreaterThan, d1, abi::MAX_DEPTH);
         let overflow = self.b.create_block();
-        let first = self.blocks[0];
-        self.b.ins().brif(over, overflow, &[], first, &[]);
+        let counted = self.b.create_block();
+        self.b.ins().brif(over, overflow, &[], counted, &[]);
         self.b.switch_to_block(overflow);
         self.store_word(d, a, 0);
         let st = self.rt_status(sym::PANIC_STACK, &[])?;
         self.b.ins().return_(&[st]);
+        self.b.switch_to_block(counted);
+        self.yield_check()?;
+        let first = self.blocks[0];
+        self.b.ins().jump(first, &[]);
         Ok(())
+    }
+
+    /// The stack probe (decision 203): the stack pointer, below the frame
+    /// the prologue made, against the task's limit. Under it, a stack
+    /// pointer at or above the real limit only crossed the decommit
+    /// watermark: the task is marked dirty and the limit lowered. One below
+    /// it has exhausted the stack: the function marks the failure, lowers
+    /// the limit to the unwinding floor, and returns at once, calling
+    /// nothing and writing nothing below its frame (the runtime raises the
+    /// panic when it next looks at the panics in flight).
+    fn probe(&mut self) {
+        let sp = self.b.ins().get_stack_pointer(types::I64);
+        let stack = self.data_addr(self.cg.stack);
+        let limit = self.load(stack, abi::STACK_PROBE);
+        let below = self.b.ins().icmp(IntCC::UnsignedLessThan, sp, limit);
+        let slow = self.b.create_block();
+        let cont = self.b.create_block();
+        self.b.ins().brif(below, slow, &[], cont, &[]);
+        self.b.set_cold_block(slow);
+        self.b.switch_to_block(slow);
+        let real = self.load(stack, abi::STACK_REAL);
+        let under = self.b.ins().icmp(IntCC::UnsignedLessThan, sp, real);
+        let watermark = self.b.create_block();
+        let fail = self.b.create_block();
+        self.b.ins().brif(under, fail, &[], watermark, &[]);
+        self.b.switch_to_block(watermark);
+        let one = self.iconst(1);
+        self.store_word(one, stack, abi::STACK_DIRTY);
+        self.store_word(real, stack, abi::STACK_PROBE);
+        self.b.ins().jump(cont, &[]);
+        self.b.set_cold_block(fail);
+        self.b.switch_to_block(fail);
+        let one = self.iconst(1);
+        self.store_word(one, stack, abi::STACK_FAILED);
+        let floor = self.load(stack, abi::STACK_FLOOR);
+        self.store_word(floor, stack, abi::STACK_PROBE);
+        let st = self.b.ins().iconst(types::I8, i64::from(abi::UNWINDING));
+        self.b.ins().return_(&[st]);
+        self.b.switch_to_block(cont);
+    }
+
+    /// A yield point (decision 85): one less of the budget, and the
+    /// scheduler when it is spent.
+    fn yield_check(&mut self) -> Result<(), Error> {
+        let a = self.data_addr(self.cg.budget);
+        let n = self.load(a, 0);
+        let n1 = self.b.ins().iadd_imm(n, -1);
+        self.store_word(n1, a, 0);
+        let spent = self.b.ins().icmp_imm(IntCC::SignedLessThanOrEqual, n1, 0);
+        let slow = self.b.create_block();
+        let cont = self.b.create_block();
+        self.b.ins().brif(spent, slow, &[], cont, &[]);
+        self.b.set_cold_block(slow);
+        self.b.switch_to_block(slow);
+        self.rt(sym::YIELD, &[])?;
+        self.b.ins().jump(cont, &[]);
+        self.b.switch_to_block(cont);
+        Ok(())
+    }
+
+    /// Records where the running code is before a call that may wait, for
+    /// the deadlock report; and whether the function is `pure`, which a
+    /// scope opened here needs (06, "Effects").
+    fn record_site(&mut self) {
+        let site = self.data_addr(self.cg.site);
+        let (file, len) = self.file;
+        let file = self.data_addr(file);
+        self.store_word(file, site, abi::SITE_FILE);
+        let len = self.iconst(len as i64);
+        self.store_word(len, site, abi::SITE_FILE_LEN);
+        let line = self.b.use_var(self.line);
+        self.store_word(line, site, abi::SITE_LINE);
+        let col = self.b.use_var(self.col);
+        self.store_word(col, site, abi::SITE_COL);
+        let flags = self.iconst(if self.f.pure { abi::SITE_PURE as i64 } else { 0 });
+        self.store_word(flags, site, abi::SITE_FLAGS);
     }
 
     fn leave(&mut self, status: u8) {
@@ -465,17 +566,42 @@ impl<'a, 'p> Cx<'a, 'p> {
     fn terminator(&mut self, t: &Terminator) -> Result<(), Error> {
         match t {
             Terminator::Goto(bb) => {
+                // A jump to a block at or before this one is a loop's back
+                // edge: a yield point (decision 85).
+                if bb.0 as usize <= self.cur {
+                    self.yield_check()?;
+                }
                 let target = self.blocks[bb.0 as usize];
                 self.b.ins().jump(target, &[]);
             }
             Terminator::Switch { value, cases, default } => {
                 let v = self.scalar(value)?.0;
+                // A back edge goes through a block of its own, which yields.
+                let mut back: Vec<(usize, Block)> = Vec::new();
+                let mut target = |cx: &mut Self, t: usize| -> Block {
+                    if t > cx.cur {
+                        return cx.blocks[t];
+                    }
+                    if let Some((_, b)) = back.iter().find(|(u, _)| *u == t) {
+                        return *b;
+                    }
+                    let b = cx.b.create_block();
+                    back.push((t, b));
+                    b
+                };
                 let mut sw = Switch::new();
                 for (k, bb) in cases {
-                    sw.set_entry(u128::from(*k as u64), self.blocks[bb.0 as usize]);
+                    let blk = target(self, bb.0 as usize);
+                    sw.set_entry(u128::from(*k as u64), blk);
                 }
-                let d = self.blocks[default.0 as usize];
+                let d = target(self, default.0 as usize);
                 sw.emit(&mut self.b, v, d);
+                for (t, blk) in back {
+                    self.b.switch_to_block(blk);
+                    self.yield_check()?;
+                    let to = self.blocks[t];
+                    self.b.ins().jump(to, &[]);
+                }
             }
             Terminator::Return => self.leave(abi::OK),
             Terminator::Resume => self.leave(abi::UNWINDING),
@@ -530,6 +656,7 @@ impl<'a, 'p> Cx<'a, 'p> {
                 Proj::Index(_) | Proj::IndexFromEnd(_) => ty = element_type(&ty)?,
                 Proj::Key(_) => match &ty {
                     Type::Named(n, a) if n == "dict" => ty = a.get(1).cloned().unwrap_or(Type::Unit),
+                    Type::Named(n, a) if n == "Arena" => ty = a.first().cloned().unwrap_or(Type::Unit),
                     other => {
                         return Err(Error::unsupported(format!("a key of a `{}`", sir::write::ty(other))));
                     }
@@ -542,19 +669,24 @@ impl<'a, 'p> Cx<'a, 'p> {
 
     /// Field `i` of a value of type `ty` (of `variant`): its offset and
     /// type. In a union of error sets, the members whose variant has the
-    /// field must agree on where it is.
+    /// field must agree on where it is and on its layout: a `String` in one
+    /// and a `Path` in another are the same words (decision 211).
     fn field_of(&mut self, ty: &Type, variant: Option<u32>, i: u32) -> Result<(u32, Type), Error> {
         if let Type::ErrSet(names) = ty {
+            let text =
+                |t: &Type| matches!(t, Type::Named(n, a) if a.is_empty() && (n == "String" || n == "Path"));
             let mut found: Option<(u32, Type)> = None;
             for n in names {
                 let t = Type::Named(n.clone(), Vec::new());
                 if let Ok(f) = self.cg.types.field(&t, variant, i) {
-                    if found.as_ref().is_some_and(|g| *g != f) {
+                    if let Some(g) = &found
+                        && (g.0 != f.0 || (g.1 != f.1 && !(text(&g.1) && text(&f.1))))
+                    {
                         return Err(Error::unsupported(
                             "a field of a union of error sets whose members differ",
                         ));
                     }
-                    found = Some(f);
+                    found.get_or_insert(f);
                 }
             }
             return found.ok_or_else(|| Error::internal("no member of an error union has the field"));
@@ -583,7 +715,12 @@ impl<'a, 'p> Cx<'a, 'p> {
         for proj in &p.proj {
             match proj {
                 Proj::Deref => {
+                    let shared = matches!(&ty, Type::Named(n, _) if n == "Shared");
                     addr = self.through(addr, &ty);
+                    if shared {
+                        // A task reaching a `Shared` cell counts for `--stats`.
+                        self.rt(sym::SHARED_TOUCH, &[addr])?;
+                    }
                     ty = deref_type(&ty)?;
                 }
                 Proj::Downcast(v) => {
@@ -603,6 +740,20 @@ impl<'a, 'p> Cx<'a, 'p> {
                         && n == "Box"
                     {
                         ty = a.first().cloned().unwrap_or(Type::Unit);
+                        if write {
+                            // A box whose value was moved out gets a new cell
+                            // (decision 216).
+                            let cell = self.load(addr, 0);
+                            let (make, have) = (self.b.create_block(), self.b.create_block());
+                            self.b.ins().brif(cell, have, &[], make, &[]);
+                            self.b.switch_to_block(make);
+                            let size = self.size(&ty)?.max(8);
+                            let bytes = self.iconst(i64::from(size));
+                            let new = self.rt_status(sym::ALLOC, &[bytes])?;
+                            self.store_word(new, addr, 0);
+                            self.b.ins().jump(have, &[]);
+                            self.b.switch_to_block(have);
+                        }
                         addr = self.load(addr, 0);
                     } else {
                         let (off, ft) = self.field_of(&ty, variant, *i)?;
@@ -628,6 +779,26 @@ impl<'a, 'p> Cx<'a, 'p> {
                     let off = self.b.ins().imul_imm(at, i64::from(size));
                     addr = self.b.ins().iadd(data, off);
                     ty = elem;
+                }
+                Proj::Key(l) if matches!(&ty, Type::Named(n, _) if n == "Arena") => {
+                    // An arena's slot, by a key of the right generation.
+                    let val = match &ty {
+                        Type::Named(_, a) => a.first().cloned().unwrap_or(Type::Unit),
+                        _ => Type::Unit,
+                    };
+                    let mode = if skip.is_some() { abi::SLOT_DROP } else { abi::SLOT_READ };
+                    let key = self.local_addr(*l)?;
+                    let mv = self.i32const(mode);
+                    let out = self.slot(8);
+                    let st = self.rt_status(sym::ARENA_SLOT, &[addr, key, mv, out])?;
+                    self.check(st);
+                    addr = self.load(out, 0);
+                    if let Some(skip) = skip {
+                        let cont = self.b.create_block();
+                        self.b.ins().brif(addr, cont, &[], skip, &[]);
+                        self.b.switch_to_block(cont);
+                    }
+                    ty = val;
                 }
                 Proj::Key(l) => {
                     let val = match &ty {
@@ -674,9 +845,55 @@ impl<'a, 'p> Cx<'a, 'p> {
             Operand::Copy(p) | Operand::Move(p) => {
                 let (addr, ty) = self.place(p, None)?;
                 let size = self.size(&ty)?;
-                Ok((self.read(addr, size), ty))
+                let v = self.read(addr, size);
+                if matches!(o, Operand::Move(_)) {
+                    self.moved_out_of_box(p)?;
+                    self.moved_out_of_error(p)?;
+                }
+                Ok((v, ty))
             }
         }
+    }
+
+    /// A value moved out of a `Box` (a local's, or a field's of one) leaves
+    /// the box without a value: its cell is freed and the box holds none,
+    /// until an assignment gives it one (decision 216).
+    fn moved_out_of_box(&mut self, p: &Place) -> Result<(), Error> {
+        let Some((Proj::Field(0), base)) = p.proj.split_last() else { return Ok(()) };
+        if !base.iter().all(|q| matches!(q, Proj::Field(_))) {
+            return Ok(());
+        }
+        let base = Place { local: p.local, proj: base.to_vec() };
+        if !matches!(self.place_type(&base)?, Type::Named(n, _) if n == "Box") {
+            return Ok(());
+        }
+        let (at, _) = self.place(&base, None)?;
+        let cell = self.load(at, 0);
+        self.rt(sym::FREE, &[cell])?;
+        let zero = self.iconst(0);
+        self.store_word(zero, at, 0);
+        Ok(())
+    }
+
+    /// A field moved out of an error value (`e.as(v).k`) leaves the value
+    /// never dropped whole: it lets go of its return trace now (decision
+    /// 215).
+    fn moved_out_of_error(&mut self, p: &Place) -> Result<(), Error> {
+        for (i, proj) in p.proj.iter().enumerate() {
+            if !matches!(proj, Proj::Downcast(_)) || !matches!(p.proj.get(i + 1), Some(Proj::Field(_))) {
+                continue;
+            }
+            let base = Place { local: p.local, proj: p.proj[..i].to_vec() };
+            if !base.proj.iter().all(|q| matches!(q, Proj::Field(_) | Proj::Downcast(_))) {
+                continue;
+            }
+            let ty = self.place_type(&base)?;
+            if self.cg.types.is_error(&ty) {
+                let (at, _) = self.place(&base, None)?;
+                self.rt(sym::TRACE_RELEASE, &[at])?;
+            }
+        }
+        Ok(())
     }
 
     fn constant(&mut self, c: &Const) -> Result<(Val, Type), Error> {
@@ -730,7 +947,7 @@ impl<'a, 'p> Cx<'a, 'p> {
             Rvalue::Use(o) => Ok(self.operand(o)?.0),
             Rvalue::Ref(p, _) => {
                 let (addr, ty) = self.place(p, None)?;
-                if matches!(ty, Type::Dyn(..)) {
+                if crate::layout::fat(&ty) {
                     // A reference to a `dyn` is the `dyn`'s two words.
                     return Ok(Val::Words(vec![self.load(addr, 0), self.load(addr, 8)]));
                 }
@@ -779,7 +996,8 @@ impl<'a, 'p> Cx<'a, 'p> {
     }
 
     /// A closure value: its function's code and the address of its
-    /// environment, the tuple of its captures. A closure that captures
+    /// environment, the tuple of its captures, or the environment itself
+    /// when it is one word (decision 213). A closure that captures
     /// references cannot leave the frame of what it captures, so its
     /// environment is a slot of this frame; one that copies its captures
     /// (`own`) may, and its environment is on the heap, never freed
@@ -799,12 +1017,27 @@ impl<'a, 'p> Cx<'a, 'p> {
         let r = self.func_ref(id);
         let code = self.b.ins().func_addr(types::I64, r);
         let size = self.size(&env_ty)?;
+        // A task's closure (and a generator's) runs after the statement that
+        // makes it, with its own environment: a heap cell, which the
+        // runtime frees when the task ends.
+        let task = f.kind == sir::FnKind::Closure(sir::ClosureRole::Task);
         let env = if size == 0 {
             self.iconst(0)
+        } else if inline_env(f.kind, size) {
+            // One word of captures is the environment itself (decision 213).
+            let mut word = self.iconst(0);
+            for (i, o) in ops.iter().enumerate() {
+                let (_, ft) = self.field_of(&env_ty, None, i as u32)?;
+                if self.size(&ft)? == 8 {
+                    let (v, _) = self.operand(o)?;
+                    word = self.first_word(&v)?;
+                }
+            }
+            word
         } else {
             let all_refs =
                 matches!(&env_ty, Type::Tuple(items) if items.iter().all(|t| matches!(t, Type::Ref(..))));
-            let env = if all_refs {
+            let env = if all_refs && !task {
                 self.slot(size)
             } else {
                 let bytes = self.iconst(i64::from(size));
@@ -1306,7 +1539,9 @@ impl<'a, 'p> Cx<'a, 'p> {
 
     /// A call of a trait's method on a `dyn`: its dispatcher, given the
     /// address of the `dyn`'s two words (the type of its value and the
-    /// value's address) and the other arguments.
+    /// value's address) and the other arguments. A capability handle that
+    /// may hold any object (its type is `Self`, decision 209) is the
+    /// address of such two words.
     fn call_dyn(
         &mut self,
         dest: &Place,
@@ -1317,12 +1552,22 @@ impl<'a, 'p> Cx<'a, 'p> {
     ) -> Result<(), Error> {
         let first = args.first().ok_or_else(|| Error::internal(format!("`{name}` without `self`")))?;
         let (v, ty) = self.operand(first)?;
-        let size = self.size(&ty)?;
-        let mut addr = self.in_memory(v, size);
-        // `ref ... ref dyn`: the innermost reference is the `dyn`'s words.
-        for _ in 1..derefs {
-            addr = self.load(addr, 0);
-        }
+        let addr = if matches!(tys.first(), Some(Type::Named(..))) {
+            // `self` is a reference to the handle, behind `derefs` more.
+            let mut w = self.first_word(&v)?;
+            for _ in 0..=derefs {
+                w = self.load(w, 0);
+            }
+            w
+        } else {
+            let size = self.size(&ty)?;
+            let mut addr = self.in_memory(v, size);
+            // `ref ... ref dyn`: the innermost reference is the `dyn`'s words.
+            for _ in 1..derefs {
+                addr = self.load(addr, 0);
+            }
+            addr
+        };
         let rest = self.arguments(&args[1..], 0, None)?;
         let ret_ty = self.place_type(dest)?;
         let arg_tys: Vec<Type> = rest.iter().map(|(_, t)| t.clone()).collect();
@@ -1334,6 +1579,12 @@ impl<'a, 'p> Cx<'a, 'p> {
         let r = self.func_ref(id);
         let call = self.b.ins().call(r, &call_args);
         let st = self.b.inst_results(call)[0];
+        // A `dyn` moved into the call (`own self`) gave its value to the
+        // method: its cell is empty (decision 216).
+        if matches!(ty, Type::Dyn(..)) {
+            let cell = self.load(addr, 8);
+            self.rt(sym::FREE, &[cell])?;
+        }
         self.check(st);
         let (daddr, _) = self.place(dest, None)?;
         self.copy_bytes(daddr, ret, rsize);
@@ -1360,7 +1611,30 @@ impl<'a, 'p> Cx<'a, 'p> {
         }
         let ret_ty = self.cg.concrete(f.ret(), &targs)?;
         let id = self.cg.instance(name, targs)?;
-        let argv = self.arguments(args, derefs, adapt.then_some(params.as_slice()))?;
+        let mut argv = self.arguments(args, derefs, adapt.then_some(params.as_slice()))?;
+        // An `Iterable[T]` parameter takes a reference to what the caller
+        // passed, with its type (decision 210); a value moved in is the
+        // callee's to read, and dropped when the call returns.
+        let mut lent = Vec::new();
+        for (a, p) in argv.iter_mut().zip(&params) {
+            let Type::Ref(want, _) = p else { continue };
+            if !matches!(&**want, Type::Named(n, _) if n == "Iterable") || a.1 == *p {
+                continue;
+            }
+            let (have, ptr) = match a.1.clone() {
+                Type::Ref(have, _) => (*have, self.load(a.0, 0)),
+                owned => {
+                    lent.push((a.0, owned.clone()));
+                    (owned, a.0)
+                }
+            };
+            let id = self.type_id(&have)?;
+            let fat = self.slot(16);
+            let idv = self.iconst(i64::from(id));
+            self.store_word(idv, fat, 0);
+            self.store_word(ptr, fat, 8);
+            *a = (fat, p.clone());
+        }
         let rsize = self.size(&ret_ty)?;
         let ret = self.slot(rsize);
         let mut call_args = vec![ret];
@@ -1369,6 +1643,14 @@ impl<'a, 'p> Cx<'a, 'p> {
         let call = self.b.ins().call(r, &call_args);
         let st = self.b.inst_results(call)[0];
         self.check(st);
+        for (addr, ty) in lent {
+            if self.cg.types.needs_drop(&ty)? {
+                let idv = self.type_id(&ty)?;
+                let idv = self.i32const(idv);
+                let st = self.rt_status(sym::DROP, &[addr, idv])?;
+                self.check(st);
+            }
+        }
         let (daddr, dty) = self.place(dest, None)?;
         let dsize = self.size(&dty)?.min(rsize);
         self.copy_bytes(daddr, ret, dsize);
@@ -1392,8 +1674,12 @@ impl<'a, 'p> Cx<'a, 'p> {
         let Some(i) = Intrinsic::from_name(name) else {
             return Err(Error::unsupported(format!("the intrinsic `{name}`")));
         };
+        self.cg.note_intrinsic(name, targs)?;
         let dest_ty = self.place_type(dest)?;
         let argv = self.arguments(args, derefs, None)?;
+        if i.may_wait() {
+            self.record_site();
+        }
         let n = argv.len() as u32;
         let mut desc = vec![i as u32, n, targs.len() as u32, self.type_id(&dest_ty)?];
         for (_, t) in &argv {
@@ -1411,6 +1697,28 @@ impl<'a, 'p> Cx<'a, 'p> {
         let rsize = self.size(&dest_ty)?;
         let ret = self.slot(rsize);
         let st = self.rt_status(sym::INTRINSIC, &[daddr, ret, arr])?;
+        // A value moved into a parameter the intrinsic neither owns nor
+        // lets its result hold was only read: it is dropped now, when
+        // nothing observes its drop, as the interpreter's host drops it
+        // (decision 218), also when the call panicked. Such a drop only
+        // frees memory, so it cannot panic itself.
+        if let Some(decl) = self.cg.prog.intrinsic(name) {
+            let held: Vec<u32> =
+                [&decl.own, &decl.from, &decl.inner, &decl.keeps].into_iter().flatten().copied().collect();
+            for (k, (o, (a, t))) in args.iter().zip(&argv).enumerate() {
+                let Operand::Move(p) = o else { continue };
+                if held.contains(&(k as u32))
+                    || self.place_type(p)? != *t
+                    || !self.cg.types.needs_drop(t)?
+                    || self.cg.types.observable_drop(t)
+                {
+                    continue;
+                }
+                let id = self.type_id(t)?;
+                let idv = self.i32const(id);
+                self.rt_status(sym::DROP, &[*a, idv])?;
+            }
+        }
         self.check(st);
         let (addr, _) = self.place(dest, None)?;
         self.copy_bytes(addr, ret, rsize);
@@ -1521,10 +1829,13 @@ fn wide_op(name: &str) -> Option<(u32, SizedOp)> {
     Some((kind(owner)?, SizedOp::from_name(method)?))
 }
 
-/// What a reference points to.
+/// What a reference (or a mutex guard) points to.
 fn deref_type(t: &Type) -> Result<Type, Error> {
     match t {
         Type::Ref(inner, _) => Ok((**inner).clone()),
+        Type::Named(n, a) if n == "MutexGuard" || n == "Shared" => {
+            Ok(a.first().cloned().unwrap_or(Type::Unit))
+        }
         other => Err(Error::unsupported(format!("dereferencing a `{}`", sir::write::ty(other)))),
     }
 }

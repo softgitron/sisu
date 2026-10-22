@@ -1,0 +1,66 @@
+//! The views `*rest` patterns bind (decision 214): a `ref list[T]` to the
+//! elements in place rather than to a list of copies. A view's header is
+//! a heap block (a list's three words, a capacity of 0 marking it, and the
+//! address of the buffer it views), freed when that buffer is: the
+//! ownership checker keeps the binding from outliving the list it views.
+
+use crate::mem::{self, List};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+
+/// The headers registered, so that a release looks at the table only when
+/// there are any.
+static REGISTERED: AtomicUsize = AtomicUsize::new(0);
+
+/// The header of every empty view, kept for the run.
+static EMPTY: OnceLock<usize> = OnceLock::new();
+
+thread_local! {
+    /// The headers of the views of each buffer, by its address.
+    static VIEWS: RefCell<HashMap<usize, Vec<usize>>> = RefCell::new(HashMap::new());
+}
+
+/// The words of a view's header: a list's three, then the buffer it views.
+const HEADER: usize = 32;
+const ROOT: u32 = 24;
+
+/// A view of the elements `lo..hi` (of `size` bytes each) of the list
+/// whose header is at `l`, which may itself be a view.
+///
+/// # Safety
+/// `l` must hold a list's header with at least `hi` elements.
+pub(crate) unsafe fn view(l: *mut u8, size: u32, lo: u64, hi: u64) -> *mut u8 {
+    // SAFETY: as the caller guarantees.
+    unsafe {
+        let list = mem::at::<List>(l);
+        if hi <= lo || list.ptr.is_null() {
+            return *EMPTY.get_or_init(|| {
+                let h = mem::alloc_kept(HEADER);
+                (h as *mut List).write(List::empty());
+                h as usize
+            }) as *mut u8;
+        }
+        let root = if list.cap == 0 && list.len > 0 { mem::word(l, ROOT) } else { list.ptr as u64 };
+        let h = mem::alloc(HEADER);
+        (h as *mut List).write(List { ptr: list.at(lo, size), len: hi - lo, cap: 0 });
+        mem::set_word(h, ROOT, root);
+        let _ = VIEWS.try_with(|v| v.borrow_mut().entry(root as usize).or_default().push(h as usize));
+        REGISTERED.fetch_add(1, Relaxed);
+        h
+    }
+}
+
+/// The block at `p` is being released: the headers of the views of it go
+/// with it.
+pub(crate) fn released(p: *mut u8) {
+    if REGISTERED.load(Relaxed) == 0 {
+        return;
+    }
+    let headers = VIEWS.try_with(|v| v.borrow_mut().remove(&(p as usize))).ok().flatten();
+    for h in headers.unwrap_or_default() {
+        REGISTERED.fetch_sub(1, Relaxed);
+        mem::release(h as *mut u8);
+    }
+}

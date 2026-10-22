@@ -10,6 +10,16 @@ use sisu_sir as sir;
 use sisu_sir::Type;
 use std::collections::HashMap;
 
+/// Whether a reference to the type is two words, the type of the value
+/// and its address: a `dyn`, and an `Iterable[T]` (decision 210).
+pub(crate) fn fat(t: &Type) -> bool {
+    match t {
+        Type::Dyn(..) => true,
+        Type::Named(n, _) => n == "Iterable",
+        _ => false,
+    }
+}
+
 /// The interned types of a program and their entries.
 pub(crate) struct Types<'p> {
     prog: &'p sir::Program,
@@ -22,16 +32,25 @@ pub(crate) struct Types<'p> {
     sizes: HashMap<Type, u32>,
     /// The types whose sizes are being computed.
     sizing: Vec<Type>,
-    /// The drop glue instances the entries name, by their index in the
-    /// function table: (glue function, type arguments).
+    /// The function table: the instances the runtime calls itself (drop
+    /// glue, a mutex guard's `invariant` check), which the entries name by
+    /// their index: (function, type arguments).
     pub glue: Vec<(String, Vec<Type>)>,
     glue_index: HashMap<(String, Vec<Type>), u32>,
+    /// Which declared types have drop glue, by name.
+    with_glue: HashMap<&'p str, bool>,
 }
 
 impl<'p> Types<'p> {
     pub(crate) fn new(prog: &'p sir::Program) -> Types<'p> {
         let decls = prog.types.iter().map(|t| (t.name(), t)).collect();
+        let with_glue = prog
+            .types
+            .iter()
+            .map(|t| (t.name(), prog.function(&sir::types::glue_name(t.name())).is_some()))
+            .collect();
         Types {
+            with_glue,
             prog,
             decls,
             ids: HashMap::new(),
@@ -80,7 +99,7 @@ impl<'p> Types<'p> {
     fn size_of(&mut self, t: &Type) -> Result<u32, Error> {
         let w = abi::WORD;
         Ok(match t {
-            Type::Ref(inner, _) if matches!(**inner, Type::Dyn(..)) => 2 * w,
+            Type::Ref(inner, _) if fat(inner) => 2 * w,
             Type::Int | Type::Float | Type::Bool | Type::Char | Type::Ref(..) => w,
             Type::Str | Type::Fn(..) | Type::Dyn(..) => 2 * w,
             Type::Unit | Type::Never | Type::Const(_) => 0,
@@ -101,10 +120,26 @@ impl<'p> Types<'p> {
             Type::Named(n, args) => {
                 let arg = |i: usize| args.get(i).cloned().unwrap_or(Type::Unit);
                 match n.as_str() {
-                    "String" | "Path" | "list" | "Array" | "Slice" => 3 * w,
+                    "String" | "Path" | "list" | "Array" | "Slice" | "bytes" => 3 * w,
                     "i128" | "u128" => 2 * w,
                     "u64" | "f32" | "u8" | "u16" | "u32" | "i8" | "i16" | "i32" | "DateTime" | "Iter"
                     | "Box" | "dict" | "set" => w,
+                    // The values of tasks and channels are numbers in the
+                    // runtime's scheduler; a guard is the address of the
+                    // value its mutex holds.
+                    "Scope" | "Handle" | "Cancellation" | "Sender" | "Receiver" | "MutexGuard" => w,
+                    "Timer" => 2 * w,
+                    "Mutex" => abi::MUTEX_HEADER + self.size(&arg(0))?,
+                    // A `Shared` (or `Weak`) is the address of the value in
+                    // its cell, an `Arena` the address of its slots, a
+                    // `Cell` its value.
+                    "Shared" | "Weak" | "Arena" => w,
+                    "Cell" => self.size(&arg(0))?,
+                    // A `Cap` is the address of its value's cell, a test
+                    // clock its clock's number, and a `Lent` its handle.
+                    "Cap" | "TestClock" | "HostStream" | "HostListener" => w,
+                    "Iterable" => 2 * w,
+                    "Lent" => self.size(&arg(0))?,
                     "Entry" => w + self.size(&arg(0))?,
                     "System" => abi::CAPABILITIES.len() as u32 * w,
                     c if abi::CAPABILITIES.iter().any(|(h, o)| *h == c || *o == c) => w,
@@ -178,7 +213,7 @@ impl<'p> Types<'p> {
             Type::Ref(inner, _) => {
                 let target = self.id(inner)?;
                 // A reference to a `dyn` is the `dyn`'s own two words.
-                let size = if matches!(**inner, Type::Dyn(..)) { 2 * w } else { w };
+                let size = if fat(inner) { 2 * w } else { w };
                 simple(Kind::Ref(target), size)
             }
             Type::Dyn(..) => simple(Kind::Dyn, 2 * w),
@@ -219,17 +254,38 @@ impl<'p> Types<'p> {
         match n {
             "String" => return simple(Kind::String, 3 * w),
             "Path" => return simple(Kind::Path, 3 * w),
+            "bytes" => return simple(Kind::Bytes, 3 * w),
+            // An `Iterable[T]` parameter is a `dyn` of what the caller
+            // passed (decision 210).
+            "Iterable" => return simple(Kind::Dyn, 2 * w),
+            // A host socket is its number in the runtime's table.
+            "Cap" | "TestClock" | "HostStream" | "HostListener" => {
+                return simple(Kind::Opaque(n.to_string()), w);
+            }
+            // A lent capability is its handle (or test clock), at no cost.
+            "Lent" => {
+                let inner = self.id(&arg(0))?;
+                return match self.entries.get(inner as usize) {
+                    Some(Some(e)) => Ok(e.clone()),
+                    _ => Err(Error::unsupported("a `Lent` of a type that holds itself")),
+                };
+            }
             "u64" => return simple(Kind::U64, w),
             "i128" => return simple(Kind::I128, 2 * w),
             "u128" => return simple(Kind::U128, 2 * w),
             "f32" => return simple(Kind::F32, w),
             "u8" | "u16" | "u32" | "i8" | "i16" | "i32" => return simple(Kind::Sized(n.to_string()), w),
-            "DateTime" => return simple(Kind::Int, w),
+            "DateTime" => return simple(Kind::DateTime, w),
             "System" => {
                 let mut fields = Vec::new();
                 for (i, (cap, _)) in abi::CAPABILITIES.iter().enumerate() {
                     let ty = self.id(&Type::Named(cap.to_string(), Vec::new()))?;
-                    fields.push(Field { name: Some(cap.to_lowercase()), offset: i as u32 * w, ty });
+                    fields.push(Field {
+                        name: Some(cap.to_lowercase()),
+                        offset: i as u32 * w,
+                        ty,
+                        glue: false,
+                    });
                 }
                 return simple(
                     Kind::Struct { name: "System".into(), fields, glue: None },
@@ -273,20 +329,91 @@ impl<'p> Types<'p> {
                 let e = self.id(&arg(0))?;
                 return simple(Kind::Box(e), w);
             }
+            "Scope" => return simple(Kind::Scope, w),
+            "Cancellation" => return simple(Kind::Cancellation, w),
+            "Timer" => return simple(Kind::Timer, 2 * w),
+            "Handle" => {
+                let e = self.id(&arg(0))?;
+                return simple(Kind::Handle(e), w);
+            }
+            "Sender" => {
+                let e = self.id(&arg(0))?;
+                return simple(Kind::Sender(e), w);
+            }
+            "Receiver" => {
+                let e = self.id(&arg(0))?;
+                return simple(Kind::Receiver(e), w);
+            }
+            "Mutex" => {
+                let (e, size) = self.part(&arg(0))?;
+                return simple(Kind::Mutex(e), abi::MUTEX_HEADER + size);
+            }
+            "Shared" => {
+                let e = self.id(&arg(0))?;
+                return simple(Kind::Shared(e), w);
+            }
+            "Weak" => {
+                let e = self.id(&arg(0))?;
+                return simple(Kind::Weak(e), w);
+            }
+            "Arena" => {
+                let e = self.id(&arg(0))?;
+                return simple(Kind::Arena(e), w);
+            }
+            "Cell" => {
+                let (e, size) = self.part(&arg(0))?;
+                return simple(Kind::Cell(e), size);
+            }
+            "MutexGuard" => {
+                let value = arg(0);
+                let e = self.id(&value)?;
+                // A guard dropped by unwinding checks the value's invariant
+                // (D-077), a function the runtime calls by its index.
+                let check = match &value {
+                    Type::Named(vn, vargs) => self.function_index(&format!("{vn}.__invariant"), vargs),
+                    _ => None,
+                };
+                return simple(Kind::Guard(e, check), w);
+            }
             _ => {}
         }
         let Some(decl) = self.decl(n) else {
             return Err(Error::unsupported(format!("values of the builtin type `{n}`")));
         };
         let glue = self.glue_of(n, args);
+        // What the glue drops is decided on the declared types, so a field
+        // of a type parameter is the glue's (decision 218).
+        let by_glue = |t: &Type| glue.is_some() && sir::types::drops_something(t, &self.with_glue);
+        let flags: Vec<Vec<bool>> = match decl {
+            sir::TypeDecl::Struct { fields, .. } => vec![fields.iter().map(|f| by_glue(&f.ty)).collect()],
+            sir::TypeDecl::Enum { variants, .. } => {
+                variants.iter().map(|v| v.fields.iter().map(|(_, t)| by_glue(t)).collect()).collect()
+            }
+        };
+        self.declared(n, args, decl, glue, &flags)
+    }
+
+    /// The entry of a declared struct or enum; `by_glue` says which fields
+    /// (of each variant) its glue drops.
+    fn declared(
+        &mut self,
+        n: &str,
+        args: &[Type],
+        decl: &'p sir::TypeDecl,
+        glue: Option<u32>,
+        by_glue: &[Vec<bool>],
+    ) -> Result<TypeEntry, Error> {
+        let w = abi::WORD;
+        let flag = |v: usize, i: usize| by_glue.get(v).and_then(|f| f.get(i)).copied().unwrap_or(false);
         match decl {
             sir::TypeDecl::Struct { fields, .. } => {
                 let mut out = Vec::new();
                 let mut off = 0;
-                for f in fields {
+                for (i, f) in fields.iter().enumerate() {
+                    let glue = flag(0, i);
                     let ft = f.ty.subst(args);
                     let (ty, size) = self.part(&ft)?;
-                    out.push(Field { name: Some(f.name.clone()), offset: off, ty });
+                    out.push(Field { name: Some(f.name.clone()), offset: off, ty, glue });
                     off += size;
                 }
                 Ok(TypeEntry { size: off, kind: Kind::Struct { name: n.to_string(), fields: out, glue } })
@@ -295,13 +422,14 @@ impl<'p> Types<'p> {
                 let start = if *error { abi::ERROR_PAYLOAD } else { w };
                 let mut vs = Vec::new();
                 let mut size = start;
-                for v in variants {
+                for (k, v) in variants.iter().enumerate() {
                     let mut fields = Vec::new();
                     let mut off = start;
-                    for (name, ft) in &v.fields {
+                    for (i, (name, ft)) in v.fields.iter().enumerate() {
+                        let glue = flag(k, i);
                         let ft = ft.subst(args);
                         let (ty, s) = self.part(&ft)?;
-                        fields.push(Field { name: name.clone(), offset: off, ty });
+                        fields.push(Field { name: name.clone(), offset: off, ty, glue });
                         off += s;
                     }
                     size = size.max(off);
@@ -318,7 +446,14 @@ impl<'p> Types<'p> {
     /// The function-table index of a declared type's drop glue, when it
     /// has one.
     fn glue_of(&mut self, n: &str, args: &[Type]) -> Option<u32> {
-        let name = sir::types::glue_name(n);
+        self.function_index(&sir::types::glue_name(n), args)
+    }
+
+    /// The function-table index of the instance of `name` for `args`, when
+    /// the program has the function: what the runtime calls itself (drop
+    /// glue, an `invariant` check).
+    fn function_index(&mut self, name: &str, args: &[Type]) -> Option<u32> {
+        let name = name.to_string();
         self.prog.function(&name)?;
         let key = (name, args.to_vec());
         if let Some(&i) = self.glue_index.get(&key) {
@@ -328,6 +463,13 @@ impl<'p> Types<'p> {
         self.glue.push(key.clone());
         self.glue_index.insert(key, i);
         Some(i)
+    }
+
+    /// Whether a program can observe a value's drop: a `Drop` runs, a
+    /// count changes, a mutex is unlocked (SIR's `drops_something`). Any
+    /// other drop only frees memory.
+    pub(crate) fn observable_drop(&self, t: &Type) -> bool {
+        sir::types::drops_something(t, &self.with_glue)
     }
 
     /// Whether dropping a value of the type can do anything.
@@ -349,19 +491,44 @@ impl<'p> Types<'p> {
         Ok(match kind {
             Kind::String
             | Kind::Path
+            | Kind::Bytes
             | Kind::List(_)
             | Kind::Iter(_)
             | Kind::Box(_)
             | Kind::Dict(..)
             | Kind::Set(_)
-            | Kind::Dyn => true,
-            Kind::Struct { glue, .. } | Kind::Enum { glue, .. } => glue.is_some(),
-            Kind::Entry(..) | Kind::Option(_) | Kind::Result(..) | Kind::Tuple(_) | Kind::ErrSet(_) => {
+            | Kind::Dyn
+            | Kind::Sender(_)
+            | Kind::Receiver(_)
+            | Kind::Guard(..)
+            | Kind::Shared(_)
+            | Kind::Weak(_)
+            | Kind::Arena(_) => true,
+            Kind::Mutex(v) | Kind::Cell(v) => match self.type_of_id(v) {
+                Some(vt) => self.needs_drop_in(&vt, seen)?,
+                None => false,
+            },
+            // An error holds its return trace (decision 215).
+            Kind::Enum { error: true, .. } => true,
+            Kind::Struct { glue: Some(_), .. } | Kind::Enum { glue: Some(_), .. } => true,
+            // A field the glue leaves out, or every field without glue, is
+            // the runtime's to drop (decision 218).
+            Kind::Entry(..)
+            | Kind::Option(_)
+            | Kind::Result(..)
+            | Kind::Tuple(_)
+            | Kind::ErrSet(_)
+            | Kind::Struct { .. }
+            | Kind::Enum { .. } => {
                 let parts: Vec<u32> = match kind {
                     Kind::Option(p) | Kind::Entry(p, _) => vec![p],
                     Kind::Result(a, b) => vec![a, b],
                     Kind::Tuple(slots) => slots.iter().map(|s| s.ty).collect(),
                     Kind::ErrSet(m) => m,
+                    Kind::Struct { fields, .. } => fields.iter().map(|f| f.ty).collect(),
+                    Kind::Enum { variants, .. } => {
+                        variants.iter().flat_map(|v| v.fields.iter().map(|f| f.ty)).collect()
+                    }
                     _ => Vec::new(),
                 };
                 let mut any = false;

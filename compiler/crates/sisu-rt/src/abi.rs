@@ -28,7 +28,9 @@ pub const WORD: u32 = 8;
 /// The symbols of the runtime that generated code refers to.
 pub mod sym {
     /// `sisu_rt_start(argc, argv, entry, flags, ret_ty, types, types_len,
-    /// fns, fns_len) -> i32`: runs the program and gives its exit status.
+    /// fns, fns_len, max_frame) -> i32`: runs the program and gives its
+    /// exit status; `max_frame` is the largest native frame of the program,
+    /// which the probe reserve of a task's stack must hold.
     pub const START: &str = "sisu_rt_start";
     /// `sisu_rt_frame(name, name_len, file, file_len, line, col)`: a panic
     /// leaves a frame of the program; one line of its stack trace.
@@ -50,6 +52,13 @@ pub mod sym {
     pub const FLOAT_OP: &str = "sisu_rt_float_op";
     /// `sisu_rt_alloc(bytes) -> ptr`: heap memory for a list or a box.
     pub const ALLOC: &str = "sisu_rt_alloc";
+    /// `sisu_rt_free(ptr)`: frees what `sisu_rt_alloc` gave, once its
+    /// value is gone (a box's or a `dyn`'s cell whose value was moved out).
+    pub const FREE: &str = "sisu_rt_free";
+    /// `sisu_rt_trace_release(error)`: a field was moved out of the error
+    /// value at `error`, which is never dropped whole: it lets go of its
+    /// return trace.
+    pub const TRACE_RELEASE: &str = "sisu_rt_trace_release";
     /// `sisu_rt_drop(value, ty) -> u8`: drops a value of a builtin type.
     pub const DROP: &str = "sisu_rt_drop";
     /// `sisu_rt_copy(dst, src, ty)`: `.copy()`.
@@ -76,7 +85,56 @@ pub mod sym {
     pub const DICT_SLOT: &str = "sisu_rt_dict_slot";
     /// A 64-bit counter of the nested calls of the program.
     pub const DEPTH: &str = "SISU_RT_DEPTH";
+    /// `sisu_rt_yield()`: a yield point found the budget of the running
+    /// task spent; the scheduler may switch tasks.
+    pub const YIELD: &str = "sisu_rt_yield";
+    /// A 64-bit counter of the yield points the running task may pass
+    /// before the scheduler is asked (`sisu_rt_yield` when it reaches 0).
+    pub const BUDGET: &str = "SISU_RT_BUDGET";
+    /// The running task's stack limits, five words ([`super::STACK_PROBE`]
+    /// and the others): what the probe at a function's entry compares the
+    /// stack pointer with.
+    pub const STACK: &str = "SISU_RT_STACK";
+    /// Where the running code calls an intrinsic that may wait, four words
+    /// ([`super::SITE_FILE`] and the others): the deadlock report names it.
+    pub const SITE: &str = "SISU_RT_SITE";
+    /// `sisu_rt_arena_slot(arena, key, mode, out) -> u8`: the address of
+    /// the value an arena holds for a key (`a{k}`), by the modes of
+    /// [`DICT_SLOT`]: a stale key panics, or gives null for a drop.
+    pub const ARENA_SLOT: &str = "sisu_rt_arena_slot";
+    /// `sisu_rt_shared_touch(value)`: code reached a `Shared`'s value, for
+    /// the cells another task than their maker reaches (`--stats`).
+    pub const SHARED_TOUCH: &str = "sisu_rt_shared_touch";
 }
+
+/// The words of [`sym::STACK`]. The probe at a function's entry compares
+/// the stack pointer, below the function's frame, with `STACK_PROBE`; when
+/// it is lower, a stack pointer at or above `STACK_REAL` only crossed the
+/// decommit watermark (set `STACK_DIRTY`, lower `STACK_PROBE` to
+/// `STACK_REAL`, go on), and one below it has exhausted the stack: the
+/// function sets `STACK_FAILED`, lowers `STACK_PROBE` to `STACK_FLOOR`
+/// (the part of the reserve kept for unwinding) and returns
+/// [`UNWINDING`] at once, calling nothing; the runtime raises the panic
+/// when it next looks at the panics in flight.
+pub const STACK_PROBE: u32 = 0;
+pub const STACK_REAL: u32 = 8;
+pub const STACK_FLOOR: u32 = 16;
+pub const STACK_DIRTY: u32 = 24;
+pub const STACK_FAILED: u32 = 32;
+/// The words of [`sym::STACK`].
+pub const STACK_WORDS: usize = 5;
+
+/// The words of [`sym::SITE`]: the address and length of the file's name,
+/// the line and column of the call, and flags ([`SITE_PURE`]).
+pub const SITE_FILE: u32 = 0;
+pub const SITE_FILE_LEN: u32 = 8;
+pub const SITE_LINE: u32 = 16;
+pub const SITE_COL: u32 = 24;
+pub const SITE_FLAGS: u32 = 32;
+pub const SITE_WORDS: usize = 5;
+/// [`SITE_FLAGS`]: the function making the call is `pure` (a scope opened
+/// there reports the lowest-index failure, 06 "Effects").
+pub const SITE_PURE: u64 = 1;
 
 /// Nested calls beyond this many panic (the interpreter's limit).
 pub const MAX_DEPTH: i64 = 100_000;
@@ -307,6 +365,12 @@ pub enum Kind {
     String,
     /// `Path`: as `String`.
     Path,
+    /// `bytes`: as `String`, a pointer to a heap buffer of the bytes, their
+    /// number and the capacity (decision 208).
+    Bytes,
+    /// `DateTime`: one word, nanoseconds since the epoch, which shows as
+    /// RFC 3339 text in UTC.
+    DateTime,
     /// `ref T`: one word, the address of the value; a reference to a
     /// `dyn` is two words, the `dyn`'s own, borrowed.
     Ref(u32),
@@ -325,11 +389,20 @@ pub enum Kind {
     Box(u32),
     /// A declared struct: its fields in order, and its drop glue (an
     /// index into the program's function table) when it has one.
-    Struct { name: String, fields: Vec<Field>, glue: Option<u32> },
+    Struct {
+        name: String,
+        fields: Vec<Field>,
+        glue: Option<u32>,
+    },
     /// A declared enum: a tag word, then the payload of the variant it
     /// holds; an error set's (`error`) starts with the number of its own
     /// type and a word for its return trace, and its tag follows them.
-    Enum { name: String, variants: Vec<Variant>, glue: Option<u32>, error: bool },
+    Enum {
+        name: String,
+        variants: Vec<Variant>,
+        glue: Option<u32>,
+        error: bool,
+    },
     /// A union of error sets: a value of one of the member enums (the
     /// numbers of their types), as that enum lays it out.
     ErrSet(Vec<u32>),
@@ -351,7 +424,56 @@ pub enum Kind {
     /// holds and the address of a heap cell holding the value, which the
     /// `dyn` owns.
     Dyn,
+    /// `Scope`: one word, the scope's number in the scheduler.
+    Scope,
+    /// `Handle[T]`: one word, the task's number; `T` is its result.
+    Handle(u32),
+    /// `Cancellation`: one word, the number of the scope it waits for.
+    Cancellation,
+    /// `Sender[T]` and `Receiver[T]`: one word, the channel's number.
+    Sender(u32),
+    Receiver(u32),
+    /// `Timer`: two words, the clock's number and the moment, in
+    /// nanoseconds on that clock.
+    Timer,
+    /// `Mutex[T]`: [`MUTEX_HEADER`] bytes (whether it is locked, the task
+    /// holding it, whether it is poisoned), then the value.
+    Mutex(u32),
+    /// `MutexGuard[T]`: one word, the address of the value inside the
+    /// mutex (its header is just before it), and the function-table index
+    /// of `T`'s `invariant` check, which a guard dropped by unwinding runs
+    /// (D-077).
+    Guard(u32, Option<u32>),
+    /// `Shared[T]` and `Weak[T]`: one word, the address of the value in its
+    /// heap cell, whose header ([`SHARED_HEADER`] bytes: the owners, the
+    /// weak handles, the task that made it, and flags) is just before it.
+    Shared(u32),
+    Weak(u32),
+    /// `Cell[T]`: the value itself.
+    Cell(u32),
+    /// `Arena[T]`: one word, the address of a runtime object holding the
+    /// slots.
+    Arena(u32),
 }
+
+/// The bytes of a `Shared` cell's header, before its value, and its words
+/// from the start of the cell.
+pub const SHARED_HEADER: u32 = 32;
+pub const SHARED_STRONG: u32 = 0;
+pub const SHARED_WEAK: u32 = 8;
+pub const SHARED_CREATOR: u32 = 16;
+pub const SHARED_FLAGS: u32 = 24;
+/// [`SHARED_FLAGS`]: made by a site the escape analysis tagged may-cross;
+/// reached by another task than its maker.
+pub const SHARED_ATOMIC: u64 = 1;
+pub const SHARED_CROSSED: u64 = 2;
+
+/// The bytes of a `Mutex`'s header, before its value.
+pub const MUTEX_HEADER: u32 = 24;
+/// The words of a `Mutex`'s header, from its start.
+pub const MUTEX_LOCKED: u32 = 0;
+pub const MUTEX_HOLDER: u32 = 8;
+pub const MUTEX_POISONED: u32 = 16;
 
 /// A part of a tuple: its offset and type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -367,6 +489,10 @@ pub struct Field {
     pub name: Option<String>,
     pub offset: u32,
     pub ty: u32,
+    /// Whether the type's drop glue drops the field. The glue leaves out a
+    /// field whose drop nothing observes (a `String`), which the runtime
+    /// drops itself after the glue (decision 218).
+    pub glue: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -444,6 +570,20 @@ const K_ENTRY: u8 = 26;
 const K_I128: u8 = 27;
 const K_U128: u8 = 28;
 const K_DYN: u8 = 29;
+const K_SCOPE: u8 = 30;
+const K_HANDLE: u8 = 31;
+const K_CANCELLATION: u8 = 32;
+const K_SENDER: u8 = 33;
+const K_RECEIVER: u8 = 34;
+const K_TIMER: u8 = 35;
+const K_MUTEX: u8 = 36;
+const K_GUARD: u8 = 37;
+const K_SHARED: u8 = 38;
+const K_WEAK: u8 = 39;
+const K_CELL: u8 = 40;
+const K_ARENA: u8 = 41;
+const K_BYTES: u8 = 42;
+const K_DATETIME: u8 = 43;
 
 struct Writer(Vec<u8>);
 
@@ -473,6 +613,7 @@ impl Writer {
             }
             self.u32(f.offset);
             self.u32(f.ty);
+            self.u8(u8::from(f.glue));
         }
     }
 }
@@ -501,6 +642,8 @@ pub fn encode(table: &[TypeEntry]) -> Vec<u8> {
             Kind::Str => w.u8(K_STR),
             Kind::String => w.u8(K_STRING),
             Kind::Path => w.u8(K_PATH),
+            Kind::Bytes => w.u8(K_BYTES),
+            Kind::DateTime => w.u8(K_DATETIME),
             Kind::Ref(t) => {
                 w.u8(K_REF);
                 w.u32(*t);
@@ -582,6 +725,46 @@ pub fn encode(table: &[TypeEntry]) -> Vec<u8> {
                 w.u32(*k);
                 w.u32(*v);
             }
+            Kind::Scope => w.u8(K_SCOPE),
+            Kind::Handle(t) => {
+                w.u8(K_HANDLE);
+                w.u32(*t);
+            }
+            Kind::Cancellation => w.u8(K_CANCELLATION),
+            Kind::Sender(t) => {
+                w.u8(K_SENDER);
+                w.u32(*t);
+            }
+            Kind::Receiver(t) => {
+                w.u8(K_RECEIVER);
+                w.u32(*t);
+            }
+            Kind::Timer => w.u8(K_TIMER),
+            Kind::Mutex(t) => {
+                w.u8(K_MUTEX);
+                w.u32(*t);
+            }
+            Kind::Guard(t, check) => {
+                w.u8(K_GUARD);
+                w.u32(*t);
+                w.opt(*check);
+            }
+            Kind::Shared(t) => {
+                w.u8(K_SHARED);
+                w.u32(*t);
+            }
+            Kind::Weak(t) => {
+                w.u8(K_WEAK);
+                w.u32(*t);
+            }
+            Kind::Cell(t) => {
+                w.u8(K_CELL);
+                w.u32(*t);
+            }
+            Kind::Arena(t) => {
+                w.u8(K_ARENA);
+                w.u32(*t);
+            }
         }
     }
     w.0
@@ -620,7 +803,8 @@ impl Reader<'_> {
             let name = if self.u8()? == 1 { Some(self.text()?) } else { None };
             let offset = self.u32()?;
             let ty = self.u32()?;
-            out.push(Field { name, offset, ty });
+            let glue = self.u8()? == 1;
+            out.push(Field { name, offset, ty, glue });
         }
         Some(out)
     }
@@ -648,6 +832,8 @@ pub fn decode(bytes: &[u8]) -> Option<Vec<TypeEntry>> {
             K_STR => Kind::Str,
             K_STRING => Kind::String,
             K_PATH => Kind::Path,
+            K_BYTES => Kind::Bytes,
+            K_DATETIME => Kind::DateTime,
             K_REF => Kind::Ref(r.u32()?),
             K_LIST => Kind::List(r.u32()?),
             K_ITER => Kind::Iter(r.u32()?),
@@ -699,6 +885,18 @@ pub fn decode(bytes: &[u8]) -> Option<Vec<TypeEntry>> {
             K_DICT => Kind::Dict(r.u32()?, r.u32()?),
             K_SET => Kind::Set(r.u32()?),
             K_ENTRY => Kind::Entry(r.u32()?, r.u32()?),
+            K_SCOPE => Kind::Scope,
+            K_HANDLE => Kind::Handle(r.u32()?),
+            K_CANCELLATION => Kind::Cancellation,
+            K_SENDER => Kind::Sender(r.u32()?),
+            K_RECEIVER => Kind::Receiver(r.u32()?),
+            K_TIMER => Kind::Timer,
+            K_MUTEX => Kind::Mutex(r.u32()?),
+            K_GUARD => Kind::Guard(r.u32()?, r.opt()?),
+            K_SHARED => Kind::Shared(r.u32()?),
+            K_WEAK => Kind::Weak(r.u32()?),
+            K_CELL => Kind::Cell(r.u32()?),
+            K_ARENA => Kind::Arena(r.u32()?),
             _ => return None,
         };
         out.push(TypeEntry { size, kind });
@@ -825,6 +1023,7 @@ intrinsics! {
     StringClear = "String.clear",
     StringLen = "String.len",
     ListNew = "list.new",
+    ListWithCapacity = "list.with_capacity",
     ListPush = "list.push",
     ListPop = "list.pop",
     ListLast = "list.last",
@@ -924,6 +1123,112 @@ intrinsics! {
     GenericValue = "generic.value",
     ArrayFilled = "Array.filled",
     ArrayToList = "Array.to_list",
+    TaskScope = "task.scope",
+    TaskRace = "task.race",
+    TaskShield = "task.shield",
+    TaskYieldNow = "task.yield_now",
+    TaskIsCancelled = "task.is_cancelled",
+    TaskCheckpoint = "task.checkpoint",
+    ScopeSpawn = "Scope.spawn",
+    ScopeSpawnWith = "Scope.spawn_with",
+    ScopeCancel = "Scope.cancel",
+    ScopeIsCancelled = "Scope.is_cancelled",
+    ScopeCancelled = "Scope.cancelled",
+    HandleJoin = "Handle.join",
+    HandleIsFinished = "Handle.is_finished",
+    CancellationWait = "Cancellation.wait",
+    Channel = "channel",
+    SenderSend = "Sender.send",
+    SenderTrySend = "Sender.try_send",
+    SenderClose = "Sender.close",
+    ReceiverRecv = "Receiver.recv",
+    ReceiverTryRecv = "Receiver.try_recv",
+    ClockAfter = "clock.after",
+    TimerWait = "Timer.wait",
+    SelectWait = "select.wait",
+    LogWrite = "log.write",
+    GenNew = "gen.new",
+    GenYield = "gen.yield",
+    MutexNew = "Mutex.new",
+    MutexLock = "Mutex.lock",
+    MutexIsPoisoned = "Mutex.is_poisoned",
+    MutexIntoInner = "Mutex.into_inner",
+    SharedNew = "Shared.new",
+    SharedNewAtomic = "Shared.new_atomic",
+    SharedGet = "Shared.get",
+    SharedDowngrade = "Shared.downgrade",
+    SharedCount = "Shared.count",
+    WeakUpgrade = "Weak.upgrade",
+    CellNew = "Cell.new",
+    CellGet = "Cell.get",
+    CellSet = "Cell.set",
+    CellReplace = "Cell.replace",
+    ArenaNew = "Arena.new",
+    ArenaInsert = "Arena.insert",
+    ArenaGet = "Arena.get",
+    ArenaGetMut = "Arena.get_mut",
+    ArenaRemove = "Arena.remove",
+    ArenaTake = "Arena.take",
+    ArenaContains = "Arena.contains",
+    ArenaKeys = "Arena.keys",
+    BytesNew = "bytes.new",
+    BytesFromHex = "bytes.from_hex",
+    BytesFromList = "bytes.from_list",
+    BytesAt = "bytes.at",
+    BytesGet = "bytes.get",
+    BytesIsEmpty = "bytes.is_empty",
+    BytesSlice = "bytes.slice",
+    BytesCut = "bytes.cut",
+    BytesIter = "bytes.iter",
+    BytesToList = "bytes.to_list",
+    BytesFind = "bytes.find",
+    BytesStartsWith = "bytes.starts_with",
+    BytesEndsWith = "bytes.ends_with",
+    BytesDecode = "bytes.decode",
+    BytesConcat = "bytes.concat",
+    StrEncode = "str.encode",
+    HostFsRead = "host.fs.read",
+    HostFsWrite = "host.fs.write",
+    CapNew = "cap.new",
+    CapCellNew = "Cap.new",
+    CapGet = "Cap.get",
+    CapLend = "cap.lend",
+    SystemAssemble = "System.assemble",
+    ClockFake = "Clock.fake",
+    TestClockAdvance = "TestClock.advance",
+    TestClockSet = "TestClock.set",
+    FmtStrftime = "fmt.strftime",
+    HostNetConnect = "host.net.connect",
+    HostNetListen = "host.net.listen",
+    HostNetAccept = "host.net.accept",
+    HostNetRead = "host.net.read",
+    HostNetWrite = "host.net.write",
+    HostNetClose = "host.net.close",
+    HostProcRun = "host.proc.run",
+    LiveBoundary = "live.boundary",
+    LiveEpoch = "live.epoch",
+}
+
+impl Intrinsic {
+    /// Whether a call may make its task wait (or, for a scope, wait at the
+    /// scope's end): the code generator records where the call is before
+    /// it ([`sym::SITE`]), for the deadlock report.
+    pub fn may_wait(self) -> bool {
+        matches!(
+            self,
+            Intrinsic::TaskScope
+                | Intrinsic::TaskRace
+                | Intrinsic::HandleJoin
+                | Intrinsic::CancellationWait
+                | Intrinsic::SenderSend
+                | Intrinsic::ReceiverRecv
+                | Intrinsic::TimerWait
+                | Intrinsic::SelectWait
+                | Intrinsic::GenYield
+                | Intrinsic::MutexLock
+                | Intrinsic::IterNext
+        )
+    }
 }
 
 #[cfg(test)]
@@ -934,8 +1239,12 @@ mod tests {
     /// runtime reads.
     #[test]
     fn the_type_table_round_trips() {
-        let field =
-            |name: Option<&str>, offset: u32, ty: u32| Field { name: name.map(str::to_string), offset, ty };
+        let field = |name: Option<&str>, offset: u32, ty: u32| Field {
+            name: name.map(str::to_string),
+            offset,
+            ty,
+            glue: ty.is_multiple_of(2),
+        };
         let kinds = vec![
             Kind::Unit,
             Kind::Int,
@@ -950,6 +1259,8 @@ mod tests {
             Kind::Str,
             Kind::String,
             Kind::Path,
+            Kind::Bytes,
+            Kind::DateTime,
             Kind::Ref(1),
             Kind::List(2),
             Kind::Iter(3),
@@ -975,6 +1286,19 @@ mod tests {
             Kind::Set(1),
             Kind::Entry(1, 2),
             Kind::Dyn,
+            Kind::Scope,
+            Kind::Handle(3),
+            Kind::Cancellation,
+            Kind::Sender(4),
+            Kind::Receiver(4),
+            Kind::Timer,
+            Kind::Mutex(5),
+            Kind::Guard(5, Some(2)),
+            Kind::Guard(5, None),
+            Kind::Shared(6),
+            Kind::Weak(6),
+            Kind::Cell(7),
+            Kind::Arena(8),
         ];
         let table: Vec<TypeEntry> =
             kinds.into_iter().enumerate().map(|(i, kind)| TypeEntry { size: 8 * i as u32, kind }).collect();

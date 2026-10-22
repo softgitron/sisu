@@ -50,6 +50,13 @@ fn make(v: i128) -> u64 {
 /// `out` must have room for the result: a word, or an option of one.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sisu_rt_sized(kind: u32, op: u32, flags: u32, x: i64, y: i64, out: *mut u8) -> u8 {
+    // SAFETY: as the caller guarantees.
+    crate::sched::system(|| unsafe { sized_op(kind, op, flags, x, y, out) })
+}
+
+/// # Safety
+/// As `sisu_rt_sized`.
+unsafe fn sized_op(kind: u32, op: u32, flags: u32, x: i64, y: i64, out: *mut u8) -> u8 {
     let Some(kind) = SIZED_TYPES.get(kind as usize).copied() else {
         rt::internal("an unknown sized integer type")
     };

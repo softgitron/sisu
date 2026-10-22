@@ -3,6 +3,7 @@
 //! loan, which must be consumed, and which implement `Drop`.
 
 use sisu_sir::{Function, Place, Program, Type, TypeDecl};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 /// The state of one look at a type and what it reaches: the types being
@@ -15,7 +16,13 @@ struct Walk {
 
 pub struct Types<'p> {
     decls: HashMap<&'p str, &'p TypeDecl>,
+    /// The program's functions by name (the first of a name, as
+    /// `Program::function` finds it).
+    fns: HashMap<&'p str, &'p Function>,
     program: &'p Program,
+    /// [`Types::has_drop_glue`]'s answers so far: each depends on the type
+    /// alone, and the checker asks again at every drop of every pass.
+    glue: RefCell<HashMap<Type, bool>>,
 }
 
 /// The builtin types whose values can hold no loan and own nothing that
@@ -62,7 +69,16 @@ const BORROWING_BUILTINS: &[&str] = &["Iter", "Entry", "Iterable", "MutexGuard",
 
 impl<'p> Types<'p> {
     pub fn new(p: &'p Program) -> Types<'p> {
-        Types { decls: p.types.iter().map(|t| (t.name(), t)).collect(), program: p }
+        let mut fns = HashMap::new();
+        for f in &p.functions {
+            fns.entry(f.name.as_str()).or_insert(f);
+        }
+        Types {
+            decls: p.types.iter().map(|t| (t.name(), t)).collect(),
+            fns,
+            program: p,
+            glue: RefCell::default(),
+        }
     }
 
     /// Whether an intrinsic keeps or returns every value its argument `i`
@@ -73,7 +89,7 @@ impl<'p> Types<'p> {
 
     /// The program's function of that name.
     pub fn function(&self, name: &str) -> Option<&'p Function> {
-        self.program.function(name)
+        self.fns.get(name).copied()
     }
 
     /// The function a call through a trait runs for concrete type
@@ -246,7 +262,12 @@ impl<'p> Types<'p> {
     /// Whether dropping a value of the type runs a user `Drop` (its own or
     /// a part's), which may read the references the value holds.
     pub fn has_drop_glue(&self, t: &Type) -> bool {
-        self.drop_glue_in(t, 0, &mut Walk::default())
+        if let Some(r) = self.glue.borrow().get(t) {
+            return *r;
+        }
+        let r = self.drop_glue_in(t, 0, &mut Walk::default());
+        self.glue.borrow_mut().insert(t.clone(), r);
+        r
     }
 
     /// A type met again while it is being looked at is a recursive type,

@@ -2,11 +2,38 @@
 //! the interpreter's drops), and the name of a type's drop glue.
 
 use crate::{Function, Place, Proj, Type, TypeDecl};
+use std::collections::HashMap;
 
 /// The drop glue of the declared type `ty`: the function `ty#drop`, of
 /// kind `glue`, taking the value with `own`.
 pub fn glue_name(ty: &str) -> String {
     format!("{ty}#drop")
+}
+
+/// Whether dropping a value of the type can do anything: run a `Drop`,
+/// change a count, unlock a mutex. `needs` says which declared types have
+/// drop glue (lowering's, which leaves out a field whose drop does
+/// nothing, so a native runtime frees such a field itself).
+pub fn drops_something(t: &Type, needs: &HashMap<&str, bool>) -> bool {
+    match t {
+        Type::Int | Type::Float | Type::Bool | Type::Char | Type::Str | Type::Unit | Type::Never => false,
+        // A reference owns nothing; a closure holds references, or copies
+        // of `Copy` values (an `own` closure).
+        Type::Ref(..) | Type::Fn(..) | Type::Const(_) | Type::ConstOp(..) => false,
+        Type::Tuple(es) => es.iter().any(|e| drops_something(e, needs)),
+        Type::Param(_) | Type::Assoc(..) | Type::Dyn(..) => true,
+        Type::ErrSet(ms) => ms.iter().any(|m| needs.get(m.as_str()).copied().unwrap_or(true)),
+        Type::Named(n, args) => match n.as_str() {
+            "Shared" | "Weak" | "MutexGuard" => true,
+            "String" | "Path" | "DateTime" | "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin"
+            | "System" | "HostFs" | "HostNet" | "HostClock" | "HostRand" | "HostEnv" | "HostProc"
+            | "HostStdin" | "TestClock" | "Cap" | "Lent" | "f32" | "u8" | "u16" | "u32" | "u64" | "u128"
+            | "i8" | "i16" | "i32" | "i128" | "bytes" | "Slice" => false,
+            "list" | "Array" | "dict" | "set" | "Iter" | "Entry" | "Iterable" | "Option" | "Result"
+            | "Cell" | "Mutex" | "Arena" => args.iter().any(|a| drops_something(a, needs)),
+            other => needs.get(other).copied().unwrap_or(true),
+        },
+    }
 }
 
 /// The type of a place in `f`, or `None` when SIR does not say (a payload

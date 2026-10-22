@@ -1,0 +1,24 @@
+# Generators consumed by several tasks at once, and a generator abandoned
+# before its end: their bodies run only while their consumers wait.
+
+def counter(name: str, n: int) -> Iter[String]:
+    for i in range(n):
+        print("{name} makes {i}")
+        yield "{name}{i}"
+
+def squares() -> Iter[int]:
+    var i = 0
+    while True:
+        yield i * i
+        i += 1
+
+def main():
+    task.scope do s:
+        for t in range(3):
+            s.spawn do:
+                for v in counter("g{t}", 3 + t):
+                    print("task {t} got {v}")
+        s.spawn do:
+            for q in squares().take(4):
+                print("square {q}")
+    print(counter("last", 2).collect())

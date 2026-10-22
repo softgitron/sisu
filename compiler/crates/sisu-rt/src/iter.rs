@@ -10,6 +10,7 @@ use crate::value;
 use sisu_diag::msg;
 
 pub(crate) struct IterObj {
+    _live: mem::Live,
     pub state: State,
     /// The bytes of each item.
     pub item_size: u32,
@@ -44,6 +45,11 @@ pub(crate) enum State {
         text: Str,
         pos: u64,
     },
+    /// A copy of the bytes of a `bytes`, as words (`bytes.iter`).
+    OwnedBytes {
+        data: Vec<u8>,
+        pos: usize,
+    },
     Enumerate {
         inner: Box<IterObj>,
         n: i64,
@@ -75,7 +81,42 @@ pub(crate) enum State {
         table: Box<Table>,
         idx: u64,
     },
+    /// The items a generator (a task) yields (`gen.new`).
+    Gen {
+        task: u32,
+    },
+    /// The values a channel's receiver gets (`for x in rx`).
+    Recv {
+        chan: u32,
+    },
     Done,
+}
+
+/// The iterators whose `Iter.next` may wait: a generator's (its task and
+/// the size of an item) and a receiver's (its channel and the size of a
+/// value).
+pub(crate) enum Waits {
+    Gen(u32, u32),
+    Recv(u32, u32),
+}
+
+/// Whether `Iter.next` on the iterator may wait.
+pub(crate) fn waits(obj: &IterObj) -> Option<Waits> {
+    match obj.state {
+        State::Gen { task } => Some(Waits::Gen(task, obj.item_size)),
+        State::Recv { chan } => Some(Waits::Recv(chan, obj.item_size)),
+        _ => None,
+    }
+}
+
+/// The iterator of the values a receiver gets.
+pub(crate) fn receiver(chan: u32, elem: u32) -> Box<IterObj> {
+    Box::new(IterObj { _live: mem::Live::new(), state: State::Recv { chan }, item_size: ty(elem).size })
+}
+
+/// The iterator of a generator's items, of `item_size` bytes.
+pub(crate) fn generator(task: u32, item_size: u32) -> Box<IterObj> {
+    Box::new(IterObj { _live: mem::Live::new(), state: State::Gen { task }, item_size })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,13 +130,13 @@ pub(crate) enum Part {
 /// elements (`Keys`).
 pub(crate) fn table_ref(table: *mut Table, part: Part) -> Box<IterObj> {
     let item_size = if part == Part::Items { 16 } else { 8 };
-    Box::new(IterObj { state: State::TableRef { table, idx: 0, part }, item_size })
+    Box::new(IterObj { _live: mem::Live::new(), state: State::TableRef { table, idx: 0, part }, item_size })
 }
 
 /// An iterator that owns a dict's or set's entries.
 pub(crate) fn table_own(table: Box<Table>) -> Box<IterObj> {
     let item_size = table.ksize + table.vsize;
-    Box::new(IterObj { state: State::TableOwn { table, idx: 0 }, item_size })
+    Box::new(IterObj { _live: mem::Live::new(), state: State::TableOwn { table, idx: 0 }, item_size })
 }
 
 /// The heap object of a new iterator, as the word that holds it.
@@ -104,35 +145,47 @@ pub(crate) fn into_word(obj: Box<IterObj>) -> u64 {
 }
 
 pub(crate) fn range(cur: i64, stop: i64, step: i64) -> Box<IterObj> {
-    Box::new(IterObj { state: State::Range { cur, stop, step }, item_size: 8 })
+    Box::new(IterObj { _live: mem::Live::new(), state: State::Range { cur, stop, step }, item_size: 8 })
 }
 
 /// An iterator over the elements of a borrowed list: their addresses.
 pub(crate) fn list_ref(list: *mut List, elem: u32) -> Box<IterObj> {
-    Box::new(IterObj { state: State::ListRef { list, idx: 0, elem_size: ty(elem).size }, item_size: 8 })
+    Box::new(IterObj {
+        _live: mem::Live::new(),
+        state: State::ListRef { list, idx: 0, elem_size: ty(elem).size },
+        item_size: 8,
+    })
 }
 
 /// An iterator that owns a list's elements.
 pub(crate) fn items(list: List, elem: u32) -> Box<IterObj> {
-    Box::new(IterObj { state: State::Items { list, idx: 0, elem }, item_size: ty(elem).size })
+    Box::new(IterObj {
+        _live: mem::Live::new(),
+        state: State::Items { list, idx: 0, elem },
+        item_size: ty(elem).size,
+    })
 }
 
 pub(crate) fn chars(text: Str) -> Box<IterObj> {
-    Box::new(IterObj { state: State::Chars { text, pos: 0 }, item_size: 8 })
+    Box::new(IterObj { _live: mem::Live::new(), state: State::Chars { text, pos: 0 }, item_size: 8 })
 }
 
 pub(crate) fn bytes(text: Str) -> Box<IterObj> {
-    Box::new(IterObj { state: State::Bytes { text, pos: 0 }, item_size: 8 })
+    Box::new(IterObj { _live: mem::Live::new(), state: State::Bytes { text, pos: 0 }, item_size: 8 })
+}
+
+pub(crate) fn owned_bytes(data: Vec<u8>) -> Box<IterObj> {
+    Box::new(IterObj { _live: mem::Live::new(), state: State::OwnedBytes { data, pos: 0 }, item_size: 8 })
 }
 
 pub(crate) fn enumerate(inner: Box<IterObj>) -> Box<IterObj> {
     let item_size = 8 + inner.item_size;
-    Box::new(IterObj { state: State::Enumerate { inner, n: 0 }, item_size })
+    Box::new(IterObj { _live: mem::Live::new(), state: State::Enumerate { inner, n: 0 }, item_size })
 }
 
 pub(crate) fn zip(a: Box<IterObj>, b: Box<IterObj>, strict: bool, a_ty: u32, b_ty: u32) -> Box<IterObj> {
     let item_size = a.item_size + b.item_size;
-    Box::new(IterObj { state: State::Zip { a, b, strict, a_ty, b_ty }, item_size })
+    Box::new(IterObj { _live: mem::Live::new(), state: State::Zip { a, b, strict, a_ty, b_ty }, item_size })
 }
 
 /// The items of an `Iterable[T]` argument (`p`, of type `arg`): a
@@ -144,27 +197,38 @@ pub(crate) fn zip(a: Box<IterObj>, b: Box<IterObj>, strict: bool, a_ty: u32, b_t
 pub(crate) unsafe fn iterable(p: *mut u8, arg: u32, item: Option<u32>) -> Box<IterObj> {
     // SAFETY: as the caller guarantees.
     let (base, elem) = unsafe {
-        match ty(arg).kind {
-            Kind::Ref(inner) => match ty(inner).kind {
-                Kind::List(e) => (list_ref(mem::word(p, 0) as *mut List, e), Some(e)),
-                Kind::Dict(..) => {
-                    (table_ref(crate::dict::table(mem::word(p, 0) as *mut u8), Part::Items), None)
-                }
-                Kind::Set(e) => {
-                    (table_ref(crate::dict::table(mem::word(p, 0) as *mut u8), Part::Keys), Some(e))
-                }
+        // What a reference refers to, and its type: an `Iterable[T]`
+        // parameter is a `dyn` of what the caller passed (decision 210).
+        let borrowed = match ty(arg).kind {
+            Kind::Ref(inner) if matches!(ty(inner).kind, Kind::Dyn) => {
+                Some((mem::word(p, 8) as *mut u8, mem::word(p, 0) as u32))
+            }
+            Kind::Ref(inner) => Some((mem::word(p, 0) as *mut u8, inner)),
+            _ => None,
+        };
+        match (borrowed, &ty(arg).kind) {
+            (Some((q, inner)), _) => match ty(inner).kind {
+                Kind::List(e) => (list_ref(q as *mut List, e), Some(e)),
+                Kind::Dict(..) => (table_ref(crate::dict::table(q), Part::Items), None),
+                Kind::Set(e) => (table_ref(crate::dict::table(q), Part::Keys), Some(e)),
+                Kind::Receiver(e) => (receiver(mem::word(q, 0) as u32, e), None),
                 Kind::Iter(_) => {
                     // An iterator behind a reference: its own object, which
                     // the reference does not own; take its remaining items.
-                    let obj = mem::word(mem::word(p, 0) as *const u8, 0) as *mut IterObj;
+                    let obj = mem::word(q, 0) as *mut IterObj;
                     let st = std::mem::replace(&mut (*obj).state, State::Done);
-                    (Box::new(IterObj { state: st, item_size: (*obj).item_size }), None)
+                    (
+                        Box::new(IterObj { _live: mem::Live::new(), state: st, item_size: (*obj).item_size }),
+                        None,
+                    )
                 }
                 _ => rt::internal("iterating over a reference to something that is not a list"),
             },
-            Kind::List(e) => (items((p as *mut List).read(), e), None),
-            Kind::Dict(..) | Kind::Set(_) => (table_own(Box::from_raw(mem::word(p, 0) as *mut Table)), None),
-            Kind::Iter(_) => (Box::from_raw(mem::word(p, 0) as *mut IterObj), None),
+            (None, Kind::List(e)) => (items((p as *mut List).read(), *e), None),
+            (None, Kind::Dict(..) | Kind::Set(_)) => {
+                (table_own(Box::from_raw(mem::word(p, 0) as *mut Table)), None)
+            }
+            (None, Kind::Iter(_)) => (Box::from_raw(mem::word(p, 0) as *mut IterObj), None),
             _ => rt::internal("iterating over something that is not a list or an iterator"),
         }
     };
@@ -177,7 +241,7 @@ pub(crate) unsafe fn iterable(p: *mut u8, arg: u32, item: Option<u32>) -> Box<It
             (None, Some(e)) => ty(e).size,
             (None, None) => 8,
         };
-        Box::new(IterObj { state: State::Decay { inner: base }, item_size: size })
+        Box::new(IterObj { _live: mem::Live::new(), state: State::Decay { inner: base }, item_size: size })
     } else {
         base
     }
@@ -254,6 +318,14 @@ pub(crate) unsafe fn next(obj: &mut IterObj, out: *mut u8) -> u8 {
                     None => none(out),
                 }
             }
+            State::OwnedBytes { data, pos } => match data.get(*pos) {
+                Some(x) => {
+                    *pos += 1;
+                    some(out);
+                    mem::set_word(out, 8, u64::from(*x));
+                }
+                None => none(out),
+            },
             State::Enumerate { inner, n } => {
                 let mut tmp = vec![0u64; 1 + (inner.item_size as usize).div_ceil(8)];
                 let t = tmp.as_mut_ptr() as *mut u8;
@@ -349,6 +421,38 @@ pub(crate) unsafe fn next(obj: &mut IterObj, out: *mut u8) -> u8 {
                 mem::copy(out.add(8), table.key_at(*idx), (table.ksize + table.vsize) as usize);
                 *idx += 1;
             }
+            // A generator or a receiver inside another iterator's adapter
+            // gives what is there already; only `Iter.next` on its own
+            // iterator waits (port-debt.md).
+            State::Gen { task } => {
+                let t = *task;
+                match crate::sched::with(|s| {
+                    let g = s.task(t);
+                    match g.yielded.take() {
+                        Some(v) => Some(Some(v)),
+                        None if matches!(g.state, crate::sched::TState::Done) => Some(None),
+                        None => None,
+                    }
+                }) {
+                    Some(Some(v)) => {
+                        some(out);
+                        mem::copy(out.add(8), v.as_ptr() as *const u8, obj.item_size as usize);
+                    }
+                    Some(None) => none(out),
+                    None => return rt::raise_msg(msg::PANIC_NESTED_RECV, &[]),
+                }
+            }
+            State::Recv { chan } => {
+                let ch = *chan;
+                match crate::sched::with(|s| s.recv_now(ch)) {
+                    Some(Ok(v)) => {
+                        some(out);
+                        mem::copy(out.add(8), v.as_ptr() as *const u8, obj.item_size as usize);
+                    }
+                    Some(Err(())) => none(out),
+                    None => return rt::raise_msg(msg::PANIC_NESTED_RECV, &[]),
+                }
+            }
             State::Done => none(out),
         }
         abi::OK
@@ -417,6 +521,11 @@ unsafe fn drop_state(st: State) -> u8 {
             State::Zip { a, b, .. } => {
                 let s = drop_state(a.state);
                 value::after_part(s, drop_state(b.state))
+            }
+            // A generator dropped before its end is abandoned (decision 95).
+            State::Gen { task } => {
+                crate::tasks::abandon(task);
+                abi::OK
             }
             _ => abi::OK,
         }
