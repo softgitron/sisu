@@ -133,7 +133,7 @@ unsafe extern "C" fn sisu_rt_start(
         // `SISU_RT_ALLOCS`: what the program left allocated (decision 217).
         if std::env::var_os("SISU_RT_ALLOCS").is_some() {
             let line = rt::render(msg::RUN_LIVE_ALLOCATIONS, &[("count", mem::live().to_string())]);
-            rt::stderr(&format!("{line}\n"));
+            rt::stderr(&format!("{line}\n{}", mem::dbg_report()));
         }
         rt::flush();
         code
