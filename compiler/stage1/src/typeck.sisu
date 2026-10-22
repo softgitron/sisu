@@ -22,25 +22,30 @@
 import stage1.typeck.call
 import stage1.typeck.contracts
 import stage1.typeck.expr
+import stage1.typeck.instances
 import stage1.typeck.pat
 import stage1.typeck.tasks
-from stage1.diag import Catalog, Diagnostic, Edit, Lines, Msg, TextRange, render_ids, sort
+from stage1.diag import Catalog, Diagnostic, Edit, Lines, Msg, TextRange, render_ids, sort_unique
 from stage1.parser import parse
-from stage1.syntax.ast import Ast, Block, ExprId, Mode
+from stage1.syntax.ast import Ast, Block, ExprId, Mode, Module
 from stage1.syntax.ast import build
 from stage1.typeck.check import Checker, Cx, Finished, RetCtx
 from stage1.typeck.collect import Resolver
 from stage1.typeck.contracts import leading_contracts
-from stage1.typeck.program import Answer, DefKind, FnKind, ParamInfo, Program
+from stage1.typeck.program import Answer, DefKind, FnKind, ModuleId, ParamInfo, Program, Request
+from stage1.typeck.std_sources import builtin_impls, target
 from stage1.typeck.tasks import has_yield
+from stage1.typeck.template import Templates
 from stage1.typeck.thir import (
     BlockId,
+    BodyKind,
     Callee,
     Capture,
     ClosureId,
     ClosureRole,
     ForMode,
     TArmBody,
+    TBody,
     TClosure,
     TCompClause,
     TExprId,
@@ -50,23 +55,109 @@ from stage1.typeck.thir import (
 )
 from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, Types
 
-## The type diagnostics of one file, and why parts of it are beyond the
-## slice (empty when the whole file is within it).
-pub struct Checked:
-    pub diagnostics: list[Diagnostic]
-    pub beyond: list[String]
+## The prelude and the std modules every file sees, resolved once, and the
+## prelude's derive templates, kept apart so that they are not copied for
+## each file.
+pub struct Base:
+    pub resolver: Resolver
+    pub templates: Templates
+    ## The syntax of the modules the base resolved, by module, for the std
+    ## bodies lowering reaches.
+    pub std_syntax: list[Module]
+    ## The source of each std module, by name.
+    pub texts: dict[String, String]
 
 ## The prelude and the std modules every file sees, resolved once: `texts`
 ## gives the source of each std module by name.
-pub pure def base(texts: dict[String, String]) -> Resolver:
-    return Resolver.base(texts)
+pub pure def base(texts: dict[String, String]) -> Base:
+    var r = Resolver.base(texts)
+    let templates = r.std_derives.copy()
+    r.std_derives = Templates.none()
+    let std_syntax = r.std_kept.copy()
+    r.std_kept = []
+    return Base(resolver=r, templates=templates, std_syntax=std_syntax, texts=texts.copy())
 
-## The type diagnostics of `text`, a file checked as a program's root
-## module, rendered as `sisu check --format=ids` writes them.
+## A base of a prelude of the given text alone (for the tests).
+pub pure def base_from(prelude_text: str) -> Base:
+    var texts: dict[String, String] = {}
+    _ = texts.insert("prelude".to_string(), prelude_text.to_string())
+    var r = Resolver.base_from(prelude_text)
+    let std_syntax = r.std_kept.copy()
+    r.std_kept = []
+    return Base(resolver=r, templates=Templates.none(), std_syntax=std_syntax, texts=texts)
+
+## The type diagnostics of one file: those in the file, then those in each
+## file the compiler wrote for it whose bodies are checked (its doc
+## examples' module, its derived impls, the instances of templates), each
+## with that file's text, in the order stage 0 makes the files; and why
+## parts of it are beyond the slice (empty when the whole file is within
+## it).
+pub struct Checked:
+    pub diagnostics: list[Diagnostic]
+    pub files: list[(String, list[Diagnostic])]
+    pub beyond: list[String]
+    ## Those of `beyond` that are only the ownership checker's: a body that
+    ## may get one of its `type.` messages, checked whole otherwise.
+    pub owner_beyond: list[String]
+    ## Whether the front end finds an error, as far as stage 1 knows: its
+    ## own, or one stage 0 reports that is not the type checker's.
+    pub has_error: bool
+    ## What lowering reads, when it asked for it.
+    pub typed: Typed?
+
+## What lowering reads of a checked file (stage 0's `Program` and
+## `Typed`): the resolved program, the table of types, and the typed bodies
+## in stage 0's order (the root module's functions, then the other
+## modules', each by definition, then the defaults of fields and
+## parameters and the constants, by definition), with the text of each
+## module whose bodies were checked.
+pub struct Typed:
+    pub prog: Program
+    pub types: Types
+    pub bodies: list[TBody]
+    pub texts: dict[ModuleId, String]
+    ## The functions the compiler wrote from code checked elsewhere too.
+    pub quiet: set[DefId]
+    ## The impls of `@delegate`, which stage 1 declares as headers.
+    pub delegated: set[DefId]
+    ## The syntax of each module (empty for those the base resolved, whose
+    ## syntax `Base.std_syntax` holds), and the inferred error sets.
+    pub syntax: list[Module]
+    pub inferred: dict[DefId, list[DefId]]
+    ## An item of the root module is `@refines(...)`.
+    pub refines: bool
+
+## The type diagnostics of a file, rendered as `sisu check --format=ids`
+## writes them: each position in its own file's lines and columns.
 pub pure def render(text: str, checked: Checked, catalog: Catalog) -> String:
-    return render_ids(text, checked.diagnostics, catalog)
+    var out = render_ids(text, checked.diagnostics, catalog)
+    for (t, ds) in checked.files:
+        out.push(render_ids(t, ds, catalog))
+    return out
 
-## What checking the bodies of a file gave: the diagnostics, why bodies
+## What checking one body left, but the table of types, which the next
+## body's check continues.
+struct BodyResult:
+    diags: list[Diagnostic]
+    beyond: String?
+    owner_beyond: String?
+    other_error: bool
+    absorbed: list[DefId]
+    requests: list[Request]
+    typed: TBody?
+
+pure def result_of(done: Finished) -> BodyResult:
+    return BodyResult(
+        diags=done.diags.copy(),
+        beyond=done.beyond.copy(),
+        owner_beyond=done.owner_beyond.copy(),
+        other_error=done.other_error,
+        absorbed=done.absorbed.copy(),
+        requests=done.requests.copy(),
+        typed=done.typed.copy(),
+    )
+
+## What checking the bodies of one file gave: the diagnostics, why bodies
 ## are beyond the slice, why the ownership checker may report about
 ## them, and whether stage 0 reports an error that is not the type
 ## checker's.
@@ -77,10 +168,13 @@ struct Bodies:
     other_error: bool
 
 impl Bodies:
+    pure def new() -> Bodies:
+        return Bodies(diags=[], beyond=[], owner_beyond=[], other_error=False)
+
     ## Adds what checking one body left; a body beyond the slice reports
     ## nothing, and a body the compiler wrote from code checked elsewhere
     ## too reports nothing of its own.
-    pure def add(mut self, done: Finished, quiet: bool):
+    pure def add(mut self, done: BodyResult, quiet: bool):
         if let Some(why) = done.owner_beyond:
             self.owner_beyond.push(why.copy())
         if quiet:
@@ -94,52 +188,165 @@ impl Bodies:
                 for x in done.diags:
                     self.diags.push(x.copy())
 
+    pure def absorb(mut self, other: Bodies):
+        for d in other.diags:
+            self.diags.push(d.copy())
+        for w in other.beyond:
+            self.beyond.push(w.copy())
+        for w in other.owner_beyond:
+            self.owner_beyond.push(w.copy())
+        if other.other_error:
+            self.other_error = True
+
+## The most rounds of checking and declaring instances (stage 0's
+## `MAX_ROUNDS`): a template whose instances need ever larger types stops.
+const MAX_ROUNDS: int = 32
+
+## What one round of checking a resolved file gave: the table of types,
+## the bodies of each file with their diagnostics (the root module's
+## first, with the signatures of `main` and the tests, then the doc
+## examples' module and the modules written from templates, each with its
+## text), and the requests the bodies made.
+struct Round:
+    types: Types
+    main: Bodies
+    files: list[(String, Bodies)]
+    requests: list[Request]
+    ## The typed bodies, when lowering asked for them.
+    typed: list[TBody]
+    texts: dict[ModuleId, String]
+    inferred: dict[DefId, list[DefId]]
+
 ## Checks one file against the resolved prelude. `name_error` says
-## whether stage 0's name pass reports an error in it.
+## whether stage 0's name pass reports an error in it; `keep` asks for
+## what lowering reads.
 pub pure def check_file(
-    base: Resolver, text: str, catalog: Catalog, name_error: bool, embedded: dict[String, bool]
+    base: Base,
+    text: str,
+    catalog: Catalog,
+    name_error: bool,
+    embedded: dict[String, bool],
+    keep: bool,
 ) -> Checked:
     let parsed = parse(text, catalog)
     let module = build.module(parsed.tree)
-    var beyond: list[String] = []
-    var r = base.copy()
-    r.prog.embedded = embedded.copy()
-    r.add_root(module, text)
-    # A declaration beyond the slice changes how the bodies type: none of
-    # them is checked.
-    if let Some(why) = r.beyond:
-        beyond.push(why.copy())
-        return Checked(diagnostics=[], beyond=beyond)
-    let root_id = r.prog.root
-    var bodies = Bodies(
-        diags=[], beyond=[], owner_beyond=[], other_error=r.other_error or name_error
-    )
-    for d in parsed.diagnostics:
-        if catalog.is_error(d.msg):
-            bodies.other_error = True
-    for (m, d) in r.diags:
-        if m == root_id:
-            bodies.diags.push(d.copy())
-    let quiet = r.quiet_fns.copy()
-    let doc_module = r.doc_module
-    let doc_syntax = r.doc_syntax()
-    let doc_text = r.doc_text.copy()
-    let (prog, types0, root) = r.into_parts()
-    var types = types0
-    # Every function with a body, in order of definition.
+    # The instances of templates the program needs (08, "Reflection"):
+    # check, declare what the check asked for, and check again, until it
+    # asks for nothing new. An instance is declared after everything else,
+    # so a round's declarations stand in the next; a promotion (a generic
+    # function that calls a template with its own type parameters becomes
+    # one) changes a declaration, and resolves again (stage 0's
+    # `Db::checked`).
+    var requests: list[Request] = []
+    var rounds = 0
+    while True:
+        var r = base.resolver.copy()
+        r.prog.embedded = embedded.copy()
+        r.catalog = catalog.copy()
+        for q in requests:
+            if let Request.Promote(d) = q:
+                _ = r.promoted.add(d)
+        r.add_root(module.copy(), text, base.templates)
+        # A declaration beyond the slice changes how the bodies type: none
+        # of them is checked.
+        if let Some(why) = r.beyond:
+            return Checked(
+                diagnostics=[],
+                files=[],
+                beyond=[why.copy()],
+                owner_beyond=[],
+                has_error=False,
+                typed=None,
+            )
+        r.declare_instances(requests)
+        var memo: dict[DefId, BodyResult] = {}
+        var again = False
+        while not again:
+            let round = check_round(r, text, catalog, mut memo, keep)
+            var fresh: list[Request] = []
+            for q in round.requests:
+                if not has_request(requests, q) and not has_request(fresh, q):
+                    fresh.push(q.copy())
+            rounds += 1
+            if fresh.is_empty() or rounds > MAX_ROUNDS:
+                # Past the bound, `comptime.instances-unbounded`.
+                let unbounded = not fresh.is_empty()
+                var checked = finish_file(
+                    r, round, parsed.diagnostics, text, catalog, name_error, unbounded
+                )
+                if keep:
+                    checked.typed = Some(
+                        Typed(
+                            prog=r.prog,
+                            types=round.types,
+                            bodies=round.typed,
+                            texts=round.texts,
+                            quiet=r.quiet_fns,
+                            delegated=r.delegated,
+                            syntax=r.sources,
+                            inferred=round.inferred,
+                            refines=r.refines,
+                        )
+                    )
+                return checked
+            for q in fresh:
+                requests.push(q.copy())
+                if let Request.Promote(_) = q:
+                    again = True
+            if not again:
+                r.types = round.types
+                r.declare_instances(fresh)
+
+pure def has_request(qs: list[Request], q: Request) -> bool:
+    for x in qs:
+        if x.same(q):
+            return True
+    return False
+
+## Checks every body of the file once: its functions but the templates,
+## those of the modules the compiler wrote for it, the defaults of fields
+## and parameters and the constants, after the error sets of the `T !`
+## functions are inferred; and `main`'s and the tests' signatures. A
+## function's body is checked once a resolution (`memo`).
+pure def check_round(
+    r: Resolver, text: str, catalog: Catalog, mut memo: dict[DefId, BodyResult], keep: bool
+) -> Round:
+    let prog = ref r.prog
+    let root_id = prog.root
+    var types = r.types.copy()
+    # The modules whose bodies are checked, each with its syntax and text,
+    # in the order stage 0 makes their files.
+    var modules: list[(ModuleId, String)] = [(root_id, text.to_string())]
+    if let Some(dm) = r.doc_module:
+        modules.push((dm, r.doc_text.copy()))
+    for (m, t) in r.generated:
+        modules.push((m, t.copy()))
+    var at_module: dict[ModuleId, int] = {}
+    for i in range(len(modules)):
+        _ = at_module.insert(modules[i].0, i)
+    # Every function with a body, the root module's first (stage 0's
+    # `functions_with_bodies`); a template is checked in its instances.
     var fns: list[DefId] = []
     var inferred_fns: list[DefId] = []
-    for i in range(len(prog.defs)):
-        if prog.defs[i].module != root_id:
-            continue
-        let d = DefId(index=i)
-        let f = prog.fn_info(d) else:
-            continue
-        if f.body.is_none():
-            continue
-        fns.push(d)
-        if f.err_inferred:
-            inferred_fns.push(d)
+    for pass_ in range(2):
+        for i in range(len(prog.defs)):
+            let m = prog.defs[i].module
+            if not at_module.contains(m) or (m == root_id) != (pass_ == 0):
+                continue
+            let d = DefId(index=i)
+            let f = prog.fn_info(d) else:
+                continue
+            if f.body.is_none() or f.template:
+                continue
+            # The impls the prelude's templates derive check whenever the
+            # derive's checks pass (`check_derives` removes their bodies
+            # otherwise): stage 1 trusts them, as stage 0's ownership
+            # checker trusts std, and declares them for what follows.
+            if prelude_derived(prog, d):
+                continue
+            fns.push(d)
+            if f.err_inferred:
+                inferred_fns.push(d)
     # Inferred error sets: iterate to a fixpoint over the functions that
     # declare `T !`, each pass using the sets known so far (05).
     var inferred: dict[DefId, list[DefId]] = {}
@@ -148,7 +355,8 @@ pub pure def check_file(
     for _ in range(32):
         var changed = False
         for d in inferred_fns:
-            let done = check_one(prog, root.ast, text, inferred, types, d)
+            let (ast, src) = syntax_of(r, modules, at_module, d)
+            let done = check_one(prog, ast, src, inferred, types, d, catalog, False)
             let absorbed = done.absorbed.copy()
             types = done.types
             var before: list[DefId] = []
@@ -159,74 +367,79 @@ pub pure def check_file(
                 changed = True
         if not changed:
             break
+    var main = Bodies.new()
+    main.other_error = r.other_error
+    for (m, d) in r.diags:
+        if m == root_id:
+            main.diags.push(d.copy())
+    var files: list[Bodies] = []
+    for _ in range(len(modules)):
+        files.push(Bodies.new())
+    var requests: list[Request] = []
+    var typed: list[TBody] = []
     for d in fns:
-        let done = check_one(prog, root.ast, text, inferred, types, d)
-        bodies.add(done, quiet.contains(d))
-        types = done.types
-    # The doc examples' tests, checked with their own module's syntax and
-    # text, whose lines are the file's: a diagnostic there is at the same
-    # line and column of the file.
-    var docs = Bodies(diags=[], beyond=[], owner_beyond=[], other_error=False)
-    if let Some(dm) = doc_module:
-        if let Some(syntax) = doc_syntax:
-            for i in range(len(prog.defs)):
-                if prog.defs[i].module != dm:
-                    continue
-                let d = DefId(index=i)
-                let f = prog.fn_info(d) else:
-                    continue
-                if f.body.is_none():
-                    continue
-                let done = check_one(prog, syntax.ast, doc_text, inferred, types, d)
-                docs.add(done, False)
-                types = done.types
-    for why in docs.beyond:
-        bodies.beyond.push(why.copy())
-    for why in docs.owner_beyond:
-        bodies.owner_beyond.push(why.copy())
-    if docs.other_error:
-        bodies.other_error = True
-    let doc_lines = Lines.of(doc_text)
-    let file_lines = Lines.of(text)
-    var doc_diags: list[Diagnostic] = []
-    for x in docs.diags:
-        doc_diags.push(moved_to(x, doc_lines, file_lines))
+        var result: BodyResult? = None
+        if let Some(x) = memo.get(d):
+            result = Some(x.copy())
+        if result.is_none():
+            let (ast, src) = syntax_of(r, modules, at_module, d)
+            let done = check_one(prog, ast, src, inferred, types, d, catalog, keep)
+            let x = result_of(done)
+            types = done.types
+            _ = memo.insert(d, x.copy())
+            result = Some(x)
+        let x = result ?? continue_never()
+        if let Some(t) = x.typed:
+            typed.push(t.copy())
+        for q in x.requests:
+            if not has_request(requests, q):
+                requests.push(q.copy())
+        let at = at_module.get(prog.defs[d.index].module) ?? 0
+        files[at].add(x, r.quiet_fns.contains(d))
     # Defaults of fields and parameters, and constants.
     for i in range(len(prog.defs)):
         let d = DefId(index=i)
-        if prog.defs[i].module != root_id:
+        let at = at_module.get(prog.defs[i].module) else:
             continue
-        var values: list[(ExprId, Ty, DefId?)] = []
+        var values: list[(ExprId, Ty, DefId?, BodyKind)] = []
         match prog.defs[i].kind:
             case DefKind.Struct(s):
-                for f in s.fields:
-                    if let Some(e) = f.default:
-                        values.push((e, f.ty, Some(d)))
+                for k in range(len(s.fields)):
+                    if let Some(e) = s.fields[k].default:
+                        values.push((e, s.fields[k].ty, Some(d), BodyKind.FieldDefault(d, k)))
             case DefKind.Fn(f):
-                for p in f.params:
-                    if let Some(e) = p.default:
-                        values.push((e, p.ty, None))
+                for k in range(len(f.params)):
+                    if let Some(e) = f.params[k].default:
+                        values.push((e, f.params[k].ty, None, BodyKind.ParamDefault(d, k)))
             case DefKind.Const(c):
                 if let Some(e) = c.value:
-                    values.push((e, c.ty, None))
+                    values.push((e, c.ty, None, BodyKind.Const))
             case _:
                 pass
-        for (e, ty, field_of) in values:
-            let done = check_value(prog, root.ast, text, inferred, types, d, e, ty, field_of)
-            bodies.add(done, False)
+        for (e, ty, field_of, kind) in values:
+            let (ast, src) = syntax_of(r, modules, at_module, d)
+            let done = check_value(
+                prog, ast, src, inferred, types, d, e, ty, field_of, catalog, kind, keep
+            )
+            let x = result_of(done)
             types = done.types
-    var diags = bodies.diags
+            if let Some(t) = x.typed:
+                typed.push(t.copy())
+            for q in x.requests:
+                if not has_request(requests, q):
+                    requests.push(q.copy())
+            files[at].add(x, False)
     # `main` takes nothing or one `System`, and returns nothing or `! E`.
-    if let Some(main) = prog.main():
-        if let Some(f) = prog.fn_info(main):
+    if let Some(main_fn) = prog.main():
+        if let Some(f) = prog.fn_info(main_fn):
             let params_ok = takes_system(prog, types, f.params)
             var ret_ok = f.ret == Ty.unit()
             if let TyData.Adt(d, a) = types.data(f.ret):
                 if Some(d) == prog.wk.result and not a.is_empty() and a[0] == Ty.unit():
                     ret_ok = True
             if not params_ok or not ret_ok or f.self_mode.is_some():
-                let span = prog.defs[main.index].span
-                diags.push(Diagnostic.new(Msg.TypeMainSignature, span.start, span.end))
+                let span = prog.defs[main_fn.index].span
+                main.diags.push(Diagnostic.new(Msg.TypeMainSignature, span.start, span.end))
     # A test takes nothing, or the real `System`.
     for t in prog.tests:
         if prog.defs[t.index].module != root_id:
@@ -238,35 +451,121 @@ pub pure def check_file(
             var span = prog.defs[t.index].span
             if let Some(p) = f.params.first():
                 span = p.span
-            diags.push(Diagnostic.new(Msg.TypeTestSignature, span.start, span.end))
+            main.diags.push(Diagnostic.new(Msg.TypeTestSignature, span.start, span.end))
+    # The root module's bodies are the file's; the others are files of
+    # their own.
+    main.absorb(files[0])
+    var others: list[(String, Bodies)] = []
+    for i in range(1, len(modules)):
+        others.push((modules[i].1.copy(), files[i].copy()))
+    var texts: dict[ModuleId, String] = {}
+    if keep:
+        for (m, t) in modules:
+            _ = texts.insert(m, t.copy())
+        for (m, t) in r.shims:
+            _ = texts.insert(m, t.copy())
+    return Round(
+        types=types,
+        main=main,
+        files=others,
+        requests=requests,
+        typed=typed,
+        texts=texts,
+        inferred=inferred,
+    )
+
+## Never called: the `else` of a `let` whose value is always there.
+pure def continue_never() -> BodyResult:
+    return BodyResult(
+        diags=[],
+        beyond=None,
+        owner_beyond=None,
+        other_error=False,
+        absorbed=[],
+        requests=[],
+        typed=None,
+    )
+
+## The syntax and the text a definition's body is checked with: its
+## module's.
+pure def syntax_of(
+    r: Resolver, modules: list[(ModuleId, String)], at_module: dict[ModuleId, int], d: DefId
+) -> (ref Ast, str) from r, modules:
+    let m = r.prog.defs[d.index].module
+    let at = at_module.get(m) ?? 0
+    return (ref r.sources[m.index].ast, modules[at].1)
+
+## The diagnostics of a file from its last round of checking: why parts of
+## it are beyond the slice, those of the ownership checker's when the front
+## end found no error, the file's own on the lines without a syntax error,
+## and each other file's, sorted and with repeats dropped.
+pure def finish_file(
+    r: Resolver,
+    round: Round,
+    syntax: list[Diagnostic],
+    text: str,
+    catalog: Catalog,
+    name_error: bool,
+    unbounded: bool,
+) -> Checked:
+    var bodies = round.main.copy()
+    if name_error or unbounded:
+        bodies.other_error = True
+    for d in syntax:
+        if catalog.is_error(d.msg):
+            bodies.other_error = True
+    var beyond: list[String] = []
+    var owner_beyond: list[String] = bodies.owner_beyond.copy()
     for why in bodies.beyond:
         beyond.push(why.copy())
-    # Stage 0's ownership checker runs when the front end found no error.
     var any_error = bodies.other_error
-    for d in diags:
+    for d in bodies.diags:
         if catalog.is_error(d.msg):
             any_error = True
-    for d in doc_diags:
-        if catalog.is_error(d.msg):
+    for (_, b) in round.files:
+        for why in b.beyond:
+            beyond.push(why.copy())
+        for why in b.owner_beyond:
+            owner_beyond.push(why.copy())
+        if b.other_error:
             any_error = True
+        for d in b.diags:
+            if catalog.is_error(d.msg):
+                any_error = True
+    # Stage 0's ownership checker runs when the front end found no error.
+    var owned: list[String] = []
     if not any_error:
-        for why in bodies.owner_beyond:
-            beyond.push("{why}, which stage 0's ownership checker checks")
+        for why in owner_beyond:
+            let reason = "{why}, which stage 0's ownership checker checks"
+            beyond.push(reason.copy())
+            owned.push(reason)
     # A line with a syntax error has no reliable meaning.
     let lines = Lines.of(text)
     var broken: set[int] = set()
-    for d in parsed.diagnostics:
+    for d in syntax:
         _ = broken.add(lines.index(d.start))
     var kept: list[Diagnostic] = []
-    for d in diags:
+    for d in bodies.diags:
         if not broken.contains(lines.index(d.start)):
             kept.push(d.copy())
-    # The examples' module is a file the driver wrote: its diagnostics are
+    sort_unique(mut kept, catalog)
+    # The other files are files the compiler wrote: their diagnostics are
     # kept whatever the file's syntax errors.
-    for d in doc_diags:
-        kept.push(d.copy())
-    sort(mut kept, catalog)
-    return Checked(diagnostics=kept, beyond=beyond)
+    var files: list[(String, list[Diagnostic])] = []
+    for (t, b) in round.files:
+        var ds = b.diags.copy()
+        if ds.is_empty():
+            continue
+        sort_unique(mut ds, catalog)
+        files.push((t.copy(), ds))
+    return Checked(
+        diagnostics=kept,
+        files=files,
+        beyond=beyond,
+        owner_beyond=owned,
+        has_error=any_error,
+        typed=None,
+    )
 
 ## Checks one function body.
 pure def check_one(
@@ -276,11 +575,20 @@ pure def check_one(
     inferred: dict[DefId, list[DefId]],
     own types: Types,
     d: DefId,
+    catalog: Catalog,
+    keep: bool,
 ) -> Finished:
-    let cx = Cx(prog=ref prog, ast=ref ast, source=text, inferred=ref inferred)
+    let cx = Cx(prog=ref prog, ast=ref ast, source=text, inferred=ref inferred, catalog=ref catalog)
     var c = Checker.new(cx, types, d)
     c.check_fn(cx)
-    return c.finish()
+    c.requests = c.template_requests(cx)
+    var typed: TBody? = None
+    if keep:
+        let span = prog.defs[d.index].span
+        typed = Some(c.typed_body(cx, BodyKind.Fn, span))
+    var done = c.finish()
+    done.typed = typed
+    return done
 
 ## Checks a default value or a constant as a body returning it.
 pure def check_value(
@@ -293,32 +601,109 @@ pure def check_value(
     e: ExprId,
     ty: Ty,
     field_of: DefId?,
+    catalog: Catalog,
+    kind: BodyKind,
+    keep: bool,
 ) -> Finished:
-    let cx = Cx(prog=ref prog, ast=ref ast, source=text, inferred=ref inferred)
+    let cx = Cx(prog=ref prog, ast=ref ast, source=text, inferred=ref inferred, catalog=ref catalog)
     var c = Checker.new(cx, types, d)
     c.check_value(cx, e, ty, field_of)
-    return c.finish()
+    c.requests = c.template_requests(cx)
+    var typed: TBody? = None
+    if keep:
+        var span = TextRange.new(0, 0)
+        if let Some(b) = c.body_block:
+            span = c.blocks[b.index].span
+        typed = Some(c.typed_body(cx, kind, span))
+    var done = c.finish()
+    done.typed = typed
+    return done
 
-## A diagnostic of the doc examples' module at the same lines and columns
-## of the file.
-pure def moved_to(d: Diagnostic, from_: Lines, to: Lines) -> Diagnostic:
-    var out = d.copy()
-    out.start = moved_offset(d.start, from_, to)
-    out.end = moved_offset(d.end, from_, to)
-    for i in range(len(out.labels)):
-        out.labels[i].start = moved_offset(d.labels[i].start, from_, to)
-        out.labels[i].end = moved_offset(d.labels[i].end, from_, to)
-    for i in range(len(out.fixes)):
-        for k in range(len(out.fixes[i].edits)):
-            out.fixes[i].edits[k].start = moved_offset(d.fixes[i].edits[k].start, from_, to)
-            out.fixes[i].edits[k].end = moved_offset(d.fixes[i].edits[k].end, from_, to)
-    return out
+## A body of the standard library that lowering reaches, checked as stage
+## 0 checks it, with its module's syntax and text; `None` when it uses
+## something beyond the type checker's slice. The table of types comes
+## back with what checking added.
+pub pure def check_std_body(
+    base: Base, typed: Typed, own types: Types, d: DefId, kind: BodyKind, catalog: Catalog
+) -> (TBody?, Types):
+    let prog = ref typed.prog
+    let m = prog.defs[d.index].module
+    var syntax = Module(ast=Ast.new(), items=[], docs=[], broken_names=[])
+    if m.index < len(typed.syntax) and not typed.syntax[m.index].items.is_empty():
+        syntax = typed.syntax[m.index].copy()
+    elif m.index < len(base.std_syntax):
+        syntax = base.std_syntax[m.index].copy()
+    var text = std_text(base, prog, m)
+    if let Some(t) = typed.texts.get(m):
+        text = t.copy()
+    if kind == BodyKind.Fn:
+        let done = check_one(prog, syntax.ast, text, typed.inferred, types, d, catalog, True)
+        if done.beyond.is_some():
+            return (None, done.types)
+        return (done.typed, done.types)
+    var e: ExprId? = None
+    var ty = Ty.error()
+    var field_of: DefId? = None
+    match prog.defs[d.index].kind:
+        case DefKind.Struct(s):
+            if let BodyKind.FieldDefault(_, i) = kind:
+                e = s.fields[i].default
+                ty = s.fields[i].ty
+                field_of = Some(d)
+        case DefKind.Fn(f):
+            if let BodyKind.ParamDefault(_, i) = kind:
+                e = f.params[i].default
+                ty = f.params[i].ty
+        case DefKind.Const(c):
+            e = c.value
+            ty = c.ty
+        case _:
+            pass
+    let x = e else:
+        return (None, types)
+    let done = check_value(
+        prog, syntax.ast, text, typed.inferred, types, d, x, ty, field_of, catalog, kind, True
+    )
+    if done.beyond.is_some():
+        return (None, done.types)
+    return (done.typed, done.types)
 
-pure def moved_offset(offset: int, from_: Lines, to: Lines) -> int:
-    let line = from_.index(offset)
-    let start = from_.start_of(line) ?? 0
-    let target = to.start_of(line) ?? 0
-    return target + offset - start
+## The text of a std module.
+pub pure def std_text(base: Base, prog: Program, m: ModuleId) -> String:
+    let name = ref prog.modules[m.index].name
+    if name == "target":
+        return target()
+    if name == "builtin_impls":
+        return builtin_impls()
+    if let Some(x) = base.texts.get(name.copy()):
+        return x.copy()
+    return String.new()
+
+## Whether a function is a method of an impl the compiler derived from a
+## template of the prelude (`Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`).
+pure def prelude_derived(prog: Program, d: DefId) -> bool:
+    let f = prog.fn_info(d) else:
+        return False
+    let i = f.impl_ else:
+        return False
+    if not prog.modules[prog.defs[d.index].module.index].name.starts_with("<derive>/"):
+        return False
+    let info = prog.impl_info(i) else:
+        return False
+    return prog.defs[info.trait_ref.def_.index].module == prog.prelude
+
+## Whether a definition is a template, checked in its instances.
+pure def is_template(prog: Program, d: DefId) -> bool:
+    if let Some(f) = prog.fn_info(d):
+        return f.template
+    return False
+
+## Whether the template `d` has an instance for `args`.
+pure def instance_declared(prog: Program, d: DefId, args: list[Ty]) -> bool:
+    for (t, a, _) in prog.instances:
+        if t == d and a == args:
+            return True
+    return False
 
 ## Whether parameters are none, or one `System`.
 pure def takes_system(prog: Program, types: Types, params: list[ParamInfo]) -> bool:
@@ -420,6 +805,8 @@ impl Checker:
             let l = self.new_local(p.name, ty, False, p.span)
             self.declare(p.name, l)
             params.push(l)
+        self.params = params.copy()
+        self.body_ret = ret
         # The contract: the clauses the body starts with (07).
         let clauses = leading_contracts(cx.ast, body_full)
         var is_test = False
@@ -459,8 +846,10 @@ impl Checker:
                 )
             )
             let gen_ty = self.fn_ret(cx, self.def_)
+            self.body_ret = gen_ty
             let value = self.add(TExprKind.Generator(id), gen_ty, span)
             block = self.new_block([TStmt.Return(value=Some(value), span=span)], span)
+        self.body_block = Some(block)
         let ends = r == Ty.unit() or r == Ty.never() or r == Ty.error()
         if not ends and not f.body_broken and not self.block_diverges(block):
             let name = cx.prog.defs[self.def_.index].name.copy()
@@ -489,12 +878,103 @@ impl Checker:
             for g in f.generics:
                 self.generic_names.push(g.name.copy())
         self.field_default_of = field_of
+        self.body_ret = ty
         self.ret.push(RetCtx(ty=ty, closure=None, first_local=0, loops=0, captures=[]))
-        _ = self.check_expr(cx, e, ty)
+        let x = self.check_expr(cx, e, ty)
+        let span = self.span_of(x)
+        self.body_block = Some(self.new_block([TStmt.Return(value=Some(x), span=span)], span))
         self.decide_captures(cx)
         self.check_own_closures(cx)
         self.check_bounds(cx)
         self.check_comptime_types(cx)
+
+    ## What the body asks of the next resolution (stage 0's
+    ## `template_requests`, for one body): an instance of each template it
+    ## calls with concrete type arguments that has none yet, and its own
+    ## promotion when it calls one with its own type parameters. A template
+    ## used as a value has no instance to be (`comptime.template-value`).
+    pub pure def template_requests(mut self, cx: Cx) -> list[Request]:
+        var exprs: list[TExprId] = []
+        if let Some(b) = self.body_block:
+            self.visit_block(b, mut exprs)
+        for c in self.closures.copy():
+            if let Some(cl) = c:
+                self.visit_block(cl.body, mut exprs)
+        var out: list[Request] = []
+        for e in exprs:
+            match self.exprs[e.index].kind.copy():
+                case TExprKind.Call(Callee.Fn(def_, type_args), _):
+                    if not is_template(cx.prog, def_):
+                        continue
+                    var param = False
+                    var unknown = False
+                    var args: list[Ty] = []
+                    for t in type_args:
+                        let ft = self.finalize(cx, t)
+                        for x in self.types.walk(ft):
+                            match self.types.data(x):
+                                case TyData.Param(_):
+                                    param = True
+                                case TyData.Var(_) | TyData.Error:
+                                    unknown = True
+                                case _:
+                                    pass
+                        args.push(ft)
+                    var q = Request.Promote(self.def_)
+                    if not param:
+                        if unknown or instance_declared(cx.prog, def_, args):
+                            continue
+                        q = Request.Instance(def_=def_, args=args)
+                    var seen = False
+                    for x in out:
+                        if x.same(q):
+                            seen = True
+                    if not seen:
+                        out.push(q)
+                case TExprKind.FnRef(def_):
+                    if is_template(cx.prog, def_):
+                        self.other()
+                case _:
+                    pass
+        return out
+
+    ## A type as the typed body keeps it (stage 0's `zonk::finalize`): its
+    ## variables resolved, one left open `()`, or the empty error set in a
+    ## result's error position.
+    pub pure def finalize(mut self, cx: Cx, t: Ty) -> Ty:
+        let z = self.infer.zonk(mut self.types, t)
+        return self.finalized(cx, z)
+
+    pure def finalized(mut self, cx: Cx, t: Ty) -> Ty:
+        match self.types.data(t).copy():
+            case TyData.Var(_):
+                return Ty.unit()
+            case TyData.Adt(d, args):
+                var out: list[Ty] = []
+                let result = Some(d) == cx.prog.wk.result and len(args) == 2
+                for i in range(len(args)):
+                    if result and i == 1:
+                        if let TyData.Var(_) = self.types.data(args[1]):
+                            out.push(self.types.err_set([]))
+                            continue
+                    out.push(self.finalized(cx, args[i]))
+                return self.types.adt(d, out)
+            case TyData.Tuple(es, labels):
+                var out: list[Ty] = []
+                for x in es:
+                    out.push(self.finalized(cx, x))
+                return self.types.intern(TyData.Tuple(elems=out, labels=labels))
+            case TyData.Fn(ps, ret, pure):
+                var out: list[Ty] = []
+                for x in ps:
+                    out.push(self.finalized(cx, x))
+                let r = self.finalized(cx, ret)
+                return self.types.fn_(out, r, pure)
+            case TyData.Ref(inner, m):
+                let i = self.finalized(cx, inner)
+                return self.types.ref_(i, m)
+            case _:
+                return t
 
     ## The type of a parameter as a local of its function: a borrowed
     ## parameter is a `ref T` unless `T` is `Copy` (04, rule 2). A borrowed
@@ -757,9 +1237,9 @@ impl Checker:
         return False
 
 ## The type checker's messages of a program, in order.
-pure def messages(base: Resolver, text: str, catalog: Catalog) -> list[Msg]:
+pure def messages(base: Base, text: str, catalog: Catalog) -> list[Msg]:
     var out: list[Msg] = []
-    for d in check_file(base, text, catalog, False, {}).diagnostics:
+    for d in check_file(base, text, catalog, False, {}, False).diagnostics:
         out.push(d.msg)
     return out
 
@@ -779,7 +1259,7 @@ pure def test_prelude() -> String:
 
 test "stage 0's type errors have their messages":
     let catalog = Catalog.parse("")
-    let r = Resolver.base_from(test_prelude())
+    let r = base_from(test_prelude())
     # The cases of `type_errors_have_codes` in sisu-typeck's tests that are
     # within the slice.
     let cases = [
@@ -819,7 +1299,7 @@ test "stage 0's type errors have their messages":
 
 test "matches, patterns and inferred error sets":
     let catalog = Catalog.parse("")
-    let r = Resolver.base_from(test_prelude())
+    let r = base_from(test_prelude())
     var light: String = "enum Light:\n    Red\n    Amber\n    Green\n"
     light.push(
         "def f(l: Light) -> int:\n    match l:\n        case Light.Red:\n            return 1\n"
@@ -844,10 +1324,10 @@ test "matches, patterns and inferred error sets":
 
 test "a body beyond the slice reports nothing, and says why":
     let catalog = Catalog.parse("")
-    let r = Resolver.base_from(test_prelude())
-    # A template of reflection: stage 0 checks it in its instances.
-    var beyond: String = "def f[T](x: T) -> int:\n    return reflect.fields_of(T)\n"
+    let r = base_from(test_prelude())
+    # An attribute of a function stage 1 does not implement.
+    var beyond: String = "@keeps\ndef f() -> int:\n    return 1\n"
     beyond.push("def g() -> int:\n    return \"x\"\n")
-    let checked = check_file(r, beyond, catalog, False, {})
+    let checked = check_file(r, beyond, catalog, False, {}, False)
     assert checked.diagnostics.is_empty()
-    assert checked.beyond == ["a generic function that reflects on its type parameters"]
+    assert checked.beyond == ["an attribute of a function"]

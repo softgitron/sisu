@@ -37,6 +37,7 @@ from stage1.typeck.thir import (
     TArg,
     TClosure,
     TContractKind,
+    TContracts,
     TExprId,
     TExprKind,
     TStmt,
@@ -71,6 +72,23 @@ impl Checker:
     ## body starts with, once its parameters are declared; `ret` is the
     ## type `result` is in `ensures`.
     pub pure def check_contracts(mut self, cx: Cx, is_test: bool, clauses: list[Clause], ret: Ty):
+        var out = TContracts(
+            requires=[], ensures=[], olds=[], result=None, labels=[], invariant=None
+        )
+        # A `mut self` method of a type with an invariant checks it again
+        # when it returns (07).
+        if let Some(f) = cx.prog.fn_info(self.def_):
+            var plain = True
+            match f.kind:
+                case FnKind.Invariant(_) | FnKind.Drop:
+                    plain = False
+                case _:
+                    pass
+            if f.self_mode == Some(Mode.Mut) and plain:
+                if let Some(o) = f.owner:
+                    if let TyData.Adt(d, args) = self.data(o):
+                        if let Some(check) = cx.prog.invariant_check(d):
+                            out.invariant = Some((check, args.copy()))
         if is_test:
             # `contract.not-in-test`, for each clause.
             if not clauses.is_empty():
@@ -78,16 +96,16 @@ impl Checker:
             return
         for c in clauses:
             if c.kind == ContractKind.Requires:
-                _ = self.contract_clause(cx, TContractKind.Requires, c.expr)
+                out.requires.push(self.contract_clause(cx, TContractKind.Requires, c.expr))
         var ensures: list[Clause] = []
         for c in clauses:
             if c.kind == ContractKind.Ensures:
                 ensures.push(c)
-        if ensures.is_empty():
-            return
-        if self.generator.is_some():
-            # `contract.generator-ensures`.
-            self.other()
+        if ensures.is_empty() or self.generator.is_some():
+            if not ensures.is_empty():
+                # `contract.generator-ensures`.
+                self.other()
+            self.keep_contracts(out)
             return
         # `result` (and a labelled result's labels) name the value
         # returned, as a borrowed parameter would: by reference unless it
@@ -98,17 +116,28 @@ impl Checker:
         let rty = self.param_local_ty(cx, ret, Mode.Borrow)
         let r = self.new_local("result", rty, False, span)
         self.declare("result", r)
+        out.result = Some(r)
         if let TyData.Tuple(elems, labels) = self.data(ret):
             for i in range(len(elems)):
                 if i < len(labels):
                     let lt = self.param_local_ty(cx, elems[i], Mode.Borrow)
                     let x = self.new_local(labels[i], lt, False, span)
                     self.declare(labels[i], x)
+                    out.labels.push((x, i))
         self.ensures = Some(EnsuresCtx(scope=scope, olds=[]))
         for c in ensures:
-            _ = self.contract_clause(cx, TContractKind.Ensures, c.expr)
+            out.ensures.push(self.contract_clause(cx, TContractKind.Ensures, c.expr))
+        if let Some(e) = self.ensures:
+            out.olds = e.olds.copy()
         self.ensures = None
         self.pop_scope()
+        self.keep_contracts(out)
+
+    ## Keeps a contract that checks something, for lowering.
+    pure def keep_contracts(mut self, own c: TContracts):
+        if c.requires.is_empty() and c.ensures.is_empty() and c.invariant.is_none():
+            return
+        self.contracts = Some(c)
 
     ## One clause: a condition that only reads.
     pub pure def contract_clause(

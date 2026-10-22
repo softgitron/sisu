@@ -1,0 +1,448 @@
+##! The SIR text form (stage 0's `sisu-sir/src/write.rs`): one construct per
+##! line, as `sisu sir` prints it; docs/architecture.md ("The text form")
+##! has the grammar.
+
+from stage1.sir import (
+    Aggregate,
+    Callee,
+    ClosureRole,
+    Const,
+    FnKind,
+    Function,
+    ImplDecl,
+    ImplTarget,
+    IntrinsicDecl,
+    Loc,
+    Operand,
+    Place,
+    Program,
+    Proj,
+    Rvalue,
+    Statement,
+    StatementKind,
+    Terminator,
+    Type,
+    TypeDecl,
+    VERSION,
+)
+
+pub pure def write(p: Program) -> String:
+    var out = String.new("sir {VERSION}\n")
+    for i in range(len(p.sources)):
+        out.push("source {i} {quote(p.sources[i])}\n")
+    if let Some(e) = p.entry:
+        out.push("entry {e.function}")
+        if e.takes_system:
+            out.push(" system")
+        if e.returns_result:
+            out.push(" result")
+        out.push("\n")
+    for (name, f) in p.tests:
+        out.push("test {quote(name)} {f}\n")
+    for t in p.types:
+        out.push("\n")
+        write_type_decl(mut out, t)
+    if not p.intrinsics.is_empty():
+        out.push("\n")
+    for i in p.intrinsics:
+        write_decl(mut out, "intrinsic", i)
+    if not p.trait_methods.is_empty():
+        out.push("\n")
+    for i in p.trait_methods:
+        write_decl(mut out, "method", i)
+    if not p.impls.is_empty():
+        out.push("\n")
+    for i in p.impls:
+        write_impl(mut out, i)
+    for f in p.functions:
+        out.push("\n")
+        write_function(mut out, f)
+    return out
+
+## Text in double quotes, with `\"`, `\\`, `\n`, `\t`, `\r`, `\0` and the
+## other control characters as `\u{hex}`.
+pub pure def quote(s: str) -> String:
+    var q = String.new("\"")
+    for c in s.chars():
+        match c:
+            case '"':
+                q.push("\\\"")
+            case '\\':
+                q.push("\\\\")
+            case '\n':
+                q.push("\\n")
+            case '\t':
+                q.push("\\t")
+            case '\r':
+                q.push("\\r")
+            case '\0':
+                q.push("\\0")
+            case _:
+                let n = c.code()
+                if n < 32:
+                    q.push("\\u{{{hex_digits(n)}}}")
+                else:
+                    q.push_char(c)
+    q.push("\"")
+    return q
+
+pure def quote_char(c: char) -> String:
+    return match c:
+        case '\'': "'\\''".to_string()
+        case '\\': "'\\\\'".to_string()
+        case '\n': "'\\n'".to_string()
+        case '\t': "'\\t'".to_string()
+        case '\r': "'\\r'".to_string()
+        case '\0': "'\\0'".to_string()
+        case _: if c.code() < 32: "'\\u{{{hex_digits(c.code())}}}'" else: "'{c}'"
+
+## `n` in lower-case hex digits.
+pure def hex_digits(n: int) -> String:
+    if n == 0:
+        return "0".to_string()
+    var digits: list[char] = []
+    var x = n
+    while x > 0:
+        let d = x % 16
+        digits.push(if d < 10: char.from_code(48 + d) ?? '0' else: char.from_code(87 + d) ?? '0')
+        x = x // 16
+    var out = String.new()
+    var i = len(digits) - 1
+    while i >= 0:
+        out.push_char(digits[i])
+        i -= 1
+    return out
+
+pub pure def ty(t: Type) -> String:
+    match t:
+        case Type.Int:
+            return "int".to_string()
+        case Type.Float:
+            return "f64".to_string()
+        case Type.Bool:
+            return "bool".to_string()
+        case Type.Char:
+            return "char".to_string()
+        case Type.Str:
+            return "str".to_string()
+        case Type.Unit:
+            return "()".to_string()
+        case Type.Never:
+            return "Never".to_string()
+        case Type.Named(n, args):
+            return named(n, args)
+        case Type.Tuple(es):
+            if len(es) == 1:
+                return "({ty(es[0])},)"
+            return "({tys(es)})"
+        case Type.ErrSet(ms):
+            return "{{{ms.join(", ")}}}"
+        case Type.Fn(ps, r, pure):
+            let p = if pure: "pure " else: ""
+            return "{p}fn({tys(ps)}) -> {ty(r[0])}"
+        case Type.Ref(inner, mutable):
+            if mutable:
+                return "ref mut {ty(inner[0])}"
+            return "ref {ty(inner[0])}"
+        case Type.Param(i):
+            return "${i}"
+        case Type.Const(n):
+            return "{n}"
+        case Type.ConstOp(op, args):
+            return "{op.name()}({tys(args)})"
+        case Type.Dyn(n, args):
+            return "dyn {named(n, args)}"
+        case Type.Assoc(s, tr, args, n):
+            return "<{ty(s[0])} as {named(tr, args)}>.{n}"
+
+pure def tys(ts: list[Type]) -> String:
+    var parts: list[String] = []
+    for t in ts:
+        parts.push(ty(t))
+    return parts.join(", ")
+
+## `Name` or `Name[A, B]`.
+pure def named(n: str, args: list[Type]) -> String:
+    if args.is_empty():
+        return n.to_string()
+    return "{n}[{tys(args)}]"
+
+## `[A, B]` after a name, or nothing.
+pure def type_args(args: list[Type]) -> String:
+    if args.is_empty():
+        return String.new()
+    return "[{tys(args)}]"
+
+## `[T, U]` after a declaration's name, or nothing.
+pure def params(ps: list[String]) -> String:
+    if ps.is_empty():
+        return String.new()
+    return "[{ps.join(", ")}]"
+
+pure def write_impl(mut out: String, i: ImplDecl):
+    var ms: list[String] = []
+    for (m, t) in i.methods:
+        match t:
+            case ImplTarget.Fn(f):
+                ms.push("{m}: {f}")
+            case ImplTarget.Intrinsic(f):
+                ms.push("{m}: intrinsic {f}")
+    for (n, t) in i.assoc:
+        ms.push("type {n} = {ty(t)}")
+    let n = if i.params == 0: String.new() else: "[{i.params}]"
+    out.push(
+        "impl{n} {named(i.trait_name, i.trait_args)} for {ty(i.self_ty)} {{ {ms.join(", ")} }}\n"
+    )
+
+pure def write_type_decl(mut out: String, t: TypeDecl):
+    match t:
+        case TypeDecl.Struct(name, ps, fields, drop, view_, must_consume):
+            let v = if view_: "view " else: ""
+            out.push("{v}struct {name}{params(ps)}")
+            if must_consume:
+                out.push(" must_consume")
+            if let Some(d) = drop:
+                out.push(" drop {d}")
+            var fs: list[String] = []
+            for f in fields:
+                match f.default:
+                    case Some(d):
+                        fs.push("{f.name}: {ty(f.ty)} = {d}")
+                    case None:
+                        fs.push("{f.name}: {ty(f.ty)}")
+            out.push(" {{ {fs.join(", ")} }}\n")
+        case TypeDecl.Enum(name, ps, variants, drop, error_, open, must_consume):
+            let kind = if error_: "error" else: "enum"
+            out.push("{kind} {name}{params(ps)}")
+            if open:
+                out.push(" open")
+            if must_consume:
+                out.push(" must_consume")
+            if let Some(d) = drop:
+                out.push(" drop {d}")
+            var vs: list[String] = []
+            for v in variants:
+                if v.fields.is_empty():
+                    vs.push(v.name.copy())
+                else:
+                    var fs: list[String] = []
+                    for (n, t) in v.fields:
+                        match n:
+                            case Some(x):
+                                fs.push("{x}: {ty(t)}")
+                            case None:
+                                fs.push(ty(t))
+                    vs.push("{v.name}({fs.join(", ")})")
+            out.push(" {{ {vs.join(", ")} }}\n")
+
+pure def indices(word: str, xs: list[int]) -> String:
+    if xs.is_empty():
+        return String.new()
+    var parts: list[String] = []
+    for x in xs:
+        parts.push("{x}")
+    return " {word} {parts.join(" ")}"
+
+pure def write_decl(mut out: String, word: str, i: IntrinsicDecl):
+    let pure = if i.pure: " pure" else: ""
+    out.push("{word} {i.name}{pure}")
+    out.push(indices("from", i.from_))
+    out.push(indices("inner", i.inner))
+    out.push(indices("own", i.owns))
+    out.push(indices("keeps", i.keeps))
+    out.push("\n")
+
+pure def kind_name(k: FnKind) -> String:
+    return match k:
+        case FnKind.Normal: String.new()
+        case FnKind.Closure(ClosureRole.Plain): " closure".to_string()
+        case FnKind.Closure(ClosureRole.ScopeBody): " closure scope".to_string()
+        case FnKind.Closure(ClosureRole.Task): " closure task".to_string()
+        case FnKind.Drop: " drop".to_string()
+        case FnKind.Glue: " glue".to_string()
+        case FnKind.Value: " value".to_string()
+        case FnKind.Test: " test".to_string()
+        case FnKind.Comptime(steps): " comptime {steps}"
+
+## One function in the text form.
+pub pure def function(f: Function) -> String:
+    var out = String.new()
+    write_function(mut out, f)
+    return out
+
+pure def write_function(mut out: String, f: Function):
+    let pure = if f.pure: " pure" else: ""
+    out.push(
+        "fn {f.name}{params(f.type_params)}({f.param_count}){kind_name(f.kind)}{pure} source {f.source}"
+    )
+    out.push(indices("from", f.from_))
+    out.push(indices("inner", f.inner))
+    out.push(indices("own", f.owns))
+    out.push(loc(f.loc))
+    out.push(" {{\n")
+    var i = 0
+    for l in f.locals:
+        out.push("    let _{i}: {ty(l.ty)}")
+        if let Some(n) = l.name:
+            out.push(" {quote(n)}")
+        if l.once:
+            out.push(" once")
+        out.push(loc(l.loc))
+        out.push("\n")
+        i += 1
+    var k = 0
+    for b in f.blocks:
+        out.push("  bb{k}")
+        if b.cleanup:
+            out.push(" (cleanup)")
+        elif let Some(u) = b.unwind:
+            out.push(" (unwind bb{u.index})")
+        out.push(":\n")
+        for s in b.stmts:
+            out.push("    ")
+            out.push(stmt(s))
+            out.push("\n")
+        out.push("    ")
+        out.push(term(b.term))
+        out.push(loc(b.loc))
+        out.push("\n")
+        k += 1
+    out.push("}}\n")
+
+## ` @L:C` or ` @L:C-L:C`, or nothing.
+pub pure def loc(l: Loc?) -> String:
+    let x = l else:
+        return String.new()
+    if x.has_end():
+        return " @{x.line}:{x.col}-{x.end_line}:{x.end_col}"
+    return " @{x.line}:{x.col}"
+
+pub pure def stmt(s: Statement) -> String:
+    var body = String.new()
+    match s.kind:
+        case StatementKind.Assign(p, r):
+            body = "{place(p)} = {rvalue(r)}"
+        case StatementKind.Call(dest, callee, args):
+            var c = String.new()
+            match callee:
+                case Callee.Fn(n, ts):
+                    c = "fn {n}{type_args(ts)}"
+                case Callee.Intrinsic(n, ts):
+                    c = "intrinsic {n}{type_args(ts)}"
+                case Callee.Trait(n, ts):
+                    c = "trait {n}{type_args(ts)}"
+                case Callee.Value(o):
+                    c = operand(o)
+            body = "{place(dest)} = call {c}({operands(args)})"
+        case StatementKind.Drop(p, flag):
+            match flag:
+                case Some(f):
+                    body = "drop {place(p)} if _{f.index}"
+                case None:
+                    body = "drop {place(p)}"
+        case StatementKind.StorageDead(l):
+            body = "dead _{l.index}"
+    body.push(loc(s.loc))
+    return body
+
+pub pure def term(t: Terminator) -> String:
+    match t:
+        case Terminator.Goto(b):
+            return "goto bb{b.index}"
+        case Terminator.Switch(value, cases, default):
+            var parts: list[String] = []
+            for (v, b) in cases:
+                parts.push("{v}: bb{b.index}")
+            parts.push("else: bb{default.index}")
+            return "switch {operand(value)} [{parts.join(", ")}]"
+        case Terminator.Return:
+            return "return".to_string()
+        case Terminator.Resume:
+            return "resume".to_string()
+        case Terminator.Unreachable:
+            return "unreachable".to_string()
+
+pub pure def place(p: Place) -> String:
+    var s = "_{p.local.index}"
+    for pr in p.proj:
+        match pr:
+            case Proj.Deref:
+                s.push(".*")
+            case Proj.Field(i):
+                s.push(".{i}")
+            case Proj.Downcast(v):
+                s.push(".as({v})")
+            case Proj.Index(l):
+                s.push("[_{l.index}]")
+            case Proj.IndexFromEnd(l):
+                s.push("[^_{l.index}]")
+            case Proj.Key(l):
+                s.push("{{_{l.index}}}")
+    return s
+
+pub pure def operand(o: Operand) -> String:
+    return match o:
+        case Operand.Copy(p): "copy {place(p)}"
+        case Operand.Move(p): "move {place(p)}"
+        case Operand.Const(c): "const {constant(c)}"
+
+pure def operands(ops: list[Operand]) -> String:
+    var parts: list[String] = []
+    for o in ops:
+        parts.push(operand(o))
+    return parts.join(", ")
+
+pub pure def constant(c: Const) -> String:
+    return match c:
+        case Const.Int(n): "{n}"
+        case Const.Float(f): float(f)
+        case Const.Bool(b): if b: "true".to_string() else: "false".to_string()
+        case Const.Char(x): quote_char(x)
+        case Const.Str(s): quote(s)
+        case Const.Unit: "()".to_string()
+        case Const.Fn(n): "fn {n}"
+
+## A float spelled so that reading it back gives the same bits and it never
+## looks like an integer: the shortest digits, as Rust's `Debug` writes
+## them, which Sisu's interpolation of an `f64` writes too.
+pub pure def float(f: f64) -> String:
+    if f != f:
+        return "nan".to_string()
+    if f > 1.7976931348623157e308:
+        return "inf".to_string()
+    if f < -1.7976931348623157e308:
+        return "-inf".to_string()
+    let s = "{f}"
+    if s.contains(".") or s.contains("e"):
+        return s
+    return "{s}.0"
+
+pub pure def rvalue(r: Rvalue) -> String:
+    match r:
+        case Rvalue.Use(o):
+            return operand(o)
+        case Rvalue.Ref(p, mutable):
+            if mutable:
+                return "ref mut {place(p)}"
+            return "ref {place(p)}"
+        case Rvalue.Binary(op, a, b):
+            return "{op.name()} {operand(a)}, {operand(b)}"
+        case Rvalue.Unary(op, a):
+            return "{op.name()} {operand(a)}"
+        case Rvalue.Aggregate(kind, ops):
+            return match kind:
+                case Aggregate.Tuple: "tuple({operands(ops)})"
+                case Aggregate.Struct(n): "struct {n}({operands(ops)})"
+                case Aggregate.Variant(t, v): "variant {t}::{v}({operands(ops)})"
+                case Aggregate.List: "list({operands(ops)})"
+                case Aggregate.Set: "set({operands(ops)})"
+                case Aggregate.Dict: "dict({operands(ops)})"
+                case Aggregate.Dyn(t): "dyn {ty(t)}({operands(ops)})"
+        case Rvalue.Discriminant(p):
+            return "discriminant {place(p)}"
+        case Rvalue.Closure(n, ts, ops):
+            return "closure {n}{type_args(ts)}({operands(ops)})"
+        case Rvalue.CopyOf(p):
+            return "copyof {place(p)}"
+        case Rvalue.StrView(p):
+            return "strview {place(p)}"

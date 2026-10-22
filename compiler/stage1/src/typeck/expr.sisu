@@ -3,7 +3,7 @@
 ##! closures, `?`, `??`, `?.`, fields and indexing, and the coercions
 ##! between them.
 
-from stage1.diag import Diagnostic, Edit, Msg, TextRange
+from stage1.diag import Diagnostic, Edit, Fix, Msg, Param, TextRange
 from stage1.syntax.ast import (
     Arg,
     Arm,
@@ -105,7 +105,7 @@ impl Checker:
             if exp == Ty.never():
                 return x
             return self.wrap(x, Coercion.NeverToAny, exp)
-        if self.infer.try_unify(self.types, actual, exp):
+        if self.infer.try_unify(mut self.types, actual, exp):
             self.check_purity_coercion(cx, x, exp)
             return x
         # A refinement where its base (or anything its base becomes) is
@@ -138,7 +138,7 @@ impl Checker:
                 var base_ok = False
                 for b in under:
                     let snap = self.infer.snapshot()
-                    if self.infer.unify(self.types, actual, b):
+                    if self.infer.unify(mut self.types, actual, b):
                         base_ok = True
                     self.infer.rollback(snap)
                 if base_ok or actual == Ty.never():
@@ -157,7 +157,7 @@ impl Checker:
                     return self.wrap(x, Coercion.RefStrView, Ty.str())
                 if m:
                     if let TyData.Ref(target, False) = ed:
-                        if self.infer.try_unify(self.types, inner, target):
+                        if self.infer.try_unify(mut self.types, inner, target):
                             return self.wrap(x, Coercion.MutToShared, exp)
             case TyData.ErrSet(a):
                 if let TyData.ErrSet(b) = ed:
@@ -168,7 +168,7 @@ impl Checker:
         if let TyData.Ref(inner, _) = ad:
             if self.is_copy(cx, inner):
                 let snap = self.infer.snapshot()
-                if self.infer.unify(self.types, inner, exp):
+                if self.infer.unify(mut self.types, inner, exp):
                     return self.wrap(x, Coercion.DerefCopy, exp)
                 self.infer.rollback(snap)
             if exp_is_str and self.resolved(inner) == Ty.str():
@@ -178,7 +178,7 @@ impl Checker:
             if let Some((t2, e2)) = self.as_result(cx, exp):
                 if let TyData.ErrSet(a) = self.data(e1):
                     if let TyData.ErrSet(b) = self.data(e2):
-                        if is_subset(a, b) and self.infer.try_unify(self.types, t1, t2):
+                        if is_subset(a, b) and self.infer.try_unify(mut self.types, t1, t2):
                             return self.wrap(x, Coercion.Widen, exp)
         # A value of a type that implements a trait, as `dyn Trait`; a
         # `ref T` as a `ref dyn Trait`; a `Box[T]` as a `Box[dyn Trait]`.
@@ -234,10 +234,10 @@ impl Checker:
                     var ok = False
                     if cx.prog.is_builtin(src, "bytes"):
                         let u8_ty = self.sized_ty(cx, "u8")
-                        ok = self.infer.try_unify(self.types, elem, u8_ty)
+                        ok = self.infer.try_unify(mut self.types, elem, u8_ty)
                     elif cx.prog.is_builtin(src, "list"):
                         if let Some(t) = first_of(srcargs):
-                            ok = self.infer.try_unify(self.types, t, elem)
+                            ok = self.infer.try_unify(mut self.types, t, elem)
                     if ok:
                         let src_ty = self.types.adt(src, srcargs)
                         if let Some(call) = self.builtin_call(cx, x, src_ty, "as_slice", exp):
@@ -247,6 +247,9 @@ impl Checker:
             if let Some(b) = self.int_kind(cx, exp):
                 if widens(a, b):
                     return self.wrap(x, Coercion.IntWiden, exp)
+        # An `f32` as an `f64`, which holds every one (03, "Numbers").
+        if self.float_kind(cx, actual) == Some("f32") and exp == Ty.float():
+            return self.wrap(x, Coercion.FloatWiden, exp)
         # A value of a type that implements a capability's operations
         # trait, as the capability (06).
         if let TyData.Adt(d, _) = ed:
@@ -280,7 +283,7 @@ impl Checker:
                 if let Some((item, _)) = self.iteration_item(cx, actual, Mode.Borrow):
                     let it = self.decay_ty(cx, item)
                     if let Some(t) = first_of(args):
-                        if self.infer.try_unify(self.types, it, t):
+                        if self.infer.try_unify(mut self.types, it, t):
                             return x
         let range = self.span_of(x)
         # An error the expected error set does not include.
@@ -291,7 +294,7 @@ impl Checker:
         if sets.is_none():
             if let Some((t1, e1)) = self.as_result(cx, actual):
                 if let Some((t2, e2)) = self.as_result(cx, exp):
-                    if self.infer.try_unify(self.types, t1, t2):
+                    if self.infer.try_unify(mut self.types, t1, t2):
                         if let TyData.ErrSet(a) = self.data(e1):
                             if let TyData.ErrSet(b) = self.data(e2):
                                 sets = Some((a.copy(), b.copy()))
@@ -349,7 +352,7 @@ impl Checker:
                     var number = False
                     if exp == Ty.int():
                         number = s.parse_int().is_some()
-                    elif exp == Ty.float():
+                    elif self.float_kind(cx, exp).is_some():
                         number = s.parse_float().is_some() and s.contains(".")
                     else:
                         number = self.int_kind(cx, exp).is_some() and s.parse_int().is_some()
@@ -560,11 +563,8 @@ impl Checker:
                 if suffix.is_none():
                     return self.literal_via_trait(cx, x, expected)
                 return x
-            case ExprKind.Float(_, value, suffix):
-                if let Some(s) = suffix:
-                    if s != "f64":
-                        self.unsupported()
-                let x = self.add(TExprKind.Float(value), Ty.float(), span)
+            case ExprKind.Float(text, value, suffix):
+                let x = self.float_literal(cx, value, suffix, text, False, span, expected)
                 if suffix.is_none():
                     return self.literal_via_trait(cx, x, expected)
                 return x
@@ -734,15 +734,27 @@ impl Checker:
             if s != "int" and s != "i64":
                 self.unsupported()
                 return self.error_expr(range)
-        var to_float = False
+        var to_float: String? = None
         if suffix.is_none():
             if let Some(t) = expected:
-                to_float = self.resolved(t) == Ty.float()
+                to_float = self.float_kind(cx, t)
         let limit = if negative: pow2(63) else: pow2(63) - one()
         match value:
             case Some(v):
                 if v <= limit:
-                    if to_float:
+                    # An integer literal where a float is expected is that
+                    # float, rounded once (`v as f32` rounds to the nearest).
+                    if to_float == Some("f32"):
+                        var f: f32 = 0.0
+                        if v == pow2(63):
+                            f = u128_to_int(v, True).to_f32()
+                        else:
+                            f = u128_to_int(v, False).to_f32()
+                            if negative:
+                                f = -f
+                        let ty = self.sized_ty(cx, "f32")
+                        return self.add(TExprKind.Float(f.to_f64()), ty, range)
+                    if to_float.is_some():
                         var f = u128_to_float(v)
                         if negative:
                             f = -f
@@ -801,11 +813,76 @@ impl Checker:
         # A `u64` above `int`'s range: its 64-bit pattern, `v - 2^64`.
         return self.add(TExprKind.Int(u128_to_int(pow2(64) - v, True)), ty, range)
 
-    ## The sized integer type named `k` (`u8`).
+    ## The sized integer type named `k` (`u8`), or `f32`.
     pub pure def sized_ty(mut self, cx: Cx, k: str) -> Ty:
         let d = cx.prog.lookup_in(cx.prog.prelude, k) else:
             return Ty.error()
         return self.types.adt(d, [])
+
+    ## `f64` for `f64`, `f32` for `f32`, `None` for any other type.
+    pub pure def float_kind(self, cx: Cx, t: Ty) -> String?:
+        let r = self.resolved(t)
+        match self.data(r):
+            case TyData.Float:
+                return Some("f64".to_string())
+            case TyData.Adt(d, a):
+                if a.is_empty() and cx.prog.builtin(d) == Some("f32"):
+                    return Some("f32".to_string())
+                return None
+            case _:
+                return None
+
+    ## Whether `t` is a number type: an integer type or a float type.
+    pub pure def is_number(self, cx: Cx, t: Ty) -> bool:
+        return self.int_kind(cx, t).is_some() or self.float_kind(cx, t).is_some()
+
+    ## Whether the expression's type is `int` or `f64`.
+    pure def int_or_float(self, x: TExprId) -> bool:
+        let t = self.resolved(self.ty_of(x))
+        return t == Ty.int() or t == Ty.float()
+
+    ## A float literal: an `f64`, or an `f32` by its suffix or where one is
+    ## expected, rounded once from its text (03, "Numbers"); one whose
+    ## magnitude its type cannot hold is `E0374`.
+    pure def float_literal(
+        mut self,
+        cx: Cx,
+        value: f64,
+        suffix: String?,
+        text: str,
+        negative: bool,
+        range: TextRange,
+        expected: Ty?,
+    ) -> TExprId:
+        var kind = "f64".to_string()
+        match suffix:
+            case Some(s):
+                if s == "f32" or s == "f64":
+                    kind = s.copy()
+                else:
+                    let d = self.error(cx, Msg.TypeFloatSuffix, range).with("suffix", s)
+                    self.report(d)
+                    return self.error_expr(range)
+            case None:
+                if let Some(t) = expected:
+                    if let Some(k) = self.float_kind(cx, t):
+                        kind = k
+        var v = if negative: -value else: value
+        var ty = Ty.float()
+        if kind == "f32":
+            let digits = text.strip_suffix("f32").replace("_", "")
+            let f: f32 = digits.parse_f32() ?? 0.0
+            v = if negative: (-f).to_f64() else: f.to_f64()
+            ty = self.sized_ty(cx, "f32")
+        # An infinity: beyond the largest finite `f64`.
+        if v.abs() > 1.7976931348623157e308:
+            let t = if negative: "-{text}" else: text.to_string()
+            let d = self.error(cx, Msg.TypeLiteralOutOfRange, range).with("text", t).with(
+                "ty", kind
+            )
+            self.report(d)
+            return self.error_expr(range)
+        return self.add(TExprKind.Float(v), ty, range)
 
     ## An expression as the borrowed receiver of a builtin method: a
     ## reference is passed on, a `Copy` value copied, anything else
@@ -927,13 +1004,14 @@ impl Checker:
                             let t = self.resolved(stripped)
                             let integers_only = "boxXd".contains(letter)
                             var wrong = self.is_string(cx, t)
-                            match self.types.data(t):
-                                case TyData.Float:
-                                    wrong = integers_only
-                                case TyData.Bool | TyData.Char | TyData.Str:
-                                    wrong = True
-                                case _:
-                                    pass
+                            if self.float_kind(cx, t).is_some():
+                                wrong = integers_only
+                            else:
+                                match self.types.data(t):
+                                    case TyData.Bool | TyData.Char | TyData.Str:
+                                        wrong = True
+                                    case _:
+                                        pass
                             if wrong:
                                 let shown = self.show(cx, t)
                                 var d = self.error(cx, Msg.TypeNoDisplay, at)
@@ -1139,7 +1217,7 @@ impl Checker:
             let r = self.resolved(exp)
             if let TyData.Adt(d, _) = self.types.data(r):
                 if d == def_:
-                    _ = self.infer.try_unify(self.types, ty, r)
+                    _ = self.infer.try_unify(mut self.types, ty, r)
         return (ty, args)
 
     pub pure def unit_variant(
@@ -1172,14 +1250,14 @@ impl Checker:
         var hint: Ty? = None
         if let Some(t) = expected:
             let r = self.resolved(t)
-            if r == Ty.int() or r == Ty.float() or self.int_kind(cx, r).is_some():
+            if self.is_number(cx, r):
                 hint = Some(r)
         let l0 = self.infer_expr(cx, lhs, hint)
         let l1 = self.decay(cx, l0)
         var l = self.unrefined(cx, l1)
         let lt = self.resolved(self.ty_of(l))
         var rhint: Ty? = None
-        if lt == Ty.int() or lt == Ty.float() or self.int_kind(cx, lt).is_some():
+        if self.is_number(cx, lt):
             rhint = Some(lt)
         let r0 = self.infer_expr(cx, rhs, rhint)
         # A reference to what is not known yet, against a number, reads a
@@ -1187,13 +1265,22 @@ impl Checker:
         if let Some(num) = rhint:
             if let TyData.Ref(inner, _) = self.data(self.ty_of(r0)):
                 if let TyData.Var(_) = self.data(inner):
-                    _ = self.infer.unify(self.types, inner, num)
+                    _ = self.infer.unify(mut self.types, inner, num)
         let r1 = self.decay(cx, r0)
         var r = self.unrefined(cx, r1)
         # A literal on the left takes the type of a float on the right.
-        if let TExprKind.Int(n) = self.exprs[l.index].kind:
-            if self.resolved(self.ty_of(r)) == Ty.float():
-                l = self.add(TExprKind.Float(n.to_f64()), Ty.float(), self.span_of(l))
+        let right = self.resolved(self.ty_of(r))
+        match self.exprs[l.index].kind:
+            case TExprKind.Int(n):
+                if right == Ty.float():
+                    l = self.add(TExprKind.Float(n.to_f64()), Ty.float(), self.span_of(l))
+                elif self.float_kind(cx, right) == Some("f32") and self.int_or_float(l):
+                    l = self.infer_expr(cx, lhs, Some(right))
+            case TExprKind.Float(_):
+                if self.float_kind(cx, right) == Some("f32") and self.int_or_float(l):
+                    l = self.infer_expr(cx, lhs, Some(right))
+            case _:
+                pass
         # A literal on the left takes the sized integer type on the right.
         let rt = self.resolved(self.ty_of(r))
         if let Some(k) = self.int_kind(cx, rt):
@@ -1202,14 +1289,25 @@ impl Checker:
                     if self.resolved(self.ty_of(l)) == Ty.int():
                         l = self.infer_expr(cx, lhs, Some(rt))
         # Integers of two types: the narrower widens when that loses nothing.
+        var widened = False
         if let Some(a) = self.int_kind(cx, self.ty_of(l)):
             if let Some(b) = self.int_kind(cx, self.ty_of(r)):
                 if a != b and widens(a, b):
                     let to = self.resolved(self.ty_of(r))
                     l = self.wrap(l, Coercion.IntWiden, to)
+                    widened = True
                 elif a != b and widens(b, a):
                     let to = self.resolved(self.ty_of(l))
                     r = self.wrap(r, Coercion.IntWiden, to)
+                    widened = True
+        # An `f32` beside an `f64` widens, as an integer does.
+        if not widened:
+            let lk = self.float_kind(cx, self.ty_of(l))
+            let rk = self.float_kind(cx, self.ty_of(r))
+            if lk == Some("f32") and rk == Some("f64"):
+                l = self.wrap(l, Coercion.FloatWiden, Ty.float())
+            elif lk == Some("f64") and rk == Some("f32"):
+                r = self.wrap(r, Coercion.FloatWiden, Ty.float())
         if let Some(call) = self.operator_call(cx, op, l, Some(r), range):
             return call
         let (ty, _) = self.binary_result(cx, op, l, r, range)
@@ -1249,7 +1347,7 @@ impl Checker:
                 return None
             case _:
                 pass
-        if self.is_string(cx, lt):
+        if self.is_string(cx, lt) or self.float_kind(cx, lt).is_some():
             return None
         var tdef = DefId(index=0)
         var method = String.new()
@@ -1277,10 +1375,10 @@ impl Checker:
             return None
         let sig = self.instantiate(cx, m, None, range)
         if let Some(v) = sig.type_args.first():
-            _ = self.infer.try_unify(self.types, v, lt)
+            _ = self.infer.try_unify(mut self.types, v, lt)
         if let Some(t) = rt:
             if len(sig.type_args) > 1:
-                _ = self.infer.try_unify(self.types, sig.type_args[1], t)
+                _ = self.infer.try_unify(mut self.types, sig.type_args[1], t)
         var args = [self.as_ref_arg(l)]
         if let Some(x) = r:
             args.push(self.as_ref_arg(x))
@@ -1308,9 +1406,9 @@ impl Checker:
         let lvar = is_var_data(self.types.data(lt))
         let rvar = is_var_data(self.types.data(rt))
         if lvar and not rvar:
-            _ = self.infer.unify(self.types, lt, rt)
+            _ = self.infer.unify(mut self.types, lt, rt)
         elif rvar and not lvar:
-            _ = self.infer.unify(self.types, rt, lt)
+            _ = self.infer.unify(mut self.types, rt, lt)
         lt = self.resolved(lt)
         rt = self.resolved(rt)
         # Two values of one sized integer type: what `int` allows.
@@ -1324,6 +1422,17 @@ impl Checker:
                     if op == BinOp.And or op == BinOp.Or or op == BinOp.Coalesce:
                         return (Ty.error(), False)
                     return (lt, True)
+        # Two `f32`s: what two `f64`s allow, giving an `f32`.
+        if self.float_kind(cx, lt) == Some("f32") and self.float_kind(cx, rt) == Some("f32"):
+            match op:
+                case BinOp.FloorDiv:
+                    let d = self.error(cx, Msg.TypeFloatFloorDivision, range)
+                    self.report(d)
+                    return (lt, False)
+                case BinOp.Add | BinOp.Sub | BinOp.Mul | BinOp.Div | BinOp.Mod | BinOp.Pow:
+                    return (lt, True)
+                case _:
+                    pass
         let both_int = lt == Ty.int() and rt == Ty.int()
         let both_float = lt == Ty.float() and rt == Ty.float()
         if op == BinOp.Div and both_int:
@@ -1358,17 +1467,22 @@ impl Checker:
         if result.is_none() and op == BinOp.Add and self.is_text(cx, lt) and self.is_text(cx, rt):
             result = Some(self.string_ty(cx))
         if result.is_none():
-            let mixed = (lt == Ty.int() and rt == Ty.float())
-                or (lt == Ty.float() and rt == Ty.int())
+            let mixed = (lt == Ty.int() and self.float_kind(cx, rt).is_some())
+                or (self.float_kind(cx, lt).is_some() and rt == Ty.int())
             if mixed:
-                # The fix converts the `int` side.
+                # The fix converts the `int` side: a literal gets its `.0`,
+                # anything else `.to_f64()` (or `.to_f32()`).
                 let int_side = if lt == Ty.int(): l else: r
+                let float = if lt == Ty.int(): rt else: lt
+                let kind = self.float_kind(cx, float) ?? "f64".to_string()
                 let shown_l = self.show(cx, lt)
                 let shown_r = self.show(cx, rt)
                 var d = self.error(cx, Msg.TypeMixedNumbers, range)
                 d = d.with("op", op.text()).with("lhs", shown_l).with("rhs", shown_r)
-                let edits = self.to_float_edits(cx, int_side)
-                self.report(d.fix_edits(Msg.TypeConvertToFloat, edits))
+                let edits = self.to_float_edits(cx, int_side, kind)
+                let ty_param = Param(name="ty".to_string(), value=kind)
+                d.fixes.push(Fix(msg=Msg.TypeConvertToFloat, params=[ty_param], edits=edits))
+                self.report(d)
                 return (Ty.error(), False)
         if let Some(t) = result:
             return (t, True)
@@ -1392,14 +1506,15 @@ impl Checker:
 
     pure def is_shown(self, cx: Cx, t: Ty) -> bool:
         match self.types.data(t):
-            case TyData.Int | TyData.Float | TyData.Bool | TyData.Char:
+            case TyData.Int | TyData.Bool | TyData.Char:
                 return True
             case _:
-                return self.int_kind(cx, t).is_some()
+                return self.is_number(cx, t)
 
-    ## The edits that make an `int` operand an `f64`: `2` becomes `2.0`, a
-    ## name or a call gets `.to_f64()`, anything else is parenthesised.
-    pure def to_float_edits(self, cx: Cx, x: TExprId) -> list[Edit]:
+    ## The edits that make an `int` operand a float of kind `kind` (`f64` or
+    ## `f32`): `2` becomes `2.0`, a name or a call gets `.to_f64()` (or
+    ## `.to_f32()`), anything else is parenthesised first.
+    pure def to_float_edits(self, cx: Cx, x: TExprId, kind: str) -> list[Edit]:
         let r = self.span_of(x)
         let text = cx.source.byte_slice(r.start, r.end)
         var digits = not text.is_empty()
@@ -1416,10 +1531,10 @@ impl Checker:
             let first = text.byte_at(0)
             simple = is_alpha(first) or first == 95
         if simple:
-            return [Edit(start=r.end, end=r.end, text=".to_f64()".to_string())]
+            return [Edit(start=r.end, end=r.end, text=".to_{kind}()")]
         return [
             Edit(start=r.start, end=r.start, text="(".to_string()),
-            Edit(start=r.end, end=r.end, text=").to_f64()".to_string()),
+            Edit(start=r.end, end=r.end, text=").to_{kind}()"),
         ]
 
     ## `"text" + x` (or `x + "text"`) as one interpolated string, when the
@@ -1459,8 +1574,8 @@ impl Checker:
                     if suffix.is_none():
                         return self.literal_via_trait(cx, x, expected)
                     return x
-                case ExprKind.Float(_, value, suffix):
-                    let x = self.add(TExprKind.Float(-value), Ty.float(), range)
+                case ExprKind.Float(text, value, suffix):
+                    let x = self.float_literal(cx, value, suffix, text, True, range, expected)
                     if suffix.is_none():
                         return self.literal_via_trait(cx, x, expected)
                     return x
@@ -1473,7 +1588,7 @@ impl Checker:
             var hint: Ty? = None
             if let Some(t) = expected:
                 let r = self.resolved(t)
-                if r == Ty.int() or r == Ty.float():
+                if r == Ty.int() or self.float_kind(cx, r).is_some():
                     hint = Some(r)
             let y = self.infer_expr(cx, inner, hint)
             let z = self.decay(cx, y)
@@ -1488,6 +1603,8 @@ impl Checker:
         elif op == UnOp.Not:
             ty = Ty.bool()
         elif op == UnOp.Neg and (t == Ty.int() or t == Ty.float()):
+            ty = t
+        elif op == UnOp.Neg and self.float_kind(cx, t).is_some():
             ty = t
         elif op == UnOp.BitNot and t == Ty.int():
             ty = Ty.int()
@@ -1557,7 +1674,7 @@ impl Checker:
                     self.require(b, cx.prog.wk.eq, range)
                     if keyed:
                         self.require(b, cx.prog.wk.hash, range)
-                    if not self.infer.try_unify(self.types, a, b):
+                    if not self.infer.try_unify(mut self.types, a, b):
                         let shown_l = self.show(cx, lt)
                         let shown_e = self.show(cx, el)
                         var d = self.error(cx, Msg.TypeComparisonTypes, range)
@@ -1572,7 +1689,7 @@ impl Checker:
             return
         let a = self.strip_text(cx, lt)
         let b = self.strip_text(cx, rt)
-        if not self.infer.try_unify(self.types, a, b):
+        if not self.infer.try_unify(mut self.types, a, b):
             let shown_l = self.show(cx, lt)
             let shown_r = self.show(cx, rt)
             var d = self.error(cx, Msg.TypeComparisonTypes, range)
@@ -1625,7 +1742,7 @@ impl Checker:
         # `a ?? b ?? c`: an optional default keeps the option.
         let d = self.infer_expr(cx, rhs, Some(inner_r))
         if self.as_option(cx, self.ty_of(d)).is_some()
-                and self.infer.try_unify(self.types, self.ty_of(d), self.ty_of(o)):
+                and self.infer.try_unify(mut self.types, self.ty_of(d), self.ty_of(o)):
             let ty = self.ty_of(o)
             return self.add(TExprKind.Coalesce(opt=o, default=d, deref=False), ty, range)
         if let TyData.Ref(target, _) = self.types.data(inner_r).copy():
@@ -2111,7 +2228,7 @@ impl Checker:
                 block = self.check_block_in_scope(cx, b)
                 let r = self.resolved(ret)
                 if is_var_data(self.types.data(r)):
-                    _ = self.infer.unify(self.types, r, Ty.unit())
+                    _ = self.infer.unify(mut self.types, r, Ty.unit())
                 elif r != Ty.unit() and r != Ty.error() and not self.block_diverges(block):
                     let shown = self.show(cx, r)
                     var d = self.error(cx, Msg.TypeMissingReturn, b.range)
@@ -2159,7 +2276,7 @@ impl Checker:
                     let v2 = self.infer.fresh(mut self.types)
                     shape = Some(self.types.adt(r, [v1, v2]))
             if let Some(s) = shape:
-                _ = self.infer.unify(self.types, ret, s)
+                _ = self.infer.unify(mut self.types, ret, s)
         if let Some(t) = self.as_option(cx, self.ty_of(x)):
             if self.as_option(cx, ret).is_none() and self.resolved(ret) != Ty.error():
                 let shown = self.show(cx, self.ty_of(x))
@@ -2185,7 +2302,7 @@ impl Checker:
                 from_ = m.copy()
             if self.infer.is_absorbing(self.types, fe):
                 let set = self.types.err_set(from_.copy())
-                _ = self.infer.unify(self.types, fe, set)
+                _ = self.infer.unify(mut self.types, fe, set)
                 let k = TryKind.Result(from_=from_.copy(), to=from_.copy())
                 return self.add(TExprKind.Try(expr=x, kind=k), t, range)
             var to: list[DefId] = []
@@ -2194,7 +2311,7 @@ impl Checker:
                     to = m.copy()
                 case TyData.Var(_):
                     let set = self.types.err_set(from_.copy())
-                    _ = self.infer.unify(self.types, fe, set)
+                    _ = self.infer.unify(mut self.types, fe, set)
                     to = from_.copy()
                 case _:
                     pass

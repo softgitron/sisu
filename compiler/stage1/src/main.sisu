@@ -5,14 +5,17 @@
 ##! sisu run -- tokens [--trivia] FILE          # what `sisu tokens` prints
 ##! sisu run -- parse --tree [--trivia] FILE    # what `sisu parse --tree` prints
 ##! sisu run -- parse --print FILE              # the source, reprinted from the tree
+##! sisu run -- parse --ast FILE                # what `sisu parse --ast` prints: the AST
 ##! sisu run -- batch OUT LIST                  # every file LIST names
 ##! sisu run -- mutate SEED COUNT OUT LIST       # COUNT mutants of the files LIST names
 ##! sisu run -- names FILE                      # the name diagnostics, as `sisu check --format=ids`
 ##! sisu run -- names-batch OUT LIST            # those of every file LIST names
-##! sisu run -- ast FILE                        # the AST, in the notation of Rust's `Debug`
-##! sisu run -- ast-batch OUT LIST              # that of every file LIST names
+##! sisu run -- ast-batch OUT LIST              # the AST of every file LIST names
 ##! sisu run -- types FILE                    # the type diagnostics, as `sisu check --format=ids`
 ##! sisu run -- types-batch OUT LIST          # those of every file LIST names
+##! sisu run -- sir FILE                      # what `sisu sir FILE` prints: the program's SIR
+##! sisu run -- ownership FILE                # the ownership checker's diagnostics, as `sisu check --format=ids`
+##! sisu run -- sir-batch OUT LIST            # both, for every file LIST names
 ##! ```
 ##!
 ##! `tokens` and `parse` print to standard output, and the diagnostics in
@@ -21,21 +24,34 @@
 ##! files `OUT/n.tokens` and `OUT/n.tokens.err` (what `tokens --trivia`
 ##! prints), `OUT/n.tree` and `OUT/n.tree.err` (what `parse --tree`
 ##! prints), `OUT/n.trivia.tree`, `OUT/n.print` (the reprint) and `OUT/n.ast`
-##! (what `ast` prints), so that one run of the interpreter checks many
-##! files.
-##! `mutate` writes `OUT/m1.sisu` to `OUT/mCOUNT.sisu`, each a mutant of one
-##! of the files in turn (`mutants.sisu`). `names` resolves the names of one
-##! module (`resolve.sisu`) against the prelude and the std modules it
-##! imports, read from `../std/`; `names-batch` writes `OUT/n.names`.
-##! `ast` prints the AST of a file (`syntax.ast.build`) as `syntax.ast.dump`
-##! writes it, one line per item; `ast-batch` writes `OUT/n.ast`. `types`
-##! checks a file's bodies against the prelude (`typeck.sisu`) and prints
-##! the type checker's diagnostics, then on standard error why parts of the
-##! file are beyond the slice it checks; `types-batch` resolves the prelude
-##! once and writes `OUT/n.types` and `OUT/n.beyond`.
+##! (what `parse --ast` prints), so that one run of the interpreter checks
+##! many files. `mutate` writes `OUT/m1.sisu` to `OUT/mCOUNT.sisu`, each a
+##! mutant of one of the files in turn (`mutants.sisu`). `names` resolves
+##! the names of one module (`resolve.sisu`) against the prelude and the
+##! std modules it imports, read from `../std/`; `names-batch` writes
+##! `OUT/n.names`. `parse --ast` prints the AST of a file
+##! (`syntax.ast.build`) as `syntax.ast.dump` writes it, in the notation of
+##! Rust's `{:#?}`; `ast-batch` writes `OUT/n.ast`. `types` checks a file's
+##! bodies against the prelude (`typeck.sisu`) and prints the type
+##! checker's diagnostics, then on standard error why parts of the file are
+##! beyond the slice it checks; `types-batch` resolves the prelude once and
+##! writes `OUT/n.types` and `OUT/n.beyond`. `sir` lowers a file the type
+##! checker checks whole (`lower.sisu`), places its drops (`borrowck.sisu`),
+##! threads its jumps (`sir.simplify`) and prints its SIR as `sisu sir`
+##! does, or nothing when the front end finds an error, then on standard
+##! error why the file is beyond the slice of lowering. `ownership` prints
+##! the diagnostics of the ownership checker's rules stage 1 has
+##! (`borrowck.sisu`) for the same file, as `sisu check --format=ids` prints
+##! them. `sir-batch` writes `OUT/n.sir`, `OUT/n.ownership` and
+##! `OUT/n.beyond`, and prints the time the front end, lowering and the
+##! ownership checker took.
 ##! `--catalog PATH` names the message catalog, by default
 ##! `../catalog/messages.catalog`.
 
+import stage1.borrowck
+import stage1.lower
+import stage1.sir.simplify
+import stage1.sir.write
 import stage1.typeck
 from stage1.diag import Catalog, quote, render_ids
 from stage1.lexer import Lexed, lex
@@ -44,7 +60,7 @@ from stage1.parser import parse, parse_lexed
 from stage1.resolve import Environment, ModuleNames, imported_std_modules
 from stage1.syntax.ast import ExprKind, StrPart, build
 from stage1.syntax.ast import visit
-from stage1.syntax.ast.dump import module_lines
+from stage1.syntax.ast.dump import module_debug
 from stage1.syntax.kinds import KindNames
 from stage1.typeck.std_sources import importable
 
@@ -79,7 +95,9 @@ def main(sys: System) -> ! {IoError, UsageError}:
         let text = sys.fs.read_to_string(Path.new(path))?
         let parsed = parse(text, catalog)
         let errs = render_ids(text, parsed.diagnostics, catalog)
-        if rest.contains("--print"):
+        if rest.contains("--ast"):
+            emit(module_debug(build.module(parsed.tree)), errs)
+        elif rest.contains("--print"):
             emit(parsed.tree.to_source(), errs)
         else:
             emit(parsed.tree.dump(rest.contains("--trivia")), errs)
@@ -108,7 +126,7 @@ def main(sys: System) -> ! {IoError, UsageError}:
             let trivia_tree = parsed.tree.dump(True)
             let reprint = parsed.tree.to_source()
             let t4 = now(sys)
-            let ast = module_lines(build.module(parsed.tree))
+            let ast = module_debug(build.module(parsed.tree))
             let t5 = now(sys)
             times.lex += t1 - t0
             times.parse += t3 - t2
@@ -163,11 +181,6 @@ def main(sys: System) -> ! {IoError, UsageError}:
             let out = names(sys, text, mut env, catalog)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.names"), out)?
         return Ok(())
-    if command == "ast" and len(rest) == 2:
-        let text = sys.fs.read_to_string(Path.new(rest[1].copy()))?
-        let parsed = parse(text, catalog)
-        emit(module_lines(build.module(parsed.tree)), "")
-        return Ok(())
     if command == "ast-batch" and len(rest) == 3:
         let out_dir = rest[1].copy()
         let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
@@ -178,7 +191,7 @@ def main(sys: System) -> ! {IoError, UsageError}:
             n += 1
             let text = sys.fs.read_to_string(Path.new(path))?
             let parsed = parse(text, catalog)
-            let lines = module_lines(build.module(parsed.tree))
+            let lines = module_debug(build.module(parsed.tree))
             sys.fs.write_text(Path.new("{out_dir}/{n}.ast"), lines)?
         return Ok(())
     if command == "types" and len(rest) == 2:
@@ -187,7 +200,7 @@ def main(sys: System) -> ! {IoError, UsageError}:
         let text = sys.fs.read_to_string(Path.new(rest[1].copy()))?
         let named = name_error(sys, text, mut env, catalog)?
         let embedded = embedded_files(sys, rest[1], text, catalog)
-        let checked = typeck.check_file(base, text, catalog, named, embedded)
+        let checked = typeck.check_file(base, text, catalog, named, embedded, False)
         var why = String.new()
         for b in checked.beyond:
             why.push("beyond the slice: {b}\n")
@@ -206,7 +219,7 @@ def main(sys: System) -> ! {IoError, UsageError}:
             let text = sys.fs.read_to_string(Path.new(path))?
             let named = name_error(sys, text, mut env, catalog)?
             let embedded = embedded_files(sys, path, text, catalog)
-            let checked = typeck.check_file(base, text, catalog, named, embedded)
+            let checked = typeck.check_file(base, text, catalog, named, embedded, False)
             var why = String.new()
             for b in checked.beyond:
                 why.push("{b}\n")
@@ -214,6 +227,72 @@ def main(sys: System) -> ! {IoError, UsageError}:
                 Path.new("{out_dir}/{n}.types"), typeck.render(text, checked, catalog)
             )?
             sys.fs.write_text(Path.new("{out_dir}/{n}.beyond"), why)?
+        return Ok(())
+    if command == "sir" and len(rest) == 2:
+        let base = typeck.base(std_texts(sys)?)
+        var env = environment(sys)?
+        let path = rest[1].copy()
+        let text = sys.fs.read_to_string(Path.new(path))?
+        let named = name_error(sys, text, mut env, catalog)?
+        let embedded = embedded_files(sys, path, text, catalog)
+        let done = sir_of(base, text, path, catalog, named, embedded)
+        var errs = String.new()
+        for b in done.beyond:
+            errs.push("beyond the slice: {b}\n")
+        emit(done.sir, errs)
+        return Ok(())
+    if command == "ownership" and len(rest) == 2:
+        let base = typeck.base(std_texts(sys)?)
+        var env = environment(sys)?
+        let path = rest[1].copy()
+        let text = sys.fs.read_to_string(Path.new(path))?
+        let named = name_error(sys, text, mut env, catalog)?
+        let embedded = embedded_files(sys, path, text, catalog)
+        let done = sir_of(base, text, path, catalog, named, embedded)
+        var errs = String.new()
+        for b in done.beyond:
+            errs.push("beyond the slice: {b}\n")
+        emit(done.ownership, errs)
+        return Ok(())
+    if command == "sir-batch" and len(rest) == 3:
+        let base = typeck.base(std_texts(sys)?)
+        var env = environment(sys)?
+        let out_dir = rest[1].copy()
+        let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
+        var times = SirTimes(check=0, lower=0, ownership=0)
+        var n = 0
+        for path in list.lines():
+            if path.is_empty():
+                continue
+            n += 1
+            let text = sys.fs.read_to_string(Path.new(path))?
+            let named = name_error(sys, text, mut env, catalog)?
+            let embedded = embedded_files(sys, path, text, catalog)
+            # The pipeline of `sir_of`, a step at a time, timed.
+            let t0 = now(sys)
+            let (checked, early) = front_of(base, text, catalog, named, embedded)
+            let t1 = now(sys)
+            let ended = early.is_some()
+            var done = early ?? Lowering(sir=String.new(), ownership=String.new(), beyond=[])
+            var t2 = t1
+            if not ended:
+                if let Some(lowered) = lower_of(checked, base, path, catalog):
+                    t2 = now(sys)
+                    done = finish_of(lowered, text, catalog)
+            let t3 = now(sys)
+            times.check += t1 - t0
+            times.lower += t2 - t1
+            if t2 != t1:
+                times.ownership += t3 - t2
+            var reasons = String.new()
+            for b in done.beyond:
+                reasons.push("{b}\n")
+            sys.fs.write_text(Path.new("{out_dir}/{n}.sir"), done.sir)?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.ownership"), done.ownership)?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.beyond"), reasons)?
+        print(
+            "files {n} check {ms(times.check)} ms lower {ms(times.lower)} ms ownership {ms(times.ownership)} ms"
+        )
         return Ok(())
     if command == "mutate" and len(rest) == 5:
         let seed = rest[1].parse_int() ?? 1
@@ -230,6 +309,92 @@ def main(sys: System) -> ! {IoError, UsageError}:
             sys.fs.write_text(Path.new("{out_dir}/m{k + 1}.sisu"), mutant)?
         return Ok(())
     return Err(Usage(text=usage()))
+
+## What stage 1 makes of a file for `sisu sir` and for the ownership
+## checker's part of `sisu check`: the SIR (nothing when the front end
+## finds an error), the ownership checker's diagnostics as `sisu check
+## --format=ids` prints them, and why the file is beyond the slice of
+## lowering, when it is (then neither is stage 0's).
+struct Lowering:
+    sir: String
+    ownership: String
+    beyond: list[String]
+
+pure def sir_of(
+    base: typeck.Base,
+    text: str,
+    path: str,
+    catalog: Catalog,
+    named: bool,
+    embedded: dict[String, bool],
+) -> Lowering:
+    let (checked, early) = front_of(base, text, catalog, named, embedded)
+    if let Some(done) = early:
+        return done.copy()
+    let lowered = lower_of(checked, base, path, catalog) else:
+        return Lowering(
+            sir=String.new(), ownership=String.new(), beyond=["nothing to lower".to_string()]
+        )
+    return finish_of(lowered, text, catalog)
+
+## Lowering's part, for a file the front end checked whole.
+pure def lower_of(
+    own checked: typeck.Checked, base: typeck.Base, path: str, catalog: Catalog
+) -> lower.Lowered?:
+    let typed = checked.typed else:
+        return None
+    return Some(lower.lower(typed, base, path, catalog))
+
+## The front end's part: the checked file, and what `sir_of` gives when it
+## ends there (beyond the type checker's slice, or a front-end error).
+pure def front_of(
+    base: typeck.Base, text: str, catalog: Catalog, named: bool, embedded: dict[String, bool]
+) -> (typeck.Checked, Lowering?):
+    let checked = typeck.check_file(base, text, catalog, named, embedded, True)
+    # A body that may get one of the ownership checker's `type.` messages
+    # is typed whole: the ownership checker here decides them.
+    var why: list[String] = []
+    for b in checked.beyond:
+        if not checked.owner_beyond.contains(b):
+            why.push("beyond the type checker's slice: {b}")
+    if not why.is_empty():
+        return (checked, Some(Lowering(sir=String.new(), ownership=String.new(), beyond=why)))
+    # `sisu sir` prints nothing for a program with a front-end error, and
+    # the ownership checker does not run.
+    if checked.has_error:
+        return (checked, Some(Lowering(sir=String.new(), ownership=String.new(), beyond=[])))
+    if checked.typed.is_none():
+        return (
+            checked,
+            Some(
+                Lowering(
+                    sir=String.new(),
+                    ownership=String.new(),
+                    beyond=["nothing to lower".to_string()],
+                )
+            ),
+        )
+    return (checked, None)
+
+## The ownership checker's part, and the SIR's text.
+pure def finish_of(lowered: lower.Lowered, text: str, catalog: Catalog) -> Lowering:
+    if not lowered.beyond.is_empty():
+        return Lowering(sir=String.new(), ownership=String.new(), beyond=lowered.beyond.copy())
+    var done = borrowck.check(lowered.program)
+    simplify.program(mut done.program)
+    let diags = borrowck.diagnostics(done.findings, text, catalog) else:
+        let elsewhere = "an ownership finding in a file of the standard library or one the compiler wrote"
+        return Lowering(sir=String.new(), ownership=String.new(), beyond=[elsewhere.to_string()])
+    return Lowering(
+        sir=write.write(done.program), ownership=render_ids(text, diags, catalog), beyond=[]
+    )
+
+## Where `sir-batch` spends its time, in nanoseconds: the front end, the
+## lowering, and the ownership checker with the writing of the SIR.
+struct SirTimes:
+    check: int
+    lower: int
+    ownership: int
 
 ## The prelude's names, with the std modules every module sees without an
 ## import (stage 0's `std_sources::AMBIENT`, and `target`), whose variants
@@ -351,7 +516,7 @@ pure def ms(nanos: int) -> int:
     return nanos // 1000000
 
 pure def usage() -> String:
-    return "usage: sisu run -- tokens [--trivia] FILE | parse (--tree [--trivia] | --print) FILE | batch OUT LIST | mutate SEED COUNT OUT LIST | names FILE | ast FILE | types FILE | types-batch OUT LIST".to_string()
+    return "usage: sisu run -- tokens [--trivia] FILE | parse (--tree [--trivia] | --print | --ast) FILE | batch OUT LIST | ast-batch OUT LIST | mutate SEED COUNT OUT LIST | names FILE | names-batch OUT LIST | types FILE | types-batch OUT LIST | sir FILE | ownership FILE | sir-batch OUT LIST".to_string()
 
 ## Prints `out` to standard output and `errs` to standard error exactly:
 ## both end in a line break, which `print` adds.

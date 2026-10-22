@@ -194,9 +194,12 @@ impl Checker:
     pub pure def expr_as_type(mut self, cx: Cx, e: ExprId) -> Ty:
         match cx.ast.expr(e).kind:
             case ExprKind.Int(_, value, None):
-                if let Some(v) = value:
-                    if let Some(n) = v.to_int():
-                        return self.types.intern(TyData.Const(n))
+                let v = value else:
+                    # `parse.expected-type`.
+                    self.other()
+                    return Ty.error()
+                if let Some(n) = v.to_int():
+                    return self.types.intern(TyData.Const(n))
                 return Ty.error()
             case ExprKind.Name(n):
                 # A `const` parameter of the function itself, passed on.
@@ -205,6 +208,11 @@ impl Checker:
                             and i < len(self.const_generics)
                             and self.const_generics[i]:
                         return self.types.param(i)
+                # A constant of the program.
+                if self.lookup_local(n).is_none():
+                    if let Some(d) = cx.prog.lookup(self.module, n):
+                        if let DefKind.Const(_) = cx.prog.defs[d.index].kind:
+                            return self.const_arg(cx, e)
                 if let Some(t) = primitive_value_type(n):
                     return t
                 if let Some(StaticPath.Type(t)) = self.static_path(cx, e):
@@ -225,6 +233,9 @@ impl Checker:
                 if tys.is_empty():
                     return Ty.unit()
                 return self.types.tuple(tys)
+            # A constant computed where it is written: `size[N * 2]()`.
+            case ExprKind.Binary(_, _, _) | ExprKind.Unary(_, _) | ExprKind.Paren(_):
+                return self.const_arg(cx, e)
             case _:
                 # `parse.expected-type`.
                 self.other()
@@ -861,12 +872,12 @@ impl Checker:
         var sig = self.instantiate(cx, d, tys, at)
         if let Some(o) = outer:
             for i in range(min(len(sig.type_args), len(o))):
-                _ = self.infer.try_unify(self.types, sig.type_args[i], o[i])
+                _ = self.infer.try_unify(mut self.types, sig.type_args[i], o[i])
         # A method of an impl for some of a type's values is not one of the
         # others.
         if let Some(o) = owner:
             if let Some(so) = sig.owner:
-                if not self.infer.try_unify(self.types, so, o)
+                if not self.infer.try_unify(mut self.types, so, o)
                         and recv.is_some()
                         and not self.infer.has_vars(mut self.types, o)
                         and o != Ty.error():
@@ -887,7 +898,7 @@ impl Checker:
             # Let the expected type drive inference (`list()`, `todo()`).
             if self.infer.has_vars(mut self.types, sig.ret):
                 let snap = self.infer.snapshot()
-                if not self.infer.unify(self.types, sig.ret, exp):
+                if not self.infer.unify(mut self.types, sig.ret, exp):
                     self.infer.rollback(snap)
         var out: list[TArg] = []
         if let Some(r) = recv:
@@ -903,6 +914,11 @@ impl Checker:
             let zero = self.add(TExprKind.Int(0), Ty.int(), TextRange.empty(args[0].range.start))
             out.push(TArg(expr=zero, mode=ArgMode.Value))
             out.push(self.check_arg(cx, arg_in(cx.ast, args[0]), p))
+            # The parameters after the two take their defaults, as for any
+            # call that omits them.
+            for i in range(2, len(sig.params)):
+                if sig.params[i].has_default:
+                    out.push(self.default_arg(cx, sig, i, at))
         else:
             for x in self.check_args(cx, sig, args, trailing, at):
                 out.push(x)
@@ -970,6 +986,26 @@ impl Checker:
         return Some(Edit(start=pos, end=pos, text=insert))
 
     ## Matches arguments to parameters and checks each.
+    ## The argument a call that omits parameter `i` passes: its default, a
+    ## temporary passed as an argument written there would be.
+    pure def default_arg(mut self, cx: Cx, sig: InstSig, i: int, at: TextRange) -> TArg:
+        let p = ref sig.params[i]
+        var mode = ArgMode.Value
+        match p.mode:
+            case Mode.Own:
+                mode = ArgMode.Value
+            case Mode.Mut:
+                mode = ArgMode.BorrowMut
+            case Mode.Borrow:
+                if p.opaque:
+                    mode = ArgMode.Ref
+                elif self.is_copy(cx, p.ty):
+                    mode = ArgMode.Value
+                else:
+                    mode = ArgMode.Borrow
+        let x = self.add(TExprKind.DefaultArg(def_=sig.def_, param=i), p.ty, at)
+        return TArg(expr=x, mode=mode)
+
     pub pure def check_args(
         mut self, cx: Cx, sig: InstSig, args: list[Arg], trailing: Closure?, at: TextRange
     ) -> list[TArg]:
@@ -1036,6 +1072,7 @@ impl Checker:
                         extra = True
                         _ = self.infer_expr(cx, a.value, None)
                     pos += 1
+        var trailing_extra = False
         if let Some(c) = trailing:
             # A `do` block binds to the last function-typed parameter.
             var target: int? = None
@@ -1060,17 +1097,19 @@ impl Checker:
                     placed = True
             if not placed:
                 extra = True
+                trailing_extra = True
         if extra:
-            # Stage 0 counts every parameter and argument; past a bare `*`
-            # the positional ones are the ones too many (DISCREPANCIES.md,
-            # D5).
+            # With keyword-only parameters, the positional ones are counted
+            # against the arguments without a name (PEP 3102: "takes 1
+            # positional argument but 2 were given"); otherwise every
+            # parameter is counted against every argument.
             var expected = n
             var found = len(args)
             if trailing.is_some():
                 found += 1
-            if kw_from < n:
-                expected = kw_from
-                found = 0
+            if let Some(k) = sig.keyword_only_from:
+                expected = k
+                found = if trailing_extra: 1 else: 0
                 for a in args:
                     if a.name.is_none():
                         found += 1
@@ -1085,23 +1124,7 @@ impl Checker:
                     out.push(self.check_arg(cx, a.copy(), p))
                 case None:
                     if p.has_default:
-                        # A default is a temporary, passed as an argument
-                        # written there would be.
-                        var mode = ArgMode.Value
-                        match p.mode:
-                            case Mode.Own:
-                                mode = ArgMode.Value
-                            case Mode.Mut:
-                                mode = ArgMode.BorrowMut
-                            case Mode.Borrow:
-                                if p.opaque:
-                                    mode = ArgMode.Ref
-                                elif self.is_copy(cx, p.ty):
-                                    mode = ArgMode.Value
-                                else:
-                                    mode = ArgMode.Borrow
-                        let x = self.add(TExprKind.DefaultArg(def_=sig.def_, param=i), p.ty, at)
-                        out.push(TArg(expr=x, mode=mode))
+                        out.push(self.default_arg(cx, sig, i, at))
                         continue
                     if not extra:
                         var d = self.error(cx, Msg.TypeMissingArgument, at)
@@ -1179,12 +1202,12 @@ impl Checker:
             case Mode.Mut:
                 let x = self.arg_infer(cx, a, Some(pty))
                 if let TyData.Ref(inner, True) = self.data(self.ty_of(x)):
-                    if not self.infer.try_unify(self.types, inner, pty):
+                    if not self.infer.try_unify(mut self.types, inner, pty):
                         let target = self.types.ref_(pty, True)
                         let y = self.coerce(cx, x, target)
                         return TArg(expr=y, mode=ArgMode.Value)
                     return TArg(expr=x, mode=ArgMode.Value)
-                if not self.infer.try_unify(self.types, self.ty_of(x), pty):
+                if not self.infer.try_unify(mut self.types, self.ty_of(x), pty):
                     let y = self.coerce(cx, x, pty)
                     return TArg(expr=y, mode=ArgMode.BorrowMut)
                 if self.is_place(x):
@@ -1195,7 +1218,7 @@ impl Checker:
                     # A generic parameter: always by reference.
                     let x = self.arg_infer(cx, a, Some(pty))
                     if let TyData.Ref(inner, _) = self.data(self.ty_of(x)):
-                        if self.infer.try_unify(self.types, inner, pty):
+                        if self.infer.try_unify(mut self.types, inner, pty):
                             return TArg(expr=x, mode=ArgMode.Value)
                     let y = self.coerce(cx, x, pty)
                     return TArg(expr=y, mode=ArgMode.Ref)
@@ -1207,7 +1230,7 @@ impl Checker:
                     return TArg(expr=x, mode=ArgMode.Value)
                 let x = self.arg_infer(cx, a, Some(pty))
                 if let TyData.Ref(inner, _) = self.data(self.ty_of(x)):
-                    if self.infer.try_unify(self.types, inner, pty):
+                    if self.infer.try_unify(mut self.types, inner, pty):
                         # A reference is passed on as it is.
                         return TArg(expr=x, mode=ArgMode.Value)
                 let y = self.coerce(cx, x, pty)
@@ -1225,7 +1248,7 @@ impl Checker:
             if let TyData.Adt(d2, ta2) = self.data(inner):
                 if Some(d2) == cx.prog.wk.iterable:
                     let given = if ta2.is_empty(): Ty.error() else: ta2[0]
-                    if not self.infer.try_unify(self.types, given, item_ty):
+                    if not self.infer.try_unify(mut self.types, given, item_ty):
                         let shown_p = self.show(cx, pty)
                         let shown_x = self.show(cx, self.ty_of(x))
                         let d = self.error(cx, Msg.TypeMismatch, a.value_range)
@@ -1234,7 +1257,7 @@ impl Checker:
         match self.iteration_item(cx, self.ty_of(x), Mode.Borrow):
             case Some((item, mode)):
                 let it = self.decay_ty(cx, item)
-                if not self.infer.try_unify(self.types, it, item_ty):
+                if not self.infer.try_unify(mut self.types, it, item_ty):
                     let shown_p = self.show(cx, pty)
                     let shown_x = self.show(cx, self.ty_of(x))
                     let d = self.error(cx, Msg.TypeMismatch, a.value_range)

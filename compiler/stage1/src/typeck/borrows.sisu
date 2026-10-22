@@ -1,0 +1,386 @@
+##! Which parameters a function's result may borrow from (stage 0's
+##! `sisu-resolve/src/borrows.rs`; 04, "Borrowing rules in detail"): the
+##! `from` clause, or the three elision rules. Lowering writes the result
+##! into SIR, where the ownership checker uses it at every call and checks
+##! every `return` against it. `can_borrow` is `typeck.program`'s.
+
+from stage1.syntax.ast import Mode
+from stage1.typeck.program import DefKind, FnInfo, Program
+from stage1.typeck.ty import Ty, TyData, Types
+
+## How a function's result relates to its arguments' loans.
+@derive(Eq, Copy)
+pub enum ResultShape:
+    ## The result cannot hold a loan.
+    Plain
+    ## The result is or contains a reference or a view, which may point
+    ## into the arguments it borrows from.
+    Deep
+    ## The result is a generic `T` (or contains one, `T?`): it holds what
+    ## the arguments' values hold, never a reference into the arguments.
+    Inner
+
+## The arguments (`self` is argument 0 of a method) a result may borrow
+## from.
+pub struct ResultBorrows:
+    pub deep: list[int]
+    pub inner: list[int]
+
+## One parameter as the elision rules see it.
+pub struct SigParam:
+    pub name: String
+    pub mode: Mode
+    pub ty: Ty
+
+## What a value of a result type can point into, beyond the loans the
+## arguments' values hold, in increasing order: nothing, only text (a `str`
+## views a `String` or a `Path`), any place (a reference, a closure, an
+## iterator, a generic value).
+const REACH_NOTHING: int = 0
+const REACH_TEXT: int = 1
+const REACH_ANYTHING: int = 2
+
+impl Program:
+    ## Whether a type is a view by its spelling (04, "Views"): a reference,
+    ## `str`, a `view struct`, or a collection, option or tuple of views.
+    ## Only a `view struct` may have a field of such a type.
+    pub pure def is_view_type(self, mut types: Types, ty: Ty) -> bool:
+        let data = types.data(ty).copy()
+        if let TyData.Adt(d, args) = data:
+            if let Some(b) = self.refinement_base(mut types, d, args):
+                return self.is_view_type(mut types, b)
+        match data:
+            case TyData.Ref(_, _) | TyData.Str:
+                return True
+            case TyData.Tuple(es, _):
+                for e in es:
+                    if self.is_view_type(mut types, e):
+                        return True
+                return False
+            case TyData.Adt(d, args):
+                match self.defs[d.index].kind:
+                    case DefKind.Struct(s):
+                        if let Some(b) = s.builtin:
+                            let bs: str = b
+                            match bs:
+                                case "MutexGuard" | "Lent" | "Slice":
+                                    return True
+                                case _:
+                                    pass
+                        elif s.view_:
+                            return True
+                        for a in args:
+                            if self.is_view_type(mut types, a):
+                                return True
+                        return False
+                    case DefKind.Enum(_):
+                        for a in args:
+                            if self.is_view_type(mut types, a):
+                                return True
+                        return False
+                    case _:
+                        return False
+            case _:
+                return False
+
+    ## Whether a value of the type is a `Copy` handle on a heap cell that
+    ## nothing frees: a capability handle, a `TestClock`, a `Cap` or a
+    ## `Lent`.
+    pub pure def is_heap_handle(self, types: Types, ty: Ty) -> bool:
+        let TyData.Adt(d, _) = types.data(ty) else:
+            return False
+        let b = self.builtin(d) else:
+            return False
+        let bs: str = b
+        match bs:
+            case "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "TestClock" | "Cap" | "Lent":
+                return True
+            case _:
+                return False
+
+    ## The shape of a declared result type (before substitution).
+    pub pure def result_shape(self, mut types: Types, ret: Ty) -> ResultShape:
+        if self.deep_result(mut types, ret):
+            return ResultShape.Deep
+        if generic_result(types, ret):
+            return ResultShape.Inner
+        return ResultShape.Plain
+
+    pure def deep_result(self, mut types: Types, t: Ty) -> bool:
+        let data = types.data(t).copy()
+        if let TyData.Adt(d, args) = data:
+            if let Some(b) = self.refinement_base(mut types, d, args):
+                return self.deep_result(mut types, b)
+        match data:
+            case TyData.Ref(_, _) | TyData.Str | TyData.Fn(_, _, _):
+                return True
+            case TyData.Tuple(es, _):
+                for e in es:
+                    if self.deep_result(mut types, e):
+                        return True
+                return False
+            case TyData.Adt(d, args):
+                match self.defs[d.index].kind:
+                    case DefKind.Struct(s):
+                        if let Some(b) = s.builtin:
+                            let bs: str = b
+                            match bs:
+                                case "Iter" | "Entry" | "Iterable" | "MutexGuard" | "Lent" | "Slice":
+                                    return True
+                                case _:
+                                    pass
+                        elif s.view_:
+                            return True
+                        for a in args:
+                            if self.deep_result(mut types, a):
+                                return True
+                        return False
+                    case DefKind.Enum(_):
+                        for a in args:
+                            if self.deep_result(mut types, a):
+                                return True
+                        return False
+                    case _:
+                        return False
+            case _:
+                return False
+
+    ## What a value of the type can point into (`REACH_...`).
+    pure def reach(self, mut types: Types, t: Ty, depth: int) -> int:
+        if depth > 16:
+            return REACH_ANYTHING
+        let data = types.data(t).copy()
+        if let TyData.Adt(d, args) = data:
+            if let Some(b) = self.refinement_base(mut types, d, args):
+                return self.reach(mut types, b, depth + 1)
+        match data:
+            case TyData.Ref(_, _) | TyData.Fn(_, _, _) | TyData.Param(_) | TyData.Var(
+                _
+            ) | TyData.Error:
+                return REACH_ANYTHING
+            case TyData.Str:
+                return REACH_TEXT
+            case TyData.Tuple(es, _):
+                return self.most(mut types, es, depth)
+            case TyData.Adt(d, args):
+                let of_args = self.most(mut types, args, depth)
+                match self.defs[d.index].kind:
+                    case DefKind.Struct(s):
+                        if let Some(b) = s.builtin:
+                            let bs: str = b
+                            return match bs:
+                                case "Iter" | "Entry" | "Iterable" | "Lent" | "Slice": REACH_ANYTHING
+                                case _: of_args
+                        if s.view_:
+                            var tys: list[Ty] = []
+                            for f in s.fields:
+                                tys.push(f.ty)
+                            return max(self.most(mut types, tys, depth), of_args)
+                        return of_args
+                    case DefKind.Enum(_):
+                        return of_args
+                    case _:
+                        return REACH_NOTHING
+            case _:
+                return REACH_NOTHING
+
+    ## The most any of the types reaches.
+    pure def most(self, mut types: Types, ts: list[Ty], depth: int) -> int:
+        var m = REACH_NOTHING
+        for t in ts:
+            m = max(m, self.reach(mut types, t, depth + 1))
+        return m
+
+    ## Whether a value of the type owns text a `str` could view: a `String`
+    ## or `Path` in its own storage, not behind a reference.
+    pure def owns_text(self, mut types: Types, t: Ty, depth: int) -> bool:
+        if depth > 16:
+            return True
+        let data = types.data(t).copy()
+        if let TyData.Adt(d, args) = data:
+            if let Some(b) = self.refinement_base(mut types, d, args):
+                return self.owns_text(mut types, b, depth + 1)
+        match data:
+            case TyData.Ref(_, _) | TyData.Str | TyData.Fn(_, _, _):
+                return False
+            case TyData.Param(_) | TyData.Var(_) | TyData.Error:
+                return True
+            case TyData.Tuple(es, _):
+                for e in es:
+                    if self.owns_text(mut types, e, depth + 1):
+                        return True
+                return False
+            case TyData.Adt(d, args):
+                for a in args:
+                    if self.owns_text(mut types, a, depth + 1):
+                        return True
+                match self.defs[d.index].kind:
+                    case DefKind.Struct(s):
+                        if let Some(b) = s.builtin:
+                            let bs: str = b
+                            return match bs:
+                                case "String" | "Path" | "Iter" | "Entry" | "Iterable": True
+                                case _: False
+                        for f in s.fields:
+                            if self.owns_text(mut types, f.ty, depth + 1):
+                                return True
+                        return False
+                    case DefKind.Enum(e):
+                        for v in e.variants:
+                            for (_, ft) in v.fields:
+                                if self.owns_text(mut types, ft, depth + 1):
+                                    return True
+                        return False
+                    case _:
+                        return False
+            case _:
+                return False
+
+    ## The parameters of a function as its arguments: `self` first.
+    pub pure def sig_params(self, f: FnInfo) -> list[SigParam]:
+        var out: list[SigParam] = []
+        if let Some(mode) = f.self_mode:
+            if let Some(owner) = f.owner:
+                out.push(SigParam(name="self".to_string(), mode=mode, ty=owner))
+        for p in f.params:
+            out.push(SigParam(name=p.name.copy(), mode=p.mode, ty=p.ty))
+        return out
+
+    ## 04: "A parameter counts as borrowed when it is passed without `own`
+    ## and is not `Copy`, or when its type is a view, since a result may
+    ## point into a view."
+    pub pure def is_borrowed_param(self, mut types: Types, p: SigParam) -> bool:
+        return match p.mode:
+            case Mode.Mut: True
+            case Mode.Own: False
+            case Mode.Borrow: not self.is_copy(mut types, p.ty) or self.can_borrow(mut types, p.ty)
+
+    ## Whether a borrowed parameter can lend anything to a result of type
+    ## `ret`. A function value lends only what its calls return, unless the
+    ## result can hold the function itself (`Filter` holds `keep`).
+    pub pure def can_lend(self, mut types: Types, p: SigParam, ret: Ty) -> bool:
+        if let TyData.Fn(_, fret, _) = types.data(p.ty).copy():
+            return self.can_borrow(mut types, fret) or self.holds_fn_value(mut types, ret, 0)
+        return True
+
+    ## Whether a value of the type can hold a function value: a function
+    ## type in it, or a `view struct`, whose fields may be anything.
+    pure def holds_fn_value(self, mut types: Types, t: Ty, depth: int) -> bool:
+        if depth > 16:
+            return True
+        let data = types.data(t).copy()
+        if let TyData.Adt(d, args) = data:
+            if let Some(b) = self.refinement_base(mut types, d, args):
+                return self.holds_fn_value(mut types, b, depth + 1)
+        match data:
+            case TyData.Fn(_, _, _):
+                return True
+            case TyData.Ref(inner, _):
+                return self.holds_fn_value(mut types, inner, depth + 1)
+            case TyData.Tuple(es, _):
+                for e in es:
+                    if self.holds_fn_value(mut types, e, depth + 1):
+                        return True
+                return False
+            case TyData.Adt(d, args):
+                if let DefKind.Struct(s) = self.defs[d.index].kind:
+                    if s.view_:
+                        return True
+                for a in args:
+                    if self.holds_fn_value(mut types, a, depth + 1):
+                        return True
+                return False
+            case _:
+                return False
+
+    ## The borrowed parameters a result comes from: the `from` clause; or
+    ## the only borrowed parameter; or `self`; otherwise every borrowed
+    ## parameter.
+    pub pure def from_params(self, mut types: Types, f: FnInfo) -> list[int]:
+        let params = self.sig_params(f)
+        var out: list[int] = []
+        if not f.from_.is_empty():
+            for i in range(len(params)):
+                if f.from_.contains(params[i].name):
+                    out.push(i)
+            return out
+        for i in range(len(params)):
+            let p = ref params[i]
+            if self.is_borrowed_param(mut types, p) and self.can_lend(mut types, p, f.ret):
+                out.push(i)
+        if len(out) <= 1:
+            return out
+        if f.self_mode.is_some() and out[0] == 0:
+            return [0]
+        return out
+
+    ## The arguments a call's result may borrow from: the borrowed
+    ## parameters of `from_params` and every owned parameter whose value can
+    ## hold a loan (a view moved in can come back out).
+    pub pure def result_borrows_of(self, mut types: Types, f: FnInfo) -> ResultBorrows:
+        let shape = self.result_shape(mut types, f.ret)
+        if shape == ResultShape.Plain:
+            return ResultBorrows(deep=[], inner=[])
+        let params = self.sig_params(f)
+        # A handle on a heap cell that is never freed lends nothing of its
+        # own: what a result reaches through it lives as long as the
+        # program.
+        var from_: list[int] = []
+        for i in self.from_params(mut types, f):
+            if not self.is_heap_handle(types, params[i].ty):
+                from_.push(i)
+        var deep: list[int] = []
+        for i in range(len(params)):
+            if params[i].mode == Mode.Own and self.can_borrow(mut types, params[i].ty):
+                deep.push(i)
+        var inner: list[int] = []
+        match shape:
+            case ResultShape.Deep:
+                let reach = self.reach(mut types, f.ret, 0)
+                for i in from_:
+                    let p = ref params[i]
+                    let by_ref = match p.mode:
+                        case Mode.Mut: True
+                        case Mode.Own: False
+                        case Mode.Borrow: not self.is_copy(mut types, p.ty)
+                    let text = reach == REACH_TEXT and self.owns_text(mut types, p.ty, 0)
+                    if not by_ref or reach == REACH_ANYTHING or text:
+                        deep.push(i)
+                    elif not deep.contains(i):
+                        inner.push(i)
+            case _:
+                for i in from_:
+                    if not deep.contains(i):
+                        inner.push(i)
+        deep.sort()
+        var unique: list[int] = []
+        for i in deep:
+            if not unique.contains(i):
+                unique.push(i)
+        return ResultBorrows(deep=unique, inner=inner)
+
+## Whether a type mentions a generic parameter.
+pure def generic_result(types: Types, t: Ty) -> bool:
+    # A copy: `types` is passed on below while the parts are walked.
+    match types.data(t).copy():
+        case TyData.Param(_):
+            return True
+        case TyData.Tuple(es, _):
+            for e in es:
+                if generic_result(types, e):
+                    return True
+            return False
+        case TyData.Adt(_, args):
+            for a in args:
+                if generic_result(types, a):
+                    return True
+            return False
+        case TyData.Ref(inner, _):
+            return generic_result(types, inner)
+        case TyData.Fn(ps, r, _):
+            for p in ps:
+                if generic_result(types, p):
+                    return True
+            return generic_result(types, r)
+        case _:
+            return False

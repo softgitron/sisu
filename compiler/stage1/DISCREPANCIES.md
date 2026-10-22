@@ -5,15 +5,9 @@ Stage 1 transcribes the Rust front end (`sisu-lexer`, `sisu-syntax`,
 rule. Where the Rust behaviour is an accident rather than a rule, stage 1
 does what the documents say instead, and the difference is listed here,
 with the file that shows it, both outputs, and the documents that decide.
-The coordinator decides which side changes; until then `check.sh` accepts
-exactly the differences listed under **Differs** and fails on any other.
-
-None of D1 to D3 occurs in the conformance suite, `compiler/std/` or
-`proposal/examples/`: every one of those 412 files gives identical tokens,
-trees, reprints and ASTs. D4 is a difference of name resolution, the stage-1
-resolver's, and shows in `proposal/examples/testing.sisu`. D5 is a
-difference of the type checker's and shows in no file of the corpus. The
-other files below are stage 1's own cases (`compiler/stage1/cases/`).
+The coordinator decides which side changes (D-079); until then `check.sh`
+accepts exactly the differences listed under **Differs** and fails on any
+other.
 
 The **Differs** lines are read by `check.sh`: a path from the repository
 root, then the outputs that differ (`tokens` is `sisu tokens --trivia` with
@@ -22,197 +16,17 @@ its diagnostics, `tree` is `sisu parse --tree` with its diagnostics,
 diagnostics of `sisu check --format=ids`, those stage 1's resolver
 reports, and `types` the type checker's diagnostics of the same command).
 
-## D1. A line break inside a one-line interpolation becomes an error token
-
-- Differs: `compiler/stage1/cases/newline_in_interpolation.sisu`: tokens, tree, trivia-tree
-
-```sisu
-    print("a{x
-    print("b")
-```
-
-The scanner reports `E0018 lex.newline-in-interpolation`, closes the
-interpolation and the string with zero-width `INTERP_END` and `STRING_END`,
-and returns without consuming the line break. `scan`'s guard against
-stalling ("Never stall: consume one character as an error token") then
-takes the line break as an `ERROR_TOKEN`, so the layout pass never sees a
-line end there and the next line joins the broken one; the parser puts the
-`ERROR_TOKEN` in an `ERROR` node. No diagnostic names the error token.
-
-Stage 0 (`sisu tokens --trivia`, line 31 of 70):
-
-```text
-ERROR_TOKEN 175..176 "\n"
-```
-
-Stage 1:
-
-```text
-LINE_BREAK 175..176 "\n"
-```
-
-and in the tree, stage 0's `ERROR 175..222` (which holds the
-`ERROR_TOKEN`) is stage 1's `ERROR 180..222`. The diagnostics are the
-same in this file; when an open bracket is closed by the layout's recovery
-on the line after, the two also report different `E0009`s, because they
-see different lines. This is the only difference mutation finds: in
-`check.sh --mutants 2000 --seed 7`, 25 of the 2000 mutants differ, all
-this way, 3 of them in their diagnostics too (with `--mutants 400`, the
-default seed, 5 of 400).
-
-**The documents support stage 1.** The scanner's own comment is "Inside an
-interpolation of a one-line string, a line break ends the string: report it
-and fall back to code", and docs/architecture.md says "An unterminated string
-ends at the line break"; an `ERROR_TOKEN` is otherwise the token of an
-unknown character, reported as `E0005`. Stage 1 closes the interpolation and
-the string and scans the line break as code. The fix in stage 0 is to fall
-through to the `match c` in `Scanner::code` (`sisu-lexer/src/scan.rs`)
-instead of returning.
-
-## D2. `\u{+41}` is accepted as an escape
-
-- Differs: `compiler/stage1/cases/unicode_escape_sign.sisu`: tokens, tree, trivia-tree
-
-```sisu
-    let a = '\u{+41}'
-    let b = "x\u{+1F600}y"
-```
-
-`Scanner::escape` checks the digits of `\u{...}` with
-`u32::from_str_radix(hex, 16)`, which accepts a leading `+`, so stage 0 takes
-`'\u{+41}'` as `'A'` (and `sisu run` prints `A`). Stage 1 accepts one to six
-hex digits only, so for stage 1 `\u{+41}` is an invalid escape, handled as
-stage 0 handles any other invalid `\u{...}`: `E0007` from the backslash,
-and the braces stay in the text (in a string, `{` then opens an
-interpolation).
-
-Stage 0: no diagnostics. Stage 1 (`sisu parse --tree`):
-
-```text
-4:13-4:22 E0016 lex.bad-char-literal
-5:15-5:17 E0007 lex.invalid-escape escape="u"
-```
-
-**The documents support stage 1.** proposal/02-syntax.md writes the escape
-as `'\u{1F600}'` and names no sign; a sign in a code point is a property of
-Rust's integer parser, not of Sisu. The fix in stage 0 is to check that
-`hex` is all ASCII hex digits before `from_str_radix`, in the lexer and
-wherever the literal's value is decoded.
-
-## D3. A nested struct resets "reported once per body"
-
-- Differs: `compiler/stage1/cases/nested_struct_members.sisu`: tree
-
-```sisu
-struct A:
-    print(1)
-    struct B:
-        x: int
-    print(2)
-
-struct C:
-    struct D:
-        print(4)
-    print(5)
-```
-
-Stage 0 keeps one flag, `bad_member_reported`, for the whole parser, and
-`struct_def` sets it to `false` at the start of every struct. A struct
-declared inside another struct's body therefore resets the outer body's
-flag, and the inner body's report sets it for the outer one.
-
-Stage 0 (`sisu parse --tree`, diagnostics):
-
-```text
-5:5-5:10 E0126 parse.expected-member
-8:5-8:10 E0126 parse.expected-member
-13:9-13:14 E0126 parse.expected-member
-```
-
-Stage 1:
-
-```text
-5:5-5:10 E0126 parse.expected-member
-13:9-13:14 E0126 parse.expected-member
-14:5-14:10 E0126 parse.expected-member
-```
-
-`A`'s body is reported twice by stage 0 and `C`'s not at all.
-
-**The documents support stage 1.** docs/architecture.md, "Error tolerance":
-"A struct body line that is neither a field, a method nor `pass` is reported
-once per body (`E0126`)", and the field's comment in `parser.rs`, "A struct
-body already has a line that is not a member, so the following ones are not
-reported again". Stage 1 saves the flag before a struct's body and restores
-it after (`struct_def` in `src/parser/items.sisu`); stage 0 can do the same.
-
-## D4. One unknown name in a parametrised test is reported once per case
-
-- Differs: `compiler/stage1/cases/parametrised_test_names.sisu`: names
-- Differs: `proposal/examples/testing.sisu`: names
-
-```sisu
-test "doubles" for n in [1, 2, 3]:
-    assert double(n) == 2 * n
-```
-
-Stage 0 makes a test of each case of a parametrised test (17) before it
-checks them (`tests_of::cases` in `sisu-resolve/src/collect.rs`), and so
-checks the body once per case: `sisu check --format=ids` prints
-
-```text
-4:12-4:18 E0200 resolve.undefined-name name="double"
-4:12-4:18 E0200 resolve.undefined-name name="double"
-4:12-4:18 E0200 resolve.undefined-name name="double"
-```
-
-where stage 1's resolver prints the line once. `proposal/examples/testing.sisu`
-shows it for its undeclared `parse_int` and `BadDigit` (three cases, each
-reported three times); with the repeats removed the two outputs are the same.
-
-**The documents support stage 1.** The parser's own principle is "one
-mistake yields one message" (`sisu-parser/src/lib.rs`), docs/architecture.md
-calls the error-tolerance rules "the rules that keep one mistake from
-producing many messages", and the conformance README compares diagnostics
-"by catalog identifier" as a set of mistakes. Stage 0 can check the body of
-a parametrised test once and expand the cases after, or drop diagnostics
-that repeat one at the same span.
-
-## D5. Too many positional arguments for keyword-only parameters
-
-- Differs: `compiler/stage1/cases/type_calls.sisu`: types
-
-```sisu
-def scale(x: int, /, *, by: int) -> int:
-    return x * by
-
-def main():
-    print(scale(2, 3))
-```
-
-`check_args` (`sisu-typeck/src/call.rs`) finds the `3` too many because it
-comes after the last positional parameter, then reports the count of every
-parameter against the count of every argument, which are equal here:
-
-Stage 0 (`sisu check --format=ids`):
-
-```text
-18:11-18:22 E0305 type.argument-count name="scale" expected="2" found="2"
-```
-
-Stage 1:
-
-```text
-18:11-18:22 E0305 type.argument-count name="scale" expected="1" found="2"
-```
-
-**The documents support stage 1.** The message is "wrong number of
-arguments to `scale`: expected 2, found 2", which contradicts itself;
-proposal/02-syntax.md makes the parameters after a bare `*` keyword-only
-"(PEP 3102)", whose rule counts the positional parameters against the
-positional arguments ("takes 1 positional argument but 2 were given").
-Stage 1 does so when the function has keyword-only parameters; stage 0
-can count `kw_from` and the arguments without a name in that case.
+None is listed now. The first round's five (D1 to D5: a line break inside
+the interpolation of a one-line string, `\u{+41}` as an escape, a nested
+struct resetting "reported once per body", one unknown name in a
+parametrised test reported once per case, and the count `E0305` reports
+past a bare `*`) were decided for the documents, and stage 0 now behaves
+as stage 1 does (docs/architecture.md, decisions 165 to 168 and 179). The
+stage-1 cases that showed them stay in `cases/` and give identical outputs,
+and the conformance suite has a case for each (`syntax/newline_in_interpolation`,
+`syntax/unicode_escape_sign`, `syntax/nested_struct_members`,
+`testing/parametrised_once`, `types/keyword_only_count`). A new
+difference is listed from D6 on.
 
 ## Not discrepancies, but found on the way
 

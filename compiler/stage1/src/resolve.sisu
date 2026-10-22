@@ -11,7 +11,10 @@
 ##! - `E0220` an import of a module that does not exist;
 ##! - `E0201` a type name that names nothing;
 ##! - `E0200` a value name that names nothing, with the closest name in
-##!   scope as a fix when one is close enough;
+##!   scope as a fix when one is close enough, and a name in a type's
+##!   constant argument written as an expression that names nothing (as
+##!   stage 0's `consts.rs` finds it: the first error of the expression
+##!   ends it, and that error is reported without a fix);
 ##! - `W0002` a `let` that shadows a name of an enclosing scope;
 ##! - `E0389` `self` outside a method;
 ##! - `E0234` a method of a trait's impl whose signature differs from the
@@ -24,9 +27,12 @@
 ##! top-level code that did not parse as a declaration are never reported,
 ##! and no diagnostic is kept on a line that has a syntax error.
 
-from stage1.diag import Catalog, Diagnostic, Lines, Msg, sort
+from stage1.diag import Catalog, Diagnostic, Lines, Msg, TextRange, sort_unique
+from stage1.sir import Folded
+from stage1.syntax.ast import ItemKind, Module, TypeKind, build
 from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Element, Tree, is_item
+from stage1.typeck.folding import Term, TermKind, terms
 
 ## A method's signature as written: what `E0234` compares and prints.
 pub struct Signature:
@@ -166,6 +172,15 @@ view struct Resolver:
     locals: list[list[String]]
     ## The generic parameters in scope.
     generics: list[String]
+    ## Those of them that are `const` parameters.
+    const_generics: list[String]
+    ## Whether a body is being resolved, where a type's constant argument
+    ## may not name a local or a type parameter (a signature may name any
+    ## generic parameter there).
+    in_body: bool
+    ## The module's AST, built when a type's constant argument written as an
+    ## expression needs it.
+    ast: Module?
     ## The associated types of the trait being resolved, named bare in it.
     assoc: list[String]
     ## Whether `self` is a parameter here.
@@ -201,6 +216,9 @@ pub pure def resolve(
         ),
         locals=[],
         generics=[],
+        const_generics=[],
+        in_body=False,
+        ast=None,
         assoc=[],
         has_self=False,
         quiet=False,
@@ -219,7 +237,7 @@ pub pure def resolve(
     for d in own r.diags:
         if not broken.contains(lines.index(d.start)):
             kept.push(d)
-    sort(mut kept, catalog)
+    sort_unique(mut kept, catalog)
     return kept
 
 # ------------------------------------------------------------------ the tree
@@ -299,6 +317,7 @@ const MODULE_PATHS: list[str] = [
 const SCALARS: list[str] = [
     "int",
     "f64",
+    "f32",
     "bool",
     "char",
     "str",
@@ -787,7 +806,7 @@ impl Resolver:
     pure def knows_type(self, name: str) -> bool:
         if self.generics.contains(name.to_string()) or is_primitive(name) or name == "Self":
             return True
-        if self.assoc.contains(name.to_string()) or name == "f32":
+        if self.assoc.contains(name.to_string()):
             return True
         let key = name.to_string()
         return self.module.items.contains(key.copy()) or self.env.prelude.items.contains(key)
@@ -842,6 +861,114 @@ impl Resolver:
                 out.push(name.copy())
         return out
 
+# ------------------------------------------------------------------ constant arguments
+
+## What folding a type's constant argument gives, as far as names need it
+## (stage 0's `consts.rs`, whose first error ends the folding).
+enum ConstValue:
+    ## A constant.
+    Known(int)
+    ## An operation on `const` parameters, whose value comes with them.
+    Open
+    ## An error other than a name that names nothing.
+    Failed
+    ## A name that names nothing, where it is written.
+    Undefined(range: TextRange, name: String)
+
+impl Resolver:
+    ## A type's constant argument written as an expression (the node
+    ## `CONST_ARG` holding it): a name in it that names nothing is `E0200`,
+    ## when folding gets that far.
+    pure def const_arg(mut self, n: int):
+        if self.ast.is_none():
+            self.ast = Some(build.module(self.tree))
+        var ts: list[Term] = []
+        if let Some(m) = self.ast:
+            for t in m.ast.types:
+                if t.node == n:
+                    if let TypeKind.ConstExpr(e) = t.kind:
+                        ts = terms(m.ast, e)
+        if ts.is_empty():
+            return
+        let v = self.fold(ts, len(ts) - 1, False, 0)
+        if let ConstValue.Undefined(r, name) = v:
+            if not self.quiet:
+                let d = Diagnostic.new(Msg.ResolveUndefinedName, r.start, r.end).with("name", name)
+                self.report(d)
+
+    ## Folds the term `at` of `ts`; in a constant's own value (`item`), every
+    ## name is an item of the module.
+    pure def fold(self, ts: list[Term], at: int, item: bool, depth: int) -> ConstValue:
+        let r = ts[at].range
+        if depth > 32:
+            return ConstValue.Failed
+        match ts[at].kind.copy():
+            case TermKind.Int(value):
+                return match value:
+                    case Some(v): ConstValue.Known(v)
+                    case None: ConstValue.Failed
+            case TermKind.NotInt(_) | TermKind.Other:
+                return ConstValue.Failed
+            case TermKind.Name(name):
+                if not item and self.generics.contains(name.copy()):
+                    # In a body only a `const` parameter is a constant.
+                    if self.in_body and not self.const_generics.contains(name.copy()):
+                        return ConstValue.Failed
+                    return ConstValue.Open
+                if not item and self.in_body and self.is_local(name):
+                    return ConstValue.Failed
+                return self.named(name, r, depth)
+            case TermKind.Unary(op, inner):
+                let x = self.fold(ts, inner, item, depth + 1)
+                return match x:
+                    case ConstValue.Known(v): known(op.fold([v]))
+                    case _: x
+            case TermKind.Binary(op, lhs, rhs):
+                let x = self.fold(ts, lhs, item, depth + 1)
+                match x:
+                    case ConstValue.Failed | ConstValue.Undefined(_, _):
+                        return x
+                    case _:
+                        pass
+                let y = self.fold(ts, rhs, item, depth + 1)
+                if let ConstValue.Known(a) = x:
+                    if let ConstValue.Known(b) = y:
+                        return known(op.fold([a, b]))
+                return match y:
+                    case ConstValue.Failed | ConstValue.Undefined(_, _): y
+                    case _: ConstValue.Open
+
+    ## A name that is not a parameter or a local: an item of the module or
+    ## of the prelude, whose value, when it is a constant of the module, is
+    ## folded where it is written; what is wrong with it is not this name's.
+    pure def named(self, name: str, r: TextRange, depth: int) -> ConstValue:
+        let key = name.to_string()
+        let known_item = self.module.items.contains(key.copy())
+            or self.module.imports.contains(key.copy())
+            or self.module.from_imports.contains(key.copy())
+            or self.env.prelude.items.contains(key.copy())
+        if not known_item:
+            return ConstValue.Undefined(range=r, name=key)
+        var ts: list[Term] = []
+        if let Some(m) = self.ast:
+            for i in m.items:
+                if let ItemKind.Const(c) = m.ast.items[i.index].kind:
+                    if c.name.text == name:
+                        if let Some(value) = c.value:
+                            ts = terms(m.ast, value)
+        if ts.is_empty():
+            return ConstValue.Failed
+        return match self.fold(ts, len(ts) - 1, True, depth + 1):
+            case ConstValue.Known(v): ConstValue.Known(v)
+            case ConstValue.Open: ConstValue.Open
+            case _: ConstValue.Failed
+
+## The value of a folded operation, or `Failed` for a fault.
+pure def known(f: Folded) -> ConstValue:
+    return match f:
+        case Folded.Value(v): ConstValue.Known(v)
+        case Folded.Fault(_): ConstValue.Failed
+
 # ------------------------------------------------------------------ signatures and bodies
 
 impl Resolver:
@@ -860,6 +987,13 @@ impl Resolver:
         if script:
             self.pop_scope()
 
+    ## A statement of a script's top level, which is `main`'s body.
+    pure def script_statement(mut self, n: int):
+        let saved_body = self.in_body
+        self.in_body = True
+        self.statement(n)
+        self.in_body = saved_body
+
     ## A node of the module's top level: a declaration; an unexpectedly
     ## indented block, whose declarations (and statements) count as
     ## top-level ones; or a statement of a script.
@@ -871,7 +1005,7 @@ impl Resolver:
             for c in child_nodes(self.tree, n):
                 self.top_level(c, statements)
         elif statements:
-            self.statement(n)
+            self.script_statement(n)
 
     ## Whether the module declares a function `main` at its top level.
     pure def declares_main(self) -> bool:
@@ -896,6 +1030,8 @@ impl Resolver:
                 if self.kind(p) == SyntaxKind.GenericParam:
                     if let Some(t) = first_token(self.tree, p, SyntaxKind.Ident):
                         self.generics.push(self.text_of(t))
+                        if first_token(self.tree, p, SyntaxKind.ConstKw) != None:
+                            self.const_generics.push(self.text_of(t))
             for p in child_nodes(self.tree, g):
                 if self.kind(p) == SyntaxKind.GenericParam:
                     self.bounds(p)
@@ -960,6 +1096,7 @@ impl Resolver:
 
     pure def item(mut self, n: int):
         let saved_generics = len(self.generics)
+        let saved_consts = len(self.const_generics)
         match self.kind(n):
             case FnDef:
                 self.function(n, False)
@@ -1040,6 +1177,8 @@ impl Resolver:
                 pass
         while len(self.generics) > saved_generics:
             _ = self.generics.pop()
+        while len(self.const_generics) > saved_consts:
+            _ = self.const_generics.pop()
 
     ## Each method of `impl Trait for Type` against the trait's: a method
     ## whose shape differs is reported (`E0234`), with both signatures.
@@ -1142,6 +1281,7 @@ impl Resolver:
     ## no unknown names in the body.
     pure def function(mut self, n: int, method: bool):
         let saved_generics = len(self.generics)
+        let saved_consts = len(self.const_generics)
         let saved_self = self.has_self
         let saved_quiet = self.quiet
         self.add_generics(n)
@@ -1167,13 +1307,18 @@ impl Resolver:
             self.quiet = saved_quiet or header_broken or has_error(self.tree, body)
             # The body shares the parameters' scope: a `let` there that
             # rebinds a parameter does not shadow it.
+            let saved_body = self.in_body
+            self.in_body = True
             self.statements_of(body)
+            self.in_body = saved_body
         self.pop_scope()
         self.result_labels = saved_labels
         self.quiet = saved_quiet
         self.has_self = saved_self
         while len(self.generics) > saved_generics:
             _ = self.generics.pop()
+        while len(self.const_generics) > saved_consts:
+            _ = self.const_generics.pop()
 
     ## The labels of a labelled tuple result, `-> (q: int, r: int)`.
     pure def labels_of(mut self, ret: int):
@@ -1240,11 +1385,14 @@ impl Resolver:
             self.params(params, False)
         if let Some(body) = first_child(self.tree, n, SyntaxKind.Block):
             let saved_quiet = self.quiet
+            let saved_body = self.in_body
             self.quiet = saved_quiet
                 or error_outside_block(self.tree, n)
                 or has_error(self.tree, body)
+            self.in_body = True
             self.statements_of(body)
             self.quiet = saved_quiet
+            self.in_body = saved_body
         self.pop_scope()
 
     # ------------------------------------------------------------------ statements
@@ -1863,6 +2011,10 @@ impl Resolver:
                 self.type_(c)
             elif kind == SyntaxKind.GenericArgs or kind == SyntaxKind.TupleTypeField:
                 self.types_in(c)
+                for a in child_nodes(self.tree, c):
+                    if self.kind(a) == SyntaxKind.ConstArg
+                            and not child_nodes(self.tree, a).is_empty():
+                        self.const_arg(a)
 
 ## Whether a node of this kind is a type.
 pure def is_type_kind(kind: SyntaxKind) -> bool:

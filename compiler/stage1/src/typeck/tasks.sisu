@@ -133,7 +133,7 @@ impl Checker:
                         if let Some(c) = self.closures[site.index]:
                             r = Some(c.ret)
                         if let Some(rt) = r:
-                            if not self.infer.unify(self.types, t, rt):
+                            if not self.infer.unify(mut self.types, t, rt):
                                 # `task.race-types`.
                                 self.other()
                     return self.flatten_join(cx, t, span)
@@ -216,7 +216,7 @@ impl Checker:
                     m = x.copy()
                 case TyData.Var(_):
                     let empty = self.types.err_set([])
-                    _ = self.infer.unify(self.types, e, empty)
+                    _ = self.infer.unify(mut self.types, e, empty)
                 case _:
                     pass
             return self.result_of(cx, ok, union(m, te))
@@ -243,7 +243,7 @@ impl Checker:
                 m = x.copy()
             case TyData.Var(_):
                 let empty = self.types.err_set([])
-                _ = self.infer.unify(self.types, e, empty)
+                _ = self.infer.unify(mut self.types, e, empty)
             case _:
                 pass
         let m2 = union(m, sets)

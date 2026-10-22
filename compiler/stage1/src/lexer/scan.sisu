@@ -321,7 +321,9 @@ impl Scanner:
         var i = self.pos + 1
         var value = 0
         while i < self.n and is_digit_in(self.byte(i), 16):
-            value = value * 16 + hex_value(self.byte(i))
+            # Seven digits are already too many: the value stops growing.
+            if i - self.pos <= 6:
+                value = value * 16 + hex_value(self.byte(i))
             i += 1
         let count = i - self.pos - 1
         if self.byte(i) != 125 or count == 0 or count > 6:

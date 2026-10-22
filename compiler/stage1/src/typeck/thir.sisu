@@ -287,6 +287,8 @@ pub enum Coercion:
     ToCap
     ## An integer as a wider integer type that holds all its values.
     IntWiden
+    ## An `f32` as the `f64` that holds it exactly.
+    FloatWiden
     ## A value of a refinement type used as its base (07).
     Unrefine
     ## A type error: the expression is kept, its type replaced by the
@@ -408,3 +410,66 @@ pub enum TPatKind:
     ## Matching goes through a reference to the value.
     Deref(PatId)
     Error
+
+## What a body computes (stage 0's `BodyKind`).
+@derive(Eq, Copy)
+pub enum BodyKind:
+    Fn
+    ## The default value of a struct field: the struct and the field's
+    ## index.
+    FieldDefault(DefId, int)
+    ## The default value of a parameter: the function and the parameter's
+    ## index.
+    ParamDefault(DefId, int)
+    Const
+
+## A function's contract (stage 0's `Contracts`; 07): what lowering
+## checks on entry and on every exit.
+pub struct TContracts:
+    pub requires: list[ContractCheck]
+    pub ensures: list[ContractCheck]
+    ## `old(e)`: the local that holds `e`'s value from the entry, and `e`.
+    pub olds: list[(int, TExprId)]
+    ## The local `ensures` calls `result`.
+    pub result: int?
+    ## The labels of a labelled result, each the local that names the
+    ## element at that index.
+    pub labels: list[(int, int)]
+    ## The invariant check a `mut self` method runs on every exit, with its
+    ## type arguments.
+    pub invariant: (DefId, list[Ty])?
+
+## A checked body as lowering reads it (stage 0's `Body`), its types final:
+## no inference variable is left. Its expressions, blocks and patterns are
+## the checker's arenas, which its ids index.
+pub struct TBody:
+    pub def_: DefId
+    pub kind: BodyKind
+    ## Parameters in order, `self` first for a method.
+    pub params: list[int]
+    pub locals: list[Local]
+    pub closures: list[TClosure]
+    pub ret: Ty
+    pub block: BlockId
+    pub span: TextRange
+    ## A generator's item type.
+    pub generator: Ty?
+    pub contracts: TContracts?
+    ## It asserts at compile time on `const` generic parameters.
+    pub generic_asserts: bool
+    pub exprs: list[TExpr]
+    pub blocks: list[TBlock]
+    pub pats: list[TPat]
+
+impl TBody:
+    pub pure def expr(self, e: TExprId) -> ref TExpr:
+        return ref self.exprs[e.index]
+
+    pub pure def block_of(self, b: BlockId) -> ref TBlock:
+        return ref self.blocks[b.index]
+
+    pub pure def pat(self, p: PatId) -> ref TPat:
+        return ref self.pats[p.index]
+
+    pub pure def local(self, l: int) -> ref Local:
+        return ref self.locals[l]

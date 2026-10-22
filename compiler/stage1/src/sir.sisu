@@ -1,0 +1,696 @@
+##! SIR, the compiler's intermediate representation (stage 0's
+##! `sisu-sir/src/lib.rs`; docs/architecture.md, "SIR"): a program is a list
+##! of source names, an entry, the tests, type declarations, the
+##! intrinsics and trait methods it calls with the facts the ownership
+##! checker needs about them, the impls `call trait` may dispatch to, and
+##! functions; a function is a typed control-flow graph of basic blocks.
+##! `sir.write` writes the text form `sisu sir` prints.
+##!
+##! The operations a type's constant argument may compute are here too,
+##! since the type checker folds them. Where the Rust holds a part in a
+##! `Box`, these types hold it in a list of one.
+
+## The operations a type's constant argument may compute, on `int` values
+## with the run time's rules: `//` floors, `%` takes the divisor's sign,
+## and overflow, a zero divisor, a negative exponent and a shift outside 0
+## to 63 are faults.
+@derive(Eq, Hash, Debug, Copy)
+pub enum ConstOp:
+    Add
+    Sub
+    Mul
+    FloorDiv
+    Mod
+    Pow
+    Shl
+    Shr
+    BitAnd
+    BitOr
+    BitXor
+    Neg
+    BitNot
+
+## Why a constant operation has no value.
+@derive(Eq, Debug, Copy)
+pub enum ConstFault:
+    Overflow
+    DivideByZero
+    NegativeExponent
+    ShiftOutOfRange
+
+## The value of a constant operation, or why it has none.
+@derive(Eq, Debug, Copy)
+pub enum Folded:
+    Value(int)
+    Fault(ConstFault)
+
+impl ConstOp:
+    ## Every operation, in the order of the enum.
+    pub pure def all() -> list[ConstOp]:
+        return [
+            ConstOp.Add,
+            ConstOp.Sub,
+            ConstOp.Mul,
+            ConstOp.FloorDiv,
+            ConstOp.Mod,
+            ConstOp.Pow,
+            ConstOp.Shl,
+            ConstOp.Shr,
+            ConstOp.BitAnd,
+            ConstOp.BitOr,
+            ConstOp.BitXor,
+            ConstOp.Neg,
+            ConstOp.BitNot,
+        ]
+
+    ## Its name in SIR, the operator's (`mul`, `neg`).
+    pub pure def name(self) -> str:
+        return match self:
+            case Add: "add"
+            case Sub: "sub"
+            case Mul: "mul"
+            case FloorDiv: "floordiv"
+            case Mod: "mod"
+            case Pow: "pow"
+            case Shl: "shl"
+            case Shr: "shr"
+            case BitAnd: "bitand"
+            case BitOr: "bitor"
+            case BitXor: "bitxor"
+            case Neg: "neg"
+            case BitNot: "bitnot"
+
+    pub pure def from_name(n: str) -> ConstOp?:
+        for o in ConstOp.all():
+            if o.name() == n:
+                return Some(o)
+        return None
+
+    ## Its spelling in Sisu (`*`, unary `-`).
+    pub pure def symbol(self) -> str:
+        return match self:
+            case Add: "+"
+            case Sub | Neg: "-"
+            case Mul: "*"
+            case FloorDiv: "//"
+            case Mod: "%"
+            case Pow: "**"
+            case Shl: "<<"
+            case Shr: ">>"
+            case BitAnd: "&"
+            case BitOr: "|"
+            case BitXor: "^"
+            case BitNot: "~"
+
+    pub pure def is_unary(self) -> bool:
+        return match self:
+            case Neg | BitNot: True
+            case _: False
+
+    ## The value on `int` operands, as the run time computes it.
+    pub pure def fold(self, args: list[int]) -> Folded:
+        if args.is_empty():
+            return Folded.Fault(ConstFault.Overflow)
+        let x = args[0]
+        if self.is_unary():
+            if self == ConstOp.Neg:
+                return checked(-wide(x))
+            return Folded.Value(~x)
+        if len(args) < 2:
+            return Folded.Fault(ConstFault.Overflow)
+        let y = args[1]
+        match self:
+            case Add:
+                return checked(wide(x) + wide(y))
+            case Sub:
+                return checked(wide(x) - wide(y))
+            case Mul:
+                return checked(wide(x) * wide(y))
+            case FloorDiv:
+                if y == 0:
+                    return Folded.Fault(ConstFault.DivideByZero)
+                # `x // y` overflows only for the least `int` over -1.
+                return checked(floor_div(wide(x), wide(y)))
+            case Mod:
+                if y == 0:
+                    return Folded.Fault(ConstFault.DivideByZero)
+                # Rust's `checked_rem` overflows where `//` does; the
+                # remainder is 0 there.
+                return Folded.Value(floor_mod(wide(x), wide(y)).to_int() ?? 0)
+            case Pow:
+                if y < 0:
+                    return Folded.Fault(ConstFault.NegativeExponent)
+                return power(x, y)
+            case Shl | Shr:
+                if y < 0 or y > 63:
+                    return Folded.Fault(ConstFault.ShiftOutOfRange)
+                if self == ConstOp.Shl:
+                    return Folded.Value(x << y)
+                return Folded.Value(x >> y)
+            case BitAnd:
+                return Folded.Value(x & y)
+            case BitOr:
+                return Folded.Value(x | y)
+            case BitXor:
+                return Folded.Value(x ^ y)
+            case _:
+                return Folded.Value(x)
+
+pure def wide(x: int) -> i128:
+    return x
+
+## A value computed in `i128`, if it is an `int`.
+pure def checked(v: i128) -> Folded:
+    return match v.to_int():
+        case Some(n): Folded.Value(n)
+        case None: Folded.Fault(ConstFault.Overflow)
+
+## `x // y` rounded toward negative infinity, as Sisu's `//` does (`y`
+## is not zero).
+pure def floor_div(x: i128, y: i128) -> i128:
+    return x // y
+
+## `x % y` with the sign of `y`, as Sisu's `%` does (`y` is not zero).
+pure def floor_mod(x: i128, y: i128) -> i128:
+    return x % y
+
+## `x ** y` for `y` at least 0, as Rust's `checked_pow` computes it.
+pure def power(x: int, y: int) -> Folded:
+    # 0, 1 and -1 to any power are known without computing it.
+    if x == 0 or x == 1:
+        return Folded.Value(if y == 0: 1 else: x)
+    if x == -1:
+        return Folded.Value(if y % 2 == 0: 1 else: -1)
+    var result: i128 = 1
+    for _ in range(y):
+        result = result * wide(x)
+        if result.to_int().is_none():
+            return Folded.Fault(ConstFault.Overflow)
+    return Folded.Value(result.to_int() ?? 0)
+
+test "constant operations fold as the run time computes them":
+    assert ConstOp.Mul.fold([4, 5]) == Folded.Value(20)
+    assert ConstOp.FloorDiv.fold([-7, 2]) == Folded.Value(-4)
+    assert ConstOp.Mod.fold([-7, 2]) == Folded.Value(1)
+    assert ConstOp.Mod.fold([7, -2]) == Folded.Value(-1)
+    assert ConstOp.Pow.fold([2, 62]) == Folded.Value(4611686018427387904)
+    assert ConstOp.Pow.fold([2, 70]) == Folded.Fault(ConstFault.Overflow)
+    assert ConstOp.Pow.fold([-1, 1000001]) == Folded.Value(-1)
+    assert ConstOp.Pow.fold([2, -1]) == Folded.Fault(ConstFault.NegativeExponent)
+    assert ConstOp.Mul.fold([4611686018427387904, 4]) == Folded.Fault(ConstFault.Overflow)
+    assert ConstOp.FloorDiv.fold([1, 0]) == Folded.Fault(ConstFault.DivideByZero)
+    assert ConstOp.Shl.fold([1, 64]) == Folded.Fault(ConstFault.ShiftOutOfRange)
+    assert ConstOp.Neg.fold([5]) == Folded.Value(-5)
+    assert ConstOp.BitNot.fold([0]) == Folded.Value(-1)
+    assert ConstOp.from_name("bitxor") == Some(ConstOp.BitXor)
+
+# ------------------------------------------------------------------ programs
+
+pub const VERSION: int = 0
+
+pub struct Program:
+    pub sources: list[String]
+    ## The entry function and whether it takes `System`.
+    pub entry: Entry?
+    pub types: list[TypeDecl]
+    ## The host intrinsics the functions call, with the facts the SIR
+    ## checkers need about each.
+    pub intrinsics: list[IntrinsicDecl]
+    pub functions: list[Function]
+    ## Test name and the function that runs it.
+    pub tests: list[(String, String)]
+    ## The trait methods called through `call trait`, with their facts.
+    pub trait_methods: list[IntrinsicDecl]
+    ## The impls a `call trait` may dispatch to at run time.
+    pub impls: list[ImplDecl]
+
+impl Program:
+    pub pure def function(self, name: str) -> ref Function?:
+        for f in self.functions:
+            if f.name == name:
+                return Some(f)
+        return None
+
+    pub pure def type_decl(self, name: str) -> ref TypeDecl?:
+        for t in self.types:
+            if t.name() == name:
+                return Some(t)
+        return None
+
+    pub pure def intrinsic(self, name: str) -> ref IntrinsicDecl?:
+        for i in self.intrinsics:
+            if i.name == name:
+                return Some(i)
+        return None
+
+    pub pure def trait_method(self, name: str) -> ref IntrinsicDecl?:
+        for i in self.trait_methods:
+            if i.name == name:
+                return Some(i)
+        return None
+
+## `impl[N] Trait[args] for Type { method: target, ... }`.
+pub struct ImplDecl:
+    pub params: int
+    pub trait_name: String
+    pub trait_args: list[Type]
+    pub self_ty: Type
+    pub methods: list[(String, ImplTarget)]
+    ## What the impl binds the trait's associated types to.
+    pub assoc: list[(String, Type)]
+
+pub enum ImplTarget:
+    Fn(String)
+    Intrinsic(String)
+
+## What the checkers know about a host intrinsic or a trait method.
+pub struct IntrinsicDecl:
+    pub name: String
+    pub pure: bool
+    ## Arguments (0-based) the result may borrow from, deeply.
+    pub from_: list[int]
+    ## Arguments whose referent's loans the result may hold, but not the
+    ## loan of the reference itself.
+    pub inner: list[int]
+    ## Arguments taken with `own`.
+    pub owns: list[int]
+    ## Arguments taken with `own` or `mut` whose every value the intrinsic
+    ## keeps or returns (`@keeps`).
+    pub keeps: list[int]
+
+pub struct Entry:
+    pub function: String
+    pub takes_system: bool
+    pub returns_result: bool
+
+pub enum TypeDecl:
+    Struct(
+        name: String,
+        params: list[String],
+        fields: list[FieldDecl],
+        drop: String?,
+        view_: bool,
+        must_consume: bool
+    )
+    Enum(
+        name: String,
+        params: list[String],
+        variants: list[VariantDecl],
+        drop: String?,
+        error_: bool,
+        open: bool,
+        must_consume: bool
+    )
+
+impl TypeDecl:
+    pub pure def name(self) -> str from self:
+        return match self:
+            case Struct(n, _, _, _, _, _): n
+            case Enum(n, _, _, _, _, _, _): n
+
+    pub pure def params(self) -> ref list[String]:
+        return match self:
+            case Struct(_, p, _, _, _, _): ref p
+            case Enum(_, p, _, _, _, _, _): ref p
+
+pub struct FieldDecl:
+    pub name: String
+    pub ty: Type
+    ## The function that computes the default.
+    pub default: String?
+
+pub struct VariantDecl:
+    pub name: String
+    pub fields: list[(String?, Type)]
+
+## A type of SIR.
+@derive(Eq)
+pub enum Type:
+    Int
+    Float
+    Bool
+    Char
+    Str
+    Unit
+    Never
+    ## A builtin or declared type, possibly with arguments.
+    Named(name: String, args: list[Type])
+    Tuple(list[Type])
+    ErrSet(list[String])
+    ## Parameters, the result (one), and whether the function is `pure`.
+    Fn(params: list[Type], ret: list[Type], pure: bool)
+    ## The referent (one) and whether the reference is `mut`.
+    Ref(inner: list[Type], mutable: bool)
+    ## Type parameter `N` of the function (or of the declaration).
+    Param(int)
+    ## `dyn Trait[args]`.
+    Dyn(name: String, args: list[Type])
+    ## `<T as Trait[args]>.Name`: the type (one), the trait, its arguments
+    ## and the name.
+    Assoc(self_ty: list[Type], trait_: String, args: list[Type], name: String)
+    ## A constant argument of a `const` generic parameter.
+    Const(int)
+    ## An integer operation on constant arguments not known yet.
+    ConstOp(op: ConstOp, args: list[Type])
+
+impl Type:
+    pub pure def named(name: str, own args: list[Type]) -> Type:
+        return Type.Named(name=name.to_string(), args=args)
+
+    pub pure def ref_(own inner: Type, mutable: bool) -> Type:
+        return Type.Ref(inner=[inner], mutable=mutable)
+
+    ## Whether two types are the same.
+    pub pure def same(self, other: Type) -> bool:
+        return self == other
+
+    ## Replaces `$i` by `args[i]` (and leaves a parameter without an
+    ## argument as it is).
+    pub pure def subst(self, args: list[Type]) -> Type:
+        match self:
+            case Param(i):
+                if i < len(args):
+                    return args[i].copy()
+                return Type.Param(i)
+            case Named(n, a):
+                return Type.Named(name=n.copy(), args=subst_all(a, args))
+            case Tuple(e):
+                return Type.Tuple(subst_all(e, args))
+            case Fn(p, r, pure):
+                return Type.Fn(params=subst_all(p, args), ret=subst_all(r, args), pure=pure)
+            case Ref(t, m):
+                return Type.Ref(inner=subst_all(t, args), mutable=m)
+            case Dyn(n, a):
+                return Type.Dyn(name=n.copy(), args=subst_all(a, args))
+            case Assoc(t, tr, a, n):
+                return Type.Assoc(
+                    self_ty=subst_all(t, args),
+                    trait_=tr.copy(),
+                    args=subst_all(a, args),
+                    name=n.copy(),
+                )
+            case ConstOp(op, a):
+                return Type.const_op(op, subst_all(a, args))
+            case _:
+                return self.copy()
+
+    ## `op` on `args`, folded to a `Const` when every argument is one and
+    ## the operation has a value.
+    pub pure def const_op(op: ConstOp, own args: list[Type]) -> Type:
+        var values: list[int] = []
+        for a in args:
+            if let Type.Const(n) = a:
+                values.push(n)
+            else:
+                return Type.ConstOp(op=op, args=args)
+        if let Folded.Value(n) = op.fold(values):
+            return Type.Const(n)
+        return Type.ConstOp(op=op, args=args)
+
+    ## Whether the type mentions a type parameter.
+    pub pure def has_params(self) -> bool:
+        match self:
+            case Param(_) | Assoc(_, _, _, _):
+                return True
+            case Named(_, a):
+                return any_params(a)
+            case Tuple(a):
+                return any_params(a)
+            case Dyn(_, a):
+                return any_params(a)
+            case ConstOp(_, a):
+                return any_params(a)
+            case Fn(p, r, _):
+                for t in p:
+                    if t.has_params():
+                        return True
+                for t in r:
+                    if t.has_params():
+                        return True
+                return False
+            case Ref(t, _):
+                for x in t:
+                    if x.has_params():
+                        return True
+                return False
+            case _:
+                return False
+
+pure def any_params(ts: list[Type]) -> bool:
+    for t in ts:
+        if t.has_params():
+            return True
+    return False
+
+pure def subst_all(ts: list[Type], args: list[Type]) -> list[Type]:
+    var out: list[Type] = []
+    for t in ts:
+        out.push(t.subst(args))
+    return out
+
+@derive(Eq, Hash, Debug, Copy)
+pub struct LocalId:
+    pub index: int
+
+@derive(Eq, Hash, Debug, Copy)
+pub struct BlockId:
+    pub index: int
+
+pub struct LocalDecl:
+    pub ty: Type
+    ## The source name.
+    pub name: String?
+    ## Where the binding is declared.
+    pub loc: Loc?
+    ## A `let` declared without a value.
+    pub once: bool
+
+impl LocalDecl:
+    pub pure def new(own ty: Type, own name: String?) -> LocalDecl:
+        return LocalDecl(ty=ty, name=name, loc=None, once=False)
+
+## What a closure is for.
+@derive(Eq, Copy)
+pub enum ClosureRole:
+    Plain
+    ScopeBody
+    Task
+
+@derive(Eq, Copy)
+pub enum FnKind:
+    Normal
+    Closure(ClosureRole)
+    Drop
+    Glue
+    Value
+    Test
+    Comptime(int)
+
+pub struct Function:
+    pub name: String
+    pub type_params: list[String]
+    pub kind: FnKind
+    pub param_count: int
+    pub pure: bool
+    pub from_: list[int]
+    pub inner: list[int]
+    pub owns: list[int]
+    pub locals: list[LocalDecl]
+    pub blocks: list[BasicBlock]
+    ## Where the function is declared (its name).
+    pub loc: Loc?
+    ## Index into `Program.sources` for statement locations.
+    pub source: int
+
+pub struct BasicBlock:
+    pub stmts: list[Statement]
+    pub term: Terminator
+    pub unwind: BlockId?
+    pub cleanup: bool
+    pub loc: Loc?
+
+## A 1-based source range: the start, and the end when it is known
+## (`end_line == 0` means a position only).
+@derive(Eq, Copy)
+pub struct Loc:
+    pub line: int
+    pub col: int
+    pub end_line: int
+    pub end_col: int
+
+impl Loc:
+    pub pure def point(line: int, col: int) -> Loc:
+        return Loc(line=line, col=col, end_line=0, end_col=0)
+
+    pub pure def has_end(self) -> bool:
+        return self.end_line != 0
+
+pub struct Statement:
+    pub kind: StatementKind
+    pub loc: Loc?
+
+pub enum StatementKind:
+    Assign(place: Place, value: Rvalue)
+    Call(dest: Place, callee: Callee, args: list[Operand])
+    ## Runs the value's drop glue, if `flag` (when given) is true.
+    Drop(place: Place, flag: LocalId?)
+    ## The local's storage ends.
+    StorageDead(LocalId)
+
+pub enum Callee:
+    ## A function, with its type arguments.
+    Fn(name: String, args: list[Type])
+    Intrinsic(name: String, args: list[Type])
+    ## `Trait.method` for `[Self, trait arguments..., the method's own...]`.
+    Trait(name: String, args: list[Type])
+    Value(Operand)
+
+pub enum Terminator:
+    Goto(BlockId)
+    ## Branches on an integer.
+    Switch(value: Operand, cases: list[(int, BlockId)], default: BlockId)
+    Return
+    Resume
+    Unreachable
+
+@derive(Eq)
+pub struct Place:
+    pub local: LocalId
+    pub proj: list[Proj]
+
+impl Place:
+    pub pure def local(l: LocalId) -> Place:
+        return Place(local=l, proj=[])
+
+    pub pure def project(self, p: Proj) -> Place:
+        var proj = self.proj.copy()
+        proj.push(p)
+        return Place(local=self.local, proj=proj)
+
+@derive(Eq, Copy)
+pub enum Proj:
+    ## The referent of a reference.
+    Deref
+    Field(int)
+    ## The payload of variant `n`.
+    Downcast(int)
+    ## A list element at the index a local holds.
+    Index(LocalId)
+    ## A list element counted from the end.
+    IndexFromEnd(LocalId)
+    ## A dict entry at the key a local holds.
+    Key(LocalId)
+
+pub enum Operand:
+    Copy(Place)
+    Move(Place)
+    Const(Const)
+
+pub enum Const:
+    Int(int)
+    Float(f64)
+    Bool(bool)
+    Char(char)
+    Str(String)
+    Unit
+    Fn(String)
+
+@derive(Eq, Copy)
+pub enum BinOp:
+    Add
+    Sub
+    Mul
+    Div
+    FloorDiv
+    Mod
+    Pow
+    WrapAdd
+    WrapSub
+    WrapMul
+    SatAdd
+    SatSub
+    SatMul
+    Shl
+    Shr
+    BitAnd
+    BitOr
+    BitXor
+    Concat
+    Eq
+    Ne
+    Lt
+    Le
+    Gt
+    Ge
+    In
+
+impl BinOp:
+    pub pure def name(self) -> str:
+        return match self:
+            case Add: "add"
+            case Sub: "sub"
+            case Mul: "mul"
+            case Div: "div"
+            case FloorDiv: "floordiv"
+            case Mod: "mod"
+            case Pow: "pow"
+            case WrapAdd: "wadd"
+            case WrapSub: "wsub"
+            case WrapMul: "wmul"
+            case SatAdd: "sadd"
+            case SatSub: "ssub"
+            case SatMul: "smul"
+            case Shl: "shl"
+            case Shr: "shr"
+            case BitAnd: "bitand"
+            case BitOr: "bitor"
+            case BitXor: "bitxor"
+            case Concat: "concat"
+            case Eq: "eq"
+            case Ne: "ne"
+            case Lt: "lt"
+            case Le: "le"
+            case Gt: "gt"
+            case Ge: "ge"
+            case In: "in"
+
+@derive(Eq, Copy)
+pub enum UnOp:
+    Neg
+    Not
+    BitNot
+
+impl UnOp:
+    pub pure def name(self) -> str:
+        return match self:
+            case Neg: "neg"
+            case Not: "not"
+            case BitNot: "bitnot"
+
+pub enum Aggregate:
+    Tuple
+    Struct(String)
+    ## Type name and variant name.
+    Variant(String, String)
+    List
+    Set
+    ## Keys and values alternate.
+    Dict
+    ## A `dyn` value holding the operand, whose type is given.
+    Dyn(Type)
+
+pub enum Rvalue:
+    Use(Operand)
+    Ref(place: Place, mutable: bool)
+    Binary(op: BinOp, lhs: Operand, rhs: Operand)
+    Unary(op: UnOp, operand: Operand)
+    Aggregate(kind: Aggregate, operands: list[Operand])
+    ## The variant index of the enum value at a place.
+    Discriminant(Place)
+    ## A closure value: its function, the type arguments of the function
+    ## that makes it, and its captured references.
+    Closure(name: String, args: list[Type], operands: list[Operand])
+    ## A deep copy of the value at a place (`.copy()`).
+    CopyOf(Place)
+    ## A `str` view of the `String` (or `str`) at a place.
+    StrView(Place)

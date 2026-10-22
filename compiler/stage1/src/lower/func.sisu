@@ -1,0 +1,787 @@
+##! Lowering one function (stage 0's `sisu-lower/src/func.rs`): the block
+##! builder, scopes and drops.
+##!
+##! Each block's unwind edge is computed when the block starts, from the
+##! values that need drop and are registered at that point; the cleanup
+##! chain for a set of values is built once and shared. A statement that
+##! drops a value ends its block, so every block's unwind edge is exact.
+##!
+##! Drops are emitted unconditionally: every value that needs drop is
+##! dropped at the end of its scope, on every exit, whether or not it was
+##! moved. The ownership checker's initialisation dataflow then removes the
+##! drops of moved values, guards the drops of values that may have been
+##! moved with a flag, and splits the drop of a partly moved value into
+##! drops of what remains (`borrowck.elaborate`). Every local that leaves a
+##! scope also gets a `dead` statement; `finish_blocks` keeps only those of
+##! locals that are borrowed somewhere.
+##!
+##! The program, the names, the typed body and the module it is in are
+##! given to every method as `cx`, as the type checker's are; the table of
+##! types is the function's own while it is lowered (`FnLower.types`), and
+##! goes back to the program after.
+
+from stage1.diag import TextRange
+from stage1.lower.names import Ctx
+from stage1.sir import (
+    BasicBlock,
+    BlockId,
+    ClosureRole,
+    Const,
+    FnKind,
+    Function,
+    Loc,
+    LocalDecl,
+    LocalId,
+    Operand,
+    Place,
+    Rvalue,
+    Statement,
+    StatementKind,
+    Terminator,
+    Type,
+)
+from stage1.syntax.ast import Mode
+from stage1.typeck.program import FnKind as DefFnKind
+from stage1.typeck.program import ModuleId, Predicate
+from stage1.typeck.program import Program as Resolved
+from stage1.typeck.thir import BlockId as TBlockId
+from stage1.typeck.thir import BodyKind, ClosureId, TBody, TCompClause, TCompKind, TExpr, TExprId, TStmt
+from stage1.typeck.thir import ClosureRole as TRole
+from stage1.typeck.ty import Ty, TyData, Types
+
+## What a lowered function reads and does not change: the program, the
+## names, the typed body and its module.
+pub view struct Cx:
+    pub prog: ref Resolved
+    pub ctx: ref Ctx
+    pub body: ref TBody
+    pub module: ModuleId
+
+impl Cx:
+    pub pure def loc(self, r: TextRange) -> Loc?:
+        return self.ctx.loc(self.module, r)
+
+    pub pure def end_loc(self, r: TextRange) -> Loc?:
+        return self.ctx.end_loc(self.module, r)
+
+## A value to drop at a scope's end.
+@derive(Eq, Copy)
+pub enum DropEntry:
+    Local(LocalId)
+    ## A `defer` block, by index into `FnLower.defers`.
+    Defer(int)
+
+pub struct Scope:
+    pub entries: list[DropEntry]
+    ## Every local whose storage ends with the scope, in creation order.
+    pub locals: list[LocalId]
+    ## Where the scope ends: what a drop at its end points at.
+    pub end: Loc?
+
+@derive(Copy)
+pub struct LoopCtx:
+    pub break_bb: BlockId
+    pub continue_bb: BlockId
+    ## Scopes at and above this index are left by `break` and `continue`.
+    pub depth: int
+
+struct BlockBuild:
+    stmts: list[Statement]
+    term: Terminator?
+    unwind: BlockId?
+    cleanup: bool
+    started: bool
+    loc: Loc?
+
+pub struct FnLower:
+    pub types: Types
+    ## The generic parameters of the function (a closure has its owner's).
+    pub type_params: list[String]
+    ## The bounds in scope, for associated types and trait calls.
+    pub bounds: list[Predicate]
+    pub closure: ClosureId?
+    pub name: String
+    pub locals: list[LocalDecl]
+    ## The SIR local of each local of the typed body.
+    pub map: dict[int, LocalId]
+    pub alias: dict[int, Place]
+    pub env: dict[int, int]
+    blocks: list[BlockBuild]
+    cur: int
+    pub scopes: list[Scope]
+    ## The cleanup chain of each list of values, by `entries_key`.
+    cleanups: dict[String, BlockId]
+    resume_block: BlockId?
+    override_live: list[DropEntry]?
+    in_cleanup: bool
+    pub loops: list[LoopCtx]
+    pub defers: list[TBlockId]
+    pub unit_temp: LocalId?
+    ## Lowering a struct's invariant check as `T.__invariant`, which returns
+    ## whether it holds instead of panicking (D-077's check).
+    pub bool_invariant: bool
+    ## The expressions lowering makes, after the body's (`lower.exprs`).
+    pub extra: list[TExpr]
+
+## The rest of a comprehension inside its loops.
+pub struct CompRest:
+    pub clauses: list[TCompClause]
+    pub elem: TExprId
+    pub value: TExprId?
+    pub dest: Place
+    ## The type of the collection being built.
+    pub dest_ty: Type
+    pub kind: TCompKind
+    pub item_tys: (Ty, Ty?)
+
+## What a `for` loop runs per item: a block, or the rest of a
+## comprehension.
+pub enum ForBody:
+    Block(TBlockId)
+    Comprehension(CompRest)
+
+## The steps a `comptime` expression may take without
+## `@comptime_budget(steps=N)` on its item (08 leaves the number open).
+pub const DEFAULT_COMPTIME_BUDGET: int = 1000000
+
+pub pure def closure_name(owner: str, id: ClosureId) -> String:
+    return "{owner}#closure{id.index}"
+
+pub pure def comptime_name(owner: str, id: ClosureId) -> String:
+    return "{owner}#comptime{id.index}"
+
+## Lowers a body and its closures to SIR functions; the table of types
+## comes back with what lowering added.
+pub pure def lower_body(
+    mut ctx: Ctx, prog: Resolved, own types_in: Types, body: TBody
+) -> (list[Function], Types):
+    var types = types_in
+    let name = ctx.body_name(prog, types, body)
+    let module = prog.defs[body.def_.index].module
+    let source = ctx.source_index(prog, module)
+    var out: list[Function] = []
+    var kind = FnKind.Value
+    var pure = True
+    var from_: list[int] = []
+    var inner: list[int] = []
+    var owns: list[int] = []
+    var type_params: list[String] = []
+    var env: list[Predicate] = []
+    if body.kind == BodyKind.Fn:
+        if let Some(f) = prog.fn_info(body.def_):
+            kind = match f.kind:
+                case DefFnKind.Test(_): FnKind.Test
+                case DefFnKind.Drop: FnKind.Drop
+                case _: FnKind.Normal
+            let b = prog.result_borrows_of(mut types, f)
+            let ps = prog.sig_params(f)
+            for i in range(len(ps)):
+                if ps[i].mode == Mode.Own:
+                    owns.push(i)
+            pure = f.pure
+            from_ = b.deep.copy()
+            inner = b.inner.copy()
+            for g in f.generics:
+                type_params.push(g.name.copy())
+            env = prog.elaborate_env(mut types, f.predicates)
+    let cx = Cx(prog=ref prog, ctx=ctx, body=ref body, module=module)
+    var main = FnLower.new(types, None, name)
+    main.type_params = type_params.copy()
+    main.bounds = env.copy()
+    let (f0, t0) = main.run(cx, kind, source, pure, from_, inner, owns)
+    out.push(f0)
+    types = t0
+    for i in range(len(body.closures)):
+        let id = ClosureId(index=i)
+        let cl = ref body.closures[i]
+        let cpure = match types.data(cl.fn_ty):
+            case TyData.Fn(_, _, p): p
+            case _: False
+        if cl.comptime_:
+            # `comptime e`: a function of nothing, which the compiler runs
+            # with the item's budget. Its value cannot depend on the owner's
+            # type arguments (E0600).
+            var fl = FnLower.new(types, Some(id), comptime_name(name, id))
+            fl.bounds = env.copy()
+            let budget = FnKind.Comptime(DEFAULT_COMPTIME_BUDGET)
+            let (f, t) = fl.run(cx, budget, source, cpure, [], [], [])
+            out.push(f)
+            types = t
+            continue
+        # A closure's result may borrow from any argument, its environment
+        # (argument 0) included: function types carry no `from` clause.
+        var cfrom: list[int] = []
+        for k in range(len(cl.params) + 1):
+            cfrom.push(k)
+        var fl = FnLower.new(types, Some(id), closure_name(name, id))
+        fl.type_params = type_params.copy()
+        fl.bounds = env.copy()
+        let role = match cl.role:
+            case TRole.Plain: ClosureRole.Plain
+            case TRole.ScopeBody: ClosureRole.ScopeBody
+            case TRole.Task: ClosureRole.Task
+        let (f, t) = fl.run(cx, FnKind.Closure(role), source, cpure, cfrom, [], [])
+        out.push(f)
+        types = t
+    return (out, types)
+
+## The text that names a list of values to drop, as a key.
+pure def entries_key(entries: list[DropEntry]) -> String:
+    var out = String.new()
+    for e in entries:
+        match e:
+            case DropEntry.Local(l):
+                out.push("L{l.index},")
+            case DropEntry.Defer(i):
+                out.push("D{i},")
+    return out
+
+## The span of a statement.
+pub pure def stmt_span(body: TBody, s: TStmt) -> TextRange:
+    return match s:
+        case TStmt.Let(_, _, _, _, span): span
+        case TStmt.Assign(_, _, span): span
+        case TStmt.AssignTuple(_, _, span): span
+        case TStmt.Discard(_, span): span
+        case TStmt.AugAssign(_, _, _, span): span
+        case TStmt.Return(_, span): span
+        case TStmt.If(_, _, span): span
+        case TStmt.While(_, _, span): span
+        case TStmt.For(_, _, _, _, _, span): span
+        case TStmt.Match(_, _, span): span
+        case TStmt.Assert(_, _, _, span, _): span
+        case TStmt.Contract(c): c.span
+        case TStmt.Select(_, span): span
+        case TStmt.Yield(_, span): span
+        case TStmt.Defer(_, span): span
+        case TStmt.Expr(e): body.exprs[e.index].span
+        case TStmt.Break(span): span
+        case TStmt.Continue(span): span
+        case TStmt.Error(span): span
+        case TStmt.Block(b): body.blocks[b.index].span
+
+impl FnLower:
+    pub pure def new(own types: Types, closure: ClosureId?, name: str) -> FnLower:
+        return FnLower(
+            types=types,
+            type_params=[],
+            bounds=[],
+            closure=closure,
+            name=name.to_string(),
+            locals=[],
+            map={},
+            alias={},
+            env={},
+            blocks=[],
+            cur=0,
+            scopes=[],
+            cleanups={},
+            resume_block=None,
+            override_live=None,
+            in_cleanup=False,
+            loops=[],
+            defers=[],
+            unit_temp=None,
+            bool_invariant=False,
+            extra=[],
+        )
+
+    ## Lowers the body; `from_` and `inner` are the arguments the result may
+    ## borrow from, deeply and through their values only.
+    pub pure def run(
+        own self,
+        cx: Cx,
+        kind: FnKind,
+        source: int,
+        pure: bool,
+        from_: list[int],
+        inner: list[int],
+        owns: list[int],
+    ) -> (Function, Types):
+        var me = self
+        let body = ref cx.body
+        # Where the function is declared: its name, or the closure.
+        var loc: Loc? = None
+        var ret = body.ret
+        var block = body.block
+        var params = body.params.copy()
+        match me.closure:
+            case Some(c):
+                let cl = ref body.closures[c.index]
+                loc = cx.loc(cl.span)
+                ret = cl.ret
+                block = cl.body
+                params = cl.params.copy()
+            case None:
+                if body.kind == BodyKind.Fn:
+                    loc = cx.loc(cx.prog.defs[body.def_.index].span)
+        var ret_sir = Type.Bool
+        if not me.bool_invariant:
+            ret_sir = me.ty(cx, ret)
+        _ = me.add_local(ret_sir, None)
+        # Parameters.
+        var param_count = 0
+        if let Some(c) = me.closure:
+            let cl = ref body.closures[c.index]
+            if not cl.comptime_:
+                var env_tys: list[Type] = []
+                var names: list[String] = []
+                for cap in cl.captures:
+                    let t = me.ty(cx, body.locals[cap.local].ty)
+                    if cap.by_value:
+                        env_tys.push(t)
+                    else:
+                        env_tys.push(Type.Ref(inner=[t], mutable=cap.mutable))
+                    names.push(body.locals[cap.local].name.copy())
+                # The environment's name lists the captures, for diagnostics.
+                var env_name = "env".to_string()
+                if not names.is_empty():
+                    env_name = "env({names.join(", ")})"
+                var env_ty = Type.Unit
+                if not env_tys.is_empty():
+                    env_ty = Type.Tuple(env_tys)
+                _ = me.add_local(env_ty, Some(env_name))
+                for i in range(len(cl.captures)):
+                    _ = me.env.insert(cl.captures[i].local, i)
+                param_count += 1
+        let entry = me.new_block()
+        me.scopes.push(Scope(entries=[], locals=[], end=me.block_end(cx, block)))
+        me.switch_to(cx, entry)
+        # A task owns its environment: it runs once, and drops what it keeps
+        # by value when it returns.
+        if let Some(c) = me.closure:
+            let cl = ref body.closures[c.index]
+            if cl.role == TRole.Task:
+                var owned = False
+                for cap in cl.captures:
+                    if cap.by_value and me.needs_drop(cx, body.locals[cap.local].ty):
+                        owned = True
+                if owned:
+                    me.register(DropEntry.Local(LocalId(index=1)))
+        for p in params:
+            let decl = ref body.locals[p]
+            let t = me.ty(cx, decl.ty)
+            let l = me.add_local(t, Some(decl.name.copy()))
+            me.locals[l.index].loc = cx.loc(decl.span)
+            _ = me.map.insert(p, l)
+            param_count += 1
+        for p in params:
+            let t = body.locals[p].ty
+            if me.needs_drop(cx, t):
+                let l = me.map.get(p).copied() ?? LocalId(index=0)
+                me.register(DropEntry.Local(l))
+        if not me.scopes[0].entries.is_empty():
+            me.split(cx)
+        # The contract's checks on entry (07).
+        me.contract_entry(cx)
+        me.block_stmts(cx, block)
+        if not me.terminated():
+            # Falling off the end: only unit functions do (the checker
+            # rejects the rest).
+            var done = Const.Unit
+            if me.bool_invariant:
+                done = Const.Bool(True)
+            me.assign(cx, Place.local(LocalId(index=0)), Rvalue.Use(Operand.Const(done)), None)
+            var end: Loc? = None
+            if let Some(s) = me.scopes.first():
+                end = s.end
+            me.contract_exit(cx, end)
+            me.emit_exit(cx, 0, end)
+            me.terminate(Terminator.Return, None)
+        let blocks = me.finish_blocks()
+        let f = Function(
+            name=me.name.copy(),
+            type_params=me.type_params.copy(),
+            kind=kind,
+            param_count=param_count,
+            pure=pure,
+            from_=from_.copy(),
+            inner=inner.copy(),
+            owns=owns.copy(),
+            locals=me.locals.copy(),
+            blocks=blocks,
+            loc=loc,
+            source=source,
+        )
+        return (f, me.types)
+
+    ## The end of a block's last statement: where its scope ends.
+    pub pure def block_end(self, cx: Cx, b: TBlockId) -> Loc?:
+        let blk = ref cx.body.blocks[b.index]
+        var span = blk.span
+        if let Some(s) = blk.stmts.last():
+            span = stmt_span(cx.body, s)
+        return cx.end_loc(span)
+
+    ## The SIR type of a type of the body.
+    pub pure def ty(mut self, cx: Cx, t: Ty) -> Type:
+        return cx.ctx.ty(cx.prog, mut self.types, t)
+
+    # ---------------------------------------------------------------- locals
+
+    pub pure def add_local(mut self, own ty: Type, own name: String?) -> LocalId:
+        let id = LocalId(index=len(self.locals))
+        self.locals.push(LocalDecl.new(ty, name))
+        return id
+
+    ## A temporary whose storage ends with the innermost scope.
+    pub pure def temp(mut self, cx: Cx, ty: Ty) -> LocalId:
+        let t = self.ty(cx, ty)
+        return self.temp_sir(t)
+
+    pub pure def temp_sir(mut self, own ty: Type) -> LocalId:
+        let l = self.add_local(ty, None)
+        self.scope_local(0, l)
+        return l
+
+    ## The scratch destination of calls whose `()` result is unused.
+    pub pure def unit(mut self) -> Place:
+        if let Some(l) = self.unit_temp:
+            return Place.local(l)
+        let l = self.add_local(Type.Unit, None)
+        self.unit_temp = Some(l)
+        return Place.local(l)
+
+    ## The SIR local of a local of the typed body, created on first use.
+    pub pure def local_for(mut self, cx: Cx, l: int) -> LocalId:
+        if let Some(s) = self.map.get(l).copied():
+            return s
+        let decl = ref cx.body.locals[l]
+        let ty = self.ty(cx, decl.ty)
+        var name: String? = None
+        if not decl.name.is_empty() and decl.name != "?":
+            name = Some(decl.name.copy())
+        let s = self.add_local(ty, name)
+        self.locals[s.index].loc = cx.loc(decl.span)
+        self.locals[s.index].once = decl.once
+        _ = self.map.insert(l, s)
+        return s
+
+    ## Records that `l`'s storage ends with the scope `below` levels under
+    ## the innermost.
+    pub pure def scope_local(mut self, below: int, l: LocalId):
+        let at = len(self.scopes) - 1 - below
+        if at >= 0 and at < len(self.scopes):
+            self.scopes[at].locals.push(l)
+        elif len(self.scopes) > 0 and at < 0:
+            self.scopes[0].locals.push(l)
+
+    pub pure def needs_drop(mut self, cx: Cx, ty: Ty) -> bool:
+        if let TyData.Ref(_, _) = self.types.data(ty):
+            return False
+        return not cx.prog.is_copy_in(mut self.types, ty, self.bounds)
+
+    # ---------------------------------------------------------------- blocks
+
+    pub pure def new_block(mut self) -> BlockId:
+        self.blocks.push(
+            BlockBuild(stmts=[], term=None, unwind=None, cleanup=False, started=False, loc=None)
+        )
+        return BlockId(index=len(self.blocks) - 1)
+
+    pub pure def switch_to(mut self, cx: Cx, b: BlockId):
+        self.cur = b.index
+        if not self.blocks[self.cur].started:
+            self.blocks[self.cur].started = True
+            self.blocks[self.cur].cleanup = self.in_cleanup
+            var unwind: BlockId? = None
+            if not self.in_cleanup:
+                unwind = self.cleanup_for_live(cx)
+            self.blocks[self.cur].unwind = unwind
+
+    pub pure def terminated(self) -> bool:
+        return self.blocks[self.cur].term.is_some()
+
+    pub pure def emit(mut self, cx: Cx, own kind: StatementKind, loc: Loc?):
+        if self.terminated():
+            # Code after a diverging statement goes to a fresh, unreachable
+            # block.
+            let b = self.new_block()
+            self.switch_to(cx, b)
+        self.blocks[self.cur].stmts.push(Statement(kind=kind, loc=loc))
+
+    pub pure def assign(mut self, cx: Cx, own p: Place, own r: Rvalue, loc: Loc?):
+        self.emit(cx, StatementKind.Assign(place=p, value=r), loc)
+
+    pub pure def terminate(mut self, own t: Terminator, loc: Loc?):
+        if self.blocks[self.cur].term.is_none():
+            self.blocks[self.cur].term = Some(t)
+            self.blocks[self.cur].loc = loc
+
+    pub pure def goto(mut self, b: BlockId):
+        self.terminate(Terminator.Goto(b), None)
+
+    ## Ends the current block with a jump to a fresh one.
+    pub pure def split(mut self, cx: Cx):
+        let b = self.new_block()
+        self.goto(b)
+        self.switch_to(cx, b)
+
+    # ---------------------------------------------------------------- scopes and drops
+
+    pub pure def push_scope(mut self):
+        var end: Loc? = None
+        if let Some(s) = self.scopes.last():
+            end = s.end
+        self.scopes.push(Scope(entries=[], locals=[], end=end))
+
+    ## A scope that ends at `end` (a block's last statement, a statement).
+    pub pure def push_scope_at(mut self, end: Loc?):
+        self.scopes.push(Scope(entries=[], locals=[], end=end))
+
+    ## Registers a value to drop in the innermost scope; the next statement
+    ## starts a block whose unwind edge includes it.
+    pub pure def register(mut self, e: DropEntry):
+        let n = len(self.scopes)
+        if n > 0:
+            self.scopes[n - 1].entries.push(e)
+
+    ## Registers in the scope `n` levels below the innermost.
+    pub pure def register_below(mut self, n: int, e: DropEntry):
+        let at = len(self.scopes) - 1 - n
+        if at >= 0:
+            self.scopes[at].entries.push(e)
+        elif len(self.scopes) > 0:
+            self.scopes[0].entries.push(e)
+
+    pure def live(self) -> list[DropEntry]:
+        if let Some(o) = self.override_live:
+            return o.copy()
+        var out: list[DropEntry] = []
+        for s in self.scopes:
+            for e in s.entries:
+                out.push(e)
+        return out
+
+    pure def cleanup_for_live(mut self, cx: Cx) -> BlockId?:
+        let live = self.live()
+        if live.is_empty():
+            return None
+        return Some(self.cleanup_chain(cx, live))
+
+    pure def cleanup_chain(mut self, cx: Cx, entries: list[DropEntry]) -> BlockId:
+        let key = entries_key(entries)
+        if let Some(b) = self.cleanups.get(key).copied():
+            return b
+        var next = BlockId(index=0)
+        if len(entries) > 1:
+            var rest: list[DropEntry] = []
+            for i in range(len(entries) - 1):
+                rest.push(entries[i])
+            next = self.cleanup_chain(cx, rest)
+        else:
+            next = self.resume(cx)
+        let saved_cur = self.cur
+        let saved_in = self.in_cleanup
+        let saved_live = self.override_live.copy()
+        self.override_live = None
+        self.in_cleanup = True
+        let b = self.new_block()
+        self.switch_to(cx, b)
+        if let Some(e) = entries.last():
+            self.emit_drop(cx, e, None)
+        self.goto(next)
+        self.cur = saved_cur
+        self.in_cleanup = saved_in
+        self.override_live = saved_live
+        _ = self.cleanups.insert(key, b)
+        return b
+
+    pure def resume(mut self, cx: Cx) -> BlockId:
+        if let Some(b) = self.resume_block:
+            return b
+        let saved_cur = self.cur
+        let saved_in = self.in_cleanup
+        self.in_cleanup = True
+        let b = self.new_block()
+        self.switch_to(cx, b)
+        self.terminate(Terminator.Resume, None)
+        self.cur = saved_cur
+        self.in_cleanup = saved_in
+        self.resume_block = Some(b)
+        return b
+
+    pure def emit_drop(mut self, cx: Cx, e: DropEntry, loc: Loc?):
+        match e:
+            case DropEntry.Local(l):
+                self.emit(cx, StatementKind.Drop(place=Place.local(l), flag=None), loc)
+            case DropEntry.Defer(i):
+                let block = self.defers[i]
+                self.push_scope()
+                self.block_stmts(cx, block)
+                self.pop_scope(cx)
+
+    ## Pops the innermost scope, dropping its values in reverse order and
+    ## ending the storage of its locals.
+    pub pure def pop_scope(mut self, cx: Cx):
+        var end: Loc? = None
+        if let Some(s) = self.scopes.last():
+            end = s.end
+        while True:
+            let n = len(self.scopes)
+            if n == 0:
+                break
+            let e = self.scopes[n - 1].entries.pop() else:
+                break
+            if self.terminated():
+                continue
+            if self.in_cleanup:
+                self.emit_drop(cx, e, None)
+            else:
+                self.split(cx)
+                self.emit_drop(cx, e, end)
+                if let DropEntry.Local(_) = e:
+                    self.split(cx)
+        var locals: list[LocalId] = []
+        if let Some(s) = self.scopes.pop():
+            locals = s.locals.copy()
+        if not self.terminated() and not self.in_cleanup:
+            var k = len(locals) - 1
+            while k >= 0:
+                self.emit(cx, StatementKind.StorageDead(locals[k]), end)
+                k -= 1
+
+    ## Drops every value of the scopes from `depth` up, innermost first,
+    ## without popping them: the path to a `return`, `break` or `continue`
+    ## written at `at`. Leaving for a loop's `break` or `continue` also ends
+    ## the storage of the scopes' locals; `return` leaves the frame.
+    pub pure def emit_exit(mut self, cx: Cx, depth_in: int, at: Loc?):
+        if self.terminated():
+            return
+        let depth = min(depth_in, len(self.scopes))
+        var base: list[DropEntry] = []
+        for i in range(depth):
+            for e in self.scopes[i].entries:
+                base.push(e)
+        var leaving: list[DropEntry] = []
+        var dead: list[LocalId] = []
+        for i in range(depth, len(self.scopes)):
+            for e in self.scopes[i].entries:
+                leaving.push(e)
+            if depth != 0:
+                for l in self.scopes[i].locals:
+                    dead.push(l)
+        if not leaving.is_empty():
+            var remaining = base.copy()
+            for e in leaving:
+                remaining.push(e)
+            let saved = self.override_live.copy()
+            var k = len(leaving) - 1
+            while k >= 0:
+                let e = leaving[k]
+                _ = remaining.pop()
+                self.override_live = Some(remaining.copy())
+                if self.in_cleanup:
+                    self.emit_drop(cx, e, None)
+                else:
+                    self.split(cx)
+                    self.emit_drop(cx, e, at)
+                k -= 1
+            self.override_live = saved
+        if not self.in_cleanup and not dead.is_empty():
+            var after_drop = False
+            if let Some(s) = self.blocks[self.cur].stmts.last():
+                if let StatementKind.Drop(_, _) = s.kind:
+                    after_drop = True
+            if after_drop:
+                self.split(cx)
+            var k = len(dead) - 1
+            while k >= 0:
+                self.emit(cx, StatementKind.StorageDead(dead[k]), at)
+                k -= 1
+
+    ## A block that drops the scopes from `depth` up and jumps to `target`.
+    pub pure def edge_to(mut self, cx: Cx, target: BlockId, depth: int) -> BlockId:
+        var leaving = False
+        for i in range(min(depth, len(self.scopes)), len(self.scopes)):
+            if not self.scopes[i].entries.is_empty() or not self.scopes[i].locals.is_empty():
+                leaving = True
+        if not leaving:
+            return target
+        let saved = self.cur
+        let b = self.new_block()
+        self.switch_to(cx, b)
+        self.emit_exit(cx, depth, None)
+        self.goto(target)
+        self.cur = saved
+        return b
+
+    # ---------------------------------------------------------------- finishing
+
+    pure def finish_blocks(mut self) -> list[BasicBlock]:
+        # Keep the `dead` statements of borrowed locals only.
+        var borrowed: set[int] = set()
+        for bb in self.blocks:
+            for s in bb.stmts:
+                match s.kind:
+                    case StatementKind.Assign(_, Rvalue.Ref(p, _)):
+                        _ = borrowed.add(p.local.index)
+                    case StatementKind.Assign(_, Rvalue.StrView(p)):
+                        _ = borrowed.add(p.local.index)
+                    case _:
+                        pass
+        for i in range(len(self.blocks)):
+            var kept: list[Statement] = []
+            for s in self.blocks[i].stmts:
+                if let StatementKind.StorageDead(l) = s.kind:
+                    if not borrowed.contains(l.index):
+                        continue
+                kept.push(s.copy())
+            self.blocks[i].stmts = kept
+        # Drop blocks no edge reaches, and renumber.
+        let n = len(self.blocks)
+        var reach: list[bool] = []
+        for _ in range(n):
+            reach.push(False)
+        var work = [0]
+        while let Some(b) = work.pop():
+            if b >= n or reach[b]:
+                continue
+            reach[b] = True
+            let bb = ref self.blocks[b]
+            if let Some(u) = bb.unwind:
+                work.push(u.index)
+            match bb.term:
+                case Some(Terminator.Goto(t)):
+                    work.push(t.index)
+                case Some(Terminator.Switch(_, cases, default)):
+                    for (_, t) in cases:
+                        work.push(t.index)
+                    work.push(default.index)
+                case _:
+                    pass
+        var renum: list[int] = []
+        var next = 0
+        for i in range(n):
+            renum.push(next)
+            if reach[i]:
+                next += 1
+        var out: list[BasicBlock] = []
+        for i in range(n):
+            if not reach[i]:
+                continue
+            let bb = ref self.blocks[i]
+            var term = Terminator.Unreachable
+            match bb.term:
+                case Some(Terminator.Goto(t)):
+                    term = Terminator.Goto(BlockId(index=renum[t.index]))
+                case Some(Terminator.Switch(value, cases, default)):
+                    var cs: list[(int, BlockId)] = []
+                    for (v, t) in cases:
+                        cs.push((v, BlockId(index=renum[t.index])))
+                    term = Terminator.Switch(
+                        value=value.copy(), cases=cs, default=BlockId(index=renum[default.index])
+                    )
+                case Some(t):
+                    term = t.copy()
+                case None:
+                    pass
+            var unwind: BlockId? = None
+            if let Some(u) = bb.unwind:
+                unwind = Some(BlockId(index=renum[u.index]))
+            out.push(
+                BasicBlock(
+                    stmts=bb.stmts.copy(), term=term, unwind=unwind, cleanup=bb.cleanup, loc=bb.loc
+                )
+            )
+        return out

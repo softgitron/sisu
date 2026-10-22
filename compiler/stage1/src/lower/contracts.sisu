@@ -1,0 +1,549 @@
+##! Contracts in SIR (stage 0's `sisu-lower/src/contracts.rs`; 07): a struct
+##! with an invariant checks it once built, an `invariant` line and a
+##! refinement's predicate checked in a body panic through `contract.fail`
+##! when they do not hold, and a failed `assert` shows the value of each
+##! part of its condition (17, "Assertions": every sub-expression's value).
+
+from stage1.diag import TextRange
+from stage1.lower.exprs import param_local_ty
+from stage1.lower.func import Cx, DropEntry, FnLower
+from stage1.lower.names import CONTRACTS_ALL, CONTRACTS_OFF
+from stage1.sir import Aggregate, Callee, Const, Loc, LocalId, Operand, Place, Proj, Rvalue, StatementKind, Terminator, Type
+from stage1.syntax.ast import Mode, UnOp
+from stage1.typeck.program import FnKind
+from stage1.typeck.thir import (
+    ContractCheck,
+    InterpPart,
+    TContractKind,
+    TExprId,
+    TExprKind,
+)
+from stage1.typeck.thir import Callee as TCallee
+from stage1.typeck.ty import DefId, Ty, TyData
+
+## The most parts of a condition a failure shows.
+const MAX_PARTS: int = 12
+
+impl FnLower:
+    ## The function's name in a contract's message: `withdraw` or, for a
+    ## method, `Account.withdraw`.
+    pure def contract_owner(self, cx: Cx) -> String:
+        let d = cx.body.def_
+        let name = cx.prog.defs[d.index].name.copy()
+        if let Some(f) = cx.prog.fn_info(d):
+            if let Some(o) = f.owner:
+                return "{cx.prog.display(self.types, o)}.{name}"
+        return name
+
+    ## On entry: the `requires` clauses, then the values `old(e)` saves.
+    pub pure def contract_entry(mut self, cx: Cx):
+        let c = cx.body.contracts.copy() else:
+            return
+        if self.closure.is_some() or cx.ctx.level == CONTRACTS_OFF:
+            return
+        for r in c.requires:
+            self.contract_check(cx, r)
+        if cx.ctx.level < CONTRACTS_ALL:
+            return
+        for (l, e) in c.olds:
+            let sl = self.local_for(cx, l)
+            self.into(cx, Place.local(sl), e)
+            let ty = cx.body.locals[l].ty
+            if self.needs_drop(cx, ty):
+                self.register(DropEntry.Local(sl))
+                self.split(cx)
+
+    ## On an exit, once the result is in `_0`: the invariant of a `mut self`
+    ## method's type, then the `ensures` clauses.
+    pub pure def contract_exit(mut self, cx: Cx, loc: Loc?):
+        let c = cx.body.contracts.copy() else:
+            return
+        if self.closure.is_some() or cx.ctx.level < CONTRACTS_ALL or self.terminated():
+            return
+        if let Some((check, args)) = c.invariant:
+            if let Some(p) = cx.body.params.first():
+                let me = self.local_for(cx, p)
+                let target = Place.local(me).project(Proj.Deref)
+                self.call_invariant(cx, check, args, target, loc)
+        if c.ensures.is_empty():
+            return
+        let ret = Place.local(LocalId(index=0))
+        if let Some(r) = c.result:
+            let rl = self.local_for(cx, r)
+            var rv = Rvalue.Use(Operand.Copy(ret.copy()))
+            if let TyData.Ref(_, _) = self.types.data(cx.body.locals[r].ty):
+                rv = Rvalue.Ref(place=ret.copy(), mutable=False)
+            self.assign(cx, Place.local(rl), rv, loc)
+        for (l, i) in c.labels:
+            let ll = self.local_for(cx, l)
+            let part = ret.project(Proj.Field(i))
+            var rv = Rvalue.Use(Operand.Copy(part.copy()))
+            if let TyData.Ref(_, _) = self.types.data(cx.body.locals[l].ty):
+                rv = Rvalue.Ref(place=part, mutable=False)
+            self.assign(cx, Place.local(ll), rv, loc)
+        for e in c.ensures:
+            self.contract_check(cx, e)
+
+    ## The invariant check of a struct, on the value at `target`.
+    pure def call_invariant(
+        mut self, cx: Cx, check: DefId, args: list[Ty], target: Place, loc: Loc?
+    ):
+        let f = cx.prog.fn_info(check) else:
+            return
+        let owner = self.types.subst(f.owner ?? Ty.error(), args)
+        let env = cx.prog.elaborate_env(mut self.types, f.predicates)
+        let local = param_local_ty(cx.prog, mut self.types, owner, Mode.Borrow, env)
+        var arg = Operand.Copy(target.copy())
+        if let TyData.Ref(_, _) = self.types.data(local):
+            let ot = self.ty(cx, owner)
+            let t = self.temp_sir(Type.Ref(inner=[ot], mutable=False))
+            self.assign(cx, Place.local(t), Rvalue.Ref(place=target.copy(), mutable=False), loc)
+            arg = Operand.Copy(Place.local(t))
+        var tys: list[Type] = []
+        for a in args:
+            tys.push(self.ty(cx, a))
+        let u = self.unit()
+        let name = cx.ctx.fn_name(cx.prog, self.types, check)
+        self.emit(
+            cx, StatementKind.Call(dest=u, callee=Callee.Fn(name=name, args=tys), args=[arg]), loc
+        )
+
+    ## After a struct is built at `dest`: its invariant, if it has one.
+    pub pure def invariant_after_construction(
+        mut self, cx: Cx, dest: Place, def_: DefId, args: list[Ty], loc: Loc?
+    ):
+        if cx.ctx.level < CONTRACTS_ALL:
+            return
+        # A generator the compiler wrote refuses a case that breaks the
+        # invariant instead (17).
+        let module = cx.prog.defs[cx.body.def_.index].module
+        if cx.prog.modules[module.index].name.starts_with("<arbitrary>/"):
+            return
+        let check = cx.prog.invariant_check(def_) else:
+            return
+        self.call_invariant(cx, check, args, dest, loc)
+
+    ## A contract statement in a body: an `invariant` line, or a
+    ## refinement's predicate checked at compile time.
+    pub pure def contract_stmt(mut self, cx: Cx, c: ContractCheck):
+        self.contract_check(cx, c)
+
+    ## Checks one clause: each conjunct of a top-level `and` in turn, so a
+    ## failure names the one that failed.
+    pub pure def contract_check(mut self, cx: Cx, c: ContractCheck):
+        let kind = match c.kind:
+            case TContractKind.Requires: 0
+            case TContractKind.Ensures: 1
+            case TContractKind.Invariant: 2
+            case TContractKind.Refinement: 3
+        var owner = String.new()
+        match c.kind:
+            case TContractKind.Invariant:
+                owner = self.contract_owner(cx)
+                if let Some(f) = cx.prog.fn_info(cx.body.def_):
+                    if let FnKind.Invariant(t) = f.kind:
+                        owner = cx.prog.qualified_name(t)
+            case TContractKind.Refinement:
+                if let TExprKind.Call(TCallee.Fn(def_, type_args), _) = self.ex(cx, c.cond).kind:
+                    if let Some(f) = cx.prog.fn_info(def_):
+                        if let FnKind.Predicate(r) = f.kind:
+                            let name = cx.prog.qualified_name(r)
+                            if type_args.is_empty():
+                                owner = name
+                            else:
+                                var shown: list[String] = []
+                                for t in type_args:
+                                    shown.push(cx.prog.display(self.types, t))
+                                owner = "{name}[{shown.join(", ")}]"
+            case _:
+                owner = self.contract_owner(cx)
+        var parts: list[TExprId] = [c.cond]
+        if c.kind != TContractKind.Refinement:
+            parts = self.conjuncts(cx, c.cond)
+        let whole = len(parts) == 1
+        for part in parts:
+            let loc = cx.loc(self.span_of(cx, part))
+            let v = self.operand(cx, part)
+            let ok = self.new_block()
+            let bad = self.new_block()
+            self.terminate(Terminator.Switch(value=v, cases=[(0, bad)], default=ok), loc)
+            self.switch_to(cx, bad)
+            self.push_scope()
+            var text = c.text.copy()
+            if not whole:
+                text = self.source_of(cx, self.span_of(cx, part))
+            var shown: list[(int, TExprId)] = []
+            if c.kind == TContractKind.Refinement:
+                # The value that is not one.
+                if let TExprKind.Call(_, args) = self.ex(cx, part).kind:
+                    if let Some(a) = args.first():
+                        shown.push((0, a.expr))
+            elif c.replay:
+                shown = self.parts_to_show(cx, part)
+            let list = self.rendered_parts(cx, shown, loc)
+            let u = self.temp_sir(Type.Never)
+            let args = [
+                Operand.Const(Const.Int(kind)),
+                Operand.Const(Const.Str(owner.copy())),
+                Operand.Const(Const.Str(text)),
+                list,
+            ]
+            self.emit(
+                cx,
+                StatementKind.Call(
+                    dest=Place.local(u),
+                    callee=Callee.Intrinsic(name="contract.fail", args=[]),
+                    args=args,
+                ),
+                loc,
+            )
+            self.terminate(Terminator.Unreachable, loc)
+            self.pop_scope(cx)
+            self.switch_to(cx, ok)
+
+    ## Whether a failed `assert` of `cond` can show its parts: it fits on
+    ## one line and has a part to show.
+    pub pure def can_show_parts(self, cx: Cx, cond: TExprId) -> bool:
+        if self.source_of(cx, self.span_of(cx, cond)).contains("\n"):
+            return False
+        return not self.parts_to_show(cx, cond).is_empty()
+
+    ## `assert cond` whose failure shows every part of `cond`.
+    pub pure def assert_showing_parts(
+        mut self, cx: Cx, cond: TExprId, message: TExprId?, span: TextRange
+    ):
+        let loc = cx.loc(span)
+        let v = self.operand(cx, cond)
+        let ok = self.new_block()
+        let bad = self.new_block()
+        self.terminate(Terminator.Switch(value=v, cases=[(0, bad)], default=ok), loc)
+        self.switch_to(cx, bad)
+        self.push_scope()
+        var m = Operand.Const(Const.Str(String.new()))
+        if let Some(x) = message:
+            m = self.str_operand(cx, x)
+        let shown = self.parts_to_show(cx, cond)
+        let list = self.rendered_parts(cx, shown, loc)
+        let text = self.source_of(cx, self.span_of(cx, cond))
+        let u = self.temp_sir(Type.Never)
+        let args = [Operand.Const(Const.Str(text)), m, list]
+        self.emit(
+            cx,
+            StatementKind.Call(
+                dest=Place.local(u),
+                callee=Callee.Intrinsic(name="assert.fail_parts", args=[]),
+                args=args,
+            ),
+            loc,
+        )
+        self.terminate(Terminator.Unreachable, loc)
+        self.pop_scope(cx)
+        self.switch_to(cx, ok)
+
+    ## The source text of a span, trimmed.
+    pure def source_of(self, cx: Cx, span: TextRange) -> String:
+        let text = cx.ctx.texts.get(cx.module) else:
+            return String.new()
+        let end = min(span.end, text.byte_len())
+        let start = min(span.start, end)
+        return text.byte_slice(start, end).trim().to_string()
+
+    ## The parts of a condition to show when it fails, each with the column
+    ## (in characters, from the condition's start) its value is drawn
+    ## under: names, calls (under a method's name), fields, indexing,
+    ## arithmetic (under the operator) and variants with arguments,
+    ## outermost first, one per column. Only the parts every evaluation of
+    ## the condition evaluates are shown.
+    pure def parts_to_show(self, cx: Cx, cond: TExprId) -> list[(int, TExprId)]:
+        var out: list[(int, TExprId)] = []
+        let text = cx.ctx.texts.get(cx.module) else:
+            return out
+        let start = self.span_of(cx, cond).start
+        self.walk_parts(cx, text, start, cond, True, mut out)
+        return out
+
+    ## The column of byte `at` from the condition's start at `start`, when
+    ## it is on the same line.
+    pure def part_col(self, text: str, start: int, at: int) -> int?:
+        if at < start or at > text.byte_len():
+            return None
+        let s = text.byte_slice(start, at)
+        if s.contains("\n"):
+            return None
+        var n = 0
+        for _ in s.chars():
+            n += 1
+        return Some(n)
+
+    pure def push_part(
+        self,
+        cx: Cx,
+        text: str,
+        start: int,
+        at: int,
+        x: TExprId,
+        top: bool,
+        mut out: list[(int, TExprId)],
+    ):
+        if top:
+            return
+        match self.types.data(self.ty_of(cx, x)):
+            case TyData.Fn(_, _, _) | TyData.Never | TyData.Unit | TyData.Error:
+                return
+            case _:
+                pass
+        let c = self.part_col(text, start, at) else:
+            return
+        for (k, _) in out:
+            if k == c:
+                return
+        out.push((c, x))
+
+    pure def walk_parts(
+        self, cx: Cx, text: str, start: int, e: TExprId, top: bool, mut out: list[(int, TExprId)]
+    ):
+        if len(out) >= MAX_PARTS:
+            return
+        let x = self.ex(cx, e)
+        let at = x.span.start
+        match x.kind:
+            case TExprKind.Local(l):
+                let name = ref cx.body.locals[l].name
+                if not name.is_empty() and name != "?" and name != "self":
+                    self.push_part(cx, text, start, at, e, top, mut out)
+            case TExprKind.Call(callee, args):
+                var method = False
+                if let TCallee.Fn(def_, _) = callee:
+                    if let Some(f) = cx.prog.fn_info(def_):
+                        if f.self_mode.is_some():
+                            if let Some(a) = args.first():
+                                method = self.span_of(cx, a.expr).start == x.span.start
+                var pos = at
+                if method:
+                    let end = self.span_of(cx, args[0].expr).end
+                    let rest = text.byte_slice(end, text.byte_len())
+                    if let Some(i) = rest.find("."):
+                        pos = end + i + 1
+                self.push_part(cx, text, start, pos, e, top, mut out)
+                if let TCallee.Value(f) = callee:
+                    self.walk_parts(cx, text, start, f, False, mut out)
+                for a in args:
+                    self.walk_parts(cx, text, start, a.expr, False, mut out)
+            case TExprKind.Field(base, _):
+                self.push_part(cx, text, start, at, e, top, mut out)
+                self.walk_parts(cx, text, start, base, False, mut out)
+            case TExprKind.Index(base, index, _):
+                self.push_part(cx, text, start, at, e, top, mut out)
+                self.walk_parts(cx, text, start, base, False, mut out)
+                self.walk_parts(cx, text, start, index, False, mut out)
+            case TExprKind.Variant(_, _, args):
+                if not args.is_empty():
+                    self.push_part(cx, text, start, at, e, top, mut out)
+                    for a in args:
+                        self.walk_parts(cx, text, start, a, False, mut out)
+            case TExprKind.Binary(_, lhs, rhs):
+                let end = self.span_of(cx, lhs).end
+                var pos = at
+                var i = end
+                while i < text.byte_len():
+                    let b = text.byte_at(i)
+                    if b != 32 and b != 9 and b != 10 and b != 13 and b != 12 and b != 41:
+                        pos = i
+                        break
+                    i += 1
+                self.push_part(cx, text, start, pos, e, top, mut out)
+                self.walk_parts(cx, text, start, lhs, False, mut out)
+                self.walk_parts(cx, text, start, rhs, False, mut out)
+            case TExprKind.Unary(op, operand):
+                if op != UnOp.Not:
+                    self.push_part(cx, text, start, at, e, top, mut out)
+                self.walk_parts(cx, text, start, operand, False, mut out)
+            case TExprKind.Compare(first, rest):
+                self.walk_parts(cx, text, start, first, False, mut out)
+                for (_, y) in rest:
+                    self.walk_parts(cx, text, start, y, False, mut out)
+            case TExprKind.Logic(_, lhs, _):
+                self.walk_parts(cx, text, start, lhs, False, mut out)
+            case TExprKind.Coalesce(opt, _, _):
+                self.walk_parts(cx, text, start, opt, False, mut out)
+            case TExprKind.Coerce(inner, _):
+                self.walk_parts(cx, text, start, inner, top, mut out)
+            case TExprKind.Deref(inner):
+                self.walk_parts(cx, text, start, inner, top, mut out)
+            case TExprKind.Borrow(inner, _):
+                self.walk_parts(cx, text, start, inner, top, mut out)
+            case TExprKind.CopyOf(inner):
+                self.push_part(cx, text, start, at, e, top, mut out)
+                self.walk_parts(cx, text, start, inner, False, mut out)
+            case TExprKind.Tuple(xs):
+                for y in xs:
+                    self.walk_parts(cx, text, start, y, False, mut out)
+            case TExprKind.List(xs):
+                for y in xs:
+                    self.walk_parts(cx, text, start, y, False, mut out)
+            case _:
+                pass
+
+    ## The parts' values rendered with `Debug`, as a `list[(int, String)]`
+    ## of columns and texts.
+    pure def rendered_parts(mut self, cx: Cx, parts: list[(int, TExprId)], loc: Loc?) -> Operand:
+        var string_ty = Ty.error()
+        if let Some(s) = cx.prog.wk.string:
+            string_ty = self.types.adt(s, [])
+        let pair_ty = self.types.tuple([Ty.int(), string_ty])
+        var items: list[Operand] = []
+        for (c, e) in parts:
+            let span = self.span_of(cx, e)
+            let shown = self.add_expr(
+                cx,
+                TExprKind.Interp([InterpPart.Value(expr=e, debug=None, spec="?".to_string())]),
+                string_ty,
+                span,
+            )
+            let t = self.temp(cx, string_ty)
+            self.into(cx, Place.local(t), shown)
+            self.register(DropEntry.Local(t))
+            self.split(cx)
+            let pair = self.temp(cx, pair_ty)
+            let made = Rvalue.Aggregate(
+                kind=Aggregate.Tuple,
+                operands=[Operand.Const(Const.Int(c)), Operand.Move(Place.local(t))],
+            )
+            self.assign(cx, Place.local(pair), made, loc)
+            self.register(DropEntry.Local(pair))
+            self.split(cx)
+            items.push(Operand.Move(Place.local(pair)))
+        var list_ty = Ty.error()
+        if let Some(l) = cx.prog.wk.list:
+            list_ty = self.types.adt(l, [pair_ty])
+        let list = self.temp(cx, list_ty)
+        self.assign(
+            cx, Place.local(list), Rvalue.Aggregate(kind=Aggregate.List, operands=items), loc
+        )
+        self.register(DropEntry.Local(list))
+        self.split(cx)
+        return Operand.Move(Place.local(list))
+
+    ## The conjuncts of a top-level `and`: `a and b and c` is checked as
+    ## `a`, then `b`, then `c`.
+    pure def conjuncts(self, cx: Cx, e: TExprId) -> list[TExprId]:
+        if let TExprKind.Logic(True, lhs, rhs) = self.ex(cx, e).kind:
+            var v = self.conjuncts(cx, lhs)
+            for x in self.conjuncts(cx, rhs):
+                v.push(x)
+            return v
+        return [e]
+
+    ## `X.try_from(v)`: `Ok(v)` when the predicate holds for `v`, else
+    ## `Err(Unsatisfied(ty=..., predicate=...))`. For a refinement of a
+    ## refinement, each predicate in turn, the outermost base's first, and
+    ## the error names the first that does not hold.
+    pub pure def refine_try(
+        mut self,
+        cx: Cx,
+        own dest: Place,
+        value: TExprId,
+        refinement: DefId,
+        type_args: list[Ty],
+        loc: Loc?,
+    ):
+        var chain: list[(DefId, list[Ty])] = []
+        var at = self.types.adt(refinement, type_args.copy())
+        while True:
+            let TyData.Adt(d, args) = self.types.data(at).copy() else:
+                break
+            let base = cx.prog.refinement_base(mut self.types, d, args) else:
+                break
+            chain.push((d, args.copy()))
+            if len(chain) > 64:
+                break
+            at = base
+        chain.reverse()
+        let vty = self.ty_of(cx, value)
+        let t = self.temp(cx, vty)
+        self.into(cx, Place.local(t), value)
+        if self.needs_drop(cx, vty):
+            self.register(DropEntry.Local(t))
+            self.split(cx)
+        let join = self.new_block()
+        for (rd, rargs) in chain:
+            let r = cx.prog.refinement(rd) else:
+                continue
+            let pred = r.predicate else:
+                continue
+            let base = self.types.subst(r.base, rargs)
+            var arg = Operand.Copy(Place.local(t))
+            if self.needs_drop(cx, base) or not cx.prog.is_copy(mut self.types, base):
+                let bt = self.ty(cx, base)
+                let rr = self.temp_sir(Type.Ref(inner=[bt], mutable=False))
+                self.assign(
+                    cx, Place.local(rr), Rvalue.Ref(place=Place.local(t), mutable=False), loc
+                )
+                arg = Operand.Copy(Place.local(rr))
+            let ok = self.temp_sir(Type.Bool)
+            var tys: list[Type] = []
+            for x in rargs:
+                tys.push(self.ty(cx, x))
+            let pname = cx.ctx.fn_name(cx.prog, self.types, pred)
+            self.emit(
+                cx,
+                StatementKind.Call(
+                    dest=Place.local(ok), callee=Callee.Fn(name=pname, args=tys), args=[arg]
+                ),
+                loc,
+            )
+            let yes = self.new_block()
+            let no = self.new_block()
+            self.terminate(
+                Terminator.Switch(
+                    value=Operand.Copy(Place.local(ok)), cases=[(0, no)], default=yes
+                ),
+                loc,
+            )
+            self.switch_to(cx, no)
+            var shown: list[String] = []
+            for x in rargs:
+                shown.push(cx.prog.display(self.types, x))
+            var name = cx.prog.qualified_name(rd)
+            if not shown.is_empty():
+                name = "{name}[{shown.join(", ")}]"
+            var string_ty = Ty.error()
+            if let Some(s) = cx.prog.wk.string:
+                string_ty = self.types.adt(s, [])
+            let a = self.temp(cx, string_ty)
+            self.intrinsic_call(
+                cx, Place.local(a), "String.new", [], [Operand.Const(Const.Str(name))], loc
+            )
+            self.register(DropEntry.Local(a))
+            self.split(cx)
+            let b = self.temp(cx, string_ty)
+            self.intrinsic_call(
+                cx, Place.local(b), "String.new", [], [Operand.Const(Const.Str(r.text.copy()))], loc
+            )
+            self.register(DropEntry.Local(b))
+            self.split(cx)
+            var err = Ty.error()
+            if let Some(d) = cx.prog.lookup_in(cx.prog.prelude, "RefinementError"):
+                err = self.types.err_set([d])
+            let e = self.temp(cx, err)
+            let unsat = Aggregate.Variant("RefinementError".to_string(), "Unsatisfied".to_string())
+            let made = Rvalue.Aggregate(
+                kind=unsat, operands=[Operand.Move(Place.local(a)), Operand.Move(Place.local(b))]
+            )
+            self.assign(cx, Place.local(e), made, loc)
+            self.register(DropEntry.Local(e))
+            self.split(cx)
+            let errv = Aggregate.Variant("Result".to_string(), "Err".to_string())
+            self.assign(
+                cx,
+                dest.copy(),
+                Rvalue.Aggregate(kind=errv, operands=[Operand.Move(Place.local(e))]),
+                loc,
+            )
+            self.goto(join)
+            self.switch_to(cx, yes)
+        let v = self.copy_or_move(cx, Place.local(t), vty)
+        let okv = Aggregate.Variant("Result".to_string(), "Ok".to_string())
+        self.assign(cx, dest, Rvalue.Aggregate(kind=okv, operands=[v]), loc)
+        self.goto(join)
+        self.switch_to(cx, join)

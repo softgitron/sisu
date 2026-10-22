@@ -1,0 +1,323 @@
+##! Pattern tests (which branch to take) and bindings (what the arm sees)
+##! (stage 0's `sisu-lower/src/pats.rs`). Testing happens first and binds
+##! nothing, so a failed test leaves the scrutinee as it was.
+
+from stage1.lower.func import Cx, FnLower
+from stage1.sir import (
+    BinOp as SirBinOp,
+    BlockId,
+    Callee,
+    Const,
+    Operand,
+    Place,
+    Proj,
+    Rvalue,
+    StatementKind,
+    Terminator,
+    Type,
+)
+from stage1.typeck.std_sources import own_kind
+from stage1.typeck.thir import BindMode, Lit, PatId, TExprKind, TPatKind
+from stage1.typeck.ty import TyData
+
+impl FnLower:
+    ## The variants `pat` tests for, and the place whose discriminant
+    ## decides, when that is all the pattern tests: a variant whose fields
+    ## cannot fail, or a choice of such variants of one place.
+    pub pure def variant_set(self, cx: Cx, pat: PatId, place: Place) -> (Place, list[int])?:
+        let p = ref cx.body.pats[pat.index]
+        match p.kind:
+            case TPatKind.Variant(_, variant, fields):
+                # A union of error sets tests which set first (`test`).
+                if let TyData.ErrSet(ms) = self.types.data(p.ty):
+                    if len(ms) > 1:
+                        return None
+                for f in fields:
+                    if not cannot_fail(cx, f):
+                        return None
+                return Some((place.copy(), [variant]))
+            case TPatKind.Or(alts):
+                var out: (Place, list[int])? = None
+                for alt in alts:
+                    let found = self.variant_set(cx, alt, place) else:
+                        return None
+                    let (q, vs) = found
+                    match out:
+                        case None:
+                            out = Some((q, vs))
+                        case Some((o, ws)):
+                            if o != q:
+                                return None
+                            var all = ws.copy()
+                            for v in vs:
+                                all.push(v)
+                            out = Some((o.copy(), all))
+                return out
+            case TPatKind.Deref(inner):
+                return self.variant_set(cx, inner, place.project(Proj.Deref))
+            case _:
+                return None
+
+    ## Continues in the current block when `pat` matches the value at
+    ## `place`, and jumps to `fail` otherwise.
+    pub pure def test(mut self, cx: Cx, pat: PatId, place: Place, fail: BlockId):
+        let p = ref cx.body.pats[pat.index]
+        let loc = cx.loc(p.span)
+        match p.kind:
+            case TPatKind.Wild | TPatKind.Bind(_, _) | TPatKind.Error:
+                pass
+            case TPatKind.Lit(l):
+                var c = Const.Int(0)
+                match l:
+                    case Lit.Int(n):
+                        c = Const.Int(n)
+                    case Lit.WideInt(_):
+                        c = Const.Int(0)
+                    case Lit.Float(f):
+                        c = Const.Float(f)
+                    case Lit.Bool(b):
+                        c = Const.Bool(b)
+                    case Lit.Char(ch):
+                        c = Const.Char(ch)
+                    case Lit.Str(s):
+                        c = Const.Str(s.copy())
+                # A literal of a `u64`, `u128`, `i128` or `f32` is a value an
+                # intrinsic makes, as in an expression.
+                var made = self.is_f32(cx, p.ty)
+                if let Some(k) = self.sized_int(cx, p.ty):
+                    if own_kind(k):
+                        made = True
+                var rhs = Operand.Const(c.copy())
+                if made:
+                    var kind = TExprKind.Int(0)
+                    match l:
+                        case Lit.WideInt(b):
+                            kind = TExprKind.WideInt(b)
+                        case Lit.Float(f):
+                            kind = TExprKind.Float(f)
+                        case _:
+                            if let Const.Int(n) = c:
+                                kind = TExprKind.Int(n)
+                    let lit = self.add_expr(cx, kind, p.ty, p.span)
+                    let t = self.temp(cx, p.ty)
+                    self.into(cx, Place.local(t), lit)
+                    rhs = Operand.Copy(Place.local(t))
+                var lhs = Operand.Copy(place.copy())
+                if not cx.prog.is_copy_in(mut self.types, p.ty, self.bounds):
+                    let pt = self.ty(cx, p.ty)
+                    let t = self.temp_sir(Type.Ref(inner=[pt], mutable=False))
+                    self.assign(
+                        cx, Place.local(t), Rvalue.Ref(place=place.copy(), mutable=False), loc
+                    )
+                    lhs = Operand.Copy(Place.local(t))
+                let r = self.temp_sir(Type.Bool)
+                self.assign(
+                    cx, Place.local(r), Rvalue.Binary(op=SirBinOp.Eq, lhs=lhs, rhs=rhs), loc
+                )
+                let ok = self.new_block()
+                self.terminate(
+                    Terminator.Switch(
+                        value=Operand.Copy(Place.local(r)), cases=[(0, fail)], default=ok
+                    ),
+                    loc,
+                )
+                self.switch_to(cx, ok)
+            case TPatKind.Variant(def_, variant, fields):
+                # A value of a union of error sets is a variant of one of
+                # them: test which before testing the variant index.
+                var union = False
+                if let TyData.ErrSet(ms) = self.types.data(p.ty):
+                    union = len(ms) > 1
+                if union:
+                    let pt = self.ty(cx, p.ty)
+                    let r = self.temp_sir(Type.Ref(inner=[pt], mutable=False))
+                    self.assign(
+                        cx, Place.local(r), Rvalue.Ref(place=place.copy(), mutable=False), loc
+                    )
+                    let is = self.temp_sir(Type.Bool)
+                    let decl = Type.Named(name=cx.ctx.type_name(cx.prog, def_), args=[])
+                    self.emit(
+                        cx,
+                        StatementKind.Call(
+                            dest=Place.local(is),
+                            callee=Callee.Intrinsic(name="error.is", args=[decl]),
+                            args=[Operand.Copy(Place.local(r))],
+                        ),
+                        loc,
+                    )
+                    let ok = self.new_block()
+                    self.terminate(
+                        Terminator.Switch(
+                            value=Operand.Copy(Place.local(is)), cases=[(0, fail)], default=ok
+                        ),
+                        loc,
+                    )
+                    self.switch_to(cx, ok)
+                let d = self.temp_sir(Type.Int)
+                self.assign(cx, Place.local(d), Rvalue.Discriminant(place.copy()), loc)
+                let ok = self.new_block()
+                self.terminate(
+                    Terminator.Switch(
+                        value=Operand.Copy(Place.local(d)), cases=[(variant, ok)], default=fail
+                    ),
+                    loc,
+                )
+                self.switch_to(cx, ok)
+                for i in range(len(fields)):
+                    let sub = place.project(Proj.Downcast(variant)).project(Proj.Field(i))
+                    self.test(cx, fields[i], sub, fail)
+            case TPatKind.Struct(_, fields):
+                for i in range(len(fields)):
+                    self.test(cx, fields[i], place.project(Proj.Field(i)), fail)
+            case TPatKind.Tuple(fields):
+                for i in range(len(fields)):
+                    self.test(cx, fields[i], place.project(Proj.Field(i)), fail)
+            case TPatKind.Deref(inner):
+                self.test(cx, inner, place.project(Proj.Deref), fail)
+            case TPatKind.Or(alts):
+                let cont = self.new_block()
+                for i in range(len(alts)):
+                    if i + 1 == len(alts):
+                        self.test(cx, alts[i], place, fail)
+                        self.goto(cont)
+                    else:
+                        let next = self.new_block()
+                        self.test(cx, alts[i], place, next)
+                        self.goto(cont)
+                        self.switch_to(cx, next)
+                self.switch_to(cx, cont)
+            case TPatKind.List(prefix, has_rest, _, suffix):
+                let n = self.temp_sir(Type.Int)
+                let pt = self.ty(cx, p.ty)
+                let r = self.temp_sir(Type.Ref(inner=[pt], mutable=False))
+                self.assign(cx, Place.local(r), Rvalue.Ref(place=place.copy(), mutable=False), loc)
+                self.emit(
+                    cx,
+                    StatementKind.Call(
+                        dest=Place.local(n),
+                        callee=Callee.Intrinsic(name="len", args=[]),
+                        args=[Operand.Copy(Place.local(r))],
+                    ),
+                    loc,
+                )
+                let need = len(prefix) + len(suffix)
+                let op = if has_rest: SirBinOp.Ge else: SirBinOp.Eq
+                let c = self.temp_sir(Type.Bool)
+                let cmp = Rvalue.Binary(
+                    op=op, lhs=Operand.Copy(Place.local(n)), rhs=Operand.Const(Const.Int(need))
+                )
+                self.assign(cx, Place.local(c), cmp, loc)
+                let ok = self.new_block()
+                self.terminate(
+                    Terminator.Switch(
+                        value=Operand.Copy(Place.local(c)), cases=[(0, fail)], default=ok
+                    ),
+                    loc,
+                )
+                self.switch_to(cx, ok)
+                for i in range(len(prefix)):
+                    let sub = self.element(cx, place, i, False)
+                    self.test(cx, prefix[i], sub, fail)
+                for j in range(len(suffix)):
+                    let sub = self.element(cx, place, len(suffix) - j, True)
+                    self.test(cx, suffix[j], sub, fail)
+
+    pure def element(mut self, cx: Cx, place: Place, i: int, from_end: bool) -> Place:
+        let idx = self.temp_sir(Type.Int)
+        self.assign(cx, Place.local(idx), Rvalue.Use(Operand.Const(Const.Int(i))), None)
+        if from_end:
+            return place.project(Proj.IndexFromEnd(idx))
+        return place.project(Proj.Index(idx))
+
+    ## Binds the names of a pattern that matched; value bindings are dropped
+    ## with the innermost scope.
+    pub pure def bind(mut self, cx: Cx, pat: PatId, place: Place):
+        self.bind_below(cx, pat, place, 0)
+
+    ## Binds, registering drops in the scope `below` levels under the
+    ## innermost (a `let` registers in its block, not its statement).
+    pub pure def bind_below(mut self, cx: Cx, pat: PatId, place: Place, below: int):
+        let p = ref cx.body.pats[pat.index]
+        let loc = cx.loc(p.span)
+        match p.kind:
+            case TPatKind.Bind(local, mode):
+                let l = self.local_for(cx, local)
+                match mode:
+                    case BindMode.Value:
+                        let v = self.copy_or_move(cx, place.copy(), p.ty)
+                        self.assign(cx, Place.local(l), Rvalue.Use(v), loc)
+                        self.bind_registered(cx, local, l, p.ty, below)
+                    case BindMode.Ref:
+                        self.assign(
+                            cx, Place.local(l), Rvalue.Ref(place=place.copy(), mutable=False), loc
+                        )
+                        self.scope_local(below, l)
+                    case BindMode.RefMut:
+                        self.assign(
+                            cx, Place.local(l), Rvalue.Ref(place=place.copy(), mutable=True), loc
+                        )
+                        self.scope_local(below, l)
+            case TPatKind.Variant(_, variant, fields):
+                for i in range(len(fields)):
+                    let sub = place.project(Proj.Downcast(variant)).project(Proj.Field(i))
+                    self.bind_below(cx, fields[i], sub, below)
+            case TPatKind.Struct(_, fields):
+                for i in range(len(fields)):
+                    self.bind_below(cx, fields[i], place.project(Proj.Field(i)), below)
+            case TPatKind.Tuple(fields):
+                for i in range(len(fields)):
+                    self.bind_below(cx, fields[i], place.project(Proj.Field(i)), below)
+            case TPatKind.Deref(inner):
+                self.bind_below(cx, inner, place.project(Proj.Deref), below)
+            case TPatKind.List(prefix, _, rest, suffix):
+                for i in range(len(prefix)):
+                    let sub = self.element(cx, place, i, False)
+                    self.bind_below(cx, prefix[i], sub, below)
+                if let Some(r) = rest:
+                    let l = self.local_for(cx, r)
+                    let pt = self.ty(cx, p.ty)
+                    let refp = self.temp_sir(Type.Ref(inner=[pt], mutable=False))
+                    self.assign(
+                        cx, Place.local(refp), Rvalue.Ref(place=place.copy(), mutable=False), loc
+                    )
+                    self.emit(
+                        cx,
+                        StatementKind.Call(
+                            dest=Place.local(l),
+                            callee=Callee.Intrinsic(name="list.slice_middle", args=[]),
+                            args=[
+                                Operand.Copy(Place.local(refp)),
+                                Operand.Const(Const.Int(len(prefix))),
+                                Operand.Const(Const.Int(len(suffix))),
+                            ],
+                        ),
+                        loc,
+                    )
+                    let ty = cx.body.locals[r].ty
+                    self.bind_registered(cx, r, l, ty, below)
+                for j in range(len(suffix)):
+                    let sub = self.element(cx, place, len(suffix) - j, True)
+                    self.bind_below(cx, suffix[j], sub, below)
+            case _:
+                pass
+
+## Whether a pattern matches every value of its type, so that testing it
+## emits nothing.
+pure def cannot_fail(cx: Cx, pat: PatId) -> bool:
+    match cx.body.pats[pat.index].kind:
+        case TPatKind.Wild | TPatKind.Bind(_, _) | TPatKind.Error:
+            return True
+        case TPatKind.Struct(_, fields):
+            for f in fields:
+                if not cannot_fail(cx, f):
+                    return False
+            return True
+        case TPatKind.Tuple(fields):
+            for f in fields:
+                if not cannot_fail(cx, f):
+                    return False
+            return True
+        case TPatKind.Deref(inner):
+            return cannot_fail(cx, inner)
+        case _:
+            return False

@@ -1,0 +1,1060 @@
+##! Lowering from the typed tree to SIR (stage 0's `sisu-lower/src/lib.rs`;
+##! docs/architecture.md, "Lowering"): control flow becomes basic blocks;
+##! drops are emitted at every scope exit in reverse declaration order,
+##! with an unwind edge per block; closures become a function plus a tuple
+##! of captured references; `?` becomes a switch and an early return that
+##! records the error's trace; `for` becomes calls to the iterator
+##! intrinsics.
+##!
+##! This module holds what is the program's rather than one function's:
+##! the names of SIR functions and types, the translation of types, which
+##! functions the entry, the tests and the root module's functions reach,
+##! the declarations of the types, intrinsics, trait methods and impls
+##! they use, and the numbering of the source files. One function is
+##! lowered by `lower.func` and the modules it imports.
+##!
+##! Stage 1 checks the bodies of the root module and of the modules the
+##! compiler writes for it, not the standard library's: a program that
+##! reaches a body stage 1 has not checked is beyond the slice of lowering,
+##! and says which (`Lowered.beyond`).
+
+import stage1.lower.contracts
+import stage1.lower.stmts
+import stage1.typeck.borrows
+from stage1.diag import Catalog
+from stage1.diag import Lines
+from stage1.lower.func import lower_body
+from stage1.lower.glue import glue_functions
+from stage1.lower.names import CONTRACTS_ALL, Ctx
+from stage1.sir import (
+    Aggregate,
+    Callee,
+    Const,
+    Entry,
+    FieldDecl,
+    Function,
+    ImplDecl,
+    ImplTarget,
+    IntrinsicDecl,
+    Operand,
+    Program,
+    Rvalue,
+    StatementKind,
+    Type,
+    TypeDecl,
+    VariantDecl,
+)
+from stage1.syntax.ast import Mode
+from stage1.typeck import Base, Typed, base_from, check_file, check_std_body, std_text
+from stage1.typeck.program import DefKind, EnumInfo, FnInfo
+from stage1.typeck.program import Program as Resolved
+from stage1.typeck.thir import BodyKind, TBody
+from stage1.typeck.ty import DefId, TyData, Types
+
+## The types that have no declaration in SIR (stage 0's
+## `validate::BUILTIN_TYPES`).
+pub pure def is_builtin_type(n: str) -> bool:
+    return match n:
+        case "String" | "list" | "Array" | "dict" | "set" | "Iter" | "Entry" | "Path": True
+        case "DateTime" | "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin": True
+        case "System" | "Option" | "Result" | "Iterable": True
+        case _: False
+
+## What the program uses that stage 1's lowering does not have: the
+## parts of the SIR stage 0 writes from what stage 1 does not keep or
+## write.
+pure def beyond_lowering(prog: Resolved, typed: Typed) -> list[String]:
+    var out: list[String] = []
+    for b in typed.bodies:
+        for cl in b.closures:
+            if cl.comptime_:
+                push_once(
+                    mut out, "a `comptime` expression, whose value stage 0 computes into the SIR"
+                )
+        if b.generic_asserts:
+            push_once(
+                mut out,
+                "a `comptime assert` on `const` parameters, which stage 0 decides at each call",
+            )
+    if typed.refines:
+        push_once(
+            mut out,
+            "a `@refines` property, which stage 0 checks with generators stage 1 does not write",
+        )
+    for i in range(len(prog.defs)):
+        if prog.defs[i].module != prog.root:
+            continue
+        # A function of the program with a contract gets a test of it, from
+        # generators stage 1 does not write (`<arbitrary>/main.sisu`); so
+        # does a `mut self` method of a type with an `invariant`, which
+        # holds when it returns.
+        if let DefKind.Fn(f) = prog.defs[i].kind:
+            var keeps_invariant = False
+            if f.self_mode == Some(Mode.Mut):
+                if let Some(o) = f.owner:
+                    if let TyData.Adt(d, _) = typed.types.data(o):
+                        keeps_invariant = prog.invariant_check(d).is_some()
+            if f.contracts or keeps_invariant:
+                push_once(
+                    mut out,
+                    "a contract, whose test stage 0 writes with generators stage 1 does not",
+                )
+    if not prog.generator_sites.is_empty():
+        push_once(
+            mut out, "a generator of `arbitrary` or `exhaustive`, which stage 1 does not write"
+        )
+    if not typed.delegated.is_empty():
+        push_once(mut out, "an impl of `@delegate`, whose methods stage 1 declares as headers")
+    return out
+
+pure def push_once(mut out: list[String], why: str):
+    let w = why.to_string()
+    if not out.contains(w):
+        out.push(w)
+
+## A program of nothing.
+pure def empty_program() -> Program:
+    return Program(
+        sources=[],
+        entry=None,
+        types=[],
+        intrinsics=[],
+        functions=[],
+        tests=[],
+        trait_methods=[],
+        impls=[],
+    )
+
+## A program lowered, or why it is beyond the slice of lowering.
+pub struct Lowered:
+    pub program: Program
+    pub beyond: list[String]
+
+## Lowers a checked program (stage 0's `lower_reaching` for `sisu sir`):
+## what the entry, the tests and the root module's functions and constants
+## reach, every contract checked. `path` is the program's file as given.
+pub pure def lower(own typed: Typed, base: Base, path: str, catalog: Catalog) -> Lowered:
+    let prog = ref typed.prog
+    var types = typed.types.copy()
+    var ctx = Ctx(
+        files={},
+        file_names=[],
+        path=path.to_string(),
+        impl_names={},
+        level=CONTRACTS_ALL,
+        root_fns=set(),
+        type_defs={},
+        texts=typed.texts.copy(),
+        lines={},
+    )
+    for (m, t) in typed.texts.items():
+        _ = ctx.lines.insert(m, Lines.of(t))
+    for i in range(len(prog.defs)):
+        let d = DefId(index=i)
+        match prog.defs[i].kind:
+            case DefKind.Struct(_) | DefKind.Enum(_) | DefKind.ErrorSet(_):
+                let n = ctx.type_name(prog, d)
+                if not ctx.type_defs.contains(n):
+                    _ = ctx.type_defs.insert(n, d)
+            case _:
+                pass
+    for i in range(len(prog.defs)):
+        let def_ = ref prog.defs[i]
+        let m = ref prog.modules[def_.module.index]
+        if def_.module != prog.root and not m.name.starts_with("<arbitrary>/"):
+            continue
+        if let DefKind.Fn(f) = def_.kind:
+            if f.owner.is_none() and f.trait_.is_none() and f.impl_.is_none():
+                _ = ctx.root_fns.add(def_.name.copy())
+    ctx.name_impls(prog, types)
+    # The root module's file is source 0.
+    _ = ctx.source_index(prog, prog.root)
+    # Each body by the name of the function it lowers to, in stage 0's order
+    # of the typed bodies. A body is lowered when a kept function first
+    # names it; its files are numbered in the order the bodies come. A body
+    # stage 1 has not checked (the standard library's) is checked when it
+    # is reached (`pending`).
+    let slots = body_slots(prog)
+    var keys: list[int] = []
+    for (k, _) in slots.items():
+        keys.push(k)
+    keys.sort()
+    for k in keys:
+        let (d, kind) = slots.get(k) ?? (DefId(index=0), BodyKind.Const)
+        if kind == BodyKind.Fn:
+            if let Some(f) = prog.fn_info(d):
+                if f.intrinsic.is_some():
+                    continue
+        _ = ctx.source_index(prog, prog.defs[d.index].module)
+    var bodies: dict[String, int] = {}
+    for i in range(len(typed.bodies)):
+        let b = ref typed.bodies[i]
+        let n = ctx.body_name(prog, types, b)
+        if not bodies.contains(n):
+            _ = bodies.insert(n, i)
+    var pending: dict[String, (DefId, BodyKind)] = {}
+    for k in keys:
+        let (d, kind) = slots.get(k) ?? (DefId(index=0), BodyKind.Const)
+        if kind == BodyKind.Fn:
+            if let Some(f) = prog.fn_info(d):
+                if f.intrinsic.is_some():
+                    continue
+        let n = slot_name(ctx, prog, types, d, kind)
+        if not bodies.contains(n) and not pending.contains(n):
+            _ = pending.insert(n, (d, kind))
+    var entry: Entry? = None
+    if let Some(m) = prog.main():
+        if let Some(f) = prog.fn_info(m):
+            var returns_result = False
+            if let TyData.Adt(d, _) = types.data(f.ret):
+                returns_result = Some(d) == prog.wk.result
+            entry = Some(
+                Entry(
+                    function=ctx.fn_name(prog, types, m),
+                    takes_system=len(f.params) == 1,
+                    returns_result=returns_result,
+                )
+            )
+    var tests: list[(String, String)] = []
+    var any_system = False
+    for d in prog.tests:
+        let f = prog.fn_info(d) else:
+            continue
+        if len(f.params) == 1:
+            any_system = True
+        if f.body.is_some():
+            tests.push((prog.defs[d.index].name.copy(), ctx.fn_name(prog, types, d)))
+    # Keep what the entry, the tests and the root module's functions reach.
+    var roots: list[String] = []
+    if let Some(e) = entry:
+        roots.push(e.function.copy())
+    for (_, f) in tests:
+        roots.push(f.copy())
+    # A test that declares a `System` gets `System.sim` in the `sim`
+    # profile, which the run time calls (17).
+    if any_system:
+        roots.push("System.sim".to_string())
+    # A constant is computed even when nothing uses it: a `comptime` in it
+    # that fails is an error of the program (08).
+    for b in typed.bodies:
+        if prog.defs[b.def_.index].module == prog.root:
+            if b.kind == BodyKind.Fn or b.kind == BodyKind.Const:
+                roots.push(ctx.body_name(prog, types, b))
+    var beyond = beyond_lowering(prog, typed)
+    if not beyond.is_empty():
+        return Lowered(program=empty_program(), beyond=beyond)
+    var all = typed.bodies.copy()
+    let (reached, t) = lower_reached(
+        mut ctx, typed, base, catalog, types, mut all, mut bodies, pending, roots, mut beyond
+    )
+    types = t
+    var functions = reached
+    let decls = collect_types(ctx, prog, mut types, functions)
+    for g in glue_functions(decls):
+        functions.push(g.copy())
+    if shared_may_cross(functions):
+        beyond.push(
+            "a `Shared` that may cross to another task, which stage 0's escape analysis tags"
+        )
+    let intrinsics = intrinsic_decls(prog, mut types, functions)
+    let (trait_methods, impls) = trait_decls(ctx, prog, mut types, functions)
+    let sources = renumber_sources(ctx.file_names, mut functions)
+    let program = Program(
+        sources=sources,
+        entry=entry,
+        types=decls,
+        intrinsics=intrinsics,
+        functions=functions,
+        tests=tests,
+        trait_methods=trait_methods,
+        impls=impls,
+    )
+    return Lowered(program=program, beyond=beyond)
+
+## Whether a `Shared` is made where a task, a channel or a generator may
+## take it elsewhere (stage 0's `shared::tag_sites` then decides which
+## sites are atomic).
+pure def shared_may_cross(functions: list[Function]) -> bool:
+    var crossing = False
+    var shared = False
+    for f in functions:
+        for b in f.blocks:
+            for s in b.stmts:
+                if let StatementKind.Call(_, Callee.Intrinsic(n, _), _) = s.kind:
+                    let ns: str = n
+                    match ns:
+                        case "Scope.spawn" | "Scope.spawn_with" | "Sender.send" | "Sender.try_send" | "gen.new":
+                            crossing = True
+                        case "Shared.new":
+                            shared = True
+                        case _:
+                            pass
+    return crossing and shared
+
+## The trait methods the functions call through `call trait`, with their
+## facts, and the impls of their traits, which the interpreter dispatches
+## to.
+pure def trait_decls(
+    ctx: Ctx, prog: Resolved, mut types: Types, functions: list[Function]
+) -> (list[IntrinsicDecl], list[ImplDecl]):
+    let called = trait_calls(functions)
+    var methods: list[IntrinsicDecl] = []
+    var traits: list[DefId] = []
+    for name in called:
+        let m = trait_method_def(prog, name) else:
+            continue
+        let f = prog.fn_info(m) else:
+            continue
+        methods.push(decl_of(prog, mut types, name, f))
+        if let Some(t) = f.trait_:
+            if not traits.contains(t):
+                traits.push(t)
+    var kept: set[String] = set()
+    for f in functions:
+        _ = kept.add(f.name.copy())
+    # The traits whose associated types the functions name: the interpreter
+    # finds `<T as Trait>.Name` in the impl for `T`.
+    var projected: set[String] = set()
+    var mentioned: set[String] = set()
+    for f in functions:
+        for l in f.locals:
+            assoc_traits(l.ty, mut projected)
+            type_names(l.ty, mut mentioned)
+        for b in f.blocks:
+            for st in b.stmts:
+                match st.kind:
+                    case StatementKind.Call(_, callee, _):
+                        match callee:
+                            case Callee.Fn(_, ts):
+                                for t in ts:
+                                    assoc_traits(t, mut projected)
+                            case Callee.Trait(_, ts):
+                                for t in ts:
+                                    assoc_traits(t, mut projected)
+                            case Callee.Intrinsic(_, ts):
+                                for t in ts:
+                                    assoc_traits(t, mut projected)
+                            case _:
+                                pass
+                    case StatementKind.Assign(_, Rvalue.Closure(_, ts, _)):
+                        for t in ts:
+                            assoc_traits(t, mut projected)
+                    case _:
+                        pass
+    var impls: list[ImplDecl] = []
+    for i in prog.impls:
+        let info = prog.impl_info(i) else:
+            continue
+        let trait_name = prog.qualified_name(info.trait_ref.def_)
+        let dispatched = traits.contains(info.trait_ref.def_)
+        let self_ty = ctx.ty(prog, mut types, info.self_ty)
+        var has_assoc = not info.assoc.is_empty() and projected.contains(trait_name)
+        if has_assoc:
+            if let Type.Named(n, _) = self_ty:
+                has_assoc = mentioned.contains(n)
+        if not dispatched and not has_assoc:
+            continue
+        # An impl for a type no kept function makes was pruned with its
+        # methods.
+        var pruned = False
+        for (_, m) in info.methods:
+            if let Some(f) = prog.fn_info(m):
+                if f.body.is_some() and f.intrinsic.is_none():
+                    if not kept.contains(ctx.fn_name(prog, types, m)):
+                        pruned = True
+        if pruned and not has_assoc:
+            continue
+        var ms: list[(String, ImplTarget)] = []
+        for (n, m) in info.methods:
+            let f = prog.fn_info(m) else:
+                continue
+            if f.body.is_none() and f.intrinsic.is_none():
+                continue
+            if let Some(intr) = f.intrinsic:
+                ms.push((n.copy(), ImplTarget.Intrinsic(intr.copy())))
+                continue
+            let fname = ctx.fn_name(prog, types, m)
+            if kept.contains(fname):
+                ms.push((n.copy(), ImplTarget.Fn(fname)))
+        var assoc: list[(String, Type)] = []
+        for (n, t) in info.assoc:
+            assoc.push((n.copy(), ctx.ty(prog, mut types, t)))
+        impls.push(
+            ImplDecl(
+                params=len(info.generics),
+                trait_name=trait_name,
+                trait_args=ctx.tys(prog, mut types, info.trait_ref.args),
+                self_ty=self_ty,
+                methods=ms,
+                assoc=assoc,
+            )
+        )
+    return (methods, impls)
+
+## The facts of a function's declaration the SIR checkers need.
+pure def decl_of(prog: Resolved, mut types: Types, name: str, f: FnInfo) -> IntrinsicDecl:
+    let b = prog.result_borrows_of(mut types, f)
+    var owns: list[int] = []
+    let ps = prog.sig_params(f)
+    for i in range(len(ps)):
+        if ps[i].mode == Mode.Own:
+            owns.push(i)
+    return IntrinsicDecl(
+        name=name.to_string(),
+        pure=f.pure,
+        from_=b.deep.copy(),
+        inner=b.inner.copy(),
+        owns=owns,
+        keeps=f.keeps.copy(),
+    )
+
+## The traits of the associated types a type names.
+pure def assoc_traits(t: Type, mut out: set[String]):
+    match t:
+        case Type.Assoc(s, tr, args, _):
+            _ = out.add(tr.copy())
+            for x in s:
+                assoc_traits(x, mut out)
+            for a in args:
+                assoc_traits(a, mut out)
+        case Type.Named(_, args):
+            for a in args:
+                assoc_traits(a, mut out)
+        case Type.Dyn(_, args):
+            for a in args:
+                assoc_traits(a, mut out)
+        case Type.Tuple(es):
+            for e in es:
+                assoc_traits(e, mut out)
+        case Type.Fn(ps, r, _):
+            for p in ps:
+                assoc_traits(p, mut out)
+            for x in r:
+                assoc_traits(x, mut out)
+        case Type.Ref(x, _):
+            for y in x:
+                assoc_traits(y, mut out)
+        case _:
+            pass
+
+## The names of the trait methods called through `call trait`, sorted.
+pure def trait_calls(functions: list[Function]) -> list[String]:
+    var names: list[String] = []
+    for f in functions:
+        for b in f.blocks:
+            for s in b.stmts:
+                if let StatementKind.Call(_, Callee.Trait(n, _), _) = s.kind:
+                    if not names.contains(n):
+                        names.push(n.copy())
+    names.sort()
+    return names
+
+## The trait method a `Trait.method` name stands for.
+pure def trait_method_def(prog: Resolved, name: str) -> DefId?:
+    let cut = last_index_of(name, ".") else:
+        return None
+    let t = name.byte_slice(0, cut)
+    let m = name.byte_slice(cut + 1, name.byte_len())
+    for i in range(len(prog.defs)):
+        if let DefKind.Trait(_) = prog.defs[i].kind:
+            let d = DefId(index=i)
+            if prog.qualified_name(d) == t:
+                if let Some(x) = prog.trait_method(d, m):
+                    return Some(x)
+    return None
+
+## The facts the SIR checkers need about every intrinsic the functions
+## call: the prelude's declaration reduced to purity and the arguments the
+## result borrows from, or, for the intrinsics lowering introduces, the
+## table in docs/architecture.md ("Lowering-only intrinsics").
+pure def intrinsic_decls(
+    prog: Resolved, mut types: Types, functions: list[Function]
+) -> list[IntrinsicDecl]:
+    var names: list[String] = []
+    for f in functions:
+        for b in f.blocks:
+            for s in b.stmts:
+                if let StatementKind.Call(_, Callee.Intrinsic(n, _), _) = s.kind:
+                    if not names.contains(n):
+                        names.push(n.copy())
+    names.sort()
+    # The last declaration of a name wins, as a map's insertion does.
+    var by_name: dict[String, DefId] = {}
+    for i in range(len(prog.defs)):
+        if let DefKind.Fn(f) = prog.defs[i].kind:
+            var n = f.intrinsic.copy()
+            if n.is_none():
+                n = f.structural.copy()
+            if let Some(x) = n:
+                _ = by_name.insert(x.copy(), DefId(index=i))
+    var out: list[IntrinsicDecl] = []
+    for name in names:
+        if let Some(d) = by_name.get(name).copied():
+            if let Some(f) = prog.fn_info(d):
+                out.push(decl_of(prog, mut types, name, f))
+                continue
+        var from_: list[int] = []
+        var inner: list[int] = []
+        let ns: str = name
+        match ns:
+            case "iter.ref" | "iter.mut" | "iter.own" | "gen.new":
+                from_ = [0]
+            case "list.slice" | "list.slice_middle":
+                inner = [0]
+            case _:
+                pass
+        # `iter.own` takes the collection and keeps every element; a
+        # generator keeps its body, and `yield` gives its item away; a
+        # capability handle keeps its object for good.
+        var owns: list[int] = []
+        match ns:
+            case "iter.own" | "gen.new" | "gen.yield" | "cap.new":
+                owns = [0]
+            case _:
+                pass
+        let keeps = owns.copy()
+        # `select` observes the schedule (06, "Effects").
+        let pure = name != "select.wait"
+        out.push(
+            IntrinsicDecl(
+                name=name.copy(), pure=pure, from_=from_, inner=inner, owns=owns, keeps=keeps
+            )
+        )
+    return out
+
+## The body a function's name comes from: its own, or the one its closure
+## or `comptime` expression is in (`f#closure2`, `T#field#comptime0`).
+pure def owner_body(name: str, bodies: dict[String, int]) -> int?:
+    var n = name.to_string()
+    while True:
+        if let Some(i) = bodies.get(n):
+            return Some(i)
+        var cut = -1
+        if let Some(c) = last_index_of(n, "#closure"):
+            cut = c
+        if let Some(c) = last_index_of(n, "#comptime"):
+            cut = max(cut, c)
+        if cut < 0:
+            return None
+        n = n.byte_slice(0, cut).to_string()
+
+## Where the last `part` in `s` starts.
+pub pure def last_index_of(s: str, part: str) -> int?:
+    let n = part.byte_len()
+    var i = s.byte_len() - n
+    while i >= 0:
+        if s.byte_slice(i, i + n) == part:
+            return Some(i)
+        i -= 1
+    return None
+
+## Where each body stage 0 checks comes in its list of typed bodies: the
+## functions with bodies (but templates), the root module's first, each by
+## definition; then the defaults of struct fields and of parameters and the
+## constants, by definition and then by position. The key orders them.
+pure def body_slots(prog: Resolved) -> dict[int, (DefId, BodyKind)]:
+    var out: dict[int, (DefId, BodyKind)] = {}
+    for i in range(len(prog.defs)):
+        let d = DefId(index=i)
+        match prog.defs[i].kind:
+            case DefKind.Fn(f):
+                if f.body.is_some() and not f.template:
+                    _ = out.insert(body_key(prog, d, BodyKind.Fn), (d, BodyKind.Fn))
+                for k in range(len(f.params)):
+                    if f.params[k].default.is_some():
+                        let kind = BodyKind.ParamDefault(d, k)
+                        _ = out.insert(body_key(prog, d, kind), (d, kind))
+            case DefKind.Struct(s):
+                for k in range(len(s.fields)):
+                    if s.fields[k].default.is_some():
+                        let kind = BodyKind.FieldDefault(d, k)
+                        _ = out.insert(body_key(prog, d, kind), (d, kind))
+            case DefKind.Const(c):
+                if c.value.is_some():
+                    _ = out.insert(body_key(prog, d, BodyKind.Const), (d, BodyKind.Const))
+            case _:
+                pass
+    return out
+
+## The place of a body in stage 0's list of typed bodies, as a number.
+pure def body_key(prog: Resolved, d: DefId, kind: BodyKind) -> int:
+    let rank = def_rank(prog, d) * 10000
+    return match kind:
+        case BodyKind.Fn: (if prog.defs[d.index].module == prog.root: 0 else: 10000000000000) + rank
+        case BodyKind.FieldDefault(_, i): 100000000000000 + rank + i
+        case BodyKind.ParamDefault(_, i): 100000000000000 + rank + i
+        case BodyKind.Const: 100000000000000 + rank
+
+## A definition's place in stage 0's order of definitions: its phase, then
+## its index (`Program.phases`).
+pub pure def def_rank(prog: Resolved, d: DefId) -> int:
+    var phase = 0
+    if d.index < len(prog.phases):
+        phase = prog.phases[d.index]
+    return phase * 10000000 + d.index
+
+## The name of the function a body lowers to.
+pure def slot_name(ctx: Ctx, prog: Resolved, types: Types, d: DefId, kind: BodyKind) -> String:
+    return match kind:
+        case BodyKind.Fn: ctx.fn_name(prog, types, d)
+        case BodyKind.FieldDefault(s, i): ctx.field_default_name(prog, s, i)
+        case BodyKind.ParamDefault(f, i): ctx.param_default_name(prog, types, f, i)
+        case BodyKind.Const: ctx.const_name(prog, d)
+
+## The body a function's name comes from among those not checked yet.
+pure def pending_owner(name: str, pending: dict[String, (DefId, BodyKind)]) -> String?:
+    var n = name.to_string()
+    while True:
+        if pending.contains(n):
+            return Some(n)
+        var cut = -1
+        if let Some(c) = last_index_of(n, "#closure"):
+            cut = c
+        if let Some(c) = last_index_of(n, "#comptime"):
+            cut = max(cut, c)
+        if cut < 0:
+            return None
+        n = n.byte_slice(0, cut).to_string()
+
+## Lowers what the roots reach, and only that: from each kept function,
+## the functions it calls or names, the defaults, drops and invariant
+## checks of the types it uses, and the methods of the impls of the traits
+## it calls through `call trait` for the types the kept functions mention.
+## The functions come in the order of their bodies. A body stage 1 has not
+## checked is noted in `beyond`.
+pure def lower_reached(
+    mut ctx: Ctx,
+    typed: Typed,
+    base: Base,
+    catalog: Catalog,
+    own types_in: Types,
+    mut all: list[TBody],
+    mut bodies: dict[String, int],
+    pending: dict[String, (DefId, BodyKind)],
+    roots: list[String],
+    mut beyond: list[String],
+) -> (list[Function], Types):
+    var types = types_in
+    let prog = ref typed.prog
+    var tried: set[String] = set()
+    var lowered: dict[int, list[Function]] = {}
+    var where_is: dict[String, int] = {}
+    var dispatched: set[DefId] = set()
+    var added_impls: set[DefId] = set()
+    var keep: set[String] = set()
+    var mentioned: set[String] = set()
+    var typed_names: set[String] = set()
+    var work: list[String] = roots.copy()
+    # The prefixes of the methods of the impls the standard library derives
+    # (`Result.Debug`), which stage 1 declares as headers.
+    var derived: set[String] = set()
+    for i in prog.impls:
+        let info = prog.impl_info(i) else:
+            continue
+        if info.derived and prog.modules[prog.defs[i.index].module.index].is_std:
+            if let Some(p) = ctx.impl_names.get(i):
+                _ = derived.add(p.copy())
+    while True:
+        while let Some(n) = work.pop():
+            if keep.contains(n):
+                continue
+            _ = keep.add(n.copy())
+            if let Some(cut) = last_index_of(n, "."):
+                if derived.contains(n.byte_slice(0, cut).to_string()):
+                    push_once(
+                        mut beyond,
+                        "an impl the standard library derives, whose methods stage 1 does not write",
+                    )
+            if not where_is.contains(n) and owner_body(n, bodies).is_none():
+                # A body of the standard library, checked now.
+                if let Some(owner) = pending_owner(n, pending):
+                    if not tried.contains(owner):
+                        _ = tried.add(owner.copy())
+                        let (d, kind) = pending.get(owner.copy())
+                            ?? (DefId(index=0), BodyKind.Const)
+                        let (tb, t) = check_std_body(base, typed, types, d, kind, catalog)
+                        types = t
+                        match tb:
+                            case Some(b):
+                                let m = prog.defs[d.index].module
+                                if not ctx.texts.contains(m):
+                                    let text = std_text(base, prog, m)
+                                    _ = ctx.lines.insert(m, Lines.of(text))
+                                    _ = ctx.texts.insert(m, text)
+                                all.push(b.copy())
+                                _ = bodies.insert(owner.copy(), len(all) - 1)
+                            case None:
+                                let why = "a body of the standard library beyond the type checker's slice, `{owner}`"
+                                if not beyond.contains(why):
+                                    beyond.push(why)
+            if not where_is.contains(n):
+                if let Some(b) = owner_body(n, bodies):
+                    if not lowered.contains(b):
+                        let (fs, t) = lower_body(mut ctx, prog, types, all[b])
+                        types = t
+                        for f in fs:
+                            _ = where_is.insert(f.name.copy(), b)
+                        _ = lowered.insert(b, fs)
+            let b = where_is.get(n) else:
+                continue
+            let fs = lowered.get(b) else:
+                continue
+            var found: Function? = None
+            for f in fs:
+                if f.name == n:
+                    found = Some(f.copy())
+                    break
+            let f = found else:
+                continue
+            for l in f.locals:
+                type_names(l.ty, mut mentioned)
+            reach_from(prog, f, mut work, mut dispatched)
+            # Defaults and drops of declared types are reached through the
+            # types, and so is a type's invariant check, which the run time
+            # calls when unwinding drops a mutex guard (D-077).
+            for t in collect_types(ctx, prog, mut types, [f]):
+                let tn = t.name().to_string()
+                if typed_names.contains(tn):
+                    continue
+                _ = typed_names.add(tn.copy())
+                match t:
+                    case TypeDecl.Struct(name, _, fields, drop, _, _):
+                        for fd in fields:
+                            if let Some(d) = fd.default:
+                                work.push(d.copy())
+                        if let Some(d) = drop:
+                            work.push(d.copy())
+                        work.push("{name}.__invariant")
+                    case TypeDecl.Enum(_, _, _, drop, _, _, _):
+                        if let Some(d) = drop:
+                            work.push(d.copy())
+        for i in prog.impls:
+            let info = prog.impl_info(i) else:
+                continue
+            if added_impls.contains(i) or not dispatched.contains(info.trait_ref.def_):
+                continue
+            var needed = True
+            if let Type.Named(n, _) = ctx.ty(prog, mut types, info.self_ty):
+                needed = mentioned.contains(n)
+            if needed:
+                _ = added_impls.add(i)
+                for (_, m) in info.methods:
+                    work.push(ctx.fn_name(prog, types, m))
+                # The impls the prelude derives for its own types are headers
+                # in stage 1: stage 0 writes their bodies from the templates.
+                if info.derived and prog.modules[prog.defs[i.index].module.index].is_std:
+                    push_once(
+                        mut beyond,
+                        "an impl the standard library derives, whose methods stage 1 does not write",
+                    )
+        if work.is_empty():
+            break
+    # In stage 0's order of the typed bodies.
+    var by_key: dict[int, int] = {}
+    var order: list[int] = []
+    for b in lowered.keys():
+        let k = body_key(prog, all[b].def_, all[b].kind)
+        _ = by_key.insert(k, b)
+        order.push(k)
+    order.sort()
+    var out: list[Function] = []
+    for k in order:
+        let b = by_key.get(k) ?? 0
+        if let Some(fs) = lowered.get(b):
+            for f in fs:
+                if keep.contains(f.name):
+                    out.push(f.copy())
+    return (out, types)
+
+## The names of the named types in a type.
+pure def type_names(t: Type, mut out: set[String]):
+    match t:
+        case Type.Named(n, args):
+            _ = out.add(n.copy())
+            for a in args:
+                type_names(a, mut out)
+        case Type.Tuple(es):
+            for e in es:
+                type_names(e, mut out)
+        case Type.Fn(ps, r, _):
+            for p in ps:
+                type_names(p, mut out)
+            for x in r:
+                type_names(x, mut out)
+        case Type.Ref(x, _):
+            for y in x:
+                type_names(y, mut out)
+        case Type.Dyn(_, args):
+            for a in args:
+                type_names(a, mut out)
+        case Type.Assoc(s, _, args, _):
+            for x in s:
+                type_names(x, mut out)
+            for a in args:
+                type_names(a, mut out)
+        case Type.ErrSet(ms):
+            for m in ms:
+                _ = out.add(m.copy())
+        case _:
+            pass
+
+## What one function reaches: its callees, the functions it names as
+## values, and the traits it calls through.
+pure def reach_from(
+    prog: Resolved, f: Function, mut work: list[String], mut dispatched: set[DefId]
+):
+    for b in f.blocks:
+        for s in b.stmts:
+            match s.kind:
+                case StatementKind.Call(_, callee, args):
+                    match callee:
+                        case Callee.Fn(c, _):
+                            work.push(c.copy())
+                            refs_in_operands(args, mut work)
+                        case Callee.Trait(c, _):
+                            refs_in_operands(args, mut work)
+                            work.push(c.copy())
+                            if let Some(m) = trait_method_def(prog, c):
+                                if let Some(fi) = prog.fn_info(m):
+                                    if let Some(t) = fi.trait_:
+                                        _ = dispatched.add(t)
+                        case _:
+                            refs_in_operands(args, mut work)
+                case StatementKind.Assign(_, r):
+                    match r:
+                        case Rvalue.Closure(c, _, ops):
+                            work.push(c.copy())
+                            refs_in_operands(ops, mut work)
+                        case Rvalue.Use(o):
+                            refs_in_operands([o.copy()], mut work)
+                        case Rvalue.Aggregate(_, ops):
+                            refs_in_operands(ops, mut work)
+                        case _:
+                            pass
+                case _:
+                    pass
+
+## The sources the kept functions come from: the root module's file first,
+## then the others in the order they were first met; each function's index
+## is rewritten to match.
+pure def renumber_sources(names: list[String], mut functions: list[Function]) -> list[String]:
+    var map: dict[int, int] = {}
+    var out: list[String] = []
+    if not names.is_empty():
+        _ = map.insert(0, 0)
+        out.push(names[0].copy())
+    var used: list[int] = []
+    for f in functions:
+        if not used.contains(f.source):
+            used.push(f.source)
+    used.sort()
+    for i in used:
+        if not map.contains(i) and i < len(names):
+            _ = map.insert(i, len(out))
+            out.push(names[i].copy())
+    for k in range(len(functions)):
+        functions[k].source = map.get(functions[k].source) ?? 0
+    return out
+
+pure def refs_in_operands(ops: list[Operand], mut work: list[String]):
+    for o in ops:
+        if let Operand.Const(Const.Fn(n)) = o:
+            work.push(n.copy())
+
+## The declarations of every non-builtin type the functions mention, in
+## definition order.
+pure def collect_types(
+    ctx: Ctx, prog: Resolved, mut types: Types, functions: list[Function]
+) -> list[TypeDecl]:
+    var names: set[String] = set()
+    for f in functions:
+        for l in f.locals:
+            walk_type(l.ty, mut names)
+        for b in f.blocks:
+            for s in b.stmts:
+                match s.kind:
+                    case StatementKind.Assign(_, Rvalue.Aggregate(kind, _)):
+                        match kind:
+                            case Aggregate.Struct(n):
+                                _ = names.add(n.copy())
+                            case Aggregate.Variant(n, _):
+                                _ = names.add(n.copy())
+                            case Aggregate.Dyn(t):
+                                walk_type(t, mut names)
+                            case _:
+                                pass
+                    case StatementKind.Call(_, callee, _):
+                        match callee:
+                            case Callee.Fn(_, ts):
+                                for t in ts:
+                                    walk_type(t, mut names)
+                            case Callee.Trait(_, ts):
+                                for t in ts:
+                                    walk_type(t, mut names)
+                            case Callee.Intrinsic(_, ts):
+                                for t in ts:
+                                    walk_type(t, mut names)
+                            case _:
+                                pass
+                    case _:
+                        pass
+    # Close over field types.
+    var decls: dict[int, TypeDecl] = {}
+    var done: set[String] = set()
+    var queue: list[String] = []
+    for n in names:
+        queue.push(n.copy())
+    queue.sort()
+    while let Some(n) = queue.pop():
+        if done.contains(n):
+            continue
+        _ = done.add(n.copy())
+        if is_builtin_type(n):
+            continue
+        let d = ctx.type_defs.get(n).copied() else:
+            continue
+        var decl: TypeDecl? = None
+        match prog.defs[d.index].kind:
+            case DefKind.Struct(s):
+                var params: list[String] = []
+                for g in s.generics:
+                    params.push(g.name.copy())
+                var fields: list[FieldDecl] = []
+                for i in range(len(s.fields)):
+                    let f = ref s.fields[i]
+                    var default: String? = None
+                    if f.default.is_some():
+                        default = Some(ctx.field_default_name(prog, d, i))
+                    fields.push(
+                        FieldDecl(
+                            name=f.name.copy(), ty=ctx.ty(prog, mut types, f.ty), default=default
+                        )
+                    )
+                var drop: String? = None
+                if let Some(x) = s.drop:
+                    drop = Some(ctx.fn_name(prog, types, x))
+                decl = Some(
+                    TypeDecl.Struct(
+                        name=n.copy(),
+                        params=params,
+                        fields=fields,
+                        drop=drop,
+                        view_=s.view_,
+                        must_consume=s.must_consume,
+                    )
+                )
+            case DefKind.Enum(e):
+                decl = Some(enum_decl(ctx, prog, mut types, d, n, e))
+            case DefKind.ErrorSet(e):
+                decl = Some(enum_decl(ctx, prog, mut types, d, n, e))
+            case _:
+                pass
+        let found = decl else:
+            continue
+        var inner: set[String] = set()
+        match found:
+            case TypeDecl.Struct(_, _, fields, _, _, _):
+                for f in fields:
+                    walk_type(f.ty, mut inner)
+            case TypeDecl.Enum(_, _, variants, _, _, _, _):
+                for v in variants:
+                    for (_, t) in v.fields:
+                        walk_type(t, mut inner)
+        var more: list[String] = []
+        for x in inner:
+            more.push(x.copy())
+        more.sort()
+        for x in more:
+            queue.push(x.copy())
+        _ = decls.insert(def_rank(prog, d), found)
+    var order: list[int] = []
+    for i in decls.keys():
+        order.push(i)
+    order.sort()
+    var out: list[TypeDecl] = []
+    for i in order:
+        if let Some(t) = decls.get(i):
+            out.push(t.copy())
+    return out
+
+pure def enum_decl(
+    ctx: Ctx, prog: Resolved, mut types: Types, d: DefId, n: str, e: EnumInfo
+) -> TypeDecl:
+    var params: list[String] = []
+    for g in e.generics:
+        params.push(g.name.copy())
+    var variants: list[VariantDecl] = []
+    for v in e.variants:
+        var fields: list[(String?, Type)] = []
+        for (fname, t) in v.fields:
+            fields.push((fname.copy(), ctx.ty(prog, mut types, t)))
+        variants.push(VariantDecl(name=v.name.copy(), fields=fields))
+    var drop: String? = None
+    if let Some(x) = e.drop:
+        drop = Some(ctx.fn_name(prog, types, x))
+    return TypeDecl.Enum(
+        name=n.to_string(),
+        params=params,
+        variants=variants,
+        drop=drop,
+        error_=prog.is_error_set(d),
+        open=e.open,
+        must_consume=e.must_consume,
+    )
+
+## The named types a type mentions, for `collect_types`.
+pure def walk_type(t: Type, mut out: set[String]):
+    match t:
+        case Type.Named(n, args):
+            _ = out.add(n.copy())
+            for a in args:
+                walk_type(a, mut out)
+        case Type.Tuple(es):
+            for e in es:
+                walk_type(e, mut out)
+        case Type.ErrSet(ms):
+            for m in ms:
+                _ = out.add(m.copy())
+        case Type.Fn(ps, r, _):
+            for p in ps:
+                walk_type(p, mut out)
+            for x in r:
+                walk_type(x, mut out)
+        case Type.Ref(x, _):
+            for y in x:
+                walk_type(y, mut out)
+        case Type.Dyn(_, args):
+            for a in args:
+                walk_type(a, mut out)
+        case Type.Assoc(s, _, args, _):
+            for x in s:
+                walk_type(x, mut out)
+            for a in args:
+                walk_type(a, mut out)
+        case _:
+            pass
+
+# ------------------------------------------------------------------ tests
+
+## Why stage 1 does not lower a program: the type checker's reasons, then
+## lowering's.
+pure def beyond_of(program: str) -> list[String]:
+    let catalog = Catalog.parse("")
+    let base = base_from("@builtin(\"String\")\nstruct String:\n    pass\n")
+    let checked = check_file(base, program, catalog, False, {}, True)
+    if not checked.beyond.is_empty():
+        return checked.beyond
+    let typed = checked.typed else:
+        return ["nothing to lower"]
+    return lower(typed, base, "main.sisu", catalog).beyond
+
+test "a program beyond the slice of lowering says why":
+    assert beyond_of("def main():\n    let x = 1\n").is_empty()
+    let folded = "def main():\n    let x = comptime 6 * 7\n"
+    assert beyond_of(folded)
+        == ["a `comptime` expression, whose value stage 0 computes into the SIR"]
+    var kept: String = "struct Account:\n    balance: int\n    invariant self.balance >= 0\n\n"
+    kept.push("    def set(mut self, b: int):\n        self.balance = b\n\n")
+    kept.push("def main():\n    var a = Account(balance=1)\n    a.set(2)\n")
+    assert beyond_of(kept)
+        == ["a contract, whose test stage 0 writes with generators stage 1 does not"]

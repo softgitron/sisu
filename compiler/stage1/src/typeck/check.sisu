@@ -16,7 +16,9 @@
 ##! on; the driver then drops that body's diagnostics, so stage 1 reports
 ##! a subset of stage 0's.
 
-from stage1.diag import Diagnostic, Msg, TextRange
+import stage1.typeck.consts
+import stage1.typeck.folding
+from stage1.diag import Catalog, Diagnostic, Msg, TextRange
 from stage1.syntax.ast import (
     Ast,
     BinOp,
@@ -37,21 +39,28 @@ from stage1.syntax.ast import (
     TypeKind,
 )
 from stage1.syntax.ast import visit
+from stage1.typeck.consts import ConstScope
 from stage1.typeck.infer import InferTable
-from stage1.typeck.program import DefKind, FnKind, ModuleId, Predicate, Program
+from stage1.typeck.program import DefKind, FnKind, ModuleId, Predicate, Program, Request
 from stage1.typeck.thir import (
     BindMode,
     BlockId,
+    BodyKind,
+    Callee,
     Capture,
     ClosureId,
+    ClosureRole,
     Coercion,
     Local,
     PatId,
     TArmBody,
     TBlock,
+    TBody,
     TClosure,
+    TCompClause,
     TCond,
     TCondPart,
+    TContracts,
     TExpr,
     TExprId,
     TExprKind,
@@ -71,6 +80,9 @@ pub view struct Cx:
     pub ast: ref Ast
     pub source: str
     pub inferred: ref dict[DefId, list[DefId]]
+    ## The message catalog, for the texts of messages that are parameters
+    ## of others.
+    pub catalog: ref Catalog
 
 ## What a `return` (or `?`) in the current function or closure targets.
 pub struct RetCtx:
@@ -111,6 +123,11 @@ pub struct Finished:
     pub other_error: bool
     ## The error set a `T !` function absorbed.
     pub absorbed: list[DefId]
+    ## The instances of templates the body calls without one yet, and its
+    ## own promotion (08, "Reflection").
+    pub requests: list[Request]
+    ## The typed body, when lowering asked for it.
+    pub typed: TBody?
 
 pub struct Checker:
     pub types: Types
@@ -175,6 +192,19 @@ pub struct Checker:
     pub exprs: list[TExpr]
     pub blocks: list[TBlock]
     pub pats: list[TPat]
+    ## The body's block, once it is checked: a function's, or a value's
+    ## `return`.
+    pub body_block: BlockId?
+    pub requests: list[Request]
+    ## The parameters' locals, `self` first.
+    pub params: list[int]
+    ## What the body returns, as lowering sees it: a generator's `Iter`.
+    pub body_ret: Ty
+    ## The function's contract, when it checks something.
+    pub contracts: TContracts?
+    ## The body asserts at compile time on `const` generic parameters,
+    ## which stage 0 decides at each call with constant arguments.
+    pub generic_asserts: bool
 
 impl Checker:
     pub pure def new(cx: Cx, own types: Types, def_: DefId) -> Checker:
@@ -221,6 +251,12 @@ impl Checker:
             exprs=[],
             blocks=[],
             pats=[],
+            body_block=None,
+            requests=[],
+            params=[],
+            body_ret=Ty.error(),
+            contracts=None,
+            generic_asserts=False,
         )
 
     pub pure def finish(own self) -> Finished:
@@ -232,7 +268,111 @@ impl Checker:
             owner_beyond=self.owner_beyond,
             other_error=self.other_error,
             absorbed=absorbed,
+            requests=self.requests,
+            typed=None,
         )
+
+    ## The body as lowering reads it (stage 0's `Body` once `zonk.rs` has
+    ## finished it): every type final, a variable left open `()`. A closure
+    ## the checker could not make is an empty one, as stage 0 makes it.
+    pub pure def typed_body(mut self, cx: Cx, kind: BodyKind, span: TextRange) -> TBody:
+        for i in range(len(self.locals)):
+            let t = self.finalize(cx, self.locals[i].ty)
+            self.locals[i].ty = t
+        for i in range(len(self.exprs)):
+            let t = self.finalize(cx, self.exprs[i].ty)
+            self.exprs[i].ty = t
+            match self.exprs[i].kind.copy():
+                case TExprKind.Call(Callee.Fn(d, targs), args):
+                    let ts = self.finalize_all(cx, targs)
+                    self.exprs[i].kind = TExprKind.Call(
+                        callee=Callee.Fn(def_=d, type_args=ts), args=args
+                    )
+                case TExprKind.RefineTry(value, r, targs):
+                    let ts = self.finalize_all(cx, targs)
+                    self.exprs[i].kind = TExprKind.RefineTry(
+                        value=value, refinement=r, type_args=ts
+                    )
+                case TExprKind.Comprehension(k, clauses, elem, value):
+                    var out: list[TCompClause] = []
+                    for c in clauses:
+                        match c:
+                            case TCompClause.For(p, it, mode, item):
+                                let ti = self.finalize(cx, item)
+                                out.push(TCompClause.For(pat=p, iter=it, mode=mode, item=ti))
+                            case TCompClause.If(x):
+                                out.push(TCompClause.If(x))
+                    self.exprs[i].kind = TExprKind.Comprehension(
+                        kind=k, clauses=out, elem=elem, value=value
+                    )
+                case _:
+                    pass
+        for i in range(len(self.pats)):
+            let t = self.finalize(cx, self.pats[i].ty)
+            self.pats[i].ty = t
+        for i in range(len(self.blocks)):
+            for k in range(len(self.blocks[i].stmts)):
+                if let TStmt.For(p, it, mode, item, body, sp) = self.blocks[i].stmts[k].copy():
+                    let ti = self.finalize(cx, item)
+                    self.blocks[i].stmts[k] = TStmt.For(
+                        pat=p, iter=it, mode=mode, item=ti, body=body, span=sp
+                    )
+        var closures: list[TClosure] = []
+        for c in self.closures.copy():
+            match c:
+                case Some(cl):
+                    var x = cl.copy()
+                    x.ret = self.finalize(cx, cl.ret)
+                    x.fn_ty = self.finalize(cx, cl.fn_ty)
+                    closures.push(x)
+                case None:
+                    if kind == BodyKind.Fn:
+                        let empty = self.new_block([], span)
+                        closures.push(
+                            TClosure(
+                                params=[],
+                                captures=[],
+                                own_=False,
+                                ret=Ty.error(),
+                                body=empty,
+                                span=span,
+                                fn_ty=Ty.error(),
+                                comptime_=False,
+                                role=ClosureRole.Plain,
+                            )
+                        )
+        let ret = self.finalize(cx, self.body_ret)
+        var generator: Ty? = None
+        if let Some(g) = self.generator:
+            generator = Some(self.finalize(cx, g))
+        var contracts: TContracts? = None
+        if let Some(c) = self.contracts.copy():
+            var k = c
+            if let Some((check, args)) = k.invariant:
+                k.invariant = Some((check, self.finalize_all(cx, args)))
+            contracts = Some(k)
+        return TBody(
+            def_=self.def_,
+            kind=kind,
+            params=self.params.copy(),
+            locals=self.locals.copy(),
+            closures=closures,
+            ret=ret,
+            block=self.body_block ?? BlockId(index=0),
+            span=span,
+            generator=generator,
+            contracts=contracts,
+            generic_asserts=self.generic_asserts,
+            exprs=self.exprs.copy(),
+            blocks=self.blocks.copy(),
+            pats=self.pats.copy(),
+        )
+
+    pure def finalize_all(mut self, cx: Cx, ts: list[Ty]) -> list[Ty]:
+        var out: list[Ty] = []
+        for t in ts:
+            out.push(self.finalize(cx, t))
+        return out
 
     ## Notes that the body uses `why`, which the slice does not cover.
     pub pure def go_beyond(mut self, why: str):
@@ -471,6 +611,16 @@ impl Checker:
                     for i in range(len(self.generic_names)):
                         if self.generic_names[i] == names[0]:
                             return self.types.param(i)
+                # A constant where a type's constant argument goes.
+                if len(names) == 1 and args.is_empty():
+                    if let Some(d) = cx.prog.lookup(self.module, names[0]):
+                        if let DefKind.Const(_) = cx.prog.defs[d.index].kind:
+                            let (t, err) = consts.const_item(
+                                cx.prog, mut self.types, self.module, names[0], rng
+                            )
+                            if let Some(x) = err:
+                                self.report_const(consts.diagnostic(x, cx.catalog))
+                            return t
                 # `C.Item`, `Self.Item`: an associated type of a parameter.
                 if len(names) == 2:
                     var subject: Ty? = None
@@ -567,9 +717,37 @@ impl Checker:
                 return Ty.error()
             case TypeKind.ConstArg(n):
                 return self.types.intern(TyData.Const(n))
+            case TypeKind.ConstExpr(e):
+                return self.const_arg(cx, e)
             case TypeKind.Unsupported(_):
                 self.unsupported()
                 return Ty.error()
+
+    ## A constant argument written as an expression, inside a body: the
+    ## function's `const` parameters are its operands (`typeck.consts`).
+    pub pure def const_arg(mut self, cx: Cx, e: ExprId) -> Ty:
+        var locals: list[String] = []
+        for scope in self.scopes:
+            for (n, _) in scope:
+                locals.push(n.copy())
+        let scope = ConstScope(
+            generics=self.generic_names.copy(),
+            consts=Some(self.const_generics.copy()),
+            locals=locals,
+        )
+        let ts = folding.terms(cx.ast, e)
+        let (t, err) = consts.const_arg(cx.prog, mut self.types, self.module, ts, scope)
+        if let Some(x) = err:
+            self.report_const(consts.diagnostic(x, cx.catalog))
+        return t
+
+    ## A diagnostic of a type's constant argument: the type checker's are
+    ## reported, any other error is another phase's.
+    pub pure def report_const(mut self, own d: Diagnostic):
+        if d.msg.id().starts_with("type."):
+            self.report(d)
+        else:
+            self.other()
 
     ## The fake of the trait named `name` (`comptime.no-fake` when there is
     ## none).
@@ -709,13 +887,13 @@ impl Checker:
             var wrong = False
             if gs[i].is_const:
                 match self.types.data(targs[i]):
-                    case TyData.Const(_) | TyData.Error | TyData.Var(_):
+                    case TyData.Const(_) | TyData.ConstOp(_, _) | TyData.Error | TyData.Var(_):
                         wrong = False
                     case _:
                         wrong = not const_param
             else:
                 match self.types.data(targs[i]):
-                    case TyData.Const(_):
+                    case TyData.Const(_) | TyData.ConstOp(_, _):
                         wrong = True
                     case _:
                         wrong = const_param
@@ -944,6 +1122,7 @@ impl Checker:
                     # An assert on `const` generic parameters: decided at each
                     # call with constant arguments (stage 0's
                     # `generic_asserts.rs`), whose messages are `comptime.`.
+                    self.generic_asserts = True
                     _ = self.check_condition_expr(cx, cond)
                     if let Some(m) = message:
                         _ = self.check_expr(cx, m, Ty.str())
@@ -1184,7 +1363,7 @@ impl Checker:
                 if result != Ty.error():
                     let shown_place = self.show(cx, pty)
                     let shown_result = self.show(cx, result)
-                    if not self.infer.try_unify(self.types, result, pty):
+                    if not self.infer.try_unify(mut self.types, result, pty):
                         let d = self.error(cx, Msg.TypeMismatch, cx.ast.expr(value).range)
                         self.report(d.with("expected", shown_place).with("found", shown_result))
                 return TStmt.AugAssign(place=place, op=o, value=v, span=span)
@@ -1373,7 +1552,7 @@ impl Checker:
                 let d = self.error(cx, Msg.TypeReturnNeedsValue, range).with("ty", shown)
                 self.report(d)
             elif is_var:
-                _ = self.infer.unify(self.types, r, Ty.unit())
+                _ = self.infer.unify(mut self.types, r, Ty.unit())
             return TStmt.Return(value=None, span=span)
         let e_range = cx.ast.expr(value).range
         if self.resolved(ret) == Ty.unit() and self.current_closure().is_none():
@@ -1439,7 +1618,7 @@ impl Checker:
             case TyData.Bool | TyData.Error | TyData.Never:
                 return x
             case TyData.Var(_):
-                _ = self.infer.unify(self.types, t, Ty.bool())
+                _ = self.infer.unify(mut self.types, t, Ty.bool())
                 return x
             case _:
                 let shown = self.show(cx, t)

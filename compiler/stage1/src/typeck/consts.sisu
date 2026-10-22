@@ -1,0 +1,221 @@
+##! A type's constant argument written as an expression (stage 0's
+##! `sisu-resolve/src/consts.rs`; 03, "Const generics": `struct Grid[T,
+##! const W: int, const H: int]` with `cells: Array[T, W * H]`). Name
+##! resolution and type checking need the value, so the compiler computes it
+##! where the type is written: integers, `const` parameters, the program's
+##! constants whose values are written that way, and the integer operators
+##! (`+ - * // % ** << >> & | ^`, unary `-` and `~`), with the run time's
+##! rules (`sir.ConstOp.fold`). An operation on a `const` parameter stays
+##! an operation (`TyData.ConstOp`) until a use gives the parameter a
+##! constant. The expression is read as terms (`typeck.folding`).
+
+from stage1.diag import Catalog, Diagnostic, Msg, Param, TextRange
+from stage1.sir import ConstFault, ConstOp, Folded
+from stage1.typeck.folding import Term, TermKind
+from stage1.typeck.program import DefKind, ModuleId, Program
+from stage1.typeck.ty import Ty, TyData, Types
+
+## Why an expression is not a constant argument.
+@derive(Eq, Debug)
+pub enum ConstError:
+    ## Not made of integers, `const` parameters, constants and the integer
+    ## operators (a call, a variable, `comptime`, `/`).
+    NotConstant(TextRange)
+    ## A value of another type than `int`, named.
+    NotInt(TextRange, String)
+    ## A name that names nothing.
+    Undefined(TextRange, String)
+    ## An integer literal beyond `int`.
+    OutOfRange(TextRange)
+    ## An operation without a value (overflow, a zero divisor, a negative
+    ## exponent, a shift out of range), shown with its operands.
+    Fault(TextRange, ConstFault, String)
+
+## What a name means where the argument is written, before the program's
+## items are looked at.
+@derive(Eq, Debug, Copy)
+pub enum Local:
+    ## The `const` generic parameter with this index.
+    ConstParam(int)
+    ## A type parameter, or a value known only at run time (a local, a
+    ## parameter): not a constant.
+    NotConstant
+    ## Nothing in scope: an item of the program, if anything.
+    Item
+
+## The names of the scope where the argument is written (stage 0's `param`
+## closures): the generic parameters, which of them are `const` where
+## that is known (in a body; a signature takes any parameter there), and
+## the locals in scope.
+pub struct ConstScope:
+    pub generics: list[String]
+    pub consts: list[bool]?
+    pub locals: list[String]
+
+impl ConstScope:
+    ## Where every name is an item: a constant's own value.
+    pub pure def items() -> ConstScope:
+        return ConstScope(generics=[], consts=None, locals=[])
+
+    ## A signature's: its generic parameters.
+    pub pure def signature(generics: list[String]) -> ConstScope:
+        return ConstScope(generics=generics.copy(), consts=None, locals=[])
+
+    pub pure def local(self, n: str) -> Local:
+        for i in range(len(self.generics)):
+            if self.generics[i] == n:
+                match self.consts:
+                    case None:
+                        return Local.ConstParam(i)
+                    case Some(c):
+                        if i < len(c) and c[i]:
+                            return Local.ConstParam(i)
+                        return Local.NotConstant
+        for l in self.locals:
+            if l == n:
+                return Local.NotConstant
+        return Local.Item
+
+## The constant (or the operation on `const` parameters) the terms of an
+## argument compute, written in `module` where `scope` names the generic
+## parameters; `Ty.error()` and why when they are not one.
+pub pure def const_arg(
+    prog: Program, mut types: Types, module: ModuleId, terms: list[Term], scope: ConstScope
+) -> (Ty, ConstError?):
+    if terms.is_empty():
+        return (Ty.error(), Some(ConstError.NotConstant(TextRange.new(0, 0))))
+    return eval(prog, mut types, module, terms, len(terms) - 1, scope, 0)
+
+pure def eval(
+    prog: Program,
+    mut types: Types,
+    module: ModuleId,
+    terms: list[Term],
+    at: int,
+    scope: ConstScope,
+    depth: int,
+) -> (Ty, ConstError?):
+    let r = terms[at].range
+    if depth > 32:
+        return (Ty.error(), Some(ConstError.NotConstant(r)))
+    match terms[at].kind.copy():
+        case TermKind.Int(value):
+            match value:
+                case Some(n):
+                    return (types.intern(TyData.Const(n)), None)
+                case None:
+                    return (Ty.error(), Some(ConstError.OutOfRange(r)))
+        case TermKind.NotInt(ty):
+            return (Ty.error(), Some(ConstError.NotInt(r, ty.copy())))
+        case TermKind.Name(n):
+            match scope.local(n):
+                case Local.ConstParam(i):
+                    return (types.param(i), None)
+                case Local.NotConstant:
+                    return (Ty.error(), Some(ConstError.NotConstant(r)))
+                case Local.Item:
+                    return named(prog, mut types, module, n, r, depth)
+        case TermKind.Unary(op, inner):
+            let (x, err) = eval(prog, mut types, module, terms, inner, scope, depth + 1)
+            if err.is_some():
+                return (x, err)
+            return apply(mut types, op, [x], r)
+        case TermKind.Binary(op, lhs, rhs):
+            let (x, err) = eval(prog, mut types, module, terms, lhs, scope, depth + 1)
+            if err.is_some():
+                return (x, err)
+            let (y, err2) = eval(prog, mut types, module, terms, rhs, scope, depth + 1)
+            if err2.is_some():
+                return (y, err2)
+            return apply(mut types, op, [x, y], r)
+        case TermKind.Other:
+            return (Ty.error(), Some(ConstError.NotConstant(r)))
+
+## The value of the program's constant `name`, written at `r` where a
+## type's constant argument goes: `SIZE` in `Array[int, SIZE]`.
+pub pure def const_item(
+    prog: Program, mut types: Types, module: ModuleId, name: str, r: TextRange
+) -> (Ty, ConstError?):
+    return named(prog, mut types, module, name, r, 0)
+
+pure def named(
+    prog: Program, mut types: Types, module: ModuleId, n: str, r: TextRange, depth: int
+) -> (Ty, ConstError?):
+    let d = prog.lookup(module, n) else:
+        return (Ty.error(), Some(ConstError.Undefined(r, n.to_string())))
+    let DefKind.Const(info) = prog.defs[d.index].kind.copy() else:
+        return (Ty.error(), Some(ConstError.NotConstant(r)))
+    if info.terms.is_empty():
+        return (Ty.error(), Some(ConstError.NotConstant(r)))
+    # The constant's own value, computed where it is written; what is
+    # wrong with it is wrong with this use of it.
+    let at = len(info.terms) - 1
+    let owner = prog.defs[d.index].module
+    let (t, err) = eval(prog, mut types, owner, info.terms, at, ConstScope.items(), depth + 1)
+    match err:
+        case None:
+            return (t, None)
+        case Some(ConstError.NotInt(_, ty)):
+            return (Ty.error(), Some(ConstError.NotInt(r, ty.copy())))
+        case Some(_):
+            return (Ty.error(), Some(ConstError.NotConstant(r)))
+
+## `op` on its operands: their value when they are constants, the
+## operation otherwise.
+pure def apply(
+    mut types: Types, op: ConstOp, own args: list[Ty], r: TextRange
+) -> (Ty, ConstError?):
+    var values: list[int] = []
+    for a in args:
+        match types.data(a):
+            case TyData.Const(n):
+                values.push(n)
+            case _:
+                return (types.intern(TyData.ConstOp(op=op, args=args)), None)
+    match op.fold(values):
+        case Folded.Value(n):
+            return (types.intern(TyData.Const(n)), None)
+        case Folded.Fault(fault):
+            var shown = String.new()
+            if len(values) == 1:
+                shown = "{op.symbol()}({values[0]})"
+            elif len(values) == 2:
+                shown = "{values[0]} {op.symbol()} {values[1]}"
+            return (Ty.error(), Some(ConstError.Fault(r, fault, shown)))
+
+## The diagnostic of `err`.
+pub pure def diagnostic(err: ConstError, catalog: Catalog) -> Diagnostic:
+    match err:
+        case ConstError.NotConstant(r):
+            return Diagnostic.new(Msg.ResolveConstExpression, r.start, r.end)
+        case ConstError.NotInt(r, ty):
+            return Diagnostic.new(Msg.ResolveConstNotInt, r.start, r.end).with("ty", ty)
+        case ConstError.Undefined(r, name):
+            return Diagnostic.new(Msg.ResolveUndefinedName, r.start, r.end).with("name", name)
+        case ConstError.OutOfRange(r):
+            let d = Diagnostic.new(Msg.TypeLiteralOutOfRange, r.start, r.end)
+            return d.with("text", "the literal").with("ty", "int")
+        case ConstError.Fault(r, fault, shown):
+            var message = String.new()
+            match fault:
+                case ConstFault.Overflow:
+                    message = catalog.render("panic.overflow", [param("expr", shown)])
+                case ConstFault.DivideByZero:
+                    message = catalog.render("panic.divide-by-zero", [])
+                case ConstFault.NegativeExponent:
+                    message = catalog.render("panic.negative-exponent", [param("expr", shown)])
+                case ConstFault.ShiftOutOfRange:
+                    let amount = last_word(shown)
+                    message = catalog.render("panic.shift-out-of-range", [param("amount", amount)])
+            return Diagnostic.new(Msg.ComptimePanicked, r.start, r.end).with("message", message)
+
+pure def param(name: str, value: str) -> Param:
+    return Param(name=name.to_string(), value=value.to_string())
+
+## What follows the last space of `s` (Rust's `rsplit(' ').next()`).
+pure def last_word(s: str) -> String:
+    var cut = 0
+    for i in range(s.byte_len()):
+        if s.byte_at(i) == 32:
+            cut = i + 1
+    return s.byte_slice(cut, s.byte_len()).to_string()
