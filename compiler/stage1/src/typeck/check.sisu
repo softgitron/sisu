@@ -18,7 +18,7 @@
 
 import stage1.typeck.consts
 import stage1.typeck.folding
-from stage1.diag import Catalog, Diagnostic, Msg, TextRange
+from stage1.diag import Catalog, Diagnostic, Edit, Msg, Param, TextRange
 from stage1.syntax.ast import (
     Ast,
     BinOp,
@@ -28,6 +28,7 @@ from stage1.syntax.ast import (
     ElseBody,
     ExprId,
     ExprKind,
+    ItemKind,
     LetElse,
     Mode,
     Name,
@@ -123,6 +124,9 @@ pub struct Finished:
     ## which runs only when the front end found no error.
     pub owner_beyond: String?
     pub other_error: bool
+    ## The rules of such errors that stage 1 notes without rendering them
+    ## (not the name pass's or the parser's, which stage 1 renders).
+    pub noted: list[String]
     ## The error set a `T !` function absorbed.
     pub absorbed: list[DefId]
     ## The instances of templates the body calls without one yet, and its
@@ -192,6 +196,8 @@ pub struct Checker:
     ## Stage 0 reports an error here that is not one of the type checker's
     ## own messages (`resolve.`, `stage0.`, `comptime.`, ...).
     pub other_error: bool
+    ## The rules of such errors that stage 1 notes without rendering them.
+    pub noted: list[String]
     ## An expression checked in place of another: `if comptime a or b`
     ## checks `a or b` with `comptime a` read as `a`.
     pub stand_in: (ExprId, ExprId)?
@@ -257,6 +263,7 @@ impl Checker:
             beyond=None,
             owner_beyond=None,
             other_error=False,
+            noted=[],
             stand_in=None,
             exprs=[],
             blocks=[],
@@ -282,6 +289,7 @@ impl Checker:
             beyond=self.beyond,
             owner_beyond=self.owner_beyond,
             other_error=self.other_error,
+            noted=self.noted,
             absorbed=absorbed,
             requests=self.requests,
             typed=None,
@@ -402,8 +410,20 @@ impl Checker:
             self.owner_beyond = Some(why.to_string())
 
     ## Notes that stage 0 reports an error here that is not one of the
-    ## type checker's own messages.
-    pub pure def other(mut self):
+    ## type checker's own messages (`rule`), without rendering it.
+    pub pure def other(mut self, rule: str):
+        self.other_error = True
+        self.noted.push(rule.to_string())
+
+    ## Reports such an error (a `resolve.`, `task.`, `contract.` message):
+    ## the front end has an error, which `check` prints with the rest.
+    pub pure def report_other(mut self, own d: Diagnostic):
+        self.other_error = True
+        self.diags.push(d)
+
+    ## Notes such an error that stage 1 renders elsewhere: the name pass's
+    ## or the parser's.
+    pub pure def other_rendered(mut self):
         self.other_error = True
 
     # ---------------------------------------------------------------- diagnostics
@@ -420,16 +440,22 @@ impl Checker:
         return Diagnostic.new(m, range.start, end)
 
     ## A construct stage 0 does not implement yet (`stage0.unsupported`).
-    pub pure def unsupported(mut self):
-        self.other()
+    pub pure def unsupported(mut self, cx: Cx, range: TextRange, construct: str, phase: str):
+        let d = self.error(cx, Msg.Stage0Unsupported, range).with("construct", construct)
+        self.report_other(d.with("phase", phase))
 
-    ## A function only the standard library may call (`@internal`).
-    pub pure def check_internal(mut self, cx: Cx, d: DefId):
+    ## A function only the standard library may call (`@internal`): the
+    ## forwarding of lent capabilities, the assembling of a `System`.
+    pub pure def check_internal(mut self, cx: Cx, d: DefId, range: TextRange):
         let f = cx.prog.fn_info(d) else:
             return
+        # Code the compiler writes (`<arbitrary>/...`) may call them too.
         let m = ref cx.prog.modules[self.module.index]
         if f.internal and not m.is_std and not m.name.starts_with("<"):
-            self.other()
+            var name = cx.prog.qualified_name(d)
+            if let Some(o) = f.owner:
+                name = "{cx.prog.display(self.types, o)}.{cx.prog.defs[d.index].name}"
+            self.report_other(self.error(cx, Msg.CapInternal, range).with("name", name))
 
     ## The display form of a type, with variables resolved as far as known.
     pub pure def show(mut self, cx: Cx, ty: Ty) -> String:
@@ -445,7 +471,7 @@ impl Checker:
     ## The fix of a missing impl: when the type has every method of the
     ## trait as its own, adding the impl is enough.
     pub pure def missing_impl_fix(
-        self, cx: Cx, own d: Diagnostic, ty: Ty, tr: TraitRef
+        mut self, cx: Cx, own d: Diagnostic, ty: Ty, tr: TraitRef
     ) -> Diagnostic:
         let info = cx.prog.trait_info(tr.def_) else:
             return d
@@ -456,7 +482,11 @@ impl Checker:
         for m in info.methods:
             if cx.prog.method(key, cx.prog.defs[m.index].name).is_none():
                 return d
-        return d.fix_edits(Msg.TypeAddImpl, [])
+        let params = [
+            Param(name="trait".to_string(), value=cx.prog.display_trait_in(self.types, tr, [])),
+            Param(name="ty".to_string(), value=self.show(cx, ty)),
+        ]
+        return d.fix_params(Msg.TypeAddImpl, params, [])
 
     pub pure def source_text(self, cx: Cx, range: TextRange) -> String:
         if range.start < 0 or range.end > cx.source.byte_len() or range.start > range.end:
@@ -651,7 +681,7 @@ impl Checker:
                                 return cx.prog.normalize(mut self.types, t, self.env)
                             case None:
                                 # `resolve.no-assoc-type`.
-                                self.other()
+                                self.other("resolve.no-assoc-type")
                                 return Ty.error()
                 if len(names) == 1:
                     if let Some(p) = primitive(names[0]):
@@ -677,7 +707,7 @@ impl Checker:
                         return self.def_type(cx, d, targs, rng)
                     case None:
                         # `resolve.undefined-type`.
-                        self.other()
+                        self.other_rendered()
                         return Ty.error()
             case TypeKind.Option(inner):
                 let t = self.resolve_ty(cx, inner)
@@ -692,7 +722,7 @@ impl Checker:
                         err_ty = self.resolve_err_set(cx, e)
                     case None:
                         # `resolve.inferred-set-position`.
-                        self.other()
+                        self.other("resolve.inferred-set-position")
                 let r = cx.prog.wk.result else:
                     return Ty.error()
                 return self.types.adt(r, [ok_ty, err_ty])
@@ -725,18 +755,18 @@ impl Checker:
                     if cx.prog.trait_info(d).is_some():
                         return self.types.intern(TyData.Dyn(TraitRef(def_=d, args=targs)))
                 # `resolve.not-a-trait`.
-                self.other()
+                self.other("resolve.not-a-trait")
                 return Ty.error()
             case TypeKind.Union(_):
                 # `resolve.union-outside-result`.
-                self.other()
+                self.other("resolve.union-outside-result")
                 return Ty.error()
             case TypeKind.ConstArg(n):
                 return self.types.intern(TyData.Const(n))
             case TypeKind.ConstExpr(e):
                 return self.const_arg(cx, e)
             case TypeKind.Unsupported(_):
-                self.unsupported()
+                self.unsupported(cx, rng, "this type", "a later phase")
                 return Ty.error()
 
     ## A constant argument written as an expression, inside a body: the
@@ -762,8 +792,10 @@ impl Checker:
     pub pure def report_const(mut self, own d: Diagnostic):
         if d.msg.id().starts_with("type."):
             self.report(d)
+        elif d.msg == Msg.ResolveUndefinedName:
+            self.other_rendered()
         else:
-            self.other()
+            self.other(d.msg.id())
 
     ## The fake of the trait named `name` (`comptime.no-fake` when there is
     ## none).
@@ -772,7 +804,7 @@ impl Checker:
             if let Some(d) = cx.prog.lookup(self.module, n):
                 if let Some(f) = cx.prog.fakes.get(d):
                     return self.types.adt(f, [])
-        self.other()
+        self.other("comptime.no-fake")
         return Ty.error()
 
     ## Whether `d` is `cap.Fake`, whose argument is a trait.
@@ -829,7 +861,7 @@ impl Checker:
                     return Ty.error()
                 case _:
                     # `resolve.not-an-error-set`.
-                    self.other()
+                    self.other("resolve.not-an-error-set")
                     return Ty.error()
         members.sort()
         var out: list[DefId] = []
@@ -868,7 +900,7 @@ impl Checker:
                 return self.types.subst(t, args)
             case _:
                 # `resolve.trait-as-type` or `resolve.not-a-type`.
-                self.other()
+                self.other("resolve.trait-as-type or resolve.not-a-type")
                 return Ty.error()
         var targs = args.copy()
         # Omitted trailing arguments take their defaults (D-060).
@@ -887,7 +919,7 @@ impl Checker:
                     vars.push(self.infer.fresh(mut self.types))
                 return self.types.adt(d, vars)
             # `resolve.type-argument-count`.
-            self.other()
+            self.other("resolve.type-argument-count")
             var errors: list[Ty] = []
             for _ in range(generics):
                 errors.push(Ty.error())
@@ -915,7 +947,7 @@ impl Checker:
                         wrong = const_param
             if wrong:
                 # `resolve.const-argument` or `resolve.type-argument`.
-                self.other()
+                self.other("resolve.const-argument or resolve.type-argument")
                 var errors: list[Ty] = []
                 for _ in range(generics):
                     errors.push(Ty.error())
@@ -1032,7 +1064,7 @@ impl Checker:
                     out.push(TStmt.Break(span))
                 else:
                     let d = self.error(cx, Msg.TypeBreakOutsideLoop, s.range)
-                    self.report(d)
+                    self.report(d.note(Msg.TypeBreakUseReturn))
                     out.push(TStmt.Error(span))
             case StmtKind.Continue:
                 if self.loops() > 0:
@@ -1105,21 +1137,32 @@ impl Checker:
                 stmts.push(TStmt.Block(b))
                 self.pop_scope()
                 out.push(TStmt.Block(self.new_block(stmts, span)))
-            case StmtKind.Item(_):
-                # A nested declaration: `stage0.unsupported`.
-                self.unsupported()
+            case StmtKind.Item(it):
+                let item = cx.ast.item(it)
+                let what = match item.kind:
+                    case ItemKind.Fn(_): "a nested `def`"
+                    case ItemKind.Const(_): "a local `const`"
+                    case _: "a nested declaration"
+                self.unsupported(cx, item.range, what, "nested declarations (a later phase)")
                 out.push(TStmt.Error(span))
             case StmtKind.Comptime(inner):
                 self.check_comptime_stmt(cx, inner, s.range, mut out)
             case StmtKind.ReturnImpl(_):
-                self.unsupported()
+                let what = "`return impl` outside a trait's `comptime def derive`"
+                self.unsupported(cx, s.range, what, "reflection beyond derive (Phase 8)")
                 out.push(TStmt.Error(span))
             case StmtKind.Select(arms):
                 out.push(self.check_select(cx, arms, s.range))
             case StmtKind.Yield(value):
                 out.push(self.check_yield(cx, value, s.range))
-            case StmtKind.Unsupported(_):
-                self.unsupported()
+            case StmtKind.Unsupported(what):
+                let written: str = what
+                let phase = match written:
+                    case "`yield`": "generators (Phase 8)"
+                    case "`select`": "tasks (Phase 6)"
+                    case "an `unsafe` block": "foreign functions (Phase 8)"
+                    case _: "contracts (Phase 8)"
+                self.unsupported(cx, s.range, what, phase)
                 out.push(TStmt.Error(span))
             case StmtKind.Error:
                 out.push(TStmt.Error(span))
@@ -1151,7 +1194,13 @@ impl Checker:
                 let x = self.comptime_block(cx, b, range)
                 out.push(TStmt.Expr(x))
             case _:
-                self.unsupported()
+                let what = "`comptime for` and `comptime if` outside a derive or a generic function"
+                self.unsupported(
+                    cx,
+                    range,
+                    what,
+                    "compile-time code in methods and non-generic functions (Phase 8)",
+                )
                 out.push(TStmt.Error(range))
 
     ## Whether an expression names one of the function's `const` generic
@@ -1422,17 +1471,20 @@ impl Checker:
                 let what = if is_local: name.copy() else: self.source_text(cx, range)
                 # A borrowed parameter is changed by taking it with `mut`; a
                 # local by declaring it with `var`.
-                var param: TextRange? = None
+                var param: (TextRange, String)? = None
                 if let Some(f) = cx.prog.fn_info(self.def_):
                     for p in f.params:
                         if p.span == decl and p.mode == Mode.Borrow and param.is_none():
-                            param = Some(p.span)
+                            param = Some((p.span, p.name.copy()))
                 var d = self.error(cx, m, range).with("name", name).with("what", what)
                 match param:
-                    case Some(at):
-                        d = d.fix_at(Msg.TypeTakeMut, at.start, at.start, "mut ")
+                    case Some((at, pname)):
+                        let edit = Edit(start=at.start, end=at.start, text="mut ".to_string())
+                        let named = Param(name="name".to_string(), value=pname.copy())
+                        d = d.fix_params(Msg.TypeTakeMut, [named], [edit])
                     case None:
-                        d = d.fix_edits(Msg.TypeDeclareVar, [])
+                        let named = Param(name="name".to_string(), value=name.copy())
+                        d = d.fix_params(Msg.TypeDeclareVar, [named], [])
                 let local_name = self.locals[l].name.copy()
                 d = d.label_with(Msg.ResolveDefinedHere, decl.start, decl.end, "name", local_name)
                 self.report(d)
@@ -1454,14 +1506,16 @@ impl Checker:
                             walking = False
                 if let Some(root) = self.place_root(base):
                     if let Some(f) = cx.prog.fn_info(self.def_):
-                        var at: TextRange? = None
+                        var at: (TextRange, String)? = None
                         for p in f.params:
                             if at.is_none()
                                     and p.span == self.locals[root].span
                                     and p.mode == Mode.Borrow:
-                                at = Some(p.span)
-                        if let Some(s) = at:
-                            d = d.fix_at(Msg.TypeTakeMut, s.start, s.start, "mut ")
+                                at = Some((p.span, p.name.copy()))
+                        if let Some((s, pname)) = at:
+                            let edit = Edit(start=s.start, end=s.start, text="mut ".to_string())
+                            let named = Param(name="name".to_string(), value=pname.copy())
+                            d = d.fix_params(Msg.TypeTakeMut, [named], [edit])
                 self.report(d)
             case None:
                 pass
@@ -1601,7 +1655,7 @@ impl Checker:
                     return TStmt.Return(value=Some(c), span=span)
                 case _:
                     # `refine.predicate-type`.
-                    self.other()
+                    self.other("refine.predicate-type")
                     let err = self.error_expr(self.span_of(x))
                     return TStmt.Return(value=Some(err), span=span)
         let x0 = self.check_expr(cx, value, ret)
@@ -1639,7 +1693,7 @@ impl Checker:
             case _:
                 let shown = self.show(cx, t)
                 let d = self.error(cx, Msg.TypeNotBool, cx.ast.expr(e).range).with("found", shown)
-                self.report(d)
+                self.report(d.note(Msg.TypeTruthiness))
                 let span = self.span_of(x)
                 return self.add(TExprKind.Coerce(expr=x, kind=Coercion.Mismatch), Ty.bool(), span)
 

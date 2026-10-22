@@ -31,7 +31,7 @@
 ##! enum; and a value holding a loan may be stored through a `mut`
 ##! parameter only if the loan is that parameter's own.
 
-from stage1.borrowck.bitset import BitSet, Rows
+from stage1.borrowck.bitset import BitSet, LEFT_OUT, Rows, WORD
 from stage1.borrowck.finding import Arg, Finding, FindingParam, param, text
 from stage1.borrowck.init import dest, index_locals, operands, targets
 from stage1.borrowck.names import is_named, is_overwrite, local_name, place_name
@@ -119,24 +119,42 @@ pub struct State:
     pub pinned: BitSet
 
 impl State:
+    ## A state of no rows, which nothing reads: the unwinding state of a
+    ## block that does not unwind.
+    pure def none() -> State:
+        let none: list[int] = []
+        return State(
+            holds=Rows.with_slots(Shared(none), 0),
+            direct=[],
+            activated=BitSet.new(0),
+            pinned=BitSet.new(0),
+        )
+
     pub pure def join(mut self, o: State) -> bool:
         var changed = False
         if self.pinned.union(o.pinned):
             changed = True
         if self.holds.union(o.holds):
             changed = True
-        for i in range(len(self.direct)):
-            if self.direct[i].is_none():
-                continue
-            match o.direct[i]:
-                case Some(y):
-                    var x = self.direct[i].copy() ?? BitSet.new(0)
-                    if x.union(y):
-                        self.direct[i] = Some(x)
-                        changed = True
-                case None:
-                    self.direct[i] = None
-                    changed = True
+        # Matched rather than asked `is_some`, here and in the other loops
+        # over every statement or local: natively, a call of an intrinsic
+        # (`is_some`, a `for` loop's `next`) costs more than the rest of a
+        # step.
+        let n = len(self.direct)
+        var i = 0
+        while i < n:
+            var gone = False
+            if let Some(x) = ref mut self.direct[i]:
+                match o.direct[i]:
+                    case Some(y):
+                        if x.union(y):
+                            changed = True
+                    case None:
+                        gone = True
+            if gone:
+                self.direct[i] = None
+                changed = True
+            i += 1
         if self.activated.union(o.activated):
             changed = True
         return changed
@@ -276,6 +294,14 @@ pub struct Analysis:
     pub live_in: list[BitSet]
     nloc: int
     nloans: int
+    ## Where each local's loans are in a state's rows: only a local whose
+    ## type can hold a loan has a row, since nothing is stored in another's
+    ## (see `write`). Every state of the function shares them.
+    slots: Shared[list[int]]
+    ## The locals each statement reads (`used_locals`), by block and
+    ## statement, found once for every pass of the dataflow and of
+    ## liveness.
+    uses: list[list[list[LocalId]]]
 
 impl Analysis:
     pub pure def run(p: Program, f: Function, types: Types, pin: bool) -> Analysis:
@@ -322,6 +348,14 @@ impl Analysis:
                     _ = made.insert(key(b, si), m)
         let nloc = len(f.locals)
         let nloans = len(loans)
+        var slots: list[int] = []
+        var kept = 0
+        for l in f.locals:
+            if types.may_hold(l.ty):
+                slots.push(kept)
+                kept += 1
+            else:
+                slots.push(LEFT_OUT)
         var ref_places: list[Place] = []
         for block in f.blocks:
             for s in block.stmts:
@@ -345,7 +379,14 @@ impl Analysis:
             live_in=live_in,
             nloc=nloc,
             nloans=nloans,
+            slots=Shared(slots),
+            uses=[],
         )
+        for block in f.blocks:
+            var block_uses: list[list[LocalId]] = []
+            for s in block.stmts:
+                block_uses.push(a.used_locals(f, types, s))
+            a.uses.push(block_uses)
         if f.blocks.is_empty():
             return a
         # Holds: forward.
@@ -368,17 +409,23 @@ impl Analysis:
             queued.push(True)
         while let Some(b) = work.pop():
             queued[b] = False
-            let start = a.entry[b].copy() else:
+            var st = a.entry[b].copy() else:
                 continue
             let block = ref f.blocks[b]
-            var st = start.copy()
             # The unwinding block may start from the block's entry or from
-            # after any of its statements: the join of all of them.
-            var unwind = start
-            for si in range(len(block.stmts)):
+            # after any of its statements: the join of all of them (copied
+            # only for a block that unwinds, as stage 0 copies it).
+            let unwinds = block.unwind.is_some()
+            var unwind = State.none()
+            if unwinds:
+                unwind = st.copy()
+            let count = len(block.stmts)
+            var si = 0
+            while si < count:
                 a.transfer(p, f, types, b, si, block.stmts[si], mut st)
-                if block.unwind.is_some():
+                if unwinds:
                     _ = unwind.join(st)
+                si += 1
             var succ: list[int] = []
             for t in targets(block):
                 succ.push(t)
@@ -395,18 +442,15 @@ impl Analysis:
                 if t >= len(f.blocks):
                     continue
                 var changed = False
-                if a.entry[t].is_none():
-                    if from_unwind:
-                        a.entry[t] = Some(unwind.copy())
-                    else:
-                        a.entry[t] = Some(st.copy())
+                if let Some(e) = ref mut a.entry[t]:
+                    # Joined in place, as stage 0 joins it.
+                    changed = if from_unwind: e.join(unwind) else: e.join(st)
+                elif from_unwind:
+                    a.entry[t] = Some(unwind.copy())
                     changed = True
                 else:
-                    var e = a.entry[t].copy() ?? a.empty_state()
-                    let joined = if from_unwind: e.join(unwind) else: e.join(st)
-                    if joined:
-                        a.entry[t] = Some(e)
-                        changed = True
+                    a.entry[t] = Some(st.copy())
+                    changed = True
                 if changed and not queued[t]:
                     queued[t] = True
                     work.push(t)
@@ -441,7 +485,7 @@ impl Analysis:
         for _ in range(self.nloc):
             direct.push(None)
         return State(
-            holds=Rows.new(self.nloc, self.nloans),
+            holds=Rows.with_slots(self.slots.copy(), self.nloans),
             direct=direct,
             activated=BitSet.new(self.nloans),
             pinned=BitSet.new(self.nloans),
@@ -563,7 +607,7 @@ impl Analysis:
 
     ## The loans a call's result may hold.
     pure def call_result(
-        self, p: Program, callee: Callee, ops: list[OpLoans], callee_loans: OpLoans?
+        self, p: Program, types: Types, callee: Callee, ops: list[OpLoans], callee_loans: OpLoans?
     ) -> BitSet:
         var out = BitSet.new(self.nloans)
         var from_: list[int]? = None
@@ -574,7 +618,10 @@ impl Analysis:
                     from_ = Some(d.from_.copy())
                     inner = d.inner.copy()
             case Callee.Fn(name, _):
-                if let Some(g) = p.function(name):
+                # The callee's `from` and `inner`, which placing the drops
+                # leaves as they were.
+                if let Some(i) = types.function(name):
+                    let g = ref p.functions[i]
                     from_ = Some(g.from_.copy())
                     inner = g.inner.copy()
             case Callee.Intrinsic(name, _):
@@ -605,7 +652,7 @@ impl Analysis:
     ):
         let made = self.made_at(b, si)
         # A use of a reference activates its two-phase loans.
-        for l in self.used_locals(f, types, s):
+        for l in self.uses[b][si]:
             for x in st.holds.row_items(l.index):
                 if self.loans[x].two_phase():
                     _ = st.activated.insert(x)
@@ -649,7 +696,7 @@ impl Analysis:
                 var callee_loans: OpLoans? = None
                 if let Callee.Value(o) = callee:
                     callee_loans = Some(self.op_loans(st, made, len(args), o))
-                let result = self.call_result(p, callee, ops, callee_loans)
+                let result = self.call_result(p, types, callee, ops, callee_loans)
                 # A callee may store an argument it takes by value (with
                 # `own`, or a view) through a `mut` one.
                 var kept: list[int]? = None
@@ -658,8 +705,9 @@ impl Analysis:
                         kept = Some(kept_args(p, name, len(ops)))
                     case Callee.Fn(name, _):
                         var k: list[int] = []
-                        match p.function(name):
-                            case Some(g):
+                        match types.function(name):
+                            case Some(gi):
+                                let g = ref p.functions[gi]
                                 for i in range(len(ops)):
                                     if lent_by_value(g, i):
                                         k.push(i)
@@ -817,8 +865,12 @@ impl Analysis:
             let s = ref block.stmts[k]
             if let Some(d) = defined_locals(s):
                 live.remove(d.index)
-            for l in self.used_locals(f, types, s):
-                _ = live.insert(l.index)
+            let used = ref self.uses[b][k]
+            let nused = len(used)
+            var j = 0
+            while j < nused:
+                _ = live.insert(used[j].index)
+                j += 1
             if let Some(u) = unwind_live:
                 _ = live.union(u)
             if each:
@@ -831,24 +883,40 @@ impl Analysis:
         var st = self.entry[b].copy() else:
             return None
         var out: list[State] = []
-        for si in range(len(f.blocks[b].stmts)):
+        let count = len(f.blocks[b].stmts)
+        var si = 0
+        while si < count:
             out.push(st.copy())
             self.transfer(p, f, types, b, si, f.blocks[b].stmts[si], mut st)
+            si += 1
         out.push(st)
         return Some(out)
 
     pure def live_loans(self, st: State, live: BitSet) -> BitSet:
         var out = st.pinned.copy()
-        for l in live.items():
-            if l < st.holds.len():
-                st.holds.add_to(l, mut out)
+        let rows = st.holds.len()
+        let n = len(live.words)
+        var k = 0
+        while k < n:
+            var w = live.words[k]
+            var l = k * WORD
+            while w != 0:
+                if (w & 1) != 0 and l < rows:
+                    st.holds.add_to(l, mut out)
+                w = w >> 1
+                l += 1
+            k += 1
         return out
 
     # ---------------------------------------------------------------- checking
 
     pub pure def findings(self, p: Program, f: Function, types: Types) -> list[Finding]:
         var out: list[Finding] = []
-        for b in range(len(f.blocks)):
+        let nblocks = len(f.blocks)
+        var next = 0
+        while next < nblocks:
+            let b = next
+            next += 1
             let start = self.entry[b].copy() else:
                 continue
             let block = ref f.blocks[b]
@@ -859,7 +927,9 @@ impl Analysis:
             let lout = self.live_out(f, b)
             let lives = self.live_before_each(f, types, b, lout)
             var after = start
-            for si in range(len(block.stmts)):
+            let count = len(block.stmts)
+            var si = 0
+            while si < count:
                 let s = ref block.stmts[si]
                 let before = after.copy()
                 self.transfer(p, f, types, b, si, s, mut after)
@@ -870,6 +940,7 @@ impl Analysis:
                 )
                 self.check_stores(p, f, types, b, si, s, before, mut out)
                 self.check_tasks(f, types, b, si, s, before, mut out)
+                si += 1
             if let Terminator.Return = block.term:
                 self.check_return(f, types, b, block.loc, after, mut out)
         # A task that borrows what it may not is the mistake; the end of what

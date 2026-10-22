@@ -2,7 +2,7 @@
 ##! diagnostic it becomes (stage 0's `Finding` and `to_diagnostic`, in
 ##! `sisu-borrowck/src/lib.rs`).
 
-from stage1.diag import Diagnostic, Edit, Fix, Label, Lines, Msg, Param
+from stage1.diag import Diagnostic, Edit, Fix, Label, Lines, Msg, Note, Param
 from stage1.sir import Function, Loc
 
 ## A parameter of a finding's message: a text, or the source text at a
@@ -169,8 +169,8 @@ pub pure def to_diagnostic(f: Finding, text: str, lines: Lines) -> Diagnostic:
             continue
         let (ls, le) = span_of(text, lines, l.loc)
         d.labels.push(Label(msg=l.msg, start=ls, end=le, params=params_of(text, lines, l.params)))
-    for (m, _) in f.notes:
-        d.notes.push(m)
+    for (m, ps) in f.notes:
+        d.notes.push(Note(msg=m, params=params_of(text, lines, ps)))
     for x in f.fixes:
         var edits: list[Edit] = []
         if let Some((loc, t)) = x.edit:

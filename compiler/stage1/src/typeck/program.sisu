@@ -157,6 +157,21 @@ pub struct Generic:
     pub default: Ty?
     pub is_const: bool
 
+## What is in the way of a type's being `Send` or `Sync` (stage 0's
+## `Obstacle`): the path to the part that is not (field names, tuple
+## indices, `[]` for an element of a container) and that part's type.
+pub struct Obstacle:
+    pub path: list[String]
+    pub ty: Ty
+
+impl Obstacle:
+    ## The obstacle as seen from what holds it under `step`.
+    pub pure def under(own self, step: str) -> Obstacle:
+        var path = [step.to_string()]
+        for p in self.path:
+            path.push(p.copy())
+        return Obstacle(path=path, ty=self.ty)
+
 pub struct ParamInfo:
     pub name: String
     pub mode: Mode
@@ -890,6 +905,13 @@ impl Program:
     pub pure def auto_trait(
         self, mut types: Types, ty: Ty, auto: Auto, env: list[Predicate]
     ) -> bool:
+        return self.auto_obstacle(mut types, ty, auto, env).is_none()
+
+    ## What is in the way of the type's being `Send` or `Sync`, if
+    ## anything (stage 0's `auto_trait`).
+    pub pure def auto_obstacle(
+        self, mut types: Types, ty: Ty, auto: Auto, env: list[Predicate]
+    ) -> Obstacle?:
         var seen: list[(DefId, list[Ty], Auto)] = []
         return self.auto_depth(mut types, ty, auto, env, mut seen, 0)
 
@@ -906,69 +928,89 @@ impl Program:
         env: list[Predicate],
         mut seen: list[(DefId, list[Ty], Auto)],
         depth: int,
-    ) -> bool:
+    ) -> Obstacle?:
         if depth > 64:
-            return True
+            return None
+        let no = Some(Obstacle(path=[], ty=ty))
         match types.data(ty).copy():
             case TyData.Int | TyData.Float | TyData.Bool | TyData.Char | TyData.Str | TyData.Unit:
-                return True
+                return None
             case TyData.Never | TyData.Error | TyData.Const(_) | TyData.ConstOp(_, _) | TyData.Var(
                 _
             ):
-                return True
+                return None
             case TyData.Ref(inner, mutable):
                 let need = if mutable and auto == Auto.Send: Auto.Send else: Auto.Sync
                 return self.auto_depth(mut types, inner, need, env, mut seen, depth + 1)
             case TyData.Tuple(es, _):
-                for e in es:
-                    if not self.auto_depth(mut types, e, auto, env, mut seen, depth + 1):
-                        return False
-                return True
+                for i in range(len(es)):
+                    if let Some(o) = self.auto_depth(
+                        mut types, es[i], auto, env, mut seen, depth + 1
+                    ):
+                        return Some(o.under("{i}"))
+                return None
             case TyData.Fn(_, _, _):
-                return False
+                return no
             case TyData.Dyn(tr):
                 let want = self.auto_bound(auto)
                 for t in self.elaborate(mut types, ty, tr):
                     if Some(t.def_) == want:
-                        return True
-                return False
+                        return None
+                return no
             case TyData.Param(_) | TyData.Assoc(_, _, _):
                 let want = self.auto_bound(auto)
                 for p in env:
                     if p.ty == ty and Some(p.bound.def_) == want:
-                        return True
-                return False
+                        return None
+                return no
             case TyData.ErrSet(members):
                 for d in members:
-                    if not self.adt_auto(mut types, d, [], auto, env, mut seen, depth):
-                        return False
-                return True
+                    if let Some(o) = self.adt_auto(mut types, d, [], auto, env, mut seen, depth):
+                        return Some(o)
+                return None
             case TyData.Adt(d, args):
                 let arg0 = args.first() ?? Ty.error()
                 let b = self.builtin(d) else:
                     return self.adt_auto(mut types, d, args, auto, env, mut seen, depth)
                 let bs: str = b
+                var found: Obstacle? = None
                 match bs:
                     case "Cell":
                         if auto == Auto.Sync:
-                            return False
-                        return self.auto_depth(mut types, arg0, Auto.Send, env, mut seen, depth + 1)
+                            return no
+                        found = self.auto_depth(
+                            mut types, arg0, Auto.Send, env, mut seen, depth + 1
+                        )
                     case "Mutex" | "Sender" | "Receiver" | "Handle":
-                        return self.auto_depth(mut types, arg0, Auto.Send, env, mut seen, depth + 1)
+                        found = self.auto_depth(
+                            mut types, arg0, Auto.Send, env, mut seen, depth + 1
+                        )
                     case "MutexGuard":
                         if auto == Auto.Send:
-                            return False
-                        return self.auto_depth(mut types, arg0, Auto.Sync, env, mut seen, depth + 1)
+                            return no
+                        found = self.auto_depth(
+                            mut types, arg0, Auto.Sync, env, mut seen, depth + 1
+                        )
                     # A `Cap` is shared by its copies, a `Lent` is a view of
                     # a capability: both are references in effect.
                     case "Shared" | "Weak" | "Cap" | "Lent" | "Slice":
-                        return self.auto_depth(mut types, arg0, Auto.Sync, env, mut seen, depth + 1)
+                        found = self.auto_depth(
+                            mut types, arg0, Auto.Sync, env, mut seen, depth + 1
+                        )
                     case _:
                         for a in args:
-                            if not self.auto_depth(mut types, a, auto, env, mut seen, depth + 1):
-                                return False
-                        return True
+                            if found.is_none():
+                                found = self.auto_depth(
+                                    mut types, a, auto, env, mut seen, depth + 1
+                                )
+                # What an element is in the way of is under `[]`.
+                let o = found else:
+                    return None
+                return Some(o.under("[]"))
 
+    ## A declared struct, enum or error set: every field, with the type's
+    ## arguments in it. A type met again on the way is assumed to hold
+    ## (coinduction, as for Rust's auto traits).
     pure def adt_auto(
         self,
         mut types: Types,
@@ -978,33 +1020,34 @@ impl Program:
         env: list[Predicate],
         mut seen: list[(DefId, list[Ty], Auto)],
         depth: int,
-    ) -> bool:
+    ) -> Obstacle?:
         if let Some(base) = self.refinement_base(mut types, d, args):
             return self.auto_depth(mut types, base, auto, env, mut seen, depth + 1)
         for (sd, sargs, sa) in seen:
             if sd == d and sargs == args and sa == auto:
-                return True
+                return None
         seen.push((d, args.copy(), auto))
-        var fields: list[Ty] = []
+        var fields: list[(String, Ty)] = []
         match self.defs[d.index].kind:
             case Struct(s):
                 for f in s.fields:
-                    fields.push(f.ty)
-            case Enum(e):
+                    fields.push((f.name.copy(), f.ty))
+            case Enum(e) | ErrorSet(e):
                 for v in e.variants:
-                    for (_, t) in v.fields:
-                        fields.push(t)
-            case ErrorSet(e):
-                for v in e.variants:
-                    for (_, t) in v.fields:
-                        fields.push(t)
+                    for i in range(len(v.fields)):
+                        let (n, t) = v.fields[i].copy()
+                        match n:
+                            case Some(name):
+                                fields.push(("{v.name}.{name}", t))
+                            case None:
+                                fields.push(("{v.name}.{i}", t))
             case _:
                 pass
-        for f in fields:
+        for (name, f) in fields:
             let t = types.subst(f, args)
-            if not self.auto_depth(mut types, t, auto, env, mut seen, depth + 1):
-                return False
-        return True
+            if let Some(o) = self.auto_depth(mut types, t, auto, env, mut seen, depth + 1):
+                return Some(o.under(name))
+        return None
 
     ## Whether dropping a value of the type may run a `drop` that is not
     ## `pure`: the type's own `Drop`, or that of a part it owns (a field, a

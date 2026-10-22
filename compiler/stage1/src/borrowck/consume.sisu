@@ -53,20 +53,61 @@ pure def unique_def(f: Function, l: LocalId) -> StatementKind?:
                 found = Some(s.kind.copy())
     return found
 
+## For each local, where the one statement that defines it as a whole is
+## (its block and index), when exactly one does: `unique_def` asked of
+## every local at once, which the dataflow below asks of its blocks in
+## every round.
+pure def unique_defs(f: Function) -> list[(int, int)?]:
+    let nl = len(f.locals)
+    var count: list[int] = []
+    var at: list[(int, int)?] = []
+    var l = 0
+    while l < nl:
+        count.push(0)
+        at.push(None)
+        l += 1
+    for b in range(len(f.blocks)):
+        let block = ref f.blocks[b]
+        for si in range(len(block.stmts)):
+            match block.stmts[si].kind:
+                case StatementKind.Assign(p, _) | StatementKind.Call(p, _, _):
+                    if p.proj.is_empty() and p.local.index < nl:
+                        count[p.local.index] += 1
+                        at[p.local.index] = Some((b, si))
+                case _:
+                    pass
+    var out: list[(int, int)?] = []
+    l = 0
+    while l < nl:
+        if count[l] == 1:
+            out.push(at[l])
+        else:
+            out.push(None)
+        l += 1
+    return out
+
+## `unique_def`, from the table `unique_defs` makes.
+pure def unique_def_in(f: Function, defs: list[(int, int)?], l: LocalId) -> StatementKind?:
+    if l.index >= len(defs):
+        return None
+    let (b, si) = defs[l.index] else:
+        return None
+    return Some(f.blocks[b].stmts[si].kind.copy())
+
 ## For a block ending in the `for` loop's switch on `Iter.next`'s result,
 ## the iterator local.
-pure def loop_iterator(f: Function, b: int) -> LocalId?:
+pure def loop_iterator(f: Function, defs: list[(int, int)?], b: int) -> LocalId?:
     let Terminator.Switch(value, _, _) = f.blocks[b].term.copy() else:
         return None
     let Operand.Copy(d) = value else:
         return None
-    let k1 = unique_def(f, d.local) else:
+    let k1 = unique_def_in(f, defs, d.local) else:
         return None
     let StatementKind.Assign(_, Rvalue.Discriminant(n)) = k1 else:
         return None
     if not n.proj.is_empty():
         return None
-    let k2 = unique_def(f, n.local) else:
+    let k2 = unique_def_in(f, defs, n.local) else:
         return None
     let StatementKind.Call(_, Callee.Intrinsic(name, _), args) = k2 else:
         return None
@@ -74,7 +115,7 @@ pure def loop_iterator(f: Function, b: int) -> LocalId?:
         return None
     let Operand.Copy(r) = args[0].copy() else:
         return None
-    let k3 = unique_def(f, r.local) else:
+    let k3 = unique_def_in(f, defs, r.local) else:
         return None
     let StatementKind.Assign(_, Rvalue.Ref(it, mutable)) = k3 else:
         return None
@@ -258,28 +299,51 @@ pure def subst_all(ts: list[Type], args: list[Type]) -> list[Type]:
 
 ## What a statement does to the exhausted iterators: assigning a local, or
 ## borrowing it with `mut`, makes it unknown again.
-pure def kill(s: StatementKind, mut st: list[bool]):
+## What a statement does to the exhausted iterators: one written again,
+## or borrowed with `mut`, is not known to be exhausted. `dense` gives each
+## local's place in the state, -1 for a local that is no loop's iterator.
+pure def kill(s: StatementKind, dense: list[int], mut st: list[bool]):
     match s:
         case StatementKind.Assign(p, rv):
             if p.proj.is_empty():
-                st[p.local.index] = False
+                forget(p.local, dense, mut st)
             if let Rvalue.Ref(q, True) = rv:
-                st[q.local.index] = False
+                forget(q.local, dense, mut st)
         case StatementKind.Call(dest, _, _):
             if dest.proj.is_empty():
-                st[dest.local.index] = False
+                forget(dest.local, dense, mut st)
         case _:
             pass
+
+pure def forget(l: LocalId, dense: list[int], mut st: list[bool]):
+    if l.index < len(dense) and dense[l.index] >= 0:
+        st[dense[l.index]] = False
 
 pure def check_body(f: Function, types: Types, p: Program) -> list[Finding]:
     let n = len(f.blocks)
     let nl = len(f.locals)
     if n == 0:
         return []
+    # Which blocks end a `for` loop's step, and on which iterator: the same
+    # in every round. Only an iterator can be exhausted, so the state has a
+    # place for each (`dense`) rather than for every local.
+    let defs = unique_defs(f)
+    var iterators: list[LocalId?] = []
+    var dense: list[int] = []
+    for _ in range(nl):
+        dense.push(-1)
+    var tracked = 0
+    for b in range(n):
+        let it = loop_iterator(f, defs, b)
+        if let Some(i) = it:
+            if dense[i.index] < 0:
+                dense[i.index] = tracked
+                tracked += 1
+        iterators.push(it)
     # Exhausted iterators: a must analysis (intersection); a block not yet
     # reached has no state.
     var empty: list[bool] = []
-    for _ in range(nl):
+    for _ in range(tracked):
         empty.push(False)
     var entry: list[list[bool]?] = []
     for _ in range(n):
@@ -294,9 +358,10 @@ pure def check_body(f: Function, types: Types, p: Program) -> list[Finding]:
             let start = entry[b].copy() else:
                 continue
             var st = start
-            for s in f.blocks[b].stmts:
-                kill(s.kind, mut st)
-            let it = loop_iterator(f, b)
+            if tracked > 0:
+                for s in f.blocks[b].stmts:
+                    kill(s.kind, dense, mut st)
+            let it = iterators[b]
             var succ: list[(int, list[bool])] = []
             match f.blocks[b].term:
                 case Terminator.Goto(t):
@@ -305,11 +370,11 @@ pure def check_body(f: Function, types: Types, p: Program) -> list[Finding]:
                     for (k, t) in cases:
                         var s2 = st.copy()
                         if let Some(i) = it:
-                            s2[i.index] = k != 0
+                            s2[dense[i.index]] = k != 0
                         succ.push((t.index, s2))
                     var s2 = st.copy()
                     if let Some(i) = it:
-                        s2[i.index] = True
+                        s2[dense[i.index]] = True
                     succ.push((default.index, s2))
                 case _:
                     pass
@@ -324,7 +389,7 @@ pure def check_body(f: Function, types: Types, p: Program) -> list[Finding]:
                     continue
                 var meet = e
                 var narrowed = False
-                for i in range(nl):
+                for i in range(tracked):
                     if meet[i] and not s2[i]:
                         meet[i] = False
                         narrowed = True
@@ -353,10 +418,11 @@ pure def check_body(f: Function, types: Types, p: Program) -> list[Finding]:
                         var exhausted = False
                         if place.proj.is_empty():
                             if let Type.Named(tn, _) = ty:
-                                exhausted = tn == "Iter" and st[place.local.index]
+                                let at = dense[place.local.index]
+                                exhausted = tn == "Iter" and at >= 0 and st[at]
                         if not exhausted and not own_method(f, ty):
                             out.push(must_consume_finding(f, types, b, si, place, ty))
-            kill(s.kind, mut st)
+            kill(s.kind, dense, mut st)
     return out
 
 ## The finding for a drop of a must-consume value: a consuming loop's

@@ -25,7 +25,17 @@ import stage1.typeck.expr
 import stage1.typeck.instances
 import stage1.typeck.pat
 import stage1.typeck.tasks
-from stage1.diag import Catalog, Diagnostic, Edit, Lines, Msg, TextRange, render_ids_in, sort_unique
+from stage1.diag import (
+    Catalog,
+    Diagnostic,
+    Edit,
+    Lines,
+    Msg,
+    Param,
+    TextRange,
+    render_ids_in,
+    sort_unique,
+)
 from stage1.parser import parse
 from stage1.syntax.ast import Ast, Block, ExprId, Mode, Module
 from stage1.syntax.ast import build
@@ -73,9 +83,11 @@ pub struct Base:
 
 ## The prelude and the std modules every file sees, resolved once: `texts`
 ## gives the source of each std module by name, to which the base adds the
-## text of each one's derived impls, `<derive>/NAME.sisu`.
-pub pure def base(texts: dict[String, String]) -> Base:
+## text of each one's derived impls, `<derive>/NAME.sisu`; `catalog` is the
+## message catalog the programs checked against the base are checked with.
+pub pure def base(texts: dict[String, String], catalog: Catalog) -> Base:
     var r = Resolver.base(texts)
+    r.catalog = Shared(catalog.copy())
     let templates = r.std_derives.copy()
     r.std_derives = Templates.none()
     let std_syntax = r.std_kept.copy()
@@ -102,10 +114,11 @@ pure def lines_of(texts: dict[String, String]) -> dict[String, Lines]:
     return out
 
 ## A base of a prelude of the given text alone (for the tests).
-pub pure def base_from(prelude_text: str) -> Base:
+pub pure def base_from(prelude_text: str, catalog: Catalog) -> Base:
     var texts: dict[String, String] = {}
     _ = texts.insert("prelude".to_string(), prelude_text.to_string())
     var r = Resolver.base_from(prelude_text)
+    r.catalog = Shared(catalog.copy())
     let std_syntax = r.std_kept.copy()
     r.std_kept = []
     return Base(
@@ -137,6 +150,11 @@ pub struct Checked:
     ## Whether the front end finds an error, as far as stage 1 knows: its
     ## own, or one stage 0 reports that is not the type checker's.
     pub has_error: bool
+    ## The rules of the errors of stage 0's front end that stage 1 notes
+    ## without rendering them (but the name pass's and the parser's, which
+    ## it renders): then `check` does not print all of stage 0's
+    ## diagnostics.
+    pub unrendered: list[String]
     ## What lowering reads, when it asked for it.
     pub typed: Typed?
 
@@ -159,15 +177,25 @@ pub struct Typed:
     pub inferred: dict[DefId, list[DefId]]
 
 ## The type diagnostics of a file, rendered as `sisu check --format=ids`
-## writes them: each position in its own file's lines and columns.
+## writes them: each position in its own file's lines and columns. The
+## other messages the checker reports (`resolve.`, `stage0.`, ...) are not
+## the type checker's own.
 pub pure def render(text: str, checked: Checked, catalog: Catalog) -> String:
-    var out = render_ids_in(checked.name, text, checked.diagnostics, catalog)
+    var out = render_ids_in(checked.name, text, type_messages(checked.diagnostics), catalog)
     for i in range(len(checked.files)):
         let (t, ds) = checked.files[i].copy()
         var name = String.new()
-        if i < len(checked.file_names):
+        if not checked.name.is_empty() and i < len(checked.file_names):
             name = checked.file_names[i].copy()
-        out.push(render_ids_in(name, t, ds, catalog))
+        out.push(render_ids_in(name, t, type_messages(ds), catalog))
+    return out
+
+## The diagnostics whose identifiers begin with `type.`.
+pure def type_messages(diags: list[Diagnostic]) -> list[Diagnostic]:
+    var out: list[Diagnostic] = []
+    for d in diags:
+        if d.msg.id().starts_with("type."):
+            out.push(d.copy())
     return out
 
 ## A module of a program to check: its path (empty for a single file), the
@@ -186,6 +214,7 @@ struct BodyResult:
     beyond: String?
     owner_beyond: String?
     other_error: bool
+    noted: list[String]
     absorbed: list[DefId]
     requests: list[Request]
     typed: TBody?
@@ -198,6 +227,7 @@ pure def result_of(done: Finished) -> BodyResult:
         beyond=done.beyond.copy(),
         owner_beyond=done.owner_beyond.copy(),
         other_error=done.other_error,
+        noted=done.noted.copy(),
         absorbed=done.absorbed.copy(),
         requests=done.requests.copy(),
         typed=done.typed.copy(),
@@ -214,10 +244,12 @@ struct Bodies:
     beyond: list[String]
     owner_beyond: list[String]
     other_error: bool
+    ## The rules of such errors that stage 1 notes without rendering them.
+    noted: list[String]
 
 impl Bodies:
     pure def new() -> Bodies:
-        return Bodies(diags=[], beyond=[], owner_beyond=[], other_error=False)
+        return Bodies(diags=[], beyond=[], owner_beyond=[], other_error=False, noted=[])
 
     ## Adds what checking one body left; a body beyond the slice reports
     ## nothing, and a body the compiler wrote from code checked elsewhere
@@ -233,6 +265,8 @@ impl Bodies:
             case None:
                 if done.other_error:
                     self.other_error = True
+                for r in done.noted:
+                    self.noted.push(r.copy())
                 for x in done.diags:
                     self.diags.push(x.copy())
 
@@ -245,6 +279,8 @@ impl Bodies:
             self.owner_beyond.push(w.copy())
         if other.other_error:
             self.other_error = True
+        for r in other.noted:
+            self.noted.push(r.copy())
 
 ## The most rounds of checking and declaring instances (stage 0's
 ## `MAX_ROUNDS`): a template whose instances need ever larger types stops.
@@ -318,7 +354,6 @@ pub pure def check_program(
     while True:
         var r = base.resolver.copy()
         r.prog.embedded = embedded.copy()
-        r.catalog = catalog.copy()
         for q in requests:
             if let Request.Promote(d) = q:
                 _ = r.promoted.add(d)
@@ -345,6 +380,7 @@ pub pure def check_program(
                 beyond=[why.copy()],
                 owner_beyond=[],
                 has_error=False,
+                unrendered=[],
                 typed=None,
             )
         r.declare_instances(requests)
@@ -366,8 +402,8 @@ pub pure def check_program(
                 )
                 if multi:
                     checked.name = modules[0].file.copy()
-                    for m in round.file_modules:
-                        checked.file_names.push(file_name_of(r, m))
+                for m in round.file_modules:
+                    checked.file_names.push(file_name_of(r, m))
                 if keep:
                     checked.typed = Some(
                         Typed(
@@ -481,6 +517,7 @@ pure def check_round(
             break
     var main = Bodies.new()
     main.other_error = r.other_error
+    main.noted = r.noted.copy()
     var files: list[Bodies] = []
     for _ in range(len(modules)):
         files.push(Bodies.new())
@@ -563,7 +600,8 @@ pure def check_round(
                     ret_ok = True
             if not params_ok or not ret_ok or f.self_mode.is_some():
                 let span = prog.defs[main_fn.index].span
-                main.diags.push(Diagnostic.new(Msg.TypeMainSignature, span.start, span.end))
+                let d = Diagnostic.new(Msg.TypeMainSignature, span.start, span.end)
+                main.diags.push(d.note(Msg.TypeMainForms))
     # A test takes nothing, or the real `System`.
     for t in prog.tests:
         let m = prog.defs[t.index].module
@@ -615,6 +653,7 @@ pure def continue_never() -> BodyResult:
         beyond=None,
         owner_beyond=None,
         other_error=False,
+        noted=[],
         absorbed=[],
         requests=[],
         typed=None,
@@ -645,11 +684,18 @@ pure def finish_file(
     unbounded: bool,
 ) -> Checked:
     var bodies = round.main.copy()
+    var unrendered = round.main.noted.copy()
+    if unbounded:
+        unrendered.push("comptime.instances-unbounded".to_string())
+    for (_, b) in round.files:
+        for r in b.noted:
+            unrendered.push(r.copy())
     if name_error or unbounded:
         bodies.other_error = True
     # A call whose constant arguments make an assert of its callee false.
     if any_fails(round.asserts, round.const_calls, round.types):
         bodies.other_error = True
+        unrendered.push("comptime.panicked".to_string())
     for ds in syntaxes:
         for d in ds:
             if catalog.is_error(d.msg):
@@ -734,6 +780,7 @@ pure def finish_file(
         beyond=beyond,
         owner_beyond=owned,
         has_error=any_error,
+        unrendered=unrendered,
         typed=None,
     )
 
@@ -1201,7 +1248,7 @@ impl Checker:
             let name = cx.prog.defs[self.def_.index].name.copy()
             let shown = cx.prog.display(self.types, r)
             var d = Diagnostic.new(Msg.TypeMissingReturn, def_span.start, def_span.end)
-            d = d.with("name", name).with("ty", shown)
+            d = d.with("name", name).with("ty", shown).note(Msg.TypeMissingReturnEnd)
             self.report(d)
         self.decide_captures(cx)
         self.check_own_closures(cx)
@@ -1279,7 +1326,7 @@ impl Checker:
                         out.push(q)
                 case TExprKind.FnRef(def_):
                     if is_template(cx.prog, def_):
-                        self.other()
+                        self.other("comptime.template-value")
                 case _:
                     pass
         return out
@@ -1423,8 +1470,12 @@ impl Checker:
                 d = d.fix_at(Msg.TypeShowDebug, span.end, span.end, ":?")
         # A type parameter without the bound: bound it.
         if let TyData.Param(i) = self.types.data(t):
-            if let Some(edit) = self.bound_edit(cx, i, bound):
-                d = d.fix_edits(Msg.TypeAddBound, [edit])
+            if let Some((name, edit)) = self.bound_edit(cx, i, bound):
+                let params = [
+                    Param(name="param".to_string(), value=name),
+                    Param(name="bound".to_string(), value=bound.copy()),
+                ]
+                d = d.fix_params(Msg.TypeAddBound, params, [edit])
         let fixed = self.missing_impl_fix(cx, d, t, b)
         self.report(fixed)
 
@@ -1472,7 +1523,7 @@ impl Checker:
                     if let TyData.Param(_) = self.types.data(w):
                         param = True
             if param:
-                self.other()
+                self.other("comptime.not-constant")
         _ = cx
 
     ## Whether the body calls a generic function that has a body with a
@@ -1607,7 +1658,7 @@ pure def test_prelude() -> String:
 
 test "stage 0's type errors have their messages":
     let catalog = Catalog.parse("")
-    let r = base_from(test_prelude())
+    let r = base_from(test_prelude(), catalog)
     # The cases of `type_errors_have_codes` in sisu-typeck's tests that are
     # within the slice.
     let cases = [
@@ -1647,7 +1698,7 @@ test "stage 0's type errors have their messages":
 
 test "matches, patterns and inferred error sets":
     let catalog = Catalog.parse("")
-    let r = base_from(test_prelude())
+    let r = base_from(test_prelude(), catalog)
     var light: String = "enum Light:\n    Red\n    Amber\n    Green\n"
     light.push(
         "def f(l: Light) -> int:\n    match l:\n        case Light.Red:\n            return 1\n"
@@ -1672,7 +1723,7 @@ test "matches, patterns and inferred error sets":
 
 test "a body beyond the slice reports nothing, and says why":
     let catalog = Catalog.parse("")
-    let r = base_from(test_prelude())
+    let r = base_from(test_prelude(), catalog)
     # An attribute of a function stage 1 does not implement.
     var beyond: String = "@keeps\ndef f() -> int:\n    return 1\n"
     beyond.push("def g() -> int:\n    return \"x\"\n")

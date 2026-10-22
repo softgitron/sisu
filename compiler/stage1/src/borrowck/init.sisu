@@ -192,12 +192,20 @@ impl Analysis:
             let block = ref f.blocks[b]
             var st = entry[b].copy()
             var unwind_states: list[State] = []
-            for s in block.stmts:
+            # A `while` over the statements, with the unwinding edge asked
+            # once: natively, a `for` loop's `next` and `is_some` are calls of
+            # intrinsics, which cost more than the rest of a step.
+            let unwinds = block.unwind.is_some()
+            let count = len(block.stmts)
+            var si = 0
+            while si < count:
+                let s = ref block.stmts[si]
                 a.apply_moves(s, mut st)
-                if block.unwind.is_some():
+                if unwinds:
                     unwind_states.push(st.copy())
                 a.apply_inits(s, mut st)
-            if block.unwind.is_some():
+                si += 1
+            if unwinds:
                 unwind_states.push(st.copy())
             if let Some(u) = block.unwind:
                 for s in unwind_states:

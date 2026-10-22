@@ -262,6 +262,48 @@ pub enum Msg:
     PackageUnknownKey
     CapUntrusted
     BorrowDeclareView
+    BorrowConsumeWith
+    TaskNotSend
+    TaskNotSendMut
+    TaskNotSync
+    TaskResultNotSend
+    CapNotShareable
+    BorrowViewInOwner
+    BorrowMustConsumeInOwner
+    BorrowViewFieldInPlainStruct
+    BorrowViewInEnum
+    BorrowTypeDeclaredHere
+    ResolveSealedTrait
+    ResolveOrphanImpl
+    ResolveNotATraitMethod
+    ResolveMissingAssocType
+    ResolveSupertraitMissing
+    ResolveMissingTraitMethod
+    BorrowFromRequired
+    BorrowBorrowedParam
+    CapInternal
+    Stage0Unsupported
+    ResolveFieldDefaultOrder
+    ContractNotPure
+    ContractChanges
+    ComptimeNoFake
+    ResolveNotInModule
+    TypeMissingReturnEnd
+    TypeMainForms
+    TypeBreakUseReturn
+    TypeTruthiness
+    TypeIntRange
+    TypeFloatRange
+    TypeMissingPatterns
+    TypeOptionNotValue
+    TypeSpecLetters
+    TypeMethodOfTraits
+    RefineUseTryFrom
+    ResolveDefaultInFunction
+    ResolveRenameDuplicate
+    ResolveWriteTraitMethod
+    TaskFieldPath
+    TaskWrapMutex
 
 impl Msg:
     ## The catalog identifier.
@@ -514,6 +556,48 @@ impl Msg:
             case PackageUnknownKey: "package.unknown-key"
             case CapUntrusted: "cap.untrusted"
             case BorrowDeclareView: "borrow.declare-view"
+            case BorrowConsumeWith: "borrow.consume-with"
+            case TaskNotSend: "task.not-send"
+            case TaskNotSendMut: "task.not-send-mut"
+            case TaskNotSync: "task.not-sync"
+            case TaskResultNotSend: "task.result-not-send"
+            case CapNotShareable: "cap.not-shareable"
+            case BorrowViewInOwner: "borrow.view-in-owner"
+            case BorrowMustConsumeInOwner: "borrow.must-consume-in-owner"
+            case BorrowViewFieldInPlainStruct: "borrow.view-field-in-plain-struct"
+            case BorrowViewInEnum: "borrow.view-in-enum"
+            case BorrowTypeDeclaredHere: "borrow.type-declared-here"
+            case ResolveSealedTrait: "resolve.sealed-trait"
+            case ResolveOrphanImpl: "resolve.orphan-impl"
+            case ResolveNotATraitMethod: "resolve.not-a-trait-method"
+            case ResolveMissingAssocType: "resolve.missing-assoc-type"
+            case ResolveSupertraitMissing: "resolve.supertrait-missing"
+            case ResolveMissingTraitMethod: "resolve.missing-trait-method"
+            case BorrowFromRequired: "borrow.from-required"
+            case BorrowBorrowedParam: "borrow.borrowed-param"
+            case CapInternal: "cap.internal"
+            case Stage0Unsupported: "stage0.unsupported"
+            case ResolveFieldDefaultOrder: "resolve.field-default-order"
+            case ContractNotPure: "contract.not-pure"
+            case ContractChanges: "contract.changes"
+            case ComptimeNoFake: "comptime.no-fake"
+            case ResolveNotInModule: "resolve.not-in-module"
+            case TypeMissingReturnEnd: "type.missing-return-end"
+            case TypeMainForms: "type.main-forms"
+            case TypeBreakUseReturn: "type.break-use-return"
+            case TypeTruthiness: "type.truthiness"
+            case TypeIntRange: "type.int-range"
+            case TypeFloatRange: "type.float-range"
+            case TypeMissingPatterns: "type.missing-patterns"
+            case TypeOptionNotValue: "type.option-not-value"
+            case TypeSpecLetters: "type.spec-letters"
+            case TypeMethodOfTraits: "type.method-of-traits"
+            case RefineUseTryFrom: "refine.use-try-from"
+            case ResolveDefaultInFunction: "resolve.default-in-function"
+            case ResolveRenameDuplicate: "resolve.rename-duplicate"
+            case ResolveWriteTraitMethod: "resolve.write-trait-method"
+            case TaskFieldPath: "task.field-path"
+            case TaskWrapMutex: "task.wrap-mutex"
 
 ## A byte range of a text: from `start` up to, not including, `end`.
 @derive(Eq, Hash, Debug, Copy)
@@ -560,6 +644,13 @@ pub struct Edit:
     pub end: int
     pub text: String
 
+## A note or help line under a diagnostic ("copy it with `.copy()`
+## before it is moved"), with its parameters.
+@derive(Eq)
+pub struct Note:
+    pub msg: Msg
+    pub params: list[Param]
+
 ## A suggested change: a message and the edits that make it.
 @derive(Eq)
 pub struct Fix:
@@ -577,7 +668,7 @@ pub struct Diagnostic:
     pub params: list[Param]
     pub labels: list[Label]
     pub fixes: list[Fix]
-    pub notes: list[Msg]
+    pub notes: list[Note]
 
 impl Diagnostic:
     pub pure def new(msg: Msg, start: int, end: int) -> Diagnostic:
@@ -629,10 +720,31 @@ impl Diagnostic:
         d.fixes.push(Fix(msg=msg, params=[], edits=edits))
         return d
 
+    ## The diagnostic with a fix, its parameters and its edits.
+    pub pure def fix_params(
+        own self, msg: Msg, own params: list[Param], own edits: list[Edit]
+    ) -> Diagnostic:
+        var d = self
+        d.fixes.push(Fix(msg=msg, params=params, edits=edits))
+        return d
+
     ## The diagnostic with a note.
     pub pure def note(own self, msg: Msg) -> Diagnostic:
         var d = self
-        d.notes.push(msg)
+        d.notes.push(Note(msg=msg, params=[]))
+        return d
+
+    ## The diagnostic with a note that has one parameter.
+    pub pure def note_with(own self, msg: Msg, name: str, value: str) -> Diagnostic:
+        var d = self
+        let param = Param(name=name.to_string(), value=value.to_string())
+        d.notes.push(Note(msg=msg, params=[param]))
+        return d
+
+    ## The diagnostic with a note and its parameters.
+    pub pure def note_params(own self, msg: Msg, own params: list[Param]) -> Diagnostic:
+        var d = self
+        d.notes.push(Note(msg=msg, params=params))
         return d
 
     ## The value of the parameter `name`, or `None`.
@@ -699,6 +811,25 @@ impl Catalog:
         if let Some(kind) = self.kinds.get(msg.id().to_string()):
             return kind == "error"
         return False
+
+    ## An error of the command line as stage 0's driver prints one
+    ## (`plain_error`): `error[CODE]: ` and the message, on a line.
+    pub pure def plain_error(self, id: str, params: list[Param]) -> String:
+        var code = String.new()
+        if let Some(c) = self.codes.get(id.to_string()):
+            code = c.copy()
+        return "error[{code}]: {self.render(id, params)}\n"
+
+    ## The word a diagnostic's severity is shown with (stage 0's
+    ## `Diagnostic::severity`): `warning` for a warning, `note` for a note
+    ## or help, `error` for anything else.
+    pub pure def severity(self, msg: Msg) -> str:
+        if let Some(kind) = self.kinds.get(msg.id().to_string()):
+            if kind == "warning":
+                return "warning"
+            if kind == "note" or kind == "help":
+                return "note"
+        return "error"
 
 ## The template of a catalog line: what follows its first three fields.
 pure def template_of(line: str) -> String:
@@ -783,21 +914,31 @@ pure def compare(a: Diagnostic, b: Diagnostic, catalog: Catalog) -> Ordering:
         return a.end.cmp(b.end)
     return catalog.code(a.msg).cmp(catalog.code(b.msg))
 
-## Where the lines of a text start, for positions in messages.
+## Where the lines of a text start, for positions in messages, and which
+## lines are ASCII, whose columns are their bytes.
 pub struct Lines:
     starts: list[int]
+    ascii: list[bool]
 
 impl Lines:
     ## The lines of `text`: one starts at 0 and after each `\n`.
     pub pure def of(text: str) -> Lines:
         var starts = [0]
+        var ascii: list[bool] = []
+        var plain = True
         let n = text.byte_len()
         var i = 0
         while i < n:
-            if text.byte_at(i) == 10:
+            let b = text.byte_at(i)
+            if b == 10:
                 starts.push(i + 1)
+                ascii.push(plain)
+                plain = True
+            elif b >= 128:
+                plain = False
             i += 1
-        return Lines(starts=starts)
+        ascii.push(plain)
+        return Lines(starts=starts, ascii=ascii)
 
     ## Where the line of 0-based index `index` starts, or `None` past the
     ## last line.
@@ -844,6 +985,8 @@ impl Lines:
         let at = min(offset, text.byte_len())
         let line = self.index(at)
         let start = self.starts[line]
+        if self.ascii[line]:
+            return (line + 1, at - start + 1)
         var col = 1
         var i = start
         while i < at:
@@ -851,6 +994,20 @@ impl Lines:
                 col += 1
             i += 1
         return (line + 1, col)
+
+    ## The text of 1-based `line`, without its line break (stage 0's
+    ## `SourceFile::line_text`); empty past the last line.
+    pub pure def text_of(self, text: str, line: int) -> String:
+        let index = max(line - 1, 0)
+        if index >= len(self.starts):
+            return String.new()
+        let start = self.starts[index]
+        var end = text.byte_len()
+        if index + 1 < len(self.starts):
+            end = self.starts[index + 1]
+        while end > start and (text.byte_at(end - 1) == 10 or text.byte_at(end - 1) == 13):
+            end -= 1
+        return text.byte_slice(start, end).to_string()
 
     ## `line:col-line:col`, the form of a span in rendered diagnostics.
     pub pure def span(self, text: str, start: int, end: int) -> String:
@@ -923,6 +1080,235 @@ pub pure def render_ids_in(
                 out.push(" {file}{lines.span(text, e.start, e.end)} {quote(e.text)}")
             out.push("\n")
     return out
+
+## A diagnostic of a program of several files, with the file it is in and
+## the file each of its labels is in (stage 0's spans carry their file), as
+## the program's list of files numbers them; a label without a file of its
+## own is in the diagnostic's.
+@derive(Eq)
+pub struct Filed:
+    pub file: int
+    pub diag: Diagnostic
+    pub label_files: list[int]
+
+impl Filed:
+    ## The file of the `k`th label.
+    pub pure def label_file(self, k: int) -> int:
+        if k < len(self.label_files):
+            return self.label_files[k]
+        return self.file
+
+## Sorts diagnostics of a program's files by file, start, end and code,
+## keeping the order of equals (stage 0's `sort`); with `unique`, drops each
+## one identical to an earlier one too (its `sort_unique`).
+pub pure def sort_filed(mut diags: list[Filed], catalog: Catalog, unique: bool):
+    diags.sort_by((a, b) -> compare_filed(a, b, catalog))
+    if not unique:
+        return
+    var kept: list[Filed] = []
+    for d in diags:
+        # Sorted, so an identical one is among the last kept at its span.
+        var repeat = False
+        var k = len(kept) - 1
+        while k >= 0 and same_span(kept[k], d):
+            if kept[k] == d:
+                repeat = True
+                break
+            k -= 1
+        if not repeat:
+            kept.push(d.copy())
+    diags = kept
+
+pure def same_span(a: Filed, b: Filed) -> bool:
+    return a.file == b.file and a.diag.start == b.diag.start and a.diag.end == b.diag.end
+
+pure def compare_filed(a: Filed, b: Filed, catalog: Catalog) -> Ordering:
+    if a.file != b.file:
+        return a.file.cmp(b.file)
+    return compare(a.diag, b.diag, catalog)
+
+## The human form of the diagnostics of one file named `name`.
+pub pure def render_human(
+    name: str, text: str, diags: list[Diagnostic], catalog: Catalog
+) -> String:
+    var filed: list[Filed] = []
+    for d in diags:
+        filed.push(Filed(file=0, diag=d.copy(), label_files=[]))
+    return render_human_files([(name.to_string(), text.to_string())], filed, catalog)
+
+## The human form of diagnostics (stage 0's `render_human`, modelled on
+## rustc's multi-span layout): for each, its severity, code and message,
+## where it is, the source line with its span marked under it, each
+## label's line with the label's span marked and its message beside (a
+## label in another file says which first), the notes and the fixes, and a
+## blank line. `files` holds each file's name and text.
+pub pure def render_human_files(
+    files: list[(String, String)], diags: list[Filed], catalog: Catalog
+) -> String:
+    var lines: list[Lines] = []
+    for (_, t) in files:
+        lines.push(Lines.of(t))
+    var out = String.new()
+    for x in diags:
+        let d = ref x.diag
+        let word = catalog.severity(d.msg)
+        out.push("{word}[{catalog.code(d.msg)}]: {catalog.render(d.msg.id(), d.params)}\n")
+        let (line, col) = place(files, lines, x.file, d.start)
+        out.push("  --> {file_name(files, x.file)}:{line}:{col}\n")
+        # The width of the line numbers, the same for every excerpt.
+        var gutter = digits(line)
+        for k in range(len(d.labels)):
+            gutter = max(gutter, digits(place(files, lines, x.label_file(k), d.labels[k].start).0))
+        excerpt(mut out, files, lines, x.file, d.start, d.end, "^", "", gutter, False)
+        var file = x.file
+        var at = line
+        for k in range(len(d.labels)):
+            let l = ref d.labels[k]
+            # A label in another file says which, as rustc does.
+            let moved = x.label_file(k) != file
+            if moved:
+                file = x.label_file(k)
+                let (ll, lc) = place(files, lines, file, l.start)
+                out.push("  ::: {file_name(files, file)}:{ll}:{lc}\n")
+            let here = place(files, lines, file, l.start).0
+            let said = catalog.render(l.msg.id(), l.params)
+            let shown = not moved and here == at
+            excerpt(mut out, files, lines, file, l.start, l.end, "-", said, gutter, shown)
+            at = here
+        for n in d.notes:
+            out.push("  = note: {catalog.render(n.msg.id(), n.params)}\n")
+        for f in d.fixes:
+            out.push("  = fix: {fix_text(f, catalog)}\n")
+        out.push("\n")
+    return out
+
+## The conformance form of diagnostics of a program's files (stage 0's
+## `render_ids`, or with `named` its `render_ids_with_files`, where every
+## position has its file's name first).
+pub pure def render_ids_files(
+    files: list[(String, String)], diags: list[Filed], named: bool, catalog: Catalog
+) -> String:
+    var lines: list[Lines] = []
+    for (_, t) in files:
+        lines.push(Lines.of(t))
+    var out = String.new()
+    for x in diags:
+        let d = ref x.diag
+        out.push(
+            "{span_in(files, lines, x.file, d.start, d.end, named)} {catalog.code(d.msg)} {d.msg.id()}"
+        )
+        for p in d.params:
+            out.push(" {p.name}={quote(p.value)}")
+        out.push("\n")
+        for k in range(len(d.labels)):
+            let l = ref d.labels[k]
+            out.push(
+                "  label {span_in(files, lines, x.label_file(k), l.start, l.end, named)} {l.msg.id()}"
+            )
+            for p in l.params:
+                out.push(" {p.name}={quote(p.value)}")
+            out.push("\n")
+        for f in d.fixes:
+            out.push("  fix {f.msg.id()}")
+            for e in f.edits:
+                out.push(" {span_in(files, lines, x.file, e.start, e.end, named)} {quote(e.text)}")
+            out.push("\n")
+    return out
+
+## A span of file `file` as `line:col-line:col`, with `named` its file's
+## name first; `0:0-0:0` in a file the list does not have.
+pure def span_in(
+    files: list[(String, String)], lines: list[Lines], file: int, start: int, end: int, named: bool
+) -> String:
+    var prefix = String.new()
+    if named:
+        prefix = "{file_name(files, file)}:"
+    if file < 0 or file >= len(files):
+        return "{prefix}0:0-0:0"
+    return "{prefix}{lines[file].span(files[file].1, start, end)}"
+
+## The 1-based line and column of byte `offset` of file `file`; `(0, 0)`
+## in a file the list does not have, as stage 0's source map gives them.
+pure def place(
+    files: list[(String, String)], lines: list[Lines], file: int, offset: int
+) -> (int, int):
+    if file < 0 or file >= len(files):
+        return (0, 0)
+    return lines[file].line_col(files[file].1, offset)
+
+## The name of file `file`, `<unknown>` for one the list does not have.
+pure def file_name(files: list[(String, String)], file: int) -> String:
+    if file < 0 or file >= len(files):
+        return "<unknown>".to_string()
+    return files[file].0.copy()
+
+## One line of source with `start..end` of file `file` marked under it by
+## `marker`, and `said` after the marks; with `shown`, the line was just
+## shown (a label on the line of the span before it), so only the marks are
+## added. A span over several lines is marked to the end of its first line.
+pure def excerpt(
+    mut out: String,
+    files: list[(String, String)],
+    lines: list[Lines],
+    file: int,
+    start: int,
+    end: int,
+    marker: str,
+    said: str,
+    gutter: int,
+    shown: bool,
+):
+    if file < 0 or file >= len(files):
+        return
+    let text: str = files[file].1
+    let (l1, c1) = lines[file].line_col(text, start)
+    let (l2, c2) = lines[file].line_col(text, end)
+    let line = lines[file].text_of(text, l1)
+    let pad = " ".repeat(gutter)
+    if not shown:
+        out.push("{pad} |\n{" ".repeat(gutter - digits(l1))}{l1} | {line}\n")
+    let before = max(c1 - 1, 0)
+    var width = max(c2 - c1, 1)
+    if l2 != l1:
+        width = max(char_count(line.trim_end()) - before, 1)
+    out.push("{pad} | {" ".repeat(before)}{marker.repeat(width)}")
+    if not said.is_empty():
+        out.push(" ")
+        out.push(said)
+    out.push("\n")
+
+## A fix as a person reads it (stage 0's `fix_text`): its message, then
+## the text it writes, each edit's in backquotes (a deletion has none to
+## show; its message says what goes).
+pub pure def fix_text(f: Fix, catalog: Catalog) -> String:
+    var out = catalog.render(f.msg.id(), f.params)
+    var first = True
+    for e in f.edits:
+        if e.text.is_empty():
+            continue
+        if first:
+            out.push(": ")
+            first = False
+        else:
+            out.push(", ")
+        out.push("`{e.text}`")
+    return out
+
+## The number of decimal digits of a line number.
+pure def digits(n: int) -> int:
+    var count = 1
+    var rest = n
+    while rest >= 10:
+        rest = rest // 10
+        count += 1
+    return count
+
+## The number of characters of a text.
+pure def char_count(s: str) -> int:
+    var n = 0
+    for _ in s.chars():
+        n += 1
+    return n
 
 test "positions count characters":
     let text = "ab\nä x\n"

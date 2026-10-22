@@ -29,10 +29,89 @@ pub pure def borrowing_builtin(n: str) -> bool:
 
 pub struct Types:
     pub decls: Decls
+    ## The program's functions by name, each the index of the first of its
+    ## name in the program's list, as `Program::function` finds it (stage
+    ## 0's `Types::function`, decision 219). Placing the drops changes no
+    ## function's name or place, so the index serves the program with its
+    ## drops too.
+    pub fns: dict[String, int]
 
 impl Types:
     pub pure def new(types: list[TypeDecl]) -> Types:
-        return Types(decls=Decls.new(types))
+        return Types(decls=Decls.new(types), fns={})
+
+    ## The types of a program, with its functions by name.
+    pub pure def of(p: Program) -> Types:
+        var fns: dict[String, int] = {}
+        for i in range(len(p.functions)):
+            if not fns.contains(p.functions[i].name.copy()):
+                _ = fns.insert(p.functions[i].name.copy(), i)
+        return Types(decls=Decls.new(p.types), fns=fns)
+
+    ## The declared types the places of `f` can reach, each once, in the
+    ## order met: those its locals' types name, and those their fields and
+    ## variants name. What initialisation and drop placement ask of the
+    ## program's types is about these.
+    pub pure def reached_decls(self, f: Function) -> list[TypeDecl]:
+        var seen: set[String] = set()
+        var out: list[TypeDecl] = []
+        var work: list[Type] = []
+        for l in f.locals:
+            work.push(l.ty.copy())
+        while let Some(t) = work.pop():
+            match t:
+                case Type.Named(n, args):
+                    for a in args:
+                        work.push(a.copy())
+                    self.reach_named(n, mut seen, mut out, mut work)
+                case Type.ErrSet(ms):
+                    for m in ms:
+                        self.reach_named(m, mut seen, mut out, mut work)
+                case Type.Tuple(es):
+                    for e in es:
+                        work.push(e.copy())
+                case Type.Ref(inner, _):
+                    for x in inner:
+                        work.push(x.copy())
+                case Type.Fn(params, ret, _):
+                    for x in params:
+                        work.push(x.copy())
+                    for x in ret:
+                        work.push(x.copy())
+                case Type.Dyn(_, args) | Type.ConstOp(_, args):
+                    for x in args:
+                        work.push(x.copy())
+                case Type.Assoc(self_ty, _, args, _):
+                    for x in self_ty:
+                        work.push(x.copy())
+                    for x in args:
+                        work.push(x.copy())
+                case _:
+                    pass
+        return out
+
+    pure def reach_named(
+        self, n: str, mut seen: set[String], mut out: list[TypeDecl], mut work: list[Type]
+    ):
+        if not seen.add(n.to_string()):
+            return
+        let d = self.decls.get(n) else:
+            return
+        match d:
+            case TypeDecl.Struct(_, _, fields, _, _, _):
+                for f in fields:
+                    work.push(f.ty.copy())
+            case TypeDecl.Enum(_, _, variants, _, _, _, _):
+                for v in variants:
+                    for (_, ft) in v.fields:
+                        work.push(ft.copy())
+        out.push(d.copy())
+
+    ## Where the program's function of that name is in its list.
+    pub pure def function(self, name: str) -> int?:
+        if let Some(i) = self.fns.get(name.to_string()):
+            return Some(i)
+        return None
 
     ## The type of a place, or `None` when SIR does not say (a payload of a
     ## union of error sets).

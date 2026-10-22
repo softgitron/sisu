@@ -15,11 +15,12 @@
 ##! The messages of these rules are not the type checker's own (`task.`);
 ##! stage 1 notes that one is reported (`Checker.other`).
 
-from stage1.diag import Msg, TextRange
+from stage1.diag import Diagnostic, Msg, TextRange
+from stage1.diag import Param as MsgParam
 from stage1.syntax.ast import ArmBody, Block, ExprId, ExprKind, SelectArm, StmtId, StmtKind
 from stage1.syntax.ast import Ast
 from stage1.typeck.check import Checker, Cx, SpawnSite, pattern_is_refutable
-from stage1.typeck.program import Auto
+from stage1.typeck.program import Auto, Obstacle
 from stage1.typeck.thir import (
     Callee,
     ClosureId,
@@ -120,7 +121,7 @@ impl Checker:
                 # A scope's body cannot hand its scope or a task's handle out.
                 if self.mentions_scope(cx, body_ret):
                     # `task.scope-escapes`.
-                    self.other()
+                    self.other("task.scope-escapes")
                 var sites: list[ClosureId] = []
                 for i in range(spawns_before, len(self.spawn_sites)):
                     let s = ref self.spawn_sites[i]
@@ -135,7 +136,7 @@ impl Checker:
                         if let Some(rt) = r:
                             if not self.infer.unify(mut self.types, t, rt):
                                 # `task.race-types`.
-                                self.other()
+                                self.other("task.race-types")
                     return self.flatten_join(cx, t, span)
                 # The scope's result carries the failures nobody joined.
                 var sets: list[DefId] = []
@@ -188,7 +189,7 @@ impl Checker:
                 return
         _ = function
         # `task.closure-literal`.
-        self.other()
+        self.other("task.closure-literal")
 
     ## Whether a type holds a `Scope` or a `Handle`, which end with their
     ## scope.
@@ -223,7 +224,7 @@ impl Checker:
         match self.data(t):
             case TyData.Var(_):
                 # `task.result-unknown`.
-                self.other()
+                self.other("task.result-unknown")
                 _ = span
                 return Ty.error()
             case TyData.Error:
@@ -277,12 +278,14 @@ impl Checker:
                         c.captures[k].by_value = by_value[k]
 
     ## The `Send` and `Sync` checks of the tasks the body spawns, once types
-    ## are known (06): their messages are `task.`, so only whether one is
-    ## reported matters here.
+    ## are known (06, "Send, Sync, and shared state"): what a task moves in
+    ## (or keeps a copy of) must be `Send`, what it shares by reference
+    ## `Sync`, what it changes through a reference `Send`, and what it
+    ## returns `Send`. The message names the part of the type in the way.
     pub pure def check_spawns(mut self, cx: Cx):
         let checks = self.spawn_checks.copy()
         self.spawn_checks = []
-        for (id, _) in checks:
+        for (id, span) in checks:
             var caps: list[(int, bool, bool)] = []
             var ret = Ty.error()
             match self.closures[id.index]:
@@ -297,44 +300,107 @@ impl Checker:
                 let ty = cx.prog.normalize(mut self.types, z, self.env)
                 if self.infer.has_vars(mut self.types, ty) or self.types.contains_error(ty):
                     continue
+                let name = self.locals[l].name.copy()
                 var auto = Auto.Sync
-                if by_value or m:
+                var msg = Msg.TaskNotSync
+                if by_value:
                     auto = Auto.Send
-                if not cx.prog.auto_trait(mut self.types, ty, auto, self.env):
-                    self.other()
+                    msg = Msg.TaskNotSend
+                elif m:
+                    auto = Auto.Send
+                    msg = Msg.TaskNotSendMut
+                if let Some(o) = cx.prog.auto_obstacle(mut self.types, ty, auto, self.env):
+                    let d = self.obstacle_diag(cx, msg, span, name, ty, o)
+                    self.report_other(d)
             let zr = self.infer.zonk(mut self.types, ret)
             let r = cx.prog.normalize(mut self.types, zr, self.env)
             if not self.infer.has_vars(mut self.types, r) and not self.types.contains_error(r):
-                if not cx.prog.auto_trait(mut self.types, r, Auto.Send, self.env):
-                    self.other()
+                if let Some(o) = cx.prog.auto_obstacle(mut self.types, r, Auto.Send, self.env):
+                    let d = self.obstacle_diag(cx, Msg.TaskResultNotSend, span, "", r, o)
+                    self.report_other(d)
 
-    ## A value made into a capability handle must be `Send` and `Sync`.
+    ## The part of a type in the way of `Send` or `Sync`, as the note that
+    ## names it (`because of `name.field`, a `Cell[int]``); none when it is
+    ## the type itself.
+    pure def obstacle_note(
+        mut self, cx: Cx, own d: Diagnostic, name: str, o: Obstacle
+    ) -> Diagnostic:
+        if o.path.is_empty():
+            return d
+        var p = name.to_string()
+        for seg in o.path:
+            if seg == "[]":
+                p.push("[...]")
+            else:
+                if not p.is_empty():
+                    p.push(".")
+                p.push(seg)
+        let params = [
+            MsgParam(name="path".to_string(), value=p),
+            MsgParam(name="ty".to_string(), value=self.show(cx, o.ty)),
+        ]
+        return d.note_params(Msg.TaskFieldPath, params)
+
+    ## A `Send` or `Sync` diagnostic: the capture, its type, and the part of
+    ## the type in the way, with the wrapper that would make it shareable.
+    pure def obstacle_diag(
+        mut self, cx: Cx, m: Msg, span: TextRange, name: str, ty: Ty, o: Obstacle
+    ) -> Diagnostic:
+        let shown = self.show(cx, ty)
+        let first = Diagnostic.new(m, span.start, span.end).with("name", name).with("ty", shown)
+        var d = self.obstacle_note(cx, first, name, o)
+        # A `Cell` shares mutation through a `Mutex` instead.
+        var cell: Ty? = None
+        if let TyData.Adt(cd, a) = self.types.data(o.ty):
+            if cx.prog.builtin(cd) == Some("Cell"):
+                cell = Some(a.first() ?? Ty.error())
+        match cell:
+            case Some(inner):
+                let shown_inner = self.show(cx, inner)
+                d = d.note_with(Msg.TaskWrapMutex, "ty", shown_inner)
+            case None:
+                if m == Msg.TaskNotSync:
+                    d = d.note(Msg.TaskUseOwn)
+        return d
+
+    ## A value made into a capability handle must be `Send` and `Sync`: the
+    ## handle is both, so every task may use what it holds (06).
     pub pure def check_capabilities(mut self, cx: Cx):
         let checks = self.cap_checks.copy()
         self.cap_checks = []
-        for (ty0, _, _) in checks:
+        for (ty0, cap, span) in checks:
             let z = self.infer.zonk(mut self.types, ty0)
             let ty = cx.prog.normalize(mut self.types, z, self.env)
             if self.infer.has_vars(mut self.types, ty) or self.types.contains_error(ty):
                 continue
-            if not cx.prog.auto_trait(mut self.types, ty, Auto.Send, self.env):
-                self.other()
-            elif not cx.prog.auto_trait(mut self.types, ty, Auto.Sync, self.env):
-                self.other()
+            for (auto, auto_name) in [(Auto.Send, "Send"), (Auto.Sync, "Sync")]:
+                let o = cx.prog.auto_obstacle(mut self.types, ty, auto, self.env) else:
+                    continue
+                let shown = self.show(cx, ty)
+                var d = Diagnostic.new(Msg.CapNotShareable, span.start, span.end)
+                d = d.with("ty", shown).with("cap", cap).with("auto", auto_name)
+                let noted = self.obstacle_note(cx, d, "", o)
+                self.report_other(noted)
+                break
 
     ## What a `Shared`, `Cell`, `Mutex` or handle owns can be neither a view
-    ## nor must-consume (`borrow.`).
+    ## nor must-consume.
     pub pure def check_owners(mut self, cx: Cx):
         let checks = self.owner_checks.copy()
         self.owner_checks = []
-        for (ty0, _, _) in checks:
+        for (ty0, owner, span) in checks:
             let z = self.infer.zonk(mut self.types, ty0)
             let t = cx.prog.normalize(mut self.types, z, self.env)
             if self.infer.has_vars(mut self.types, t) or self.types.contains_error(t):
                 continue
-            if cx.prog.can_borrow(mut self.types, t)
-                    or cx.prog.must_consume_ty(mut self.types, t, 0):
-                self.other()
+            if cx.prog.can_borrow(mut self.types, t):
+                let shown = self.show(cx, t)
+                let d = Diagnostic.new(Msg.BorrowViewInOwner, span.start, span.end)
+                self.report_other(d.with("ty", shown).with("owner", owner))
+            elif cx.prog.must_consume_ty(mut self.types, t, 0):
+                let shown = self.show(cx, t)
+                let d = Diagnostic.new(Msg.BorrowMustConsumeInOwner, span.start, span.end)
+                self.report_other(d.with("ty", shown).with("owner", owner))
 
     ## `select:` (06, "Channels and select"): each arm waits for a call of
     ## `recv`, `send` or `join`, or for a `Timer` or a `Cancellation`; its
@@ -377,7 +443,7 @@ impl Checker:
             return (SelectOp.Cancelled(x), Ty.unit())
         if self.ty_of(x) != Ty.error():
             # `task.select-arm`.
-            self.other()
+            self.other("task.select-arm")
         let span = self.span_of(x)
         return (SelectOp.Timer(self.error_expr(span)), Ty.error())
 

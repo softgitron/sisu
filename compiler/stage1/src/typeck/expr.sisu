@@ -143,7 +143,7 @@ impl Checker:
                     self.infer.rollback(snap)
                 if base_ok or actual == Ty.never():
                     # `refine.needs-try-from`.
-                    self.other()
+                    self.other("refine.needs-try-from")
                     return self.wrap(x, Coercion.Mismatch, exp)
         let ad = self.types.data(actual).copy()
         let ed = self.types.data(exp).copy()
@@ -318,6 +318,14 @@ impl Checker:
                 d = d.with("expected", expected_s).with("found", found_s)
                 if let Some(r) = because:
                     d = d.label(Msg.TypeExpectedBecause, r.start, r.end)
+        if actual == Ty.int():
+            if let Some(k) = self.float_kind(cx, exp):
+                let params = [
+                    Param(name="op".to_string(), value="=".to_string()),
+                    Param(name="lhs".to_string(), value=k),
+                    Param(name="rhs".to_string(), value="int".to_string()),
+                ]
+                d = d.note_params(Msg.TypeMixedNumbers, params)
         d = self.mismatch_fix(cx, d, x, actual, exp)
         self.report(d)
         return self.wrap(x, Coercion.Mismatch, exp)
@@ -332,7 +340,14 @@ impl Checker:
         let shown_to = cx.prog.display(self.types, to_ty)
         var d = self.error(cx, Msg.TypeErrorNotInSet, range)
         d = d.with("from", shown_from).with("to", shown_to)
-        return d.fix_edits(Msg.TypeAddErrorSet, [])
+        var missing = String.new()
+        for e in from_:
+            if not to.contains(e):
+                if not missing.is_empty():
+                    missing.push(", ")
+                missing.push(cx.prog.qualified_name(e))
+        let set = Param(name="set".to_string(), value=missing)
+        return d.fix_params(Msg.TypeAddErrorSet, [set], [])
 
     ## The fix of a value of the wrong type, where one is plain: a number
     ## written as text loses its quotes; a value whose type has a method of
@@ -407,15 +422,15 @@ impl Checker:
         for b in text.bytes():
             if not is_simple_byte(b) and b != 34:
                 simple = False
+        let method = [Param(name="method".to_string(), value=m.copy())]
         if simple:
-            return d.fix_edits(
-                Msg.TypeCallConversion, [Edit(start=r.end, end=r.end, text=".{m}()")]
-            )
+            let edit = Edit(start=r.end, end=r.end, text=".{m}()")
+            return d.fix_params(Msg.TypeCallConversion, method, [edit])
         let edits = [
             Edit(start=r.start, end=r.start, text="(".to_string()),
             Edit(start=r.end, end=r.end, text=").{m}()"),
         ]
-        return d.fix_edits(Msg.TypeCallConversion, edits)
+        return d.fix_params(Msg.TypeCallConversion, method, edits)
 
     ## A coercion to `dyn Trait` of a value of type `concrete`: it must
     ## implement the trait, and it must own what it holds (04, "Views").
@@ -690,10 +705,16 @@ impl Checker:
             case ExprKind.Comptime(inner):
                 return self.comptime_expr(cx, inner, expected, span)
             case ExprKind.FieldOf(_, _):
-                self.unsupported()
+                let what = "a field named by a compile-time value (`x.[f]`) outside a derive or a generic function"
+                self.unsupported(
+                    cx,
+                    span,
+                    what,
+                    "compile-time code in methods and non-generic functions (Phase 8)",
+                )
                 return self.error_expr(span)
-            case ExprKind.Unsupported(_):
-                self.unsupported()
+            case ExprKind.Unsupported(what):
+                self.unsupported(cx, span, what, "foreign functions (Phase 8)")
                 return self.error_expr(span)
             case ExprKind.Error:
                 return self.error_expr(span)
@@ -732,7 +753,7 @@ impl Checker:
                     f = -f
                 return self.add(TExprKind.Float(f), Ty.float(), range)
             if s != "int" and s != "i64":
-                self.unsupported()
+                self.unsupported(cx, range, "`{s}`", "the sized numeric types (Phase 4)")
                 return self.error_expr(range)
         var to_float: String? = None
         if suffix.is_none():
@@ -765,7 +786,10 @@ impl Checker:
                 pass
         let t = if negative: "-{text}" else: text.to_string()
         let d = self.error(cx, Msg.TypeLiteralOutOfRange, range).with("text", t).with("ty", "int")
-        self.report(d)
+        let min = Param(name="min".to_string(), value="-9223372036854775808".to_string())
+        let max = Param(name="max".to_string(), value="9223372036854775807".to_string())
+        let ty = Param(name="ty".to_string(), value="int".to_string())
+        self.report(d.note_params(Msg.TypeIntRange, [ty, min, max]))
         return self.error_expr(range)
 
     ## An integer literal of the sized type `k`, checked to fit. A `u64`
@@ -792,7 +816,13 @@ impl Checker:
         if not fits:
             let t = if negative: "-{text}" else: text.to_string()
             let d = self.error(cx, Msg.TypeLiteralOutOfRange, range).with("text", t).with("ty", k)
-            self.report(d)
+            let low = if signed: "-{max + one()}" else: "0".to_string()
+            let params = [
+                Param(name="ty".to_string(), value=k.to_string()),
+                Param(name="min".to_string(), value=low),
+                Param(name="max".to_string(), value="{max}"),
+            ]
+            self.report(d.note_params(Msg.TypeIntRange, params))
             return self.error_expr(range)
         let v = value ?? (0.to_u128() ?? one())
         # A 128-bit literal beyond `int` keeps its 128 bits.
@@ -880,7 +910,13 @@ impl Checker:
             let d = self.error(cx, Msg.TypeLiteralOutOfRange, range).with("text", t).with(
                 "ty", kind
             )
-            self.report(d)
+            # The largest finite value of the type, as Rust's `{:e}` writes it.
+            let largest = if kind == "f32": "3.4028235e38" else: "1.7976931348623157e308"
+            let params = [
+                Param(name="ty".to_string(), value=kind.to_string()),
+                Param(name="max".to_string(), value=largest.to_string()),
+            ]
+            self.report(d.note_params(Msg.TypeFloatRange, params))
             return self.error_expr(range)
         return self.add(TExprKind.Float(v), ty, range)
 
@@ -1016,7 +1052,7 @@ impl Checker:
                                 let shown = self.show(cx, t)
                                 var d = self.error(cx, Msg.TypeNoDisplay, at)
                                 d = d.with("ty", shown).with("spec", spec)
-                                self.report(d)
+                                self.report(d.note(Msg.TypeSpecLetters))
                     out.push(InterpPart.Value(expr=x, debug=debug.copy(), spec=spec))
         let s = self.string_ty(cx)
         return self.add(TExprKind.Interp(out), s, range)
@@ -1096,10 +1132,29 @@ impl Checker:
             return self.unit_variant(cx, def_, vi, expected, at)
         if self.quiet_unknown_names or cx.prog.poisoned.contains(n.to_string()):
             return self.error_expr(at)
-        # `reflect` and `target` outside a template, another field of the
-        # struct whose default this is, or a name nothing declares: all
-        # errors of other families.
-        self.other()
+        # The compile-time module `reflect` (08) exists only in a derive's
+        # template and in a generic function, which is made for each call.
+        if n == "reflect":
+            let what = "`reflect` outside a derive or a generic function"
+            let phase = "compile-time code in methods and non-generic functions (Phase 8)"
+            self.unsupported(cx, at, what, phase)
+            return self.error_expr(at)
+        if n == "target":
+            self.unsupported(cx, at, "`target`", "conditional compilation on the target (Phase 8)")
+            return self.error_expr(at)
+        # Another field of the struct whose default this is (E0221).
+        if let Some(s) = self.field_default_of:
+            if let Some(info) = cx.prog.struct_info(s):
+                var field = False
+                for f in info.fields:
+                    if f.name == n:
+                        field = True
+                if field:
+                    let d = self.error(cx, Msg.ResolveFieldDefaultOrder, at)
+                    self.report_other(d.note_with(Msg.ResolveDefaultInFunction, "name", n))
+                    return self.error_expr(at)
+        # A name nothing declares: the name pass's `resolve.undefined-name`.
+        self.other_rendered()
         return self.error_expr(at)
 
     ## A declaration used as a value.
@@ -1114,8 +1169,8 @@ impl Checker:
                     return self.error_expr(range)
                 if f.comptime_ and not self.in_comptime:
                     # `comptime.only`.
-                    self.other()
-                self.check_internal(cx, d)
+                    self.other("comptime.only")
+                self.check_internal(cx, d, range)
                 let ret = self.fn_ret(cx, d)
                 var params: list[Ty] = []
                 for p in f.params:
@@ -1197,7 +1252,7 @@ impl Checker:
             return None
         if len(visible) > 1:
             # `resolve.ambiguous-variant`.
-            self.other()
+            self.other("resolve.ambiguous-variant")
         _ = range
         return Some(visible[0])
 
@@ -1498,6 +1553,9 @@ impl Checker:
             if text_first or text_second:
                 if let Some(text) = self.interpolated(cx, l, r):
                     d = d.fix_at(Msg.TypeInterpolate, range.start, range.end, text)
+        # An optional value used as the value it may hold.
+        if self.is_option(cx, lt) or self.is_option(cx, rt):
+            d = d.note(Msg.TypeOptionNotValue)
         self.report(d)
         return (Ty.error(), False)
 
@@ -1708,8 +1766,12 @@ impl Checker:
                 var d = self.error(cx, Msg.TypeNotOrdered, range)
                 d = d.with("ty", shown).with("op", op.text())
                 if let TyData.Param(i) = self.types.data(t):
-                    if let Some(edit) = self.bound_edit(cx, i, "PartialOrd"):
-                        d = d.fix_edits(Msg.TypeAddBound, [edit])
+                    if let Some((name, edit)) = self.bound_edit(cx, i, "PartialOrd"):
+                        let params = [
+                            Param(name="param".to_string(), value=name),
+                            Param(name="bound".to_string(), value="PartialOrd".to_string()),
+                        ]
+                        d = d.fix_params(Msg.TypeAddBound, params, [edit])
                 self.report(d)
         elif let TyData.Fn(_, _, _) = self.data(a):
             let shown_l = self.show(cx, lt)
@@ -1908,7 +1970,7 @@ impl Checker:
                 ty = self.types.adt(d, [self.ty_of(el)])
         else:
             if kind == CompKind.Gen:
-                self.unsupported()
+                self.unsupported(cx, range, "a generator expression", "generators (Phase 8)")
             ty = self.list_of(cx, self.ty_of(el))
         let k = TExprKind.Comprehension(kind=tkind, clauses=out, elem=el, value=val)
         return self.add(k, ty, range)
@@ -1988,7 +2050,7 @@ impl Checker:
         var first: TextRange? = None
         var out: list[TArm] = []
         for a in arms:
-            if self.arm_made_at_compile_time(a):
+            if self.arm_made_at_compile_time(cx, a):
                 continue
             self.push_scope()
             let p = self.check_pat(cx, a.pat, sty, by_ref)
@@ -2027,10 +2089,13 @@ impl Checker:
 
     ## Arms made by `comptime for` or `comptime if` exist only in a
     ## derive's template (08); anywhere else they are reported.
-    pure def arm_made_at_compile_time(mut self, a: Arm) -> bool:
+    pure def arm_made_at_compile_time(mut self, cx: Cx, a: Arm) -> bool:
         if a.generated.is_none():
             return False
-        self.unsupported()
+        let what = "arms made at compile time outside a derive or a generic function"
+        self.unsupported(
+            cx, a.range, what, "compile-time code in methods and non-generic functions (Phase 8)"
+        )
         return True
 
     ## A `match` in statement position: arms may hold blocks.
@@ -2042,7 +2107,7 @@ impl Checker:
         let sty = self.ty_of(s)
         var out: list[TArm] = []
         for a in arms:
-            if self.arm_made_at_compile_time(a):
+            if self.arm_made_at_compile_time(cx, a):
                 continue
             self.push_scope()
             let p = self.check_pat(cx, a.pat, sty, by_ref)
@@ -2133,7 +2198,7 @@ impl Checker:
         if let Some(cl) = self.closures[id.index]:
             if not cl.captures.is_empty():
                 # `comptime.not-constant`.
-                self.other()
+                self.other("comptime.not-constant")
         if let Some(cl) = ref mut self.closures[id.index]:
             cl.comptime_ = True
         self.comptime_sites.push((id, range))
@@ -2463,7 +2528,7 @@ impl Checker:
     ## in its header (`[T]` becomes `[T: Ord]`, `[T: Hash]` becomes
     ## `[T: Hash + Ord]`); `None` for an impl's parameter or a header that
     ## does not read as expected.
-    pub pure def bound_edit(self, cx: Cx, i: int, bound: str) -> Edit?:
+    pub pure def bound_edit(self, cx: Cx, i: int, bound: str) -> (String, Edit)?:
         let f = cx.prog.fn_info(self.def_) else:
             return None
         if i < f.impl_generics or i >= len(f.generics):
@@ -2502,7 +2567,7 @@ impl Checker:
             let name_end = a + lead + word.byte_len()
             match seg.find(":"):
                 case None:
-                    return Some(Edit(start=name_end, end=name_end, text=": {bound}"))
+                    return Some((name.copy(), Edit(start=name_end, end=name_end, text=": {bound}")))
                 case Some(_):
                     # After the last bound, before a default.
                     var end = b
@@ -2510,7 +2575,7 @@ impl Checker:
                         end = a + eq
                     let text = cx.source.byte_slice(a, end)
                     let at = a + text.trim_end().byte_len()
-                    return Some(Edit(start=at, end=at, text=" + {bound}"))
+                    return Some((name.copy(), Edit(start=at, end=at, text=" + {bound}")))
         return None
 
     ## The field or method of a type closest to a misspelt one.
@@ -2539,7 +2604,7 @@ impl Checker:
             return
         if not cx.prog.vis_allows(s.fields[i].vis, cx.prog.defs[d.index].module, self.module):
             # `resolve.private-field`.
-            self.other()
+            self.other("resolve.private-field")
 
     ## A method or associated function of a type of another module is
     ## called only when it is `pub` (09).
@@ -2549,7 +2614,7 @@ impl Checker:
         if f.trait_.is_some() or f.impl_.is_some() or cx.prog.visible_from(m, self.module):
             return
         # `resolve.private-method`.
-        self.other()
+        self.other("resolve.private-method")
 
     pure def index_expr(
         mut self, cx: Cx, base: ExprId, args: list[IndexArg], at: TextRange

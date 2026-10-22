@@ -50,7 +50,19 @@
 # for the programs `sir.list` names, each of which must be within the slice
 # and match; and with --sir for every program of the corpus, where a file
 # within the slice must match and any other is beyond it (stage 1 says
-# why).
+# why). Then what `check` prints, every diagnostic of a program in the
+# order `sisu check` prints them, from one run of stage 1 per class:
+#
+#   human        `sisu check FILE`, standard error: the human form, the
+#                diagnostics with their source lines, labels, notes and
+#                fixes, for the wrong programs of conformance/cases/wrong/,
+#                each of which must be within the slice and match
+#   corpus-check `sisu check --format=ids FILE`, the whole of it, and
+#   corpus-human the human form, with --check for every program of the
+#                corpus, where a file within the slice must match and any
+#                other is beyond it (it has an error of stage 0's front end
+#                that stage 1 notes without rendering it, which stage 1
+#                names) and may only report fewer of stage 0's diagnostics
 # A difference listed in DISCREPANCIES.md ("- Differs: `path`: outputs") is
 # expected; any other fails the check.
 #
@@ -63,14 +75,28 @@
 #                --partial`, the SIR of what lowering reaches also when it
 #                is beyond the slice, which then names why)
 #
-# Usage: compiler/stage1/check.sh [--native] [--self] [--mutants N] [--seed S] [--names] [--types] [--sir] [--keep DIR]
+# and the second half, the fixed point itself (`bootstrap.sh` runs it
+# alone):
+#
+#   fixed        stage 1 built by stage 0 (`sisu build --native`, stage1-A)
+#                prints the SIR of its own package (`sir`), which must be
+#                what `sisu sir` prints of it, the whole file; stage 0's
+#                backend alone builds that SIR into stage1-B (`sisu build
+#                --native --from-sir`); stage1-B prints the SIR of the
+#                package again, which must be stage1-A's; and since the
+#                backend is deterministic, stage1-B must be stage1-A byte
+#                for byte
+#
+# Usage: compiler/stage1/check.sh [--native] [--self] [--mutants N] [--seed S] [--names] [--types] [--sir] [--check] [--keep DIR]
 #
 #   --native     build stage 1 once with stage 0's native backend (`sisu
 #                build --native`) and run that executable for every batch,
 #                instead of `sisu run --` on the interpreter; the outputs
 #                are the same, in minutes instead of an hour; it implies
-#                --self
-#   --self       check stage 1 over its own package (the class `self`)
+#                --self and --check
+#   --self       check stage 1 over its own package and the fixed point
+#                (the classes `self` and `fixed`; the second builds stage 1
+#                natively also without --native)
 #   --mutants N  also compare N mutants of the corpus (deleted, inserted and
 #                swapped characters, from stage 1's `mutate` with seed S);
 #                a mutant may differ only in the way a listed discrepancy
@@ -78,6 +104,8 @@
 #   --names      resolve the names of the whole corpus, not only names/
 #   --types      check the types of the whole corpus, not only types.list
 #   --sir        lower the whole corpus, not only sir.list
+#   --check      check the whole corpus as `sisu check` does, not only
+#                conformance/cases/wrong/ (--native implies it)
 #   --keep DIR   leave every output in DIR instead of a temporary directory
 set -uo pipefail
 
@@ -91,6 +119,7 @@ keep=""
 all_names=0
 all_types=0
 all_sir=0
+all_check=0
 native=0
 self_check=0
 while [ $# -gt 0 ]; do
@@ -101,9 +130,10 @@ while [ $# -gt 0 ]; do
         --names) all_names=1; shift ;;
         --types) all_types=1; shift ;;
         --sir) all_sir=1; shift ;;
-        --native) native=1; self_check=1; shift ;;
+        --check) all_check=1; shift ;;
+        --native) native=1; self_check=1; all_check=1; shift ;;
         --self) self_check=1; shift ;;
-        *) echo "usage: $0 [--native] [--self] [--mutants N] [--seed S] [--names] [--types] [--sir] [--keep DIR]" >&2; exit 2 ;;
+        *) echo "usage: $0 [--native] [--self] [--mutants N] [--seed S] [--names] [--types] [--sir] [--check] [--keep DIR]" >&2; exit 2 ;;
     esac
 done
 
@@ -193,7 +223,17 @@ stage0_sir() {
     fi
     stage0_check "$@"
 }
-export -f stage0_syntax check0 stage0_check stage0_sir
+# What `sisu check` prints in the human form, on standard error, run as
+# stage0_check runs it.
+stage0_human() {
+    if [ -d "$2" ]; then
+        (cd "$2" && "$sisu" check > /dev/null 2> "$3/$1.human")
+    else
+        (cd "$(dirname "$2")" && "$sisu" check "$(basename "$2")" > /dev/null 2> "$3/$1.human")
+    fi
+    stage0_check "$@"
+}
+export -f stage0_syntax check0 stage0_check stage0_sir stage0_human
 
 # The differences DISCREPANCIES.md lists, one "path output" per line.
 allowed="$work/allowed.txt"
@@ -239,7 +279,7 @@ explained() {
     return 1
 }
 
-total=0; identical=0; subsets=0; lowered_beyond=0; listed=0; unlisted=0
+total=0; identical=0; subsets=0; lowered_beyond=0; check_beyond=0; listed=0; unlisted=0
 report=""
 summary=""
 for class in $classes; do
@@ -518,6 +558,87 @@ for class in $sir_classes; do
     done
 done
 
+# What `check` prints: every diagnostic of a program, in the conformance
+# form (the whole of `sisu check --format=ids`) and in the human form (what
+# `sisu check` prints on standard error), against stage 1's `check-batch`.
+find "$compiler/conformance/cases/wrong" -name '*.sisu' | sort > "$work/human.list"
+check_classes="human"
+if [ "$all_check" = 1 ]; then
+    find "$compiler/conformance/cases" -name '*.sisu' | grep -v '/packages/' | sort > "$work/corpus-check.list"
+    cat "$work/examples.list" "$work/packages.list" >> "$work/corpus-check.list"
+    check_classes="human corpus-check"
+fi
+check_summary=""
+for class in $check_classes; do
+    list="$work/$class.list"
+    n=$(wc -l < "$list" | tr -d ' ')
+    ref="$work/$class.stage0"; out="$work/$class.stage1"
+    mkdir -p "$ref" "$out"
+    parallel stage0_human "$list" "$ref"
+    start=$(date +%s.%N)
+    if ! stage1 check-batch "$out" "$list" > "$work/$class.log" 2> "$work/$class.stderr"; then
+        cat "$work/$class.stderr" >&2
+        echo "check.sh: stage 1 failed checking the $class files" >&2
+        exit 1
+    fi
+    end=$(date +%s.%N)
+    seconds=$(awk "BEGIN { printf \"%.1f\", $end - $start }")
+    outputs="human"
+    [ "$class" = corpus-check ] && outputs="ids human"
+    for output in $outputs; do
+        same=0; beyond=0; class_listed=0; class_unlisted=0
+        i=0
+        while read -r f; do
+            i=$((i + 1))
+            rel="${f#"$repo"/}"
+            theirs="$ref/$i.human"
+            [ "$output" = ids ] && theirs="$(check0 "$f")"
+            if [ -s "$out/$i.beyond" ]; then
+                why=$(head -1 "$out/$i.beyond")
+                if [ "$class" = human ]; then
+                    class_unlisted=$((class_unlisted + 1))
+                    report="$report\n  UNLISTED: $rel: human (beyond the slice: $why)"
+                    continue
+                fi
+                # Beyond the slice: only fewer of stage 0's diagnostics.
+                if [ "$output" = ids ]; then
+                    type_blocks "$theirs" > "$ref/$i.blocks"
+                    type_blocks "$out/$i.ids" > "$out/$i.blocks"
+                    if grep -vxFf "$ref/$i.blocks" "$out/$i.blocks" > /dev/null; then
+                        class_unlisted=$((class_unlisted + 1))
+                        report="$report\n  UNLISTED: $rel: check, beyond the slice ($why) but not a subset (stage 0 in $theirs, stage 1 in $out/$i.ids)"
+                        continue
+                    fi
+                fi
+                beyond=$((beyond + 1))
+                continue
+            fi
+            if cmp -s "$theirs" "$out/$i.$output"; then
+                same=$((same + 1))
+                continue
+            fi
+            if grep -qxF "$rel $output" "$allowed"; then
+                class_listed=$((class_listed + 1))
+                report="$report\n  listed:   $rel: $output"
+            else
+                class_unlisted=$((class_unlisted + 1))
+                report="$report\n  UNLISTED: $rel: $output (stage 0 in $theirs, stage 1 in $out/$i.$output)"
+            fi
+        done < "$list"
+        total=$((total + n)); identical=$((identical + same)); check_beyond=$((check_beyond + beyond))
+        listed=$((listed + class_listed)); unlisted=$((unlisted + class_unlisted))
+        label="$class"
+        [ "$class" = corpus-check ] && [ "$output" = human ] && label=corpus-human
+        line="$(printf '  %-12s %4d files, %4d identical, %3d beyond the slice, %3d differing as listed, %3d otherwise' \
+            "$label" "$n" "$same" "$beyond" "$class_listed" "$class_unlisted")"
+        if [ "$output" = human ] && [ "$class" = corpus-check ]; then
+            check_summary="$check_summary\n$line (the same run)"
+        else
+            check_summary="$check_summary\n$line; stage 1 $(printf '%6s' "$seconds")s"
+        fi
+    done
+done
+
 # Stage 1 over its own package: its name and type diagnostics, and its
 # SIR, split by the file each function comes from (each function's source
 # written by name), with what is not a function as the declarations.
@@ -598,6 +719,66 @@ SPLIT
         self-sir "$n" "$same" "$beyond" "$differing" "$seconds")"
 fi
 
+# The fixed point (D-078): stage1-A, stage 1 as stage 0 builds it (the
+# executable the batches ran with --native), prints the SIR of its own
+# package (`sir`, run in its directory), which must be stage 0's (`sisu
+# sir`, from the class `self`) as a whole file; the backend alone builds
+# that SIR into stage1-B; stage1-B prints the SIR of the package again,
+# which must be stage1-A's; and the backend being deterministic, stage1-B
+# must be stage1-A byte for byte.
+fixed_summary=""
+if [ "$self_check" = 1 ]; then
+    stage1_a="$stage1_exe"
+    if [ -z "$stage1_a" ]; then
+        echo "building stage 1 natively for the fixed point (sisu build --native)"
+        if ! (cd "$here" && "$sisu" build --native --output "$work/stage1-A" > "$work/fixed.A.log" 2>&1); then
+            cat "$work/fixed.A.log" >&2
+            echo "check.sh: stage 1 does not build natively" >&2
+            exit 1
+        fi
+        stage1_a="$work/stage1-A"
+    fi
+    start=$(date +%s.%N)
+    if ! (cd "$here" && "$stage1_a" sir > "$work/fixed.A.sir" 2> "$work/fixed.A.err"); then
+        cat "$work/fixed.A.err" >&2
+        echo "check.sh: stage1-A failed printing the SIR of its own package" >&2
+        exit 1
+    fi
+    middle=$(date +%s.%N)
+    if ! "$sisu" build --native --from-sir "$work/fixed.A.sir" --output "$work/stage1-B" > "$work/fixed.B.log" 2>&1; then
+        cat "$work/fixed.B.log" >&2
+        echo "check.sh: the backend does not build stage1-A's SIR" >&2
+        exit 1
+    fi
+    built=$(date +%s.%N)
+    if ! (cd "$here" && "$work/stage1-B" sir > "$work/fixed.B.sir" 2> "$work/fixed.B.err"); then
+        cat "$work/fixed.B.err" >&2
+        echo "check.sh: stage1-B failed printing the SIR of its own package" >&2
+        exit 1
+    fi
+    end=$(date +%s.%N)
+    took_a=$(awk "BEGIN { printf \"%.1f\", $middle - $start }")
+    took_backend=$(awk "BEGIN { printf \"%.1f\", $built - $middle }")
+    took_b=$(awk "BEGIN { printf \"%.1f\", $end - $built }")
+    size() { wc -c < "$1" | tr -d ' '; }
+    fixed_pair() {
+        # fixed_pair LABEL OURS THEIRS WHAT
+        total=$((total + 1))
+        if [ -s "$2" ] && cmp -s "$2" "$3"; then
+            identical=$((identical + 1))
+            fixed_summary="$fixed_summary\n$(printf '  %-12s identical: %s (%s bytes)' "$1" "$4" "$(size "$2")")"
+        else
+            unlisted=$((unlisted + 1))
+            report="$report\n  UNLISTED: fixed: $1, $4 ($2 against $3)"
+            fixed_summary="$fixed_summary\n$(printf '  %-12s differing: %s' "$1" "$4")"
+        fi
+    }
+    fixed_pair fixed-sir0 "$work/fixed.A.sir" "$work/self.stage0.sir" "stage1-A's SIR of its own package and stage 0's"
+    fixed_pair fixed-sir "$work/fixed.B.sir" "$work/fixed.A.sir" "stage1-B's SIR of the package and stage1-A's"
+    fixed_pair fixed-exe "$work/stage1-B" "$stage1_a" "stage1-B and stage1-A"
+    fixed_summary="$fixed_summary\n$(printf '  stage1-A %ss, the backend %ss, stage1-B %ss' "$took_a" "$took_backend" "$took_b")"
+fi
+
 echo "stage 1 against stage 0 (tokens, tree, trivia-tree, print, ast):"
 printf "%b\n" "${summary#\\n}"
 echo "stage 1's name resolution against stage 0's (names):"
@@ -608,14 +789,21 @@ echo "stage 1's lowering against stage 0's (sir):"
 printf "%b\n" "${sir_summary#\\n}"
 echo "stage 1's ownership checker against stage 0's (ownership):"
 printf "%b\n" "${own_summary#\\n}"
+echo "stage 1's check against stage 0's (every diagnostic, in the human and the conformance form):"
+printf "%b\n" "${check_summary#\\n}"
 if [ -n "$self_summary" ]; then
     echo "stage 1 over its own package against stage 0 (self: names, types, the SIR by source file):"
     printf "%b\n" "${self_summary#\\n}"
+fi
+if [ -n "$fixed_summary" ]; then
+    echo "the fixed point (fixed: stage1-A built by stage 0, stage1-B by the backend from stage1-A's SIR):"
+    printf "%b\n" "${fixed_summary#\\n}"
 fi
 [ -n "$report" ] && printf "differences:%b\n" "$report"
 beyond_note=""
 [ "$subsets" -gt 0 ] && beyond_note=", $subsets beyond the type checker's slice and a subset"
 [ "$lowered_beyond" -gt 0 ] && beyond_note="$beyond_note, $lowered_beyond beyond the slice of lowering"
+[ "$check_beyond" -gt 0 ] && beyond_note="$beyond_note, $check_beyond with an error stage 1 does not render"
 echo "total: $total files checked, $identical identical$beyond_note, $((listed + unlisted)) differing ($listed listed in DISCREPANCIES.md, $unlisted not)"
 if [ "$unlisted" -gt 0 ]; then
     [ -z "$keep" ] && echo "(run with --keep DIR to inspect the outputs)"

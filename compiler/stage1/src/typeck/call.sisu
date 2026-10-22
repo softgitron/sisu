@@ -2,7 +2,7 @@
 ##! associated functions, constructors and variants, with keyword
 ##! arguments, defaults, `mut` at the call site and trailing `do` blocks.
 
-from stage1.diag import Edit, Msg, TextRange
+from stage1.diag import Diagnostic, Edit, Msg, Param, TextRange
 from stage1.syntax.ast import Arg, Ast, Closure, ExprId, ExprKind, IndexArg, Mode, Name, StrPart
 from stage1.typeck.check import Checker, Cx, primitive
 from stage1.typeck.expr import ClosureParamSrc, ClosureSource, is_var_data
@@ -87,7 +87,7 @@ impl Checker:
                 if let Some(StaticPath.Module(m)) = self.static_path(cx, base):
                     let d = self.module_member(cx, m, name) else:
                         # `resolve.not-in-module`.
-                        self.other()
+                        self.other("resolve.not-in-module")
                         return Some(StaticPath.Type(Ty.error()))
                     return self.classify(cx, d, at)
                 return None
@@ -155,7 +155,7 @@ impl Checker:
                         case Some(d):
                             path = self.classify(cx, d, names[i].range)
                         case None:
-                            self.other()
+                            self.other("resolve.not-in-module")
                             path = Some(StaticPath.Type(Ty.error()))
                 case _:
                     return None
@@ -169,7 +169,7 @@ impl Checker:
         let (d, visible) = member
         if not visible:
             # `resolve.private-item` and its kin.
-            self.other()
+            self.other("resolve.private-item")
         return Some(d)
 
     pure def classify(mut self, cx: Cx, d: DefId, range: TextRange) -> StaticPath?:
@@ -196,7 +196,7 @@ impl Checker:
             case ExprKind.Int(_, value, None):
                 let v = value else:
                     # `parse.expected-type`.
-                    self.other()
+                    self.other("parse.expected-type")
                     return Ty.error()
                 if let Some(n) = v.to_int():
                     return self.types.intern(TyData.Const(n))
@@ -218,13 +218,13 @@ impl Checker:
                 if let Some(StaticPath.Type(t)) = self.static_path(cx, e):
                     return t
                 # `resolve.undefined-type`.
-                self.other()
+                self.other_rendered()
                 return Ty.error()
             case ExprKind.Field(_, _) | ExprKind.Index(_, _):
                 if let Some(StaticPath.Type(t)) = self.static_path(cx, e):
                     return t
                 # `resolve.not-a-type`.
-                self.other()
+                self.other("resolve.not-a-type")
                 return Ty.error()
             case ExprKind.Tuple(xs):
                 var tys: list[Ty] = []
@@ -238,7 +238,7 @@ impl Checker:
                 return self.const_arg(cx, e)
             case _:
                 # `parse.expected-type`.
-                self.other()
+                self.other("parse.expected-type")
                 return Ty.error()
 
     ## `module.name`, `Type.Variant`, `Type.function`, used as a value or,
@@ -257,7 +257,7 @@ impl Checker:
             case StaticPath.Module(m):
                 let d = self.module_member(cx, m, name) else:
                     # `resolve.not-in-module`.
-                    self.other()
+                    self.other("resolve.not-in-module")
                     if let Some(a) = args:
                         self.check_args_loosely(cx, a)
                     return self.error_expr(at)
@@ -514,7 +514,7 @@ impl Checker:
                     if not self.quiet_unknown_names
                             and not cx.prog.poisoned.contains(n.to_string()):
                         # `resolve.undefined-name`.
-                        self.other()
+                        self.other_rendered()
                     self.check_args_loosely(cx, args)
                     return self.error_expr(at)
             case _:
@@ -652,7 +652,7 @@ impl Checker:
         for i in range(n):
             if not cx.prog.vis_allows(s.fields[i].vis, home, self.module):
                 # `resolve.private-field`.
-                self.other()
+                self.other("resolve.private-field")
                 break
         var fields: list[FieldInit] = []
         for i in range(n):
@@ -669,7 +669,8 @@ impl Checker:
                         var d = self.error(cx, Msg.TypeMissingField, at)
                         d = d.with("field", f.name).with("ty", tyname)
                         if let Some(edit) = self.hole_edit(cx, at, "{f.name}=todo(\"{f.name}\")"):
-                            d = d.fix_edits(Msg.TypeAddHole, [edit])
+                            let name = Param(name="name".to_string(), value=f.name.copy())
+                            d = d.fix_params(Msg.TypeAddHole, [name], [edit])
                         self.report(d)
                         fields.push(FieldInit.Value(self.error_expr(at)))
         let result = self.types.adt(def_, targs)
@@ -767,7 +768,7 @@ impl Checker:
                     self.report(diag)
                 else:
                     # `resolve.type-argument-count`.
-                    self.other()
+                    self.other("resolve.type-argument-count")
         var vars: list[Ty] = []
         for i in range(len(f.generics)):
             var v: Ty? = None
@@ -858,8 +859,8 @@ impl Checker:
             return self.error_expr(at)
         if f.comptime_ and not self.in_comptime:
             # `comptime.only`.
-            self.other()
-        self.check_internal(cx, d)
+            self.other("comptime.only")
+        self.check_internal(cx, d, at)
         # A pure body's calls are checked on SIR, by stage 0's ownership
         # checker (E0333).
         if not f.pure and self.body_is_pure(cx):
@@ -969,7 +970,9 @@ impl Checker:
         var d = self.error(cx, Msg.TypePositionalAfterKeyword, range)
         if let Some(n) = name:
             if not n.is_empty():
-                d = d.fix_at(Msg.TypeNameArgument, range.start, range.start, "{n}=")
+                let edit = Edit(start=range.start, end=range.start, text="{n}=")
+                let named = Param(name="name".to_string(), value=n.copy())
+                d = d.fix_params(Msg.TypeNameArgument, [named], [edit])
         self.report(d)
 
     ## The edit that adds an argument (`todo("b")`, `y=todo("y")`) at the
@@ -1142,7 +1145,8 @@ impl Checker:
                             hole = "{p.name}={hole}"
                         if not p.name.is_empty():
                             if let Some(edit) = self.hole_edit(cx, at, hole):
-                                d = d.fix_edits(Msg.TypeAddHole, [edit])
+                                let name = Param(name="name".to_string(), value=p.name.copy())
+                                d = d.fix_params(Msg.TypeAddHole, [name], [edit])
                         self.report(d)
                     out.push(TArg(expr=self.error_expr(at), mode=ArgMode.Value))
         return out
@@ -1392,7 +1396,7 @@ impl Checker:
             d = d.with("ty", shown).with("name", name.text)
             if let Some(similar) = self.similar_member(cx, base, name.text):
                 d = d.fix_at(Msg.TypeSimilarMember, name.range.start, name.range.end, similar)
-            self.report(d)
+            self.report(unknown_method_note(cx, d, name.text))
             self.check_args_loosely(cx, args)
             return self.error_expr(at)
 
@@ -1640,3 +1644,21 @@ pub pure def mentions_it(ast: Ast, e: ExprId) -> bool:
             return False
         case _:
             return False
+
+## A note naming the traits that have a method called `name`, when the
+## receiver implements none of them (stage 0's `unknown_method_note`).
+pure def unknown_method_note(cx: Cx, own d: Diagnostic, name: str) -> Diagnostic:
+    var traits = String.new()
+    for i in range(len(cx.prog.defs)):
+        if let DefKind.Trait(_) = cx.prog.defs[i].kind:
+            if cx.prog.trait_method(DefId(index=i), name).is_some():
+                if not traits.is_empty():
+                    traits.push(", ")
+                traits.push("`{cx.prog.defs[i].name}`")
+    if traits.is_empty():
+        return d
+    let params = [
+        Param(name="name".to_string(), value=name.to_string()),
+        Param(name="traits".to_string(), value=traits),
+    ]
+    return d.note_params(Msg.TypeMethodOfTraits, params)
