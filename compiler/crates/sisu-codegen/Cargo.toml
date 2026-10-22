@@ -1,0 +1,23 @@
+[package]
+name = "sisu-codegen"
+description = "The native debug backend (stage 2): SIR to machine code with Cranelift, linked against sisu-rt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The backend carries the workspace's only external dependencies: the
+# front end, SIR and the interpreter stay free of them (docs/architecture.md,
+# decision 186).
+[dependencies]
+sisu-sir.workspace = true
+sisu-rt.workspace = true
+cranelift-codegen = "0.123"
+cranelift-frontend = "0.123"
+cranelift-module = "0.123"
+cranelift-object = "0.123"
+cranelift-native = "0.123"
+
+[lints]
+workspace = true

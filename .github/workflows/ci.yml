@@ -99,3 +99,52 @@ jobs:
         # step for std and the conformance corpus (docs/port-debt.md, Phase 0).
         continue-on-error: true
         run: cargo run --release -p sisu-driver --example speed || true
+
+  native:
+    # Stage 2's native backend (compiler/docs/architecture.md, "Stage 2"):
+    # every case of compiler/conformance/native.list built with `sisu build
+    # --native`, run, and compared with the interpreter's expectations.
+    # On pushes only, like the rest of CI, never on a schedule.
+    name: stage-2 native backend conformance
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: compiler
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal
+          rustup override set 1.97.0
+          rustc --version
+          cc --version
+      - name: Cache the cargo registry and the build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            compiler/target
+          key: native-${{ runner.os }}-rust-1.97.0-${{ hashFiles('compiler/Cargo.lock') }}
+          restore-keys: |
+            native-${{ runner.os }}-rust-1.97.0-
+      - name: Build the compiler, the runtime and the runner
+        run: cargo build
+      - name: Native conformance (conformance/native.list)
+        run: ./target/debug/sisu-conformance --sisu target/debug/sisu --native conformance/native.list
+      - name: Stage 1 compiled natively (informational, never fails)
+        # The bootstrap path: stage 1 built by the backend, its token
+        # stream and tree of the prelude against stage 0's.
+        continue-on-error: true
+        working-directory: compiler/stage1
+        run: |
+          ../target/debug/sisu build --native --output "$RUNNER_TEMP/stage1"
+          "$RUNNER_TEMP/stage1" tokens --trivia ../std/prelude.sisu > "$RUNNER_TEMP/tokens.native"
+          ../target/debug/sisu tokens --trivia ../std/prelude.sisu > "$RUNNER_TEMP/tokens.stage0"
+          cmp "$RUNNER_TEMP/tokens.native" "$RUNNER_TEMP/tokens.stage0"
+          "$RUNNER_TEMP/stage1" parse --tree ../std/prelude.sisu > "$RUNNER_TEMP/tree.native"
+          ../target/debug/sisu parse --tree ../std/prelude.sisu > "$RUNNER_TEMP/tree.stage0"
+          cmp "$RUNNER_TEMP/tree.native" "$RUNNER_TEMP/tree.stage0"

@@ -167,6 +167,7 @@ const VALUE_FLAGS: &[&str] = &[
     "--skip-tag",
     "--iterations",
     "--diary",
+    "--output",
 ];
 
 /// The most schedules a bounded exhaustive search runs of one test (or of
@@ -209,6 +210,8 @@ struct Opts {
     stats: sisu_interp::StatsKind,
     /// `sisu check --diary PATH`: the log the check appends to.
     diary: Option<String>,
+    /// `sisu build --native --output PATH`: where the executable goes.
+    output: Option<String>,
 }
 
 /// What a command works on, read from disk (09): a file, or the root
@@ -498,10 +501,12 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
         "run" | "check" | "sir" | "test" | "bench" | "build" | "tokens" | "parse" => {
             let p = split_args(rest);
             let allowed: &[&str] = match cmd.as_str() {
-                "run" => &["--sir", "--monitor", "--defer-borrow", "--stats", "--locked", "--watch"],
+                "run" => {
+                    &["--sir", "--monitor", "--defer-borrow", "--stats", "--locked", "--watch", "--native"]
+                }
                 "test" => &["--no-monitor", "--defer-borrow", "--sim", "--update", "--locked", "--std"],
                 "check" => &["--format=ids", "--format=human", "--explain", "--locked"],
-                "build" => &["--locked"],
+                "build" => &["--locked", "--native"],
                 "bench" => &["--locked"],
                 "tokens" => &["--trivia"],
                 "parse" => &["--tree", "--print", "--trivia", "--shape", "--ast"],
@@ -518,6 +523,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 !matches!(cmd.as_str(), "run" | "test" | "bench")
                     && !(*k == "--contracts" && cmd == "sir")
                     && !(*k == "--diary" && cmd == "check")
+                    && !(*k == "--output" && cmd == "build" && p.flags.contains(&"--native"))
             }) {
                 host.stderr(&plain_error(
                     msg::CLI_UNKNOWN_OPTION,
@@ -544,12 +550,14 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
             let mut iterations = 100;
             let mut select = Select::default();
             let mut diary = None;
+            let mut output = None;
             for (k, v) in &p.values {
                 let only = match *k {
                     "--record" | "--redact" => Some("run"),
                     "--replay" | "--faults" | "--jobs" | "--filter" | "--tag" | "--skip-tag" => Some("test"),
                     "--iterations" => Some("bench"),
                     "--diary" => Some("check"),
+                    "--output" => Some("build"),
                     _ => None,
                 };
                 if let Some(c) = only
@@ -568,6 +576,10 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                     }
                     "--diary" => {
                         diary = Some(v.to_string());
+                        continue;
+                    }
+                    "--output" => {
+                        output = Some(v.to_string());
                         continue;
                     }
                     "--redact" => {
@@ -692,6 +704,21 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 host.stderr(&plain_error(msg::CLI_WATCH_ALONE, &[("option", other)]));
                 return EXIT_USAGE;
             }
+            if p.flags.contains(&"--native")
+                && let Some(other) = ["--sir", "--monitor", "--defer-borrow", "--stats", "--watch"]
+                    .iter()
+                    .find(|o| p.flags.contains(o))
+                    .map(|o| o.to_string())
+                    .or_else(|| {
+                        ["--record", "--explore", "--schedule-seed", "--scheduler", "--contracts"]
+                            .iter()
+                            .find(|o| p.values.iter().any(|(k, _)| k == *o))
+                            .map(|o| o.to_string())
+                    })
+            {
+                host.stderr(&plain_error(msg::NATIVE_ALONE, &[("option", other)]));
+                return EXIT_USAGE;
+            }
             let sim = p.flags.contains(&"--sim");
             if faults.is_some() && !sim {
                 host.stderr(&plain_error(msg::CLI_FAULTS_WITHOUT_SIM, &[]));
@@ -720,6 +747,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 iterations,
                 stats,
                 diary,
+                output,
             };
             // Each member of a workspace in turn (09); the worst status wins.
             let mut status = exit::OK;
@@ -1329,6 +1357,19 @@ fn command(
                 // through the ownership checker, its `comptime` values
                 // computed: everything but running it. Stage 0 builds for
                 // the interpreter, so there is no artefact to write.
+                // A library has no `main`: there is nothing to link, and the
+                // build is the plain one.
+                "build" if has("--native") && prog.entry.is_some() => {
+                    stage.set("the native backend");
+                    let output = match &opts.output {
+                        Some(o) => std::path::PathBuf::from(o),
+                        None => crate::native::output_for(
+                            &input.disk,
+                            input.package.as_ref().map(|(n, _)| n.as_str()),
+                        ),
+                    };
+                    crate::native::build_command(&prog, &output, host)
+                }
                 "build" => {
                     let line = match input.package.clone() {
                         Some((name, version)) => text_line(
@@ -1546,6 +1587,17 @@ fn command(
                     if prog.entry.is_none() {
                         host.stderr(&plain_error(msg::CLI_NO_MAIN, &[("file", file.to_string())]));
                         return exit::ERROR;
+                    }
+                    if has("--native") {
+                        stage.set("the native backend");
+                        let name = input.package.as_ref().map(|(n, _)| n.clone()).unwrap_or_else(|| {
+                            input
+                                .disk
+                                .file_stem()
+                                .map(|s| s.to_string_lossy().into_owned())
+                                .unwrap_or_default()
+                        });
+                        return crate::native::run_command(&prog, &name, &args, host);
                     }
                     let options = Options {
                         monitor: defer || has("--monitor"),
@@ -2451,6 +2503,7 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
         iterations: 0,
         stats: sisu_interp::StatsKind::Summary,
         diary: None,
+        output: None,
     };
     let stage = std::cell::Cell::new("the front end");
     let flags: Vec<&str> = p.flags.clone();

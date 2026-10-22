@@ -42,8 +42,10 @@ replacement in epochs (`sisu run --watch`), the REPL (`sisu repl`, with
 `:back` and `:why`), worksheets (`sisu ws`) and the language server
 (`sisu lsp`). Not here: from Phase 6, `RwLock`, `Atomic`,
 `Condvar`, TLS and `sisu audit --caps`; the checked string DSLs, `@cfg`
-and foreign functions (Phase 8), and a native backend. Their syntax
-parses, and using them is a diagnostic (`E0900 stage0.unsupported`).
+and foreign functions (Phase 8). Their syntax parses, and using them is a
+diagnostic (`E0900 stage0.unsupported`). Stage 2's first round, a native
+debug backend for a subset of the language (`sisu build --native`), is
+described in its own section, "Stage 2".
 
 ## Crate map
 
@@ -60,11 +62,13 @@ architecture"); data flows down the table.
 | `sisu-resolve` | 11125 | Loads the Sisu-written std (`compiler/std/`), declares every item, resolves signatures to types, registers methods; traits, impls, coherence and the trait solver; derives (unfolding each trait's `comptime def derive`), delegation and the instances of templates; the generators and generated tests of property testing, the interceptors and fakes of the program's traits; the borrow rules about declarations |
 | `sisu-typeck` | 11358 | The bidirectional checker, with method resolution through traits and `comptime` expressions; produces the typed tree (THIR) for every body, broken or not |
 | `sisu-sir` | 3066 | SIR: the data model, the text writer and reader, the validator, the types of places, and the jump threading of the SIR that runs |
-| `sisu-lower` | 5329 | THIR to SIR: control flow, scopes and their drops, unwind edges, closure conversion, trait calls and their static resolution, drop glue, `comptime` functions, the borrow facts of signatures |
+| `sisu-lower` | 5444 | THIR to SIR: control flow, scopes and their drops, unwind edges, closure conversion, trait calls and their static resolution, drop glue, `comptime` functions, the borrow facts of signatures |
 | `sisu-borrowck` | 5266 | The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, the task rules, escapes, must-consume, purity, `explain-borrow`, and the `Shared` escape analysis |
 | `sisu-interp` | 13320 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the task scheduler (random, PCT, bounded exhaustive) and the `sim` profile's faults, capabilities and the host's objects, the capability log, hot replacement in epochs, the parallel test runner, the dynamic ownership monitor, and the compile-time evaluator |
-| `sisu-driver` | 10155 | The query layer and the `sisu` command line; manifests (a TOML reader of its own), the package layout and the lockfile; the counterexample mode, `audit --ownership`, `check --explain`, replay tokens, snapshot files and transcripts, the `sim` build check; `fmt`, the REPL and worksheets, `run --watch`'s rebuilds, and the language server with its JSON; the soundness tests (fault injection, mutation fuzzing) and the language server's protocol tests |
-| `sisu-conformance` | 1032 | The language-agnostic conformance runner |
+| `sisu-rt` | 5589 | Stage 2's runtime, linked into every native executable: the shared ABI (the value layout, the type table's encoding, the entry points), panics and stack traces, allocation, the structural operations on values, iterators, dicts and sets, and the intrinsics |
+| `sisu-codegen` | 3219 | Stage 2's debug backend: SIR to Cranelift IR, one instance per function and list of type arguments, with trait calls resolved at compile time; the object file and the link |
+| `sisu-driver` | 10383 | The query layer and the `sisu` command line; manifests (a TOML reader of its own), the package layout and the lockfile; the counterexample mode, `audit --ownership`, `check --explain`, replay tokens, snapshot files and transcripts, the `sim` build check; `fmt`, the REPL and worksheets, `run --watch`'s rebuilds, and the language server with its JSON; `build --native` and `run --native`; the soundness tests (fault injection, mutation fuzzing), the language server's protocol tests and the native conformance test |
+| `sisu-conformance` | 1267 | The language-agnostic conformance runner, and its native mode |
 
 Line counts are of each crate's `src`, unit tests included. Besides the crates:
 `catalog/messages.catalog` (every message); the standard library, in
@@ -87,7 +91,8 @@ suite, described in its own [README](../conformance/README.md)).
 The workspace forbids `unsafe` and denies `unwrap`, `expect`, `panic`,
 `todo`, `unimplemented` and `unreachable` outside tests (18, Phase 0,
 "Panic policy"); an internal error becomes a catalog message, never a
-host panic.
+host panic. `sisu-rt`, where native code meets Rust, is the one crate
+allowed `unsafe` (decision 187).
 
 ## Pipeline
 
@@ -100,6 +105,7 @@ source --lex--> tokens --parse--> lossless tree --ast::build--> AST
        --simplify--> SIR with its jumps threaded
        --comptime--> SIR with every `comptime` value built from literals
        --validate--> SIR --interp [--monitor]--> output, exit status
+                         --codegen--> object file --cc, with sisu-rt--> executable
 ```
 
 Every stage is total: it returns its output and its diagnostics for any
@@ -1119,7 +1125,9 @@ closures). The rules, so that another front end produces the same SIR:
   a `bool`; `while` is a head block with the condition and an exit; `for`
   calls `iter.ref`, `iter.mut` or `iter.own` (or uses an `Iter` directly)
   and then `Iter.next` each round, switching on the option; iterating a
-  reference (a borrowed parameter) borrows what it points to. The loop's
+  reference (a borrowed parameter) borrows what it points to, and an
+  `Iter` behind a reference is driven through the reference, which the
+  loop does not drop (decision 196). The loop's
   own statements are located at its head, `for x in xs`. `and`/`or`
   short-circuit. A comparison chain evaluates each operand once.
 - **`match`** tests each arm's pattern in order, binding nothing until it
@@ -2831,6 +2839,329 @@ lints are meant to make impossible) is caught and reported as `D0012`
 naming the stage, with the input written to the temporary directory, and
 exits 70.
 
+## Stage 2: the native backend
+
+Stage 2 of the bootstrap ([18](../../proposal/18-next-steps.md),
+"Bootstrapping") compiles SIR to machine code. Its first round is the
+debug backend of [10](../../proposal/10-tooling.md) ("A non-LLVM backend
+for debug builds"): Cranelift 0.123 at its lowest optimisation level
+writes an object file, and the system's `cc` links it with the runtime.
+Two crates hold it, and they carry the workspace's only external
+dependencies (decision 186):
+
+- `sisu-codegen` compiles a `sisu_sir::Program` to an object file that
+  defines the C `main`, and links it.
+- `sisu-rt` is the runtime: a static library (`libsisu_rt.a`) linked into
+  every executable, and a Rust library whose `abi` module the code
+  generator shares, so that both sides of the boundary are one
+  definition. It holds the type table, the panics in flight and their
+  stack traces, standard output, allocation, the structural operations on
+  values, iterators, dicts and sets, and the intrinsics, each with the
+  interpreter's results, messages and exit statuses. It is the only crate
+  with `unsafe` code (decision 187).
+
+`sisu build --native [FILE]` checks, lowers and checks ownership as `sisu
+run` does, compiles the SIR that `sisu sir` prints (after the ownership
+checker, jump threading and compile-time evaluation, so the backend
+compiles exactly what the interpreter runs), links it, and prints `built
+PATH`. The executable goes beside a file's source, named by its stem
+(`hello.sisu` makes `hello`), or into a package's directory, named by the
+package (`stage1/stage1`); `--output PATH` puts it elsewhere. `sisu run
+--native [FILE] [ARGS...]` builds into a directory of its own under the
+system's temporary directory, runs the executable with the arguments, the
+standard streams and the environment of the command, removes it, and
+exits with its status (decision 197). `--native` does not combine with the
+options that only the interpreter has (`--sir`, `--monitor`,
+`--defer-borrow`, `--stats`, `--watch`, `--record`, `--explore`,
+`--schedule-seed`, `--scheduler`, `--contracts`; `D0109`). A construct the
+backend does not compile yet is `D0103`, naming it and the function it is
+in; the program still runs without `--native`. `SISU_NATIVE_SURVEY=1`
+lists every such construct of a program with the number of functions
+that have it, and `SISU_NATIVE_TIMES=1` prints where a build's time went.
+
+### Values
+
+Every value is a whole number of 8-byte words, and every part of a value
+starts on a word (decision 188). Each concrete type of the program has a
+number and an entry in the type table, whose kinds (`abi::Kind`) say
+where the parts are:
+
+| Type | Words | Layout |
+|---|---:|---|
+| `()`, `Never`, a constant argument | 0 | |
+| `int`, `u8` to `u64`, `i8` to `i32`, `DateTime` | 1 | the value; a sized integer is kept in its range by its operations, a `u64` is unsigned |
+| `i128`, `u128` | 2 | the low word first |
+| `f64`, `f32` | 1 | the bits; an `f32`'s in the low half |
+| `bool`, `char` | 1 | 0 or 1; the code point |
+| `str` | 2 | the address of the UTF-8 bytes, their length |
+| `String`, `Path` | 3 | a heap buffer, the length and the capacity in bytes |
+| `list[T]`, `Array[T, N]`, `Slice[T]` | 3 | a heap buffer of elements, the length and the capacity in elements |
+| `ref T`, `ref mut T` | 1 | the address of the value |
+| `dyn Trait` | 2 | the number of the type of the value it holds, and the address of a heap cell holding the value, which the `dyn` owns |
+| `ref dyn Trait` | 2 | the same two words, borrowed: the address is of the value the `dyn` holds |
+| `Box[T]` | 1 | the address of a heap cell holding the value |
+| `T?` | 1 + T | a tag (0 `Some`, 1 `None`), then the payload |
+| `Result[T, E]` | 1 + the larger | a tag (0 `Ok`, 1 `Err`), then the payload |
+| a tuple or a struct | the sum | the parts in order |
+| an enum | 1 + the largest variant | the tag (the variant's index), then the variant's fields |
+| an `error` enum, a union of error sets | 3 + the largest variant | its own type's number, its return trace, the tag, then the fields |
+| a function value | 2 | the code's address and the environment's |
+| `dict[K, V]`, `set[T]`, `Iter[T]` | 1 | the address of a runtime object |
+| a capability handle | 1 | the address of the host's object |
+| `System` | 7 | its handles, in decision 101's order |
+
+A union of error sets holds a value of one of its member enums, as that
+enum lays it out; the first word says which. A dict or set is a table of
+entries in the order they were inserted, each the key's words then the
+value's, with a hash index over the keys' structural hash, as the
+interpreter's are; an iterator is a runtime object that yields copies of
+its items or references to them.
+
+### Functions, calls and unwinding
+
+A compiled function is `fn(ret, arg_1, ..., arg_n) -> u8`: the result and
+every argument live in memory, the function gets their addresses, and it
+returns 0, or 1 when a panic is leaving it (decision 189). The caller puts
+each argument in memory of its own, which the callee owns as the
+interpreter's callee owns its locals. Every local has a stack slot except
+the result and the parameters.
+
+Unwinding is the cleanup blocks of SIR run as ordinary control flow, with
+no unwinder. Each statement that can panic (a call, a drop, an overflow or
+bounds check, a dict key, `unreachable`) is followed by a test of its
+status, which leads to the failure path of its block: in a cleanup block,
+the abort of a panic during unwinding (`panic.during-unwind`, status 134,
+both messages); in any other, a line of the stack trace (the function,
+file, line and column of the statement, left out for drop glue and the
+standard library as the interpreter leaves them out), then the block's
+`unwind` block, or the return of 1 when it has none. A runtime entry point
+that panics records the panic and returns 1 the same way. The panic's
+message and trace are the runtime's until `main` returns: a panic that
+leaves `main` is printed with its trace and the program exits with 101; a
+`main` that returns `T ! E` and returns an error prints it with its return
+trace and exits with 1; otherwise 0.
+
+Every function but drop glue counts itself in `SISU_RT_DEPTH` on entry and
+out on return; past 100 000 nested calls a call panics with the
+interpreter's `panic.stack-overflow`. The program runs on a thread with a
+1 GiB stack, so that the limit, and not the machine's stack, is what a
+deep recursion meets (decision 190).
+
+### Each SIR construct
+
+| SIR | Native code |
+|---|---|
+| a place `_n` | the local's slot, or the address the caller passed |
+| `.*` (`Deref`) | the address the reference holds; a reference to a `dyn` is the `dyn`'s own words, in place |
+| `.i` (`Field`) | the field's offset in the type's layout; a `Box`'s field 0 is the boxed value, at the address the box holds |
+| `.as(v)` (`Downcast`) | the payload's fields after the tag; for a `drop`, the tag is tested first and another variant drops nothing |
+| `[_n]`, `[^_n]` (`Index`, `IndexFromEnd`) | the buffer plus the index times the element's size, after a bounds test that raises the interpreter's index panic |
+| `{_n}` (`Key`) | `sisu_rt_dict_slot`: the address of the value a dict holds for the key; reading a missing key panics, an assignment's destination inserts it, a drop of a missing one does nothing |
+| `copy p`, `move p` | the words at the place (a move is the same copy: the ownership checker saw that the source is not used or dropped again) |
+| `const` | an immediate; a text is the address and length of read-only bytes; a function is the pair of its value thunk and a null environment |
+| `ref p`, `ref mut p` | the place's address; for a `dyn`, a copy of its two words |
+| arithmetic on `int` | Cranelift's instructions, `+`, `-`, `*` and unary `-` with an overflow test that raises `panic.overflow` with the interpreter's operands; `//`, `%`, `**` and the shifts through `sisu_rt_int_op`; wrapping and saturating operators inline |
+| arithmetic on `f64`, `f32` | instructions, `//`, `%` and `**` through `sisu_rt_float_op`; an `f32` operation is computed in `f64` and rounded once (decision 169) |
+| comparisons of numbers, `bool`, `char` | `icmp` and `fcmp` |
+| `==`, `<`, `in`, `+` of texts on other values | `sisu_rt_binary`: structural equality, order, membership and concatenation by the type table |
+| `not`, `~` | `x ^ 1`, `bnot` |
+| `tuple(...)`, `Point(...)` | the parts at their offsets in a new slot |
+| a variant | the tag (and for an `error` enum its type's number and an empty trace), then the fields |
+| `Box(x)` | a heap cell from `sisu_rt_alloc`, holding the value |
+| `dyn T(x)`, `dyn ref T(r)` | the number of `T` and a heap cell holding `x`; the number of `T` and the address `r` holds (decision 202) |
+| `list(...)` | a heap buffer holding the elements |
+| `set(...)`, `dict(...)` | the entries in a slot, made into a table by `sisu_rt_table` |
+| `discriminant p` | the tag word |
+| `closure f(...)` | the code of `f`'s instance and the environment, the tuple of the captures (decision 195) |
+| `copyof p` | `sisu_rt_copy`, a deep copy by the type table |
+| `strview p` | the `String`'s first two words |
+| `p = rvalue` | the rvalue's words stored at the place's address |
+| `call fn f[T](...)` | a direct call of the instance of `f` for the concrete type arguments |
+| `call trait Tr.m[S, ...](...)` | resolved when the instance is compiled (decision 191), then a direct call, an intrinsic, or a structural operation; with a `dyn` `S`, a call of the method's dispatcher (decision 202) |
+| `call intrinsic name(...)` | `sisu_rt_intrinsic` with the call's descriptor; the sized integers' operations through `sisu_rt_sized` and `sisu_rt_wide` (decision 193) |
+| `call _n(...)` | an indirect call of the value's code with its environment first |
+| `drop p [if flag]` | when the type needs a drop: the flag's test (clearing it), then `sisu_rt_drop`, which runs the type's drop glue or the structural drop |
+| `dead _n` | nothing |
+| `goto`, `switch`, `return`, `resume` | `jump`, Cranelift's `Switch` on the scalar, the return of 0, the return of 1 |
+| `unreachable` | the `unreachable` panic and the failure path |
+
+### Generics, traits, closures and capabilities
+
+Code generation starts at `main` and compiles each function once for
+every list of concrete type arguments that a reached call gives it: an
+instance. A call through a trait is resolved when its instance is
+compiled, by the rules the interpreter's `dispatch.rs` applies at run
+time: the impl whose self type and trait arguments match the concrete
+ones, with `Self` taken through any references (the first argument is
+read through as many); its method is an SIR function, an intrinsic, or,
+where a type has no impl of `Display`, `Debug`, `Eq`, `PartialOrd`, `Ord`
+or `Hash`, the structural operation the interpreter falls back to
+(decision 191). The associated types of impls are looked up the same way.
+
+A `Self` that is a `dyn` is the one dispatch left to run time, since only
+the value knows its type. A call of a trait's method on a `dyn` calls a
+dispatcher, one function per method and type arguments, with the
+address of the `dyn`'s two words: it switches on the number of the type of
+the value, and calls what the call runs for that type, resolved as above,
+with `self` the value's address (or a copy of the value, for a method that
+takes it). The types a dispatcher knows are those of the values the
+compiled code puts in `dyn`s of its type; compiling what a dispatcher
+calls can compile more `dyn`s, so code generation repeats until no new
+type and no new dispatcher appears, then writes the dispatchers (decision
+202). The structural operations look through a `dyn` to its value, as the
+interpreter's do.
+
+A closure is its function's code and the address of its environment. One
+whose captures are all references cannot outlive the frame it is made in,
+so its environment is a slot of that frame; one that holds values (`own`)
+gets a heap cell, which round 1 never frees. A named function used as a
+value is a thunk that takes an environment and ignores it, so every
+function value is called as a closure is (decision 195).
+
+`main(sys: System)` receives seven handles, each the address of a host
+object of the runtime. A call through a capability handle (the prelude's
+`cap.forward`) compiles to the host object's operation when nothing `main`
+can reach makes a handle of that type hold another object: no `cap.new`
+of it, no `Clock.fake` for a clock, no `cap.lend`. Otherwise the call is
+`D0103`, since fakes, attenuations and interceptors need the call to look
+at the object, which round 1 does not (decision 194). What `main` reaches
+is found from `main` itself, through calls, closures, function values and
+the impls a trait call may select, so that a program's tests and their
+fakes, which `main` does not run, do not count.
+
+### The runtime
+
+The runtime's entry points (`abi::sym`) are the boundary:
+
+| Entry point | What it does |
+|---|---|
+| `sisu_rt_start(argc, argv, entry, flags, ret_ty, types, types_len, fns, fns_len) -> i32` | decodes the type table, keeps the function table, runs `main` on its thread (with a `System` when `flags` says so) and gives the exit status |
+| `sisu_rt_frame(name, len, file, len, line, col)` | adds a line to the stack trace of the panic in flight |
+| `sisu_rt_abort_unwind()` | a panic reached a frame running cleanup: abort |
+| `sisu_rt_panic_overflow`, `_index`, `_stack`, `_unreachable` | raise those panics |
+| `sisu_rt_int_op(op, x, y, out) -> u8`, `sisu_rt_float_op(op, x, y) -> f64` | the arithmetic that is not one instruction |
+| `sisu_rt_alloc(bytes) -> ptr` | heap memory for a list, a box or an environment |
+| `sisu_rt_drop(value, ty) -> u8`, `sisu_rt_copy(dst, src, ty)` | the drop and `.copy()` of a value by its type |
+| `sisu_rt_binary(op, out, a, a_ty, b, b_ty) -> u8` | equality, order, `in` and concatenation of values that are not numbers |
+| `sisu_rt_intrinsic(desc, ret, args) -> u8` | a call of an intrinsic |
+| `sisu_rt_sized(kind, op, flags, x, y, out) -> u8`, `sisu_rt_wide(kind, op, x, x_ty, y, y_ty, out) -> u8` | an operation of a sized integer type, of one word or of 128 bits |
+| `sisu_rt_table(ty, items, n, out) -> u8`, `sisu_rt_dict_slot(dict, key, key_ty, mode, out) -> u8` | a dict or set literal; a dict's value for a key |
+| `SISU_RT_DEPTH` | the counter of nested calls |
+
+The type table is encoded by `abi::encode` into the object's read-only
+data and decoded once when the program starts; the function table holds
+the address of each type's drop glue, which is an SIR function compiled
+like any other. The structural operations (drop, copy, equality, order,
+hashing, `Display` and `Debug`) walk a value by its type's entry, in the
+order and with the texts of the interpreter's, and a struct or enum with a
+`Drop` impl or fields that need dropping runs its glue (decision 192). An
+intrinsic call passes a descriptor that the code generator writes once per
+shape of call (the intrinsic's number, the types of the result, of each
+argument and of each type argument) and the addresses of the arguments;
+the runtime reads through references, so an intrinsic does not care
+whether it got a value or a reference to one (decision 193). Standard
+output is buffered and written before anything goes to standard error and
+when the program ends, so the two interleave as the interpreter's do.
+
+### Linking
+
+`sisu-codegen` writes the object beside the output (`NAME.o`, removed
+afterwards unless `SISU_NATIVE_KEEP=1`), and `cc` links it with the
+runtime and the system libraries a Rust static library needs, using LLVM's
+`lld` when `ld.lld` is on the search path: it links in a third of the time
+of the system's `ld` (87 against 224 ms for a small program). The search
+path is given to `cc` explicitly, since the conformance runner runs `sisu`
+in an empty environment (decision 198). The runtime is the
+`libsisu_rt.a` cargo built beside the `sisu` executable, or the newest
+`deps/libsisu_rt-*.a` there, which a `cargo test` leaves without copying
+it up; without one the build is `D0104` (decision 199). An executable is
+mostly the runtime: 6 MB for a small program with the release runtime, 9
+MB with the debug one.
+
+### Coverage
+
+`conformance/native.list` names the cases the backend builds and runs:
+111 of them, among them every case of `run/` that has a `main` but
+`run/capabilities`, whose fakes and attenuations are a later round
+(`run/testing` is a test file without `main`). The 38 are `arithmetic`,
+`assert_fail`, `byte_find_two_way`, `char_boundary`, `closures`,
+`collections`, `control_flow`, `declarations`, `divide_by_zero`,
+`double_panic`, `drop_chain`, `drop_order`, `drop_panic_fields`,
+`drop_torture`, `errors`, `expect`, `f32`, `format_specs`,
+`interpolation`, `iterators`, `let_else_copy`, `list_keys`,
+`lossless_layout`, `main_error`, `missing_key`, `options`,
+`or_bindings`, `overflow`, `parse_int`, `pure_functions`, `recursion`,
+`sized_integers`, `strings`, `structs_enums`, `text_bytes`,
+`unicode_escapes`, `unwind` and `wide_overflow`. `sisu-conformance --native
+conformance/native.list` builds each with `sisu build --native`, runs the
+executable as the runner runs `sisu` (its arguments, standard input, an
+empty environment), and compares its standard output, exit status and
+standard error with the files the interpreter meets; `cargo test` does the
+same (`crates/sisu-driver/tests/native.rs`), and CI runs it on every push.
+`--native-survey LIST` tries every runnable case the list leaves out and
+says which would pass, or the first construct that stops each.
+
+What round 1 does not compile yet, by how many of the suite's cases need
+it: `Mutex`, `Shared`, `Cell` and `Arena`; tasks, scopes, channels,
+`select`, races and generators; capabilities other than the host's
+(fakes, attenuations, interceptors, `cap.lend`, the `sim` profile) and
+the host's network, process and byte-file operations; `bytes`;
+`fmt.strftime`; a parameter of type `Iterable[T]` of a compiled
+function; a field of a union of error sets whose members lay it out
+differently; a generic function as a value. The interpreter's modes have
+no native counterpart: the ownership monitor, the counterexample mode, the
+capability log and replay, hot replacement, and `sisu test`. port-debt.md
+("Stage 2") lists these and what round 1 leaks.
+
+### Compile time and run time
+
+Measured on one machine (4 cores, shared, so times vary by a tenth),
+with the release `sisu`, the best of three. Stage 1 (`compiler/stage1`, 28 659
+lines of Sisu, with the standard library it uses) builds natively in
+6.2 s: its front end takes 3.9 s (`sisu check` takes 3.8), code
+generation 2.19 s for 1 204 function instances and 100 809 SIR statements
+(22 microseconds a statement), and the link 0.12 s; the executable is
+11 MB. That is 0.22 s for each thousand lines of stage 1, so a clean
+debug build of 100 kLOC would take about 22 s against 10's target of 10
+s. The backend's own share, code generation and the link, is 0.08 s per
+thousand lines, 8 s for 100 kLOC, within the target alone; the rest is the
+stage-0 front end, which checks a package on one thread and from scratch.
+With a debug `sisu`, whose Cranelift checks every function it is given,
+code generation takes 4.1 s. A small program builds in 0.15 to 0.21 s, of
+which code generation is 1 to 33 ms and the link 60 to 70 ms; the rest is
+the front end, which `sisu run` spends as well.
+
+The executables run 10 to 30 times as fast as the interpreter. On stage
+1's commands, from `compiler/stage1`, with byte-identical output:
+
+| command | interpreter | native |
+|---|---:|---:|
+| `tokens ../std/prelude.sisu` | 5.3 s | 0.09 s |
+| `parse --tree ../std/prelude.sisu` | 7.3 s | 0.17 s |
+| `ast ../std/prelude.sisu` | 8.5 s | 0.19 s |
+| `types ../std/prelude.sisu` | 30.0 s | 0.93 s |
+| `batch` of the 405 conformance files | 21.8 s | 1.19 s |
+| `names-batch` of the 379 one-module programs | 19.6 s | 0.62 s |
+| `types-batch` of the same | 116.8 s | 4.3 s |
+
+The interpreter's times include the 4 s of checking stage 1 that every
+`sisu run` spends. Without them, `batch`'s lexing took 2.7 s against
+0.11 s, its parsing 4.2 s against 0.13 s, and `types-batch` about 113 s
+against 4.3 s. A conformance case's executable runs in 4 to 6 ms, most of
+it starting the process and the program's thread.
+
+### Stage 1, compiled
+
+Stage 1 compiles natively without a change (its sources, built from a
+copy so that the executable is not written into the package), and the
+executable gives the interpreter's output byte for byte on every command
+`check.sh` drives: `batch` over the 455 files of the conformance suite,
+the standard library, the proposal's examples and stage 1's own cases
+(tokens with trivia, trees with and without trivia, reprints and ASTs, and
+their diagnostics), `names-batch` and `types-batch` over the 379 programs
+of one module. Its tests (`sisu test`) are not compiled: the backend
+builds programs, not test runs.
+
 ## How to add a construct
 
 1. **Tokens**: a new keyword or punctuation goes in
@@ -2866,7 +3197,11 @@ exits 70.
    be, over intrinsics that are primitives; a new intrinsic is
    implemented in `sisu-interp` and gets its contract as a `##` comment in
    `compiler/std/*.sisu` (or in the table above if only lowering uses
-   it), with `@keeps` for the arguments it keeps.
+   it), with `@keeps` for the arguments it keeps. The native backend
+   needs it too: a name in `sisu-rt/src/abi.rs` (`intrinsics!`) and its
+   implementation in `sisu-rt/src/intrinsics.rs`, with the interpreter's
+   results and messages; until then a program that calls it is `D0103`
+   under `--native` (section "Stage 2").
 9. **Cases**: conformance cases under `conformance/cases/` for the
    working construct, its diagnostics, and a broken use; bless them,
    review every expected file, and run the suite.
@@ -3594,3 +3929,132 @@ what transcribing the Rust type checker found in stage 0)
      what had been read through it (`case Kind.Items(fields)` on
      `c.nodes[i].kind`), and a later read of `fields` was a violation the
      checker had rightly not reported.
+
+**Stage 2, round 1** (the native debug backend; section "Stage 2")
+
+186. The front end, SIR and the interpreter stay free of external
+     dependencies, as stage 0 has been from its first commit; the backend
+     crates carry them. `sisu-codegen` depends on Cranelift 0.123
+     (`cranelift-codegen`, `-frontend`, `-module`, `-object` and
+     `-native`), and `sisu-rt` only on `sisu-diag`, for the catalog's
+     messages. The driver depends on `sisu-codegen`, so `cargo build`
+     builds the runtime with `sisu`, and a build without the backend would
+     drop one dependency of one crate.
+187. `unsafe` is allowed in `sisu-rt` and nowhere else: the runtime's entry
+     points take the raw addresses native code passes, and its operations
+     read values in the native layout. Its own lints deny `unsafe` inside
+     an `unsafe fn` without a block of its own, and the workspace's lints
+     against `unwrap`, `expect`, `panic` and the rest; every `unsafe` block
+     says why it is sound. The workspace keeps `unsafe_code = "forbid"`.
+188. Every value is a whole number of 8-byte words, with every part on a
+     word: a sized integer, a `bool` or a `char` takes a word, an option's
+     tag takes a word before its payload. Values are larger than they need
+     be, and in exchange generated code moves every value as words, the
+     runtime finds every part at an offset the type table gives, and one
+     table describes both sides. The layouts are section "Stage 2"'s
+     table; `i128` and `u128` are two words, the low one first.
+189. A function takes the addresses of its result and arguments and
+     returns a status, 0 or 1 when a panic is leaving it, and unwinding is
+     SIR's cleanup blocks run as ordinary control flow: each statement
+     that can panic is followed by a test of its status. There is no
+     unwinder, no landing pad and no table to keep, the order of drops and
+     the messages are the interpreter's because the same SIR runs, and a
+     panic during unwinding is found where SIR says the frame is running
+     cleanup. The cost is a compare and a branch after every call, which
+     a debug build can afford.
+190. The interpreter's limit of 100 000 nested calls holds natively: a
+     counter in the runtime, incremented by every function but drop glue,
+     raises `panic.stack-overflow` past it, and the program runs on a
+     thread with a 1 GiB stack, so that the limit and not the machine's
+     stack is what a deep recursion meets, with the interpreter's message
+     and exit status.
+191. Generic functions are monomorphised: each is compiled once for every
+     list of concrete type arguments a reached call gives it, from `main`.
+     A call through a trait is resolved when the instance that makes it is
+     compiled, by the interpreter's dispatch rules (`dispatch.rs`): the
+     matching impl's method, with `Self` taken through references, or the
+     structural operation the interpreter falls back to. The interpreter
+     resolves at run time what native code resolves once; nothing about
+     the values decides it in either. 10's instantiation sharing and
+     budget are not round 1's.
+192. The structural operations (drop, `.copy()`, equality, order, hashing,
+     `Display`, `Debug`) are the runtime's, walking a value by its type's
+     entry in the type table, which the program carries encoded and
+     decodes when it starts; drop glue stays an SIR function, compiled
+     like any other, which the runtime calls through the function table.
+     Generated code calls one entry point for each, with the type's
+     number, rather than a function per type, so code generation is
+     proportional to the program and not to its types.
+193. An intrinsic call passes a descriptor (the intrinsic, the types of
+     its result, arguments and type arguments), written once per shape
+     of call into the read-only data, and the addresses of its arguments;
+     the runtime reads through references, so an intrinsic takes a value
+     and a reference to one alike, as the interpreter's do. The sized
+     integers' operations have entry points of their own, one for the
+     types a word holds and one for `i128` and `u128`, with the
+     interpreter's arithmetic and messages.
+194. A call through a capability handle compiles to the host object's
+     operation only when nothing `main` reaches can make a handle of that
+     type hold another object (`cap.new` of it, `Clock.fake`, `cap.lend`);
+     otherwise it is `D0103`. Round 1 has no dispatch on the object a
+     handle holds; finding what `main` reaches, rather than looking at the
+     whole program, keeps a program's tests and their fakes from making
+     its `main` unsupported.
+195. A closure is two words, its code and the address of its environment.
+     The environment of a closure whose captures are all references is a
+     slot of the frame that makes it, which the ownership checker's rules
+     keep the closure from outliving; one that holds values gets a heap
+     cell. A named function used as a value is a thunk that takes an
+     environment and ignores it, so that a call of a function value is one
+     indirect call whatever made the value.
+196. A `for` loop over an `Iter` behind a reference (a parameter `it: ref
+     Iter[T]` iterated with `for x in it:`) drives the iterator through
+     the reference: the loop's local holds the reference, and the loop
+     registers no drop of it, since the caller owns the iterator. Lowering
+     used to give the local the type `Iter[T]` while it held the
+     reference, which the interpreter, whose values carry their kind,
+     never noticed, and the native layout could not survive.
+197. `sisu build --native` writes the executable beside a file's source,
+     named by its stem, or into a package's directory, named by the
+     package; `--output PATH` names another place. `sisu run --native`
+     builds into `sisu-native-PID` under the system's temporary directory,
+     named as `build` would name it, runs it with the program's arguments,
+     standard streams and environment, removes the directory, and exits
+     with the program's status (128 and the signal's number when a signal
+     ended it). `--native` refuses the options that only the interpreter
+     honours (`D0109`) rather than ignoring them.
+198. The link is the system's `cc` with the object, the runtime and the
+     system libraries a Rust static library needs, with LLVM's `lld` when
+     `ld.lld` is on the search path, which links in a third of the time of
+     the system's `ld`. `cc` gets the search path explicitly (the usual
+     directories when the environment has none), since the conformance
+     runner gives `sisu` an empty environment.
+199. The runtime is found beside the running `sisu`: `libsisu_rt.a`, or the
+     newest `deps/libsisu_rt-*.a`, which `cargo test` builds without
+     copying it up; the newest of them wins, so a stale copy does not.
+     Without one, the build is `D0104`, which says to run `cargo build`.
+200. Round 1 frees what the interpreter frees, except four things it
+     leaks (port-debt.md, "Stage 2"): the heap environment of a closure
+     that holds values, the list of copies a `*rest` pattern borrows
+     from, the nodes of error return traces, which copies of an error
+     share, and the cell of a `Box` or a `dyn` whose value was moved
+     out. Each is bounded by what the program makes, and none changes
+     what a program prints.
+201. `conformance/native.list` is the backend's oracle: the cases it names
+     must build natively and give the interpreter's standard output, exit
+     status and standard error (less the build's warnings), in `cargo
+     test` and in CI. The expectations are the interpreter's files, never
+     the backend's own; a case joins the list when `--native-survey` says
+     it passes.
+202. A `dyn` is two words: the number of the type of its value and the
+     value's address, a heap cell the `dyn` owns. A reference to a `dyn`
+     is the same two words, borrowed, so that `dyn ref T(r)`, the
+     coercion of a `ref T`, is the number of `T` and the address `r`
+     holds and allocates nothing; it is the one reference of two words. A
+     call of a trait's method on a `dyn` goes to a dispatcher, one per
+     method and type arguments, which switches on the number among the
+     types the program's `dyn`s of that type hold, and calls what the
+     interpreter's dispatch would choose for that type (`dispatch.rs`,
+     which dispatches a `dyn` on the type it carries). The types are known
+     only once everything is compiled, so the dispatchers are written
+     last, after compiling until nothing new appears.

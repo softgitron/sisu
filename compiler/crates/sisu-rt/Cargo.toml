@@ -1,0 +1,31 @@
+[package]
+name = "sisu-rt"
+description = "The native runtime: what code compiled by sisu-codegen calls (allocation, panics, text, lists, formatting, intrinsics)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# A static library linked into every native executable, and a Rust library
+# whose `abi` module the code generator shares, so that both sides of the
+# boundary are one definition.
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+sisu-diag.workspace = true
+
+# The workspace's lints, except that this crate is where native code meets
+# Rust: its entry points take raw pointers, so `unsafe` is allowed here and
+# nowhere else (docs/architecture.md, "Stage 2").
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

@@ -401,8 +401,12 @@ impl FnLower<'_, '_> {
         };
         let loc = self.ctx.loc(head);
         self.push_scope();
-        // A type that implements `Iterator` is driven through the trait.
-        let iter_ty = if mode == ForMode::Trait {
+        // A type that implements `Iterator` is driven through the trait. An
+        // `Iter` behind a reference (a borrowed parameter) is driven through
+        // the reference: the loop's local holds the reference, and the
+        // caller keeps (and drops) the iterator.
+        let borrowed_iter = mode == ForMode::Iter && matches!(iter.ty, Ty::Ref(..));
+        let iter_ty = if mode == ForMode::Trait || borrowed_iter {
             self.ctx.ty(&iter.ty)
         } else {
             sir::Type::Named("Iter".into(), vec![self.ctx.ty(item)])
@@ -446,8 +450,10 @@ impl FnLower<'_, '_> {
             }
             ForMode::Iter | ForMode::Trait => self.into(Place::local(it), iter),
         }
-        self.register(DropEntry::Local(it));
-        self.split();
+        if !borrowed_iter {
+            self.register(DropEntry::Local(it));
+            self.split();
+        }
         let head = self.new_block();
         let exit = self.new_block();
         self.goto(head);

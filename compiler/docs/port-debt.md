@@ -99,7 +99,9 @@ string, so a view costs O(length), and so does a piece of a view
 (`byte_slice`, and the pieces `split` and the others make). Semantics are the same because the
 viewed `String` cannot change while the view exists, which the ownership
 checker enforces, and which the monitor checks through the loan each
-view carries. *Pay*: a view is a pointer and a length in the backend.
+view carries. *Pay*: a view is a pointer and a length in the backend,
+as it is in the native backend's first round (architecture.md, "Stage
+2").
 
 **The commonest intrinsics have a second path.** Outside the monitor the
 run loop calls about twenty intrinsics directly (architecture.md,
@@ -154,6 +156,9 @@ level checks `ensures`. *Pay*: a backend copies only what a reached
 its declaration's name, and `error.is[D]` compares names. *Pay*: the
 backend chooses a representation for unions of error sets (a global tag
 per variant, or declaration plus index); SIR keeps `error.is` either way.
+The native backend's first round chose declaration plus index: an error
+value's first word is its own type's number, which `error.is[D]`
+compares (architecture.md, "Stage 2").
 
 **Panic messages are rendered when raised.** A panic carries English
 text rendered from the catalog, not an identifier and parameters, so
@@ -208,7 +213,9 @@ or counting copies, which would make handles not `Copy`.
 the handle's cell (`cap.forward` in the prelude, a special case in
 lowering's `callee_for` and in `dispatch.rs`), since the object's type is
 known only at run time. *Pay*: none for the interpreter; a backend
-compiles a handle as a `dyn` of its trait.
+compiles a handle as a `dyn` of its trait. The native backend's first
+round compiles a call through a handle to the host's object, and only
+when nothing `main` reaches makes another (decision 194).
 
 **`Wrap` and `Fake` are written by the compiler.** 06 builds `Wrap[T]`
 from the reflection behind `Fake[T]`. std.cap writes `Wrap`'s impl for
@@ -443,6 +450,86 @@ error in std's `Contextual`, whose `Display` (`message: cause`) is a case
 in the host's display text (`format.rs`) because error sets display
 structurally. *Pay*: a `Display` impl in the prelude, when error sets can
 have impls that the fast path respects.
+
+## Stage 2, round 1: what the native backend leaves out
+
+The native debug backend (architecture.md, "Stage 2") compiles the subset
+`conformance/native.list` covers. A program outside it is `D0103` under
+`--native` and runs as before without it. In the order of how many of the
+suite's cases need each (`sisu-conformance --native-survey
+conformance/native.list` lists them):
+
+- **The library types the interpreter implements**: `Mutex`, `Shared`,
+  `Weak`, `Cell` and `Arena`. *Pay*: runtime objects with their
+  contracts, or Sisu over raw storage (the entry above on their drops).
+- **Tasks and the scheduler**: `task.scope`, `task.race`, channels,
+  `select` and generators. The scheduler is interpreter code. *Pay*: a
+  native scheduler with the seeded order of the interpreter's (tasks on
+  stacks of their own, switched at the same yield points), the next
+  round's first item.
+- **Capabilities other than the host's**: fakes, attenuations,
+  interceptors, `cap.lend`, `Clock.fake` and the `sim` profile, because a
+  call through a handle is compiled to the host's object (decision 194);
+  and of the host's operations, the network, processes and reading a file
+  as `bytes`, with `bytes` itself. *Pay*: handles as `dyn` values of
+  their traits (the entry "Handles forward by dispatch" above), which the
+  backend has (decision 202), and the remaining host operations in the
+  runtime.
+- **Intrinsics the runtime does not have**: `fmt.strftime` among those the
+  suite reaches; `sisu_rt::abi::Intrinsic` lists the ones it has. *Pay*:
+  each one, as the construct guide's step 8 says.
+- **A function with a parameter of type `Iterable[T]`** (`sorted` of a
+  type with its own `Ord`, which runs the Sisu `sorted` rather than the
+  intrinsic): `Iterable[T]` stands for any iterable argument and has no
+  layout. *Pay*: instances keyed by the argument's own type, or lowering
+  giving the parameter the argument's type.
+- **A field of a union of error sets whose members lay it out
+  differently**, and a generic function used as a value. *Pay*: a read
+  through a switch on the member; a thunk per instance.
+- **The interpreter's modes**: the ownership monitor, the counterexample
+  mode, the capability log and replay, hot replacement, `--stats`, the
+  schedulers' options, and `sisu test`, whose tests the backend does not
+  compile. *Pay*: `sisu test --native`, once tasks are native (tests run
+  in parallel tasks).
+
+What round 1 does, and a later round must not copy:
+
+- **Four leaks** (decision 200): the heap environment of a closure that
+  holds values (`own` captures), the list of copies a `*rest` pattern
+  borrows from, the nodes of error return traces, and the cell of a `Box`
+  or a `dyn` whose value was moved out (lowering's coercion of a
+  `Box[T]` to a `Box[dyn Trait]` moves the value out of the first box,
+  and a method that takes `own self` takes it out of its `dyn`). Each
+  grows with what the program makes and none changes what it prints.
+  *Pay*: a closure's environment dropped
+  with the closure (a drop for function values, which SIR does not have);
+  `*rest` as a view, a pointer and a length, once `Slice` is one; traces
+  freed with the last error that holds them; and SIR ending the storage
+  of a box or a `dyn` whose value was moved, so that the cell is freed.
+- **Every part of a value is a word** (decision 188): a `u8` takes eight
+  bytes, an option a word for its tag, a `bool` a word. *Pay*: in a
+  release backend, each type its own width and alignment, and options
+  that use a niche; the layout stays in `sisu_rt::abi`, so both sides
+  change together.
+- **Every temporary has a stack slot of its own**, so a large function's
+  frame is the sum of its temporaries. *Pay*: scalars in Cranelift
+  variables and slots reused between statements.
+- **Instances are not shared**: each list of type arguments compiles a
+  function again (decision 191); 10 asks for sharing by shape and a
+  budget. *Pay*: compile once per layout rather than per type where the
+  code is the same.
+- **The type table is read at start**, and the structural operations walk
+  it on every call (decision 192), as the interpreter's walk its values.
+  *Pay*: a release backend generates them per type where profiling says
+  so.
+- **No debug information**: the executable has no DWARF for the Sisu
+  source, so a debugger shows the runtime's frames and addresses; a
+  panic's stack trace is the runtime's own. *Pay*: line tables from SIR's
+  locations, and DWARF types from the type table (10, "Debugging and
+  profiling").
+- **The runtime trusts the generated code**: an address or a type number
+  that breaks the runtime's rules is not checked everywhere, and where it
+  is, it is `R0122` and status 134, not a diagnostic of the program.
 
 ## Not yet done from Phases 0, 2, 3, 4, 6 and 8
 

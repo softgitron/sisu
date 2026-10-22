@@ -145,6 +145,39 @@ parameters, positions, labels and fixes) is printed once, however many
 times the implementation found it (the cases of a parametrised test share
 one body: `testing/parametrised_once`).
 
+## The native mode
+
+`native.list` names the cases the native backend (stage 2;
+[architecture.md](../docs/architecture.md), "Stage 2") must build and
+run, one per line as the runner names them (`run/arithmetic`); `#`
+starts a comment. With `--native LIST` the runner builds each case with
+`sisu build --native --output EXE NAME.sisu` (a package case without the
+file) in the case's sandbox, runs the executable as it runs `sisu run`
+(with the case's `.args`, `.stdin` and `.cwd`, an empty environment and
+the time limit), and compares:
+
+- standard output with `NAME.out`;
+- the exit status with `NAME.status` (absent means `0`);
+- standard error with `NAME.err` (absent means empty), except that when
+  the build printed warnings, which a `sisu run` prints before the
+  program's own standard error, the program's must be the end of
+  `NAME.err`.
+
+The expectations are the interpreter's: the native mode reads no file of
+its own and does not bless. `cargo test -p sisu-driver --test native`
+runs the list, and CI runs it on every push. `--native-survey LIST`
+builds and runs every runnable case the list leaves out (one with an
+`.out`, `.err` or `.status`) and prints `pass` or the first thing that
+stopped it, which is how the list grows:
+
+```text
+cargo run -p sisu-conformance -- --sisu target/debug/sisu --native conformance/native.list
+cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-survey conformance/native.list
+```
+
+(from `compiler/`). The summary line counts the cases and their lines,
+and the time spent building and running them.
+
 ## Groups
 
 - `examples/` holds copies of `proposal/examples/hello.sisu` and

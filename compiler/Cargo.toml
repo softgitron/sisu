@@ -15,6 +15,8 @@ members = [
     "crates/sisu-lower",
     "crates/sisu-borrowck",
     "crates/sisu-interp",
+    "crates/sisu-rt",
+    "crates/sisu-codegen",
     "crates/sisu-driver",
     "crates/sisu-conformance",
 ]
@@ -38,6 +40,8 @@ sisu-sir = { path = "crates/sisu-sir" }
 sisu-lower = { path = "crates/sisu-lower" }
 sisu-borrowck = { path = "crates/sisu-borrowck" }
 sisu-interp = { path = "crates/sisu-interp" }
+sisu-rt = { path = "crates/sisu-rt" }
+sisu-codegen = { path = "crates/sisu-codegen" }
 sisu-driver = { path = "crates/sisu-driver" }
 sisu-conformance = { path = "crates/sisu-conformance" }
 
