@@ -41,6 +41,81 @@ fn native_conformance_from_sir() {
     assert!(report.failures.is_empty(), "{}", report.render());
 }
 
+/// The same cases built with the release profile, every contract checked
+/// as the interpreter's runs check them (decision 232): Cranelift's
+/// optimisations change nothing a program does.
+#[test]
+fn native_conformance_release() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let root = compiler_dir().join("conformance/cases");
+    let text =
+        std::fs::read_to_string(compiler_dir().join("conformance/native.list")).expect("the coverage list");
+    let list = sisu_conformance::native::read_list(&text);
+    let report = sisu_conformance::native::run_native_release(&sisu, &root, &list);
+    println!("{}", report.render());
+    assert!(report.cases > 0, "no cases in the coverage list");
+    assert!(report.failures.is_empty(), "{}", report.render());
+}
+
+/// A package's native builds go to `build/PROFILE/NAME` beside its
+/// lockfile (decision 231): `sisu build --native` to `build/debug`, with
+/// `--release` to `build/release`, which checks only the preconditions
+/// unless the manifest says otherwise (decision 232); `sisu run --native`
+/// builds there too and keeps it; `sisu build` alone still only checks
+/// and lowers; and `--release` goes with `--native` only (`D0111`).
+#[test]
+fn a_package_builds_where_its_profile_goes() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = scratch("profiles");
+    copy_dir(&compiler_dir().join("conformance/cases/packages/modules.pkg"), &dir);
+    let expected = std::fs::read_to_string(compiler_dir().join("conformance/cases/packages/modules.out"))
+        .expect("the expected output");
+    let sisu_in = |args: &[&str]| {
+        let out = std::process::Command::new(&sisu).args(args).current_dir(&dir).output().expect("sisu runs");
+        (
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+            out.status.code(),
+        )
+    };
+    // The plain build checks and lowers: nothing is written but the
+    // lockfile.
+    let (out, _, status) = sisu_in(&["build"]);
+    assert_eq!((out.as_str(), status), ("built the package `atlas` 0.2.0 (modules: 4)\n", Some(0)));
+    assert!(!dir.join("build").exists());
+    for (flags, profile) in [(&["--native"][..], "debug"), (&["--native", "--release"][..], "release")] {
+        let mut args = vec!["build"];
+        args.extend(flags);
+        let (out, err, status) = sisu_in(&args);
+        assert_eq!(status, Some(0), "{err}");
+        let exe = dir.join("build").join(profile).join("atlas");
+        assert!(out.ends_with(&format!("build/{profile}/atlas`\n")), "{out}");
+        let ran = std::process::Command::new(&exe).current_dir(&dir).output().expect("the program runs");
+        assert_eq!(String::from_utf8_lossy(&ran.stdout), expected, "{profile}");
+    }
+    // A release build checks the preconditions only, unless the manifest
+    // says `[profile.release] contracts`.
+    std::fs::write(
+        dir.join("src/main.sisu"),
+        "struct Count:\n    n: int\n    invariant self.n >= 0\n\ndef main():\n    let c = Count(n=-1)\n    print(c.n)\n",
+    )
+    .expect("the program");
+    let (_, _, status) = sisu_in(&["run", "--native"]);
+    assert_eq!(status, Some(101), "the debug profile checks the invariant");
+    assert!(dir.join("build/debug/atlas").is_file(), "`sisu run --native` keeps a package's executable");
+    let (out, _, status) = sisu_in(&["run", "--native", "--release"]);
+    assert_eq!((out.as_str(), status), ("-1\n", Some(0)), "the release profile checks preconditions only");
+    let manifest = std::fs::read_to_string(dir.join("sisu.toml")).expect("the manifest");
+    std::fs::write(dir.join("sisu.toml"), format!("{manifest}\n[profile.release]\ncontracts = \"all\"\n"))
+        .expect("the manifest");
+    let (_, _, status) = sisu_in(&["run", "--native", "--release"]);
+    assert_eq!(status, Some(101), "the manifest asks for every contract");
+    let (_, err, status) = sisu_in(&["build", "--release"]);
+    assert_eq!(status, Some(2));
+    assert!(err.contains("goes with `--native`"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The serialised SIR of every case the backend compiles reads back into
 /// a program that writes the same bytes (decision 212): the reader parses
 /// exactly what the writer prints, whole programs with the standard
@@ -164,6 +239,58 @@ fn nothing_the_program_allocates_is_live_at_exit() {
     assert_eq!(status, Some(0));
     assert_eq!(out, expected);
     assert_eq!(err, "allocations: 0 of the runtime's live at exit\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A struct, an enum or a tuple dropped whole frees what its fields hold
+/// (lists, dicts, sets, texts, boxes), with drop glue or without (decision
+/// 218), so a program that makes and drops them in a loop runs in bounded
+/// memory: `tests/leaks/aggregates.sisu`, run natively under
+/// `SISU_RT_ALLOCS=peak` for 20 and for 500 rounds, holds at most as many
+/// allocations at once either way and none at exit (decision 229), and
+/// prints what the interpreter prints.
+#[test]
+fn aggregates_dropped_in_a_loop_run_in_bounded_memory() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = scratch("aggregates");
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/leaks/aggregates.sisu");
+    std::fs::copy(&fixture, dir.join("aggregates.sisu")).expect("the fixture");
+    let interpreted = std::process::Command::new(&sisu)
+        .args(["run", "aggregates.sisu", "20"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu runs");
+    let (expected, _, status) = outcome(interpreted);
+    assert_eq!(status, Some(0));
+    let built = std::process::Command::new(&sisu)
+        .args(["build", "--native", "--output", "aggregates", "aggregates.sisu"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu builds");
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let peak = |rounds: &str| {
+        let ran = std::process::Command::new(dir.join("aggregates"))
+            .arg(rounds)
+            .env("SISU_RT_ALLOCS", "peak")
+            .current_dir(&dir)
+            .output()
+            .expect("the program runs");
+        let (out, err, status) = outcome(ran);
+        assert_eq!(status, Some(0), "{err}");
+        let lines: Vec<&str> = err.lines().collect();
+        assert_eq!(lines.len(), 2, "the runtime's two lines of report: {err}");
+        assert_eq!(lines[1], "allocations: 0 of the runtime's live at exit", "{rounds} rounds");
+        let most: u64 = lines[0]
+            .strip_prefix("allocations: at most ")
+            .and_then(|r| r.strip_suffix(" of the runtime's live at once"))
+            .and_then(|n| n.parse().ok())
+            .expect("the most live at once");
+        (out, most)
+    };
+    let (out, few) = peak("20");
+    assert_eq!(out, expected);
+    let (_, many) = peak("500");
+    assert_eq!(few, many, "the allocations live at once grow with the rounds");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

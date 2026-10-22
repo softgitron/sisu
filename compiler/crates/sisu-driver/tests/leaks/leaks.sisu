@@ -67,6 +67,9 @@ def load(i: int) -> int ! {ParseError, LoadError}:
 def pair(i: int) -> (String, int) ! ParseError:
     return Ok(("first{i}", twice("t{i}")?))
 
+def count_of[T](xs: list[T]) -> int:
+    return len(xs)
+
 def main():
     var total = 0
     for i in range(40):
@@ -131,6 +134,13 @@ def main():
                 total += p.1
             case Err(e):
                 total += len("{e}")
+        # A `Slice` of a `bytes`, which holds copies of its bytes, and a
+        # generic function as a value (decision 225).
+        let raw = "r{i}".encode()
+        let bytes_seen = raw.as_slice()
+        total += len(bytes_seen) + bytes_seen[0].to_int()
+        let count: (list[String]) -> int = count_of
+        total += count(["p{i}".to_string(), "q".to_string()])
         print("{total}")
     let last = Loud(name="last", tags=["x".to_string(), "y".to_string()])
     print(len(last.name))

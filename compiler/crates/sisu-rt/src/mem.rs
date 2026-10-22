@@ -9,9 +9,23 @@ use std::sync::atomic::{AtomicI64, Ordering::Relaxed};
 /// The cells kept for the whole run ([`alloc_kept`]) are not counted.
 static LIVE: AtomicI64 = AtomicI64::new(0);
 
+/// The most of them live at once so far (decision 229).
+static PEAK: AtomicI64 = AtomicI64::new(0);
+
 /// The number of the program's allocations live now.
 pub(crate) fn live() -> i64 {
     LIVE.load(Relaxed)
+}
+
+/// The most of the program's allocations that were live at once.
+pub(crate) fn peak() -> i64 {
+    PEAK.load(Relaxed)
+}
+
+/// One more allocation is live.
+fn counted() {
+    let now = LIVE.fetch_add(1, Relaxed) + 1;
+    PEAK.fetch_max(now, Relaxed);
 }
 
 /// A runtime object of a value counts itself live while it exists.
@@ -19,7 +33,7 @@ pub(crate) struct Live(());
 
 impl Live {
     pub(crate) fn new() -> Live {
-        LIVE.fetch_add(1, Relaxed);
+        counted();
         Live(())
     }
 }
@@ -41,7 +55,7 @@ unsafe extern "C" {
 pub(crate) fn alloc(bytes: usize) -> *mut u8 {
     let p = alloc_kept(bytes);
     if !p.is_null() {
-        LIVE.fetch_add(1, Relaxed);
+        counted();
     }
     p
 }
@@ -80,7 +94,7 @@ pub(crate) fn grow(p: *mut u8, bytes: usize) -> *mut u8 {
         crate::rt::abort("out of memory");
     }
     if p.is_null() {
-        LIVE.fetch_add(1, Relaxed);
+        counted();
     }
     q
 }

@@ -830,11 +830,12 @@ body yields a THIR body, with ill-typed parts typed `Error`.
   what it captures in (copies what is `Copy`), cannot change it
   (`E0424`), and so may be stored and returned. A task's captures are
   "Send, Sync and what a task captures".
-- What a `Shared`, `Cell`, `Mutex`, `Cap` or capability handle owns can
-  be neither a view (`E0421`) nor must-consume (`E0422`, which looks
-  through fields), checked once the type is known; a `Shared` value is
-  reached through the owner, and nothing may be changed through it except
-  inside a `Cell` or a `Mutex`.
+- What a `Shared`, `Cell`, `Mutex`, `Cap`, capability handle or channel
+  owns can be neither a view (`E0421`) nor must-consume (`E0422`, which
+  looks through fields), checked once the type is known (a channel's
+  receiver may keep what was sent longer than what it borrows lives,
+  decision 230); a `Shared` value is reached through the owner, and
+  nothing may be changed through it except inside a `Cell` or a `Mutex`.
 - Coercions where a type is expected, besides those below: a value
   implementing a capability's operations trait to the handle
   (`Coercion::ToCap`), a narrower integer to a wider one
@@ -1403,7 +1404,9 @@ inserted into it, or an intrinsic keeping an `own` argument there (an
 entry of a dict counts as pointing into the dict). A closure capturing a
 local holds the loans of its captures, so storing or returning it is
 caught by the same rules: it never escapes the frame of what it borrows.
-"Never sent across a task" holds vacuously until tasks exist (Phase 6).
+"Never sent across a task" holds by the task rules (section "Send, Sync
+and what a task captures") and by the type of what a channel carries,
+which is never a view (decision 230).
 
 ### 5. Must-consume
 
@@ -1508,8 +1511,8 @@ counterexample mode finds should be checked against this list first.
     is assumed to hold the loans its parameters may, so storing a generic
     value where a view may not go is rejected even when every call's
     type argument owns its data.
-14. **What a `Shared`, `Cell` or `Mutex` holds is decided by its type.**
-    A view or a must-consume value cannot be put in one (`E0421`,
+14. **What a `Shared`, `Cell`, `Mutex` or channel holds is decided by its
+    type.** A view or a must-consume value cannot be put in one (`E0421`,
     `E0422`) even when it would be released before what it borrows.
 
 ## The interpreter
@@ -2789,12 +2792,15 @@ sisu run [FILE] [ARGS...]    check, lower and run; `--watch` swaps in each save 
                              `--contracts=off|preconditions|all` what it checks (07),
                              `--record LOG [--redact fs,net,...]` writes the capability log,
                              `--stats` the scheduler's numbers, `--stats stack-depth` the
-                             frame depths, `--stats shared` each `Shared` construction site
+                             frame depths, `--stats shared` each `Shared` construction site,
+                             `--native [--release]` builds it natively and runs that
 sisu replay LOG              run a recorded program again against its log (`--monitor`)
 sisu check [FILE]            diagnostics; `--format=ids` for the conformance form,
                              `--explain` the signatures with their contracts,
                              `--diary LOG` appends them to the friction log
-sisu build [FILE]            check and lower a package (or a file), and write its lockfile
+sisu build [FILE]            check and lower a package (or a file), and write its lockfile;
+                             `--native [--release] [--output PATH]` the executable, a
+                             package's in `build/debug/` or `build/release/`
 sisu sir [FILE]              the serialised SIR, drops placed and `comptime` values baked
                              (also for a program the ownership checker rejects)
 sisu test [FILE]             run the tests (and `tests/*.transcript`) under the monitor: ok,
@@ -2883,7 +2889,9 @@ dependencies (decisions 186 and 203):
 - `sisu-codegen` compiles a `sisu_sir::Program` to an object file that
   defines the C `main`, and links it. It writes each function's Cranelift
   IR on the calling thread and compiles the IR on threads, defining the
-  machine code in the order it made the functions (decision 219).
+  machine code in the order it made the functions (decision 219); each
+  thread keeps its Cranelift context and hands every function back,
+  cleared, for the next to be written into (decision 228).
 - `sisu-rt` is the runtime: a static library (`libsisu_rt.a`) linked into
   every executable, and a Rust library whose `abi` module the code
   generator shares, so that both sides of the boundary are one
@@ -2898,20 +2906,31 @@ run` does, compiles the SIR that `sisu sir` prints (after the ownership
 checker, jump threading and compile-time evaluation, so the backend
 compiles exactly what the interpreter runs), links it, and prints `built
 PATH`. The executable goes beside a file's source, named by its stem
-(`hello.sisu` makes `hello`), or into a package's directory, named by the
-package (`stage1/stage1`); `--output PATH` puts it elsewhere. `sisu run
---native [FILE] [ARGS...]` builds into a directory of its own under the
-system's temporary directory, runs the executable with the arguments, the
-standard streams and the environment of the command, removes it, and
-exits with its status (decision 197). It takes `--schedule-seed N`,
-`--explore N` and the scheduler's `--stats` (section "Tasks" below); it
-does not combine with the options that only the interpreter has (`--sir`,
-`--monitor`, `--defer-borrow`, `--stats stack-depth`, `--stats shared`,
-`--watch`, `--record`, `--scheduler`, `--contracts`; `D0109`). A construct the
-backend does not compile yet is `D0103`, naming it and the function it is
-in; the program still runs without `--native`. `SISU_NATIVE_SURVEY=1`
+(`hello.sisu` makes `hello`), or, for a package, to `build/PROFILE/NAME`
+in the directory of its lockfile, its workspace's or its own
+(`stage1/build/debug/stage1`; decision 231); `--output PATH` puts it
+elsewhere. `sisu build` without `--native` checks and lowers, as before,
+and writes nothing but the lockfile. The profile (09, "Build") is `debug`,
+or `release` with `--release` (decision 232): Cranelift's `speed`
+optimisations, the checks of overflow and bounds as in every build, and
+the contracts the root package's `[profile.release] contracts` names,
+preconditions by default (07); `--contracts=LEVEL` overrides it, in
+either profile. `sisu run --native [FILE] [ARGS...]` builds a package
+where its builds go and a file into a directory of its own under the
+system's temporary directory, which it removes after, runs the executable
+with the arguments, the standard streams and the environment of the
+command, and exits with its status (decision 197). It takes
+`--schedule-seed N`, `--explore N` and the scheduler's `--stats` (section
+"Tasks" below); it does not combine with the options that only the
+interpreter has (`--sir`, `--monitor`, `--defer-borrow`, `--stats
+stack-depth`, `--stats shared`, `--watch`, `--record`, `--scheduler`;
+`D0109`), and `--release` goes with `--native` only (`D0111`). A
+construct the backend does not compile yet is `D0103`, naming it and the
+function it is in; the program still runs without `--native`. `SISU_NATIVE_SURVEY=1`
 lists every such construct of a program with the number of functions
-that have it, and `SISU_NATIVE_TIMES=1` prints where a build's time went.
+that have it, and `SISU_NATIVE_TIMES=1` prints where a build's time went:
+a line for each step of checking and lowering the program (`time: names
+resolved 133.0 ms`), of generating its code, and the link.
 `sisu build --native --from-sir FILE [--output PATH]` and `sisu run
 --native --from-sir FILE [ARGS...]` compile a file of serialised SIR
 instead, without the front end (section "From serialised SIR" below).
@@ -3136,7 +3155,11 @@ runtime objects of iterators, tables, arenas and return traces), and
 `SISU_RT_ALLOCS=1` makes a native run report the count at exit (`R0125`),
 which the native mode of the conformance runner holds at 0 for every run
 that does not abort (decision 226), as a test does for a program that
-makes everything the first two rounds leaked. What the interpreter's host
+makes everything the first two rounds leaked; `SISU_RT_ALLOCS=peak` also
+reports the most that were live at once (`R0126`), which a test holds to
+the same number for 20 and for 500 rounds of a loop that makes and drops
+values whose fields hold lists, dicts, sets, texts and boxes (decision
+229). What the interpreter's host
 lets go of without dropping it, the runtime frees without running Sisu
 code (forgetting: no drop glue, no `Drop`, no guard's check, decision
 223): the error a `main` returned and the objects of capabilities and the
@@ -3360,9 +3383,9 @@ arguments, standard input, an environment holding only `SISU_RT_ALLOCS=1`),
 compares its standard output, exit status and standard error with the
 files the interpreter meets, and requires the runtime's report to say
 that nothing it allocated is live at exit (decision 226); `cargo test`
-does the same
-(`crates/sisu-driver/tests/native.rs`), from source and from serialised
-SIR, and CI runs both on every push. `--native-survey LIST` tries every
+does the same (`crates/sisu-driver/tests/native.rs`), from source, from
+serialised SIR and with the release profile (every contract checked,
+decision 232), and CI runs all three on every push. `--native-survey LIST` tries every
 runnable case the list leaves out and says which would pass, or the first
 construct that stops each.
 
@@ -3374,26 +3397,31 @@ what the backend still leaves out.
 ### Compile time and run time
 
 Measured on one machine (4 cores, shared, so times vary by a third from
-one run to the next), with the release `sisu`, the best of five runs
-taken in turn with the compiler before decision 219. Stage 1
-(`compiler/stage1`, 46 293 lines of Sisu, with the 6 434 of the standard
-library) builds natively in 4.4 s, against 13.3 s before (medians 4.6 and
-14.1 s): its front end takes 2.5 s (`sisu check`; 7.4 s before), code
-generation 1.3 s for 1 847 function instances and 173 916 SIR statements
-(5.3 s before), and the link 0.10 s; the executable, 16 MB, is the same
-file byte for byte. Most of the gain is the four cores, the rest is less
-work: on one core the build takes 10.6 s against 12.9. That is 0.08 s for
-each thousand lines, so a clean debug build of 100 kLOC would take about
-8 s, within 10's target of 10 s. What still runs on one thread is
-resolution, lowering, and the code generator's writing of IR, about half
-of the time left. With a debug `sisu`, whose Cranelift checks every
-function it is given, code generation takes 3.5 s. A small program
-builds in 0.18 to 0.20 s (0.21 to 0.30 before), of which code generation
-is 1 to 3 ms and the link 80 to 100 ms; the rest is the front end, which
-`sisu run` spends as well.
+one run to the next), with the release `sisu`, the best of runs taken in
+turn, medians in brackets. Round 2 put the costliest steps on threads
+(decision 219): stage 1 as it was then (46 293 lines of Sisu, with the
+6 434 of the standard library) built natively in 4.4 s instead of 13.3 s.
+Round 3 took on what still ran on one thread (decision 228). Stage 1 now
+(`compiler/stage1`, 52 441 lines) builds in 3.9 s (4.1 s, nine runs),
+against 4.3 s (4.7 s) with that round's threads and cuts turned off and
+4.0 s (4.4 s) with round 2's compiler, which wrote no debug information.
+Name resolution takes 0.13 s against 0.18 s, lowering 0.24 s against
+0.59 s, the type checker 0.16 s and the ownership checker 1.3 s, on
+threads already, and code generation 1.4 s for 2 101 function instances
+and 213 660 SIR statements, of which writing the IR is 0.61 s against
+0.93 s; the link takes 0.08 s, and the SIR and the 20 MB executable are
+the same bytes either way. Code generation is bounded by Cranelift's compiling,
+3.2 s of the 11 s of processor time a build spends: the IR is written
+before the threads have compiled what they were given. That is 0.066 s
+for each thousand lines, so a clean debug build of 100 kLOC would take
+under 7 s, within 10's target of 10 s. A small program builds in 0.12
+to 0.15 s, of which code generation is 1 to 2 ms and the link 60 to 85
+ms; the rest is the front end, which `sisu run` spends as well.
 
 The executables run 10 to 30 times as fast as the interpreter. On stage
-1's commands, from `compiler/stage1`, with byte-identical output:
+1's commands, from `compiler/stage1`, with byte-identical output, as
+round 2 measured them on stage 1 as it was then (decisions 232 and 233
+have this round's times of some):
 
 | command | interpreter | native |
 |---|---:|---:|
@@ -4630,3 +4658,97 @@ what transcribing the Rust type checker found in stage 0)
      own, decision 223). A panic's message needs none of this: it names
      the Sisu functions and lines as the interpreter's does, from the
      locations the code keeps as it runs.
+228. The steps of a build that ran on one thread do less on it, and what
+     the compiler writes is the same byte for byte (stage 1's SIR and
+     executable, every case's). Resolution plans the derived impls of
+     every module before it declares any, runs their templates on
+     threads (a template is a pure function of the type's shape) and
+     parses the texts they write on threads into the cache of generated
+     texts, then declares them in the modules' order. Lowering hands a
+     body to threads when the worklist first names a function of it, and
+     the program's own bodies at once (not the standard library's, of
+     which a program reaches few), lowering one itself while it waits;
+     the worklist takes each body's functions when it comes to them, in
+     its own order, so the program is the one it makes alone. The writing
+     of IR stays on one thread, since the numbers it gives types,
+     functions and data as it meets them are in the object file, and
+     threads would have to number them again in that order and rewrite
+     the IR; it does less instead: it finds functions by name through an
+     index (SIR's `function` searched them all), hashes its maps with
+     FxHash's function rather than SipHash, does not rebuild a type that
+     has nothing to put in, keeps whether a type needs a drop, and the
+     threads that compile keep their Cranelift contexts and hand each
+     function back cleared, to be written into again on the thread that
+     allocated it. Stage 1 builds in 3.9 s instead of 4.3 s (section
+     "Compile time and run time"); `SISU_NATIVE_TIMES=1` reports each
+     step.
+229. A native run under `SISU_RT_ALLOCS=peak` also reports the most of
+     the runtime's allocations that were live at once (`R0126`), before
+     the count at exit. A program whose memory is bounded holds as many at
+     once however many rounds its loops run, which a test checks of
+     structs, enums and tuples whose fields hold lists, dicts, sets, texts
+     and boxes, made, copied, replaced and dropped in a loop
+     (`tests/leaks/aggregates.sisu`, for 20 and for 500 rounds). Dropping
+     such a value frees every part, with drop glue or without, since
+     decision 218: the leak stage 1 found (a struct with a `list[bool]`
+     field kept the list), which made its lowering of its own package
+     peak at 3.4 GB natively, was a backend from before that decision;
+     that run now peaks at 530 MB (the interpreter's at 2.5 GB). A count
+     of allocations rather than the process's resident memory, since the
+     count is the same on every machine and every run.
+230. What a channel carries is checked as what a `Shared`, `Cell` or
+     `Mutex` owns is: it is neither a view (`E0421`) nor must-consume
+     (`E0422`), as the prelude's documentation of `channel` says. A
+     channel's receiver may keep what was sent after what it borrows is
+     gone: the checker accepted `tx.send("a{i}")` on a `channel[str]`,
+     whose view of a temporary text the interpreter printed (its `str`
+     owns its text) and a native run read after the text was freed. The
+     two programs of the suite that sent string literals through a
+     `channel[str]` send `String`s instead, with the same output, and
+     `concurrency/channel_owner_errors` holds the diagnostics. As for a
+     `Shared`, a type parameter and a function value count as views
+     (known over-rejections 13 and 14), so a generic function cannot make
+     a `channel[T]`, nor a program a channel of closures. Stage 1's type
+     checker follows.
+231. The native build of a package writes its executable to
+     `build/PROFILE/NAME` in the directory of its lockfile, its
+     workspace's or its own. 09 names the profiles (`debug`, `release`,
+     `release-size`) but not where a build's artefacts go; a directory per
+     profile keeps a release build from replacing a debug one, as Cargo's
+     `target/PROFILE` and SwiftPM's `.build/PROFILE` do, under the name of
+     the command that makes it. A single file's executable still goes
+     beside it, named by its stem. `sisu run --native` builds a package's
+     there and keeps it, the executable a debugger is then pointed at, and
+     a file's aside as before. `sisu build` without `--native` keeps its
+     meaning: it checks and lowers, and writes nothing but the lockfile.
+232. `--release` is the native backend's release profile as far as it
+     goes without LLVM (09: "LLVM, optimised, overflow and bounds checks
+     on, contracts per manifest"): Cranelift's `speed` level rather than
+     `none`; the checks of overflow and bounds of every build, since no
+     profile turns them off; and the contracts of the root package's
+     `[profile.release] contracts`, preconditions by default (07), which
+     `--contracts=LEVEL`, now accepted with `--native`, overrides. It goes
+     with `--native` only (`D0111`). The runner's `--native-release` mode
+     builds every case of the list so with every contract checked, and
+     `cargo test` and CI hold it to the interpreter's expectations. It
+     buys little yet. Stage 1 builds in 4.5 s instead of 4.0 s (code
+     generation 2.0 s instead of 1.5 s) and runs as fast: its batch of the
+     409 conformance files 2.05 s against 2.22 s, its type check of the
+     prelude 1.66 s against 1.67 s, its lowering of its own package 51.4 s
+     against 51.5 s, with the same output. Loops of arithmetic and indexing
+     gain 8 to 20% (`fib(32)` 0.04 s against 0.05 s, a sieve of 3 million
+     0.26 s against 0.31 s). Stage 1's time is mostly in the runtime's
+     intrinsics, which a release build calls as a debug one does (decision
+     233 made them cheaper for both), and the generated code keeps every
+     SIR local in a stack slot, which Cranelift's optimisations do not
+     keep in registers (port-debt.md, "Stage 2").
+233. A call of an intrinsic does less in the runtime. The runtime's own
+     table of intrinsics is matched first and the modules with tables of
+     their own (cells, bytes, capabilities, the host's network) only for
+     the rest, where each of the four was asked first, and the drops the
+     runtime moved aside (decision 205) are drained only when there are
+     some, which a count kept beside them says in one load. Stage 1's
+     native type check of the prelude runs 12.1 rather than 15.1 billion
+     instructions (1.22 s against 1.63 s), its batch of the conformance
+     files takes 1.6 s against 2.2 s, and its lowering of its own package
+     46.6 s against 48.8 s, with the same output.

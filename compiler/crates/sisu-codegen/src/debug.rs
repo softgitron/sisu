@@ -338,6 +338,10 @@ fn add_sections(
     Ok(())
 }
 
+/// A variant's fields as the debug information describes them: each one's
+/// name, type and offset in the value.
+type Fields = Vec<(String, Type, u32)>;
+
 /// The DWARF types of the program's types, made once each.
 struct TypeBuilder<'t, 'p> {
     types: &'t mut Types<'p>,
@@ -573,7 +577,7 @@ impl TypeBuilder<'_, '_> {
                 let names: &[&str] = if n == "Option" { &["Some", "None"] } else { &["Ok", "Err"] };
                 let payloads =
                     if n == "Option" { vec![Some(arg(0)), None] } else { vec![Some(arg(0)), Some(arg(1))] };
-                let variants: Vec<(String, Vec<(String, Type, u32)>)> = names
+                let variants: Vec<(String, Fields)> = names
                     .iter()
                     .zip(payloads)
                     .map(|(v, p)| {
@@ -641,7 +645,7 @@ impl TypeBuilder<'_, '_> {
         size: u32,
         tag: u32,
         head: &[(&str, u32)],
-        variants: Vec<(String, Vec<(String, Type, u32)>)>,
+        variants: Vec<(String, Fields)>,
     ) -> UnitEntryId {
         let id = self.structure(dwarf, name, size);
         self.ids.insert(t.clone(), id);

@@ -126,4 +126,3 @@ impl<'a> Ahead<'a> {
         self.changed.notify_all();
     }
 }
-

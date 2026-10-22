@@ -29,6 +29,8 @@ pub struct NativeReport {
     /// In the mode from SIR: the cases built from their own `.sir`
     /// expectation (the others from `sisu sir`'s output).
     pub from_sir: Option<usize>,
+    /// Built with the release profile.
+    pub release: bool,
     pub failures: Vec<Failure>,
     /// Time spent building (the front end, the backend and the linker)
     /// and running the executables, over every case.
@@ -46,6 +48,7 @@ impl NativeReport {
         }
         let what = match self.from_sir {
             Some(own) => format!("native from SIR: {} cases ({own} from their own `.sir`)", self.cases),
+            None if self.release => format!("native, release: {} cases ({} lines)", self.cases, self.lines),
             None => format!("native: {} cases ({} lines)", self.cases, self.lines),
         };
         out.push_str(&format!(
@@ -70,17 +73,25 @@ pub fn read_list(text: &str) -> Vec<String> {
 /// Builds and runs every case of `list` natively, on as many threads as
 /// the machine has (at most eight).
 pub fn run_native(sisu: &Path, root: &Path, list: &[String]) -> NativeReport {
-    run_list(sisu, root, list, false)
+    run_list(sisu, root, list, false, false)
 }
 
 /// [`run_native`], each case built from serialised SIR (decision 212).
 pub fn run_native_from_sir(sisu: &Path, root: &Path, list: &[String]) -> NativeReport {
-    run_list(sisu, root, list, true)
+    run_list(sisu, root, list, true, false)
 }
 
-fn run_list(sisu: &Path, root: &Path, list: &[String], from_sir: bool) -> NativeReport {
+/// [`run_native`], each case built with the release profile and every
+/// contract checked (`sisu build --native --release --contracts=all`,
+/// decision 232): Cranelift's optimisations must not change what a program
+/// does.
+pub fn run_native_release(sisu: &Path, root: &Path, list: &[String]) -> NativeReport {
+    run_list(sisu, root, list, false, true)
+}
+
+fn run_list(sisu: &Path, root: &Path, list: &[String], from_sir: bool, release: bool) -> NativeReport {
     let all = discover(root);
-    let mut report = NativeReport::default();
+    let mut report = NativeReport { release, ..NativeReport::default() };
     let mut cases = Vec::new();
     for name in list {
         match all.iter().find(|c| c.name == *name) {
@@ -92,7 +103,7 @@ fn run_list(sisu: &Path, root: &Path, list: &[String], from_sir: bool) -> Native
             }),
         }
     }
-    let results = parallel(&cases, |case, n| native_case(sisu, case, n, from_sir));
+    let results = parallel(&cases, |case, n| native_case(sisu, case, n, from_sir, release));
     if from_sir {
         report.from_sir = Some(results.iter().filter(|r| r.own_sir).count());
     }
@@ -113,7 +124,7 @@ pub fn survey(sisu: &Path, root: &Path, list: &[String]) -> Vec<(String, String)
         .into_iter()
         .filter(|c| !list.contains(&c.name) && ["out", "err", "status"].iter().any(|e| c.path(e).exists()))
         .collect();
-    let results = parallel(&cases, |case, n| native_case(sisu, case, n, false));
+    let results = parallel(&cases, |case, n| native_case(sisu, case, n, false, false));
     cases
         .iter()
         .zip(results)
@@ -159,7 +170,7 @@ struct CaseResult {
     own_sir: bool,
 }
 
-fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool) -> CaseResult {
+fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool, release: bool) -> CaseResult {
     let mut r = CaseResult {
         failures: Vec::new(),
         build: Duration::ZERO,
@@ -170,8 +181,15 @@ fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool) -> CaseResult
     let fail = |r: &mut CaseResult, check: &str, detail: String| {
         r.failures.push(Failure { case: case.name.clone(), check: check.to_string(), detail });
     };
-    // The two modes may run at once (`cargo test`): sandboxes of their own.
-    let sandbox = match Sandbox::new(case, if from_sir { 2_000_000 } else { 1_000_000 } + n) {
+    // The modes may run at once (`cargo test`): sandboxes of their own.
+    let mode = if from_sir {
+        2_000_000
+    } else if release {
+        3_000_000
+    } else {
+        1_000_000
+    };
+    let sandbox = match Sandbox::new(case, mode + n) {
         Ok(s) => s,
         Err(e) => {
             fail(&mut r, "setup", e.to_string());
@@ -181,6 +199,13 @@ fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool) -> CaseResult
     let exe = sandbox.dir.join("native-program");
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
     let mut build_args = s(&["build", "--native", "--output", &exe.display().to_string()]);
+    // The release profile with every contract checked, as the
+    // interpreter's runs check them, so that the expectations hold: what
+    // is compared is what Cranelift's optimisations do.
+    if release {
+        build_args.push("--release".to_string());
+        build_args.push("--contracts=all".to_string());
+    }
     if !case.package {
         build_args.push(format!("{}.sisu", case.stem));
         r.lines = std::fs::read_to_string(case.source()).map(|t| t.lines().count()).unwrap_or(0);

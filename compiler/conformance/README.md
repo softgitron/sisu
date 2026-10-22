@@ -173,8 +173,12 @@ builds each case from serialised SIR instead, `sisu build --native
 --from-sir NAME.sir`, with the case's own `NAME.sir` where it has one and
 what `sisu sir` prints for it otherwise (whose warnings stand for the
 build's), and compares the same way: the path a self-hosted front end's
-SIR takes to native code. `cargo test -p sisu-driver --test native` runs
-the list both ways, and CI runs both on every push. `--native-survey
+SIR takes to native code. With `--native-release LIST` it builds each case
+with the release profile, `sisu build --native --release
+--contracts=all`: every contract checked, as the interpreter checks them,
+so that what is compared is what Cranelift's optimisations do. `cargo
+test -p sisu-driver --test native` runs the list all three ways, and CI
+runs them on every push. `--native-survey
 LIST` builds and runs every runnable case the list leaves out (one with
 an `.out`, `.err` or `.status`) and prints `pass` or the first thing that
 stopped it, which is how the list grows:
@@ -182,6 +186,7 @@ stopped it, which is how the list grows:
 ```text
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-from-sir conformance/native.list
+cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-release conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-survey conformance/native.list
 ```
 
@@ -285,8 +290,9 @@ and the time spent building and running them.
   panics in tasks, cancellation at the blocking points, shields and
   deadlines, channels, `select`, races, mutexes across tasks with guards
   dropped by unwinding, the lowest-index rule of `pure` scopes, deadlock
-  reports, generators, `log`, and the diagnostics of `Send`, `Sync` and
-  what a task may borrow.
+  reports, generators, `log`, and the diagnostics of `Send`, `Sync`,
+  what a task may borrow and what a channel may carry
+  (`channel_owner_errors`: neither a view nor must-consume).
 - `capabilities/` is std.cap (06): attenuations, lent capabilities and
   their diagnostics, caretakers, interceptors (of the standard
   capabilities and, `wrap_trait`, of a program's own trait), the fakes

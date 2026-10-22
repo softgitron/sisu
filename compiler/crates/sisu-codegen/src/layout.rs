@@ -5,10 +5,10 @@
 //! return trace, its tag) and the payload.
 
 use crate::Error;
+use crate::fx::FxMap;
 use sisu_rt::abi::{self, Field, Kind, Slot, TypeEntry, Variant};
 use sisu_sir as sir;
 use sisu_sir::Type;
-use std::collections::HashMap;
 
 /// Whether a reference to the type is two words, the type of the value
 /// and its address: a `dyn`, and an `Iterable[T]` (decision 210).
@@ -22,23 +22,27 @@ pub(crate) fn fat(t: &Type) -> bool {
 
 /// The interned types of a program and their entries.
 pub(crate) struct Types<'p> {
-    prog: &'p sir::Program,
-    decls: HashMap<&'p str, &'p sir::TypeDecl>,
-    ids: HashMap<Type, u32>,
+    decls: FxMap<&'p str, &'p sir::TypeDecl>,
+    ids: FxMap<Type, u32>,
     /// `None` while a type's entry is being made.
     entries: Vec<Option<TypeEntry>>,
     /// The type each number stands for.
     by_id: Vec<Type>,
-    sizes: HashMap<Type, u32>,
+    sizes: FxMap<Type, u32>,
     /// The types whose sizes are being computed.
     sizing: Vec<Type>,
     /// The function table: the instances the runtime calls itself (drop
     /// glue, a mutex guard's `invariant` check), which the entries name by
     /// their index: (function, type arguments).
     pub glue: Vec<(String, Vec<Type>)>,
-    glue_index: HashMap<(String, Vec<Type>), u32>,
+    glue_index: FxMap<(String, Vec<Type>), u32>,
     /// Which declared types have drop glue, by name.
-    with_glue: HashMap<&'p str, bool>,
+    with_glue: std::collections::HashMap<&'p str, bool>,
+    /// The names of the program's functions.
+    fn_names: FxMap<&'p str, ()>,
+    /// Whether dropping a value of each type can do anything, by number,
+    /// as far as asked.
+    drops: Vec<Option<bool>>,
     /// The words of a function value's environment: the largest an `own`
     /// closure of the program needs, at least one (decision 224).
     pub env_words: u32,
@@ -47,22 +51,24 @@ pub(crate) struct Types<'p> {
 impl<'p> Types<'p> {
     pub(crate) fn new(prog: &'p sir::Program, env_words: u32) -> Types<'p> {
         let decls = prog.types.iter().map(|t| (t.name(), t)).collect();
+        let fn_names: FxMap<&'p str, ()> = prog.functions.iter().map(|f| (f.name.as_str(), ())).collect();
         let with_glue = prog
             .types
             .iter()
-            .map(|t| (t.name(), prog.function(&sir::types::glue_name(t.name())).is_some()))
+            .map(|t| (t.name(), fn_names.contains_key(sir::types::glue_name(t.name()).as_str())))
             .collect();
         Types {
             with_glue,
-            prog,
+            fn_names,
+            drops: Vec::new(),
             decls,
-            ids: HashMap::new(),
+            ids: FxMap::default(),
             entries: Vec::new(),
             by_id: Vec::new(),
-            sizes: HashMap::new(),
+            sizes: FxMap::default(),
             sizing: Vec::new(),
             glue: Vec::new(),
-            glue_index: HashMap::new(),
+            glue_index: FxMap::default(),
             env_words,
         }
     }
@@ -464,9 +470,10 @@ impl<'p> Types<'p> {
     /// the program has the function: what the runtime calls itself (drop
     /// glue, an `invariant` check).
     fn function_index(&mut self, name: &str, args: &[Type]) -> Option<u32> {
-        let name = name.to_string();
-        self.prog.function(&name)?;
-        let key = (name, args.to_vec());
+        if !self.fn_names.contains_key(name) {
+            return None;
+        }
+        let key = (name.to_string(), args.to_vec());
         if let Some(&i) = self.glue_index.get(&key) {
             return Some(i);
         }
@@ -485,8 +492,17 @@ impl<'p> Types<'p> {
 
     /// Whether dropping a value of the type can do anything.
     pub(crate) fn needs_drop(&mut self, t: &Type) -> Result<bool, Error> {
+        let id = self.id(t)? as usize;
+        if let Some(Some(known)) = self.drops.get(id) {
+            return Ok(*known);
+        }
         let mut seen = Vec::new();
-        self.needs_drop_in(t, &mut seen)
+        let answer = self.needs_drop_in(t, &mut seen)?;
+        if self.drops.len() <= id {
+            self.drops.resize(id + 1, None);
+        }
+        self.drops[id] = Some(answer);
+        Ok(answer)
     }
 
     fn needs_drop_in(&mut self, t: &Type, seen: &mut Vec<u32>) -> Result<bool, Error> {

@@ -36,10 +36,10 @@ def main():
         return sum
     print(total)
     # The receiver is gone: sending fails.
-    let tx2, rx2 = channel[str](capacity=1)
+    let tx2, rx2 = channel[String](capacity=1)
     _ = rx2
-    print(tx2.try_send("kept"))
-    print(tx2.send("lost"))
+    print(tx2.try_send("kept".to_string()))
+    print(tx2.send("lost".to_string()))
     let tx3, rx3 = channel[int](capacity=3)
     print(tx3.try_send(1))
     print(rx3.try_recv())

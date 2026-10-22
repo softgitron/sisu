@@ -139,8 +139,13 @@ unsafe extern "C" fn sisu_rt_start(
         if let Some(stats) = crate::sched::finish() {
             rt::stderr(&stats_report(&stats));
         }
-        // `SISU_RT_ALLOCS`: what the program left allocated (decision 217).
-        if std::env::var_os("SISU_RT_ALLOCS").is_some() {
+        // `SISU_RT_ALLOCS`: what the program left allocated (decision 217),
+        // and with `peak` the most it held at once (decision 229).
+        if let Some(how) = std::env::var_os("SISU_RT_ALLOCS") {
+            if how == "peak" {
+                let line = rt::render(msg::RUN_PEAK_ALLOCATIONS, &[("count", mem::peak().to_string())]);
+                rt::stderr(&format!("{line}\n"));
+            }
             let line = rt::render(msg::RUN_LIVE_ALLOCATIONS, &[("count", mem::live().to_string())]);
             rt::stderr(&format!("{line}\n"));
         }

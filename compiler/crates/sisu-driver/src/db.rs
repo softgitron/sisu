@@ -459,10 +459,10 @@ impl Db {
         }
         let mut tt = std::time::Instant::now();
         let program = self.program(name);
-        tphase("program", &mut tt);
+        step("the program found", &mut tt);
         let names: Vec<&str> = program.modules.iter().map(|(_, file, _)| file.as_str()).collect();
         self.parse_all(&names);
-        tphase("parse", &mut tt);
+        step("the files parsed", &mut tt);
         let mut files = Vec::new();
         for (_, file, _) in &program.modules {
             files.push(self.parsed(file)?);
@@ -541,16 +541,16 @@ impl Db {
             }
             let iface = h.finish();
             let outcome = {
-                tphase("before resolve", &mut tt);
+                step("the interface hashed and the map copied", &mut tt);
                 let mut session = sisu_resolve::resolve_session(&mut map, sources, &requests, &embedded);
-                tphase("resolve", &mut tt);
+                step("names resolved", &mut tt);
                 loop {
                     let (typed, type_diags) = sisu_typeck::check_with(
                         session.program(),
                         session.sources(),
                         Some((&mut memos.bodies, iface)),
                     );
-                    tphase("typeck", &mut tt);
+                    step("bodies checked", &mut tt);
                     let fresh: Vec<sisu_resolve::Request> = typed
                         .requests
                         .iter()
@@ -560,7 +560,7 @@ impl Db {
                     rounds += 1;
                     if fresh.is_empty() || rounds > MAX_ROUNDS {
                         let fin = session.finish();
-                        tphase("session finish", &mut tt);
+                        step("the resolution finished", &mut tt);
                         break Some((fin, typed, type_diags));
                     }
                     let promotes = fresh.iter().any(|q| matches!(q, sisu_resolve::Request::Promote(_)));
@@ -569,7 +569,7 @@ impl Db {
                         break None;
                     }
                     session.add_instances(&fresh);
-                    tphase("add instances", &mut tt);
+                    step("instances added", &mut tt);
                 }
             };
             if let Some((r, typed, type_diags)) = outcome {
@@ -654,7 +654,7 @@ impl Db {
             diagnostics.retain(|d| !generated(d));
         }
         sisu_diag::diagnostic::sort_unique(&mut diagnostics);
-        tphase("check diagnostics", &mut tt);
+        step("the diagnostics sorted", &mut tt);
         let c = Arc::new(Checked { map, file: parsed.file, program: r.program, typed, diagnostics, iface });
         self.checked.insert(name.to_string(), (h, c.clone()));
         Some(c)
@@ -683,17 +683,17 @@ impl Db {
         let mut tt = std::time::Instant::now();
         let lowered =
             sisu_lower::lower_cached(&c.program, &c.typed, &c.map, self.contracts, &mut memos.lower);
-        tphase("lower", &mut tt);
+        step("lowered", &mut tt);
         let options = sisu_borrowck::Options { trust_std, ..Default::default() };
         let mut ctx = DefaultHasher::new();
         (c.iface, self.contracts, trust_std).hash(&mut ctx);
         let mut checked =
             sisu_borrowck::check_with(&lowered, &options, Some((&mut memos.borrow, ctx.finish())));
-        tphase("borrowck", &mut tt);
+        step("ownership checked", &mut tt);
         // What runs takes a step per jump: the jumps that only lead to
         // another are threaded once the checker is done with them.
         sisu_sir::simplify::program(&mut checked.program);
-        tphase("simplify", &mut tt);
+        step("jumps threaded", &mut tt);
         self.counters.bodies_lowered = memos.lower.lowered;
         self.counters.lowered_reused = memos.lower.reused;
         self.counters.functions_checked = memos.borrow.checked;
@@ -712,7 +712,7 @@ impl Db {
         } else {
             Vec::new()
         };
-        tphase("comptime", &mut tt);
+        step("compile-time code run", &mut tt);
         let mut diagnostics = by_finding.clone();
         diagnostics.extend(comptime.iter().cloned());
         sisu_diag::diagnostic::sort_unique(&mut diagnostics);
@@ -764,11 +764,15 @@ impl Db {
     }
 }
 
-fn tphase(name: &str, t: &mut std::time::Instant) {
-    if std::env::var_os("SISU_PHASES").is_some() {
-        eprintln!("phase {name}: {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
+/// `SISU_NATIVE_TIMES=1`: a line per step of checking and lowering a
+/// program saying how long it took, for measuring a build (code generation
+/// and the link report theirs).
+fn step(name: &str, since: &mut std::time::Instant) {
+    static TIMES: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *TIMES.get_or_init(|| std::env::var_os("SISU_NATIVE_TIMES").is_some()) {
+        eprintln!("time: {name} {:.1} ms", since.elapsed().as_secs_f64() * 1e3);
     }
-    *t = std::time::Instant::now();
+    *since = std::time::Instant::now();
 }
 
 /// A must-consume value dropped: the note names the methods of its type

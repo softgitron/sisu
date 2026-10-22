@@ -51,10 +51,11 @@ impl Compiled {
     }
 }
 
-/// Compiles one function, as `Module::define_function` would before it
-/// places the code.
-pub(crate) fn compile(isa: &dyn TargetIsa, id: FuncId, func: ir::Function) -> Result<Code, String> {
-    let mut ctx = Context::for_function(func);
+/// Compiles one function in `ctx`, as `Module::define_function` would
+/// before it places the code. The context is the thread's own, cleared
+/// and used again for each function, which keeps what Cranelift allocated
+/// for the last one.
+pub(crate) fn compile(isa: &dyn TargetIsa, ctx: &mut Context, id: FuncId) -> Result<Code, String> {
     let alignment = match ctx.compile(isa, &mut ControlPlane::default()) {
         Ok(code) => u64::from(code.buffer.alignment),
         Err(e) => return Err(format!("{:?}", ModuleError::from(e))),
@@ -78,19 +79,25 @@ pub(crate) fn count() -> usize {
 }
 
 /// The channels between the code generator and the threads: where jobs
-/// go and the threads take them, and where the results come back.
+/// go and the threads take them, where the results come back, and where
+/// the functions they compiled go back, cleared, for the code generator
+/// to write the next ones into (their memory, made on its thread, is used
+/// again rather than freed on another).
 pub(crate) struct Channels {
     pub jobs: Sender<Job>,
     pub queue: Mutex<Receiver<Job>>,
     pub results: Sender<(usize, Result<Code, String>)>,
     pub done: Receiver<(usize, Result<Code, String>)>,
+    pub spare: Sender<ir::Function>,
+    pub spares: Receiver<ir::Function>,
 }
 
 impl Channels {
     pub fn new() -> Channels {
         let (jobs, queue) = channel();
         let (results, done) = channel();
-        Channels { jobs, queue: Mutex::new(queue), results, done }
+        let (spare, spares) = channel();
+        Channels { jobs, queue: Mutex::new(queue), results, done, spare, spares }
     }
 }
 
@@ -100,8 +107,10 @@ pub(crate) fn work(
     isa: &dyn TargetIsa,
     queue: &Mutex<Receiver<Job>>,
     results: &Sender<(usize, Result<Code, String>)>,
+    spare: &Sender<ir::Function>,
     stop: &AtomicBool,
 ) {
+    let mut ctx = Context::new();
     loop {
         if stop.load(Ordering::Relaxed) {
             return;
@@ -111,7 +120,14 @@ pub(crate) fn work(
             Err(_) => return,
         };
         let Ok(Job { order, id, func }) = job else { return };
-        if results.send((order, compile(isa, id, func))).is_err() {
+        ctx.clear();
+        ctx.func = func;
+        let code = compile(isa, &mut ctx, id);
+        let mut done = std::mem::replace(&mut ctx.func, ir::Function::new());
+        done.clear();
+        // The code generator may have stopped taking them back.
+        let _ = spare.send(done);
+        if results.send((order, code)).is_err() {
             return;
         }
     }

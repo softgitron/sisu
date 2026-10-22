@@ -64,7 +64,12 @@ enum Act {
     Delegate(String),
     /// The impl the plan's job `job` unfolds, of the trait for the type,
     /// asked for at `span`.
-    Derive { trait_name: String, ty: String, span: Span, job: usize },
+    Derive {
+        trait_name: String,
+        ty: String,
+        span: Span,
+        job: usize,
+    },
 }
 
 /// One run of a trait's derive template for a type.
@@ -125,7 +130,14 @@ pub(crate) fn unfold_plans(plans: &[Plan]) -> Vec<Unfolded> {
     let work: Vec<(&ast::FnDef, &str, &str, Target<'_>)> = plans
         .iter()
         .flat_map(|p| &p.jobs)
-        .map(|j| (&*j.template, &*j.source, j.head.as_str(), Target { name: &j.name, written: &j.written, body: &j.body }))
+        .map(|j| {
+            (
+                &*j.template,
+                &*j.source,
+                j.head.as_str(),
+                Target { name: &j.name, written: &j.written, body: &j.body },
+            )
+        })
         .collect();
     let run = |(template, source, head, target): &(&ast::FnDef, &str, &str, Target<'_>)| {
         crate::template::unfold(template, source, head, target)
@@ -342,7 +354,11 @@ impl Resolver<'_> {
     }
 
     /// Does what a plan says, with the texts its templates unfolded to.
-    pub(crate) fn apply_derived(&mut self, plan: Plan, unfolded: &[Result<String, crate::template::Failure>]) {
+    pub(crate) fn apply_derived(
+        &mut self,
+        plan: Plan,
+        unfolded: &[Result<String, crate::template::Failure>],
+    ) {
         let (delegate, text) = plan.texts(unfolded);
         let module = plan.module;
         let mut checks: Vec<(String, String, Span, Option<String>)> = Vec::new();

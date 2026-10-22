@@ -17,7 +17,7 @@ def fetch_with_timeout(clock: Clock, n: int) -> int ! {Late, TaskError}:
                 s.cancel()
                 return Err(TimedOut)
 
-def first_message(rx: Receiver[str], other: Receiver[str]) -> String:
+def first_message(rx: Receiver[String], other: Receiver[String]) -> String:
     select:
         case m = rx.recv():
             return "from rx: {m}"
@@ -26,9 +26,9 @@ def first_message(rx: Receiver[str], other: Receiver[str]) -> String:
 
 def main(sys: System):
     print(fetch_with_timeout(sys.clock, 21))
-    let tx, rx = channel[str](capacity=1)
-    let tx2, rx2 = channel[str](capacity=1)
-    tx.send("hello").expect("room")
+    let tx, rx = channel[String](capacity=1)
+    let tx2, rx2 = channel[String](capacity=1)
+    tx.send("hello".to_string()).expect("room")
     print(first_message(rx, rx2))
     _ = tx2
     let quiet = channel[int](capacity=1)

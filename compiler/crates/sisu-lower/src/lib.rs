@@ -349,7 +349,11 @@ fn memo_key(ctx: &Ctx, body: &Body) -> Option<((u64, u32, ContractLevel), u32)> 
 /// A body's functions, and the copy of them the memo keeps when it may:
 /// when every location in them lies on the lines of the body's own item,
 /// so that the same key always gives the same SIR.
-pub(crate) fn lower_kept(ctx: &Ctx, body: &Body, memoizing: bool) -> (Vec<sir::Function>, Option<Vec<sir::Function>>) {
+pub(crate) fn lower_kept(
+    ctx: &Ctx,
+    body: &Body,
+    memoizing: bool,
+) -> (Vec<sir::Function>, Option<Vec<sir::Function>>) {
     let fs = func::lower_body(ctx, body);
     let Some(((_, first, _), last)) = memo_key(ctx, body).filter(|_| memoizing) else { return (fs, None) };
     let inside =
@@ -810,6 +814,33 @@ fn reach(
     // unless the memo holds it.
     let mut asked: HashSet<usize> = HashSet::new();
     let mut seen = 0;
+    if let Some(ahead) = ahead {
+        // The program's own bodies, which the worklist mostly reaches, are
+        // handed to the threads at once (the standard library's only as the
+        // worklist names them, since a program reaches few of them); a body
+        // asked for later is lowered before them.
+        let held = |b: usize| {
+            cache.as_ref().is_some_and(|c| {
+                memo_key(ctx, &typed.bodies[b]).is_some_and(|(k, _)| c.entries.contains_key(&k))
+            })
+        };
+        let mut own: Vec<usize> = bodies
+            .values()
+            .copied()
+            .filter(|&b| {
+                let m = prog.def(typed.bodies[b].def).module;
+                prog.modules.get(m.0 as usize).is_some_and(|m| !m.is_std)
+            })
+            .collect();
+        own.sort_unstable();
+        own.dedup();
+        for b in own.into_iter().rev() {
+            if !held(b) {
+                asked.insert(b);
+                ahead.ask(b);
+            }
+        }
+    }
     loop {
         loop {
             if let Some(ahead) = ahead {

@@ -9,6 +9,7 @@
 //! return of [`abi::UNWINDING`]; in a cleanup block, the abort of a panic
 //! during unwinding.
 
+use crate::fx::FxMap;
 use crate::{Codegen, Error, Target};
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
@@ -21,7 +22,6 @@ use sisu_sir as sir;
 use sisu_sir::{
     Aggregate, BinOp, Callee, Const, Operand, Place, Proj, Rvalue, StatementKind, Terminator, Type, UnOp,
 };
-use std::collections::HashMap;
 
 /// Values larger than this many words are copied through memory rather
 /// than as words.
@@ -78,8 +78,8 @@ struct Cx<'a, 'p> {
     fails: Vec<Option<Block>>,
     line: Variable,
     col: Variable,
-    funcs: HashMap<FuncId, FuncRef>,
-    data: HashMap<DataId, GlobalValue>,
+    funcs: FxMap<FuncId, FuncRef>,
+    data: FxMap<DataId, GlobalValue>,
     /// The function's name and file for its stack trace lines; `None` for
     /// drop glue and the standard library, which traces leave out.
     trace: Option<(DataId, usize, DataId, usize)>,
@@ -215,8 +215,8 @@ impl<'a, 'p> Cx<'a, 'p> {
             fails,
             line,
             col,
-            funcs: HashMap::new(),
-            data: HashMap::new(),
+            funcs: FxMap::default(),
+            data: FxMap::default(),
             trace,
             file: file_text,
             glue,
@@ -1061,7 +1061,6 @@ impl<'a, 'p> Cx<'a, 'p> {
         let targs: Vec<Type> = tys.iter().map(|t| self.concrete(t)).collect::<Result<_, _>>()?;
         let f = self
             .cg
-            .prog
             .function(name)
             .ok_or_else(|| Error::internal(format!("the program has no function `{name}`")))?;
         let env_ty = match f.locals.get(1) {
@@ -1663,7 +1662,6 @@ impl<'a, 'p> Cx<'a, 'p> {
     ) -> Result<(), Error> {
         let f = self
             .cg
-            .prog
             .function(name)
             .ok_or_else(|| Error::internal(format!("the program has no function `{name}`")))?;
         let mut params = Vec::new();

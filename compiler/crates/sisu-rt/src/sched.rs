@@ -512,14 +512,30 @@ pub(crate) unsafe fn defer(p: *mut u8, t: u32) -> u8 {
     let mut words = vec![0u64; size.div_ceil(8)].into_boxed_slice();
     // SAFETY: `p` holds `size` bytes, and the buffer has room for them.
     unsafe { crate::mem::copy(words.as_mut_ptr() as *mut u8, p, size) };
-    DEFERRED.with(|d| d.borrow_mut().push((words, t)));
+    DEFERRED.with(|d| {
+        let mut d = d.borrow_mut();
+        d.push((words, t));
+        PENDING.store(d.len(), Relaxed);
+    });
     abi::OK
 }
 
+/// How many values [`DEFERRED`] holds: what [`drain`] reads first, since
+/// most runtime code moves nothing aside and the program's one thread of
+/// Sisu code is the only one that runs it.
+static PENDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// Drops what the runtime code just run moved aside, on the task's stack,
 /// in the order it was moved; `status` is that code's.
-pub(crate) fn drain(mut status: u8) -> u8 {
+#[inline]
+pub(crate) fn drain(status: u8) -> u8 {
+    if PENDING.load(Relaxed) == 0 { status } else { drain_pending(status) }
+}
+
+#[inline(never)]
+fn drain_pending(mut status: u8) -> u8 {
     let batch = DEFERRED.with(|d| std::mem::take(&mut *d.borrow_mut()));
+    PENDING.store(0, Relaxed);
     for (mut words, t) in batch {
         // SAFETY: the words hold the value moved aside, dropped once here.
         let st = unsafe { crate::value::drop_value(words.as_mut_ptr() as *mut u8, t) };
@@ -703,6 +719,7 @@ pub(crate) fn unwind_abandoned(t: u32) -> bool {
     save_ctx(&mut mine);
     let (my_yielder, on_system) = (YIELDER.with(Cell::get), ON_SYSTEM.with(Cell::get));
     let deferred = DEFERRED.with(|d| std::mem::take(&mut *d.borrow_mut()));
+    PENDING.store(0, Relaxed);
     ctx.stack[(abi::STACK_ABANDONED / 8) as usize] = 1;
     load_ctx(&mut ctx);
     YIELDER.with(|c| c.set(yielder));
@@ -711,6 +728,7 @@ pub(crate) fn unwind_abandoned(t: u32) -> bool {
     save_ctx(&mut ctx);
     YIELDER.with(|c| c.set(my_yielder));
     ON_SYSTEM.with(|c| c.set(on_system));
+    PENDING.store(deferred.len(), Relaxed);
     DEFERRED.with(|d| *d.borrow_mut() = deferred);
     load_ctx(&mut mine);
     let ended = matches!(r, CoroutineResult::Return(()));

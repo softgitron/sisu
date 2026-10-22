@@ -12,15 +12,48 @@ use std::path::{Path, PathBuf};
 const EXIT_ERROR: i32 = 1;
 const EXIT_ICE: i32 = 70;
 
-/// Where `sisu build --native` writes the executable: beside a file's
-/// source, named by its stem (`hello.sisu` makes `hello`); for a package,
-/// in its directory, named by the package.
-pub(crate) fn output_for(disk: &Path, package: Option<&str>) -> PathBuf {
+/// A native build's profile (09, "Build"): `debug` compiles fast with
+/// every check, `release` with Cranelift's optimisations, the checks still
+/// on and the contracts its manifest asks for (decision 232).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Profile {
+    Debug,
+    Release,
+}
+
+impl Profile {
+    pub(crate) fn of(release: bool) -> Profile {
+        if release { Profile::Release } else { Profile::Debug }
+    }
+
+    /// The profile's name, its directory under `build/`.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Profile::Debug => "debug",
+            Profile::Release => "release",
+        }
+    }
+}
+
+/// Where `sisu build --native` writes the executable (decision 231): for a
+/// package, `build/PROFILE/NAME` in the directory of its lockfile, its
+/// workspace's or its own; for a file, beside its source, named by its stem
+/// (`hello.sisu` makes `hello`).
+pub(crate) fn output_for(
+    disk: &Path,
+    package: Option<&str>,
+    root: Option<&Path>,
+    profile: Profile,
+) -> PathBuf {
     match package {
         Some(name) => {
-            // The root module is `src/main.sisu` in the package's directory.
-            let dir = disk.parent().and_then(Path::parent).map(Path::to_path_buf).unwrap_or_default();
-            dir.join(name)
+            // Without a lockfile's directory, the package's: the root
+            // module is `src/main.sisu` in it.
+            let dir = root
+                .map(Path::to_path_buf)
+                .or_else(|| disk.parent().and_then(Path::parent).map(Path::to_path_buf))
+                .unwrap_or_default();
+            dir.join("build").join(profile.name()).join(name)
         }
         None => disk.with_extension(""),
     }
@@ -44,7 +77,12 @@ fn sources() -> sisu_codegen::Sources {
 
 /// Compiles the program and links it at `output`. On failure the message
 /// is reported to `host` and the exit status returned.
-pub(crate) fn build(prog: &sisu_sir::Program, output: &Path, host: &mut dyn Host) -> Result<(), i32> {
+pub(crate) fn build(
+    prog: &sisu_sir::Program,
+    output: &Path,
+    profile: Profile,
+    host: &mut dyn Host,
+) -> Result<(), i32> {
     let exe = std::env::current_exe().unwrap_or_default();
     let runtime = match sisu_codegen::find_runtime(&exe) {
         Ok(r) => r,
@@ -66,7 +104,8 @@ pub(crate) fn build(prog: &sisu_sir::Program, output: &Path, host: &mut dyn Host
         }
     }
     let start = std::time::Instant::now();
-    let compiled = match sisu_codegen::compile_for(prog, &sources()) {
+    let options = sisu_codegen::Options { sources: sources(), release: profile == Profile::Release };
+    let compiled = match sisu_codegen::compile_with_options(prog, &options) {
         Ok(c) => c,
         Err(e) => return Err(report(e, output, host)),
     };
@@ -117,8 +156,13 @@ fn report(e: sisu_codegen::Error, output: &Path, host: &mut dyn Host) -> i32 {
 }
 
 /// `sisu build --native`: the executable, and a line saying where it is.
-pub(crate) fn build_command(prog: &sisu_sir::Program, output: &Path, host: &mut dyn Host) -> i32 {
-    match build(prog, output, host) {
+pub(crate) fn build_command(
+    prog: &sisu_sir::Program,
+    output: &Path,
+    profile: Profile,
+    host: &mut dyn Host,
+) -> i32 {
+    match build(prog, output, profile, host) {
         Ok(()) => {
             host.stdout(&text(msg::NATIVE_BUILT, &[("output", output.display().to_string())]));
             0
@@ -135,14 +179,19 @@ pub(crate) struct Run {
     pub seed: u64,
     pub explore: Option<u64>,
     pub stats: bool,
+    pub profile: Profile,
+    /// Where a package's executable goes and stays (decision 231); none
+    /// for a file, whose executable is built aside and removed.
+    pub keep: Option<PathBuf>,
 }
 
-/// `sisu run --native`: the executable, built in a directory of its own
-/// under the system's temporary directory, run with the program's
-/// arguments and this process's standard streams and environment, and
-/// removed; its exit status is the run's. Under `--explore N` it runs
-/// under the seeds from `--schedule-seed` on, as the interpreter's runs do,
-/// and reports the first seed whose run fails.
+/// `sisu run --native`: the executable, built where a package's builds go
+/// or, for a file, in a directory of its own under the system's temporary
+/// directory, which is removed after; run with the program's arguments and
+/// this process's standard streams and environment; its exit status is
+/// the run's. Under `--explore N` it runs under the seeds from
+/// `--schedule-seed` on, as the interpreter's runs do, and reports the
+/// first seed whose run fails.
 pub(crate) fn run_command(
     prog: &sisu_sir::Program,
     name: &str,
@@ -150,17 +199,24 @@ pub(crate) fn run_command(
     how: &Run,
     host: &mut dyn Host,
 ) -> i32 {
-    let dir = std::env::temp_dir().join(format!("sisu-native-{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&dir);
-    let exe = dir.join(if name.is_empty() { "program" } else { name });
-    let code = match build(prog, &exe, host) {
+    let aside = std::env::temp_dir().join(format!("sisu-native-{}", std::process::id()));
+    let exe = match &how.keep {
+        Some(exe) => exe.clone(),
+        None => aside.join(if name.is_empty() { "program" } else { name }),
+    };
+    if let Some(dir) = exe.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let code = match build(prog, &exe, how.profile, host) {
         Ok(()) => match how.explore {
             None => run_once(&exe, args, how.seed, how.stats, host),
             Some(n) => explore(&exe, args, how, n, host),
         },
         Err(code) => code,
     };
-    let _ = std::fs::remove_dir_all(&dir);
+    if how.keep.is_none() {
+        let _ = std::fs::remove_dir_all(&aside);
+    }
     code
 }
 

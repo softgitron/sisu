@@ -16,6 +16,7 @@
 
 mod debug;
 mod func;
+mod fx;
 mod layout;
 mod workers;
 
@@ -33,7 +34,7 @@ use layout::Types;
 use sisu_rt::abi::{self, Intrinsic, sym};
 use sisu_sir as sir;
 use sisu_sir::{ImplTarget, Type};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 /// Why a program was not compiled or linked.
@@ -99,7 +100,23 @@ pub fn compile(prog: &sir::Program) -> Result<Compiled, Error> {
 
 /// [`compile`], with the debug information saying where the sources are.
 pub fn compile_for(prog: &sir::Program, sources: &Sources) -> Result<Compiled, Error> {
-    compile_with(prog, false, sources).map(|(c, _)| c)
+    compile_with_options(prog, &Options { sources: sources.clone(), release: false })
+}
+
+/// How a program is compiled: where its sources are, for the debug
+/// information, and the profile (09, "Build"; decision 232).
+#[derive(Clone, Debug, Default)]
+pub struct Options {
+    pub sources: Sources,
+    /// The `release` profile: Cranelift's optimisations (its `speed`
+    /// level) rather than none. The checks of overflow and bounds are the
+    /// same, as 09 asks; the contracts are lowering's business.
+    pub release: bool,
+}
+
+/// [`compile`], with the options of the build.
+pub fn compile_with_options(prog: &sir::Program, options: &Options) -> Result<Compiled, Error> {
+    compile_with(prog, false, options).map(|(c, _)| c)
 }
 
 /// Every construct of the program that the backend does not compile yet,
@@ -107,7 +124,7 @@ pub fn compile_for(prog: &sir::Program, sources: &Sources) -> Result<Compiled, E
 /// the first: how far a program is from compiling (a function is left at
 /// its first such construct).
 pub fn survey(prog: &sir::Program) -> Result<Vec<(String, String, usize)>, Error> {
-    let (_, missing) = compile_with(prog, true, &Sources::default())?;
+    let (_, missing) = compile_with(prog, true, &Options::default())?;
     let mut counted: Vec<(String, String, usize)> = Vec::new();
     for (what, function) in missing {
         match counted.iter_mut().find(|(w, _, _)| *w == what) {
@@ -122,14 +139,14 @@ pub fn survey(prog: &sir::Program) -> Result<Vec<(String, String, usize)>, Error
 fn compile_with(
     prog: &sir::Program,
     survey: bool,
-    sources: &Sources,
+    options: &Options,
 ) -> Result<(Compiled, Vec<(String, String)>), Error> {
     // A function value holds its closure's environment, as many words as
     // the largest `own` closure's (decision 224), which only compiling
     // finds: a program that needs more is compiled again with them.
     let mut env_words = 1;
     loop {
-        match compile_once(prog, survey, env_words, sources)? {
+        match compile_once(prog, survey, env_words, options)? {
             Ok(done) => return Ok(done),
             Err(more) => env_words = more,
         }
@@ -144,43 +161,44 @@ fn compile_once(
     prog: &sir::Program,
     survey: bool,
     env_words: u32,
-    sources: &Sources,
+    options: &Options,
 ) -> Result<Result<(Compiled, Vec<(String, String)>), u32>, Error> {
     let Some(entry) = &prog.entry else {
         return Err(Error::unsupported("a program without `main`"));
     };
     let mut tt = std::time::Instant::now();
-    let mut cg = Codegen::new(prog, env_words)?;
-    tphase("codegen new", &mut tt);
+    let mut cg = Codegen::new(prog, env_words, options.release)?;
     cg.survey = survey;
     let threads = workers::count();
     let (main_id, flags, ret_ty) = if threads > 1 {
-        let workers::Channels { jobs, queue, results, done } = workers::Channels::new();
+        let workers::Channels { jobs, queue, results, done, spare, spares } = workers::Channels::new();
         // A thread fewer than the machine runs while this one writes the
         // IR; then it compiles too.
         let senders: Vec<_> = (1..threads).map(|_| results.clone()).collect();
         let isa = cg.isa.clone();
         let stop = std::sync::atomic::AtomicBool::new(false);
         cg.jobs = Some(jobs);
+        cg.spares = Some(spares);
         std::thread::scope(|s| {
             // A thread that cannot be made leaves its share to the others,
             // and to this one.
             let handles: Vec<_> = senders
                 .into_iter()
                 .filter_map(|r| {
-                    let (isa, queue, stop) = (&isa, &queue, &stop);
+                    let (isa, queue, stop, spare) = (&isa, &queue, &stop, spare.clone());
                     std::thread::Builder::new()
-                        .spawn_scoped(s, move || workers::work(&**isa, queue, &r, stop))
+                        .spawn_scoped(s, move || workers::work(&**isa, queue, &r, &spare, stop))
                         .ok()
                 })
                 .collect();
             let generated = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cg.generate(entry)));
-            tphase("generate (IR writing)", &mut tt);
+            step("the IR written", &mut tt);
             // Closing the queue lets the threads finish what is in it; a
             // failure stops them, since nothing they compile will be used.
             cg.jobs = None;
+            cg.spares = None;
             if matches!(generated, Ok(Ok(_))) {
-                workers::work(&*isa, &queue, &results, &stop);
+                workers::work(&*isa, &queue, &results, &spare, &stop);
             } else {
                 stop.store(true, std::sync::atomic::Ordering::Relaxed);
             }
@@ -190,14 +208,15 @@ fn compile_once(
                     std::panic::resume_unwind(e);
                 }
             }
-            tphase("drain workers", &mut tt);
+            step("the rest compiled", &mut tt);
             let main = generated.unwrap_or_else(|e| std::panic::resume_unwind(e))?;
             cg.place(done.try_iter().collect())?;
-            tphase("place", &mut tt);
             Ok::<_, Error>(main)
         })?
     } else {
-        cg.generate(entry)?
+        let main = cg.generate(entry)?;
+        step("the IR written and compiled", &mut tt);
+        main
     };
     if cg.env_needed > env_words {
         return Ok(Err(cg.env_needed));
@@ -206,25 +225,36 @@ fn compile_once(
     let functions = cg.compiled;
     let statements = cg.statements;
     let missing = std::mem::take(&mut cg.missing);
-    tphase("define main", &mut tt);
     let mut product = cg.module.finish();
-    tphase("finish", &mut tt);
-    debug::write(&mut product, prog, &cg.debug, &mut cg.types, sources, &*cg.isa)?;
-    tphase("debug", &mut tt);
+    step("the code placed", &mut tt);
+    debug::write(&mut product, prog, &cg.debug, &mut cg.types, &options.sources, &*cg.isa)?;
+    step("the debug information written", &mut tt);
     let object = product.emit().map_err(|e| Error::internal(format!("writing the object file: {e}")))?;
-    tphase("emit", &mut tt);
+    step("the object emitted", &mut tt);
     Ok(Ok((Compiled { object, functions, statements }, missing)))
 }
 
-static COMPILE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-fn tphase(name: &str, t: &mut std::time::Instant) {
-    if std::env::var_os("SISU_PHASES").is_some() && COMPILE_NS.load(std::sync::atomic::Ordering::Relaxed) > 0 {
-        eprintln!("  (cranelift compile so far: {:.1} ms)", COMPILE_NS.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e6);
+/// `SISU_NATIVE_TIMES=1`, as the driver reads it: a line per step of code
+/// generation saying how long it took, for measuring the backend.
+fn step(name: &str, since: &mut std::time::Instant) {
+    static TIMES: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *TIMES.get_or_init(|| std::env::var_os("SISU_NATIVE_TIMES").is_some()) {
+        eprintln!("time: {name} {:.1} ms", since.elapsed().as_secs_f64() * 1e3);
     }
-    if std::env::var_os("SISU_PHASES").is_some() {
-        eprintln!("phase {name}: {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
+    *since = std::time::Instant::now();
+}
+
+/// Whether a type is concrete as it is: it has no type parameter, no
+/// associated type and no constant operation to put arguments in or look
+/// up, so that [`Codegen::concrete`] gives it unchanged.
+fn settled(t: &Type) -> bool {
+    match t {
+        Type::Param(_) | Type::Assoc(..) | Type::ConstOp(..) => false,
+        Type::Named(_, a) | Type::Tuple(a) | Type::Dyn(_, a) => a.iter().all(settled),
+        Type::Fn(p, r, _) => p.iter().all(settled) && settled(r),
+        Type::Ref(x, _) => settled(x),
+        _ => true,
     }
-    *t = std::time::Instant::now();
 }
 
 /// The system libraries a Rust static library needs on this target.
@@ -303,14 +333,17 @@ pub fn find_runtime(exe: &Path) -> Result<PathBuf, Error> {
 /// What the code generator keeps across the functions of a program.
 pub(crate) struct Codegen<'p> {
     pub prog: &'p sir::Program,
+    /// The program's functions by name, the first of each name, as
+    /// [`sir::Program::function`] finds them by searching.
+    fns: fx::FxMap<&'p str, &'p sir::Function>,
     pub module: ObjectModule,
     pub types: Types<'p>,
     pub call_conv: CallConv,
     /// Every instance declared, by function and type arguments.
-    instances: HashMap<(String, Vec<Type>), FuncId>,
+    instances: fx::FxMap<(String, Vec<Type>), FuncId>,
     queue: VecDeque<(String, Vec<Type>, FuncId)>,
     /// The runtime's entry points, declared once.
-    runtime: HashMap<&'static str, FuncId>,
+    runtime: fx::FxMap<&'static str, FuncId>,
     pub depth: DataId,
     /// The scheduler's budget, the running task's stack limits, and the
     /// site of the last call that may wait (`sisu_rt::abi::sym`).
@@ -321,8 +354,8 @@ pub(crate) struct Codegen<'p> {
     /// reserve of a task's stack holds it (decision 203).
     max_frame: u32,
     /// Texts and call descriptors in the read-only data, by content.
-    texts: HashMap<Vec<u8>, DataId>,
-    descs: HashMap<Vec<u32>, DataId>,
+    texts: fx::FxMap<Vec<u8>, DataId>,
+    descs: fx::FxMap<Vec<u32>, DataId>,
     /// The glue instances the type table names, as they are declared.
     glue_ids: Vec<FuncId>,
     /// The capability handles of which the program makes objects other
@@ -333,13 +366,16 @@ pub(crate) struct Codegen<'p> {
     /// The function each named function has as a value: it takes an
     /// environment it ignores, so that every function value is called the
     /// way a closure is.
-    thunks: HashMap<String, (FuncId, Type)>,
+    thunks: fx::FxMap<String, (FuncId, Type)>,
     fbctx: FunctionBuilderContext,
     /// The target, which the threads that compile share (decision 219).
     isa: cranelift_codegen::isa::OwnedTargetIsa,
     /// Where the functions go to be compiled on those threads; none when
     /// each is compiled as it is made.
     jobs: Option<std::sync::mpsc::Sender<workers::Job>>,
+    /// The functions the threads compiled, cleared, to write the next
+    /// ones into.
+    spares: Option<std::sync::mpsc::Receiver<ir::Function>>,
     /// The functions handed to the threads, in the order they were made:
     /// each one's id, what an error in it is called, whether its frame
     /// counts towards `max_frame`, and what the debug information says of
@@ -354,11 +390,11 @@ pub(crate) struct Codegen<'p> {
     missing: Vec<(String, String)>,
     /// The types of the values each `dyn` type holds, as the compiled
     /// code makes them (`dyn T(...)`).
-    carried: HashMap<Type, Vec<Type>>,
+    carried: fx::FxMap<Type, Vec<Type>>,
     /// The dispatchers of the calls through a `dyn`, one per method and
     /// type arguments, and where each is in the list.
     dispatchers: Vec<Dispatcher>,
-    dispatcher_index: HashMap<(String, Vec<Type>), usize>,
+    dispatcher_index: fx::FxMap<(String, Vec<Type>), usize>,
     /// Whether the dispatchers are written: from then on no `dyn` may be
     /// made and no call through one compiled.
     dispatched: bool,
@@ -407,12 +443,13 @@ struct Dispatcher {
 }
 
 impl<'p> Codegen<'p> {
-    fn new(prog: &'p sir::Program, env_words: u32) -> Result<Codegen<'p>, Error> {
+    fn new(prog: &'p sir::Program, env_words: u32, release: bool) -> Result<Codegen<'p>, Error> {
         let mut flags = settings::builder();
         let set = |f: &mut settings::Builder, k: &str, v: &str| {
             f.set(k, v).map_err(|e| Error::internal(format!("the setting `{k}`: {e}")))
         };
-        set(&mut flags, "opt_level", "none")?;
+        // The release profile is Cranelift's optimisations (decision 232).
+        set(&mut flags, "opt_level", if release { "speed" } else { "none" })?;
         set(&mut flags, "is_pic", "true")?;
         set(&mut flags, "enable_verifier", if cfg!(debug_assertions) { "true" } else { "false" })?;
         let isa = cranelift_native::builder()
@@ -433,34 +470,40 @@ impl<'p> Codegen<'p> {
         let budget = import(sym::BUDGET)?;
         let stack = import(sym::STACK)?;
         let site = import(sym::SITE)?;
+        let mut fns = fx::FxMap::default();
+        for f in &prog.functions {
+            fns.entry(f.name.as_str()).or_insert(f);
+        }
         Ok(Codegen {
             prog,
+            fns,
             module,
             types: Types::new(prog, env_words),
             call_conv,
-            instances: HashMap::new(),
+            instances: fx::FxMap::default(),
             queue: VecDeque::new(),
-            runtime: HashMap::new(),
+            runtime: fx::FxMap::default(),
             depth,
             budget,
             stack,
             site,
             max_frame: 0,
-            texts: HashMap::new(),
-            descs: HashMap::new(),
+            texts: fx::FxMap::default(),
+            descs: fx::FxMap::default(),
             glue_ids: Vec::new(),
-            thunks: HashMap::new(),
+            thunks: fx::FxMap::default(),
             foreign: foreign_objects(prog, &reachable(prog)),
             fbctx: FunctionBuilderContext::new(),
             isa: shared,
             jobs: None,
+            spares: None,
             handed: Vec::new(),
             debug: Vec::new(),
             survey: false,
             missing: Vec::new(),
-            carried: HashMap::new(),
+            carried: fx::FxMap::default(),
             dispatchers: Vec::new(),
-            dispatcher_index: HashMap::new(),
+            dispatcher_index: fx::FxMap::default(),
             dispatched: false,
             names: 0,
             compiled: 0,
@@ -471,13 +514,28 @@ impl<'p> Codegen<'p> {
 
     /// The instance of `name` for these (concrete) type arguments,
     /// declared and queued to be compiled the first time it is asked for.
+    /// A context to write a function's IR in, as `make_context` makes one,
+    /// in a function the threads compiled and gave back when there is one.
+    fn context(&mut self) -> Context {
+        let mut ctx = match self.spares.as_ref().and_then(|r| r.try_recv().ok()) {
+            Some(func) => Context::for_function(func),
+            None => Context::new(),
+        };
+        ctx.func.signature.call_conv = self.call_conv;
+        ctx
+    }
+
+    /// The program's function named `name`.
+    pub(crate) fn function(&self, name: &str) -> Option<&'p sir::Function> {
+        self.fns.get(name).copied()
+    }
+
     pub(crate) fn instance(&mut self, name: &str, targs: Vec<Type>) -> Result<FuncId, Error> {
         let key = (name.to_string(), targs);
         if let Some(&id) = self.instances.get(&key) {
             return Ok(id);
         }
         let f = self
-            .prog
             .function(name)
             .ok_or_else(|| Error::internal(format!("the program has no function `{name}`")))?;
         let sig = sisu_signature(self.call_conv, f.param_count);
@@ -629,7 +687,6 @@ impl<'p> Codegen<'p> {
             calls.push(match target {
                 Target::Fn(f, targs) => {
                     let func = self
-                        .prog
                         .function(f)
                         .ok_or_else(|| Error::internal(format!("the program has no function `{f}`")))?;
                     let first = match func.locals.get(1) {
@@ -663,7 +720,7 @@ impl<'p> Codegen<'p> {
         } else {
             None
         };
-        let mut ctx = self.module.make_context();
+        let mut ctx = self.context();
         ctx.func.signature = sisu_signature(self.call_conv, n as u32);
         let mut fbctx = std::mem::take(&mut self.fbctx);
         {
@@ -768,9 +825,7 @@ impl<'p> Codegen<'p> {
             self.handed.push((id, what, frame, dbg));
             return Ok(());
         }
-        let t0 = std::time::Instant::now();
         self.module.define_function(id, &mut ctx).map_err(|e| Error::internal(format!("{what}: {e:?}")))?;
-        COMPILE_NS.fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
         if let Some(code) = ctx.compiled_code() {
             if frame {
                 self.max_frame = self.max_frame.max(code.frame_size);
@@ -814,7 +869,7 @@ impl<'p> Codegen<'p> {
     fn generate(&mut self, entry: &sir::Entry) -> Result<(FuncId, u32, u32), Error> {
         let main_id = self.instance(&entry.function, Vec::new())?;
         self.complete()?;
-        let ret = self.prog.function(&entry.function).map(|f| f.ret().clone()).unwrap_or(Type::Unit);
+        let ret = self.function(&entry.function).map(|f| f.ret().clone()).unwrap_or(Type::Unit);
         let ret_ty = self.types.id(&self.concrete(&ret, &[])?)?;
         self.complete()?;
         let mut flags = if entry.returns_result { abi::ENTRY_RESULT } else { 0 };
@@ -851,10 +906,9 @@ impl<'p> Codegen<'p> {
 
     fn compile_instance(&mut self, name: &str, targs: &[Type], id: FuncId) -> Result<(), Error> {
         let f = self
-            .prog
             .function(name)
             .ok_or_else(|| Error::internal(format!("the program has no function `{name}`")))?;
-        let mut ctx: Context = self.module.make_context();
+        let mut ctx: Context = self.context();
         ctx.func.signature = sisu_signature(self.call_conv, f.param_count);
         let mut fbctx = std::mem::take(&mut self.fbctx);
         let result = {
@@ -886,7 +940,6 @@ impl<'p> Codegen<'p> {
             return Ok(t.clone());
         }
         let f = self
-            .prog
             .function(name)
             .ok_or_else(|| Error::internal(format!("the program has no function `{name}`")))?;
         if !f.type_params.is_empty() {
@@ -906,7 +959,7 @@ impl<'p> Codegen<'p> {
             .module
             .declare_function(&symbol, Linkage::Local, &sig)
             .map_err(|e| Error::internal(e.to_string()))?;
-        let mut ctx = self.module.make_context();
+        let mut ctx = self.context();
         ctx.func.signature = sig;
         let mut fbctx = std::mem::take(&mut self.fbctx);
         {
@@ -941,8 +994,8 @@ impl<'p> Codegen<'p> {
     /// A body that stops the program, for a function the survey could not
     /// compile.
     fn stub(&mut self, name: &str, id: FuncId) -> Result<(), Error> {
-        let params = self.prog.function(name).map(|f| f.param_count).unwrap_or(0);
-        let mut ctx = self.module.make_context();
+        let params = self.function(name).map(|f| f.param_count).unwrap_or(0);
+        let mut ctx = self.context();
         ctx.func.signature = sisu_signature(self.call_conv, params);
         let mut fbctx = std::mem::take(&mut self.fbctx);
         {
@@ -1037,6 +1090,9 @@ impl<'p> Codegen<'p> {
     /// A type with the instance's type arguments put in, and the
     /// associated types of impls looked up.
     pub(crate) fn concrete(&self, t: &Type, targs: &[Type]) -> Result<Type, Error> {
+        if settled(t) {
+            return Ok(t.clone());
+        }
         let t = t.subst(targs);
         self.resolve_assoc(&t)
     }
@@ -1222,7 +1278,7 @@ impl<'p> Codegen<'p> {
             .declare_function("main", Linkage::Export, &sig)
             .map_err(|e| Error::internal(e.to_string()))?;
         let start = self.runtime(sym::START)?;
-        let mut ctx = self.module.make_context();
+        let mut ctx = self.context();
         ctx.func.signature = sig;
         let mut fbctx = std::mem::take(&mut self.fbctx);
         {
@@ -1268,6 +1324,10 @@ impl<'p> Codegen<'p> {
 /// tests, which `main` does not run, and their fakes.
 fn reachable(prog: &sir::Program) -> std::collections::HashSet<String> {
     use std::collections::{HashMap, HashSet};
+    let mut fns: HashMap<&str, &sir::Function> = HashMap::new();
+    for f in &prog.functions {
+        fns.entry(f.name.as_str()).or_insert(f);
+    }
     let mut seen: HashSet<String> = HashSet::new();
     // The object types each capability handle type may hold.
     let mut objects: HashMap<String, HashSet<Type>> = HashMap::new();
@@ -1299,7 +1359,7 @@ fn reachable(prog: &sir::Program) -> std::collections::HashSet<String> {
                 continue;
             }
             seen.insert(name.clone());
-            let Some(f) = prog.function(&name) else { continue };
+            let Some(f) = fns.get(name.as_str()).copied() else { continue };
             let mut found = Vec::new();
             let operand_fn = |o: &sir::Operand, out: &mut Vec<String>| {
                 if let sir::Operand::Const(sir::Const::Fn(n)) = o {
