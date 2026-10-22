@@ -254,7 +254,10 @@ The language server and the query layer key on these.
 
 **The AST** (`sisu_syntax::ast`) is an owned view built from the tree by
 `ast::build::module`, a total function: an `ERROR` node becomes an `Error`
-expression, pattern, type or statement.
+expression, pattern, type or statement. `sisu parse --ast` prints it as
+Rust's `{:#?}` of it, one field per line, indented: byte ranges and node
+indices, no addresses, and every list in source order, so that the text
+is the same on every run and stage 1 can compare its AST with it.
 
 ### Error tolerance
 
@@ -1629,22 +1632,26 @@ of the stage-1 commands showed it:
   and checks a block's statements from two states it reuses.
 
 Measured on one machine (4 cores, shared, so times vary by a tenth),
-from `compiler/stage1`, against the compiler before these changes, on
-the same stage-1 sources and inputs:
+from `compiler/stage1` (20 500 lines of Sisu, 73 tests), against the
+compiler before these changes, on the same sources and inputs, the best
+of three:
 
 | command | before | after |
 |---|---|---|
-| `sisu run -- tokens ../std/prelude.sisu` | 4.5 to 4.8 s | 1.75 to 1.9 s |
-| `sisu run -- parse --tree ../std/prelude.sisu` | 7.8 to 8.1 s | 3.2 to 3.3 s |
-| `sisu test` (59 tests, under the monitor) | 33.0 s | 16.9 s |
-| `sisu check` | 1.3 s | 0.6 s |
+| `sisu run -- tokens ../std/prelude.sisu` | 7.5 s | 3.2 s |
+| `sisu run -- parse --tree ../std/prelude.sisu` | 11.1 s | 4.7 s |
+| `sisu check` | 4.5 s | 2.0 s |
+| `sisu test` (under the monitor) | 36.3 s | 19.5 s |
 
-In instructions (callgrind), `parse --tree ../std/http.sisu` takes 6.45
-billion in the interpreter and 11.6 billion compiling stage 1 before, and
-2.95 and 3.7 billion after; the monitored test `random inputs are
-lossless` takes 16.0 billion before and 4.2 billion after. A copy of a
-`str`'s text, which a view makes (port-debt.md), is not among the costs:
-`tokens` of the prelude makes 27 000 views copying 1.6 MB in all.
+On the smaller stage 1 of round 4 (7 800 lines, 59 tests) the same
+commands went from 4.5, 7.8, 1.3 and 33.0 s to 1.75, 3.2, 0.6 and
+16.9 s. In instructions (callgrind) on those sources, `parse --tree
+../std/http.sisu` took 6.45 billion in the interpreter and 11.6 billion
+compiling stage 1 before, and 2.95 and 3.7 billion after; the changes to
+the monitor alone took the monitored test `random inputs are lossless`
+from 16.0 billion to 4.2. A copy of a `str`'s text, which a view makes
+(port-debt.md), is not among the costs: `tokens` of the prelude makes
+27 000 views copying 1.6 MB in all.
 
 `cargo run --release -p sisu-driver --example speed` prints the front
 end's milliseconds per thousand lines and the interpreter's nanoseconds
@@ -2757,8 +2764,8 @@ sisu ws FILE                 run a worksheet; `--run` with the real `System`
 sisu lsp                     the language server, over standard input and output
 sisu new NAME                a package (`--lib` for a library)
 sisu tokens FILE             the token stream; `--trivia` includes trivia
-sisu parse FILE              `--tree` the syntax tree, `--print` the source again,
-                             `--shape` what formatting keeps
+sisu parse FILE              `--tree` the syntax tree, `--ast` the AST built from it,
+                             `--print` the source again, `--shape` what formatting keeps
 sisu explain CODE            the catalog entry for a code or identifier
 sisu explain-borrow FILE:LINE  every borrow live on the line
 sisu audit --ownership FILE...  per file, the uses of the ownership model's escape hatches
@@ -3520,7 +3527,8 @@ Rust code was an accident, the documents decided and stage 0 changed)
      join of the states after each statement, computed as it goes; the
      results are those of the state per statement it replaces.
 
-**Stage 1's findings, continued** (`stage1/DISCREPANCIES.md`, D5)
+**Stage 1's findings, continued** (`stage1/DISCREPANCIES.md`, D5, and
+what the stage-1 work found in stage 0)
 
 179. A call with too many arguments to a function with keyword-only
      parameters (after a bare `*`, 02) counts its positional parameters
@@ -3528,3 +3536,15 @@ Rust code was an accident, the documents decided and stage 0 changed)
      `scale(2, 3)` for `def scale(x: int, /, *, by: int)` is `E0305`
      with expected 1, found 2. A function without keyword-only parameters
      counts every parameter against every argument, as before.
+180. The ownership checker's questions about a type (must it be consumed,
+     does dropping it run a `Drop`, which `Drop`s) look once at each type
+     the type reaches, so a recursive type (an enum holding itself through
+     lists, any number of times) takes time in proportion to its types,
+     not exponential in them. The answers are those the bound on depth
+     gave: a type met again inside itself adds nothing to must-consume,
+     and counts as running a `Drop` (which may read the references it
+     holds).
+181. A `list` or `Array` is a `dict` key or `set` element when its
+     elements are, as the prelude's `Hash` impls for them declare: the
+     host keys it by its elements in order, as it keys a tuple, so equal
+     lists are one key, alone or inside a tuple, an option or a struct.

@@ -283,7 +283,9 @@ impl<'p> Types<'p> {
                         Some(TypeDecl::Enum { drop, variants, .. }) => {
                             drop.is_some()
                                 || variants.iter().any(|v| {
-                                    v.fields.iter().any(|(_, t)| self.drop_glue_in(&t.subst(args), depth + 1, w))
+                                    v.fields
+                                        .iter()
+                                        .any(|(_, t)| self.drop_glue_in(&t.subst(args), depth + 1, w))
                                 })
                         }
                         None => false,
@@ -400,9 +402,9 @@ impl<'p> Types<'p> {
                     }
                     Some(TypeDecl::Enum { must_consume, variants, .. }) => {
                         *must_consume
-                            || variants
-                                .iter()
-                                .any(|v| v.fields.iter().any(|(_, t)| self.must_consume_in(t, depth + 1, seen)))
+                            || variants.iter().any(|v| {
+                                v.fields.iter().any(|(_, t)| self.must_consume_in(t, depth + 1, seen))
+                            })
                     }
                     None => false,
                 }

@@ -504,7 +504,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 "build" => &["--locked"],
                 "bench" => &["--locked"],
                 "tokens" => &["--trivia"],
-                "parse" => &["--tree", "--print", "--trivia", "--shape"],
+                "parse" => &["--tree", "--print", "--trivia", "--shape", "--ast"],
                 _ => &[],
             };
             if let Some(bad) = p.flags.iter().find(|f| !allowed.contains(f)) {
@@ -1199,7 +1199,12 @@ fn command(
                     }
                 };
             }
-            if has("--print") {
+            if has("--ast") {
+                // The AST `ast::build` makes, as its `Debug` (stage 1
+                // compares its own with it): positions and node indices,
+                // no addresses, every list in source order.
+                host.stdout(&format!("{:#?}\n", p.module));
+            } else if has("--print") {
                 host.stdout(&p.parse.tree.to_source());
             } else {
                 host.stdout(&p.parse.tree.dump(has("--trivia")));

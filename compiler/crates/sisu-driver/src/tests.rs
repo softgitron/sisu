@@ -91,6 +91,19 @@ fn parse_print_is_lossless() {
 }
 
 #[test]
+fn parse_ast_prints_the_ast_the_same_every_time() {
+    let f = temp_file("ast.sisu", "def double(x: int) -> int:\n    return x * 2\n");
+    let (code, first) = cli(&["parse", "--ast", &f]);
+    assert_eq!(code, 0, "{}", first.err);
+    assert!(first.out.starts_with("Module {\n    items: [\n"), "{}", first.out);
+    assert!(first.out.contains("text: \"double\""), "{}", first.out);
+    assert!(first.out.contains("Binary"), "{}", first.out);
+    assert!(!first.out.contains("0x"), "{}", first.out);
+    let (_, second) = cli(&["parse", "--ast", &f]);
+    assert_eq!(first.out, second.out);
+}
+
+#[test]
 fn usage_errors() {
     assert_eq!(cli(&[]).0, crate::cli::EXIT_USAGE);
     assert_eq!(cli(&["frobnicate"]).0, crate::cli::EXIT_USAGE);

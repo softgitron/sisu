@@ -1,7 +1,8 @@
 # Directly recursive types: an enum whose variants hold the enum itself
-# through lists, several times over, and a struct holding a list of
-# itself. The ownership checker looks once at each type a type reaches,
-# so these check at once rather than in time exponential in the variants.
+# through lists, several times over, one that holds itself through boxes,
+# and a struct holding a list of itself. The ownership checker looks once
+# at each type a type reaches, so these check at once rather than in time
+# exponential in the variants.
 
 enum Expr:
     Lit(int)
@@ -9,6 +10,11 @@ enum Expr:
     Plus(list[Expr], list[Expr])
     Times(list[Expr], list[Expr])
     Call(String, list[Expr])
+
+enum Node:
+    Leaf(int)
+    Pair(Box[Node], Box[Node])
+    Triple(Box[Node], Box[Node], Box[Node])
 
 struct Tree:
     value: int
@@ -22,6 +28,12 @@ def eval(e: Expr) -> int:
         case Times(a, b): eval(a[0]) * eval(b[0])
         case Call(_, args): len(args)
 
+def size(n: Node) -> int:
+    return match n:
+        case Leaf(_): 1
+        case Pair(a, b): size(a.boxed) + size(b.boxed)
+        case Triple(a, b, c): size(a.boxed) + size(b.boxed) + size(c.boxed)
+
 def total(t: Tree) -> int:
     var sum = t.value
     for c in t.children:
@@ -31,5 +43,6 @@ def total(t: Tree) -> int:
 def main():
     print(eval(Plus([Lit(1)], [Times([Lit(2)], [Minus([Lit(3)])])])))
     print(eval(Call("f".to_string(), [Lit(1), Lit(2)])))
+    print(size(Pair(Box(Leaf(1)), Box(Triple(Box(Leaf(2)), Box(Leaf(3)), Box(Leaf(4)))))))
     let leaves = [Tree(value=2, children=[]), Tree(value=3, children=[])]
     print(total(Tree(value=1, children=leaves)))
