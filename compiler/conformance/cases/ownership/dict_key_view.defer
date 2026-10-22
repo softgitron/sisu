@@ -20,15 +20,13 @@ fn main(0) source 0 @4:5-4:9 {
   bb0:
     _1 = call intrinsic String.new(const "aino") @5:16-5:34
     goto bb1
-  bb1 (unwind bb3):
+  bb1 (unwind bb2):
     _2 = dict() @6:32-6:34
-    goto bb4
+    goto bb3
   bb2 (cleanup):
-    resume
-  bb3 (cleanup):
     drop _1
-    goto bb2
-  bb4 (unwind bb5):
+    resume
+  bb3 (unwind bb4):
     _3 = strview _1 @7:10-7:14
     _2{_3} = const 27 @7:5-7:20
     _5 = ref mut _1 @8:5-8:9
@@ -36,14 +34,14 @@ fn main(0) source 0 @4:5-4:9 {
     _7 = ref _2 @9:11-9:15
     _6 = call intrinsic print(copy _7) @9:5-9:16
     _0 = const ()
-    goto bb6
-  bb5 (cleanup):
+    goto bb5
+  bb4 (cleanup):
     drop _2
-    goto bb3
-  bb6 (unwind bb3):
+    goto bb2
+  bb5 (unwind bb2):
     drop _2 @9:16-9:16
-    goto bb7
-  bb7:
+    goto bb6
+  bb6:
     drop _1 @9:16-9:16
     return
 }

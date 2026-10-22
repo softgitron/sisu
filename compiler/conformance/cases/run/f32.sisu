@@ -1,0 +1,61 @@
+# `f32` (03, "Numbers"): IEEE 754 binary32, strict as `f64` is (D-074).
+# Each operation rounds once to `f32`; an `f32` widens to `f64` where one
+# is expected; `x.to_f32()` rounds the other way; only `mul_add` fuses.
+const THIRD: f32 = comptime third()
+
+def third() -> f32:
+    return 1.0 / 3.0
+
+def mean(xs: list[f32]) -> f32:
+    return sum(xs) / len(xs).to_f32()
+
+def widened(x: f64) -> f64:
+    return x
+
+def main():
+    # Literals round once from their text.
+    let a: f32 = 0.1
+    let b = 0.2f32
+    print((a, b, a + b))
+    print(a + b == 0.3)
+    print(0.1 + 0.2 == 0.3)
+    print(THIRD)
+    # Each operation rounds to `f32`: 2**24 + 1 is not an `f32`.
+    let big: f32 = 16777216.0
+    print(big + 1.0)
+    print(16777217.to_f32())
+    print(mean([1.0, 2.0, 4.0]))
+    # Widening is exact and implicit; narrowing rounds and is a method.
+    print(widened(a))
+    print(a * 2.0 + 1.0f64)
+    let d: f64 = 0.1
+    print(d.to_f32())
+    print(1e300.to_f32())
+    # One rounding only when asked for.
+    print(0.1 * 10.0 - 1.0)
+    print(0.1.mul_add(10.0, -1.0))
+    print(a * 10.0 - 1.0)
+    print(a.mul_add(10.0, -1.0))
+    # `%` takes the divisor's sign, as for `f64` and the integers.
+    print((7.5f32 % 2.0, -7.5f32 % 2.0, 7.5f32 % -2.0))
+    print(1e17 % 3.0)
+    print((2.0f32 ** 10.0, 2.0f32.sqrt(), (-1.0f32).sqrt().is_nan()))
+    print((3.7f32.floor(), 3.2f32.ceil(), 2.5f32.round(), (-2.5f32).abs()))
+    print(3.99f32.truncate_to_int())
+    # The bits, as IEEE 754 lays them out.
+    print(1.5f32.to_bits())
+    print(f32.from_bits(1069547520))
+    # Text in and out: the shortest text that reads back as the same `f32`.
+    print("{a} {a:.3} {a:>8} {a:e} {a:?} {a=}")
+    print("3.25".parse_f32())
+    print("0.1".parse_f32() == Some(a))
+    print("x".parse_f32())
+    print([1.5f32, -0.0, 1e-45, 3.4028235e38])
+    # Comparisons, NaN and `cmp`.
+    let nan = 0.0f32 / 0.0
+    print((a < b, nan == nan, nan < a, a.cmp(b)))
+    match b:
+        case 0.2:
+            print("0.2 matched")
+        case _:
+            print("no match")

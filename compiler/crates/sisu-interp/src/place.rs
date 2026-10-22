@@ -86,22 +86,8 @@ impl Interp<'_, '_> {
                         Value::List(xs) => xs.len() as i64,
                         other => return Err(ice(format!("indexing {other:?}"))),
                     };
-                    let at = if matches!(proj, Proj::IndexFromEnd(_)) { len - i } else { i };
-                    if i < 0 && matches!(proj, Proj::Index(_)) {
-                        return Err(panic(msg::PANIC_NEGATIVE_INDEX, &[("index", i.to_string())]));
-                    }
-                    if i < 0 || at < 0 || at >= len {
-                        let shown = if matches!(proj, Proj::IndexFromEnd(_)) {
-                            format!("^{i}")
-                        } else {
-                            i.to_string()
-                        };
-                        return Err(panic(
-                            msg::PANIC_INDEX_OUT_OF_BOUNDS,
-                            &[("len", len.to_string()), ("index", shown)],
-                        ));
-                    }
-                    ptr.path.push(Step::Index(at as usize));
+                    let at = list_index(i, len, matches!(proj, Proj::IndexFromEnd(_)))?;
+                    ptr.path.push(Step::Index(at));
                 }
                 Proj::Key(l) if matches!(self.read(&ptr)?, Value::Arena(_)) => {
                     // An arena slot, by a key of the right generation.
@@ -153,6 +139,55 @@ impl Interp<'_, '_> {
             }
         }
         Ok(Some(ptr))
+    }
+
+    /// The value at a place of the top frame, for a read outside the
+    /// ownership monitor: walked in place, without building a pointer.
+    /// `None` where the read must go through [`Interp::resolve`]: under the
+    /// monitor (which needs the pointer and its loan), at a dict or arena
+    /// key, and at a `Shared`, a guard or a moved value reached on the way.
+    /// The errors are `resolve`'s and `read`'s.
+    pub(crate) fn read_fast(&self, p: &Place) -> Option<Result<&Value, Unwind>> {
+        if self.monitor.is_some() {
+            return None;
+        }
+        let fr = self.frames.last()?;
+        let mut v = fr.locals.get(p.local.0 as usize)?;
+        for proj in &p.proj {
+            let next = match proj {
+                Proj::Deref => match v {
+                    Value::Ref(q) => self.read(q),
+                    Value::Dyn(d) if matches!(d.ty, sisu_sir::Type::Ref(..)) => match &d.value {
+                        Value::Ref(q) => self.read(q),
+                        _ => return None,
+                    },
+                    _ => return None,
+                },
+                Proj::Field(i) if !v.is_moved() => step(v, Step::Field(*i)),
+                Proj::Downcast(k) if !v.is_moved() => step(v, Step::Payload(*k)),
+                Proj::Index(l) | Proj::IndexFromEnd(l) if !v.is_moved() => {
+                    let i = match self.local(*l).and_then(|x| self.target(x)) {
+                        Ok(Value::Int(i)) => *i,
+                        Ok(other) => return Some(Err(ice(format!("index {other:?}")))),
+                        Err(e) => return Some(Err(e)),
+                    };
+                    let Value::List(xs) = v else { return Some(Err(ice(format!("indexing {v:?}")))) };
+                    match list_index(i, xs.len() as i64, matches!(proj, Proj::IndexFromEnd(_))) {
+                        Ok(at) => step(v, Step::Index(at)),
+                        Err(e) => Err(e),
+                    }
+                }
+                Proj::Field(_) | Proj::Downcast(_) | Proj::Index(_) | Proj::IndexFromEnd(_) => {
+                    Err(panic(msg::PANIC_MOVED_VALUE, &[]))
+                }
+                Proj::Key(_) => return None,
+            };
+            match next {
+                Ok(n) => v = n,
+                Err(e) => return Some(Err(e)),
+            }
+        }
+        Some(Ok(v))
     }
 
     /// The value at a pointer.
@@ -291,6 +326,20 @@ impl Interp<'_, '_> {
 
 fn dangling() -> Unwind {
     panic(msg::PANIC_DANGLING, &[])
+}
+
+/// The position `xs[i]` (or `xs[^i]`, `from_end`) names in a list of
+/// `len` elements, or the panic of a negative or out-of-bounds index.
+fn list_index(i: i64, len: i64, from_end: bool) -> Result<usize, Unwind> {
+    let at = if from_end { len - i } else { i };
+    if i < 0 && !from_end {
+        return Err(panic(msg::PANIC_NEGATIVE_INDEX, &[("index", i.to_string())]));
+    }
+    if i < 0 || at < 0 || at >= len {
+        let shown = if from_end { format!("^{i}") } else { i.to_string() };
+        return Err(panic(msg::PANIC_INDEX_OUT_OF_BOUNDS, &[("len", len.to_string()), ("index", shown)]));
+    }
+    Ok(at as usize)
 }
 
 fn step(v: &Value, s: Step) -> Result<&Value, Unwind> {

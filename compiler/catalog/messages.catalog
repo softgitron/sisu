@@ -136,6 +136,8 @@ E0260 error   resolve.not-a-dependency    cannot import `{name}`: `{package}` is
 E0261 error   resolve.script-main         a script's statements at the top level are its `main`, so it cannot also declare `main`
 E0262 error   resolve.const-argument      `{param}` is a `const` parameter of `{name}`, so it takes a constant, such as `{name}[..., 8]`, not a type
 E0263 error   resolve.type-argument       `{param}` is a type parameter of `{name}`, so it takes a type, not a constant
+E0264 error   resolve.const-expression    a type's constant argument is computed where the type is written, from integers, `const` parameters, constants written that way and the operators `+ - * // % ** << >> & | ^`; this is none of them
+E0265 error   resolve.const-not-int       a type's constant argument is an `int`, and this is a `{ty}`
 -     label   resolve.first-impl          the other impl is here
 -     fix     resolve.add-dyn             write `dyn {name}`
 -     label   resolve.first-defined       first defined here
@@ -214,6 +216,7 @@ E0371 error   type.coalesce               `??` needs an optional value on its le
 E0372 error   type.float-floor-division   `//` divides integers; for floats use `/`
 E0373 error   type.mixed-numbers          `{op}` cannot mix `{lhs}` and `{rhs}`; convert one of them explicitly
 E0374 error   type.literal-out-of-range   `{text}` does not fit in `{ty}`
+E0332 error   type.float-suffix           a float literal takes the suffix `f32` or `f64`, not `{suffix}`
 E0375 error   type.type-arguments-needed  `{name}` needs a type argument, as in `{name}[T]`
 E0376 error   type.positional-after-keyword  a positional argument cannot follow a keyword argument
 # E0377 is retired: a call that leaves out a parameter without a default
@@ -251,7 +254,7 @@ E0399 error   type.bad-format-spec        `{spec}` is not a format spec; it is `
 -     fix     type.from-end-index         count from the end with `^`
 -     fix     type.add-error-set          add `{set}` to the function's error set
 -     fix     type.add-copy               copy it with `.copy()`
--     fix     type.convert-to-float       make the `int` an `f64`
+-     fix     type.convert-to-float       make the `int` an `{ty}`
 -     fix     type.interpolate            write the value into the text
 -     note    type.option-not-value       the value may be missing: give a default with `??`, or take it apart with `if let` or `match`
 -     fix     type.similar-member         the type has a member with a similar name
@@ -267,6 +270,7 @@ E0399 error   type.bad-format-spec        `{spec}` is not a format spec; it is `
 -     note    type.spec-letters           `d`, `x`, `X`, `o` and `b` format integers, `e`, `E`, `f`, `F` and `%` format numbers, and text takes none of them
 -     note    type.break-use-return       `return` leaves the function; `break` leaves only a loop
 -     note    type.int-range              `{ty}` holds {min} to {max}
+-     note    type.float-range            `{ty}` holds magnitudes up to {max}
 -     note    type.missing-return-end     return a value on that path too, or end the body with a `return`
 -     note    type.main-forms             write `def main():` or `def main(sys: System):`, returning nothing or `!`
 -     fix     type.add-mut                write `mut` before the argument

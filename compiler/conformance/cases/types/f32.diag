@@ -1,0 +1,14 @@
+7:18-7:19 E0300 type.mismatch expected="f32" found="f64"
+  label 7:12-7:15 type.expected-because
+  fix type.call-conversion 7:19-7:19 ".to_f32()"
+8:13-8:18 E0373 type.mixed-numbers op="+" lhs="f32" rhs="int"
+  fix type.convert-to-float 8:18-8:18 ".to_f32()"
+9:13-9:19 E0372 type.float-floor-division
+10:13-10:20 E0374 type.literal-out-of-range text="1e39f32" ty="f32"
+11:13-11:18 E0332 type.float-suffix suffix="u8"
+12:13-12:18 E0369 type.comparison-types lhs="f32" rhs="f64"
+13:18-13:19 E0300 type.mismatch expected="int" found="f32"
+  label 13:12-13:15 type.expected-because
+  fix type.call-conversion 13:19-13:19 ".truncate_to_int()"
+14:13-14:18 E0374 type.literal-out-of-range text="1e400" ty="f64"
+15:13-15:14 E0380 type.no-display ty="f32" spec="x"

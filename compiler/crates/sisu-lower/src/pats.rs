@@ -8,6 +8,46 @@ use sisu_sir as sir;
 use sisu_sir::{BlockId, Const, Operand, Place, Proj, Rvalue, StatementKind, Terminator};
 use sisu_typeck::thir::{self, BindMode, Lit, PatKind};
 
+/// The variants `pat` tests for, and the place whose discriminant
+/// decides, when that is all the pattern tests: a variant whose fields
+/// cannot fail, or a choice of such variants of one place.
+pub fn variant_set(pat: &thir::Pat, place: &Place) -> Option<(Place, Vec<i64>)> {
+    match &pat.kind {
+        PatKind::Variant { variant, fields, .. } => {
+            // A union of error sets tests which set first (`test`).
+            if matches!(&pat.ty, Ty::ErrSet(ms) if ms.len() > 1) || !fields.iter().all(cannot_fail) {
+                return None;
+            }
+            Some((place.clone(), vec![*variant as i64]))
+        }
+        PatKind::Or(alts) => {
+            let mut out: Option<(Place, Vec<i64>)> = None;
+            for alt in alts {
+                let (q, vs) = variant_set(alt, place)?;
+                match &mut out {
+                    None => out = Some((q, vs)),
+                    Some((o, ws)) if *o == q => ws.extend(vs),
+                    Some(_) => return None,
+                }
+            }
+            out
+        }
+        PatKind::Deref(inner) => variant_set(inner, &place.project(Proj::Deref)),
+        _ => None,
+    }
+}
+
+/// Whether a pattern matches every value of its type, so that testing it
+/// emits nothing.
+fn cannot_fail(pat: &thir::Pat) -> bool {
+    match &pat.kind {
+        PatKind::Wild | PatKind::Bind { .. } | PatKind::Error => true,
+        PatKind::Struct { fields, .. } | PatKind::Tuple(fields) => fields.iter().all(cannot_fail),
+        PatKind::Deref(inner) => cannot_fail(inner),
+        PatKind::Lit(_) | PatKind::Variant { .. } | PatKind::Or(_) | PatKind::List { .. } => false,
+    }
+}
+
 impl FnLower<'_, '_> {
     /// Continues in the current block when `pat` matches the value at
     /// `place`, and jumps to `fail` otherwise.
@@ -24,12 +64,15 @@ impl FnLower<'_, '_> {
                     Lit::Char(c) => Const::Char(*c),
                     Lit::Str(s) => Const::Str(s.clone()),
                 };
-                // A literal of a `u64`, `u128` or `i128` is a value an
-                // intrinsic makes, as in an expression.
-                let c = match self.sized_int(&pat.ty).filter(|k| sisu_resolve::std_sources::own_kind(k)) {
-                    Some(_) => {
+                // A literal of a `u64`, `u128`, `i128` or `f32` is a value
+                // an intrinsic makes, as in an expression.
+                let made = self.sized_int(&pat.ty).is_some_and(sisu_resolve::std_sources::own_kind)
+                    || self.is_f32(&pat.ty);
+                let c = match made {
+                    true => {
                         let kind = match l {
                             Lit::WideInt(b) => thir::ExprKind::WideInt(*b),
+                            Lit::Float(f) => thir::ExprKind::Float(*f),
                             _ => thir::ExprKind::Int(match c {
                                 Const::Int(n) => n,
                                 _ => 0,
@@ -40,7 +83,7 @@ impl FnLower<'_, '_> {
                         self.into(Place::local(t), &lit);
                         Operand::Copy(Place::local(t))
                     }
-                    None => Operand::Const(c),
+                    false => Operand::Const(c),
                 };
                 let lhs = if self.ctx.prog.is_copy_in(&pat.ty, &self.bounds) {
                     Operand::Copy(place.clone())

@@ -234,6 +234,9 @@ impl Reader<'_> {
 
     fn hex4(&mut self) -> Result<u32, usize> {
         let digits = self.s.get(self.at..self.at + 4).ok_or(self.at)?;
+        if !digits.iter().all(u8::is_ascii_hexdigit) {
+            return Err(self.at);
+        }
         let text = std::str::from_utf8(digits).map_err(|_| self.at)?;
         let n = u32::from_str_radix(text, 16).map_err(|_| self.at)?;
         self.at += 4;

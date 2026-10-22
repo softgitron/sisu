@@ -121,6 +121,24 @@ pub fn sort(diags: &mut [Diagnostic]) {
     });
 }
 
+/// Sorts diagnostics as [`sort`] does and drops each one identical to an
+/// earlier one (the same message, parameters, span, labels, notes and
+/// fixes): one mistake is one message, also where the compiler checks one
+/// piece of source more than once, as it checks the body the cases of a
+/// parametrised test share once per case.
+pub fn sort_unique(diags: &mut Vec<Diagnostic>) {
+    sort(diags);
+    let mut kept: Vec<Diagnostic> = Vec::with_capacity(diags.len());
+    for d in diags.drain(..) {
+        // Sorted, so an identical one is among the last kept at its span.
+        let repeat = kept.iter().rev().take_while(|k| k.span == d.span).any(|k| *k == d);
+        if !repeat {
+            kept.push(d);
+        }
+    }
+    *diags = kept;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,5 +154,23 @@ mod tests {
         assert!(d.is_error());
         let w = Diagnostic::new(msg::TYPE_HOLE, span).with("name", "x").with("ty", "int");
         assert_eq!(w.severity(), Severity::Warning);
+    }
+
+    #[test]
+    fn repeats_are_reported_once() {
+        let at = |a: u32, b: u32| Span::new(FileId(0), TextRange::new(a, b));
+        let undefined =
+            |name: &str, span| Diagnostic::new(msg::RESOLVE_UNDEFINED_NAME, span).with("name", name);
+        let mut diags = vec![
+            undefined("double", at(5, 11)),
+            undefined("triple", at(5, 11)),
+            undefined("double", at(1, 2)),
+            undefined("double", at(5, 11)),
+            undefined("triple", at(5, 11)),
+        ];
+        sort_unique(&mut diags);
+        let names: Vec<_> =
+            diags.iter().map(|d| (d.span.range.start, d.param("name").unwrap_or(""))).collect();
+        assert_eq!(names, vec![(1, "double"), (5, "double"), (5, "triple")]);
     }
 }

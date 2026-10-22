@@ -1,7 +1,7 @@
 //! Types as written: names, generic arguments with defaults, bounds,
 //! `dyn Trait` and associated types (`C.Item`, `Self.Item`).
 
-use crate::collect::{LATER_TYPES, Pending, Resolver, TyCtx};
+use crate::collect::{Pending, Resolver, TyCtx};
 use crate::program::*;
 use crate::ty::{AssocTy, FnTy, Ty};
 use sisu_diag::{Diagnostic, Span, msg};
@@ -341,6 +341,22 @@ impl Resolver<'_> {
                 None => Ty::Error,
             },
             TypeKind::ConstArg(n) => Ty::Const(*n),
+            TypeKind::ConstExpr(e) => {
+                // Which generic parameters are `const` is checked in bodies;
+                // a signature takes any parameter here.
+                let param = |n: &str| match ctx.generics.iter().position(|g| g == n) {
+                    Some(i) => crate::consts::Local::ConstParam(i as u32),
+                    None => crate::consts::Local::Item,
+                };
+                match crate::consts::const_arg(&self.prog, ctx.module, e, &param) {
+                    Ok(t) => t,
+                    Err(err) => {
+                        let d = crate::consts::diagnostic(&err, |r| self.span(ctx.module, r));
+                        self.report(d);
+                        Ty::Error
+                    }
+                }
+            }
             TypeKind::Unsupported(what) => {
                 let phase = if what.contains("pointer") {
                     "foreign functions (Phase 8)"
@@ -460,11 +476,19 @@ impl Resolver<'_> {
                 return t;
             }
             if let Some(d) = self.prog.lookup(ctx.module, name) {
+                // A constant where a type's constant argument goes:
+                // `Array[int, SIZE]`.
+                if matches!(self.prog.def(d).kind, DefKind::Const(_)) && args.is_empty() {
+                    return match crate::consts::const_item(&self.prog, ctx.module, name, first.range) {
+                        Ok(t) => t,
+                        Err(err) => {
+                            let d = crate::consts::diagnostic(&err, |_| span);
+                            self.report(d);
+                            Ty::Error
+                        }
+                    };
+                }
                 return self.def_as_type(d, name, args, span);
-            }
-            if let Some((_, phase)) = LATER_TYPES.iter().find(|(n, _)| *n == name) {
-                self.unsupported(span, &format!("`{name}`"), phase);
-                return Ty::Error;
             }
             if !self.prog.poisoned.contains(name) {
                 let d = Diagnostic::new(msg::RESOLVE_UNDEFINED_TYPE, span).with("name", name);
@@ -591,10 +615,10 @@ impl Resolver<'_> {
             let Some(&is_const) = consts.get(i) else { continue };
             let param = generics.get(i).map(|g| g.name.clone()).unwrap_or_else(|| (i + 1).to_string());
             let wrong = if is_const {
-                (!matches!(a, Ty::Const(_) | Ty::Param(_) | Ty::Error | Ty::Var(_)))
+                (!matches!(a, Ty::Const(_) | Ty::ConstOp(..) | Ty::Param(_) | Ty::Error | Ty::Var(_)))
                     .then_some(msg::RESOLVE_CONST_ARGUMENT)
             } else {
-                matches!(a, Ty::Const(_)).then_some(msg::RESOLVE_TYPE_ARGUMENT)
+                matches!(a, Ty::Const(_) | Ty::ConstOp(..)).then_some(msg::RESOLVE_TYPE_ARGUMENT)
             };
             if let Some(m) = wrong {
                 self.report(Diagnostic::new(m, span).with("name", name).with("param", param));
@@ -652,8 +676,8 @@ impl Resolver<'_> {
             )
         };
         let mut names: Vec<String> = [
-            "int", "f64", "bool", "char", "str", "u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32",
-            "i64", "i128",
+            "int", "f64", "f32", "bool", "char", "str", "u8", "u16", "u32", "u64", "u128", "i8", "i16",
+            "i32", "i64", "i128",
         ]
         .iter()
         .map(|s| s.to_string())

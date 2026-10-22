@@ -190,6 +190,24 @@ fn types() {
 }
 
 #[test]
+fn constant_arguments_may_be_expressions() {
+    // 03's `Array[T, W * H]`: an argument whose leading path, integer or
+    // parenthesised group is followed by an operator, or that starts with
+    // what no type starts with, is an expression in a `CONST_ARG`.
+    let src = "struct G[T, const W: int, const H: int]:\n    a: Array[T, W * H]\n    b: Array[int, 2 ** 3 - 1]\n    c: Array[int, (W + 1) * H]\n    d: Array[int, -1]\n    e: Array[int, 3]\n    f: list[(int, str)]\n    g: Array[pure (int) -> int, N]\n";
+    assert!(codes(src).is_empty(), "{:?}", codes(src));
+    let parse = p(src);
+    let t = &parse.tree;
+    let args: Vec<Vec<SyntaxKind>> = t
+        .preorder(t.root())
+        .into_iter()
+        .filter(|&n| t.kind(n) == CONST_ARG)
+        .map(|n| t.child_nodes(n).map(|c| t.kind(c)).collect())
+        .collect();
+    assert_eq!(args, vec![vec![BIN_EXPR], vec![BIN_EXPR], vec![BIN_EXPR], vec![PREFIX_EXPR], vec![]]);
+}
+
+#[test]
 fn top_level_statement_is_reported_but_kept() {
     let parse = p("print(1)\ndef main():\n    pass\n");
     assert_eq!(parse.diagnostics.iter().map(|d| d.code()).collect::<Vec<_>>(), vec!["E0107"]);

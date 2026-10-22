@@ -3,6 +3,7 @@
 use crate::value::{DictPart, IterState, Step, Value};
 use crate::{Interp, Unwind, ice, msg, panic};
 use sisu_sir as sir;
+use std::rc::Rc;
 
 impl Interp<'_, '_> {
     /// The iterator over a borrowed collection (`iter.ref`, `iter.mut`):
@@ -70,7 +71,7 @@ impl Interp<'_, '_> {
                 }
                 let p = base.join(Step::Index(*idx));
                 *idx += 1;
-                Ok(Some(Value::Ref(Box::new(p))))
+                Ok(Some(Value::Ref(Rc::new(p))))
             }
             IterState::SetRef { base, idx } => {
                 self.mon_iter_use(base)?;
@@ -83,7 +84,7 @@ impl Interp<'_, '_> {
                 }
                 let p = base.join(Step::SetItem(*idx));
                 *idx += 1;
-                Ok(Some(Value::Ref(Box::new(p))))
+                Ok(Some(Value::Ref(Rc::new(p))))
             }
             IterState::DictRef { base, idx, part } => {
                 self.mon_iter_use(base)?;
@@ -94,8 +95,8 @@ impl Interp<'_, '_> {
                 if *idx >= len {
                     return Ok(None);
                 }
-                let k = Value::Ref(Box::new(base.join(Step::DictKey(*idx))));
-                let v = Value::Ref(Box::new(base.join(Step::DictVal(*idx))));
+                let k = Value::Ref(Rc::new(base.join(Step::DictKey(*idx))));
+                let v = Value::Ref(Rc::new(base.join(Step::DictVal(*idx))));
                 *idx += 1;
                 Ok(Some(match part {
                     DictPart::Keys => k,

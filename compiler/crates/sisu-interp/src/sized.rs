@@ -9,6 +9,7 @@
 use crate::value::Value;
 use crate::{Interp, Unwind, ice, panic};
 use sisu_diag::msg;
+use std::rc::Rc;
 
 /// The sized integer types (as `sisu_resolve::std_sources::SIZED`).
 const SIZED: &[&str] = &["u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32", "i128"];
@@ -404,9 +405,9 @@ impl Interp<'_, '_> {
                 let at = usize::try_from(i).ok().filter(|i| *i < len);
                 match (name, at) {
                     ("Slice.get", at) => Ok(Value::option(
-                        at.map(|i| Value::Ref(Box::new(p.join(crate::value::Step::Index(i))))),
+                        at.map(|i| Value::Ref(Rc::new(p.join(crate::value::Step::Index(i))))),
                     )),
-                    (_, Some(i)) => Ok(Value::Ref(Box::new(p.join(crate::value::Step::Index(i))))),
+                    (_, Some(i)) => Ok(Value::Ref(Rc::new(p.join(crate::value::Step::Index(i))))),
                     (_, None) => Err(panic(
                         msg::PANIC_INDEX_OUT_OF_BOUNDS,
                         &[("len", len.to_string()), ("index", i.to_string())],

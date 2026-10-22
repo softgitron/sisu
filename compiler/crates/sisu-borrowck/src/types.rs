@@ -17,6 +17,7 @@ const PLAIN_BUILTINS: &[&str] = &[
     "Path",
     "DateTime",
     "bytes",
+    "f32",
     "u8",
     "u16",
     "u32",
@@ -281,7 +282,7 @@ impl<'p> Types<'p> {
     pub fn trivial_drop(&self, t: &Type) -> bool {
         match t {
             Type::Int | Type::Float | Type::Bool | Type::Char | Type::Str | Type::Unit | Type::Never => true,
-            Type::Ref(..) | Type::Fn(..) | Type::Const(_) => true,
+            Type::Ref(..) | Type::Fn(..) | Type::Const(_) | Type::ConstOp(..) => true,
             Type::Tuple(es) => es.iter().all(|e| self.trivial_drop(e)),
             Type::Named(n, args) => {
                 matches!(n.as_str(), "Fs" | "Env" | "Clock" | "DateTime")

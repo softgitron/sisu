@@ -8,17 +8,13 @@ SIR of `discard`:
 fn discard[T](1) source 0 own 0 @12:5-12:12 {
     let _0: ()
     let _1: $0 "x" @12:16-12:24
-  bb0:
-    goto bb1
-  bb1 (unwind bb3):
+  bb0 (unwind bb1):
     _0 = const ()
-    goto bb4
-  bb2 (cleanup):
-    resume
-  bb3 (cleanup):
-    drop _1
     goto bb2
-  bb4:
+  bb1 (cleanup):
+    drop _1
+    resume
+  bb2:
     drop _1 @13:9-13:9
     return
 }

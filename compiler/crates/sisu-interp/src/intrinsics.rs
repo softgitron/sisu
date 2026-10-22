@@ -65,6 +65,36 @@ fn pairwise(xs: &[f64]) -> f64 {
     }
 }
 
+/// `pairwise` in `f32`: each sum rounded once to `f32`.
+fn pairwise32(xs: &[f32]) -> f32 {
+    match xs.len() {
+        0 => 0.0,
+        1 => xs[0],
+        n => pairwise32(&xs[..n / 2]) + pairwise32(&xs[n / 2..]),
+    }
+}
+
+/// Which dispatcher answers an intrinsic: each takes a name or leaves it
+/// to the next, by the name alone, so the first call of a name finds its
+/// dispatcher and every later one goes straight to it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Route {
+    Task,
+    Cap,
+    Sized,
+    F32,
+    Bytes,
+    /// None of those: the names below.
+    Rest,
+}
+
+/// Whether the intrinsic reads the type of its call's destination: `sum`,
+/// whose result type says whether it adds floats, and a scope, whose result
+/// type says which failures it carries (`sched.rs`).
+pub(crate) fn needs_return_type(name: &str) -> bool {
+    matches!(name, "sum" | "task.scope" | "task.race" | "task.shield")
+}
+
 impl<'p> Interp<'p, '_> {
     pub(crate) fn intrinsic(
         &mut self,
@@ -74,21 +104,43 @@ impl<'p> Interp<'p, '_> {
         ret: Option<&sir::Type>,
     ) -> Result<Value, Unwind> {
         let mut args = args;
-        if let Some(r) = self.task_intrinsic(name, tys, &mut args) {
+        let known = self.routes.get(name).copied();
+        let learn = |me: &mut Self, r: Route| {
+            if known.is_none() {
+                me.routes.insert(name.to_string(), r);
+            }
+        };
+        if matches!(known, None | Some(Route::Task))
+            && let Some(r) = self.task_intrinsic(name, tys, &mut args)
+        {
+            learn(self, Route::Task);
             return r;
         }
-        if let Some(r) = self.cap_intrinsic(name, tys, &mut args) {
+        if matches!(known, None | Some(Route::Cap))
+            && let Some(r) = self.cap_intrinsic(name, tys, &mut args)
+        {
+            learn(self, Route::Cap);
             return r;
         }
-        if let Some(r) = self.sized_intrinsic(name, &args) {
+        if matches!(known, None | Some(Route::Sized))
+            && let Some(r) = self.sized_intrinsic(name, &args)
+        {
+            learn(self, Route::Sized);
             return r;
         }
-        if let Some(r) = self.f32_intrinsic(name, &args) {
+        if matches!(known, None | Some(Route::F32))
+            && let Some(r) = self.f32_intrinsic(name, &args)
+        {
+            learn(self, Route::F32);
             return r;
         }
-        if let Some(r) = self.bytes_intrinsic(name, &args) {
+        if matches!(known, None | Some(Route::Bytes))
+            && let Some(r) = self.bytes_intrinsic(name, &args)
+        {
+            learn(self, Route::Bytes);
             return r;
         }
+        learn(self, Route::Rest);
         if name == "Mutex.lock" {
             return self.lock(&mut args);
         }
@@ -294,6 +346,16 @@ impl<'p> Interp<'p, '_> {
                     let xs = items.iter().map(|x| self.float(x)).collect::<Result<Vec<_>, _>>()?;
                     return Ok(Value::Float(pairwise(&xs)));
                 }
+                if matches!(tys.first().or(ret), Some(sir::Type::Named(n, _)) if n == "f32") {
+                    let mut xs = Vec::with_capacity(items.len());
+                    for x in &items {
+                        match self.target(x)? {
+                            Value::F32(f) => xs.push(*f),
+                            other => return Err(ice(format!("sum of f32 over {other:?}"))),
+                        }
+                    }
+                    return Ok(Value::F32(pairwise32(&xs)));
+                }
                 let mut total = 0i64;
                 for x in &items {
                     let v = self.int(x)?;
@@ -320,6 +382,7 @@ impl<'p> Interp<'p, '_> {
                     .map(Value::Int)
                     .ok_or_else(|| panic(msg::PANIC_OVERFLOW, &[("expr", format!("abs({i})"))])),
                 Value::Float(f) => Ok(Value::Float(f.abs())),
+                Value::F32(f) => Ok(Value::F32(f.abs())),
                 other => Err(ice(format!("abs of {other:?}"))),
             },
             "panic" => Err(panic(msg::PANIC_EXPLICIT, &[("message", self.text(a.get(0)?)?.to_string())])),
@@ -373,6 +436,9 @@ impl<'p> Interp<'p, '_> {
                     "round" => Value::Float(f.round()),
                     "abs" => Value::Float(f.abs()),
                     "is_nan" => Value::Bool(f.is_nan()),
+                    // One rounding: the host's fused multiply-add, which
+                    // IEEE 754 defines exactly.
+                    "mul_add" => Value::Float(f.mul_add(self.float(y()?)?, self.float(a.get(2)?)?)),
                     // How many `f64`s lie between the two, at most `n`.
                     "within_ulps" => {
                         let g = self.float(y()?)?;
@@ -474,6 +540,10 @@ impl<'p> Interp<'p, '_> {
             "chars" => Value::Iter(Box::new(IterState::Chars { text: s, pos: 0 })),
             "parse_float" => {
                 Value::option(decimal(&s).then(|| s.parse::<f64>().ok()).flatten().map(Value::Float))
+            }
+            // Rounded once from the decimal text, not through an `f64`.
+            "parse_f32" => {
+                Value::option(decimal(&s).then(|| s.parse::<f32>().ok()).flatten().map(Value::F32))
             }
             "to_lowercase" => Value::String(s.to_lowercase()),
             "to_uppercase" => Value::String(s.to_uppercase()),
@@ -578,7 +648,7 @@ impl<'p> Interp<'p, '_> {
                 };
                 Ok(Value::option(
                     (i >= 0 && (i as usize) < len)
-                        .then(|| Value::Ref(Box::new(p.join(Step::Index(i as usize))))),
+                        .then(|| Value::Ref(Rc::new(p.join(Step::Index(i as usize))))),
                 ))
             }
             "iter" => {
@@ -717,14 +787,14 @@ impl<'p> Interp<'p, '_> {
                     }
                 }
             };
-            return Ok(Value::Ref(Box::new(dict.join(Step::DictVal(pos)))));
+            return Ok(Value::Ref(Rc::new(dict.join(Step::DictVal(pos)))));
         }
         match method {
             "new" => Ok(Value::Dict(Box::default())),
             "get" => {
                 let p = self.dict_ptr(a.get(0)?)?;
                 let pos = self.dict_position(&p, a.get(1)?)?;
-                Ok(Value::option(pos.map(|i| Value::Ref(Box::new(p.join(Step::DictVal(i)))))))
+                Ok(Value::option(pos.map(|i| Value::Ref(Rc::new(p.join(Step::DictVal(i)))))))
             }
             "contains" => {
                 let p = self.dict_ptr(a.get(0)?)?;
@@ -935,6 +1005,15 @@ impl<'p> Interp<'p, '_> {
                 let kind = self.text(a.get(1)?)?.chars().next();
                 let precision = usize::try_from(self.int(a.get(2)?)?).ok();
                 return Ok(Value::String(crate::format::float_digits(x, kind, precision)));
+            }
+            "float32_digits" => {
+                let x = match self.target(a.get(0)?)? {
+                    Value::F32(f) => *f,
+                    other => return Err(ice(format!("fmt.float32_digits of {other:?}"))),
+                };
+                let kind = self.text(a.get(1)?)?.chars().next();
+                let precision = usize::try_from(self.int(a.get(2)?)?).ok();
+                return Ok(Value::String(crate::format::float32_digits(x, kind, precision)));
             }
             "strftime" => {
                 let t = match self.target(a.get(0)?)? {
@@ -1224,7 +1303,7 @@ impl Interp<'_, '_> {
                     path: Vec::new(),
                     tag: 0,
                 };
-                Ok(Value::Ref(Box::new(p)))
+                Ok(Value::Ref(Rc::new(p)))
             }
             ("Shared", "downgrade") => {
                 let id = self.shared_id(a.get(0)?)?;
@@ -1370,7 +1449,7 @@ impl Interp<'_, '_> {
                 if !live {
                     return Ok(Value::none());
                 }
-                Ok(Value::some(Value::Ref(Box::new(p.join(crate::value::Step::Slot(index))))))
+                Ok(Value::some(Value::Ref(Rc::new(p.join(crate::value::Step::Slot(index))))))
             }
             "remove" | "take" => {
                 let p = self.pointer_of(a.get(0)?)?;

@@ -283,7 +283,7 @@ fn declare_intrinsic(prog: &mut sir::Program, name: &str) {
 
 /// Builds the statements that make a value.
 struct Baker<'a> {
-    types: &'a HashMap<&'a str, &'a TypeDecl>,
+    types: &'a crate::fx::FxMap<&'a str, &'a TypeDecl>,
     locals: Vec<LocalDecl>,
     stmts: Vec<Statement>,
     intrinsics: Vec<&'static str>,
@@ -368,13 +368,15 @@ impl Baker<'_> {
                 });
                 return Ok(());
             }
-            Value::U64(_) | Value::I128(_) | Value::U128(_) => {
+            Value::U64(_) | Value::I128(_) | Value::U128(_) | Value::F32(_) => {
                 // A value of a kind of its own: a `u64` from its bits, a
-                // 128-bit integer from its decimal text.
+                // 128-bit integer from its decimal text, an `f32` from the
+                // `f64` that holds it.
                 let (name, arg) = match v {
                     Value::U64(n) => ("u64.from_bits", Const::Int(*n as i64)),
                     Value::I128(n) => ("i128.from_text", Const::Str(n.to_string())),
                     Value::U128(n) => ("u128.from_text", Const::Str(n.to_string())),
+                    Value::F32(f) => ("f32.from_literal", Const::Float(f64::from(*f))),
                     _ => return Err("an integer of its own kind".into()),
                 };
                 if !self.intrinsics.contains(&name) {

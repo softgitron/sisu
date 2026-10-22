@@ -153,6 +153,41 @@ fn strings_and_chars() {
     assert_eq!(codes("\"\"\"never closed\n"), vec!["E0004"]);
     assert!(codes("\"\"\"two\nlines\"\"\"\n").is_empty());
     assert!(codes("'\\u{1F600}'\n").is_empty());
+    // One to six hex digits: a sign is not one, and the braces stay in the
+    // text (in a string, `{` then opens an interpolation).
+    assert_eq!(codes("\"\\u{+41}\"\n"), vec!["E0007"]);
+    assert_eq!(codes("'\\u{+41}'\n"), vec!["E0007", "E0016"]);
+    assert_eq!(codes("'\\u{0000041}'\n"), vec!["E0007", "E0016"]);
+    assert!(codes("'\\u{10FFFF}'\n").is_empty());
+}
+
+#[test]
+fn line_break_in_interpolation_ends_the_string_and_the_line() {
+    // The interpolation and the string close before the line break, which
+    // is then scanned as code: a line end, not an error token.
+    let src = "x = \"a{b\ny = 1\n";
+    assert_eq!(
+        sig(src),
+        vec![
+            IDENT,
+            EQ,
+            STRING_START,
+            STRING_TEXT,
+            INTERP_START,
+            IDENT,
+            INTERP_END,
+            STRING_END,
+            NEWLINE,
+            IDENT,
+            EQ,
+            INT_NUMBER,
+            NEWLINE,
+            EOF
+        ]
+    );
+    assert_eq!(codes(src), vec!["E0018"]);
+    lossless(src);
+    lossless("f(\"{a\r\n\"{b\r\n");
 }
 
 #[test]

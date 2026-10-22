@@ -9,10 +9,13 @@
 //! jumps to the current block's cleanup, which ends in `resume`, or, if the
 //! block has none, leaves the frame once its pending drops are done.
 
-use crate::value::Value;
+use crate::value::{IterState, Value};
 use crate::{Frame, Interp, MAX_DEPTH, PanicInfo, Unwind, ice, msg, panic, render};
 use sisu_sir as sir;
-use sisu_sir::{Callee, Operand, Place, Rvalue, StatementKind, Terminator};
+use sisu_sir::{Callee, Operand, Place, Proj, Rvalue, StatementKind, Terminator};
+
+/// How many emptied locals vectors the interpreter keeps for reuse.
+const SPARE_LOCALS: usize = 64;
 use std::rc::Rc;
 
 pub(crate) enum Event<'p> {
@@ -32,6 +35,17 @@ impl<'p> Interp<'p, '_> {
     /// task has adopted (`live.rs`).
     pub(crate) fn fn_index(&self, name: &str) -> Result<usize, Unwind> {
         self.fn_index_in(self.task_epoch(), name)
+    }
+
+    /// [`Interp::fn_index`] for a callee named in the program's SIR.
+    fn callee_index(&mut self, name: &'p str) -> Result<usize, Unwind> {
+        let key = (self.task_epoch(), name.as_ptr() as usize, name.len());
+        if let Some(i) = self.callees.get(&key) {
+            return Ok(*i);
+        }
+        let i = self.fn_index_in(key.0, name)?;
+        self.callees.insert(key, i);
+        Ok(i)
     }
 
     pub(crate) fn fn_index_in(&self, epoch: usize, name: &str) -> Result<usize, Unwind> {
@@ -154,13 +168,26 @@ impl<'p> Interp<'p, '_> {
         ret: Option<&'p Place>,
         tys: Vec<sir::Type>,
     ) -> Result<Frame<'p>, Unwind> {
+        let mut locals = self.spare_locals.pop().unwrap_or_default();
+        locals.push(Value::Moved);
+        locals.extend(args);
+        self.frame_with(fi, locals, ret, tys)
+    }
+
+    /// A frame for a call of function `fi` whose locals start with the
+    /// result's slot and the arguments: the rest are added, empty (and
+    /// arguments past the function's locals dropped).
+    fn frame_with(
+        &mut self,
+        fi: usize,
+        mut locals: Vec<Value>,
+        ret: Option<&'p Place>,
+        tys: Vec<sir::Type>,
+    ) -> Result<Frame<'p>, Unwind> {
         let f = self.func(fi).ok_or_else(|| ice("no such function"))?;
-        let mut locals = vec![Value::Moved; f.locals.len()];
-        for (i, a) in args.into_iter().enumerate() {
-            if let Some(slot) = locals.get_mut(i + 1) {
-                *slot = a;
-            }
-        }
+        let n = f.locals.len();
+        locals.truncate(n);
+        locals.resize_with(n, || Value::Moved);
         self.serial += 1;
         Ok(Frame {
             serial: self.serial,
@@ -502,11 +529,17 @@ impl<'p> Interp<'p, '_> {
                 Ok(back(t.0 as usize))
             }
             Terminator::Switch { value, cases, default } => {
-                let v = self.operand(value)?;
-                let n = match self.target(&v)? {
-                    Value::Int(n) => *n,
-                    Value::Bool(b) => *b as i64,
-                    other => return Err(ice(format!("switch on {other:?}"))),
+                let n = match self.scalar(value) {
+                    Some(Value::Int(n)) => n,
+                    Some(Value::Bool(b)) => b as i64,
+                    _ => {
+                        let v = self.operand(value)?;
+                        match self.target(&v)? {
+                            Value::Int(n) => *n,
+                            Value::Bool(b) => *b as i64,
+                            other => return Err(ice(format!("switch on {other:?}"))),
+                        }
+                    }
                 };
                 let t = cases.iter().find(|(c, _)| *c == n).map(|(_, t)| *t).unwrap_or(*default);
                 self.jump(t.0 as usize);
@@ -519,6 +552,12 @@ impl<'p> Interp<'p, '_> {
                 let v =
                     fr.locals.first_mut().map(|v| std::mem::replace(v, Value::Moved)).unwrap_or(Value::Unit);
                 let v = if v.is_moved() { Value::Unit } else { v };
+                // The locals' storage goes to the next frame.
+                let mut locals = std::mem::take(&mut fr.locals);
+                locals.clear();
+                if self.spare_locals.len() < SPARE_LOCALS {
+                    self.spare_locals.push(locals);
+                }
                 if let Some(a) = fr.after.take() {
                     self.after(a, &v)?;
                 }
@@ -544,12 +583,35 @@ impl<'p> Interp<'p, '_> {
     fn stmt(&mut self, s: &'p sir::Statement) -> Result<(), Unwind> {
         match &s.kind {
             StatementKind::Assign(p, r) => {
+                if let Some(v) = self.scalar_rvalue(r) {
+                    return self.store(p, v);
+                }
                 let v = self.rvalue(r)?;
                 self.store(p, v)
             }
             StatementKind::Call { dest, callee, args } => match callee {
                 Callee::Fn(name, tys) => {
-                    let fi = self.fn_index(name)?;
+                    let fi = self.callee_index(name)?;
+                    if self.monitor.is_none() {
+                        // The arguments go straight to the new frame's
+                        // locals (the monitor's hooks are all that the
+                        // general path adds).
+                        let mut locals = self.spare_locals.pop().unwrap_or_default();
+                        locals.push(Value::Moved);
+                        for o in args {
+                            match self.operand_value(o) {
+                                Ok(v) => locals.push(v),
+                                Err(e) => {
+                                    locals.clear();
+                                    self.spare_locals.push(locals);
+                                    return Err(e);
+                                }
+                            }
+                        }
+                        let tys = tys.iter().map(|t| self.concrete(t)).collect();
+                        let fr = self.frame_with(fi, locals, Some(dest), tys)?;
+                        return self.push_built(fr);
+                    }
                     let vals = self.operands(args)?;
                     // Passing a reference or a view is a use of its loan.
                     vals.iter().try_for_each(|v| self.mon_passed(v))?;
@@ -570,7 +632,11 @@ impl<'p> Interp<'p, '_> {
                             self.push_frame(fi, vals, Some(dest), tys)
                         }
                         crate::dispatch::Target::Intrinsic(n, vals, tys) => {
-                            let ret = self.dest_type(dest);
+                            let ret = if crate::intrinsics::needs_return_type(&n) {
+                                self.dest_type(dest)
+                            } else {
+                                None
+                            };
                             let r = self.intrinsic(&n, &tys, vals, ret.as_ref());
                             self.finish_call(&n, &tys, dest, ret, r)
                         }
@@ -585,8 +651,18 @@ impl<'p> Interp<'p, '_> {
                     self.push_frame(fi, vals, Some(dest), tys)
                 }
                 Callee::Intrinsic(name, tys) => {
-                    let tys: Vec<sir::Type> = tys.iter().map(|t| self.concrete(t)).collect();
-                    let tys = &tys;
+                    if let Some(r) = self.quick_intrinsic(name, args) {
+                        return self.store(dest, r?);
+                    }
+                    // Type arguments without parameters are concrete as
+                    // they are.
+                    let owned: Vec<sir::Type>;
+                    let tys: &[sir::Type] = if tys.iter().any(sir::Type::has_params) {
+                        owned = tys.iter().map(|t| self.concrete(t)).collect();
+                        &owned
+                    } else {
+                        tys
+                    };
                     let vals = self.operands(args)?;
                     self.mon_args(&vals)?;
                     // `list.clear` drops the elements: under the monitor, a
@@ -598,7 +674,8 @@ impl<'p> Interp<'p, '_> {
                         let at = self.pointer_of(v)?;
                         self.mon_drop_unconsumed(&at, self.read(&at)?)?;
                     }
-                    let ret = self.dest_type(dest);
+                    let ret =
+                        if crate::intrinsics::needs_return_type(name) { self.dest_type(dest) } else { None };
                     // A scope's body runs as a frame above the scope's
                     // anchor, which gives the result to `dest`.
                     if matches!(name.as_str(), "task.scope" | "task.race" | "task.shield") {
@@ -755,6 +832,14 @@ impl<'p> Interp<'p, '_> {
     }
 
     fn store(&mut self, p: &Place, v: Value) -> Result<(), Unwind> {
+        // A whole local of the top frame, outside the monitor: in place.
+        if p.proj.is_empty()
+            && self.monitor.is_none()
+            && let Some(slot) = self.frames.last_mut().and_then(|f| f.locals.get_mut(p.local.0 as usize))
+        {
+            *slot = v;
+            return Ok(());
+        }
         let ptr = self.resolve_for_write(p)?;
         self.mon_access(&ptr, crate::monitor::Op::Write)?;
         *self.write(&ptr)? = v;
@@ -764,7 +849,7 @@ impl<'p> Interp<'p, '_> {
     /// The operands of one statement. Under the monitor, a copied `ref mut`
     /// reborrows only once every operand is read: a `mut` argument is
     /// two-phase, active at the call, as the checker has it.
-    fn operands(&mut self, ops: &[Operand]) -> Result<Vec<Value>, Unwind> {
+    fn operands(&mut self, ops: &'p [Operand]) -> Result<Vec<Value>, Unwind> {
         let mut vals = Vec::with_capacity(ops.len());
         for o in ops {
             vals.push(self.operand_value(o)?);
@@ -775,16 +860,269 @@ impl<'p> Interp<'p, '_> {
         Ok(vals)
     }
 
-    pub(crate) fn operand(&mut self, o: &Operand) -> Result<Value, Unwind> {
+    pub(crate) fn operand(&mut self, o: &'p Operand) -> Result<Value, Unwind> {
         let mut v = self.operand_value(o)?;
         self.mon_copied(&mut v)?;
         Ok(v)
     }
 
-    fn operand_value(&mut self, o: &Operand) -> Result<Value, Unwind> {
+    /// The value an operand copies, read in place outside the monitor;
+    /// `None` for a constant, a move, and a read that fails.
+    fn peek(&self, o: &Operand) -> Option<&Value> {
         match o {
-            Operand::Const(c) => Ok(const_value(c)),
+            Operand::Copy(p) => self.read_fast(p)?.ok().filter(|v| !v.is_moved()),
+            Operand::Const(_) | Operand::Move(_) => None,
+        }
+    }
+
+    /// The text an operand copies (a `str`, `String` or `Path`, through
+    /// references), read in place outside the monitor.
+    fn peek_text(&self, o: &Operand) -> Option<&str> {
+        match self.target(self.peek(o)?).ok()? {
+            Value::Str(t, _) | Value::Path(t) => Some(t),
+            Value::String(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// Whether an operand can be evaluated without failing: a constant, or
+    /// a place that holds a value.
+    fn evaluates(&self, o: &Operand) -> bool {
+        match o {
+            Operand::Const(_) => true,
+            Operand::Copy(p) | Operand::Move(p) => {
+                self.read_fast(p).is_some_and(|v| v.is_ok_and(|v| !v.is_moved()))
+            }
+        }
+    }
+
+    /// The intrinsics the bootstrap calls most, called directly outside
+    /// the monitor: each gives what the general path ([`Interp::intrinsic`])
+    /// gives and has its effects, without its dispatch on the name and
+    /// without collecting the arguments. `None`, before any effect, for
+    /// any other call and for one that would fail, which the general path
+    /// then makes and reports.
+    fn quick_intrinsic(&mut self, name: &str, args: &'p [Operand]) -> Option<Result<Value, Unwind>> {
+        if self.monitor.is_some() {
+            return None;
+        }
+        match (name, args) {
+            ("str.byte_at", [s, i]) => {
+                let Value::Int(i) = self.target(self.peek(i)?).ok()? else { return None };
+                let text = match self.target(self.peek(s)?).ok()? {
+                    Value::Str(t, _) => &**t,
+                    Value::String(t) => t.as_str(),
+                    Value::Path(t) => &**t,
+                    _ => return None,
+                };
+                let b = usize::try_from(*i).ok().and_then(|i| text.as_bytes().get(i))?;
+                Some(Ok(Value::Int(i64::from(*b))))
+            }
+            // A `u8` is an `int` in its range (`sized.rs`).
+            ("u8.to_int", [x]) => match self.target(self.peek(x)?).ok()? {
+                Value::Int(n) => Some(Ok(Value::Int(*n))),
+                _ => None,
+            },
+            ("char.code", [c]) => match self.target(self.peek(c)?).ok()? {
+                Value::Char(c) => Some(Ok(Value::Int(i64::from(u32::from(*c))))),
+                _ => None,
+            },
+            ("len", [x]) => match self.target(self.peek(x)?).ok()? {
+                Value::List(xs) => Some(Ok(Value::Int(xs.len() as i64))),
+                _ => None,
+            },
+            // A range's next number (`iter_next`), counted in place.
+            ("Iter.next", [r]) => {
+                let p = self.pointer_of(self.peek(r)?).ok()?;
+                let Ok(Value::Iter(st)) = self.write(&p) else { return None };
+                let IterState::Range { cur, stop, step } = &mut **st else { return None };
+                let more = if *step > 0 { *cur < *stop } else { *cur > *stop };
+                if !more {
+                    return Some(Ok(Value::none()));
+                }
+                let v = *cur;
+                match cur.checked_add(*step) {
+                    Some(n) => *cur = n,
+                    None => **st = IterState::Done,
+                }
+                Some(Ok(Value::some(Value::Int(v))))
+            }
+            ("list.push", [l, x]) => {
+                let p = self.pointer_of(self.peek(l)?).ok()?;
+                if !matches!(self.read(&p), Ok(Value::List(_))) || !self.evaluates(x) {
+                    return None;
+                }
+                Some(self.operand_value(x).and_then(|x| match self.write(&p)? {
+                    Value::List(xs) => {
+                        xs.push(x);
+                        Ok(Value::Unit)
+                    }
+                    other => Err(ice(format!("expected a list, found {other:?}"))),
+                }))
+            }
+            ("list.pop", [l]) => {
+                let p = self.pointer_of(self.peek(l)?).ok()?;
+                match self.write(&p) {
+                    Ok(Value::List(xs)) => Some(Ok(Value::option(xs.pop()))),
+                    _ => None,
+                }
+            }
+            ("list.is_empty", [l]) => {
+                let p = self.pointer_of(self.peek(l)?).ok()?;
+                match self.read(&p).ok()? {
+                    Value::List(xs) => Some(Ok(Value::Bool(xs.is_empty()))),
+                    _ => None,
+                }
+            }
+            ("list.last", [l]) => {
+                let p = self.pointer_of(self.peek(l)?).ok()?;
+                let Value::List(xs) = self.read(&p).ok()? else { return None };
+                let last = xs.len().checked_sub(1);
+                Some(Ok(Value::option(
+                    last.map(|i| Value::Ref(Rc::new(p.join(crate::value::Step::Index(i))))),
+                )))
+            }
+            ("str.byte_len", [t]) => Some(Ok(Value::Int(self.peek_text(t)?.len() as i64))),
+            ("str.to_string", [t]) => Some(Ok(Value::String(self.peek_text(t)?.to_string()))),
+            ("str.byte_slice", [t, start, end]) => {
+                let (Value::Int(start), Value::Int(end)) = (self.scalar(start)?, self.scalar(end)?) else {
+                    return None;
+                };
+                let tag = match self.target(self.peek(t)?).ok()? {
+                    Value::Str(_, tag) => *tag,
+                    _ => 0,
+                };
+                let s = self.peek_text(t)?;
+                let ok = 0 <= start && start <= end && end <= s.len() as i64;
+                let (start, end) = (start as usize, end as usize);
+                if !ok || !s.is_char_boundary(start) || !s.is_char_boundary(end) {
+                    return None;
+                }
+                Some(Ok(Value::Str(Rc::from(&s[start..end]), tag)))
+            }
+            ("char.is_whitespace", [c]) => match self.scalar(c)? {
+                Value::Char(c) => Some(Ok(Value::Bool(c.is_whitespace()))),
+                _ => None,
+            },
+            ("char.from_code", [n]) => match self.scalar(n)? {
+                Value::Int(n) => {
+                    Some(Ok(Value::option(u32::try_from(n).ok().and_then(char::from_u32).map(Value::Char))))
+                }
+                _ => None,
+            },
+            ("range", [start, stop, step]) => {
+                match (self.scalar(start)?, self.scalar(stop)?, self.scalar(step)?) {
+                    (Value::Int(cur), Value::Int(stop), Value::Int(step)) if step != 0 => {
+                        Some(Ok(Value::Iter(Box::new(IterState::Range { cur, stop, step }))))
+                    }
+                    _ => None,
+                }
+            }
+            // Interpolation (lowering's `fmt.new`, then a `fmt.text` or
+            // `fmt.display` per part): the parts pushed onto the `String`
+            // being made.
+            ("fmt.new", []) => Some(Ok(Value::String(String::new()))),
+            ("fmt.text" | "fmt.display", [r, v, ..]) => {
+                let p = self.pointer_of(self.peek(r)?).ok()?;
+                let text = match (name, v) {
+                    ("fmt.text", Operand::Const(sir::Const::Str(t))) => t.clone(),
+                    ("fmt.text", _) => self.peek_text(v)?.to_string(),
+                    _ => self.display_string(self.target(self.peek(v)?).ok()?),
+                };
+                match self.write(&p) {
+                    Ok(Value::String(s)) => {
+                        s.push_str(&text);
+                        Some(Ok(Value::Unit))
+                    }
+                    _ => None,
+                }
+            }
+            ("String.push", [s, t]) => {
+                let p = self.pointer_of(self.peek(s)?).ok()?;
+                let extra = match self.target(self.peek(t)?).ok()? {
+                    Value::Str(t, _) => t.clone(),
+                    _ => return None,
+                };
+                match self.write(&p) {
+                    Ok(Value::String(s)) => {
+                        s.push_str(&extra);
+                        Some(Ok(Value::Unit))
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// The value of a copy of a number, `bool`, `char` or `()` outside
+    /// the monitor, read in place; `None` for anything else, and for a
+    /// read that fails, which [`Interp::operand`] then makes and reports.
+    fn scalar(&self, o: &Operand) -> Option<Value> {
+        if self.monitor.is_some() {
+            return None;
+        }
+        let v = match o {
+            Operand::Const(c) => return scalar_const(c),
+            Operand::Copy(p) => self.read_fast(p)?.ok()?,
+            Operand::Move(_) => return None,
+        };
+        match v {
+            Value::Int(_)
+            | Value::Bool(_)
+            | Value::Char(_)
+            | Value::Unit
+            | Value::Float(_)
+            | Value::F32(_) => Some(v.clone()),
+            _ => None,
+        }
+    }
+
+    /// An rvalue that only copies or combines such values, computed the
+    /// way [`Interp::rvalue`] does, without its general machinery: `None`
+    /// for every other rvalue, and where it would fail or overflow.
+    fn scalar_rvalue(&self, r: &Rvalue) -> Option<Value> {
+        match r {
+            Rvalue::Use(o) => self.scalar(o),
+            Rvalue::Binary(op, a, b) => {
+                use sir::BinOp;
+                let (a, b) = (self.scalar(a)?, self.scalar(b)?);
+                let ordered = |o: std::cmp::Ordering| match op {
+                    BinOp::Lt => Some(o.is_lt()),
+                    BinOp::Le => Some(o.is_le()),
+                    BinOp::Gt => Some(o.is_gt()),
+                    BinOp::Ge => Some(o.is_ge()),
+                    BinOp::Eq => Some(o.is_eq()),
+                    BinOp::Ne => Some(o.is_ne()),
+                    _ => None,
+                };
+                match (a, b) {
+                    (Value::Int(x), Value::Int(y)) => match op {
+                        BinOp::Add => x.checked_add(y).map(Value::Int),
+                        BinOp::Sub => x.checked_sub(y).map(Value::Int),
+                        BinOp::Mul => x.checked_mul(y).map(Value::Int),
+                        _ => ordered(x.cmp(&y)).map(Value::Bool),
+                    },
+                    (Value::Char(x), Value::Char(y)) => ordered(x.cmp(&y)).map(Value::Bool),
+                    (Value::Bool(x), Value::Bool(y)) => ordered(x.cmp(&y)).map(Value::Bool),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn operand_value(&mut self, o: &'p Operand) -> Result<Value, Unwind> {
+        match o {
+            Operand::Const(c) => Ok(self.const_value(c)),
             Operand::Copy(p) => {
+                if let Some(v) = self.read_fast(p) {
+                    let v = v?;
+                    if v.is_moved() {
+                        return Err(panic(msg::PANIC_MOVED_VALUE, &[]));
+                    }
+                    return Ok(v.clone());
+                }
                 let ptr = self.resolve(p)?;
                 self.mon_access(&ptr, crate::monitor::Op::Read)?;
                 let v = self.read(&ptr)?;
@@ -794,6 +1132,18 @@ impl<'p> Interp<'p, '_> {
                 Ok(v.clone())
             }
             Operand::Move(p) => {
+                // A whole local of the top frame, outside the monitor.
+                if p.proj.is_empty()
+                    && self.monitor.is_none()
+                    && let Some(slot) =
+                        self.frames.last_mut().and_then(|f| f.locals.get_mut(p.local.0 as usize))
+                {
+                    let v = std::mem::replace(slot, Value::Moved);
+                    if v.is_moved() {
+                        return Err(panic(msg::PANIC_MOVED_VALUE, &[]));
+                    }
+                    return Ok(v);
+                }
                 let ptr = self.resolve(p)?;
                 self.mon_access(&ptr, crate::monitor::Op::Move)?;
                 let v = std::mem::replace(self.write(&ptr)?, Value::Moved);
@@ -809,6 +1159,26 @@ impl<'p> Interp<'p, '_> {
         match r {
             Rvalue::Use(o) => self.operand(o),
             Rvalue::Ref(p, m) => {
+                // A reborrow through a reference of the top frame, outside
+                // the monitor, shares the reference's pointer.
+                if self.monitor.is_none()
+                    && let [Proj::Deref] = p.proj.as_slice()
+                    && let Some(v) = self.frames.last().and_then(|f| f.locals.get(p.local.0 as usize))
+                {
+                    match v {
+                        Value::Ref(q) => return Ok(Value::Ref(q.clone())),
+                        // Reborrowing a `ref dyn` made from a `ref T` keeps `T`.
+                        Value::Dyn(d) if matches!(d.ty, sir::Type::Ref(..)) => {
+                            if let Value::Ref(q) = &d.value {
+                                return Ok(Value::Dyn(Box::new(crate::value::DynVal {
+                                    ty: d.ty.clone(),
+                                    value: Value::Ref(q.clone()),
+                                })));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
                 let mut ptr = self.resolve(p)?;
                 if self.monitoring() {
                     // Borrowing a moved-from place is a use after move.
@@ -817,7 +1187,7 @@ impl<'p> Interp<'p, '_> {
                     }
                     ptr.tag = self.mon_borrow(&ptr, *m, !self.dest_is_temp())?;
                 }
-                let r = Value::Ref(Box::new(ptr));
+                let r = Value::Ref(Rc::new(ptr));
                 // Reborrowing a `ref dyn` made from a `ref T` keeps `T`.
                 Ok(match self.fat_type_of_deref(p)? {
                     Some(ty) => Value::Dyn(Box::new(crate::value::DynVal { ty, value: r })),
@@ -842,6 +1212,12 @@ impl<'p> Interp<'p, '_> {
                 self.aggregate(kind, vals)
             }
             Rvalue::Discriminant(p) => {
+                if let Some(v) = self.read_fast(p) {
+                    return match self.target(v?)? {
+                        Value::Variant(a) => Ok(Value::Int(a.variant as i64)),
+                        other => Err(ice(format!("discriminant of {other:?}"))),
+                    };
+                }
                 let ptr = self.resolve(p)?;
                 self.mon_access(&ptr, crate::monitor::Op::Read)?;
                 match self.target(self.read(&ptr)?)? {
@@ -996,6 +1372,37 @@ pub(crate) fn display_fn_name(name: &str, prog: &sir::Program) -> String {
     match name.split_once("#closure") {
         Some((owner, _)) => format!("closure in {}", display_fn_name(owner, prog)),
         None => name.to_string(),
+    }
+}
+
+impl<'p> Interp<'p, '_> {
+    /// A constant of the program as a value; a string or a function name
+    /// is made once and shared by every evaluation of the constant.
+    fn const_value(&mut self, c: &'p sir::Const) -> Value {
+        match c {
+            sir::Const::Str(s) => {
+                let key = s as *const String as usize;
+                let text = self.const_texts.entry(key).or_insert_with(|| Rc::from(s.as_str())).clone();
+                Value::Str(text, 0)
+            }
+            sir::Const::Fn(n) => {
+                let key = n as *const String as usize;
+                Value::Fn(self.const_texts.entry(key).or_insert_with(|| Rc::from(n.as_str())).clone())
+            }
+            other => const_value(other),
+        }
+    }
+}
+
+/// A constant number, `bool`, `char` or `()`.
+fn scalar_const(c: &sir::Const) -> Option<Value> {
+    match c {
+        sir::Const::Int(n) => Some(Value::Int(*n)),
+        sir::Const::Float(f) => Some(Value::Float(*f)),
+        sir::Const::Bool(b) => Some(Value::Bool(*b)),
+        sir::Const::Char(c) => Some(Value::Char(*c)),
+        sir::Const::Unit => Some(Value::Unit),
+        sir::Const::Str(_) | sir::Const::Fn(_) => None,
     }
 }
 

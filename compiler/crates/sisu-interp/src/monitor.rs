@@ -37,7 +37,7 @@ use crate::value::{Pointer, Step, Value};
 use crate::{Interp, Unwind, render};
 use sisu_diag::msg;
 use sisu_sir as sir;
-use std::collections::HashMap;
+use std::rc::Rc;
 
 /// Where something happened: a statement of a function.
 #[derive(Clone, Debug, Default)]
@@ -100,15 +100,23 @@ pub(crate) struct DynLoan {
     pub owner: Option<usize>,
 }
 
+/// The active loans of a local, shared and `mut` apart: a read ends no
+/// shared loan, so it looks at the `mut` ones only.
+#[derive(Default)]
+pub(crate) struct Active {
+    pub shared: Vec<u32>,
+    pub mutable: Vec<u32>,
+}
+
 #[derive(Default)]
 pub(crate) struct Monitor {
     /// Loan `t` is `loans[t - 1]`.
     pub loans: Vec<DynLoan>,
     /// The active loans of each (frame serial, local).
-    pub active: HashMap<(u64, u32), Vec<u32>>,
+    pub active: crate::fx::FxMap<(u64, u32), Active>,
     /// How often each source position ran a statement: (function, line,
     /// column).
-    pub coverage: Option<HashMap<(usize, u32, u32), u32>>,
+    pub coverage: Option<crate::fx::FxMap<(usize, u32, u32), u32>>,
     /// Set once a violation was reported.
     pub violated: std::cell::Cell<bool>,
 }
@@ -119,9 +127,8 @@ const VIEW_SCAN_BUDGET: u32 = 256;
 /// Whether two paths reach overlapping places: one is a prefix of the
 /// other, variant payloads being the value itself.
 fn overlap(a: &[Step], b: &[Step]) -> bool {
-    let strip = |p: &[Step]| p.iter().filter(|s| !matches!(s, Step::Payload(_))).copied().collect::<Vec<_>>();
-    let (a, b) = (strip(a), strip(b));
-    a.iter().zip(&b).all(|(x, y)| x == y)
+    let place = |s: &&Step| !matches!(s, Step::Payload(_));
+    a.iter().filter(place).zip(b.iter().filter(place)).all(|(x, y)| x == y)
 }
 
 enum Violation {
@@ -189,34 +196,42 @@ impl Interp<'_, '_> {
     }
 
     fn end_conflicting(&mut self, ptr: &Pointer, op: Op, through: &[u32]) {
-        let site = self.site();
-        let Some(m) = &mut self.monitor else { return };
-        let Some(list) = m.active.get(&(ptr.serial, ptr.local)) else { return };
+        let Some(m) = &self.monitor else { return };
+        let Some(active) = m.active.get(&(ptr.serial, ptr.local)) else { return };
         // A mutex's value changes behind shared references to the mutex
         // (06, "Send, Sync, and shared state"): an access through a guard
         // ends no shared loan of the mutex or of what holds it.
         let mutexes = |p: &[Step]| p.iter().filter(|s| matches!(s, Step::MutexValue)).count();
         let inside = mutexes(&ptr.path);
         let mut ending = Vec::new();
-        for &t in list {
+        let shared: &[u32] = if op.writes() { &active.shared } else { &[] };
+        for &t in active.mutable.iter().chain(shared) {
             if through.contains(&t) {
                 continue;
             }
             let Some(l) = m.loans.get(t as usize - 1) else { continue };
+            // A read ends only an active `mut` loan.
+            if !(op.writes() || (l.mutable && !l.reserved)) {
+                continue;
+            }
             if !overlap(&l.at.path, &ptr.path) || (!l.mutable && mutexes(&l.at.path) < inside) {
                 continue;
             }
-            if op.writes() || (l.mutable && !l.reserved) {
-                ending.push(t);
-            }
+            ending.push(t);
         }
+        if ending.is_empty() {
+            return;
+        }
+        let site = self.site();
+        let Some(m) = &mut self.monitor else { return };
         for t in &ending {
             if let Some(l) = m.loans.get_mut(*t as usize - 1) {
                 l.ended = Some(Box::new(Ending { op, site: site.clone(), at: ptr.clone() }));
             }
         }
-        if let Some(list) = m.active.get_mut(&(ptr.serial, ptr.local)) {
-            list.retain(|t| !ending.contains(t));
+        if let Some(active) = m.active.get_mut(&(ptr.serial, ptr.local)) {
+            active.mutable.retain(|t| !ending.contains(t));
+            active.shared.retain(|t| !ending.contains(t));
         }
     }
 
@@ -245,23 +260,33 @@ impl Interp<'_, '_> {
             owner,
         });
         let tag = m.loans.len() as u32;
-        m.active.entry((ptr.serial, ptr.local)).or_default().push(tag);
+        let active = m.active.entry((ptr.serial, ptr.local)).or_default();
+        if mutable {
+            active.mutable.push(tag)
+        } else {
+            active.shared.push(tag)
+        }
         Ok(tag)
     }
 
     /// A copy of a `ref mut` is a reborrow: a new `mut` loan under the
     /// copied reference's loan.
+    #[inline]
     pub(crate) fn mon_copied(&mut self, v: &mut Value) -> Result<(), Unwind> {
         if self.monitor.is_none() {
             return Ok(());
         }
+        self.mon_copied_ref(v)
+    }
+
+    fn mon_copied_ref(&mut self, v: &mut Value) -> Result<(), Unwind> {
         if let Value::Ref(p) = v
             && p.tag != 0
             && self.loan(p.tag).is_some_and(|l| l.mutable)
         {
             let target = (**p).clone();
             let tag = self.mon_borrow(&target, true, true)?;
-            p.tag = tag;
+            Rc::make_mut(p).tag = tag;
         }
         Ok(())
     }
@@ -755,9 +780,9 @@ impl Interp<'_, '_> {
             }
             let (mut shared, mut exclusive) = (0, 0);
             if let Some(m) = &self.monitor
-                && let Some(list) = m.active.get(&(l.at.serial, l.at.local))
+                && let Some(active) = m.active.get(&(l.at.serial, l.at.local))
             {
-                for t in list {
+                for t in active.mutable.iter().chain(&active.shared) {
                     match m.loans.get(*t as usize - 1) {
                         Some(x) if x.mutable => exclusive += 1,
                         Some(_) => shared += 1,

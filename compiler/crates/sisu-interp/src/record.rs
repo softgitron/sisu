@@ -441,7 +441,10 @@ fn fields(line: &str) -> Result<Vec<Field>, String> {
                                 }
                                 h.push(d);
                             }
-                            let ch = u32::from_str_radix(&h, 16).ok().and_then(char::from_u32);
+                            let ch = Some(h)
+                                .filter(|h| h.bytes().all(|b| b.is_ascii_hexdigit()))
+                                .and_then(|h| u32::from_str_radix(&h, 16).ok())
+                                .and_then(char::from_u32);
                             s.push(ch.ok_or("a bad escape")?);
                         }
                         _ => return Err("a bad escape".into()),

@@ -781,6 +781,9 @@ pub enum TypeKind {
         inner: Box<TypeExpr>,
     },
     ConstArg(i128),
+    /// A constant argument written as an expression: `W * H` in
+    /// `Array[T, W * H]` (03, "Const generics").
+    ConstExpr(Box<Expr>),
     /// `dyn Trait`: the inner type is the trait's path.
     Dyn(Box<TypeExpr>),
     Unsupported(&'static str),

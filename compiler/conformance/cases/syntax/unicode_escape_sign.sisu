@@ -1,0 +1,7 @@
+# `\u{...}` takes one to six hex digits naming a Unicode scalar value. A
+# sign is not a hex digit, so `\u{+41}` is an invalid escape (E0007), and
+# its braces stay in the text (in a string, `{` opens an interpolation).
+def main():
+    let a = '\u{+41}'
+    let b = "x\u{+1F600}y"
+    print("{a}{b}")

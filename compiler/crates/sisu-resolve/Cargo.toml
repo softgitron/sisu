@@ -11,6 +11,7 @@ publish.workspace = true
 sisu-diag.workspace = true
 sisu-syntax.workspace = true
 sisu-parser.workspace = true
+sisu-sir.workspace = true
 
 [lints]
 workspace = true

@@ -1,0 +1,7 @@
+# One mistake is one diagnostic (E0200), also in the body of a
+# parametrised test, which is checked as a test of its own for each case.
+test "doubles" for n in [1, 2, 3]:
+    assert double(n) == 2 * n
+
+def main():
+    pass

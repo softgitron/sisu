@@ -1,0 +1,32 @@
+# What a type's constant argument written as an expression rejects: what is
+# not known where the type is written, a call or a local (`E0264`), a value
+# that is not an `int` (`E0265`), an operation without a value, at compile
+# time as at run time (`E0602`), and a name that names nothing (`E0200`).
+# An operation on `const` parameters equals only the same operation:
+# `W * H` is not `H * W` (`E0300`).
+const HALF: f64 = 0.5
+const BIG: int = 2 ** 62
+
+def size() -> int:
+    return 3
+
+struct Bad:
+    a: Array[int, size()]
+    b: Array[int, 1.5]
+    c: Array[int, HALF]
+    d: Array[int, 2 ** 70]
+    e: Array[int, BIG * 4]
+    f: Array[int, 1 // 0]
+    g: Array[int, 1 << 64]
+    h: Array[int, 6 / 2]
+    i: Array[int, nothing + 1]
+
+struct Pair[const W: int, const H: int]:
+    cells: Array[int, W * H]
+
+    def flipped(self) -> Array[int, H * W]:
+        return self.cells
+
+def main():
+    let n = 3
+    let x: Array[int, n * 2] = Array.filled(0)

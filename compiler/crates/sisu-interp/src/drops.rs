@@ -23,6 +23,7 @@ use crate::value::{Pointer, Step, Value};
 use crate::{Interp, Unwind, ice};
 use sisu_sir as sir;
 use sisu_sir::Type;
+use std::rc::Rc;
 
 /// A value waiting to be dropped, with its type when the drop knows it.
 pub(crate) type PendingDrop = (Value, Option<Type>);
@@ -210,7 +211,7 @@ impl<'p> Interp<'p, '_> {
                     Some(Type::Named(_, args)) => args,
                     _ => Vec::new(),
                 };
-                self.push_frame(fi, vec![Value::Ref(Box::new(value))], None, tys)?;
+                self.push_frame(fi, vec![Value::Ref(Rc::new(value))], None, tys)?;
                 if let Some(fr) = self.frames.last_mut() {
                     fr.after = Some(After::Unlock(p));
                 }

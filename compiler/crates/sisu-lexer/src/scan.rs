@@ -131,7 +131,8 @@ impl Scanner<'_> {
         let start = self.pos;
         let Some(c) = self.peek() else { return };
         // Inside an interpolation of a one-line string, a line break ends
-        // the string: report it and fall back to code.
+        // the string: report it, close the interpolation and the string,
+        // and scan the line break as code, so that it ends the line.
         if (c == '\n' || c == '\r') && matches!(self.mode(), Mode::Interp { triple: false, .. }) {
             self.error(msg::LEX_NEWLINE_IN_INTERPOLATION, start, start);
             while matches!(self.mode(), Mode::Interp { .. } | Mode::Str { .. }) {
@@ -139,7 +140,6 @@ impl Scanner<'_> {
                 self.modes.pop();
                 self.push(if matches!(m, Mode::Interp { .. }) { INTERP_END } else { STRING_END }, start);
             }
-            return;
         }
         match c {
             ' ' | '\t' | '\u{c}' => {
@@ -297,27 +297,11 @@ impl Scanner<'_> {
             return;
         }
         if c == 'u' {
-            let ok = if self.peek() == Some('{') {
-                let open = self.pos;
-                let close = self.rest().find('}').map(|i| open + i);
-                match close {
-                    Some(close) => {
-                        let hex = &self.text[open + 1..close];
-                        let valid = !hex.is_empty()
-                            && hex.len() <= 6
-                            && u32::from_str_radix(hex, 16).ok().and_then(char::from_u32).is_some();
-                        if valid {
-                            self.pos = close + 1;
-                        }
-                        valid
-                    }
-                    None => false,
-                }
-            } else {
-                false
-            };
-            if !ok {
-                self.error_with(msg::LEX_INVALID_ESCAPE, start, self.pos, "escape", "u".into());
+            // `{`, one to six hex digits naming a Unicode scalar value, and
+            // `}`; otherwise the braces stay in the text.
+            match sisu_syntax::ast::build::unicode_escape(self.rest()) {
+                Some((_, len)) => self.pos += len,
+                None => self.error_with(msg::LEX_INVALID_ESCAPE, start, self.pos, "escape", "u".into()),
             }
         }
     }

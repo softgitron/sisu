@@ -314,6 +314,23 @@ impl<'p> Checker<'p> {
                 {
                     return Ty::Param(i as u32);
                 }
+                // A constant where a type's constant argument goes.
+                if let [n] = names.as_slice()
+                    && args.is_empty()
+                    && prog
+                        .lookup(self.module, n)
+                        .is_some_and(|d| matches!(prog.def(d).kind, DefKind::Const(_)))
+                {
+                    return match sisu_resolve::consts::const_item(prog, self.module, n, te.range) {
+                        Ok(t) => t,
+                        Err(err) => {
+                            let file = self.file;
+                            let d = sisu_resolve::consts::diagnostic(&err, |r| Span::new(file, r));
+                            self.report(d);
+                            Ty::Error
+                        }
+                    };
+                }
                 // `C.Item`, `Self.Item`: an associated type of a parameter.
                 if let [base, name] = names.as_slice() {
                     let subject = if let Some(i) = self.generic_names.iter().position(|g| g == base) {
@@ -424,8 +441,33 @@ impl<'p> Checker<'p> {
                 Ty::Error
             }
             TypeKind::ConstArg(n) => Ty::Const(*n),
+            TypeKind::ConstExpr(e) => self.const_arg(e),
             TypeKind::Unsupported(_) => {
                 self.unsupported(te.range, "this type", "a later phase");
+                Ty::Error
+            }
+        }
+    }
+
+    /// A constant argument written as an expression, inside a body: the
+    /// function's `const` parameters are its operands (`consts.rs`).
+    pub fn const_arg(&mut self, e: &ast::Expr) -> Ty {
+        use sisu_resolve::consts::Local;
+        let names = self.generic_names.clone();
+        let consts = self.const_generics.clone();
+        let locals: Vec<String> = self.scopes.iter().flatten().map(|(n, _)| n.clone()).collect();
+        let param = |n: &str| match names.iter().position(|g| g == n) {
+            Some(i) if consts.get(i) == Some(&true) => Local::ConstParam(i as u32),
+            Some(_) => Local::NotConstant,
+            None if locals.iter().any(|l| l == n) => Local::NotConstant,
+            None => Local::Item,
+        };
+        match sisu_resolve::consts::const_arg(self.prog, self.module, e, &param) {
+            Ok(t) => t,
+            Err(err) => {
+                let file = self.file;
+                let d = sisu_resolve::consts::diagnostic(&err, |r| sisu_diag::Span::new(file, r));
+                self.report(d);
                 Ty::Error
             }
         }
@@ -560,12 +602,13 @@ impl<'p> Checker<'p> {
             let wrong = if g.is_const {
                 let param_ok =
                     matches!(a, Ty::Param(k) if self.const_generics.get(*k as usize) == Some(&true));
-                (!matches!(a, Ty::Const(_) | Ty::Error | Ty::Var(_)) && !param_ok)
+                (!matches!(a, Ty::Const(_) | Ty::ConstOp(..) | Ty::Error | Ty::Var(_)) && !param_ok)
                     .then_some(msg::RESOLVE_CONST_ARGUMENT)
             } else {
                 let const_param =
                     matches!(a, Ty::Param(k) if self.const_generics.get(*k as usize) == Some(&true));
-                (matches!(a, Ty::Const(_)) || const_param).then_some(msg::RESOLVE_TYPE_ARGUMENT)
+                (matches!(a, Ty::Const(_) | Ty::ConstOp(..)) || const_param)
+                    .then_some(msg::RESOLVE_TYPE_ARGUMENT)
             };
             if let Some(m) = wrong {
                 let diag = self.error(m, range).with("name", name.clone()).with("param", g.name.clone());

@@ -145,6 +145,8 @@ impl FnLower<'_, '_> {
             ExprKind::Int(_) if self.sized_int(&e.ty).is_some_and(sisu_resolve::std_sources::own_kind) => {
                 return None;
             }
+            // So is an `f32`, made from the `f64` that holds it.
+            ExprKind::Float(_) if self.is_f32(&e.ty) => return None,
             ExprKind::Int(n) => Const::Int(*n),
             ExprKind::Float(f) => Const::Float(*f),
             ExprKind::Bool(b) => Const::Bool(*b),
@@ -154,6 +156,11 @@ impl FnLower<'_, '_> {
             ExprKind::FnRef(d) => Const::Fn(self.ctx.fn_name(*d)),
             _ => return None,
         })
+    }
+
+    /// Whether `t` is `f32`.
+    pub fn is_f32(&self, t: &Ty) -> bool {
+        matches!(t, Ty::Adt(d, a) if a.is_empty() && self.ctx.prog.builtin(*d) == Some("f32"))
     }
 
     /// The name of a sized integer type (`u8`), `None` for any other.
@@ -434,6 +441,17 @@ impl FnLower<'_, '_> {
             ExprKind::Borrow { place, mutable } => {
                 let p = self.place_of(place);
                 self.assign(dest, Rvalue::Ref(p, *mutable), loc);
+            }
+            ExprKind::Float(f) => {
+                // An `f32` literal (the others are constants) travels as
+                // the `f64` that holds it exactly.
+                self.intrinsic_call(
+                    dest,
+                    "f32.from_literal",
+                    Vec::new(),
+                    vec![Operand::Const(Const::Float(*f))],
+                    loc,
+                );
             }
             ExprKind::Bytes(b) => {
                 // The bytes travel as hex text, which any byte survives.
@@ -948,6 +966,10 @@ impl FnLower<'_, '_> {
                 Coercion::NeverToAny | Coercion::Widen | Coercion::Mismatch | Coercion::Unrefine => {
                     self.into(dest, expr)
                 }
+                Coercion::FloatWiden => {
+                    let v = self.operand(expr);
+                    self.intrinsic_call(dest, "f32.to_f64", Vec::new(), vec![v], loc);
+                }
                 Coercion::IntWiden => {
                     // The same value; a `u64`, `u128` or `i128` is a kind of
                     // its own.
@@ -1021,11 +1043,7 @@ impl FnLower<'_, '_> {
                 self.refine_try(dest, value, *refinement, type_args, loc)
             }
             ExprKind::Error => self.terminate(Terminator::Unreachable, loc),
-            ExprKind::Float(_)
-            | ExprKind::Bool(_)
-            | ExprKind::Char(_)
-            | ExprKind::Unit
-            | ExprKind::FnRef(_) => {}
+            ExprKind::Bool(_) | ExprKind::Char(_) | ExprKind::Unit | ExprKind::FnRef(_) => {}
         }
     }
 

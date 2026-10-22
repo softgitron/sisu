@@ -1664,13 +1664,16 @@ impl B<'_> {
                 mutable: self.has(n, MUT_KW),
                 inner: Box::new(types.first().map(|&c| self.type_expr(c)).unwrap_or(self.error_type(n))),
             },
-            CONST_ARG => TypeKind::ConstArg(
-                self.tokens(n)
-                    .first()
-                    .and_then(|&t| parse_int(&split_suffix(self.text(t), false).0))
-                    .map(|v| v as i128)
-                    .unwrap_or(0),
-            ),
+            CONST_ARG => match self.nodes(n).into_iter().find(|&c| is_expr_node(self.kind(c))) {
+                Some(e) => TypeKind::ConstExpr(Box::new(self.expr(e))),
+                None => TypeKind::ConstArg(
+                    self.tokens(n)
+                        .first()
+                        .and_then(|&t| parse_int(&split_suffix(self.text(t), false).0))
+                        .map(|v| v as i128)
+                        .unwrap_or(0),
+                ),
+            },
             DYN_TYPE => match types.first() {
                 Some(&c) => TypeKind::Dyn(Box::new(self.type_expr(c))),
                 None => TypeKind::Error,
@@ -1863,8 +1866,6 @@ pub fn parse_int(text: &str) -> Option<u128> {
     }
 }
 
-/// Decodes `\n`, `\t`, `\r`, `\0`, `\\`, `\"`, `\'` and `\u{...}`; an
-/// unknown escape (already reported by the lexer) is kept as written.
 /// The bytes of a byte string's text: its escapes, with `\xNN` for any
 /// byte, and every other character as its UTF-8 bytes.
 pub fn decode_byte_escapes(s: &str) -> Vec<u8> {
@@ -1890,44 +1891,61 @@ pub fn decode_byte_escapes(s: &str) -> Vec<u8> {
     out
 }
 
+/// Decodes `\n`, `\t`, `\r`, `\0`, `\\`, `\"`, `\'` and `\u{...}`; an
+/// unknown or invalid escape (already reported by the lexer) is kept as
+/// written.
 pub fn decode_escapes(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            out.push(c);
-            continue;
-        }
-        match chars.next() {
-            Some('n') => out.push('\n'),
-            Some('t') => out.push('\t'),
-            Some('r') => out.push('\r'),
-            Some('0') => out.push('\0'),
-            Some('\\') => out.push('\\'),
-            Some('"') => out.push('"'),
-            Some('\'') => out.push('\''),
-            Some('u') if chars.peek() == Some(&'{') => {
-                chars.next();
-                let mut hex = String::new();
-                for h in chars.by_ref() {
-                    if h == '}' {
-                        break;
-                    }
-                    hex.push(h);
+    let mut rest = s;
+    while let Some(i) = rest.find('\\') {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 1..];
+        let Some(c) = after.chars().next() else {
+            out.push('\\');
+            return out;
+        };
+        let mut used = c.len_utf8();
+        match c {
+            'n' => out.push('\n'),
+            't' => out.push('\t'),
+            'r' => out.push('\r'),
+            '0' => out.push('\0'),
+            '\\' => out.push('\\'),
+            '"' => out.push('"'),
+            '\'' => out.push('\''),
+            'u' => match unicode_escape(&after[used..]) {
+                Some((ch, len)) => {
+                    out.push(ch);
+                    used += len;
                 }
-                match u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
-                    Some(ch) => out.push(ch),
-                    None => out.push('\u{fffd}'),
-                }
-            }
-            Some(other) => {
+                // Reported by the lexer, which leaves the braces in the
+                // text: the escape is kept as written.
+                None => out.push_str("\\u"),
+            },
+            other => {
                 out.push('\\');
                 out.push(other);
             }
-            None => out.push('\\'),
         }
+        rest = &after[used..];
     }
+    out.push_str(rest);
     out
+}
+
+/// The text after `\u` of a Unicode escape: `{`, one to six ASCII hex
+/// digits naming a Unicode scalar value, and `}`. Gives the character and
+/// the length of that text, or `None` when it is not one (no sign, no
+/// space, no surrogate, nothing past `10FFFF`).
+pub fn unicode_escape(s: &str) -> Option<(char, usize)> {
+    let inner = s.strip_prefix('{')?;
+    let close = inner.find('}')?;
+    let hex = &inner[..close];
+    if hex.is_empty() || hex.len() > 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let ch = u32::from_str_radix(hex, 16).ok().and_then(char::from_u32)?;
+    Some((ch, close + 2))
 }
 
 /// The text of a string literal with no interpolation.
@@ -1957,5 +1975,11 @@ mod tests {
     #[test]
     fn escapes() {
         assert_eq!(decode_escapes("a\\nb\\u{41}\\\\"), "a\nbA\\");
+        // A sign is not a hex digit (`u32::from_str_radix` would take it).
+        assert_eq!(decode_escapes("\\u{+41}"), "\\u{+41}");
+        assert_eq!(decode_escapes("\\u{110000}x"), "\\u{110000}x");
+        assert_eq!(unicode_escape("{1F600}y"), Some(('\u{1F600}', 7)));
+        assert_eq!(unicode_escape("{}"), None);
+        assert_eq!(unicode_escape("{0000041}"), None);
     }
 }

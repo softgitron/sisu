@@ -280,6 +280,21 @@ impl<'a> Cur<'a> {
             return Ok(Type::ErrSet(ms));
         }
         let n = self.type_name()?;
+        // A constant operation, `mul($1, $2)`: no type name is followed by
+        // `(`.
+        if let Some(op) = ConstOp::from_name(&n)
+            && self.eat("(")
+        {
+            let mut args = Vec::new();
+            loop {
+                args.push(self.ty()?);
+                if self.eat(")") {
+                    break;
+                }
+                self.expect(",")?;
+            }
+            return Ok(Type::ConstOp(op, args));
+        }
         let t = match n.as_str() {
             "int" => Type::Int,
             "f64" => Type::Float,

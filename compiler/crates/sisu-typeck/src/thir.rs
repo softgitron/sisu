@@ -472,6 +472,8 @@ pub enum Coercion {
     ToCap,
     /// An integer as a wider integer type that holds all its values.
     IntWiden,
+    /// An `f32` as the `f64` that holds it exactly.
+    FloatWiden,
     /// A value of a refinement type used as its base (07): the same value.
     Unrefine,
     /// A type error: the expression is kept, its type replaced by the

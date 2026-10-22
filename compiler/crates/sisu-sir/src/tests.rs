@@ -411,3 +411,39 @@ fn validator_catches_broken_graphs() {
     assert!(problems.iter().any(|m| m.contains("missing bb9")));
     assert!(problems.iter().any(|m| m.contains("not a cleanup block")));
 }
+
+/// One function's blocks as `sisu sir` prints them, threaded.
+fn threaded(body: &str) -> String {
+    let text = format!("sir 0\nsource 0 \"t.sisu\"\nentry main\n\nfn main(0) source 0 {{\n{body}}}\n");
+    let mut p = read(&text).unwrap();
+    simplify::program(&mut p);
+    assert_eq!(validate(&p), Vec::<String>::new());
+    let out = write(&p);
+    let start = out.find("  bb0").unwrap();
+    out[start..out.len() - 2].to_string()
+}
+
+#[test]
+fn jumps_are_threaded_and_blocks_taken() {
+    let body = "    let _0: ()\n    let _1: bool\n  bb0:\n    _1 = const true\n    goto bb1\n  bb1:\n    goto bb2\n  bb2:\n    switch copy _1 [0: bb3, else: bb4] @1:1\n  bb3:\n    goto bb5\n  bb4:\n    goto bb5\n  bb5:\n    _0 = const ()\n    return\n";
+    // The empty blocks are gone, the switch moves up to the block that
+    // jumped to it, and the block both arms reach stays a block.
+    assert_eq!(
+        threaded(body),
+        "  bb0:\n    _1 = const true\n    switch copy _1 [0: bb1, else: bb1] @1:1\n  bb1:\n    _0 = const ()\n    return\n"
+    );
+}
+
+#[test]
+fn threading_keeps_cycles_drops_and_unwinding() {
+    // A loop of empty blocks stays a loop, of one block.
+    let spin = "    let _0: ()\n  bb0:\n    goto bb1\n  bb1:\n    goto bb2\n  bb2:\n    goto bb1\n";
+    assert_eq!(threaded(spin), "  bb0:\n    goto bb1\n  bb1:\n    goto bb1\n");
+    // A drop ends its block; statements under another unwinding edge stay
+    // in their own block.
+    let body = "    let _0: ()\n    let _1: String\n  bb0:\n    _1 = call intrinsic String.new()\n    goto bb1\n  bb1 (unwind bb4):\n    _0 = const ()\n    goto bb2\n  bb2:\n    drop _1\n    goto bb3\n  bb3:\n    dead _1\n    return\n  bb4 (cleanup):\n    drop _1\n    goto bb5\n  bb5 (cleanup):\n    resume\n";
+    assert_eq!(
+        threaded(body),
+        "  bb0:\n    _1 = call intrinsic String.new()\n    goto bb1\n  bb1 (unwind bb4):\n    _0 = const ()\n    goto bb2\n  bb2:\n    drop _1\n    goto bb3\n  bb3:\n    dead _1\n    return\n  bb4 (cleanup):\n    drop _1\n    resume\n"
+    );
+}

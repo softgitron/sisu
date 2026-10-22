@@ -303,7 +303,11 @@ impl<'a> Reader<'a> {
             Some(u @ ('u' | 'U')) => {
                 let n = if u == 'u' { 4 } else { 8 };
                 let digits = self.text.get(self.pos..self.pos + n).unwrap_or("");
-                let code = u32::from_str_radix(digits, 16).ok().and_then(char::from_u32);
+                // Hex digits only: `u32::from_str_radix` would take a sign.
+                let code = Some(digits)
+                    .filter(|d| d.bytes().all(|b| b.is_ascii_hexdigit()))
+                    .and_then(|d| u32::from_str_radix(d, 16).ok())
+                    .and_then(char::from_u32);
                 match code {
                     Some(c) if digits.len() == n => {
                         self.pos += n;

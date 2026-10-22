@@ -16,7 +16,7 @@ pub const BUILTIN_TYPES: &[&str] = &[
 fn params_needed(t: &Type) -> u32 {
     match t {
         Type::Param(i) => i + 1,
-        Type::Named(_, a) | Type::Tuple(a) | Type::Dyn(_, a) => {
+        Type::Named(_, a) | Type::Tuple(a) | Type::Dyn(_, a) | Type::ConstOp(_, a) => {
             a.iter().map(params_needed).max().unwrap_or(0)
         }
         Type::Fn(ps, r, _) => ps.iter().map(params_needed).max().unwrap_or(0).max(params_needed(r)),

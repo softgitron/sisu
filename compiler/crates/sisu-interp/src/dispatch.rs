@@ -13,6 +13,7 @@ use crate::value::{HEAP, Pointer, Step, Value};
 use crate::{Interp, Unwind, ice};
 use sisu_sir as sir;
 use sisu_sir::{ImplTarget, Type};
+use std::rc::Rc;
 
 /// What a trait call runs, with its arguments and type arguments.
 pub(crate) enum Target {
@@ -52,7 +53,7 @@ impl Interp<'_, '_> {
                         let (ty, arg) = match self.read(&p)? {
                             Value::Dyn(d) => match &d.ty {
                                 Type::Ref(inner, _) => ((**inner).clone(), d.value.clone()),
-                                ty => (ty.clone(), Value::Ref(Box::new(p.join(Step::DynValue)))),
+                                ty => (ty.clone(), Value::Ref(Rc::new(p.join(Step::DynValue)))),
                             },
                             other => return Err(ice(format!("`{name}` on a `dyn` holding {other:?}"))),
                         };
@@ -105,7 +106,7 @@ impl Interp<'_, '_> {
                         path: Vec::new(),
                         tag: 0,
                     };
-                    args[0] = Value::Ref(Box::new(p.join(Step::DynValue)));
+                    args[0] = Value::Ref(Rc::new(p.join(Step::DynValue)));
                     self_ty = ty;
                 }
                 _ => break,

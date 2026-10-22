@@ -18,19 +18,17 @@ fn main(0) source 0 @4:5-4:9 {
   bb0:
     _1 = call intrinsic String.new(const "Aino") @5:16-5:34
     goto bb1
-  bb1 (unwind bb3):
+  bb1 (unwind bb2):
     _2 = strview _1 @6:22-6:26
     _4 = ref mut _1 @7:5-7:9
     _3 = call intrinsic String.push(copy _4, const " Virtanen") @7:5-7:27
     _5 = call intrinsic print(copy _2) @8:5-8:17
     _0 = const ()
-    goto bb4
+    goto bb3
   bb2 (cleanup):
-    resume
-  bb3 (cleanup):
     drop _1
-    goto bb2
-  bb4:
+    resume
+  bb3:
     drop _1 @8:17-8:17
     return
 }

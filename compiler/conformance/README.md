@@ -111,8 +111,9 @@ These checks apply to every case without an expectation file:
 - Every file that parses keeps its tree when `sisu fmt` rewrites it:
   `sisu parse --shape` prints the same before and after (the tree's nodes
   and significant tokens, up to what the formatter changes on purpose:
-  trailing commas, `Option[T]` written `T?`, unused imports, and the order
-  of imports), and formatting it a second time changes nothing. Unless
+  trailing commas, `Option[T]` written `T?`, `Result[T, E]` written `T !
+  E`, unused imports, and the order of imports), and formatting it a
+  second time changes nothing. Unless
   the case has a `NAME.unformatted`, `sisu fmt --check` must also accept
   it as it is: the case is canonical text.
 
@@ -138,7 +139,11 @@ English text:
 Positions are `line:column-line:column`, 1-based, columns counted in
 characters. Parameters follow in the order the implementation gives them;
 the catalog (`compiler/catalog/messages.catalog`) defines which
-parameters each identifier takes.
+parameters each identifier takes. The lines are sorted by position, then
+code, and a diagnostic identical to another (the same identifier,
+parameters, positions, labels and fixes) is printed once, however many
+times the implementation found it (the cases of a parametrised test share
+one body: `testing/parametrised_once`).
 
 ## Groups
 
@@ -153,7 +158,9 @@ parameters each identifier takes.
   where broken code still gets a typed tree and only the first error in a
   chain is reported.
 - `run/` is the semantics: arithmetic and its traps, the sized integers
-  from `u8` to `u128` (`sized_integers`, `wide_overflow`), strings and
+  from `u8` to `u128` (`sized_integers`, `wide_overflow`), `f32` and its
+  one rounding per operation (`f32`; `types/f32` is what it rejects,
+  `sir/f32` its SIR), strings and
   their bytes (`text_bytes`: the text methods written in Sisu over the
   bytes; `char_boundary`), formatting (`format_specs`: the spec
   mini-language, written in Sisu),
@@ -169,7 +176,9 @@ parameters each identifier takes.
 - `generics/` is user generics: functions and types with bounds checked
   at the definition, defaults, type arguments at run time, views through
   generic parameters, `Drop` for a generic type, and `const` parameters
-  with `Array[T, N]` (`const_generic`, `const_generic_errors`).
+  with `Array[T, N]` (`const_generic`, `const_generic_errors`) and
+  constant arguments written as expressions, `Array[T, W * H]`
+  (`const_expressions`, `const_expression_errors`).
 - `comptime/` is compile-time evaluation: constants computed by the
   compiler (`baked` pins the SIR built from literals), `comptime assert`,
   `comptime def`, budgets, the evaluation errors, and derives written as

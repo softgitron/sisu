@@ -31,7 +31,7 @@
 //! enum; and a value holding a loan may be stored through a `mut`
 //! parameter only if the loan is that parameter's own.
 
-use crate::bitset::BitSet;
+use crate::bitset::{BitSet, Rows};
 use crate::cfg::{Cfg, targets};
 use crate::init::{dest, index_locals};
 use crate::names;
@@ -85,9 +85,10 @@ struct Made {
     reborrows: HashMap<usize, LoanId>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct State {
-    pub holds: Vec<BitSet>,
+    /// The loans each local may hold, a row per local.
+    pub holds: Rows,
     /// For a local holding a reference, the loans that are the reference
     /// itself (rather than loans of what it points into), when known.
     pub direct: Vec<Option<BitSet>>,
@@ -98,25 +99,38 @@ pub struct State {
     pub pinned: BitSet,
 }
 
+impl Clone for State {
+    fn clone(&self) -> State {
+        State {
+            holds: self.holds.clone(),
+            direct: self.direct.clone(),
+            activated: self.activated.clone(),
+            pinned: self.pinned.clone(),
+        }
+    }
+
+    /// Copies into the buffers already there.
+    fn clone_from(&mut self, o: &State) {
+        self.holds.clone_from(&o.holds);
+        self.direct.clone_from(&o.direct);
+        self.activated.clone_from(&o.activated);
+        self.pinned.clone_from(&o.pinned);
+    }
+}
+
 impl State {
     fn join(&mut self, o: &State) -> bool {
         let mut changed = false;
         changed |= self.pinned.union(&o.pinned);
-        for (a, b) in self.holds.iter_mut().zip(&o.holds) {
-            changed |= a.union(b);
-        }
+        changed |= self.holds.union(&o.holds);
         for (a, b) in self.direct.iter_mut().zip(&o.direct) {
-            let n = match (a.as_ref(), b) {
-                (Some(x), Some(y)) => {
-                    let mut x = x.clone();
-                    x.union(y);
-                    Some(x)
+            match (a.as_mut(), b) {
+                (Some(x), Some(y)) => changed |= x.union(y),
+                (Some(_), None) => {
+                    *a = None;
+                    changed = true;
                 }
-                _ => None,
-            };
-            if *a != n {
-                *a = n;
-                changed = true;
+                (None, _) => {}
             }
         }
         changed |= self.activated.union(&o.activated);
@@ -297,7 +311,7 @@ impl Analysis {
         let mut init = a.empty_state();
         for (id, l) in a.loans.iter().enumerate() {
             if let LoanKind::Param(i) = l.kind {
-                init.holds[i as usize + 1].insert(id);
+                init.holds.insert(i as usize + 1, id);
                 if matches!(f.locals[i as usize + 1].ty, Type::Ref(..)) {
                     let mut d = BitSet::new(nloans);
                     d.insert(id);
@@ -308,36 +322,34 @@ impl Analysis {
         a.entry[0] = Some(init);
         let mut work: Vec<usize> = a.cfg.order.iter().rev().copied().collect();
         let mut queued = vec![true; f.blocks.len()];
+        // The state through the block, copied into one buffer each time.
+        let mut st = a.empty_state();
         while let Some(b) = work.pop() {
             queued[b] = false;
-            let Some(mut st) = a.entry[b].clone() else { continue };
+            let Some(entry) = &a.entry[b] else { continue };
+            st.clone_from(entry);
             let block = &f.blocks[b];
-            let mut unwind_states = Vec::new();
+            // The unwinding block may start from the block's entry or from
+            // after any of its statements: the join of all of them.
+            let mut unwind = block.unwind.map(|_| entry.clone());
             for (si, s) in block.stmts.iter().enumerate() {
                 a.transfer(p, f, types, b, si, s, &mut st);
-                if block.unwind.is_some() {
-                    unwind_states.push(st.clone());
+                if let Some(u) = &mut unwind {
+                    u.join(&st);
                 }
             }
-            let mut succ: Vec<(usize, State)> = targets(block).into_iter().map(|t| (t, st.clone())).collect();
-            if let Some(u) = block.unwind {
-                for s in unwind_states {
-                    succ.push((u.0 as usize, s));
-                }
-                if let Some(e) = a.entry[b].clone() {
-                    succ.push((u.0 as usize, e));
-                }
-            }
-            for (t, s) in succ {
+            let succ = targets(block).into_iter().map(|t| (t, &st));
+            let unwinding = block.unwind.zip(unwind.as_ref()).map(|(u, s)| (u.0 as usize, s));
+            for (t, s) in succ.chain(unwinding) {
                 if t >= f.blocks.len() {
                     continue;
                 }
                 let changed = match &mut a.entry[t] {
                     None => {
-                        a.entry[t] = Some(s);
+                        a.entry[t] = Some(s.clone());
                         true
                     }
-                    Some(e) => e.join(&s),
+                    Some(e) => e.join(s),
                 };
                 if changed && !queued[t] {
                     queued[t] = true;
@@ -354,11 +366,9 @@ impl Analysis {
             rounds += 1;
             for &b in order.iter().rev() {
                 let out = a.live_out(f, b);
-                let live = a.live_before_each(f, types, b, &out);
-                if let Some(first) = live.first()
-                    && a.live_in[b] != *first
-                {
-                    a.live_in[b] = first.clone();
+                let first = a.live_at_start(f, types, b, &out);
+                if a.live_in[b] != first {
+                    a.live_in[b] = first;
                     changed = true;
                 }
             }
@@ -380,7 +390,7 @@ impl Analysis {
 
     fn empty_state(&self) -> State {
         State {
-            holds: vec![BitSet::new(self.nloans); self.nloc],
+            holds: Rows::new(self.nloc, self.nloans),
             direct: vec![None; self.nloc],
             activated: BitSet::new(self.nloans),
             pinned: BitSet::new(self.nloans),
@@ -393,19 +403,18 @@ impl Analysis {
     /// referent holds, not the reference's own loan.
     fn value_loans(&self, st: &State, p: &Place) -> BitSet {
         let Some(k) = p.proj.iter().rposition(|x| matches!(x, Proj::Deref)) else {
-            return st.holds[p.local.0 as usize].clone();
+            return st.holds.get(p.local.0 as usize);
         };
         if k == 0 {
             return self.inner_of(st, p.local);
         }
-        st.holds[p.local.0 as usize].clone()
+        st.holds.get(p.local.0 as usize)
     }
 
     /// What the referent of a reference local holds.
     fn inner_of(&self, st: &State, r: LocalId) -> BitSet {
-        let holds = &st.holds[r.0 as usize];
-        let Some(direct) = &st.direct[r.0 as usize] else { return holds.clone() };
-        let mut out = holds.clone();
+        let mut out = st.holds.get(r.0 as usize);
+        let Some(direct) = &st.direct[r.0 as usize] else { return out };
         out.subtract(direct);
         for l in direct.iter() {
             match &self.loans[l].kind {
@@ -428,7 +437,7 @@ impl Analysis {
                 let inner =
                     if p.proj.is_empty() { self.inner_of(st, p.local) } else { self.value_loans(st, p) };
                 if let Some(&r) = made.and_then(|m| m.reborrows.get(&oi)) {
-                    let mut holds = st.holds[p.local.0 as usize].clone();
+                    let mut holds = st.holds.get(p.local.0 as usize);
                     holds.insert(r);
                     let mut d = BitSet::new(self.nloans);
                     d.insert(r);
@@ -456,7 +465,7 @@ impl Analysis {
     fn with_keys(&self, st: &State, d: &Place, mut loans: BitSet) -> BitSet {
         for x in &d.proj {
             if let Proj::Key(k) = x {
-                loans.union(&st.holds[k.0 as usize]);
+                st.holds.add_to(k.0 as usize, &mut loans);
             }
         }
         loans
@@ -483,22 +492,22 @@ impl Analysis {
         };
         match d.proj.iter().position(|x| matches!(x, Proj::Deref)) {
             None if d.proj.is_empty() => {
-                st.holds[l] = filter(l, loans);
+                st.holds.set(l, &filter(l, loans));
                 st.direct[l] = direct;
             }
             None => {
                 let add = filter(l, loans);
-                st.holds[l].union(&add);
+                st.holds.union_row(l, &add);
                 st.direct[l] = None;
             }
             Some(k) => {
                 let targets: Vec<LoanId> = if k == 0 {
                     match &st.direct[l] {
                         Some(dset) => dset.iter().collect(),
-                        None => st.holds[l].iter().collect(),
+                        None => st.holds.iter_row(l).collect(),
                     }
                 } else {
-                    st.holds[l].iter().collect()
+                    st.holds.iter_row(l).collect()
                 };
                 for t in targets {
                     if let LoanKind::Local { place, mutable: true, .. } = &self.loans[t].kind
@@ -506,7 +515,7 @@ impl Analysis {
                     {
                         let root = place.local.0 as usize;
                         let add = filter(root, loans.clone());
-                        st.holds[root].union(&add);
+                        st.holds.union_row(root, &add);
                         st.direct[root] = None;
                     }
                 }
@@ -606,7 +615,7 @@ impl Analysis {
         let made = self.made.get(&(b, si));
         // A use of a reference activates its two-phase loans.
         for l in self.used_locals(f, types, s) {
-            let held = st.holds[l.0 as usize].clone();
+            let held = st.holds.get(l.0 as usize);
             for x in held.iter() {
                 if self.loans[x].two_phase() {
                     st.activated.insert(x);
@@ -621,7 +630,7 @@ impl Analysis {
                         (ol.holds, ol.direct)
                     }
                     Rvalue::Ref(pl, _) | Rvalue::StrView(pl) => {
-                        let mut h = st.holds[pl.local.0 as usize].clone();
+                        let mut h = st.holds.get(pl.local.0 as usize);
                         let mut dset = BitSet::new(self.nloans);
                         if let Some(l) = made.and_then(|m| m.rvalue) {
                             h.insert(l);
@@ -646,7 +655,7 @@ impl Analysis {
                 if let Rvalue::Use(Operand::Move(src)) = rv
                     && src.proj.is_empty()
                 {
-                    st.holds[src.local.0 as usize].clear();
+                    st.holds.clear_row(src.local.0 as usize);
                     st.direct[src.local.0 as usize] = None;
                 }
                 let loans = self.with_keys(st, d, loans);
@@ -689,7 +698,7 @@ impl Analysis {
                             {
                                 let root = place.local.0 as usize;
                                 if types.may_hold(&f.locals[root].ty) {
-                                    st.holds[root].union(&stored);
+                                    st.holds.union_row(root, &stored);
                                     st.direct[root] = None;
                                 }
                             }
@@ -700,7 +709,7 @@ impl Analysis {
                     if let Operand::Move(src) = o
                         && src.proj.is_empty()
                     {
-                        st.holds[src.local.0 as usize].clear();
+                        st.holds.clear_row(src.local.0 as usize);
                         st.direct[src.local.0 as usize] = None;
                     }
                 }
@@ -718,12 +727,12 @@ impl Analysis {
             }
             StatementKind::Drop { place, .. } => {
                 if place.proj.is_empty() {
-                    st.holds[place.local.0 as usize].clear();
+                    st.holds.clear_row(place.local.0 as usize);
                     st.direct[place.local.0 as usize] = None;
                 }
             }
             StatementKind::StorageDead(l) => {
-                st.holds[l.0 as usize].clear();
+                st.holds.clear_row(l.0 as usize);
                 st.direct[l.0 as usize] = None;
             }
         }
@@ -808,16 +817,39 @@ impl Analysis {
     /// Live locals before each statement of a block, and before its
     /// terminator (the last element); `out` is live at the block's end.
     fn live_before_each(&self, f: &Function, types: &Types, b: usize, out: &BitSet) -> Vec<BitSet> {
+        let mut res = Vec::new();
+        self.live_backward(f, types, b, out, |live| res.push(live.clone()));
+        res.reverse();
+        res
+    }
+
+    /// Live locals at the start of a block: the first of
+    /// [`Analysis::live_before_each`].
+    fn live_at_start(&self, f: &Function, types: &Types, b: usize, out: &BitSet) -> BitSet {
+        self.live_backward(f, types, b, out, |_| {})
+    }
+
+    /// Walks a block backward from `out`, live at its end, showing `each`
+    /// what is live before its terminator and before each statement, last
+    /// first; returns what is live at its start.
+    fn live_backward(
+        &self,
+        f: &Function,
+        types: &Types,
+        b: usize,
+        out: &BitSet,
+        mut each: impl FnMut(&BitSet),
+    ) -> BitSet {
         let block = &f.blocks[b];
-        let unwind_live = block.unwind.and_then(|u| self.live_in.get(u.0 as usize)).cloned();
+        let unwind_live = block.unwind.and_then(|u| self.live_in.get(u.0 as usize));
         let mut live = out.clone();
         for l in Self::term_uses(block) {
             live.insert(l.0 as usize);
         }
-        if let Some(u) = &unwind_live {
+        if let Some(u) = unwind_live {
             live.union(u);
         }
-        let mut res = vec![live.clone()];
+        each(&live);
         for s in block.stmts.iter().rev() {
             if let Some(d) = Self::defined_locals(s) {
                 live.remove(d.0 as usize);
@@ -825,13 +857,12 @@ impl Analysis {
             for l in self.used_locals(f, types, s) {
                 live.insert(l.0 as usize);
             }
-            if let Some(u) = &unwind_live {
+            if let Some(u) = unwind_live {
                 live.union(u);
             }
-            res.push(live.clone());
+            each(&live);
         }
-        res.reverse();
-        res
+        live
     }
 
     /// The holds state before each statement of a block (and at its end).
@@ -849,8 +880,8 @@ impl Analysis {
     fn live_loans(&self, st: &State, live: &BitSet) -> BitSet {
         let mut out = st.pinned.clone();
         for l in live.iter() {
-            if let Some(h) = st.holds.get(l) {
-                out.union(h);
+            if l < st.holds.len() {
+                st.holds.add_to(l, &mut out);
             }
         }
         out
@@ -860,19 +891,26 @@ impl Analysis {
 
     pub fn findings(&self, p: &Program, f: &Function, types: &Types, opts: &Options) -> Vec<Finding> {
         let mut out = Vec::new();
+        // The states before and after the statement at hand, in two
+        // buffers that each statement copies into.
+        let mut before = self.empty_state();
+        let mut after = self.empty_state();
         for b in 0..f.blocks.len() {
-            let Some(states) = self.states(p, f, types, b) else { continue };
-            let lout = self.live_out(f, b);
-            let lives = self.live_before_each(f, types, b, &lout);
+            let Some(entry) = &self.entry[b] else { continue };
             let block = &f.blocks[b];
             // The unwinding path drops in the order of the normal one, so a
             // conflict there is one the normal path reports.
             if block.cleanup {
                 continue;
             }
+            let lout = self.live_out(f, b);
+            let lives = self.live_before_each(f, types, b, &lout);
+            after.clone_from(entry);
             for (si, s) in block.stmts.iter().enumerate() {
-                let before = &states[si];
-                let after = &states[si + 1];
+                std::mem::swap(&mut before, &mut after);
+                after.clone_from(&before);
+                self.transfer(p, f, types, b, si, s, &mut after);
+                let (before, after) = (&before, &after);
                 let pre = self.live_loans(before, &lives[si]);
                 let post = self.live_loans(after, &lives[si + 1]);
                 if opts.on(Rule::Conflicts) {
@@ -896,11 +934,8 @@ impl Analysis {
                     self.check_tasks(f, types, b, si, s, before, &mut out);
                 }
             }
-            if opts.on(Rule::Escapes)
-                && matches!(block.term, Terminator::Return)
-                && let Some(st) = states.last()
-            {
-                self.check_return(f, types, b, block.loc, st, &mut out);
+            if opts.on(Rule::Escapes) && matches!(block.term, Terminator::Return) {
+                self.check_return(f, types, b, block.loc, &after, &mut out);
             }
         }
         // A borrow that outlives its place is the mistake; the conflicts
@@ -1014,7 +1049,7 @@ impl Analysis {
         let used = self.used_locals(f, types, s);
         let mut activating = Vec::new();
         for l in &used {
-            for x in before.holds[l.0 as usize].iter() {
+            for x in before.holds.iter_row(l.0 as usize) {
                 if self.loans[x].two_phase() && !before.activated.contains(x) && !activating.contains(&x) {
                     activating.push(x);
                 }
@@ -1232,7 +1267,7 @@ impl Analysis {
                     continue;
                 }
                 for l in self.used_locals(f, types, s) {
-                    if st.holds[l.0 as usize].contains(y) {
+                    if st.holds.contains(l.0 as usize, y) {
                         return Some((s.loc, Some(l)));
                     }
                 }
@@ -1240,7 +1275,7 @@ impl Analysis {
             let end = &states[block.stmts.len()];
             if block.loc.is_some() {
                 for l in Self::term_uses(block) {
-                    if end.holds[l.0 as usize].contains(y) {
+                    if end.holds.contains(l.0 as usize, y) {
                         return Some((block.loc, Some(l)));
                     }
                 }
@@ -1312,9 +1347,13 @@ impl Analysis {
                     let Some(k) = place.proj.iter().position(|x| matches!(x, Proj::Deref)) else { continue };
                     // A borrow through another reference: what that one
                     // points to.
+                    let row;
                     let set = match &st.direct[l as usize] {
                         Some(d) if k == 0 => d,
-                        _ => &st.holds[l as usize],
+                        _ => {
+                            row = st.holds.get(l as usize);
+                            &row
+                        }
                     };
                     work.extend(set.iter());
                 }
@@ -1412,7 +1451,7 @@ impl Analysis {
         // dict keeps the key's loans.
         for (i, x) in d.proj.iter().enumerate() {
             if let Proj::Key(k) = x {
-                let keys = st.holds[k.0 as usize].clone();
+                let keys = st.holds.get(k.0 as usize);
                 let dict = Place { local: d.local, proj: d.proj[..i].to_vec() };
                 if !keys.is_empty() && self.store_into(f, types, b, si, s, st, &dict, &keys, out) {
                     return;
@@ -1458,7 +1497,7 @@ impl Analysis {
             let r = d.local.0 as usize;
             let targets: Vec<LoanId> = match &st.direct[r] {
                 Some(dset) if k == 0 => dset.iter().collect(),
-                _ => st.holds[r].iter().collect(),
+                _ => st.holds.iter_row(r).collect(),
             };
             let Some(i) = self.caller_param(f, st, targets) else { return false };
             // Only what the caller lent through this parameter may go back,
@@ -1576,9 +1615,13 @@ impl Analysis {
                         return false;
                     };
                     let base = place.local.0 as usize;
+                    let row;
                     let set = match &st.direct[base] {
                         Some(d) if k == 0 => d,
-                        _ => &st.holds[base],
+                        _ => {
+                            row = st.holds.get(base);
+                            &row
+                        }
                     };
                     if set.is_empty() {
                         return false;
@@ -1610,7 +1653,7 @@ impl Analysis {
         st: &State,
         out: &mut Vec<Finding>,
     ) {
-        for l in st.holds[0].iter() {
+        for l in st.holds.iter_row(0) {
             let loan = &self.loans[l];
             match &loan.kind {
                 LoanKind::Param(i) => {
@@ -1710,7 +1753,7 @@ impl Analysis {
                     if on_line {
                         for (st2, live2) in [(st, &lives[si]), (&states[si + 1], &lives[si + 1])] {
                             for v in live2.iter() {
-                                if st2.holds[v].contains(l) && names::is_named(f, LocalId(v as u32)) {
+                                if st2.holds.contains(v, l) && names::is_named(f, LocalId(v as u32)) {
                                     let n = names::local_name(f, LocalId(v as u32));
                                     if !holders.contains(&n) {
                                         holders.push(n);
@@ -1720,7 +1763,7 @@ impl Analysis {
                         }
                     }
                     // The last position where it is live.
-                    if lives[si].iter().any(|v| st.holds[v].contains(l))
+                    if lives[si].iter().any(|v| st.holds.contains(v, l))
                         && let Some(loc) = s.loc
                         && until.is_none_or(|u| (loc.line, loc.col) > (u.line, u.col))
                     {

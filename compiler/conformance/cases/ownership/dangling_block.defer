@@ -22,7 +22,7 @@ fn main(0) source 0 @4:5-4:9 {
     _1 = const 1 @5:13-5:14
     _4 = call intrinsic len(const "x") @7:8-7:16
     _3 = gt copy _4, const 0 @7:8-7:20
-    goto bb3
+    switch copy _3 [0: bb2, else: bb3] @7:8-7:20
   bb1:
     _8 = call intrinsic print(copy _2) @12:5-12:13
     _0 = const ()
@@ -32,15 +32,11 @@ fn main(0) source 0 @4:5-4:9 {
     _2 = copy _7 @11:9-11:18
     goto bb1
   bb3:
-    switch copy _3 [0: bb5, else: bb4] @7:8-7:20
-  bb4:
     _5 = const 5 @8:17-8:18
     _6 = ref _5 @9:13-9:18
     _2 = copy _6 @9:9-9:18
     dead _5 @9:18-9:18
     goto bb1
-  bb5:
-    goto bb2
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict
 --- status 134

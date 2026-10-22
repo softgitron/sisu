@@ -1,0 +1,15 @@
+# Too many positional arguments for a function with keyword-only
+# parameters: its positional parameters are counted against the arguments
+# without a name (02, keyword-only parameters after a bare `*`, as PEP 3102
+# counts them).
+
+def scale(x: int, /, *, by: int) -> int:
+    return x * by
+
+def clamp(x: int, low: int, *, high: int) -> int:
+    return max(low, min(x, high))
+
+def main():
+    print(scale(2, 3))
+    print(clamp(5, 0, 10, high=8))
+    print(scale(2, by=3))

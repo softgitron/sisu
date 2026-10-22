@@ -10,6 +10,7 @@ mod arbitrary;
 pub mod auto;
 pub mod borrows;
 mod collect;
+pub mod consts;
 mod derive;
 pub mod doctests;
 mod instances;

@@ -19,10 +19,6 @@ pub struct Resolved {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// Type names this stage knows but does not implement, with the phase of
-/// proposal/18-next-steps.md that brings them.
-pub(crate) const LATER_TYPES: &[(&str, &str)] = &[("f32", "`f32`")];
-
 /// Where a method is declared, which decides the generics, bounds and
 /// `Self` of its signature.
 #[derive(Clone, Debug)]
@@ -971,7 +967,9 @@ impl Resolver<'_> {
                     self.pending.push(Pending::Test { def, module, ast: t.clone() });
                 }
                 ItemKind::Const(c) => {
-                    let info = ConstInfo { ty: Ty::Error, value: None, file: self.file(module) };
+                    // The value is known from here on, for a type's
+                    // constant argument that names it (`consts.rs`).
+                    let info = ConstInfo { ty: Ty::Error, value: c.value.clone(), file: self.file(module) };
                     let def = self.new_def(
                         module,
                         &c.name.text,

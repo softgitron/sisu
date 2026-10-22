@@ -31,6 +31,9 @@ pub enum Ty {
     /// A constant argument of a `const` generic parameter (03, "Const
     /// generics"): the `256` of `Array[u32, 256]`.
     Const(i128),
+    /// An integer operation on constant arguments not known yet: `W * H`
+    /// in `Array[T, W * H]`, a `Const` once they are (`Ty::const_op`).
+    ConstOp(sisu_sir::ConstOp, Vec<Ty>),
     /// An inference variable of the body being checked.
     Var(u32),
     /// A type that could not be determined; it unifies with everything, so
@@ -99,7 +102,20 @@ impl Ty {
                 trait_: a.trait_.subst(args),
                 name: a.name.clone(),
             })),
+            Ty::ConstOp(op, a) => Ty::const_op(*op, a.iter().map(|t| t.subst(args)).collect()),
             other => other.clone(),
+        }
+    }
+
+    /// `op` on `args`, folded to a `Const` when every argument is one and
+    /// the operation has a value (it may overflow, as at run time; the type
+    /// then stays as it is written).
+    pub fn const_op(op: sisu_sir::ConstOp, args: Vec<Ty>) -> Ty {
+        let values: Option<Vec<i128>> =
+            args.iter().map(|a| if let Ty::Const(n) = a { Some(*n) } else { None }).collect();
+        match values.map(|v| op.fold(&v)) {
+            Some(Ok(n)) => Ty::Const(n),
+            _ => Ty::ConstOp(op, args),
         }
     }
 
@@ -119,6 +135,7 @@ impl Ty {
                 a.self_ty.walk(f);
                 a.trait_.args.iter().for_each(|t| t.walk(f));
             }
+            Ty::ConstOp(_, a) => a.iter().for_each(|t| t.walk(f)),
             _ => {}
         }
     }
@@ -200,6 +217,18 @@ impl Program {
             Ty::Error => "{unknown}".into(),
             Ty::Var(_) => "_".into(),
             Ty::Const(n) => n.to_string(),
+            // `W * H`, `-N`, `(W + 1) * H`.
+            Ty::ConstOp(op, args) => {
+                let part = |t: &Ty| match t {
+                    Ty::ConstOp(..) => format!("({})", display(t)),
+                    _ => display(t),
+                };
+                match args.as_slice() {
+                    [x] => format!("{}{}", op.symbol(), part(x)),
+                    [x, y] => format!("{} {} {}", part(x), op.symbol(), part(y)),
+                    _ => "{unknown}".into(),
+                }
+            }
             Ty::Param(i) => names.get(*i as usize).cloned().unwrap_or_else(|| format!("T{i}")),
             Ty::Dyn(tr) => format!("dyn {}", self.display_trait_in(tr, names)),
             Ty::Assoc(a) => {
@@ -354,7 +383,8 @@ impl Program {
             | Ty::Unit
             | Ty::Never
             | Ty::Error
-            | Ty::Const(_) => true,
+            | Ty::Const(_)
+            | Ty::ConstOp(..) => true,
             Ty::Ref(_, m) => !*m,
             Ty::Fn(_) => true,
             Ty::Tuple(e, _) => e.iter().all(|t| self.is_copy_depth(t, depth + 1)),
@@ -398,6 +428,7 @@ impl Program {
                             | "Cap"
                             | "Lent"
                             | "DateTime"
+                            | "f32"
                             | "u8"
                             | "u16"
                             | "u32"

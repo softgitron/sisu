@@ -140,8 +140,8 @@ pub fn reexports(module: &str) -> &'static [&'static str] {
         "test" => &["check", "arbitrary", "exhaustive", "Gen", "Draws"],
         "collections" => &["list", "dict", "set", "Arena", "Key", "Slice", "Iter", "Entry"],
         "num" => &[
-            "Num", "u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32", "i128", "bytes", "abs", "min",
-            "max", "sum",
+            "Num", "u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32", "i128", "f32", "bytes", "abs",
+            "min", "max", "sum",
         ],
         _ => &[],
     }
@@ -151,6 +151,7 @@ pub fn reexports(module: &str) -> &'static [&'static str] {
 const LEAVES: &[(&str, &[&str])] = &[
     ("int", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
     ("f64", &["Display", "Debug", "Eq", "PartialOrd"]),
+    ("f32", &["Display", "Debug", "Eq", "PartialOrd"]),
     ("bool", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
     ("char", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash"]),
     ("str", &["Display", "Debug", "Eq", "PartialOrd", "Ord", "Hash", "Len"]),
@@ -230,7 +231,7 @@ pub fn builtin_impls() -> &'static str {
         sized_impls(&mut s);
         // The operators of the numbers, as traits for generic code; `a + b`
         // on numbers stays the language's own operation.
-        for ty in ["int", "f64"] {
+        for ty in ["int", "f64", "f32"] {
             for (t, m) in [("Add", "add"), ("Sub", "sub"), ("Mul", "mul"), ("Div", "div"), ("Rem", "rem")] {
                 let _ = writeln!(s, "\nimpl {t} for {ty}:");
                 let _ =
@@ -281,6 +282,7 @@ fn leaf_format(t: &str, ty: &str) -> Option<String> {
             ("fmt", "\"{self}\"", "f.write(s.int(self.to_int()))".to_string())
         }
         ("Display", "f64") => ("fmt", "\"{self}\"", "f.write(s.float(self))".to_string()),
+        ("Display", "f32") => ("fmt", "\"{self}\"", "f.write(s.float32(self))".to_string()),
         // `?` as the spec's type asks for the `Debug` text.
         ("Display", _) => (
             "fmt",

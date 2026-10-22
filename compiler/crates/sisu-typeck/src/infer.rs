@@ -84,6 +84,7 @@ impl InferTable {
                 trait_: self.zonk_trait(&a.trait_),
                 name: a.name.clone(),
             })),
+            Ty::ConstOp(op, a) => Ty::const_op(op, a.iter().map(|x| self.zonk(x)).collect()),
             other => other,
         }
     }
@@ -101,6 +102,7 @@ impl InferTable {
             Ty::Ref(t, _) => self.has_vars(&t),
             Ty::Dyn(tr) => tr.args.iter().any(|x| self.has_vars(x)),
             Ty::Assoc(a) => self.has_vars(&a.self_ty) || a.trait_.args.iter().any(|x| self.has_vars(x)),
+            Ty::ConstOp(_, a) => a.iter().any(|x| self.has_vars(x)),
             _ => false,
         }
     }
@@ -114,6 +116,7 @@ impl InferTable {
             Ty::Ref(t, _) => self.occurs(v, &t),
             Ty::Dyn(tr) => tr.args.iter().any(|x| self.occurs(v, x)),
             Ty::Assoc(a) => self.occurs(v, &a.self_ty) || a.trait_.args.iter().any(|x| self.occurs(v, x)),
+            Ty::ConstOp(_, a) => a.iter().any(|x| self.occurs(v, x)),
             _ => false,
         }
     }
@@ -122,8 +125,13 @@ impl InferTable {
     /// having bound some variables; callers that need atomicity snapshot)
     /// when they cannot be.
     pub fn unify(&mut self, a: &Ty, b: &Ty) -> bool {
-        let a = self.resolve(a);
-        let b = self.resolve(b);
+        // A constant operation whose arguments are known is its value.
+        let known = |me: &Self, t: &Ty| match me.resolve(t) {
+            t @ Ty::ConstOp(..) => me.zonk(&t),
+            t => t,
+        };
+        let a = known(self, a);
+        let b = known(self, b);
         match (&a, &b) {
             (Ty::Var(x), Ty::Var(y)) if x == y => true,
             (Ty::Var(x), other) | (other, Ty::Var(x)) if Some(*x) == self.absorbing => match other {
@@ -168,6 +176,11 @@ impl InferTable {
                 t1.def == t2.def
                     && t1.args.len() == t2.args.len()
                     && t1.args.iter().zip(t2.args.iter()).all(|(x, y)| self.unify(x, y))
+            }
+            // An operation on constants not known yet equals only the same
+            // operation on equal arguments: `W * H` is not `H * W`.
+            (Ty::ConstOp(o1, a1), Ty::ConstOp(o2, a2)) => {
+                o1 == o2 && a1.len() == a2.len() && a1.iter().zip(a2.iter()).all(|(x, y)| self.unify(x, y))
             }
             // An associated type that is not known yet (its `Self` is a
             // generic parameter) equals only itself.

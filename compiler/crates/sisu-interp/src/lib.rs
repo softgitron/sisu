@@ -29,6 +29,7 @@ mod drops;
 mod exec;
 mod float32;
 mod format;
+pub mod fx;
 mod host;
 mod intrinsics;
 mod iter;
@@ -161,6 +162,8 @@ pub struct RunReport {
     /// Each snapshot the test took, by [`snapshot_key`], with what it
     /// rendered.
     pub snapshots: Vec<(String, String)>,
+    /// The steps the run took: statements and terminators, of every task.
+    pub steps: u64,
 }
 
 /// Why execution left a frame other than by returning.
@@ -254,14 +257,27 @@ pub struct Interp<'p, 'h> {
     pub(crate) funcs: Vec<&'p sir::Function>,
     /// The function table of each epoch: a function's name (its slot) to
     /// its body in that epoch. Epoch 0 is the program's.
-    pub(crate) epochs: Vec<HashMap<&'p str, usize>>,
+    pub(crate) epochs: Vec<fx::FxMap<&'p str, usize>>,
     /// Hot replacement, under `--watch`.
     pub(crate) live: Option<live::Live<'h>>,
-    pub(crate) types: HashMap<&'p str, &'p sir::TypeDecl>,
+    pub(crate) types: fx::FxMap<&'p str, &'p sir::TypeDecl>,
     /// The drop glue of each declared type that has one, by type name.
-    pub(crate) glue: HashMap<&'p str, usize>,
+    pub(crate) glue: fx::FxMap<&'p str, usize>,
     /// Variant indices by (type, variant) name.
-    pub(crate) variants: HashMap<(&'p str, &'p str), u32>,
+    pub(crate) variants: fx::FxMap<(&'p str, &'p str), u32>,
+    /// Which of the intrinsics' dispatchers answers each intrinsic name,
+    /// learnt at its first call (`intrinsics.rs`).
+    pub(crate) routes: fx::FxMap<String, intrinsics::Route>,
+    /// The text of each string and function constant of the program, by
+    /// the address of the constant in its SIR (which outlives the run).
+    pub(crate) const_texts: fx::FxMap<usize, std::rc::Rc<str>>,
+    /// The body each callee a statement names has in an epoch, by the
+    /// epoch and the address of the name in the SIR (which outlives the
+    /// run): resolved once rather than at every call.
+    pub(crate) callees: fx::FxMap<(usize, usize, usize), usize>,
+    /// The locals of frames that returned, emptied, for the next frames
+    /// to reuse.
+    pub(crate) spare_locals: Vec<Vec<Value>>,
     pub(crate) frames: Vec<Frame<'p>>,
     pub(crate) serial: u64,
     /// Whether any type has a `Drop`; without one, drop glue has nothing
@@ -314,8 +330,8 @@ impl<'p, 'h> Interp<'p, 'h> {
             .filter(|(_, f)| f.kind == sir::FnKind::Glue)
             .filter_map(|(i, f)| Some((f.name.strip_suffix("#drop")?, i)))
             .collect();
-        let mut types = HashMap::new();
-        let mut variants = HashMap::new();
+        let mut types = fx::FxMap::default();
+        let mut variants = fx::FxMap::default();
         variants.insert(("Option", "Some"), 0);
         variants.insert(("Option", "None"), 1);
         variants.insert(("Result", "Ok"), 0);
@@ -344,13 +360,17 @@ impl<'p, 'h> Interp<'p, 'h> {
             types,
             glue,
             variants,
+            routes: fx::FxMap::default(),
+            const_texts: fx::FxMap::default(),
+            callees: fx::FxMap::default(),
+            spare_locals: Vec::new(),
             frames: Vec::new(),
             serial: 0,
             any_drop,
             fuel: options.fuel,
             fuel_limit: options.fuel.unwrap_or(0),
             monitor: options.monitor.then(|| monitor::Monitor {
-                coverage: options.coverage.then(HashMap::new),
+                coverage: options.coverage.then(fx::FxMap::default),
                 ..Default::default()
             }),
             heap: Vec::new(),
@@ -376,6 +396,7 @@ impl<'p, 'h> Interp<'p, 'h> {
             case: self.recorded_case.clone(),
             trail: self.sched.trail.clone(),
             snapshots: self.snapshots_taken.clone(),
+            steps: self.sched.steps,
             ..Default::default()
         };
         if self.sched.keep_stats {

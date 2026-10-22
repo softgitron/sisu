@@ -187,6 +187,7 @@ impl Ctx<'_> {
             Ty::Unit | Ty::Var(_) | Ty::Error => sir::Type::Unit,
             Ty::Param(i) => sir::Type::Param(*i),
             Ty::Const(n) => sir::Type::Const(*n),
+            Ty::ConstOp(op, args) => sir::Type::ConstOp(*op, args.iter().map(|a| self.ty(a)).collect()),
             Ty::Dyn(tr) => {
                 sir::Type::Dyn(prog.qualified_name(tr.def), tr.args.iter().map(|a| self.ty(a)).collect())
             }

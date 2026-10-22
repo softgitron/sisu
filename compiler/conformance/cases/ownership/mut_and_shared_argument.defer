@@ -19,20 +19,18 @@ fn main(0) source 0 @8:5-8:9 {
   bb0:
     _1 = list(const 1, const 2) @9:14-9:20
     goto bb1
-  bb1 (unwind bb3):
+  bb1 (unwind bb2):
     _3 = ref mut _1 @10:20-10:22
     _4 = ref _1 @10:24-10:26
     _2 = call fn append_all(copy _3, copy _4) @10:5-10:27
     _6 = ref _1 @11:11-11:13
     _5 = call intrinsic print(copy _6) @11:5-11:14
     _0 = const ()
-    goto bb4
+    goto bb3
   bb2 (cleanup):
-    resume
-  bb3 (cleanup):
     drop _1
-    goto bb2
-  bb4:
+    resume
+  bb3:
     drop _1 @11:14-11:14
     return
 }

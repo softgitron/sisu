@@ -1,0 +1,8 @@
+# A line break inside the interpolation of a one-line string ends the
+# string (E0018) and then ends the line, as any line break does, so the
+# statement after it is one of its own.
+def main():
+    let x = 1
+    let s = "a{x
+    let t = 2
+    print(t)

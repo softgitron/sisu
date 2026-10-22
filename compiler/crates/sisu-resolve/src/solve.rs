@@ -388,7 +388,8 @@ impl Program {
             | Ty::Unit
             | Ty::Never
             | Ty::Error
-            | Ty::Const(_) => true,
+            | Ty::Const(_)
+            | Ty::ConstOp(..) => true,
             Ty::Ref(t, _) => rec(t),
             Ty::Tuple(es, _) => es.iter().all(rec),
             Ty::Fn(_) => Some(tr) == self.wk.debug,

@@ -51,7 +51,7 @@ fn borrows(t: &ast::TypeExpr) -> bool {
         TypeKind::Union(xs) => xs.iter().any(borrows),
         TypeKind::Tuple(xs) => xs.iter().any(|(_, x)| borrows(x)),
         TypeKind::Fn { params, ret, .. } => params.iter().any(borrows) || borrows(ret),
-        TypeKind::ConstArg(_) => false,
+        TypeKind::ConstArg(_) | TypeKind::ConstExpr(_) => false,
         TypeKind::Unsupported(_) | TypeKind::Error => true,
     }
 }

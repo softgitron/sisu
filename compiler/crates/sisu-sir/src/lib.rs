@@ -26,6 +26,7 @@
 //! into drops of the parts that remain.
 
 pub mod read;
+pub mod simplify;
 pub mod types;
 pub mod validate;
 pub mod write;
@@ -188,6 +189,155 @@ pub enum Type {
     /// The argument of a `const` generic parameter: the `256` of
     /// `Array[u32, 256]`, written as the number.
     Const(i128),
+    /// An integer operation on constant arguments not known yet, `W * H`
+    /// in `Array[T, W * H]` (03, "Const generics"), written `mul($1, $2)`:
+    /// substituting constants for its parameters folds it to a `Const`.
+    ConstOp(ConstOp, Vec<Type>),
+}
+
+/// The operations a type's constant argument may compute, on `int`
+/// values with the run time's rules: `//` floors, `%` takes the
+/// divisor's sign, and overflow, a zero divisor, a negative exponent and a
+/// shift outside 0 to 63 are faults.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ConstOp {
+    Add,
+    Sub,
+    Mul,
+    FloorDiv,
+    Mod,
+    Pow,
+    Shl,
+    Shr,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Neg,
+    BitNot,
+}
+
+/// Why a constant operation has no value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConstFault {
+    Overflow,
+    DivideByZero,
+    NegativeExponent,
+    ShiftOutOfRange,
+}
+
+impl ConstOp {
+    pub const ALL: [ConstOp; 13] = [
+        ConstOp::Add,
+        ConstOp::Sub,
+        ConstOp::Mul,
+        ConstOp::FloorDiv,
+        ConstOp::Mod,
+        ConstOp::Pow,
+        ConstOp::Shl,
+        ConstOp::Shr,
+        ConstOp::BitAnd,
+        ConstOp::BitOr,
+        ConstOp::BitXor,
+        ConstOp::Neg,
+        ConstOp::BitNot,
+    ];
+
+    /// Its name in SIR, the operator's (`mul`, `neg`).
+    pub fn name(self) -> &'static str {
+        match self {
+            ConstOp::Add => "add",
+            ConstOp::Sub => "sub",
+            ConstOp::Mul => "mul",
+            ConstOp::FloorDiv => "floordiv",
+            ConstOp::Mod => "mod",
+            ConstOp::Pow => "pow",
+            ConstOp::Shl => "shl",
+            ConstOp::Shr => "shr",
+            ConstOp::BitAnd => "bitand",
+            ConstOp::BitOr => "bitor",
+            ConstOp::BitXor => "bitxor",
+            ConstOp::Neg => "neg",
+            ConstOp::BitNot => "bitnot",
+        }
+    }
+
+    pub fn from_name(n: &str) -> Option<ConstOp> {
+        ConstOp::ALL.iter().copied().find(|o| o.name() == n)
+    }
+
+    /// Its spelling in Sisu (`*`, unary `-`).
+    pub fn symbol(self) -> &'static str {
+        match self {
+            ConstOp::Add => "+",
+            ConstOp::Sub | ConstOp::Neg => "-",
+            ConstOp::Mul => "*",
+            ConstOp::FloorDiv => "//",
+            ConstOp::Mod => "%",
+            ConstOp::Pow => "**",
+            ConstOp::Shl => "<<",
+            ConstOp::Shr => ">>",
+            ConstOp::BitAnd => "&",
+            ConstOp::BitOr => "|",
+            ConstOp::BitXor => "^",
+            ConstOp::BitNot => "~",
+        }
+    }
+
+    pub fn is_unary(self) -> bool {
+        matches!(self, ConstOp::Neg | ConstOp::BitNot)
+    }
+
+    /// The value on `int` operands, as the run time computes it.
+    pub fn fold(self, args: &[i128]) -> Result<i128, ConstFault> {
+        let int = |i: usize| -> Result<i64, ConstFault> {
+            args.get(i).and_then(|&v| i64::try_from(v).ok()).ok_or(ConstFault::Overflow)
+        };
+        let x = int(0)?;
+        if self.is_unary() {
+            return match self {
+                ConstOp::Neg => x.checked_neg().map(i128::from).ok_or(ConstFault::Overflow),
+                _ => Ok(i128::from(!x)),
+            };
+        }
+        let y = int(1)?;
+        let v = match self {
+            ConstOp::Add => x.checked_add(y).ok_or(ConstFault::Overflow)?,
+            ConstOp::Sub => x.checked_sub(y).ok_or(ConstFault::Overflow)?,
+            ConstOp::Mul => x.checked_mul(y).ok_or(ConstFault::Overflow)?,
+            ConstOp::FloorDiv | ConstOp::Mod if y == 0 => return Err(ConstFault::DivideByZero),
+            ConstOp::FloorDiv => {
+                let q = x.checked_div(y).ok_or(ConstFault::Overflow)?;
+                if x % y != 0 && ((x < 0) != (y < 0)) { q - 1 } else { q }
+            }
+            ConstOp::Mod => {
+                let r = x.checked_rem(y).unwrap_or(0);
+                if r != 0 && ((r < 0) != (y < 0)) { r + y } else { r }
+            }
+            ConstOp::Pow if y < 0 => return Err(ConstFault::NegativeExponent),
+            ConstOp::Pow => match u32::try_from(y) {
+                Ok(e) => x.checked_pow(e).ok_or(ConstFault::Overflow)?,
+                Err(_) => match x {
+                    0 | 1 => x,
+                    -1 => {
+                        if y % 2 == 0 {
+                            1
+                        } else {
+                            -1
+                        }
+                    }
+                    _ => return Err(ConstFault::Overflow),
+                },
+            },
+            ConstOp::Shl | ConstOp::Shr if !(0..64).contains(&y) => return Err(ConstFault::ShiftOutOfRange),
+            ConstOp::Shl => x << y,
+            ConstOp::Shr => x >> y,
+            ConstOp::BitAnd => x & y,
+            ConstOp::BitOr => x | y,
+            ConstOp::BitXor => x ^ y,
+            ConstOp::Neg | ConstOp::BitNot => x,
+        };
+        Ok(i128::from(v))
+    }
 }
 
 impl Type {
@@ -209,7 +359,19 @@ impl Type {
                 a.iter().map(|x| x.subst(args)).collect(),
                 n.clone(),
             ),
+            Type::ConstOp(op, a) => Type::const_op(*op, a.iter().map(|t| t.subst(args)).collect()),
             other => other.clone(),
+        }
+    }
+
+    /// `op` on `args`, folded to a `Const` when every argument is one and
+    /// the operation has a value.
+    pub fn const_op(op: ConstOp, args: Vec<Type>) -> Type {
+        let values: Option<Vec<i128>> =
+            args.iter().map(|a| if let Type::Const(n) = a { Some(*n) } else { None }).collect();
+        match values.map(|v| op.fold(&v)) {
+            Some(Ok(n)) => Type::Const(n),
+            _ => Type::ConstOp(op, args),
         }
     }
 
@@ -217,7 +379,9 @@ impl Type {
     pub fn has_params(&self) -> bool {
         match self {
             Type::Param(_) | Type::Assoc(..) => true,
-            Type::Named(_, a) | Type::Tuple(a) | Type::Dyn(_, a) => a.iter().any(Type::has_params),
+            Type::Named(_, a) | Type::Tuple(a) | Type::Dyn(_, a) | Type::ConstOp(_, a) => {
+                a.iter().any(Type::has_params)
+            }
             Type::Fn(p, r, _) => p.iter().any(Type::has_params) || r.has_params(),
             Type::Ref(t, _) => t.has_params(),
             _ => false,

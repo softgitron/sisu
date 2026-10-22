@@ -28,19 +28,28 @@ mappings can be Sisu over `char` mappings); add conformance cases at the
 edges (a character added in a recent version, Turkish dotted `İ`, a
 final `Σ`).
 
-**Float to text.** `Display` of an `f64` is Rust's shortest round-trip
-form and `{x:.N}` is Rust's correctly rounded fixed form (the intrinsic
-`fmt.float_digits`, `sisu-interp/src/format.rs`; the rest of a format
-spec is Sisu). Any correct shortest-round-trip algorithm gives the same
+**Float to text.** `Display` of an `f64` or an `f32` is Rust's shortest
+round-trip form for its type and `{x:.N}` is Rust's correctly rounded
+fixed form (the intrinsics `fmt.float_digits` and `fmt.float32_digits`,
+`sisu-interp/src/format.rs`; the rest of a format spec is Sisu). Any correct shortest-round-trip algorithm gives the same
 digits, but the exponent spelling (`1e100`, `1.5e-7`) and the rounding of
 fixed forms are Rust's. *Pay*: specify both in std's contract and
 implement them in Sisu (Ryu-style shortest digits, round half to even on
 the exact binary value).
 
 **Text to float.** Float literals are converted by Rust's `str::parse`
-in the lexer, which is correctly rounded. *Pay*: stage 1 needs a
-correctly rounded parser; add literals at rounding boundaries to the
-suite.
+in the AST builder (`f64`) and the checker (`f32`, rounded once from the
+text), which is correctly rounded. *Pay*: stage 1 needs a correctly
+rounded parser for both widths; add literals at rounding boundaries to
+the suite.
+
+**Float powers.** `x ** y` on floats is Rust's `powf` (an `f32` power is
+the `f64` one, rounded), which is the platform's maths library and not
+correctly rounded: the one float operation whose bits may differ between
+targets, against D-074. `+`, `-`, `*`, `/`, the square root and
+`mul_add` are exactly specified by IEEE 754, and `%` is exact up to its
+one addition. *Pay*: a correctly rounded `pow`, with `std.math`'s
+functions (Q-23).
 
 **Hashing.** `dict` and `set` keep an insertion-ordered vector with a Rust
 `HashMap` as the index (`sisu-interp/src/value.rs`), over the host's
@@ -50,16 +59,11 @@ depends on the hash, since iteration is in insertion order (D-074).
 *Pay*: write `dict` and `set` in Sisu over `Hash` and `Eq`, with the
 per-process SipHash key of D-049 as std's, and lift `E0398`.
 
-**Text search is naive.** `str.byte_find`, which `find`, `contains`,
-`split`, `split_once`, `lines` and `replace` are written over, tries each
-place where the first byte matches: O(n·m) for a text of n bytes and a
-pattern of m in the worst case (`"aaaa...b".find("aa...ab")`). *Pay*: a
-search with a linear bound (Two-Way, as Rust's `str::find`), in Sisu.
-
-**Text to `f64` at run time.** `str.parse_float` (which `cli.parse` uses
-for an `f64` option) is Rust's `parse`, after a check that the text is
-decimal syntax (no `inf` or `nan`); `str.parse_int` is Sisu. *Pay*: a
-Sisu `f64` parser, correctly rounded, as for literals.
+**Text to a float at run time.** `str.parse_float` (which `cli.parse`
+uses for an `f64` option) and `str.parse_f32` are Rust's `parse`, after
+a check that the text is decimal syntax (no `inf` or `nan`);
+`str.parse_int` is Sisu. *Pay*: a Sisu float parser, correctly rounded,
+as for literals.
 
 **Civil time.** `DateTime` is nanoseconds since the epoch in UTC, in an
 `i64` (the years 1678 to 2261); its RFC 3339 parser is Sisu, its
@@ -96,6 +100,16 @@ string, so a view costs O(length), and so does a piece of a view
 viewed `String` cannot change while the view exists, which the ownership
 checker enforces, and which the monitor checks through the loan each
 view carries. *Pay*: a view is a pointer and a length in the backend.
+
+**The commonest intrinsics have a second path.** Outside the monitor the
+run loop calls about twenty intrinsics directly (architecture.md,
+"Speed"), each a copy of part of its general implementation that must
+give the same value and effects or decline before any effect. A change
+to one of them is a change in two places; the conformance suite runs
+every program case under the monitor too (the general path) and compares
+the outputs, which is what holds the two together. *Pay*: none for a
+backend; for the interpreter, intrinsics resolved once to a function
+that both paths call.
 
 **References are paths.** A reference is a frame, a local and a path of
 steps walked on every access, with a serial number to detect a reference
@@ -337,21 +351,36 @@ capability) records, so the log is of Sisu calls; the epochs a run
 published are logged as `swap` records, as 10 says, so a replay needs no
 compiler.
 
-**Sized integers and bytes are host values.** A `u64`, `u128` and
-`i128` are value kinds of their own and the other sized integers are
+**Sized numbers and bytes are host values.** A `u64`, `u128`, `i128` and
+`f32` are value kinds of their own and the other sized integers are
 `int` values kept in range by typed intrinsics
 (`sisu-interp/src/sized.rs`), which compute in `i128` up to 64 bits and
 in the type's own host integer for the 128-bit ones; a 128-bit literal
 beyond `int` travels in SIR as decimal text (`i128.from_text`), since
-SIR's integer constant is 64 bits. `bytes` is a shared immutable host
-buffer. *Pay*: none for the interpreter; the backend gives each its
-width, and SIR may grow a 128-bit constant.
+SIR's integer constant is 64 bits, and an `f32` literal as the `f64` that
+holds it (`f32.from_literal`), since SIR has one float constant; `f32`
+arithmetic is computed in `f64` and rounded once (`float32.rs`), which
+gives `f32`'s results. `bytes` is a shared immutable host buffer. *Pay*:
+none for the interpreter; the backend gives each its width, and SIR may
+grow 128-bit and `f32` constants.
 
 **`Array` is a list.** An `Array[T, N]` is a host list of `N` values
 (`Array.filled` copies its value `N - 1` times), checked against its
 length on every index, so it has no inline layout and costs an
 allocation. *Pay*: the backend lays it out inline, `N` values wide, and
 can drop the check where `N` and the index are known.
+
+**A type's constant expression is folded, not evaluated.** A constant
+argument written as an expression (`Array[T, W * H]`) is computed where
+the type is written by `sisu-resolve/src/consts.rs`: integers, `const`
+parameters, constants whose values are written that way and the integer
+operators. A call or `comptime` there is `E0264`, though 08 says such an
+argument requires compile-time evaluation, because the evaluator runs on
+SIR, after every type is known. An operation on `const` parameters
+stays symbolic until substitution folds it, and two such operations are
+equal only when they are written alike (`W * H` is not `H * W`). *Pay*:
+the comptime evaluator over typed IR (above) run per instantiation, and
+normalised constant expressions if programs need the algebra.
 
 **A generic `comptime assert` is folded, not evaluated.** A `comptime
 assert` over `const` parameters is checked at each call that gives them
@@ -417,17 +446,33 @@ have impls that the fast path respects.
 
 ## Not yet done from Phases 0, 2, 3, 4, 6 and 8
 
-- **The wrong-program corpus.** The suite has about thirty cases with
-  expected codes under `syntax/`, `names/` and `types/`; Phase 2 asks for
-  forty files, and for the checker to return a typed tree for every
-  parser-fuzz input.
 - **The parser fuzz target** (Phase 0): "never panics, always returns a
   tree that reprints its input byte for byte, never emits a diagnostic
-  storm". The suite checks the reprint property for every case; there is
-  no fuzzer.
-- **Benchmarks in CI** (Phase 0): front-end milliseconds per kLOC and
-  interpreter nanoseconds per SIR statement, and Phase 2's "parse to SIR
-  under 50 ms per kLOC".
+  storm", run for 24 hours and then as a CI job. Two deterministic tests
+  hold the property on every `cargo test`: the parser's
+  (`fuzz_never_panics_and_round_trips`, 3 000 random token strings and
+  mutations of every proposal example, with a bound on diagnostics per
+  line) and the driver's (`mutated_programs_never_break_the_pipeline`,
+  300 mutated programs through every stage, a typed tree for each and
+  valid SIR for those that check), and the suite checks the reprint for
+  every case. There is no coverage-guided fuzzer and no long run. (The
+  wrong-program corpus Phase 2 asks for is `conformance/cases/wrong`:
+  forty programs with one mistake each, held by `tests/wrong.rs` to one
+  error that names its fix, each fix with edits applied and checked.)
+- **Benchmarks as a gate** (Phase 0). CI runs `cargo run --release -p
+  sisu-driver --example speed` on every push and prints the front end's
+  milliseconds per kLOC (text to the SIR that runs) and the
+  interpreter's nanoseconds per step (a SIR statement or terminator) for
+  std and the conformance corpus; it fails nothing, runs once and keeps
+  no history. On the development machine (4 shared cores): std's 6 590
+  lines in 62 ms, 9.4 ms per kLOC (28 ms once parsed); the corpus's 358
+  cases, 8 571 lines, in 2.3 s beyond std's, 272 ms per kLOC or 6.5 ms per
+  case, which is work per program (the std functions a program reaches
+  are lowered and checked with it) more than per line; the interpreter
+  at 194 ns per step over std's doc examples (16 558 steps, a fresh
+  interpreter per example) and 128 ns over the 127 programs of the corpus
+  that run alone (3.5 million steps). Phase 2's "parse to SIR under 50 ms
+  per kLOC" holds for std, not for the corpus's small files.
 - **The examples.** `hello.sisu` and `wordcount.sisu` run unmodified;
   `traits.sisu` and `errors.sisu` run with a `main` (and, for
   `errors.sisu`, the `default_port_for` it uses) appended, and the
@@ -454,11 +499,11 @@ From Phase 3 (18, "Phase 3: the ownership checker and the dynamic
 monitor"):
 
 - **The generation-checked reference type** behind a flag, if Phase 0
-  triggered it; `sisu check --diary`.
+  triggered it.
 - **The corpora**: a translated slice of rustc's borrow-checker UI tests,
   the referee's 20 adversarial programs, and the 60-file wrong-ownership
-  corpus with expected codes and named fixes. The suite has 73 ownership
-  cases (31 accepted, 42 rejected) and the soundness tests below.
+  corpus with expected codes and named fixes. The suite has 74 ownership
+  cases (32 accepted, 42 rejected) and the soundness tests below.
 - **24 hours of mutation fuzzing.** `sisu-driver/tests/soundness.rs` runs
   a deterministic mutation fuzz (statement reorderings of accepted
   programs' SIR) on every `cargo test`, and more with
@@ -471,11 +516,12 @@ monitor"):
 
 From Phase 4 (18, "Phase 4: traits, generics, std in Sisu"):
 
-- **`f32`** is `E0900`; every sized integer type, `bytes`, `Slice`,
-  `Array` and const generics exist. A `const` parameter is an `int`
-  (another type is `E0900`), and its argument an integer literal or a
-  `const` parameter: an expression, as 03's `Array[T, W * H]`, does not
-  parse there yet.
+- **Const generics beyond `int`.** Every number type of 03 (`f32`
+  included), `bytes`, `Slice`, `Array` and const generics exist. A
+  `const` parameter is an `int` (another type is `E0900`); its argument
+  may be an integer expression of literals, `const` parameters and
+  constants (03's `Array[T, W * H]`), folded where it is written (above),
+  but not a call or `comptime` (`Array[u32, comptime size()]`).
 - **`@derive(Default)`**; the auto traits `Send`, `Sync` and `Escapable`
   are inferred, and `Copy` is computed from fields.
 - **`std` as modules.** The core traits and their impls, the iterator
@@ -523,10 +569,14 @@ and profiling", "REPL and scripts"):
   puts after 0.1, worksheets in the editor are there; always-on
   evaluation, structural editing (N-31's commands beyond the fixes) and
   the stepper are not.
-- **The formatter** keeps `Result[T, E]` rather than writing 10's
-  `T ! E`, since whether `E` is an error set is not in the syntax; with
-  name resolution in the formatter's reach (the language server has it)
-  it could be.
+- **The formatter** writes 10's `T ! E` for `Result[T, E]` when `E`
+  names an error set, which the driver finds by resolving the file
+  (`sisu-driver/src/format.rs`). `sisu fmt` resolves each file as a
+  program of its own, so in a package an error set the file imports from
+  another of the package's modules is not known and its `Result[T, E]`
+  stays as written; the language server formats a document with its
+  whole program. Resolving the package (or caching its error sets) would
+  make the two agree.
 - **Hot replacement** swaps bodies only; resuming from a chosen frame
   after a fix (10's stated goal of the debug ABI) and DWARF-level
   debugging are a backend's.

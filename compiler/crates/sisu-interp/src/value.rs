@@ -303,7 +303,7 @@ pub enum Value {
     List(Vec<Value>),
     Dict(Box<Dict>),
     Set(Box<Set>),
-    Ref(Box<Pointer>),
+    Ref(Rc<Pointer>),
     Fn(Rc<str>),
     Closure(Rc<ClosureVal>),
     Dyn(Box<DynVal>),
@@ -346,13 +346,34 @@ pub enum Value {
     },
 }
 
+thread_local! {
+    /// The type names of the struct and enum values a thread makes, each
+    /// made once and shared by every value of the type.
+    static NAMES: std::cell::RefCell<crate::fx::FxSet<Rc<str>>> = Default::default();
+    /// The names of the two enums the run time makes most.
+    static OPTION: Rc<str> = type_name("Option");
+    static RESULT: Rc<str> = type_name("Result");
+}
+
+/// The shared name of a type, for its values.
+pub fn type_name(ty: &str) -> Rc<str> {
+    NAMES.with(|names| {
+        if let Some(n) = names.borrow().get(ty) {
+            return n.clone();
+        }
+        let n: Rc<str> = Rc::from(ty);
+        names.borrow_mut().insert(n.clone());
+        n
+    })
+}
+
 impl Value {
     pub fn str(s: &str) -> Value {
         Value::Str(Rc::from(s), 0)
     }
 
     pub fn adt(ty: &str, variant: u32, fields: Vec<Value>) -> Box<Adt> {
-        Box::new(Adt { ty: Rc::from(ty), variant, fields, trace: Vec::new() })
+        Box::new(Adt { ty: type_name(ty), variant, fields, trace: Vec::new() })
     }
 
     pub fn variant(ty: &str, variant: u32, fields: Vec<Value>) -> Value {
@@ -360,11 +381,21 @@ impl Value {
     }
 
     pub fn some(v: Value) -> Value {
-        Value::variant("Option", 0, vec![v])
+        Value::Variant(Box::new(Adt {
+            ty: OPTION.with(Rc::clone),
+            variant: 0,
+            fields: vec![v],
+            trace: Vec::new(),
+        }))
     }
 
     pub fn none() -> Value {
-        Value::variant("Option", 1, Vec::new())
+        Value::Variant(Box::new(Adt {
+            ty: OPTION.with(Rc::clone),
+            variant: 1,
+            fields: Vec::new(),
+            trace: Vec::new(),
+        }))
     }
 
     pub fn option(v: Option<Value>) -> Value {
@@ -375,11 +406,21 @@ impl Value {
     }
 
     pub fn ok(v: Value) -> Value {
-        Value::variant("Result", 0, vec![v])
+        Value::Variant(Box::new(Adt {
+            ty: RESULT.with(Rc::clone),
+            variant: 0,
+            fields: vec![v],
+            trace: Vec::new(),
+        }))
     }
 
     pub fn err(v: Value) -> Value {
-        Value::variant("Result", 1, vec![v])
+        Value::Variant(Box::new(Adt {
+            ty: RESULT.with(Rc::clone),
+            variant: 1,
+            fields: vec![v],
+            trace: Vec::new(),
+        }))
     }
 
     pub fn ordering(o: std::cmp::Ordering) -> Value {

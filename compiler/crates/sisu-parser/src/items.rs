@@ -395,8 +395,11 @@ impl Parser<'_> {
         if self.at(L_BRACKET) {
             self.generic_params();
         }
-        self.bad_member_reported = false;
+        // Once per body: a struct declared inside another one has a body
+        // of its own, and the outer body's report stands after it.
+        let outer_reported = std::mem::replace(&mut self.bad_member_reported, false);
         self.colon_members("struct", line, Self::struct_member);
+        self.bad_member_reported = outer_reported;
         self.finish_node();
     }
 

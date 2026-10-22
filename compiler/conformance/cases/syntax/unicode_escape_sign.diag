@@ -1,0 +1,2 @@
+5:13-5:22 E0016 lex.bad-char-literal
+6:15-6:17 E0007 lex.invalid-escape escape="u"

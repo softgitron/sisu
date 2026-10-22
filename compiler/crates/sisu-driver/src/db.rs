@@ -589,7 +589,7 @@ impl Db {
         if diagnostics.iter().any(|d| d.is_error() && !generated(d)) {
             diagnostics.retain(|d| !generated(d));
         }
-        sisu_diag::diagnostic::sort(&mut diagnostics);
+        sisu_diag::diagnostic::sort_unique(&mut diagnostics);
         let c = Arc::new(Checked { map, file: parsed.file, program: r.program, typed, diagnostics, iface });
         self.checked.insert(name.to_string(), (h, c.clone()));
         Some(c)
@@ -622,6 +622,9 @@ impl Db {
         (c.iface, self.contracts, trust_std).hash(&mut ctx);
         let mut checked =
             sisu_borrowck::check_with(&lowered, &options, Some((&mut memos.borrow, ctx.finish())));
+        // What runs takes a step per jump: the jumps that only lead to
+        // another are threaded once the checker is done with them.
+        sisu_sir::simplify::program(&mut checked.program);
         self.counters.bodies_lowered = memos.lower.lowered;
         self.counters.lowered_reused = memos.lower.reused;
         self.counters.functions_checked = memos.borrow.checked;
@@ -642,7 +645,7 @@ impl Db {
         };
         let mut diagnostics = by_finding.clone();
         diagnostics.extend(comptime.iter().cloned());
-        sisu_diag::diagnostic::sort(&mut diagnostics);
+        sisu_diag::diagnostic::sort_unique(&mut diagnostics);
         let l = Arc::new(Lowered {
             sir: checked.program,
             findings: checked.findings,
@@ -664,6 +667,7 @@ impl Db {
         }
         let lowered = sisu_lower::lower_for(&c.program, &c.typed, &c.map, self.contracts, extra);
         let mut checked = sisu_borrowck::check(&lowered, &sisu_borrowck::Options::default());
+        sisu_sir::simplify::program(&mut checked.program);
         if !checked.findings.is_empty() || !sisu_interp::comptime::evaluate(&mut checked.program).is_empty() {
             return None;
         }
@@ -684,7 +688,7 @@ impl Db {
             && let Some(l) = self.lowered(name)
         {
             all.extend(l.diagnostics.iter().cloned());
-            sisu_diag::diagnostic::sort(&mut all);
+            sisu_diag::diagnostic::sort_unique(&mut all);
         }
         all
     }

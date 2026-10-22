@@ -132,6 +132,18 @@ type i64 = int
 
 type uint = u64
 
+## IEEE 754 binary32 (03, "Numbers"), for layouts, graphics and audio;
+## `f64` is the default float. Floating point is strict (D-074): each
+## operation on `f32`s rounds once to `f32`, never through a wider format,
+## and nothing fuses `a * b + c` (`a.mul_add(b, c)` is the one-rounding
+## form). A float literal takes `f32` where one is expected, or by its
+## suffix (`1.5f32`), rounded once from its text. An `f32` becomes an
+## `f64` where one is expected, which loses nothing; `x.to_f32()` rounds
+## the other way. Like `f64` it is `PartialOrd` and not `Ord` or `Hash`.
+@builtin("f32")
+struct f32:
+    pass
+
 ## An immutable owned sequence of bytes (03, "Strings and text"): the type
 ## of `b"..."` and of what a connection reads. It views as `Slice[u8]`
 ## where one is expected; `b[i]` is a byte and `b[i:j]` a copy of a run.
@@ -533,7 +545,25 @@ impl Spec:
         let kind = match self.kind:
             case Some(k): "{k}"
             case None: ""
-        var body = Spec.float_digits(x.abs(), kind, self.precision ?? -1)
+        return self.float_text(x < 0.0, Spec.float_digits(x.abs(), kind, self.precision ?? -1))
+
+    ## An `f32` by the spec, as `float` writes an `f64`: the shortest text
+    ## is the one that reads back as the same `f32`.
+    pure def float32(self, x: f32) -> String:
+        if self.kind == Some('?'):
+            return self.pad("{x:?}")
+        if self.kind == Some('s'):
+            return self.text("{x}")
+        if x.is_nan():
+            return self.pad_number("", "NaN")
+        let kind = match self.kind:
+            case Some(k): "{k}"
+            case None: ""
+        return self.float_text(x < 0.0, Spec.float32_digits(x.abs(), kind, self.precision ?? -1))
+
+    ## A float's digits with its sign, grouping and padding.
+    pure def float_text(self, negative: bool, own digits: String) -> String:
+        var body = digits
         if self.grouping != None:
             let cs = Spec.chars_of(body)
             var k = 0
@@ -547,7 +577,7 @@ impl Spec:
                 else:
                     rest.push("{cs[i]}")
             body = "{Spec.group(whole, self.grouping ?? ',', 3)}{rest}"
-        return self.pad_number(self.sign_of(x < 0.0), body)
+        return self.pad_number(self.sign_of(negative), body)
 
     ## A text by the spec: at most `precision` characters, padded.
     pure def text(self, t: str) -> String:
@@ -624,6 +654,12 @@ impl Spec:
     ## correctly rounded ones (port-debt.md, "Float to text").
     @intrinsic("fmt.float_digits")
     pure def float_digits(x: f64, kind: str, precision: int) -> String
+
+    ## `float_digits` of an `f32`: the same digits as of the `f64` that
+    ## holds it, except that the shortest form is the shortest that reads
+    ## back as the same `f32`.
+    @intrinsic("fmt.float32_digits")
+    pure def float32_digits(x: f32, kind: str, precision: int) -> String
 
     ## `t` by the `strftime` pattern (UTC; the subset in docs/architecture.md).
     @intrinsic("fmt.strftime")
@@ -1193,6 +1229,9 @@ impl int:
     ## The nearest `f64`; exact up to 2**53.
     @intrinsic("int.to_f64")
     pure def to_f64(self) -> f64
+    ## The nearest `f32`; exact up to 2**24.
+    @intrinsic("int.to_f32")
+    pure def to_f32(self) -> f32
     ## `self` raised to `exp`, which must not be negative; overflow panics.
     @intrinsic("int.pow")
     pure def pow(self, exp: int) -> int
@@ -1217,6 +1256,50 @@ impl f64:
     pure def truncate_to_int(self) -> int
     @intrinsic("f64.is_nan")
     pure def is_nan(self) -> bool
+    ## The nearest `f32` (an infinity beyond its range).
+    @intrinsic("f64.to_f32")
+    pure def to_f32(self) -> f32
+    ## `self * a + b` with one rounding, a fused multiply-add: the only way
+    ## to get one, since `self * a + b` rounds twice everywhere (D-074).
+    @intrinsic("f64.mul_add")
+    pure def mul_add(self, a: f64, b: f64) -> f64
+
+## IEEE 754 binary32. `+`, `-`, `*`, `/` and `sqrt` round the exact result
+## once to `f32`; `%` and `**` are `f64`'s on the two values, rounded once
+## to `f32`.
+impl f32:
+    ## `Less`, `Equal` or `Greater`; panics if either is NaN.
+    @intrinsic("f32.cmp")
+    pure def cmp(self, other: f32) -> Ordering
+    @intrinsic("f32.sqrt")
+    pure def sqrt(self) -> f32
+    @intrinsic("f32.floor")
+    pure def floor(self) -> f32
+    @intrinsic("f32.ceil")
+    pure def ceil(self) -> f32
+    ## Rounds half away from zero.
+    @intrinsic("f32.round")
+    pure def round(self) -> f32
+    @intrinsic("f32.abs")
+    pure def abs(self) -> f32
+    @intrinsic("f32.is_nan")
+    pure def is_nan(self) -> bool
+    ## The same value as an `f64`, which holds every `f32`.
+    @intrinsic("f32.to_f64")
+    pure def to_f64(self) -> f64
+    ## The integer part; panics if the value is NaN or out of range for `int`.
+    @intrinsic("f32.truncate_to_int")
+    pure def truncate_to_int(self) -> int
+    ## `self * a + b` with one rounding, a fused multiply-add (D-074).
+    @intrinsic("f32.mul_add")
+    pure def mul_add(self, a: f32, b: f32) -> f32
+    ## The value's 32 bits (sign, exponent, fraction), as IEEE 754 lays
+    ## them out.
+    @intrinsic("f32.to_bits")
+    pure def to_bits(self) -> u32
+    ## The `f32` whose 32 bits are `bits`.
+    @intrinsic("f32.from_bits")
+    pure def from_bits(bits: u32) -> f32
 
 impl bool:
     @intrinsic("bool.cmp")
@@ -1556,6 +1639,10 @@ impl str:
     ## the nearest `f64`, or `None`; `inf` and `nan` are not numbers here.
     @intrinsic("str.parse_float")
     pure def parse_float(self) -> f64?
+    ## The decimal number the whole text spells, as `parse_float` reads
+    ## it, rounded once to the nearest `f32`, or `None`.
+    @intrinsic("str.parse_f32")
+    pure def parse_f32(self) -> f32?
     ## `self` repeated `n` times; `n` must not be negative.
     pure def repeat(self, n: int) -> String:
         if n < 0:
@@ -2700,6 +2787,10 @@ impl Draws:
     def gen_f64(d: Draws) -> f64:
         let whole = Draws.gen_int(d)
         return whole.to_f64() + d.draw(4).to_f64() / 4.0
+    ## An `f32`: an integer and a quarter, as `gen_f64` draws them.
+    def gen_f32(d: Draws) -> f32:
+        let whole = Draws.gen_int(d)
+        return whole.to_f32() + d.draw(4).to_f32() / 4.0
     ## A character of a small alphabet, letters first.
     def gen_char(d: Draws) -> char:
         let alphabet = if d.exhaustive(): "ab" else: "abcxyzABCXYZ0129 _-.,!?\u{e9}\u{3b1}\n"
@@ -3610,10 +3701,11 @@ impl[T] Debug for Lent[T]:
     pure def fmt_debug(self, mut f: Formatter)
 
 # ------------------------------------------------------------------ the traits of the builtin types
-# The leaf types (`int`, `f64`, `bool`, `char`, `str`, `String`, `Path`,
-# `DateTime`, `()`) and tuples of up to six elements implement `Display`,
-# `Debug`, `Eq`, `PartialOrd`, `Ord` (not `f64`) and `Hash` (not `f64`) in
-# the generated module `<std>/builtin_impls.sisu` (see
+# The leaf types (`int`, `f64`, `f32`, `bool`, `char`, `str`, `String`,
+# `Path`, `DateTime`, `()`) and tuples of up to six elements implement
+# `Display`, `Debug`, `Eq`, `PartialOrd`, `Ord` and `Hash` (the floats
+# neither of the last two) in the generated module
+# `<std>/builtin_impls.sisu` (see
 # compiler/crates/sisu-resolve/src/std_sources.rs), with the intrinsics
 # `structural.*`, whose contracts are written there.
 
@@ -3821,4 +3913,7 @@ impl Num for int:
     pass
 
 impl Num for f64:
+    pass
+
+impl Num for f32:
     pass

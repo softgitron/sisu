@@ -73,8 +73,8 @@ impl Writer<'_> {
                 let all = |args: &[ast::TypeExpr]| args.iter().try_for_each(|a| self.type_ok(a, params));
                 match (*n, args.len()) {
                     (
-                        "int" | "i64" | "bool" | "f64" | "char" | "String" | "u8" | "u16" | "u32" | "i8"
-                        | "i16" | "i32" | "Duration",
+                        "int" | "i64" | "bool" | "f64" | "f32" | "char" | "String" | "u8" | "u16" | "u32"
+                        | "i8" | "i16" | "i32" | "Duration",
                         0,
                     ) => Ok(()),
                     ("list" | "set" | "Option" | "Box" | "Slice", 1) => all(args),
@@ -103,6 +103,7 @@ impl Writer<'_> {
                     ("int" | "i64", []) => leaf("int"),
                     ("bool", []) => leaf("bool"),
                     ("f64", []) => leaf("f64"),
+                    ("f32", []) => leaf("f32"),
                     ("char", []) => leaf("char"),
                     ("String", []) => leaf("string"),
                     ("Duration", []) => leaf("duration"),
@@ -143,7 +144,7 @@ impl Writer<'_> {
             let n = segments.first().map(|s| s.text.as_str()).unwrap_or("");
             let named = match n {
                 "int" | "i64" => Some("Draws.gen_int".to_string()),
-                "bool" | "f64" | "char" | "u8" | "u16" | "u32" | "i8" | "i16" | "i32" => {
+                "bool" | "f64" | "f32" | "char" | "u8" | "u16" | "u32" | "i8" | "i16" | "i32" => {
                     Some(format!("Draws.gen_{n}"))
                 }
                 "String" => Some("Draws.gen_string".into()),

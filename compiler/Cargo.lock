@@ -93,6 +93,7 @@ version = "0.0.1"
 dependencies = [
  "sisu-diag",
  "sisu-parser",
+ "sisu-sir",
  "sisu-syntax",
 ]
 

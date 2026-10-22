@@ -197,6 +197,15 @@ impl Checker<'_> {
                 let i = self.generic_names.iter().position(|g| g == n).unwrap_or(0);
                 Ty::Param(i as u32)
             }
+            // A constant of the program.
+            ast::ExprKind::Name(n)
+                if self.lookup_local(n).is_none()
+                    && self.prog.lookup(self.module, n).is_some_and(|d| {
+                        matches!(self.prog.def(d).kind, sisu_resolve::DefKind::Const(_))
+                    }) =>
+            {
+                self.const_arg(e)
+            }
             ast::ExprKind::Name(n) => match n.as_str() {
                 "int" => Ty::Int,
                 "f64" => Ty::Float,
@@ -224,6 +233,10 @@ impl Checker<'_> {
             ast::ExprKind::Tuple(xs) => {
                 let tys = xs.iter().map(|x| self.expr_as_type(x)).collect::<Vec<_>>();
                 if tys.is_empty() { Ty::Unit } else { Ty::tuple(tys) }
+            }
+            // A constant computed where it is written: `size[N * 2]()`.
+            ast::ExprKind::Binary { .. } | ast::ExprKind::Unary { .. } | ast::ExprKind::Paren(_) => {
+                self.const_arg(e)
             }
             _ => {
                 let d = self
@@ -1188,6 +1201,7 @@ impl Checker<'_> {
                 }
             }
         }
+        let mut trailing_extra = false;
         if let Some(c) = trailing {
             // A `do` block binds to the last function-typed parameter.
             let target = (0..n).rev().find(|&i| matches!(self.resolved(&sig.params[i].ty), Ty::Fn(_)));
@@ -1201,15 +1215,27 @@ impl Checker<'_> {
                     slots[i] =
                         Some(ast::Arg { node: c.node, range: c.range, name: None, mutable: false, value });
                 }
-                _ => extra = true,
+                _ => {
+                    extra = true;
+                    trailing_extra = true;
+                }
             }
         }
         if extra {
-            let found = args.len() + trailing.is_some() as usize;
+            // With keyword-only parameters, the positional ones are counted
+            // against the arguments without a name (PEP 3102: "takes 1
+            // positional argument but 2 were given"); otherwise every
+            // parameter is counted against every argument.
+            let (expected, found) = match sig.keyword_only_from {
+                Some(k) => {
+                    (k, args.iter().filter(|a| a.name.is_none()).count() + usize::from(trailing_extra))
+                }
+                None => (n, args.len() + usize::from(trailing.is_some())),
+            };
             let d = self
                 .error(msg::TYPE_ARGUMENT_COUNT, range)
                 .with("name", sig.name.clone())
-                .with("expected", n.to_string())
+                .with("expected", expected.to_string())
                 .with("found", found.to_string());
             self.report(d);
         }

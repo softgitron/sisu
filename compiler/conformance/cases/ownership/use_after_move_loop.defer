@@ -21,42 +21,34 @@ fn main(0) source 0 @7:5-7:9 {
     _1 = call intrinsic str.to_string(const "once") @8:13-8:31
     _9 = const true
     goto bb1
-  bb1 (unwind bb3):
+  bb1 (unwind bb2):
     _3 = call fn range#step() @9:14-9:22
     _2 = call intrinsic range(const 0, const 2, copy _3) @9:14-9:22
     goto bb4
   bb2 (cleanup):
+    drop _1 if _9
     resume
   bb3 (cleanup):
-    drop _1 if _9
-    goto bb2
-  bb4 (unwind bb5):
-    goto bb6
-  bb5 (cleanup):
     drop _2
-    goto bb3
-  bb6 (unwind bb5):
+    goto bb2
+  bb4 (unwind bb3):
     _4 = ref mut _2 @9:5-9:22
     _5 = call intrinsic Iter.next(copy _4) @9:5-9:22
     _6 = discriminant _5 @9:5-9:22
-    switch copy _6 [0: bb8, else: bb9] @9:5-9:22
-  bb7 (unwind bb5):
-    goto bb10
-  bb8 (unwind bb5):
+    switch copy _6 [0: bb5, else: bb6] @9:5-9:22
+  bb5 (unwind bb3):
     _7 = copy _5.as(0).0 @9:9-9:10
     _9 = const false
     _8 = call fn consume(move _1) @10:9-10:19
-    goto bb6
-  bb9 (unwind bb5):
-    goto bb7
-  bb10 (unwind bb3):
+    goto bb4
+  bb6 (unwind bb2):
     drop _2 @10:19-10:19
-    goto bb11
-  bb11 (unwind bb3):
+    goto bb7
+  bb7 (unwind bb2):
     dead _2 @10:19-10:19
     _0 = const ()
-    goto bb12
-  bb12:
+    goto bb8
+  bb8:
     drop _1 if _9 @10:19-10:19
     return
 }

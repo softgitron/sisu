@@ -656,7 +656,10 @@ impl Resolver<'_> {
 /// associated type).
 fn outermost(t: &Ty) -> Option<(u8, u64)> {
     Some(match t {
-        Ty::Param(_) | Ty::Assoc(_) | Ty::Var(_) | Ty::Error | Ty::ErrSet(_) => return None,
+        // A constant operation may fold to any constant.
+        Ty::Param(_) | Ty::Assoc(_) | Ty::Var(_) | Ty::Error | Ty::ErrSet(_) | Ty::ConstOp(..) => {
+            return None;
+        }
         Ty::Int => (0, 0),
         Ty::Float => (1, 0),
         Ty::Bool => (2, 0),

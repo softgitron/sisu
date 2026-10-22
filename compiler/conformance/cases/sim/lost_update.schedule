@@ -10,4 +10,4 @@ panic: assertion failed: bumped_twice() == 2
 replay: sisu test --replay 1-f262d0e5f1b21338-0.0.1-t0-s0-r0-x0.0.1.0.0.0 lost_update.sisu
 
 1 passed, 1 failed, 0 blocked
-searched 307 schedules (preemption bound 1)
+searched 283 schedules (preemption bound 1)

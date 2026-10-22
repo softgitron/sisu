@@ -18,18 +18,16 @@ fn main(0) source 0 @18:5-18:9 {
     _3 = struct Receipt(const 2) @19:40-19:57
     _1 = list(move _2, move _3) @19:20-19:58
     goto bb1
-  bb1 (unwind bb3):
+  bb1 (unwind bb2):
     _6 = ref _1 @20:17-20:25
     _5 = call fn total(copy _6) @20:11-20:26
     _4 = call intrinsic print(copy _5) @20:5-20:27
     _0 = const ()
-    goto bb4
+    goto bb3
   bb2 (cleanup):
-    resume
-  bb3 (cleanup):
     drop _1
-    goto bb2
-  bb4:
+    resume
+  bb3:
     drop _1 @20:27-20:27
     return
 }

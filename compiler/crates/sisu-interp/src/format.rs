@@ -56,7 +56,7 @@ impl Interp<'_, '_> {
             Value::I128(i) => out.push_str(&i.to_string()),
             Value::U128(i) => out.push_str(&i.to_string()),
             Value::Float(f) => out.push_str(&float_repr(*f)),
-            Value::F32(f) => out.push_str(&format!("{f:?}")),
+            Value::F32(f) => out.push_str(&float32_repr(*f)),
             Value::Bool(b) => out.push_str(if *b { "True" } else { "False" }),
             Value::Char(c) => out.push_str(&quote_char(*c)),
             Value::Str(s, _) | Value::Path(s) => out.push_str(&quote_str(s)),
@@ -280,6 +280,16 @@ pub(crate) fn float_digits(x: f64, kind: Option<char>, precision: Option<usize>)
     }
 }
 
+/// `fmt.float32_digits`: `float_digits` of the `f64` that holds `x`,
+/// except that the shortest form reads back as the same `f32`.
+pub(crate) fn float32_digits(x: f32, kind: Option<char>, precision: Option<usize>) -> String {
+    match (kind, precision) {
+        (Some('f' | 'F' | 'e' | 'E' | '%'), _) | (_, Some(_)) => float_digits(f64::from(x), kind, precision),
+        _ if x.is_infinite() => "inf".into(),
+        _ => float32_repr(x),
+    }
+}
+
 /// `1.500000e+00`.
 fn exponent_form(x: f64, precision: usize) -> String {
     let s = format!("{x:.precision$e}");
@@ -298,6 +308,12 @@ fn exponent_form(x: f64, precision: usize) -> String {
 /// The shortest text that reads back as the same `f64`, always with a
 /// decimal point or an exponent: `3.0`, `0.1`, `1e100`, `inf`, `NaN`.
 pub(crate) fn float_repr(f: f64) -> String {
+    format!("{f:?}")
+}
+
+/// The shortest text that reads back as the same `f32`, as `float_repr`
+/// writes an `f64`: `0.1`, `3.4028235e38`.
+pub(crate) fn float32_repr(f: f32) -> String {
     format!("{f:?}")
 }
 

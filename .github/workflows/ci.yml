@@ -94,3 +94,8 @@ jobs:
           exit $status
       - name: Tests (unit tests and the conformance suite)
         run: cargo test
+      - name: Speed (informational, never fails)
+        # Front-end milliseconds per kLOC and interpreter nanoseconds per
+        # step for std and the conformance corpus (docs/port-debt.md, Phase 0).
+        continue-on-error: true
+        run: cargo run --release -p sisu-driver --example speed || true

@@ -196,6 +196,10 @@ impl Checker<'_> {
         {
             return self.wrap(x, Coercion::IntWiden, exp);
         }
+        // An `f32` as an `f64`, which holds every one (03, "Numbers").
+        if self.float_kind(&actual) == Some("f32") && exp == Ty::Float {
+            return self.wrap(x, Coercion::FloatWiden, exp);
+        }
         // A value of a type that implements a capability's operations
         // trait, as the capability (06, "Capabilities").
         if let Ty::Adt(d, _) = &exp
@@ -286,10 +290,12 @@ impl Checker<'_> {
                 }
             }
         };
-        if matches!(actual, Ty::Int) && matches!(exp, Ty::Float) {
+        if matches!(actual, Ty::Int)
+            && let Some(k) = self.float_kind(&exp)
+        {
             d = d.note(
                 msg::TYPE_MIXED_NUMBERS,
-                vec![("op", "=".into()), ("lhs", "f64".into()), ("rhs", "int".into())],
+                vec![("op", "=".into()), ("lhs", k.into()), ("rhs", "int".into())],
             );
         }
         d = self.mismatch_fix(d, &x, &actual, &exp);
@@ -315,7 +321,7 @@ impl Checker<'_> {
         {
             let number = match exp {
                 Ty::Int => s.parse::<i64>().is_ok(),
-                Ty::Float => s.parse::<f64>().is_ok() && s.contains('.'),
+                t if self.float_kind(t).is_some() => s.parse::<f64>().is_ok() && s.contains('.'),
                 t => self.int_kind(t).is_some() && s.parse::<i128>().is_ok(),
             };
             if number && !s.is_empty() {
@@ -578,13 +584,8 @@ impl Checker<'_> {
                 let x = self.int_literal(*value, suffix.as_deref(), text, false, e.range, expected);
                 if suffix.is_none() { self.literal_via_trait(x, expected) } else { x }
             }
-            ast::ExprKind::Float { value, suffix, .. } => {
-                if let Some(s) = suffix
-                    && s != "f64"
-                {
-                    self.unsupported(e.range, &format!("`{s}`"), "the sized numeric types (Phase 4)");
-                }
-                let x = Expr::new(ExprKind::Float(*value), Ty::Float, span);
+            ast::ExprKind::Float { value, suffix, text } => {
+                let x = self.float_literal(*value, suffix.as_deref(), text, false, e.range, expected);
                 if suffix.is_none() { self.literal_via_trait(x, expected) } else { x }
             }
             ast::ExprKind::Char(c) => Expr::new(ExprKind::Char(*c), Ty::Char, span),
@@ -748,11 +749,17 @@ impl Checker<'_> {
                 return Expr::error(span);
             }
         }
-        let to_float = suffix.is_none() && expected.map(|t| self.resolved(t)) == Some(Ty::Float);
+        let to_float = if suffix.is_none() { expected.and_then(|t| self.float_kind(t)) } else { None };
         let limit: u128 = if negative { 1u128 << 63 } else { (1u128 << 63) - 1 };
         match value {
             Some(v) if v <= limit => {
-                if to_float {
+                // An integer literal where a float is expected is that
+                // float, rounded once (`v as f32` rounds to the nearest).
+                if to_float == Some("f32") {
+                    let f = if negative { -(v as f32) } else { v as f32 };
+                    return Expr::new(ExprKind::Float(f64::from(f)), self.sized_ty("f32"), span);
+                }
+                if to_float.is_some() {
                     let f = v as f64;
                     return Expr::new(ExprKind::Float(if negative { -f } else { f }), Ty::Float, span);
                 }
@@ -821,9 +828,66 @@ impl Checker<'_> {
         Expr::new(ExprKind::Int(n), ty, span)
     }
 
-    /// The sized integer type named `k` (`u8`).
+    /// The sized integer type named `k` (`u8`), or `f32`.
     pub fn sized_ty(&self, k: &str) -> Ty {
         self.prog.lookup_in(self.prog.prelude, k).map(|d| Ty::Adt(d, Vec::new())).unwrap_or(Ty::Error)
+    }
+
+    /// `f64` for `f64`, `f32` for `f32`, `None` for any other type.
+    pub fn float_kind(&self, t: &Ty) -> Option<&'static str> {
+        match self.resolved(t) {
+            Ty::Float => Some("f64"),
+            Ty::Adt(d, a) if a.is_empty() && self.prog.builtin(d) == Some("f32") => Some("f32"),
+            _ => None,
+        }
+    }
+
+    /// Whether `t` is a number type: an integer type or a float type.
+    pub fn is_number(&self, t: &Ty) -> bool {
+        self.int_kind(t).is_some() || self.float_kind(t).is_some()
+    }
+
+    /// A float literal: an `f64`, or an `f32` by its suffix or where one is
+    /// expected, rounded once from its text (03, "Numbers"); one whose
+    /// magnitude its type cannot hold is `E0374`.
+    fn float_literal(
+        &mut self,
+        value: f64,
+        suffix: Option<&str>,
+        text: &str,
+        negative: bool,
+        range: TextRange,
+        expected: Option<&Ty>,
+    ) -> Expr {
+        let span = self.span(range);
+        let kind = match suffix {
+            Some("f32") => "f32",
+            Some("f64") => "f64",
+            Some(s) => {
+                let d = self.error(msg::TYPE_FLOAT_SUFFIX, range).with("suffix", s);
+                self.report(d);
+                return Expr::error(span);
+            }
+            None => expected.and_then(|t| self.float_kind(t)).unwrap_or("f64"),
+        };
+        let (value, ty, max) = if kind == "f32" {
+            let digits = text.strip_suffix("f32").unwrap_or(text).replace('_', "");
+            let v: f32 = digits.parse().unwrap_or(0.0);
+            (f64::from(if negative { -v } else { v }), self.sized_ty("f32"), format!("{:e}", f32::MAX))
+        } else {
+            (if negative { -value } else { value }, Ty::Float, format!("{:e}", f64::MAX))
+        };
+        if value.is_infinite() {
+            let t = if negative { format!("-{text}") } else { text.to_string() };
+            let d = self
+                .error(msg::TYPE_LITERAL_OUT_OF_RANGE, range)
+                .with("text", t)
+                .with("ty", kind)
+                .note(msg::TYPE_FLOAT_RANGE, vec![("ty", kind.to_string()), ("max", max)]);
+            self.report(d);
+            return Expr::error(span);
+        }
+        Expr::new(ExprKind::Float(value), ty, span)
     }
 
     /// An expression as the borrowed receiver of a builtin method: a
@@ -938,7 +1002,7 @@ impl Checker<'_> {
                         let t = self.resolved(x.ty.strip_ref());
                         let integers_only = "boxXd".contains(letter);
                         let wrong = match &t {
-                            Ty::Float => integers_only,
+                            t if self.float_kind(t).is_some() => integers_only,
                             Ty::Bool | Ty::Char | Ty::Str => true,
                             t => self.is_string(t),
                         };
@@ -1292,18 +1356,12 @@ impl Checker<'_> {
             BinOp::Coalesce => return self.coalesce(lhs, rhs, range, expected),
             _ => {}
         }
-        let hint = expected
-            .map(|t| self.resolved(t))
-            .filter(|t| matches!(t, Ty::Int | Ty::Float) || self.int_kind(t).is_some());
+        let hint = expected.map(|t| self.resolved(t)).filter(|t| self.is_number(t));
         let l = self.infer_expr(lhs, hint.as_ref());
         let l = self.decay(l);
         let l = self.unrefined(l);
         let lt = self.resolved(&l.ty);
-        let rhint = if matches!(lt, Ty::Int | Ty::Float) || self.int_kind(&lt).is_some() {
-            Some(lt.clone())
-        } else {
-            None
-        };
+        let rhint = if self.is_number(&lt) { Some(lt.clone()) } else { None };
         let r = self.infer_expr(rhs, rhint.as_ref());
         // A reference to what is not known yet, against a number, reads a
         // number (`n % it` over `found.iter()` before `found` is known).
@@ -1318,6 +1376,12 @@ impl Checker<'_> {
         // A literal on the left takes the type of a float on the right.
         let l = match (&l.kind, self.resolved(&r.ty)) {
             (ExprKind::Int(n), Ty::Float) => Expr::new(ExprKind::Float(*n as f64), Ty::Float, l.span),
+            (ExprKind::Int(_) | ExprKind::Float(_), rt)
+                if self.float_kind(&rt) == Some("f32")
+                    && matches!(self.resolved(&l.ty), Ty::Int | Ty::Float) =>
+            {
+                self.infer_expr(lhs, Some(&rt))
+            }
             _ => l,
         };
         // A literal on the left takes the sized integer type on the right.
@@ -1342,7 +1406,15 @@ impl Checker<'_> {
                 let r = self.wrap(r, Coercion::IntWiden, to);
                 (l, r)
             }
-            _ => (l, r),
+            _ => match (self.float_kind(&l.ty), self.float_kind(&r.ty)) {
+                // An `f32` beside an `f64` widens, as an integer does.
+                (Some("f32"), Some("f64")) => (self.wrap(l, Coercion::FloatWiden, Ty::Float), r),
+                (Some("f64"), Some("f32")) => {
+                    let r = self.wrap(r, Coercion::FloatWiden, Ty::Float);
+                    (l, r)
+                }
+                _ => (l, r),
+            },
         };
         if let Some(call) = self.operator_call(op, l.clone(), Some(r.clone()), range) {
             return call;
@@ -1381,7 +1453,9 @@ impl Checker<'_> {
             |c: &Self, t: &Ty| -> Ty { prog.normalize(&c.infer.zonk(c.resolved(t).strip_ref()), &c.env) };
         let lt = base(self, &l.ty);
         let builtin = |c: &Self, t: &Ty| {
-            matches!(t, Ty::Int | Ty::Float | Ty::Str | Ty::Var(_) | Ty::Error | Ty::Never) || c.is_string(t)
+            matches!(t, Ty::Int | Ty::Float | Ty::Str | Ty::Var(_) | Ty::Error | Ty::Never)
+                || c.is_string(t)
+                || c.float_kind(t).is_some()
         };
         if builtin(self, &lt) {
             return None;
@@ -1451,6 +1525,20 @@ impl Checker<'_> {
                 _ => (lt.clone(), true),
             };
         }
+        // Two `f32`s: what two `f64`s allow, giving an `f32`.
+        if self.float_kind(&lt) == Some("f32") && self.float_kind(&rt) == Some("f32") {
+            match op {
+                BinOp::FloorDiv => {
+                    let d = self.error(msg::TYPE_FLOAT_FLOOR_DIVISION, range);
+                    self.report(d);
+                    return (lt.clone(), false);
+                }
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Pow => {
+                    return (lt.clone(), true);
+                }
+                _ => {}
+            }
+        }
         let result = match (op, &lt, &rt) {
             (BinOp::Div, Ty::Int, Ty::Int) => {
                 let op_span = self.op_span(l, r, "/");
@@ -1492,16 +1580,24 @@ impl Checker<'_> {
                 Ty::Float,
             ) => Some(Ty::Float),
             (BinOp::Add, a, b) if is_text(self, a) && is_text(self, b) => Some(self.string_ty()),
-            (_, Ty::Int, Ty::Float) | (_, Ty::Float, Ty::Int) => {
+            (_, a, b)
+                if (*a == Ty::Int && self.float_kind(b).is_some())
+                    || (self.float_kind(a).is_some() && *b == Ty::Int) =>
+            {
                 // The fix converts the `int` side: a literal gets its `.0`,
-                // anything else `.to_f64()`.
-                let int_side = if lt == Ty::Int { l } else { r };
+                // anything else `.to_f64()` (or `.to_f32()`).
+                let (int_side, float) = if lt == Ty::Int { (l, &rt) } else { (r, &lt) };
+                let kind = self.float_kind(float).unwrap_or("f64");
                 let d = self
                     .error(msg::TYPE_MIXED_NUMBERS, range)
                     .with("op", op.text())
                     .with("lhs", self.show(&lt))
                     .with("rhs", self.show(&rt))
-                    .fix(msg::TYPE_CONVERT_TO_FLOAT, Vec::new(), self.to_float_edits(int_side));
+                    .fix(
+                        msg::TYPE_CONVERT_TO_FLOAT,
+                        vec![("ty", kind.to_string())],
+                        self.to_float_edits(int_side, kind),
+                    );
                 self.report(d);
                 return (Ty::Error, false);
             }
@@ -1517,9 +1613,7 @@ impl Checker<'_> {
                     .with("rhs", self.show(&rt));
                 // Text and a number, a `bool` or a `char` joined by `+`:
                 // interpolation writes the value into the text.
-                let shown = |t: &Ty| {
-                    matches!(t, Ty::Int | Ty::Float | Ty::Bool | Ty::Char) || self.int_kind(t).is_some()
-                };
+                let shown = |t: &Ty| matches!(t, Ty::Int | Ty::Bool | Ty::Char) || self.is_number(t);
                 if op == BinOp::Add
                     && ((is_text(self, &lt) && shown(&rt)) || (shown(&lt) && is_text(self, &rt)))
                     && let Some(text) = self.interpolated(l, r)
@@ -1537,10 +1631,10 @@ impl Checker<'_> {
         }
     }
 
-    /// The edits that make an `int` operand an `f64`: `2` becomes `2.0`, a
-    /// name or a call gets `.to_f64()`, anything else is parenthesised
-    /// first.
-    fn to_float_edits(&self, x: &Expr) -> Vec<Edit> {
+    /// The edits that make an `int` operand a float of kind `kind` (`f64`
+    /// or `f32`): `2` becomes `2.0`, a name or a call gets `.to_f64()` (or
+    /// `.to_f32()`), anything else is parenthesised first.
+    fn to_float_edits(&self, x: &Expr, kind: &str) -> Vec<Edit> {
         let r = x.span.range;
         let text = self.source.get(r.start as usize..r.end as usize).unwrap_or("");
         if !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit() || b == b'_') {
@@ -1551,11 +1645,11 @@ impl Checker<'_> {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'(' | b')' | b'[' | b']'))
             && text.bytes().next().is_some_and(|b| b.is_ascii_alphabetic() || b == b'_');
         if simple {
-            vec![Edit { span: Span::new(self.file, TextRange::empty(r.end)), text: ".to_f64()".into() }]
+            vec![Edit { span: Span::new(self.file, TextRange::empty(r.end)), text: format!(".to_{kind}()") }]
         } else {
             vec![
                 Edit { span: Span::new(self.file, TextRange::empty(r.start)), text: "(".into() },
-                Edit { span: Span::new(self.file, TextRange::empty(r.end)), text: ").to_f64()".into() },
+                Edit { span: Span::new(self.file, TextRange::empty(r.end)), text: format!(").to_{kind}()") },
             ]
         }
     }
@@ -1595,15 +1689,17 @@ impl Checker<'_> {
                 let x = self.int_literal(*value, suffix.as_deref(), text, true, range, expected);
                 return if suffix.is_none() { self.literal_via_trait(x, expected) } else { x };
             }
-            if let ast::ExprKind::Float { value, suffix, .. } = &inner.kind {
-                let x = Expr::new(ExprKind::Float(-*value), Ty::Float, span);
+            if let ast::ExprKind::Float { value, suffix, text } = &inner.kind {
+                let x = self.float_literal(*value, suffix.as_deref(), text, true, range, expected);
                 return if suffix.is_none() { self.literal_via_trait(x, expected) } else { x };
             }
         }
         let x = match op {
             UnOp::Not => self.check_condition_expr(inner),
             _ => {
-                let hint = expected.map(|t| self.resolved(t)).filter(|t| matches!(t, Ty::Int | Ty::Float));
+                let hint = expected
+                    .map(|t| self.resolved(t))
+                    .filter(|t| matches!(t, Ty::Int) || self.float_kind(t).is_some());
                 let x = self.infer_expr(inner, hint.as_ref());
                 let x = self.decay(x);
                 self.unrefined(x)
@@ -1619,6 +1715,7 @@ impl Checker<'_> {
             (_, Ty::Error) => Ty::Error,
             (UnOp::Not, _) => Ty::Bool,
             (UnOp::Neg, Ty::Int | Ty::Float) => t.clone(),
+            (UnOp::Neg, t) if self.float_kind(t).is_some() => t.clone(),
             (UnOp::BitNot, Ty::Int) => Ty::Int,
             (UnOp::BitNot, t) if self.int_kind(t).is_some() => t.clone(),
             _ => {

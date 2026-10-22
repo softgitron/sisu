@@ -34,7 +34,8 @@ impl Interp<'_, '_> {
                 (Value::Float(x), Value::Float(y)) => Ok(Value::Float(float_op(op, *x, *y))),
                 // In `f64`, which holds every `f32` and rounds the result
                 // of `+`, `-`, `*` and `/` the same once it is rounded
-                // again to `f32` (it has more than twice the bits).
+                // again to `f32` (it has more than twice the bits); `%`
+                // and `**` are `f64`'s, rounded once to `f32`.
                 (Value::F32(x), Value::F32(y)) => {
                     Ok(Value::F32(float_op(op, f64::from(*x), f64::from(*y)) as f32))
                 }
@@ -292,8 +293,23 @@ pub(crate) fn float_op(op: BinOp, x: f64, y: f64) -> f64 {
         BinOp::Mul => x * y,
         BinOp::Div => x / y,
         BinOp::FloorDiv => (x / y).floor(),
-        BinOp::Mod => x - y * (x / y).floor(),
+        BinOp::Mod => float_mod(x, y),
         BinOp::Pow => x.powf(y),
         _ => f64::NAN,
+    }
+}
+
+/// `x % y` on floats (decision 18): the remainder of the exact division
+/// (IEEE 754's `fmod`, which is exact), moved to the divisor's sign by
+/// adding the divisor once, which is the only rounding; a zero remainder
+/// takes the divisor's sign. Python's rule, so `1e17 % 3.0` is `1.0`.
+pub(crate) fn float_mod(x: f64, y: f64) -> f64 {
+    let r = x % y;
+    if r == 0.0 {
+        0.0f64.copysign(y)
+    } else if (r < 0.0) != (y < 0.0) {
+        r + y
+    } else {
+        r
     }
 }

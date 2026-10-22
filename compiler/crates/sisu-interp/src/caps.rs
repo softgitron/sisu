@@ -96,7 +96,7 @@ impl Interp<'_, '_> {
             "cap.ops" | "Cap.get" => (|| {
                 let id = self.cap_id(args.first().ok_or_else(|| ice("no handle"))?)?;
                 let serial = self.heap.get(id as usize).map(|c| c.serial).unwrap_or(0);
-                Ok(Value::Ref(Box::new(Pointer {
+                Ok(Value::Ref(Rc::new(Pointer {
                     task: 0,
                     frame: HEAP,
                     serial,

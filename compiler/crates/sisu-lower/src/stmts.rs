@@ -500,13 +500,32 @@ impl FnLower<'_, '_> {
         self.push_scope();
         let p = self.place_of(scrutinee);
         let join = self.new_block();
-        for arm in arms {
-            let next = self.new_block();
+        // The arms at the start that test only which variant the value is
+        // share one switch on its discriminant; the others test in turn.
+        let (starts, rest) = self.variant_switch(arms, &p, loc);
+        for (i, arm) in arms.iter().enumerate() {
+            if i == starts.len()
+                && let Some(r) = rest
+            {
+                self.switch_to(r);
+            }
             let depth = self.scopes.len();
             self.push_scope();
-            self.test(&arm.pat, &p, next);
+            let next = match starts.get(i) {
+                Some(&start) => {
+                    self.switch_to(start);
+                    None
+                }
+                None => {
+                    let next = self.new_block();
+                    self.test(&arm.pat, &p, next);
+                    Some(next)
+                }
+            };
             self.bind(&arm.pat, &p);
-            if let Some(g) = &arm.guard {
+            if let Some(g) = &arm.guard
+                && let Some(next) = next
+            {
                 let v = self.operand(g);
                 let ok = self.new_block();
                 let f = self.edge_to(next, depth);
@@ -530,11 +549,68 @@ impl FnLower<'_, '_> {
             }
             self.pop_scope();
             self.goto(join);
-            self.switch_to(next);
+            if let Some(next) = next {
+                self.switch_to(next);
+            }
+        }
+        if starts.len() == arms.len()
+            && let Some(r) = rest
+        {
+            self.switch_to(r);
         }
         self.terminate(Terminator::Unreachable, loc);
         self.switch_to(join);
         self.pop_scope();
+    }
+
+    /// For the arms at the start of a `match` whose patterns test only
+    /// which variant the value is (a variant whose fields cannot fail, or
+    /// a choice of such), one switch on the discriminant instead of a test
+    /// per arm and per alternative: a `match` over many variants without
+    /// payloads takes two steps rather than two per variant tried. Returns
+    /// the block where each of those arms starts and the block where the
+    /// others are tried; no blocks when fewer than two variants are
+    /// switched on, as a single test is the same switch.
+    fn variant_switch(
+        &mut self,
+        arms: &[thir::Arm],
+        p: &Place,
+        loc: Option<sir::Loc>,
+    ) -> (Vec<BlockId>, Option<BlockId>) {
+        let mut on: Option<Place> = None;
+        let mut cases: Vec<(i64, usize)> = Vec::new();
+        let mut run = 0;
+        for arm in arms {
+            if arm.guard.is_some() {
+                break;
+            }
+            let Some((q, variants)) = crate::pats::variant_set(&arm.pat, p) else { break };
+            if on.as_ref().is_some_and(|o| *o != q) {
+                break;
+            }
+            on = Some(q);
+            for v in variants {
+                // An earlier arm takes a variant first.
+                if !cases.iter().any(|(c, _)| *c == v) {
+                    cases.push((v, run));
+                }
+            }
+            run += 1;
+        }
+        let Some(on) = on else { return (Vec::new(), None) };
+        if cases.len() < 2 {
+            return (Vec::new(), None);
+        }
+        let d = self.temp_sir(sir::Type::Int);
+        self.assign(Place::local(d), Rvalue::Discriminant(on), loc);
+        let starts: Vec<BlockId> = (0..run).map(|_| self.new_block()).collect();
+        let rest = self.new_block();
+        let cases = cases.into_iter().map(|(v, a)| (v, starts[a])).collect();
+        self.terminate(
+            Terminator::Switch { value: Operand::Copy(Place::local(d)), cases, default: rest },
+            loc,
+        );
+        (starts, Some(rest))
     }
 
     fn assert(

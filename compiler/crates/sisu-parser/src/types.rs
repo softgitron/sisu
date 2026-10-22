@@ -7,10 +7,17 @@
 //! ref_type  := 'ref' 'mut'? primary_type | primary_type
 //! primary_type := path generic_args? | 'Self' | 'pure'? '(' types? ')' ('->' type)?
 //!              | 'dyn' path | '{' option (',' option)* '}'
-//! generic_args := '[' (type | integer) (',' (type | integer))* ']'
+//! generic_args := '[' generic_arg (',' generic_arg)* ']'
+//! generic_arg := const_expr | integer | type
 //! ```
 //!
-//! `ref T?` is `(ref T)?`, an optional reference (02, "Types").
+//! `ref T?` is `(ref T)?`, an optional reference (02, "Types"). A
+//! constant argument may be an expression (03, `Array[T, W * H]`): an
+//! argument is one when it starts with what starts an expression and no
+//! type (`-`, `~`, a literal other than an integer standing alone,
+//! `comptime`), or when its leading path (`W`, `m.N`), integer or
+//! parenthesised group is followed by an operator or a call's `(`; it is a
+//! `CONST_ARG` node holding the expression.
 
 use crate::parser::Parser;
 use sisu_diag::msg;
@@ -188,11 +195,68 @@ impl Parser<'_> {
         (count, trailing)
     }
 
+    /// Whether the type argument here is a constant written as an
+    /// expression (see the module comment).
+    fn at_const_expr(&self) -> bool {
+        let mut i = 0;
+        match self.current() {
+            IDENT if self.current_text() == "pure" && self.nth(1) == L_PAREN => return false,
+            IDENT => {
+                i = 1;
+                while self.nth(i) == DOT && self.nth(i + 1) == IDENT {
+                    i += 2;
+                }
+            }
+            INT_NUMBER => i = 1,
+            L_PAREN => {
+                let mut depth = 0u32;
+                loop {
+                    match self.nth(i) {
+                        L_PAREN | L_BRACKET | L_BRACE => depth += 1,
+                        R_PAREN | R_BRACKET | R_BRACE => {
+                            depth = depth.saturating_sub(1);
+                            if depth == 0 {
+                                i += 1;
+                                break;
+                            }
+                        }
+                        NEWLINE | EOF => return false,
+                        _ => {}
+                    }
+                    i += 1;
+                }
+            }
+            SELF_TYPE_KW | REF_KW | DYN_KW | L_BRACE | IMPL_KW | TYPE_KW | BANG => return false,
+            // What starts an expression and no type (`-`, `~`, a literal,
+            // `comptime`); anything else is a broken type.
+            _ => return self.at_expr_start(),
+        }
+        matches!(
+            self.nth(i),
+            PLUS | MINUS
+                | STAR
+                | SLASH
+                | SLASH_SLASH
+                | PERCENT
+                | STAR_STAR
+                | SHL
+                | SHR
+                | AMP
+                | PIPE
+                | CARET
+                | L_PAREN
+        )
+    }
+
     fn generic_args(&mut self) {
         self.start(GENERIC_ARGS);
         self.bump();
         while !self.at_any(&[R_BRACKET, NEWLINE, EOF]) {
-            if self.at(INT_NUMBER) {
+            if self.at_const_expr() {
+                self.start(CONST_ARG);
+                self.expr();
+                self.finish_node();
+            } else if self.at(INT_NUMBER) {
                 self.start(CONST_ARG);
                 self.bump();
                 self.finish_node();
