@@ -1,0 +1,247 @@
+##! `comptime assert` on `const` generic parameters (stage 0's
+##! `generic_asserts.rs`; 08, "comptime assert"; 03, "Const generics"):
+##! `comptime assert N > 0 and N & (N - 1) == 0, "capacity {N} must be a
+##! power of two"` in a generic type's method can be decided only for
+##! constant arguments, so it is checked at each call that gives them, once
+##! the whole program is typed: its condition is folded with the call's
+##! arguments for the parameters, and a false condition is the call's
+##! compile-time error (`comptime.panicked`, whose message stage 1 does not
+##! write). What such checks are made of is folded: integer and boolean
+##! arithmetic and comparisons; a condition that calls a function is checked
+##! nowhere.
+##!
+##! A body's asserts are kept as `Fold` trees, apart from the body's typed
+##! expressions, which the checker keeps only when lowering asks for them;
+##! so are its calls with constant type arguments (`ConstCall`).
+
+from stage1.syntax.ast import BinOp, CmpOp, UnOp
+from stage1.typeck.thir import Callee, TExpr, TExprId, TExprKind
+from stage1.typeck.ty import DefId, Ty, TyData, Types
+
+const INT_MAX: int = 9223372036854775807
+const INT_MIN: int = -9223372036854775807 - 1
+
+## An assert's condition as far as folding reads it.
+pub enum Fold:
+    Int(int)
+    Bool(bool)
+    ## The function's `const` generic parameter at this index.
+    ConstParam(int)
+    Unary(op: UnOp, operand: list[Fold])
+    Binary(op: BinOp, operands: list[Fold])
+    Logic(and_: bool, operands: list[Fold])
+    Compare(first: list[Fold], rest: list[(CmpOp, Fold)])
+    ## Anything else, which does not fold.
+    Other
+
+## A call of a function with type arguments, some of them constants.
+pub struct ConstCall:
+    pub def_: DefId
+    pub type_args: list[Ty]
+
+## A folded value.
+enum Value:
+    Int(int)
+    Bool(bool)
+
+## The fold tree of a typed expression.
+pub pure def fold_tree(exprs: list[TExpr], e: TExprId) -> Fold:
+    match exprs[e.index].kind:
+        case TExprKind.Int(n):
+            return Fold.Int(n)
+        case TExprKind.Bool(b):
+            return Fold.Bool(b)
+        case TExprKind.ConstParam(i):
+            return Fold.ConstParam(i)
+        case TExprKind.Coerce(inner, _):
+            return fold_tree(exprs, inner)
+        case TExprKind.Unary(op, operand):
+            return Fold.Unary(op=op, operand=[fold_tree(exprs, operand)])
+        case TExprKind.Binary(op, lhs, rhs):
+            return Fold.Binary(op=op, operands=[fold_tree(exprs, lhs), fold_tree(exprs, rhs)])
+        case TExprKind.Logic(and_, lhs, rhs):
+            return Fold.Logic(and_=and_, operands=[fold_tree(exprs, lhs), fold_tree(exprs, rhs)])
+        case TExprKind.Compare(first, rest):
+            var rs: list[(CmpOp, Fold)] = []
+            for (op, x) in rest:
+                rs.push((op, fold_tree(exprs, x)))
+            return Fold.Compare(first=[fold_tree(exprs, first)], rest=rs)
+        case _:
+            return Fold.Other
+
+## The calls among a body's expressions with a constant among their type
+## arguments.
+pub pure def const_calls(exprs: list[TExpr], types: Types) -> list[ConstCall]:
+    var out: list[ConstCall] = []
+    for x in exprs:
+        if let TExprKind.Call(Callee.Fn(d, targs), _) = x.kind:
+            var constant = False
+            for t in targs:
+                if let TyData.Const(_) = types.data(t):
+                    constant = True
+            if constant:
+                out.push(ConstCall(def_=d, type_args=targs.copy()))
+    return out
+
+## The value of a fold tree with the call's type arguments for the
+## function's generic parameters, when it is made of constants.
+pure def fold(f: Fold, args: list[Ty], types: Types) -> Value?:
+    match f:
+        case Fold.Int(n):
+            return Some(Value.Int(n))
+        case Fold.Bool(b):
+            return Some(Value.Bool(b))
+        case Fold.ConstParam(i):
+            if i >= len(args):
+                return None
+            if let TyData.Const(n) = types.data(args[i]):
+                return Some(Value.Int(n))
+            return None
+        case Fold.Unary(op, operand):
+            match op:
+                case UnOp.Neg:
+                    let n = int_of(operand[0], args, types) else:
+                        return None
+                    if n == INT_MIN:
+                        return None
+                    return Some(Value.Int(-n))
+                case UnOp.BitNot:
+                    let n = int_of(operand[0], args, types) else:
+                        return None
+                    return Some(Value.Int(-n - 1))
+                case UnOp.Not:
+                    let b = bool_of(operand[0], args, types) else:
+                        return None
+                    return Some(Value.Bool(not b))
+        case Fold.Binary(op, operands):
+            let a = int_of(operands[0], args, types) else:
+                return None
+            let b = int_of(operands[1], args, types) else:
+                return None
+            let n = binary(op, a, b) else:
+                return None
+            return Some(Value.Int(n))
+        case Fold.Logic(and_, operands):
+            let a = bool_of(operands[0], args, types) else:
+                return None
+            # The right side is folded only when the left does not decide.
+            if and_ and not a:
+                return Some(Value.Bool(False))
+            if not and_ and a:
+                return Some(Value.Bool(True))
+            let b = bool_of(operands[1], args, types) else:
+                return None
+            return Some(Value.Bool(b))
+        case Fold.Compare(first, rest):
+            var left = int_of(first[0], args, types) else:
+                return None
+            for (op, x) in rest:
+                let right = int_of(x, args, types) else:
+                    return None
+                var holds = False
+                match op:
+                    case CmpOp.Eq:
+                        holds = left == right
+                    case CmpOp.Ne:
+                        holds = left != right
+                    case CmpOp.Lt:
+                        holds = left < right
+                    case CmpOp.Le:
+                        holds = left <= right
+                    case CmpOp.Gt:
+                        holds = left > right
+                    case CmpOp.Ge:
+                        holds = left >= right
+                    case _:
+                        return None
+                if not holds:
+                    return Some(Value.Bool(False))
+                left = right
+            return Some(Value.Bool(True))
+        case Fold.Other:
+            return None
+
+pure def int_of(f: Fold, args: list[Ty], types: Types) -> int?:
+    if let Some(Value.Int(n)) = fold(f, args, types):
+        return Some(n)
+    return None
+
+pure def bool_of(f: Fold, args: list[Ty], types: Types) -> bool?:
+    if let Some(Value.Bool(b)) = fold(f, args, types):
+        return Some(b)
+    return None
+
+## An integer operation as stage 0 folds it: `None` when the result does
+## not fit, for a zero divisor or a shift out of range.
+pure def binary(op: BinOp, a: int, b: int) -> int?:
+    match op:
+        case BinOp.Add | BinOp.WrapAdd:
+            if (b > 0 and a > INT_MAX - b) or (b < 0 and a < INT_MIN - b):
+                return None
+            return Some(a + b)
+        case BinOp.Sub | BinOp.WrapSub:
+            if (b < 0 and a > INT_MAX + b) or (b > 0 and a < INT_MIN + b):
+                return None
+            return Some(a - b)
+        case BinOp.Mul | BinOp.WrapMul:
+            if a == 0 or b == 0:
+                return Some(0)
+            if a == INT_MIN or b == INT_MIN:
+                return None
+            if abs(a) > INT_MAX // abs(b):
+                return None
+            return Some(a * b)
+        case BinOp.FloorDiv:
+            if b == 0 or (a == INT_MIN and b == -1):
+                return None
+            return Some(a // b)
+        case BinOp.Mod:
+            if b == 0 or (a == INT_MIN and b == -1):
+                return None
+            return Some(a % b)
+        case BinOp.BitAnd:
+            return Some(a & b)
+        case BinOp.BitOr:
+            return Some(a | b)
+        case BinOp.BitXor:
+            return Some(a ^ b)
+        case BinOp.Shl:
+            if b < 0 or b >= 64:
+                return None
+            return Some(a << b)
+        case BinOp.Shr:
+            if b < 0 or b >= 64:
+                return None
+            return Some(a >> b)
+        case _:
+            return None
+
+## Whether a call with constant arguments makes one of its callee's asserts
+## false (stage 0's `check_calls`, whose diagnostic is `comptime.panicked`
+## at the call).
+pub pure def any_fails(
+    asserts: dict[DefId, list[Fold]], calls: list[ConstCall], types: Types
+) -> bool:
+    if asserts.is_empty():
+        return False
+    for c in calls:
+        let conds = asserts.get(c.def_) else:
+            continue
+        for cond in conds:
+            if bool_of(cond, c.type_args, types) == Some(False):
+                return True
+    return False
+
+test "a condition folds with the call's constant arguments":
+    var types = Types.new()
+    let four = types.intern(TyData.Const(4))
+    let three = types.intern(TyData.Const(3))
+    # `N > 0 and N & (N - 1) == 0`
+    let minus = Fold.Binary(op=BinOp.Sub, operands=[Fold.ConstParam(0), Fold.Int(1)])
+    let masked = Fold.Binary(op=BinOp.BitAnd, operands=[Fold.ConstParam(0), minus])
+    let positive = Fold.Compare(first=[Fold.ConstParam(0)], rest=[(CmpOp.Gt, Fold.Int(0))])
+    let power = Fold.Compare(first=[masked], rest=[(CmpOp.Eq, Fold.Int(0))])
+    let cond = Fold.Logic(and_=True, operands=[positive, power])
+    assert bool_of(cond, [four], types) == Some(True)
+    assert bool_of(cond, [three], types) == Some(False)
+    assert bool_of(cond, [], types) == None

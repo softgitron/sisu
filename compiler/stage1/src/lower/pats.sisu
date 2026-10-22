@@ -8,6 +8,7 @@ from stage1.sir import (
     BlockId,
     Callee,
     Const,
+    LocalId,
     Operand,
     Place,
     Proj,
@@ -16,9 +17,10 @@ from stage1.sir import (
     Terminator,
     Type,
 )
+from stage1.typeck.pat import pattern_bindings
 from stage1.typeck.std_sources import own_kind
 from stage1.typeck.thir import BindMode, Lit, PatId, TExprKind, TPatKind
-from stage1.typeck.ty import TyData
+from stage1.typeck.ty import Ty, TyData
 
 impl FnLower:
     ## The variants `pat` tests for, and the place whose discriminant
@@ -237,6 +239,66 @@ impl FnLower:
     ## Binds, registering drops in the scope `below` levels under the
     ## innermost (a `let` registers in its block, not its statement).
     pub pure def bind_below(mut self, cx: Cx, pat: PatId, place: Place, below: int):
+        self.bind_with(cx, pat, place, Some(below))
+
+    ## Assigns a pattern's bindings without registering them, for a
+    ## binding made on several paths and registered once where they join
+    ## (`register_bindings`): the alternatives of `|`, and the two paths of
+    ## `let PATTERN = e else: fallback`.
+    pub pure def bind_values(mut self, cx: Cx, pat: PatId, place: Place):
+        self.bind_with(cx, pat, place, None)
+
+    ## Registers the bindings of a pattern that `bind_values` assigned, in
+    ## the scope `below` levels under the innermost.
+    pub pure def register_bindings(mut self, cx: Cx, pat: PatId, below: int):
+        let p = ref cx.body.pats[pat.index]
+        match p.kind:
+            case TPatKind.Bind(local, mode):
+                let l = self.local_for(cx, local)
+                match mode:
+                    case BindMode.Value:
+                        self.bind_registered(cx, local, l, p.ty, below)
+                    case BindMode.Ref | BindMode.RefMut:
+                        self.scope_local(below, l)
+            case TPatKind.Variant(_, _, fields):
+                for f in fields:
+                    self.register_bindings(cx, f, below)
+            case TPatKind.Struct(_, fields):
+                for f in fields:
+                    self.register_bindings(cx, f, below)
+            case TPatKind.Tuple(fields):
+                for f in fields:
+                    self.register_bindings(cx, f, below)
+            case TPatKind.Deref(inner):
+                self.register_bindings(cx, inner, below)
+            case TPatKind.Or(alts):
+                if let Some(first) = alts.first():
+                    self.register_bindings(cx, first, below)
+            case TPatKind.List(prefix, _, rest, suffix):
+                for f in prefix:
+                    self.register_bindings(cx, f, below)
+                if let Some(r) = rest:
+                    let l = self.local_for(cx, r)
+                    let ty = cx.body.locals[r].ty
+                    self.bind_registered(cx, r, l, ty, below)
+                for f in suffix:
+                    self.register_bindings(cx, f, below)
+            case TPatKind.Wild | TPatKind.Lit(_) | TPatKind.Error:
+                pass
+
+    ## Binds a value binding, registering it in the scope `below` levels
+    ## down, or, when `reg` is `None`, ending the block after a value that
+    ## needs drop (the lowering invariant) and leaving its registration to
+    ## the caller.
+    pure def bind_value(mut self, cx: Cx, local: int, l: LocalId, ty: Ty, reg: int?):
+        match reg:
+            case Some(below):
+                self.bind_registered(cx, local, l, ty, below)
+            case None:
+                if self.needs_drop(cx, ty):
+                    self.split(cx)
+
+    pure def bind_with(mut self, cx: Cx, pat: PatId, place: Place, reg: int?):
         let p = ref cx.body.pats[pat.index]
         let loc = cx.loc(p.span)
         match p.kind:
@@ -246,33 +308,56 @@ impl FnLower:
                     case BindMode.Value:
                         let v = self.copy_or_move(cx, place.copy(), p.ty)
                         self.assign(cx, Place.local(l), Rvalue.Use(v), loc)
-                        self.bind_registered(cx, local, l, p.ty, below)
+                        self.bind_value(cx, local, l, p.ty, reg)
                     case BindMode.Ref:
                         self.assign(
                             cx, Place.local(l), Rvalue.Ref(place=place.copy(), mutable=False), loc
                         )
-                        self.scope_local(below, l)
+                        if let Some(below) = reg:
+                            self.scope_local(below, l)
                     case BindMode.RefMut:
                         self.assign(
                             cx, Place.local(l), Rvalue.Ref(place=place.copy(), mutable=True), loc
                         )
-                        self.scope_local(below, l)
+                        if let Some(below) = reg:
+                            self.scope_local(below, l)
             case TPatKind.Variant(_, variant, fields):
                 for i in range(len(fields)):
                     let sub = place.project(Proj.Downcast(variant)).project(Proj.Field(i))
-                    self.bind_below(cx, fields[i], sub, below)
+                    self.bind_with(cx, fields[i], sub, reg)
             case TPatKind.Struct(_, fields):
                 for i in range(len(fields)):
-                    self.bind_below(cx, fields[i], place.project(Proj.Field(i)), below)
+                    self.bind_with(cx, fields[i], place.project(Proj.Field(i)), reg)
             case TPatKind.Tuple(fields):
                 for i in range(len(fields)):
-                    self.bind_below(cx, fields[i], place.project(Proj.Field(i)), below)
+                    self.bind_with(cx, fields[i], place.project(Proj.Field(i)), reg)
             case TPatKind.Deref(inner):
-                self.bind_below(cx, inner, place.project(Proj.Deref), below)
+                self.bind_with(cx, inner, place.project(Proj.Deref), reg)
+            case TPatKind.Or(alts):
+                # The alternatives bind the same locals: test again which one
+                # matched (testing binds nothing and changes nothing) and bind
+                # from it; the bindings are registered once, after the join.
+                if pattern_bindings(cx.body.pats, pat).is_empty():
+                    return
+                let done = self.new_block()
+                for i in range(len(alts)):
+                    if i + 1 < len(alts):
+                        let next = self.new_block()
+                        self.test(cx, alts[i], place, next)
+                        self.bind_values(cx, alts[i], place)
+                        self.goto(done)
+                        self.switch_to(cx, next)
+                    else:
+                        self.bind_values(cx, alts[i], place)
+                        self.goto(done)
+                self.switch_to(cx, done)
+                if let Some(below) = reg:
+                    if let Some(first) = alts.first():
+                        self.register_bindings(cx, first, below)
             case TPatKind.List(prefix, _, rest, suffix):
                 for i in range(len(prefix)):
                     let sub = self.element(cx, place, i, False)
-                    self.bind_below(cx, prefix[i], sub, below)
+                    self.bind_with(cx, prefix[i], sub, reg)
                 if let Some(r) = rest:
                     let l = self.local_for(cx, r)
                     let pt = self.ty(cx, p.ty)
@@ -294,10 +379,10 @@ impl FnLower:
                         loc,
                     )
                     let ty = cx.body.locals[r].ty
-                    self.bind_registered(cx, r, l, ty, below)
+                    self.bind_value(cx, r, l, ty, reg)
                 for j in range(len(suffix)):
                     let sub = self.element(cx, place, len(suffix) - j, True)
-                    self.bind_below(cx, suffix[j], sub, below)
+                    self.bind_with(cx, suffix[j], sub, reg)
             case _:
                 pass
 

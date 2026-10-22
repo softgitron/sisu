@@ -1,0 +1,2 @@
+pub def shout(s: str) -> String:
+    return s.to_uppercase()

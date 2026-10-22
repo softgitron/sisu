@@ -25,15 +25,15 @@
 ##!    value on a normal path is an error.
 ##! 5. **Purity** (`borrowck.purity`): a `pure` function calls only pure
 ##!    functions.
-##!
-##! Stage 0's `Shared` escape analysis (`shared.rs`), which tags the sites
-##! that make a `Shared`, is not here: lowering's slice leaves out a
-##! program with a site that may cross to another task.
+##! 6. **`Shared` escape analysis** (`borrowck.shared`): each site that
+##!    makes a `Shared` is tagged task-local or may-cross, which the SIR
+##!    writes as `Shared.new` or `Shared.new_atomic`.
 
 import stage1.borrowck.consume
 import stage1.borrowck.elaborate
 import stage1.borrowck.loans
 import stage1.borrowck.purity
+import stage1.borrowck.shared
 import stage1.lower
 import stage1.sir.simplify
 import stage1.sir.write
@@ -55,17 +55,24 @@ pub struct Checked:
 ## (`trust_std`): their drops are placed and their moves checked, but
 ## must-consume is not checked again for every program.
 pub pure def check(p: Program) -> Checked:
+    return check_with(p, True)
+
+## `check`, or with `findings` false only its drop placement (what the SIR
+## shows: the initialisation dataflow and the drops it places), without
+## the loans, must-consume and purity, whose findings change no statement.
+pub pure def check_with(p: Program, findings_too: bool) -> Checked:
     let types = Types.new(p.types)
     var findings: list[Finding] = []
     var functions: list[Function] = []
     for f in p.functions:
         var g = f.copy()
         let init = Analysis.run(g, types)
-        for x in init.findings(g, types, p):
-            findings.push(x.copy())
+        if findings_too:
+            for x in init.findings(g, types, p):
+                findings.push(x.copy())
         elaborate.elaborate(mut g, init, types)
         functions.push(g)
-    let program = Program(
+    var program = Program(
         sources=p.sources.copy(),
         entry=p.entry.copy(),
         types=p.types.copy(),
@@ -75,6 +82,9 @@ pub pure def check(p: Program) -> Checked:
         trait_methods=p.trait_methods.copy(),
         impls=p.impls.copy(),
     )
+    if not findings_too:
+        _ = shared.tag_sites(mut program)
+        return Checked(program=program, findings=[])
     for f in program.functions:
         let trusted = f.source < len(program.sources)
             and program.sources[f.source].starts_with("<std>/")
@@ -88,7 +98,29 @@ pub pure def check(p: Program) -> Checked:
     for x in purity.check(program, types):
         findings.push(x.copy())
     dedup(mut findings)
+    _ = shared.tag_sites(mut program)
     return Checked(program=program, findings=findings)
+
+## The findings as diagnostics of a program of several files: `files`
+## gives, for each of the program's SIR sources, the position of its file
+## among the `count` files of the program and its text, or none for a file
+## of the standard library or one the compiler wrote (a finding there is
+## not one stage 1 renders: `None`). Each file's diagnostics, sorted.
+pub pure def diagnostics_by_file(
+    findings: list[Finding], files: list[(int, String)?], count: int, catalog: Catalog
+) -> list[list[Diagnostic]]?:
+    var out: list[list[Diagnostic]] = []
+    for _ in range(count):
+        out.push([])
+    for f in findings:
+        if f.source >= len(files):
+            return None
+        let (at, text) = files[f.source].copy() else:
+            return None
+        out[at].push(to_diagnostic(f, text, Lines.of(text)))
+    for k in range(count):
+        sort_unique(mut out[k], catalog)
+    return Some(out)
 
 ## The findings as diagnostics of the program's file (SIR source 0), in
 ## the order `sisu check` prints them; `None` when one is in another file.
@@ -124,7 +156,8 @@ pure def function_text(program: str, name: str) -> String:
         return "not lowered"
     let typed = checked.typed else:
         return "not lowered"
-    let lowered = lower.lower(typed, base, "main.sisu", catalog)
+    var kept = typeck.StdBodies.new()
+    let lowered = lower.lower(typed, base, "main.sisu", catalog, mut kept)
     if not lowered.beyond.is_empty():
         return lowered.beyond.join("\n")
     var p = check(lowered.program).program
@@ -158,7 +191,8 @@ pure def ownership_of(program: str) -> String:
             return "not lowered"
     let typed = checked.typed else:
         return "not lowered"
-    let lowered = lower.lower(typed, base, "main.sisu", catalog)
+    var kept = typeck.StdBodies.new()
+    let lowered = lower.lower(typed, base, "main.sisu", catalog, mut kept)
     if not lowered.beyond.is_empty():
         return lowered.beyond.join("\n")
     let done = check(lowered.program)

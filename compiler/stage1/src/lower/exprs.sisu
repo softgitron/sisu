@@ -43,7 +43,7 @@ from stage1.typeck.thir import (
     TryKind,
 )
 from stage1.typeck.thir import Callee as TCallee
-from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, TyKey, Types
+from stage1.typeck.ty import DefId, Ty, TyData, TyKey, Types
 
 pub pure def bin_op(cx: Cx, types: Types, op: BinOp, ty: Ty) -> SirBinOp:
     var is_string = False
@@ -1125,24 +1125,6 @@ impl FnLower:
                         trait_args.push(type_args[i])
                     else:
                         own_args.push(type_args[i])
-                # A method of an impl the standard library derives, which stage
-                # 1 declares as a header: stage 0's name for it, which marks the
-                # program beyond the slice (`lower_reached`).
-                let tr = TraitRef(def_=t, args=trait_args.copy())
-                if let Some((imp, iargs)) = cx.prog.find_impl(
-                    mut self.types, self_ty, tr, self.bounds
-                ):
-                    var derived = False
-                    if let Some(info) = cx.prog.impl_info(imp):
-                        derived = info.derived
-                            and cx.prog.modules[cx.prog.defs[imp.index].module.index].is_std
-                    if derived:
-                        var prefix = "impl".to_string()
-                        if let Some(p) = cx.ctx.impl_names.get(imp):
-                            prefix = p.copy()
-                        let tys = self.tys(cx, iargs)
-                        let name = "{prefix}.{cx.prog.defs[def_.index].name}"
-                        return (Callee.Fn(name=name, args=tys), [])
                 if let Some(found) = cx.prog.resolve_method(
                     mut self.types, def_, trait_args, self_ty, self.bounds
                 ):

@@ -22,6 +22,7 @@
 ##! value is reported too, and so is a move out of a value whose type
 ##! implements `Drop`, or through a reference, an index or a key.
 
+from stage1.borrowck.bitset import BitSet
 from stage1.borrowck.finding import Finding, param, text
 from stage1.borrowck.names import is_named, local_name, place_name, temp_source
 from stage1.borrowck.paths import Cover, MovePaths
@@ -44,30 +45,21 @@ from stage1.sir import (
 )
 from stage1.sir.write import ty as type_text
 
+## What may be initialised (`mi`) and what may be uninitialised (`mu`)
+## at a point, by move path.
 pub struct State:
-    pub mi: list[bool]
-    pub mu: list[bool]
+    pub mi: BitSet
+    pub mu: BitSet
 
 impl State:
     pub pure def bottom(n: int) -> State:
-        var mi: list[bool] = []
-        var mu: list[bool] = []
-        for _ in range(n):
-            mi.push(False)
-            mu.push(False)
-        return State(mi=mi, mu=mu)
+        return State(mi=BitSet.new(n), mu=BitSet.new(n))
 
     ## Adds every bit of `o`; returns whether anything changed.
     pub pure def join(mut self, o: State) -> bool:
-        var changed = False
-        for i in range(len(o.mi)):
-            if o.mi[i] and not self.mi[i]:
-                self.mi[i] = True
-                changed = True
-            if o.mu[i] and not self.mu[i]:
-                self.mu[i] = True
-                changed = True
-        return changed
+        let a = self.mi.union(o.mi)
+        let b = self.mu.union(o.mu)
+        return a or b
 
 pub struct Analysis:
     pub paths: MovePaths
@@ -222,18 +214,18 @@ impl Analysis:
 
     pub pure def set_init(self, mut st: State, id: int):
         for d in self.paths.descendants(id):
-            st.mi[d] = True
-            st.mu[d] = False
+            _ = st.mi.insert(d)
+            st.mu.remove(d)
 
     pub pure def set_uninit(self, mut st: State, id: int):
         for d in self.paths.descendants(id):
-            st.mi[d] = False
-            st.mu[d] = True
+            st.mi.remove(d)
+            _ = st.mu.insert(d)
 
     pure def set_vacuous(self, mut st: State, id: int):
         for d in self.paths.descendants(id):
-            st.mi[d] = False
-            st.mu[d] = False
+            st.mi.remove(d)
+            st.mu.remove(d)
 
     ## The paths a statement moves out, drops or ends.
     pub pure def removed_paths(self, s: Statement) -> list[int]:
@@ -342,14 +334,14 @@ impl Analysis:
     ## Whether the path and everything below it are initialised.
     pub pure def fully_init(self, st: State, id: int) -> bool:
         for d in self.paths.descendants(id):
-            if st.mu[d]:
+            if st.mu.contains(d):
                 return False
         return True
 
     ## Whether the path and everything below it are uninitialised.
     pub pure def fully_uninit(self, st: State, id: int) -> bool:
         for d in self.paths.descendants(id):
-            if st.mi[d]:
+            if st.mi.contains(d):
                 return False
         return True
 
@@ -414,7 +406,7 @@ impl Analysis:
                             and d.local.index < len(f.locals)
                             and f.locals[d.local.index].once:
                         let root = self.paths.roots[d.local.index]
-                        if states[si].mi[root] and not reported.contains((root, None)):
+                        if states[si].mi.contains(root) and not reported.contains((root, None)):
                             reported.push((root, None))
                             let name = local_name(f, d.local)
                             let first = self.find_site(f, b, si, [root], Site.Init)
@@ -515,7 +507,7 @@ impl Analysis:
             loc = f.blocks[b].stmts[si].loc
         if loc.is_none():
             loc = f.blocks[b].loc
-        if st.mu[id]:
+        if st.mu.contains(id):
             let site = self.find_site(f, b, si, self.related(id), Site.Move)
             let key = (self.paths.roots[self.paths.local_of(id).index], site)
             if reported.contains(key):
@@ -556,7 +548,7 @@ impl Analysis:
             let below = self.paths.descendants(id)
             for k in range(1, len(below)):
                 let d = below[k]
-                if not st.mu[d]:
+                if not st.mu.contains(d):
                     continue
                 let site = self.find_site(f, b, si, self.paths.descendants(d), Site.Move)
                 let key = (d, site)

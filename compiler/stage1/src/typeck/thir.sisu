@@ -412,7 +412,7 @@ pub enum TPatKind:
     Error
 
 ## What a body computes (stage 0's `BodyKind`).
-@derive(Eq, Copy)
+@derive(Eq, Hash, Copy)
 pub enum BodyKind:
     Fn
     ## The default value of a struct field: the struct and the field's
@@ -455,8 +455,6 @@ pub struct TBody:
     ## A generator's item type.
     pub generator: Ty?
     pub contracts: TContracts?
-    ## It asserts at compile time on `const` generic parameters.
-    pub generic_asserts: bool
     pub exprs: list[TExpr]
     pub blocks: list[TBlock]
     pub pats: list[TPat]

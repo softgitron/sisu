@@ -1,0 +1,11 @@
+from app import main
+
+pub def twice(x: int) -> int:
+    return x * 2
+
+def unknown_use() -> int:
+    let x = 1
+    if x > 0:
+        let x = 2
+        return x
+    return nope

@@ -1,0 +1,229 @@
+##! Escape analysis for `Shared` (stage 0's `sisu-borrowck/src/shared.rs`;
+##! 18, Phase 6: "the `Shared` escape analysis that tags each `Shared(...)`
+##! construction site task-local or may-cross"). A `Shared` counts its
+##! owners atomically only when one of its owners can reach another task;
+##! each construction site (a call of the intrinsic `Shared.new`) is tagged
+##! by whether its value may.
+##!
+##! A program that spawns no task, sends on no channel and makes no
+##! generator has only task-local sites. Otherwise, per site, the analysis
+##! follows the locals that may hold the value, a copy of it, a reference to
+##! it or something holding one (assignments, borrows, aggregates, `.copy()`,
+##! closures capturing them, call results), flow-insensitively, and the site
+##! may cross when one of them reaches: a `spawn`, a `send` or a generator;
+##! a scope's body; a store through a reference; the function's result; or
+##! a call of a function that may itself let what it is given cross (one
+##! that, directly or through the functions it calls, spawns, sends or makes
+##! a generator, or calls a function value or through a trait). Intrinsics
+##! other than those keep nothing beyond what their `own` arguments put into
+##! their `mut` arguments and what their result holds.
+##!
+##! A may-cross site is written `call intrinsic Shared.new_atomic`.
+
+from stage1.sir import (
+    Callee,
+    Function,
+    IntrinsicDecl,
+    LocalId,
+    Operand,
+    Place,
+    Program,
+    Proj,
+    Rvalue,
+    Statement,
+    StatementKind,
+)
+
+## How many construction sites each tag got.
+pub struct SharedStats:
+    pub local: int
+    pub crossing: int
+
+## The intrinsics through which a value reaches another task.
+pure def crossing_intrinsic(name: str) -> bool:
+    return match name:
+        case "Scope.spawn" | "Scope.spawn_with" | "Sender.send" | "Sender.try_send": True
+        case "gen.new" | "task.scope" | "task.race" | "task.shield": True
+        # A capability handle may reach every task.
+        case "cap.new" | "Cap.new": True
+        case _: False
+
+## The intrinsics that start another task or hand a value to one.
+pure def spawning_intrinsic(name: str) -> bool:
+    return match name:
+        case "Scope.spawn" | "Scope.spawn_with" | "Sender.send" | "Sender.try_send": True
+        case "gen.new": True
+        case _: False
+
+pure def root(o: Operand) -> LocalId?:
+    return match o:
+        case Operand.Copy(p) | Operand.Move(p): Some(p.local)
+        case Operand.Const(_): None
+
+## Tags every `Shared.new` call site of the program; returns the counts.
+pub pure def tag_sites(mut p: Program) -> SharedStats:
+    let (tags, stats) = crossing_sites(p)
+    for (fi, b, si) in tags:
+        let s = ref mut p.functions[fi].blocks[b].stmts[si]
+        if let StatementKind.Call(dest, Callee.Intrinsic(_, targs), args) = s.kind.copy():
+            let callee = Callee.Intrinsic(name="Shared.new_atomic".to_string(), args=targs)
+            s.kind = StatementKind.Call(dest=dest, callee=callee, args=args)
+    if stats.crossing > 0 and p.intrinsic("Shared.new_atomic").is_none():
+        var atomic: IntrinsicDecl? = None
+        if let Some(d) = p.intrinsic("Shared.new"):
+            var x = d.copy()
+            x.name = "Shared.new_atomic".to_string()
+            atomic = Some(x)
+        if let Some(x) = atomic:
+            p.intrinsics.push(x.copy())
+            p.intrinsics.sort_by((a, b) -> a.name.cmp(b.name))
+    return stats
+
+## The `Shared.new` call sites whose value may cross, each by its function,
+## block and statement, with the counts.
+pure def crossing_sites(p: Program) -> (list[(int, int, int)], SharedStats):
+    var any_crossing = False
+    for f in p.functions:
+        for b in f.blocks:
+            for s in b.stmts:
+                if let StatementKind.Call(_, Callee.Intrinsic(n, _), _) = s.kind:
+                    if spawning_intrinsic(n):
+                        any_crossing = True
+    var crossing_fns: set[String] = set()
+    if any_crossing:
+        crossing_fns = crossing_functions(p)
+    var stats = SharedStats(local=0, crossing=0)
+    var tags: list[(int, int, int)] = []
+    for fi in range(len(p.functions)):
+        let f = ref p.functions[fi]
+        for b in range(len(f.blocks)):
+            for si in range(len(f.blocks[b].stmts)):
+                if let StatementKind.Call(dest, Callee.Intrinsic(n, _), _) = f.blocks[b].stmts[
+                    si
+                ].kind:
+                    if n != "Shared.new":
+                        continue
+                    if any_crossing and may_cross(p, f, dest, crossing_fns):
+                        stats.crossing += 1
+                        tags.push((fi, b, si))
+                    else:
+                        stats.local += 1
+    return (tags, stats)
+
+## The functions that may let what they are given reach another task.
+pure def crossing_functions(p: Program) -> set[String]:
+    var out: set[String] = set()
+    for f in p.functions:
+        var direct = False
+        for b in f.blocks:
+            for s in b.stmts:
+                if let StatementKind.Call(_, callee, _) = s.kind:
+                    match callee:
+                        case Callee.Intrinsic(n, _):
+                            if crossing_intrinsic(n):
+                                direct = True
+                        # An unknown callee may do anything.
+                        case Callee.Value(_) | Callee.Trait(_, _):
+                            direct = True
+                        case Callee.Fn(_, _):
+                            pass
+        if direct:
+            _ = out.add(f.name.copy())
+    while True:
+        var changed = False
+        for f in p.functions:
+            if out.contains(f.name):
+                continue
+            var calls = False
+            for b in f.blocks:
+                for s in b.stmts:
+                    if let StatementKind.Call(_, Callee.Fn(n, _), _) = s.kind:
+                        if out.contains(n):
+                            calls = True
+                    if let Some(n) = closure_made(s):
+                        if out.contains(n):
+                            calls = True
+            if calls:
+                _ = out.add(f.name.copy())
+                changed = True
+        if not changed:
+            return out
+
+## The function a statement makes a closure of.
+pure def closure_made(s: Statement) -> String?:
+    if let StatementKind.Assign(_, Rvalue.Closure(n, _, _)) = s.kind:
+        return Some(n.copy())
+    return None
+
+## Whether an operand is one of the carriers.
+pure def held(o: Operand, carriers: set[int]) -> bool:
+    let l = root(o) else:
+        return False
+    return carriers.contains(l.index)
+
+## Whether the value made into `dest` may reach another task.
+pure def may_cross(p: Program, f: Function, dest: Place, crossing: set[String]) -> bool:
+    var carriers: set[int] = set()
+    _ = carriers.add(dest.local.index)
+    while True:
+        var changed = False
+        for b in f.blocks:
+            for s in b.stmts:
+                match s.kind:
+                    case StatementKind.Assign(d, rv):
+                        var carries = False
+                        match rv:
+                            case Rvalue.Use(o):
+                                carries = held(o, carriers)
+                            case Rvalue.Ref(pl, _) | Rvalue.CopyOf(pl) | Rvalue.StrView(pl):
+                                carries = carriers.contains(pl.local.index)
+                            case Rvalue.Aggregate(_, ops) | Rvalue.Closure(_, _, ops):
+                                for o in ops:
+                                    if held(o, carriers):
+                                        carries = True
+                            case _:
+                                pass
+                        if carries:
+                            # A store through a reference reaches memory the
+                            # analysis does not follow.
+                            for x in d.proj:
+                                if let Proj.Deref = x:
+                                    return True
+                            if carriers.add(d.local.index):
+                                changed = True
+                    case StatementKind.Call(to, callee, args):
+                        var passed = False
+                        for o in args:
+                            if held(o, carriers):
+                                passed = True
+                        if let Callee.Value(o) = callee:
+                            if held(o, carriers):
+                                passed = True
+                        if not passed:
+                            continue
+                        match callee:
+                            case Callee.Intrinsic(n, _):
+                                if crossing_intrinsic(n):
+                                    return True
+                                # What it keeps goes into its `mut` arguments,
+                                # and its result may hold what it was given.
+                                if let Some(decl) = p.intrinsic(n):
+                                    if not decl.owns.is_empty():
+                                        for o in args:
+                                            if let Some(l) = root(o):
+                                                if carriers.add(l.index):
+                                                    changed = True
+                            case Callee.Fn(n, _):
+                                if crossing.contains(n):
+                                    return True
+                            case Callee.Trait(_, _) | Callee.Value(_):
+                                return True
+                        if carriers.add(to.local.index):
+                            changed = True
+                    case _:
+                        pass
+        if carriers.contains(0):
+            # The function returns it: the caller may let it cross.
+            return True
+        if not changed:
+            return False

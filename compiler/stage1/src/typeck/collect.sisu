@@ -29,7 +29,6 @@ from stage1.syntax.ast import (
     Attr,
     BinOp,
     Block,
-    ClosureBody,
     ConstDef,
     EnumDef,
     Expr,
@@ -40,7 +39,6 @@ from stage1.syntax.ast import (
     GenericParam,
     ImplDef,
     Import,
-    IndexArg,
     Item,
     ItemId,
     ItemKind,
@@ -82,6 +80,7 @@ from stage1.typeck.program import (
     ImplInfo,
     ModuleData,
     ModuleId,
+    PackageData,
     ParamInfo,
     Predicate,
     Program,
@@ -90,7 +89,6 @@ from stage1.typeck.program import (
     TraitInfo,
     VariantInfo,
     WellKnown,
-    derivable,
 )
 from stage1.typeck.std_sources import ambient, builtin_impls, importable, module_for, module_paths, reexports, target
 from stage1.typeck.template import Src, Templates, template_parts
@@ -120,16 +118,6 @@ pub enum Pending:
     Test(def_: DefId, module: ModuleId, ast: TestDef)
     Const(def_: DefId, module: ModuleId, ast: ConstDef)
     Refinement(def_: DefId, module: ModuleId, ast: TypeAlias, node: int, range: TextRange)
-    ## An impl the compiler writes: `@derive(trait_)` (or the `Debug` every
-    ## struct and enum has), or `@delegate(trait_, to=...)`.
-    Derived(
-        ty: DefId,
-        module: ModuleId,
-        trait_: String,
-        derived: bool,
-        used: list[bool],
-        range: TextRange
-    )
 
 ## What a type expression may mention where it is written.
 struct TyCtx:
@@ -192,19 +180,20 @@ pub struct Resolver:
     special_kinds: dict[DefId, FnKind]
     ## `@derive(Copy)` to check against the fields, with the type.
     pub copy_checks: list[DefId]
-    ## The functions the compiler writes without a body here.
-    written: set[DefId]
     ## The root module's text.
     pub root_text: String
-    ## The module of the root module's doc examples, a test each, and its
-    ## text, which keeps every example line where the file has it.
-    pub doc_module: ModuleId?
-    pub doc_text: String
+    ## The text of each module of the program, and of each module the
+    ## compiler wrote for it, by module.
+    pub module_texts: dict[ModuleId, String]
+    ## The modules of the program's doc examples, a test each, with their
+    ## texts, which keep every example line where the module's file has it.
+    pub docs: list[(ModuleId, String)]
     ## The message catalog, for the texts of the messages that are
     ## parameters of others (a panic folding a constant reports).
     pub catalog: Catalog
-    ## The root module's derive templates, by their trait's name.
-    pub derive_templates: dict[String, FnDef]
+    ## The derive templates of the program's modules, by module and their
+    ## trait's name.
+    pub derive_templates: dict[(int, String), FnDef]
     ## The syntax of each template, for its instances.
     pub template_fns: dict[DefId, FnDef]
     ## Generic functions the last check found calling a template with their
@@ -227,8 +216,6 @@ pub struct Resolver:
     pub shims: list[(ModuleId, String)]
     ## The derived and delegated impls to check once every impl is known.
     pub derive_checks: list[DeriveCheck]
-    ## The impls of `@delegate` stage 1 declares as headers.
-    pub delegated: set[DefId]
     ## The text of each std module that has templates, by name.
     pub std_texts: dict[String, String]
     ## The syntax of the modules the base resolves, by module, which
@@ -237,9 +224,6 @@ pub struct Resolver:
     ## The traits written as `dyn T` in signatures, with the module, for the
     ## check that they can be (stage 0's `dyn_uses`).
     dyn_uses: list[(DefId, ModuleId)]
-    ## Whether an item of the root module is `@refines(...)`, a property
-    ## stage 0 checks with generators it writes.
-    pub refines: bool
     ## The phase the definitions made now belong to: 0 while modules are
     ## declared, 1 to 4 while the types, the traits, the impls and the rest
     ## are resolved, 9 once the root module is.
@@ -248,6 +232,11 @@ pub struct Resolver:
     ## base keeps until `typeck.base` takes them (they are not copied with
     ## the program for each file).
     pub std_derives: Templates
+    ## The text of each std module's derived impls (its `<derive>/NAME.sisu`
+    ## module), by the module's name, which the base makes from the
+    ## prelude's templates for every std module, those a program may import
+    ## included: a program that imports one declares the text made here.
+    pub std_derived: dict[String, String]
 
 impl Resolver:
     pub pure def new() -> Resolver:
@@ -271,10 +260,9 @@ impl Resolver:
             quiet_fns=set(),
             special_kinds={},
             copy_checks=[],
-            written=set(),
             root_text=String.new(),
-            doc_module=None,
-            doc_text=String.new(),
+            module_texts={},
+            docs=[],
             catalog=Catalog.parse(""),
             derive_templates={},
             template_fns={},
@@ -285,46 +273,38 @@ impl Resolver:
             generated=[],
             shims=[],
             derive_checks=[],
-            delegated=set(),
             std_texts={},
             std_kept=[],
             dyn_uses=[],
             phase=0,
-            refines=False,
             std_derives=Templates.none(),
+            std_derived={},
         )
 
     ## The prelude, the ambient std modules, `target` and `builtin_impls`,
     ## resolved: `texts` gives each std module's source by name.
     pub pure def base(texts: dict[String, String]) -> Resolver:
         var r = Resolver.new()
-        let prelude = r.load_std("prelude", text_of(texts, "prelude"))
+        # The prelude's derive templates, with its syntax and text, which
+        # unfold the derived impls of every std module and stay for the
+        # program's.
+        let prelude_text = text_of(texts, "prelude")
+        let prelude_module = build.module(parse(prelude_text, Catalog.parse("")).tree)
+        let templates = derive_templates(prelude_module.copy(), prelude_text)
+        let prelude = r.load_std_module("prelude", prelude_module, prelude_text, templates)
         r.prog.prelude = prelude
         r.fill_well_known()
         for name in ambient():
-            let m = r.load_std(name, text_of(texts, name))
+            let m = r.load_std(name, text_of(texts, name), templates)
             let d = r.new_def(prelude, name, TextRange.empty(0), Vis.Pub, DefKind.Module(m))
             _ = r.prog.modules[prelude.index].items.insert(name.to_string(), d)
-        let t = r.load_std("target", target())
+        let t = r.load_std("target", target(), templates)
         let td = r.new_def(prelude, "target", TextRange.empty(0), Vis.Pub, DefKind.Module(t))
         _ = r.prog.modules[prelude.index].items.insert("target".to_string(), td)
-        _ = r.load_std("builtin_impls", builtin_impls())
+        _ = r.load_std("builtin_impls", builtin_impls(), templates)
         r.resolve_pending()
         r.build_variant_index(0)
         r.check_traits(0)
-        # The prelude's derive templates stay, with its syntax and text.
-        let prelude_syntax = r.sources[prelude.index].copy()
-        var derives: dict[String, FnDef] = {}
-        for it in prelude_syntax.items:
-            if let ItemKind.Trait(t) = prelude_syntax.ast.item(it).kind:
-                for m in t.methods:
-                    if m.is_comptime and m.name.text == "derive":
-                        let src = Src(ast=ref prelude_syntax.ast, source="")
-                        if template_parts(src, m).is_some():
-                            _ = derives.insert(t.name.text.copy(), m.copy())
-        r.std_derives = Templates(
-            syntax=prelude_syntax.ast, text=text_of(texts, "prelude"), derives=derives
-        )
         # The type checker never checks the std modules' bodies: their syntax
         # goes from the program, which each file copies, and stays for
         # lowering.
@@ -343,51 +323,136 @@ impl Resolver:
             if not text.is_empty():
                 let module = build.module(parse(text, Catalog.parse("")).tree)
                 _ = r.std_parsed.insert(name.to_string(), module)
+        # Their derived impls, unfolded now on a copy that loads them all:
+        # stage 0 unfolds them whenever a program loads the module, and the
+        # text is the same each time.
+        var all = r.copy()
+        for name in importable():
+            if let Some(module) = r.std_parsed.get(name.to_string()):
+                _ = all.load_std_module(name, module.copy(), text_of(texts, name), templates)
+        r.std_derived = all.std_derived.copy()
+        # The std modules' texts were for the bounds their derived impls
+        # repeat.
+        r.module_texts = {}
+        r.std_derives = templates
         return r
 
     ## A prelude of the given text alone, resolved: no ambient modules, no
     ## `target` and no `builtin_impls` (for the tests).
     pub pure def base_from(prelude_text: str) -> Resolver:
         var r = Resolver.new()
-        let prelude = r.load_std("prelude", prelude_text)
+        let prelude_module = build.module(parse(prelude_text, Catalog.parse("")).tree)
+        let templates = derive_templates(prelude_module.copy(), prelude_text)
+        let prelude = r.load_std_module("prelude", prelude_module, prelude_text, templates)
         r.prog.prelude = prelude
         r.fill_well_known()
         r.resolve_pending()
         r.build_variant_index(0)
         r.check_traits(0)
+        r.module_texts = {}
         return r
 
     ## Declares and resolves the root module, `module`, the syntax of a
-    ## file: the base with the file's module added.
+    ## file: the base with the file's module added, a program of one module.
     pub pure def add_root(mut self, own module: Module, text: str, templates: Templates):
-        let script = text.starts_with("#!")
-        self.root_text = text.to_string()
+        let source = SourceModule(
+            path=[], file=String.new(), syntax=module, text=text.to_string(), package=0
+        )
+        let package = SourcePackage(name=String.new(), deps=[], trusted=True)
+        self.add_program([source], [package], templates)
+
+    ## Declares and resolves a program of several modules and packages
+    ## (stage 0's `resolve_session`; 09): every module of the program is
+    ## declared before any import is resolved, so the modules of a package
+    ## may name each other in any order; then the impls the compiler writes
+    ## for each, and everything is resolved. The root module comes first,
+    ## and the root package.
+    pub pure def add_program(
+        mut self,
+        own modules: list[SourceModule],
+        packages: list[SourcePackage],
+        templates: Templates,
+    ):
         let first_def = len(self.prog.defs)
-        let poisoned = module.broken_names.copy()
-        let items = module.items.copy()
-        for it in items:
-            for a in module.ast.item(it).attrs:
-                if a.name == "refines":
-                    self.refines = True
-        let root = self.add_module("main", False, module)
-        self.prog.root = root
-        for n in poisoned:
-            _ = self.prog.poisoned.add(n.copy())
-        var items_declared = items.copy()
-        if script:
-            items_declared = self.script_items(root, items)
-        # Every item, then the imports, then the impls the compiler writes.
+        if not modules.is_empty():
+            self.root_text = modules[0].text.copy()
+        # The packages: the root package, std, then the dependencies.
+        for k in range(len(packages)):
+            var deps: list[(String, int)] = []
+            for (n, d) in packages[k].deps:
+                deps.push((n.copy(), package_id(d)))
+            let data = PackageData(
+                name=packages[k].name.copy(),
+                trusted=packages[k].trusted or k == 0,
+                deps=deps,
+                root=None,
+            )
+            self.prog.packages.push(data)
+            if k == 0:
+                self.prog.packages.push(
+                    PackageData(name="std".to_string(), trusted=True, deps=[], root=None)
+                )
+        # The program's own modules, the root module first: each is a module
+        # of its package, and a child of the module its path's prefix names.
+        var ids: list[ModuleId] = []
+        var all_items: list[list[ItemId]] = []
+        for i in range(len(modules)):
+            let m = ref modules[i]
+            let items = m.syntax.items.copy()
+            all_items.push(items)
+            var name = "main".to_string()
+            if i > 0:
+                name = m.path.join(".")
+            let id = self.add_module(name, False, m.syntax.copy())
+            self.prog.modules[id.index].package = package_id(m.package)
+            self.prog.modules[id.index].path = m.path.copy()
+            self.prog.modules[id.index].file = m.file.copy()
+            _ = self.module_texts.insert(id, m.text.copy())
+            self.prog.user_modules.push(id)
+            ids.push(id)
+        if let Some(root) = ids.first():
+            self.prog.root = root
+        if let Some(m) = modules.first():
+            for n in m.syntax.broken_names:
+                _ = self.prog.poisoned.add(n.copy())
+        for i in range(len(modules)):
+            self.link_module(ids[i], modules[i].path, modules[i].package, modules[i].file)
+        # Every module's items, then the imports between them.
         self.deferring = True
-        self.declare_items(root, items_declared, "")
-        self.declare_trait_shims(root, items_declared)
-        self.declare_doc_tests(root, items_declared)
+        var owned: list[list[ItemId]] = []
+        for i in range(len(modules)):
+            let id = ids[i]
+            # A dependency's tests and benchmarks are its own package's
+            # business (stage 0's `own_items`).
+            var items: list[ItemId] = []
+            for it in all_items[i]:
+                var tested = False
+                match self.ast(id).item(it).kind:
+                    case ItemKind.Test(_) | ItemKind.Suite(_) | ItemKind.Bench(_):
+                        tested = True
+                    case _:
+                        pass
+                if not (tested and modules[i].package != 0):
+                    items.push(it)
+            owned.push(items.copy())
+            var declared = items.copy()
+            # A script's top-level statements are its `main` (10).
+            if modules[i].text.starts_with("#!"):
+                declared = self.script_items(id, items)
+            let prefix = test_prefix(modules[i].path)
+            self.declare_items(id, declared, prefix)
+            self.declare_trait_shims(id, declared)
+            # The root package's doc examples are its tests too (10).
+            if modules[i].package == 0:
+                self.declare_doc_tests(id, declared, prefix)
         self.deferring = False
         let deferred = self.deferred.copy()
         self.deferred = []
         for (m, id) in deferred:
             self.declare_import(m, id)
-        self.declare_derived_root(root, items, templates)
-        self.declare_generators(root, items)
+        for i in range(len(modules)):
+            self.declare_derived(ids[i], owned[i], templates)
+            self.declare_generators(ids[i], owned[i])
         self.resolve_pending()
         self.build_variant_index(first_def)
         self.check_traits(first_def)
@@ -395,6 +460,65 @@ impl Resolver:
         # What is made from now on (the instances of templates) comes after
         # everything, as in stage 0.
         self.phase = 9
+
+    ## Makes a module of the program's source the child of the module its
+    ## path's prefix names (a directory with no file of its own is a module
+    ## too, whose items are its children), and a package's root module the
+    ## one its imports name the package by (stage 0's `link_module`).
+    pure def link_module(mut self, id: ModuleId, path: list[String], package: int, file: str):
+        let pid = package_id(package)
+        if len(path) == 1:
+            if pid < len(self.prog.packages) and self.prog.packages[pid].root.is_none():
+                self.prog.packages[pid].root = Some(id)
+            return
+        if len(path) < 2:
+            return
+        var prefix = path.copy()
+        let last = prefix.pop() ?? String.new()
+        let parent = self.module_at(prefix, pid, file)
+        let d = self.new_def(parent, last, TextRange.empty(0), Vis.Pub, DefKind.Module(id))
+        _ = self.prog.modules[parent.index].items.insert(last, d)
+
+    ## The module of the program at `path`, made (as a directory's module,
+    ## with no items but its children) when no file is (stage 0's
+    ## `module_at`); `pid` is its package's index in the program.
+    pure def module_at(mut self, path: list[String], pid: int, file: str) -> ModuleId:
+        for m in self.prog.user_modules:
+            if self.prog.modules[m.index].path == path:
+                return m
+        let empty = Module(ast=Ast.new(), items=[], docs=[], broken_names=[])
+        let id = self.add_module(path.join("."), False, empty)
+        self.prog.modules[id.index].package = pid
+        self.prog.modules[id.index].path = path.copy()
+        self.prog.modules[id.index].file = file.to_string()
+        self.prog.user_modules.push(id)
+        # Linked as `link_module` would, with this package.
+        if len(path) == 1:
+            if pid < len(self.prog.packages) and self.prog.packages[pid].root.is_none():
+                self.prog.packages[pid].root = Some(id)
+        elif len(path) > 1:
+            var prefix = path.copy()
+            let last = prefix.pop() ?? String.new()
+            let parent = self.module_at(prefix, pid, file)
+            let d = self.new_def(parent, last, TextRange.empty(0), Vis.Pub, DefKind.Module(id))
+            _ = self.prog.modules[parent.index].items.insert(last, d)
+        return id
+
+    ## The text of a module of the program, or of one the compiler wrote,
+    ## by which a range of its syntax is read.
+    pub pure def text_of_module(self, module: ModuleId) -> String:
+        if let Some(t) = self.module_texts.get(module):
+            return t.copy()
+        return self.root_text.copy()
+
+    ## The text at `range` of a module's text.
+    pub pure def text_in(self, module: ModuleId, range: TextRange) -> String:
+        if let Some(t) = self.module_texts.get(module):
+            return slice_text(t, range)
+        # A std module's text is the base's, which a program does not keep.
+        if self.is_std(module):
+            return String.new()
+        return slice_text(self.root_text, range)
 
     ## The `from` clauses and the elision rules of every function from the
     ## definition `first` on that is not the standard library's (stage 0's
@@ -454,7 +578,7 @@ impl Resolver:
 
     ## The syntax of the module of doc examples, when there is one.
     pub pure def doc_syntax(self) -> Module?:
-        let m = self.doc_module else:
+        let (m, _) = self.docs.first() else:
             return None
         if m.index >= len(self.sources):
             return None
@@ -462,27 +586,59 @@ impl Resolver:
 
     pub pure def add_module(mut self, name: str, is_std: bool, own module: Module) -> ModuleId:
         let id = ModuleId(index=len(self.prog.modules))
-        self.prog.modules.push(
-            ModuleData(
-                name=name.to_string(), items={}, order=[], is_std=is_std, parent=None, imported={}
-            )
-        )
+        self.prog.modules.push(ModuleData.new(name, is_std))
         self.sources.push(module)
         return id
 
-    pure def load_std(mut self, name: str, text: str) -> ModuleId:
-        let module = build.module(parse(text, Catalog.parse("")).tree)
-        return self.load_std_module(name, module)
+    ## `@comptime_budget(steps=N)` (08): the item's own budget for its
+    ## `comptime` expressions; one written otherwise is stage 0's
+    ## `comptime.budget-attribute`.
+    pure def comptime_budget(mut self, module: ModuleId, def_: DefId, attrs: list[Attr]):
+        for a in attrs:
+            if a.name != "comptime_budget":
+                continue
+            var steps: int? = None
+            if len(a.args) == 1:
+                if let Some(n) = a.args[0].name:
+                    if n.text == "steps":
+                        if let ExprKind.Int(_, value, suffix) = self.ast(module).expr(
+                            a.args[0].value
+                        ).kind:
+                            if let Some(v) = value:
+                                if suffix.is_none():
+                                    if let Some(k) = v.to_int():
+                                        if k > 0:
+                                            steps = Some(k)
+            match steps:
+                case Some(k):
+                    _ = self.prog.comptime_budgets.insert(def_, k)
+                case None:
+                    self.note_error(module)
 
-    ## Declares a parsed std module, once.
-    pure def load_std_module(mut self, name: str, own module: Module) -> ModuleId:
+    ## Whether the std module `name` is loaded.
+    pub pure def is_loaded(self, name: str) -> bool:
+        return self.std_loaded.contains(name.to_string())
+
+    pure def load_std(mut self, name: str, text: str, templates: Templates) -> ModuleId:
+        let module = build.module(parse(text, Catalog.parse("")).tree)
+        return self.load_std_module(name, module, text, templates)
+
+    ## Declares a parsed std module, once, and its derived impls: unfolded
+    ## from the prelude's `templates` while the base is made, with the
+    ## module's `text` for the bounds they repeat; the text the base made
+    ## (`std_derived`) for a module a program imports.
+    pure def load_std_module(
+        mut self, name: str, own module: Module, text: str, templates: Templates
+    ) -> ModuleId:
         if let Some(m) = self.std_loaded.get(name.to_string()):
             return m
         let items = module.items.copy()
         let m = self.add_module(name, True, module)
         _ = self.std_loaded.insert(name.to_string(), m)
+        if not text.is_empty():
+            _ = self.module_texts.insert(m, text.to_string())
         self.declare_items(m, items, "")
-        self.declare_derived(m, items)
+        self.declare_derived(m, items, templates)
         return m
 
     pure def fill_well_known(mut self):
@@ -629,9 +785,9 @@ impl Resolver:
         var attributed: list[(String, list[(String, list[String])])] = []
         for id in items:
             let item = self.sources[module.index].ast.item(id).copy()
-            # The attributes of a type of the root module, as data for
+            # The attributes of a type of the program, as data for
             # `reflect.attributes_of`.
-            if module == self.prog.root and not self.is_std(module) and not item.attrs.is_empty():
+            if not self.is_std(module) and not item.attrs.is_empty():
                 var type_name: String? = None
                 match item.kind:
                     case ItemKind.Struct(s):
@@ -647,7 +803,7 @@ impl Resolver:
                     for a in item.attrs:
                         var args: list[String] = []
                         for x in a.args:
-                            args.push(slice_text(self.root_text, x.range))
+                            args.push(self.text_in(module, x.range))
                         attrs.push((a.name.copy(), args))
                     attributed.push((n.copy(), attrs))
             match item.kind:
@@ -657,6 +813,7 @@ impl Resolver:
                         module, f.name.text, f.name.range, item.vis, DefKind.Fn(info)
                     )
                     self.bind(module, f.name.text, def_)
+                    self.comptime_budget(module, def_, item.attrs)
                     self.pending.push(
                         Pending.Fn(def_=def_, module=module, ast=f.copy(), owner=None)
                     )
@@ -705,10 +862,12 @@ impl Resolver:
                     for m in t.methods:
                         if not m.is_comptime or m.name.text != "derive":
                             continue
-                        let src = Src(ast=ref self.sources[module.index].ast, source=self.root_text)
+                        let source = self.text_of_module(module)
+                        let src = Src(ast=ref self.sources[module.index].ast, source=source)
                         if template_parts(src, m).is_some():
-                            if module == self.prog.root and not self.is_std(module):
-                                _ = self.derive_templates.insert(t.name.text.copy(), m.copy())
+                            if not self.is_std(module):
+                                let key = (module.index, t.name.text.copy())
+                                _ = self.derive_templates.insert(key, m.copy())
                         elif self.is_root(module):
                             # `comptime.derive-template`.
                             self.other_error = True
@@ -737,12 +896,14 @@ impl Resolver:
                 case ItemKind.Suite(s):
                     let prefix = prefixed(test_prefix, s.name)
                     self.declare_items(module, s.items, prefix)
+                # A benchmark is checked like a test; `sisu bench` runs it.
                 case ItemKind.Bench(t):
                     let name = prefixed(test_prefix, t.name)
                     let info = self.placeholder_fn(FnKind.Test(name.copy()))
                     let def_ = self.new_def(
                         module, name, t.name_range, Vis.Private, DefKind.Fn(info)
                     )
+                    self.prog.benches.push(def_)
                     self.pending.push(Pending.Test(def_=def_, module=module, ast=t.copy()))
                 case ItemKind.Const(c):
                     # The value is known from here on, for a type's
@@ -753,11 +914,18 @@ impl Resolver:
                         module, c.name.text, c.name.range, item.vis, DefKind.Const(info)
                     )
                     self.bind(module, c.name.text, def_)
+                    self.comptime_budget(module, def_, item.attrs)
                     self.pending.push(Pending.Const(def_=def_, module=module, ast=c.copy()))
                 case ItemKind.TypeAlias(a):
                     if a.refinement:
+                        # The predicate as written, which a failed conversion
+                        # shows.
+                        var text = String.new()
+                        if let Some(p) = a.predicate:
+                            let r = self.ast(module).expr(p).range
+                            text = self.text_in(module, r).trim().to_string()
                         let info = RefinementInfo(
-                            generics=[], base=Ty.error(), predicate=None, text=String.new()
+                            generics=[], base=Ty.error(), predicate=None, text=text
                         )
                         let def_ = self.new_def(
                             module, a.name.text, a.name.range, item.vis, DefKind.Refinement(info)
@@ -856,7 +1024,7 @@ impl Resolver:
                     types.push(p)
                 case Pending.Trait(_, _, _, _):
                     traits.push(p)
-                case Pending.Impl(_, _, _) | Pending.Derived(_, _, _, _, _, _):
+                case Pending.Impl(_, _, _):
                     impls.push(p)
                 case _:
                     rest.push(p)
@@ -962,8 +1130,6 @@ impl Resolver:
                 self.prog.defs[def_.index].kind = DefKind.Const(info)
             case Pending.Impl(module, imp, rng):
                 self.resolve_impl(module, imp, rng)
-            case Pending.Derived(ty, module, t, derived, used, rng):
-                self.resolve_derived(ty, module, t, derived, used, rng)
             case Pending.Refinement(def_, module, a, node, rng):
                 var names: list[String] = []
                 for g in a.generics:
@@ -1314,7 +1480,7 @@ impl Resolver:
                 and info.intrinsic.is_none()
                 and not f.name.text.is_empty()
                 and in_trait.is_none():
-            if self.is_root(module) and not self.written.contains(def_):
+            if self.is_root(module):
                 self.other_error = True
         # Register methods and associated functions.
         if let Some(o) = owner:
@@ -1497,8 +1663,57 @@ impl Resolver:
             return
         if self_ty == Ty.error():
             return
+        # A refinement has its base's reading impls and no others (07,
+        # `refine.own-impl`).
         if let TyData.Adt(d, _) = self.types.data(self_ty):
             if let DefKind.Refinement(_) = self.prog.defs[d.index].kind:
+                self.note_error(module)
+                return
+        # `Drop` is for a struct or enum of this module, with exactly
+        # `def drop(mut self)`, and for all of a generic type: the drop glue
+        # (a SIR function per type) runs it for every value, whatever the
+        # type arguments.
+        if Some(trait_ref.def_) == self.prog.wk.drop:
+            var target: DefId? = None
+            if let TyData.Adt(d, _) = self.types.data(self_ty):
+                if self.prog.defs[d.index].module == module:
+                    match self.prog.defs[d.index].kind:
+                        case DefKind.Struct(_) | DefKind.Enum(_):
+                            target = Some(d)
+                        case _:
+                            pass
+            let t = target else:
+                # `resolve.drop-target`.
+                self.note_error(module)
+                return
+            let params = len(self.prog.type_generics(t))
+            if params > 0:
+                let declared_preds = self.preds_of(t)
+                var whole = len(generics) == params and self_ty == self.self_type(t, params)
+                for p in predicates:
+                    var declared = False
+                    for q in declared_preds:
+                        if q.ty == p.ty and q.bound == p.bound:
+                            declared = True
+                    if not declared:
+                        whole = False
+                if not whole:
+                    # `resolve.drop-generic`.
+                    self.note_error(module)
+                    return
+            var ok = len(imp.methods) == 1
+            if ok:
+                let m = ref imp.methods[0]
+                ok = m.name.text == "drop" and len(m.params) == 1 and m.ret.is_none()
+                if ok:
+                    ok = m.params[0].mode == Mode.Mut
+                    if let ParamKind.SelfParam = m.params[0].kind:
+                        pass
+                    else:
+                        ok = False
+            if not ok:
+                # `resolve.drop-signature`.
+                self.note_error(module)
                 return
         # What the impl binds its associated types to.
         var assoc: list[(String, Ty)] = []
@@ -1530,6 +1745,9 @@ impl Resolver:
             module, "impl {shown_trait} for {shown_ty}", range, Vis.Pub, DefKind.Impl(info)
         )
         self.prog.impls.push(def_)
+        if Some(trait_ref.def_) == self.prog.wk.drop:
+            if let TyData.Adt(d, _) = self.types.data(self_ty):
+                _ = self.prog.drop_types.add(d)
         for m in imp.methods:
             let finfo = self.placeholder_fn(FnKind.Method)
             let fdef = self.new_def(module, m.name.text, m.name.range, Vis.Pub, DefKind.Fn(finfo))
@@ -1557,18 +1775,61 @@ impl Resolver:
             case _:
                 pass
 
-    ## The std module an import path names, loaded; `None` after noting
-    ## that stage 0 reports the path (`resolve.import-unknown`), with the
-    ## name a similar module's import would bind.
+    ## The module an import path names (09, "Modules"): a module of the
+    ## importing package (by the package's own name), of one of its
+    ## dependencies (by the dependency's name), or of the standard library
+    ## (`std.json`, and stage 0's short names), loaded; `None` after noting
+    ## that stage 0 reports the path (`resolve.import-unknown`, with the name
+    ## a similar module's import would bind; `resolve.not-a-dependency`;
+    ## `resolve.unknown-module`).
     pure def import_target(mut self, module: ModuleId, path: list[Name]) -> (ModuleId?, String?):
         var words: list[String] = []
         for n in path:
             words.push(n.text.copy())
+        let first = words.first() else:
+            return (None, None)
+        let package = self.prog.package_of(module)
+        var root: ModuleId? = None
+        if package < len(self.prog.packages):
+            let this = ref self.prog.packages[package]
+            if not this.name.is_empty() and this.name == first:
+                root = this.root
+            else:
+                for (n, d) in this.deps:
+                    if n == first and root.is_none() and d < len(self.prog.packages):
+                        root = self.prog.packages[d].root
+        if let Some(found) = root:
+            var m = found
+            for i in range(1, len(path)):
+                let seg = path[i].text.copy()
+                var next: ModuleId? = None
+                if let Some(d) = self.prog.lookup_in(m, seg):
+                    if let DefKind.Module(c) = self.prog.defs[d.index].kind:
+                        if not self.prog.modules[m.index].imported.contains(seg.copy()):
+                            next = Some(c)
+                let c = next else:
+                    # `resolve.unknown-module`.
+                    self.note_error(module)
+                    return (None, None)
+                m = c
+            return (Some(m), None)
+        # A package of the program that this package does not depend on
+        # (`resolve.not-a-dependency`).
+        if not self.is_std(module) and module_for(words).is_none():
+            for k in range(2, len(self.prog.packages)):
+                if self.prog.packages[k].name == first:
+                    self.note_error(module)
+                    return (None, None)
         let name = module_for(words) else:
             if self.is_root(module):
                 self.other_error = True
+            # The closest module a path can name: std's, or a package's.
+            var candidates = module_paths()
+            for p in self.prog.packages:
+                if not p.name.is_empty():
+                    candidates.push(p.name.copy())
             var similar: String? = None
-            if let Some(c) = closest(words.join("."), module_paths()):
+            if let Some(c) = closest(words.join("."), candidates):
                 similar = Some(last_word(c))
             return (None, similar)
         if let Some(m) = self.std_loaded.get(name.copy()):
@@ -1578,7 +1839,12 @@ impl Resolver:
             # not one it can check against.
             self.beyond_in(module, "an import of a std module stage 1 has not read")
             return (None, None)
-        let m = self.load_std_module(name, parsed.copy())
+        if not self.std_derived.contains(name.copy()):
+            self.beyond_in(
+                module, "an import of a std module whose derived impls the base did not make"
+            )
+            return (None, None)
+        let m = self.load_std_module(name, parsed.copy(), "", Templates.none())
         return (Some(m), None)
 
     ## The names an import that failed would have bound: their uses are not
@@ -1758,349 +2024,13 @@ impl Resolver:
         out.push(self.sources[module.index].ast.add_item(item))
         return out
 
-    # ---------------------------------------------------------------- generators
-
-    ## The generators of the property tests of the root module (stage 0's
-    ## `arbitrary.rs`): for each type written in `arbitrary[T]` or
-    ## `exhaustive[T](...)`, whether it has a generator, and if so the
-    ## function the compiler writes for it, `def __arbitrary_site_N(d:
-    ## Draws) -> T` (declared here by its signature: its body, and the
-    ## generators of the module's types it calls, are in a file of their
-    ## own), with the call that stands for the site, `Gen.of(...)` or
-    ## `Gen.every(..., max_len=n)`.
-    pure def declare_generators(mut self, module: ModuleId, items: list[ItemId]):
-        # The module's types and the parts their generators draw.
-        var shapes: dict[String, (list[String], list[TypeExprId])] = {}
-        var order: list[String] = []
-        for it in items:
-            let item = self.ast(module).item(it).copy()
-            let builtin = has_attr(item.attrs, "builtin")
-            match item.kind:
-                case ItemKind.Struct(s):
-                    var has_const = False
-                    for g in s.generics:
-                        if g.is_const:
-                            has_const = True
-                    if s.is_view or builtin or s.name.text.is_empty() or has_const:
-                        continue
-                    var parts: list[TypeExprId] = []
-                    for f in s.fields:
-                        parts.push(f.ty)
-                    _ = shapes.insert(s.name.text.copy(), (generic_names(s.generics), parts))
-                    order.push(s.name.text.copy())
-                case ItemKind.Enum(e):
-                    if e.name.text.is_empty():
-                        continue
-                    var parts: list[TypeExprId] = []
-                    for v in e.variants:
-                        for f in v.fields:
-                            parts.push(f.ty)
-                    _ = shapes.insert(e.name.text.copy(), (generic_names(e.generics), parts))
-                    order.push(e.name.text.copy())
-                case ItemKind.TypeAlias(a):
-                    if not a.refinement or a.name.text.is_empty():
-                        continue
-                    let base = a.ty else:
-                        continue
-                    _ = shapes.insert(a.name.text.copy(), (generic_names(a.generics), [base]))
-                    order.push(a.name.text.copy())
-                case _:
-                    pass
-        # Which types have a generator: assume all do, then drop those with
-        # a part that has none, until nothing changes.
-        var ok: set[String] = set()
-        for n in order:
-            _ = ok.add(n.copy())
-        var changed = True
-        while changed:
-            changed = False
-            for n in order:
-                if not ok.contains(n.copy()):
-                    continue
-                let shape = shapes.get(n.copy()) else:
-                    continue
-                var fine = True
-                for t in shape.1:
-                    if not self.type_ok(module, t, shape.0, shapes, ok):
-                        fine = False
-                if not fine:
-                    _ = ok.remove(n.copy())
-                    changed = True
-        # The calls whose callee is a site, with their arguments.
-        var calls: dict[int, (ExprId, list[Arg])] = {}
-        let exprs = visit.exprs_in_items(self.ast(module), items)
-        for e in exprs:
-            if let ExprKind.Call(callee, args, _) = self.ast(module).expr(e).kind:
-                if let ExprKind.Index(_, _) = self.ast(module).expr(callee).kind:
-                    _ = calls.insert(callee.index, (e, args.copy()))
-        # The types written in `arbitrary[T]` and `exhaustive[T](...)`.
-        var keys: list[String] = []
-        for e in exprs:
-            let ExprKind.Index(base, targs) = self.ast(module).expr(e).kind.copy() else:
-                continue
-            var kind = String.new()
-            if let ExprKind.Name(n) = self.ast(module).expr(base).kind:
-                kind = n.copy()
-            if kind != "arbitrary" and kind != "exhaustive":
-                continue
-            if len(targs) != 1:
-                continue
-            var t = ExprId(index=0)
-            match targs[0]:
-                case IndexArg.Expr(x):
-                    t = x
-                case _:
-                    continue
-            let key = without_spaces(self.root_text_of(self.ast(module).expr(t).range))
-            if not keys.contains(key.copy()):
-                keys.push(key.copy())
-                let i = len(keys) - 1
-                match self.expr_as_type(module, t):
-                    case Some(te):
-                        if self.type_ok(module, te, [], shapes, ok):
-                            let name = "__arbitrary_site_{i}"
-                            self.declare_site(module, name, te)
-                            _ = self.prog.generator_sites.insert(key.copy(), Some(name))
-                        else:
-                            _ = self.prog.generator_sites.insert(key.copy(), None)
-                    case None:
-                        _ = self.prog.generator_sites.insert(key.copy(), None)
-            # The call that stands for this site.
-            var site = String.new()
-            if let Some(entry) = self.prog.generator_sites.get(key.copy()):
-                if let Some(n) = entry:
-                    site = n.copy()
-            if site.is_empty():
-                continue
-            var whole = e
-            var call_args: list[Arg]? = None
-            if let Some(c) = calls.get(e.index):
-                whole = c.0
-                call_args = Some(c.1.copy())
-            let at = self.ast(module).expr(whole).range
-            let node = self.ast(module).expr(whole).node
-            var method = "of"
-            let callee_name = self.add_name_expr(module, node, at, site)
-            var args = [Arg(node=node, range=at, name=None, mutable=False, value=callee_name)]
-            if kind == "exhaustive":
-                method = "every"
-                var max_len: ExprId? = None
-                if let Some(given) = call_args:
-                    for a in given:
-                        if max_len.is_none():
-                            match a.name:
-                                case None:
-                                    max_len = Some(a.value)
-                                case Some(n):
-                                    if n.text == "max_len":
-                                        max_len = Some(a.value)
-                let three = Expr(
-                    node=node,
-                    range=at,
-                    kind=ExprKind.Int(text="3".to_string(), value=Some(three_u128()), suffix=None),
-                )
-                var value = ExprId(index=0)
-                match max_len:
-                    case Some(v):
-                        value = v
-                    case None:
-                        value = self.sources[module.index].ast.add_expr(three)
-                args.push(
-                    Arg(
-                        node=node,
-                        range=at,
-                        name=Some(Name(text="max_len".to_string(), range=at)),
-                        mutable=False,
-                        value=value,
-                    )
-                )
-            let gen = self.add_name_expr(module, node, at, "Gen")
-            let field = Expr(
-                node=node,
-                range=at,
-                kind=ExprKind.Field(base=gen, name=Name(text=method.to_string(), range=at)),
-            )
-            let f = self.sources[module.index].ast.add_expr(field)
-            let call = Expr(
-                node=node, range=at, kind=ExprKind.Call(callee=f, args=args, trailing=None)
-            )
-            _ = self.prog.generator_calls.insert(
-                e.index, self.sources[module.index].ast.add_expr(call)
-            )
-
-    pure def add_name_expr(
-        mut self, module: ModuleId, node: int, at: TextRange, name: str
-    ) -> ExprId:
-        return self.sources[module.index].ast.add_expr(
-            Expr(node=node, range=at, kind=ExprKind.Name(name.to_string()))
-        )
-
-    ## `def name(d: Draws) -> T` with no body of its own here, bound in the
-    ## module (the names of the generated module are the served module's).
-    pure def declare_site(mut self, module: ModuleId, name: str, te: TypeExprId):
-        let at = self.ast(module).type_expr(te).range
-        let node = self.ast(module).type_expr(te).node
-        let draws = TypeExpr(
-            node=node,
-            range=at,
-            kind=TypeKind.Path(segments=[Name(text="Draws".to_string(), range=at)], args=[]),
-        )
-        let draws_ty = self.sources[module.index].ast.add_type(draws)
-        let param = Param(
-            node=node,
-            range=at,
-            mode=Mode.Borrow,
-            kind=ParamKind.Named(
-                name=Name(text="d".to_string(), range=at), ty=draws_ty, default=None
-            ),
-        )
-        let f = FnDef(
-            node=node,
-            range=at,
-            name=Name(text=name.to_string(), range=at),
-            is_pure=False,
-            is_comptime=False,
-            generics=[],
-            params=[param],
-            ret=Some(te),
-            from_=[],
-            where_=[],
-            body=None,
-            attrs=[],
-            header_broken=False,
-            body_broken=False,
-            vis=Vis.Private,
-        )
-        let def_ = self.new_def(
-            module, name, at, Vis.Private, DefKind.Fn(self.placeholder_fn(FnKind.Free))
-        )
-        _ = self.written.add(def_)
-        if not self.prog.modules[module.index].items.contains(name.to_string()):
-            _ = self.prog.modules[module.index].items.insert(name.to_string(), def_)
-        self.pending.push(Pending.Fn(def_=def_, module=module, ast=f, owner=None))
-
-    ## An index argument read as a type: `list[int]` in `arbitrary[list[int]]`.
-    pure def expr_as_type(mut self, module: ModuleId, e: ExprId) -> TypeExprId?:
-        let x = self.ast(module).expr(e).copy()
-        var kind = TypeKind.Error
-        match x.kind:
-            case ExprKind.Name(n):
-                kind = TypeKind.Path(segments=[Name(text=n.copy(), range=x.range)], args=[])
-            case ExprKind.Index(base, args):
-                let ExprKind.Name(n) = self.ast(module).expr(base).kind.copy() else:
-                    return None
-                let base_range = self.ast(module).expr(base).range
-                var targs: list[TypeExprId] = []
-                for a in args:
-                    var y = ExprId(index=0)
-                    match a:
-                        case IndexArg.Expr(x):
-                            y = x
-                        case _:
-                            return None
-                    let t = self.expr_as_type(module, y) else:
-                        return None
-                    targs.push(t)
-                kind = TypeKind.Path(segments=[Name(text=n, range=base_range)], args=targs)
-            case ExprKind.Tuple(xs):
-                if xs.is_empty():
-                    return None
-                var es: list[(Name?, TypeExprId)] = []
-                for y in xs:
-                    let t = self.expr_as_type(module, y) else:
-                        return None
-                    es.push((None, t))
-                kind = TypeKind.Tuple(es)
-            case ExprKind.Paren(inner):
-                return self.expr_as_type(module, inner)
-            # `(int) -> bool` reads as a closure.
-            case ExprKind.Closure(c):
-                if c.implicit_param:
-                    return None
-                var params: list[TypeExprId] = []
-                for p in c.params:
-                    if p.ty.is_some():
-                        return None
-                    let pt = TypeExpr(
-                        node=x.node,
-                        range=p.name.range,
-                        kind=TypeKind.Path(segments=[p.name.copy()], args=[]),
-                    )
-                    params.push(self.sources[module.index].ast.add_type(pt))
-                var body = ExprId(index=0)
-                match c.body:
-                    case ClosureBody.Expr(x):
-                        body = x
-                    case _:
-                        return None
-                let ret = self.expr_as_type(module, body) else:
-                    return None
-                kind = TypeKind.Fn(pure=False, params=params, ret=ret)
-            case _:
-                return None
-        return Some(
-            self.sources[module.index].ast.add_type(TypeExpr(node=x.node, range=x.range, kind=kind))
-        )
-
-    ## Whether every part of a type has a generator; `params` are the type
-    ## parameters in scope (each given by a generator parameter).
-    pure def type_ok(
-        self,
-        module: ModuleId,
-        t: TypeExprId,
-        params: list[String],
-        shapes: dict[String, (list[String], list[TypeExprId])],
-        ok: set[String],
-    ) -> bool:
-        match self.ast(module).type_expr(t).kind:
-            case TypeKind.Path(segments, args):
-                if len(segments) != 1:
-                    return False
-                let n = segments[0].text.copy()
-                if params.contains(n.copy()) and args.is_empty():
-                    return True
-                var all = True
-                for a in args:
-                    if not self.type_ok(module, a, params, shapes, ok):
-                        all = False
-                if args.is_empty() and leaf_generator(n):
-                    return True
-                if len(args) == 1
-                        and (
-                            n == "list" or n == "set" or n == "Option" or n == "Box" or n == "Slice"
-                        ):
-                    return all
-                if len(args) == 2 and n == "dict":
-                    return all
-                if let Some(shape) = shapes.get(n.copy()):
-                    if len(shape.0) == len(args) and ok.contains(n.copy()):
-                        return all
-                return False
-            case TypeKind.Option(inner):
-                return self.type_ok(module, inner, params, shapes, ok)
-            case TypeKind.Tuple(es):
-                if es.is_empty():
-                    return False
-                for (_, e) in es:
-                    if not self.type_ok(module, e, params, shapes, ok):
-                        return False
-                return True
-            case _:
-                return False
-
-    ## The text of the root module at `range`.
-    pure def root_text_of(self, range: TextRange) -> String:
-        if range.start < 0 or range.end > self.root_text.byte_len() or range.start > range.end:
-            return String.new()
-        return self.root_text.byte_slice(range.start, range.end).to_string()
-
     # ---------------------------------------------------------------- doc examples
 
     ## The root module's doc examples as tests (stage 0's `doctests.rs`; 10,
     ## "Testing"): a module of its own whose text keeps every example line
     ## where it is, so that a diagnostic in an example points at it, and
     ## whose scope is the root module's.
-    pure def declare_doc_tests(mut self, module: ModuleId, items: list[ItemId]):
+    pure def declare_doc_tests(mut self, module: ModuleId, items: list[ItemId], test_prefix: str):
         # Where each item that can carry a doc comment starts, with the name
         # its examples' tests are named after: a method as `Type.method`.
         var starts: list[(int, String)] = []
@@ -2135,20 +2065,25 @@ impl Resolver:
                         starts.push((m.range.start, "{owner}.{m.name.text}"))
                 case _:
                     pass
-        let examples = doc_examples(self.root_text, starts)
+        let source = self.text_of_module(module)
+        let examples = doc_examples(source, starts)
         if examples.is_empty():
             return
-        let text = doc_test_module(self.root_text, examples)
+        let text = doc_test_module(source, examples)
         let parsed = parse(text, Catalog.parse(""))
         if not parsed.diagnostics.is_empty():
             self.other_error = True
         let generated = build.module(parsed.tree)
         let g_items = generated.items.copy()
-        let g = self.add_module("<doc>/main.sisu", False, generated)
+        let name = "<doc>/{self.prog.modules[module.index].name}.sisu"
+        let g = self.add_module(name, False, generated)
         self.prog.modules[g.index].parent = Some(module)
-        self.doc_module = Some(g)
-        self.doc_text = text
-        self.declare_items(g, g_items, "")
+        self.prog.modules[g.index].package = self.prog.modules[module.index].package
+        # The file keeps the module's name: its lines are the module's.
+        self.prog.modules[g.index].file = self.prog.modules[module.index].file.copy()
+        _ = self.module_texts.insert(g, text.copy())
+        self.docs.push((g, text))
+        self.declare_items(g, g_items, test_prefix)
 
     # ---------------------------------------------------------------- interceptors and fakes
 
@@ -2163,8 +2098,9 @@ impl Resolver:
     pure def declare_trait_shims(mut self, module: ModuleId, items: list[ItemId]):
         if self.is_std(module):
             return
-        let wrap = self.root_text.contains("Wrap")
-        let fakes = self.root_text.contains("Fake")
+        let source = self.text_of_module(module)
+        let wrap = source.contains("Wrap")
+        let fakes = source.contains("Fake")
         if not wrap and not fakes:
             return
         var text = String.new()
@@ -2185,8 +2121,11 @@ impl Resolver:
             return
         let generated = build.module(parse(text, Catalog.parse("")).tree)
         let g_items = generated.items.copy()
-        let g = self.add_module("<shims>/main.sisu", False, generated)
+        let name = "<shims>/{self.prog.modules[module.index].name}.sisu"
+        let g = self.add_module(name, False, generated)
         self.prog.modules[g.index].parent = Some(module)
+        self.prog.modules[g.index].package = self.prog.modules[module.index].package
+        _ = self.module_texts.insert(g, text.copy())
         self.shims.push((g, text.copy()))
         self.declare_items(g, g_items, "")
         for name in faked:
@@ -2238,13 +2177,13 @@ impl Resolver:
             if let Some(r) = m.ret:
                 if self.borrows(module, r):
                     return None
-                let written = self.root_text_of(self.ast(module).type_expr(r).range)
+                let written = self.text_in(module, self.ast(module).type_expr(r).range)
                 ret = " -> {written}"
                 if written != "()":
                     result = Some(written.copy())
             var params: list[String] = []
             for p in m.params:
-                params.push(self.root_text_of(p.range))
+                params.push(self.text_in(module, p.range))
             out.push(
                 ShimMethod(
                     name=m.name.text.copy(),
@@ -2341,7 +2280,7 @@ impl Resolver:
                     # Each case is named after its element as written.
                     var shown = "?".to_string()
                     if self.is_root(module):
-                        shown = self.root_text_of(at)
+                        shown = self.text_in(module, at)
                     out.push(("{name} {shown}", self.case_def(t, first, False)))
             case _:
                 # `for PAT in LIST:` around the body.
@@ -2530,127 +2469,6 @@ impl Resolver:
 
     # ---------------------------------------------------------------- derived impls
 
-    ## The impls the compiler writes for the structs and enums among
-    ## `items` (stage 0's `derive.rs`): each `@derive`d trait's, `PartialOrd`
-    ## with `Ord`, `Debug` for every type without its own, and each
-    ## `@delegate`d trait's. Stage 0 writes them as source from the traits'
-    ## `derive` templates; stage 1 declares their headers, which are what
-    ## the checker reads.
-    pure def declare_derived(mut self, module: ModuleId, items: list[ItemId]):
-        for id in items:
-            let item = self.sources[module.index].ast.item(id).copy()
-            var name = String.new()
-            var gps: list[GenericParam] = []
-            var field_tys: list[TypeExprId] = []
-            var field_names: list[String] = []
-            var is_struct = False
-            match item.kind:
-                case ItemKind.Struct(s):
-                    name = s.name.text.copy()
-                    gps = s.generics.copy()
-                    for f in s.fields:
-                        field_tys.push(f.ty)
-                        field_names.push(f.name.text.copy())
-                    is_struct = True
-                case ItemKind.Enum(e):
-                    name = e.name.text.copy()
-                    gps = e.generics.copy()
-                    for v in e.variants:
-                        for f in v.fields:
-                            field_tys.push(f.ty)
-                case _:
-                    continue
-            let builtin = is_struct and has_attr(item.attrs, "builtin")
-            var has_const = False
-            for g in gps:
-                if g.is_const:
-                    has_const = True
-            if name.is_empty() or has_const:
-                continue
-            let ty = self.prog.lookup_in(module, name) else:
-                continue
-            let used = self.used_params(module, gps, field_tys)
-            var wanted: list[(String, TextRange)] = []
-            for a in item.attrs:
-                if a.name != "derive":
-                    continue
-                for arg in a.args:
-                    var written = String.new()
-                    if let ExprKind.Name(n) = self.ast(module).expr(arg.value).kind:
-                        written = n.copy()
-                    if written == "Copy":
-                        self.copy_checks.push(ty)
-                    elif derivable(written):
-                        var seen = False
-                        for (w, _) in wanted:
-                            if w == written:
-                                seen = True
-                        if not seen:
-                            wanted.push((written, arg.range))
-                    elif not written.is_empty() and self.has_derive_template(module, written):
-                        # Stage 0 runs the trait's `comptime def derive`.
-                        self.beyond_in(module, "a derive template of the program's own")
-                    elif self.is_root(module):
-                        # `resolve.not-derivable`.
-                        self.other_error = True
-            let delegated = self.delegations(module, item.attrs, is_struct, field_names)
-            for (t, _, at) in delegated:
-                self.pending.push(
-                    Pending.Derived(
-                        ty=ty,
-                        module=module,
-                        trait_=t.copy(),
-                        derived=False,
-                        used=used.copy(),
-                        range=at,
-                    )
-                )
-            # `Ord` brings `PartialOrd`, which it determines.
-            var has_ord = False
-            var has_partial = False
-            var ord_at = item.range
-            for (w, at) in wanted:
-                if w == "Ord":
-                    has_ord = True
-                    ord_at = at
-                if w == "PartialOrd":
-                    has_partial = True
-            if has_ord and not has_partial and not self.has_impl(module, items, "PartialOrd", name):
-                wanted.push(("PartialOrd".to_string(), ord_at))
-            # Every type has `Debug` (11): the derived one unless it has its
-            # own.
-            var debug = False
-            for (w, _) in wanted:
-                if w == "Debug":
-                    debug = True
-            for (w, _, _) in delegated:
-                if w == "Debug":
-                    debug = True
-            if not builtin and not debug and not self.has_impl(module, items, "Debug", name):
-                wanted.push(("Debug".to_string(), TextRange.empty(item.range.start)))
-            for (t, at) in wanted:
-                self.pending.push(
-                    Pending.Derived(
-                        ty=ty,
-                        module=module,
-                        trait_=t.copy(),
-                        derived=True,
-                        used=used.copy(),
-                        range=at,
-                    )
-                )
-
-    ## Whether a trait `name` of `module` has a `comptime def derive` (the
-    ## prelude's that have one are the derivable traits).
-    pure def has_derive_template(self, module: ModuleId, name: str) -> bool:
-        for it in self.sources[module.index].items:
-            if let ItemKind.Trait(t) = self.ast(module).item(it).kind:
-                if t.name.text == name:
-                    for f in t.methods:
-                        if f.is_comptime and f.name.text == "derive":
-                            return True
-        return False
-
     ## The traits a struct's `@delegate` forwards, with where each is
     ## named, after checking the attribute (stage 0's `delegations`).
     pub pure def delegations(
@@ -2761,56 +2579,6 @@ impl Resolver:
             case _:
                 pass
 
-    ## The header of an impl the compiler writes: `impl[A: Bound + Trait]
-    ## Trait for P[A]`, each parameter that a field names bounded by the
-    ## trait too.
-    pure def resolve_derived(
-        mut self,
-        ty: DefId,
-        module: ModuleId,
-        trait_name: str,
-        derived: bool,
-        used: list[bool],
-        rng: TextRange,
-    ):
-        let tr = self.prog.lookup(module, trait_name) else:
-            return
-        if self.prog.trait_info(tr).is_none():
-            return
-        let generics = self.prog.type_generics(ty)
-        var names: list[String] = []
-        var predicates: list[Predicate] = []
-        let own_preds = self.preds_of(ty)
-        for i in range(len(generics)):
-            names.push(generics[i].name.copy())
-            let p = self.types.param(i)
-            for q in own_preds:
-                if q.ty == p:
-                    predicates.push(q.copy())
-            if i >= len(used) or used[i]:
-                predicates.push(Predicate(ty=p, bound=TraitRef(def_=tr, args=[]), span=rng))
-        let self_ty = self.self_type(ty, len(generics))
-        var gs: list[Generic] = []
-        for g in generics:
-            gs.push(Generic(name=g.name.copy(), default=None, is_const=g.is_const))
-        let info = ImplInfo(
-            generics=gs,
-            predicates=predicates,
-            trait_ref=TraitRef(def_=tr, args=[]),
-            self_ty=self_ty,
-            methods=[],
-            assoc=[],
-            derived=derived,
-        )
-        let shown_trait = self.prog.defs[tr.index].name.copy()
-        let shown_ty = self.prog.display_in(self.types, self_ty, names)
-        let def_ = self.new_def(
-            module, "impl {shown_trait} for {shown_ty}", rng, Vis.Pub, DefKind.Impl(info)
-        )
-        self.prog.impls.push(def_)
-        if not derived:
-            _ = self.delegated.add(def_)
-
     # ---------------------------------------------------------------- checks of impls
 
     ## The checks of the impls from the definition `first` on, once every
@@ -2843,6 +2611,17 @@ impl Resolver:
                 if self.is_root(module):
                     self.other_error = True
                 continue
+            # The orphan rule: an impl lives in the package of the trait or of
+            # the type, except in the root package, which nothing depends on
+            # (`resolve.orphan-impl`).
+            let package = self.prog.package_of(module)
+            if package != 0 and not self.is_std(module):
+                let trait_pkg = self.prog.package_of(self.prog.defs[tr.index].module)
+                var type_pkg = -1
+                if let TyData.Adt(d, _) = self.types.data(self_ty):
+                    type_pkg = self.prog.package_of(self.prog.defs[d.index].module)
+                if trait_pkg != package and type_pkg != package:
+                    self.other_error = True
             for (mname, mdef) in methods:
                 let tm = self.prog.trait_method(tr, mname) else:
                     # `resolve.not-a-trait-method`.
@@ -2855,8 +2634,11 @@ impl Resolver:
                 if tpure:
                     if let DefKind.Fn(f) = ref mut self.prog.defs[mdef.index].kind:
                         f.pure = True
-            # A delegated impl is a header here, its methods stage 0's.
-            if derived or self.delegated.contains(i) or not self.is_root(module):
+            # A derived or delegated impl's are checked at its attribute
+            # (`check_derives`).
+            if derived
+                    or self.prog.modules[module.index].name.starts_with("<delegate>/")
+                    or not self.is_root(module):
                 continue
             # Each associated type the trait declares without a default is
             # bound (`resolve.missing-assoc-type`).
@@ -3629,12 +3411,47 @@ pure def sorted_members(own v: list[DefId]) -> list[DefId]:
     return out
 
 ## The text of `r` in `text`, or nothing when `r` is not in it.
+## A module of a program's own source, for `Resolver.add_program`: its path
+## (`["atlas", "geo", "point"]`; empty for a single file), the name of its
+## file as diagnostics give it, its syntax and text, and its package (an
+## index of the program's packages, the root package first).
+pub struct SourceModule:
+    pub path: list[String]
+    pub file: String
+    pub syntax: Module
+    pub text: String
+    pub package: int
+
+## A package of a program's source: its name (empty for a single file), its
+## dependencies (by the names its imports give them, as indices of the
+## program's packages) and whether `[trust]` lets it use `unsafe` and
+## `extern`.
+pub struct SourcePackage:
+    pub name: String
+    pub deps: list[(String, int)]
+    pub trusted: bool
+
+## The package of the program's `k`th package in the resolved program, where
+## std is `STD_PACKAGE` (stage 0's `package_id`).
+pure def package_id(k: int) -> int:
+    return if k == 0: 0 else: k + 1
+
+## The prefix of the names of a module's tests: its path within its package
+## (`parser/accepts leading zeros`); none for a root module.
+pure def test_prefix(path: list[String]) -> String:
+    if len(path) <= 1:
+        return String.new()
+    var rest: list[String] = []
+    for i in range(1, len(path)):
+        rest.push(path[i].copy())
+    return rest.join(".")
+
 pure def slice_text(text: str, r: TextRange) -> String:
     if r.start < 0 or r.end > text.byte_len() or r.start > r.end:
         return String.new()
     return text.byte_slice(r.start, r.end).to_string()
 
-pure def has_attr(attrs: list[Attr], name: str) -> bool:
+pub pure def has_attr(attrs: list[Attr], name: str) -> bool:
     for a in attrs:
         if a.name == name:
             return True
@@ -3652,6 +3469,19 @@ pure def primitive(name: str) -> Ty?:
         case _: None
 
 ## A std module's text, from the texts read by name.
+## The `comptime def derive` of each trait of a module (the prelude's),
+## with the module's syntax and text: what `@derive` unfolds.
+pure def derive_templates(own syntax: Module, text: str) -> Templates:
+    var derives: dict[String, FnDef] = {}
+    for it in syntax.items:
+        if let ItemKind.Trait(t) = syntax.ast.item(it).kind:
+            for m in t.methods:
+                if m.is_comptime and m.name.text == "derive":
+                    let src = Src(ast=ref syntax.ast, source="")
+                    if template_parts(src, m).is_some():
+                        _ = derives.insert(t.name.text.copy(), m.copy())
+    return Templates(syntax=syntax.ast, text=text.to_string(), derives=derives)
+
 pure def text_of(texts: dict[String, String], name: str) -> String:
     if let Some(t) = texts.get(name.to_string()):
         return t.copy()
@@ -3700,36 +3530,6 @@ pure def returns_self(name: str) -> bool:
     return match name:
         case "Add" | "Sub" | "Mul" | "Div" | "Rem" | "Neg": True
         case _: False
-
-## The names of generic parameters.
-pure def generic_names(gs: list[GenericParam]) -> list[String]:
-    var out: list[String] = []
-    for g in gs:
-        out.push(g.name.text.copy())
-    return out
-
-## The types whose values the prelude's `Draws` draws itself.
-pure def leaf_generator(n: str) -> bool:
-    return match n:
-        case "int" | "i64" | "bool" | "f64" | "f32" | "char" | "String" | "u8" | "u16": True
-        case "u32": True
-        case "i8" | "i16" | "i32" | "Duration": True
-        case _: False
-
-## A text without its whitespace: a site's key.
-pure def without_spaces(text: str) -> String:
-    var out = String.new()
-    for c in text.chars():
-        if c != ' ' and c != '\n' and c != '\t' and c != '\r':
-            out.push_char(c)
-    return out
-
-## `3`, as the value of an integer literal.
-pure def three_u128() -> u128:
-    var x: u128 = 0
-    for _ in range(3):
-        x = x + 1
-    return x
 
 ## A method of a trait, as the interceptor and the fake write it.
 struct ShimMethod:

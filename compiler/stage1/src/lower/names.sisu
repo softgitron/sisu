@@ -46,6 +46,9 @@ impl Ctx:
         for i in range(len(prog.tests)):
             if prog.tests[i] == d:
                 return "test#{i}"
+        for i in range(len(prog.benches)):
+            if prog.benches[i] == d:
+                return "bench#{i}"
         if let Some(f) = prog.fn_info(d):
             # A refinement's predicate, which the compiler writes.
             if let FnKind.Predicate(r) = f.kind:
@@ -220,6 +223,9 @@ impl Ctx:
         if m == prog.root:
             return self.path.copy()
         let data = ref prog.modules[m.index]
+        # A module of a program of several modules has its file's name.
+        if not data.file.is_empty() and not data.name.starts_with("<"):
+            return data.file.copy()
         if data.name.starts_with("<doc>/"):
             if let Some(p) = data.parent:
                 return self.file_name(prog, p)

@@ -246,7 +246,9 @@ pub struct ConstInfo:
     pub terms: list[Term]
 
 pub struct ModuleData:
-    ## `main` for the root module, `prelude` for the prelude.
+    ## The module's name in SIR: `main` for the root module, the import
+    ## path for the program's other modules (`weather.parser`), the std
+    ## module's name (`json`), or a generated module's (`<derive>/main.sisu`).
     pub name: String
     ## Names declared in or imported into the module.
     pub items: dict[String, DefId]
@@ -258,6 +260,53 @@ pub struct ModuleData:
     ## The names an import bound here, with the import's visibility (a
     ## `pub` import re-exports).
     pub imported: dict[String, Vis]
+    ## The package the module belongs to (an index of `Program.packages`):
+    ## `ROOT_PACKAGE` for the program's own code, `STD_PACKAGE` for the
+    ## standard library, and the others for the dependencies.
+    pub package: int
+    ## The path an import names the module by (`weather.parser`); empty for
+    ## a module no import names.
+    pub path: list[String]
+    ## The name of the module's file, as diagnostics and SIR name it, for a
+    ## module of a program of several modules (`src/geo/point.sisu`).
+    pub file: String
+
+impl ModuleData:
+    pub pure def new(name: str, is_std: bool) -> ModuleData:
+        var package = ROOT_PACKAGE
+        if is_std:
+            package = STD_PACKAGE
+        return ModuleData(
+            name=name.to_string(),
+            items={},
+            order=[],
+            is_std=is_std,
+            parent=None,
+            imported={},
+            package=package,
+            path=[],
+            file=String.new(),
+        )
+
+## The program's own package: the one being built, which nothing depends
+## on (the orphan rule's exception, D-013).
+pub const ROOT_PACKAGE: int = 0
+## The standard library, one package.
+pub const STD_PACKAGE: int = 1
+
+## A package of the program (09): the root package, the standard library,
+## or a dependency.
+pub struct PackageData:
+    ## Its name as `sisu.toml` gives it (and imports name it); empty for a
+    ## single file, which is a package of its own without a name.
+    pub name: String
+    ## `[trust] unsafe` lists it, or it is the root package or std.
+    pub trusted: bool
+    ## The packages its imports may name, by the names they are imported
+    ## by: its own dependencies, as indices of `Program.packages`.
+    pub deps: list[(String, int)]
+    ## Its root module.
+    pub root: ModuleId?
 
 ## Definitions of the prelude that the checker refers to by role.
 pub struct WellKnown:
@@ -414,6 +463,8 @@ pub struct Program:
     pub variants: dict[String, list[(DefId, int)]]
     ## Tests in declaration order.
     pub tests: list[DefId]
+    ## Benchmarks in declaration order.
+    pub benches: list[DefId]
     ## Every trait impl, in declaration order.
     pub impls: list[DefId]
     ## Names in top-level code of the root module that failed to parse.
@@ -426,6 +477,9 @@ pub struct Program:
     pub generator_sites: dict[String, String?]
     ## The call that stands for each such site, by the site's expression.
     pub generator_calls: dict[int, ExprId]
+    ## The budget of steps of the `comptime` expressions of each item with
+    ## `@comptime_budget(steps=N)` (08).
+    pub comptime_budgets: dict[DefId, int]
     ## The files the root module's `embed("path")` calls name, and whether
     ## each could be read (the driver reads them, relative to the file).
     pub embedded: dict[String, bool]
@@ -438,6 +492,14 @@ pub struct Program:
     ## stage 0 declares every module's items before it resolves any, so a
     ## definition's place in its order is its phase and then its index.
     pub phases: list[int]
+    ## The packages: the root package, std, then the dependencies.
+    pub packages: list[PackageData]
+    ## The modules of the program's own source (and the modules of its
+    ## directories), the root module first.
+    pub user_modules: list[ModuleId]
+    ## The types with an `impl Drop`, by definition: no other type's value
+    ## runs a `drop` of its own.
+    pub drop_types: set[DefId]
 
 impl Program:
     pub pure def new() -> Program:
@@ -450,15 +512,20 @@ impl Program:
             methods={},
             variants={},
             tests=[],
+            benches=[],
             impls=[],
             poisoned=set(),
             assoc_consts={},
             generator_sites={},
             generator_calls={},
+            comptime_budgets={},
             embedded={},
             fakes={},
             instances=[],
             phases=[],
+            packages=[],
+            user_modules=[],
+            drop_types=set(),
         )
 
     pub pure def def(self, d: DefId) -> ref Def:
@@ -660,8 +727,7 @@ impl Program:
         return self.vis_allows(d.vis, d.module, from_)
 
     ## Whether an item of `owner` with visibility `vis` may be named from
-    ## `from`. Stage 1 checks one file, so every module that is not the
-    ## standard library's is of the same package.
+    ## `from`: `pub(package)` reaches the modules of the same package.
     pub pure def vis_allows(self, vis: Vis, owner_in: ModuleId, from_in: ModuleId) -> bool:
         let owner = self.scope_module(owner_in)
         let seen_from = self.scope_module(from_in)
@@ -672,8 +738,18 @@ impl Program:
         if self.modules[owner.index].is_std or self.modules[seen_from.index].is_std:
             return True
         return match vis:
-            case Vis.Pub | Vis.PubPackage: True
+            case Vis.Pub: True
+            case Vis.PubPackage: self.package_of(owner) == self.package_of(seen_from)
             case Vis.Private: False
+
+    ## The package a module belongs to, for the orphan rule (03,
+    ## "Coherence") and `pub(package)`.
+    pub pure def package_of(self, m: ModuleId) -> int:
+        if m.index >= len(self.modules):
+            return ROOT_PACKAGE
+        if self.modules[m.index].is_std:
+            return STD_PACKAGE
+        return self.modules[m.index].package
 
     ## `name` in module `m` as code in `from` sees it through the module
     ## (`m.name`, `from m import name`): the item, and whether `from` may
@@ -742,19 +818,41 @@ impl Program:
     ## `@must_consume` (D-054), through containers, options and tuples
     ## (D-064): a type is must-consume when it is declared so or holds one,
     ## in a field or a type argument.
+    ##
+    ## The walk is stage 0's, to the same depth; a type already found to
+    ## hold none from a depth no deeper is not walked again, which gives
+    ## the same answer without the exponential cost of a type whose fields
+    ## nest (decision 180).
     pub pure def must_consume_ty(self, mut types: Types, t: Ty, depth: int) -> bool:
+        var cleared: dict[Ty, int] = {}
+        return self.must_consume_from(mut types, t, depth, mut cleared)
+
+    pure def must_consume_from(
+        self, mut types: Types, t: Ty, depth: int, mut cleared: dict[Ty, int]
+    ) -> bool:
         if depth > 16:
             return False
+        if let Some(at) = cleared.get(t):
+            if at <= depth:
+                return False
+        let found = self.must_consume_walk(mut types, t, depth, mut cleared)
+        if not found:
+            _ = cleared.insert(t, depth)
+        return found
+
+    pure def must_consume_walk(
+        self, mut types: Types, t: Ty, depth: int, mut cleared: dict[Ty, int]
+    ) -> bool:
         match types.data(t).copy():
             case TyData.Tuple(es, _):
                 for e in es:
-                    if self.must_consume_ty(mut types, e, depth + 1):
+                    if self.must_consume_from(mut types, e, depth + 1, mut cleared):
                         return True
                 return False
             case TyData.Adt(d, args):
                 if let Refinement(_) = self.defs[d.index].kind:
                     let base = self.refinement_base(mut types, d, args) ?? Ty.error()
-                    return self.must_consume_ty(mut types, base, depth + 1)
+                    return self.must_consume_from(mut types, base, depth + 1, mut cleared)
                 var flag = False
                 var fields: list[Ty] = []
                 match self.defs[d.index].kind:
@@ -777,11 +875,11 @@ impl Program:
                 if flag:
                     return True
                 for a in args:
-                    if self.must_consume_ty(mut types, a, depth + 1):
+                    if self.must_consume_from(mut types, a, depth + 1, mut cleared):
                         return True
                 for f in fields:
                     let ft = types.subst(f, args)
-                    if self.must_consume_ty(mut types, ft, depth + 1):
+                    if self.must_consume_from(mut types, ft, depth + 1, mut cleared):
                         return True
                 return False
             case _:
@@ -911,20 +1009,32 @@ impl Program:
     ## Whether dropping a value of the type may run a `drop` that is not
     ## `pure`: the type's own `Drop`, or that of a part it owns (a field, a
     ## type argument), which stage 0's ownership checker holds a pure
-    ## function to (E0393).
+    ## function to (E0393). Each type is looked at once, as decision 180
+    ## has stage 0 look at the parts of a type: a type with several fields
+    ## of recursive types made the walk exponential.
     pub pure def drops_impure(self, mut types: Types, ty: Ty, depth: int) -> bool:
-        if depth > 16:
+        var seen: set[Ty] = set()
+        return self.drops_impure_in(mut types, ty, mut seen)
+
+    ## `drops_impure` for one of several types whose answer is wanted
+    ## together: what `seen` holds was walked already.
+    pub pure def drops_impure_in(self, mut types: Types, ty: Ty, mut seen: set[Ty]) -> bool:
+        if seen.contains(ty):
             return False
+        _ = seen.add(ty)
         match types.data(ty).copy():
             case TyData.Tuple(es, _):
                 for e in es:
-                    if self.drops_impure(mut types, e, depth + 1):
+                    if self.drops_impure_in(mut types, e, mut seen):
                         return True
                 return False
             case TyData.Adt(d, args):
                 if let Some(base) = self.refinement_base(mut types, d, args):
-                    return self.drops_impure(mut types, base, depth + 1)
-                if let Some(drop) = self.wk.drop:
+                    return self.drops_impure_in(mut types, base, mut seen)
+                var drop_trait = self.wk.drop
+                if not self.drop_types.contains(d):
+                    drop_trait = None
+                if let Some(drop) = drop_trait:
                     let tr = TraitRef(def_=drop, args=[])
                     if let Some((i, _)) = self.find_impl(mut types, ty, tr, []):
                         if let Some(info) = self.impl_info(i):
@@ -934,7 +1044,7 @@ impl Program:
                                         if not f.pure:
                                             return True
                 for a in args:
-                    if self.drops_impure(mut types, a, depth + 1):
+                    if self.drops_impure_in(mut types, a, mut seen):
                         return True
                 var fields: list[Ty] = []
                 match self.defs[d.index].kind:
@@ -949,7 +1059,7 @@ impl Program:
                         pass
                 for f in fields:
                     let t = types.subst(f, args)
-                    if self.drops_impure(mut types, t, depth + 1):
+                    if self.drops_impure_in(mut types, t, mut seen):
                         return True
                 return False
             case _:

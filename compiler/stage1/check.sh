@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Checks the stage-1 lexer and parser (this package, run on the stage-0
-# interpreter) against the stage-0 Rust front end, byte for byte:
+# Checks stage 1 (this package, run on the stage-0 interpreter, or with
+# --native compiled by stage 0's native backend) against stage 0, byte for
+# byte. First its lexer and parser against the Rust front end:
 #
 #   tokens       `sisu tokens --trivia FILE`, standard output and error
 #   tree         `sisu parse --tree FILE`, standard output and error
@@ -17,17 +18,24 @@
 #   names        `sisu check --format=ids FILE`, its name diagnostics only
 #                (E0200, E0201, E0202, E0220, E0234, E0389, W0002)
 #
-# for the conformance suite's names/ cases and stage 1's own cases, and
-# with --names for every program of the corpus that is one module (the
-# conformance cases outside packages/, and the proposal's examples).
-# Then stage 1's type checker, which covers a slice of the language:
+# for the conformance suite's names/ cases, stage 1's own cases, and the
+# programs of several modules: the conformance suite's packages (each
+# directory NAME.pkg, or the one its NAME.cwd names inside it, which stage
+# 0 checks from inside it) and scripts, and stage 1's own cases/packages/;
+# and with --names for every program of the corpus that is one module (the
+# conformance cases outside packages/ and names/, and the proposal's
+# examples). Then stage 1's type checker, which covers a slice of the
+# language:
 #
-#   types        `sisu check --format=ids FILE`, the type checker's own
-#                diagnostics only (the identifiers that begin with `type.`)
+#   types        `sisu check --format=ids FILE`, the diagnostics whose
+#                identifiers begin with `type.` only (the type checker's,
+#                and six of the ownership checker's)
 #
-# for the files `types.list` names, each of which must be within the slice
-# and match; and with --types for every program of the corpus that is one
-# module, where a file within the slice must match and any other may only
+# for the programs `types.list` names (a file, or the directory of a
+# package or workspace), each of which must be within the slice and match;
+# and with --types for every program of the corpus (the conformance cases
+# outside packages/, the proposal's examples and the programs of several
+# modules), where a file within the slice must match and any other may only
 # report fewer of stage 0's diagnostics (stage 1 says why it is beyond).
 # Then stage 1's lowering and ownership checker, which cover a slice of
 # their own, both from one run of stage 1 per class:
@@ -39,15 +47,30 @@
 #                diagnostics only (E0333, E0366, E0367, E0392, E0393,
 #                E0397, E0400 to E0410, E0416 to E0420, E0428, E0429)
 #
-# for the files `sir.list` names, each of which must be within the slice
-# and match; and with --sir for every program of the corpus that is one
-# module, where a file within the slice must match and any other is
-# beyond it (stage 1 says why).
+# for the programs `sir.list` names, each of which must be within the slice
+# and match; and with --sir for every program of the corpus, where a file
+# within the slice must match and any other is beyond it (stage 1 says
+# why).
 # A difference listed in DISCREPANCIES.md ("- Differs: `path`: outputs") is
 # expected; any other fails the check.
 #
-# Usage: compiler/stage1/check.sh [--mutants N] [--seed S] [--names] [--types] [--sir] [--keep DIR]
+# Then stage 1 over its own package, the first half of D-078's fixed point:
 #
+#   self         this package's name and type diagnostics, and its SIR
+#                module by module: the functions each source file gives
+#                (and the declarations) in what `sisu sir` prints of this
+#                package, against what stage 1 makes of it (`sir
+#                --partial`, the SIR of what lowering reaches also when it
+#                is beyond the slice, which then names why)
+#
+# Usage: compiler/stage1/check.sh [--native] [--self] [--mutants N] [--seed S] [--names] [--types] [--sir] [--keep DIR]
+#
+#   --native     build stage 1 once with stage 0's native backend (`sisu
+#                build --native`) and run that executable for every batch,
+#                instead of `sisu run --` on the interpreter; the outputs
+#                are the same, in minutes instead of an hour; it implies
+#                --self
+#   --self       check stage 1 over its own package (the class `self`)
 #   --mutants N  also compare N mutants of the corpus (deleted, inserted and
 #                swapped characters, from stage 1's `mutate` with seed S);
 #                a mutant may differ only in the way a listed discrepancy
@@ -68,6 +91,8 @@ keep=""
 all_names=0
 all_types=0
 all_sir=0
+native=0
+self_check=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --mutants) mutants="$2"; shift 2 ;;
@@ -76,7 +101,9 @@ while [ $# -gt 0 ]; do
         --names) all_names=1; shift ;;
         --types) all_types=1; shift ;;
         --sir) all_sir=1; shift ;;
-        *) echo "usage: $0 [--mutants N] [--seed S] [--names] [--types] [--sir] [--keep DIR]" >&2; exit 2 ;;
+        --native) native=1; self_check=1; shift ;;
+        --self) self_check=1; shift ;;
+        *) echo "usage: $0 [--native] [--self] [--mutants N] [--seed S] [--names] [--types] [--sir] [--keep DIR]" >&2; exit 2 ;;
     esac
 done
 
@@ -86,14 +113,87 @@ if ! (cd "$compiler" && cargo build --release --quiet); then
     exit 1
 fi
 
+# Stage 0 writes a package's `sisu.lock` beside its manifest when it checks
+# it (09); the run removes the ones it wrote, and leaves the cases as they
+# were.
+lock_dirs=("$compiler/conformance/cases/packages" "$here/cases/packages")
+locks_before=$(find "${lock_dirs[@]}" -name sisu.lock 2> /dev/null | sort)
+forget_locks() {
+    find "${lock_dirs[@]}" -name sisu.lock 2> /dev/null | while read -r f; do
+        grep -qxF "$f" <<< "$locks_before" || rm -f "$f"
+    done
+}
+
 if [ -n "$keep" ]; then
     work="$keep"
     rm -rf "$work"
     mkdir -p "$work"
+    trap forget_locks EXIT
 else
     work=$(mktemp -d)
-    trap 'rm -rf "$work"' EXIT
+    trap 'forget_locks; rm -rf "$work"' EXIT
 fi
+
+# Stage 1 itself, run from its directory (it reads the catalog and the
+# standard library relative to it): on the interpreter, or with --native
+# as the executable stage 0's backend builds once into the work directory.
+stage1_exe=""
+if [ "$native" = 1 ]; then
+    echo "building stage 1 natively (sisu build --native)"
+    if ! (cd "$here" && "$sisu" build --native --output "$work/stage1" > "$work/native.log" 2>&1); then
+        cat "$work/native.log" >&2
+        echo "check.sh: stage 1 does not build natively" >&2
+        exit 1
+    fi
+    stage1_exe="$work/stage1"
+fi
+stage1() {
+    if [ -n "$stage1_exe" ]; then
+        (cd "$here" && "$stage1_exe" "$@")
+    else
+        (cd "$here" && "$sisu" run -- "$@")
+    fi
+}
+
+# Stage 0's outputs, made `jobs` at a time: `parallel FUNCTION LIST REF`
+# runs `FUNCTION N FILE REF` for the Nth file of LIST. `sisu check
+# --format=ids` runs once per file (`check0`), from the file's directory,
+# and the names, types and ownership classes read what it printed.
+jobs=$(nproc 2> /dev/null || echo 4)
+mkdir -p "$work/check0"
+export sisu work
+parallel() {
+    awk -v ref="$3" '{ print NR " " $0 " " ref }' "$2" | xargs -P "$jobs" -L 1 bash -c "$1"' "$@"' _
+}
+stage0_syntax() {
+    "$sisu" tokens --trivia "$2" > "$3/$1.tokens" 2> "$3/$1.tokens.err"
+    "$sisu" parse --tree "$2" > "$3/$1.tree" 2> "$3/$1.tree.err"
+    "$sisu" parse --tree --trivia "$2" > "$3/$1.trivia.tree" 2> /dev/null
+    "$sisu" parse --ast "$2" > "$3/$1.ast" 2> /dev/null
+}
+check0() {
+    echo "$work/check0/$(printf '%s' "$1" | tr '/' '%')"
+}
+stage0_check() {
+    local kept
+    kept=$(check0 "$2")
+    [ -e "$kept" ] && return 0
+    if [ -d "$2" ]; then
+        (cd "$2" && "$sisu" check --format=ids 2> /dev/null) > "$kept.part"
+    else
+        (cd "$(dirname "$2")" && "$sisu" check --format=ids "$(basename "$2")" 2> /dev/null) > "$kept.part"
+    fi
+    mv "$kept.part" "$kept"
+}
+stage0_sir() {
+    if [ -d "$2" ]; then
+        (cd "$2" && "$sisu" sir 2> /dev/null) > "$3/$1.sir"
+    else
+        "$sisu" sir "$2" > "$3/$1.sir" 2> /dev/null
+    fi
+    stage0_check "$@"
+}
+export -f stage0_syntax check0 stage0_check stage0_sir
 
 # The differences DISCREPANCIES.md lists, one "path output" per line.
 allowed="$work/allowed.txt"
@@ -107,12 +207,23 @@ find "$compiler/conformance/cases" -name '*.sisu' | sort > "$work/conformance.li
 find "$compiler/std" -name '*.sisu' | sort > "$work/std.list"
 find "$repo/proposal/examples" -name '*.sisu' | sort > "$work/examples.list"
 find "$here/cases" -name '*.sisu' | sort > "$work/cases.list"
+# The programs of several modules and packages (09): each package case of
+# the conformance suite and of stage 1's own, a directory `NAME.pkg` (or the
+# one `NAME.cwd` names inside it), which stage 0 checks from inside it, and
+# the conformance suite's scripts beside them.
+for cases in "$compiler/conformance/cases/packages" "$here/cases/packages"; do
+    for d in "$cases"/*.pkg; do
+        [ -d "$d" ] || continue
+        if [ -f "${d%.pkg}.cwd" ]; then echo "$d/$(cat "${d%.pkg}.cwd")"; else echo "$d"; fi
+    done
+done > "$work/packages.list"
+find "$compiler/conformance/cases/packages" -maxdepth 1 -name '*.sisu' | sort >> "$work/packages.list"
 classes="conformance std examples cases"
 if [ "$mutants" -gt 0 ]; then
     mkdir -p "$work/mutants.src"
     cat "$work/conformance.list" "$work/std.list" "$work/examples.list" > "$work/corpus.list"
-    if ! (cd "$here" && "$sisu" run -- mutate "$seed" "$mutants" "$work/mutants.src" "$work/corpus.list" \
-            > "$work/mutate.log" 2>&1); then
+    if ! stage1 mutate "$seed" "$mutants" "$work/mutants.src" "$work/corpus.list" \
+            > "$work/mutate.log" 2>&1; then
         cat "$work/mutate.log" >&2
         echo "check.sh: stage 1 could not write the mutants" >&2
         exit 1
@@ -137,17 +248,10 @@ for class in $classes; do
     ref="$work/$class.stage0"; out="$work/$class.stage1"
     mkdir -p "$ref" "$out"
     # Stage 0's outputs.
-    i=0
-    while read -r f; do
-        i=$((i + 1))
-        "$sisu" tokens --trivia "$f" > "$ref/$i.tokens" 2> "$ref/$i.tokens.err"
-        "$sisu" parse --tree "$f" > "$ref/$i.tree" 2> "$ref/$i.tree.err"
-        "$sisu" parse --tree --trivia "$f" > "$ref/$i.trivia.tree" 2> /dev/null
-        "$sisu" parse --ast "$f" > "$ref/$i.ast" 2> /dev/null
-    done < "$list"
+    parallel stage0_syntax "$list" "$ref"
     # Stage 1's, in one run of the interpreter.
     start=$(date +%s.%N)
-    if ! (cd "$here" && "$sisu" run -- batch "$out" "$list" > "$work/$class.log" 2> "$work/$class.stderr"); then
+    if ! stage1 batch "$out" "$list" > "$work/$class.log" 2> "$work/$class.stderr"; then
         cat "$work/$class.stderr" >&2
         echo "check.sh: stage 1 failed on the $class files" >&2
         exit 1
@@ -204,7 +308,8 @@ done
 
 # Name resolution, one module at a time.
 find "$compiler/conformance/cases/names" -name '*.sisu' | sort > "$work/names.list"
-cat "$work/cases.list" >> "$work/names.list"
+grep -v '/packages/' "$work/cases.list" >> "$work/names.list"
+cat "$work/packages.list" >> "$work/names.list"
 name_classes="names"
 if [ "$all_names" = 1 ]; then
     find "$compiler/conformance/cases" -name '*.sisu' | grep -v '/packages/' | grep -v '/names/' | sort \
@@ -218,17 +323,17 @@ for class in $name_classes; do
     n=$(wc -l < "$list" | tr -d ' ')
     ref="$work/$class.stage0"; out="$work/$class.stage1"
     mkdir -p "$ref" "$out"
+    parallel stage0_check "$list" "$ref"
     i=0
     while read -r f; do
         i=$((i + 1))
-        (cd "$(dirname "$f")" && "$sisu" check --format=ids "$(basename "$f")" 2> /dev/null) |
-            awk '/^  / { if (keep) print; next }
-                 { keep = ($2 == "E0200" || $2 == "E0201" || $2 == "E0202" || $2 == "E0220" ||
-                           $2 == "E0234" || $2 == "E0389" || $2 == "W0002"); if (keep) print }' \
-            > "$ref/$i.names"
+        awk '/^  / { if (keep) print; next }
+             { keep = ($2 == "E0200" || $2 == "E0201" || $2 == "E0202" || $2 == "E0220" ||
+                       $2 == "E0234" || $2 == "E0389" || $2 == "W0002"); if (keep) print }' \
+            "$(check0 "$f")" > "$ref/$i.names"
     done < "$list"
     start=$(date +%s.%N)
-    if ! (cd "$here" && "$sisu" run -- names-batch "$out" "$list" > "$work/$class.log" 2> "$work/$class.stderr"); then
+    if ! stage1 names-batch "$out" "$list" > "$work/$class.log" 2> "$work/$class.stderr"; then
         cat "$work/$class.stderr" >&2
         echo "check.sh: stage 1 failed resolving the $class files" >&2
         exit 1
@@ -267,7 +372,7 @@ sed -n 's/^\([^#].*\)$/\1/p' "$here/types.list" | while read -r p; do echo "$rep
 type_classes="types"
 if [ "$all_types" = 1 ]; then
     find "$compiler/conformance/cases" -name '*.sisu' | grep -v '/packages/' | sort > "$work/corpus-types.list"
-    cat "$work/examples.list" >> "$work/corpus-types.list"
+    cat "$work/examples.list" "$work/packages.list" >> "$work/corpus-types.list"
     type_classes="types corpus-types"
 fi
 types_summary=""
@@ -276,15 +381,15 @@ for class in $type_classes; do
     n=$(wc -l < "$list" | tr -d ' ')
     ref="$work/$class.stage0"; out="$work/$class.stage1"
     mkdir -p "$ref" "$out"
+    parallel stage0_check "$list" "$ref"
     i=0
     while read -r f; do
         i=$((i + 1))
-        (cd "$(dirname "$f")" && "$sisu" check --format=ids "$(basename "$f")" 2> /dev/null) |
-            awk '/^  / { if (keep) print; next } { keep = ($3 ~ /^type\./); if (keep) print }' \
-            > "$ref/$i.types"
+        awk '/^  / { if (keep) print; next } { keep = ($3 ~ /^type\./); if (keep) print }' \
+            "$(check0 "$f")" > "$ref/$i.types"
     done < "$list"
     start=$(date +%s.%N)
-    if ! (cd "$here" && "$sisu" run -- types-batch "$out" "$list" > "$work/$class.log" 2> "$work/$class.stderr"); then
+    if ! stage1 types-batch "$out" "$list" > "$work/$class.log" 2> "$work/$class.stderr"; then
         cat "$work/$class.stderr" >&2
         echo "check.sh: stage 1 failed checking the types of the $class files" >&2
         exit 1
@@ -341,7 +446,7 @@ sed -n 's/^\([^#].*\)$/\1/p' "$here/sir.list" | while read -r p; do echo "$repo/
 sir_classes="sir"
 if [ "$all_sir" = 1 ]; then
     find "$compiler/conformance/cases" -name '*.sisu' | grep -v '/packages/' | sort > "$work/corpus-sir.list"
-    cat "$work/examples.list" >> "$work/corpus-sir.list"
+    cat "$work/examples.list" "$work/packages.list" >> "$work/corpus-sir.list"
     sir_classes="sir corpus-sir"
 fi
 sir_summary=""
@@ -351,16 +456,15 @@ for class in $sir_classes; do
     n=$(wc -l < "$list" | tr -d ' ')
     ref="$work/$class.stage0"; out="$work/$class.stage1"
     mkdir -p "$ref" "$out"
+    parallel stage0_sir "$list" "$ref"
     i=0
     while read -r f; do
         i=$((i + 1))
-        "$sisu" sir "$f" > "$ref/$i.sir" 2> /dev/null
-        (cd "$(dirname "$f")" && "$sisu" check --format=ids "$(basename "$f")" 2> /dev/null) |
-            awk -v ids="$own_ids" '/^  / { if (keep) print; next } { keep = ($3 ~ ids); if (keep) print }' \
-            > "$ref/$i.ownership"
+        awk -v ids="$own_ids" '/^  / { if (keep) print; next } { keep = ($3 ~ ids); if (keep) print }' \
+            "$(check0 "$f")" > "$ref/$i.ownership"
     done < "$list"
     start=$(date +%s.%N)
-    if ! (cd "$here" && "$sisu" run -- sir-batch "$out" "$list" > "$work/$class.log" 2> "$work/$class.stderr"); then
+    if ! stage1 sir-batch "$out" "$list" > "$work/$class.log" 2> "$work/$class.stderr"; then
         cat "$work/$class.stderr" >&2
         echo "check.sh: stage 1 failed lowering the $class files" >&2
         exit 1
@@ -414,16 +518,100 @@ for class in $sir_classes; do
     done
 done
 
+# Stage 1 over its own package: its name and type diagnostics, and its
+# SIR, split by the file each function comes from (each function's source
+# written by name), with what is not a function as the declarations.
+self_summary=""
+if [ "$self_check" = 1 ]; then
+    mkdir -p "$work/self.stage0" "$work/self.stage1"
+    cat > "$work/split.awk" <<'SPLIT'
+/^source [0-9]+ "/ {
+    num = $2; name = $0
+    sub(/^source [0-9]+ "/, "", name); sub(/"$/, "", name)
+    src[num] = name
+    next
+}
+/^fn / {
+    line = $0; name = "(no source)"
+    if (match(line, / source [0-9]+ /)) {
+        num = substr(line, RSTART + 8, RLENGTH - 9)
+        name = src[num]
+        line = substr(line, 1, RSTART) "source \"" name "\" " substr(line, RSTART + RLENGTH)
+    }
+    file = name; gsub("/", "%", file); out = dir "/" file
+    print line > out
+    infn = 1
+    next
+}
+infn { print > out; if ($0 == "}") infn = 0; next }
+{ print > (dir "/(declarations)") }
+SPLIT
+    (cd "$here" && "$sisu" check --format=ids 2> /dev/null) > "$work/self.stage0.check"
+    (cd "$here" && "$sisu" sir 2> /dev/null) > "$work/self.stage0.sir"
+    awk '/^  / { if (keep) print; next }
+         { keep = ($2 == "E0200" || $2 == "E0201" || $2 == "E0202" || $2 == "E0220" ||
+                   $2 == "E0234" || $2 == "E0389" || $2 == "W0002"); if (keep) print }' \
+        "$work/self.stage0.check" > "$work/self.stage0.names"
+    awk '/^  / { if (keep) print; next } { keep = ($3 ~ /^type\./); if (keep) print }' \
+        "$work/self.stage0.check" > "$work/self.stage0.types"
+    start=$(date +%s.%N)
+    if ! { stage1 names "$here" > "$work/self.stage1.names" 2> "$work/self.stderr" &&
+           stage1 types "$here" > "$work/self.stage1.types" 2> "$work/self.types.beyond" &&
+           stage1 sir --partial "$here" > "$work/self.stage1.sir" 2> "$work/self.beyond"; }; then
+        cat "$work/self.stderr" >&2
+        echo "check.sh: stage 1 failed over its own package" >&2
+        exit 1
+    fi
+    end=$(date +%s.%N)
+    seconds=$(awk "BEGIN { printf \"%.1f\", $end - $start }")
+    awk -v dir="$work/self.stage0" -f "$work/split.awk" "$work/self.stage0.sir"
+    awk -v dir="$work/self.stage1" -f "$work/split.awk" "$work/self.stage1.sir"
+    why=$(sed -n 's/^beyond the slice: //p' "$work/self.beyond" | head -1)
+    for output in names types; do
+        total=$((total + 1))
+        if cmp -s "$work/self.stage0.$output" "$work/self.stage1.$output" && [ ! -s "$work/self.types.beyond" ]; then
+            identical=$((identical + 1))
+            self_summary="$self_summary\n$(printf '  %-12s identical' "self-$output")"
+        else
+            unlisted=$((unlisted + 1))
+            report="$report\n  UNLISTED: self: $output (stage 0 in $work/self.stage0.$output, stage 1 in $work/self.stage1.$output)"
+            self_summary="$self_summary\n$(printf '  %-12s differing' "self-$output")"
+        fi
+    done
+    n=0; same=0; beyond=0; differing=0
+    for f in $( (ls "$work/self.stage0"; ls "$work/self.stage1") | sort -u); do
+        n=$((n + 1))
+        shown=$(printf '%s' "$f" | tr '%' '/')
+        if cmp -s "$work/self.stage0/$f" "$work/self.stage1/$f"; then
+            same=$((same + 1))
+        elif [ -n "$why" ]; then
+            beyond=$((beyond + 1))
+            report="$report\n  beyond:   self: $shown (stage 1 is beyond the slice of lowering: $why)"
+        else
+            differing=$((differing + 1))
+            report="$report\n  UNLISTED: self: $shown (stage 0 in $work/self.stage0/$f, stage 1 in $work/self.stage1/$f)"
+        fi
+    done
+    total=$((total + n)); identical=$((identical + same)); lowered_beyond=$((lowered_beyond + beyond))
+    unlisted=$((unlisted + differing))
+    self_summary="$self_summary\n$(printf '  %-12s %4d files, %4d identical, %3d beyond the slice, %3d otherwise; stage 1 %6ss' \
+        self-sir "$n" "$same" "$beyond" "$differing" "$seconds")"
+fi
+
 echo "stage 1 against stage 0 (tokens, tree, trivia-tree, print, ast):"
-printf "%b\n" "$summary"
+printf "%b\n" "${summary#\\n}"
 echo "stage 1's name resolution against stage 0's (names):"
-printf "%b\n" "$names_summary"
+printf "%b\n" "${names_summary#\\n}"
 echo "stage 1's type checker against stage 0's (types):"
-printf "%b\n" "$types_summary"
+printf "%b\n" "${types_summary#\\n}"
 echo "stage 1's lowering against stage 0's (sir):"
-printf "%b\n" "$sir_summary"
+printf "%b\n" "${sir_summary#\\n}"
 echo "stage 1's ownership checker against stage 0's (ownership):"
-printf "%b\n" "$own_summary"
+printf "%b\n" "${own_summary#\\n}"
+if [ -n "$self_summary" ]; then
+    echo "stage 1 over its own package against stage 0 (self: names, types, the SIR by source file):"
+    printf "%b\n" "${self_summary#\\n}"
+fi
 [ -n "$report" ] && printf "differences:%b\n" "$report"
 beyond_note=""
 [ "$subsets" -gt 0 ] && beyond_note=", $subsets beyond the type checker's slice and a subset"

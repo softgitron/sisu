@@ -203,7 +203,8 @@ pub pure def lower_body(
             # type arguments (E0600).
             var fl = FnLower.new(types, Some(id), comptime_name(name, id))
             fl.bounds = env.copy()
-            let budget = FnKind.Comptime(DEFAULT_COMPTIME_BUDGET)
+            let steps = prog.comptime_budgets.get(body.def_) ?? DEFAULT_COMPTIME_BUDGET
+            let budget = FnKind.Comptime(steps)
             let (f, t) = fl.run(cx, budget, source, cpure, [], [], [])
             out.push(f)
             types = t

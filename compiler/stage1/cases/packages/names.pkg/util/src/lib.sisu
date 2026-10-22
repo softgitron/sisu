@@ -1,0 +1,4 @@
+pub const VERSION: str = "1"
+
+test "a dependency's tests are not this build's":
+    assert nothing_here

@@ -1,5 +1,7 @@
-# The files stage 1's type checker must check whole and match stage 0 on
-# (check.sh's types class), by their path in the repository.
+# The programs stage 1's type checker must check whole and match stage 0
+# on (check.sh's types class), by their path in the repository: a file, or
+# the directory of a package (or of a workspace), which stage 0 checks from
+# inside it.
 compiler/conformance/cases/capabilities/attenuation.sisu
 compiler/conformance/cases/capabilities/datetime.sisu
 compiler/conformance/cases/capabilities/fake_rejected.sisu
@@ -91,6 +93,7 @@ compiler/conformance/cases/names/unknown_import.sisu
 compiler/conformance/cases/names/user_generics.sisu
 compiler/conformance/cases/ownership/arena.sisu
 compiler/conformance/cases/ownership/arena_stale.sisu
+compiler/conformance/cases/ownership/assign_twice.sisu
 compiler/conformance/cases/ownership/borrowed_results.sisu
 compiler/conformance/cases/ownership/candidate_false_positive.sisu
 compiler/conformance/cases/ownership/cell.sisu
@@ -99,6 +102,8 @@ compiler/conformance/cases/ownership/closure_in_struct.sisu
 compiler/conformance/cases/ownership/closure_modify_captured.sisu
 compiler/conformance/cases/ownership/closure_mut_capture.sisu
 compiler/conformance/cases/ownership/closures.sisu
+compiler/conformance/cases/ownership/conditional_moves.sisu
+compiler/conformance/cases/ownership/dangling_block.sisu
 compiler/conformance/cases/ownership/dangling_loop.sisu
 compiler/conformance/cases/ownership/dict_entries.sisu
 compiler/conformance/cases/ownership/dict_key_view.sisu
@@ -111,6 +116,8 @@ compiler/conformance/cases/ownership/from_without_borrow.sisu
 compiler/conformance/cases/ownership/guard_escape.sisu
 compiler/conformance/cases/ownership/iterate_and_push.sisu
 compiler/conformance/cases/ownership/iteration.sisu
+compiler/conformance/cases/ownership/let_else_tuple.sisu
+compiler/conformance/cases/ownership/let_later.sisu
 compiler/conformance/cases/ownership/modify_while_borrowed.sisu
 compiler/conformance/cases/ownership/move_out_of_drop.sisu
 compiler/conformance/cases/ownership/move_while_borrowed.sisu
@@ -134,6 +141,7 @@ compiler/conformance/cases/ownership/partial_moves.sisu
 compiler/conformance/cases/ownership/proposal_core.sisu
 compiler/conformance/cases/ownership/proposal_graph.sisu
 compiler/conformance/cases/ownership/proposal_shared.sisu
+compiler/conformance/cases/ownership/pure_drop.sisu
 compiler/conformance/cases/ownership/push_while_borrowed.sisu
 compiler/conformance/cases/ownership/recursive_types.sisu
 compiler/conformance/cases/ownership/ref_field.sisu
@@ -144,6 +152,7 @@ compiler/conformance/cases/ownership/returned_views.sisu
 compiler/conformance/cases/ownership/shared.sisu
 compiler/conformance/cases/ownership/shared_immutable.sisu
 compiler/conformance/cases/ownership/shared_owner_errors.sisu
+compiler/conformance/cases/ownership/shared_param_passed_on.sisu
 compiler/conformance/cases/ownership/store_into_caller.sisu
 compiler/conformance/cases/ownership/store_into_caller_paths.sisu
 compiler/conformance/cases/ownership/str_views.sisu
@@ -151,6 +160,7 @@ compiler/conformance/cases/ownership/strview_mutate.sisu
 compiler/conformance/cases/ownership/temporary_borrow.sisu
 compiler/conformance/cases/ownership/two_mut_arguments.sisu
 compiler/conformance/cases/ownership/two_phase.sisu
+compiler/conformance/cases/ownership/uninitialized.sisu
 compiler/conformance/cases/ownership/untested_path.sisu
 compiler/conformance/cases/ownership/use_after_move.sisu
 compiler/conformance/cases/ownership/use_after_move_loop.sisu
@@ -158,6 +168,23 @@ compiler/conformance/cases/ownership/use_while_mut_borrowed.sisu
 compiler/conformance/cases/ownership/view_field.sisu
 compiler/conformance/cases/ownership/view_in_enum.sisu
 compiler/conformance/cases/ownership/views.sisu
+compiler/conformance/cases/packages/cycle.pkg/a
+compiler/conformance/cases/packages/failing_test.pkg
+compiler/conformance/cases/packages/manifest_errors.pkg
+compiler/conformance/cases/packages/manifest_syntax.pkg
+compiler/conformance/cases/packages/missing_member.pkg
+compiler/conformance/cases/packages/modules.pkg
+compiler/conformance/cases/packages/orphan.pkg/app
+compiler/conformance/cases/packages/path_dependency.pkg/app
+compiler/conformance/cases/packages/repl.pkg
+compiler/conformance/cases/packages/script.sisu
+compiler/conformance/cases/packages/script_bad_manifest.sisu
+compiler/conformance/cases/packages/script_main.sisu
+compiler/conformance/cases/packages/script_metadata.sisu
+compiler/conformance/cases/packages/trust.pkg/app
+compiler/conformance/cases/packages/visibility.pkg/app
+compiler/conformance/cases/packages/watch.pkg
+compiler/conformance/cases/packages/workspace.pkg
 compiler/conformance/cases/reflect/cli.sisu
 compiler/conformance/cases/reflect/cli_rejected.sisu
 compiler/conformance/cases/reflect/comptime_panic.sisu
@@ -194,11 +221,13 @@ compiler/conformance/cases/run/f32.sisu
 compiler/conformance/cases/run/format_specs.sisu
 compiler/conformance/cases/run/interpolation.sisu
 compiler/conformance/cases/run/iterators.sisu
+compiler/conformance/cases/run/let_else_copy.sisu
 compiler/conformance/cases/run/list_keys.sisu
 compiler/conformance/cases/run/lossless_layout.sisu
 compiler/conformance/cases/run/main_error.sisu
 compiler/conformance/cases/run/missing_key.sisu
 compiler/conformance/cases/run/options.sisu
+compiler/conformance/cases/run/or_bindings.sisu
 compiler/conformance/cases/run/overflow.sisu
 compiler/conformance/cases/run/parse_int.sisu
 compiler/conformance/cases/run/pure_functions.sisu
@@ -273,9 +302,11 @@ compiler/conformance/cases/traits/derive_field.sisu
 compiler/conformance/cases/traits/dyn_values.sisu
 compiler/conformance/cases/traits/from_literal.sisu
 compiler/conformance/cases/traits/generic_defaults.sisu
+compiler/conformance/cases/traits/impure_impl.sisu
 compiler/conformance/cases/traits/method_needs_bound.sisu
 compiler/conformance/cases/traits/missing_assoc_type.sisu
 compiler/conformance/cases/traits/missing_method.sisu
+compiler/conformance/cases/traits/must_consume_generic.sisu
 compiler/conformance/cases/traits/not_a_method.sisu
 compiler/conformance/cases/traits/not_a_trait.sisu
 compiler/conformance/cases/traits/not_derivable.sisu
@@ -307,6 +338,8 @@ compiler/conformance/cases/types/missing_return.sisu
 compiler/conformance/cases/types/mixed_numbers.sisu
 compiler/conformance/cases/types/no_truthiness.sisu
 compiler/conformance/cases/types/non_exhaustive.sisu
+compiler/conformance/cases/types/or_bindings.sisu
+compiler/conformance/cases/types/pure_violation.sisu
 compiler/conformance/cases/types/sized_literals.sisu
 compiler/conformance/cases/types/try_context.sisu
 compiler/conformance/cases/types/typed_hole.sisu
@@ -368,3 +401,4 @@ proposal/examples/wordcount.sisu
 compiler/stage1/cases/type_calls.sisu
 compiler/stage1/cases/type_conversions.sisu
 compiler/stage1/cases/type_flow.sisu
+compiler/stage1/cases/packages/names.pkg/app
