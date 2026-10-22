@@ -48,6 +48,11 @@ pub enum DefKind:
 pub struct RefinementInfo:
     pub generics: list[Generic]
     pub base: Ty
+    ## The function the compiler writes for the predicate, `where(self) ->
+    ## bool`.
+    pub predicate: DefId?
+    ## The predicate as written, for messages.
+    pub text: String
 
 ## `ty: bound`, from a generic parameter's bounds or a `where` clause.
 @derive(Eq)
@@ -90,6 +95,9 @@ pub struct ImplInfo:
     pub methods: list[(String, DefId)]
     ## The associated types it binds.
     pub assoc: list[(String, Ty)]
+    ## Written by the compiler for `@derive` (or a struct's or enum's own
+    ## `Debug`): it compares, hashes or prints the fields.
+    pub derived: bool
 
 pub struct StructInfo:
     pub generics: list[Generic]
@@ -132,6 +140,11 @@ pub enum FnKind:
     Assoc
     Test(String)
     Drop
+    ## The predicate of the refinement type, written by the compiler.
+    Predicate(DefId)
+    ## The check of the struct's `invariant` lines, written by the
+    ## compiler.
+    Invariant(DefId)
 
 pub struct Generic:
     pub name: String
@@ -203,6 +216,9 @@ pub struct ModuleData:
     ## Whether this is a standard-library module (intrinsics allowed).
     pub is_std: bool
     pub parent: ModuleId?
+    ## The names an import bound here, with the import's visibility (a
+    ## `pub` import re-exports).
+    pub imported: dict[String, Vis]
 
 ## Definitions of the prelude that the checker refers to by role.
 pub struct WellKnown:
@@ -238,6 +254,14 @@ pub struct WellKnown:
     pub sync: DefId?
     pub escapable: DefId?
     pub system: DefId?
+    pub formatter: DefId?
+    pub fs_ops: DefId?
+    pub net_ops: DefId?
+    pub clock_ops: DefId?
+    pub rand_ops: DefId?
+    pub env_ops: DefId?
+    pub stdin_ops: DefId?
+    pub proc_ops: DefId?
 
 impl WellKnown:
     pub pure def none() -> WellKnown:
@@ -274,6 +298,14 @@ impl WellKnown:
             sync=None,
             escapable=None,
             system=None,
+            formatter=None,
+            fs_ops=None,
+            net_ops=None,
+            clock_ops=None,
+            rand_ops=None,
+            env_ops=None,
+            stdin_ops=None,
+            proc_ops=None,
         )
 
 ## The traits `@derive` knows (stage 0's `derive::DERIVABLE`): every
@@ -325,6 +357,12 @@ impl Match:
             return Match.Unknown
         return Match.Yes
 
+## The auto traits (06, "Send, Sync, and shared state").
+@derive(Eq, Copy)
+pub enum Auto:
+    Send
+    Sync
+
 pub struct Program:
     pub defs: list[Def]
     pub modules: list[ModuleData]
@@ -341,6 +379,19 @@ pub struct Program:
     pub impls: list[DefId]
     ## Names in top-level code of the root module that failed to parse.
     pub poisoned: set[String]
+    ## Associated constants by type and name (`Money.ZERO`).
+    pub assoc_consts: dict[(TyKey, String), DefId]
+    ## The types written in `arbitrary[T]` and `exhaustive[T](...)`, by
+    ## their text without whitespace: the generator the compiler writes
+    ## for it, or `None` when it has none.
+    pub generator_sites: dict[String, String?]
+    ## The call that stands for each such site, by the site's expression.
+    pub generator_calls: dict[int, ExprId]
+    ## The files the root module's `embed("path")` calls name, and whether
+    ## each could be read (the driver reads them, relative to the file).
+    pub embedded: dict[String, bool]
+    ## The fake the compiler wrote for each trait of the program's own.
+    pub fakes: dict[DefId, DefId]
 
 impl Program:
     pub pure def new() -> Program:
@@ -355,6 +406,11 @@ impl Program:
             tests=[],
             impls=[],
             poisoned=set(),
+            assoc_consts={},
+            generator_sites={},
+            generator_calls={},
+            embedded={},
+            fakes={},
         )
 
     pub pure def def(self, d: DefId) -> ref Def:
@@ -432,6 +488,439 @@ impl Program:
         if let Refinement(r) = self.defs[d.index].kind:
             return Some(types.subst(r.base, args))
         return None
+
+    pub pure def refinement(self, d: DefId) -> ref RefinementInfo?:
+        if let Refinement(r) = self.defs[d.index].kind:
+            return Some(r)
+        return None
+
+    ## The type with every refinement replaced by its base, at the top
+    ## only (`Port` is `int`; `list[Port]` stays as it is).
+    pub pure def unrefine(self, mut types: Types, ty: Ty) -> Ty:
+        var t = ty
+        for _ in range(16):
+            let TyData.Adt(d, args) = types.data(t).copy() else:
+                return t
+            let b = self.refinement_base(mut types, d, args) else:
+                return t
+            t = b
+        return t
+
+    ## The check of a struct's invariant, `T.__check_invariant`, when the
+    ## struct has `invariant` lines.
+    pub pure def invariant_check(self, d: DefId) -> DefId?:
+        let m = self.method(TyKey.Adt(d), "__check_invariant") else:
+            return None
+        let f = self.fn_info(m) else:
+            return None
+        if let FnKind.Invariant(_) = f.kind:
+            return Some(m)
+        return None
+
+    ## The operations trait of a capability handle type (`Fs`: `FsOps`).
+    pub pure def capability_ops(self, d: DefId) -> DefId?:
+        let b = self.builtin(d) else:
+            return None
+        let wk = ref self.wk
+        let bs: str = b
+        return match bs:
+            case "Fs": wk.fs_ops
+            case "Net": wk.net_ops
+            case "Clock": wk.clock_ops
+            case "Rand": wk.rand_ops
+            case "Env": wk.env_ops
+            case "Proc": wk.proc_ops
+            case "Stdin": wk.stdin_ops
+            case _: None
+
+    ## Associated constant `name` of the type with key `k`.
+    pub pure def assoc_const(self, k: TyKey, name: str) -> DefId?:
+        if let Some(d) = self.assoc_consts.get((k, name.to_string())):
+            return Some(d)
+        return None
+
+    # ---------------------------------------------------------------- visibility
+
+    ## The module whose names `module` sees: itself, or for a module of
+    ## derived impls, the module of the types.
+    pub pure def scope_module(self, module: ModuleId) -> ModuleId:
+        if module.index < len(self.modules):
+            if let Some(p) = self.modules[module.index].parent:
+                return p
+        return module
+
+    ## Whether code in `from` may name `def_`, an item of another module
+    ## (09, "Modules"): items are private to their module unless `pub`. A
+    ## module is always reachable by its path, and the standard library's
+    ## items are all public in stage 0.
+    pub pure def visible_from(self, def_: DefId, from_: ModuleId) -> bool:
+        let d = ref self.defs[def_.index]
+        if let Module(_) = d.kind:
+            return True
+        return self.vis_allows(d.vis, d.module, from_)
+
+    ## Whether an item of `owner` with visibility `vis` may be named from
+    ## `from`. Stage 1 checks one file, so every module that is not the
+    ## standard library's is of the same package.
+    pub pure def vis_allows(self, vis: Vis, owner_in: ModuleId, from_in: ModuleId) -> bool:
+        let owner = self.scope_module(owner_in)
+        let seen_from = self.scope_module(from_in)
+        if owner == seen_from:
+            return True
+        if owner.index >= len(self.modules) or seen_from.index >= len(self.modules):
+            return True
+        if self.modules[owner.index].is_std or self.modules[seen_from.index].is_std:
+            return True
+        return match vis:
+            case Vis.Pub | Vis.PubPackage: True
+            case Vis.Private: False
+
+    ## `name` in module `m` as code in `from` sees it through the module
+    ## (`m.name`, `from m import name`): the item, and whether `from` may
+    ## name it there. A name an import bound in `m` is seen only when the
+    ## import is `pub` (a re-export).
+    pub pure def member(self, m: ModuleId, name: str, from_: ModuleId) -> (DefId, bool)?:
+        if m.index >= len(self.modules):
+            return None
+        let data = ref self.modules[m.index]
+        var found: DefId? = None
+        if let Some(x) = data.items.get(name.to_string()):
+            found = Some(x)
+        let d = found else:
+            return None
+        if let Some(vis) = data.imported.get(name.to_string()):
+            return Some((d, self.vis_allows(vis, m, from_)))
+        return Some((d, self.visible_from(d, from_)))
+
+    # ---------------------------------------------------------------- views and auto traits
+
+    ## Whether a value of the type can hold a loan at all: a view, and also
+    ## a function value (a closure borrows its captures) and an iterator or
+    ## dict entry (they borrow what they walk). A generic parameter can,
+    ## since it may stand for any of these.
+    pub pure def can_borrow(self, mut types: Types, ty: Ty) -> bool:
+        let data = types.data(ty).copy()
+        if let TyData.Adt(d, args) = data:
+            if let Some(b) = self.refinement_base(mut types, d, args):
+                return self.can_borrow(mut types, b)
+        match data:
+            case TyData.Ref(_, _) | TyData.Str | TyData.Fn(_, _, _) | TyData.Param(_) | TyData.Var(
+                _
+            ) | TyData.Error:
+                return True
+            case TyData.Tuple(es, _):
+                for t in es:
+                    if self.can_borrow(mut types, t):
+                        return True
+                return False
+            case TyData.Adt(d, args):
+                match self.defs[d.index].kind:
+                    case Struct(s):
+                        if let Some(b) = s.builtin:
+                            let bs: str = b
+                            match bs:
+                                case "Iter" | "Entry" | "Iterable" | "MutexGuard" | "Lent" | "Slice":
+                                    return True
+                                case _:
+                                    pass
+                        elif s.view_:
+                            return True
+                        for t in args:
+                            if self.can_borrow(mut types, t):
+                                return True
+                        return False
+                    case Enum(_):
+                        for t in args:
+                            if self.can_borrow(mut types, t):
+                                return True
+                        return False
+                    case _:
+                        return False
+            case _:
+                return False
+
+    ## `@must_consume` (D-054), through containers, options and tuples
+    ## (D-064): a type is must-consume when it is declared so or holds one,
+    ## in a field or a type argument.
+    pub pure def must_consume_ty(self, mut types: Types, t: Ty, depth: int) -> bool:
+        if depth > 16:
+            return False
+        match types.data(t).copy():
+            case TyData.Tuple(es, _):
+                for e in es:
+                    if self.must_consume_ty(mut types, e, depth + 1):
+                        return True
+                return False
+            case TyData.Adt(d, args):
+                if let Refinement(_) = self.defs[d.index].kind:
+                    let base = self.refinement_base(mut types, d, args) ?? Ty.error()
+                    return self.must_consume_ty(mut types, base, depth + 1)
+                var flag = False
+                var fields: list[Ty] = []
+                match self.defs[d.index].kind:
+                    case Struct(s):
+                        flag = s.must_consume
+                        for f in s.fields:
+                            fields.push(f.ty)
+                    case Enum(e):
+                        flag = e.must_consume
+                        for v in e.variants:
+                            for (_, ft) in v.fields:
+                                fields.push(ft)
+                    case ErrorSet(e):
+                        flag = e.must_consume
+                        for v in e.variants:
+                            for (_, ft) in v.fields:
+                                fields.push(ft)
+                    case _:
+                        pass
+                if flag:
+                    return True
+                for a in args:
+                    if self.must_consume_ty(mut types, a, depth + 1):
+                        return True
+                for f in fields:
+                    let ft = types.subst(f, args)
+                    if self.must_consume_ty(mut types, ft, depth + 1):
+                        return True
+                return False
+            case _:
+                return False
+
+    ## Whether the type is `Send` (or `Sync`) by the structural rule (06):
+    ## stage 0's `auto_trait`, without the part of the type in the way.
+    pub pure def auto_trait(
+        self, mut types: Types, ty: Ty, auto: Auto, env: list[Predicate]
+    ) -> bool:
+        var seen: list[(DefId, list[Ty], Auto)] = []
+        return self.auto_depth(mut types, ty, auto, env, mut seen, 0)
+
+    pure def auto_bound(self, auto: Auto) -> DefId?:
+        return match auto:
+            case Auto.Send: self.wk.send
+            case Auto.Sync: self.wk.sync
+
+    pure def auto_depth(
+        self,
+        mut types: Types,
+        ty: Ty,
+        auto: Auto,
+        env: list[Predicate],
+        mut seen: list[(DefId, list[Ty], Auto)],
+        depth: int,
+    ) -> bool:
+        if depth > 64:
+            return True
+        match types.data(ty).copy():
+            case TyData.Int | TyData.Float | TyData.Bool | TyData.Char | TyData.Str | TyData.Unit:
+                return True
+            case TyData.Never | TyData.Error | TyData.Const(_) | TyData.Var(_):
+                return True
+            case TyData.Ref(inner, mutable):
+                let need = if mutable and auto == Auto.Send: Auto.Send else: Auto.Sync
+                return self.auto_depth(mut types, inner, need, env, mut seen, depth + 1)
+            case TyData.Tuple(es, _):
+                for e in es:
+                    if not self.auto_depth(mut types, e, auto, env, mut seen, depth + 1):
+                        return False
+                return True
+            case TyData.Fn(_, _, _):
+                return False
+            case TyData.Dyn(tr):
+                let want = self.auto_bound(auto)
+                for t in self.elaborate(mut types, ty, tr):
+                    if Some(t.def_) == want:
+                        return True
+                return False
+            case TyData.Param(_) | TyData.Assoc(_, _, _):
+                let want = self.auto_bound(auto)
+                for p in env:
+                    if p.ty == ty and Some(p.bound.def_) == want:
+                        return True
+                return False
+            case TyData.ErrSet(members):
+                for d in members:
+                    if not self.adt_auto(mut types, d, [], auto, env, mut seen, depth):
+                        return False
+                return True
+            case TyData.Adt(d, args):
+                let arg0 = args.first() ?? Ty.error()
+                let b = self.builtin(d) else:
+                    return self.adt_auto(mut types, d, args, auto, env, mut seen, depth)
+                let bs: str = b
+                match bs:
+                    case "Cell":
+                        if auto == Auto.Sync:
+                            return False
+                        return self.auto_depth(mut types, arg0, Auto.Send, env, mut seen, depth + 1)
+                    case "Mutex" | "Sender" | "Receiver" | "Handle":
+                        return self.auto_depth(mut types, arg0, Auto.Send, env, mut seen, depth + 1)
+                    case "MutexGuard":
+                        if auto == Auto.Send:
+                            return False
+                        return self.auto_depth(mut types, arg0, Auto.Sync, env, mut seen, depth + 1)
+                    # A `Cap` is shared by its copies, a `Lent` is a view of
+                    # a capability: both are references in effect.
+                    case "Shared" | "Weak" | "Cap" | "Lent" | "Slice":
+                        return self.auto_depth(mut types, arg0, Auto.Sync, env, mut seen, depth + 1)
+                    case _:
+                        for a in args:
+                            if not self.auto_depth(mut types, a, auto, env, mut seen, depth + 1):
+                                return False
+                        return True
+
+    pure def adt_auto(
+        self,
+        mut types: Types,
+        d: DefId,
+        args: list[Ty],
+        auto: Auto,
+        env: list[Predicate],
+        mut seen: list[(DefId, list[Ty], Auto)],
+        depth: int,
+    ) -> bool:
+        if let Some(base) = self.refinement_base(mut types, d, args):
+            return self.auto_depth(mut types, base, auto, env, mut seen, depth + 1)
+        for (sd, sargs, sa) in seen:
+            if sd == d and sargs == args and sa == auto:
+                return True
+        seen.push((d, args.copy(), auto))
+        var fields: list[Ty] = []
+        match self.defs[d.index].kind:
+            case Struct(s):
+                for f in s.fields:
+                    fields.push(f.ty)
+            case Enum(e):
+                for v in e.variants:
+                    for (_, t) in v.fields:
+                        fields.push(t)
+            case ErrorSet(e):
+                for v in e.variants:
+                    for (_, t) in v.fields:
+                        fields.push(t)
+            case _:
+                pass
+        for f in fields:
+            let t = types.subst(f, args)
+            if not self.auto_depth(mut types, t, auto, env, mut seen, depth + 1):
+                return False
+        return True
+
+    ## Whether dropping a value of the type may run a `drop` that is not
+    ## `pure`: the type's own `Drop`, or that of a part it owns (a field, a
+    ## type argument), which stage 0's ownership checker holds a pure
+    ## function to (E0393).
+    pub pure def drops_impure(self, mut types: Types, ty: Ty, depth: int) -> bool:
+        if depth > 16:
+            return False
+        match types.data(ty).copy():
+            case TyData.Tuple(es, _):
+                for e in es:
+                    if self.drops_impure(mut types, e, depth + 1):
+                        return True
+                return False
+            case TyData.Adt(d, args):
+                if let Some(base) = self.refinement_base(mut types, d, args):
+                    return self.drops_impure(mut types, base, depth + 1)
+                if let Some(drop) = self.wk.drop:
+                    let tr = TraitRef(def_=drop, args=[])
+                    if let Some((i, _)) = self.find_impl(mut types, ty, tr, []):
+                        if let Some(info) = self.impl_info(i):
+                            for (n, m) in info.methods:
+                                if n == "drop":
+                                    if let Some(f) = self.fn_info(m):
+                                        if not f.pure:
+                                            return True
+                for a in args:
+                    if self.drops_impure(mut types, a, depth + 1):
+                        return True
+                var fields: list[Ty] = []
+                match self.defs[d.index].kind:
+                    case Struct(s):
+                        for f in s.fields:
+                            fields.push(f.ty)
+                    case Enum(e):
+                        for v in e.variants:
+                            for (_, t) in v.fields:
+                                fields.push(t)
+                    case _:
+                        pass
+                for f in fields:
+                    let t = types.subst(f, args)
+                    if self.drops_impure(mut types, t, depth + 1):
+                        return True
+                return False
+            case _:
+                return False
+
+    ## Whether `ty` implements the trait `tr` (one of `Display`, `Debug`,
+    ## `Eq`, `PartialOrd`, `Ord`, `Hash`) structurally, the way the
+    ## interpreter compares, orders, hashes and prints values: by the
+    ## language's rules, the standard library's impls and derived impls,
+    ## all the way down.
+    pub pure def is_structural(self, mut types: Types, ty: Ty, tr: DefId) -> bool:
+        return self.structural_depth(mut types, ty, tr, 0)
+
+    pure def structural_depth(self, mut types: Types, ty: Ty, tr: DefId, depth: int) -> bool:
+        if depth > 16:
+            return False
+        match types.data(ty).copy():
+            case TyData.Int | TyData.Float | TyData.Bool | TyData.Char | TyData.Str | TyData.Unit:
+                return True
+            case TyData.Never | TyData.Error | TyData.Const(_) | TyData.ErrSet(_):
+                return True
+            case TyData.Ref(t, _):
+                return self.structural_depth(mut types, t, tr, depth + 1)
+            case TyData.Tuple(es, _):
+                for e in es:
+                    if not self.structural_depth(mut types, e, tr, depth + 1):
+                        return False
+                return True
+            case TyData.Fn(_, _, _):
+                return Some(tr) == self.wk.debug
+            case TyData.Adt(d, args):
+                let tref = TraitRef(def_=tr, args=[])
+                let found_impl = self.find_impl(mut types, ty, tref, []) else:
+                    return False
+                let (imp, iargs) = found_impl
+                let info = self.impl_info(imp) else:
+                    return False
+                let module = ref self.modules[self.defs[imp.index].module.index]
+                if info.derived:
+                    # The derived impl compares or prints the fields.
+                    var fields: list[Ty] = []
+                    match self.defs[d.index].kind:
+                        case Struct(s):
+                            for f in s.fields:
+                                fields.push(types.subst(f.ty, args))
+                        case Enum(e):
+                            for v in e.variants:
+                                for (_, t) in v.fields:
+                                    fields.push(types.subst(t, args))
+                        case _:
+                            pass
+                    for f in fields:
+                        if not self.structural_depth(mut types, f, tr, depth + 1):
+                            return False
+                    for a in iargs:
+                        if not self.structural_depth(mut types, a, tr, depth + 1):
+                            return False
+                    return True
+                let name: str = self.defs[d.index].name
+                let core = name == "Option"
+                    or name == "Result"
+                    or name == "Ordering"
+                    or name == "Box"
+                if module.is_std and (self.builtin(d).is_some() or core):
+                    # std's impls of the host-backed types and the core
+                    # enums render as the host does.
+                    for a in args:
+                        if not self.structural_depth(mut types, a, tr, depth + 1):
+                            return False
+                    return True
+                return False
+            case _:
+                return False
 
     ## Looks a name up in a module (and the module it derives for), then in
     ## the prelude.
@@ -799,10 +1288,17 @@ impl Program:
             if self.is_copy(mut types, ty):
                 return Answer.Yes(ImplSource.Builtin)
             return Answer.No
-        # `Send`, `Sync` and `Escapable` are structural (06); stage 1 does
-        # not decide them.
-        if t == self.wk.send or t == self.wk.sync or t == self.wk.escapable:
-            return Answer.Unknown
+        # `Send` and `Sync` are structural (06), and so is `Escapable`:
+        # whatever holds no reference or view.
+        if t == self.wk.send or t == self.wk.sync:
+            let auto = if t == self.wk.send: Auto.Send else: Auto.Sync
+            if self.auto_trait(mut types, ty, auto, env):
+                return Answer.Yes(ImplSource.Builtin)
+            return Answer.No
+        if t == self.wk.escapable:
+            if not self.can_borrow(mut types, ty):
+                return Answer.Yes(ImplSource.Builtin)
+            return Answer.No
         # A refinement implements the reading traits of its base (07).
         if let TyData.Adt(d, args) = types.data(ty).copy():
             if let Some(base) = self.refinement_base(mut types, d, args):
@@ -874,26 +1370,7 @@ impl Program:
             return ok
         if unknown:
             return Answer.Unknown
-        # Stage 1: an impl stage 0 derives (`@derive`, `@delegate`, and the
-        # `Debug` every struct and enum has) is not declared here.
-        if self.may_derive(types, ty, tr.def_):
-            return Answer.Unknown
         return Answer.No
-
-    ## Whether stage 0 may have derived an impl of `tr` for `ty`.
-    pure def may_derive(self, types: Types, ty: Ty, tr: DefId) -> bool:
-        let name = self.defs[tr.index].name.copy()
-        if let TyData.Adt(d, _) = types.data(ty):
-            match self.defs[d.index].kind:
-                case Struct(s):
-                    if s.builtin.is_some():
-                        return False
-                    return derivable(name) or s.derives.contains(name)
-                case Enum(e):
-                    return derivable(name) or e.derives.contains(name)
-                case _:
-                    return False
-        return False
 
     ## The traits that a `ref T` implements whenever `T` does: those whose
     ## methods only read.
@@ -1039,11 +1516,10 @@ impl Program:
     ## The traits whose methods named `name` a value of type `ty` can call:
     ## for a generic parameter, its bounds; for `dyn T`, `T` and its
     ## supertraits; otherwise every trait the type implements. Each comes
-    ## with the trait's arguments. `Unknown` in place of the list when an
-    ## answer stage 1 cannot give decides it.
+    ## with the trait's arguments.
     pub pure def trait_methods_for(
         self, mut types: Types, ty: Ty, name: str, env: list[Predicate]
-    ) -> list[(TraitRef, DefId)]?:
+    ) -> list[(TraitRef, DefId)]:
         var out: list[(TraitRef, DefId)] = []
         match types.data(ty).copy():
             case TyData.Param(_) | TyData.Assoc(_, _, _):
@@ -1064,13 +1540,8 @@ impl Program:
                         continue
                     if info.generics.is_empty():
                         let tr = TraitRef(def_=d, args=[])
-                        match self.implements(mut types, ty, tr, env):
-                            case Yes(_):
-                                push_method(self, tr, name, mut out)
-                            case Unknown:
-                                return None
-                            case No:
-                                pass
+                        if self.implements(mut types, ty, tr, env).holds():
+                            push_method(self, tr, name, mut out)
                     else:
                         for im in self.impls:
                             let ii = self.impl_info(im) else:
@@ -1086,7 +1557,7 @@ impl Program:
                                     args.push(b.copy() ?? Ty.error())
                                 let tr = types.subst_trait(ii.trait_ref, args)
                                 push_method(self, tr, name, mut out)
-        return Some(out)
+        return out
 
     ## The first `dyn Trait` a type holds by value rather than behind a
     ## `ref` or in a `Box` (03, "Dispatch": `dyn` is unsized).

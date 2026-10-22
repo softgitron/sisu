@@ -1,23 +1,24 @@
-##! Calls (stage 0's `sisu-typeck/src/call.rs`): functions and methods,
-##! with keyword arguments, defaults and `mut` at the call site, and the
-##! variants of enums. Constructors, static paths (`Type.f`, `module.f`),
-##! calls of trait methods and of function values, and trailing blocks are
-##! beyond the slice.
+##! Calls (stage 0's `sisu-typeck/src/call.rs`): functions, methods,
+##! associated functions, constructors and variants, with keyword
+##! arguments, defaults, `mut` at the call site and trailing `do` blocks.
 
 from stage1.diag import Edit, Msg, TextRange
-from stage1.syntax.ast import Arg, ExprId, ExprKind, IndexArg, Mode, Name
+from stage1.syntax.ast import Arg, Ast, Closure, ExprId, ExprKind, IndexArg, Mode, Name, StrPart
 from stage1.typeck.check import Checker, Cx, primitive
+from stage1.typeck.expr import ClosureParamSrc, ClosureSource, is_var_data
 from stage1.typeck.program import DefKind, ModuleId
-from stage1.typeck.thir import TExprId, TExprKind
-from stage1.typeck.ty import DefId, Ty, TyData, TyKey
+from stage1.typeck.tasks import task_call
+from stage1.typeck.thir import ArgMode, Callee, FieldInit, ForMode, TArg, TExprId, TExprKind
+from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, TyKey
 
-## A name that denotes a module, a type, a trait or a generic function
-## rather than a value.
+## A name that denotes a module, a type, a function or a trait rather than
+## a value.
 pub enum StaticPath:
     Module(ModuleId)
     Type(Ty)
     ## A generic function, with the type arguments written after it.
     Fn(def_: DefId, args: list[Ty]?)
+    ## A trait, whose methods are called as `Trait.method(x, ...)`.
     Trait(DefId)
 
 ## A parameter of a function as a call sees it, its type instantiated.
@@ -42,17 +43,26 @@ pub struct InstSig:
     pub keyword_only_from: int?
     pub positional_only_until: int
 
+## An argument as the matching of arguments to parameters sees it: one
+## written in the parentheses, or the trailing `do` block.
+pub struct ArgIn:
+    pub name: Name?
+    pub mutable: bool
+    ## The argument's expression; `None` for a trailing block.
+    pub value: ExprId?
+    pub closure: Closure?
+    pub range: TextRange
+    ## Where the value is written.
+    pub value_range: TextRange
+
 impl Checker:
-    ## Checks the arguments of a call whose callee is not checked: each on
-    ## its own.
+    ## Checks arguments for their own errors when the callee is unknown.
     pub pure def check_args_loosely(mut self, cx: Cx, args: list[Arg]):
         for a in args:
             _ = self.infer_expr(cx, a.value, None)
 
     # ---------------------------------------------------------------- static paths
 
-    ## What an expression names when it names a module, a type, a trait or
-    ## a generic function.
     pub pure def static_path(mut self, cx: Cx, e: ExprId) -> StaticPath?:
         let at = cx.ast.expr(e).range
         match cx.ast.expr(e).kind:
@@ -75,14 +85,25 @@ impl Checker:
                 return None
             case ExprKind.Field(base, name):
                 if let Some(StaticPath.Module(m)) = self.static_path(cx, base):
-                    let d = cx.prog.lookup_in(m, name.text) else:
-                        # Not in the module: the name pass's to report.
+                    let d = self.module_member(cx, m, name) else:
+                        # `resolve.not-in-module`.
+                        self.other()
                         return Some(StaticPath.Type(Ty.error()))
                     return self.classify(cx, d, at)
                 return None
             case ExprKind.Index(base, args):
                 let path = self.static_path(cx, base) else:
                     return None
+                # `cap.Fake[Trait]`: the fake the compiler wrote (17).
+                if let StaticPath.Type(t) = path:
+                    if let TyData.Adt(d, _) = self.types.data(t).copy():
+                        if self.is_fake_marker(cx, d):
+                            var as_expr: String? = None
+                            if len(args) == 1:
+                                if let IndexArg.Expr(x) = args[0]:
+                                    if let ExprKind.Name(n) = cx.ast.expr(x).kind:
+                                        as_expr = Some(n.copy())
+                            return Some(StaticPath.Type(self.fake_named(cx, as_expr)))
                 var tys: list[Ty] = []
                 for a in args:
                     match a:
@@ -102,6 +123,55 @@ impl Checker:
             case _:
                 return None
 
+    ## The static path of a pattern's qualifier (`Shape` in
+    ## `Shape.Circle(r)`): names joined by dots.
+    pub pure def static_path_of_names(mut self, cx: Cx, names: list[Name]) -> StaticPath?:
+        let first = names.first() else:
+            return None
+        var path: StaticPath? = None
+        let n = first.text.copy()
+        if self.lookup_local(n).is_some() or n == "it":
+            return None
+        var found = False
+        for i in range(len(self.generic_names)):
+            if self.generic_names[i] == n and not found:
+                path = Some(StaticPath.Type(self.types.param(i)))
+                found = True
+        if not found:
+            if let Some(t) = primitive_value_type(n):
+                if cx.prog.lookup(self.module, n).is_none():
+                    path = Some(StaticPath.Type(t))
+                    found = True
+        if not found:
+            let d = cx.prog.lookup(self.module, n) else:
+                return None
+            path = self.classify(cx, d, first.range)
+        for i in range(1, len(names)):
+            let p = path else:
+                return None
+            match p:
+                case StaticPath.Module(m):
+                    match self.module_member(cx, m, names[i]):
+                        case Some(d):
+                            path = self.classify(cx, d, names[i].range)
+                        case None:
+                            self.other()
+                            path = Some(StaticPath.Type(Ty.error()))
+                case _:
+                    return None
+        return path
+
+    ## `m.name` as this module sees it (09): the item, reported when it is
+    ## not visible here.
+    pub pure def module_member(mut self, cx: Cx, m: ModuleId, name: Name) -> DefId?:
+        let member = cx.prog.member(m, name.text, self.module) else:
+            return None
+        let (d, visible) = member
+        if not visible:
+            # `resolve.private-item` and its kin.
+            self.other()
+        return Some(d)
+
     pure def classify(mut self, cx: Cx, d: DefId, range: TextRange) -> StaticPath?:
         match cx.prog.defs[d.index].kind:
             case DefKind.Module(m):
@@ -119,166 +189,339 @@ impl Checker:
             case _:
                 return None
 
-    ## An index argument read as a type: `Options` in `cli.parse[Options]`.
-    pure def expr_as_type(mut self, cx: Cx, e: ExprId) -> Ty:
+    ## An index argument read as a type: `Options` in `cli.parse[Options]`,
+    ## or a constant for a `const` parameter: `16` in `size[16]()`.
+    pub pure def expr_as_type(mut self, cx: Cx, e: ExprId) -> Ty:
         match cx.ast.expr(e).kind:
+            case ExprKind.Int(_, value, None):
+                if let Some(v) = value:
+                    if let Some(n) = v.to_int():
+                        return self.types.intern(TyData.Const(n))
+                return Ty.error()
             case ExprKind.Name(n):
+                # A `const` parameter of the function itself, passed on.
+                for i in range(len(self.generic_names)):
+                    if self.generic_names[i] == n
+                            and i < len(self.const_generics)
+                            and self.const_generics[i]:
+                        return self.types.param(i)
                 if let Some(t) = primitive_value_type(n):
                     return t
                 if let Some(StaticPath.Type(t)) = self.static_path(cx, e):
                     return t
+                # `resolve.undefined-type`.
+                self.other()
+                return Ty.error()
             case ExprKind.Field(_, _) | ExprKind.Index(_, _):
                 if let Some(StaticPath.Type(t)) = self.static_path(cx, e):
                     return t
+                # `resolve.not-a-type`.
+                self.other()
+                return Ty.error()
+            case ExprKind.Tuple(xs):
+                var tys: list[Ty] = []
+                for x in xs:
+                    tys.push(self.expr_as_type(cx, x))
+                if tys.is_empty():
+                    return Ty.unit()
+                return self.types.tuple(tys)
             case _:
-                pass
-        self.go_beyond("a type argument of this form")
-        return Ty.error()
+                # `parse.expected-type`.
+                self.other()
+                return Ty.error()
 
-    ## `module.name`, `Type.Variant`, `Type.function`, used as a value.
-    pub pure def static_value(
-        mut self, cx: Cx, path: StaticPath, name: Name, at: TextRange
-    ) -> TExprId:
-        match path:
-            case StaticPath.Module(m):
-                let d = cx.prog.lookup_in(m, name.text) else:
-                    return self.error_expr(at)
-                return self.def_value(cx, d, name.text, at)
-            case StaticPath.Type(ty):
-                if ty == Ty.error():
-                    return self.error_expr(at)
-                if let Some((def_, vi)) = self.variant_in(cx, ty, name.text):
-                    return self.unit_variant(cx, def_, vi, Some(ty), at)
-                if let Some(k) = self.types.key(ty):
-                    if let Some(d) = cx.prog.method(k, name.text):
-                        return self.def_value(cx, d, name.text, at)
-                return self.unknown_associated(cx, ty, name, at)
-            case StaticPath.Trait(_):
-                self.go_beyond("a trait's method as a value")
-                return self.error_expr(at)
-            case StaticPath.Fn(d, _):
-                let owner = cx.prog.defs[d.index].name.copy()
-                let diag = self.error(cx, Msg.TypeUnknownField, name.range).with("ty", owner)
-                self.report(diag.with("name", name.text))
-                return self.error_expr(at)
-
-    ## `module.f(...)`, `Type.Variant(...)`, `Type.f(...)`.
-    pub pure def static_call(
+    ## `module.name`, `Type.Variant`, `Type.function`, used as a value or,
+    ## with `args`, called.
+    pub pure def static_member(
         mut self,
         cx: Cx,
         path: StaticPath,
         name: Name,
-        args: list[Arg],
         at: TextRange,
+        args: list[Arg]?,
+        trailing: Closure?,
         expected: Ty?,
     ) -> TExprId:
         match path:
             case StaticPath.Module(m):
-                let d = cx.prog.lookup_in(m, name.text) else:
-                    self.check_args_loosely(cx, args)
+                let d = self.module_member(cx, m, name) else:
+                    # `resolve.not-in-module`.
+                    self.other()
+                    if let Some(a) = args:
+                        self.check_args_loosely(cx, a)
                     return self.error_expr(at)
-                return self.call_def(cx, d, args, at, expected)
+                match args:
+                    case Some(a):
+                        return self.call_def(cx, d, None, a, trailing, at, expected)
+                    case None:
+                        return self.def_value(cx, d, name.text, at)
             case StaticPath.Type(ty):
                 if ty == Ty.error():
-                    self.check_args_loosely(cx, args)
+                    if let Some(a) = args:
+                        self.check_args_loosely(cx, a)
                     return self.error_expr(at)
+                # `X.try_from(v)` for a refinement type (07).
+                if name.text == "try_from" and self.refinement_of(cx, ty).is_some():
+                    if let Some(a) = args:
+                        return self.refine_try(cx, ty, a, trailing, at)
+                # `X.__default_f()`: the default of the field `f` of `X`.
+                if name.text.starts_with("__default_"):
+                    if let Some(a) = args:
+                        if let TyData.Adt(d, targs) = self.types.data(ty).copy():
+                            if let Some(si) = cx.prog.struct_info(d):
+                                let field = name.text.byte_slice(10, name.text.byte_len())
+                                for fi in range(len(si.fields)):
+                                    if si.fields[fi].name == field
+                                            and si.fields[fi].default.is_some():
+                                        if not a.is_empty() or trailing.is_some():
+                                            self.check_args_loosely(cx, a)
+                                        let fty = self.types.subst(si.fields[fi].ty, targs)
+                                        let k = TExprKind.FieldDefault(def_=d, field=fi)
+                                        return self.add(k, fty, at)
+                # An associated constant (`Money.ZERO`).
+                if let Some(k) = self.types.key(ty):
+                    if let Some(c) = cx.prog.assoc_const(k, name.text):
+                        let value = self.def_value(cx, c, name.text, at)
+                        match args:
+                            case Some(a):
+                                return self.call_value(cx, value, a, trailing, at)
+                            case None:
+                                return value
+                # A variant of the type.
                 if let Some((def_, vi)) = self.variant_in(cx, ty, name.text):
-                    return self.variant_call(cx, def_, vi, args, at, Some(ty))
+                    match args:
+                        case Some(a):
+                            return self.variant_call(cx, def_, vi, a, trailing, at, Some(ty))
+                        case None:
+                            return self.unit_variant_value(cx, def_, vi, ty, at)
+                # An associated function.
                 var method: DefId? = None
                 if let Some(k) = self.types.key(ty):
                     method = cx.prog.method(k, name.text)
                 if let Some(d) = method:
-                    if let Some(f) = cx.prog.fn_info(d):
-                        if f.self_mode.is_some():
+                    match args:
+                        case Some(a):
+                            var has_self = False
+                            if let Some(f) = cx.prog.fn_info(d):
+                                has_self = f.self_mode.is_some()
+                            if has_self:
+                                let diag = self.error(cx, Msg.TypeMethodNeedsReceiver, name.range)
+                                self.report(diag.with("name", name.text))
+                                self.check_args_loosely(cx, a)
+                                return self.error_expr(at)
+                            self.check_method_vis(cx, d)
+                            return self.call_fn(
+                                cx, d, None, Some(ty), None, a, trailing, at, expected
+                            )
+                        case None:
+                            self.check_method_vis(cx, d)
+                            return self.def_value(cx, d, name.text, at)
+                if let Some(a) = args:
+                    if let Some((tr, m)) = self.trait_static(cx, ty, name.text):
+                        var has_self = False
+                        if let Some(f) = cx.prog.fn_info(m):
+                            has_self = f.self_mode.is_some()
+                        if has_self:
                             let diag = self.error(cx, Msg.TypeMethodNeedsReceiver, name.range)
                             self.report(diag.with("name", name.text))
-                            self.check_args_loosely(cx, args)
+                            self.check_args_loosely(cx, a)
                             return self.error_expr(at)
-                    return self.call_fn(cx, d, None, Some(ty), None, args, at, expected)
-                let z = self.infer.zonk(mut self.types, ty)
-                let norm = cx.prog.normalize(mut self.types, z, self.env)
-                match cx.prog.trait_methods_for(mut self.types, norm, name.text, self.env):
-                    case Some(found):
-                        if len(found) == 1:
-                            self.go_beyond("a trait's function called on a type")
-                            self.check_args_loosely(cx, args)
-                            return self.error_expr(at)
-                    case None:
-                        self.go_beyond("a trait's function stage 1 cannot decide")
-                        self.check_args_loosely(cx, args)
-                        return self.error_expr(at)
-                let e = self.unknown_associated(cx, ty, name, at)
-                self.check_args_loosely(cx, args)
-                return e
-            case StaticPath.Trait(_):
-                self.go_beyond("a call through a trait's name")
-                self.check_args_loosely(cx, args)
+                        let z = self.infer.zonk(mut self.types, ty)
+                        let norm = cx.prog.normalize(mut self.types, z, self.env)
+                        var outer = [norm]
+                        for t in tr.args:
+                            outer.push(t)
+                        return self.call_fn_with(
+                            cx, m, None, Some(outer), Some(norm), None, a, trailing, at, expected
+                        )
+                let shown = self.show(cx, ty)
+                let diag = self.error(cx, Msg.TypeUnknownAssociated, name.range).with("ty", shown)
+                self.report(diag.with("name", name.text))
+                if let Some(a) = args:
+                    self.check_args_loosely(cx, a)
                 return self.error_expr(at)
+            case StaticPath.Trait(t):
+                return self.trait_path_call(cx, t, name, at, args, trailing, expected)
             case StaticPath.Fn(d, _):
                 let owner = cx.prog.defs[d.index].name.copy()
                 let diag = self.error(cx, Msg.TypeUnknownField, name.range).with("ty", owner)
                 self.report(diag.with("name", name.text))
                 return self.error_expr(at)
 
-    ## E0351: a type with no associated function of the name.
-    pure def unknown_associated(mut self, cx: Cx, ty: Ty, name: Name, at: TextRange) -> TExprId:
-        let shown = self.show(cx, ty)
-        let diag = self.error(cx, Msg.TypeUnknownAssociated, name.range).with("ty", shown)
-        self.report(diag.with("name", name.text))
-        return self.error_expr(at)
+    ## The one trait method called `name` that `ty` has through the traits
+    ## it implements.
+    pure def trait_static(mut self, cx: Cx, ty: Ty, name: str) -> (TraitRef, DefId)?:
+        let z = self.infer.zonk(mut self.types, ty)
+        let norm = cx.prog.normalize(mut self.types, z, self.env)
+        let found = cx.prog.trait_methods_for(mut self.types, norm, name, self.env)
+        if len(found) == 1:
+            return Some(found[0].copy())
+        return None
+
+    ## `Trait.method(x, ...)`: the trait's method called on `x`, or, for a
+    ## method without `self`, with `Self` inferred from the arguments and
+    ## the expected type (`Default.default()`).
+    pure def trait_path_call(
+        mut self,
+        cx: Cx,
+        t: DefId,
+        name: Name,
+        at: TextRange,
+        args_in: list[Arg]?,
+        trailing: Closure?,
+        expected: Ty?,
+    ) -> TExprId:
+        let m = cx.prog.trait_method(t, name.text) else:
+            let tname = cx.prog.defs[t.index].name.copy()
+            let diag = self.error(cx, Msg.TypeUnknownAssociated, name.range).with("ty", tname)
+            self.report(diag.with("name", name.text))
+            if let Some(a) = args_in:
+                self.check_args_loosely(cx, a)
+            return self.error_expr(at)
+        if args_in.is_none():
+            let text = self.source_text(cx, at)
+            var diag = self.error(cx, Msg.TypeNotAValue, at)
+            diag = diag.with("name", text).with("kind", "trait method")
+            self.report(diag)
+            return self.error_expr(at)
+        let args = args_in.copy() ?? []
+        # The trait's own parameters: inferred, or their defaults.
+        var targs: list[Ty] = []
+        if let Some(info) = cx.prog.trait_info(t):
+            for _ in info.generics:
+                targs.push(self.infer.fresh(mut self.types))
+        let tr = TraitRef(def_=t, args=targs)
+        var has_self = False
+        if let Some(f) = cx.prog.fn_info(m):
+            has_self = f.self_mode.is_some()
+        if has_self:
+            if args.is_empty():
+                var d = self.error(cx, Msg.TypeArgumentCount, at)
+                d = d.with("name", name.text).with("expected", "1 or more").with("found", "0")
+                self.report(d)
+                return self.error_expr(at)
+            let recv0 = self.infer_expr(cx, args[0].value, None)
+            let recv = self.auto_deref(recv0)
+            let z = self.infer.zonk(mut self.types, self.ty_of(recv))
+            let self_ty = cx.prog.normalize(mut self.types, z, self.env)
+            self.bounds.push((self_ty, tr.copy(), self.span_of(recv)))
+            var rest: list[Arg] = []
+            for i in range(1, len(args)):
+                rest.push(args[i].copy())
+            return self.trait_call(cx, m, tr, recv, self_ty, name, rest, trailing, at, expected)
+        let self_ty = self.infer.fresh(mut self.types)
+        self.bounds.push((self_ty, tr.copy(), at))
+        var outer = [self_ty]
+        for a in tr.args:
+            outer.push(a)
+        return self.call_fn_with(cx, m, None, Some(outer), None, None, args, trailing, at, expected)
+
+    pure def unit_variant_value(
+        mut self, cx: Cx, def_: DefId, vi: int, ty: Ty, at: TextRange
+    ) -> TExprId:
+        if let Some(e) = cx.prog.enum_info(def_):
+            if vi < len(e.variants) and not e.variants[vi].fields.is_empty():
+                let name = e.variants[vi].name.copy()
+                let d = self.error(cx, Msg.TypeVariantNeedsFields, at).with("name", name)
+                self.report(d)
+                return self.error_expr(at)
+        let (owner, _) = self.variant_owner_ty(cx, def_, Some(ty))
+        return self.add(TExprKind.Variant(def_=def_, variant=vi, args=[]), owner, at)
+
+    # ---------------------------------------------------------------- calls
 
     pub pure def call_expr(
-        mut self, cx: Cx, callee: ExprId, args: list[Arg], at: TextRange, expected: Ty?
+        mut self,
+        cx: Cx,
+        callee: ExprId,
+        args: list[Arg],
+        trailing: Closure?,
+        at: TextRange,
+        expected: Ty?,
     ) -> TExprId:
         match cx.ast.expr(callee).kind:
             case ExprKind.Field(base, name):
                 if let Some(path) = self.static_path(cx, base):
-                    return self.static_call(cx, path, name, args, at, expected)
+                    return self.static_member(
+                        cx, path, name, at, Some(args.copy()), trailing, expected
+                    )
                 let recv = self.infer_expr(cx, base, None)
-                return self.method_call_on(cx, recv, name, args, at, expected)
-            case ExprKind.Index(_, _):
+                return self.method_call_on(cx, recv, name, args, trailing, at, expected)
+            case ExprKind.OptField(base, name):
+                return self.opt_chain(cx, base, name, Some(args.copy()), trailing, at)
+            case ExprKind.Index(inner, targs):
+                if self.generator_kind(cx, inner).is_some():
+                    return self.generator_site(
+                        cx, callee, inner, targs, Some(args.copy()), at, expected
+                    )
                 match self.static_path(cx, callee):
+                    case Some(StaticPath.Fn(d, tys)):
+                        return self.call_fn(cx, d, tys, None, None, args, trailing, at, expected)
                     case Some(StaticPath.Type(ty)):
-                        return self.construct(cx, ty, args, at, expected)
+                        return self.construct(cx, ty, args, trailing, at, expected)
                     case _:
-                        self.go_beyond("explicit type arguments")
-                        self.check_args_loosely(cx, args)
-                        return self.error_expr(at)
+                        # `x.method[T](...)`: a method with its type arguments.
+                        if let ExprKind.Field(base, name) = cx.ast.expr(inner).kind:
+                            if self.static_path(cx, base).is_none():
+                                var tys: list[Ty] = []
+                                for a in targs:
+                                    match a:
+                                        case IndexArg.Expr(x):
+                                            tys.push(self.expr_as_type(cx, x))
+                                        case _:
+                                            tys.push(Ty.error())
+                                let recv = self.infer_expr(cx, base, None)
+                                self.explicit_method_args = Some(tys)
+                                let x = self.method_call_on(
+                                    cx, recv, name, args, trailing, at, expected
+                                )
+                                self.explicit_method_args = None
+                                return x
             case ExprKind.SelfType:
                 if let Some(t) = self.self_ty:
-                    return self.construct(cx, t, args, at, expected)
-            case ExprKind.OptField(_, _):
-                self.go_beyond("`?.`")
-                self.check_args_loosely(cx, args)
-                return self.error_expr(at)
+                    return self.construct(cx, t, args, trailing, at, expected)
             case ExprKind.Name(n):
+                if n == "old"
+                        and self.lookup_local(n).is_none()
+                        and cx.prog.lookup(self.module, n).is_none():
+                    return self.old_expr(cx, args, trailing, at)
                 if self.lookup_local(n).is_none() and n != "it":
-                    if n == "old" and cx.prog.lookup(self.module, n).is_none():
-                        self.go_beyond("`old`")
-                        self.check_args_loosely(cx, args)
-                        return self.error_expr(at)
                     if let Some(exp) = expected:
                         if let Some((def_, vi)) = self.variant_in(cx, exp, n):
-                            return self.variant_call(cx, def_, vi, args, at, Some(exp))
+                            return self.variant_call(cx, def_, vi, args, trailing, at, Some(exp))
                     if let Some(d) = cx.prog.lookup(self.module, n):
-                        return self.call_def(cx, d, args, at, expected)
+                        var embed = False
+                        if let Some(f) = cx.prog.fn_info(d):
+                            if let Some(i) = f.intrinsic:
+                                embed = i == "compiler.embed"
+                        if embed:
+                            return self.embed_call(cx, args, trailing, at)
+                        return self.call_def(cx, d, None, args, trailing, at, expected)
                     let callee_range = cx.ast.expr(callee).range
                     if let Some((def_, vi)) = self.global_variant(cx, n, callee_range):
-                        return self.variant_call(cx, def_, vi, args, at, expected)
-                    # A name nothing declares: the name pass's to report.
+                        return self.variant_call(cx, def_, vi, args, trailing, at, expected)
+                    if not self.quiet_unknown_names
+                            and not cx.prog.poisoned.contains(n.to_string()):
+                        # `resolve.undefined-name`.
+                        self.other()
                     self.check_args_loosely(cx, args)
                     return self.error_expr(at)
             case _:
                 pass
-        _ = self.infer_expr(cx, callee, None)
-        self.go_beyond("a call of a function value")
-        self.check_args_loosely(cx, args)
-        return self.error_expr(at)
+        let f = self.infer_expr(cx, callee, None)
+        return self.call_value(cx, f, args, trailing, at)
 
-    ## Calls a declaration: a function (a struct's constructor and a
-    ## constant holding a function are beyond the slice).
+    ## Calls a declaration: a function, a struct's constructor, a constant
+    ## holding a function.
     pub pure def call_def(
-        mut self, cx: Cx, d: DefId, args: list[Arg], at: TextRange, expected: Ty?
+        mut self,
+        cx: Cx,
+        d: DefId,
+        tys: list[Ty]?,
+        args: list[Arg],
+        trailing: Closure?,
+        at: TextRange,
+        expected: Ty?,
     ) -> TExprId:
         match cx.prog.defs[d.index].kind:
             case DefKind.Fn(f):
@@ -288,18 +531,14 @@ impl Checker:
                     self.report(diag)
                     self.check_args_loosely(cx, args)
                     return self.error_expr(at)
-                if let Some(i) = f.intrinsic:
-                    if i == "compiler.embed":
-                        self.go_beyond("`embed`")
-                        return self.error_expr(at)
-                return self.call_fn(cx, d, None, None, None, args, at, expected)
+                return self.call_fn(cx, d, tys, None, None, args, trailing, at, expected)
             case DefKind.Struct(_) | DefKind.Enum(_) | DefKind.ErrorSet(_) | DefKind.TypeAlias(_):
-                let ty = self.def_type(cx, d, [], at)
-                return self.construct(cx, ty, args, at, expected)
-            case DefKind.Const(_) | DefKind.Refinement(_):
-                self.go_beyond("a call of a constant or a refinement")
-                self.check_args_loosely(cx, args)
-                return self.error_expr(at)
+                let ty = self.def_type(cx, d, tys.copy() ?? [], at)
+                return self.construct(cx, ty, args, trailing, at, expected)
+            case DefKind.Const(_):
+                let name = cx.prog.defs[d.index].name.copy()
+                let f = self.def_value(cx, d, name, at)
+                return self.call_value(cx, f, args, trailing, at)
             case _:
                 let name = cx.prog.defs[d.index].name.copy()
                 let diag = self.error(cx, Msg.TypeNotCallable, at).with("ty", name)
@@ -309,7 +548,7 @@ impl Checker:
 
     ## `T(...)` for a type: a struct's fields, or `new` for a builtin type.
     pub pure def construct(
-        mut self, cx: Cx, ty: Ty, args: list[Arg], at: TextRange, expected: Ty?
+        mut self, cx: Cx, ty: Ty, args: list[Arg], trailing: Closure?, at: TextRange, expected: Ty?
     ) -> TExprId:
         let TyData.Adt(def_, targs) = self.data(ty) else:
             if ty != Ty.error():
@@ -327,7 +566,7 @@ impl Checker:
         if s.builtin.is_some():
             if let Some(new) = cx.prog.method(TyKey.Adt(def_), "new"):
                 let owner = self.types.adt(def_, targs)
-                return self.call_fn(cx, new, None, Some(owner), None, args, at, expected)
+                return self.call_fn(cx, new, None, Some(owner), None, args, trailing, at, expected)
             let shown = self.show(cx, ty)
             let d = self.error(cx, Msg.TypeNoConstructor, at).with("ty", shown)
             self.report(d)
@@ -379,8 +618,9 @@ impl Checker:
                         var free_name: String? = None
                         if let Some(i) = free:
                             free_name = Some(s.fields[i].name.copy())
+                        self.positional_after_keyword(cx, a.range, free_name)
+                        if let Some(i) = free:
                             slots[i] = Some(k)
-                        self.positional_after_keyword(cx, a, free_name)
                         pos += 1
                         continue
                     if pos < n:
@@ -391,25 +631,49 @@ impl Checker:
                         d = d.with("found", "{len(args)}")
                         self.report(d)
                     pos += 1
+        if trailing.is_some():
+            var d = self.error(cx, Msg.TypeArgumentCount, at)
+            d = d.with("name", tyname).with("expected", "{n}").with("found", "{len(args) + 1}")
+            self.report(d)
+        # A struct of another module is built there only when every field
+        # is visible (09).
+        let home = cx.prog.defs[def_.index].module
+        for i in range(n):
+            if not cx.prog.vis_allows(s.fields[i].vis, home, self.module):
+                # `resolve.private-field`.
+                self.other()
+                break
+        var fields: list[FieldInit] = []
         for i in range(n):
             let f = ref s.fields[i]
             let fty = self.types.subst(f.ty, targs)
             match slots[i]:
                 case Some(k):
                     let x = self.check_expr(cx, args[k].value, fty)
-                    _ = self.check_movable(cx, x)
+                    fields.push(FieldInit.Value(self.check_movable(cx, x)))
                 case None:
-                    if f.default.is_none():
+                    if f.default.is_some():
+                        fields.push(FieldInit.Default(i))
+                    else:
                         var d = self.error(cx, Msg.TypeMissingField, at)
                         d = d.with("field", f.name).with("ty", tyname)
                         if let Some(edit) = self.hole_edit(cx, at, "{f.name}=todo(\"{f.name}\")"):
                             d = d.fix_edits(Msg.TypeAddHole, [edit])
                         self.report(d)
+                        fields.push(FieldInit.Value(self.error_expr(at)))
         let result = self.types.adt(def_, targs)
-        return self.add(TExprKind.Other, result, at)
+        return self.add(TExprKind.Struct(def_=def_, fields=fields), result, at)
 
+    ## `Variant(args)`.
     pub pure def variant_call(
-        mut self, cx: Cx, def_: DefId, vi: int, args: list[Arg], at: TextRange, expected: Ty?
+        mut self,
+        cx: Cx,
+        def_: DefId,
+        vi: int,
+        args: list[Arg],
+        trailing: Closure?,
+        at: TextRange,
+        expected: Ty?,
     ) -> TExprId:
         let (ty, targs) = self.variant_owner_ty(cx, def_, expected)
         let e = cx.prog.enum_info(def_) else:
@@ -444,26 +708,34 @@ impl Checker:
                     if pos < n:
                         slots[pos] = Some(k)
                     pos += 1
-        if pos > n:
+        if pos > n or trailing.is_some():
+            var found = len(args)
+            if trailing.is_some():
+                found += 1
             var d = self.error(cx, Msg.TypeArgumentCount, at)
-            d = d.with("name", v.name).with("expected", "{n}").with("found", "{len(args)}")
+            d = d.with("name", v.name).with("expected", "{n}").with("found", "{found}")
             self.report(d)
+        var out: list[TExprId] = []
         for i in range(n):
             let fty = self.types.subst(v.fields[i].1, targs)
             match slots[i]:
                 case Some(k):
                     let x = self.check_expr(cx, args[k].value, fty)
-                    _ = self.check_movable(cx, x)
+                    out.push(self.check_movable(cx, x))
                 case None:
                     let shown = v.fields[i].0.copy() ?? "{i}"
                     var d = self.error(cx, Msg.TypeMissingArgument, at)
                     d = d.with("arg", shown).with("name", v.name)
                     self.report(d)
-        return self.add(TExprKind.Other, ty, at)
+                    out.push(self.error_expr(at))
+        return self.add(TExprKind.Variant(def_=def_, variant=vi, args=out), ty, at)
 
-    ## Instantiates a function's signature with fresh type variables; its
+    ## Instantiates a function's signature with fresh type variables, or
+    ## the explicit type arguments for its own generic parameters; its
     ## bounds are required of the arguments.
-    pub pure def instantiate(mut self, cx: Cx, d: DefId, at: TextRange) -> InstSig:
+    pub pure def instantiate(
+        mut self, cx: Cx, d: DefId, explicit: list[Ty]?, at: TextRange
+    ) -> InstSig:
         let f = cx.prog.fn_info(d) else:
             return InstSig(
                 def_=d,
@@ -475,9 +747,24 @@ impl Checker:
                 keyword_only_from=None,
                 positional_only_until=0,
             )
+        let own_count = len(f.generics) - f.impl_generics
+        if let Some(ex) = explicit:
+            if len(ex) != own_count:
+                if own_count == 0:
+                    let name = cx.prog.defs[d.index].name.copy()
+                    let diag = self.error(cx, Msg.TypeNotGeneric, at).with("name", name)
+                    self.report(diag)
+                else:
+                    # `resolve.type-argument-count`.
+                    self.other()
         var vars: list[Ty] = []
-        for _ in range(len(f.generics)):
-            vars.push(self.infer.fresh(mut self.types))
+        for i in range(len(f.generics)):
+            var v: Ty? = None
+            if i >= f.impl_generics:
+                if let Some(ex) = explicit:
+                    if i - f.impl_generics < len(ex):
+                        v = Some(ex[i - f.impl_generics])
+            vars.push(v ?? self.infer.fresh(mut self.types))
         for p in f.predicates:
             # A trait method's `Self: Trait` asks for an impl; any other
             # predicate is a bound.
@@ -525,43 +812,56 @@ impl Checker:
             positional_only_until=f.positional_only_until,
         )
 
-    ## Calls a function given its definition. `owner` is the type a method
-    ## call's receiver has; `recv` the receiver argument.
+    ## Calls a function given its definition. `owner` is the type a static
+    ## call names; `recv` the receiver argument of a method call.
     pub pure def call_fn(
         mut self,
         cx: Cx,
         d: DefId,
         tys: list[Ty]?,
         owner: Ty?,
-        recv: TExprId?,
+        recv: TArg?,
         args: list[Arg],
+        trailing: Closure?,
+        at: TextRange,
+        expected: Ty?,
+    ) -> TExprId:
+        return self.call_fn_with(cx, d, tys, None, owner, recv, args, trailing, at, expected)
+
+    ## `call_fn` where the outer generic parameters are known: for a
+    ## trait's method, `Self` and the trait's arguments.
+    pub pure def call_fn_with(
+        mut self,
+        cx: Cx,
+        d: DefId,
+        tys: list[Ty]?,
+        outer: list[Ty]?,
+        owner: Ty?,
+        recv: TArg?,
+        args: list[Arg],
+        trailing: Closure?,
         at: TextRange,
         expected: Ty?,
     ) -> TExprId:
         let f = cx.prog.fn_info(d) else:
             return self.error_expr(at)
-        if tys.is_some():
-            self.go_beyond("explicit type arguments")
         if f.comptime_ and not self.in_comptime:
-            self.go_beyond("a `comptime def`")
+            # `comptime.only`.
+            self.other()
+        self.check_internal(cx, d)
         # A pure body's calls are checked on SIR, by stage 0's ownership
         # checker (E0333).
         if not f.pure and self.body_is_pure(cx):
-            self.go_beyond("a call of an impure function from a pure one")
-        if f.internal and not cx.prog.modules[self.module.index].is_std:
-            self.go_beyond("an `@internal` function")
+            self.owner_go_beyond("a call of an impure function from a pure one")
         if f.header_broken:
             # Its signature is unknown: check the arguments on their own.
             self.check_args_loosely(cx, args)
             return self.error_expr(at)
-        if let Some(i) = f.intrinsic:
-            if i == "Shared.new"
-                    or i == "Cell.new"
-                    or i == "Mutex.new"
-                    or i == "Cap.new"
-                    or i.starts_with("task."):
-                self.go_beyond("a call the rules of tasks and shared values check")
-        var sig = self.instantiate(cx, d, at)
+        let intrinsic = f.intrinsic.copy() ?? String.new()
+        var sig = self.instantiate(cx, d, tys, at)
+        if let Some(o) = outer:
+            for i in range(min(len(sig.type_args), len(o))):
+                _ = self.infer.try_unify(self.types, sig.type_args[i], o[i])
         # A method of an impl for some of a type's values is not one of the
         # others.
         if let Some(o) = owner:
@@ -589,58 +889,71 @@ impl Checker:
                 let snap = self.infer.snapshot()
                 if not self.infer.unify(self.types, sig.ret, exp):
                     self.infer.rollback(snap)
-        var out: list[TExprId] = []
+        var out: list[TArg] = []
         if let Some(r) = recv:
             out.push(r)
+        let task = task_call(intrinsic)
+        let spawns_before = len(self.spawn_sites)
         # `range(n)` is `range(0, n)` (02, "Prelude functions").
         if Some(d) == cx.prog.wk.range
                 and len(args) == 1
                 and args[0].name.is_none()
                 and len(sig.params) >= 2:
             let p = sig.params[1].copy()
-            out.push(self.add(TExprKind.Int(0), Ty.int(), TextRange.empty(args[0].range.start)))
-            out.push(self.check_arg(cx, args[0], p))
+            let zero = self.add(TExprKind.Int(0), Ty.int(), TextRange.empty(args[0].range.start))
+            out.push(TArg(expr=zero, mode=ArgMode.Value))
+            out.push(self.check_arg(cx, arg_in(cx.ast, args[0]), p))
         else:
-            for x in self.check_args(cx, sig, args, at):
+            for x in self.check_args(cx, sig, args, trailing, at):
                 out.push(x)
         let zret = self.infer.zonk(mut self.types, sig.ret)
-        let ret = cx.prog.normalize(mut self.types, zret, self.env)
+        var ret = cx.prog.normalize(mut self.types, zret, self.env)
+        if let Some(tc) = task:
+            let text = self.source_text(cx, at)
+            let function = call_name(text)
+            ret = self.task_rules(cx, tc, out, ret, spawns_before, at, function)
+        # What a `Shared`, `Cell` or `Mutex` owns can be neither a view nor
+        # must-consume (checked when the type is known).
+        var owner_name: String? = None
+        if intrinsic == "Shared.new":
+            owner_name = Some("Shared".to_string())
+        elif intrinsic == "Cell.new":
+            owner_name = Some("Cell".to_string())
+        elif intrinsic == "Mutex.new":
+            owner_name = Some("Mutex".to_string())
+        elif intrinsic == "Cap.new":
+            owner_name = Some("Cap".to_string())
+        if let Some(o) = owner_name:
+            if let Some(t) = sig.type_args.first():
+                self.owner_checks.push((t, o.copy(), at))
         # A typed hole is reported with the type it stands for (D-061).
-        if let Some(i) = f.intrinsic:
-            if i == "todo":
-                var name = String.new()
-                if let Some(first) = out.first():
-                    if let TExprKind.Str(s) = self.exprs[first.index].kind:
-                        name = s.copy()
-                let shown = self.show(cx, self.resolved(sig.ret))
-                let diag = self.error(cx, Msg.TypeHole, at).with("name", name).with("ty", shown)
-                self.report(diag)
-        return self.add(TExprKind.Call(def_=d, args=out), ret, at)
+        if intrinsic == "todo":
+            var name = String.new()
+            if let Some(first) = out.first():
+                if let TExprKind.Str(s) = self.exprs[first.expr.index].kind:
+                    name = s.copy()
+            let shown = self.show(cx, self.resolved(sig.ret))
+            let diag = self.error(cx, Msg.TypeHole, at).with("name", name).with("ty", shown)
+            self.report(diag)
+        let call = TExprKind.Call(
+            callee=Callee.Fn(def_=d, type_args=sig.type_args.copy()), args=out
+        )
+        return self.add(call, ret, at)
 
     ## Whether the body is pure: declared so, or the impl of a trait's pure
     ## method.
     pub pure def body_is_pure(self, cx: Cx) -> bool:
         let f = cx.prog.fn_info(self.def_) else:
             return False
-        if f.pure:
-            return True
-        let i = f.impl_ else:
-            return False
-        let info = cx.prog.impl_info(i) else:
-            return False
-        let m = cx.prog.trait_method(info.trait_ref.def_, cx.prog.defs[self.def_.index].name) else:
-            return False
-        if let Some(tf) = cx.prog.fn_info(m):
-            return tf.pure
-        return False
+        return f.pure
 
     ## A positional argument after a keyword one (E0376), with the fix that
     ## names it as `name`.
-    pure def positional_after_keyword(mut self, cx: Cx, a: Arg, name: String?):
-        var d = self.error(cx, Msg.TypePositionalAfterKeyword, a.range)
+    pure def positional_after_keyword(mut self, cx: Cx, range: TextRange, name: String?):
+        var d = self.error(cx, Msg.TypePositionalAfterKeyword, range)
         if let Some(n) = name:
             if not n.is_empty():
-                d = d.fix_at(Msg.TypeNameArgument, a.range.start, a.range.start, "{n}=")
+                d = d.fix_at(Msg.TypeNameArgument, range.start, range.start, "{n}=")
         self.report(d)
 
     ## The edit that adds an argument (`todo("b")`, `y=todo("y")`) at the
@@ -653,15 +966,15 @@ impl Checker:
         let close = at.start + trimmed.byte_len() - 1
         let before = cx.source.byte_slice(at.start, close).trim_end()
         let insert = if before.ends_with("("): arg.to_string() else: ", {arg}"
-        let at = at.start + before.byte_len()
-        return Some(Edit(start=at, end=at, text=insert))
+        let pos = at.start + before.byte_len()
+        return Some(Edit(start=pos, end=pos, text=insert))
 
     ## Matches arguments to parameters and checks each.
     pub pure def check_args(
-        mut self, cx: Cx, sig: InstSig, args: list[Arg], at: TextRange
-    ) -> list[TExprId]:
+        mut self, cx: Cx, sig: InstSig, args: list[Arg], trailing: Closure?, at: TextRange
+    ) -> list[TArg]:
         let n = len(sig.params)
-        var slots: list[int?] = []
+        var slots: list[ArgIn?] = []
         for _ in range(n):
             slots.push(None)
         let kw_from = sig.keyword_only_from ?? n
@@ -686,7 +999,7 @@ impl Checker:
                                 d = d.with("arg", key.text)
                                 self.report(d)
                             else:
-                                slots[i] = Some(k)
+                                slots[i] = Some(arg_in(cx.ast, a))
                     if not named:
                         var d = self.error(cx, Msg.TypeUnknownKeyword, key.range)
                         d = d.with("name", sig.name).with("arg", key.text)
@@ -709,26 +1022,52 @@ impl Checker:
                         var free_name: String? = None
                         if let Some(i) = free:
                             free_name = Some(sig.params[i].name.copy())
-                        self.positional_after_keyword(cx, a, free_name)
+                        self.positional_after_keyword(cx, a.range, free_name)
                         match free:
                             case Some(i):
-                                slots[i] = Some(k)
+                                slots[i] = Some(arg_in(cx.ast, a))
                             case None:
                                 _ = self.infer_expr(cx, a.value, None)
                         pos += 1
                         continue
                     if pos < kw_from and pos < n:
-                        slots[pos] = Some(k)
+                        slots[pos] = Some(arg_in(cx.ast, a))
                     else:
                         extra = True
                         _ = self.infer_expr(cx, a.value, None)
                     pos += 1
+        if let Some(c) = trailing:
+            # A `do` block binds to the last function-typed parameter.
+            var target: int? = None
+            var i = n - 1
+            while i >= 0 and target.is_none():
+                if let TyData.Fn(_, _, _) = self.data(sig.params[i].ty):
+                    target = Some(i)
+                i -= 1
+            var placed = False
+            if let Some(t) = target:
+                if slots[t].is_none():
+                    slots[t] = Some(
+                        ArgIn(
+                            name=None,
+                            mutable=False,
+                            value=None,
+                            closure=Some(c.copy()),
+                            range=c.range,
+                            value_range=c.range,
+                        )
+                    )
+                    placed = True
+            if not placed:
+                extra = True
         if extra:
             # Stage 0 counts every parameter and argument; past a bare `*`
             # the positional ones are the ones too many (DISCREPANCIES.md,
             # D5).
             var expected = n
             var found = len(args)
+            if trailing.is_some():
+                found += 1
             if kw_from < n:
                 expected = kw_from
                 found = 0
@@ -738,15 +1077,31 @@ impl Checker:
             var d = self.error(cx, Msg.TypeArgumentCount, at)
             d = d.with("name", sig.name).with("expected", "{expected}").with("found", "{found}")
             self.report(d)
-        var out: list[TExprId] = []
+        var out: list[TArg] = []
         for i in range(n):
             let p = sig.params[i].copy()
             match slots[i]:
-                case Some(k):
-                    out.push(self.check_arg(cx, args[k], p))
+                case Some(a):
+                    out.push(self.check_arg(cx, a.copy(), p))
                 case None:
                     if p.has_default:
-                        out.push(self.add(TExprKind.Other, p.ty, at))
+                        # A default is a temporary, passed as an argument
+                        # written there would be.
+                        var mode = ArgMode.Value
+                        match p.mode:
+                            case Mode.Own:
+                                mode = ArgMode.Value
+                            case Mode.Mut:
+                                mode = ArgMode.BorrowMut
+                            case Mode.Borrow:
+                                if p.opaque:
+                                    mode = ArgMode.Ref
+                                elif self.is_copy(cx, p.ty):
+                                    mode = ArgMode.Value
+                                else:
+                                    mode = ArgMode.Borrow
+                        let x = self.add(TExprKind.DefaultArg(def_=sig.def_, param=i), p.ty, at)
+                        out.push(TArg(expr=x, mode=mode))
                         continue
                     if not extra:
                         var d = self.error(cx, Msg.TypeMissingArgument, at)
@@ -766,140 +1121,257 @@ impl Checker:
                             if let Some(edit) = self.hole_edit(cx, at, hole):
                                 d = d.fix_edits(Msg.TypeAddHole, [edit])
                         self.report(d)
-                    out.push(self.error_expr(at))
+                    out.push(TArg(expr=self.error_expr(at), mode=ArgMode.Value))
         return out
 
-    pure def check_arg(mut self, cx: Cx, a: Arg, p: InstParam) -> TExprId:
-        let value_range = cx.ast.expr(a.value).range
+    ## An argument's value inferred with `expected` as a hint.
+    pure def arg_infer(mut self, cx: Cx, a: ArgIn, expected: Ty?) -> TExprId:
+        match a.value:
+            case Some(v):
+                return self.infer_expr(cx, v, expected)
+            case None:
+                let c = a.closure.copy() else:
+                    return self.error_expr(a.range)
+                var fn_ty: Ty? = None
+                if let Some(t) = expected:
+                    if let TyData.Fn(_, _, _) = self.data(t):
+                        fn_ty = Some(self.resolved(t))
+                return self.check_closure(cx, c, fn_ty)
+
+    ## An argument's value checked against `ty`.
+    pure def arg_check(mut self, cx: Cx, a: ArgIn, ty: Ty) -> TExprId:
+        if let Some(v) = a.value:
+            return self.check_expr(cx, v, ty)
+        let x = self.arg_infer(cx, a, Some(ty))
+        return self.coerce(cx, x, ty)
+
+    pure def check_arg(mut self, cx: Cx, a: ArgIn, p: InstParam) -> TArg:
         if p.mode == Mode.Mut and not a.mutable:
-            let d = self.error(cx, Msg.TypeMutArgumentMissing, value_range).with("param", p.name)
-            self.report(d.fix_at(Msg.TypeAddMut, value_range.start, value_range.start, "mut "))
+            let r = a.value_range
+            let d = self.error(cx, Msg.TypeMutArgumentMissing, r).with("param", p.name)
+            self.report(d.fix_at(Msg.TypeAddMut, r.start, r.start, "mut "))
         elif p.mode != Mode.Mut and a.mutable:
             let d = self.error(cx, Msg.TypeMutArgumentUnexpected, a.range).with("param", p.name)
             self.report(d.fix_edits(Msg.TypeRemoveMut, []))
         # What earlier arguments inferred may settle an associated type.
         let z = self.infer.zonk(mut self.types, p.ty)
         let pty = cx.prog.normalize(mut self.types, z, self.env)
-        if let TyData.Fn(_, _, _) = self.types.data(pty):
-            self.go_beyond("a function as an argument")
+        # An argument that mentions `it` where a one-parameter function is
+        # expected is a closure over `it`.
+        if let TyData.Fn(ps, _, _) = self.types.data(pty):
+            if len(ps) == 1:
+                if let Some(v) = a.value:
+                    var is_closure = False
+                    if let ExprKind.Closure(_) = cx.ast.expr(v).kind:
+                        is_closure = True
+                    if not is_closure and mentions_it(cx.ast, v):
+                        let r = cx.ast.expr(v).range
+                        let it = ClosureParamSrc(name="it".to_string(), ty=None, range=r)
+                        let c = self.closure_from_parts(
+                            cx, [it], ClosureSource.Expr(v), Some(pty), r
+                        )
+                        let cc = self.coerce(cx, c, pty)
+                        return TArg(expr=cc, mode=ArgMode.Value)
         match p.mode:
             case Mode.Own:
-                let x = self.check_expr(cx, a.value, pty)
-                return self.check_movable(cx, x)
+                let x = self.arg_check(cx, a, pty)
+                return TArg(expr=self.check_movable(cx, x), mode=ArgMode.Value)
             case Mode.Mut:
-                let x = self.infer_expr(cx, a.value, Some(pty))
+                let x = self.arg_infer(cx, a, Some(pty))
                 if let TyData.Ref(inner, True) = self.data(self.ty_of(x)):
                     if not self.infer.try_unify(self.types, inner, pty):
                         let target = self.types.ref_(pty, True)
-                        return self.coerce(cx, x, target)
-                    return x
+                        let y = self.coerce(cx, x, target)
+                        return TArg(expr=y, mode=ArgMode.Value)
+                    return TArg(expr=x, mode=ArgMode.Value)
                 if not self.infer.try_unify(self.types, self.ty_of(x), pty):
-                    return self.coerce(cx, x, pty)
+                    let y = self.coerce(cx, x, pty)
+                    return TArg(expr=y, mode=ArgMode.BorrowMut)
                 if self.is_place(x):
-                    self.require_mutable(cx, x, value_range)
-                return x
+                    self.require_mutable(cx, x, a.value_range)
+                return TArg(expr=x, mode=ArgMode.BorrowMut)
             case Mode.Borrow:
                 if p.opaque:
                     # A generic parameter: always by reference.
-                    let x = self.infer_expr(cx, a.value, Some(pty))
+                    let x = self.arg_infer(cx, a, Some(pty))
                     if let TyData.Ref(inner, _) = self.data(self.ty_of(x)):
                         if self.infer.try_unify(self.types, inner, pty):
-                            return x
-                    return self.coerce(cx, x, pty)
-                if let TyData.Adt(d, _) = self.types.data(pty):
+                            return TArg(expr=x, mode=ArgMode.Value)
+                    let y = self.coerce(cx, x, pty)
+                    return TArg(expr=y, mode=ArgMode.Ref)
+                if let TyData.Adt(d, targs) = self.types.data(pty).copy():
                     if Some(d) == cx.prog.wk.iterable:
-                        self.go_beyond("an `Iterable` parameter")
-                        return self.infer_expr(cx, a.value, None)
-                var is_var = False
-                if let TyData.Var(_) = self.types.data(pty):
-                    is_var = True
-                if self.is_copy(cx, pty) and not is_var:
-                    return self.check_expr(cx, a.value, pty)
-                let x = self.infer_expr(cx, a.value, Some(pty))
+                        return self.iterable_arg(cx, a, pty, targs)
+                if self.is_copy(cx, pty) and not is_var_data(self.types.data(pty)):
+                    let x = self.arg_check(cx, a, pty)
+                    return TArg(expr=x, mode=ArgMode.Value)
+                let x = self.arg_infer(cx, a, Some(pty))
                 if let TyData.Ref(inner, _) = self.data(self.ty_of(x)):
                     if self.infer.try_unify(self.types, inner, pty):
                         # A reference is passed on as it is.
-                        return x
-                return self.coerce(cx, x, pty)
+                        return TArg(expr=x, mode=ArgMode.Value)
+                let y = self.coerce(cx, x, pty)
+                let mode = if self.is_copy(cx, self.ty_of(y)): ArgMode.Value else: ArgMode.Borrow
+                return TArg(expr=y, mode=mode)
 
-    ## `recv.name(args)`: a method of the receiver's type, through
-    ## references. A method of a trait is beyond the slice.
+    ## An argument for an `Iterable[T]` parameter: any collection or
+    ## iterator of `T`.
+    pure def iterable_arg(mut self, cx: Cx, a: ArgIn, pty: Ty, targs: list[Ty]) -> TArg:
+        let x = self.arg_infer(cx, a, None)
+        let item_ty = if targs.is_empty(): Ty.error() else: targs[0]
+        # An `Iterable` parameter passed on as it is: the reference to what
+        # the caller gave.
+        if let TyData.Ref(inner, _) = self.data(self.ty_of(x)):
+            if let TyData.Adt(d2, ta2) = self.data(inner):
+                if Some(d2) == cx.prog.wk.iterable:
+                    let given = if ta2.is_empty(): Ty.error() else: ta2[0]
+                    if not self.infer.try_unify(self.types, given, item_ty):
+                        let shown_p = self.show(cx, pty)
+                        let shown_x = self.show(cx, self.ty_of(x))
+                        let d = self.error(cx, Msg.TypeMismatch, a.value_range)
+                        self.report(d.with("expected", shown_p).with("found", shown_x))
+                    return TArg(expr=x, mode=ArgMode.Value)
+        match self.iteration_item(cx, self.ty_of(x), Mode.Borrow):
+            case Some((item, mode)):
+                let it = self.decay_ty(cx, item)
+                if not self.infer.try_unify(self.types, it, item_ty):
+                    let shown_p = self.show(cx, pty)
+                    let shown_x = self.show(cx, self.ty_of(x))
+                    let d = self.error(cx, Msg.TypeMismatch, a.value_range)
+                    self.report(d.with("expected", shown_p).with("found", shown_x))
+                if mode == ForMode.Iter:
+                    return TArg(expr=self.check_movable(cx, x), mode=ArgMode.Value)
+                return TArg(expr=x, mode=ArgMode.Borrow)
+            case None:
+                if self.ty_of(x) != Ty.error():
+                    let shown_p = self.show(cx, pty)
+                    let shown_x = self.show(cx, self.ty_of(x))
+                    let d = self.error(cx, Msg.TypeMismatch, a.value_range)
+                    self.report(d.with("expected", shown_p).with("found", shown_x))
+                return TArg(expr=x, mode=ArgMode.Value)
+
+    ## `recv.name(args)`: a method of the receiver's type, then of a trait
+    ## it implements (or, for a generic parameter, a trait it is bounded
+    ## by); through references and `Box`es.
     pub pure def method_call_on(
-        mut self, cx: Cx, recv0: TExprId, name: Name, args: list[Arg], at: TextRange, expected: Ty?
+        mut self,
+        cx: Cx,
+        recv0: TExprId,
+        name: Name,
+        args: list[Arg],
+        trailing: Closure?,
+        at: TextRange,
+        expected: Ty?,
     ) -> TExprId:
         var recv = self.auto_deref(recv0)
-        var base = self.resolved(self.ty_of(recv))
-        match self.types.data(base):
-            case TyData.Error:
-                self.check_args_loosely(cx, args)
-                return self.error_expr(at)
-            case TyData.Var(_):
-                let recv_at = self.span_of(recv)
-                let text = self.source_text(cx, recv_at)
-                let d = self.error(cx, Msg.TypeCannotInfer, recv_at).with("name", text)
+        while True:
+            var base = self.resolved(self.ty_of(recv))
+            match self.types.data(base):
+                case TyData.Error:
+                    self.check_args_loosely(cx, args)
+                    return self.error_expr(at)
+                case TyData.Var(_):
+                    let recv_at = self.span_of(recv)
+                    let text = self.source_text(cx, recv_at)
+                    let d = self.error(cx, Msg.TypeCannotInfer, recv_at).with("name", text)
+                    self.report(d)
+                    self.check_args_loosely(cx, args)
+                    return self.error_expr(at)
+                case _:
+                    pass
+            if name.text == "copy" and args.is_empty() and trailing.is_none():
+                return self.add(TExprKind.CopyOf(recv), base, at)
+            if name.text == "trace" and args.is_empty():
+                if let TyData.ErrSet(_) = self.types.data(base):
+                    let s = self.string_ty(cx)
+                    return self.add(TExprKind.Trace(recv), s, at)
+            var def_: DefId? = None
+            if let Some(k) = self.types.key(base):
+                def_ = cx.prog.method(k, name.text)
+            # A `Shared`'s own functions take it as an argument: a method
+            # call reaches the value's methods.
+            if self.smart_pointer(cx, base) == Some("Shared".to_string()):
+                if let Some(d) = def_:
+                    if let Some(f) = cx.prog.fn_info(d):
+                        if f.self_mode.is_none():
+                            def_ = None
+            if def_.is_none() and self.is_string(cx, base):
+                if let Some(d) = cx.prog.method(TyKey.Str, name.text):
+                    def_ = Some(d)
+                    recv = self.coerce(cx, recv, Ty.str())
+                    base = Ty.str()
+            if let Some(d) = def_:
+                # A `dict` or `set` finds its keys by their hash.
+                if let TyData.Adt(cd, a) = self.types.data(base):
+                    if Some(cd) == cx.prog.wk.dict or Some(cd) == cx.prog.wk.set:
+                        if let Some(k) = a.first():
+                            self.require(k, cx.prog.wk.hash, at)
+                return self.inherent_call(cx, d, recv, base, name, args, trailing, at, expected)
+            # A method of a trait.
+            let z = self.infer.zonk(mut self.types, base)
+            let norm = cx.prog.normalize(mut self.types, z, self.env)
+            let candidates = cx.prog.trait_methods_for(mut self.types, norm, name.text, self.env)
+            if len(candidates) == 1:
+                let (tr, m) = candidates[0].copy()
+                return self.trait_call(cx, m, tr, recv, norm, name, args, trailing, at, expected)
+            if len(candidates) > 1:
+                # One generic trait implemented for several of its arguments
+                # (`Into[u32]`, `Into[int]`): the arguments are inferred.
+                var same = True
+                for (t, m) in candidates:
+                    if t.def_ != candidates[0].0.def_ or m != candidates[0].1:
+                        same = False
+                if same:
+                    let (tr0, m) = candidates[0].copy()
+                    var fresh: list[Ty] = []
+                    for _ in tr0.args:
+                        fresh.push(self.infer.fresh(mut self.types))
+                    let tr = TraitRef(def_=tr0.def_, args=fresh)
+                    return self.trait_call(
+                        cx, m, tr, recv, norm, name, args, trailing, at, expected
+                    )
+                var traits: list[String] = []
+                for (t, _) in candidates:
+                    traits.push(cx.prog.display_trait_in(self.types, t, self.generic_names))
+                let shown = self.show(cx, base)
+                var d = self.error(cx, Msg.TypeAmbiguousMethod, name.range)
+                d = d.with("name", name.text).with("ty", shown).with("traits", traits.join(", "))
                 self.report(d)
                 self.check_args_loosely(cx, args)
                 return self.error_expr(at)
-            case _:
-                pass
-        if name.text == "copy" and args.is_empty():
-            return self.add(TExprKind.CopyOf(recv), base, at)
-        if name.text == "trace" and args.is_empty():
-            if let TyData.ErrSet(_) = self.types.data(base):
-                self.go_beyond("`trace`")
-                return self.error_expr(at)
-        var def_: DefId? = None
-        if let Some(k) = self.types.key(base):
-            def_ = cx.prog.method(k, name.text)
-        if self.is_builtin(cx, base, "Shared"):
-            self.go_beyond("a method of a `Shared`")
+            # A refinement has its base's methods, with the same value as the
+            # receiver.
+            if self.refinement_of(cx, base).is_some():
+                recv = self.unrefined_once(cx, recv)
+                continue
+            # A `Box` and a `Shared` lend their methods' receiver to what
+            # they hold.
+            if self.is_box(cx, base):
+                recv = self.unbox(recv)
+                recv = self.auto_deref(recv)
+                continue
+            if self.smart_pointer(cx, base).is_some():
+                recv = self.deref_smart(recv)
+                recv = self.auto_deref(recv)
+                continue
+            # A field holding a function.
+            if let TyData.Adt(sd, _) = self.types.data(base):
+                if let Some(s) = cx.prog.struct_info(sd):
+                    var has_field = False
+                    for f in s.fields:
+                        if f.name == name.text:
+                            has_field = True
+                    if has_field:
+                        let fv = self.field_of(cx, recv, name, at)
+                        return self.call_value(cx, fv, args, trailing, at)
+            let shown = self.show(cx, base)
+            var d = self.error(cx, Msg.TypeUnknownMethod, name.range)
+            d = d.with("ty", shown).with("name", name.text)
+            if let Some(similar) = self.similar_member(cx, base, name.text):
+                d = d.fix_at(Msg.TypeSimilarMember, name.range.start, name.range.end, similar)
+            self.report(d)
             self.check_args_loosely(cx, args)
             return self.error_expr(at)
-        if def_.is_none() and self.is_string(cx, base):
-            if let Some(d) = cx.prog.method(TyKey.Str, name.text):
-                def_ = Some(d)
-                recv = self.coerce(cx, recv, Ty.str())
-                base = Ty.str()
-        if let Some(d) = def_:
-            # A `dict` or `set` finds its keys by their hash.
-            if let TyData.Adt(cd, a) = self.types.data(base):
-                if Some(cd) == cx.prog.wk.dict or Some(cd) == cx.prog.wk.set:
-                    if let Some(k) = a.first():
-                        self.require(k, cx.prog.wk.hash, at)
-            return self.inherent_call(cx, d, recv, base, name, args, at, expected)
-        # A method of a trait.
-        let z = self.infer.zonk(mut self.types, base)
-        let norm = cx.prog.normalize(mut self.types, z, self.env)
-        match cx.prog.trait_methods_for(mut self.types, norm, name.text, self.env):
-            case Some(candidates):
-                if not candidates.is_empty():
-                    self.go_beyond("a method of a trait")
-                    self.check_args_loosely(cx, args)
-                    return self.error_expr(at)
-            case None:
-                self.go_beyond("a method of a trait stage 1 cannot decide")
-                self.check_args_loosely(cx, args)
-                return self.error_expr(at)
-        if self.is_box(cx, base) or self.is_smart_pointer(cx, base):
-            self.go_beyond("a method through a `Box` or a shared pointer")
-            self.check_args_loosely(cx, args)
-            return self.error_expr(at)
-        # A field holding a function.
-        if let TyData.Adt(sd, _) = self.types.data(base):
-            if let Some(s) = cx.prog.struct_info(sd):
-                for f in s.fields:
-                    if f.name == name.text:
-                        self.go_beyond("a call of a field")
-                        self.check_args_loosely(cx, args)
-                        return self.error_expr(at)
-        let shown = self.show(cx, base)
-        var d = self.error(cx, Msg.TypeUnknownMethod, name.range)
-        d = d.with("ty", shown).with("name", name.text)
-        if let Some(similar) = self.similar_member(cx, base, name.text):
-            d = d.fix_at(Msg.TypeSimilarMember, name.range.start, name.range.end, similar)
-        self.report(d)
-        self.check_args_loosely(cx, args)
-        return self.error_expr(at)
 
     pure def inherent_call(
         mut self,
@@ -909,6 +1381,7 @@ impl Checker:
         base: Ty,
         name: Name,
         args: list[Arg],
+        trailing: Closure?,
         at: TextRange,
         expected: Ty?,
     ) -> TExprId:
@@ -917,9 +1390,7 @@ impl Checker:
         if info.header_broken:
             self.check_args_loosely(cx, args)
             return self.error_expr(at)
-        let module = cx.prog.defs[d.index].module
-        if module != self.module and not cx.prog.modules[module.index].is_std:
-            self.go_beyond("a method of another module")
+        self.check_method_vis(cx, d)
         let mode = info.self_mode else:
             let shown = self.show(cx, base)
             var diag = self.error(cx, Msg.TypeAssocNotMethod, name.range)
@@ -927,19 +1398,222 @@ impl Checker:
             self.report(diag)
             self.check_args_loosely(cx, args)
             return self.error_expr(at)
-        var receiver = recv
+        var recv_arg = TArg(expr=recv, mode=ArgMode.Value)
         match mode:
             case Mode.Borrow:
-                pass
+                if not self.is_copy(cx, base):
+                    recv_arg = TArg(expr=recv, mode=ArgMode.Borrow)
             case Mode.Mut:
                 if self.is_place(recv):
                     self.require_mutable(cx, recv, self.span_of(recv))
+                recv_arg = TArg(expr=recv, mode=ArgMode.BorrowMut)
             case Mode.Own:
-                receiver = self.check_movable(cx, recv)
-        return self.call_fn(cx, d, None, Some(base), Some(receiver), args, at, expected)
+                recv_arg = TArg(expr=self.check_movable(cx, recv), mode=ArgMode.Value)
+        let explicit = self.explicit_method_args.copy()
+        self.explicit_method_args = None
+        return self.call_fn(
+            cx, d, explicit, Some(base), Some(recv_arg), args, trailing, at, expected
+        )
+
+    ## A call of the trait method `m` of `tr` on `recv`, of type `self_ty`.
+    ## `self` is the trait's `Self`, a generic parameter, so a borrowed one
+    ## is passed by reference whatever its type.
+    pub pure def trait_call(
+        mut self,
+        cx: Cx,
+        m: DefId,
+        tr: TraitRef,
+        recv: TExprId,
+        self_ty: Ty,
+        name: Name,
+        args: list[Arg],
+        trailing: Closure?,
+        at: TextRange,
+        expected: Ty?,
+    ) -> TExprId:
+        let info = cx.prog.fn_info(m) else:
+            return self.error_expr(at)
+        if info.header_broken:
+            self.check_args_loosely(cx, args)
+            return self.error_expr(at)
+        let mode = info.self_mode else:
+            let shown = self.show(cx, self_ty)
+            var diag = self.error(cx, Msg.TypeAssocNotMethod, name.range)
+            diag = diag.with("name", name.text).with("ty", shown)
+            self.report(diag)
+            self.check_args_loosely(cx, args)
+            return self.error_expr(at)
+        var recv_arg = TArg(expr=recv, mode=ArgMode.Ref)
+        match mode:
+            case Mode.Borrow:
+                if let TyData.Ref(_, _) = self.data(self.ty_of(recv)):
+                    recv_arg = TArg(expr=recv, mode=ArgMode.Value)
+            case Mode.Mut:
+                if self.is_place(recv):
+                    self.require_mutable(cx, recv, self.span_of(recv))
+                recv_arg = TArg(expr=recv, mode=ArgMode.BorrowMut)
+            case Mode.Own:
+                recv_arg = TArg(expr=self.check_movable(cx, recv), mode=ArgMode.Value)
+        var outer = [self_ty]
+        for a in tr.args:
+            outer.push(a)
+        return self.call_fn_with(
+            cx, m, None, Some(outer), Some(self_ty), Some(recv_arg), args, trailing, at, expected
+        )
+
+    ## Calls a value of function type.
+    pub pure def call_value(
+        mut self, cx: Cx, f0: TExprId, args: list[Arg], trailing: Closure?, at: TextRange
+    ) -> TExprId:
+        # A reference to a function value calls the function.
+        var f = f0
+        while let TyData.Ref(inner, _) = self.data(self.ty_of(f)):
+            if let TyData.Fn(_, _, _) = self.data(inner):
+                let fspan = self.span_of(f)
+                f = self.add(TExprKind.Deref(f), inner, fspan)
+            else:
+                break
+        let t = self.resolved(self.ty_of(f))
+        let TyData.Fn(ps, ret, _) = self.types.data(t).copy() else:
+            if t != Ty.error():
+                let shown = self.show(cx, t)
+                let d = self.error(cx, Msg.TypeNotCallable, at).with("ty", shown)
+                self.report(d)
+            self.check_args_loosely(cx, args)
+            return self.error_expr(at)
+        var params: list[InstParam] = []
+        for i in range(len(ps)):
+            params.push(
+                InstParam(name="{i}", mode=Mode.Own, ty=ps[i], has_default=False, opaque=False)
+            )
+        let sig = InstSig(
+            def_=DefId(index=-1),
+            name=self.source_text(cx, self.span_of(f)),
+            params=params,
+            ret=ret,
+            owner=None,
+            type_args=[],
+            keyword_only_from=None,
+            positional_only_until=len(ps),
+        )
+        let out = self.check_args(cx, sig, args, trailing, at)
+        if let Some(root) = self.place_root(f):
+            self.note_use(root, False)
+        return self.add(TExprKind.Call(callee=Callee.Value(f), args=out), ret, at)
+
+## The argument as `check_args` sees it.
+pure def arg_in(ast: Ast, a: Arg) -> ArgIn:
+    return ArgIn(
+        name=a.name.copy(),
+        mutable=a.mutable,
+        value=Some(a.value),
+        closure=None,
+        range=a.range,
+        value_range=ast.expr(a.value).range,
+    )
+
+## The function a task call names, for its messages: the text before `(`.
+pure def call_name(text: str) -> String:
+    var out = String.new()
+    for c in text.chars():
+        if c == '(' or c == ' ' or c == '\n' or c == '\t':
+            return out
+        out.push_char(c)
+    return out
 
 ## The type a primitive name denotes where a value is written (`int.max`).
 pure def primitive_value_type(name: str) -> Ty?:
     if name == "Never":
         return None
     return primitive(name)
+
+## Whether an expression mentions `it` outside any nested closure: such an
+## argument, where a one-parameter function is expected, is a closure over
+## `it` (02, "Closures").
+pub pure def mentions_it(ast: Ast, e: ExprId) -> bool:
+    match ast.expr(e).kind:
+        case ExprKind.Name(n):
+            return n == "it"
+        case ExprKind.Closure(_):
+            return False
+        case ExprKind.Paren(x):
+            return mentions_it(ast, x)
+        case ExprKind.Try(x):
+            return mentions_it(ast, x)
+        case ExprKind.FromEnd(x):
+            return mentions_it(ast, x)
+        case ExprKind.Unary(_, x):
+            return mentions_it(ast, x)
+        case ExprKind.Ref(_, x):
+            return mentions_it(ast, x)
+        case ExprKind.Binary(_, l, r):
+            return mentions_it(ast, l) or mentions_it(ast, r)
+        case ExprKind.Compare(first, rest):
+            if mentions_it(ast, first):
+                return True
+            for (_, x) in rest:
+                if mentions_it(ast, x):
+                    return True
+            return False
+        case ExprKind.Tuple(xs):
+            for x in xs:
+                if mentions_it(ast, x):
+                    return True
+            return False
+        case ExprKind.List(xs):
+            for x in xs:
+                if mentions_it(ast, x):
+                    return True
+            return False
+        case ExprKind.Set(xs):
+            for x in xs:
+                if mentions_it(ast, x):
+                    return True
+            return False
+        case ExprKind.Dict(kv):
+            for (k, v) in kv:
+                if mentions_it(ast, k) or mentions_it(ast, v):
+                    return True
+            return False
+        case ExprKind.Call(callee, args, _):
+            if mentions_it(ast, callee):
+                return True
+            for a in args:
+                if mentions_it(ast, a.value):
+                    return True
+            return False
+        case ExprKind.Field(base, _):
+            return mentions_it(ast, base)
+        case ExprKind.OptField(base, _):
+            return mentions_it(ast, base)
+        case ExprKind.Index(base, args):
+            if mentions_it(ast, base):
+                return True
+            for a in args:
+                match a:
+                    case IndexArg.Expr(x):
+                        if mentions_it(ast, x):
+                            return True
+                    case IndexArg.Slice(lo, hi):
+                        if let Some(x) = lo:
+                            if mentions_it(ast, x):
+                                return True
+                        if let Some(x) = hi:
+                            if mentions_it(ast, x):
+                                return True
+            return False
+        case ExprKind.If(branches, else_):
+            for (c, v) in branches:
+                if mentions_it(ast, c) or mentions_it(ast, v):
+                    return True
+            if let Some(x) = else_:
+                return mentions_it(ast, x)
+            return False
+        case ExprKind.Str(parts):
+            for p in parts:
+                if let StrPart.Interp(x, _, _, _) = p:
+                    if mentions_it(ast, x):
+                        return True
+            return False
+        case _:
+            return False

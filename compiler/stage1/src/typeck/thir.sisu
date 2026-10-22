@@ -1,90 +1,410 @@
-##! The typed tree as far as the checker's slice reads it (stage 0's
-##! `sisu-typeck/src/thir.rs`): each expression with its type and span,
-##! and the statements as much as the rules of divergence need. Stage 0's
-##! tree is what lowering consumes; here only the checker reads it, so a
-##! node keeps no more than the rules ask of it (`Other` for the rest).
-##! Expressions, statements and blocks live in arenas of the checker and
-##! refer to each other by index.
+##! The typed tree (stage 0's `sisu-typeck/src/thir.rs`): what the checker
+##! makes of every body, broken or not. Every expression carries its type;
+##! ill-typed subterms have type `Error` and kind `Error`, so the tree is
+##! complete even when the program is not.
+##!
+##! Compared with the AST, names are resolved (locals, functions,
+##! variants), sugar is decided (`it` closures, `Type(...)` constructors,
+##! `range(n)`), implicit operations are explicit (auto-deref, borrows of
+##! arguments, coercions), and literals have their final types.
+##!
+##! Where the Rust tree holds a child in a `Box`, this one holds an id:
+##! expressions, blocks, patterns and closures live in the arenas of the
+##! checker (`Checker.exprs`, `.blocks`, `.pats`, `.closures`) and refer to
+##! each other by index, as the AST does (`syntax.ast` says why).
 
 from stage1.diag import TextRange
+from stage1.syntax.ast import BinOp, CmpOp, UnOp
 from stage1.typeck.ty import DefId, Ty
 
 @derive(Eq, Hash, Debug, Copy)
 pub struct TExprId:
     pub index: int
 
-## How a value was converted to the type expected of it.
+@derive(Eq, Hash, Debug, Copy)
+pub struct BlockId:
+    pub index: int
+
+@derive(Eq, Hash, Debug, Copy)
+pub struct PatId:
+    pub index: int
+
+@derive(Eq, Hash, Debug, Copy)
+pub struct ClosureId:
+    pub index: int
+
+## A local variable of the body (or a parameter), by its index in
+## `Checker.locals`.
+pub struct Local:
+    pub name: String
+    pub ty: Ty
+    ## `var`, or a `let` declared without a value (assigned later).
+    pub mutable: bool
+    ## Declared by `let x: T` without a value: it may be assigned once on
+    ## each path, which the ownership checker's dataflow decides.
+    pub once: bool
+    pub span: TextRange
+    ## The closure whose parameter or local this is; `None` for the
+    ## function.
+    pub closure: ClosureId?
+
+## A local a closure uses from outside it.
+@derive(Eq, Copy)
+pub struct Capture:
+    pub local: int
+    ## Captured by `ref mut` because the closure modifies it.
+    pub mutable: bool
+    ## Kept by value in the environment rather than borrowed: every capture
+    ## of an `own` closure, and a task's `Copy` captures it does not change
+    ## (decided once the types are known).
+    pub by_value: bool
+
+## What a closure is for (06, "Tasks and scopes").
 @derive(Eq, Debug, Copy)
-pub enum Coercion:
-    NeverToAny
-    StrView
-    RefStrView
-    MutToShared
-    Widen
-    DerefCopy
-    IntWiden
-    Mismatch
+pub enum ClosureRole:
+    Plain
+    ## The body of `task.scope` or `task.race`.
+    ScopeBody
+    ## A task, written at its `spawn`.
+    Task
+
+pub struct TClosure:
+    pub params: list[int]
+    pub captures: list[Capture]
+    ## `own x -> ...`: the closure keeps copies of what it captures.
+    pub own_: bool
+    pub ret: Ty
+    ## An inline closure `x -> e` is a block holding `return e`.
+    pub body: BlockId
+    pub span: TextRange
+    pub fn_ty: Ty
+    ## The body of `comptime e` (08).
+    pub comptime_: bool
+    pub role: ClosureRole
+
+pub struct TBlock:
+    pub stmts: list[TStmt]
+    pub span: TextRange
+
+@derive(Eq, Copy)
+pub enum Unwrap:
+    Option
+    Result
+
+pub enum TLetElse:
+    ## `else: v` and `else as e: v`: `v` replaces the missing value.
+    Fallback(binding: int?, value: TExprId)
+    ## A block that must leave the scope.
+    Diverge(binding: int?, body: BlockId)
+
+## What a check of a contract is for (07).
+@derive(Eq, Copy)
+pub enum TContractKind:
+    Requires
+    Ensures
+    Invariant
+    Refinement
+
+## One clause of a contract, checked where lowering puts it.
+pub struct ContractCheck:
+    pub kind: TContractKind
+    pub cond: TExprId
+    ## The clause as written, without its keyword.
+    pub text: String
+    pub span: TextRange
+    ## The condition only reads (17, "Assertions").
+    pub replay: bool
+
+pub enum TStmt:
+    ## `unwrap` is set when `init` is a `T?` or `T ! E` whose value the
+    ## pattern binds, with `else_` handling the missing case.
+    Let(pat: PatId, init: TExprId?, unwrap: Unwrap?, else_: TLetElse?, span: TextRange)
+    Assign(place: TExprId, value: TExprId, span: TextRange)
+    ## `a, b = x, y`: all values are computed, then assigned in order.
+    AssignTuple(places: list[TExprId], value: TExprId, span: TextRange)
+    ## `_ = e`.
+    Discard(value: TExprId, span: TextRange)
+    AugAssign(place: TExprId, op: BinOp, value: TExprId, span: TextRange)
+    Expr(TExprId)
+    Return(value: TExprId?, span: TextRange)
+    Break(TextRange)
+    Continue(TextRange)
+    If(branches: list[(TCond, BlockId)], else_: BlockId?, span: TextRange)
+    While(cond: TCond, body: BlockId, span: TextRange)
+    For(pat: PatId, iter: TExprId, mode: ForMode, item: Ty, body: BlockId, span: TextRange)
+    Match(scrutinee: TExprId, arms: list[TArm], span: TextRange)
+    ## `text` is the condition as written, for the panic message.
+    Assert(cond: TExprId, message: TExprId?, text: String, span: TextRange, replay: bool)
+    Contract(ContractCheck)
+    Defer(body: BlockId, span: TextRange)
+    ## A nested scope (from `with`).
+    Block(BlockId)
+    ## `select:` (06, "Channels and select").
+    Select(arms: list[TSelectArm], span: TextRange)
+    ## `yield e` in a generator.
+    Yield(value: TExprId, span: TextRange)
+    Error(TextRange)
+
+## `case pattern = operation:` of a `select`.
+pub struct TSelectArm:
+    pub op: SelectOp
+    pub pat: PatId
+    pub body: BlockId
+    pub span: TextRange
+
+## What a `select` arm waits for.
+pub enum SelectOp:
+    Recv(TExprId)
+    Send(TExprId)
+    Join(TExprId)
+    Timer(TExprId)
+    Cancelled(TExprId)
+
+impl SelectOp:
+    pub pure def expr(self) -> TExprId:
+        return match self:
+            case Recv(e): e
+            case Send(e): e
+            case Join(e): e
+            case Timer(e): e
+            case Cancelled(e): e
+
+## How a `for` loop or comprehension takes its items.
+@derive(Eq, Debug, Copy)
+pub enum ForMode:
+    ## Borrows a collection; items are references.
+    Borrow
+    ## Borrows a collection mutably; items are `ref mut`.
+    Mut
+    ## Consumes a collection.
+    Own
+    ## Drives an `Iter` value.
+    Iter
+    ## Drives a value of another type that implements `Iterator`.
+    Trait
+
+pub struct TCond:
+    pub parts: list[TCondPart]
+
+pub enum TCondPart:
+    Bool(TExprId)
+    Let(pat: PatId, value: TExprId)
+
+pub struct TArm:
+    pub pat: PatId
+    pub guard: TExprId?
+    pub body: TArmBody
+    pub span: TextRange
+
+pub enum TArmBody:
+    Expr(TExprId)
+    Block(BlockId)
 
 pub struct TExpr:
     pub kind: TExprKind
     pub ty: Ty
     pub span: TextRange
 
+pub enum Callee:
+    Fn(def_: DefId, type_args: list[Ty])
+    ## A function value: a local, a field, any expression of function type.
+    Value(TExprId)
+
+## How an argument is passed (04, parameter conventions).
+@derive(Eq, Debug, Copy)
+pub enum ArgMode:
+    ## Moved, or copied when the type is `Copy`.
+    Value
+    ## A shared borrow of the argument place (or of a temporary).
+    Borrow
+    ## An exclusive borrow; the argument is a mutable place.
+    BorrowMut
+    ## A shared borrow even of a `Copy` value: the parameter's declared
+    ## type is a generic parameter (or an associated type of one).
+    Ref
+
+@derive(Copy)
+pub struct TArg:
+    pub expr: TExprId
+    pub mode: ArgMode
+
+pub enum FieldInit:
+    Value(TExprId)
+    ## The field's default, evaluated at this construction.
+    Default(int)
+
+pub enum InterpPart:
+    Text(String)
+    ## `debug` holds the source text for `{expr=}`; `spec` is the format
+    ## spec after `:`, empty if none.
+    Value(expr: TExprId, debug: String?, spec: String)
+
+@derive(Eq, Copy)
+pub enum TCompKind:
+    List
+    Set
+    Dict
+
+pub enum TCompClause:
+    For(pat: PatId, iter: TExprId, mode: ForMode, item: Ty)
+    If(TExprId)
+
+pub enum TryKind:
+    Option
+    ## `from_` is the operand's error set, `to` the function's.
+    Result(from_: list[DefId], to: list[DefId])
+
+@derive(Eq, Copy)
+pub enum IndexKind:
+    List
+    ## `xs[^i]`.
+    ListFromEnd
+    Dict
+
+## How a value was converted to the type expected of it.
+@derive(Eq, Debug, Copy)
+pub enum Coercion:
+    ## `Never` to anything: the expression does not return.
+    NeverToAny
+    ## `String` viewed as `str`.
+    StrView
+    ## `ref String` viewed as `str`.
+    RefStrView
+    ## `ref T` to `T` for a `Copy` type.
+    DerefCopy
+    ## `ref mut T` used as `ref T`.
+    MutToShared
+    ## An error set widened to a superset, possibly inside `T ! E`.
+    Widen
+    ## A value of a type that implements the trait, as a `dyn Trait`.
+    ToDyn
+    ## `Box[T]` to `Box[dyn Trait]`.
+    BoxToDyn
+    ## `ref T` to `ref dyn Trait`.
+    RefToDyn
+    ## A value of a type that implements a capability's operations trait,
+    ## as the capability's handle (06).
+    ToCap
+    ## An integer as a wider integer type that holds all its values.
+    IntWiden
+    ## A value of a refinement type used as its base (07).
+    Unrefine
+    ## A type error: the expression is kept, its type replaced by the
+    ## expected one so nothing downstream reports again.
+    Mismatch
+
 pub enum TExprKind:
+    ## An integer literal: its value, or for a `u64` its 64 bits.
     Int(int)
+    ## A literal of `i128` or `u128` that `int` cannot hold: its 128 bits.
+    WideInt(u128)
+    Float(f64)
+    Bool(bool)
+    Char(char)
+    ## A string literal of type `str`, `String` or `Path`.
+    Str(String)
+    ## A byte string literal, `b"..."`.
+    Bytes(list[int])
+    Unit
+    Local(int)
+    Const(DefId)
+    FnRef(DefId)
+    Call(callee: Callee, args: list[TArg])
+    Variant(def_: DefId, variant: int, args: list[TExprId])
+    Struct(def_: DefId, fields: list[FieldInit])
+    Tuple(list[TExprId])
+    List(list[TExprId])
+    Dict(list[(TExprId, TExprId)])
+    Set(list[TExprId])
+    ## A struct field or tuple element of a place or value.
+    Field(base: TExprId, index: int)
+    Index(base: TExprId, index: TExprId, kind: IndexKind)
+    ## `xs[lo:hi]` on a list: a new list of copies.
+    Slice(base: TExprId, lo: TExprId?, hi: TExprId?)
+    ## The place a reference points to.
+    Deref(TExprId)
+    Borrow(place: TExprId, mutable: bool)
+    Unary(op: UnOp, operand: TExprId)
+    Binary(op: BinOp, lhs: TExprId, rhs: TExprId)
+    ## `and` (`and_`) or `or`, short-circuiting.
+    Logic(and_: bool, lhs: TExprId, rhs: TExprId)
+    Compare(first: TExprId, rest: list[(CmpOp, TExprId)])
+    ## `opt ?? default`; `deref` when the option holds a `ref T` of a
+    ## `Copy` type and the result is the `T`.
+    Coalesce(opt: TExprId, default: TExprId, deref: bool)
+    If(cond: TExprId, then: TExprId, else_: TExprId)
+    Match(scrutinee: TExprId, arms: list[TArm])
+    Closure(ClosureId)
+    ## `comptime e`: the value of the closure, computed at compile time.
+    Comptime(ClosureId)
+    ## A generator's `Iter`.
+    Generator(ClosureId)
+    Try(expr: TExprId, kind: TryKind)
+    ## `base?.rest`: `binder` holds the value inside `base`.
+    OptChain(base: TExprId, binder: int, then: TExprId, flatten: bool)
+    Interp(list[InterpPart])
+    Comprehension(kind: TCompKind, clauses: list[TCompClause], elem: TExprId, value: TExprId?)
+    Coerce(expr: TExprId, kind: Coercion)
+    ## The default of parameter `param` of `def_`, evaluated at this call.
+    DefaultArg(def_: DefId, param: int)
+    ## The default of field `field` of the struct `def_` (08).
+    FieldDefault(def_: DefId, field: int)
+    ## `x.copy()`: an explicit deep copy (04, rule 1).
+    CopyOf(TExprId)
+    ## `e.trace()` on an error: its error return trace as text (05).
+    Trace(TExprId)
+    ## `X.try_from(v)` for a refinement type `X` (07).
+    RefineTry(value: TExprId, refinement: DefId, type_args: list[Ty])
+    ## The value of the function's `const` generic parameter at this index.
+    ConstParam(int)
+    Error
+
+@derive(Eq, Debug, Copy)
+pub enum BindMode:
+    ## Takes the value: a move, or a copy for a `Copy` type.
+    Value
+    ## Binds a shared reference to the matched part.
+    Ref
+    ## Binds an exclusive reference.
+    RefMut
+
+pub struct TPat:
+    pub kind: TPatKind
+    pub ty: Ty
+    pub span: TextRange
+
+pub enum Lit:
+    Int(int)
+    WideInt(u128)
     Float(f64)
     Bool(bool)
     Char(char)
     Str(String)
-    Interp
-    List
-    Tuple
-    Unit
-    Local(int)
-    Field(base: TExprId, index: int)
-    ## An element of a list, an array or a `dict`.
-    Index(base: TExprId)
-    Deref(TExprId)
-    Borrow(place: TExprId, mutable: bool)
-    Coerce(expr: TExprId, kind: Coercion)
-    ## A call of a function, with its arguments.
-    Call(def_: DefId, args: list[TExprId])
-    FnRef(DefId)
-    Const(DefId)
-    CopyOf(TExprId)
+
+impl Lit:
+    ## A text that names the literal, equal exactly when the literals are
+    ## (what Rust's `Debug` of a literal gives the exhaustiveness check).
+    pub pure def key(self) -> String:
+        return match self:
+            case Int(n): "Int({n})"
+            case WideInt(n): "WideInt({n})"
+            case Float(f): "Float({f})"
+            case Bool(b): "Bool({b})"
+            case Char(c): "Char({c})"
+            case Str(s): "Str({s})"
+
+pub enum TPatKind:
+    Wild
+    Bind(local: int, mode: BindMode)
+    Lit(Lit)
+    ## A variant with one pattern per field.
+    Variant(def_: DefId, variant: int, fields: list[PatId])
+    Struct(def_: DefId, fields: list[PatId])
+    Tuple(list[PatId])
+    ## `[a, b, *rest, z]`: `has_rest` when a star is present, `rest` its
+    ## binding.
+    List(prefix: list[PatId], has_rest: bool, rest: int?, suffix: list[PatId])
+    Or(list[PatId])
+    ## Matching goes through a reference to the value.
+    Deref(PatId)
     Error
-    ## Anything whose parts no rule of the slice reads.
-    Other
-
-## A local variable of the body (or a parameter).
-pub struct Local:
-    pub name: String
-    pub ty: Ty
-    pub mutable: bool
-    ## Declared by `let x: T` without a value: assigned once, later.
-    pub once: bool
-    pub span: TextRange
-
-@derive(Eq, Hash, Debug, Copy)
-pub struct BlockId:
-    pub index: int
-
-## A statement, as far as divergence reads it.
-pub enum TStmt:
-    Return
-    Break
-    Continue
-    ## An expression statement, of this type.
-    Expr(Ty)
-    ## A `let` with a value of this type, and whether it has `else`.
-    Let(init: Ty?, has_else: bool)
-    ## Each branch's condition (whether it has parts) and block, and the
-    ## `else` block.
-    If(branches: list[(bool, BlockId)], else_: BlockId?)
-    ## Whether the condition is the literal `True`, and the body.
-    While(infinite: bool, body: BlockId)
-    Block(BlockId)
-    Other
-
-pub struct TBlock:
-    pub stmts: list[TStmt]

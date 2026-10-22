@@ -20,29 +20,48 @@
 
 from stage1.diag import Catalog, Diagnostic, Msg, TextRange
 from stage1.parser import parse
+from stage1.resolve import closest
 from stage1.syntax.ast import (
+    Arg,
     Ast,
     Attr,
+    BinOp,
+    Block,
+    ClosureBody,
     ConstDef,
     EnumDef,
+    Expr,
+    ExprId,
     ExprKind,
     FnDef,
+    FromImport,
     GenericParam,
     ImplDef,
+    Import,
+    IndexArg,
+    Item,
     ItemId,
     ItemKind,
+    Mode,
     Module,
     Name,
+    Param,
     ParamKind,
+    PatternId,
+    Stmt,
+    StmtId,
+    StmtKind,
     StructDef,
     TestDef,
     TraitDef,
     TypeAlias,
+    TypeExpr,
     TypeExprId,
     TypeKind,
     Vis,
 )
 from stage1.syntax.ast import build
+from stage1.syntax.ast import visit
 from stage1.typeck.program import (
     AssocInfo,
     ConstInfo,
@@ -64,9 +83,10 @@ from stage1.typeck.program import (
     TraitInfo,
     VariantInfo,
     WellKnown,
+    derivable,
 )
-from stage1.typeck.std_sources import ambient, builtin_impls, target
-from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, Types
+from stage1.typeck.std_sources import ambient, builtin_impls, importable, module_for, module_paths, reexports, target
+from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, TyKey, Types
 
 ## Where a method is declared, which decides the generics, bounds and
 ## `Self` of its signature.
@@ -79,6 +99,8 @@ enum Owner:
     Trait(DefId)
     ## A trait impl's method.
     Impl(DefId)
+    ## A refinement type's predicate, whose `self` is a value of the base.
+    Refinement(DefId)
 
 ## A declaration waiting for its signature.
 enum Pending:
@@ -89,7 +111,17 @@ enum Pending:
     Impl(module: ModuleId, ast: ImplDef, range: TextRange)
     Test(def_: DefId, module: ModuleId, ast: TestDef)
     Const(def_: DefId, module: ModuleId, ast: ConstDef)
-    Refinement(def_: DefId, module: ModuleId, ast: TypeAlias)
+    Refinement(def_: DefId, module: ModuleId, ast: TypeAlias, node: int, range: TextRange)
+    ## An impl the compiler writes: `@derive(trait_)` (or the `Debug` every
+    ## struct and enum has), or `@delegate(trait_, to=...)`.
+    Derived(
+        ty: DefId,
+        module: ModuleId,
+        trait_: String,
+        derived: bool,
+        used: list[bool],
+        range: TextRange
+    )
 
 ## What a type expression may mention where it is written.
 struct TyCtx:
@@ -134,6 +166,32 @@ pub struct Resolver:
     headers_done: set[DefId]
     ## The bounds of every struct's and enum's generic parameters.
     type_preds: dict[DefId, list[Predicate]]
+    ## The std modules a program may import, parsed once by the base.
+    std_parsed: dict[String, Module]
+    ## The std modules loaded, by name.
+    std_loaded: dict[String, ModuleId]
+    ## While the root module's items are declared: its imports, declared
+    ## once every item is (stage 0's deferred imports).
+    deferring: bool
+    deferred: list[(ModuleId, ItemId)]
+    ## Stage 0 reports an error about the root module's declarations that
+    ## is not the type checker's (a `resolve.` message).
+    pub other_error: bool
+    ## The functions the compiler writes and checks elsewhere too, which
+    ## report nothing of their own.
+    pub quiet_fns: set[DefId]
+    ## The kinds of the functions the compiler writes.
+    special_kinds: dict[DefId, FnKind]
+    ## `@derive(Copy)` to check against the fields, with the type.
+    copy_checks: list[DefId]
+    ## The functions the compiler writes without a body here.
+    written: set[DefId]
+    ## The root module's text.
+    root_text: String
+    ## The module of the root module's doc examples, a test each, and its
+    ## text, which keeps every example line where the file has it.
+    pub doc_module: ModuleId?
+    pub doc_text: String
 
 impl Resolver:
     pub pure def new() -> Resolver:
@@ -149,6 +207,18 @@ impl Resolver:
             type_params={},
             headers_done=set(),
             type_preds={},
+            std_parsed={},
+            std_loaded={},
+            deferring=False,
+            deferred=[],
+            other_error=False,
+            quiet_fns=set(),
+            special_kinds={},
+            copy_checks=[],
+            written=set(),
+            root_text=String.new(),
+            doc_module=None,
+            doc_text=String.new(),
         )
 
     ## The prelude, the ambient std modules, `target` and `builtin_impls`,
@@ -168,9 +238,16 @@ impl Resolver:
         _ = r.load_std("builtin_impls", builtin_impls())
         r.resolve_pending()
         r.build_variant_index(0)
+        r.check_traits(0)
         # The std modules' bodies are never checked: their syntax goes.
         for i in range(len(r.sources)):
             r.sources[i] = Module(ast=Ast.new(), items=[], docs=[], broken_names=[])
+        # The std modules a program may import, parsed once.
+        for name in importable():
+            let text = text_of(texts, name)
+            if not text.is_empty():
+                let module = build.module(parse(text, Catalog.parse("")).tree)
+                _ = r.std_parsed.insert(name.to_string(), module)
         return r
 
     ## A prelude of the given text alone, resolved: no ambient modules, no
@@ -182,11 +259,14 @@ impl Resolver:
         r.fill_well_known()
         r.resolve_pending()
         r.build_variant_index(0)
+        r.check_traits(0)
         return r
 
     ## Declares and resolves the root module, `module`, the syntax of a
     ## file: the base with the file's module added.
-    pub pure def add_root(mut self, own module: Module, script: bool):
+    pub pure def add_root(mut self, own module: Module, text: str):
+        let script = text.starts_with("#!")
+        self.root_text = text.to_string()
         let first_def = len(self.prog.defs)
         let poisoned = module.broken_names.copy()
         let items = module.items.copy()
@@ -194,33 +274,68 @@ impl Resolver:
         self.prog.root = root
         for n in poisoned:
             _ = self.prog.poisoned.add(n.copy())
+        var items_declared = items.copy()
         if script:
-            for i in items:
-                if let ItemKind.Stmt(_) = self.sources[root.index].ast.item(i).kind:
-                    self.beyond = Some("a script's statements".to_string())
-        self.declare_items(root, items, "")
+            items_declared = self.script_items(root, items)
+        # Every item, then the imports, then the impls the compiler writes.
+        self.deferring = True
+        self.declare_items(root, items_declared, "")
+        self.declare_trait_shims(root, items_declared)
+        self.declare_doc_tests(root, items_declared)
+        self.deferring = False
+        let deferred = self.deferred.copy()
+        self.deferred = []
+        for (m, id) in deferred:
+            self.declare_import(m, id)
+        self.declare_derived(root, items)
+        self.declare_generators(root, items)
         self.resolve_pending()
         self.build_variant_index(first_def)
+        self.check_traits(first_def)
 
     ## The program, its table of types and the root module's syntax.
     pub pure def into_parts(own self) -> (Program, Types, Module):
         var sources = self.sources
-        let root = sources.pop() ?? Module(ast=Ast.new(), items=[], docs=[], broken_names=[])
+        var root = Module(ast=Ast.new(), items=[], docs=[], broken_names=[])
+        let at = self.prog.root.index
+        if at < len(sources):
+            # The modules the root module imports come after it.
+            while len(sources) > at + 1:
+                _ = sources.pop()
+            root = sources.pop() ?? root
         return (self.prog, self.types, root)
+
+    ## The syntax of the module of doc examples, when there is one.
+    pub pure def doc_syntax(self) -> Module?:
+        let m = self.doc_module else:
+            return None
+        if m.index >= len(self.sources):
+            return None
+        return Some(self.sources[m.index].copy())
 
     pure def add_module(mut self, name: str, is_std: bool, own module: Module) -> ModuleId:
         let id = ModuleId(index=len(self.prog.modules))
         self.prog.modules.push(
-            ModuleData(name=name.to_string(), items={}, order=[], is_std=is_std, parent=None)
+            ModuleData(
+                name=name.to_string(), items={}, order=[], is_std=is_std, parent=None, imported={}
+            )
         )
         self.sources.push(module)
         return id
 
     pure def load_std(mut self, name: str, text: str) -> ModuleId:
         let module = build.module(parse(text, Catalog.parse("")).tree)
+        return self.load_std_module(name, module)
+
+    ## Declares a parsed std module, once.
+    pure def load_std_module(mut self, name: str, own module: Module) -> ModuleId:
+        if let Some(m) = self.std_loaded.get(name.to_string()):
+            return m
         let items = module.items.copy()
         let m = self.add_module(name, True, module)
+        _ = self.std_loaded.insert(name.to_string(), m)
         self.declare_items(m, items, "")
+        self.declare_derived(m, items)
         return m
 
     pure def fill_well_known(mut self):
@@ -258,6 +373,14 @@ impl Resolver:
         wk.sync = self.prog.lookup_in(p, "Sync")
         wk.escapable = self.prog.lookup_in(p, "Escapable")
         wk.system = self.prog.lookup_in(p, "System")
+        wk.formatter = self.prog.lookup_in(p, "Formatter")
+        wk.fs_ops = self.prog.lookup_in(p, "FsOps")
+        wk.net_ops = self.prog.lookup_in(p, "NetOps")
+        wk.clock_ops = self.prog.lookup_in(p, "ClockOps")
+        wk.rand_ops = self.prog.lookup_in(p, "RandOps")
+        wk.env_ops = self.prog.lookup_in(p, "EnvOps")
+        wk.stdin_ops = self.prog.lookup_in(p, "StdinOps")
+        wk.proc_ops = self.prog.lookup_in(p, "ProcOps")
         self.prog.wk = wk
 
     pure def is_std(self, module: ModuleId) -> bool:
@@ -291,6 +414,9 @@ impl Resolver:
         if name.is_empty():
             return
         if self.prog.modules[module.index].items.contains(name.to_string()):
+            # `resolve.duplicate-definition`.
+            if self.is_root(module):
+                self.other_error = True
             return
         _ = self.prog.modules[module.index].items.insert(name.to_string(), def_)
         self.prog.modules[module.index].order.push(def_)
@@ -355,10 +481,13 @@ impl Resolver:
                     self.bind(module, s.name.text, def_)
                     _ = self.type_params.insert(def_, s.generics.copy())
                     self.declare_methods(module, def_, s.methods)
-                    if not s.consts.is_empty():
-                        self.beyond_in(module, "an associated constant")
+                    for c in s.consts:
+                        self.declare_assoc_const(module, TyKey.Adt(def_), s.name.text, c)
+                    # `invariant e` lines (07): a method of the struct that
+                    # checks them, which construction, every `mut self`
+                    # method and the `Mutex` rule call.
                     if not s.invariants.is_empty():
-                        self.beyond_in(module, "an invariant")
+                        self.declare_invariant(module, def_, item.node, s)
                     self.pending.push(
                         Pending.Struct(
                             def_=def_, module=module, ast=s.copy(), attrs=item.attrs.copy()
@@ -369,8 +498,6 @@ impl Resolver:
                 case ItemKind.ErrorSet(e):
                     self.declare_enum(module, e, item.vis, item.attrs, True)
                 case ItemKind.Impl(i):
-                    if not i.consts.is_empty():
-                        self.beyond_in(module, "an associated constant")
                     self.pending.push(Pending.Impl(module=module, ast=i.copy(), range=item.range))
                 case ItemKind.Trait(t):
                     let def_ = self.new_def(
@@ -378,24 +505,28 @@ impl Resolver:
                     )
                     self.bind(module, t.name.text, def_)
                     _ = self.type_params.insert(def_, t.generics.copy())
-                    self.beyond_in(module, "a trait")
                     self.pending.push(
                         Pending.Trait(
                             def_=def_, module=module, ast=t.copy(), attrs=item.attrs.copy()
                         )
                     )
                 case ItemKind.Import(_) | ItemKind.FromImport(_):
-                    self.beyond_in(module, "an import")
+                    if self.deferring:
+                        self.deferred.push((module, id))
+                    else:
+                        self.declare_import(module, id)
                 case ItemKind.Test(t):
-                    if t.cases.is_some():
-                        self.beyond_in(module, "a parametrised test")
                     let name = prefixed(test_prefix, t.name)
-                    let info = self.placeholder_fn(FnKind.Test(name.copy()))
-                    let def_ = self.new_def(
-                        module, name, t.name_range, Vis.Private, DefKind.Fn(info)
-                    )
-                    self.prog.tests.push(def_)
-                    self.pending.push(Pending.Test(def_=def_, module=module, ast=t.copy()))
+                    # A parametrised test is a test for each case (17).
+                    for (case_name, case_def) in self.test_cases(module, name, t):
+                        let info = self.placeholder_fn(FnKind.Test(case_name.copy()))
+                        let def_ = self.new_def(
+                            module, case_name, t.name_range, Vis.Private, DefKind.Fn(info)
+                        )
+                        self.prog.tests.push(def_)
+                        self.pending.push(
+                            Pending.Test(def_=def_, module=module, ast=case_def.copy())
+                        )
                 case ItemKind.Suite(s):
                     let prefix = prefixed(test_prefix, s.name)
                     self.declare_items(module, s.items, prefix)
@@ -415,15 +546,22 @@ impl Resolver:
                     self.pending.push(Pending.Const(def_=def_, module=module, ast=c.copy()))
                 case ItemKind.TypeAlias(a):
                     if a.refinement:
-                        let info = RefinementInfo(generics=[], base=Ty.error())
+                        let info = RefinementInfo(
+                            generics=[], base=Ty.error(), predicate=None, text=String.new()
+                        )
                         let def_ = self.new_def(
                             module, a.name.text, a.name.range, item.vis, DefKind.Refinement(info)
                         )
                         self.bind(module, a.name.text, def_)
                         _ = self.type_params.insert(def_, a.generics.copy())
-                        self.beyond_in(module, "a refinement type")
                         self.pending.push(
-                            Pending.Refinement(def_=def_, module=module, ast=a.copy())
+                            Pending.Refinement(
+                                def_=def_,
+                                module=module,
+                                ast=a.copy(),
+                                node=item.node,
+                                range=item.range,
+                            )
                         )
                     else:
                         let def_ = self.new_def(
@@ -436,18 +574,11 @@ impl Resolver:
                         self.bind(module, a.name.text, def_)
                         _ = self.aliases.insert(def_, (module, a.copy()))
                 case ItemKind.Extern(_):
-                    self.beyond_in(module, "`extern`")
+                    # `stage0.unsupported`: nothing is declared.
+                    if self.is_root(module):
+                        self.other_error = True
                 case _:
                     pass
-            if not item.attrs.is_empty() and not self.is_std(module):
-                for a in item.attrs:
-                    if a.name == "derive" or a.name == "delegate":
-                        self.beyond_in(module, "a derived impl")
-                    # Stage 0's ownership checker follows must-consume
-                    # values into the generic functions they are given to
-                    # (E0397).
-                    if a.name == "must_consume":
-                        self.beyond_in(module, "a must-consume type")
 
     pure def declare_enum(
         mut self, module: ModuleId, e: EnumDef, vis: Vis, attrs: list[Attr], error_set: bool
@@ -502,11 +633,11 @@ impl Resolver:
             match p:
                 case Pending.Struct(_, _, _, _) | Pending.Enum(_, _, _, _):
                     types.push(p)
-                case Pending.Refinement(_, _, _):
+                case Pending.Refinement(_, _, _, _, _):
                     types.push(p)
                 case Pending.Trait(_, _, _, _):
                     traits.push(p)
-                case Pending.Impl(_, _, _):
+                case Pending.Impl(_, _, _) | Pending.Derived(_, _, _, _, _, _):
                     impls.push(p)
                 case _:
                     rest.push(p)
@@ -597,9 +728,11 @@ impl Resolver:
                 if let Some(t) = c.ty:
                     ty = self.resolve_ty(t, TyCtx.plain(module, [], False))
                 self.prog.defs[def_.index].kind = DefKind.Const(ConstInfo(ty=ty, value=c.value))
-            case Pending.Impl(module, imp, range):
-                self.resolve_impl(module, imp, range)
-            case Pending.Refinement(def_, module, a):
+            case Pending.Impl(module, imp, rng):
+                self.resolve_impl(module, imp, rng)
+            case Pending.Derived(ty, module, t, derived, used, rng):
+                self.resolve_derived(ty, module, t, derived, used, rng)
+            case Pending.Refinement(def_, module, a, node, rng):
                 var names: list[String] = []
                 for g in a.generics:
                     names.push(g.name.text.copy())
@@ -608,8 +741,26 @@ impl Resolver:
                 var base = Ty.error()
                 if let Some(t) = a.ty:
                     base = self.resolve_ty(t, ctx)
+                # A refinement of a refinement keeps it as its base; a chain
+                # that comes back is a cycle (`resolve.alias-cycle`).
+                var at = base
+                var cycle = False
+                for _ in range(64):
+                    let TyData.Adt(d, args) = self.types.data(at).copy() else:
+                        break
+                    if d == def_:
+                        cycle = True
+                        break
+                    let b = self.prog.refinement_base(mut self.types, d, args) else:
+                        break
+                    at = b
+                if cycle:
+                    if self.is_root(module):
+                        self.other_error = True
+                    base = Ty.error()
                 if let DefKind.Refinement(r) = ref mut self.prog.defs[def_.index].kind:
                     r.base = base
+                self.declare_predicate(module, def_, node, a, rng)
 
     pure def resolve_struct(
         mut self, def_: DefId, module: ModuleId, s: StructDef, attrs: list[Attr]
@@ -764,6 +915,13 @@ impl Resolver:
                     predicates = info.predicates.copy()
                     self_ty = Some(info.self_ty)
                     impl_def = Some(i)
+            case Some(Owner.Refinement(r)):
+                outer = self.prog.type_generics(r)
+                for g in outer:
+                    outer_names.push(g.name.copy())
+                predicates = self.preds_of(r)
+                if let Some(ri) = self.prog.refinement(r):
+                    self_ty = Some(ri.base)
             case _:
                 pass
         var names = outer_names.copy()
@@ -809,6 +967,14 @@ impl Resolver:
         info.body = f.body.copy()
         info.intrinsic = self.builtin_attr(module, f.attrs, "intrinsic")
         info.internal = has_attr(f.attrs, "internal")
+        # A free generic function that reflects on its type parameters is a
+        # template (08): stage 0 checks the instances its calls ask for.
+        if self.is_root(module) and owner.is_none() and not f.generics.is_empty():
+            if let Some(b) = f.body:
+                if reflects(self.ast(module), b, f.generics):
+                    self.beyond_in(
+                        module, "a generic function that reflects on its type parameters"
+                    )
         if self.is_root(module):
             info.contracts = not f.contracts(self.ast(module)).is_empty()
             if has_attr(f.attrs, "structural") or has_attr(f.attrs, "keeps"):
@@ -873,6 +1039,13 @@ impl Resolver:
             info.header_broken = True
             info.ret = Ty.error()
             info.err_inferred = False
+        # A function without a body that is no trait's (`resolve.missing-body`).
+        if info.body.is_none()
+                and info.intrinsic.is_none()
+                and not f.name.text.is_empty()
+                and in_trait.is_none():
+            if self.is_root(module) and not self.written.contains(def_):
+                self.other_error = True
         # Register methods and associated functions.
         if let Some(o) = owner:
             if self.is_drop_impl(impl_def):
@@ -888,12 +1061,20 @@ impl Resolver:
                             let k = (key, f.name.text.copy())
                             if not self.prog.methods.contains(k.copy()):
                                 _ = self.prog.methods.insert(k, def_)
+                            elif self.is_root(module):
+                                # `resolve.duplicate-method`.
+                                self.other_error = True
                 case Owner.Trait(t):
                     if let DefKind.Trait(ti) = ref mut self.prog.defs[t.index].kind:
                         ti.methods.push(def_)
                 case Owner.Impl(i):
                     if let DefKind.Impl(ii) = ref mut self.prog.defs[i.index].kind:
                         ii.methods.push((f.name.text.copy(), def_))
+                # A refinement's predicate is nobody's method.
+                case Owner.Refinement(_):
+                    pass
+        if let Some(k) = self.special_kinds.get(def_):
+            info.kind = k.copy()
         self.prog.defs[def_.index].kind = DefKind.Fn(info)
 
     ## Whether an impl is of `Drop`.
@@ -1008,8 +1189,18 @@ impl Resolver:
         let self_ty = self.resolve_ty(imp.self_ty, ctx)
         let trait_ty = imp.trait_ty else:
             # An inherent impl adds methods to a type.
-            if self.types.key(self_ty).is_none():
+            let key = self.types.key(self_ty) else:
+                if self_ty != Ty.error() and self.is_root(module):
+                    # `resolve.not-a-type`.
+                    self.other_error = True
                 return
+            let shown = self.prog.display(self.types, self_ty)
+            var owner_name = String.new()
+            for part in shown.split("["):
+                if owner_name.is_empty():
+                    owner_name = part.to_string()
+            for c in imp.consts:
+                self.declare_assoc_const(module, key, owner_name, c)
             for m in imp.methods:
                 let vis = if self.is_std(module): Vis.Pub else: m.vis
                 let info = self.placeholder_fn(FnKind.Method)
@@ -1054,6 +1245,7 @@ impl Resolver:
             self_ty=self_ty,
             methods=[],
             assoc=assoc,
+            derived=False,
         )
         let def_ = self.new_def(
             module, "impl {shown_trait} for {shown_ty}", range, Vis.Pub, DefKind.Impl(info)
@@ -1065,6 +1257,1350 @@ impl Resolver:
             self.pending.push(
                 Pending.Fn(def_=fdef, module=module, ast=m.copy(), owner=Some(Owner.Impl(def_)))
             )
+
+    # ---------------------------------------------------------------- imports
+
+    ## An `import` or `from ... import` item of `module` (09, "Modules").
+    pure def declare_import(mut self, module: ModuleId, id: ItemId):
+        let item = self.sources[module.index].ast.item(id).copy()
+        match item.kind:
+            case ItemKind.Import(imp):
+                self.import_module(module, imp, item.range, item.vis)
+            case ItemKind.FromImport(imp):
+                self.import_from(module, imp, item.range, item.vis)
+            case _:
+                pass
+
+    ## The std module an import path names, loaded; `None` after noting
+    ## that stage 0 reports the path (`resolve.import-unknown`), with the
+    ## name a similar module's import would bind.
+    pure def import_target(mut self, module: ModuleId, path: list[Name]) -> (ModuleId?, String?):
+        var words: list[String] = []
+        for n in path:
+            words.push(n.text.copy())
+        let name = module_for(words) else:
+            if self.is_root(module):
+                self.other_error = True
+            var similar: String? = None
+            if let Some(c) = closest(words.join("."), module_paths()):
+                similar = Some(last_word(c))
+            return (None, similar)
+        if let Some(m) = self.std_loaded.get(name.copy()):
+            return (Some(m), None)
+        let parsed = self.std_parsed.get(name.copy()) else:
+            # Stage 1 reads every std module it may import; one missing is
+            # not one it can check against.
+            self.beyond_in(module, "an import of a std module stage 1 has not read")
+            return (None, None)
+        let m = self.load_std_module(name, parsed.copy())
+        return (Some(m), None)
+
+    ## The names an import that failed would have bound: their uses are not
+    ## reported again.
+    pure def poison_import(mut self, module: ModuleId, name: str, similar: String?):
+        if not self.is_root(module):
+            return
+        if let Some(s) = similar:
+            _ = self.prog.poisoned.add(s.copy())
+        _ = self.prog.poisoned.add(name.to_string())
+
+    ## Records that an import bound `name` in `module`, with the import's
+    ## visibility (a `pub` import re-exports it).
+    pure def bind_import(mut self, module: ModuleId, name: str, def_: DefId, vis: Vis):
+        if let Some(old) = self.prog.modules[module.index].items.get(name.to_string()):
+            if old == def_:
+                return
+            if let DefKind.Module(a) = self.prog.defs[old.index].kind:
+                if let DefKind.Module(b) = self.prog.defs[def_.index].kind:
+                    if a == b:
+                        return
+            self.bind(module, name, def_)
+            return
+        _ = self.prog.modules[module.index].items.insert(name.to_string(), def_)
+        _ = self.prog.modules[module.index].imported.insert(name.to_string(), vis)
+
+    pure def import_module(mut self, module: ModuleId, imp: Import, range: TextRange, vis: Vis):
+        if imp.c_header.is_some():
+            # `stage0.unsupported`.
+            if self.is_root(module):
+                self.other_error = True
+            return
+        var bound = String.new()
+        var at = range
+        match imp.alias:
+            case Some(a):
+                bound = a.text.copy()
+                at = a.range
+            case None:
+                if let Some(last) = imp.path.last():
+                    bound = last.text.copy()
+                    at = last.range
+        let (target, similar) = self.import_target(module, imp.path)
+        let m = target else:
+            self.poison_import(module, bound, similar)
+            return
+        let def_ = self.new_def(module, bound, at, vis, DefKind.Module(m))
+        if self.is_std(module):
+            self.bind(module, bound, def_)
+        else:
+            self.bind_import(module, bound, def_, vis)
+
+    pure def import_from(mut self, module: ModuleId, imp: FromImport, range: TextRange, vis: Vis):
+        let (target, similar) = self.import_target(module, imp.path)
+        let m = target else:
+            for (n, alias) in imp.names:
+                var bound = n.text.copy()
+                if let Some(a) = alias:
+                    bound = a.text.copy()
+                self.poison_import(module, bound, similar)
+            return
+        let mname = self.prog.modules[m.index].name.copy()
+        let prelude = self.prog.prelude
+        for (n, alias) in imp.names:
+            var found = self.prog.member(m, n.text, module)
+            var reexported = False
+            for x in reexports(mname):
+                if x == n.text:
+                    reexported = True
+            if found.is_none() and self.is_std(m) and reexported:
+                if let Some(d) = self.prog.lookup_in(prelude, n.text):
+                    found = Some((d, True))
+            match found:
+                case Some((d, visible)):
+                    if not visible and self.is_root(module):
+                        # `resolve.private-item` and its kin.
+                        self.other_error = True
+                    var bound = n.text.copy()
+                    if let Some(a) = alias:
+                        bound = a.text.copy()
+                    self.bind_import(module, bound, d, vis)
+                case None:
+                    # `resolve.not-in-module`.
+                    if self.is_root(module):
+                        self.other_error = True
+
+    # ---------------------------------------------------------------- scripts
+
+    ## The items of a script (10, "REPL and scripts"): its top-level
+    ## statements are the body of its `main`, `def main(sys: System) ->
+    ## !:` with `return Ok(())` after them, declared after the other items.
+    ## A script that declares its own `main` keeps it (stage 0 reports the
+    ## statements, `resolve.script-main`).
+    pure def script_items(mut self, module: ModuleId, items: list[ItemId]) -> list[ItemId]:
+        var stmts: list[StmtId] = []
+        var out: list[ItemId] = []
+        var own_main = False
+        for i in items:
+            match self.ast(module).item(i).kind:
+                case ItemKind.Stmt(st):
+                    stmts.push(st)
+                case ItemKind.Fn(f):
+                    if f.name.text == "main":
+                        own_main = True
+                    out.push(i)
+                case _:
+                    out.push(i)
+        if stmts.is_empty():
+            return items.copy()
+        if own_main:
+            self.other_error = True
+            return items.copy()
+        let first = self.ast(module).stmt(stmts[0]).copy()
+        let last = self.ast(module).stmt(stmts[len(stmts) - 1]).copy()
+        let node = first.node
+        let at = TextRange.empty(first.range.start)
+        let end = TextRange.empty(last.range.end)
+        var body = stmts.copy()
+        var returns = False
+        if let StmtKind.Return(_) = last.kind:
+            returns = True
+        if not returns:
+            let ok_name = self.sources[module.index].ast.add_expr(
+                Expr(node=node, range=end, kind=ExprKind.Name("Ok".to_string()))
+            )
+            let unit = self.sources[module.index].ast.add_expr(
+                Expr(node=node, range=end, kind=ExprKind.Tuple([]))
+            )
+            let arg = Arg(node=node, range=end, name=None, mutable=False, value=unit)
+            let call = Expr(
+                node=node, range=end, kind=ExprKind.Call(callee=ok_name, args=[arg], trailing=None)
+            )
+            let ok = self.sources[module.index].ast.add_expr(call)
+            body.push(
+                self.sources[module.index].ast.add_stmt(
+                    Stmt(node=node, range=end, kind=StmtKind.Return(Some(ok)))
+                )
+            )
+        let range = TextRange.new(first.range.start, last.range.end)
+        let system = TypeExpr(
+            node=node,
+            range=at,
+            kind=TypeKind.Path(segments=[Name(text="System".to_string(), range=at)], args=[]),
+        )
+        let sys_ty = self.sources[module.index].ast.add_type(system)
+        let ret = self.sources[module.index].ast.add_type(
+            TypeExpr(node=node, range=at, kind=TypeKind.Result(ok=None, err=None))
+        )
+        let param = Param(
+            node=node,
+            range=at,
+            mode=Mode.Borrow,
+            kind=ParamKind.Named(
+                name=Name(text="sys".to_string(), range=at), ty=sys_ty, default=None
+            ),
+        )
+        let f = FnDef(
+            node=node,
+            range=range,
+            name=Name(text="main".to_string(), range=at),
+            is_pure=False,
+            is_comptime=False,
+            generics=[],
+            params=[param],
+            ret=Some(ret),
+            from_=[],
+            where_=[],
+            body=Some(Block(node=node, range=range, stmts=body)),
+            attrs=[],
+            header_broken=False,
+            body_broken=False,
+            vis=Vis.Private,
+        )
+        let item = Item(
+            node=node, range=range, attrs=[], vis=Vis.Private, docs=[], kind=ItemKind.Fn(f)
+        )
+        out.push(self.sources[module.index].ast.add_item(item))
+        return out
+
+    # ---------------------------------------------------------------- generators
+
+    ## The generators of the property tests of the root module (stage 0's
+    ## `arbitrary.rs`): for each type written in `arbitrary[T]` or
+    ## `exhaustive[T](...)`, whether it has a generator, and if so the
+    ## function the compiler writes for it, `def __arbitrary_site_N(d:
+    ## Draws) -> T` (declared here by its signature: its body, and the
+    ## generators of the module's types it calls, are in a file of their
+    ## own), with the call that stands for the site, `Gen.of(...)` or
+    ## `Gen.every(..., max_len=n)`.
+    pure def declare_generators(mut self, module: ModuleId, items: list[ItemId]):
+        # The module's types and the parts their generators draw.
+        var shapes: dict[String, (list[String], list[TypeExprId])] = {}
+        var order: list[String] = []
+        for it in items:
+            let item = self.ast(module).item(it).copy()
+            let builtin = has_attr(item.attrs, "builtin")
+            match item.kind:
+                case ItemKind.Struct(s):
+                    var has_const = False
+                    for g in s.generics:
+                        if g.is_const:
+                            has_const = True
+                    if s.is_view or builtin or s.name.text.is_empty() or has_const:
+                        continue
+                    var parts: list[TypeExprId] = []
+                    for f in s.fields:
+                        parts.push(f.ty)
+                    _ = shapes.insert(s.name.text.copy(), (generic_names(s.generics), parts))
+                    order.push(s.name.text.copy())
+                case ItemKind.Enum(e):
+                    if e.name.text.is_empty():
+                        continue
+                    var parts: list[TypeExprId] = []
+                    for v in e.variants:
+                        for f in v.fields:
+                            parts.push(f.ty)
+                    _ = shapes.insert(e.name.text.copy(), (generic_names(e.generics), parts))
+                    order.push(e.name.text.copy())
+                case ItemKind.TypeAlias(a):
+                    if not a.refinement or a.name.text.is_empty():
+                        continue
+                    let base = a.ty else:
+                        continue
+                    _ = shapes.insert(a.name.text.copy(), (generic_names(a.generics), [base]))
+                    order.push(a.name.text.copy())
+                case _:
+                    pass
+        # Which types have a generator: assume all do, then drop those with
+        # a part that has none, until nothing changes.
+        var ok: set[String] = set()
+        for n in order:
+            _ = ok.add(n.copy())
+        var changed = True
+        while changed:
+            changed = False
+            for n in order:
+                if not ok.contains(n.copy()):
+                    continue
+                let shape = shapes.get(n.copy()) else:
+                    continue
+                var fine = True
+                for t in shape.1:
+                    if not self.type_ok(module, t, shape.0, shapes, ok):
+                        fine = False
+                if not fine:
+                    _ = ok.remove(n.copy())
+                    changed = True
+        # The calls whose callee is a site, with their arguments.
+        var calls: dict[int, (ExprId, list[Arg])] = {}
+        let exprs = visit.exprs_in_items(self.ast(module), items)
+        for e in exprs:
+            if let ExprKind.Call(callee, args, _) = self.ast(module).expr(e).kind:
+                if let ExprKind.Index(_, _) = self.ast(module).expr(callee).kind:
+                    _ = calls.insert(callee.index, (e, args.copy()))
+        # The types written in `arbitrary[T]` and `exhaustive[T](...)`.
+        var keys: list[String] = []
+        for e in exprs:
+            let ExprKind.Index(base, targs) = self.ast(module).expr(e).kind.copy() else:
+                continue
+            var kind = String.new()
+            if let ExprKind.Name(n) = self.ast(module).expr(base).kind:
+                kind = n.copy()
+            if kind != "arbitrary" and kind != "exhaustive":
+                continue
+            if len(targs) != 1:
+                continue
+            var t = ExprId(index=0)
+            match targs[0]:
+                case IndexArg.Expr(x):
+                    t = x
+                case _:
+                    continue
+            let key = without_spaces(self.root_text_of(self.ast(module).expr(t).range))
+            if not keys.contains(key.copy()):
+                keys.push(key.copy())
+                let i = len(keys) - 1
+                match self.expr_as_type(module, t):
+                    case Some(te):
+                        if self.type_ok(module, te, [], shapes, ok):
+                            let name = "__arbitrary_site_{i}"
+                            self.declare_site(module, name, te)
+                            _ = self.prog.generator_sites.insert(key.copy(), Some(name))
+                        else:
+                            _ = self.prog.generator_sites.insert(key.copy(), None)
+                    case None:
+                        _ = self.prog.generator_sites.insert(key.copy(), None)
+            # The call that stands for this site.
+            var site = String.new()
+            if let Some(entry) = self.prog.generator_sites.get(key.copy()):
+                if let Some(n) = entry:
+                    site = n.copy()
+            if site.is_empty():
+                continue
+            var whole = e
+            var call_args: list[Arg]? = None
+            if let Some(c) = calls.get(e.index):
+                whole = c.0
+                call_args = Some(c.1.copy())
+            let at = self.ast(module).expr(whole).range
+            let node = self.ast(module).expr(whole).node
+            var method = "of"
+            let callee_name = self.add_name_expr(module, node, at, site)
+            var args = [Arg(node=node, range=at, name=None, mutable=False, value=callee_name)]
+            if kind == "exhaustive":
+                method = "every"
+                var max_len: ExprId? = None
+                if let Some(given) = call_args:
+                    for a in given:
+                        if max_len.is_none():
+                            match a.name:
+                                case None:
+                                    max_len = Some(a.value)
+                                case Some(n):
+                                    if n.text == "max_len":
+                                        max_len = Some(a.value)
+                let three = Expr(
+                    node=node,
+                    range=at,
+                    kind=ExprKind.Int(text="3".to_string(), value=Some(three_u128()), suffix=None),
+                )
+                var value = ExprId(index=0)
+                match max_len:
+                    case Some(v):
+                        value = v
+                    case None:
+                        value = self.sources[module.index].ast.add_expr(three)
+                args.push(
+                    Arg(
+                        node=node,
+                        range=at,
+                        name=Some(Name(text="max_len".to_string(), range=at)),
+                        mutable=False,
+                        value=value,
+                    )
+                )
+            let gen = self.add_name_expr(module, node, at, "Gen")
+            let field = Expr(
+                node=node,
+                range=at,
+                kind=ExprKind.Field(base=gen, name=Name(text=method.to_string(), range=at)),
+            )
+            let f = self.sources[module.index].ast.add_expr(field)
+            let call = Expr(
+                node=node, range=at, kind=ExprKind.Call(callee=f, args=args, trailing=None)
+            )
+            _ = self.prog.generator_calls.insert(
+                e.index, self.sources[module.index].ast.add_expr(call)
+            )
+
+    pure def add_name_expr(
+        mut self, module: ModuleId, node: int, at: TextRange, name: str
+    ) -> ExprId:
+        return self.sources[module.index].ast.add_expr(
+            Expr(node=node, range=at, kind=ExprKind.Name(name.to_string()))
+        )
+
+    ## `def name(d: Draws) -> T` with no body of its own here, bound in the
+    ## module (the names of the generated module are the served module's).
+    pure def declare_site(mut self, module: ModuleId, name: str, te: TypeExprId):
+        let at = self.ast(module).type_expr(te).range
+        let node = self.ast(module).type_expr(te).node
+        let draws = TypeExpr(
+            node=node,
+            range=at,
+            kind=TypeKind.Path(segments=[Name(text="Draws".to_string(), range=at)], args=[]),
+        )
+        let draws_ty = self.sources[module.index].ast.add_type(draws)
+        let param = Param(
+            node=node,
+            range=at,
+            mode=Mode.Borrow,
+            kind=ParamKind.Named(
+                name=Name(text="d".to_string(), range=at), ty=draws_ty, default=None
+            ),
+        )
+        let f = FnDef(
+            node=node,
+            range=at,
+            name=Name(text=name.to_string(), range=at),
+            is_pure=False,
+            is_comptime=False,
+            generics=[],
+            params=[param],
+            ret=Some(te),
+            from_=[],
+            where_=[],
+            body=None,
+            attrs=[],
+            header_broken=False,
+            body_broken=False,
+            vis=Vis.Private,
+        )
+        let def_ = self.new_def(
+            module, name, at, Vis.Private, DefKind.Fn(self.placeholder_fn(FnKind.Free))
+        )
+        _ = self.written.add(def_)
+        if not self.prog.modules[module.index].items.contains(name.to_string()):
+            _ = self.prog.modules[module.index].items.insert(name.to_string(), def_)
+        self.pending.push(Pending.Fn(def_=def_, module=module, ast=f, owner=None))
+
+    ## An index argument read as a type: `list[int]` in `arbitrary[list[int]]`.
+    pure def expr_as_type(mut self, module: ModuleId, e: ExprId) -> TypeExprId?:
+        let x = self.ast(module).expr(e).copy()
+        var kind = TypeKind.Error
+        match x.kind:
+            case ExprKind.Name(n):
+                kind = TypeKind.Path(segments=[Name(text=n.copy(), range=x.range)], args=[])
+            case ExprKind.Index(base, args):
+                let ExprKind.Name(n) = self.ast(module).expr(base).kind.copy() else:
+                    return None
+                let base_range = self.ast(module).expr(base).range
+                var targs: list[TypeExprId] = []
+                for a in args:
+                    var y = ExprId(index=0)
+                    match a:
+                        case IndexArg.Expr(x):
+                            y = x
+                        case _:
+                            return None
+                    let t = self.expr_as_type(module, y) else:
+                        return None
+                    targs.push(t)
+                kind = TypeKind.Path(segments=[Name(text=n, range=base_range)], args=targs)
+            case ExprKind.Tuple(xs):
+                if xs.is_empty():
+                    return None
+                var es: list[(Name?, TypeExprId)] = []
+                for y in xs:
+                    let t = self.expr_as_type(module, y) else:
+                        return None
+                    es.push((None, t))
+                kind = TypeKind.Tuple(es)
+            case ExprKind.Paren(inner):
+                return self.expr_as_type(module, inner)
+            # `(int) -> bool` reads as a closure.
+            case ExprKind.Closure(c):
+                if c.implicit_param:
+                    return None
+                var params: list[TypeExprId] = []
+                for p in c.params:
+                    if p.ty.is_some():
+                        return None
+                    let pt = TypeExpr(
+                        node=x.node,
+                        range=p.name.range,
+                        kind=TypeKind.Path(segments=[p.name.copy()], args=[]),
+                    )
+                    params.push(self.sources[module.index].ast.add_type(pt))
+                var body = ExprId(index=0)
+                match c.body:
+                    case ClosureBody.Expr(x):
+                        body = x
+                    case _:
+                        return None
+                let ret = self.expr_as_type(module, body) else:
+                    return None
+                kind = TypeKind.Fn(pure=False, params=params, ret=ret)
+            case _:
+                return None
+        return Some(
+            self.sources[module.index].ast.add_type(TypeExpr(node=x.node, range=x.range, kind=kind))
+        )
+
+    ## Whether every part of a type has a generator; `params` are the type
+    ## parameters in scope (each given by a generator parameter).
+    pure def type_ok(
+        self,
+        module: ModuleId,
+        t: TypeExprId,
+        params: list[String],
+        shapes: dict[String, (list[String], list[TypeExprId])],
+        ok: set[String],
+    ) -> bool:
+        match self.ast(module).type_expr(t).kind:
+            case TypeKind.Path(segments, args):
+                if len(segments) != 1:
+                    return False
+                let n = segments[0].text.copy()
+                if params.contains(n.copy()) and args.is_empty():
+                    return True
+                var all = True
+                for a in args:
+                    if not self.type_ok(module, a, params, shapes, ok):
+                        all = False
+                if args.is_empty() and leaf_generator(n):
+                    return True
+                if len(args) == 1
+                        and (
+                            n == "list" or n == "set" or n == "Option" or n == "Box" or n == "Slice"
+                        ):
+                    return all
+                if len(args) == 2 and n == "dict":
+                    return all
+                if let Some(shape) = shapes.get(n.copy()):
+                    if len(shape.0) == len(args) and ok.contains(n.copy()):
+                        return all
+                return False
+            case TypeKind.Option(inner):
+                return self.type_ok(module, inner, params, shapes, ok)
+            case TypeKind.Tuple(es):
+                if es.is_empty():
+                    return False
+                for (_, e) in es:
+                    if not self.type_ok(module, e, params, shapes, ok):
+                        return False
+                return True
+            case _:
+                return False
+
+    ## The text of the root module at `range`.
+    pure def root_text_of(self, range: TextRange) -> String:
+        if range.start < 0 or range.end > self.root_text.byte_len() or range.start > range.end:
+            return String.new()
+        return self.root_text.byte_slice(range.start, range.end).to_string()
+
+    # ---------------------------------------------------------------- doc examples
+
+    ## The root module's doc examples as tests (stage 0's `doctests.rs`; 10,
+    ## "Testing"): a module of its own whose text keeps every example line
+    ## where it is, so that a diagnostic in an example points at it, and
+    ## whose scope is the root module's.
+    pure def declare_doc_tests(mut self, module: ModuleId, items: list[ItemId]):
+        var starts: list[int] = []
+        for it in items:
+            let start = self.ast(module).item(it).range.start
+            match self.ast(module).item(it).kind:
+                case ItemKind.Fn(_) | ItemKind.Const(_) | ItemKind.TypeAlias(_):
+                    starts.push(start)
+                case ItemKind.Struct(st):
+                    starts.push(start)
+                    for m in st.methods:
+                        starts.push(m.range.start)
+                case ItemKind.Enum(e):
+                    starts.push(start)
+                    for m in e.methods:
+                        starts.push(m.range.start)
+                case ItemKind.ErrorSet(e):
+                    starts.push(start)
+                    for m in e.methods:
+                        starts.push(m.range.start)
+                case ItemKind.Trait(t):
+                    starts.push(start)
+                    for m in t.methods:
+                        starts.push(m.range.start)
+                case ItemKind.Impl(i):
+                    for m in i.methods:
+                        starts.push(m.range.start)
+                case _:
+                    pass
+        let examples = doc_examples(self.root_text, starts)
+        if examples.is_empty():
+            return
+        let text = doc_test_module(self.root_text, examples)
+        let parsed = parse(text, Catalog.parse(""))
+        if not parsed.diagnostics.is_empty():
+            self.other_error = True
+        let generated = build.module(parsed.tree)
+        let g_items = generated.items.copy()
+        let g = self.add_module("<doc>/main.sisu", False, generated)
+        self.prog.modules[g.index].parent = Some(module)
+        self.doc_module = Some(g)
+        self.doc_text = text
+        self.declare_items(g, g_items, "")
+
+    # ---------------------------------------------------------------- interceptors and fakes
+
+    ## The interceptor and the fake of each trait among `items` (stage 0's
+    ## `shims.rs`; 06, "Interceptors and trace context"; 17, "Fakes"), when
+    ## the module's text names `Wrap` or `Fake`: `cap.Wrap(inner=x,
+    ## hook=h)` implements the trait by showing each call to the
+    ## interceptor and forwarding it, and `cap.Fake[Trait]` is a recording
+    ## fake of it. Stage 0 writes them as source text, in a module of their
+    ## own whose scope is the trait's; so does stage 1, which then parses
+    ## and declares that text.
+    pure def declare_trait_shims(mut self, module: ModuleId, items: list[ItemId]):
+        if self.is_std(module):
+            return
+        let wrap = self.root_text.contains("Wrap")
+        let fakes = self.root_text.contains("Fake")
+        if not wrap and not fakes:
+            return
+        var text = String.new()
+        var faked: list[String] = []
+        for it in items:
+            let ItemKind.Trait(t) = self.ast(module).item(it).kind.copy() else:
+                continue
+            let ms = self.shim_methods(module, t) else:
+                continue
+            if wrap:
+                text.push("\n")
+                text.push(wrap_impl(t.name.text, ms))
+            if fakes:
+                text.push("\n")
+                text.push(fake_text(t.name.text, ms))
+                faked.push(t.name.text.copy())
+        if text.is_empty():
+            return
+        let generated = build.module(parse(text, Catalog.parse("")).tree)
+        let g_items = generated.items.copy()
+        let g = self.add_module("<shims>/main.sisu", False, generated)
+        self.prog.modules[g.index].parent = Some(module)
+        self.declare_items(g, g_items, "")
+        for name in faked:
+            let tr = self.prog.lookup_in(module, name)
+            let st = self.prog.lookup_in(g, "__Fake_{name}")
+            if let Some(a) = tr:
+                if let Some(b) = st:
+                    _ = self.prog.fakes.insert(a, b)
+
+    ## The methods of a trait, when every one can be forwarded: a `self` or
+    ## `mut self` receiver, no type parameters of its own, and no borrow or
+    ## `Self` in its signature; the trait itself has no type parameters,
+    ## associated types or supertraits.
+    pure def shim_methods(self, module: ModuleId, t: TraitDef) -> list[ShimMethod]?:
+        if not t.generics.is_empty()
+                or not t.supertraits.is_empty()
+                or not t.assoc_types.is_empty():
+            return None
+        var out: list[ShimMethod] = []
+        for m in t.methods:
+            if m.is_comptime:
+                continue
+            if not m.generics.is_empty()
+                    or not m.where_.is_empty()
+                    or not m.from_.is_empty()
+                    or m.header_broken:
+                return None
+            if m.params.is_empty():
+                return None
+            match m.params[0].kind:
+                case ParamKind.SelfParam:
+                    pass
+                case _:
+                    return None
+            if m.params[0].mode == Mode.Own:
+                return None
+            var args: list[(String, bool)] = []
+            for k in range(1, len(m.params)):
+                let p = ref m.params[k]
+                match p.kind:
+                    case ParamKind.Named(name, ty, _):
+                        if self.borrows(module, ty):
+                            return None
+                        args.push((name.text.copy(), p.mode == Mode.Mut))
+                    case _:
+                        return None
+            var ret = String.new()
+            var result: String? = None
+            if let Some(r) = m.ret:
+                if self.borrows(module, r):
+                    return None
+                let written = self.root_text_of(self.ast(module).type_expr(r).range)
+                ret = " -> {written}"
+                if written != "()":
+                    result = Some(written.copy())
+            var params: list[String] = []
+            for p in m.params:
+                params.push(self.root_text_of(p.range))
+            out.push(
+                ShimMethod(
+                    name=m.name.text.copy(),
+                    params=params.join(", "),
+                    ret=ret,
+                    result=result,
+                    args=args,
+                )
+            )
+        if out.is_empty():
+            return None
+        return Some(out)
+
+    ## Whether a type mentions a borrow or `Self`.
+    pure def borrows(self, module: ModuleId, t: TypeExprId) -> bool:
+        match self.ast(module).type_expr(t).kind:
+            case TypeKind.Ref(_, _):
+                return True
+            case TypeKind.Path(segments, args):
+                for s in segments:
+                    if s.text == "Self":
+                        return True
+                for a in args:
+                    if self.borrows(module, a):
+                        return True
+                return False
+            case TypeKind.Option(x):
+                return self.borrows(module, x)
+            case TypeKind.Dyn(x):
+                return self.borrows(module, x)
+            case TypeKind.Result(ok, err):
+                if let Some(o) = ok:
+                    if self.borrows(module, o):
+                        return True
+                if let Some(e) = err:
+                    if self.borrows(module, e):
+                        return True
+                return False
+            case TypeKind.Union(xs):
+                for x in xs:
+                    if self.borrows(module, x):
+                        return True
+                return False
+            case TypeKind.Tuple(xs):
+                for (_, x) in xs:
+                    if self.borrows(module, x):
+                        return True
+                return False
+            case TypeKind.Fn(_, params, ret):
+                for x in params:
+                    if self.borrows(module, x):
+                        return True
+                return self.borrows(module, ret)
+            case TypeKind.ConstArg(_):
+                return False
+            case TypeKind.Unsupported(_):
+                return True
+            case TypeKind.Error:
+                return True
+
+    # ---------------------------------------------------------------- tests
+
+    ## The tests a declaration named `name` declares, with their names
+    ## (stage 0's `tests_of::cases`): `test "name" for x, y in [(1, 2), (3,
+    ## 4)]:` over a list written out is one test per element, whose body
+    ## starts by binding the pattern to the element; over a list computed
+    ## some other way, one test whose body is a `for` over it.
+    pure def test_cases(
+        mut self, module: ModuleId, name: str, t: TestDef
+    ) -> list[(String, TestDef)]:
+        var pat = PatternId(index=0)
+        var list = ExprId(index=0)
+        match t.cases:
+            case Some((p, l)):
+                pat = p
+                list = l
+            case None:
+                return [(name.to_string(), t.copy())]
+        let pat_node = self.ast(module).pattern(pat).node
+        var out: list[(String, TestDef)] = []
+        match self.ast(module).expr(list).kind.copy():
+            case ExprKind.List(elems):
+                for k in range(len(elems)):
+                    let e = elems[k]
+                    let at = self.ast(module).expr(e).range
+                    let bind = Stmt(
+                        node=pat_node,
+                        range=at,
+                        kind=StmtKind.Let(
+                            mutable=False, pat=pat, ty=None, init=Some(e), else_=None
+                        ),
+                    )
+                    let first = self.sources[module.index].ast.add_stmt(bind)
+                    out.push(("{name} {k}", self.case_def(t, first, False)))
+            case _:
+                # `for PAT in LIST:` around the body.
+                let at = self.ast(module).expr(list).range
+                let list_node = self.ast(module).expr(list).node
+                var body = Block(node=list_node, range=at, stmts=[])
+                if let Some(b) = t.body:
+                    body = b.copy()
+                let body_range = body.range
+                let looped = Stmt(
+                    node=list_node,
+                    range=body_range,
+                    kind=StmtKind.For(pat=pat, mode=Mode.Borrow, iter=list, body=body),
+                )
+                let first = self.sources[module.index].ast.add_stmt(looped)
+                out.push((name.to_string(), self.case_def(t, first, True)))
+        return out
+
+    ## A test `t` whose body starts with the statement `first` (and, when
+    ## `alone`, is only that statement).
+    pure def case_def(self, t: TestDef, first: StmtId, alone: bool) -> TestDef:
+        var body: Block? = None
+        if let Some(b) = t.body:
+            var stmts = [first]
+            if not alone:
+                for s in b.stmts:
+                    stmts.push(s)
+            body = Some(Block(node=b.node, range=b.range, stmts=stmts))
+        return TestDef(
+            name=t.name.copy(),
+            name_range=t.name_range,
+            cases=None,
+            params=t.params.copy(),
+            body=body,
+        )
+
+    # ---------------------------------------------------------------- associated constants
+
+    ## An associated constant of a type (03), named `Type.NAME`.
+    pure def declare_assoc_const(mut self, module: ModuleId, key: TyKey, owner: str, c: ConstDef):
+        let info = ConstInfo(ty=Ty.error(), value=None)
+        let name = "{owner}.{c.name.text}"
+        let def_ = self.new_def(module, name, c.name.range, Vis.Pub, DefKind.Const(info))
+        let k = (key, c.name.text.copy())
+        if self.prog.assoc_consts.contains(k.copy()) or self.prog.methods.contains(k.copy()):
+            # `resolve.duplicate-method`.
+            if self.is_root(module):
+                self.other_error = True
+            return
+        _ = self.prog.assoc_consts.insert(k, def_)
+        self.pending.push(Pending.Const(def_=def_, module=module, ast=c.copy()))
+
+    # ---------------------------------------------------------------- functions the compiler writes
+
+    ## `invariant e` lines (07): a method of the struct that checks them,
+    ## `pure def __check_invariant(self)`, whose body is the lines; and the
+    ## invariant as a `bool`, `pure def __invariant(self) -> bool`, which
+    ## reports nothing of its own.
+    pure def declare_invariant(mut self, module: ModuleId, def_: DefId, node: int, s: StructDef):
+        let range = s.invariants[0].range
+        var stmts: list[StmtId] = []
+        for c in s.invariants:
+            let st = Stmt(node=node, range=c.range, kind=StmtKind.Contract(c.copy()))
+            stmts.push(self.sources[module.index].ast.add_stmt(st))
+        let body = Block(node=node, range=range, stmts=stmts)
+        let check = self.written_fn(node, range, "__check_invariant", body, None, True)
+        let m = self.new_def(
+            module,
+            "__check_invariant",
+            range,
+            Vis.Private,
+            DefKind.Fn(self.placeholder_fn(FnKind.Method)),
+        )
+        _ = self.special_kinds.insert(m, FnKind.Invariant(def_))
+        self.pending.push(
+            Pending.Fn(def_=m, module=module, ast=check, owner=Some(Owner.Type(def_)))
+        )
+        var cond: ExprId? = None
+        for c in s.invariants:
+            let at = self.sources[module.index].ast.expr(c.expr).range
+            let part = self.sources[module.index].ast.add_expr(
+                Expr(node=node, range=at, kind=ExprKind.Paren(c.expr))
+            )
+            match cond:
+                case None:
+                    cond = Some(part)
+                case Some(l):
+                    let both = Expr(
+                        node=node, range=range, kind=ExprKind.Binary(op=BinOp.And, lhs=l, rhs=part)
+                    )
+                    cond = Some(self.sources[module.index].ast.add_expr(both))
+        var whole = ExprId(index=0)
+        match cond:
+            case Some(c):
+                whole = c
+            case None:
+                let t = Expr(node=node, range=range, kind=ExprKind.Name("True".to_string()))
+                whole = self.sources[module.index].ast.add_expr(t)
+        let holds = self.predicate_fn(module, node, whole, "__invariant", True)
+        let h = self.new_def(
+            module,
+            "__invariant",
+            range,
+            Vis.Private,
+            DefKind.Fn(self.placeholder_fn(FnKind.Method)),
+        )
+        _ = self.quiet_fns.add(h)
+        self.pending.push(
+            Pending.Fn(def_=h, module=module, ast=holds, owner=Some(Owner.Type(def_)))
+        )
+
+    ## `pure def name(self) -> bool: return pred`, written for a predicate.
+    pure def predicate_fn(
+        mut self, module: ModuleId, node: int, pred: ExprId, name: str, internal: bool
+    ) -> FnDef:
+        let range = self.sources[module.index].ast.expr(pred).range
+        let ret_ty = TypeExpr(
+            node=node,
+            range=range,
+            kind=TypeKind.Path(segments=[Name(text="bool".to_string(), range=range)], args=[]),
+        )
+        let ret = self.sources[module.index].ast.add_type(ret_ty)
+        let st = Stmt(node=node, range=range, kind=StmtKind.Return(Some(pred)))
+        let body = Block(
+            node=node, range=range, stmts=[self.sources[module.index].ast.add_stmt(st)]
+        )
+        return self.written_fn(node, range, name, body, Some(ret), internal)
+
+    ## A `pure` method of `self` the compiler writes, with a body; an
+    ## `internal` one only the compiler's checks call.
+    pure def written_fn(
+        self,
+        node: int,
+        range: TextRange,
+        name: str,
+        own body: Block,
+        ret: TypeExprId?,
+        internal: bool,
+    ) -> FnDef:
+        var attrs: list[Attr] = []
+        if internal:
+            attrs.push(Attr(name="internal".to_string(), args=[], range=range))
+        return FnDef(
+            node=node,
+            range=range,
+            name=Name(text=name.to_string(), range=range),
+            is_pure=True,
+            is_comptime=False,
+            generics=[],
+            params=[Param(node=node, range=range, mode=Mode.Borrow, kind=ParamKind.SelfParam)],
+            ret=ret,
+            from_=[],
+            where_=[],
+            body=Some(body),
+            attrs=attrs,
+            header_broken=False,
+            body_broken=False,
+            vis=Vis.Private,
+        )
+
+    ## A refinement type's predicate as a function the compiler writes:
+    ## `def where(self) -> bool: return pred`, `pure`, with `self` a value
+    ## of the base.
+    pure def declare_predicate(
+        mut self, module: ModuleId, def_: DefId, node: int, a: TypeAlias, range: TextRange
+    ):
+        var pred = ExprId(index=0)
+        match a.predicate:
+            case Some(p):
+                pred = p
+            case None:
+                pred = self.sources[module.index].ast.add_expr(
+                    Expr(node=node, range=range, kind=ExprKind.Error)
+                )
+        let f = self.predicate_fn(module, node, pred, "where", False)
+        let at = self.sources[module.index].ast.expr(pred).range
+        let pd = self.new_def(
+            module, "where", at, Vis.Private, DefKind.Fn(self.placeholder_fn(FnKind.Free))
+        )
+        _ = self.special_kinds.insert(pd, FnKind.Predicate(def_))
+        if let DefKind.Refinement(r) = ref mut self.prog.defs[def_.index].kind:
+            r.predicate = Some(pd)
+        self.pending.push(
+            Pending.Fn(def_=pd, module=module, ast=f, owner=Some(Owner.Refinement(def_)))
+        )
+
+    # ---------------------------------------------------------------- derived impls
+
+    ## The impls the compiler writes for the structs and enums among
+    ## `items` (stage 0's `derive.rs`): each `@derive`d trait's, `PartialOrd`
+    ## with `Ord`, `Debug` for every type without its own, and each
+    ## `@delegate`d trait's. Stage 0 writes them as source from the traits'
+    ## `derive` templates; stage 1 declares their headers, which are what
+    ## the checker reads.
+    pure def declare_derived(mut self, module: ModuleId, items: list[ItemId]):
+        for id in items:
+            let item = self.sources[module.index].ast.item(id).copy()
+            var name = String.new()
+            var gps: list[GenericParam] = []
+            var field_tys: list[TypeExprId] = []
+            var field_names: list[String] = []
+            var is_struct = False
+            match item.kind:
+                case ItemKind.Struct(s):
+                    name = s.name.text.copy()
+                    gps = s.generics.copy()
+                    for f in s.fields:
+                        field_tys.push(f.ty)
+                        field_names.push(f.name.text.copy())
+                    is_struct = True
+                case ItemKind.Enum(e):
+                    name = e.name.text.copy()
+                    gps = e.generics.copy()
+                    for v in e.variants:
+                        for f in v.fields:
+                            field_tys.push(f.ty)
+                case _:
+                    continue
+            let builtin = is_struct and has_attr(item.attrs, "builtin")
+            var has_const = False
+            for g in gps:
+                if g.is_const:
+                    has_const = True
+            if name.is_empty() or has_const:
+                continue
+            let ty = self.prog.lookup_in(module, name) else:
+                continue
+            let used = self.used_params(module, gps, field_tys)
+            var wanted: list[(String, TextRange)] = []
+            for a in item.attrs:
+                if a.name != "derive":
+                    continue
+                for arg in a.args:
+                    var written = String.new()
+                    if let ExprKind.Name(n) = self.ast(module).expr(arg.value).kind:
+                        written = n.copy()
+                    if written == "Copy":
+                        self.copy_checks.push(ty)
+                    elif derivable(written):
+                        var seen = False
+                        for (w, _) in wanted:
+                            if w == written:
+                                seen = True
+                        if not seen:
+                            wanted.push((written, arg.range))
+                    elif not written.is_empty() and self.has_derive_template(module, written):
+                        # Stage 0 runs the trait's `comptime def derive`.
+                        self.beyond_in(module, "a derive template of the program's own")
+                    elif self.is_root(module):
+                        # `resolve.not-derivable`.
+                        self.other_error = True
+            let delegated = self.delegations(module, item.attrs, is_struct, field_names)
+            for (t, at) in delegated:
+                self.pending.push(
+                    Pending.Derived(
+                        ty=ty,
+                        module=module,
+                        trait_=t.copy(),
+                        derived=False,
+                        used=used.copy(),
+                        range=at,
+                    )
+                )
+            # `Ord` brings `PartialOrd`, which it determines.
+            var has_ord = False
+            var has_partial = False
+            var ord_at = item.range
+            for (w, at) in wanted:
+                if w == "Ord":
+                    has_ord = True
+                    ord_at = at
+                if w == "PartialOrd":
+                    has_partial = True
+            if has_ord and not has_partial and not self.has_impl(module, items, "PartialOrd", name):
+                wanted.push(("PartialOrd".to_string(), ord_at))
+            # Every type has `Debug` (11): the derived one unless it has its
+            # own.
+            var debug = False
+            for (w, _) in wanted:
+                if w == "Debug":
+                    debug = True
+            for (w, _) in delegated:
+                if w == "Debug":
+                    debug = True
+            if not builtin and not debug and not self.has_impl(module, items, "Debug", name):
+                wanted.push(("Debug".to_string(), TextRange.empty(item.range.start)))
+            for (t, at) in wanted:
+                self.pending.push(
+                    Pending.Derived(
+                        ty=ty,
+                        module=module,
+                        trait_=t.copy(),
+                        derived=True,
+                        used=used.copy(),
+                        range=at,
+                    )
+                )
+
+    ## Whether a trait `name` of `module` has a `comptime def derive` (the
+    ## prelude's that have one are the derivable traits).
+    pure def has_derive_template(self, module: ModuleId, name: str) -> bool:
+        for it in self.sources[module.index].items:
+            if let ItemKind.Trait(t) = self.ast(module).item(it).kind:
+                if t.name.text == name:
+                    for f in t.methods:
+                        if f.is_comptime and f.name.text == "derive":
+                            return True
+        return False
+
+    ## The traits a struct's `@delegate` forwards, with where each is
+    ## named, after checking the attribute (stage 0's `delegations`).
+    pure def delegations(
+        mut self, module: ModuleId, attrs: list[Attr], is_struct: bool, fields: list[String]
+    ) -> list[(String, TextRange)]:
+        var out: list[(String, TextRange)] = []
+        for a in attrs:
+            if a.name != "delegate":
+                continue
+            var field: String? = None
+            for arg in a.args:
+                if let Some(n) = arg.name:
+                    if n.text == "to":
+                        if let ExprKind.Str(parts) = self.ast(module).expr(arg.value).kind:
+                            field = Some(build.plain_text(parts))
+            var ok = False
+            if let Some(f) = field:
+                ok = is_struct and fields.contains(f)
+            if not ok:
+                # `resolve.delegate-to`.
+                if self.is_root(module):
+                    self.other_error = True
+                continue
+            for arg in a.args:
+                if arg.name.is_some():
+                    continue
+                var n = String.new()
+                if let ExprKind.Name(x) = self.ast(module).expr(arg.value).kind:
+                    n = x.copy()
+                if not delegable(n):
+                    if self.is_root(module):
+                        self.other_error = True
+                    continue
+                if returns_self(n) and len(fields) != 1:
+                    if self.is_root(module):
+                        self.other_error = True
+                    continue
+                var seen = False
+                for (t, _) in out:
+                    if t == n:
+                        seen = True
+                if not seen:
+                    out.push((n, arg.range))
+        return out
+
+    ## Whether `items` has its own `impl trait_name for ty`.
+    pure def has_impl(
+        self, module: ModuleId, items: list[ItemId], trait_name: str, ty: str
+    ) -> bool:
+        for id in items:
+            if let ItemKind.Impl(i) = self.ast(module).item(id).kind:
+                let t = i.trait_ty else:
+                    continue
+                if self.last_segment(module, t) == Some(trait_name.to_string())
+                        and self.last_segment(module, i.self_ty) == Some(ty.to_string()):
+                    return True
+        return False
+
+    pure def last_segment(self, module: ModuleId, te: TypeExprId) -> String?:
+        if let TypeKind.Path(segments, _) = self.ast(module).type_expr(te).kind:
+            if let Some(s) = segments.last():
+                return Some(s.text.copy())
+        return None
+
+    ## Whether each generic parameter is named in one of the field types:
+    ## one that is not (`Key[T]`'s `T`) needs no bound in a derived impl.
+    pure def used_params(
+        self, module: ModuleId, gps: list[GenericParam], tys: list[TypeExprId]
+    ) -> list[bool]:
+        var names: list[String] = []
+        for t in tys:
+            self.type_names(module, t, mut names)
+        var out: list[bool] = []
+        for g in gps:
+            out.push(names.contains(g.name.text))
+        return out
+
+    pure def type_names(self, module: ModuleId, t: TypeExprId, mut names: list[String]):
+        match self.ast(module).type_expr(t).kind:
+            case TypeKind.Path(segments, args):
+                if let Some(s) = segments.first():
+                    names.push(s.text.copy())
+                for a in args:
+                    self.type_names(module, a, mut names)
+            case TypeKind.Option(i):
+                self.type_names(module, i, mut names)
+            case TypeKind.Dyn(i):
+                self.type_names(module, i, mut names)
+            case TypeKind.Ref(_, inner):
+                self.type_names(module, inner, mut names)
+            case TypeKind.Result(ok, err):
+                if let Some(o) = ok:
+                    self.type_names(module, o, mut names)
+                if let Some(e) = err:
+                    self.type_names(module, e, mut names)
+            case TypeKind.Tuple(es):
+                for (_, e) in es:
+                    self.type_names(module, e, mut names)
+            case TypeKind.Fn(_, params, ret):
+                for p in params:
+                    self.type_names(module, p, mut names)
+                self.type_names(module, ret, mut names)
+            case TypeKind.Union(us):
+                for u in us:
+                    self.type_names(module, u, mut names)
+            case _:
+                pass
+
+    ## The header of an impl the compiler writes: `impl[A: Bound + Trait]
+    ## Trait for P[A]`, each parameter that a field names bounded by the
+    ## trait too.
+    pure def resolve_derived(
+        mut self,
+        ty: DefId,
+        module: ModuleId,
+        trait_name: str,
+        derived: bool,
+        used: list[bool],
+        rng: TextRange,
+    ):
+        let tr = self.prog.lookup(module, trait_name) else:
+            return
+        if self.prog.trait_info(tr).is_none():
+            return
+        let generics = self.prog.type_generics(ty)
+        var names: list[String] = []
+        var predicates: list[Predicate] = []
+        let own_preds = self.preds_of(ty)
+        for i in range(len(generics)):
+            names.push(generics[i].name.copy())
+            let p = self.types.param(i)
+            for q in own_preds:
+                if q.ty == p:
+                    predicates.push(q.copy())
+            if i >= len(used) or used[i]:
+                predicates.push(Predicate(ty=p, bound=TraitRef(def_=tr, args=[]), span=rng))
+        let self_ty = self.self_type(ty, len(generics))
+        var gs: list[Generic] = []
+        for g in generics:
+            gs.push(Generic(name=g.name.copy(), default=None, is_const=g.is_const))
+        let info = ImplInfo(
+            generics=gs,
+            predicates=predicates,
+            trait_ref=TraitRef(def_=tr, args=[]),
+            self_ty=self_ty,
+            methods=[],
+            assoc=[],
+            derived=derived,
+        )
+        let shown_trait = self.prog.defs[tr.index].name.copy()
+        let shown_ty = self.prog.display_in(self.types, self_ty, names)
+        let def_ = self.new_def(
+            module, "impl {shown_trait} for {shown_ty}", rng, Vis.Pub, DefKind.Impl(info)
+        )
+        self.prog.impls.push(def_)
+
+    # ---------------------------------------------------------------- checks of impls
+
+    ## The checks of the impls from the definition `first` on, once every
+    ## impl is known (stage 0's `check_traits`): an impl's method is as
+    ## `pure` as the trait's; an impl of the root module without one of the
+    ## trait's required methods is an error stage 0 reports; and
+    ## `@derive(Copy)` holds only for a type whose fields are `Copy`.
+    pure def check_traits(mut self, first: int):
+        let impls = self.prog.impls.copy()
+        for i in impls:
+            if i.index < first:
+                continue
+            let info = self.prog.impl_info(i) else:
+                continue
+            let tr = info.trait_ref.def_
+            let methods = info.methods.copy()
+            let derived = info.derived
+            let tinfo = self.prog.trait_info(tr) else:
+                continue
+            let trait_methods = tinfo.methods.copy()
+            let sealed = tinfo.sealed
+            let module = self.prog.defs[i.index].module
+            if sealed and not self.is_std(module):
+                if self.is_root(module):
+                    self.other_error = True
+                continue
+            for (mname, mdef) in methods:
+                let tm = self.prog.trait_method(tr, mname) else:
+                    # `resolve.not-a-trait-method`.
+                    if self.is_root(module):
+                        self.other_error = True
+                    continue
+                var tpure = False
+                if let Some(f) = self.prog.fn_info(tm):
+                    tpure = f.pure
+                if tpure:
+                    if let DefKind.Fn(f) = ref mut self.prog.defs[mdef.index].kind:
+                        f.pure = True
+            if derived or not self.is_root(module):
+                continue
+            for m in trait_methods:
+                let f = self.prog.fn_info(m) else:
+                    continue
+                if f.body.is_some() or f.intrinsic.is_some() or f.header_broken:
+                    continue
+                var found = False
+                for (n, _) in methods:
+                    if n == self.prog.defs[m.index].name:
+                        found = True
+                if not found:
+                    # `resolve.missing-trait-method`.
+                    self.other_error = True
+        let checks = self.copy_checks.copy()
+        self.copy_checks = []
+        for d in checks:
+            self.check_copy_fields(d)
+
+    ## `@derive(Copy)` only for a type whose fields are all `Copy` (03); a
+    ## field of a type parameter's type is, since the type is `Copy` only
+    ## for `Copy` arguments.
+    pure def check_copy_fields(mut self, d: DefId):
+        var fields: list[Ty] = []
+        match self.prog.defs[d.index].kind:
+            case DefKind.Struct(s):
+                for f in s.fields:
+                    fields.push(f.ty)
+            case DefKind.Enum(e):
+                for v in e.variants:
+                    for (_, t) in v.fields:
+                        fields.push(t)
+            case _:
+                return
+        var as_copy: list[Ty] = []
+        for _ in range(len(self.prog.type_generics(d))):
+            as_copy.push(Ty.int())
+        for fty in fields:
+            if self.types.contains_error(fty):
+                continue
+            let t = self.types.subst(fty, as_copy)
+            if self.prog.is_copy(mut self.types, t):
+                continue
+            # `resolve.derive-field`.
+            if self.is_root(self.prog.defs[d.index].module):
+                self.other_error = True
+            match ref mut self.prog.defs[d.index].kind:
+                case DefKind.Struct(s):
+                    s.copy = False
+                case DefKind.Enum(e):
+                    e.copy = False
+                case _:
+                    pass
+            return
 
     # ---------------------------------------------------------------- headers and bounds
 
@@ -1209,8 +2745,7 @@ impl Resolver:
                 return Ty.error()
             case TypeKind.Path(segments, args):
                 if len(args) == 1 and self.is_fake_marker(segments, ctx.module):
-                    self.beyond_in(ctx.module, "`cap.Fake`")
-                    return Ty.error()
+                    return self.fake_ty(args[0], ctx)
                 var targs: list[Ty] = []
                 for a in args:
                     targs.push(self.resolve_ty(a, ctx))
@@ -1271,8 +2806,23 @@ impl Resolver:
             case TypeKind.ConstArg(n):
                 return self.types.intern(TyData.Const(n))
             case TypeKind.Unsupported(_):
-                self.beyond_in(ctx.module, "a type of a later phase")
+                # `stage0.unsupported`.
+                if self.is_root(ctx.module):
+                    self.other_error = True
                 return Ty.error()
+
+    ## `cap.Fake[Trait]`: the fake the compiler wrote for the trait (17); a
+    ## trait without one is `comptime.no-fake`.
+    pure def fake_ty(mut self, arg: TypeExprId, ctx: TyCtx) -> Ty:
+        let written = self.ast(ctx.module).type_expr(arg).copy()
+        if let TypeKind.Path(segments, args) = written.kind:
+            if args.is_empty():
+                if let Some(t) = self.lookup_path(segments, ctx):
+                    if let Some(f) = self.prog.fakes.get(t):
+                        return self.types.adt(f, [])
+        if self.is_root(ctx.module):
+            self.other_error = True
+        return Ty.error()
 
     ## Whether `segments` name `cap.Fake` in the program's code.
     pure def is_fake_marker(self, segments: list[Name], module: ModuleId) -> bool:
@@ -1542,3 +3092,280 @@ pure def text_of(texts: dict[String, String], name: str) -> String:
     if let Some(t) = texts.get(name.to_string()):
         return t.copy()
     return String.new()
+
+## Whether a body reflects on one of the type parameters `generics`: a
+## `reflect` query, a field reached by a compile-time descriptor, or a
+## compile-time expression that names a type parameter (stage 0's
+## `instances::reflects`).
+pure def reflects(ast: Ast, body: Block, generics: list[GenericParam]) -> bool:
+    for e in visit.exprs_in_block(ast, body):
+        match ast.expr(e).kind:
+            case ExprKind.FieldOf(_, _):
+                return True
+            case ExprKind.Call(callee, _, _):
+                if let ExprKind.Field(base, _) = ast.expr(callee).kind:
+                    if let ExprKind.Name(n) = ast.expr(base).kind:
+                        if n == "reflect":
+                            return True
+            case ExprKind.Comptime(inner):
+                for x in visit.exprs_of(ast, inner):
+                    if let ExprKind.Name(n) = ast.expr(x).kind:
+                        for g in generics:
+                            if g.name.text == n:
+                                return True
+            case _:
+                pass
+    return False
+
+## The last part of a dotted path: `json` for `std.json`.
+pure def last_word(path: str) -> String:
+    var out = String.new()
+    for part in path.split("."):
+        out = part.to_string()
+    return out
+
+## The traits `@delegate` forwards (03, "Coherence").
+pure def delegable(name: str) -> bool:
+    return match name:
+        case "Add" | "Sub" | "Mul" | "Div" | "Rem" | "Neg" | "Eq" | "PartialOrd" | "Ord": True
+        case "Hash" | "Display" | "Debug" | "Len": True
+        case _: False
+
+## The delegable traits whose methods return `Self`.
+pure def returns_self(name: str) -> bool:
+    return match name:
+        case "Add" | "Sub" | "Mul" | "Div" | "Rem" | "Neg": True
+        case _: False
+
+## The names of generic parameters.
+pure def generic_names(gs: list[GenericParam]) -> list[String]:
+    var out: list[String] = []
+    for g in gs:
+        out.push(g.name.text.copy())
+    return out
+
+## The types whose values the prelude's `Draws` draws itself.
+pure def leaf_generator(n: str) -> bool:
+    return match n:
+        case "int" | "i64" | "bool" | "f64" | "char" | "String" | "u8" | "u16" | "u32": True
+        case "i8" | "i16" | "i32" | "Duration": True
+        case _: False
+
+## A text without its whitespace: a site's key.
+pure def without_spaces(text: str) -> String:
+    var out = String.new()
+    for c in text.chars():
+        if c != ' ' and c != '\n' and c != '\t' and c != '\r':
+            out.push_char(c)
+    return out
+
+## `3`, as the value of an integer literal.
+pure def three_u128() -> u128:
+    var x: u128 = 0
+    for _ in range(3):
+        x = x + 1
+    return x
+
+## A method of a trait, as the interceptor and the fake write it.
+struct ShimMethod:
+    name: String
+    ## The receiver and parameters as written: `mut self, x: int`.
+    params: String
+    ## ` -> T ! E` as written, or empty.
+    ret: String
+    ## The result type as written (`T ! E`), when it is not `()`.
+    result: String?
+    ## The parameters' names, and whether each is passed `mut`.
+    args: list[(String, bool)]
+
+## `"{a:?}, {b:?}"`: the arguments of a call as an interceptor and a fake
+## show them.
+pure def shown_args(m: ShimMethod) -> String:
+    var parts: list[String] = []
+    for (n, _) in m.args:
+        parts.push("{{{n}:?}}")
+    return parts.join(", ")
+
+## `x, mut y`: the arguments of the forwarded call.
+pure def passed(m: ShimMethod) -> String:
+    var parts: list[String] = []
+    for (n, by_mut) in m.args:
+        if by_mut:
+            parts.push("mut {n}")
+        else:
+            parts.push(n.copy())
+    return parts.join(", ")
+
+## The impl of `trait_name` for `cap.Wrap`.
+pure def wrap_impl(trait_name: str, ms: list[ShimMethod]) -> String:
+    var s: String = "impl[__T: {trait_name}, __I: cap.Interceptor] {trait_name} for cap.Wrap[__T, __I]:\n"
+    for m in ms:
+        s.push("    def {m.name}({m.params}){m.ret}:\n")
+        s.push(
+            "        let __call = cap.Call(capability=\"{trait_name}\".to_string(), method=\"{m.name}\".to_string(), args=\"{shown_args(m)}\")\n"
+        )
+        s.push("        self.hook.before(__call.copy())\n")
+        match m.result:
+            case Some(_):
+                s.push("        let __result = self.inner.{m.name}({passed(m)})\n")
+                s.push("        self.hook.after(__call, \"{{__result:?}}\")\n")
+                s.push("        return __result\n")
+            case None:
+                s.push("        self.inner.{m.name}({passed(m)})\n")
+                s.push("        self.hook.after(__call, \"()\")\n")
+    return s
+
+## The fake of `trait_name`: a struct, its own methods, and its impl of
+## the trait.
+pure def fake_text(trait_name: str, ms: list[ShimMethod]) -> String:
+    let ty = "__Fake_{trait_name}"
+    var s: String = "## A recording fake of `{trait_name}` (17): `cap.Fake[{trait_name}]`. Its copies share\n"
+    s.push(
+        "## what it recorded.\n@derive(Copy)\nstruct {ty}:\n    __log: Cap[Mutex[list[String]]]\n"
+    )
+    for m in ms:
+        if let Some(r) = m.result:
+            s.push("    __on_{m.name}: Cap[Mutex[list[{r}]]]\n")
+    var fields = ["__log=Cap(Mutex(list()))".to_string()]
+    for m in ms:
+        if m.result.is_some():
+            fields.push("__on_{m.name}=Cap(Mutex(list()))")
+    s.push("\nimpl {ty}:\n")
+    s.push("    ## A fake of `{trait_name}` that has seen no calls and has no results queued.\n")
+    s.push("    def new() -> {ty}:\n        return {ty}({fields.join(", ")})\n")
+    s.push("    ## The calls so far, in order, each written `method(arguments)`.\n")
+    s.push(
+        "    def calls(self) -> list[String]:\n        return self.__log.get().lock().value.copy()\n"
+    )
+    for m in ms:
+        if let Some(r) = m.result:
+            s.push(
+                "    ## Queues what a call of `{m.name}` returns; the last result queued is returned\n"
+            )
+            s.push("    ## again once the others are used.\n")
+            s.push("    def on_{m.name}(self, own result: {r}):\n")
+            s.push("        self.__on_{m.name}.get().lock().value.push(result)\n")
+    s.push("\nimpl {trait_name} for {ty}:\n")
+    for m in ms:
+        s.push("    def {m.name}({m.params}){m.ret}:\n")
+        s.push("        self.__log.get().lock().value.push(\"{m.name}({shown_args(m)})\")\n")
+        if m.result.is_some():
+            s.push("        var __queued = self.__on_{m.name}.get().lock()\n")
+            s.push("        if __queued.value.is_empty():\n")
+            s.push(
+                "            panic(\"`cap.Fake[{trait_name}]`: `{m.name}` was called with no result queued (`on_{m.name}`)\")\n"
+            )
+            s.push("        if len(__queued.value) == 1:\n")
+            s.push("            return __queued.value[0].copy()\n")
+            s.push("        return __queued.value.remove(0)\n")
+    return s
+
+## One fenced example of a run of `##` lines: the line of its opening
+## fence, and each of its lines (the line, the column its text starts at,
+## and the text).
+struct DocExample:
+    fence_line: int
+    lines: list[(int, int, String)]
+
+## A `##` line's indentation and its text after the marker; `None` for any
+## other line (`##!` is a module's doc).
+pure def doc_line(line: str) -> (int, String)?:
+    var indent = 0
+    while indent < line.byte_len() and line.byte_at(indent) == 32:
+        indent += 1
+    let rest = line.byte_slice(indent, line.byte_len())
+    if not rest.starts_with("##") or rest.starts_with("##!"):
+        return None
+    return Some((indent, rest.byte_slice(2, rest.byte_len()).to_string()))
+
+## The examples in a text (stage 0's `doctests::examples`): an example is
+## a fenced block in a run of `##` lines, opened by "```" or "```sisu" and
+## closed by "```", and documents the first item that starts after the run;
+## one with no item after it, or no line, is none.
+pure def doc_examples(text: str, starts: list[int]) -> list[DocExample]:
+    var out: list[DocExample] = []
+    var run: list[DocExample] = []
+    var open: DocExample? = None
+    var offset = 0
+    var index = 0
+    for raw in text.split("\n"):
+        let start = offset
+        offset += raw.byte_len() + 1
+        var bare = raw.to_string()
+        if bare.ends_with("\r"):
+            bare = bare.byte_slice(0, bare.byte_len() - 1).to_string()
+        match doc_line(bare):
+            case Some((indent, content)):
+                let fence = content.trim()
+                match open:
+                    case Some(e):
+                        if fence == "```":
+                            run.push(e.copy())
+                            open = None
+                        else:
+                            var col = indent + 2
+                            var body = content.copy()
+                            if content.starts_with(" "):
+                                col = indent + 3
+                                body = content.byte_slice(1, content.byte_len()).to_string()
+                            if not body.trim().is_empty():
+                                if let Some(x) = ref mut open:
+                                    x.lines.push((index, col, body))
+                    case None:
+                        if fence == "```" or fence == "```sisu":
+                            open = Some(DocExample(fence_line=index, lines=[]))
+            case None:
+                open = None
+                finish_doc_run(mut run, start, starts, mut out)
+        index += 1
+    finish_doc_run(mut run, text.byte_len(), starts, mut out)
+    var kept: list[DocExample] = []
+    for e in out:
+        if not e.lines.is_empty():
+            kept.push(e.copy())
+    return kept
+
+## The examples of a run that ended at `at` document the first item that
+## starts there or later; without one they are none.
+pure def finish_doc_run(
+    mut run: list[DocExample], at: int, starts: list[int], mut out: list[DocExample]
+):
+    if run.is_empty():
+        return
+    var found = False
+    for s in starts:
+        if s >= at:
+            found = True
+    if found:
+        for e in run:
+            out.push(e.copy())
+    run.clear()
+
+## The module of tests for the examples (stage 0's `doctests::test_module`):
+## as many lines as `text`, the opening fence's line holding the test's
+## header, the example's lines its body, every other line empty.
+pure def doc_test_module(text: str, examples: list[DocExample]) -> String:
+    var count = 0
+    for _ in text.split("\n"):
+        count += 1
+    if text.ends_with("\n"):
+        count -= 1
+    if count < 1:
+        count = 1
+    var lines: list[String] = []
+    for _ in range(count):
+        lines.push(String.new())
+    for k in range(len(examples)):
+        let e = ref examples[k]
+        if e.fence_line < count:
+            lines[e.fence_line] = "test \"doc example {k}\":"
+        for (line, col, body) in e.lines:
+            if line < count:
+                var l = String.new()
+                for _ in range(col):
+                    l.push(" ")
+                l.push(body)
+                lines[line] = l
+    var out = lines.join("\n")
+    out.push("\n")
+    return out

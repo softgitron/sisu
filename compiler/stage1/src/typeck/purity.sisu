@@ -1,0 +1,319 @@
+##! `pure` (D-074) in the type system (stage 0's `sisu-typeck/src/purity.rs`):
+##! a closure's function type is `pure` when its body calls only pure
+##! functions, which this walk decides, and a function passed where a
+##! `pure` one is expected must be pure (E0335). The rule that a pure
+##! function's own body calls only pure functions is checked on SIR by
+##! stage 0's ownership checker.
+##!
+##! The walks go over the typed tree in the order the Rust visitor takes:
+##! each expression before the ones inside it.
+
+from stage1.typeck.check import Checker, Cx
+from stage1.typeck.thir import (
+    ArgMode,
+    BlockId,
+    Callee,
+    FieldInit,
+    InterpPart,
+    TArmBody,
+    TCompClause,
+    TCondPart,
+    TExprId,
+    TExprKind,
+    TLetElse,
+    TStmt,
+)
+from stage1.typeck.ty import Ty, TyData
+
+## What keeps an expression from only reading.
+pub enum Reading:
+    ## It calls this function, which is not `pure`.
+    Calls(String)
+    ## It changes something (a `mut` argument or borrow, an assignment).
+    Changes
+
+impl Checker:
+    ## The name of the first impure function a block calls, if any. The
+    ## closures it makes are not looked into.
+    pub pure def first_impure_in_block(self, cx: Cx, b: BlockId) -> String?:
+        for s in self.blocks[b.index].stmts:
+            # `select` observes the schedule (06, "Effects").
+            if let TStmt.Select(_, _) = s:
+                return Some("select".to_string())
+            for e in self.stmt_exprs(s):
+                if let Some(name) = self.impure_callee(cx, e):
+                    return Some(name)
+        return None
+
+    pure def impure_callee(self, cx: Cx, e: TExprId) -> String?:
+        match self.exprs[e.index].kind:
+            case TExprKind.Call(Callee.Fn(def_, _), _):
+                if let Some(f) = cx.prog.fn_info(def_):
+                    if not f.pure:
+                        return Some(cx.prog.defs[def_.index].name.copy())
+                return None
+            case TExprKind.Call(Callee.Value(f), _):
+                if let TyData.Fn(_, _, False) = self.types.data(self.ty_of(f)):
+                    return Some("a function value that is not `pure`".to_string())
+                return None
+            case _:
+                return None
+
+    ## Every expression of a statement, each before the ones inside it.
+    pub pure def stmt_exprs(self, s: TStmt) -> list[TExprId]:
+        var out: list[TExprId] = []
+        self.visit_stmt(s, mut out)
+        return out
+
+    pure def visit_stmt(self, s: TStmt, mut out: list[TExprId]):
+        match s:
+            case TStmt.Let(_, init, _, else_, _):
+                if let Some(e) = init:
+                    self.visit_expr(e, mut out)
+                match else_:
+                    case Some(TLetElse.Fallback(_, value)):
+                        self.visit_expr(value, mut out)
+                    case Some(TLetElse.Diverge(_, body)):
+                        self.visit_block(body, mut out)
+                    case None:
+                        pass
+            case TStmt.Assign(place, value, _):
+                self.visit_expr(place, mut out)
+                self.visit_expr(value, mut out)
+            case TStmt.AugAssign(place, _, value, _):
+                self.visit_expr(place, mut out)
+                self.visit_expr(value, mut out)
+            case TStmt.AssignTuple(places, value, _):
+                for p in places:
+                    self.visit_expr(p, mut out)
+                self.visit_expr(value, mut out)
+            case TStmt.Discard(value, _):
+                self.visit_expr(value, mut out)
+            case TStmt.Expr(value):
+                self.visit_expr(value, mut out)
+            case TStmt.Return(value, _):
+                if let Some(v) = value:
+                    self.visit_expr(v, mut out)
+            case TStmt.If(branches, else_, _):
+                for (c, b) in branches:
+                    for p in c.parts:
+                        match p:
+                            case TCondPart.Bool(e):
+                                self.visit_expr(e, mut out)
+                            case TCondPart.Let(_, e):
+                                self.visit_expr(e, mut out)
+                    self.visit_block(b, mut out)
+                if let Some(b) = else_:
+                    self.visit_block(b, mut out)
+            case TStmt.While(cond, body, _):
+                for p in cond.parts:
+                    match p:
+                        case TCondPart.Bool(e):
+                            self.visit_expr(e, mut out)
+                        case TCondPart.Let(_, e):
+                            self.visit_expr(e, mut out)
+                self.visit_block(body, mut out)
+            case TStmt.For(_, iter, _, _, body, _):
+                self.visit_expr(iter, mut out)
+                self.visit_block(body, mut out)
+            case TStmt.Match(scrutinee, arms, _):
+                self.visit_expr(scrutinee, mut out)
+                for a in arms:
+                    if let Some(g) = a.guard:
+                        self.visit_expr(g, mut out)
+                    match a.body:
+                        case TArmBody.Expr(e):
+                            self.visit_expr(e, mut out)
+                        case TArmBody.Block(b):
+                            self.visit_block(b, mut out)
+            case TStmt.Assert(cond, message, _, _, _):
+                self.visit_expr(cond, mut out)
+                if let Some(m) = message:
+                    self.visit_expr(m, mut out)
+            case TStmt.Contract(c):
+                self.visit_expr(c.cond, mut out)
+            case TStmt.Defer(body, _):
+                self.visit_block(body, mut out)
+            case TStmt.Block(body):
+                self.visit_block(body, mut out)
+            case TStmt.Select(arms, _):
+                for a in arms:
+                    self.visit_expr(a.op.expr(), mut out)
+                    self.visit_block(a.body, mut out)
+            case TStmt.Yield(value, _):
+                self.visit_expr(value, mut out)
+            case _:
+                pass
+
+    pub pure def visit_block(self, b: BlockId, mut out: list[TExprId]):
+        for s in self.blocks[b.index].stmts:
+            self.visit_stmt(s, mut out)
+
+    pub pure def visit_expr(self, e: TExprId, mut out: list[TExprId]):
+        out.push(e)
+        match self.exprs[e.index].kind:
+            case TExprKind.Call(callee, args):
+                if let Callee.Value(c) = callee:
+                    self.visit_expr(c, mut out)
+                for a in args:
+                    self.visit_expr(a.expr, mut out)
+            case TExprKind.Variant(_, _, args):
+                for a in args:
+                    self.visit_expr(a, mut out)
+            case TExprKind.Tuple(args):
+                for a in args:
+                    self.visit_expr(a, mut out)
+            case TExprKind.List(args):
+                for a in args:
+                    self.visit_expr(a, mut out)
+            case TExprKind.Set(args):
+                for a in args:
+                    self.visit_expr(a, mut out)
+            case TExprKind.Struct(_, fields):
+                for f in fields:
+                    if let FieldInit.Value(v) = f:
+                        self.visit_expr(v, mut out)
+            case TExprKind.Dict(kv):
+                for (k, v) in kv:
+                    self.visit_expr(k, mut out)
+                    self.visit_expr(v, mut out)
+            case TExprKind.Field(base, _):
+                self.visit_expr(base, mut out)
+            case TExprKind.Deref(base):
+                self.visit_expr(base, mut out)
+            case TExprKind.CopyOf(base):
+                self.visit_expr(base, mut out)
+            case TExprKind.Trace(base):
+                self.visit_expr(base, mut out)
+            case TExprKind.Index(base, index, _):
+                self.visit_expr(base, mut out)
+                self.visit_expr(index, mut out)
+            case TExprKind.Slice(base, lo, hi):
+                self.visit_expr(base, mut out)
+                if let Some(x) = lo:
+                    self.visit_expr(x, mut out)
+                if let Some(x) = hi:
+                    self.visit_expr(x, mut out)
+            case TExprKind.Borrow(place, _):
+                self.visit_expr(place, mut out)
+            case TExprKind.Unary(_, operand):
+                self.visit_expr(operand, mut out)
+            case TExprKind.Binary(_, lhs, rhs):
+                self.visit_expr(lhs, mut out)
+                self.visit_expr(rhs, mut out)
+            case TExprKind.Logic(_, lhs, rhs):
+                self.visit_expr(lhs, mut out)
+                self.visit_expr(rhs, mut out)
+            case TExprKind.Compare(first, rest):
+                self.visit_expr(first, mut out)
+                for (_, x) in rest:
+                    self.visit_expr(x, mut out)
+            case TExprKind.Coalesce(opt, default, _):
+                self.visit_expr(opt, mut out)
+                self.visit_expr(default, mut out)
+            case TExprKind.If(cond, then, else_):
+                self.visit_expr(cond, mut out)
+                self.visit_expr(then, mut out)
+                self.visit_expr(else_, mut out)
+            case TExprKind.Match(scrutinee, arms):
+                self.visit_expr(scrutinee, mut out)
+                for a in arms:
+                    if let Some(g) = a.guard:
+                        self.visit_expr(g, mut out)
+                    match a.body:
+                        case TArmBody.Expr(x):
+                            self.visit_expr(x, mut out)
+                        case TArmBody.Block(b):
+                            self.visit_block(b, mut out)
+            case TExprKind.Try(x, _):
+                self.visit_expr(x, mut out)
+            case TExprKind.Coerce(x, _):
+                self.visit_expr(x, mut out)
+            case TExprKind.RefineTry(value, _, _):
+                self.visit_expr(value, mut out)
+            case TExprKind.OptChain(base, _, then, _):
+                self.visit_expr(base, mut out)
+                self.visit_expr(then, mut out)
+            case TExprKind.Interp(parts):
+                for p in parts:
+                    if let InterpPart.Value(x, _, _) = p:
+                        self.visit_expr(x, mut out)
+            case TExprKind.Comprehension(_, clauses, elem, value):
+                for c in clauses:
+                    match c:
+                        case TCompClause.For(_, iter, _, _):
+                            self.visit_expr(iter, mut out)
+                        case TCompClause.If(x):
+                            self.visit_expr(x, mut out)
+                self.visit_expr(elem, mut out)
+                if let Some(v) = value:
+                    self.visit_expr(v, mut out)
+            case _:
+                pass
+
+    ## Why an expression could not be evaluated again without changing
+    ## anything (07, "Contract expressions must be `pure`"): the impure
+    ## function it calls, or what it changes. Closures it makes are looked
+    ## into.
+    pub pure def reading_problem(self, cx: Cx, e: TExprId) -> Reading?:
+        var bodies: list[BlockId] = []
+        var exprs: list[TExprId] = []
+        self.visit_expr(e, mut exprs)
+        for x in exprs:
+            if let Some(name) = self.impure_callee(cx, x):
+                return Some(Reading.Calls(name))
+            match self.exprs[x.index].kind:
+                case TExprKind.Call(_, args):
+                    for a in args:
+                        if a.mode == ArgMode.BorrowMut:
+                            return Some(Reading.Changes)
+                case TExprKind.Borrow(_, True):
+                    return Some(Reading.Changes)
+                case TExprKind.Closure(c):
+                    if let Some(cl) = self.closures[c.index]:
+                        bodies.push(cl.body)
+                case TExprKind.Comptime(c):
+                    if let Some(cl) = self.closures[c.index]:
+                        bodies.push(cl.body)
+                case _:
+                    pass
+        while let Some(b) = bodies.pop():
+            var inner: list[TExprId] = []
+            self.visit_block(b, mut inner)
+            for x in inner:
+                if let Some(name) = self.impure_callee(cx, x):
+                    return Some(Reading.Calls(name))
+                match self.exprs[x.index].kind:
+                    case TExprKind.Call(_, args):
+                        for a in args:
+                            if a.mode == ArgMode.BorrowMut:
+                                return Some(Reading.Changes)
+                    case TExprKind.Borrow(_, True):
+                        return Some(Reading.Changes)
+                    case TExprKind.Closure(c):
+                        if let Some(cl) = self.closures[c.index]:
+                            bodies.push(cl.body)
+                    case _:
+                        pass
+            for s in self.blocks[b.index].stmts:
+                match s:
+                    case TStmt.Assign(_, _, _) | TStmt.AugAssign(_, _, _, _) | TStmt.AssignTuple(
+                        _, _, _
+                    ):
+                        return Some(Reading.Changes)
+                    case _:
+                        pass
+        return None
+
+    ## Whether the expression only reads; with `report`, a contract's
+    ## condition that does not is an error (`contract.`).
+    pub pure def only_reads(mut self, cx: Cx, e: TExprId, report: bool) -> bool:
+        if self.ty_of(e) == Ty.error():
+            return True
+        match self.reading_problem(cx, e):
+            case None:
+                return True
+            case Some(_):
+                if report:
+                    self.other()
+                return False

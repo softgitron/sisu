@@ -42,9 +42,11 @@ from stage1.lexer import Lexed, lex
 from stage1.mutants import Rng, mutate
 from stage1.parser import parse, parse_lexed
 from stage1.resolve import Environment, ModuleNames, imported_std_modules
-from stage1.syntax.ast import build
+from stage1.syntax.ast import ExprKind, StrPart, build
+from stage1.syntax.ast import visit
 from stage1.syntax.ast.dump import module_lines
 from stage1.syntax.kinds import KindNames
+from stage1.typeck.std_sources import importable
 
 error UsageError:
     Usage(text: String)
@@ -181,8 +183,11 @@ def main(sys: System) -> ! {IoError, UsageError}:
         return Ok(())
     if command == "types" and len(rest) == 2:
         let base = typeck.base(std_texts(sys)?)
+        var env = environment(sys)?
         let text = sys.fs.read_to_string(Path.new(rest[1].copy()))?
-        let checked = typeck.check_file(base, text, catalog)
+        let named = name_error(sys, text, mut env, catalog)?
+        let embedded = embedded_files(sys, rest[1], text, catalog)
+        let checked = typeck.check_file(base, text, catalog, named, embedded)
         var why = String.new()
         for b in checked.beyond:
             why.push("beyond the slice: {b}\n")
@@ -190,6 +195,7 @@ def main(sys: System) -> ! {IoError, UsageError}:
         return Ok(())
     if command == "types-batch" and len(rest) == 3:
         let base = typeck.base(std_texts(sys)?)
+        var env = environment(sys)?
         let out_dir = rest[1].copy()
         let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
         var n = 0
@@ -198,7 +204,9 @@ def main(sys: System) -> ! {IoError, UsageError}:
                 continue
             n += 1
             let text = sys.fs.read_to_string(Path.new(path))?
-            let checked = typeck.check_file(base, text, catalog)
+            let named = name_error(sys, text, mut env, catalog)?
+            let embedded = embedded_files(sys, path, text, catalog)
+            let checked = typeck.check_file(base, text, catalog, named, embedded)
             var why = String.new()
             for b in checked.beyond:
                 why.push("{b}\n")
@@ -240,12 +248,81 @@ def environment(sys: System) -> Environment ! IoError:
     _ = prelude.items.add("target".to_string())
     return Ok(Environment(prelude=prelude, std=std))
 
-## The sources of the prelude and the ambient std modules, by name.
+## The sources of the std modules, by name: the prelude, the ambient
+## modules and those a program may import.
 def std_texts(sys: System) -> dict[String, String] ! IoError:
     var texts: dict[String, String] = {}
-    for name in ["prelude", "task", "log", "cap", "live"]:
+    var names = ["prelude", "task", "log", "cap", "live"]
+    for name in importable():
+        names.push(name)
+    for name in names:
         _ = texts.insert(name.to_string(), sys.fs.read_to_string(Path.new("../std/{name}.sisu"))?)
     return Ok(texts)
+
+## The files the `embed("path")` calls of `text` name, read relative to
+## the file at `path` (stage 0's `embedded_files`): whether each could be
+## read.
+def embedded_files(sys: System, path: str, text: str, catalog: Catalog) -> dict[String, bool]:
+    var out: dict[String, bool] = {}
+    if not text.contains("embed("):
+        return out
+    var dir = ".".to_string()
+    var cut = -1
+    for i in range(text_len(path)):
+        if path.byte_at(i) == 47:
+            cut = i
+    if cut >= 0:
+        dir = path.byte_slice(0, cut).to_string()
+    let module = build.module(parse(text, catalog).tree)
+    for e in visit.exprs_in_items(module.ast, module.items):
+        let ExprKind.Call(callee, args, _) = module.ast.expr(e).kind.copy() else:
+            continue
+        var named_embed = False
+        if let ExprKind.Name(n) = module.ast.expr(callee).kind:
+            named_embed = n == "embed"
+        if not named_embed or len(args) != 1:
+            continue
+        let ExprKind.Str(parts) = module.ast.expr(args[0].value).kind.copy() else:
+            continue
+        var plain = True
+        for p in parts:
+            if let StrPart.Interp(_, _, _, _) = p:
+                plain = False
+        if not plain:
+            continue
+        let file = build.plain_text(parts)
+        if out.contains(file.copy()):
+            continue
+        var inside = not file.starts_with("/")
+        for part in file.split("/"):
+            if part == "..":
+                inside = False
+        var read = False
+        if inside:
+            match sys.fs.read_to_string(Path.new("{dir}/{file}")):
+                case Ok(_):
+                    read = True
+                case Err(_):
+                    read = False
+        _ = out.insert(file, read)
+    return out
+
+pure def text_len(s: str) -> int:
+    return s.byte_len()
+
+## Whether stage 0's name pass reports an error in `text`, after loading
+## the std modules it imports into `env`.
+def name_error(sys: System, text: str, mut env: Environment, catalog: Catalog) -> bool ! IoError:
+    let parsed = parse(text, catalog)
+    for module in imported_std_modules(text, parsed.tree):
+        if not env.std.contains(module.copy()):
+            let source = sys.fs.read_to_string(Path.new("../std/{module}.sisu"))?
+            let names = ModuleNames.of(source, parse(source, catalog).tree)
+            _ = env.std.insert(module.copy(), names)
+    for d in resolve.resolve(text, parsed.tree, parsed.diagnostics, env, catalog):
+        if catalog.is_error(d.msg):
+            return Ok(True)
+    return Ok(False)
 
 ## The name diagnostics of `text` in the conformance form, after loading the
 ## std modules it imports into `env`.

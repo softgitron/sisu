@@ -1,0 +1,382 @@
+##! Patterns (stage 0's `sisu-typeck/src/pat.rs`). A pattern matched
+##! through a reference, or against a place, binds references to the
+##! matched parts (copies for `Copy` parts); one matched against a temporary
+##! takes the parts by value.
+
+from stage1.diag import Msg, TextRange
+from stage1.syntax.ast import ExprId, Name, PatArg, PatKind, PatternId
+from stage1.typeck.call import StaticPath
+from stage1.typeck.check import Checker, Cx
+from stage1.typeck.program import DefKind
+from stage1.typeck.thir import BindMode, Lit, PatId, TExprKind, TPatKind
+from stage1.typeck.ty import DefId, Ty, TyData
+
+impl Checker:
+    ## A pattern of `match`, `if let`, `for`: bindings are immutable.
+    pub pure def check_pat(mut self, cx: Cx, p: PatternId, ty: Ty, by_ref: bool?) -> PatId:
+        return self.check_pat_with(cx, p, ty, by_ref, False)
+
+    pub pure def check_pat_with(
+        mut self, cx: Cx, p: PatternId, ty: Ty, by_ref: bool?, mutable: bool
+    ) -> PatId:
+        let node = cx.ast.pattern(p)
+        let span = node.range
+        let t = self.resolved(ty)
+        var simple = False
+        match node.kind:
+            case PatKind.Bind(_) | PatKind.Wildcard | PatKind.Error:
+                simple = True
+            case _:
+                pass
+        if not simple:
+            if let TyData.Ref(inner, m) = self.types.data(t).copy():
+                let inner_p = self.check_pat_with(cx, p, inner, Some(m), mutable)
+                return self.add_pat(TPatKind.Deref(inner_p), t, span)
+            # A refinement is matched as its base, the same value.
+            if let Some((_, _, base)) = self.refinement_of(cx, t):
+                return self.check_pat_with(cx, p, base, by_ref, mutable)
+        match node.kind:
+            case PatKind.Wildcard:
+                return self.add_pat(TPatKind.Wild, t, span)
+            case PatKind.Error:
+                return self.add_pat(TPatKind.Error, t, span)
+            case PatKind.Bind(n):
+                var lty = t
+                var mode = BindMode.Value
+                if let Some(m) = by_ref:
+                    if not self.is_copy(cx, t):
+                        lty = self.types.ref_(t, m)
+                        mode = if m: BindMode.RefMut else: BindMode.Ref
+                let l = self.new_local(n.text, lty, mutable, n.range)
+                self.declare(n.text, l)
+                return self.add_pat(TPatKind.Bind(local=l, mode=mode), t, span)
+            case PatKind.Literal(e):
+                let k = self.literal_pat(cx, e, t)
+                return self.add_pat(k, t, span)
+            case PatKind.Ctor(path, args):
+                let k = self.ctor_pat(cx, path, args, t, by_ref, mutable, span)
+                return self.add_pat(k, t, span)
+            case PatKind.Tuple(ps):
+                # `()` matches the one value of the unit type.
+                if ps.is_empty():
+                    if t == Ty.unit() or self.infer.try_unify(self.types, t, Ty.unit()):
+                        return self.add_pat(TPatKind.Wild, t, span)
+                var elems: list[Ty] = []
+                match self.types.data(t).copy():
+                    case TyData.Tuple(es, _):
+                        if len(es) == len(ps):
+                            elems = es.copy()
+                        else:
+                            var d = self.error(cx, Msg.TypeUnpackCount, span)
+                            d = d.with("found", "{len(es)}").with("expected", "{len(ps)}")
+                            self.report(d)
+                            for _ in ps:
+                                elems.push(Ty.error())
+                    case TyData.Var(_):
+                        for _ in ps:
+                            elems.push(self.infer.fresh(mut self.types))
+                        let tt = self.types.tuple(elems.copy())
+                        _ = self.infer.unify(self.types, t, tt)
+                    case TyData.Error:
+                        for _ in ps:
+                            elems.push(Ty.error())
+                    case _:
+                        let shown = self.show(cx, t)
+                        let d = self.error(cx, Msg.TypePatternMismatch, span).with("ty", shown)
+                        self.report(d)
+                        for _ in ps:
+                            elems.push(Ty.error())
+                var pats: list[PatId] = []
+                for i in range(len(ps)):
+                    pats.push(self.check_pat_with(cx, ps[i], elems[i], by_ref, mutable))
+                return self.add_pat(TPatKind.Tuple(pats), t, span)
+            case PatKind.List(ps):
+                var elem = Ty.error()
+                match self.types.data(t).copy():
+                    case TyData.Adt(d, a):
+                        if Some(d) == cx.prog.wk.list:
+                            elem = if a.is_empty(): Ty.error() else: a[0]
+                        else:
+                            let shown = self.show(cx, t)
+                            let dd = self.error(cx, Msg.TypePatternMismatch, span).with("ty", shown)
+                            self.report(dd)
+                    case TyData.Error:
+                        pass
+                    case _:
+                        let shown = self.show(cx, t)
+                        let dd = self.error(cx, Msg.TypePatternMismatch, span).with("ty", shown)
+                        self.report(dd)
+                var prefix: list[PatId] = []
+                var suffix: list[PatId] = []
+                var has_rest = False
+                var rest: int? = None
+                for sp in ps:
+                    if let PatKind.Star(name) = cx.ast.pattern(sp).kind:
+                        if let Some(n) = name:
+                            var lt = self.types.ref_(t, False)
+                            if by_ref.is_none():
+                                lt = t
+                            let l = self.new_local(n.text, lt, mutable, n.range)
+                            self.declare(n.text, l)
+                            rest = Some(l)
+                        has_rest = True
+                        continue
+                    let pat = self.check_pat_with(cx, sp, elem, by_ref, mutable)
+                    if has_rest:
+                        suffix.push(pat)
+                    else:
+                        prefix.push(pat)
+                let k = TPatKind.List(prefix=prefix, has_rest=has_rest, rest=rest, suffix=suffix)
+                return self.add_pat(k, t, span)
+            case PatKind.Star(_):
+                let d = self.error(cx, Msg.TypeStarOutsideList, span)
+                self.report(d)
+                return self.add_pat(TPatKind.Error, t, span)
+            case PatKind.Rest:
+                let d = self.error(cx, Msg.TypeRestOutsideArguments, span)
+                self.report(d)
+                return self.add_pat(TPatKind.Error, t, span)
+            case PatKind.Or(ps):
+                let before = len(self.locals)
+                var pats: list[PatId] = []
+                for sp in ps:
+                    pats.push(self.check_pat_with(cx, sp, t, by_ref, mutable))
+                if len(self.locals) > before:
+                    let d = self.error(cx, Msg.TypeBindingsInOrPattern, span)
+                    self.report(d)
+                return self.add_pat(TPatKind.Or(pats), t, span)
+
+    pure def literal_pat(mut self, cx: Cx, e: ExprId, t: Ty) -> TPatKind:
+        let x = self.infer_expr(cx, e, Some(t))
+        var lit = Lit.Int(0)
+        match self.exprs[x.index].kind:
+            case TExprKind.Int(n):
+                lit = Lit.Int(n)
+            case TExprKind.WideInt(n):
+                lit = Lit.WideInt(n)
+            case TExprKind.Float(f):
+                lit = Lit.Float(f)
+            case TExprKind.Char(c):
+                lit = Lit.Char(c)
+            case TExprKind.Str(s):
+                lit = Lit.Str(s.copy())
+            case TExprKind.Bool(b):
+                lit = Lit.Bool(b)
+            case _:
+                return TPatKind.Error
+        var lt = self.resolved(self.ty_of(x))
+        var target = t
+        if self.is_string(cx, t):
+            target = Ty.str()
+        if self.is_string(cx, lt):
+            lt = Ty.str()
+        if not self.infer.try_unify(self.types, lt, target):
+            let shown = self.show(cx, t)
+            let d = self.error(cx, Msg.TypePatternMismatch, cx.ast.expr(e).range).with("ty", shown)
+            self.report(d)
+            return TPatKind.Error
+        return TPatKind.Lit(lit)
+
+    pure def ctor_pat(
+        mut self,
+        cx: Cx,
+        path: list[Name],
+        args: list[PatArg]?,
+        t: Ty,
+        by_ref: bool?,
+        mutable: bool,
+        rng: TextRange,
+    ) -> TPatKind:
+        let last = path.last() else:
+            return TPatKind.Error
+        let name = last.text.copy()
+        if len(path) == 1 and (name == "True" or name == "False") and args.is_none():
+            if not self.infer.try_unify(self.types, t, Ty.bool()):
+                let shown = self.show(cx, t)
+                let d = self.error(cx, Msg.TypePatternMismatch, rng).with("ty", shown)
+                self.report(d)
+            return TPatKind.Lit(Lit.Bool(name == "True"))
+        # Resolve the variant: in the scrutinee's type first.
+        var found: (DefId, int)? = None
+        if len(path) == 1:
+            found = self.variant_in(cx, t, name)
+            if found.is_none():
+                if let Some(d) = cx.prog.lookup(self.module, name):
+                    match cx.prog.defs[d.index].kind:
+                        case DefKind.Struct(_):
+                            return self.struct_pat(cx, d, args, t, by_ref, mutable, rng)
+                        case DefKind.Const(_):
+                            let diag = self.error(cx, Msg.TypeConstPattern, rng)
+                            self.report(diag)
+                            return TPatKind.Error
+                        case _:
+                            pass
+                found = self.global_variant(cx, name, last.range)
+        else:
+            var prefix: list[Name] = []
+            for i in range(len(path) - 1):
+                prefix.push(path[i].copy())
+            if let Some(StaticPath.Type(ty)) = self.static_path_of_names(cx, prefix):
+                found = self.variant_in(cx, ty, name)
+        let variant = found else:
+            if t != Ty.error():
+                let shown = self.show(cx, t)
+                let d = self.error(cx, Msg.TypeUnknownVariant, last.range).with("ty", shown).with(
+                    "name", name
+                )
+                self.report(d)
+            # The names the pattern binds still exist (with the error type),
+            # so the arm's body reports nothing about them.
+            if let Some(list) = args:
+                for a in list:
+                    match a:
+                        case PatArg.Positional(pp):
+                            _ = self.check_pat_with(cx, pp, Ty.error(), by_ref, mutable)
+                        case PatArg.Keyword(_, pp):
+                            _ = self.check_pat_with(cx, pp, Ty.error(), by_ref, mutable)
+                        case PatArg.Rest:
+                            pass
+            return TPatKind.Error
+        let (def_, vi) = variant
+        # The variant must belong to the scrutinee's type.
+        var targs: list[Ty] = []
+        match self.types.data(t).copy():
+            case TyData.Adt(d, a):
+                if d == def_:
+                    targs = a.copy()
+                else:
+                    let shown = self.show(cx, t)
+                    let dd = self.error(cx, Msg.TypePatternMismatch, rng).with("ty", shown)
+                    self.report(dd)
+                    return TPatKind.Error
+            case TyData.ErrSet(m):
+                if not m.contains(def_):
+                    let shown = self.show(cx, t)
+                    let dd = self.error(cx, Msg.TypePatternMismatch, rng).with("ty", shown)
+                    self.report(dd)
+                    return TPatKind.Error
+            case TyData.Var(_):
+                let (owner, a) = self.variant_owner_ty(cx, def_, None)
+                _ = self.infer.unify(self.types, t, owner)
+                targs = a
+            case TyData.Error:
+                pass
+            case _:
+                let shown = self.show(cx, t)
+                let dd = self.error(cx, Msg.TypePatternMismatch, rng).with("ty", shown)
+                self.report(dd)
+                return TPatKind.Error
+        let e = cx.prog.enum_info(def_) else:
+            return TPatKind.Error
+        if vi >= len(e.variants):
+            return TPatKind.Error
+        let v = ref e.variants[vi]
+        var ftys: list[Ty] = []
+        var names: list[String?] = []
+        for (n, ft) in v.fields:
+            ftys.push(self.types.subst(ft, targs))
+            names.push(n.copy())
+        let vname = v.name.copy()
+        var fields: list[PatId] = []
+        match args:
+            case None:
+                if not ftys.is_empty():
+                    let d = self.error(cx, Msg.TypeVariantNeedsFields, rng).with("name", vname)
+                    self.report(d)
+                for ft in ftys:
+                    fields.push(self.add_pat(TPatKind.Wild, ft, rng))
+            case Some(list):
+                fields = self.field_pats(cx, vname, names, ftys, list, by_ref, mutable, rng)
+        return TPatKind.Variant(def_=def_, variant=vi, fields=fields)
+
+    pure def struct_pat(
+        mut self,
+        cx: Cx,
+        def_: DefId,
+        args: list[PatArg]?,
+        t: Ty,
+        by_ref: bool?,
+        mutable: bool,
+        range: TextRange,
+    ) -> TPatKind:
+        let s = cx.prog.struct_info(def_) else:
+            return TPatKind.Error
+        if s.builtin.is_some():
+            let name = cx.prog.defs[def_.index].name.copy()
+            let d = self.error(cx, Msg.TypeNotAStructPattern, range).with("name", name)
+            self.report(d)
+            return TPatKind.Error
+        let plain = self.types.adt(def_, [])
+        if not self.infer.try_unify(self.types, t, plain):
+            let shown = self.show(cx, t)
+            let d = self.error(cx, Msg.TypePatternMismatch, range).with("ty", shown)
+            self.report(d)
+            return TPatKind.Error
+        var ftys: list[Ty] = []
+        var names: list[String?] = []
+        for f in s.fields:
+            ftys.push(f.ty)
+            names.push(Some(f.name.copy()))
+        let list = args.copy() ?? []
+        let owner = cx.prog.defs[def_.index].name.copy()
+        let fields = self.field_pats(cx, owner, names, ftys, list, by_ref, mutable, range)
+        return TPatKind.Struct(def_=def_, fields=fields)
+
+    pure def field_pats(
+        mut self,
+        cx: Cx,
+        owner: str,
+        names: list[String?],
+        ftys: list[Ty],
+        list: list[PatArg],
+        by_ref: bool?,
+        mutable: bool,
+        rng: TextRange,
+    ) -> list[PatId]:
+        let n = len(ftys)
+        var slots: list[PatternId?] = []
+        for _ in range(n):
+            slots.push(None)
+        var pos = 0
+        var rest = False
+        var count = 0
+        for a in list:
+            match a:
+                case PatArg.Positional(p):
+                    if pos < n:
+                        slots[pos] = Some(p)
+                    pos += 1
+                    count += 1
+                case PatArg.Keyword(k, p):
+                    count += 1
+                    var found: int? = None
+                    for i in range(n):
+                        if found.is_none():
+                            if let Some(x) = names[i]:
+                                if x == k.text:
+                                    found = Some(i)
+                    match found:
+                        case Some(i):
+                            slots[i] = Some(p)
+                        case None:
+                            var d = self.error(cx, Msg.TypeUnknownField, k.range)
+                            d = d.with("ty", owner).with("name", k.text)
+                            self.report(d)
+                case PatArg.Rest:
+                    rest = True
+        var filled = 0
+        for s in slots:
+            if s.is_some():
+                filled += 1
+        if pos > n or (not rest and filled < n):
+            var d = self.error(cx, Msg.TypePatternFieldCount, rng)
+            d = d.with("name", owner).with("expected", "{n}").with("found", "{count}")
+            self.report(d)
+        var out: list[PatId] = []
+        for i in range(n):
+            match slots[i]:
+                case Some(p):
+                    out.push(self.check_pat_with(cx, p, ftys[i], by_ref, mutable))
+                case None:
+                    out.push(self.add_pat(TPatKind.Wild, ftys[i], rng))
+        return out

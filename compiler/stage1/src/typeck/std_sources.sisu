@@ -8,6 +8,112 @@
 pub pure def ambient() -> list[str]:
     return ["task", "log", "cap", "live"]
 
+## The std modules a program imports by path, besides the ambient ones.
+pub pure def importable() -> list[str]:
+    return ["cli", "math", "net", "time", "http", "sim", "json", "test", "collections", "num"]
+
+## The paths an import may name a std module by, for the fix of one that
+## names none.
+pub pure def module_paths() -> list[String]:
+    var out: list[String] = []
+    for p in [
+        "std.x.cli",
+        "std.math",
+        "std.task",
+        "std.log",
+        "std.cap",
+        "std.net",
+        "std.time",
+        "std.x.http",
+        "std.sim",
+        "std.json",
+        "std.test",
+        "std.collections",
+        "std.num",
+        "std.live",
+    ]:
+        out.push(p.to_string())
+    return out
+
+## The std module an import path names (`std.json`, and stage 0's short
+## names `cli`, `http`, `json`, ...).
+pub pure def module_for(words: list[String]) -> String?:
+    let joined = words.join(".")
+    let path: str = joined
+    return match path:
+        case "cli" | "std.x.cli": Some("cli".to_string())
+        case "std.math" | "math": Some("math".to_string())
+        case "std.task" | "task": Some("task".to_string())
+        case "std.log" | "log": Some("log".to_string())
+        case "std.cap" | "cap": Some("cap".to_string())
+        case "std.net" | "net": Some("net".to_string())
+        case "std.time" | "time": Some("time".to_string())
+        case "std.x.http" | "http": Some("http".to_string())
+        case "std.sim" | "sim": Some("sim".to_string())
+        case "std.json" | "json": Some("json".to_string())
+        case "std.test": Some("test".to_string())
+        case "std.collections": Some("collections".to_string())
+        case "std.num": Some("num".to_string())
+        case "std.live": Some("live".to_string())
+        case _: None
+
+## The prelude's names a std module re-exports (`from std.time import
+## Duration`).
+pub pure def reexports(module: str) -> list[str]:
+    if module == "time":
+        return ["DateTime", "Duration", "Timer", "TimeError", "TestClock", "Clock"]
+    if module == "net":
+        return ["Net", "NetOps", "NetError", "Conn", "Listener", "Stream", "Accept"]
+    if module == "cap":
+        return [
+            "System",
+            "Fs",
+            "Net",
+            "Clock",
+            "Rand",
+            "Env",
+            "Proc",
+            "Stdin",
+            "FsOps",
+            "NetOps",
+            "ClockOps",
+            "RandOps",
+            "EnvOps",
+            "ProcOps",
+            "StdinOps",
+            "Lent",
+            "Cap",
+            "Revoker",
+            "TestClock",
+        ]
+    if module == "task":
+        return [
+            "Scope", "Handle", "TaskError", "Cancellation", "channel", "Sender", "Receiver", "Mutex"
+        ]
+    if module == "test":
+        return ["check", "arbitrary", "exhaustive", "Gen", "Draws"]
+    if module == "collections":
+        return ["list", "dict", "set", "Arena", "Key", "Slice", "Iter", "Entry"]
+    if module == "num":
+        return [
+            "Num",
+            "u8",
+            "u16",
+            "u32",
+            "u64",
+            "u128",
+            "i8",
+            "i16",
+            "i32",
+            "i128",
+            "bytes",
+            "abs",
+            "min",
+            "max",
+            "sum",
+        ]
+    return []
+
 ## The sized integer types (03, "Numbers"), narrowest first in each kind.
 pub pure def sized() -> list[str]:
     return ["u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32", "i128"]
