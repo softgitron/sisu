@@ -84,21 +84,14 @@ impl<'a> Ahead<'a> {
             match next {
                 Some(x) => {
                     drop(st);
-                    let t0 = std::time::Instant::now();
                     let d = self.lower(x);
-                    SELF_NS.fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
-                    SELF_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if x == b {
                         break d;
                     }
                     st = self.lock();
                     st.done.insert(x, d);
                 }
-                None => {
-                    let t0 = std::time::Instant::now();
-                    st = self.changed.wait(st).unwrap_or_else(std::sync::PoisonError::into_inner);
-                    WAIT_NS.fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
-                }
+                None => st = self.changed.wait(st).unwrap_or_else(std::sync::PoisonError::into_inner),
             }
         };
         done.unwrap_or_else(|e| std::panic::resume_unwind(e))
@@ -111,9 +104,7 @@ impl<'a> Ahead<'a> {
         loop {
             if let Some(b) = st.queue.pop_back() {
                 drop(st);
-                let t0 = std::time::Instant::now();
                 let d = self.lower(b);
-                WORK_NS.fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
                 st = self.lock();
                 st.done.insert(b, d);
                 self.changed.notify_all();
@@ -136,7 +127,3 @@ impl<'a> Ahead<'a> {
     }
 }
 
-pub(crate) static WAIT_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-pub(crate) static SELF_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-pub(crate) static SELF_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-pub(crate) static WORK_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
