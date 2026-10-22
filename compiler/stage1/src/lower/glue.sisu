@@ -1,0 +1,298 @@
+##! Drop glue as SIR functions (stage 0's `sisu-lower/src/glue.rs`; 04,
+##! rule 6; 18, Phase 4).
+##!
+##! For each declared type whose drop can run code or change what the
+##! program observes, lowering emits `T#drop`, a function of kind `glue`
+##! that takes the value with `own` and drops it: the type's own `Drop`
+##! first, with a reference to the whole value, then the fields in reverse
+##! declaration order (of the active variant, for an enum), each by its own
+##! `drop`. A panic in one of them still drops the rest, in cleanup blocks
+##! (the drop ladder), where a second panic aborts.
+##!
+##! A field whose type drops nothing is left out, and a type all of whose
+##! fields drop nothing and that has no `Drop` has no glue. A generic
+##! parameter may stand for anything, so a field of that type is dropped.
+##! The host-backed types have no glue in SIR.
+
+from stage1.sir import (
+    BasicBlock,
+    BlockId,
+    Callee,
+    FnKind,
+    Function,
+    LocalDecl,
+    LocalId,
+    Operand,
+    Place,
+    Proj,
+    Rvalue,
+    Statement,
+    StatementKind,
+    Terminator,
+    Type,
+    TypeDecl,
+)
+from stage1.sir.types import glue_name
+
+## The host-backed types that have declarations in SIR (the others are
+## `lower.is_builtin_type`'s).
+pure def host_declared(n: str) -> bool:
+    return match n:
+        case "Shared" | "Weak" | "Cell" | "Mutex" | "MutexGuard" | "Arena": True
+        case _: False
+
+## The glue functions of the declared types that need one.
+pub pure def glue_functions(types: list[TypeDecl]) -> list[Function]:
+    let needs = needs_glue(types)
+    var out: list[Function] = []
+    for t in types:
+        if needs.get(t.name().to_string()).copied() ?? False:
+            out.push(glue(t, needs))
+    return out
+
+## Which declared types need glue: the least fixpoint of "has a `Drop`, or
+## a field whose type drops something".
+pure def needs_glue(types: list[TypeDecl]) -> dict[String, bool]:
+    var needs: dict[String, bool] = {}
+    for t in types:
+        if not host_declared(t.name()):
+            _ = needs.insert(t.name().to_string(), False)
+    while True:
+        var changed = False
+        for t in types:
+            if needs.get(t.name().to_string()).copied() != Some(False):
+                continue
+            var yes = False
+            match t:
+                case TypeDecl.Struct(_, _, fields, drop, _, _):
+                    yes = drop.is_some()
+                    for f in fields:
+                        if drops_something(f.ty, needs):
+                            yes = True
+                case TypeDecl.Enum(_, _, variants, drop, _, _, _):
+                    yes = drop.is_some()
+                    for v in variants:
+                        for (_, ft) in v.fields:
+                            if drops_something(ft, needs):
+                                yes = True
+            if yes:
+                _ = needs.insert(t.name().to_string(), True)
+                changed = True
+        if not changed:
+            return needs
+
+## Whether dropping a value of the type can do anything: run a `Drop`,
+## change a count, unlock a mutex.
+pub pure def drops_something(t: Type, needs: dict[String, bool]) -> bool:
+    match t:
+        case Type.Int | Type.Float | Type.Bool | Type.Char | Type.Str | Type.Unit | Type.Never:
+            return False
+        # A reference owns nothing; a closure holds references, or copies of
+        # `Copy` values (an `own` closure).
+        case Type.Ref(_, _) | Type.Fn(_, _, _) | Type.Const(_) | Type.ConstOp(_, _):
+            return False
+        case Type.Tuple(es):
+            for e in es:
+                if drops_something(e, needs):
+                    return True
+            return False
+        case Type.Param(_) | Type.Assoc(_, _, _, _) | Type.Dyn(_, _):
+            return True
+        case Type.ErrSet(ms):
+            for m in ms:
+                if needs.get(m.copy()).copied() ?? True:
+                    return True
+            return False
+        case Type.Named(n, args):
+            let ns: str = n
+            match ns:
+                case "Shared" | "Weak" | "MutexGuard":
+                    return True
+                case "String" | "Path" | "DateTime" | "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin":
+                    return False
+                case "System" | "HostFs" | "HostNet" | "HostClock" | "HostRand" | "HostEnv" | "HostProc":
+                    return False
+                case "HostStdin" | "TestClock" | "Cap" | "Lent" | "f32" | "u8" | "u16" | "u32" | "u64":
+                    return False
+                case "u128" | "i8" | "i16" | "i32" | "i128" | "bytes" | "Slice":
+                    return False
+                case "list" | "Array" | "dict" | "set" | "Iter" | "Entry" | "Iterable" | "Option" | "Result":
+                    return any_drops(args, needs)
+                case "Cell" | "Mutex" | "Arena":
+                    return any_drops(args, needs)
+                case _:
+                    return needs.get(n.copy()).copied() ?? True
+
+pure def any_drops(ts: list[Type], needs: dict[String, bool]) -> bool:
+    for a in ts:
+        if drops_something(a, needs):
+            return True
+    return False
+
+## Builds blocks in order.
+struct Builder:
+    blocks: list[BasicBlock]
+
+impl Builder:
+    pure def add(
+        mut self, own stmts: list[Statement], own term: Terminator, unwind: BlockId?, cleanup: bool
+    ) -> BlockId:
+        self.blocks.push(
+            BasicBlock(stmts=stmts, term=term, unwind=unwind, cleanup=cleanup, loc=None)
+        )
+        return BlockId(index=len(self.blocks) - 1)
+
+    ## Drops `parts` in order, each in a block of its own, and returns after
+    ## the last. The cleanup ladder beside them drops what is left when one
+    ## panics: rung `i` drops part `i` and climbs on, the last one resumes.
+    ## Returns the first block and, when `whole` asks for it, the rung that
+    ## drops every part (for a panic before the first).
+    pure def drops(
+        mut self, parts: list[Place], resume: BlockId, whole: bool
+    ) -> (BlockId, BlockId):
+        var rungs: list[BlockId] = []
+        for _ in range(len(parts) + 1):
+            rungs.push(resume)
+        let lowest = if whole: 0 else: 1
+        var i = len(parts) - 1
+        while i >= lowest:
+            rungs[i] = self.add([drop_of(parts[i])], Terminator.Goto(rungs[i + 1]), None, True)
+            i -= 1
+        var next: BlockId? = None
+        var k = len(parts) - 1
+        while k >= 0:
+            var unwind: BlockId? = None
+            if rungs[k + 1] != resume:
+                unwind = Some(rungs[k + 1])
+            var term = Terminator.Return
+            if let Some(n) = next:
+                term = Terminator.Goto(n)
+            next = Some(self.add([drop_of(parts[k])], term, unwind, False))
+            k -= 1
+        return (next ?? resume, rungs[0])
+
+pure def drop_of(place: Place) -> Statement:
+    return Statement(kind=StatementKind.Drop(place=place.copy(), flag=None), loc=None)
+
+pure def glue(t: TypeDecl, needs: dict[String, bool]) -> Function:
+    let params = t.params().copy()
+    var self_args: list[Type] = []
+    for i in range(len(params)):
+        self_args.push(Type.Param(i))
+    let self_ty = Type.Named(name=t.name().to_string(), args=self_args.copy())
+    let value = Place.local(LocalId(index=1))
+    var locals = [
+        LocalDecl.new(Type.Unit, None), LocalDecl.new(self_ty.copy(), Some("self".to_string()))
+    ]
+    # The parts to drop, in order, for the struct (`None`) or each variant.
+    var arms: list[(int?, list[Place])] = []
+    var drop_fn: String? = None
+    var is_enum = False
+    match t:
+        case TypeDecl.Struct(_, _, fields, drop, _, _):
+            drop_fn = drop.copy()
+            var parts: list[Place] = []
+            var i = len(fields) - 1
+            while i >= 0:
+                if drops_something(fields[i].ty, needs):
+                    parts.push(value.project(Proj.Field(i)))
+                i -= 1
+            if not parts.is_empty():
+                arms.push((None, parts))
+        case TypeDecl.Enum(_, _, variants, drop, _, _, _):
+            drop_fn = drop.copy()
+            is_enum = True
+            for v in range(len(variants)):
+                let var_ = ref variants[v]
+                var parts: list[Place] = []
+                var i = len(var_.fields) - 1
+                while i >= 0:
+                    if drops_something(var_.fields[i].1, needs):
+                        parts.push(value.project(Proj.Downcast(v)).project(Proj.Field(i)))
+                    i -= 1
+                if not parts.is_empty():
+                    arms.push((Some(v), parts))
+    var b = Builder(blocks=[])
+    # bb0 is the entry, filled in last.
+    let entry = b.add([], Terminator.Unreachable, None, False)
+    let ret = b.add([], Terminator.Return, None, False)
+    # Cleanup is needed when a panic can leave parts behind: in the type's
+    # `Drop`, or in a part that is not the last.
+    var unwinds = False
+    for (_, parts) in arms:
+        if drop_fn.is_some() or len(parts) > 1:
+            unwinds = True
+    var resume = ret
+    if unwinds:
+        resume = b.add([], Terminator.Resume, None, True)
+    var normal: list[(int, BlockId)] = []
+    var unwinding: list[(int, BlockId)] = []
+    for (v, parts) in arms:
+        let (first, rung) = b.drops(parts, resume, drop_fn.is_some())
+        normal.push((v ?? 0, first))
+        unwinding.push((v ?? 0, rung))
+    # Where the fields' drops start, and where they start when the type's
+    # `Drop` panicked.
+    var body = ret
+    var cleanup: BlockId? = None
+    if not arms.is_empty():
+        if not is_enum:
+            body = normal[0].1
+            cleanup = Some(unwinding[0].1)
+        else:
+            let disc = LocalId(index=len(locals))
+            locals.push(LocalDecl.new(Type.Int, None))
+            let read = Statement(
+                kind=StatementKind.Assign(
+                    place=Place.local(disc), value=Rvalue.Discriminant(value.copy())
+                ),
+                loc=None,
+            )
+            let sw = Terminator.Switch(
+                value=Operand.Copy(Place.local(disc)), cases=normal, default=ret
+            )
+            body = b.add([read.copy()], sw, None, False)
+            if drop_fn.is_some():
+                let csw = Terminator.Switch(
+                    value=Operand.Copy(Place.local(disc)), cases=unwinding, default=resume
+                )
+                cleanup = Some(b.add([read], csw, None, True))
+    var first = BasicBlock(
+        stmts=[], term=Terminator.Goto(body), unwind=None, cleanup=False, loc=None
+    )
+    # The type's own `Drop` runs first, on the whole value.
+    if let Some(d) = drop_fn:
+        let r = LocalId(index=len(locals))
+        locals.push(LocalDecl.new(Type.Ref(inner=[self_ty.copy()], mutable=True), None))
+        first.stmts = [
+            Statement(
+                kind=StatementKind.Assign(
+                    place=Place.local(r), value=Rvalue.Ref(place=value.copy(), mutable=True)
+                ),
+                loc=None,
+            ),
+            Statement(
+                kind=StatementKind.Call(
+                    dest=Place.local(LocalId(index=0)),
+                    callee=Callee.Fn(name=d.copy(), args=self_args.copy()),
+                    args=[Operand.Move(Place.local(r))],
+                ),
+                loc=None,
+            ),
+        ]
+        first.unwind = cleanup
+    b.blocks[entry.index] = first
+    return Function(
+        name=glue_name(t.name()),
+        type_params=params,
+        kind=FnKind.Glue,
+        param_count=1,
+        pure=False,
+        from_=[],
+        inner=[],
+        owns=[0],
+        locals=locals,
+        blocks=b.blocks,
+        loc=None,
+        source=0,
+    )

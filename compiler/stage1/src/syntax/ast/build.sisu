@@ -71,6 +71,7 @@ from stage1.syntax.ast import (
 )
 from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Element, Tree, is_item
+from stage1.text import char_at
 
 ## Builds the AST of a whole file.
 pub pure def module(tree: Tree) -> Module:
@@ -1771,7 +1772,10 @@ impl B:
         let ret_id = ret ?? self.error_type(n)
         return TypeKind.Fn(pure=pure, params=params, ret=ret_id)
 
-    pure def const_arg(self, n: int) -> TypeKind:
+    pure def const_arg(mut self, n: int) -> TypeKind:
+        for c in self.nodes(n):
+            if is_expr_node(self.kind(c)):
+                return TypeKind.ConstExpr(self.expr(c))
         let toks = self.tokens(n)
         if toks.is_empty():
             return TypeKind.ConstArg(0)
@@ -2051,28 +2055,22 @@ pure def is_hex_pair(s: str) -> bool:
     return True
 
 ## Decodes `\n`, `\t`, `\r`, `\0`, `\\`, `\"`, `\'` and `\u{...}`; an
-## unknown escape (already reported by the lexer) is kept as written.
+## unknown or invalid escape (already reported by the lexer) is kept as
+## written.
 pub pure def decode_escapes(s: str) -> String:
     if not s.contains("\\"):
         return s.to_string()
     var out = String.new()
-    var chars: list[char] = []
-    for c in s.chars():
-        chars.push(c)
-    var i = 0
-    let n = len(chars)
-    while i < n:
-        let c = chars[i]
-        i += 1
-        if c != '\\':
-            out.push_char(c)
-            continue
-        if i >= n:
+    var rest = s
+    while let Some(i) = rest.byte_find("\\"):
+        out.push(rest.byte_slice(0, i))
+        let after = rest.byte_slice(i + 1, rest.byte_len())
+        if after.is_empty():
             out.push_char('\\')
-            break
-        let e = chars[i]
-        i += 1
-        match e:
+            return out
+        let c = char_at(after, 0)
+        var used = c.len_utf8()
+        match c:
             case 'n':
                 out.push_char('\n')
             case 't':
@@ -2087,31 +2085,50 @@ pub pure def decode_escapes(s: str) -> String:
                 out.push_char('"')
             case '\'':
                 out.push_char('\'')
-            case 'u' if i < n and chars[i] == '{':
-                i += 1
-                var hex = String.new()
-                while i < n:
-                    let h = chars[i]
-                    i += 1
-                    if h == '}':
-                        break
-                    hex.push_char(h)
-                out.push_char(code_point(hex) ?? '\u{fffd}')
+            case 'u':
+                match unicode_escape(after.byte_slice(used, after.byte_len())):
+                    case Some((ch, len)):
+                        out.push_char(ch)
+                        used += len
+                    # Reported by the lexer, which leaves the braces in the
+                    # text: the escape is kept as written.
+                    case None:
+                        out.push("\\u")
             case other:
                 out.push_char('\\')
                 out.push_char(other)
+        rest = after.byte_slice(used, after.byte_len())
+    out.push(rest)
     return out
 
-## The character a `\u{...}` escape's digits name, as Rust's
-## `u32::from_str_radix` and `char::from_u32` read them.
-pure def code_point(hex: str) -> char?:
-    let v = parse_radix(hex.strip_prefix("+"), 16) else:
+## The text after `\u` of a Unicode escape: `{`, one to six ASCII hex
+## digits naming a Unicode scalar value, and `}`. Gives the character and
+## the length of that text, or `None` when it is not one (no sign, no
+## space, no surrogate, nothing past `10FFFF`).
+pub pure def unicode_escape(s: str) -> (char, int)?:
+    if s.byte_len() == 0 or s.byte_at(0) != 123:
         return None
-    let n = v.to_int() else:
+    let inner = s.byte_slice(1, s.byte_len())
+    let close = inner.byte_find("}}") else:
         return None
-    if n > 0xFFFFFFFF:
+    if close == 0 or close > 6:
         return None
-    return char.from_code(n)
+    var value = 0
+    for i in range(close):
+        let b = inner.byte_at(i).to_int()
+        var digit = -1
+        if b >= 48 and b <= 57:
+            digit = b - 48
+        elif b >= 97 and b <= 102:
+            digit = b - 87
+        elif b >= 65 and b <= 70:
+            digit = b - 55
+        if digit < 0:
+            return None
+        value = value * 16 + digit
+    let ch = char.from_code(value) else:
+        return None
+    return Some((ch, close + 2))
 
 ## The text of a string literal with no interpolation.
 pub pure def plain_text(parts: list[StrPart]) -> String:

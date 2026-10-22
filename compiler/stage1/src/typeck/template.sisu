@@ -1,0 +1,1972 @@
+##! Code evaluated at compile time by unfolding (stage 0's
+##! `sisu-resolve/src/template.rs`; 08, "Derive" and "Reflection"; 18,
+##! Phase 4 and 8): a derive, and a generic function that reflects on its
+##! type parameters.
+##!
+##! A trait's `comptime def derive(T: type) -> impl Trait for T` returns the
+##! impl the trait derives for `T`, written `return impl Trait for T:` with
+##! methods. A generic function whose body asks about its type parameters
+##! (`if comptime reflect.is_struct(T):`, `comptime for f in
+##! reflect.fields_of(T):`, `value.[f]`) is made once for each list of type
+##! arguments it is called with (an instance). Both are evaluated by
+##! unfolding: the code that runs at compile time (`comptime for`, `comptime
+##! if`, `if comptime`, the same two among a `match`'s arms, `comptime
+##! panic`, and every expression made only of compile-time values) is
+##! evaluated, and the rest is the impl's or the instance's code, written
+##! out as source text with the compile-time values in it as literals and
+##! each type parameter replaced by its argument. The text is declared
+##! beside the type (or the function) and checked like any other code, so
+##! an error in it is reported as in any other.
+##!
+##! The compile-time values are types, descriptors of their fields,
+##! variants and attributes, lists and pairs of them, integers, text and
+##! booleans. Reflection is the compile-time module `reflect`: `name_of(T)`
+##! (the type's name), `is_struct`, `is_enum`, `is_int`, `is_float`,
+##! `is_bool`, `is_char`, `is_str` (`str` or `String`), `is_list`,
+##! `is_option` and `is_tuple` of a type, `elem_of(T)` (a list's or an
+##! option's element type), `fields_of(T)` (a struct's fields),
+##! `variants_of(T)` (an enum's variants), `attributes_of(T)` (the
+##! attributes written on its declaration, as data) and `implements(T,
+##! "Trait")` (whether it has an impl of the trait). A field has `name` (for
+##! a positional variant field, its position), `index`, `named`, `ty` (its
+##! type, when known) and `default` (whether it has a default); a variant
+##! has `name`, `index` and `fields`; an attribute has `name` and `args`
+##! (the text of each argument). `x.[field]` is that field of `x`; a
+##! variant's field is reachable only inside an arm `case V(..)` that
+##! `comptime for V in reflect.variants_of(T)` made for a `match x`, where
+##! it is the arm's binding. Compile-time code may also use `enumerate`,
+##! `len`, integer arithmetic, comparisons, `and`, `or` and `not`.
+##!
+##! Where the Rust holds a type's shape in a `Box`, this one holds it in a
+##! list of at most one; the syntax is stage 1's arenas, read through
+##! `Src`, which every function takes beside the unfolding's own state.
+
+from stage1.diag import Catalog, TextRange
+from stage1.parser import parse
+from stage1.syntax.ast import (
+    Arg,
+    Arm,
+    ArmBody,
+    ArmGen,
+    Ast,
+    BinOp,
+    Block,
+    ClosureBody,
+    CmpOp,
+    CompClause,
+    CompKind,
+    Cond,
+    CondPart,
+    ExprId,
+    ExprKind,
+    FnDef,
+    ImplDef,
+    IndexArg,
+    ItemKind,
+    Mode,
+    Module,
+    ParamKind,
+    PatArg,
+    PatKind,
+    PatternId,
+    StmtId,
+    StmtKind,
+    StrPart,
+    TypeKind,
+    UnOp,
+)
+from stage1.syntax.ast import build
+from stage1.text import is_alphanumeric
+
+## Why the unfolding stopped, and where in the template.
+pub error Unfolding:
+    Failed(at: TextRange, why: String)
+
+## The syntax and the text a template is written in.
+pub view struct Src:
+    pub ast: ref Ast
+    pub source: str
+
+## A module's derive templates with the syntax and the text they are
+## written in: the prelude's, which the base keeps (it keeps no other std
+## syntax).
+pub struct Templates:
+    pub syntax: Ast
+    pub text: String
+    ## The `comptime def derive` of each trait, by the trait's name.
+    pub derives: dict[String, FnDef]
+
+impl Templates:
+    pub pure def none() -> Templates:
+        return Templates(syntax=Ast.new(), text=String.new(), derives={})
+
+## The shape of the type being derived for.
+pub enum Body:
+    ## Field names.
+    Struct(list[String])
+    ## Variant names, each with its field names (`None` for positional).
+    Enum(list[(String, list[String?])])
+
+## What kind of type a type is, for `reflect.is_...`.
+@derive(Eq, Debug, Copy)
+pub enum Kind:
+    Int
+    Float
+    Bool
+    Char
+    Str
+    List
+    Option
+    Tuple
+    Struct
+    Enum
+    Other
+
+## What reflection sees of a type: an instance's type argument, the type a
+## derive is for, or a field's type (whose own fields are not looked into).
+pub struct TypeShape:
+    ## `reflect.name_of`: `Point`, `int`, `list[int]`.
+    pub name: String
+    ## How the unfolded code writes the type.
+    pub written: String
+    pub kind: Kind
+    pub fields: list[FieldShape]
+    pub variants: list[VariantShape]
+    ## The attributes on the declaration: each name and its arguments' text.
+    pub attrs: list[(String, list[String])]
+    ## The traits it implements, by name.
+    pub impls: list[String]
+    ## A list's or an option's element type (at most one).
+    pub elem: list[TypeShape]
+
+pub struct FieldShape:
+    pub name: String
+    ## Its type, when known (at most one).
+    pub ty: list[TypeShape]
+    pub default: bool
+
+pub struct VariantShape:
+    pub name: String
+    ## Each field's name (`None` for positional) and type (at most one).
+    pub fields: list[(String?, list[TypeShape])]
+
+impl TypeShape:
+    ## A shape that knows only the type's name.
+    pub pure def named(name: str, written: str, kind: Kind) -> TypeShape:
+        return TypeShape(
+            name=name.to_string(),
+            written=written.to_string(),
+            kind=kind,
+            fields=[],
+            variants=[],
+            attrs=[],
+            impls=[],
+            elem=[],
+        )
+
+    ## The shape of a derive's target, from its declaration's names.
+    pure def of_target(t: Target) -> TypeShape:
+        var s = TypeShape.named(t.name, t.written, Kind.Other)
+        match t.body:
+            case Body.Struct(fields):
+                s.kind = Kind.Struct
+                for n in fields:
+                    s.fields.push(FieldShape(name=n.copy(), ty=[], default=False))
+            case Body.Enum(vs):
+                s.kind = Kind.Enum
+                for (n, fs) in vs:
+                    var fields: list[(String?, list[TypeShape])] = []
+                    for f in fs:
+                        fields.push((f.copy(), []))
+                    s.variants.push(VariantShape(name=n.copy(), fields=fields))
+        return s
+
+## Whether two shapes are the same (Rust's derived `PartialEq`).
+pure def same_shape(a: TypeShape, b: TypeShape) -> bool:
+    if a.name != b.name or a.written != b.written or a.kind != b.kind:
+        return False
+    if a.attrs != b.attrs or a.impls != b.impls:
+        return False
+    if not same_shapes(a.elem, b.elem) or len(a.fields) != len(b.fields):
+        return False
+    for i in range(len(a.fields)):
+        let (x, y) = (ref a.fields[i], ref b.fields[i])
+        if x.name != y.name or x.default != y.default or not same_shapes(x.ty, y.ty):
+            return False
+    if len(a.variants) != len(b.variants):
+        return False
+    for i in range(len(a.variants)):
+        let (x, y) = (ref a.variants[i], ref b.variants[i])
+        if x.name != y.name or len(x.fields) != len(y.fields):
+            return False
+        for k in range(len(x.fields)):
+            if x.fields[k].0 != y.fields[k].0 or not same_shapes(x.fields[k].1, y.fields[k].1):
+                return False
+    return True
+
+pure def same_shapes(a: list[TypeShape], b: list[TypeShape]) -> bool:
+    if len(a) != len(b):
+        return False
+    for i in range(len(a)):
+        if not same_shape(a[i], b[i]):
+            return False
+    return True
+
+## A compile-time value.
+pub enum Value:
+    ## A type: a type parameter's argument, or a field's type.
+    Type(TypeShape)
+    Field(
+        name: String,
+        index: int,
+        variant: int?,
+        named: bool,
+        ty: list[TypeShape],
+        default: bool,
+        ## How the unfolded code writes the struct the field is in.
+        owner: String?
+    )
+    ## An attribute on a declaration: its name and its arguments' text.
+    Attr(name: String, args: list[String])
+    Variant(name: String, index: int, fields: list[Value])
+    Str(String)
+    Int(int)
+    Bool(bool)
+    List(list[Value])
+    Tuple(list[Value])
+
+## Whether two values are the same (Rust's derived `PartialEq`).
+pure def same_value(a: Value, b: Value) -> bool:
+    match a:
+        case Value.Type(x):
+            if let Value.Type(y) = b:
+                return same_shape(x, y)
+        case Value.Field(n1, i1, v1, nm1, t1, d1, o1):
+            if let Value.Field(n2, i2, v2, nm2, t2, d2, o2) = b:
+                return n1 == n2
+                    and i1 == i2
+                    and v1 == v2
+                    and nm1 == nm2
+                    and same_shapes(t1, t2)
+                    and d1 == d2
+                    and o1 == o2
+        case Value.Attr(n1, a1):
+            if let Value.Attr(n2, a2) = b:
+                return n1 == n2 and a1 == a2
+        case Value.Variant(n1, i1, f1):
+            if let Value.Variant(n2, i2, f2) = b:
+                return n1 == n2 and i1 == i2 and same_values(f1, f2)
+        case Value.Str(x):
+            if let Value.Str(y) = b:
+                return x == y
+        case Value.Int(x):
+            if let Value.Int(y) = b:
+                return x == y
+        case Value.Bool(x):
+            if let Value.Bool(y) = b:
+                return x == y
+        case Value.List(xs):
+            if let Value.List(ys) = b:
+                return same_values(xs, ys)
+        case Value.Tuple(xs):
+            if let Value.Tuple(ys) = b:
+                return same_values(xs, ys)
+    return False
+
+pure def same_values(a: list[Value], b: list[Value]) -> bool:
+    if len(a) != len(b):
+        return False
+    for i in range(len(a)):
+        if not same_value(a[i], b[i]):
+            return False
+    return True
+
+## The bindings of an arm `case V(..)` made for a `match` on `key`.
+struct ArmScope:
+    key: String
+    variant: int
+    names: list[String]
+
+## The type a derive is for.
+pub struct Target:
+    pub name: String
+    ## The type as the impl names it (`Pair[A, B]`).
+    pub written: String
+    pub body: Body
+
+struct Unfold:
+    ## The type parameters (`T`) and their arguments.
+    params: list[(String, TypeShape)]
+    env: list[(String, Value)]
+    arms: list[ArmScope]
+
+## A failure at `at`, for `why`.
+pure def fail[T](at: TextRange, why: str) -> T ! Unfolding:
+    return Err(Failed(at=at, why=why.to_string()))
+
+## What `reflect.construct` says of a second argument it cannot read.
+const NOT_A_DICT: str = "`reflect.construct` takes the fields as a dict whose keys are known at compile time"
+
+## Checks that `f` is a trait's derive template: `comptime def derive(T:
+## type) -> impl Trait for T` whose body is `return impl Trait for T:`.
+## Returns the type parameter's name and the impl.
+pub pure def template_parts(src: Src, f: FnDef) -> (String, ImplDef)?:
+    if len(f.params) != 1:
+        return None
+    let ParamKind.Named(name, ty, _) = f.params[0].kind.copy() else:
+        return None
+    let TypeKind.Path(segments, args) = src.ast.type_expr(ty).kind.copy() else:
+        return None
+    if not args.is_empty() or len(segments) != 1 or segments[0].text != "type":
+        return None
+    var imp: ImplDef? = None
+    match f.body:
+        case Some(body):
+            for s in body.stmts:
+                match src.ast.stmt(s).kind:
+                    case StmtKind.ReturnImpl(i) if imp.is_none():
+                        imp = Some(i.copy())
+                    case StmtKind.Pass:
+                        pass
+                    case _:
+                        return None
+        case None:
+            return None
+    return match imp:
+        case Some(i): Some((name.text.copy(), i.copy()))
+        case None: None
+
+## The source of the impl that `template` (from the file whose syntax and
+## text `src` holds) derives for `target`, under the impl header `head`.
+pub pure def unfold(src: Src, template: FnDef, head: str, target: Target) -> String ! Unfolding:
+    let parts = template_parts(src, template) else:
+        return fail(template.name.range, "it is not a derive template")
+    let (param, imp) = parts
+    let shape = TypeShape.of_target(target)
+    var u = Unfold(params=[(param.copy(), shape.copy())], env=[], arms=[])
+    u.env.push((param, Value.Type(shape)))
+    var out = "\n{head}"
+    if not imp.assoc_types.is_empty():
+        return fail(
+            imp.assoc_types[0].range, "a derived impl cannot bind associated types in stage 0"
+        )
+    if imp.methods.is_empty():
+        out.push("    pass\n")
+    for m in imp.methods:
+        match m.body:
+            case Some(body):
+                let sig = slice(
+                    src.source, TextRange.new(m.range.start, body.range.start)
+                ).trim_end()
+                line(mut out, 1, u.substitute_param(sig))
+                let n = u.stmts(src, body.stmts, 2, mut out)?
+                if n == 0:
+                    line(mut out, 2, "pass")
+            case None:
+                return fail(m.name.range, "a derived method needs a body")
+    return Ok(out)
+
+## The source of the instance of the generic function `f` (from the file
+## whose syntax and text `src` holds) for these type arguments, named
+## `name`: its signature with each type parameter replaced, and its body
+## unfolded.
+pub pure def unfold_fn(
+    src: Src, f: FnDef, params: list[(String, TypeShape)], name: str
+) -> String ! Unfolding:
+    var body_start = 0
+    var stmts: list[StmtId] = []
+    match f.body:
+        case Some(body):
+            body_start = body.range.start
+            stmts = body.stmts.copy()
+        case None:
+            return fail(f.name.range, "a function without a body has no instance")
+    var u = Unfold(params=params.copy(), env=[], arms=[])
+    for (p, shape) in params:
+        u.env.push((p.copy(), Value.Type(shape.copy())))
+    # `def name[T: B](params) -> R:` becomes `def NAME(params) -> R:`.
+    let header = slice(src.source, TextRange.new(f.name.range.end, body_start)).trim_end()
+    var rest = header.to_string()
+    if header.starts_with("["):
+        let after = header.byte_slice(1, header.byte_len())
+        var depth = 1
+        var cut = after.byte_len()
+        for i in range(after.byte_len()):
+            let b = after.byte_at(i)
+            if b == 91:
+                depth += 1
+            elif b == 93:
+                depth -= 1
+                if depth == 0:
+                    cut = i + 1
+                    break
+        rest = after.byte_slice(cut, after.byte_len()).to_string()
+    # A `where` clause names the parameters, which an instance has not.
+    if let Some(i) = rest.byte_find(" where "):
+        rest = "{rest.byte_slice(0, i).trim_end()}:"
+    let pure = if f.is_pure: "pure " else: ""
+    var out = String.new()
+    line(mut out, 0, "{pure}def {name}{u.substitute_param(rest)}")
+    if u.stmts(src, stmts, 1, mut out)? == 0:
+        line(mut out, 1, "pass")
+    return Ok(out)
+
+pure def slice(source: str, r: TextRange) -> str from source:
+    if r.start < 0 or r.end > source.byte_len() or r.start > r.end:
+        return ""
+    return source.byte_slice(r.start, r.end)
+
+pure def line(mut out: String, depth: int, text: str):
+    for _ in range(depth):
+        out.push("    ")
+    out.push(text)
+    out.push("\n")
+
+## A value as a Sisu literal; a type as its name in the unfolded code.
+pure def literal(v: Value) -> String?:
+    match v:
+        case Value.Str(s):
+            return Some("\"{escape(s)}\"")
+        case Value.Int(i):
+            return Some("{i}")
+        case Value.Bool(b):
+            return Some(if b: "True".to_string() else: "False".to_string())
+        case Value.Type(t):
+            return Some(t.written.copy())
+        case Value.List(xs):
+            var parts: list[String] = []
+            for x in xs:
+                let p = literal(x) else:
+                    return None
+                parts.push(p)
+            return Some("[{parts.join(", ")}]")
+        case Value.Tuple(xs):
+            var parts: list[String] = []
+            for x in xs:
+                let p = literal(x) else:
+                    return None
+                parts.push(p)
+            if len(parts) == 1:
+                return Some("({parts[0]},)")
+            return Some("({parts.join(", ")})")
+        case _:
+            return None
+
+## Whether `e` is marked to be decided at compile time: `comptime c`, or
+## an operator chain that starts with it (`comptime a or b`).
+pure def marked_comptime(src: Src, e: ExprId) -> bool:
+    var x = e
+    while True:
+        match src.ast.expr(x).kind:
+            case ExprKind.Comptime(_):
+                return True
+            case ExprKind.Binary(_, lhs, _):
+                x = lhs
+            case ExprKind.Compare(first, _):
+                x = first
+            case _:
+                return False
+
+## The `reflect` functions that make run-time code instead of a
+## compile-time value.
+pure def is_code_maker(name: str) -> bool:
+    return name == "construct" or name == "default_of"
+
+## A value as interpolated text shows it: a list as `[a, b]`.
+pure def written(v: Value) -> String?:
+    match v:
+        case Value.Str(s):
+            return Some(s.copy())
+        case Value.Int(i):
+            return Some("{i}")
+        case Value.Bool(b):
+            return Some(if b: "True".to_string() else: "False".to_string())
+        case Value.Type(t):
+            return Some(t.name.copy())
+        case Value.List(xs):
+            var parts: list[String] = []
+            for x in xs:
+                let p = written(x) else:
+                    return None
+                parts.push(p)
+            return Some("[{parts.join(", ")}]")
+        case _:
+            return None
+
+## Text as it is written inside a string literal.
+pure def escape(s: str) -> String:
+    var q = String.new()
+    for c in s.chars():
+        match c:
+            case '"':
+                q.push("\\\"")
+            case '\\':
+                q.push("\\\\")
+            case '{':
+                q.push("{{{{")
+            case '}':
+                q.push("}}}}")
+            case '\n':
+                q.push("\\n")
+            case _:
+                q.push_char(c)
+    return q
+
+pure def describe(v: Value) -> str:
+    return match v:
+        case Value.Type(_): "a type"
+        case Value.Attr(_, _): "an attribute"
+        case Value.Field(_, _, _, _, _, _, _): "a field"
+        case Value.Variant(_, _, _): "a variant"
+        case Value.Str(_): "text"
+        case Value.Int(_): "an integer"
+        case Value.Bool(_): "a boolean"
+        case Value.List(_): "a list"
+        case Value.Tuple(_): "a tuple"
+
+## `x + y`, `x - y` and `x * y` on `int`s, when the result is one.
+pure def checked(op: BinOp, x: int, y: int) -> int?:
+    let a: i128 = x
+    let b: i128 = y
+    return match op:
+        case BinOp.Add: (a + b).to_int()
+        case BinOp.Sub: (a - b).to_int()
+        case _: (a * b).to_int()
+
+impl Unfold:
+    pure def lookup(self, n: str) -> Value?:
+        var i = len(self.env) - 1
+        while i >= 0:
+            if self.env[i].0 == n:
+                return Some(self.env[i].1.copy())
+            i -= 1
+        return None
+
+    pure def bound(self, n: str) -> bool:
+        for (k, _) in self.env:
+            if k == n:
+                return True
+        return False
+
+    ## Drops the bindings made after the first `n`.
+    pure def truncate_env(mut self, n: int):
+        while len(self.env) > n:
+            _ = self.env.pop()
+
+    ## Replaces each type parameter by its argument, as a word, outside
+    ## string literals.
+    pure def substitute_param(self, text: str) -> String:
+        var out = String.new()
+        var word = String.new()
+        var in_str = False
+        var escaped = False
+        var prev = ' '
+        for c in text.chars():
+            if in_str:
+                out.push_char(c)
+                if escaped:
+                    escaped = False
+                elif c == '\\':
+                    escaped = True
+                elif c == '"':
+                    in_str = False
+                continue
+            if c == '"' and not (word.is_empty() and is_alphanumeric(prev)):
+                self.flush(mut word, mut out)
+                in_str = True
+                out.push_char(c)
+            elif is_alphanumeric(c) or c == '_':
+                word.push_char(c)
+            else:
+                self.flush(mut word, mut out)
+                out.push_char(c)
+            prev = c
+        self.flush(mut word, mut out)
+        return out
+
+    pure def flush(self, mut word: String, mut out: String):
+        var found = False
+        for (p, shape) in self.params:
+            if not found and p == word:
+                out.push(shape.written)
+                found = True
+        if not found:
+            out.push(word)
+        word.clear()
+
+    # ------------------------------------------------------------ values
+
+    ## Whether the expression mentions anything evaluated at compile time.
+    pure def depends(self, src: Src, e: ExprId) -> bool:
+        for x in walk(src, e):
+            match src.ast.expr(x).kind:
+                case ExprKind.Name(n):
+                    if self.bound(n) or n == "reflect":
+                        return True
+                case ExprKind.FieldOf(_, _) | ExprKind.Comptime(_):
+                    return True
+                case _:
+                    pass
+        return False
+
+    ## Whether the expression is made only of compile-time values.
+    pure def is_static(self, src: Src, e: ExprId) -> bool:
+        match src.ast.expr(e).kind:
+            case ExprKind.Name(n):
+                return self.bound(n) or n == "True" or n == "False"
+            case ExprKind.Int(_, _, _):
+                return True
+            case ExprKind.Str(parts):
+                for p in parts:
+                    if let StrPart.Interp(expr, debug, spec, _) = p:
+                        if spec.is_some() or debug.is_some() or not self.is_static(src, expr):
+                            return False
+                return True
+            # The attributes of descriptors; anything else (a method) runs
+            # at run time on the value.
+            case ExprKind.Field(base, name):
+                let attribute = match name.text:
+                    case "name" | "index" | "named" | "fields" | "ty" | "default" | "args": True
+                    case _: False
+                return attribute and self.is_static(src, base)
+            case ExprKind.Call(callee, args, trailing):
+                if trailing.is_some():
+                    return False
+                var known = False
+                match src.ast.expr(callee).kind:
+                    case ExprKind.Field(base, name):
+                        if let ExprKind.Name(n) = src.ast.expr(base).kind:
+                            known = n == "reflect" and not is_code_maker(name.text)
+                    case ExprKind.Name(n):
+                        known = (n == "enumerate" or n == "len") and not self.bound(n)
+                    case _:
+                        pass
+                if not known:
+                    return False
+                for a in args:
+                    if a.name.is_some() or not self.is_static(src, a.value):
+                        return False
+                return True
+            case ExprKind.Binary(_, lhs, rhs):
+                return self.is_static(src, lhs) and self.is_static(src, rhs)
+            case ExprKind.Compare(first, rest):
+                if not self.is_static(src, first):
+                    return False
+                for (_, x) in rest:
+                    if not self.is_static(src, x):
+                        return False
+                return True
+            case ExprKind.Unary(_, x):
+                return self.is_static(src, x)
+            case ExprKind.Paren(x):
+                return self.is_static(src, x)
+            case ExprKind.Comptime(x):
+                return self.is_static(src, x)
+            case ExprKind.Tuple(xs):
+                return self.all_static(src, xs)
+            case ExprKind.List(xs):
+                return self.all_static(src, xs)
+            case ExprKind.If(branches, else_):
+                for (c, v) in branches:
+                    if not self.is_static(src, c) or not self.is_static(src, v):
+                        return False
+                return match else_:
+                    case Some(x): self.is_static(src, x)
+                    case None: False
+            # A comprehension over compile-time lists whose element is
+            # known: its bindings are compile-time values too.
+            case ExprKind.Comprehension(kind, elem, value, clauses):
+                if kind != CompKind.List or value.is_some():
+                    return False
+                match self.envs(src, clauses):
+                    case Ok(es):
+                        for u in es:
+                            if not u.is_static(src, elem):
+                                return False
+                        return True
+                    case Err(_):
+                        return False
+            case _:
+                return False
+
+    pure def all_static(self, src: Src, xs: list[ExprId]) -> bool:
+        for x in xs:
+            if not self.is_static(src, x):
+                return False
+        return True
+
+    ## The environments a comprehension over compile-time lists makes,
+    ## one for each element, in order.
+    pure def envs(self, src: Src, clauses: list[CompClause]) -> list[Unfold] ! Unfolding:
+        var envs = [self.fork()]
+        for c in clauses:
+            var next: list[Unfold] = []
+            for u in envs:
+                match c:
+                    case CompClause.For(pat, iter):
+                        if not u.is_static(src, iter):
+                            return fail(src.ast.expr(iter).range, "this is not a compile-time list")
+                        for v in u.items(src, iter)?:
+                            var w = u.fork()
+                            _ = w.bind(src, pat, v)?
+                            next.push(w)
+                    case CompClause.If(cond):
+                        if u.truth(src, cond)?:
+                            next.push(u.fork())
+            envs = next
+        return Ok(envs)
+
+    ## A copy of the unfolding's scope, to bind more names in.
+    pure def fork(self) -> Unfold:
+        return Unfold(params=self.params.copy(), env=self.env.copy(), arms=self.arms.copy())
+
+    pure def eval(self, src: Src, e: ExprId) -> Value ! Unfolding:
+        let here = src.ast.expr(e).range
+        match src.ast.expr(e).kind:
+            case ExprKind.Name(n):
+                if let Some(v) = self.lookup(n):
+                    return Ok(v)
+                if n == "True":
+                    return Ok(Value.Bool(True))
+                if n == "False":
+                    return Ok(Value.Bool(False))
+                return fail(here, "`{n}` is not known at compile time")
+            case ExprKind.Int(_, value, _):
+                match value:
+                    case Some(v):
+                        match v.to_int():
+                            case Some(i):
+                                return Ok(Value.Int(i))
+                            case None:
+                                return fail(here, "the integer does not fit in `int`")
+                    case None:
+                        return fail(here, "this cannot be evaluated at compile time")
+            case ExprKind.Str(parts):
+                var s = String.new()
+                for p in parts:
+                    match p:
+                        case StrPart.Text(t):
+                            s.push(t)
+                        case StrPart.Interp(expr, _, _, _):
+                            let v = self.eval(src, expr)?
+                            match written(v):
+                                case Some(t):
+                                    s.push(t)
+                                case None:
+                                    let again = self.eval(src, expr)?
+                                    return fail(
+                                        here, "{describe(again)} cannot be written into text"
+                                    )
+                return Ok(Value.Str(s))
+            case ExprKind.Paren(x):
+                return self.eval(src, x)
+            case ExprKind.Comptime(x):
+                return self.eval(src, x)
+            case ExprKind.Field(base, name):
+                let b = self.eval(src, base)?
+                var got: Value? = None
+                match b:
+                    case Value.Field(n, index, _, named, ty, default, _):
+                        match name.text:
+                            case "name":
+                                got = Some(Value.Str(n.copy()))
+                            case "index":
+                                got = Some(Value.Int(index))
+                            case "named":
+                                got = Some(Value.Bool(named))
+                            case "ty":
+                                if let Some(t) = ty.first():
+                                    got = Some(Value.Type(t.copy()))
+                            case "default":
+                                got = Some(Value.Bool(default))
+                            case _:
+                                pass
+                    case Value.Variant(n, index, fields):
+                        match name.text:
+                            case "name":
+                                got = Some(Value.Str(n.copy()))
+                            case "index":
+                                got = Some(Value.Int(index))
+                            case "fields":
+                                got = Some(Value.List(fields.copy()))
+                            case _:
+                                pass
+                    case Value.Attr(n, args):
+                        match name.text:
+                            case "name":
+                                got = Some(Value.Str(n.copy()))
+                            case "args":
+                                var xs: list[Value] = []
+                                for a in args:
+                                    xs.push(Value.Str(a.copy()))
+                                got = Some(Value.List(xs))
+                            case _:
+                                pass
+                    case _:
+                        pass
+                if let Some(v) = got:
+                    return Ok(v.copy())
+                return fail(here, "{describe(b)} has no `{name.text}`")
+            case ExprKind.Call(callee, args, _):
+                var vals: list[Value] = []
+                for a in args:
+                    vals.push(self.eval(src, a.value)?)
+                match src.ast.expr(callee).kind:
+                    case ExprKind.Field(_, name):
+                        var t = TypeShape.named("", "", Kind.Other)
+                        match vals.first():
+                            case Some(Value.Type(x)):
+                                t = x.copy()
+                            case _:
+                                return fail(here, "`reflect.{name.text}` takes a type")
+                        if name.text == "implements":
+                            var tr = String.new()
+                            match vals.get(1):
+                                case Some(Value.Str(x)):
+                                    tr = x.copy()
+                                case _:
+                                    return fail(
+                                        here, "`reflect.implements` takes a type and a trait's name"
+                                    )
+                            return Ok(Value.Bool(t.impls.contains(tr)))
+                        if len(vals) != 1:
+                            return fail(here, "`reflect.{name.text}` takes one type")
+                        if let Some(v) = reflect(name.text, t):
+                            return Ok(v)
+                        return fail(here, "`reflect` has no `{name.text}`")
+                    case ExprKind.Name(n) if n == "enumerate":
+                        if len(vals) != 1:
+                            return fail(here, "this takes one argument")
+                        match vals[0].copy():
+                            case Value.List(xs):
+                                var out: list[Value] = []
+                                var i = 0
+                                for x in xs:
+                                    out.push(Value.Tuple([Value.Int(i), x.copy()]))
+                                    i += 1
+                                return Ok(Value.List(out))
+                            case other:
+                                return fail(here, "`enumerate` of {describe(other)}")
+                    case ExprKind.Name(n) if n == "len":
+                        if len(vals) != 1:
+                            return fail(here, "this takes one argument")
+                        match vals[0].copy():
+                            case Value.List(xs):
+                                return Ok(Value.Int(len(xs)))
+                            case Value.Str(s):
+                                var count = 0
+                                for _ in s.chars():
+                                    count += 1
+                                return Ok(Value.Int(count))
+                            case other:
+                                return fail(here, "`len` of {describe(other)}")
+                    case _:
+                        return fail(
+                            here,
+                            "only `reflect`, `enumerate` and `len` can be called at compile time here",
+                        )
+            case ExprKind.Unary(op, x):
+                let v = self.eval(src, x)?
+                match v:
+                    case Value.Bool(b) if op == UnOp.Not:
+                        return Ok(Value.Bool(not b))
+                    case Value.Int(i) if op == UnOp.Neg:
+                        let w: i128 = i
+                        return match (-w).to_int():
+                            case Some(n): Ok(Value.Int(n))
+                            case None: fail(here, "overflow")
+                    case _:
+                        return fail(here, "`{op.text()}` of {describe(v)}")
+            case ExprKind.Binary(op, lhs, rhs):
+                let a = self.eval(src, lhs)?
+                let b = self.eval(src, rhs)?
+                match op:
+                    case BinOp.And | BinOp.Or:
+                        if let Value.Bool(x) = a:
+                            if let Value.Bool(y) = b:
+                                return Ok(Value.Bool(if op == BinOp.And: x and y else: x or y))
+                    case BinOp.Add | BinOp.Sub | BinOp.Mul:
+                        if let Value.Int(x) = a:
+                            if let Value.Int(y) = b:
+                                return match checked(op, x, y):
+                                    case Some(n): Ok(Value.Int(n))
+                                    case None: fail(here, "overflow")
+                        if op == BinOp.Add:
+                            if let Value.Str(x) = a:
+                                if let Value.Str(y) = b:
+                                    return Ok(Value.Str("{x}{y}"))
+                    case _:
+                        pass
+                return fail(here, "`{op.text()}` of {describe(a)} and {describe(b)}")
+            case ExprKind.Compare(first, rest):
+                var left = self.eval(src, first)?
+                for (op, x) in rest:
+                    let right = self.eval(src, x)?
+                    var holds = False
+                    var known = True
+                    match op:
+                        case CmpOp.Eq:
+                            holds = same_value(left, right)
+                        case CmpOp.Ne:
+                            holds = not same_value(left, right)
+                        case CmpOp.Lt | CmpOp.Le | CmpOp.Gt | CmpOp.Ge:
+                            known = False
+                            if let Value.Int(a) = left:
+                                if let Value.Int(b) = right:
+                                    known = True
+                                    holds = match op:
+                                        case CmpOp.Lt: a < b
+                                        case CmpOp.Le: a <= b
+                                        case CmpOp.Gt: a > b
+                                        case _: a >= b
+                        case _:
+                            known = False
+                    if not known:
+                        return fail(here, "`{op.text()}` of {describe(left)} and {describe(right)}")
+                    if not holds:
+                        return Ok(Value.Bool(False))
+                    left = right
+                return Ok(Value.Bool(True))
+            case ExprKind.Tuple(xs):
+                var out: list[Value] = []
+                for x in xs:
+                    out.push(self.eval(src, x)?)
+                return Ok(Value.Tuple(out))
+            case ExprKind.List(xs):
+                var out: list[Value] = []
+                for x in xs:
+                    out.push(self.eval(src, x)?)
+                return Ok(Value.List(out))
+            case ExprKind.If(branches, else_):
+                for (c, v) in branches:
+                    if self.truth(src, c)?:
+                        return self.eval(src, v)
+                return match else_:
+                    case Some(x): self.eval(src, x)
+                    case None: fail(here, "an `if` expression needs an `else`")
+            case ExprKind.Comprehension(kind, elem, value, clauses):
+                if kind != CompKind.List or value.is_some():
+                    return fail(here, "this cannot be evaluated at compile time")
+                let es = self.envs(src, clauses)?
+                var out: list[Value] = []
+                for u in es:
+                    out.push(u.eval(src, elem)?)
+                return Ok(Value.List(out))
+            case _:
+                return fail(here, "this cannot be evaluated at compile time")
+
+    pure def truth(self, src: Src, e: ExprId) -> bool ! Unfolding:
+        match self.eval(src, e)?:
+            case Value.Bool(b):
+                return Ok(b)
+            case other:
+                return fail(
+                    src.ast.expr(e).range, "a condition must be a boolean, not {describe(other)}"
+                )
+
+    pure def bind(mut self, src: Src, p: PatternId, v: Value) -> int ! Unfolding:
+        let here = src.ast.pattern(p).range
+        match src.ast.pattern(p).kind:
+            case PatKind.Bind(n):
+                self.env.push((n.text.copy(), v.copy()))
+                return Ok(1)
+            case PatKind.Ctor(path, args) if len(path) == 1 and args.is_none():
+                self.env.push((path[0].text.copy(), v.copy()))
+                return Ok(1)
+            case PatKind.Wildcard:
+                return Ok(0)
+            case PatKind.Tuple(ps):
+                if let Value.Tuple(vs) = v:
+                    if len(ps) == len(vs):
+                        var n = 0
+                        for i in range(len(ps)):
+                            n += self.bind(src, ps[i], vs[i].copy())?
+                        return Ok(n)
+            case _:
+                pass
+        return fail(here, "this pattern cannot take {describe(v)}")
+
+    pure def items(self, src: Src, e: ExprId) -> list[Value] ! Unfolding:
+        match self.eval(src, e)?:
+            case Value.List(xs):
+                return Ok(xs)
+            case other:
+                return fail(
+                    src.ast.expr(e).range, "`comptime for` needs a list, not {describe(other)}"
+                )
+
+    # ------------------------------------------------------------ text
+
+    ## The text of `e` with its compile-time parts replaced.
+    pure def text(self, src: Src, e: ExprId) -> String ! Unfolding:
+        var reps: list[(TextRange, String)] = []
+        self.replacements(src, e, mut reps)?
+        return Ok(self.apply(src, src.ast.expr(e).range, reps))
+
+    ## The source of `range` with `reps` in it and, in what is copied
+    ## from the source, each type parameter replaced by its argument.
+    pure def apply(self, src: Src, here: TextRange, own reps: list[(TextRange, String)]) -> String:
+        var sorted = reps
+        sorted.sort_by((a, b) -> a.0.start.cmp(b.0.start))
+        var out = String.new()
+        var at = here.start
+        for (r, t) in sorted:
+            if r.start < at:
+                continue
+            out.push(self.substitute_param(slice(src.source, TextRange.new(at, r.start))))
+            out.push(t)
+            at = r.end
+        out.push(self.substitute_param(slice(src.source, TextRange.new(at, here.end))))
+        return out
+
+    pure def replacements(
+        self, src: Src, e: ExprId, mut out: list[(TextRange, String)]
+    ) -> () ! Unfolding:
+        if not self.depends(src, e):
+            return Ok(())
+        let here = src.ast.expr(e).range
+        if self.is_static(src, e):
+            let v = self.eval(src, e)?
+            let lit = literal(v) else:
+                return fail(here, "{describe(v)} is a compile-time value with no run-time form")
+            out.push((here, lit))
+            return Ok(())
+        match src.ast.expr(e).kind:
+            case ExprKind.FieldOf(base, field):
+                let f = self.eval(src, field)?
+                let base_text = self.text(src, base)?
+                let Value.Field(name, index, variant, _, _, _, _) = f else:
+                    return fail(
+                        src.ast.expr(field).range, "`x.[f]` needs a field, not {describe(f)}"
+                    )
+                var text = String.new()
+                match variant:
+                    case None:
+                        text = "{base_text}.{name}"
+                    case Some(v):
+                        var found = False
+                        var i = len(self.arms) - 1
+                        while i >= 0 and not found:
+                            let a = ref self.arms[i]
+                            if a.key == base_text and a.variant == v:
+                                found = True
+                                if index >= 0 and index < len(a.names):
+                                    text = a.names[index].copy()
+                            i -= 1
+                        if not found:
+                            let written_field = slice(src.source, src.ast.expr(field).range)
+                            return fail(
+                                here,
+                                "`{base_text}.[{written_field}]` is a variant's field, reachable only in an arm `case V(..)` of a `match {base_text}`",
+                            )
+                out.push((here, text))
+            case ExprKind.Str(parts):
+                for p in parts:
+                    if let StrPart.Interp(expr, debug, spec, r) = p:
+                        if self.depends(src, expr):
+                            if spec.is_none() and debug.is_none() and self.is_static(src, expr):
+                                let v = self.eval(src, expr)?
+                                let t = written(v) else:
+                                    return fail(
+                                        src.ast.expr(expr).range,
+                                        "{describe(v)} cannot be written into text",
+                                    )
+                                out.push((r, escape(t)))
+                            else:
+                                self.replacements(src, expr, mut out)?
+            # `if comptime c: a else: b` as an expression: the branch the
+            # condition picks.
+            case ExprKind.If(branches, else_):
+                if branches.is_empty() or not marked_comptime(src, branches[0].0):
+                    for k in children(src, e):
+                        self.replacements(src, k, mut out)?
+                    return Ok(())
+                var chosen: ExprId? = None
+                for (c, v) in branches:
+                    if not marked_comptime(src, c):
+                        let at = src.ast.expr(c).range
+                        return fail(at, "an `if comptime` chain needs `comptime` in each `elif`")
+                    if self.truth(src, c)?:
+                        chosen = Some(v)
+                        break
+                if chosen.is_none():
+                    chosen = else_
+                match chosen:
+                    case Some(x):
+                        out.push((here, "({self.text(src, x)?})"))
+                    case None:
+                        return fail(here, "an `if` expression needs an `else`")
+            case ExprKind.Comprehension(kind, elem, value, clauses):
+                # A comprehension over compile-time lists is unrolled into
+                # the list, set or dict it makes.
+                match self.envs(src, clauses):
+                    case Ok(es):
+                        var parts: list[String] = []
+                        for u in es:
+                            let item = u.text(src, elem)?
+                            match value:
+                                case Some(v):
+                                    parts.push("{item}: {u.text(src, v)?}")
+                                case None:
+                                    parts.push(item)
+                        var text = String.new()
+                        match kind:
+                            case CompKind.List:
+                                text = "[{parts.join(", ")}]"
+                            case CompKind.Dict | CompKind.Set:
+                                if parts.is_empty():
+                                    text = if kind == CompKind.Dict: "dict()" else: "set()"
+                                else:
+                                    text = "{{{parts.join(", ")}}}"
+                            case CompKind.Gen:
+                                let why = "a generator over compile-time values is not unrolled; use a list"
+                                return fail(here, why)
+                        out.push((here, text))
+                    case Err(_):
+                        # A comprehension over run-time values with
+                        # compile-time values in it: they are written in,
+                        # unless a name it binds hides one.
+                        for c in clauses:
+                            if let CompClause.For(pat, _) = c:
+                                for n in bound_names(src, pat):
+                                    if self.lookup(n).is_some():
+                                        return fail(
+                                            src.ast.pattern(pat).range,
+                                            "`{n}` here hides the compile-time `{n}`",
+                                        )
+                        self.replacements(src, elem, mut out)?
+                        if let Some(v) = value:
+                            self.replacements(src, v, mut out)?
+                        for c in clauses:
+                            match c:
+                                case CompClause.For(_, iter):
+                                    self.replacements(src, iter, mut out)?
+                                case CompClause.If(x):
+                                    self.replacements(src, x, mut out)?
+            case ExprKind.Call(callee, args, trailing):
+                let made = code_maker(src, callee)
+                if trailing.is_some() or made.is_none():
+                    for k in children(src, e):
+                        self.replacements(src, k, mut out)?
+                    return Ok(())
+                var text = String.new()
+                if made == Some("default_of".to_string()):
+                    text = self.default_of(src, e, args)?
+                else:
+                    text = self.construct(src, e, args)?
+                out.push((here, text))
+            # In a `match` or a closure, compile-time values are written in
+            # where they are used; their statements are copied as they are.
+            case ExprKind.Match(scrutinee, arms):
+                if not none_generated(arms):
+                    return fail(here, "compile-time values cannot be used inside this expression")
+                self.replacements(src, scrutinee, mut out)?
+                for a in arms:
+                    if let Some(g) = a.guard:
+                        self.replacements(src, g, mut out)?
+                    match a.body:
+                        case ArmBody.Expr(x):
+                            self.replacements(src, x, mut out)?
+                        case ArmBody.Block(b):
+                            self.block_replacements(src, b, mut out)?
+            case ExprKind.Closure(c):
+                match c.body:
+                    case ClosureBody.Expr(x):
+                        self.replacements(src, x, mut out)?
+                    case ClosureBody.Block(b):
+                        self.block_replacements(src, b, mut out)?
+            case _:
+                for k in children(src, e):
+                    self.replacements(src, k, mut out)?
+        return Ok(())
+
+    ## The replacements in a block inside an expression, whose statements
+    ## are copied as they are written (none of them runs at compile time).
+    pure def block_replacements(
+        self, src: Src, b: Block, mut out: list[(TextRange, String)]
+    ) -> () ! Unfolding:
+        for s in b.stmts:
+            let here = src.ast.stmt(s).range
+            match src.ast.stmt(s).kind:
+                case StmtKind.Comptime(_):
+                    return fail(here, "a compile-time statement cannot be inside an expression")
+                case StmtKind.If(branches, else_block):
+                    if not branches.is_empty() and comptime_cond(src, branches[0].0).is_some():
+                        return fail(here, "an `if comptime` cannot be inside an expression")
+                    for (c, body) in branches:
+                        self.cond_replacements(src, c, mut out)?
+                        self.block_replacements(src, body, mut out)?
+                    if let Some(body) = else_block:
+                        self.block_replacements(src, body, mut out)?
+                case StmtKind.While(cond, body):
+                    self.cond_replacements(src, cond, mut out)?
+                    self.block_replacements(src, body, mut out)?
+                case StmtKind.For(_, _, iter, body):
+                    self.replacements(src, iter, mut out)?
+                    self.block_replacements(src, body, mut out)?
+                case _:
+                    for x in stmt_exprs(src, s):
+                        self.replacements(src, x, mut out)?
+        return Ok(())
+
+    pure def cond_replacements(
+        self, src: Src, c: Cond, mut out: list[(TextRange, String)]
+    ) -> () ! Unfolding:
+        for p in c.parts:
+            match p:
+                case CondPart.Expr(x):
+                    self.replacements(src, x, mut out)?
+                case CondPart.Let(_, value):
+                    self.replacements(src, value, mut out)?
+        return Ok(())
+
+    ## `reflect.default_of(f)`: the default of the struct field `f`,
+    ## evaluated where the call is (as an omitted argument's would be).
+    pure def default_of(self, src: Src, e: ExprId, args: list[Arg]) -> String ! Unfolding:
+        if len(args) != 1:
+            return fail(src.ast.expr(e).range, "`reflect.default_of` takes a field")
+        let at = src.ast.expr(args[0].value).range
+        match self.eval(src, args[0].value)?:
+            case Value.Field(name, _, _, _, _, default, owner):
+                match owner:
+                    case Some(o):
+                        if default:
+                            return Ok("{o}.__default_{name}()")
+                        return fail(at, "the field `{name}` has no default")
+                    case None:
+                        return fail(at, "`{name}` is a variant's field, which has no default")
+            case other:
+                return fail(at, "`reflect.default_of` takes a field, not {describe(other)}")
+
+    ## `reflect.construct(T, {name: value, ...})`: the struct `T` with
+    ## each field named by a key set to its value, the keys known at
+    ## compile time (a dict, or a comprehension over compile-time values);
+    ## a field that is not named takes its default.
+    pure def construct(self, src: Src, e: ExprId, args: list[Arg]) -> String ! Unfolding:
+        if len(args) != 2:
+            return fail(
+                src.ast.expr(e).range,
+                "`reflect.construct` takes a struct type and a dict of its fields",
+            )
+        let (t, d) = (args[0].value, args[1].value)
+        let t_range = src.ast.expr(t).range
+        var shape = TypeShape.named("", "", Kind.Other)
+        match self.eval(src, t)?:
+            case Value.Type(x):
+                shape = x
+            case _:
+                return fail(t_range, "`reflect.construct` takes a type first")
+        if shape.kind != Kind.Struct:
+            return fail(t_range, "`{shape.name}` is not a struct")
+        let d_range = src.ast.expr(d).range
+        var pairs: list[(Value, String, TextRange)] = []
+        match src.ast.expr(d).kind:
+            case ExprKind.Dict(kvs):
+                for (k, v) in kvs:
+                    pairs.push((self.eval(src, k)?, self.text(src, v)?, src.ast.expr(k).range))
+            case ExprKind.Comprehension(kind, elem, Some(v), clauses):
+                if kind != CompKind.Dict:
+                    return fail(d_range, NOT_A_DICT)
+                for u in self.envs(src, clauses)?:
+                    pairs.push((u.eval(src, elem)?, u.text(src, v)?, src.ast.expr(elem).range))
+            case _:
+                return fail(d_range, NOT_A_DICT)
+        var given: list[String] = []
+        var parts: list[String] = []
+        for (k, v, at) in pairs:
+            var key = String.new()
+            match k:
+                case Value.Str(x):
+                    key = x.copy()
+                case _:
+                    return fail(at, "a field is named by text, not by {describe(k)}")
+            var known = False
+            for f in shape.fields:
+                if f.name == key:
+                    known = True
+            if not known:
+                return fail(at, "`{shape.name}` has no field `{key}`")
+            if given.contains(key):
+                return fail(at, "the field `{key}` is given twice")
+            parts.push("{key}={v}")
+            given.push(key)
+        for f in shape.fields:
+            if not f.default and not given.contains(f.name):
+                return fail(d_range, "the field `{f.name}` of `{shape.name}` is not given")
+        return Ok("{shape.written}({parts.join(", ")})")
+
+    ## A statement's own text, re-indented to `depth`.
+    pure def copy_stmt(
+        self,
+        src: Src,
+        here: TextRange,
+        own reps: list[(TextRange, String)],
+        depth: int,
+        mut out: String,
+    ):
+        let col = column(src.source, here.start)
+        let text = self.apply(src, here, reps)
+        var i = 0
+        for l in text.trim_end().lines():
+            if i == 0:
+                line(mut out, depth, l.trim_start())
+            else:
+                let lead = l.byte_len() - l.trim_start().byte_len()
+                var s = " ".repeat(max(lead - col, 0))
+                s.push(l.trim_start())
+                line(mut out, depth, s)
+            i += 1
+
+    pure def cond_text(self, src: Src, c: Cond) -> String ! Unfolding:
+        var reps: list[(TextRange, String)] = []
+        self.cond_replacements(src, c, mut reps)?
+        return Ok(self.apply(src, c.range, reps))
+
+    # ------------------------------------------------------------ statements
+
+    ## Unfolds statements at `depth`; returns how many it wrote.
+    pure def stmts(
+        mut self, src: Src, stmts: list[StmtId], depth: int, mut out: String
+    ) -> int ! Unfolding:
+        var n = 0
+        for s in stmts:
+            n += self.stmt(src, s, depth, mut out)?
+        return Ok(n)
+
+    pure def block(mut self, src: Src, b: Block, depth: int, mut out: String) -> () ! Unfolding:
+        if self.stmts(src, b.stmts, depth, mut out)? == 0:
+            line(mut out, depth, "pass")
+        return Ok(())
+
+    pure def stmt(mut self, src: Src, s: StmtId, depth: int, mut out: String) -> int ! Unfolding:
+        let here = src.ast.stmt(s).range
+        if let StmtKind.Comptime(inner) = src.ast.stmt(s).kind:
+            return self.comptime_stmt(src, inner, depth, mut out)
+        if let StmtKind.If(branches, else_block) = src.ast.stmt(s).kind:
+            if not branches.is_empty() and comptime_cond(src, branches[0].0).is_some():
+                for (c, b) in branches:
+                    let x = comptime_cond(src, c) else:
+                        return fail(
+                            c.range, "an `if comptime` chain needs `comptime` in each `elif`"
+                        )
+                    if self.truth(src, x)?:
+                        return self.stmts(src, b.stmts, depth, mut out)
+                if let Some(b) = else_block:
+                    return self.stmts(src, b.stmts, depth, mut out)
+                return Ok(0)
+        if not self.stmt_depends(src, s):
+            self.copy_stmt(src, here, [], depth, mut out)
+            return Ok(1)
+        match src.ast.stmt(s).kind:
+            case StmtKind.If(branches, else_block):
+                var i = 0
+                for (c, b) in branches:
+                    let kw = if i == 0: "if" else: "elif"
+                    line(mut out, depth, "{kw} {self.cond_text(src, c)?}:")
+                    self.block(src, b, depth + 1, mut out)?
+                    i += 1
+                if let Some(b) = else_block:
+                    line(mut out, depth, "else:")
+                    self.block(src, b, depth + 1, mut out)?
+                return Ok(1)
+            case StmtKind.While(cond, body):
+                line(mut out, depth, "while {self.cond_text(src, cond)?}:")
+                self.block(src, body, depth + 1, mut out)?
+                return Ok(1)
+            case StmtKind.For(pat, mode, iter, body):
+                let m = match mode:
+                    case Mode.Own: "own "
+                    case Mode.Mut: "mut "
+                    case Mode.Borrow: ""
+                let p = slice(src.source, src.ast.pattern(pat).range)
+                line(mut out, depth, "for {p} in {m}{self.text(src, iter)?}:")
+                self.block(src, body, depth + 1, mut out)?
+                return Ok(1)
+            case StmtKind.Expr(e):
+                if let ExprKind.Match(scrutinee, arms) = src.ast.expr(e).kind:
+                    let key = self.text(src, scrutinee)?
+                    line(mut out, depth, "match {key}:")
+                    if self.arms(src, key, arms.copy(), depth + 1, mut out)? == 0:
+                        return fail(src.ast.expr(e).range, "this `match` has no arms for the type")
+                    return Ok(1)
+                return self.copy_with_replacements(src, s, depth, mut out)
+            case StmtKind.Let(_, _, _, _, _) | StmtKind.Assign(_, _, _) | StmtKind.Return(_):
+                return self.copy_with_replacements(src, s, depth, mut out)
+            case StmtKind.Assert(_, _) | StmtKind.Expect(_):
+                return self.copy_with_replacements(src, s, depth, mut out)
+            case _:
+                return fail(here, "compile-time values cannot be used in this statement")
+
+    ## A simple statement copied with its compile-time parts replaced.
+    pure def copy_with_replacements(
+        self, src: Src, s: StmtId, depth: int, mut out: String
+    ) -> int ! Unfolding:
+        var reps: list[(TextRange, String)] = []
+        for x in stmt_exprs(src, s):
+            self.replacements(src, x, mut reps)?
+        self.copy_stmt(src, src.ast.stmt(s).range, reps, depth, mut out)
+        return Ok(1)
+
+    pure def comptime_stmt(
+        mut self, src: Src, inner: StmtId, depth: int, mut out: String
+    ) -> int ! Unfolding:
+        let here = src.ast.stmt(inner).range
+        match src.ast.stmt(inner).kind:
+            case StmtKind.For(pat, _, iter, body):
+                var n = 0
+                for v in self.items(src, iter)?:
+                    let before = len(self.env)
+                    _ = self.bind(src, pat, v)?
+                    let r = self.stmts(src, body.stmts, depth, mut out)
+                    self.truncate_env(before)
+                    n += r?
+                return Ok(n)
+            case StmtKind.If(branches, else_block):
+                for (c, b) in branches:
+                    var x: ExprId? = None
+                    if len(c.parts) == 1:
+                        if let CondPart.Expr(e) = c.parts[0]:
+                            x = Some(e)
+                    let cond = x else:
+                        return fail(c.range, "a `comptime if` condition is one expression")
+                    if self.truth(src, cond)?:
+                        return self.stmts(src, b.stmts, depth, mut out)
+                return match else_block:
+                    case Some(b): self.stmts(src, b.stmts, depth, mut out)
+                    case None: Ok(0)
+            case StmtKind.Assert(cond, message):
+                if self.truth(src, cond)?:
+                    return Ok(0)
+                var why = "a compile-time assertion failed".to_string()
+                if let Some(m) = message:
+                    match self.eval(src, m):
+                        case Ok(Value.Str(s)):
+                            why = s
+                        case _:
+                            pass
+                return fail(src.ast.expr(cond).range, why)
+            # `comptime panic("...")`: a compile error where the code is
+            # unfolded (for this type).
+            case StmtKind.Expr(e) if is_panic(src, e):
+                var why = "`comptime panic`".to_string()
+                if let ExprKind.Call(_, args, _) = src.ast.expr(e).kind:
+                    if let Some(a) = args.first():
+                        match self.eval(src, a.value):
+                            case Ok(Value.Str(s)):
+                                why = s
+                            case Ok(_):
+                                pass
+                            case Err(f):
+                                return Err(f)
+                return fail(src.ast.expr(e).range, why)
+            case StmtKind.Expr(e):
+                _ = self.eval(src, e)?
+                return Ok(0)
+            case _:
+                return fail(here, "this statement cannot run at compile time")
+
+    ## The arms of a `match` on `key`, those made at compile time unfolded.
+    pure def arms(
+        mut self, src: Src, key: str, arms: list[Arm], depth: int, mut out: String
+    ) -> int ! Unfolding:
+        var n = 0
+        for a in arms:
+            match a.generated:
+                case Some(g):
+                    match src.ast.arm_gen(g):
+                        case ArmGen.For(pat, iter, made):
+                            for v in self.items(src, iter)?:
+                                let before = len(self.env)
+                                _ = self.bind(src, pat, v)?
+                                let r = self.arms(src, key, made.copy(), depth, mut out)
+                                self.truncate_env(before)
+                                n += r?
+                        case ArmGen.If(cond, then, else_):
+                            let chosen = if self.truth(src, cond)?: then.copy() else: else_.copy()
+                            n += self.arms(src, key, chosen, depth, mut out)?
+                case None:
+                    self.arm(src, key, a, depth, mut out)?
+                    n += 1
+        return Ok(n)
+
+    pure def arm(
+        mut self, src: Src, key: str, a: Arm, depth: int, mut out: String
+    ) -> () ! Unfolding:
+        let pat_range = src.ast.pattern(a.pat).range
+        # `case V(..)` for a variant `V` bound at compile time.
+        var made: (String, ArmScope)? = None
+        if let PatKind.Ctor(path, args) = src.ast.pattern(a.pat).kind:
+            if len(path) == 1:
+                match self.lookup(path[0].text):
+                    case Some(Value.Variant(name, index, fields)):
+                        if not only_rest(args):
+                            return fail(
+                                pat_range, "a variant bound at compile time is matched as `V(..)`"
+                            )
+                        var stem = String.new()
+                        for c in key.chars():
+                            if is_alphanumeric(c) or c == '_':
+                                stem.push_char(c)
+                        var names: list[String] = []
+                        for i in range(len(fields)):
+                            names.push("__{stem}_{i}")
+                        let pat = if names.is_empty(): name.copy() else: "{name}({names.join(", ")})"
+                        made = Some(
+                            (pat, ArmScope(key=key.to_string(), variant=index, names=names))
+                        )
+                    case Some(other):
+                        return fail(pat_range, "{describe(other)} is not a variant")
+                    case None:
+                        pass
+        var pat = slice(src.source, pat_range).to_string()
+        if let Some((p, _)) = made:
+            pat = p.copy()
+        var guard = String.new()
+        if let Some(g) = a.guard:
+            guard = " if {self.text(src, g)?}"
+        let pushed = made.is_some()
+        if let Some((_, scope)) = made:
+            self.arms.push(scope.copy())
+        var r: () ! Unfolding = Ok(())
+        match a.body:
+            case ArmBody.Block(b):
+                line(mut out, depth, "case {pat}{guard}:")
+                r = self.block(src, b, depth + 1, mut out)
+            case ArmBody.Expr(e):
+                match self.text(src, e):
+                    case Ok(t):
+                        line(mut out, depth, "case {pat}{guard}: {t}")
+                    case Err(f):
+                        r = Err(f)
+        if pushed:
+            _ = self.arms.pop()
+        return r
+
+    ## Whether anything in the statement is evaluated at compile time.
+    pure def stmt_depends(self, src: Src, s: StmtId) -> bool:
+        match src.ast.stmt(s).kind:
+            case StmtKind.Comptime(_):
+                return True
+            case StmtKind.If(branches, else_block):
+                for (c, b) in branches:
+                    if self.cond_depends(src, c) or self.block_depends(src, b):
+                        return True
+                return match else_block:
+                    case Some(b): self.block_depends(src, b)
+                    case None: False
+            case StmtKind.While(cond, body):
+                return self.cond_depends(src, cond) or self.block_depends(src, body)
+            case StmtKind.For(_, _, iter, body):
+                return self.depends(src, iter) or self.block_depends(src, body)
+            case StmtKind.Expr(e):
+                return self.expr_stmt_depends(src, e)
+            case _:
+                for x in stmt_exprs(src, s):
+                    if self.depends(src, x):
+                        return True
+                return False
+
+    pure def block_depends(self, src: Src, b: Block) -> bool:
+        for s in b.stmts:
+            if self.stmt_depends(src, s):
+                return True
+        return False
+
+    pure def expr_stmt_depends(self, src: Src, e: ExprId) -> bool:
+        match src.ast.expr(e).kind:
+            case ExprKind.Match(scrutinee, arms):
+                if self.depends(src, scrutinee):
+                    return True
+                for a in arms:
+                    if self.arm_depends(src, a):
+                        return True
+                return False
+            case _:
+                return self.depends(src, e)
+
+    pure def arm_depends(self, src: Src, a: Arm) -> bool:
+        if a.generated.is_some():
+            return True
+        if let Some(g) = a.guard:
+            if self.depends(src, g):
+                return True
+        return match a.body:
+            case ArmBody.Expr(e): self.depends(src, e)
+            case ArmBody.Block(b): self.block_depends(src, b)
+
+    pure def cond_depends(self, src: Src, c: Cond) -> bool:
+        for p in c.parts:
+            match p:
+                case CondPart.Expr(e):
+                    if self.depends(src, e):
+                        return True
+                case CondPart.Let(_, value):
+                    if self.depends(src, value):
+                        return True
+        return False
+
+## `reflect.f(t)`.
+pure def reflect(f: str, t: TypeShape) -> Value?:
+    match f:
+        case "name_of":
+            return Some(Value.Str(t.name.copy()))
+        case "is_struct":
+            return Some(Value.Bool(t.kind == Kind.Struct))
+        case "is_enum":
+            return Some(Value.Bool(t.kind == Kind.Enum))
+        case "is_int":
+            return Some(Value.Bool(t.kind == Kind.Int))
+        case "is_float":
+            return Some(Value.Bool(t.kind == Kind.Float))
+        case "is_bool":
+            return Some(Value.Bool(t.kind == Kind.Bool))
+        case "is_char":
+            return Some(Value.Bool(t.kind == Kind.Char))
+        case "is_str":
+            return Some(Value.Bool(t.kind == Kind.Str))
+        case "is_list":
+            return Some(Value.Bool(t.kind == Kind.List))
+        case "is_option":
+            return Some(Value.Bool(t.kind == Kind.Option))
+        case "is_tuple":
+            return Some(Value.Bool(t.kind == Kind.Tuple))
+        case "elem_of":
+            let e = t.elem.first() else:
+                return None
+            return Some(Value.Type(e.copy()))
+        case "fields_of":
+            var out: list[Value] = []
+            var index = 0
+            for f in t.fields:
+                out.push(
+                    Value.Field(
+                        name=f.name.copy(),
+                        index=index,
+                        variant=None,
+                        named=True,
+                        ty=f.ty.copy(),
+                        default=f.default,
+                        owner=Some(t.written.copy()),
+                    )
+                )
+                index += 1
+            return Some(Value.List(out))
+        case "variants_of":
+            var out: list[Value] = []
+            var vi = 0
+            for v in t.variants:
+                var fields: list[Value] = []
+                var index = 0
+                for (n, ty) in v.fields:
+                    fields.push(
+                        Value.Field(
+                            name=n.copy() ?? "{index}",
+                            index=index,
+                            variant=Some(vi),
+                            named=n.is_some(),
+                            ty=ty.copy(),
+                            default=False,
+                            owner=None,
+                        )
+                    )
+                    index += 1
+                out.push(Value.Variant(name=v.name.copy(), index=vi, fields=fields))
+                vi += 1
+            return Some(Value.List(out))
+        case "attributes_of":
+            var out: list[Value] = []
+            for (name, args) in t.attrs:
+                out.push(Value.Attr(name=name.copy(), args=args.copy()))
+            return Some(Value.List(out))
+        case _:
+            return None
+
+## The column of byte `at`: the bytes before it on its line.
+pure def column(source: str, at: int) -> int:
+    var i = min(at, source.byte_len()) - 1
+    var count = 0
+    while i >= 0 and source.byte_at(i) != 10:
+        count += 1
+        i -= 1
+    return count
+
+## The name of the code-making `reflect` function `callee` calls
+## (`reflect.construct`, `reflect.default_of`), if it calls one.
+pure def code_maker(src: Src, callee: ExprId) -> String?:
+    if let ExprKind.Field(base, name) = src.ast.expr(callee).kind:
+        if let ExprKind.Name(n) = src.ast.expr(base).kind:
+            if n == "reflect" and is_code_maker(name.text):
+                return Some(name.text.copy())
+    return None
+
+## Whether no arm of a `match` was written at compile time.
+pure def none_generated(arms: list[Arm]) -> bool:
+    for a in arms:
+        if a.generated.is_some():
+            return False
+    return True
+
+pure def is_match(src: Src, e: ExprId) -> bool:
+    return match src.ast.expr(e).kind:
+        case ExprKind.Match(_, _): True
+        case _: False
+
+## `panic(...)`, which a `comptime` statement makes a compile error.
+pure def is_panic(src: Src, e: ExprId) -> bool:
+    if let ExprKind.Call(callee, _, _) = src.ast.expr(e).kind:
+        if let ExprKind.Name(n) = src.ast.expr(callee).kind:
+            return n == "panic"
+    return False
+
+## Whether a constructor pattern's arguments are none or only `..`.
+pure def only_rest(args: list[PatArg]?) -> bool:
+    match args:
+        case None:
+            return True
+        case Some(xs):
+            if len(xs) != 1:
+                return False
+            return match xs[0]:
+                case PatArg.Rest: True
+                case _: False
+
+## The condition of `if comptime e:`: `comptime` before a condition makes
+## all of it compile-time (`if comptime a or b:`), though as an operator
+## it applies to the operand that follows it.
+pure def comptime_cond(src: Src, c: Cond) -> ExprId?:
+    if len(c.parts) != 1:
+        return None
+    var e = ExprId(index=0)
+    match c.parts[0]:
+        case CondPart.Expr(x):
+            e = x
+        case _:
+            return None
+    var x = e
+    while True:
+        match src.ast.expr(x).kind:
+            case ExprKind.Comptime(_):
+                return Some(e)
+            case ExprKind.Binary(_, lhs, _):
+                x = lhs
+            case ExprKind.Compare(first, _):
+                x = first
+            case _:
+                return None
+
+## The names a pattern binds.
+pure def bound_names(src: Src, p: PatternId) -> list[String]:
+    var out: list[String] = []
+    match src.ast.pattern(p).kind:
+        case PatKind.Bind(n):
+            out.push(n.text.copy())
+        case PatKind.Tuple(ps):
+            for q in ps:
+                out.extend(bound_names(src, q))
+        case _:
+            pass
+    return out
+
+## The expressions a simple statement holds.
+pure def stmt_exprs(src: Src, s: StmtId) -> list[ExprId]:
+    var out: list[ExprId] = []
+    match src.ast.stmt(s).kind:
+        case StmtKind.Let(_, _, _, init, _):
+            if let Some(e) = init:
+                out.push(e)
+        case StmtKind.Assign(target, _, value):
+            out.push(target)
+            out.push(value)
+        case StmtKind.Expr(e):
+            out.push(e)
+        case StmtKind.Expect(e):
+            out.push(e)
+        case StmtKind.Return(Some(e)):
+            out.push(e)
+        case StmtKind.Assert(cond, message):
+            out.push(cond)
+            if let Some(m) = message:
+                out.push(m)
+        case _:
+            pass
+    return out
+
+## The direct subexpressions of an expression.
+pure def children(src: Src, e: ExprId) -> list[ExprId]:
+    var out: list[ExprId] = []
+    match src.ast.expr(e).kind:
+        case ExprKind.Paren(x):
+            out.push(x)
+        case ExprKind.Unary(_, x):
+            out.push(x)
+        case ExprKind.Ref(_, x):
+            out.push(x)
+        case ExprKind.FromEnd(x):
+            out.push(x)
+        case ExprKind.Try(x):
+            out.push(x)
+        case ExprKind.Comptime(x):
+            out.push(x)
+        case ExprKind.Field(base, _):
+            out.push(base)
+        case ExprKind.OptField(base, _):
+            out.push(base)
+        case ExprKind.FieldOf(base, field):
+            out.push(base)
+            out.push(field)
+        case ExprKind.Binary(_, lhs, rhs):
+            out.push(lhs)
+            out.push(rhs)
+        case ExprKind.Compare(first, rest):
+            out.push(first)
+            for (_, x) in rest:
+                out.push(x)
+        case ExprKind.Call(callee, args, _):
+            out.push(callee)
+            for a in args:
+                out.push(a.value)
+        case ExprKind.Index(base, args):
+            out.push(base)
+            for a in args:
+                match a:
+                    case IndexArg.Expr(x):
+                        out.push(x)
+                    case IndexArg.Slice(lo, hi):
+                        if let Some(x) = lo:
+                            out.push(x)
+                        if let Some(x) = hi:
+                            out.push(x)
+        case ExprKind.Tuple(xs):
+            out.extend(xs.copy())
+        case ExprKind.List(xs):
+            out.extend(xs.copy())
+        case ExprKind.Set(xs):
+            out.extend(xs.copy())
+        case ExprKind.Dict(kvs):
+            for (k, v) in kvs:
+                out.push(k)
+                out.push(v)
+        case ExprKind.If(branches, else_):
+            for (c, v) in branches:
+                out.push(c)
+                out.push(v)
+            if let Some(x) = else_:
+                out.push(x)
+        case ExprKind.Str(parts):
+            for p in parts:
+                if let StrPart.Interp(x, _, _, _) = p:
+                    out.push(x)
+        case ExprKind.Comprehension(_, elem, value, clauses):
+            out.push(elem)
+            if let Some(v) = value:
+                out.push(v)
+            for c in clauses:
+                match c:
+                    case CompClause.For(_, iter):
+                        out.push(iter)
+                    case CompClause.If(x):
+                        out.push(x)
+        case _:
+            pass
+    return out
+
+## An expression and everything in it, in the order Rust's `walk` visits
+## them.
+pure def walk(src: Src, e: ExprId) -> list[ExprId]:
+    var out: list[ExprId] = []
+    walk_into(src, e, mut out)
+    return out
+
+pure def walk_into(src: Src, e: ExprId, mut out: list[ExprId]):
+    out.push(e)
+    for k in children(src, e):
+        walk_into(src, k, mut out)
+    match src.ast.expr(e).kind:
+        case ExprKind.Closure(c):
+            match c.body:
+                case ClosureBody.Expr(x):
+                    walk_into(src, x, mut out)
+                case ClosureBody.Block(b):
+                    walk_block(src, b, mut out)
+        case ExprKind.Match(scrutinee, arms):
+            walk_into(src, scrutinee, mut out)
+            for a in arms:
+                match a.body:
+                    case ArmBody.Expr(x):
+                        walk_into(src, x, mut out)
+                    case ArmBody.Block(b):
+                        walk_block(src, b, mut out)
+        case _:
+            pass
+
+pure def walk_block(src: Src, b: Block, mut out: list[ExprId]):
+    for s in b.stmts:
+        for x in stmt_exprs(src, s):
+            walk_into(src, x, mut out)
+
+## The first function of a module, or the first method of its first
+## trait (for the tests).
+pure def first_fn(m: Module) -> FnDef?:
+    for it in m.items:
+        match m.ast.item(it).kind:
+            case ItemKind.Fn(f):
+                return Some(f.copy())
+            case ItemKind.Trait(t):
+                for f in t.methods:
+                    if f.is_comptime:
+                        return Some(f.copy())
+            case _:
+                pass
+    return None
+
+test "a derive template unfolds into the impl's source":
+    var source = String.new("trait Named:\n    def name(self) -> String\n\n")
+    source.push("    comptime def derive(T: type) -> impl Named for T:\n")
+    source.push("        return impl Named for T:\n            def name(self) -> String:\n")
+    source.push("                var parts: list[String] = []\n")
+    source.push("                comptime for f in reflect.fields_of(T):\n")
+    source.push("                    parts.push(\"{{f.name}}={{self.[f]}}\")\n")
+    source.push("                return \"{{reflect.name_of(T)}}({{parts.join(\", \")}})\"\n")
+    let m = build.module(parse(source, Catalog.parse("")).tree)
+    let f = first_fn(m) ?? panic("no template")
+    let src = Src(ast=ref m.ast, source=source)
+    let fields = ["x".to_string(), "y".to_string()]
+    let target = Target(
+        name="Point".to_string(), written="Point".to_string(), body=Body.Struct(fields)
+    )
+    var expected = String.new("\nimpl Named for Point:\n    def name(self) -> String:\n")
+    expected.push("        var parts: list[String] = []\n")
+    expected.push("        parts.push(\"x={{self.x}}\")\n        parts.push(\"y={{self.y}}\")\n")
+    expected.push("        return \"Point({{parts.join(\", \")}})\"\n")
+    match unfold(src, f, "impl Named for Point:\n", target):
+        case Ok(text):
+            assert text == expected
+        case Err(_):
+            assert False
+
+test "an instance keeps the branch its type argument picks":
+    var source = String.new("def kind[T]() -> String:\n    if comptime reflect.is_int(T):\n")
+    source.push("        return \"int\".to_string()\n    else:\n")
+    source.push("        return \"other\".to_string()\n")
+    let m = build.module(parse(source, Catalog.parse("")).tree)
+    let f = first_fn(m) ?? panic("no template")
+    let src = Src(ast=ref m.ast, source=source)
+    let params = [("T".to_string(), TypeShape.named("int", "__T0", Kind.Int))]
+    match unfold_fn(src, f, params, "__instance_0"):
+        case Ok(text):
+            assert text == "def __instance_0() -> String:\n    return \"int\".to_string()\n"
+        case Err(_):
+            assert False
+
+test "a failure names where the template stopped":
+    let source = "def bad[T]() -> int:\n    comptime panic(\"no {{reflect.name_of(T)}}\")\n"
+    let m = build.module(parse(source, Catalog.parse("")).tree)
+    let f = first_fn(m) ?? panic("no template")
+    let src = Src(ast=ref m.ast, source=source)
+    let params = [("T".to_string(), TypeShape.named("f64", "__T0", Kind.Float))]
+    match unfold_fn(src, f, params, "__instance_0"):
+        case Ok(_):
+            assert False
+        case Err(Failed(at, why)):
+            assert why == "no f64"
+            assert at.start == 34

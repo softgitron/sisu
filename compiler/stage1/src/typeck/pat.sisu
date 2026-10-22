@@ -59,7 +59,7 @@ impl Checker:
             case PatKind.Tuple(ps):
                 # `()` matches the one value of the unit type.
                 if ps.is_empty():
-                    if t == Ty.unit() or self.infer.try_unify(self.types, t, Ty.unit()):
+                    if t == Ty.unit() or self.infer.try_unify(mut self.types, t, Ty.unit()):
                         return self.add_pat(TPatKind.Wild, t, span)
                 var elems: list[Ty] = []
                 match self.types.data(t).copy():
@@ -76,7 +76,7 @@ impl Checker:
                         for _ in ps:
                             elems.push(self.infer.fresh(mut self.types))
                         let tt = self.types.tuple(elems.copy())
-                        _ = self.infer.unify(self.types, t, tt)
+                        _ = self.infer.unify(mut self.types, t, tt)
                     case TyData.Error:
                         for _ in ps:
                             elems.push(Ty.error())
@@ -170,7 +170,7 @@ impl Checker:
             target = Ty.str()
         if self.is_string(cx, lt):
             lt = Ty.str()
-        if not self.infer.try_unify(self.types, lt, target):
+        if not self.infer.try_unify(mut self.types, lt, target):
             let shown = self.show(cx, t)
             let d = self.error(cx, Msg.TypePatternMismatch, cx.ast.expr(e).range).with("ty", shown)
             self.report(d)
@@ -191,7 +191,7 @@ impl Checker:
             return TPatKind.Error
         let name = last.text.copy()
         if len(path) == 1 and (name == "True" or name == "False") and args.is_none():
-            if not self.infer.try_unify(self.types, t, Ty.bool()):
+            if not self.infer.try_unify(mut self.types, t, Ty.bool()):
                 let shown = self.show(cx, t)
                 let d = self.error(cx, Msg.TypePatternMismatch, rng).with("ty", shown)
                 self.report(d)
@@ -257,7 +257,7 @@ impl Checker:
                     return TPatKind.Error
             case TyData.Var(_):
                 let (owner, a) = self.variant_owner_ty(cx, def_, None)
-                _ = self.infer.unify(self.types, t, owner)
+                _ = self.infer.unify(mut self.types, t, owner)
                 targs = a
             case TyData.Error:
                 pass
@@ -307,7 +307,7 @@ impl Checker:
             self.report(d)
             return TPatKind.Error
         let plain = self.types.adt(def_, [])
-        if not self.infer.try_unify(self.types, t, plain):
+        if not self.infer.try_unify(mut self.types, t, plain):
             let shown = self.show(cx, t)
             let d = self.error(cx, Msg.TypePatternMismatch, range).with("ty", shown)
             self.report(d)

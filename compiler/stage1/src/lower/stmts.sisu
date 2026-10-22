@@ -1,0 +1,745 @@
+##! Statements (stage 0's `sisu-lower/src/stmts.rs`): blocks, `let`,
+##! assignment, `return`, loops, `if`, `match`, `assert`, `defer` and
+##! `select`.
+
+from stage1.diag import TextRange
+from stage1.lower.exprs import bin_op, cmp_op
+from stage1.lower.func import Cx, DropEntry, FnLower, ForBody, LoopCtx, stmt_span
+from stage1.sir import (
+    BlockId,
+    Callee,
+    Const,
+    Loc,
+    LocalId,
+    Operand,
+    Place,
+    Proj,
+    Rvalue,
+    StatementKind,
+    Terminator,
+    Type,
+)
+from stage1.syntax.ast import BinOp
+from stage1.typeck.thir import (
+    BindMode,
+    Callee as TCallee,
+    ForMode,
+    PatId,
+    SelectOp,
+    TArm,
+    TArmBody,
+    TCond,
+    TCondPart,
+    TExprId,
+    TExprKind,
+    TLetElse,
+    TPatKind,
+    TSelectArm,
+    TStmt,
+    Unwrap,
+)
+from stage1.typeck.thir import BlockId as TBlockId
+from stage1.typeck.ty import Ty, TyData
+
+## How an arm of a `select` makes its value.
+enum Made:
+    Call(callee: Callee, args: list[Operand], ty: Ty)
+    Event
+
+impl FnLower:
+    ## A block in its own scope.
+    pub pure def block(mut self, cx: Cx, b: TBlockId):
+        let end = self.block_end(cx, b)
+        self.push_scope_at(end)
+        self.block_stmts(cx, b)
+        self.pop_scope(cx)
+
+    pub pure def block_stmts(mut self, cx: Cx, b: TBlockId):
+        for s in cx.body.blocks[b.index].stmts:
+            self.stmt(cx, s)
+
+    pure def stmt(mut self, cx: Cx, s: TStmt):
+        # Temporaries of a statement live until its end.
+        let span = stmt_span(cx.body, s)
+        let at = cx.loc(span)
+        self.push_scope_at(cx.end_loc(span))
+        match s:
+            case TStmt.Let(pat, init, unwrap, else_, sp):
+                self.let_stmt(cx, pat, init, unwrap, else_, sp)
+            case TStmt.Assign(place, value, sp):
+                let loc = cx.loc(sp)
+                let v = self.operand(cx, value)
+                let p = self.place_of(cx, place)
+                self.overwrite(cx, place, p, v, loc)
+            case TStmt.AssignTuple(places, value, sp):
+                let loc = cx.loc(sp)
+                let t = self.temp(cx, cx.body.exprs[value.index].ty)
+                self.into(cx, Place.local(t), value)
+                for i in range(len(places)):
+                    let pe = places[i]
+                    let src = Place.local(t).project(Proj.Field(i))
+                    let v = self.copy_or_move(cx, src, cx.body.exprs[pe.index].ty)
+                    let p = self.place_of(cx, pe)
+                    self.overwrite(cx, pe, p, v, loc)
+            case TStmt.Discard(value, _):
+                let vty = cx.body.exprs[value.index].ty
+                let t = self.temp(cx, vty)
+                self.into(cx, Place.local(t), value)
+                if self.needs_drop(cx, vty):
+                    self.register(DropEntry.Local(t))
+                    self.split(cx)
+            case TStmt.AugAssign(place, op, value, sp):
+                self.aug_assign(cx, place, op, value, sp)
+            case TStmt.Select(arms, sp):
+                self.select(cx, arms, sp)
+            case TStmt.Yield(value, sp):
+                let loc = cx.loc(sp)
+                let v = self.operand(cx, value)
+                let u = self.unit()
+                self.intrinsic_call(cx, u, "gen.yield", [], [v], loc)
+            case TStmt.Expr(e):
+                let ety = cx.body.exprs[e.index].ty
+                let t = self.temp(cx, ety)
+                self.into(cx, Place.local(t), e)
+                if self.needs_drop(cx, ety) and ety != Ty.never():
+                    self.register(DropEntry.Local(t))
+                    self.split(cx)
+            case TStmt.Return(value, sp):
+                let loc = cx.loc(sp)
+                match value:
+                    case Some(v):
+                        self.into(cx, Place.local(LocalId(index=0)), v)
+                    case None:
+                        self.assign(
+                            cx,
+                            Place.local(LocalId(index=0)),
+                            Rvalue.Use(Operand.Const(Const.Unit)),
+                            loc,
+                        )
+                self.contract_exit(cx, loc)
+                self.emit_exit(cx, 0, loc)
+                self.terminate(Terminator.Return, loc)
+            case TStmt.Break(_):
+                if let Some(l) = self.loops.last().copied():
+                    let target = l.break_bb
+                    self.emit_exit(cx, l.depth, at)
+                    self.goto(target)
+            case TStmt.Continue(_):
+                if let Some(l) = self.loops.last().copied():
+                    let target = l.continue_bb
+                    self.emit_exit(cx, l.depth, at)
+                    self.goto(target)
+            case TStmt.If(branches, else_, _):
+                let join = self.new_block()
+                for (cond, block) in branches:
+                    let next = self.new_block()
+                    let depth = len(self.scopes)
+                    self.push_scope()
+                    self.cond(cx, cond, next, depth)
+                    self.block(cx, block)
+                    self.pop_scope(cx)
+                    self.goto(join)
+                    self.switch_to(cx, next)
+                if let Some(b) = else_:
+                    self.block(cx, b)
+                self.goto(join)
+                self.switch_to(cx, join)
+            case TStmt.While(cond, body, _):
+                let head = self.new_block()
+                let exit = self.new_block()
+                self.goto(head)
+                self.switch_to(cx, head)
+                let depth = len(self.scopes)
+                self.push_scope()
+                let fail = self.edge_to(cx, exit, depth)
+                self.cond(cx, cond, fail, depth)
+                self.loops.push(LoopCtx(break_bb=exit, continue_bb=head, depth=depth))
+                self.block(cx, body)
+                _ = self.loops.pop()
+                self.pop_scope(cx)
+                self.goto(head)
+                self.switch_to(cx, exit)
+            case TStmt.For(pat, iter, mode, item, body, sp):
+                self.for_loop(cx, pat, iter, mode, item, ForBody.Block(body), sp)
+            case TStmt.Match(scrutinee, arms, sp):
+                self.match_into(cx, None, scrutinee, arms, sp)
+            case TStmt.Assert(cond, message, text, sp, replay):
+                self.assert_(cx, cond, message, text, sp, replay)
+            case TStmt.Contract(c):
+                self.contract_stmt(cx, c)
+            case TStmt.Defer(body, _):
+                let i = len(self.defers)
+                self.defers.push(body)
+                self.register_below(1, DropEntry.Defer(i))
+                self.split(cx)
+            case TStmt.Block(b):
+                self.block(cx, b)
+            case TStmt.Error(_):
+                self.terminate(Terminator.Unreachable, None)
+        self.pop_scope(cx)
+
+    ## Stores `v` into the place `p` of the expression `pe`, dropping the
+    ## value it held (if it holds one: the ownership checker removes the
+    ## drop of a place that is not initialised there).
+    pure def overwrite(mut self, cx: Cx, pe: TExprId, own p: Place, own v: Operand, loc: Loc?):
+        if self.needs_drop(cx, cx.body.exprs[pe.index].ty):
+            self.split(cx)
+            self.emit(cx, StatementKind.Drop(place=p.copy(), flag=None), loc)
+            self.split(cx)
+        self.assign(cx, p, Rvalue.Use(v), loc)
+
+    pure def aug_assign(
+        mut self, cx: Cx, place: TExprId, op: BinOp, value: TExprId, span: TextRange
+    ):
+        let loc = cx.loc(span)
+        let pty = cx.body.exprs[place.index].ty
+        var is_string = False
+        if let TyData.Adt(d, _) = self.types.data(pty):
+            is_string = cx.prog.builtin(d) == Some("String".to_string())
+        if is_string:
+            let p = self.place_of(cx, place)
+            let t = self.ty(cx, pty)
+            let r = self.temp_sir(Type.Ref(inner=[t], mutable=True))
+            self.assign(cx, Place.local(r), Rvalue.Ref(place=p, mutable=True), loc)
+            let v = self.str_operand(cx, value)
+            let u = self.unit()
+            self.emit(
+                cx,
+                StatementKind.Call(
+                    dest=u,
+                    callee=Callee.Intrinsic(name="String.push", args=[]),
+                    args=[Operand.Copy(Place.local(r)), v],
+                ),
+                loc,
+            )
+            return
+        let v = self.operand(cx, value)
+        let p = self.place_of(cx, place)
+        let t = self.temp(cx, pty)
+        let bop = bin_op(cx, self.types, op, pty)
+        self.assign(
+            cx, Place.local(t), Rvalue.Binary(op=bop, lhs=Operand.Copy(p.copy()), rhs=v), loc
+        )
+        self.assign(cx, p, Rvalue.Use(Operand.Move(Place.local(t))), loc)
+
+    pure def let_stmt(
+        mut self,
+        cx: Cx,
+        pat: PatId,
+        init_in: TExprId?,
+        unwrap: Unwrap?,
+        else_: TLetElse?,
+        span: TextRange,
+    ):
+        let loc = cx.loc(span)
+        let pty = cx.body.pats[pat.index].ty
+        let init = init_in else:
+            # `let x: T`: the local exists from here, assigned later; its
+            # drop at the end of the scope is guarded by the dataflow.
+            if let TPatKind.Bind(local, _) = cx.body.pats[pat.index].kind:
+                let l = self.local_for(cx, local)
+                self.scope_local(1, l)
+                if self.needs_drop(cx, pty):
+                    self.register_below(1, DropEntry.Local(l))
+                    self.split(cx)
+            return
+        match else_:
+            case None:
+                if unwrap.is_none():
+                    if let TPatKind.Bind(local, BindMode.Value) = cx.body.pats[pat.index].kind:
+                        let l = self.local_for(cx, local)
+                        self.into(cx, Place.local(l), init)
+                        self.bind_registered(cx, local, l, pty, 1)
+                        return
+                let p = self.place_of(cx, init)
+                self.bind_below(cx, pat, p, 1)
+            case Some(e):
+                if unwrap.is_some():
+                    self.let_unwrap_else(cx, pat, init, unwrap, e, loc)
+                else:
+                    # `let Pattern = e else: diverge`.
+                    let t = self.place_of(cx, init)
+                    let fail = self.new_block()
+                    let join = self.new_block()
+                    self.test(cx, pat, t, fail)
+                    self.bind_below(cx, pat, t, 1)
+                    self.goto(join)
+                    self.switch_to(cx, fail)
+                    match e:
+                        case TLetElse.Diverge(_, body):
+                            self.block(cx, body)
+                        case TLetElse.Fallback(_, value):
+                            let tmp = self.temp(cx, cx.body.exprs[value.index].ty)
+                            self.into(cx, Place.local(tmp), value)
+                    self.terminate(Terminator.Unreachable, None)
+                    self.switch_to(cx, join)
+
+    ## `let x = e else ...` on an option or a result.
+    pure def let_unwrap_else(
+        mut self, cx: Cx, pat: PatId, init: TExprId, unwrap: Unwrap?, e: TLetElse, loc: Loc?
+    ):
+        let pty = cx.body.pats[pat.index].ty
+        let t = self.place_of(cx, init)
+        let d = self.temp_sir(Type.Int)
+        self.assign(cx, Place.local(d), Rvalue.Discriminant(t.copy()), loc)
+        let ok = self.new_block()
+        let other = self.new_block()
+        let join = self.new_block()
+        self.terminate(
+            Terminator.Switch(value=Operand.Copy(Place.local(d)), cases=[(0, ok)], default=other),
+            loc,
+        )
+        # The bindings exist on both paths.
+        var binding: (int, LocalId)? = None
+        if let TPatKind.Bind(local, _) = cx.body.pats[pat.index].kind:
+            binding = Some((local, self.local_for(cx, local)))
+        self.switch_to(cx, ok)
+        let payload = t.project(Proj.Downcast(0)).project(Proj.Field(0))
+        match binding:
+            case Some((_, l)):
+                let v = self.copy_or_move(cx, payload, pty)
+                self.assign(cx, Place.local(l), Rvalue.Use(v), loc)
+            case None:
+                self.bind(cx, pat, payload)
+        self.goto(join)
+        self.switch_to(cx, other)
+        match e:
+            case TLetElse.Fallback(eb, value):
+                self.push_scope()
+                self.else_binding(cx, eb, t, unwrap, loc)
+                match binding:
+                    case Some((_, l)):
+                        self.into(cx, Place.local(l), value)
+                    case None:
+                        let p = self.place_of(cx, value)
+                        self.bind(cx, pat, p)
+                self.pop_scope(cx)
+                self.goto(join)
+            case TLetElse.Diverge(eb, body):
+                self.push_scope()
+                self.else_binding(cx, eb, t, unwrap, loc)
+                self.block(cx, body)
+                self.pop_scope(cx)
+                self.terminate(Terminator.Unreachable, None)
+        self.switch_to(cx, join)
+        if let Some((tl, l)) = binding:
+            self.bind_registered(cx, tl, l, pty, 1)
+
+    ## `else as e:` on a result binds the error.
+    pure def else_binding(mut self, cx: Cx, eb: int?, t: Place, unwrap: Unwrap?, loc: Loc?):
+        let b = eb else:
+            return
+        let bl = self.local_for(cx, b)
+        if unwrap == Some(Unwrap.Result):
+            let src = t.project(Proj.Downcast(1)).project(Proj.Field(0))
+            let ety = cx.body.locals[b].ty
+            let v = self.copy_or_move(cx, src, ety)
+            self.assign(cx, Place.local(bl), Rvalue.Use(v), loc)
+            self.bind_registered(cx, b, bl, ety, 0)
+
+    ## Registers a value binding in the scope `below` levels down: its drop
+    ## and the end of its storage.
+    pub pure def bind_registered(mut self, cx: Cx, tl: int, l: LocalId, ty: Ty, below: int):
+        self.scope_local(below, l)
+        if self.needs_drop(cx, ty):
+            self.register_below(below, DropEntry.Local(l))
+            self.split(cx)
+
+    ## A condition chain: on failure, jumps to `fail` (dropping what the
+    ## chain made live, down to `depth`).
+    pub pure def cond(mut self, cx: Cx, c: TCond, fail: BlockId, depth: int):
+        for part in c.parts:
+            match part:
+                case TCondPart.Bool(e):
+                    let v = self.operand(cx, e)
+                    let ok = self.new_block()
+                    let f = self.edge_to(cx, fail, depth)
+                    let at = cx.loc(cx.body.exprs[e.index].span)
+                    self.terminate(Terminator.Switch(value=v, cases=[(0, f)], default=ok), at)
+                    self.switch_to(cx, ok)
+                case TCondPart.Let(pat, value):
+                    let p = self.place_of(cx, value)
+                    let f = self.edge_to(cx, fail, depth)
+                    self.test(cx, pat, p, f)
+                    self.bind(cx, pat, p)
+
+    pub pure def for_loop(
+        mut self,
+        cx: Cx,
+        pat: PatId,
+        iter: TExprId,
+        mode: ForMode,
+        item: Ty,
+        own body: ForBody,
+        span: TextRange,
+    ):
+        let iter_e = ref cx.body.exprs[iter.index]
+        let ity = iter_e.ty
+        let ispan = iter_e.span
+        # The loop's own statements are at its head, `for x in xs`.
+        var head_span = span
+        if ispan.end >= span.start:
+            head_span = TextRange.new(span.start, ispan.end)
+        let loc = cx.loc(head_span)
+        self.push_scope()
+        # A type that implements `Iterator` is driven through the trait.
+        var iter_ty = Type.Unit
+        if mode == ForMode.Trait:
+            iter_ty = self.ty(cx, ity)
+        else:
+            iter_ty = Type.Named(name="Iter", args=[self.ty(cx, item)])
+        let it = self.temp_sir(iter_ty.copy())
+        match mode:
+            case ForMode.Borrow | ForMode.Mut:
+                let mutable = mode == ForMode.Mut
+                # Iterating a reference (a borrowed parameter) borrows what it
+                # points to, not the reference itself.
+                var r = Operand.Const(Const.Unit)
+                if let TyData.Ref(inner, _) = self.types.data(ity).copy():
+                    let p = self.place_of(cx, iter).project(Proj.Deref)
+                    let ti = self.ty(cx, inner)
+                    let t = self.temp_sir(Type.Ref(inner=[ti], mutable=mutable))
+                    self.assign(
+                        cx, Place.local(t), Rvalue.Ref(place=p, mutable=mutable), cx.loc(ispan)
+                    )
+                    r = Operand.Copy(Place.local(t))
+                else:
+                    r = self.borrow_operand(cx, iter, mutable)
+                let name = if mode == ForMode.Mut: "iter.mut" else: "iter.ref"
+                self.emit(
+                    cx,
+                    StatementKind.Call(
+                        dest=Place.local(it),
+                        callee=Callee.Intrinsic(name=name.to_string(), args=[]),
+                        args=[r],
+                    ),
+                    loc,
+                )
+            case ForMode.Own:
+                let v = self.operand(cx, iter)
+                self.emit(
+                    cx,
+                    StatementKind.Call(
+                        dest=Place.local(it),
+                        callee=Callee.Intrinsic(name="iter.own", args=[]),
+                        args=[v],
+                    ),
+                    loc,
+                )
+            case ForMode.Iter | ForMode.Trait:
+                self.into(cx, Place.local(it), iter)
+        self.register(DropEntry.Local(it))
+        self.split(cx)
+        let head = self.new_block()
+        let exit = self.new_block()
+        self.goto(head)
+        self.switch_to(cx, head)
+        let depth = len(self.scopes)
+        self.push_scope()
+        let r = self.temp_sir(Type.Ref(inner=[iter_ty.copy()], mutable=True))
+        self.assign(cx, Place.local(r), Rvalue.Ref(place=Place.local(it), mutable=True), loc)
+        let opt_ty = Type.Named(name="Option", args=[self.ty(cx, item)])
+        let next = self.temp_sir(opt_ty)
+        var callee = Callee.Intrinsic(name="Iter.next", args=[])
+        if mode == ForMode.Trait:
+            if let Some(t) = cx.prog.wk.iterator:
+                if let Some(m) = cx.prog.trait_method(t, "next"):
+                    callee = self.callee_for(cx, m, [ity]).0
+        self.emit(
+            cx,
+            StatementKind.Call(
+                dest=Place.local(next), callee=callee, args=[Operand.Copy(Place.local(r))]
+            ),
+            loc,
+        )
+        if self.needs_drop(cx, item):
+            self.register(DropEntry.Local(next))
+            self.split(cx)
+        let d = self.temp_sir(Type.Int)
+        self.assign(cx, Place.local(d), Rvalue.Discriminant(Place.local(next)), loc)
+        let body_bb = self.new_block()
+        let done = self.edge_to(cx, exit, depth)
+        self.terminate(
+            Terminator.Switch(
+                value=Operand.Copy(Place.local(d)), cases=[(0, body_bb)], default=done
+            ),
+            loc,
+        )
+        self.switch_to(cx, body_bb)
+        let payload = Place.local(next).project(Proj.Downcast(0)).project(Proj.Field(0))
+        self.bind(cx, pat, payload)
+        self.loops.push(LoopCtx(break_bb=exit, continue_bb=head, depth=depth))
+        match body:
+            case ForBody.Block(b):
+                self.block(cx, b)
+            case ForBody.Comprehension(c):
+                self.comprehension_rest(cx, c.copy())
+        _ = self.loops.pop()
+        self.pop_scope(cx)
+        self.goto(head)
+        self.switch_to(cx, exit)
+        self.pop_scope(cx)
+
+    ## `match` as a statement (`dest` is `None`) or as an expression.
+    pub pure def match_into(
+        mut self, cx: Cx, dest: Place?, scrutinee: TExprId, arms: list[TArm], span: TextRange
+    ):
+        let loc = cx.loc(span)
+        self.push_scope()
+        let p = self.place_of(cx, scrutinee)
+        let join = self.new_block()
+        # The arms at the start that test only which variant the value is
+        # share one switch on its discriminant; the others test in turn.
+        let (starts, rest) = self.variant_switch(cx, arms, p, loc)
+        for i in range(len(arms)):
+            let arm = ref arms[i]
+            if i == len(starts):
+                if let Some(r) = rest:
+                    self.switch_to(cx, r)
+            let depth = len(self.scopes)
+            self.push_scope()
+            var next: BlockId? = None
+            if i < len(starts):
+                self.switch_to(cx, starts[i])
+            else:
+                let n = self.new_block()
+                self.test(cx, arm.pat, p, n)
+                next = Some(n)
+            self.bind(cx, arm.pat, p)
+            if let Some(g) = arm.guard:
+                if let Some(n) = next:
+                    let v = self.operand(cx, g)
+                    let ok = self.new_block()
+                    let f = self.edge_to(cx, n, depth)
+                    let at = cx.loc(cx.body.exprs[g.index].span)
+                    self.terminate(Terminator.Switch(value=v, cases=[(0, f)], default=ok), at)
+                    self.switch_to(cx, ok)
+            match arm.body:
+                case TArmBody.Expr(e):
+                    match dest:
+                        case Some(d):
+                            self.into(cx, d.copy(), e)
+                        case None:
+                            let ety = cx.body.exprs[e.index].ty
+                            let t = self.temp(cx, ety)
+                            self.into(cx, Place.local(t), e)
+                            if self.needs_drop(cx, ety):
+                                self.register(DropEntry.Local(t))
+                                self.split(cx)
+                case TArmBody.Block(b):
+                    self.block(cx, b)
+            self.pop_scope(cx)
+            self.goto(join)
+            if let Some(n) = next:
+                self.switch_to(cx, n)
+        if len(starts) == len(arms):
+            if let Some(r) = rest:
+                self.switch_to(cx, r)
+        self.terminate(Terminator.Unreachable, loc)
+        self.switch_to(cx, join)
+        self.pop_scope(cx)
+
+    ## For the arms at the start of a `match` whose patterns test only which
+    ## variant the value is, one switch on the discriminant instead of a
+    ## test per arm and per alternative. Returns the block where each of
+    ## those arms starts and the block where the others are tried; no blocks
+    ## when fewer than two variants are switched on.
+    pure def variant_switch(
+        mut self, cx: Cx, arms: list[TArm], p: Place, loc: Loc?
+    ) -> (list[BlockId], BlockId?):
+        var on: Place? = None
+        var cases: list[(int, int)] = []
+        var run = 0
+        for arm in arms:
+            if arm.guard.is_some():
+                break
+            let found = self.variant_set(cx, arm.pat, p) else:
+                break
+            let (q, variants) = found
+            if let Some(o) = on:
+                if o != q:
+                    break
+            on = Some(q)
+            for v in variants:
+                # An earlier arm takes a variant first.
+                var taken = False
+                for (c, _) in cases:
+                    if c == v:
+                        taken = True
+                if not taken:
+                    cases.push((v, run))
+            run += 1
+        let at = on else:
+            return ([], None)
+        if len(cases) < 2:
+            return ([], None)
+        let d = self.temp_sir(Type.Int)
+        self.assign(cx, Place.local(d), Rvalue.Discriminant(at), loc)
+        var starts: list[BlockId] = []
+        for _ in range(run):
+            starts.push(self.new_block())
+        let rest = self.new_block()
+        var cs: list[(int, BlockId)] = []
+        for (v, a) in cases:
+            cs.push((v, starts[a]))
+        self.terminate(
+            Terminator.Switch(value=Operand.Copy(Place.local(d)), cases=cs, default=rest), loc
+        )
+        return (starts, Some(rest))
+
+    pure def assert_(
+        mut self, cx: Cx, cond: TExprId, message: TExprId?, text: str, span: TextRange, replay: bool
+    ):
+        let loc = cx.loc(span)
+        # A condition that only reads shows every part's value when it fails
+        # (17, "Assertions").
+        if replay and self.can_show_parts(cx, cond):
+            self.assert_showing_parts(cx, cond, message, span)
+            return
+        # `assert a == b` shows both sides when it fails.
+        if let TExprKind.Compare(first, rest) = cx.body.exprs[cond.index].kind:
+            if len(rest) == 1:
+                let (op, second) = rest[0]
+                let a = self.compare_operand(cx, first)
+                let b = self.compare_operand(cx, second)
+                let r = self.temp_sir(Type.Bool)
+                self.assign(
+                    cx,
+                    Place.local(r),
+                    Rvalue.Binary(op=cmp_op(op), lhs=a.copy(), rhs=b.copy()),
+                    loc,
+                )
+                let ok = self.new_block()
+                let bad = self.new_block()
+                self.terminate(
+                    Terminator.Switch(
+                        value=Operand.Copy(Place.local(r)), cases=[(0, bad)], default=ok
+                    ),
+                    loc,
+                )
+                self.switch_to(cx, bad)
+                var m = Operand.Const(Const.Str(String.new()))
+                if let Some(x) = message:
+                    m = self.str_operand(cx, x)
+                let u = self.temp_sir(Type.Never)
+                let args = [Operand.Const(Const.Str(text.to_string())), m, a, b]
+                self.emit(
+                    cx,
+                    StatementKind.Call(
+                        dest=Place.local(u),
+                        callee=Callee.Intrinsic(name="assert.fail_compare", args=[]),
+                        args=args,
+                    ),
+                    loc,
+                )
+                self.terminate(Terminator.Unreachable, loc)
+                self.switch_to(cx, ok)
+                return
+        let v = self.operand(cx, cond)
+        let ok = self.new_block()
+        let bad = self.new_block()
+        self.terminate(Terminator.Switch(value=v, cases=[(0, bad)], default=ok), loc)
+        self.switch_to(cx, bad)
+        var m = Operand.Const(Const.Str(String.new()))
+        if let Some(x) = message:
+            m = self.str_operand(cx, x)
+        let u = self.temp_sir(Type.Never)
+        self.emit(
+            cx,
+            StatementKind.Call(
+                dest=Place.local(u),
+                callee=Callee.Intrinsic(name="assert.fail", args=[]),
+                args=[Operand.Const(Const.Str(text.to_string())), m],
+            ),
+            loc,
+        )
+        self.terminate(Terminator.Unreachable, loc)
+        self.switch_to(cx, ok)
+
+    ## `select:` (06, "Channels and select"): the arms' calls have their
+    ## arguments evaluated and their events their values, then
+    ## `select.wait(kind, subject, ...)` waits for one that can go on and
+    ## gives its index, and the arm taken makes its call, binds its pattern
+    ## and runs its block.
+    pure def select(mut self, cx: Cx, arms: list[TSelectArm], span: TextRange):
+        let loc = cx.loc(span)
+        var made: list[Made] = []
+        var wait_args: list[Operand] = []
+        for a in arms:
+            let e = a.op.expr()
+            let kind = match a.op:
+                case SelectOp.Recv(_): 0
+                case SelectOp.Send(_): 1
+                case SelectOp.Join(_): 2
+                case SelectOp.Timer(_): 3
+                case SelectOp.Cancelled(_): 4
+            wait_args.push(Operand.Const(Const.Int(kind)))
+            if kind <= 2:
+                let TExprKind.Call(TCallee.Fn(def_, type_args), args) = cx.body.exprs[
+                    e.index
+                ].kind.copy() else:
+                    made.push(Made.Event)
+                    wait_args.push(Operand.Const(Const.Unit))
+                    continue
+                let (callee, by_value) = self.callee_for(cx, def_, type_args)
+                var ops: list[Operand] = []
+                for i in range(len(args)):
+                    let x = args[i]
+                    let bv = if i < len(by_value): by_value[i] else: False
+                    let o = self.arg_operand_for(cx, x, bv)
+                    # Each operand in a temporary, so it is evaluated once.
+                    if let Operand.Copy(p) = o:
+                        if not p.proj.is_empty():
+                            let t = self.temp(cx, cx.body.exprs[x.expr.index].ty)
+                            self.assign(cx, Place.local(t), Rvalue.Use(Operand.Copy(p.copy())), loc)
+                            ops.push(Operand.Copy(Place.local(t)))
+                            continue
+                    ops.push(o)
+                var first = Operand.Const(Const.Unit)
+                if let Some(o) = ops.first():
+                    first = o.copy()
+                wait_args.push(first)
+                made.push(Made.Call(callee=callee, args=ops, ty=cx.body.exprs[e.index].ty))
+            else:
+                let t = self.temp(cx, cx.body.exprs[e.index].ty)
+                self.into(cx, Place.local(t), e)
+                wait_args.push(Operand.Copy(Place.local(t)))
+                made.push(Made.Event)
+        let k = self.temp_sir(Type.Int)
+        self.intrinsic_call(cx, Place.local(k), "select.wait", [], wait_args, loc)
+        let join = self.new_block()
+        var blocks: list[BlockId] = []
+        for _ in arms:
+            blocks.push(self.new_block())
+        let none = self.new_block()
+        var cs: list[(int, BlockId)] = []
+        for i in range(len(blocks)):
+            cs.push((i, blocks[i]))
+        self.terminate(
+            Terminator.Switch(value=Operand.Copy(Place.local(k)), cases=cs, default=none), loc
+        )
+        self.switch_to(cx, none)
+        self.terminate(Terminator.Unreachable, loc)
+        for i in range(len(arms)):
+            let a = ref arms[i]
+            self.switch_to(cx, blocks[i])
+            self.push_scope()
+            let aloc = cx.loc(a.span)
+            match made[i].copy():
+                case Made.Call(callee, ops, ty):
+                    let r = self.temp(cx, ty)
+                    self.emit(
+                        cx, StatementKind.Call(dest=Place.local(r), callee=callee, args=ops), aloc
+                    )
+                    if self.needs_drop(cx, ty):
+                        self.register(DropEntry.Local(r))
+                        self.split(cx)
+                    self.bind(cx, a.pat, Place.local(r))
+                case Made.Event:
+                    let r = self.temp(cx, Ty.unit())
+                    self.assign(cx, Place.local(r), Rvalue.Use(Operand.Const(Const.Unit)), aloc)
+                    self.bind(cx, a.pat, Place.local(r))
+            self.block(cx, a.body)
+            self.pop_scope(cx)
+            self.goto(join)
+        self.switch_to(cx, join)

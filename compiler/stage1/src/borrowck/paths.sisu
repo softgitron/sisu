@@ -1,0 +1,211 @@
+##! Move paths (stage 0's `sisu-borrowck/src/paths.rs`): the places whose
+##! initialisation the dataflow tracks. A path is a local followed by field
+##! and variant projections (`_3`, `_3.1`, `_3.as(0).0`); a place through a
+##! reference, a list index or a dict key is tracked as the path before
+##! that projection, since nothing can be moved out of it. Paths form a
+##! tree per local.
+
+from stage1.borrowck.types import Types
+from stage1.sir import Callee, Function, LocalId, Operand, Place, Proj, Rvalue, StatementKind
+
+pub struct PathData:
+    pub place: Place
+    pub parent: int?
+    pub children: list[int]
+
+## How much of a place its path covers.
+@derive(Eq, Copy)
+pub enum Cover:
+    ## The place is the path.
+    Exact
+    ## The place continues through a reference, index or key of the path's
+    ## value: using it uses the whole value.
+    Through
+    ## The place is a part of the path's value that has no path of its own.
+    Field
+
+pub struct MovePaths:
+    pub paths: list[PathData]
+    ## The root path of each local.
+    pub roots: list[int]
+
+## The longest prefix of a place made of field and variant projections,
+## never ending in a bare downcast (`_3.as(0)` is the value `_3`).
+pure def trackable(p: Place) -> Place:
+    var n = len(p.proj)
+    for i in range(len(p.proj)):
+        match p.proj[i]:
+            case Proj.Field(_) | Proj.Downcast(_):
+                pass
+            case _:
+                n = i
+                break
+    while n > 0:
+        if let Proj.Downcast(_) = p.proj[n - 1]:
+            n -= 1
+        else:
+            break
+    var proj: list[Proj] = []
+    for i in range(n):
+        proj.push(p.proj[i])
+    return Place(local=p.local, proj=proj)
+
+impl MovePaths:
+    ## The paths of a function: every place moved, assigned or dropped, and
+    ## a path per variant of every place whose discriminant is read (so a
+    ## switch can mark the payloads of the other variants empty).
+    pub pure def build_with(f: Function, types: Types) -> MovePaths:
+        var mp = MovePaths.build(f)
+        for b in f.blocks:
+            for s in b.stmts:
+                if let StatementKind.Assign(_, Rvalue.Discriminant(p)) = s.kind:
+                    let t = trackable(p)
+                    if len(t.proj) != len(p.proj):
+                        continue
+                    let ty = types.place_ty(f, p) else:
+                        continue
+                    let n = types.variant_count(ty) else:
+                        continue
+                    let base = mp.add(t)
+                    for v in range(n):
+                        var proj = t.proj.copy()
+                        proj.push(Proj.Downcast(v))
+                        let place = Place(local=t.local, proj=proj)
+                        var found = False
+                        for c in mp.paths[base].children:
+                            if mp.paths[c].place == place:
+                                found = True
+                        if not found:
+                            let id = len(mp.paths)
+                            mp.paths.push(PathData(place=place, parent=Some(base), children=[]))
+                            mp.paths[base].children.push(id)
+        return mp
+
+    pub pure def build(f: Function) -> MovePaths:
+        var mp = MovePaths(paths=[], roots=[])
+        for l in range(len(f.locals)):
+            let id = len(mp.paths)
+            mp.paths.push(PathData(place=Place.local(LocalId(index=l)), parent=None, children=[]))
+            mp.roots.push(id)
+        for b in f.blocks:
+            for s in b.stmts:
+                match s.kind:
+                    case StatementKind.Assign(dest, rv):
+                        _ = mp.add(trackable(dest))
+                        match rv:
+                            case Rvalue.Use(Operand.Move(p)):
+                                _ = mp.add(trackable(p))
+                            case Rvalue.Aggregate(_, ops):
+                                mp.add_moves(ops)
+                            case Rvalue.Closure(_, _, ops):
+                                mp.add_moves(ops)
+                            case Rvalue.Binary(_, a, b2):
+                                mp.add_moves([a.copy(), b2.copy()])
+                            case Rvalue.Unary(_, Operand.Move(p)):
+                                _ = mp.add(trackable(p))
+                            case _:
+                                pass
+                    case StatementKind.Call(dest, callee, args):
+                        _ = mp.add(trackable(dest))
+                        mp.add_moves(args)
+                        if let Callee.Value(Operand.Move(p)) = callee:
+                            _ = mp.add(trackable(p))
+                    case StatementKind.Drop(place, _):
+                        _ = mp.add(trackable(place))
+                    case StatementKind.StorageDead(_):
+                        pass
+        return mp
+
+    pure def add_moves(mut self, ops: list[Operand]):
+        for o in ops:
+            if let Operand.Move(p) = o:
+                _ = self.add(trackable(p))
+
+    ## Adds the path for a place (and its prefixes), returning it.
+    pure def add(mut self, p: Place) -> int:
+        var cur = self.roots[p.local.index]
+        for i in range(len(p.proj)):
+            if let Proj.Downcast(_) = p.proj[i]:
+                if i + 1 == len(p.proj):
+                    break
+            var prefix_proj: list[Proj] = []
+            for k in range(i + 1):
+                prefix_proj.push(p.proj[k])
+            let prefix = Place(local=p.local, proj=prefix_proj)
+            var found: int? = None
+            for c in self.paths[cur].children:
+                if self.paths[c].place == prefix:
+                    found = Some(c)
+                    break
+            match found:
+                case Some(c):
+                    cur = c
+                case None:
+                    let id = len(self.paths)
+                    self.paths.push(PathData(place=prefix, parent=Some(cur), children=[]))
+                    self.paths[cur].children.push(id)
+                    cur = id
+        return cur
+
+    ## The deepest path that is a prefix of `p`, and how much of `p` it
+    ## covers: `Exact` when it is the whole place.
+    pub pure def lookup(self, p: Place) -> (int, Cover):
+        if p.local.index >= len(self.roots):
+            return (0, Cover.Field)
+        var cur = self.roots[p.local.index]
+        for i in range(len(p.proj)):
+            match p.proj[i]:
+                case Proj.Field(_) | Proj.Downcast(_):
+                    var found: int? = None
+                    for c in self.paths[cur].children:
+                        if same_prefix(self.paths[c].place.proj, p.proj, i + 1):
+                            found = Some(c)
+                            break
+                    match found:
+                        case Some(c):
+                            cur = c
+                        case None:
+                            var trailing_downcast = False
+                            if i + 1 == len(p.proj):
+                                if let Proj.Downcast(_) = p.proj[i]:
+                                    trailing_downcast = True
+                            if trailing_downcast:
+                                return (cur, Cover.Exact)
+                            return (cur, Cover.Field)
+                case _:
+                    return (cur, Cover.Through)
+        return (cur, Cover.Exact)
+
+    ## The path and every path below it.
+    pub pure def descendants(self, id: int) -> list[int]:
+        var out = [id]
+        var i = 0
+        while i < len(out):
+            for c in self.paths[out[i]].children:
+                out.push(c)
+            i += 1
+        return out
+
+    ## The paths above `id`, nearest first.
+    pub pure def ancestors(self, id: int) -> list[int]:
+        var out: list[int] = []
+        var cur = self.paths[id].parent
+        while let Some(p) = cur:
+            out.push(p)
+            cur = self.paths[p].parent
+        return out
+
+    pub pure def count(self) -> int:
+        return len(self.paths)
+
+    pub pure def local_of(self, id: int) -> LocalId:
+        return self.paths[id].place.local
+
+## Whether `a` is exactly the first `n` projections of `b`.
+pure def same_prefix(a: list[Proj], b: list[Proj], n: int) -> bool:
+    if len(a) != n:
+        return False
+    for i in range(n):
+        if a[i] != b[i]:
+            return False
+    return True

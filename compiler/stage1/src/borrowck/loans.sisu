@@ -1,0 +1,1721 @@
+##! Loans and the borrow rules (stage 0's `sisu-borrowck/src/loans.rs`; 04,
+##! "Borrowing rules in detail"; 18, Phase 3, "The borrow checker on SIR").
+##!
+##! A loan is made by a borrow statement: `ref P`, `ref mut P`, `strview P`,
+##! or a copy of a `ref mut` (a reborrow of what it points to). Each
+##! parameter that can hold a loan also brings one: what the caller lent.
+##!
+##! **Which locals hold a loan** is a forward dataflow (union): a borrow's
+##! destination holds the new loan and the loans of the borrowed value (a
+##! reference is only valid while what it points into is); a copy or move
+##! passes the value's loans on; a call's result holds the loans of the
+##! arguments its signature says it borrows from (`from`, SIR's record of
+##! the `from` clause and the elision rules); an intrinsic that stores an
+##! argument through a `mut` argument (`list.push`) adds the argument's
+##! loans to what that `mut` argument points to.
+##!
+##! **Which locals are live** is a backward dataflow: a local is live where
+##! it may be read later before being overwritten; dropping a value whose
+##! drop glue runs a user `Drop` reads it.
+##!
+##! A loan is live where a local holding it is live (non-lexical). An
+##! access conflicts with a live loan of an overlapping place when the
+##! access writes (assignment, move, drop, end of storage, `mut` borrow) or
+##! when it reads and the loan is `mut`. A `ref mut` made for an argument is
+##! two-phase: until its first use it conflicts only as a shared borrow
+##! would, so `xs.push(len(xs))` is accepted; at its first use it must not
+##! conflict with any live loan.
+##!
+##! Escapes: a `return` may carry only loans of parameters in the `from`
+##! clause; a value holding a loan may not be stored in a plain struct or
+##! enum; and a value holding a loan may be stored through a `mut`
+##! parameter only if the loan is that parameter's own.
+
+from stage1.borrowck.bitset import BitSet, Rows
+from stage1.borrowck.finding import Arg, Finding, FindingParam, param, text
+from stage1.borrowck.init import dest, index_locals, operands, targets
+from stage1.borrowck.names import is_named, is_overwrite, local_name, place_name
+from stage1.borrowck.types import Types
+from stage1.diag import Msg
+from stage1.sir import (
+    Aggregate,
+    BasicBlock,
+    Callee,
+    ClosureRole,
+    FnKind,
+    Function,
+    Loc,
+    LocalId,
+    Operand,
+    Place,
+    Program,
+    Proj,
+    Rvalue,
+    Statement,
+    StatementKind,
+    Terminator,
+    Type,
+    TypeDecl,
+)
+from stage1.sir.write import ty as type_text
+
+pub enum LoanKind:
+    ## A borrow of a place of this function.
+    Local(place: Place, mutable: bool, two_phase: bool)
+    ## What the caller lent through argument `i`.
+    Param(int)
+
+pub struct Loan:
+    pub kind: LoanKind
+    pub loc: Loc?
+
+impl Loan:
+    pub pure def place(self) -> Place?:
+        return match self.kind:
+            case LoanKind.Local(p, _, _): Some(p.copy())
+            case LoanKind.Param(_): None
+
+    pub pure def mutable(self) -> bool:
+        return match self.kind:
+            case LoanKind.Local(_, m, _): m
+            case LoanKind.Param(_): False
+
+    pub pure def two_phase(self) -> bool:
+        return match self.kind:
+            case LoanKind.Local(_, _, t): t
+            case LoanKind.Param(_): False
+
+## What a statement makes: the loan of its rvalue (a borrow) and the
+## reborrows of its `ref mut` operands, by operand index.
+struct Made:
+    rvalue: int?
+    reborrows: list[(int, int)]
+
+impl Made:
+    ## The reborrow operand `oi` makes.
+    pure def reborrow(self, oi: int) -> int?:
+        for (k, l) in self.reborrows:
+            if k == oi:
+                return Some(l)
+        return None
+
+    ## Whether loan `l` is one of the reborrows.
+    pure def reborrows_loan(self, l: int) -> bool:
+        for (_, x) in self.reborrows:
+            if x == l:
+                return True
+        return False
+
+pub struct State:
+    ## The loans each local may hold, a row per local.
+    pub holds: Rows
+    ## For a local holding a reference, the loans that are the reference
+    ## itself (rather than loans of what it points into), when known.
+    pub direct: list[BitSet?]
+    ## Two-phase loans whose reference has been used.
+    pub activated: BitSet
+    ## Loans a task spawned on this scope holds: live until the body
+    ## returns, which is when the scope can end (06).
+    pub pinned: BitSet
+
+impl State:
+    pub pure def join(mut self, o: State) -> bool:
+        var changed = False
+        if self.pinned.union(o.pinned):
+            changed = True
+        if self.holds.union(o.holds):
+            changed = True
+        for i in range(len(self.direct)):
+            if self.direct[i].is_none():
+                continue
+            match o.direct[i]:
+                case Some(y):
+                    var x = self.direct[i].copy() ?? BitSet.new(0)
+                    if x.union(y):
+                        self.direct[i] = Some(x)
+                        changed = True
+                case None:
+                    self.direct[i] = None
+                    changed = True
+        if self.activated.union(o.activated):
+            changed = True
+        return changed
+
+## One operand's loans: what the value holds, which of those are the
+## reference itself, and what the referent holds.
+struct OpLoans:
+    holds: BitSet
+    direct: BitSet?
+    inner: BitSet
+
+@derive(Eq, Copy)
+enum Access:
+    Read
+    ## The reservation of a two-phase `ref mut`: a read.
+    Reserve
+    ## A reborrow of what a `ref mut` points to, or the activation of a
+    ## two-phase loan: an exclusive borrow.
+    MutBorrow
+    Write
+    Move
+    ## A drop at the end of a scope.
+    DropEnd
+    ## A drop that an assignment makes of the old value.
+    DropOverwrite
+    Dead
+
+impl Access:
+    pure def writes(self) -> bool:
+        return match self:
+            case Access.Read | Access.Reserve: False
+            case _: True
+
+## Whether two places may be the same memory, or one part of the other.
+pub pure def overlap(a: Place, b: Place) -> bool:
+    if a.local != b.local:
+        return False
+    for k in range(min(len(a.proj), len(b.proj))):
+        match a.proj[k]:
+            case Proj.Field(i):
+                if let Proj.Field(j) = b.proj[k]:
+                    if i != j:
+                        return False
+            case Proj.Downcast(i):
+                if let Proj.Downcast(j) = b.proj[k]:
+                    if i != j:
+                        return False
+            # Indices and keys are not known statically: any two may be
+            # equal.
+            case _:
+                pass
+    return True
+
+pure def is_ref_mut(t: Type?) -> bool:
+    if let Some(Type.Ref(_, True)) = t:
+        return True
+    return False
+
+## Where the first `.*` of a place is.
+pure def first_deref(p: Place) -> int?:
+    for k in range(len(p.proj)):
+        if p.proj[k] == Proj.Deref:
+            return Some(k)
+    return None
+
+## Where the last `.*` of a place is.
+pure def last_deref(p: Place) -> int?:
+    var k = len(p.proj) - 1
+    while k >= 0:
+        if p.proj[k] == Proj.Deref:
+            return Some(k)
+        k -= 1
+    return None
+
+pure def key(b: int, si: int) -> int:
+    return b * 1000000 + si
+
+## The blocks in reverse post-order from the entry (unwind edges count),
+## then any block the entry does not reach (stage 0's `Cfg.order`).
+pub pure def block_order(f: Function) -> list[int]:
+    let n = len(f.blocks)
+    var succ: list[list[int]] = []
+    for i in range(n):
+        var s = targets(f.blocks[i])
+        if let Some(u) = f.blocks[i].unwind:
+            s.push(u.index)
+        var kept: list[int] = []
+        for t in s:
+            if t < n:
+                kept.push(t)
+        kept.sort()
+        var unique: list[int] = []
+        for t in kept:
+            if unique.is_empty() or unique[len(unique) - 1] != t:
+                unique.push(t)
+        succ.push(unique)
+    var seen: list[bool] = []
+    for _ in range(n):
+        seen.push(False)
+    var post: list[int] = []
+    var stack: list[(int, int)] = []
+    if n > 0:
+        stack.push((0, 0))
+        seen[0] = True
+    while not stack.is_empty():
+        let top = len(stack) - 1
+        let (b, i) = stack[top]
+        if i < len(succ[b]):
+            stack[top] = (b, i + 1)
+            let t = succ[b][i]
+            if not seen[t]:
+                seen[t] = True
+                stack.push((t, 0))
+        else:
+            post.push(b)
+            _ = stack.pop()
+    var order: list[int] = []
+    var k = len(post) - 1
+    while k >= 0:
+        order.push(post[k])
+        k -= 1
+    for b in range(n):
+        if not seen[b]:
+            order.push(b)
+    return order
+
+pub struct Analysis:
+    pub loans: list[Loan]
+    ## Whether a task's loans are pinned to the end of its scope's body
+    ## (the task rules).
+    pin: bool
+    made: dict[int, Made]
+    ## The projected operand places whose type is a reference.
+    ref_places: list[Place]
+    order: list[int]
+    pub entry: list[State?]
+    pub live_in: list[BitSet]
+    nloc: int
+    nloans: int
+
+impl Analysis:
+    pub pure def run(p: Program, f: Function, types: Types, pin: bool) -> Analysis:
+        var loans: list[Loan] = []
+        var made: dict[int, Made] = {}
+        # The parameters' loans first, then every borrow statement's.
+        for i in range(f.param_count):
+            if types.may_hold(f.locals[i + 1].ty):
+                loans.push(Loan(kind=LoanKind.Param(i), loc=f.locals[i + 1].loc))
+        for b in range(len(f.blocks)):
+            for si in range(len(f.blocks[b].stmts)):
+                let s = ref f.blocks[b].stmts[si]
+                var m = Made(rvalue=None, reborrows=[])
+                if let StatementKind.Assign(d, rv) = s.kind:
+                    match rv:
+                        case Rvalue.Ref(pl, mutable):
+                            # A `mut` borrow into a temporary (a call's
+                            # argument or receiver) is two-phase; one bound
+                            # to a name is active at once.
+                            let temp = not is_named(f, d.local)
+                            m.rvalue = Some(len(loans))
+                            let kind = LoanKind.Local(
+                                place=pl.copy(), mutable=mutable, two_phase=mutable and temp
+                            )
+                            loans.push(Loan(kind=kind, loc=s.loc))
+                        case Rvalue.StrView(pl):
+                            m.rvalue = Some(len(loans))
+                            let kind = LoanKind.Local(
+                                place=pl.copy(), mutable=False, two_phase=False
+                            )
+                            loans.push(Loan(kind=kind, loc=s.loc))
+                        case _:
+                            pass
+                let ops = operands(s)
+                for oi in range(len(ops)):
+                    if let Operand.Copy(pl) = ops[oi]:
+                        if is_ref_mut(types.place_ty(f, pl)):
+                            m.reborrows.push((oi, len(loans)))
+                            let kind = LoanKind.Local(
+                                place=pl.project(Proj.Deref), mutable=True, two_phase=False
+                            )
+                            loans.push(Loan(kind=kind, loc=s.loc))
+                if m.rvalue.is_some() or not m.reborrows.is_empty():
+                    _ = made.insert(key(b, si), m)
+        let nloc = len(f.locals)
+        let nloans = len(loans)
+        var ref_places: list[Place] = []
+        for block in f.blocks:
+            for s in block.stmts:
+                for o in operands(s):
+                    if let Operand.Copy(pl) = o:
+                        if not pl.proj.is_empty() and not ref_places.contains(pl):
+                            if let Some(Type.Ref(_, _)) = types.place_ty(f, pl):
+                                ref_places.push(pl.copy())
+        var entry: list[State?] = []
+        var live_in: list[BitSet] = []
+        for _ in range(len(f.blocks)):
+            entry.push(None)
+            live_in.push(BitSet.new(nloc))
+        var a = Analysis(
+            loans=loans,
+            pin=pin,
+            made=made,
+            ref_places=ref_places,
+            order=block_order(f),
+            entry=entry,
+            live_in=live_in,
+            nloc=nloc,
+            nloans=nloans,
+        )
+        if f.blocks.is_empty():
+            return a
+        # Holds: forward.
+        var init = a.empty_state()
+        for id in range(len(a.loans)):
+            if let LoanKind.Param(i) = a.loans[id].kind:
+                _ = init.holds.insert(i + 1, id)
+                if let Type.Ref(_, _) = f.locals[i + 1].ty:
+                    var d = BitSet.new(nloans)
+                    _ = d.insert(id)
+                    init.direct[i + 1] = Some(d)
+        a.entry[0] = Some(init)
+        var work: list[int] = []
+        var k = len(a.order) - 1
+        while k >= 0:
+            work.push(a.order[k])
+            k -= 1
+        var queued: list[bool] = []
+        for _ in range(len(f.blocks)):
+            queued.push(True)
+        while let Some(b) = work.pop():
+            queued[b] = False
+            let start = a.entry[b].copy() else:
+                continue
+            let block = ref f.blocks[b]
+            var st = start.copy()
+            # The unwinding block may start from the block's entry or from
+            # after any of its statements: the join of all of them.
+            var unwind = start
+            for si in range(len(block.stmts)):
+                a.transfer(p, f, types, b, si, block.stmts[si], mut st)
+                if block.unwind.is_some():
+                    _ = unwind.join(st)
+            var succ: list[int] = []
+            for t in targets(block):
+                succ.push(t)
+            for idx in range(len(succ) + 1):
+                var t = 0
+                var from_unwind = False
+                if idx < len(succ):
+                    t = succ[idx]
+                else:
+                    let u = block.unwind else:
+                        continue
+                    t = u.index
+                    from_unwind = True
+                if t >= len(f.blocks):
+                    continue
+                var changed = False
+                if a.entry[t].is_none():
+                    if from_unwind:
+                        a.entry[t] = Some(unwind.copy())
+                    else:
+                        a.entry[t] = Some(st.copy())
+                    changed = True
+                else:
+                    var e = a.entry[t].copy() ?? a.empty_state()
+                    let joined = if from_unwind: e.join(unwind) else: e.join(st)
+                    if joined:
+                        a.entry[t] = Some(e)
+                        changed = True
+                if changed and not queued[t]:
+                    queued[t] = True
+                    work.push(t)
+        # Liveness: backward.
+        var changed = True
+        var rounds = 0
+        while changed and rounds < 10000:
+            changed = False
+            rounds += 1
+            var j = len(a.order) - 1
+            while j >= 0:
+                let b = a.order[j]
+                let out = a.live_out(f, b)
+                let first = a.live_at_start(f, types, b, out)
+                if a.live_in[b] != first:
+                    a.live_in[b] = first
+                    changed = True
+                j -= 1
+        # The union over a finite set always converges; if the bound is
+        # ever reached anyway, every local is live everywhere, which is
+        # sound (it only rejects more).
+        if changed:
+            var all = BitSet.new(a.nloc)
+            for l in range(a.nloc):
+                _ = all.insert(l)
+            for b in range(len(a.live_in)):
+                a.live_in[b] = all.copy()
+        return a
+
+    pure def empty_state(self) -> State:
+        var direct: list[BitSet?] = []
+        for _ in range(self.nloc):
+            direct.push(None)
+        return State(
+            holds=Rows.new(self.nloc, self.nloans),
+            direct=direct,
+            activated=BitSet.new(self.nloans),
+            pinned=BitSet.new(self.nloans),
+        )
+
+    pure def made_at(self, b: int, si: int) -> Made?:
+        if let Some(m) = self.made.get(key(b, si)):
+            return Some(m.copy())
+        return None
+
+    # ---------------------------------------------------------------- holds
+
+    ## The loans of the value at a place: through a reference, what the
+    ## referent holds, not the reference's own loan.
+    pure def value_loans(self, st: State, p: Place) -> BitSet:
+        let k = last_deref(p) else:
+            return st.holds.get(p.local.index)
+        if k == 0:
+            return self.inner_of(st, p.local)
+        return st.holds.get(p.local.index)
+
+    ## What the referent of a reference local holds.
+    pure def inner_of(self, st: State, r: LocalId) -> BitSet:
+        var out = st.holds.get(r.index)
+        let direct = st.direct[r.index].copy() else:
+            return out
+        out.subtract(direct)
+        for l in direct.items():
+            match self.loans[l].kind:
+                case LoanKind.Local(place, _, _):
+                    _ = out.union(self.value_loans(st, place))
+                case LoanKind.Param(_):
+                    _ = out.insert(l)
+        return out
+
+    pure def ref_typed(self, p: Place) -> bool:
+        return self.ref_places.contains(p)
+
+    pure def op_loans(self, st: State, made: Made?, oi: int, o: Operand) -> OpLoans:
+        let empty = BitSet.new(self.nloans)
+        var pl: Place? = None
+        var copied = False
+        match o:
+            case Operand.Copy(x):
+                pl = Some(x.copy())
+                copied = True
+            case Operand.Move(x):
+                pl = Some(x.copy())
+            case _:
+                pass
+        let p = pl else:
+            return OpLoans(holds=empty.copy(), direct=None, inner=empty)
+        let inner = if p.proj.is_empty(): self.inner_of(st, p.local) else: self.value_loans(st, p)
+        var r: int? = None
+        if let Some(m) = made:
+            r = m.reborrow(oi)
+        if let Some(x) = r:
+            var holds = st.holds.get(p.local.index)
+            _ = holds.insert(x)
+            var d = BitSet.new(self.nloans)
+            _ = d.insert(x)
+            return OpLoans(holds=holds, direct=Some(d), inner=inner)
+        let holds = self.value_loans(st, p)
+        # A reference read out of a value (an option's payload, a tuple's
+        # element) is treated as pointing into every place the value holds
+        # a loan of: the referent's loans are then what those places hold,
+        # which includes what it holds.
+        var direct: BitSet? = None
+        if p.proj.is_empty():
+            direct = st.direct[p.local.index].copy()
+        elif copied and self.ref_typed(p):
+            direct = Some(holds.copy())
+        return OpLoans(holds=holds, direct=direct, inner=inner)
+
+    ## The loans written by an assignment to `d`, with those of the keys it
+    ## inserts (`d{k} = v` keeps `k` in the dict).
+    pure def with_keys(self, st: State, d: Place, own loans: BitSet) -> BitSet:
+        var out = loans
+        for x in d.proj:
+            if let Proj.Key(k) = x:
+                st.holds.add_to(k.index, mut out)
+        return out
+
+    ## Stores loans into a place: a whole local is replaced, a part of one is
+    ## added to, and a place through a reference adds to what the reference
+    ## points to.
+    pure def write(
+        self,
+        f: Function,
+        types: Types,
+        mut st: State,
+        d: Place,
+        own loans: BitSet,
+        own direct: BitSet?,
+    ):
+        let l = d.local.index
+        match first_deref(d):
+            case None:
+                let add = filtered(f, types, l, loans)
+                if d.proj.is_empty():
+                    st.holds.set(l, add)
+                    st.direct[l] = direct
+                else:
+                    _ = st.holds.union_row(l, add)
+                    st.direct[l] = None
+            case Some(k):
+                var tg: list[int] = []
+                if k == 0 and st.direct[l].is_some():
+                    tg = (st.direct[l].copy() ?? BitSet.new(0)).items()
+                else:
+                    tg = st.holds.row_items(l)
+                for t in tg:
+                    if let LoanKind.Local(place, True, _) = self.loans[t].kind:
+                        if first_deref(place).is_none():
+                            let root = place.local.index
+                            let add = filtered(f, types, root, loans.copy())
+                            _ = st.holds.union_row(root, add)
+                            st.direct[root] = None
+
+    ## The loans a call's result may hold.
+    pure def call_result(
+        self, p: Program, callee: Callee, ops: list[OpLoans], callee_loans: OpLoans?
+    ) -> BitSet:
+        var out = BitSet.new(self.nloans)
+        var from_: list[int]? = None
+        var inner: list[int] = []
+        match callee:
+            case Callee.Trait(name, _):
+                if let Some(d) = p.trait_method(name):
+                    from_ = Some(d.from_.copy())
+                    inner = d.inner.copy()
+            case Callee.Fn(name, _):
+                if let Some(g) = p.function(name):
+                    from_ = Some(g.from_.copy())
+                    inner = g.inner.copy()
+            case Callee.Intrinsic(name, _):
+                if let Some(d) = p.intrinsic(name):
+                    from_ = Some(d.from_.copy())
+                    inner = d.inner.copy()
+            case Callee.Value(_):
+                for o in ops:
+                    _ = out.union(o.holds)
+                if let Some(c) = callee_loans:
+                    _ = out.union(c.holds)
+                return out
+        match from_:
+            case Some(fs):
+                for i in fs:
+                    if i < len(ops):
+                        _ = out.union(ops[i].holds)
+                for i in inner:
+                    if i < len(ops):
+                        _ = out.union(ops[i].inner)
+            case None:
+                for o in ops:
+                    _ = out.union(o.holds)
+        return out
+
+    pure def transfer(
+        self, p: Program, f: Function, types: Types, b: int, si: int, s: Statement, mut st: State
+    ):
+        let made = self.made_at(b, si)
+        # A use of a reference activates its two-phase loans.
+        for l in self.used_locals(f, types, s):
+            for x in st.holds.row_items(l.index):
+                if self.loans[x].two_phase():
+                    _ = st.activated.insert(x)
+        match s.kind:
+            case StatementKind.Assign(d, rv):
+                var loans = BitSet.new(self.nloans)
+                var direct: BitSet? = None
+                match rv:
+                    case Rvalue.Use(o):
+                        let ol = self.op_loans(st, made, 0, o)
+                        loans = ol.holds
+                        direct = ol.direct
+                    case Rvalue.Ref(pl, _):
+                        let (h, dset) = self.borrow_loans(mut st, made, pl)
+                        loans = h
+                        direct = Some(dset)
+                    case Rvalue.StrView(pl):
+                        let (h, dset) = self.borrow_loans(mut st, made, pl)
+                        loans = h
+                        direct = Some(dset)
+                    case Rvalue.Aggregate(_, ops):
+                        for oi in range(len(ops)):
+                            _ = loans.union(self.op_loans(st, made, oi, ops[oi]).holds)
+                    case Rvalue.Closure(_, _, ops):
+                        for oi in range(len(ops)):
+                            _ = loans.union(self.op_loans(st, made, oi, ops[oi]).holds)
+                    case Rvalue.CopyOf(pl):
+                        loans = self.value_loans(st, pl)
+                    case _:
+                        pass
+                if let Rvalue.Use(Operand.Move(src)) = rv:
+                    if src.proj.is_empty():
+                        st.holds.clear_row(src.local.index)
+                        st.direct[src.local.index] = None
+                let written = self.with_keys(st, d, loans)
+                self.write(f, types, mut st, d, written, direct)
+            case StatementKind.Call(d, callee, args):
+                var ops: list[OpLoans] = []
+                for oi in range(len(args)):
+                    ops.push(self.op_loans(st, made, oi, args[oi]))
+                var callee_loans: OpLoans? = None
+                if let Callee.Value(o) = callee:
+                    callee_loans = Some(self.op_loans(st, made, len(args), o))
+                let result = self.call_result(p, callee, ops, callee_loans)
+                # A callee may store an argument it takes by value (with
+                # `own`, or a view) through a `mut` one.
+                var kept: list[int]? = None
+                match callee:
+                    case Callee.Intrinsic(name, _):
+                        kept = Some(kept_args(p, name, len(ops)))
+                    case Callee.Fn(name, _):
+                        var k: list[int] = []
+                        match p.function(name):
+                            case Some(g):
+                                for i in range(len(ops)):
+                                    if lent_by_value(g, i):
+                                        k.push(i)
+                            case None:
+                                for i in range(len(ops)):
+                                    k.push(i)
+                        kept = Some(k)
+                    # Any impl may run: any argument may be kept.
+                    case Callee.Trait(_, _):
+                        var k: list[int] = []
+                        for i in range(len(ops)):
+                            k.push(i)
+                        kept = Some(k)
+                    case Callee.Value(_):
+                        pass
+                if let Some(kp) = kept:
+                    for ai in range(len(ops)):
+                        var stored = BitSet.new(self.nloans)
+                        for bi in range(len(ops)):
+                            if bi != ai and kp.contains(bi):
+                                _ = stored.union(ops[bi].holds)
+                        if stored.is_empty():
+                            continue
+                        for t in ops[ai].holds.items():
+                            if let LoanKind.Local(place, True, _) = self.loans[t].kind:
+                                if first_deref(place).is_none():
+                                    let root = place.local.index
+                                    if types.may_hold(f.locals[root].ty):
+                                        _ = st.holds.union_row(root, stored)
+                                        st.direct[root] = None
+                for o in args:
+                    if let Operand.Move(src) = o:
+                        if src.proj.is_empty():
+                            st.holds.clear_row(src.local.index)
+                            st.direct[src.local.index] = None
+                # A task spawned on this body's own scope keeps what it
+                # borrows until the scope ends.
+                if self.pin:
+                    if let Some(k) = spawn_task_arg(callee):
+                        if scope_body_spawn(f, args) and k < len(ops):
+                            _ = st.pinned.union(ops[k].holds)
+                let written = self.with_keys(st, d, result)
+                self.write(f, types, mut st, d, written, None)
+            case StatementKind.Drop(place, _):
+                if place.proj.is_empty():
+                    st.holds.clear_row(place.local.index)
+                    st.direct[place.local.index] = None
+            case StatementKind.StorageDead(l):
+                st.holds.clear_row(l.index)
+                st.direct[l.index] = None
+
+    ## A borrow's loans: what the borrowed local holds and the new loan,
+    ## which is the reference itself; a new borrow is reserved again until
+    ## its first use.
+    pure def borrow_loans(self, mut st: State, made: Made?, pl: Place) -> (BitSet, BitSet):
+        var h = st.holds.get(pl.local.index)
+        var dset = BitSet.new(self.nloans)
+        if let Some(m) = made:
+            if let Some(l) = m.rvalue:
+                _ = h.insert(l)
+                _ = dset.insert(l)
+                st.activated.remove(l)
+        return (h, dset)
+
+    # ---------------------------------------------------------------- liveness
+
+    ## The locals a statement reads.
+    pure def used_locals(self, f: Function, types: Types, s: Statement) -> list[LocalId]:
+        var out: list[LocalId] = []
+        for o in operands(s):
+            match o:
+                case Operand.Copy(p):
+                    push_place(p, mut out)
+                case Operand.Move(p):
+                    push_place(p, mut out)
+                case _:
+                    pass
+        match s.kind:
+            case StatementKind.Assign(d, rv):
+                match rv:
+                    case Rvalue.Ref(p, _):
+                        push_place(p, mut out)
+                    case Rvalue.StrView(p):
+                        push_place(p, mut out)
+                    case Rvalue.Discriminant(p):
+                        push_place(p, mut out)
+                    case Rvalue.CopyOf(p):
+                        push_place(p, mut out)
+                    case _:
+                        pass
+                for l in index_locals(d):
+                    out.push(l)
+                if first_deref(d).is_some():
+                    out.push(d.local)
+            case StatementKind.Call(d, _, _):
+                for l in index_locals(d):
+                    out.push(l)
+                if first_deref(d).is_some():
+                    out.push(d.local)
+            case StatementKind.Drop(p, _):
+                # A user `Drop` may read the references the value holds.
+                if let Some(t) = types.place_ty(f, p):
+                    if types.has_drop_glue(t):
+                        out.push(p.local)
+                for l in index_locals(p):
+                    out.push(l)
+            case StatementKind.StorageDead(_):
+                pass
+        return out
+
+    pure def live_out(self, f: Function, b: int) -> BitSet:
+        var out = BitSet.new(self.nloc)
+        for t in targets(f.blocks[b]):
+            if t < len(self.live_in):
+                _ = out.union(self.live_in[t])
+        return out
+
+    ## Live locals before each statement of a block, and before its
+    ## terminator (the last element); `out` is live at the block's end.
+    pure def live_before_each(self, f: Function, types: Types, b: int, out: BitSet) -> list[BitSet]:
+        let (_, seen) = self.live_backward(f, types, b, out, True)
+        var res: list[BitSet] = []
+        var k = len(seen) - 1
+        while k >= 0:
+            res.push(seen[k].copy())
+            k -= 1
+        return res
+
+    ## Live locals at the start of a block.
+    pure def live_at_start(self, f: Function, types: Types, b: int, out: BitSet) -> BitSet:
+        let (live, _) = self.live_backward(f, types, b, out, False)
+        return live
+
+    ## Walks a block backward from `out`, live at its end, keeping (when
+    ## `each`) what is live before its terminator and before each
+    ## statement, last first; returns what is live at its start.
+    pure def live_backward(
+        self, f: Function, types: Types, b: int, out: BitSet, each: bool
+    ) -> (BitSet, list[BitSet]):
+        let block = ref f.blocks[b]
+        var unwind_live: BitSet? = None
+        if let Some(u) = block.unwind:
+            if u.index < len(self.live_in):
+                unwind_live = Some(self.live_in[u.index].copy())
+        var live = out.copy()
+        for l in term_uses(block):
+            _ = live.insert(l.index)
+        if let Some(u) = unwind_live:
+            _ = live.union(u)
+        var seen: list[BitSet] = []
+        if each:
+            seen.push(live.copy())
+        var k = len(block.stmts) - 1
+        while k >= 0:
+            let s = ref block.stmts[k]
+            if let Some(d) = defined_locals(s):
+                live.remove(d.index)
+            for l in self.used_locals(f, types, s):
+                _ = live.insert(l.index)
+            if let Some(u) = unwind_live:
+                _ = live.union(u)
+            if each:
+                seen.push(live.copy())
+            k -= 1
+        return (live, seen)
+
+    ## The holds state before each statement of a block (and at its end).
+    pure def states(self, p: Program, f: Function, types: Types, b: int) -> list[State]?:
+        var st = self.entry[b].copy() else:
+            return None
+        var out: list[State] = []
+        for si in range(len(f.blocks[b].stmts)):
+            out.push(st.copy())
+            self.transfer(p, f, types, b, si, f.blocks[b].stmts[si], mut st)
+        out.push(st)
+        return Some(out)
+
+    pure def live_loans(self, st: State, live: BitSet) -> BitSet:
+        var out = st.pinned.copy()
+        for l in live.items():
+            if l < st.holds.len():
+                st.holds.add_to(l, mut out)
+        return out
+
+    # ---------------------------------------------------------------- checking
+
+    pub pure def findings(self, p: Program, f: Function, types: Types) -> list[Finding]:
+        var out: list[Finding] = []
+        for b in range(len(f.blocks)):
+            let start = self.entry[b].copy() else:
+                continue
+            let block = ref f.blocks[b]
+            # The unwinding path drops in the order of the normal one, so a
+            # conflict there is one the normal path reports.
+            if block.cleanup:
+                continue
+            let lout = self.live_out(f, b)
+            let lives = self.live_before_each(f, types, b, lout)
+            var after = start
+            for si in range(len(block.stmts)):
+                let s = ref block.stmts[si]
+                let before = after.copy()
+                self.transfer(p, f, types, b, si, s, mut after)
+                let pre = self.live_loans(before, lives[si])
+                let post = self.live_loans(after, lives[si + 1])
+                self.check_conflicts(
+                    p, f, types, b, si, s, before, after, pre, post, lives[si + 1], mut out
+                )
+                self.check_stores(p, f, types, b, si, s, before, mut out)
+                self.check_tasks(f, types, b, si, s, before, mut out)
+            if let Terminator.Return = block.term:
+                self.check_return(f, types, b, block.loc, after, mut out)
+        # A task that borrows what it may not is the mistake; the end of what
+        # it borrows follows from it.
+        var tasks: list[int] = []
+        for fd in out:
+            if fd.msg == Msg.TaskBorrowsBodyLocal or fd.msg == Msg.TaskBorrowsElsewhere:
+                if let Some(l) = fd.loan:
+                    tasks.push(l)
+        var kept: list[Finding] = []
+        for fd in out:
+            var follows = False
+            if fd.msg != Msg.TaskBorrowsBodyLocal and fd.msg != Msg.TaskBorrowsElsewhere:
+                if let Some(l) = fd.loan:
+                    follows = tasks.contains(l)
+            if not follows:
+                kept.push(fd.copy())
+        # A borrow that outlives its place is the mistake; the conflicts the
+        # same loan meets afterwards (the place made again in the next
+        # iteration) follow from it.
+        var gone: list[int] = []
+        for fd in kept:
+            if fd.msg == Msg.BorrowDoesNotLiveLongEnough:
+                if let Some(l) = fd.loan:
+                    gone.push(l)
+        var result: list[Finding] = []
+        for fd in kept:
+            var follows = False
+            if fd.msg != Msg.BorrowDoesNotLiveLongEnough:
+                if let Some(l) = fd.loan:
+                    follows = gone.contains(l)
+            if not follows:
+                result.push(fd.copy())
+        return result
+
+    ## The accesses a statement makes, in order: (place, kind, made loan to
+    ## exclude).
+    pure def accesses(
+        self, f: Function, b: int, si: int, s: Statement
+    ) -> list[(Place, Access, int?)]:
+        let made = self.made_at(b, si)
+        var v: list[(Place, Access, int?)] = []
+        let ops = operands(s)
+        for oi in range(len(ops)):
+            match ops[oi]:
+                case Operand.Copy(pl):
+                    for l in index_locals(pl):
+                        v.push((Place.local(l), Access.Read, None))
+                    var r: int? = None
+                    if let Some(m) = made:
+                        r = m.reborrow(oi)
+                    if let Some(x) = r:
+                        v.push((pl.project(Proj.Deref), Access.MutBorrow, Some(x)))
+                    else:
+                        v.push((pl.copy(), Access.Read, None))
+                case Operand.Move(pl):
+                    for l in index_locals(pl):
+                        v.push((Place.local(l), Access.Read, None))
+                    v.push((pl.copy(), Access.Move, None))
+                case _:
+                    pass
+        var rv_loan: int? = None
+        if let Some(m) = made:
+            rv_loan = m.rvalue
+        match s.kind:
+            case StatementKind.Assign(_, rv):
+                var read: Place? = None
+                match rv:
+                    case Rvalue.Ref(pl, mutable):
+                        if mutable:
+                            v.push((pl.copy(), Access.Reserve, rv_loan))
+                        else:
+                            read = Some(pl.copy())
+                    case Rvalue.StrView(pl):
+                        read = Some(pl.copy())
+                    case Rvalue.Discriminant(pl):
+                        read = Some(pl.copy())
+                    case Rvalue.CopyOf(pl):
+                        read = Some(pl.copy())
+                    case _:
+                        pass
+                if let Some(pl) = read:
+                    for l in index_locals(pl):
+                        v.push((Place.local(l), Access.Read, None))
+                    v.push((pl.copy(), Access.Read, rv_loan))
+            case StatementKind.Drop(place, _):
+                let acc = if is_overwrite(f, b, place): Access.DropOverwrite else: Access.DropEnd
+                v.push((place.copy(), acc, None))
+            case StatementKind.StorageDead(l):
+                v.push((Place.local(l), Access.Dead, None))
+            case _:
+                pass
+        return v
+
+    pure def check_conflicts(
+        self,
+        p: Program,
+        f: Function,
+        types: Types,
+        b: int,
+        si: int,
+        s: Statement,
+        before: State,
+        after: State,
+        pre: BitSet,
+        post: BitSet,
+        post_live: BitSet,
+        mut out: list[Finding],
+    ):
+        let made = self.made_at(b, si)
+        # Loans made by earlier operands of this statement are live for the
+        # later ones (two `mut` reborrows passed to one call).
+        var pending = BitSet.new(self.nloans)
+        # Activation of two-phase loans at their first use.
+        let used = self.used_locals(f, types, s)
+        var activating: list[int] = []
+        for l in used:
+            for x in before.holds.row_items(l.index):
+                if self.loans[x].two_phase()
+                        and not before.activated.contains(x)
+                        and not activating.contains(x):
+                    activating.push(x)
+        for x in activating:
+            let place = self.loans[x].place() else:
+                continue
+            for y in pre.items():
+                if y != x and self.conflicts_with(place, Access.MutBorrow, y, before):
+                    self.report(p, f, types, b, si, s, Access.MutBorrow, place, y, mut out)
+        var after_dest = False
+        match s.kind:
+            case StatementKind.Drop(_, _) | StatementKind.StorageDead(_):
+                after_dest = True
+            case _:
+                pass
+        # A loan only the return value holds is reported at the `return`.
+        var lives = BitSet.new(self.nloc)
+        for l in post_live.items():
+            if l != 0:
+                _ = lives.insert(l)
+        let post_without_return = self.live_loans(after, lives)
+        for (place, acc, own_loan) in self.accesses(f, b, si, s):
+            var live = if after_dest: post_without_return.items() else: pre.items()
+            for y in pending.items():
+                live.push(y)
+            for y in live:
+                if own_loan == Some(y)
+                        or (acc == Access.Dead and self.through_reference(f, place, y)):
+                    continue
+                if self.conflicts_with(place, acc, y, before):
+                    self.report(p, f, types, b, si, s, acc, place, y, mut out)
+            if let Some(r) = own_loan:
+                if let Some(m) = made:
+                    if m.reborrows_loan(r):
+                        _ = pending.insert(r)
+        # The destination is written after the operands are evaluated.
+        if let Some(d) = dest(s):
+            for y in post.items():
+                if let Some(m) = made:
+                    if m.rvalue == Some(y) or m.reborrows_loan(y):
+                        continue
+                if self.conflicts_with(d, Access.Write, y, before):
+                    self.report(p, f, types, b, si, s, Access.Write, d, y, mut out)
+
+    pure def report(
+        self,
+        p: Program,
+        f: Function,
+        types: Types,
+        b: int,
+        si: int,
+        s: Statement,
+        acc: Access,
+        place: Place,
+        y: int,
+        mut out: list[Finding],
+    ):
+        if let Some(fd) = self.conflict(p, f, types, b, si, s, acc, place, y):
+            out.push(fd)
+
+    ## Whether loan `y` borrows through the reference that `place`, a local
+    ## going out of storage, holds (`ref (*r).f`): the reborrow holds the
+    ## reference's own loans, which keep what it points into alive, so the
+    ## reference itself may go.
+    pure def through_reference(self, f: Function, place: Place, y: int) -> bool:
+        let lp = self.loans[y].place() else:
+            return False
+        if not place.proj.is_empty() or lp.local != place.local:
+            return False
+        if lp.proj.is_empty() or lp.proj[0] != Proj.Deref:
+            return False
+        if place.local.index >= len(f.locals):
+            return False
+        if let Type.Ref(_, _) = f.locals[place.local.index].ty:
+            return True
+        return False
+
+    ## Whether an access to `place` conflicts with live loan `y`.
+    pure def conflicts_with(self, place: Place, acc: Access, y: int, st: State) -> bool:
+        let loan = ref self.loans[y]
+        let lp = loan.place() else:
+            return False
+        if not overlap(place, lp):
+            return False
+        if acc.writes():
+            return True
+        # A read conflicts with a `mut` loan, unless it is still reserved.
+        return loan.mutable() and (not loan.two_phase() or st.activated.contains(y))
+
+    pure def conflict(
+        self,
+        p: Program,
+        f: Function,
+        types: Types,
+        b: int,
+        si: int,
+        s: Statement,
+        acc: Access,
+        place: Place,
+        y: int,
+    ) -> Finding?:
+        let loan = ref self.loans[y]
+        let lp = loan.place() else:
+            return None
+        var later_loc: Loc? = None
+        var later_holder: LocalId? = None
+        if let Some((l, h)) = self.later_use(p, f, types, b, si, y):
+            later_loc = l
+            later_holder = h
+        var line = 0
+        if let Some(l) = loan.loc:
+            line = l.line
+        # Where the borrow ends; for a place that is gone, where the borrow
+        # is still used.
+        let gone = acc == Access.DropEnd or acc == Access.Dead
+        var end_line: int? = None
+        if not gone:
+            end_line = self.last_live_line(p, f, types, y)
+        if end_line.is_none():
+            if let Some(l) = later_loc:
+                end_line = Some(l.line)
+        let end = "{end_line ?? 0}"
+        # Name what both sides are about: the longer common prefix of the
+        # accessed place and the borrowed one (`xs` for a push while an
+        # element of `xs` is borrowed).
+        let name_place = if gone: place.copy() else: common_prefix(place, lp)
+        let name = place_name(types, f, shorten(name_place))
+        var m = Msg.BorrowModifyWhileBorrowed
+        match acc:
+            case Access.Read:
+                if not loan.mutable():
+                    return None
+                m = Msg.BorrowUseWhileMutBorrowed
+            case Access.Reserve | Access.MutBorrow:
+                m = Msg.BorrowMutWhileBorrowed
+            case Access.Write | Access.DropOverwrite:
+                m = Msg.BorrowModifyWhileBorrowed
+            case Access.Move:
+                m = Msg.BorrowMoveWhileBorrowed
+            case Access.DropEnd | Access.Dead:
+                m = Msg.BorrowDoesNotLiveLongEnough
+        var holder: LocalId? = None
+        if let Some(h) = later_holder:
+            if is_named(f, h):
+                holder = Some(h)
+        var fd = Finding.new(m, f, s.loc).with_arg("name", name).with("line", "{line}").with(
+            "end", end
+        )
+        match holder:
+            case Some(h):
+                fd = fd.label(loan.loc, Msg.BorrowBorrowedBy, [text("borrower", local_name(f, h))])
+            case None:
+                fd = fd.label(loan.loc, Msg.BorrowBorrowedHere, [])
+        fd = fd.at(b, si)
+        fd.loan = Some(y)
+        if let Some(l) = later_loc:
+            fd = fd.label(Some(l), Msg.BorrowLaterUsed, [])
+        if not gone:
+            fd = fd.note(Msg.BorrowMoveAfter, [text("end", end)])
+        elif is_named(f, name_place.local):
+            fd = fd.note(
+                Msg.BorrowDeclareOutside, [param("name", place_name(types, f, shorten(name_place)))]
+            )
+        else:
+            fd = fd.note(Msg.BorrowBindTemporary, [])
+        return Some(fd)
+
+    ## The last source line at which loan `y` is live: where the borrow
+    ## ends, for the message (in a loop that uses it at its head, the end of
+    ## the loop's body).
+    pure def last_live_line(self, p: Program, f: Function, types: Types, y: int) -> int?:
+        var last: int? = None
+        for b in range(len(f.blocks)):
+            let block = ref f.blocks[b]
+            if block.cleanup:
+                continue
+            let states = self.states(p, f, types, b) else:
+                continue
+            let lout = self.live_out(f, b)
+            let lives = self.live_before_each(f, types, b, lout)
+            for si in range(len(block.stmts)):
+                if self.live_loans(states[si], lives[si]).contains(y):
+                    if let Some(l) = block.stmts[si].loc:
+                        last = Some(max(last ?? l.end_line, l.end_line))
+            let n = len(block.stmts)
+            if self.live_loans(states[n], lives[n]).contains(y):
+                if let Some(l) = block.loc:
+                    last = Some(max(last ?? l.end_line, l.end_line))
+        return last
+
+    ## The first statement after (b, si) that uses a local holding loan
+    ## `y`, and that local.
+    pure def later_use(
+        self, p: Program, f: Function, types: Types, b: int, si: int, y: int
+    ) -> (Loc?, LocalId?)?:
+        var visited: list[bool] = []
+        for _ in range(len(f.blocks)):
+            visited.push(False)
+        var queue: list[(int, int)] = [(b, si)]
+        var head = 0
+        var first = True
+        while head < len(queue):
+            let (blk, start) = queue[head]
+            head += 1
+            if not first:
+                if visited[blk]:
+                    continue
+                visited[blk] = True
+            let states = self.states(p, f, types, blk) else:
+                return None
+            let block = ref f.blocks[blk]
+            let begin = if first: start else: 0
+            first = False
+            # From the conflicting statement itself: a use of the loan by its
+            # own operands counts.
+            for k in range(begin, len(block.stmts)):
+                let s = ref block.stmts[k]
+                if s.loc.is_none():
+                    continue
+                for l in self.used_locals(f, types, s):
+                    if states[k].holds.contains(l.index, y):
+                        return Some((s.loc, Some(l)))
+            let end = ref states[len(block.stmts)]
+            if block.loc.is_some():
+                for l in term_uses(block):
+                    if end.holds.contains(l.index, y):
+                        return Some((block.loc, Some(l)))
+            for t in targets(block):
+                if t < len(visited) and not visited[t]:
+                    queue.push((t, 0))
+        return None
+
+    ## How a label names where a loan comes from: the borrow, or for what
+    ## the caller lent, the parameter.
+    pure def loan_label(self, f: Function, l: int) -> (Msg, list[FindingParam]):
+        if let LoanKind.Param(i) = self.loans[l].kind:
+            return (Msg.BorrowDeclaredHere, [text("name", local_name(f, LocalId(index=i + 1)))])
+        return (Msg.BorrowBorrowedHere, [])
+
+    # ---------------------------------------------------------------- escapes
+
+    ## The `mut` parameter whose referent an operand points into, when the
+    ## operand is a `ref mut` that may reach the caller's memory: the
+    ## parameter itself, or a borrow through it (followed through the
+    ## locals that hold such borrows).
+    pure def caller_target(
+        self, f: Function, types: Types, st: State, o: Operand, ol: OpLoans
+    ) -> int?:
+        var pl: Place? = None
+        match o:
+            case Operand.Copy(x):
+                pl = Some(x.copy())
+            case Operand.Move(x):
+                pl = Some(x.copy())
+            case _:
+                return None
+        let p = pl else:
+            return None
+        # A `mut` reference, or a dict entry, which writes into its dict.
+        match types.place_ty(f, p):
+            case Some(Type.Ref(_, True)):
+                pass
+            case Some(Type.Named(n, _)):
+                if n != "Entry":
+                    return None
+            case _:
+                return None
+        let work = match ol.direct:
+            case Some(d): d.items()
+            case None: ol.holds.items()
+        return self.caller_param(f, st, work)
+
+    ## The `mut` parameter whose referent one of the loans `work` points
+    ## into, following borrows through the locals that hold them.
+    pure def caller_param(self, f: Function, st: State, own work_in: list[int]) -> int?:
+        var work = work_in
+        var seen = BitSet.new(self.nloans)
+        while let Some(t) = work.pop():
+            if not seen.insert(t):
+                continue
+            match self.loans[t].kind:
+                case LoanKind.Param(i):
+                    if is_mut_param(f, i):
+                        return Some(i)
+                case LoanKind.Local(place, _, _):
+                    # A borrow of a `mut` parameter, or of a place behind it
+                    # (`ref mut xs` then `.*.*` reaches the caller too).
+                    let l = place.local.index
+                    if l >= 1 and is_mut_param(f, l - 1):
+                        return Some(l - 1)
+                    let k = first_deref(place) else:
+                        continue
+                    # A borrow through another reference: what that one
+                    # points to.
+                    var set: list[int] = []
+                    if k == 0 and st.direct[l].is_some():
+                        set = (st.direct[l].copy() ?? BitSet.new(0)).items()
+                    else:
+                        set = st.holds.row_items(l)
+                    for x in set:
+                        work.push(x)
+        return None
+
+    pure def check_stores(
+        self,
+        p: Program,
+        f: Function,
+        types: Types,
+        b: int,
+        si: int,
+        s: Statement,
+        st: State,
+        mut out: list[Finding],
+    ):
+        let made = self.made_at(b, si)
+        # An intrinsic that stores an argument through a `mut` parameter of
+        # this function stores it in the caller's memory: only that
+        # parameter's own loans may go there, and those of the arguments the
+        # caller handed over by value, which a caller assumes may be kept by
+        # its `mut` arguments.
+        if let StatementKind.Call(_, Callee.Intrinsic(name, _), args) = s.kind:
+            var ops: list[OpLoans] = []
+            for oi in range(len(args)):
+                ops.push(self.op_loans(st, made, oi, args[oi]))
+            let kept = kept_args(p, name, len(ops))
+            for ai in range(len(ops)):
+                let i = self.caller_target(f, types, st, args[ai], ops[ai]) else:
+                    continue
+                let Type.Ref(inner, True) = f.locals[i + 1].ty.copy() else:
+                    continue
+                if not types.may_hold(inner[0]):
+                    continue
+                for bi in range(len(ops)):
+                    if bi == ai or not kept.contains(bi):
+                        continue
+                    if let Some(x) = self.foreign(f, ops[bi].holds, i):
+                        let (lm, lp) = self.loan_label(f, x)
+                        out.push(
+                            Finding.new(Msg.BorrowStoreIntoCaller, f, s.loc).with_arg(
+                                "name", self.loan_name(f, types, x)
+                            ).with("param", local_name(f, LocalId(index=i + 1))).with(
+                                "function", display_fn(f.name)
+                            ).label(self.loans[x].loc, lm, lp).at(b, si)
+                        )
+                        return
+        # A plain struct or enum cannot hold a loan.
+        if let StatementKind.Assign(_, Rvalue.Aggregate(agg, ops)) = s.kind:
+            var tn: String? = None
+            var variant: int? = None
+            match agg:
+                case Aggregate.Struct(x):
+                    tn = Some(x.copy())
+                case Aggregate.Variant(x, v):
+                    tn = Some(x.copy())
+                    variant = types.variant_index(x, v)
+                case _:
+                    pass
+            if let Some(n) = tn:
+                if types.is_plain_aggregate(n):
+                    for oi in range(len(ops)):
+                        # A field whose type is a type parameter holds what
+                        # the argument holds: the generic type is view-like
+                        # through its arguments, as `list[Token]` is (04,
+                        # "Views").
+                        if let Some(t) = types.declared_field_ty(n, variant, oi):
+                            if types.carried_by_params(t):
+                                continue
+                        let ol = self.op_loans(st, made, oi, ops[oi])
+                        if let Some(l) = ol.holds.first():
+                            let (lm, lp) = self.loan_label(f, l)
+                            out.push(
+                                declare_view(
+                                    types,
+                                    n,
+                                    Finding.new(Msg.BorrowStoreInPlainType, f, s.loc).with(
+                                        "ty", n
+                                    ).with_arg("name", self.loan_name(f, types, l)).label(
+                                        self.loans[l].loc, lm, lp
+                                    ).at(b, si),
+                                )
+                            )
+                            break
+        # A place that cannot hold a loan, or memory of the caller.
+        let d = dest(s) else:
+            return
+        # An assignment to `d{k}` inserts the key when it is missing: the
+        # dict keeps the key's loans.
+        for i in range(len(d.proj)):
+            if let Proj.Key(k) = d.proj[i]:
+                let keys = st.holds.get(k.index)
+                var proj: list[Proj] = []
+                for j in range(i):
+                    proj.push(d.proj[j])
+                let dict = Place(local=d.local, proj=proj)
+                if not keys.is_empty()
+                        and self.store_into(f, types, b, si, s, st, dict, keys, mut out):
+                    return
+        var stored = BitSet.new(self.nloans)
+        match s.kind:
+            case StatementKind.Assign(_, Rvalue.Use(o)):
+                stored = self.op_loans(st, made, 0, o).holds
+            case StatementKind.Assign(_, Rvalue.Aggregate(_, ops)):
+                for oi in range(len(ops)):
+                    _ = stored.union(self.op_loans(st, made, oi, ops[oi]).holds)
+            case StatementKind.Assign(_, Rvalue.Closure(_, _, ops)):
+                for oi in range(len(ops)):
+                    _ = stored.union(self.op_loans(st, made, oi, ops[oi]).holds)
+            case _:
+                pass
+        if stored.is_empty() or d.proj.is_empty():
+            return
+        let t = types.place_ty(f, d) else:
+            return
+        if not types.may_hold(t):
+            return
+        _ = self.store_into(f, types, b, si, s, st, d, stored, mut out)
+
+    ## The first loan of `set` that is not the `mut` parameter `i`'s own nor
+    ## one the caller handed over by value.
+    pure def foreign(self, f: Function, set: BitSet, i: int) -> int?:
+        for x in set.items():
+            var own_loan = False
+            if let LoanKind.Param(j) = self.loans[x].kind:
+                own_loan = j == i or lent_by_value(f, j)
+            if not own_loan:
+                return Some(x)
+        return None
+
+    ## Loans `stored` written into place `d` (a part of a local, or what a
+    ## reference points to): reports a store into memory of the caller
+    ## other than the `mut` parameter's own loans, or into a value that
+    ## cannot hold a loan. Returns whether it reported.
+    pure def store_into(
+        self,
+        f: Function,
+        types: Types,
+        b: int,
+        si: int,
+        s: Statement,
+        st: State,
+        d: Place,
+        stored: BitSet,
+        mut out: list[Finding],
+    ) -> bool:
+        if let Some(k) = first_deref(d):
+            let r = d.local.index
+            var tg: list[int] = []
+            if k == 0 and st.direct[r].is_some():
+                tg = (st.direct[r].copy() ?? BitSet.new(0)).items()
+            else:
+                tg = st.holds.row_items(r)
+            let i = self.caller_param(f, st, tg) else:
+                return False
+            # Only what the caller lent through this parameter may go back,
+            # and what it handed over by value.
+            let x = self.foreign(f, stored, i) else:
+                return False
+            let (lm, lp) = self.loan_label(f, x)
+            out.push(
+                Finding.new(Msg.BorrowStoreIntoCaller, f, s.loc).with_arg(
+                    "name", self.loan_name(f, types, x)
+                ).with("param", local_name(f, LocalId(index=i + 1))).with(
+                    "function", display_fn(f.name)
+                ).label(self.loans[x].loc, lm, lp).at(b, si)
+            )
+            return True
+        let lty = ref f.locals[d.local.index].ty
+        if not types.may_hold(lty):
+            if let Some(l) = stored.first():
+                let tn = type_text(lty)
+                let (lm, lp) = self.loan_label(f, l)
+                out.push(
+                    declare_view(
+                        types,
+                        tn,
+                        Finding.new(Msg.BorrowStoreInPlainType, f, s.loc).with("ty", tn).with_arg(
+                            "name", self.loan_name(f, types, l)
+                        ).label(self.loans[l].loc, lm, lp).at(b, si),
+                    )
+                )
+                return True
+        return False
+
+    ## The task rules (06, "Tasks and scopes"). A task spawned on the scope
+    ## of the body it is spawned in (the body's parameter) may borrow only
+    ## what the body's environment borrows, which outlives the scope: a loan
+    ## the environment brought, or one through it. A task spawned anywhere
+    ## else borrows nothing, since the checker cannot tell how long its
+    ## scope lasts. A generator's `yield` gives its item to the consumer, so
+    ## the item may borrow only what the generator's environment does, as a
+    ## `return` may borrow only from parameters.
+    pure def check_tasks(
+        self,
+        f: Function,
+        types: Types,
+        b: int,
+        si: int,
+        s: Statement,
+        st: State,
+        mut out: list[Finding],
+    ):
+        let StatementKind.Call(_, callee, args) = s.kind.copy() else:
+            return
+        let made = self.made_at(b, si)
+        var yielding = False
+        if let Callee.Intrinsic(n, _) = callee:
+            yielding = n == "gen.yield"
+        var k = 0
+        match spawn_task_arg(callee):
+            case Some(x):
+                k = x
+            case None:
+                if not yielding:
+                    return
+        if k >= len(args):
+            return
+        let ol = self.op_loans(st, made, k, args[k])
+        let through_env = yielding
+            or (f.kind == FnKind.Closure(ClosureRole.ScopeBody) and scope_body_spawn(f, args))
+        var offending: int? = None
+        for l in ol.holds.items():
+            if not through_env or not self.borrows_through_env(f, st, l):
+                offending = Some(l)
+                break
+        let l = offending else:
+            return
+        let m = if yielding: Msg.BorrowReturnLocal elif through_env: Msg.TaskBorrowsBodyLocal else: Msg.TaskBorrowsElsewhere
+        var fd = Finding.new(m, f, s.loc).with_arg("name", self.loan_name(f, types, l)).label(
+            self.loans[l].loc, Msg.BorrowBorrowedHere, []
+        ).at(b, si)
+        if yielding:
+            fd = fd.with("function", display_fn(f.name)).note(Msg.BorrowReturnOwned, [])
+        else:
+            fd = fd.note(Msg.TaskUseOwn, [])
+        fd.loan = Some(l)
+        out.push(fd)
+
+    ## Whether a loan is one the environment of a closure brought (its
+    ## parameter 1, the caller's loans), or a borrow through it.
+    pure def borrows_through_env(self, f: Function, st: State, l: int) -> bool:
+        var work = [l]
+        var seen = BitSet.new(self.nloans)
+        while let Some(t) = work.pop():
+            if not seen.insert(t):
+                continue
+            match self.loans[t].kind:
+                # The environment is argument 0; the scope (argument 1 of a
+                # scope's body) lasts as long as the scope.
+                case LoanKind.Param(i):
+                    let scope_param = i == 1 and f.kind == FnKind.Closure(ClosureRole.ScopeBody)
+                    if i != 0 and not scope_param:
+                        return False
+                case LoanKind.Local(place, _, _):
+                    let k = first_deref(place) else:
+                        return False
+                    let base = place.local.index
+                    var set: list[int] = []
+                    if k == 0 and st.direct[base].is_some():
+                        set = (st.direct[base].copy() ?? BitSet.new(0)).items()
+                    else:
+                        set = st.holds.row_items(base)
+                    if set.is_empty():
+                        return False
+                    for x in set:
+                        work.push(x)
+        return True
+
+    pure def check_return(
+        self, f: Function, types: Types, b: int, loc: Loc?, st: State, mut out: list[Finding]
+    ):
+        for l in st.holds.row_items(0):
+            let loan = ref self.loans[l]
+            match loan.kind:
+                case LoanKind.Param(i):
+                    if not f.from_.contains(i) and not f.inner.contains(i):
+                        let name = local_name(f, LocalId(index=i + 1))
+                        var decl: Loc? = None
+                        if i + 1 < len(f.locals):
+                            decl = f.locals[i + 1].loc
+                        out.push(
+                            Finding.new(Msg.BorrowReturnNotFrom, f, loc).with("param", name).with(
+                                "function", display_fn(f.name)
+                            ).label(decl, Msg.BorrowDeclaredHere, [text("name", name)]).fix(
+                                Msg.BorrowAddFrom, [text("param", name)], None
+                            ).at(b, len(f.blocks[b].stmts))
+                        )
+                case LoanKind.Local(place, _, _):
+                    if first_deref(place).is_some():
+                        continue
+                    var note = Msg.BorrowReturnOwned
+                    if let Type.Fn(_, _, _) = f.locals[0].ty:
+                        note = Msg.BorrowUseOwnClosure
+                    out.push(
+                        Finding.new(Msg.BorrowReturnLocal, f, loc).with_arg(
+                            "name", place_name(types, f, shorten(place))
+                        ).with("function", display_fn(f.name)).label(
+                            loan.loc, Msg.BorrowBorrowedHere, []
+                        ).note(note, []).at(b, len(f.blocks[b].stmts))
+                    )
+
+    ## What a loan borrows, in source terms.
+    pure def loan_name(self, f: Function, types: Types, l: int) -> Arg:
+        return match self.loans[l].kind:
+            case LoanKind.Local(place, _, _): place_name(types, f, shorten(place))
+            case LoanKind.Param(i): Arg.Text(local_name(f, LocalId(index=i + 1)))
+
+## A local, and the locals its index and key projections name.
+pure def push_place(p: Place, mut out: list[LocalId]):
+    out.push(p.local)
+    for l in index_locals(p):
+        out.push(l)
+
+## The local a statement overwrites as a whole.
+pure def defined_locals(s: Statement) -> LocalId?:
+    match s.kind:
+        case StatementKind.Assign(d, _):
+            if d.proj.is_empty():
+                return Some(d.local)
+        case StatementKind.Call(d, _, _):
+            if d.proj.is_empty():
+                return Some(d.local)
+        case StatementKind.Drop(place, _):
+            if place.proj.is_empty():
+                return Some(place.local)
+        case StatementKind.StorageDead(l):
+            return Some(l)
+    return None
+
+pure def term_uses(block: BasicBlock) -> list[LocalId]:
+    match block.term:
+        case Terminator.Switch(value, _, _):
+            match value:
+                case Operand.Copy(p):
+                    return [p.local]
+                case Operand.Move(p):
+                    return [p.local]
+                case _:
+                    return []
+        case Terminator.Return:
+            return [LocalId(index=0)]
+        case _:
+            return []
+
+## The loans a local may hold, none when its type cannot hold one.
+pure def filtered(f: Function, types: Types, local: int, own b: BitSet) -> BitSet:
+    var out = b
+    if not types.may_hold(f.locals[local].ty):
+        out.clear()
+    return out
+
+pure def is_mut_param(f: Function, i: int) -> bool:
+    if i >= f.param_count:
+        return False
+    if let Type.Ref(_, True) = f.locals[i + 1].ty:
+        return True
+    return False
+
+## The fix for a borrow stored in a plain struct: make it a `view struct`
+## (an enum has no view form, so it gets no fix).
+pure def declare_view(types: Types, ty: str, own fd: Finding) -> Finding:
+    if let Some(TypeDecl.Struct(_, _, _, _, _, _)) = types.decl(ty):
+        return fd.fix(Msg.BorrowDeclareView, [text("ty", ty)], None)
+    return fd
+
+## The longest common prefix of two places of one local.
+pure def common_prefix(a: Place, b: Place) -> Place:
+    var proj: list[Proj] = []
+    for k in range(min(len(a.proj), len(b.proj))):
+        if a.proj[k] != b.proj[k]:
+            break
+        proj.push(a.proj[k])
+    return Place(local=a.local, proj=proj)
+
+## A place without the projections that do not change what the programmer
+## calls it: a trailing dereference of a reference local.
+pure def shorten(p: Place) -> Place:
+    var q = p.copy()
+    while not q.proj.is_empty() and q.proj[len(q.proj) - 1] == Proj.Deref:
+        _ = q.proj.pop()
+    return q
+
+## A SIR function name as the programmer knows it: `f`, or the function a
+## closure is written in.
+pub pure def display_fn(name: str) -> String:
+    var owner = name.to_string()
+    for i in range(name.byte_len()):
+        if name.byte_at(i) == 35:
+            owner = name.byte_slice(0, i).to_string()
+            break
+    var k = owner.byte_len() - 1
+    while k >= 0:
+        if owner.byte_at(k) == 46:
+            return owner.byte_slice(k + 1, owner.byte_len()).to_string()
+        k -= 1
+    return owner
+
+## Whether a function's parameter `j` is taken with `own`: a caller assumes
+## what it holds may be kept by the call's `mut` arguments (a borrowed one,
+## even a view passed by value, is lent for the call only).
+pure def lent_by_value(f: Function, j: int) -> bool:
+    return f.owns.contains(j)
+
+## The arguments of an intrinsic call it may keep: those it takes with
+## `own`, or every argument of an intrinsic SIR does not declare.
+pure def kept_args(p: Program, name: str, n: int) -> list[int]:
+    if let Some(d) = p.intrinsic(name):
+        return d.owns.copy()
+    var out: list[int] = []
+    for i in range(n):
+        out.push(i)
+    return out
+
+## The argument of a `spawn` call that is the task.
+pure def spawn_task_arg(callee: Callee) -> int?:
+    if let Callee.Intrinsic(n, _) = callee:
+        if n == "Scope.spawn":
+            return Some(1)
+        if n == "Scope.spawn_with":
+            return Some(2)
+    return None
+
+## Whether a `spawn` in `f` spawns on the scope `f` is the body of: `f` is a
+## scope's body and the receiver is its parameter, the scope.
+pure def scope_body_spawn(f: Function, args: list[Operand]) -> bool:
+    if f.kind != FnKind.Closure(ClosureRole.ScopeBody) or args.is_empty():
+        return False
+    return match args[0]:
+        case Operand.Copy(p): p.local.index == 2 and p.proj.is_empty()
+        case Operand.Move(p): p.local.index == 2 and p.proj.is_empty()
+        case _: False

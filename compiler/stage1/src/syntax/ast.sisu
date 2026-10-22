@@ -712,6 +712,9 @@ pub enum TypeKind:
     Fn(pure: bool, params: list[TypeExprId], ret: TypeExprId)
     Ref(mutable: bool, inner: TypeExprId)
     ConstArg(int)
+    ## A constant argument written as an expression: `W * H` in
+    ## `Array[T, W * H]` (03, "Const generics").
+    ConstExpr(ExprId)
     ## `dyn Trait`: the inner type is the trait's path.
     Dyn(TypeExprId)
     Unsupported(String)

@@ -6,10 +6,9 @@
 #   tree         `sisu parse --tree FILE`, standard output and error
 #   trivia-tree  `sisu parse --tree --trivia FILE`, standard output
 #   print        the source reprinted from stage 1's tree, against the file
-#   ast          the AST of `ast::build::module`, in Rust's `Debug` notation
-#                (no `sisu` command prints it: `oracle/` does, from the
-#                stage-0 crates); a file whose tree differs as listed may
-#                differ here too
+#   ast          `sisu parse --ast FILE`, standard output: the AST of
+#                `ast::build::module`, in Rust's `{:#?}` notation; a file
+#                whose tree differs as listed may differ here too
 #
 # for every `.sisu` file under compiler/conformance/cases/, compiler/std/
 # and proposal/examples/, and stage 1's own cases (compiler/stage1/cases/).
@@ -30,17 +29,32 @@
 # and match; and with --types for every program of the corpus that is one
 # module, where a file within the slice must match and any other may only
 # report fewer of stage 0's diagnostics (stage 1 says why it is beyond).
+# Then stage 1's lowering and ownership checker, which cover a slice of
+# their own, both from one run of stage 1 per class:
+#
+#   sir          `sisu sir FILE`, standard output: the program's SIR after
+#                drop placement and jump threading, or nothing when the
+#                front end finds an error
+#   ownership    `sisu check --format=ids FILE`, the ownership checker's
+#                diagnostics only (E0333, E0366, E0367, E0392, E0393,
+#                E0397, E0400 to E0410, E0416 to E0420, E0428, E0429)
+#
+# for the files `sir.list` names, each of which must be within the slice
+# and match; and with --sir for every program of the corpus that is one
+# module, where a file within the slice must match and any other is
+# beyond it (stage 1 says why).
 # A difference listed in DISCREPANCIES.md ("- Differs: `path`: outputs") is
 # expected; any other fails the check.
 #
-# Usage: compiler/stage1/check.sh [--mutants N] [--seed S] [--names] [--types] [--keep DIR]
+# Usage: compiler/stage1/check.sh [--mutants N] [--seed S] [--names] [--types] [--sir] [--keep DIR]
 #
 #   --mutants N  also compare N mutants of the corpus (deleted, inserted and
 #                swapped characters, from stage 1's `mutate` with seed S);
 #                a mutant may differ only in the way a listed discrepancy
-#                does (its signature is checked below)
+#                does (its mark is checked below)
 #   --names      resolve the names of the whole corpus, not only names/
 #   --types      check the types of the whole corpus, not only types.list
+#   --sir        lower the whole corpus, not only sir.list
 #   --keep DIR   leave every output in DIR instead of a temporary directory
 set -uo pipefail
 
@@ -53,6 +67,7 @@ seed=1
 keep=""
 all_names=0
 all_types=0
+all_sir=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --mutants) mutants="$2"; shift 2 ;;
@@ -60,19 +75,14 @@ while [ $# -gt 0 ]; do
         --keep) keep="$2"; shift 2 ;;
         --names) all_names=1; shift ;;
         --types) all_types=1; shift ;;
-        *) echo "usage: $0 [--mutants N] [--seed S] [--names] [--types] [--keep DIR]" >&2; exit 2 ;;
+        --sir) all_sir=1; shift ;;
+        *) echo "usage: $0 [--mutants N] [--seed S] [--names] [--types] [--sir] [--keep DIR]" >&2; exit 2 ;;
     esac
 done
 
 echo "building stage 0 (cargo build --release)"
 if ! (cd "$compiler" && cargo build --release --quiet); then
     echo "check.sh: stage 0 does not build" >&2
-    exit 1
-fi
-oracle="$compiler/target/stage1-oracle/release/stage1-oracle"
-if ! CARGO_TARGET_DIR="$compiler/target/stage1-oracle" \
-        cargo build --release --quiet --manifest-path "$here/oracle/Cargo.toml"; then
-    echo "check.sh: the oracle does not build" >&2
     exit 1
 fi
 
@@ -111,21 +121,14 @@ if [ "$mutants" -gt 0 ]; then
     classes="$classes mutants"
 fi
 
-# A mutant's difference is a listed discrepancy's when it has its mark:
-# D1, a line break that stage 0 made an ERROR_TOKEN; D2, a `\u{+` escape;
-# D3, trees and tokens alike and only E0126 diagnostics differing.
+# A mutant's difference is a listed discrepancy's when it has its mark (a
+# test of the outputs that only that discrepancy makes). None is listed
+# now, so every mutant must give identical outputs.
 explained() {
-    local src="$1" ref="$2" out="$3"
-    if grep -Eq '^ERROR_TOKEN [0-9]+\.\.[0-9]+ "(\\r\\n|\\n|\\r)"$' "$ref.tokens"; then return 0; fi
-    if grep -Fq '\u{+' "$src"; then return 0; fi
-    if cmp -s "$ref.tokens" "$out.tokens" && cmp -s "$ref.tree" "$out.tree" &&
-        ! diff "$ref.tree.err" "$out.tree.err" | grep -E '^[<>]' | grep -vq 'E0126'; then
-        return 0
-    fi
     return 1
 }
 
-total=0; identical=0; subsets=0; listed=0; unlisted=0
+total=0; identical=0; subsets=0; lowered_beyond=0; listed=0; unlisted=0
 report=""
 summary=""
 for class in $classes; do
@@ -140,11 +143,8 @@ for class in $classes; do
         "$sisu" tokens --trivia "$f" > "$ref/$i.tokens" 2> "$ref/$i.tokens.err"
         "$sisu" parse --tree "$f" > "$ref/$i.tree" 2> "$ref/$i.tree.err"
         "$sisu" parse --tree --trivia "$f" > "$ref/$i.trivia.tree" 2> /dev/null
+        "$sisu" parse --ast "$f" > "$ref/$i.ast" 2> /dev/null
     done < "$list"
-    if ! "$oracle" ast "$ref" "$list"; then
-        echo "check.sh: the oracle failed on the $class files" >&2
-        exit 1
-    fi
     # Stage 1's, in one run of the interpreter.
     start=$(date +%s.%N)
     if ! (cd "$here" && "$sisu" run -- batch "$out" "$list" > "$work/$class.log" 2> "$work/$class.stderr"); then
@@ -332,15 +332,102 @@ for class in $type_classes; do
         "$class" "$n" "$same" "$beyond" "$class_listed" "$class_unlisted" "$seconds")"
 done
 
+# Lowering and the ownership checker, one program at a time: what `sisu
+# sir` prints on standard output, and the ownership checker's diagnostics
+# of `sisu check --format=ids` (with their labels and fixes), against
+# stage 1's SIR and diagnostics.
+own_ids='^(borrow\.(use-after-move|use-after-partial-move|modify-while-borrowed|use-while-mut-borrowed|move-while-borrowed|mut-while-borrowed|does-not-live-long-enough|return-local|return-not-from|store-in-plain-type|store-into-caller|move-out-of-drop|must-consume|must-consume-exit|move-out-of-place|must-consume-intrinsic)|type\.(impure-call|uninitialized|reassign-let|impure-value-call|impure-drop|must-consume-argument)|task\.(borrows-body-local|borrows-elsewhere))$'
+sed -n 's/^\([^#].*\)$/\1/p' "$here/sir.list" | while read -r p; do echo "$repo/$p"; done > "$work/sir.list"
+sir_classes="sir"
+if [ "$all_sir" = 1 ]; then
+    find "$compiler/conformance/cases" -name '*.sisu' | grep -v '/packages/' | sort > "$work/corpus-sir.list"
+    cat "$work/examples.list" >> "$work/corpus-sir.list"
+    sir_classes="sir corpus-sir"
+fi
+sir_summary=""
+own_summary=""
+for class in $sir_classes; do
+    list="$work/$class.list"
+    n=$(wc -l < "$list" | tr -d ' ')
+    ref="$work/$class.stage0"; out="$work/$class.stage1"
+    mkdir -p "$ref" "$out"
+    i=0
+    while read -r f; do
+        i=$((i + 1))
+        "$sisu" sir "$f" > "$ref/$i.sir" 2> /dev/null
+        (cd "$(dirname "$f")" && "$sisu" check --format=ids "$(basename "$f")" 2> /dev/null) |
+            awk -v ids="$own_ids" '/^  / { if (keep) print; next } { keep = ($3 ~ ids); if (keep) print }' \
+            > "$ref/$i.ownership"
+    done < "$list"
+    start=$(date +%s.%N)
+    if ! (cd "$here" && "$sisu" run -- sir-batch "$out" "$list" > "$work/$class.log" 2> "$work/$class.stderr"); then
+        cat "$work/$class.stderr" >&2
+        echo "check.sh: stage 1 failed lowering the $class files" >&2
+        exit 1
+    fi
+    end=$(date +%s.%N)
+    seconds=$(awk "BEGIN { printf \"%.1f\", $end - $start }")
+    # `sir-batch` ends with where its time went: "files N check MS ms
+    # lower MS ms ownership MS ms".
+    phases=$(awk '/^files / { printf "front end %.0fs, lowering %.0fs, ownership %.0fs", $4 / 1000, $7 / 1000, $10 / 1000 }' "$work/$class.log")
+    for output in sir ownership; do
+        same=0; beyond=0; class_listed=0; class_unlisted=0
+        i=0
+        while read -r f; do
+            i=$((i + 1))
+            rel="${f#"$repo"/}"
+            if [ -s "$out/$i.beyond" ]; then
+                if [ "$class" = sir ]; then
+                    class_unlisted=$((class_unlisted + 1))
+                    report="$report\n  UNLISTED: $rel: $output (beyond the slice: $(head -1 "$out/$i.beyond"))"
+                else
+                    beyond=$((beyond + 1))
+                fi
+                continue
+            fi
+            if cmp -s "$ref/$i.$output" "$out/$i.$output"; then
+                same=$((same + 1))
+                continue
+            fi
+            if grep -qxF "$rel $output" "$allowed"; then
+                class_listed=$((class_listed + 1))
+                report="$report\n  listed:   $rel: $output"
+            else
+                class_unlisted=$((class_unlisted + 1))
+                report="$report\n  UNLISTED: $rel: $output (stage 0 in $ref/$i.$output, stage 1 in $out/$i.$output)"
+            fi
+        done < "$list"
+        total=$((total + n)); identical=$((identical + same)); lowered_beyond=$((lowered_beyond + beyond))
+        listed=$((listed + class_listed)); unlisted=$((unlisted + class_unlisted))
+        label="$class"
+        if [ "$output" = ownership ]; then
+            label=ownership
+            [ "$class" = corpus-sir ] && label=corpus-own
+        fi
+        line="$(printf '  %-12s %4d files, %4d identical, %3d beyond the slice, %3d differing as listed, %3d otherwise' \
+            "$label" "$n" "$same" "$beyond" "$class_listed" "$class_unlisted")"
+        if [ "$output" = sir ]; then
+            sir_summary="$sir_summary\n$line; stage 1 $(printf '%6s' "$seconds")s ($phases)"
+        else
+            own_summary="$own_summary\n$line (the same run)"
+        fi
+    done
+done
+
 echo "stage 1 against stage 0 (tokens, tree, trivia-tree, print, ast):"
 printf "%b\n" "$summary"
 echo "stage 1's name resolution against stage 0's (names):"
 printf "%b\n" "$names_summary"
 echo "stage 1's type checker against stage 0's (types):"
 printf "%b\n" "$types_summary"
+echo "stage 1's lowering against stage 0's (sir):"
+printf "%b\n" "$sir_summary"
+echo "stage 1's ownership checker against stage 0's (ownership):"
+printf "%b\n" "$own_summary"
 [ -n "$report" ] && printf "differences:%b\n" "$report"
 beyond_note=""
 [ "$subsets" -gt 0 ] && beyond_note=", $subsets beyond the type checker's slice and a subset"
+[ "$lowered_beyond" -gt 0 ] && beyond_note="$beyond_note, $lowered_beyond beyond the slice of lowering"
 echo "total: $total files checked, $identical identical$beyond_note, $((listed + unlisted)) differing ($listed listed in DISCREPANCIES.md, $unlisted not)"
 if [ "$unlisted" -gt 0 ]; then
     [ -z "$keep" ] && echo "(run with --keep DIR to inspect the outputs)"

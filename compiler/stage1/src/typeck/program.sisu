@@ -12,6 +12,7 @@
 from stage1.diag import TextRange
 from stage1.resolve import closest
 from stage1.syntax.ast import Block, ExprId, Mode, Vis
+from stage1.typeck.folding import Term
 from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, TyKey, Types
 
 @derive(Eq, Hash, Debug, Copy)
@@ -112,6 +113,8 @@ pub struct StructInfo:
     ## The traits `@derive` and `@delegate` name: stage 0 declares their
     ## impls from templates, which stage 1 does not unfold.
     pub derives: list[String]
+    ## The method of its `impl Drop`, which dropping a value runs.
+    pub drop: DefId?
 
 pub struct FieldInfo:
     pub name: String
@@ -127,6 +130,8 @@ pub struct EnumInfo:
     pub copy: bool
     pub must_consume: bool
     pub derives: list[String]
+    ## The method of its `impl Drop`, which dropping a value runs.
+    pub drop: DefId?
 
 pub struct VariantInfo:
     pub name: String
@@ -188,6 +193,14 @@ pub struct FnInfo:
     ## Rust's `comptime` (a keyword here).
     pub comptime_: bool
     pub intrinsic: String?
+    ## `@structural("name")`: the intrinsic that computes the function
+    ## when every bound is met by a structural impl.
+    pub structural: String?
+    ## `@keeps(self, x)`: the positions among `self` and the parameters of
+    ## the arguments whose every value the function keeps or returns.
+    pub keeps: list[int]
+    ## The `from` clause of the result: the parameters it borrows from.
+    pub from_: list[String]
     pub internal: bool
     ## The body, in the AST of the module that declares it.
     pub body: Block?
@@ -201,10 +214,36 @@ pub struct FnInfo:
     ## The body begins with contracts (`requires`, `ensures`), which the
     ## checker of stage 1 does not check.
     pub contracts: bool
+    ## A free generic function that reflects on its type parameters, or was
+    ## promoted for calling one with them (08, "Reflection"): it is checked
+    ## in its instances, not as written.
+    pub template: bool
+
+## What the bodies ask of the next resolution (08, "Reflection"): an
+## instance of a template for concrete type arguments, or the promotion of
+## a generic function that calls one with its own type parameters (stage 0's
+## `Request`, without the site, which only places a `comptime.` message).
+pub enum Request:
+    Instance(def_: DefId, args: list[Ty])
+    Promote(DefId)
+
+impl Request:
+    ## Whether the two ask for the same thing.
+    pub pure def same(self, other: Request) -> bool:
+        match self:
+            case Instance(a, x):
+                if let Instance(b, y) = other:
+                    return a == b and x == y
+            case Promote(a):
+                if let Promote(b) = other:
+                    return a == b
+        return False
 
 pub struct ConstInfo:
     pub ty: Ty
     pub value: ExprId?
+    ## The value as folding reads it (`typeck.folding`), empty without one.
+    pub terms: list[Term]
 
 pub struct ModuleData:
     ## `main` for the root module, `prelude` for the prelude.
@@ -392,6 +431,13 @@ pub struct Program:
     pub embedded: dict[String, bool]
     ## The fake the compiler wrote for each trait of the program's own.
     pub fakes: dict[DefId, DefId]
+    ## Each instance of a template declared: the template, the type
+    ## arguments and the instance.
+    pub instances: list[(DefId, list[Ty], DefId)]
+    ## When each definition was made, as stage 0 makes them (`Resolver.phase`):
+    ## stage 0 declares every module's items before it resolves any, so a
+    ## definition's place in its order is its phase and then its index.
+    pub phases: list[int]
 
 impl Program:
     pub pure def new() -> Program:
@@ -411,6 +457,8 @@ impl Program:
             generator_calls={},
             embedded={},
             fakes={},
+            instances=[],
+            phases=[],
         )
 
     pub pure def def(self, d: DefId) -> ref Def:
@@ -505,6 +553,58 @@ impl Program:
                 return t
             t = b
         return t
+
+    ## The type with every refinement in it replaced by its base, at any
+    ## depth (`list[Port]` is `list[int]`).
+    pub pure def erase_refinements(self, mut types: Types, ty: Ty) -> Ty:
+        var has = False
+        for t in types.walk(ty):
+            if let TyData.Adt(d, _) = types.data(t):
+                if self.refinement(d).is_some():
+                    has = True
+        if not has:
+            return ty
+        return self.erase_depth(mut types, ty, 0)
+
+    pure def erase_depth(self, mut types: Types, ty: Ty, depth: int) -> Ty:
+        if depth > 32:
+            return ty
+        match types.data(ty).copy():
+            case TyData.Adt(d, a):
+                var args: list[Ty] = []
+                for x in a:
+                    args.push(self.erase_depth(mut types, x, depth + 1))
+                if let Some(b) = self.refinement_base(mut types, d, args):
+                    return self.erase_depth(mut types, b, depth + 1)
+                return types.adt(d, args)
+            case TyData.Tuple(es, l):
+                var out: list[Ty] = []
+                for x in es:
+                    out.push(self.erase_depth(mut types, x, depth + 1))
+                return types.intern(TyData.Tuple(elems=out, labels=l))
+            case TyData.Fn(ps, r, pure):
+                var out: list[Ty] = []
+                for x in ps:
+                    out.push(self.erase_depth(mut types, x, depth + 1))
+                let ret = self.erase_depth(mut types, r, depth + 1)
+                return types.fn_(out, ret, pure)
+            case TyData.Ref(inner, m):
+                let i = self.erase_depth(mut types, inner, depth + 1)
+                return types.ref_(i, m)
+            case TyData.Dyn(tr):
+                var out: list[Ty] = []
+                for x in tr.args:
+                    out.push(self.erase_depth(mut types, x, depth + 1))
+                return types.intern(TyData.Dyn(TraitRef(def_=tr.def_, args=out)))
+            case TyData.Assoc(s, tr, name):
+                let st = self.erase_depth(mut types, s, depth + 1)
+                var out: list[Ty] = []
+                for x in tr.args:
+                    out.push(self.erase_depth(mut types, x, depth + 1))
+                let t = TraitRef(def_=tr.def_, args=out)
+                return types.intern(TyData.Assoc(self_ty=st, trait_=t, name=name))
+            case _:
+                return ty
 
     ## The check of a struct's invariant, `T.__check_invariant`, when the
     ## struct has `invariant` lines.
@@ -714,7 +814,9 @@ impl Program:
         match types.data(ty).copy():
             case TyData.Int | TyData.Float | TyData.Bool | TyData.Char | TyData.Str | TyData.Unit:
                 return True
-            case TyData.Never | TyData.Error | TyData.Const(_) | TyData.Var(_):
+            case TyData.Never | TyData.Error | TyData.Const(_) | TyData.ConstOp(_, _) | TyData.Var(
+                _
+            ):
                 return True
             case TyData.Ref(inner, mutable):
                 let need = if mutable and auto == Auto.Send: Auto.Send else: Auto.Sync
@@ -867,7 +969,9 @@ impl Program:
         match types.data(ty).copy():
             case TyData.Int | TyData.Float | TyData.Bool | TyData.Char | TyData.Str | TyData.Unit:
                 return True
-            case TyData.Never | TyData.Error | TyData.Const(_) | TyData.ErrSet(_):
+            case TyData.Never | TyData.Error | TyData.Const(_) | TyData.ConstOp(_, _):
+                return True
+            case TyData.ErrSet(_):
                 return True
             case TyData.Ref(t, _):
                 return self.structural_depth(mut types, t, tr, depth + 1)
@@ -1002,6 +1106,21 @@ impl Program:
                 return "_".to_string()
             case TyData.Const(n):
                 return "{n}"
+            # `W * H`, `-N`, `(W + 1) * H`.
+            case TyData.ConstOp(op, args):
+                var parts: list[String] = []
+                for a in args:
+                    let shown = self.display_in(types, a, names)
+                    match types.data(a):
+                        case TyData.ConstOp(_, _):
+                            parts.push("({shown})")
+                        case _:
+                            parts.push(shown)
+                if len(parts) == 1:
+                    return "{op.symbol()}{parts[0]}"
+                if len(parts) == 2:
+                    return "{parts[0]} {op.symbol()} {parts[1]}"
+                return "{{unknown}}".to_string()
             case TyData.Param(i):
                 if i < len(names):
                     return names[i].copy()
@@ -1079,7 +1198,11 @@ impl Program:
                 and self.prelude.index < len(self.modules):
             if self.modules[self.prelude.index].items.contains(item.name.copy()):
                 return "{module.name}.{item.name}"
-        if item.module == self.root or item.module == self.prelude:
+        if item.module == self.root
+                or item.module == self.prelude
+                or module.name.starts_with("<shims>/"):
+            # What the compiler writes for the program's traits is named
+            # `__Fake_Trait`, a name the program does not use.
             return item.name.copy()
         return "{module.name}.{item.name}"
 
@@ -1154,7 +1277,7 @@ impl Program:
         match types.data(ty).copy():
             case TyData.Int | TyData.Float | TyData.Bool | TyData.Char | TyData.Str:
                 return True
-            case TyData.Unit | TyData.Never | TyData.Error | TyData.Const(_):
+            case TyData.Unit | TyData.Never | TyData.Error | TyData.Const(_) | TyData.ConstOp(_, _):
                 return True
             case TyData.Ref(_, m):
                 return not m
@@ -1427,6 +1550,37 @@ impl Program:
             return Some((def_, args))
         return None
 
+    ## The function a call of the trait method `method` runs for `self_ty`
+    ## (stage 0's `resolve_method`): the impl's method with the impl's type
+    ## arguments, or the trait's provided method with `Self` and the
+    ## trait's arguments.
+    pub pure def resolve_method(
+        self,
+        mut types: Types,
+        method: DefId,
+        trait_args: list[Ty],
+        self_ty: Ty,
+        env: list[Predicate],
+    ) -> (DefId, list[Ty])?:
+        let f = self.fn_info(method) else:
+            return None
+        let t = f.trait_ else:
+            return None
+        let tr = TraitRef(def_=t, args=trait_args.copy())
+        let found = self.find_impl(mut types, self_ty, tr, env) else:
+            return None
+        let (imp, args) = found
+        let info = self.impl_info(imp) else:
+            return None
+        let name = ref self.defs[method.index].name
+        for (n, m) in info.methods:
+            if n == name:
+                return Some((m, args))
+        var targs = [self_ty]
+        for a in trait_args:
+            targs.push(a)
+        return Some((method, targs))
+
     ## Replaces associated types of known types by what their impls bind.
     pub pure def normalize(self, mut types: Types, ty: Ty, env: list[Predicate]) -> Ty:
         return self.normalize_depth(mut types, ty, env, 0)
@@ -1696,5 +1850,5 @@ pure def is_copy_builtin(b: str) -> bool:
         case "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "System": True
         case "HostFs" | "HostNet" | "HostClock" | "HostRand" | "HostEnv" | "HostProc" | "HostStdin": True
         case "TestClock" | "Cap" | "Lent" | "DateTime" | "Scope" | "Cancellation" | "Timer": True
-        case "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i128": True
+        case "f32" | "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i128": True
         case _: False

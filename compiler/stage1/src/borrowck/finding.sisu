@@ -1,0 +1,180 @@
+##! A finding of the ownership checker, located by SIR positions, and the
+##! diagnostic it becomes (stage 0's `Finding` and `to_diagnostic`, in
+##! `sisu-borrowck/src/lib.rs`).
+
+from stage1.diag import Diagnostic, Edit, Fix, Label, Lines, Msg, Param
+from stage1.sir import Function, Loc
+
+## A parameter of a finding's message: a text, or the source text at a
+## location (a temporary's expression).
+@derive(Eq)
+pub enum Arg:
+    Text(String)
+    Source(Loc)
+
+## A message's parameter, by name.
+@derive(Eq)
+pub struct FindingParam:
+    pub name: String
+    pub value: Arg
+
+@derive(Eq)
+pub struct FindingLabel:
+    pub loc: Loc?
+    pub msg: Msg
+    pub params: list[FindingParam]
+
+## A fix: its message, the message's parameters, and the edit that makes it
+## when there is one.
+@derive(Eq)
+pub struct FindingFix:
+    pub msg: Msg
+    pub params: list[FindingParam]
+    pub edit: (Loc, String)?
+
+## One diagnostic of the checker, located by SIR positions.
+@derive(Eq)
+pub struct Finding:
+    pub msg: Msg
+    pub params: list[FindingParam]
+    ## The SIR function and its source index.
+    pub function: String
+    pub source: int
+    pub loc: Loc?
+    pub labels: list[FindingLabel]
+    pub notes: list[(Msg, list[FindingParam])]
+    pub fixes: list[FindingFix]
+    ## The block and statement the finding is about.
+    pub site: (int, int)?
+    ## The loan a conflict is about, so that one mistake is reported once.
+    pub loan: int?
+
+## A parameter with a text value.
+pub pure def text(name: str, value: str) -> FindingParam:
+    return FindingParam(name=name.to_string(), value=Arg.Text(value.to_string()))
+
+## A parameter with any value.
+pub pure def param(name: str, own value: Arg) -> FindingParam:
+    return FindingParam(name=name.to_string(), value=value)
+
+impl Finding:
+    pub pure def new(msg: Msg, f: Function, loc: Loc?) -> Finding:
+        return Finding(
+            msg=msg,
+            params=[],
+            function=f.name.copy(),
+            source=f.source,
+            loc=loc,
+            labels=[],
+            notes=[],
+            fixes=[],
+            site=None,
+            loan=None,
+        )
+
+    ## Whether the finding is an ownership rule, which the dynamic monitor
+    ## observes, rather than purity or a second assignment to a `let`,
+    ## which it does not.
+    pub pure def is_ownership(self) -> bool:
+        return match self.msg:
+            case Msg.TypeImpureCall | Msg.TypeImpureValueCall | Msg.TypeImpureDrop | Msg.TypeReassignLet: False
+            case _: True
+
+    pub pure def with(own self, name: str, value: str) -> Finding:
+        var me = self
+        me.params.push(text(name, value))
+        return me
+
+    pub pure def with_arg(own self, name: str, own value: Arg) -> Finding:
+        var me = self
+        me.params.push(param(name, value))
+        return me
+
+    pub pure def label(own self, loc: Loc?, msg: Msg, own params: list[FindingParam]) -> Finding:
+        var me = self
+        me.labels.push(FindingLabel(loc=loc, msg=msg, params=params))
+        return me
+
+    pub pure def note(own self, msg: Msg, own params: list[FindingParam]) -> Finding:
+        var me = self
+        me.notes.push((msg, params))
+        return me
+
+    ## A fix, with the edit that makes it when there is one.
+    pub pure def fix(
+        own self, msg: Msg, own params: list[FindingParam], own edit: (Loc, String)?
+    ) -> Finding:
+        var me = self
+        me.fixes.push(FindingFix(msg=msg, params=params, edit=edit))
+        return me
+
+    pub pure def at(own self, block: int, stmt: int) -> Finding:
+        var me = self
+        me.site = Some((block, stmt))
+        return me
+
+## Drops a finding that repeats an earlier one: the same message, place,
+## parameters and function.
+pub pure def dedup(mut fs: list[Finding]):
+    var kept: list[Finding] = []
+    for f in fs:
+        var seen = False
+        for k in kept:
+            if k.msg == f.msg
+                    and k.loc == f.loc
+                    and k.params == f.params
+                    and k.function == f.function:
+                seen = True
+                break
+        if not seen:
+            kept.push(f.copy())
+    fs = kept
+
+## The byte range of a SIR location in a text.
+pub pure def span_of(text: str, lines: Lines, loc: Loc?) -> (int, int):
+    let l = loc else:
+        return (0, 0)
+    let start = lines.offset(text, l.line, l.col)
+    var end = start
+    if l.has_end():
+        end = lines.offset(text, l.end_line, l.end_col)
+    return (start, end)
+
+pure def render_arg(text: str, lines: Lines, a: Arg) -> String:
+    return match a:
+        case Arg.Text(t): t.copy()
+        case Arg.Source(l): source_text(text, lines, l)
+
+## The text at a location.
+pure def source_text(text: str, lines: Lines, l: Loc) -> String:
+    let (start, end) = span_of(text, lines, Some(l))
+    if start > end or end > text.byte_len():
+        return String.new()
+    return text.byte_slice(start, end).to_string()
+
+pure def params_of(text: str, lines: Lines, ps: list[FindingParam]) -> list[Param]:
+    var out: list[Param] = []
+    for p in ps:
+        out.push(Param(name=p.name.copy(), value=render_arg(text, lines, p.value)))
+    return out
+
+## A finding as a diagnostic of the file whose text is `text` (the file of
+## its SIR source).
+pub pure def to_diagnostic(f: Finding, text: str, lines: Lines) -> Diagnostic:
+    let (start, end) = span_of(text, lines, f.loc)
+    var d = Diagnostic.new(f.msg, start, end)
+    d.params = params_of(text, lines, f.params)
+    for l in f.labels:
+        if l.loc.is_none():
+            continue
+        let (ls, le) = span_of(text, lines, l.loc)
+        d.labels.push(Label(msg=l.msg, start=ls, end=le, params=params_of(text, lines, l.params)))
+    for (m, _) in f.notes:
+        d.notes.push(m)
+    for x in f.fixes:
+        var edits: list[Edit] = []
+        if let Some((loc, t)) = x.edit:
+            let (es, ee) = span_of(text, lines, Some(loc))
+            edits.push(Edit(start=es, end=ee, text=t.copy()))
+        d.fixes.push(Fix(msg=x.msg, params=params_of(text, lines, x.params), edits=edits))
+    return d

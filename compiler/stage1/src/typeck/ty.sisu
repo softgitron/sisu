@@ -7,6 +7,8 @@
 ##! (`TyData`), whose parts are `Ty`s again: a recursive type would cost
 ##! stage 0's ownership checker exponential time (`syntax.ast` says why).
 
+from stage1.sir import ConstOp, Folded
+
 ## A definition of the program, by its index in `Program.defs`.
 @derive(Eq, Hash, Debug, Copy)
 pub struct DefId:
@@ -79,6 +81,9 @@ pub enum TyData:
     Assoc(self_ty: Ty, trait_: TraitRef, name: String)
     ## A constant argument of a `const` generic parameter.
     Const(int)
+    ## An integer operation on constant arguments not known yet: `W * H`
+    ## in `Array[T, W * H]`, a `Const` once they are (`Types.const_op`).
+    ConstOp(op: ConstOp, args: list[Ty])
     ## An inference variable of the body being checked.
     Var(int)
     Error
@@ -194,8 +199,26 @@ impl Types:
                 return self.intern(TyData.Dyn(new))
             case TyData.Assoc(s, tr, name):
                 return self.subst_assoc(s, tr, name, args)
+            case TyData.ConstOp(op, a):
+                let new = self.subst_all(a, args)
+                return self.const_op(op, new)
             case _:
                 return t
+
+    ## `op` on `args`, folded to a `Const` when every argument is one and
+    ## the operation has a value (it may overflow, as at run time; the type
+    ## then stays as it is written).
+    pub pure def const_op(mut self, op: ConstOp, own args: list[Ty]) -> Ty:
+        var values: list[int] = []
+        for a in args:
+            match self.data(a):
+                case TyData.Const(n):
+                    values.push(n)
+                case _:
+                    return self.intern(TyData.ConstOp(op=op, args=args))
+        if let Folded.Value(n) = op.fold(values):
+            return self.intern(TyData.Const(n))
+        return self.intern(TyData.ConstOp(op=op, args=args))
 
     pure def subst_tuple(mut self, elems: list[Ty], labels: list[String], args: list[Ty]) -> Ty:
         let e = self.subst_all(elems, args)
@@ -244,6 +267,9 @@ impl Types:
                 self.walk_into(s, mut out)
                 for x in tr.args:
                     self.walk_into(x, mut out)
+            case TyData.ConstOp(_, a):
+                for x in a:
+                    self.walk_into(x, mut out)
             case _:
                 pass
 
@@ -291,6 +317,7 @@ pure def key_text(d: TyData) -> String:
         case TyData.Dyn(tr): "D{tr.def_.index}{indices(tr.args)}"
         case TyData.Assoc(s, tr, name): "S{s.index}:{tr.def_.index}{indices(tr.args)}{name}"
         case TyData.Const(n): "C{n}"
+        case TyData.ConstOp(op, args): "O{op.name()}{indices(args)}"
         case TyData.Var(i): "V{i}"
 
 pure def indices(ts: list[Ty]) -> String:

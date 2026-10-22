@@ -1,0 +1,138 @@
+##! Places as the programmer wrote them, for diagnostics (stage 0's
+##! `sisu-borrowck/src/names.rs`): `u.name` for `_1.*.0`, `xs[...]` for an
+##! element. A temporary has no name, so it is described by the source text
+##! of the expression that made it.
+
+from stage1.borrowck.finding import Arg
+from stage1.borrowck.types import Types
+from stage1.sir import Function, Loc, LocalId, Operand, Place, Proj, Rvalue, StatementKind, Terminator, Type
+
+## The name of a local, or `_N` for an unnamed one.
+pub pure def local_name(f: Function, l: LocalId) -> String:
+    if l.index < len(f.locals):
+        if let Some(n) = f.locals[l.index].name:
+            return n.copy()
+    return "_{l.index}"
+
+## Whether a local has a source name.
+pub pure def is_named(f: Function, l: LocalId) -> bool:
+    if l.index >= len(f.locals):
+        return False
+    if let Some(n) = f.locals[l.index].name:
+        return not n.is_empty()
+    return False
+
+## Where an unnamed local gets its value: its first assignment.
+pub pure def temp_source(f: Function, l: LocalId) -> Loc?:
+    for b in f.blocks:
+        for s in b.stmts:
+            match s.kind:
+                case StatementKind.Assign(d, _):
+                    if d.local == l and d.proj.is_empty():
+                        return s.loc
+                case StatementKind.Call(d, _, _):
+                    if d.local == l and d.proj.is_empty():
+                        return s.loc
+                case _:
+                    pass
+    return None
+
+## A place in source terms.
+pub pure def place_name(types: Types, f: Function, p: Place) -> Arg:
+    if not is_named(f, p.local):
+        if let Some(loc) = temp_source(f, p.local):
+            if loc.has_end():
+                return Arg.Source(loc)
+    return Arg.Text(place_text(types, f, p))
+
+## The names of a closure's captures, from its environment's name
+## (`env(a, b)`, which lowering gives it).
+pub pure def capture_names(f: Function) -> list[String]?:
+    if len(f.locals) < 2:
+        return None
+    let n = f.locals[1].name.copy() else:
+        return None
+    if not n.starts_with("env(") or not n.ends_with(")"):
+        return None
+    var out: list[String] = []
+    for part in n.byte_slice(4, n.byte_len() - 1).split(", "):
+        out.push(part.to_string())
+    return Some(out)
+
+pub pure def place_text(types: Types, f: Function, p: Place) -> String:
+    var s = local_name(f, p.local)
+    var ty: Type? = None
+    if p.local.index < len(f.locals):
+        ty = Some(f.locals[p.local.index].ty.copy())
+    var variant: int? = None
+    var start = 0
+    # A capture is named as the closure's code names it: `counter`, not
+    # `env.0.*`.
+    if p.local.index == 1 and not p.proj.is_empty():
+        if let Some(names) = capture_names(f):
+            if let Proj.Field(k) = p.proj[0]:
+                if k < len(names):
+                    s = names[k].copy()
+                    var elem: Type? = None
+                    if let Some(Type.Tuple(es)) = ty:
+                        if k < len(es):
+                            elem = Some(es[k].copy())
+                    ty = elem
+                    start = 1
+                    if len(p.proj) > 1 and p.proj[1] == Proj.Deref:
+                        if let Some(Type.Ref(inner, _)) = ty.copy():
+                            ty = Some(inner[0].copy())
+                            start = 2
+    for i in range(start, len(p.proj)):
+        match p.proj[i]:
+            case Proj.Deref:
+                var inner_ty: Type? = None
+                if let Some(Type.Ref(inner, _)) = ty:
+                    inner_ty = Some(inner[0].copy())
+                ty = inner_ty
+            case Proj.Downcast(v):
+                variant = Some(v)
+            case Proj.Field(k):
+                var name: String? = None
+                if let Some(t) = ty:
+                    name = types.field_name(t, variant, k)
+                # A payload field of an option or result is the value inside.
+                let is_payload = variant.is_some() and name.is_none()
+                if not is_payload:
+                    s.push(".")
+                    s.push(name ?? "{k}")
+                var next: Type? = None
+                if let Some(t) = ty:
+                    next = types.field_ty(t, variant, k)
+                ty = next
+                variant = None
+            case _:
+                s.push("[...]")
+                ty = None
+    return s
+
+## Whether a drop is the first half of an assignment over the place (the
+## old value goes), rather than the end of the place's scope. Elaboration
+## may have narrowed the drop to the parts that hold something, so the
+## assignment may be to a place containing the dropped one.
+pub pure def is_overwrite(f: Function, b: int, place: Place) -> bool:
+    let Terminator.Goto(t) = f.blocks[b].term else:
+        return False
+    if t.index >= len(f.blocks):
+        return False
+    for s in f.blocks[t.index].stmts:
+        if let StatementKind.Assign(_, Rvalue.Use(Operand.Const(_))) = s.kind:
+            continue
+        if let StatementKind.Assign(p, _) = s.kind:
+            return p.local == place.local and starts_with(place.proj, p.proj)
+        return False
+    return False
+
+## Whether `whole` begins with `prefix`.
+pub pure def starts_with(whole: list[Proj], prefix: list[Proj]) -> bool:
+    if len(prefix) > len(whole):
+        return False
+    for i in range(len(prefix)):
+        if whole[i] != prefix[i]:
+            return False
+    return True

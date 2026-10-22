@@ -1,7 +1,8 @@
-##! The AST in the notation of Rust's `Debug` (`{:?}`), field for field in
+##! The AST in the notation of Rust's derived `Debug`, field for field in
 ##! the order of stage 0's `sisu-syntax/src/ast/mod.rs`, so that stage 1's
-##! AST can be compared with what stage 0's `ast::build::module` makes:
-##! `docs`, `broken` and then one line per item.
+##! AST can be compared with what `sisu parse --ast` prints: the module's
+##! `{:#?}`. The printer writes the one-line form (`{:?}`) and `pretty`
+##! lays it out as `{:#?}` does.
 
 from stage1.diag import TextRange
 from stage1.syntax.ast import (
@@ -55,17 +56,82 @@ from stage1.syntax.ast import (
 )
 from stage1.text import debug_char, debug_str
 
-## The lines of a module: its docs, its broken names, and each item.
-pub pure def module_lines(m: Module) -> String:
-    var out = String.new("docs ")
-    strings(mut out, m.docs)
-    out.push("\nbroken ")
-    strings(mut out, m.broken_names)
-    out.push("\n")
+## What `sisu parse --ast` prints for a module: its `{:#?}`, and a line
+## break.
+pub pure def module_debug(m: Module) -> String:
+    var out = String.new("Module {{ items: ")
     let d = D(ast=ref m.ast)
-    for i in m.items:
-        d.item(mut out, i)
-        out.push("\n")
+    d.items(mut out, m.items)
+    out.push(", docs: ")
+    strings(mut out, m.docs)
+    out.push(", broken_names: ")
+    strings(mut out, m.broken_names)
+    out.push(" }}")
+    var text = pretty(out)
+    text.push("\n")
+    return text
+
+## Rust's `{:#?}` of a value, from its `{:?}` as derived `Debug` writes it:
+## a struct, a tuple or a list that is not empty puts each field or element
+## on a line of its own, four spaces deeper, ending in `,`, and its closing
+## bracket on a line of its own. Texts and characters are taken whole.
+pub pure def pretty(s: str) -> String:
+    var out = String.new()
+    var breaks: list[String] = ["\n"]
+    var depth = 0
+    var start = 0
+    var i = 0
+    let n = s.byte_len()
+    while i < n:
+        let b = s.byte_at(i)
+        if b == 34:
+            # A text: to its closing quote, past escaped ones.
+            i += 1
+            while i < n and s.byte_at(i) != 34:
+                i += if s.byte_at(i) == 92: 2 else: 1
+            i += 1
+        elif b == 39:
+            # A character: `'a'`, `'\''`, `'\u{301}'`.
+            i += if i + 1 < n and s.byte_at(i + 1) == 92: 3 else: 2
+            while i < n and s.byte_at(i) != 39:
+                i += 1
+            i += 1
+        elif b == 123 or b == 40 or b == 91:
+            let close: u8 = match b:
+                case 123: 125
+                case 40: 41
+                case _: 93
+            if i + 1 < n and s.byte_at(i + 1) == close:
+                # `()`, `[]`: empty, as they are.
+                i += 2
+                continue
+            out.push(s.byte_slice(start, i + 1))
+            depth += 1
+            while len(breaks) <= depth:
+                breaks.push("{breaks[len(breaks) - 1]}    ")
+            out.push(breaks[depth])
+            # A struct's `{` is followed by a space.
+            i += if b == 123: 2 else: 1
+            start = i
+        elif b == 44:
+            out.push(s.byte_slice(start, i + 1))
+            out.push(breaks[depth])
+            # `, `
+            i += 2
+            start = i
+        elif b == 125 or b == 41 or b == 93:
+            # A struct's `}` follows a space.
+            let end = if b == 125: i - 1 else: i
+            out.push(s.byte_slice(start, end))
+            out.push(",")
+            depth -= 1
+            out.push(breaks[depth])
+            out.push(s.byte_slice(i, i + 1))
+            i += 1
+            start = i
+        else:
+            i += 1
+    out.push(s.byte_slice(start, n))
     return out
 
 pure def strings(mut out: String, xs: list[String]):
@@ -1212,6 +1278,10 @@ impl D:
                 out.push(" }}")
             case ConstArg(n):
                 out.push("ConstArg({n})")
+            case ConstExpr(e):
+                out.push("ConstExpr(")
+                self.expr(mut out, e)
+                out.push(")")
             case Dyn(inner):
                 out.push("Dyn(")
                 self.type_expr(mut out, inner)
@@ -1319,3 +1389,10 @@ impl D:
             first = False
             self.pattern(mut out, x)
         out.push("]")
+
+test "the pretty form lays out structs, tuples and lists as Rust's `{{:#?}}` does":
+    let compact = "Item {{ name: Some(\"a, (b)\"), xs: [], ys: [1, 2], c: '\\'', t: () }}"
+    var expected = String.new("Item {{\n    name: Some(\n        \"a, (b)\",\n    ),\n")
+    expected.push("    xs: [],\n    ys: [\n        1,\n        2,\n    ],\n")
+    expected.push("    c: '\\'',\n    t: (),\n}}")
+    assert pretty(compact) == expected

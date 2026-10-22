@@ -1,0 +1,120 @@
+##! What folding reads of an expression (`typeck.consts`): stage 0 folds a
+##! type's constant argument from the AST, and a constant's value from the
+##! AST of the module that declares it, wherever the constant is used. A
+##! checker of stage 1 holds the syntax of its own module only, so each
+##! constant keeps this much of its value with it (`ConstInfo.terms`), and
+##! an argument written in a type is read the same way.
+
+from stage1.diag import TextRange
+from stage1.sir import ConstOp
+from stage1.syntax.ast import Ast, BinOp, ExprId, ExprKind, UnOp
+
+## An expression as folding reads it.
+@derive(Eq, Debug)
+pub enum TermKind:
+    ## An integer literal of type `int`, with its value when it fits one.
+    Int(int?)
+    ## A literal or an operation whose value has another type than `int`.
+    NotInt(String)
+    Name(String)
+    ## An operation on the terms with these indices.
+    Unary(op: ConstOp, inner: int)
+    Binary(op: ConstOp, lhs: int, rhs: int)
+    ## Anything else, which is not a constant.
+    Other
+
+@derive(Eq, Debug)
+pub struct Term:
+    pub kind: TermKind
+    pub range: TextRange
+
+## The terms of the expression `e`, its operands before it: the last is
+## the whole.
+pub pure def terms(ast: Ast, e: ExprId) -> list[Term]:
+    var out: list[Term] = []
+    _ = term(ast, e, mut out)
+    return out
+
+pure def term(ast: Ast, e: ExprId, mut out: list[Term]) -> int:
+    let x = ast.expr(e)
+    let r = x.range
+    var kind = TermKind.Other
+    match x.kind:
+        case ExprKind.Int(_, value, suffix):
+            kind = int_term(value, suffix)
+        case ExprKind.Float(_, _, suffix):
+            match suffix:
+                case Some(s):
+                    kind = TermKind.NotInt(s.copy())
+                case None:
+                    kind = TermKind.NotInt("f64".to_string())
+        case ExprKind.Char(_):
+            kind = TermKind.NotInt("char".to_string())
+        case ExprKind.Str(_) | ExprKind.RawStr(_):
+            kind = TermKind.NotInt("str".to_string())
+        case ExprKind.ByteStr(_):
+            kind = TermKind.NotInt("bytes".to_string())
+        case ExprKind.Compare(_, _):
+            kind = TermKind.NotInt("bool".to_string())
+        case ExprKind.Paren(inner):
+            # Folded as what it holds.
+            return term(ast, inner, mut out)
+        case ExprKind.Name(n):
+            if n == "True" or n == "False":
+                kind = TermKind.NotInt("bool".to_string())
+            else:
+                kind = TermKind.Name(n.copy())
+        case ExprKind.Unary(op, inner):
+            match op:
+                case UnOp.Neg:
+                    let i = term(ast, inner, mut out)
+                    kind = TermKind.Unary(op=ConstOp.Neg, inner=i)
+                case UnOp.BitNot:
+                    let i = term(ast, inner, mut out)
+                    kind = TermKind.Unary(op=ConstOp.BitNot, inner=i)
+                case UnOp.Not:
+                    kind = TermKind.NotInt("bool".to_string())
+        case ExprKind.Binary(op, lhs, rhs):
+            match const_op(op):
+                case Some(o):
+                    let a = term(ast, lhs, mut out)
+                    let b = term(ast, rhs, mut out)
+                    kind = TermKind.Binary(op=o, lhs=a, rhs=b)
+                case None:
+                    if op == BinOp.And or op == BinOp.Or:
+                        kind = TermKind.NotInt("bool".to_string())
+        case _:
+            pass
+    out.push(Term(kind=kind, range=r))
+    return len(out) - 1
+
+## An integer literal: an `int` (or `i64`) when it fits one; with another
+## suffix, a value of that type.
+pure def int_term(value: u128?, suffix: String?) -> TermKind:
+    match suffix:
+        case None:
+            pass
+        case Some(s):
+            if s == "uint":
+                return TermKind.NotInt("u64".to_string())
+            if s != "int" and s != "i64":
+                return TermKind.NotInt(s.copy())
+    let v = value else:
+        return TermKind.Int(None)
+    return TermKind.Int(v.to_int())
+
+## The constant operation of a binary operator, for those folding knows.
+pure def const_op(op: BinOp) -> ConstOp?:
+    return match op:
+        case Add: Some(ConstOp.Add)
+        case Sub: Some(ConstOp.Sub)
+        case Mul: Some(ConstOp.Mul)
+        case FloorDiv: Some(ConstOp.FloorDiv)
+        case Mod: Some(ConstOp.Mod)
+        case Pow: Some(ConstOp.Pow)
+        case Shl: Some(ConstOp.Shl)
+        case Shr: Some(ConstOp.Shr)
+        case BitAnd: Some(ConstOp.BitAnd)
+        case BitOr: Some(ConstOp.BitOr)
+        case BitXor: Some(ConstOp.BitXor)
+        case _: None

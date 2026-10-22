@@ -1,0 +1,228 @@
+##! A set of small integers, the dataflow lattice element, and a table of
+##! such sets in one buffer (stage 0's `sisu-borrowck/src/bitset.rs`). A
+##! word holds 62 members here, so that no operation reaches the sign bit
+##! of an `int`.
+
+## The members a word holds.
+pub const WORD: int = 62
+
+pure def words_for(n: int) -> int:
+    return (n + WORD - 1) // WORD
+
+pure def bit(i: int) -> int:
+    return 1 << (i % WORD)
+
+@derive(Eq)
+pub struct BitSet:
+    pub words: list[int]
+
+impl BitSet:
+    pub pure def new(n: int) -> BitSet:
+        var words: list[int] = []
+        for _ in range(words_for(n)):
+            words.push(0)
+        return BitSet(words=words)
+
+    pub pure def contains(self, i: int) -> bool:
+        let w = i // WORD
+        if w >= len(self.words):
+            return False
+        return (self.words[w] & bit(i)) != 0
+
+    ## Adds `i`; returns whether it was not there.
+    pub pure def insert(mut self, i: int) -> bool:
+        let w = i // WORD
+        while len(self.words) <= w:
+            self.words.push(0)
+        if (self.words[w] & bit(i)) != 0:
+            return False
+        self.words[w] = self.words[w] | bit(i)
+        return True
+
+    pub pure def remove(mut self, i: int):
+        let w = i // WORD
+        if w < len(self.words) and (self.words[w] & bit(i)) != 0:
+            self.words[w] = self.words[w] ^ bit(i)
+
+    ## Adds every member of `other`; returns whether anything changed.
+    pub pure def union(mut self, other: BitSet) -> bool:
+        while len(self.words) < len(other.words):
+            self.words.push(0)
+        var changed = False
+        for k in range(len(other.words)):
+            let n = self.words[k] | other.words[k]
+            if n != self.words[k]:
+                self.words[k] = n
+                changed = True
+        return changed
+
+    ## Keeps only the members of `other`; returns whether anything changed.
+    pub pure def intersect(mut self, other: BitSet) -> bool:
+        var changed = False
+        for k in range(len(self.words)):
+            var b = 0
+            if k < len(other.words):
+                b = other.words[k]
+            let n = self.words[k] & b
+            if n != self.words[k]:
+                self.words[k] = n
+                changed = True
+        return changed
+
+    pub pure def subtract(mut self, other: BitSet):
+        for k in range(min(len(self.words), len(other.words))):
+            self.words[k] = self.words[k] ^ (self.words[k] & other.words[k])
+
+    pub pure def clear(mut self):
+        for k in range(len(self.words)):
+            self.words[k] = 0
+
+    pub pure def is_empty(self) -> bool:
+        for w in self.words:
+            if w != 0:
+                return False
+        return True
+
+    ## The members, in increasing order.
+    pub pure def items(self) -> list[int]:
+        var out: list[int] = []
+        for k in range(len(self.words)):
+            var w = self.words[k]
+            var i = k * WORD
+            while w != 0:
+                if (w & 1) != 0:
+                    out.push(i)
+                w = w >> 1
+                i += 1
+        return out
+
+    ## The smallest member.
+    pub pure def first(self) -> int?:
+        for k in range(len(self.words)):
+            var w = self.words[k]
+            var i = k * WORD
+            while w != 0:
+                if (w & 1) != 0:
+                    return Some(i)
+                w = w >> 1
+                i += 1
+        return None
+
+## One set per row, every row the same number of words, kept in one
+## buffer: the loans dataflow's state has a set per local, and a copy of it
+## is one list rather than one per local.
+@derive(Eq)
+pub struct Rows:
+    ## Words per row.
+    pub width: int
+    pub rows: int
+    pub words: list[int]
+
+impl Rows:
+    ## `rows` empty sets, each with room for the members below `bits`.
+    pub pure def new(rows: int, bits: int) -> Rows:
+        let width = words_for(bits)
+        var words: list[int] = []
+        for _ in range(rows * width):
+            words.push(0)
+        return Rows(width=width, rows=rows, words=words)
+
+    pub pure def len(self) -> int:
+        return self.rows
+
+    ## Makes every row `width` words wide (a member past the room made at
+    ## the start).
+    pure def widen(mut self, width: int):
+        if width <= self.width:
+            return
+        var words: list[int] = []
+        for r in range(self.rows):
+            for k in range(width):
+                if k < self.width:
+                    words.push(self.words[r * self.width + k])
+                else:
+                    words.push(0)
+        self.width = width
+        self.words = words
+
+    pub pure def contains(self, r: int, i: int) -> bool:
+        let w = i // WORD
+        if r >= self.rows or w >= self.width:
+            return False
+        return (self.words[r * self.width + w] & bit(i)) != 0
+
+    pub pure def insert(mut self, r: int, i: int) -> bool:
+        if r >= self.rows:
+            return False
+        self.widen(i // WORD + 1)
+        let at = r * self.width + i // WORD
+        let had = (self.words[at] & bit(i)) != 0
+        self.words[at] = self.words[at] | bit(i)
+        return not had
+
+    ## Row `r` as a set of its own.
+    pub pure def get(self, r: int) -> BitSet:
+        var words: list[int] = []
+        if r < self.rows:
+            for k in range(self.width):
+                words.push(self.words[r * self.width + k])
+        return BitSet(words=words)
+
+    ## Replaces row `r` with `b`.
+    pub pure def set(mut self, r: int, b: BitSet):
+        self.clear_row(r)
+        _ = self.union_row(r, b)
+
+    ## Adds every member of `b` to row `r`; returns whether anything
+    ## changed.
+    pub pure def union_row(mut self, r: int, b: BitSet) -> bool:
+        if r >= self.rows:
+            return False
+        var last = len(b.words) - 1
+        while last >= 0 and b.words[last] == 0:
+            last -= 1
+        self.widen(last + 1)
+        var changed = False
+        for k in range(min(self.width, len(b.words))):
+            let at = r * self.width + k
+            let n = self.words[at] | b.words[k]
+            if n != self.words[at]:
+                self.words[at] = n
+                changed = True
+        return changed
+
+    pub pure def clear_row(mut self, r: int):
+        if r >= self.rows:
+            return
+        for k in range(self.width):
+            self.words[r * self.width + k] = 0
+
+    ## Adds the members of row `r` to `out`.
+    pub pure def add_to(self, r: int, mut out: BitSet):
+        if r >= self.rows:
+            return
+        while len(out.words) < self.width:
+            out.words.push(0)
+        for k in range(self.width):
+            out.words[k] = out.words[k] | self.words[r * self.width + k]
+
+    ## The members of row `r`, in increasing order.
+    pub pure def row_items(self, r: int) -> list[int]:
+        return self.get(r).items()
+
+    ## Adds every row of `o` to the same row here; returns whether anything
+    ## changed.
+    pub pure def union(mut self, o: Rows) -> bool:
+        self.widen(o.width)
+        var changed = False
+        if self.width == o.width:
+            for k in range(min(len(self.words), len(o.words))):
+                let n = self.words[k] | o.words[k]
+                if n != self.words[k]:
+                    self.words[k] = n
+                    changed = True
+        else:
+            for r in range(min(self.rows, o.rows)):
+                if self.union_row(r, o.get(r)):
+                    changed = True
+        return changed

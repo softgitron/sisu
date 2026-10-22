@@ -65,6 +65,9 @@ pub enum Msg:
     ParseParenthesize
     ResolveUndefinedName
     ResolveUndefinedType
+    ResolveConstExpression
+    ResolveConstNotInt
+    ComptimePanicked
     ResolveDuplicateDefinition
     ResolveFirstDefined
     ResolveSimilarName
@@ -83,6 +86,7 @@ pub enum Msg:
     TypeIntegerDivision
     TypeUseFloorDivision
     TypeFloatFloorDivision
+    TypeFloatSuffix
     TypeMixedNumbers
     TypeConvertToFloat
     TypeBinaryOperator
@@ -189,6 +193,52 @@ pub enum Msg:
     TypeRemovePure
     TypeGeneratorResult
     TypeStructuralOnly
+    # The ownership checker's (`sisu-borrowck`), on SIR.
+    TypeImpureCall
+    TypeImpureValueCall
+    TypeImpureDrop
+    TypeDeclaredPureHere
+    TypeUninitialized
+    TypeReassignLet
+    TypeMustConsumeArgument
+    BorrowUseAfterMove
+    BorrowUseAfterPartialMove
+    BorrowMoveOutOfDrop
+    BorrowMoveOutOfPlace
+    BorrowMustConsume
+    BorrowMustConsumeExit
+    BorrowMustConsumeIntrinsic
+    BorrowMovedHere
+    BorrowMovedInLoop
+    BorrowDeclaredHere
+    BorrowAssignedHere
+    BorrowAssignedInLoop
+    BorrowDropImplHere
+    BorrowMadeHere
+    BorrowCopyBeforeMove
+    BorrowUnvisitedRest
+    BorrowModifyWhileBorrowed
+    BorrowUseWhileMutBorrowed
+    BorrowMoveWhileBorrowed
+    BorrowMutWhileBorrowed
+    BorrowDoesNotLiveLongEnough
+    BorrowReturnLocal
+    BorrowReturnNotFrom
+    BorrowStoreInPlainType
+    BorrowStoreIntoCaller
+    TaskBorrowsBodyLocal
+    TaskBorrowsElsewhere
+    BorrowBorrowedBy
+    BorrowBorrowedHere
+    BorrowLaterUsed
+    BorrowMoveAfter
+    BorrowDeclareOutside
+    BorrowBindTemporary
+    BorrowReturnOwned
+    BorrowUseOwnClosure
+    TaskUseOwn
+    BorrowAddFrom
+    BorrowDeclareView
 
 impl Msg:
     ## The catalog identifier.
@@ -246,6 +296,9 @@ impl Msg:
             case ParseUseIfExpression: "parse.use-if-expression"
             case ParseParenthesize: "parse.parenthesize"
             case ResolveUndefinedName: "resolve.undefined-name"
+            case ResolveConstExpression: "resolve.const-expression"
+            case ResolveConstNotInt: "resolve.const-not-int"
+            case ComptimePanicked: "comptime.panicked"
             case ResolveUndefinedType: "resolve.undefined-type"
             case ResolveDuplicateDefinition: "resolve.duplicate-definition"
             case ResolveFirstDefined: "resolve.first-defined"
@@ -265,6 +318,7 @@ impl Msg:
             case TypeIntegerDivision: "type.integer-division"
             case TypeUseFloorDivision: "type.use-floor-division"
             case TypeFloatFloorDivision: "type.float-floor-division"
+            case TypeFloatSuffix: "type.float-suffix"
             case TypeMixedNumbers: "type.mixed-numbers"
             case TypeConvertToFloat: "type.convert-to-float"
             case TypeBinaryOperator: "type.binary-operator"
@@ -371,6 +425,51 @@ impl Msg:
             case TypeRemovePure: "type.remove-pure"
             case TypeGeneratorResult: "type.generator-result"
             case TypeStructuralOnly: "type.structural-only"
+            case TypeImpureCall: "type.impure-call"
+            case TypeImpureValueCall: "type.impure-value-call"
+            case TypeImpureDrop: "type.impure-drop"
+            case TypeDeclaredPureHere: "type.declared-pure-here"
+            case TypeUninitialized: "type.uninitialized"
+            case TypeReassignLet: "type.reassign-let"
+            case TypeMustConsumeArgument: "type.must-consume-argument"
+            case BorrowUseAfterMove: "borrow.use-after-move"
+            case BorrowUseAfterPartialMove: "borrow.use-after-partial-move"
+            case BorrowMoveOutOfDrop: "borrow.move-out-of-drop"
+            case BorrowMoveOutOfPlace: "borrow.move-out-of-place"
+            case BorrowMustConsume: "borrow.must-consume"
+            case BorrowMustConsumeExit: "borrow.must-consume-exit"
+            case BorrowMustConsumeIntrinsic: "borrow.must-consume-intrinsic"
+            case BorrowMovedHere: "borrow.moved-here"
+            case BorrowMovedInLoop: "borrow.moved-in-loop"
+            case BorrowDeclaredHere: "borrow.declared-here"
+            case BorrowAssignedHere: "borrow.assigned-here"
+            case BorrowAssignedInLoop: "borrow.assigned-in-loop"
+            case BorrowDropImplHere: "borrow.drop-impl-here"
+            case BorrowMadeHere: "borrow.made-here"
+            case BorrowCopyBeforeMove: "borrow.copy-before-move"
+            case BorrowUnvisitedRest: "borrow.unvisited-rest"
+            case BorrowModifyWhileBorrowed: "borrow.modify-while-borrowed"
+            case BorrowUseWhileMutBorrowed: "borrow.use-while-mut-borrowed"
+            case BorrowMoveWhileBorrowed: "borrow.move-while-borrowed"
+            case BorrowMutWhileBorrowed: "borrow.mut-while-borrowed"
+            case BorrowDoesNotLiveLongEnough: "borrow.does-not-live-long-enough"
+            case BorrowReturnLocal: "borrow.return-local"
+            case BorrowReturnNotFrom: "borrow.return-not-from"
+            case BorrowStoreInPlainType: "borrow.store-in-plain-type"
+            case BorrowStoreIntoCaller: "borrow.store-into-caller"
+            case TaskBorrowsBodyLocal: "task.borrows-body-local"
+            case TaskBorrowsElsewhere: "task.borrows-elsewhere"
+            case BorrowBorrowedBy: "borrow.borrowed-by"
+            case BorrowBorrowedHere: "borrow.borrowed-here"
+            case BorrowLaterUsed: "borrow.later-used"
+            case BorrowMoveAfter: "borrow.move-after"
+            case BorrowDeclareOutside: "borrow.declare-outside"
+            case BorrowBindTemporary: "borrow.bind-temporary"
+            case BorrowReturnOwned: "borrow.return-owned"
+            case BorrowUseOwnClosure: "borrow.use-own-closure"
+            case TaskUseOwn: "task.use-own"
+            case BorrowAddFrom: "borrow.add-from"
+            case BorrowDeclareView: "borrow.declare-view"
 
 ## A byte range of a text: from `start` up to, not including, `end`.
 @derive(Eq, Hash, Debug, Copy)
@@ -397,11 +496,13 @@ impl TextRange:
         return self.start == self.end
 
 ## A named parameter of a message: `name="value"` in the rendered form.
+@derive(Eq)
 pub struct Param:
     pub name: String
     pub value: String
 
 ## A secondary span with a message of its own ("opened here").
+@derive(Eq)
 pub struct Label:
     pub msg: Msg
     pub start: int
@@ -409,12 +510,14 @@ pub struct Label:
     pub params: list[Param]
 
 ## A replacement of the text from byte `start` up to `end`.
+@derive(Eq)
 pub struct Edit:
     pub start: int
     pub end: int
     pub text: String
 
 ## A suggested change: a message and the edits that make it.
+@derive(Eq)
 pub struct Fix:
     pub msg: Msg
     pub params: list[Param]
@@ -422,6 +525,7 @@ pub struct Fix:
 
 ## One diagnostic: a message, its parameters, the byte range it is about,
 ## labels, fixes, and notes (which the conformance form does not print).
+@derive(Eq)
 pub struct Diagnostic:
     pub msg: Msg
     pub start: int
@@ -499,13 +603,14 @@ impl Diagnostic:
 pub struct Catalog:
     codes: dict[String, String]
     kinds: dict[String, String]
+    templates: dict[String, String]
 
 impl Catalog:
     ## Reads the catalog's line format: `CODE KIND IDENTIFIER TEMPLATE...`,
     ## with blank lines and `#` comments. A line with fewer fields is
     ## skipped, as is a second entry for an identifier.
     pub pure def parse(text: str) -> Catalog:
-        var catalog = Catalog(codes={}, kinds={})
+        var catalog = Catalog(codes={}, kinds={}, templates={})
         for raw in text.lines():
             let line = raw.trim()
             if line.is_empty() or line.starts_with("#"):
@@ -517,7 +622,21 @@ impl Catalog:
                 continue
             _ = catalog.codes.insert(fields[2].copy(), fields[0].copy())
             _ = catalog.kinds.insert(fields[2].copy(), fields[1].copy())
+            _ = catalog.templates.insert(fields[2].copy(), template_of(line))
         return catalog
+
+    ## A message's text with its parameters filled in (stage 0's
+    ## `Catalog::render`); an identifier the catalog lacks renders as
+    ## itself with its parameters.
+    pub pure def render(self, id: str, params: list[Param]) -> String:
+        match self.templates.get(id.to_string()):
+            case Some(t):
+                return fill_template(t, params)
+            case None:
+                var s = id.to_string()
+                for p in params:
+                    s.push(" {p.name}={p.value}")
+                return s
 
     ## Whether the catalog has an entry for `msg`.
     pub pure def has(self, msg: Msg) -> bool:
@@ -537,10 +656,81 @@ impl Catalog:
             return kind == "error"
         return False
 
+## The template of a catalog line: what follows its first three fields.
+pure def template_of(line: str) -> String:
+    var rest = line
+    for _ in range(3):
+        let trimmed = rest.trim_start()
+        var end = 0
+        let n = trimmed.byte_len()
+        while end < n and trimmed.byte_at(end) != 32 and trimmed.byte_at(end) != 9:
+            end += 1
+        rest = trimmed.byte_slice(end, n)
+    return rest.trim().to_string()
+
+## Substitutes `{name}` parameters into a template (stage 0's
+## `fill_template`): `{{` and `}}` are braces, `\n` a line break, and a
+## parameter not given stays as written.
+pub pure def fill_template(template: str, params: list[Param]) -> String:
+    var out = String.new()
+    var chars: list[char] = []
+    for c in template.chars():
+        chars.push(c)
+    let n = len(chars)
+    var i = 0
+    while i < n:
+        let c = chars[i]
+        if c == '{' and i + 1 < n and chars[i + 1] == '{':
+            out.push_char('{')
+            i += 2
+        elif c == '}' and i + 1 < n and chars[i + 1] == '}':
+            out.push_char('}')
+            i += 2
+        elif c == '\\' and i + 1 < n and chars[i + 1] == 'n':
+            out.push_char('\n')
+            i += 2
+        elif c == '{':
+            var j = i + 1
+            var name = String.new()
+            while j < n and chars[j] != '}':
+                name.push_char(chars[j])
+                j += 1
+            var found = False
+            for p in params:
+                if p.name == name and not found:
+                    out.push(p.value)
+                    found = True
+            if not found:
+                out.push("{{{name}}}")
+            i = j + 1
+        else:
+            out.push_char(c)
+            i += 1
+    return out
+
 ## Sorts diagnostics by position, then code, keeping the order of equals
 ## (stage 0 sorts stably by start, end and code).
 pub pure def sort(mut diags: list[Diagnostic], catalog: Catalog):
     diags.sort_by((a, b) -> compare(a, b, catalog))
+
+## Sorts diagnostics as `sort` does and drops each one identical to an
+## earlier one (stage 0's `sort_unique`): one mistake is one message, also
+## where the compiler checks one piece of source more than once.
+pub pure def sort_unique(mut diags: list[Diagnostic], catalog: Catalog):
+    sort(mut diags, catalog)
+    var kept: list[Diagnostic] = []
+    for d in diags:
+        # Sorted, so an identical one is among the last kept at its span.
+        var repeat = False
+        var k = len(kept) - 1
+        while k >= 0 and kept[k].start == d.start and kept[k].end == d.end:
+            if kept[k] == d:
+                repeat = True
+                break
+            k -= 1
+        if not repeat:
+            kept.push(d.copy())
+    diags = kept
 
 pure def compare(a: Diagnostic, b: Diagnostic, catalog: Catalog) -> Ordering:
     if a.start != b.start:
@@ -583,6 +773,26 @@ impl Lines:
             else:
                 hi = mid - 1
         return lo
+
+    ## The byte offset of 1-based `line` and `col` of `text`, the column
+    ## counting characters (stage 0's `SourceFile::offset`); past the last
+    ## line, the end of the text.
+    pub pure def offset(self, text: str, line: int, col: int) -> int:
+        let index = max(line - 1, 0)
+        if index >= len(self.starts):
+            return text.byte_len()
+        let start = self.starts[index]
+        var end = text.byte_len()
+        if index + 1 < len(self.starts):
+            end = self.starts[index + 1]
+        var off = start
+        var i = 0
+        for c in text.byte_slice(start, end).chars():
+            if i + 1 >= col:
+                break
+            off += c.len_utf8()
+            i += 1
+        return off
 
     ## The 1-based line and column of byte `offset` of `text`, the column
     ## counting characters from the start of the line.
@@ -671,6 +881,25 @@ test "positions count characters":
 test "quoting escapes five characters":
     assert quote("a\"b\\c\nd\te\rf") == "\"a\\\"b\\\\c\\nd\\te\\rf\""
     assert quote("ï€") == "\"ï€\""
+
+test "the catalog renders a message's template":
+    let catalog = Catalog.parse("R0003 runtime panic.overflow   integer overflow: {{expr}}\n")
+    let p = Param(name="expr".to_string(), value="2 ** 70".to_string())
+    let rendered = catalog.render("panic.overflow", [p])
+    assert rendered == "integer overflow: 2 ** 70"
+    assert catalog.render("panic.none", []) == "panic.none"
+
+test "identical diagnostics are reported once":
+    let catalog = Catalog.parse("E0200 error resolve.undefined-name x\n")
+    let a = Diagnostic.new(Msg.ResolveUndefinedName, 5, 11).with("name", "double")
+    let b = Diagnostic.new(Msg.ResolveUndefinedName, 5, 11).with("name", "triple")
+    let c = Diagnostic.new(Msg.ResolveUndefinedName, 1, 2).with("name", "double")
+    var diags = [a.copy(), b.copy(), c.copy(), a.copy(), b.copy()]
+    sort_unique(mut diags, catalog)
+    assert len(diags) == 3
+    assert diags[0] == c
+    assert diags[1] == a
+    assert diags[2] == b
 
 test "the catalog gives codes and kinds":
     let catalog = Catalog.parse(

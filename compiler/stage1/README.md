@@ -2,12 +2,13 @@
 
 Stage 1 of the bootstrap ([18](../../proposal/18-next-steps.md),
 "Bootstrapping"): the lexer, the lossless syntax tree, the error-tolerant
-parser, the AST, the name resolution of one module and the type checker,
-written in Sisu, run by the stage-0 interpreter, and
-checked byte for byte against the Rust front end (`sisu-lexer`,
-`sisu-syntax`, `sisu-parser`, and `ast::build`) and against the name and
-type diagnostics of `sisu check`. The ownership checker and SIR emission
-are not here yet.
+parser, the AST, the name resolution of one module, the type checker with
+its template engine, lowering to SIR and the ownership checker, written in
+Sisu, run by the stage-0 interpreter, and checked byte for byte against
+the Rust front end (`sisu-lexer`, `sisu-syntax`, `sisu-parser`, and
+`ast::build`), against the name, type and ownership diagnostics of `sisu
+check`, and against the SIR `sisu sir` prints. What runs SIR (the
+interpreter, and with it the evaluation of `comptime` code) is not here.
 
 It is a transcription: every rule of
 [docs/architecture.md](../docs/architecture.md) ("Lexing", "Parsing and the
@@ -15,9 +16,11 @@ syntax tree", "Error tolerance") and every function of the Rust crates has
 its counterpart here, under the same name where the language allows. Where
 the Rust behaviour is an accident rather than a rule, stage 1 follows the
 documents and the difference is listed in
-[DISCREPANCIES.md](DISCREPANCIES.md): five, three of the parser's, none of
-which occurs in the corpus, one of name resolution and one of the type
-checker's.
+[DISCREPANCIES.md](DISCREPANCIES.md) until the coordinator decides it
+(D-079). None is listed now: the first round's five (three of the
+parser's, one of name resolution and one of the type checker's) were
+decided for the documents, and stage 0 now behaves as stage 1 does
+(docs/architecture.md, decisions 165 to 168 and 179).
 
 ## Running it
 
@@ -25,27 +28,31 @@ From this directory, with stage 0 built (`cargo build --release` in
 `compiler/`):
 
 ```text
-sisu test                                   # 75 tests, 49 of them stage 0's own, transcribed
+sisu test                                   # 88 tests, 50 of them stage 0's own, transcribed
 sisu run -- tokens [--trivia] FILE          # what `sisu tokens [--trivia] FILE` prints
 sisu run -- parse --tree [--trivia] FILE    # what `sisu parse --tree [--trivia] FILE` prints
 sisu run -- parse --print FILE              # the file, reprinted from the tree
-sisu run -- ast FILE                        # the AST of FILE, in the notation of Rust's `Debug`
+sisu run -- parse --ast FILE                # what `sisu parse --ast FILE` prints: the AST, as Rust's `{:#?}`
 sisu run -- names FILE                      # the name diagnostics of `sisu check --format=ids FILE`
 sisu run -- types FILE                      # the type checker's diagnostics of the same command
 sisu run -- batch OUT LIST                  # tokens, trees and ASTs for every file LIST names, into OUT
 sisu run -- ast-batch OUT LIST              # the AST of every file LIST names, into OUT
 sisu run -- names-batch OUT LIST            # the name diagnostics of every file LIST names, into OUT
 sisu run -- types-batch OUT LIST            # the type diagnostics of every file LIST names, into OUT
+sisu run -- sir FILE                        # what `sisu sir FILE` prints: the program's SIR
+sisu run -- ownership FILE                  # the ownership checker's diagnostics of `sisu check --format=ids FILE`
+sisu run -- sir-batch OUT LIST              # both, for every file LIST names, into OUT
 sisu run -- mutate SEED COUNT OUT LIST      # mutants of the files LIST names
 sisu run -- profile FILE                    # the time lexing, parsing and each dump of FILE take
-./check.sh [--mutants N] [--seed S] [--names] [--types] [--keep DIR]
+./check.sh [--mutants N] [--seed S] [--names] [--types] [--sir] [--keep DIR]
 ```
 
 Stage 1 prints to standard output and its diagnostics to standard error,
 in the conformance form (`--format=ids`), as stage 0 does; `names` and
 `types` print their diagnostics to standard output, as `sisu check` does,
 and `types` then prints on standard error why parts of the file are beyond
-the slice it checks. It reads the
+the slice it checks; `sir` and `ownership` print on standard error why
+the file is beyond the slice of lowering, when it is. It reads the
 message catalog at run time, by default `../catalog/messages.catalog`
 (`--catalog PATH` names another), and the standard library's sources from
 `../std/`, so it is run from this directory; the tests read the catalog and
@@ -56,12 +63,11 @@ every file, runs stage 1 once per class of files (`batch`, one interpreter
 run for many files), and compares five outputs per file: `tokens` (`sisu
 tokens --trivia`, standard output and error), `tree` (`sisu parse --tree`,
 both), `trivia-tree` (`sisu parse --tree --trivia`), `print` (stage 1's
-reprint against the file itself) and `ast` (the AST, below), where a file
-whose tree differs as listed may differ in its AST too. Then it compares
-`names`: the
-name diagnostics of `sisu check --format=ids` (the lines with `E0200`,
-`E0201`, `E0202`, `E0220`, `E0234`, `E0389` or `W0002`, with their labels
-and fixes) against stage 1's (`names-batch`), for the conformance suite's
+reprint against the file itself) and `ast` (`sisu parse --ast`, the AST,
+below), where a file whose tree differs as listed may differ in its AST
+too. Then it compares `names`: the name diagnostics of `sisu check
+--format=ids` (the lines with `E0200`, `E0201`, `E0202`, `E0220`, `E0234`,
+`E0389` or `W0002`, with their labels and fixes) against stage 1's (`names-batch`), for the conformance suite's
 `names/` cases and stage 1's own cases, and with `--names` for every
 program of the corpus that is one module (the conformance cases outside
 `packages/`, and the proposal's examples). Then `types`: the type
@@ -70,8 +76,16 @@ begins with `type.`, with their labels and fixes) against stage 1's
 (`types-batch`), for the files `types.list` names, each of which must be
 within the slice and match, and with `--types` for every program of the
 corpus that is one module, where a file within the slice must match and
-any other may only report fewer of stage 0's diagnostics. It exits non-zero
-on any difference that DISCREPANCIES.md does not list ("- Differs: `path`:
+any other may only report fewer of stage 0's diagnostics. Then `sir` and
+`ownership`: what `sisu sir` prints, and the ownership checker's
+diagnostics of `sisu check --format=ids` (`E0333`, `E0366`, `E0367`,
+`E0392`, `E0393`, `E0397`, `E0400` to `E0410`, `E0416` to `E0420`, `E0428`
+and `E0429`, with their labels and fixes), against stage 1's (one run of
+`sir-batch` for both), for the files `sir.list` names, each of which must
+be within the slice of lowering and match, and with `--sir` for every
+program of the corpus that is one module, where a file within the slice
+must match and any other is beyond it. It exits non-zero on any
+difference that DISCREPANCIES.md does not list ("- Differs: `path`:
 outputs"). With `--mutants N` it also compares N mutants of the corpus
 (deleted, inserted and swapped characters), where a difference must carry
 the mark of a listed discrepancy.
@@ -82,20 +96,24 @@ the mark of a listed discrepancy.
 
 ```text
 stage 1 against stage 0 (tokens, tree, trivia-tree, print, ast):
-  conformance   386 files,  386 identical,   0 differing as listed,   0 differing otherwise; stage 1   36.7s (250253 bytes; lex 4939 ms, parse 6801 ms, dumps 10640 ms, ast 5630 ms)
-  std            15 files,   15 identical,   0 differing as listed,   0 differing otherwise; stage 1   29.4s (234728 bytes; lex 3699 ms, parse 4628 ms, dumps 7610 ms, ast 4898 ms)
-  examples       11 files,   11 identical,   0 differing as listed,   0 differing otherwise; stage 1   10.1s (27495 bytes; lex 413 ms, parse 553 ms, dumps 898 ms, ast 455 ms)
-  cases          24 files,   21 identical,   3 differing as listed,   0 differing otherwise; stage 1    9.4s (12878 bytes; lex 255 ms, parse 396 ms, dumps 559 ms, ast 244 ms)
+  conformance   400 files,  400 identical,   0 differing as listed,   0 differing otherwise; stage 1   34.2s (259853 bytes; lex 2943 ms, parse 4500 ms, dumps 6727 ms, ast 10516 ms)
+  std            15 files,   15 identical,   0 differing as listed,   0 differing otherwise; stage 1   25.6s (238695 bytes; lex 2029 ms, parse 2816 ms, dumps 4591 ms, ast 7616 ms)
+  examples       11 files,   11 identical,   0 differing as listed,   0 differing otherwise; stage 1   11.0s (27495 bytes; lex 256 ms, parse 328 ms, dumps 508 ms, ast 853 ms)
+  cases          25 files,   25 identical,   0 differing as listed,   0 differing otherwise; stage 1   10.0s (13816 bytes; lex 175 ms, parse 305 ms, dumps 424 ms, ast 557 ms)
 stage 1's name resolution against stage 0's (names):
-  names          34 files,   33 identical,   1 differing as listed,   0 differing otherwise; stage 1   18.0s
-  corpus-names  350 files,  349 identical,   1 differing as listed,   0 differing otherwise; stage 1   36.0s
+  names          35 files,   35 identical,   0 differing as listed,   0 differing otherwise; stage 1   14.3s
+  corpus-names  364 files,  364 identical,   0 differing as listed,   0 differing otherwise; stage 1   25.3s
 stage 1's type checker against stage 0's (types):
-  types         345 files,  344 identical,   0 beyond the slice and a subset,   1 differing as listed,   0 otherwise; stage 1  177.6s
-  corpus-types  360 files,  342 identical,  18 beyond the slice and a subset,   0 differing as listed,   0 otherwise; stage 1  182.8s
-total: 1525 files checked, 1501 identical, 18 beyond the type checker's slice and a subset, 6 differing (6 listed in DISCREPANCIES.md, 0 not)
+  types         368 files,  368 identical,   0 beyond the slice and a subset,   0 differing as listed,   0 otherwise; stage 1  166.0s
+  corpus-types  374 files,  365 identical,   9 beyond the slice and a subset,   0 differing as listed,   0 otherwise; stage 1  179.2s
+stage 1's lowering against stage 0's (sir):
+  sir           329 files,  329 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1  513.1s (front end 110s, lowering 267s, ownership 95s)
+stage 1's ownership checker against stage 0's (ownership):
+  ownership     329 files,  329 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
+total: 2250 files checked, 2241 identical, 9 beyond the type checker's slice and a subset, 0 differing (0 listed in DISCREPANCIES.md, 0 not)
 ```
 
-All 412 files of the conformance suite, `compiler/std/` and
+All 426 files of the conformance suite, `compiler/std/` and
 `proposal/examples/` give identical token streams with trivia, trees with
 and without trivia, diagnostics, reprints and ASTs. `cases/` holds stage
 1's own inputs for the error-tolerance rules the corpus never triggers
@@ -104,15 +122,18 @@ expression, statement, expression, declaration, lexical, indentation,
 bracket and structure mistakes, the keyword that opens a missing block, the
 token a line misses at its end, the forms of later phases, scripts, CR LF,
 Unicode beyond ASCII, type arguments where a value is written), for the
-type checker's rules (calls, conversions, control flow) and the five
-discrepancies. With `--mutants 2000 --seed 7` the 2000 mutants differ only
-by discrepancy D1 (21 of them), and their ASTs only where their trees do;
-this round changed nothing those classes check. Of the 350 programs of one
-module, every one but D4's `proposal/examples/testing.sisu` gets the name
-diagnostics of stage 0. Of the 360 programs of one module (the 350 and the
-conformance suite's `names/` cases), 342 are within the type checker's
-slice and get stage 0's type diagnostics exactly; the other 18 get a
-subset of them.
+type checker's rules (calls, conversions, control flow), the names in
+constant arguments, and the five discrepancies of the first round, which
+stage 0 now shares. With `--mutants 2000 --seed 7` all 2000 mutants give
+identical outputs, their ASTs included (in the first round 21 differed, by
+D1). Of the 364 programs of one module, every one gets the name
+diagnostics of stage 0. Of the 374 programs of one module (the 364 and the
+conformance suite's `names/` cases), 365 are within the type checker's
+slice and get stage 0's type diagnostics exactly; the other 9 get a subset
+of them, and each is beyond only for a message of the ownership checker's.
+Of the 374 and stage 1's three cases of type rules, 329 are within the
+slice of lowering and get stage 0's SIR and the ownership checker's
+diagnostics exactly, the 9 among them.
 
 ## Name resolution
 
@@ -154,10 +175,18 @@ its reach: a method name, a field name, and the variant of an expected
 type are not names it looks up, and a signature mismatch of types (rather
 than of shape) is the type checker's.
 
+A name in a type's constant argument written as an expression
+(`Array[int, N * W]`) is looked up as stage 0's folding looks it up
+(`consts.rs`): the expression is folded to its first error, and only a
+name reached before any other error, that names no generic parameter
+(in a body, no `const` one), no local in a body and no item, is `E0200`,
+without a fix; what is wrong inside a constant's own value is reported
+where that value is checked (`cases/const_argument_names.sisu`).
+
 `check.sh` compares its diagnostics with the name diagnostics of `sisu
-check --format=ids` (above). One difference is listed: D4, a parametrised
-test whose body names something unknown, which stage 0 reports once per
-case and stage 1 once.
+check --format=ids` (above), and none differs. Stage 0 reports a mistake
+it finds more than once (in the body the cases of a parametrised test
+share) once (decision 168), as stage 1 always did.
 
 ## The AST
 
@@ -177,13 +206,14 @@ recursive type with many boxed fields is what stage 0's ownership checker
 handles worst (item 13 below): with the boxed transcription, `sisu check`
 of stage 1 did not finish.
 
-No `sisu` command prints stage 0's AST, so `oracle/` does: a small Rust
-program over the stage-0 crates (`sisu-diag`, `sisu-parser`, `sisu-syntax`)
-that `check.sh` builds into `target/stage1-oracle/` and that writes, for
-each file, the module's doc comments, its broken names and each item in
-Rust's `Debug` notation. `syntax.ast.dump` writes stage 1's in the same
-notation, following the ids. A `sisu parse --ast` in stage 0 would let the
-oracle go.
+`sisu parse --ast FILE` prints stage 0's AST: the module's `{:#?}`, its
+items, doc comments and broken names. `syntax.ast.dump` writes stage 1's
+in the one-line notation of Rust's derived `Debug`, field for field and
+following the ids, and `pretty` lays it out as `{:#?}` does (each field and
+element on a line of its own, four spaces deeper, ending in a comma);
+`sisu run -- parse --ast FILE` prints it, and `check.sh` compares the two
+for every file. (A small Rust program over the stage-0 crates, `oracle/`,
+printed stage 0's AST before stage 0 had the command; it is gone.)
 
 ## The type checker's slice
 
@@ -233,9 +263,45 @@ syntax and text, their diagnostics put at the same lines and columns of
 the file; then the defaults of fields and parameters and the constants,
 then `main`'s and the tests' signatures. Diagnostics on a line with a
 syntax error are dropped (but for the examples', whose module is a file
-of its own), and the rest are sorted by start, end and code, as the
+of its own), and the rest are sorted by start, end and code, a diagnostic
+identical to an earlier one dropped (`sort_unique`, decision 168), as the
 driver does. Types are interned (`typeck.ty`): a type is an index into a
 table, so two types are equal when their indices are.
+
+Two things round 5 of stage 0 added go through every part of this:
+`f32`, a type of the prelude whose literals are rounded once from their
+text (`float_literal`: `1.5u8` is `E0332`, a literal that rounds to an
+infinity in its type `E0374`), which widens to `f64` where one is expected
+and beside an `f64` operand (`Coercion.FloatWiden`) and mixes with
+nothing else; and a type's constant argument written as an expression,
+`Array[T, W * H]` (decisions 173 and 174). The parser reads such an
+argument as an expression in a `CONST_ARG` (`at_const_expr`), the AST
+holds it as `TypeKind.ConstExpr`, and the checker folds it where the type
+is written (`typeck.consts`, from stage 0's `consts.rs`): integers,
+`const` parameters, the program's constants and the integer operators
+with the run time's rules (`sir.ConstOp.fold`). An operation on `const`
+parameters stays one (`TyData.ConstOp`) until substitution or unification
+knows its arguments, and equals only the same operation on equal
+arguments. A checker of stage 1 holds the syntax of its own module only,
+so a constant keeps its value as folding reads it (`typeck.folding`'s
+terms) beside its definition.
+
+Templates (08, "Derive" and "Reflection"; stage 0's `template.rs`,
+`derive.rs` and `instances.rs`) are unfolded as stage 0 unfolds them
+(`typeck.template`, `typeck.instances`): a trait's `comptime def derive`,
+the prelude's or the program's own, and a generic function that reflects
+on its type parameters run on an evaluator of compile-time code over the
+shapes of types (fields, variants, attributes) that writes source text;
+the text is parsed, declared in a module of its own whose scope is the
+template's (`<derive>/main.sisu`, `<NAME[ARGS]>/main.sisu`) and checked
+like any other code, a diagnostic there being at its line and column in
+that text. Which instances a program needs is known only once its calls
+are typed, so the driver checks the program, declares what its bodies
+asked for, and checks again until no new request comes; a generic
+function that calls a template with its own type parameters becomes a
+template too, and the program is resolved again (stage 0's
+`Db::checked`). The impls the standard library derives for its own types
+stay headers here (lowering's slice ends there, below).
 
 What it reports: every `type.` message of the catalog but the six that
 stage 0's ownership checker reports, on SIR, after the type checker
@@ -249,40 +315,124 @@ none. The names pass's errors come from stage 1's own (`resolve`).
 
 What is beyond it:
 
-- in the module, which then reports nothing at all: a trait's `comptime
-  def derive` of the program's own (stage 0 unfolds it, `template.rs`), a
-  generic function that reflects on its type parameters (a template, which
-  stage 0 checks in its instances), a contract of a struct other than
-  `invariant`, `@structural` and `@keeps`, variadic parameters, `f32`, and
-  a `ref` in a declaration's type;
+- in the module, which then reports nothing at all: a contract of a
+  struct other than `invariant`, `@structural` and `@keeps`, variadic
+  parameters, a `ref` in a declaration's type, and an import of a std
+  module stage 1 does not read;
 - the `type.` messages of stage 0's ownership checker: when the front end
-  finds no error, a body that may get one is beyond. That is a pure body
-  that calls an impure function or function value (`E0333`, `E0392`),
-  uses `select` or loops over an `Iterator`, or holds a value whose drop
-  runs a `drop` that is not `pure` (`E0393`); a `let` without a value
-  (`E0366`, `E0367`); and a call of a generic function with a
-  must-consume type argument (`E0397`).
+  finds no error, a body that may get one is beyond the type checker's
+  slice, since `types` does not report them. That is a pure body that
+  calls an impure function or function value (`E0333`, `E0392`), uses
+  `select` or loops over an `Iterator`, or holds a value whose drop runs a
+  `drop` that is not `pure` (`E0393`); a `let` without a value (`E0366`,
+  `E0367`); and a call of a generic function with a must-consume type
+  argument (`E0397`). Stage 1's ownership checker decides them (below),
+  and lowering goes past them.
 
-One choice of stage 1 differs from stage 0 within the slice: D5, the count
-`E0305` reports for positional arguments past a bare `*`. And one
-difference of order has no effect on what is reported: stage 0 declares
+No choice of stage 1 differs from stage 0 within the slice (the count
+`E0305` reports for positional arguments past a bare `*`, D5, is stage
+0's now). One difference of order has no effect on what is reported:
+stage 0 declares
 every module's items before it resolves any, so its definitions of the root
 module come before those the prelude's impls and traits make; stage 1
 resolves the prelude once, so they come after.
 
-`check.sh` checks the slice twice: `types.list` names the 342 programs of
-one module that are within the slice (60 of the 61 of
+`check.sh` checks the slice twice: `types.list` names the 365 programs of
+one module that are within the slice (62 of the 63 of
 `conformance/cases/types/` and `wrong/`, all but `pure_violation.sisu`,
 whose `E0333` is the ownership checker's) and stage 1's three cases of
-type rules, which must match (344 do, and D5's case is listed);
-`--types` checks all 360 programs of one module, of which those 342 are
-within the slice and the other 18 report a subset. The first reason each
-of the 18 is beyond, by count: a `let` without a value (5, two of which
-get `E0366` or `E0367`), a derive template of the program's own (5), a
-generic function that reflects on its type parameters (4), a pure body
-that calls an impure function (2, both `E0333`), a pure body that drops a
-value with an impure `drop` (1, `E0393`), a must-consume type argument (1,
-`E0397`).
+type rules, which must match (all 368 do); `--types` checks all 374
+programs of one module, of which those 365 are within the slice and the
+other 9 report a subset. The reason each of the 9 is beyond is one of the
+ownership checker's, by count: a `let` without a value (5, two of which
+get `E0366` or `E0367`), a pure body that calls an impure function (2,
+both `E0333`), a pure body that drops a value with an impure `drop` (1,
+`E0393`), a must-consume type argument (1, `E0397`). Round 5's 18 had
+nine more, the derive templates of the programs' own (5) and the generic
+functions that reflect on their type parameters (4), which the template
+engine brought within the slice.
+
+## Lowering and the ownership checker
+
+`lower.sisu` and `lower/` transcribe stage 0's `sisu-lower` (the functions
+of `lib.rs`, `func.rs`, `stmts.rs`, `exprs.rs`, `pats.rs`, `contracts.rs`
+and `glue.rs`), `sir.sisu` and `sir/` its SIR (`sisu-sir`'s data,
+`types.rs`, `write.rs` and `simplify.rs`), and `borrowck.sisu` and
+`borrowck/` the ownership checker (`sisu-borrowck`: `paths.rs`,
+`init.rs`, `elaborate.rs`, `loans.rs`, `consume.rs`, `purity.rs`,
+`names.rs`, `types.rs`, `bitset.rs` and `check_with` of `lib.rs`), rule
+for rule. Together they make what `sisu sir` prints and the ownership
+checker's part of `sisu check`, for a program of one module:
+
+1. The type checker keeps what lowering reads (`typeck.Typed`): the
+   resolved program, the table of types and the typed bodies, in stage 0's
+   order of `typed.bodies`, which decides the order of SIR's functions and
+   the numbering of its source files. Stage 0 numbers its definitions as
+   it declares them, every module's items before any is resolved; stage 1
+   resolves the prelude once, so it records the phase each definition was
+   made in (`Program.phases`: declared, a type resolved, a trait, an impl,
+   the rest, after the root module) and orders by phase, then by index.
+2. Lowering starts from `main` and the tests and lowers what they reach:
+   the functions they call or name, the defaults, drops and invariant
+   checks of the types they use, and the methods of the impls of the
+   traits they call through `call trait` for the types they mention (stage
+   0's `lower_reaching`). A body of the standard library is type-checked
+   when lowering first reaches it, from the syntax and text the base keeps;
+   the drop glue of each declared type that needs one is written from the
+   types (`lower.glue`).
+3. The ownership checker runs as stage 0's `check_with` does, without its
+   memo: per function, the initialisation dataflow and its findings, then
+   drop placement; then, for the functions that are not the standard
+   library's (`trust_std`, as `sisu check` runs it), the loans and
+   must-consume; then purity over the whole program; and a finding that
+   repeats one goes. The findings become diagnostics of the program's
+   file, sorted as `sisu check` sorts them.
+4. Jump threading (`sir.simplify`), and the text form (`sir.write`).
+
+The front end must agree with stage 0 on whether a program has an error,
+since then `sisu sir` prints nothing and the ownership checker does not
+run: stage 1 notes each error of stage 0's that is not the type checker's
+(the resolver's `resolve.` and `borrow.` rules, among them the borrowed
+signatures of `borrows.rs`, which `typeck.borrows` transcribes, the
+coherence of impls and object safety) without reporting it.
+
+What is beyond the slice of lowering (`sir` and `ownership` print why on
+standard error, `sir-batch` writes it to `OUT/n.beyond`): what is beyond
+the type checker's slice, but the bodies that may get one of the
+ownership checker's `type.` messages, which the ownership checker here
+decides; a `comptime` expression, whose value stage 0 computes into the
+SIR by running it; a `comptime assert` on `const` parameters, which stage 0
+decides at each call; a function with a contract, or a `mut self` method
+of a type with an `invariant`, whose test stage 0 writes with generators;
+a `@refines` property and a generator of `arbitrary` or `exhaustive`, for
+the same reason; an impl of `@delegate`; an impl the standard library
+derives for its own types (`Debug` of `Option`), whose methods stage 1
+declares as headers; a `Shared` that may cross to another task, which
+stage 0's escape analysis (`shared.rs`) tags; a body of the standard
+library beyond the type checker's slice; and an ownership finding in a
+file other than the program's. Of the 374 programs of one module and
+stage 1's three cases of type rules, 329 are within the slice of lowering
+and get stage 0's SIR and ownership diagnostics exactly: 185 are lowered,
+43 of them with diagnostics of the ownership checker (21 of its messages
+between them; `E0392`, `E0419` and `E0420` occur nowhere in the corpus),
+and 144 have a front-end error, for which both print nothing. `sir.list`
+names the 329. The other 48 are beyond the slice, by the first reason:
+an impl the standard library derives (22), a `comptime` expression (9), a
+contract's test (6), an impl of `@delegate` (3), a generator of
+`arbitrary` or `exhaustive` (3), a `comptime assert` on `const` parameters
+(2), a `@refines` property (2), a `Shared` that may cross to another task
+(1).
+
+The ownership checker was transcribed whole before it ran, and it matched
+stage 0 on every program it checked the first time, the conformance
+suite's ownership cases included; what took the work was lowering, whose
+SIR depends on everything the front end decided (the order of
+definitions, the bodies of the standard library a program reaches, the
+names stage 0 gives what it writes). One rule of stage 0's checker shows
+in stage 1's own source: a `let` with a tuple pattern and `else` (`let
+(name, tys) = found else: continue`) is reported as a use after a move
+of the names it binds (item 19 below), so `borrowck.consume` binds them in
+two steps; the transcription keeps the rule.
 
 ## Module layout
 
@@ -290,36 +440,47 @@ value with an impure `drop` (1, `E0393`), a must-consume type argument (1,
 |---|---:|---|---|
 | `syntax.kinds` | 538 | `SyntaxKind` (246 kinds), the keyword and punctuation tables, kind predicates, names in dumps | `sisu-syntax/src/kinds.rs` |
 | `syntax.tree` | 338 | `Token`, the arena tree, the builder with checkpoints, the dumps, the reprint, stable identities | `sisu-syntax/src/tree.rs` |
-| `diag` | 693 | `Msg` (the catalog identifiers stage 1 reports), diagnostics with labels, fixes and notes, the catalog reader, positions, `render_ids`, `quote`, the stable sort | `sisu-diag` (the parts the front end uses) |
+| `diag` | 922 | `Msg` (the catalog identifiers stage 1 reports), diagnostics with labels, fixes and notes, the catalog reader and its templates, positions, `render_ids`, `quote`, the stable sort and `sort_unique` | `sisu-diag` (the parts the front end uses) |
 | `text`, `text.unicode` | 369 | UTF-8 decoding, `is_alphanumeric`, Rust's `Debug` quoting, and the Unicode tables it needs (pinned, Unicode 17.0.0) | the host's `char` methods and `{:?}` |
 | `lexer` | 262 | `lex`, and stage 0's lexer tests | `sisu-lexer/src/lib.rs`, `tests.rs` |
-| `lexer.scan` | 556 | the raw scanner: every byte a token, strings and interpolation as tokens | `sisu-lexer/src/scan.rs` |
+| `lexer.scan` | 558 | the raw scanner: every byte a token, strings and interpolation as tokens | `sisu-lexer/src/scan.rs` |
 | `lexer.layout` | 347 | Python's layout algorithm, continuation, bracket recovery and its fixes | `sisu-lexer/src/layout.rs` |
 | `parser` | 517 | `parse`, the diagnostic filters (bracket echoes, structure echoes, one per line), and stage 0's parser tests | `sisu-parser/src/lib.rs`, `tests.rs` |
 | `parser.state` | 403 | the parser's state: looking, attaching tokens with their trivia, reporting, the fixes added later, Python's conditional | `sisu-parser/src/parser.rs` |
-| `parser.items`, `.stmts`, `.exprs`, `.patterns`, `.types` | 2162 | one function per rule of the grammar | the files of the same names |
-| `syntax.ast` | 745 | the AST: items, statements, expressions, types and patterns in arenas, referred to by id | `sisu-syntax/src/ast/mod.rs` |
-| `syntax.ast.build` | 2132 | `build.module`, the AST of a tree as a total function, and the decoding of literals | `sisu-syntax/src/ast/build.rs` |
-| `syntax.ast.dump` | 1321 | the AST in the notation of Rust's derived `Debug`, for `check.sh` | Rust's `{:?}` |
+| `parser.items`, `.stmts`, `.exprs`, `.patterns`, `.types` | 2213 | one function per rule of the grammar | the files of the same names |
+| `syntax.ast` | 748 | the AST: items, statements, expressions, types and patterns in arenas, referred to by id | `sisu-syntax/src/ast/mod.rs` |
+| `syntax.ast.build` | 2149 | `build.module`, the AST of a tree as a total function, and the decoding of literals | `sisu-syntax/src/ast/build.rs` |
+| `syntax.ast.dump` | 1398 | the AST in the notation of Rust's derived `Debug`, laid out as `{:#?}`, for `check.sh` | Rust's `{:#?}`, which `sisu parse --ast` prints |
 | `syntax.ast.visit` | 307 | the expressions of items, blocks and expressions, each before the ones inside it | `sisu-syntax/src/ast/visit.rs` |
-| `resolve` | 1913 | the names of one module: declarations, imports, scopes, the prelude's and std's names, and the name diagnostics | `sisu-resolve/src/collect.rs` and `types.rs`, and the name lookups of `sisu-typeck` |
-| `typeck.ty` | 349 | types, interned in a table | `sisu-resolve/src/ty.rs` |
-| `typeck.program` | 1700 | the resolved program, the spelling of types, `Copy`, the trait solver, `Send` and `Sync`, visibility, views and must-consume types | `program.rs`, `ty.rs`, `solve.rs`, `auto.rs` and `borrows.rs` of `sisu-resolve` |
-| `typeck.std_sources` | 414 | `target` and `builtin_impls`, the std text stage 0 writes, and the import paths of the std modules | `sisu-resolve/src/std_sources.rs` |
-| `typeck.collect` | 3371 | declarations, signatures, imports, traits and impls, resolved, and what the compiler writes: derived impls, interceptors and fakes, generators, invariants, predicates, a script's `main`, test cases, doc tests | `collect.rs`, `types.rs`, `traits.rs`, `derive.rs`, `shims.rs`, `arbitrary.rs`, `tests_of.rs` and `doctests.rs` of `sisu-resolve` |
-| `typeck.infer`, `typeck.thir` | 679 | inference variables and unification; the typed tree | `infer.rs` and `thir.rs` of `sisu-typeck` |
-| `typeck.check`, `.expr`, `.call`, `.pat` | 6323 | the body checker: statements, expressions, calls, patterns | `check.rs`, `expr.rs`, `call.rs` and `pat.rs` of `sisu-typeck` |
+| `resolve` | 2065 | the names of one module: declarations, imports, scopes, the prelude's and std's names, and the name diagnostics | `sisu-resolve/src/collect.rs` and `types.rs`, and the name lookups of `sisu-typeck` |
+| `sir`, `sir.types`, `sir.write`, `sir.simplify` | 1466 | SIR: programs, functions, blocks, statements and types, with the operations a type's constant argument may compute; the types of places; the text form `sisu sir` prints; jump threading | `lib.rs`, `types.rs`, `write.rs` and `simplify.rs` of `sisu-sir` |
+| `typeck.ty` | 376 | types, interned in a table | `sisu-resolve/src/ty.rs` |
+| `typeck.program` | 1854 | the resolved program, the spelling of types, `Copy`, the trait solver, `Send` and `Sync`, visibility, views and must-consume types | `program.rs`, `ty.rs`, `solve.rs` and `auto.rs` of `sisu-resolve` |
+| `typeck.borrows` | 386 | what a signature borrows: the parameters a result may borrow from (`from`, and the elision rules), the borrowed-signature errors | `sisu-resolve/src/borrows.rs` |
+| `typeck.std_sources` | 441 | `target` and `builtin_impls`, the std text stage 0 writes, and the import paths of the std modules | `sisu-resolve/src/std_sources.rs` |
+| `typeck.collect` | 4003 | declarations, signatures, imports, traits and impls, resolved, and what the compiler writes: derived impls, interceptors and fakes, generators, invariants, predicates, a script's `main`, test cases, doc tests | `collect.rs`, `types.rs`, `traits.rs`, `derive.rs`, `shims.rs`, `arbitrary.rs`, `tests_of.rs` and `doctests.rs` of `sisu-resolve` |
+| `typeck.template` | 1972 | the evaluator of compile-time code that unfolds a template (a `comptime def derive`, a generic function that reflects on its type parameters) into source text | `sisu-resolve/src/template.rs` |
+| `typeck.instances` | 568 | the impls `@derive` makes for the root module's types and the instances of templates, declared in modules of their own | `derive.rs` and `instances.rs` of `sisu-resolve` |
+| `typeck.consts`, `typeck.folding` | 341 | a type's constant argument written as an expression, folded where it is written; an expression as folding reads it | `sisu-resolve/src/consts.rs` |
+| `typeck.infer`, `typeck.thir` | 767 | inference variables and unification; the typed tree | `infer.rs` and `thir.rs` of `sisu-typeck` |
+| `typeck.check`, `.expr`, `.call`, `.pat` | 6642 | the body checker: statements, expressions, calls, patterns | `check.rs`, `expr.rs`, `call.rs` and `pat.rs` of `sisu-typeck` |
 | `typeck.exhaustive` | 572 | exhaustiveness and unreachable arms of `match` | `sisu-typeck/src/exhaustive.rs` |
-| `typeck.contracts`, `.purity`, `.tasks` | 1309 | contracts and refinements, `pure`, structured concurrency and generators | `contracts.rs`, `purity.rs` and `tasks.rs` of `sisu-typeck` |
-| `typeck` | 853 | a body's checks, a file's, the inferred error sets and the driver | `sisu-typeck/src/lib.rs` |
+| `typeck.contracts`, `.purity`, `.tasks` | 1338 | contracts and refinements, `pure`, structured concurrency and generators | `contracts.rs`, `purity.rs` and `tasks.rs` of `sisu-typeck` |
+| `typeck` | 1333 | a body's checks, a file's, the inferred error sets, the driver, and the typed bodies lowering reads | `sisu-typeck/src/lib.rs` |
+| `lower`, `lower.names`, `.func`, `.stmts`, `.exprs`, `.pats`, `.contracts`, `.glue` | 5572 | lowering the typed bodies to SIR: what `main` and the tests reach, names, functions and closures, statements, expressions, patterns, contracts, drop glue | `lib.rs`, `func.rs`, `stmts.rs`, `exprs.rs`, `pats.rs`, `contracts.rs` and `glue.rs` of `sisu-lower` |
+| `borrowck`, `borrowck.paths`, `.init`, `.elaborate`, `.loans`, `.consume`, `.purity`, `.names`, `.types`, `.bitset`, `.finding` | 4877 | the ownership checker: move paths, initialisation and moves, drop placement, loans, must-consume, purity, places in source terms, and the findings as diagnostics | `sisu-borrowck` (but `explain.rs` and `shared.rs`) |
 | `mutants` | 109 | a seeded generator and the mutations of stage 0's robustness test | `sisu-driver/src/tests.rs` |
-| `main` | 377 | the command line | `sisu-driver/src/cli.rs`, `tokens`, `parse` and `check` |
+| `main` | 524 | the command line | `sisu-driver/src/cli.rs`, `tokens`, `parse`, `check` and `sir` |
 
-28659 lines in all, about 850 of them tests; the Rust the lexer and the
+46275 lines in all, about 1100 of them tests; the Rust the lexer and the
 parser transcribe (`sisu-lexer`, `sisu-parser`, and `kinds.rs` and
 `tree.rs` of `sisu-syntax`) is 5717 lines with its tests, the AST and its
-builder 2782, and `sisu-resolve` and `sisu-typeck`, of which stage 1 transcribes
-`sisu-typeck` whole and of `sisu-resolve` what one file needs, 22053.
+builder 2782, `sisu-resolve` and `sisu-typeck`, of which stage 1
+transcribes `sisu-typeck` whole and of `sisu-resolve` what one file needs,
+22483, `sisu-lower` 5329 with its tests, the parts of `sisu-sir` stage 1
+has (its data, the types of places, the writer and jump threading) 1486,
+and `sisu-borrowck` 5299 with its tests, all of it but the explanation of
+loans (`explain.rs`) and the `Shared` escape analysis (`shared.rs`).
 
 ## How the port went
 
@@ -337,11 +498,13 @@ parser's `match self.current(): case IntNumber | FloatNumber | ...:` reads
 as the Rust does, `Mode::Interp { depth, triple }` is `Interp(depth: int,
 triple: bool)`, and `while let`, `if let` and chained conditions
 (`if let Some(next) = next_indentation(...), next > logical_width:`) cover
-Rust's `is_some_and`. Stage 0's unit tests came along: 49 of them (the
+Rust's `is_some_and`. Stage 0's unit tests came along: 50 of them (the
 lexer's, the parser's except those of the AST, the AST builder's, the
 kinds', the tree's, the source map's columns, the inference table's, and the
 type errors of `sisu-typeck`'s tests that are within the slice) are tests of
-stage 1 now, beside 26 new ones.
+stage 1 now, beside 38 new ones (among them the template engine's, drop
+placement's and the ownership checker's, each against what stage 0
+prints for the same program).
 
 The rules were complete enough to transcribe: the lexer and the parser
 matched stage 0 on all 370 files the first time they ran. What the
@@ -447,24 +610,22 @@ consequential first.
     the catalog, so each takes `sys: System`, runs alone, and depends on the
     working directory. A test-only way to name a file of the package (an
     `embed` for tests) would make them hermetic.
-12. **Compiling the package takes about 5 s** on every `sisu run` (`sisu
-    check` of these 20 000 lines takes 4.5 s; of the first 5800, 0.58 s was
-    the ownership checker's); `batch` and its kin exist so that one run
-    covers many files.
-13. **A recursive type costs the ownership checker exponential time.**
-    `sisu-borrowck`'s `Types::must_consume_depth` follows the types of
-    fields with no memory of what it has seen and a depth limit of 32, at
-    every drop and at every intrinsic call with a moved argument; a type
-    with several recursive fields (the Rust AST's `Box<Expr>`, in a dozen
-    variants) makes `sisu check` of its users take hours, and a directly
-    recursive enum (`enum E: Lit(int) Add(lhs: E, rhs: E)`, which 03 says
-    needs a `Box`, but nothing reports) makes it never return. Stage 1's
-    AST and typed tree are arenas with typed ids, and its types are
-    interned.
-14. **A `dict` key cannot hold a list when the program runs.** A type with
-    a list in it derives `Hash` and type-checks as a key, and then the
-    interpreter stops at the first insertion: "List([]) is not hashable".
-    The table of types finds a type by a text that names its parts.
+12. **Compiling the package takes about 8 s** on every `sisu run` (`sisu
+    check` of these 46 000 lines takes about as long; of the first 5800,
+    0.58 s was the ownership checker's); `batch` and its kin exist so that
+    one run covers many files.
+13. **A recursive type cost the ownership checker exponential time.**
+    `sisu-borrowck`'s `Types::must_consume_depth` followed the types of
+    fields with no memory of what it had seen and a depth limit of 32; a
+    type with several recursive fields (the Rust AST's `Box<Expr>`, in a
+    dozen variants) made `sisu check` of its users take hours. Round 5
+    fixed it (decision 180: each type is looked at once); stage 1's AST and
+    typed tree stay arenas with typed ids, and its types stay interned, but
+    the template engine's shapes nest through lists.
+14. **A `dict` key could not hold a list when the program ran** ("List([])
+    is not hashable"); round 5 made lists keys as their `Hash` impls
+    declare (decision 181). The table of types still finds a type by a
+    text that names its parts.
 15. **Borrowing through a `ref` field borrows the whole struct.** A view
     struct with `prog: ref Program` cannot call a `mut self` method while it
     holds anything read through `prog` (`E0405`), though the program is not
@@ -496,7 +657,12 @@ consequential first.
     `case TPatKind.List(prefix, ...)` on `c.pats[...]` and then
     `self.product(c, ...)` is "a reference was used after its loan had
     ended" under `sisu test`, and runs under `sisu run`. Copying what the
-    pattern bound before the call satisfies both.
+    pattern bound before the call satisfies both. Lowering's round met it
+    three times more: a `mut` parameter passed on to a view parameter
+    stays `mut` to the monitor, so the callee's own copy of it ends the
+    loans the callee made through it (the drop placement's decisions, the
+    walk of a type's parts in `typeck.borrows`, the checker's loop over the
+    functions); the static checker accepts each.
 21. **`own`, `def` and `from` are keywords**, so Rust's variables and
     parameters of those names become `owns`, `defaults` and `from_`.
 
@@ -542,23 +708,34 @@ ambient std modules and `builtin_impls`, and parsing the ten std modules a
 program may import, takes about 25 s, nearly all of it parsing, and each
 file then about half a second (copying the resolved program is 0.13 s of
 it; a file that imports a std module declares and resolves it too, as
-stage 0 does); `types-batch` checks the 360 programs of the corpus in about
-180 s. Its tests use a small prelude of their own.
+stage 0 does); `types-batch` checks the 374 programs of the corpus in about
+155 s (180 s for 360 before round 5 made the interpreter faster,
+decisions 175 to 178; the template engine checks a file again for each
+round of instances it declares). Its tests use a small prelude of their
+own.
+
+Lowering and the ownership checker add about a second a program:
+`sir-batch` takes 513 s for the 329 programs of `sir.list`, of which the
+front end is 110 s, lowering 267 s (most of it type-checking, for each
+program again, the bodies of the standard library it reaches, since the
+table of types is the program's) and the ownership checker with the
+writing of the SIR 95 s. With them, `./check.sh --names --types` takes
+about 20 minutes.
 
 ## What is next
 
-1. **The rest of the type checker's corpus**: the derive templates and
-   the reflection of generic functions (both `template.rs`, the unfolding
-   of compile-time code, whose code stage 0 then checks).
-2. **The ownership checker**, after lowering to SIR, as a slice of its own
-   with its own `check.sh` class: it reports the `type.` messages of
-   purity, definite assignment and must-consume type arguments that keep
-   the last of `types/` and `wrong/` (`pure_violation.sisu`) and twelve
-   other programs beyond the type checker's slice, then **SIR emission**
-   against the `.sir` files of the suite and `sisu sir`, which is where
-   stage 1 becomes the oracle.
-3. **Speed** where it pays: the scanner over a byte list, dumps without
-   interpolation, a prelude resolved once for many runs, and, in the
-   interpreter, views that do not copy.
-4. **The discrepancies**: once the coordinator has decided D1 to D5, either
-   stage 0 changes (and `check.sh` stops listing them) or stage 1 does.
+1. **The rest of lowering's corpus**: the impls the standard library
+   derives for its own types (the template engine run once on the std
+   modules' types, in the base, as stage 0 writes `<std>/<derive>/`),
+   `comptime` expressions (an evaluator of SIR, which stage 0 has in its
+   interpreter), the generators of `arbitrary` and `exhaustive` with the
+   contract tests and `@refines` properties they feed (`arbitrary.rs`),
+   the methods of `@delegate`, and the `Shared` escape analysis
+   (`shared.rs`). Then **running SIR**, where stage 1 becomes the oracle.
+2. **Speed** where it pays: lowering checks the bodies of the standard
+   library a program reaches anew for every program (the table of types is
+   the program's); the scanner over a byte list, dumps without
+   interpolation, and, in the interpreter, views that do not copy.
+3. **The discrepancies**: none is listed; the first five were decided for
+   the documents and stage 0 changed (D-079). A new one is listed from D6
+   on and decided the same way.

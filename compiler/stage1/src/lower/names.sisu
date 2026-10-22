@@ -1,0 +1,269 @@
+##! The names of SIR functions and types, the translation of the type
+##! checker's types into SIR's, and the files the functions come from
+##! (stage 0's `Ctx`, in `sisu-lower/src/lib.rs`).
+
+from stage1.diag import Lines, TextRange
+from stage1.sir import Loc, Type
+from stage1.text import is_alphanumeric
+from stage1.typeck.program import FnKind, ModuleId
+from stage1.typeck.program import Program as Resolved
+from stage1.typeck.thir import BodyKind, TBody
+from stage1.typeck.ty import DefId, Ty, TyData, Types
+
+## Which contracts a build checks (07: `contracts = "off" | "preconditions"
+## | "all"`), in increasing order; debug and test builds check all.
+pub const CONTRACTS_OFF: int = 0
+pub const CONTRACTS_PRECONDITIONS: int = 1
+pub const CONTRACTS_ALL: int = 2
+
+## Names of SIR functions and types, and the files they come from (stage
+## 0's `Ctx`, but the program and the table of types, which are given).
+pub struct Ctx:
+    ## The source index of each module's file, in the order first met.
+    pub files: dict[ModuleId, int]
+    pub file_names: list[String]
+    ## The name of each module's file: the program's path for the root
+    ## module and its doc examples' module, `<std>/NAME.sisu` for a std
+    ## module, the module's own name for one the compiler wrote.
+    pub path: String
+    ## The prefix of the names of each trait impl's methods: `Circle.Shape`.
+    pub impl_names: dict[DefId, String]
+    ## Which contracts the build checks.
+    pub level: int
+    ## The names of the program's own free functions (and the ones the
+    ## compiler writes for it): a prelude function of the same name, which
+    ## the program's hides, is `std.NAME` in SIR.
+    pub root_fns: set[String]
+    ## Each declared type by its SIR name (the first of a name).
+    pub type_defs: dict[String, DefId]
+    ## The text of each module whose bodies were checked, and its lines.
+    pub texts: dict[ModuleId, String]
+    pub lines: dict[ModuleId, Lines]
+
+impl Ctx:
+    pub pure def fn_name(self, prog: Resolved, types: Types, d: DefId) -> String:
+        let def_ = ref prog.defs[d.index]
+        for i in range(len(prog.tests)):
+            if prog.tests[i] == d:
+                return "test#{i}"
+        if let Some(f) = prog.fn_info(d):
+            # A refinement's predicate, which the compiler writes.
+            if let FnKind.Predicate(r) = f.kind:
+                return "{prog.qualified_name(r)}#where"
+            # An instance of a template: `to_json#Point` (08).
+            for (t, args, inst) in prog.instances:
+                if inst != d:
+                    continue
+                var shown: list[String] = []
+                for a in args:
+                    shown.push(prog.display(types, a))
+                var key = String.new()
+                for c in shown.join(",").chars():
+                    if is_alphanumeric(c) or c == '.' or c == '_':
+                        key.push_char(c)
+                    else:
+                        key.push_char('_')
+                return "{self.fn_name(prog, types, t)}#{key}"
+            if let Some(i) = f.impl_:
+                var prefix = "impl".to_string()
+                if let Some(p) = self.impl_names.get(i):
+                    prefix = p.copy()
+                return "{prefix}.{def_.name}"
+            if let Some(t) = f.trait_:
+                return "{prog.qualified_name(t)}.{def_.name}"
+            if let Some(owner) = f.owner:
+                return "{self.owner_name(prog, types, owner)}.{def_.name}"
+        # The generators the compiler writes (`<arbitrary>/...`) are bound in
+        # the root module, by names a program cannot declare again.
+        let m = ref prog.modules[def_.module.index]
+        let generated = m.name.starts_with("<arbitrary>/")
+        if def_.module == prog.prelude and self.root_fns.contains(def_.name):
+            return "std.{def_.name}"
+        if def_.module == prog.root or def_.module == prog.prelude or generated:
+            return def_.name.copy()
+        return "{m.name}.{def_.name}"
+
+    pure def owner_name(self, prog: Resolved, types: Types, owner: Ty) -> String:
+        return match types.data(owner):
+            case TyData.Adt(d, _): self.type_name(prog, d)
+            case TyData.Int: "int".to_string()
+            case TyData.Float: "f64".to_string()
+            case TyData.Bool: "bool".to_string()
+            case TyData.Char: "char".to_string()
+            case TyData.Str: "str".to_string()
+            case TyData.Unit: "unit".to_string()
+            case TyData.Tuple(es, _): "tuple{len(es)}"
+            case TyData.Ref(_, _): "ref".to_string()
+            case TyData.Fn(_, _, _): "fn".to_string()
+            case TyData.Dyn(tr): "dyn{prog.defs[tr.def_.index].name}"
+            case TyData.ErrSet(ms): if len(ms) == 1: self.type_name(
+                prog, ms[0]
+            ) else: "any".to_string()
+            case _: "any".to_string()
+
+    ## Names every trait impl's methods: `Type.Trait.method`, with `#2` and
+    ## on for a second impl of one trait for one type constructor.
+    pub pure def name_impls(mut self, prog: Resolved, types: Types):
+        var used: dict[String, int] = {}
+        for i in prog.impls:
+            let info = prog.impl_info(i) else:
+                continue
+            let owner = self.owner_name(prog, types, info.self_ty)
+            let base = "{owner}.{prog.qualified_name(info.trait_ref.def_)}"
+            let n = (used.get(base) ?? 0) + 1
+            _ = used.insert(base.copy(), n)
+            let name = if n == 1: base else: "{base}#{n}"
+            _ = self.impl_names.insert(i, name)
+
+    ## The SIR name of a type definition: its builtin tag, or its name
+    ## qualified by a std module.
+    pub pure def type_name(self, prog: Resolved, d: DefId) -> String:
+        if let Some(b) = prog.builtin(d):
+            return b.copy()
+        return prog.qualified_name(d)
+
+    pub pure def body_name(self, prog: Resolved, types: Types, b: TBody) -> String:
+        return match b.kind:
+            case BodyKind.Fn: self.fn_name(prog, types, b.def_)
+            case BodyKind.FieldDefault(s, i): self.field_default_name(prog, s, i)
+            case BodyKind.ParamDefault(f, i): self.param_default_name(prog, types, f, i)
+            case BodyKind.Const: self.const_name(prog, b.def_)
+
+    pub pure def field_default_name(self, prog: Resolved, s: DefId, i: int) -> String:
+        var field = String.new()
+        if let Some(x) = prog.struct_info(s):
+            if i < len(x.fields):
+                field = x.fields[i].name.copy()
+        return "{self.type_name(prog, s)}#{field}"
+
+    pub pure def param_default_name(self, prog: Resolved, types: Types, f: DefId, i: int) -> String:
+        var p = String.new()
+        if let Some(x) = prog.fn_info(f):
+            if i < len(x.params):
+                p = x.params[i].name.copy()
+        return "{self.fn_name(prog, types, f)}#{p}"
+
+    pub pure def const_name(self, prog: Resolved, d: DefId) -> String:
+        let def_ = ref prog.defs[d.index]
+        if def_.module == prog.root or def_.module == prog.prelude:
+            return def_.name.copy()
+        return "{prog.modules[def_.module.index].name}.{def_.name}"
+
+    ## The SIR type of a type of the checker.
+    pub pure def ty(self, prog: Resolved, mut types: Types, t: Ty) -> Type:
+        match types.data(t).copy():
+            case TyData.Int:
+                return Type.Int
+            case TyData.Float:
+                return Type.Float
+            case TyData.Bool:
+                return Type.Bool
+            case TyData.Char:
+                return Type.Char
+            case TyData.Str:
+                return Type.Str
+            case TyData.Unit | TyData.Var(_) | TyData.Error:
+                return Type.Unit
+            case TyData.Param(i):
+                return Type.Param(i)
+            case TyData.Const(n):
+                return Type.Const(n)
+            case TyData.ConstOp(op, args):
+                return Type.ConstOp(op=op, args=self.tys(prog, mut types, args))
+            case TyData.Dyn(tr):
+                let args = self.tys(prog, mut types, tr.args)
+                return Type.Dyn(name=prog.qualified_name(tr.def_), args=args)
+            case TyData.Assoc(s, tr, name):
+                let st = self.ty(prog, mut types, s)
+                let args = self.tys(prog, mut types, tr.args)
+                return Type.Assoc(
+                    self_ty=[st], trait_=prog.qualified_name(tr.def_), args=args, name=name
+                )
+            case TyData.Never:
+                return Type.Never
+            case TyData.Adt(d, args):
+                # A refinement is represented as its base (07).
+                if prog.refinement(d).is_some():
+                    let base = prog.refinement_base(mut types, d, args) ?? Ty.error()
+                    return self.ty(prog, mut types, base)
+                var name = self.type_name(prog, d)
+                if Some(d) == prog.wk.option:
+                    name = "Option".to_string()
+                elif Some(d) == prog.wk.result:
+                    name = "Result".to_string()
+                return Type.Named(name=name, args=self.tys(prog, mut types, args))
+            case TyData.Tuple(es, _):
+                if es.is_empty():
+                    return Type.Unit
+                return Type.Tuple(self.tys(prog, mut types, es))
+            case TyData.ErrSet(ms):
+                var names: list[String] = []
+                for m in ms:
+                    names.push(self.type_name(prog, m))
+                return Type.ErrSet(names)
+            case TyData.Fn(ps, r, pure):
+                let params = self.tys(prog, mut types, ps)
+                let ret = self.ty(prog, mut types, r)
+                return Type.Fn(params=params, ret=[ret], pure=pure)
+            case TyData.Ref(inner, m):
+                let i = self.ty(prog, mut types, inner)
+                return Type.Ref(inner=[i], mutable=m)
+
+    pub pure def tys(self, prog: Resolved, mut types: Types, ts: list[Ty]) -> list[Type]:
+        var out: list[Type] = []
+        for t in ts:
+            out.push(self.ty(prog, mut types, t))
+        return out
+
+    ## The name of a module's file, as stage 0's source map has it.
+    pub pure def file_name(self, prog: Resolved, m: ModuleId) -> String:
+        if m == prog.root:
+            return self.path.copy()
+        let data = ref prog.modules[m.index]
+        if data.name.starts_with("<doc>/"):
+            if let Some(p) = data.parent:
+                return self.file_name(prog, p)
+            return self.path.copy()
+        if data.name.starts_with("<"):
+            if data.is_std:
+                return "<std>/{data.name}"
+            return data.name.copy()
+        return "<std>/{data.name}.sisu"
+
+    pub pure def source_index(mut self, prog: Resolved, m: ModuleId) -> int:
+        if let Some(i) = self.files.get(m):
+            return i
+        let i = len(self.file_names)
+        self.file_names.push(self.file_name(prog, m))
+        _ = self.files.insert(m, i)
+        return i
+
+    ## The source range of a span of module `m`'s text, without the line
+    ## breaks and indentation a statement's range ends with.
+    pub pure def loc(self, m: ModuleId, r: TextRange) -> Loc?:
+        let text = self.texts.get(m) else:
+            return None
+        let lines = self.lines.get(m) else:
+            return None
+        let (line, col) = lines.line_col(text, r.start)
+        let (end_line, end_col) = lines.line_col(text, trimmed_end(text, r))
+        return Some(Loc(line=line, col=col, end_line=end_line, end_col=end_col))
+
+    ## The empty range at the end of a span.
+    pub pure def end_loc(self, m: ModuleId, r: TextRange) -> Loc?:
+        let text = self.texts.get(m) else:
+            return None
+        let lines = self.lines.get(m) else:
+            return None
+        let (line, col) = lines.line_col(text, trimmed_end(text, r))
+        return Some(Loc(line=line, col=col, end_line=line, end_col=col))
+
+## The end of a range, before any trailing whitespace.
+pure def trimmed_end(text: str, r: TextRange) -> int:
+    var end = min(r.end, text.byte_len())
+    while end > r.start and end > 0 and is_ascii_space(text.byte_at(end - 1)):
+        end -= 1
+    return end
+
+pure def is_ascii_space(b: int) -> bool:
+    return b == 32 or b == 9 or b == 10 or b == 12 or b == 13
