@@ -1,0 +1,15 @@
+drop 1
+drop 0
+ignored: 0
+drop 2
+drop 1
+drop 0
+twice: 30
+drop 0
+drop 1
+drop 2
+drop 0
+drop 1
+zip: the arguments have different lengths
+drop 1
+drop 0

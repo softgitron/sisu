@@ -399,6 +399,46 @@ impl Program {
         }
     }
 
+    /// Whether a value of the type holds a capability handle (`Fs` and the
+    /// others of a `System`) or a `Cap` by value (decision 237). Such a
+    /// value is `Copy` (Q-51), but each copy of a handle is counted and
+    /// the object goes with the last one, so lowering drops it as it drops
+    /// a value that is not `Copy`. A `Lent` is a view of a handle, and
+    /// counts nothing; a type parameter holds none here (lowering drops a
+    /// value whose type is `Copy` only by a bound all the same).
+    pub fn holds_capability(&self, ty: &Ty) -> bool {
+        self.holds_capability_depth(ty, 0)
+    }
+
+    fn holds_capability_depth(&self, ty: &Ty, depth: u32) -> bool {
+        if depth > 32 {
+            return false;
+        }
+        match ty {
+            Ty::Tuple(e, _) => e.iter().any(|t| self.holds_capability_depth(t, depth + 1)),
+            Ty::ErrSet(members) => members.iter().any(|d| self.def_holds_capability(*d, &[], depth + 1)),
+            Ty::Adt(d, args) => self.def_holds_capability(*d, args, depth + 1),
+            _ => false,
+        }
+    }
+
+    fn def_holds_capability(&self, d: DefId, args: &[Ty], depth: u32) -> bool {
+        match &self.def(d).kind {
+            DefKind::Refinement(r) => self.holds_capability_depth(&r.base.subst(args), depth),
+            DefKind::Struct(s) if s.builtin.is_some() => match s.builtin.as_deref() {
+                Some("Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "System" | "Cap") => true,
+                Some("Lent") => false,
+                _ => args.iter().any(|a| self.holds_capability_depth(a, depth + 1)),
+            },
+            DefKind::Struct(s) => s.fields.iter().any(|f| self.holds_capability_depth(&f.ty.subst(args), depth)),
+            DefKind::Enum(e) | DefKind::ErrorSet(e) => e
+                .variants
+                .iter()
+                .any(|v| v.fields.iter().any(|(_, t)| self.holds_capability_depth(&t.subst(args), depth))),
+            _ => args.iter().any(|a| self.holds_capability_depth(a, depth + 1)),
+        }
+    }
+
     /// A `@derive(Copy)` type whose fields, with its arguments in them,
     /// are all `Copy` (a generic one is `Copy` only for such arguments;
     /// `Key[T]` is for any `T`, which no field holds).

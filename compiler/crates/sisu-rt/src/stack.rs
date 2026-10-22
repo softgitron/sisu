@@ -12,14 +12,20 @@
 //! **Probes.** Without a guard page, what keeps a task inside its slot is
 //! the probe the code generator puts at the entry of every function:
 //! the stack pointer, below the function's frame, is compared with the
-//! task's limit ([`abi::STACK_PROBE`]). The harness's probe compares before
-//! the frame is allocated; Cranelift allocates the frame in its prologue,
-//! before any code of ours runs, so the reserve below the limit holds the
-//! largest frame of the program on top of the policy's 5 KiB, and a
-//! function whose probe fails returns at once, writing nothing below its
-//! frame. Runtime code called from a task runs on the system stack (the
-//! root task's, as Go's `systemstack`), so the reserve holds only the
-//! frames of the switch, the runtime's thin wrappers and the unwinding.
+//! task's limit ([`abi::STACK_PROBE`]). The harness's probe compares the
+//! stack pointer less the frame before the frame is allocated; Cranelift
+//! allocates the frame in its prologue, before any code of ours runs, but
+//! writes only its top there (the saved registers, and the spill slots
+//! the register allocator may fill at the entry), not the stack slots
+//! below them, so comparing the stack pointer after the prologue is that
+//! comparison for everything but the top (decision 234). The reserve below
+//! the limit holds the policy's 5 KiB and what a call may write before a
+//! probe sees it: the largest such top, and the frame of a function
+//! without a probe (a dispatcher, a thunk) on top of it. A function whose
+//! probe fails returns at once, writing nothing more. Runtime code called
+//! from a task runs on the system stack (the root task's, as Go's
+//! `systemstack`), so the reserve holds only the frames of the switch, the
+//! runtime's thin wrappers and the unwinding.
 //!
 //! **Decommit on park.** When a task waits, the pages of its stack below
 //! the stack pointer it parked at (less a margin for the switch) are given
@@ -109,11 +115,12 @@ pub(crate) struct Mark {
 
 /// The pool of slots.
 pub(crate) struct Pool {
-    /// Bytes below the probe limit: [`PROBE_RESERVE`] and the largest
-    /// frame.
+    /// Bytes below the probe limit: [`PROBE_RESERVE`] and what a call may
+    /// write before a probe sees it.
     pub reserve: usize,
-    /// The largest frame, which the unwinding floor keeps room for.
-    max_frame: usize,
+    /// What a call may write below a probe limit before a probe sees it,
+    /// which the unwinding floor keeps room for.
+    unprobed: usize,
     slot: usize,
     page: usize,
     free: Vec<usize>,
@@ -125,13 +132,13 @@ pub(crate) struct Pool {
 }
 
 impl Pool {
-    pub(crate) fn new(reservation: usize, max_frame: usize) -> Pool {
+    pub(crate) fn new(reservation: usize, unprobed: usize) -> Pool {
         let page = page_size();
-        let reserve = round_up(PROBE_RESERVE + max_frame, 16);
+        let reserve = round_up(PROBE_RESERVE + unprobed, 16);
         let slot = round_up(reservation + reserve, page);
         Pool {
             reserve,
-            max_frame,
+            unprobed,
             slot,
             page,
             free: Vec::new(),
@@ -145,7 +152,7 @@ impl Pool {
     /// The limits a task on `r` starts with ([`abi::STACK_PROBE`] and the
     /// others).
     pub(crate) fn limits(&self, r: Region) -> [u64; abi::STACK_WORDS] {
-        limits(r.low, self.reserve, self.max_frame)
+        limits(r.low, self.reserve, self.unprobed)
     }
 
     /// A slot, from the free list or carved from a reservation; `None`
@@ -222,11 +229,11 @@ impl Pool {
 
 /// The limits of a stack whose lowest usable address is `low`: the probe
 /// fires below `low + reserve`; once it has failed, the unwinding may go
-/// down to the floor, which keeps the largest frame and
-/// [`FLOOR_MARGIN`] above `low`.
-pub(crate) fn limits(low: usize, reserve: usize, max_frame: usize) -> [u64; abi::STACK_WORDS] {
+/// down to the floor, which keeps what a call may write before a probe
+/// sees it (`unprobed`) and [`FLOOR_MARGIN`] above `low`.
+pub(crate) fn limits(low: usize, reserve: usize, unprobed: usize) -> [u64; abi::STACK_WORDS] {
     let real = (low + reserve) as u64;
-    let floor = (low + max_frame + FLOOR_MARGIN).min(low + reserve) as u64;
+    let floor = (low + unprobed + FLOOR_MARGIN).min(low + reserve) as u64;
     let mut w = [0u64; abi::STACK_WORDS];
     w[(abi::STACK_PROBE / 8) as usize] = real;
     w[(abi::STACK_REAL / 8) as usize] = real;

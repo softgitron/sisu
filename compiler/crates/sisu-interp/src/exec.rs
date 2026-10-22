@@ -10,7 +10,7 @@
 //! block has none, leaves the frame once its pending drops are done.
 
 use crate::value::{IterState, Value};
-use crate::{Frame, Interp, MAX_DEPTH, PanicInfo, Unwind, ice, msg, panic, render};
+use crate::{Frame, Interp, MAX_DEPTH, PanicInfo, UNWIND_DEPTH, Unwind, ice, msg, panic, render};
 use sisu_sir as sir;
 use sisu_sir::{Callee, Operand, Place, Proj, Rvalue, StatementKind, Terminator};
 
@@ -204,11 +204,12 @@ impl<'p> Interp<'p, '_> {
             resume_after_drops: false,
             anchor: None,
             stack_bytes: 0,
+            lent: 0,
         })
     }
 
     pub(crate) fn push_built(&mut self, mut fr: Frame<'p>) -> Result<(), Unwind> {
-        if self.frames.len() >= MAX_DEPTH {
+        if self.frames.len() + self.depth_base() >= MAX_DEPTH && !self.unwinding_within_margin() {
             // The frame that does not fit names the overflow (decision 234):
             // its function, or the intrinsic that opened an anchor.
             let function = match fr.func.and_then(|i| self.func(i)) {
@@ -216,6 +217,9 @@ impl<'p> Interp<'p, '_> {
                 None => fr.anchor.as_ref().map(|a| self.anchor_name(a)).unwrap_or_default(),
             };
             return Err(panic(msg::PANIC_STACK_OVERFLOW, &[("function", function)]));
+        }
+        if let Some(fi) = fr.func {
+            self.lend_iterables(fi, &mut fr);
         }
         if self.stats_kind == crate::StatsKind::StackDepth && self.sched.keep_stats {
             fr.stack_bytes =
@@ -234,6 +238,61 @@ impl<'p> Interp<'p, '_> {
         }
         self.frames.push(fr);
         Ok(())
+    }
+
+    /// What the caller gave an `Iterable[T]` parameter by value (an
+    /// iterator it moved in; SIR types the parameter as a reference) goes
+    /// to a local of the frame past the function's own, and the parameter
+    /// refers to it, as native code keeps it in the caller's memory: the
+    /// callee iterates it in place, and the value, with whatever the callee
+    /// left of it, is dropped when the frame returns or unwinds (decision
+    /// 235). `fr` is about to be pushed.
+    fn lend_iterables(&self, fi: usize, fr: &mut Frame<'p>) {
+        let Some(f) = self.func(fi) else { return };
+        let params = (f.param_count as usize).min(fr.locals.len().saturating_sub(1));
+        for i in 1..=params {
+            let iterable = matches!(f.locals.get(i).map(|l| &l.ty),
+                Some(sir::Type::Ref(t, _)) if matches!(&**t, sir::Type::Named(n, _) if n == "Iterable"));
+            if !iterable || matches!(fr.locals[i], Value::Ref(_) | Value::Moved) {
+                continue;
+            }
+            let v = std::mem::replace(&mut fr.locals[i], Value::Moved);
+            let local = fr.locals.len() as u32;
+            fr.locals.push(v);
+            fr.lent += 1;
+            fr.locals[i] = Value::Ref(Rc::new(crate::value::Pointer {
+                task: self.sched.cur,
+                frame: self.frames.len() as u32,
+                serial: fr.serial,
+                local,
+                path: Vec::new(),
+                tag: 0,
+            }));
+        }
+    }
+
+    /// A frame that held values for its `Iterable[T]` parameters is gone:
+    /// they are dropped in the frame below, before its next statement (or
+    /// as its unwinding goes on), as native code drops them when the call
+    /// returns (decision 235).
+    fn drop_lent(&mut self, fr: &mut Frame<'p>) {
+        if fr.lent == 0 {
+            return;
+        }
+        let from = fr.locals.len().saturating_sub(fr.lent as usize);
+        let values: Vec<Value> = fr.locals.drain(from..).filter(|v| !v.is_moved()).collect();
+        fr.lent = 0;
+        for v in values.into_iter().rev() {
+            self.queue_drop(v, None);
+        }
+    }
+
+    /// Whether the running task unwinds a panic (a frame runs cleanup or
+    /// the drops it was leaving with) and has room left of the frames
+    /// [`UNWIND_DEPTH`] gives it beyond the limit.
+    fn unwinding_within_margin(&self) -> bool {
+        self.frames.len() + self.depth_base() < MAX_DEPTH + UNWIND_DEPTH
+            && self.frames.iter().rev().any(|f| f.pending.is_some() || f.resume_after_drops)
     }
 
     /// Runs until the frame at index `base` of the running task returns.
@@ -322,6 +381,17 @@ impl<'p> Interp<'p, '_> {
     /// when the panic leaves the frame at `base` of task `root`, or aborts.
     /// The anchor of a task or a scope stops a panic: it records it, and
     /// its next step joins what it must before the panic goes on.
+    /// [`Interp::raise`] in task `t`, down to its anchor (a generator's
+    /// closing, decision 236).
+    pub(crate) fn raise_in(&mut self, e: Unwind, t: u32) -> Result<(), Unwind> {
+        self.raise(e, 0, t)
+    }
+
+    /// One step of the running task ([`Interp::step`]).
+    pub(crate) fn step_once(&mut self) -> Result<Event<'p>, Unwind> {
+        self.step()
+    }
+
     fn raise(&mut self, e: Unwind, base: usize, root: u32) -> Result<(), Unwind> {
         let mut p = match e {
             Unwind::Panic(p) => p,
@@ -361,19 +431,20 @@ impl<'p> Interp<'p, '_> {
             };
             let draining = self.frames.last().is_some_and(|f| f.resume_after_drops);
             if cleanup || draining {
-                let first = self
-                    .frames
-                    .last()
-                    .and_then(|f| f.pending.as_ref())
-                    .map(|q| q.message.clone())
-                    .unwrap_or_default();
+                let first = self.frames.last().and_then(|f| f.pending.as_ref());
+                // A generator dropped before its end cleans up without a
+                // panic of its own (decision 236).
+                let text = match first {
+                    Some(q) if q.abandon => render(msg::PANIC_DURING_ABANDON, &[("message", p.message.clone())]),
+                    _ => render(
+                        msg::PANIC_DURING_UNWIND,
+                        &[("first", first.map(|q| q.message.clone()).unwrap_or_default()), ("message", p.message.clone())],
+                    ),
+                };
                 if self.sched.cur == root {
                     self.frames.truncate(base);
                 }
-                return Err(Unwind::Abort(render(
-                    msg::PANIC_DURING_UNWIND,
-                    &[("first", first), ("message", p.message.clone())],
-                )));
+                return Err(Unwind::Abort(text));
             }
             // A trace names the program's frames: the standard library's
             // (`check`'s loop around a property) are left out.
@@ -398,9 +469,10 @@ impl<'p> Interp<'p, '_> {
                     return Ok(());
                 }
                 None => {
-                    if let Some(fr) = self.frames.pop() {
+                    if let Some(mut fr) = self.frames.pop() {
                         let n = self.frames.len() as u32;
                         self.mon_frame_gone(fr.serial, n, fr.locals.len());
+                        self.drop_lent(&mut fr);
                     }
                 }
             }
@@ -465,6 +537,7 @@ impl<'p> Interp<'p, '_> {
                 hole: None,
                 refinement: None,
                 too_long: Some(*steps),
+                abandon: false,
             })));
         }
         if let Some(f) = &mut self.fuel {
@@ -496,9 +569,10 @@ impl<'p> Interp<'p, '_> {
             return Ok(Event::Continue);
         }
         if self.frames[top].resume_after_drops {
-            let fr = self.frames.pop().ok_or_else(|| ice("resume without a frame"))?;
+            let mut fr = self.frames.pop().ok_or_else(|| ice("resume without a frame"))?;
             let n = self.frames.len() as u32;
             self.mon_frame_gone(fr.serial, n, fr.locals.len());
+            self.drop_lent(&mut fr);
             return fr.pending.map(Event::Resumed).ok_or_else(|| ice("resume outside unwinding"));
         }
         if let Some(a) = self.frames[top].anchor {
@@ -555,6 +629,7 @@ impl<'p> Interp<'p, '_> {
                 let mut fr = self.frames.pop().ok_or_else(|| ice("return without a frame"))?;
                 let n = self.frames.len() as u32;
                 self.mon_frame_gone(fr.serial, n, fr.locals.len());
+                self.drop_lent(&mut fr);
                 let v =
                     fr.locals.first_mut().map(|v| std::mem::replace(v, Value::Moved)).unwrap_or(Value::Unit);
                 let v = if v.is_moved() { Value::Unit } else { v };
@@ -570,9 +645,10 @@ impl<'p> Interp<'p, '_> {
                 Ok(Event::Returned(v, fr.ret))
             }
             Terminator::Resume => {
-                let fr = self.frames.pop().ok_or_else(|| ice("resume without a frame"))?;
+                let mut fr = self.frames.pop().ok_or_else(|| ice("resume without a frame"))?;
                 let n = self.frames.len() as u32;
                 self.mon_frame_gone(fr.serial, n, fr.locals.len());
+                self.drop_lent(&mut fr);
                 fr.pending.map(Event::Resumed).ok_or_else(|| ice("resume outside unwinding"))
             }
             Terminator::Unreachable => Err(panic(msg::PANIC_UNREACHABLE_PLAIN, &[])),
@@ -593,6 +669,13 @@ impl<'p> Interp<'p, '_> {
                     return self.store(p, v);
                 }
                 let v = self.rvalue(r)?;
+                // A copy of a handle is counted (decision 237).
+                if let Rvalue::Use(Operand::Copy(q)) = r
+                    && crate::caps::holds_cap(&v)
+                {
+                    let t = self.place_type(q);
+                    self.retain_caps(&v, t.as_ref());
+                }
                 self.store(p, v)
             }
             StatementKind::Call { dest, callee, args } => match callee {
@@ -614,14 +697,16 @@ impl<'p> Interp<'p, '_> {
                                 }
                             }
                         }
-                        let tys = tys.iter().map(|t| self.concrete(t)).collect();
+                        let tys: Vec<sir::Type> = tys.iter().map(|t| self.concrete(t)).collect();
+                        self.retain_args(fi, args, &locals[1..], &tys, 0);
                         let fr = self.frame_with(fi, locals, Some(dest), tys)?;
                         return self.push_built(fr);
                     }
                     let vals = self.operands(args)?;
                     // Passing a reference or a view is a use of its loan.
                     vals.iter().try_for_each(|v| self.mon_passed(v))?;
-                    let tys = tys.iter().map(|t| self.concrete(t)).collect();
+                    let tys: Vec<sir::Type> = tys.iter().map(|t| self.concrete(t)).collect();
+                    self.retain_args(fi, args, &vals, &tys, 0);
                     self.push_frame(fi, vals, Some(dest), tys)
                 }
                 Callee::Trait(name, tys) => {
@@ -635,6 +720,7 @@ impl<'p> Interp<'p, '_> {
                     }
                     match self.dispatch(name, tys, vals)? {
                         crate::dispatch::Target::Fn(fi, vals, tys) => {
+                            self.retain_args(fi, args, &vals, &tys, 0);
                             self.push_frame(fi, vals, Some(dest), tys)
                         }
                         crate::dispatch::Target::Intrinsic(n, vals, tys) => {
@@ -643,6 +729,7 @@ impl<'p> Interp<'p, '_> {
                             } else {
                                 None
                             };
+                            self.retain_kept(&n, args, &vals);
                             let r = self.intrinsic(&n, &tys, vals, ret.as_ref());
                             self.finish_call(&n, &tys, dest, ret, r)
                         }
@@ -654,6 +741,9 @@ impl<'p> Interp<'p, '_> {
                     vals.iter().try_for_each(|v| self.mon_passed(v))?;
                     self.mon_passed(&f)?;
                     let (fi, vals, tys) = self.callee_of(&f, vals)?;
+                    // A closure's environment comes first; it is not copied.
+                    let env = usize::from(vals.len() > args.len());
+                    self.retain_args(fi, args, &vals[env..], &tys, env);
                     self.push_frame(fi, vals, Some(dest), tys)
                 }
                 Callee::Intrinsic(name, tys) => {
@@ -671,6 +761,7 @@ impl<'p> Interp<'p, '_> {
                     };
                     let vals = self.operands(args)?;
                     self.mon_args(&vals)?;
+                    self.retain_kept(name, args, &vals);
                     // `list.clear` drops the elements: under the monitor, a
                     // must-consume one among them is the violation.
                     if name == "list.clear"
@@ -837,7 +928,7 @@ impl<'p> Interp<'p, '_> {
             .ok_or_else(|| ice(format!("no local _{}", l.0)))
     }
 
-    fn store(&mut self, p: &Place, v: Value) -> Result<(), Unwind> {
+    pub(crate) fn store(&mut self, p: &Place, v: Value) -> Result<(), Unwind> {
         // A whole local of the top frame, outside the monitor: in place.
         if p.proj.is_empty()
             && self.monitor.is_none()
@@ -1232,6 +1323,7 @@ impl<'p> Interp<'p, '_> {
             }
             Rvalue::Aggregate(kind, ops) => {
                 let vals = self.operands(ops)?;
+                self.retain_copies(ops, &vals);
                 self.aggregate(kind, vals)
             }
             Rvalue::Discriminant(p) => {
@@ -1250,6 +1342,7 @@ impl<'p> Interp<'p, '_> {
             }
             Rvalue::Closure(name, tys, ops) => {
                 let env = self.operands(ops)?;
+                self.retain_copies(ops, &env);
                 let tys = tys.iter().map(|t| self.concrete(t)).collect();
                 Ok(Value::Closure(Rc::new(crate::value::ClosureVal {
                     name: Rc::from(name.as_str()),
@@ -1329,6 +1422,53 @@ impl<'p> Interp<'p, '_> {
     /// A copy made by `.copy()`: a deep copy, except that a `Shared` gets
     /// another owner (and a `Weak` another handle) rather than a copy of
     /// its value (04, rule 5).
+    /// Counts the handles copied into a Sisu function's arguments
+    /// (decision 237): the callee owns its arguments and drops them. A
+    /// moved one keeps its count; a parameter's type says which hold
+    /// handles (not a `Lent`), from the `skip`-th parameter on.
+    fn retain_args(&mut self, fi: usize, ops: &[Operand], vals: &[Value], tys: &[sir::Type], skip: usize) {
+        if !vals.iter().any(crate::caps::holds_cap) {
+            return;
+        }
+        let Some(f) = self.func(fi) else { return };
+        for (i, (o, v)) in ops.iter().zip(vals).enumerate() {
+            if matches!(o, Operand::Move(_)) || !crate::caps::holds_cap(v) {
+                continue;
+            }
+            let t = f.locals.get(1 + skip + i).map(|l| l.ty.subst(tys));
+            self.retain_caps(v, t.as_ref());
+        }
+    }
+
+    /// Counts the handles copied into what an intrinsic keeps: its `own`
+    /// arguments (decision 237); it only reads the others.
+    fn retain_kept(&mut self, name: &str, ops: &[Operand], vals: &[Value]) {
+        if !vals.iter().any(crate::caps::holds_cap) {
+            return;
+        }
+        let own: Vec<u32> = self.prog.intrinsic(name).map(|d| d.own.clone()).unwrap_or_default();
+        for i in own {
+            let (Some(Operand::Copy(q)), Some(v)) = (ops.get(i as usize), vals.get(i as usize)) else { continue };
+            if crate::caps::holds_cap(v) {
+                let t = self.place_type(q);
+                self.retain_caps(v, t.as_ref());
+            }
+        }
+    }
+
+    /// Counts the handles an aggregate or a closure's environment copies
+    /// (decision 237).
+    fn retain_copies(&mut self, ops: &[Operand], vals: &[Value]) {
+        for (o, v) in ops.iter().zip(vals) {
+            if let Operand::Copy(q) = o
+                && crate::caps::holds_cap(v)
+            {
+                let t = self.place_type(q);
+                self.retain_caps(v, t.as_ref());
+            }
+        }
+    }
+
     pub(crate) fn copy_value(&mut self, v: &Value) -> Value {
         match v {
             Value::Shared(id) => {
@@ -1377,6 +1517,11 @@ impl<'p> Interp<'p, '_> {
                 ty: d.ty.clone(),
                 value: self.copy_value(&d.value),
             })),
+            // A copy of a handle is counted (decision 237).
+            Value::Cap(id) => {
+                self.retain_caps(v, None);
+                Value::Cap(*id)
+            }
             other => other.clone(),
         }
     }

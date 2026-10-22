@@ -562,6 +562,11 @@ R0126 runtime run.peak-allocations        allocations: at most {count} of the ru
 # A panic's stack trace deeper than its innermost and outermost frames
 # shows (decision 234): the line that stands for the frames between.
 R0127 runtime run.trace-elided            ... (frames left out)
+# A generator dropped before its end is closed: its frames unwind, running
+# their drops and `defer`s (decision 236). A panic there aborts, as one
+# during unwinding does, and so does a wait.
+R0128 runtime panic.during-abandon        panic while a generator dropped before its end cleans up: {message}\n  a panic there aborts the program
+R0129 runtime panic.abandoned-wait        a generator dropped before its end cannot wait while it cleans up
 
 # ---------------------------------------------------------------- driver
 

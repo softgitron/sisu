@@ -246,7 +246,12 @@ impl Interp<'_, '_> {
         let op = if mutable && reborrow { Op::MutBorrow } else { Op::Read };
         self.mon_access(ptr, op)?;
         let created = self.site();
-        let owner = self.frames_of(ptr.task).iter().find(|f| f.serial == ptr.serial).and_then(|f| f.func);
+        // The pointer knows its frame's index: no walk of a deep stack.
+        let owner = self
+            .frames_of(ptr.task)
+            .get(ptr.frame as usize)
+            .filter(|f| f.serial == ptr.serial)
+            .and_then(|f| f.func);
         let Some(m) = &mut self.monitor else { return Ok(0) };
         let mut at = ptr.clone();
         at.tag = 0;
@@ -536,7 +541,15 @@ impl Interp<'_, '_> {
     }
 
     pub(crate) fn mon_dangling(&self, p: &Pointer) -> Unwind {
-        let name = format!("_{}", p.local);
+        // A cell of the heap is named by what holds it (a `Shared`, a
+        // capability handle, a `Cap`), when it says.
+        let label = (p.frame == crate::value::HEAP)
+            .then(|| self.heap.get(p.local as usize).and_then(|c| c.label.clone()))
+            .flatten();
+        let name = match label {
+            Some(l) => l.to_string(),
+            None => format!("_{}", p.local),
+        };
         self.violation(Violation::Dangling { name, used: self.site() })
     }
 
@@ -575,7 +588,7 @@ impl Interp<'_, '_> {
     /// As [`Self::pointer_label`], naming the local by `owner`'s
     /// declarations when its frame has returned.
     fn pointer_label_in(&self, p: &Pointer, owner: Option<usize>) -> String {
-        let frame = self.frames_of(p.task).iter().find(|fr| fr.serial == p.serial);
+        let frame = self.frames_of(p.task).get(p.frame as usize).filter(|fr| fr.serial == p.serial);
         let f = frame.and_then(|fr| fr.func).or(owner);
         let decl = f.and_then(|i| self.func(i)).and_then(|f| f.locals.get(p.local as usize));
         let mut s = decl.and_then(|l| l.name.clone()).unwrap_or_else(|| format!("_{}", p.local));

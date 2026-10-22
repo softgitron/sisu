@@ -12,6 +12,7 @@ capabilities/host
 capabilities/interceptors
 capabilities/lent
 capabilities/network
+capabilities/object_drops
 capabilities/revocable
 capabilities/wrap_trait
 comptime/baked
@@ -23,6 +24,8 @@ concurrency/cancellation
 concurrency/channels
 concurrency/deadlock
 concurrency/failures
+concurrency/generator_close
+concurrency/generator_close_panic
 concurrency/generators
 concurrency/join
 concurrency/logging
@@ -31,6 +34,7 @@ concurrency/panics
 concurrency/pure_scope
 concurrency/race
 concurrency/select
+concurrency/stack_overflow
 contracts/checks
 contracts/invariants
 contracts/proposal_contracts
@@ -119,6 +123,7 @@ run/expect
 run/f32
 run/format_specs
 run/interpolation
+run/iterable_rest
 run/iterators
 run/let_else_copy
 run/list_keys
@@ -132,6 +137,7 @@ run/parse_int
 run/pure_functions
 run/recursion
 run/sized_integers
+run/stack_overflow
 run/strings
 run/structs_enums
 run/text_bytes

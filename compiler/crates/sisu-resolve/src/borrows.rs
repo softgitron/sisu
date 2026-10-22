@@ -102,19 +102,12 @@ impl Program {
         }
     }
 
-    /// Whether a value of the type is a `Copy` handle on a heap cell that
-    /// nothing frees: a capability handle, a `TestClock`, a `Cap` or a
-    /// `Lent`.
-    pub fn is_heap_handle(&self, ty: &Ty) -> bool {
-        match ty {
-            Ty::Adt(d, _) => matches!(
-                self.builtin(*d),
-                Some(
-                    "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "TestClock" | "Cap" | "Lent"
-                )
-            ),
-            _ => false,
-        }
+    /// Whether a value of the type is a `Copy` handle on something that
+    /// lives as long as the run: a `TestClock`, the number of one of the
+    /// scheduler's clocks. A capability handle, a `Cap` and a `Lent` are
+    /// not: their object goes with the handle's last copy (decision 237).
+    pub fn is_run_handle(&self, ty: &Ty) -> bool {
+        matches!(ty, Ty::Adt(d, _) if self.builtin(*d) == Some("TestClock"))
     }
 
     /// The shape of a declared result type (before substitution).
@@ -243,12 +236,14 @@ impl Program {
 
     /// 04: "A parameter counts as borrowed when it is passed without
     /// `own` and is not `Copy`, or when its type is a view, since a result
-    /// may point into a view."
+    /// may point into a view." A value that holds a capability handle or a
+    /// `Cap` counts too, since a result may point into the handle's object
+    /// (decision 237).
     pub fn is_borrowed_param(&self, p: &SigParam) -> bool {
         match p.mode {
             Mode::Mut => true,
             Mode::Own => false,
-            Mode::Borrow => !self.is_copy(&p.ty) || self.can_borrow(&p.ty),
+            Mode::Borrow => !self.is_copy(&p.ty) || self.can_borrow(&p.ty) || self.holds_capability(&p.ty),
         }
     }
 
@@ -329,13 +324,14 @@ impl Program {
             return ResultBorrows::default();
         }
         let params = self.sig_params(f);
-        // A handle on a heap cell that is never freed (a capability, a
-        // `Cap`, a `Lent`) lends nothing of its own: what a result reaches
-        // through it lives as long as the program.
+        // A handle on what lives as long as the run (a test clock) lends
+        // nothing of its own; what a result reaches through a capability
+        // handle, a `Cap` or a `Lent` lives as long as the handle's copy
+        // the caller passed (decision 237).
         let from: Vec<u32> = self
             .from_params(f)
             .into_iter()
-            .filter(|i| !self.is_heap_handle(&params[*i as usize].ty))
+            .filter(|i| !self.is_run_handle(&params[*i as usize].ty))
             .collect();
         let owned: Vec<u32> = params
             .iter()

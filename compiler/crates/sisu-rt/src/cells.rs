@@ -397,6 +397,9 @@ pub(crate) unsafe fn call(i: abi::Intrinsic, c: &Call<'_>) -> Option<u8> {
                 let (p, t) = c.place(0);
                 let Kind::Cell(v) = ty(t).kind else { rt::internal("`Cell.get` of something not a cell") };
                 mem::copy(c.ret, p, ty(v).size as usize);
+                // A copy of what the cell holds: its handles count one more
+                // (decision 237).
+                crate::value::retain_value(c.ret, v);
                 abi::OK
             }
             I::CellSet | I::CellReplace => {

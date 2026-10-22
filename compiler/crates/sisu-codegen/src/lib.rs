@@ -350,9 +350,11 @@ pub(crate) struct Codegen<'p> {
     pub budget: DataId,
     pub stack: DataId,
     pub site: DataId,
-    /// The largest frame of a compiled function, in bytes: the probe
-    /// reserve of a task's stack holds it (decision 203).
-    max_frame: u32,
+    /// The largest top of a probed function's frame, and the largest frame
+    /// of a function without a probe, in bytes: the probe reserve of a
+    /// task's stack holds them (decisions 203 and 234).
+    max_top: u32,
+    max_unprobed: u32,
     /// Texts and call descriptors in the read-only data, by content.
     texts: fx::FxMap<Vec<u8>, DataId>,
     descs: fx::FxMap<Vec<u32>, DataId>,
@@ -377,10 +379,10 @@ pub(crate) struct Codegen<'p> {
     /// ones into.
     spares: Option<std::sync::mpsc::Receiver<ir::Function>>,
     /// The functions handed to the threads, in the order they were made:
-    /// each one's id, what an error in it is called, whether its frame
-    /// counts towards `max_frame`, and what the debug information says of
+    /// each one's id, what an error in it is called, how its frame counts
+    /// towards the probe reserve, and what the debug information says of
     /// it.
-    handed: Vec<(FuncId, String, bool, debug::FnDebug)>,
+    handed: Vec<(FuncId, String, Frame, debug::FnDebug)>,
     /// What the debug information says of the functions defined, in the
     /// order they were made (decision 227).
     debug: Vec<debug::FnDebug>,
@@ -410,6 +412,21 @@ pub(crate) struct Codegen<'p> {
 /// as its size: the return address, the saved frame pointer, and the
 /// arguments passed on the stack.
 const FRAME_EXTRA: i64 = 256;
+
+/// How a function's frame counts toward what a task's stack keeps below
+/// its probe limit (decisions 203 and 234).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Frame {
+    /// Its entry probes the stack, and nothing but the top of its frame
+    /// (the saved registers and the spill slots, above its stack slots) is
+    /// written before the probe: only that top may lie below the limit.
+    Probed,
+    /// It has no probe (a dispatcher, a function's thunk): its whole frame
+    /// may lie below the limit, on top of its callee's top.
+    Unprobed,
+    /// It never runs on a task's stack (C's `main`, a stub that stops).
+    Outside,
+}
 
 /// The `Sisu` signature: the result's address and each argument's, and
 /// the status.
@@ -487,7 +504,8 @@ impl<'p> Codegen<'p> {
             budget,
             stack,
             site,
-            max_frame: 0,
+            max_top: 0,
+            max_unprobed: 0,
             texts: fx::FxMap::default(),
             descs: fx::FxMap::default(),
             glue_ids: Vec::new(),
@@ -678,8 +696,11 @@ impl<'p> Codegen<'p> {
         // a method that borrows it, a copy of the value for one that takes
         // it (a `Copy` type's, decision 59), and for an intrinsic the value's
         // address as a reference, with the call's descriptor.
+        // A method owns its arguments: the copy of the value a by-value
+        // `self` takes, when it holds a capability handle, is counted with
+        // its type (decision 237); the call counts the other arguments.
         enum Call {
-            Fn { callee: FuncId, by_value: Option<u32> },
+            Fn { callee: FuncId, by_value: Option<u32>, count: Option<u32> },
             Intrinsic { desc: DataId },
         }
         let mut calls = Vec::new();
@@ -695,7 +716,11 @@ impl<'p> Codegen<'p> {
                     };
                     let by_value =
                         if matches!(first, Type::Ref(..)) { None } else { Some(self.types.size(value_ty)?) };
-                    Call::Fn { callee: self.instance(f, targs.clone())?, by_value }
+                    let count = match by_value.is_some() && self.types.counted(value_ty)? {
+                        true => Some(self.types.id(value_ty)?),
+                        false => None,
+                    };
+                    Call::Fn { callee: self.instance(f, targs.clone())?, by_value, count }
                 }
                 Target::Intrinsic(name, targs) => {
                     let Some(intrinsic) = Intrinsic::from_name(name) else {
@@ -717,6 +742,11 @@ impl<'p> Codegen<'p> {
         }
         let intrinsic_fn = if calls.iter().any(|c| matches!(c, Call::Intrinsic { .. })) {
             Some(self.runtime(sym::INTRINSIC)?)
+        } else {
+            None
+        };
+        let retain_fn = if calls.iter().any(|c| matches!(c, Call::Fn { count: Some(_), .. })) {
+            Some(self.runtime(sym::RETAIN)?)
         } else {
             None
         };
@@ -755,7 +785,7 @@ impl<'p> Codegen<'p> {
                     b.ins().stack_addr(types::I64, ss, 0)
                 };
                 let status = match call {
-                    Call::Fn { callee, by_value } => {
+                    Call::Fn { callee, by_value, count } => {
                         let me = match by_value {
                             None => {
                                 let s = slot(&mut b, 8);
@@ -771,6 +801,11 @@ impl<'p> Codegen<'p> {
                                 s
                             }
                         };
+                        if let (Some(rf), Some(t)) = (retain_fn, count) {
+                            let r = self.module.declare_func_in_func(rf, b.func);
+                            let tv = b.ins().iconst(types::I32, i64::from(*t));
+                            b.ins().call(r, &[me, tv]);
+                        }
                         let r = self.module.declare_func_in_func(*callee, b.func);
                         let mut args = vec![ret, me];
                         args.extend(params.iter().skip(2).copied());
@@ -801,20 +836,19 @@ impl<'p> Codegen<'p> {
         self.fbctx = fbctx;
         let what = format!("the dispatcher of `{}`", self.dispatchers[i].name);
         let dbg = debug::FnDebug::new(id, format!("{}#dispatch", self.dispatchers[i].name));
-        self.define(id, ctx, what, true, dbg)
+        self.define(id, ctx, what, Frame::Unprobed, dbg)
     }
 
     /// Defines function `id` with the body in `ctx`: compiled here, or
     /// handed to the threads that compile (decision 219), whose code
     /// [`Codegen::place`] defines. `what` names the function in an error;
-    /// `frame`: whether its frame counts towards `max_frame` (a task may
-    /// run it).
+    /// `frame`: how its frame counts towards the probe reserve.
     fn define(
         &mut self,
         id: FuncId,
         mut ctx: Context,
         what: String,
-        frame: bool,
+        frame: Frame,
         dbg: debug::FnDebug,
     ) -> Result<(), Error> {
         if let Some(jobs) = &self.jobs {
@@ -827,9 +861,8 @@ impl<'p> Codegen<'p> {
         }
         self.module.define_function(id, &mut ctx).map_err(|e| Error::internal(format!("{what}: {e:?}")))?;
         if let Some(code) = ctx.compiled_code() {
-            if frame {
-                self.max_frame = self.max_frame.max(code.frame_size);
-            }
+            let top = code.frame_size.saturating_sub(workers::slots_size(&ctx.func));
+            self.count_frame(frame, code.frame_size, top);
             let size = code.buffer.data().len() as u32;
             self.debug.push(dbg.compiled(size, workers::Compiled::of(code, &*self.isa)));
         }
@@ -855,12 +888,20 @@ impl<'p> Codegen<'p> {
             self.module
                 .define_function_bytes(id, code.alignment, &code.bytes, &code.relocs)
                 .map_err(|e| Error::internal(format!("{what}: {e:?}")))?;
-            if frame {
-                self.max_frame = self.max_frame.max(code.frame_size);
-            }
+            self.count_frame(frame, code.frame_size, code.top);
             self.debug.push(dbg.compiled(code.bytes.len() as u32, code.debug));
         }
         Ok(())
+    }
+
+    /// Counts a compiled function's frame, of `size` bytes whose `top` its
+    /// entry writes before its probe, toward the probe reserve.
+    fn count_frame(&mut self, frame: Frame, size: u32, top: u32) {
+        match frame {
+            Frame::Probed => self.max_top = self.max_top.max(top),
+            Frame::Unprobed => self.max_unprobed = self.max_unprobed.max(size),
+            Frame::Outside => {}
+        }
     }
 
     /// Everything but `main`: the instances the entry reaches, the
@@ -928,7 +969,7 @@ impl<'p> Codegen<'p> {
         dbg.source = Some(f.source);
         dbg.line = f.loc.map_or(0, |l| l.line);
         dbg.vars = vars;
-        self.define(id, ctx, format!("Cranelift rejected `{name}`"), true, dbg)?;
+        self.define(id, ctx, format!("Cranelift rejected `{name}`"), Frame::Probed, dbg)?;
         self.compiled += 1;
         Ok(())
     }
@@ -984,7 +1025,7 @@ impl<'p> Codegen<'p> {
             id,
             ctx,
             format!("{name} as a value"),
-            true,
+            Frame::Unprobed,
             debug::FnDebug::new(id, format!("{name}#thunk")),
         )?;
         self.thunks.insert(name.to_string(), (id, ty.clone()));
@@ -1008,7 +1049,7 @@ impl<'p> Codegen<'p> {
             b.finalize();
         }
         self.fbctx = fbctx;
-        self.define(id, ctx, name.to_string(), false, debug::FnDebug::new(id, name.to_string()))
+        self.define(id, ctx, name.to_string(), Frame::Outside, debug::FnDebug::new(id, name.to_string()))
     }
 
     /// A runtime entry point, declared once with its signature.
@@ -1027,6 +1068,7 @@ impl<'p> Codegen<'p> {
             sym::PANIC_OVERFLOW => (&[i32_, i64_, i64_], &[i8_]),
             sym::PANIC_INDEX => (&[i64_, i64_, i64_], &[i8_]),
             sym::PANIC_STACK => (&[i64_, i64_], &[i8_]),
+            sym::RETAIN => (&[i64_, i32_], &[]),
             sym::PANIC_UNREACHABLE => (&[], &[i8_]),
             sym::INT_OP => (&[i32_, i64_, i64_, i64_], &[i8_]),
             sym::FLOAT_OP => (&[i32_, f64_, f64_], &[f64_]),
@@ -1299,13 +1341,15 @@ impl<'p> Codegen<'p> {
             let ret_ty = b.ins().iconst(types::I32, i64::from(ret_ty));
             let types_len = b.ins().iconst(types::I64, table.len() as i64);
             let fns_len = b.ins().iconst(types::I64, n as i64);
-            // The largest frame, and room for what a call adds to it (the
-            // return address, the saved frame pointer, arguments on the
-            // stack).
-            let max_frame = b.ins().iconst(types::I64, i64::from(self.max_frame) + FRAME_EXTRA);
+            // What a call may write below a probe limit before a probe sees
+            // it: an unprobed frame and a probed one's top, each with room
+            // for what a call adds (the return address, the saved frame
+            // pointer, arguments on the stack).
+            let unprobed = i64::from(self.max_unprobed) + i64::from(self.max_top) + 2 * FRAME_EXTRA;
+            let unprobed = b.ins().iconst(types::I64, unprobed);
             let call = b.ins().call(
                 start_ref,
-                &[argc, argv, entry_addr, flags, ret_ty, types_addr, types_len, fns_addr, fns_len, max_frame],
+                &[argc, argv, entry_addr, flags, ret_ty, types_addr, types_len, fns_addr, fns_len, unprobed],
             );
             let code = b.inst_results(call)[0];
             b.ins().return_(&[code]);
@@ -1313,7 +1357,7 @@ impl<'p> Codegen<'p> {
             b.finalize();
         }
         self.fbctx = fbctx;
-        self.define(main, ctx, "main".to_string(), false, debug::FnDebug::new(main, "main".to_string()))
+        self.define(main, ctx, "main".to_string(), Frame::Outside, debug::FnDebug::new(main, "main".to_string()))
     }
 }
 

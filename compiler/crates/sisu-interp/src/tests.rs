@@ -216,10 +216,19 @@ fn main(0) source 0 {{
     );
     let (code, _, err) = run(&text);
     assert_eq!(code, exit::PANIC);
+    // The overflow names the function that did not fit (decision 234),
+    // and the trace of 100 000 frames shows its ends.
     assert!(
-        err.starts_with(&format!("panic: stack overflow: more than {MAX_DEPTH} nested calls\n")),
+        err.starts_with(
+            "panic: stack overflow in `down`: the calls nest deeper than the stack holds\n  at down (t.sisu)\n"
+        ),
         "{err}"
     );
+    let lines: Vec<&str> = err.lines().collect();
+    assert_eq!(lines.len(), 2 + sisu_diag::trace::INNER + sisu_diag::trace::OUTER, "{err}");
+    assert_eq!(lines[1 + sisu_diag::trace::INNER], "  ... (frames left out)");
+    assert_eq!(lines.last(), Some(&"  at main (t.sisu)"));
+    assert!(MAX_DEPTH > sisu_diag::trace::INNER + sisu_diag::trace::OUTER);
 }
 
 #[test]

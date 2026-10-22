@@ -24,11 +24,13 @@ pub fn drops_something(t: &Type, needs: &HashMap<&str, bool>) -> bool {
         Type::Param(_) | Type::Assoc(..) | Type::Dyn(..) => true,
         Type::ErrSet(ms) => ms.iter().any(|m| needs.get(m.as_str()).copied().unwrap_or(true)),
         Type::Named(n, args) => match n.as_str() {
-            "Shared" | "Weak" | "MutexGuard" => true,
-            "String" | "Path" | "DateTime" | "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin"
-            | "System" | "HostFs" | "HostNet" | "HostClock" | "HostRand" | "HostEnv" | "HostProc"
-            | "HostStdin" | "TestClock" | "Cap" | "Lent" | "f32" | "u8" | "u16" | "u32" | "u64" | "u128"
-            | "i8" | "i16" | "i32" | "i128" | "bytes" | "Slice" => false,
+            // A capability handle's and a `Cap`'s copies are counted, and
+            // the last one's drop drops the object (decision 237).
+            "Shared" | "Weak" | "MutexGuard" | "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin"
+            | "System" | "Cap" => true,
+            "String" | "Path" | "DateTime" | "HostFs" | "HostNet" | "HostClock" | "HostRand" | "HostEnv"
+            | "HostProc" | "HostStdin" | "TestClock" | "Lent" | "f32" | "u8" | "u16" | "u32" | "u64"
+            | "u128" | "i8" | "i16" | "i32" | "i128" | "bytes" | "Slice" => false,
             "list" | "Array" | "dict" | "set" | "Iter" | "Entry" | "Iterable" | "Option" | "Result"
             | "Cell" | "Mutex" | "Arena" => args.iter().any(|a| drops_something(a, needs)),
             other => needs.get(other).copied().unwrap_or(true),

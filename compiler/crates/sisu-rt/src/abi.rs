@@ -28,9 +28,11 @@ pub const WORD: u32 = 8;
 /// The symbols of the runtime that generated code refers to.
 pub mod sym {
     /// `sisu_rt_start(argc, argv, entry, flags, ret_ty, types, types_len,
-    /// fns, fns_len, max_frame) -> i32`: runs the program and gives its
-    /// exit status; `max_frame` is the largest native frame of the program,
-    /// which the probe reserve of a task's stack must hold.
+    /// fns, fns_len, unprobed) -> i32`: runs the program and gives its
+    /// exit status; `unprobed` is the most a call may write below a probe
+    /// limit before a probe sees it (a function without a probe, and the
+    /// top of a probed function's frame, decision 234), which the probe
+    /// reserve of a task's stack must hold beyond the policy's 5 KiB.
     pub const START: &str = "sisu_rt_start";
     /// `sisu_rt_frame(name, name_len, file, file_len, line, col)`: a panic
     /// leaves a frame of the program; one line of its stack trace.
@@ -112,6 +114,10 @@ pub mod sym {
     /// `sisu_rt_shared_touch(value)`: code reached a `Shared`'s value, for
     /// the cells another task than their maker reaches (`--stats`).
     pub const SHARED_TOUCH: &str = "sisu_rt_shared_touch";
+    /// `sisu_rt_retain(value, ty)`: a copy of a value of type `ty` that
+    /// holds capability handles was made; each handle's cell counts one
+    /// more (decision 237).
+    pub const RETAIN: &str = "sisu_rt_retain";
 }
 
 /// The words of [`sym::STACK`]. The probe at a function's entry compares
@@ -129,14 +135,10 @@ pub const STACK_REAL: u32 = 8;
 pub const STACK_FLOOR: u32 = 16;
 pub const STACK_DIRTY: u32 = 24;
 pub const STACK_FAILED: u32 = 32;
-/// 1 while the running task is a generator being abandoned: its yield
-/// returns [`UNWINDING`] without a panic, and its frames unwind running
-/// their drops, which forget what they drop (decisions 95 and 223). A generator's
-/// closure whose cleanup runs code of its own (a `defer`) sets it to
-/// [`ABANDON_KEEP`] when it starts: its frames are left as they are.
+/// 1 while the running task is a generator dropped before its end: the
+/// call it waits in returns [`UNWINDING`] without a panic, and its frames
+/// unwind running their drops and `defer`s (decision 236).
 pub const STACK_ABANDONED: u32 = 40;
-/// See [`STACK_ABANDONED`].
-pub const ABANDON_KEEP: u64 = 2;
 /// See [`STACK_PROBE`].
 pub const STACK_FAILED_LEN: u32 = 48;
 /// The words of [`sym::STACK`].
@@ -156,6 +158,10 @@ pub const SITE_PURE: u64 = 1;
 
 /// Nested calls beyond this many panic (the interpreter's limit).
 pub const MAX_DEPTH: i64 = 100_000;
+/// The calls beyond [`MAX_DEPTH`] that the unwinding of a panic may nest:
+/// the drops it runs call code of their own (the interpreter's
+/// `UNWIND_DEPTH`, decision 234).
+pub const UNWIND_DEPTH: i64 = 1_000;
 
 /// `flags` of `sisu_rt_start`: `main` returns `T ! E`.
 pub const ENTRY_RESULT: u32 = 1;
@@ -170,6 +176,13 @@ pub const SLOT_DROP: u32 = 2;
 
 /// The capability handles a `System` holds, in its fields' order
 /// (decision 101), and the host's object behind each.
+/// Whether a type the runtime knows by its name (`Kind::Opaque`) is a
+/// counted handle: a capability's (`Fs` and the others of a `System`) or
+/// a `Cap` (decision 237). A `Lent`'s name is `Lent` and its handle's.
+pub fn counted_handle(name: &str) -> bool {
+    name == "Cap" || CAPABILITIES.iter().any(|(h, _)| *h == name)
+}
+
 pub const CAPABILITIES: [(&str, &str); 7] = [
     ("Fs", "HostFs"),
     ("Net", "HostNet"),

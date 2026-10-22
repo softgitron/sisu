@@ -407,6 +407,7 @@ impl<'p> Interp<'p, '_> {
                     hole: Some(n),
                     refinement: None,
                     too_long: None,
+                    abandon: false,
                 })))
             }
             _ => Err(ice(format!("unknown intrinsic `{name}`"))),
@@ -1166,6 +1167,7 @@ impl<'p> Interp<'p, '_> {
                 hole: None,
                 refinement: Some((owner, value, clause)),
                 too_long: None,
+                abandon: false,
             })));
         }
         let (id, key) = match kind {
@@ -1349,7 +1351,13 @@ impl Interp<'_, '_> {
         match method {
             "new" => Ok(Value::Cell(Box::new(a.take(0)?))),
             "get" => match self.target(a.get(0)?)? {
-                Value::Cell(v) => Ok((**v).clone()),
+                Value::Cell(v) => {
+                    // A copy of what the cell holds: its handles are
+                    // counted (decision 237).
+                    let v = (**v).clone();
+                    self.retain_caps(&v, None);
+                    Ok(v)
+                }
                 other => Err(ice(format!("Cell.get on {other:?}"))),
             },
             "set" | "replace" => {

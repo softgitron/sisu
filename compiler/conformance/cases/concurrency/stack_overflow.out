@@ -1,0 +1,6 @@
+the task's outermost guard is dropped
+stack overflow in `down`: the calls nest deeper than the stack holds
+a trace of 101 lines, from at down (stack_overflow.sisu:18:12) to at closure in main (stack_overflow.sisu:27:34)
+... (frames left out)
+the shallow task returned Ok(100)
+the task's outermost guard is dropped

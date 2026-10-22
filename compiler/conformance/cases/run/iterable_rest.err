@@ -1,0 +1,3 @@
+panic: boom
+  at boom (iterable_rest.sisu:30:5)
+  at main (iterable_rest.sisu:51:11)

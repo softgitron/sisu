@@ -1,10 +1,16 @@
 //! Capabilities (06, "Capabilities"): a handle (`Fs`, `Clock`, ...) is a
 //! cell of the heap that holds its object as a `dyn` of the object's type,
-//! which every copy of the handle reaches and nothing frees; a `Cap[T]` is
-//! the same cell holding the `T`, and a `Lent` is the handle itself. The
-//! root objects of a `System` are the host's (`HostFs`, `HostClock`, ...),
-//! whose operations are the intrinsics `host.*` over [`crate::Host`]. The
-//! run's test clock is a virtual clock of the scheduler, made on first use.
+//! which every copy of the handle reaches; a `Cap[T]` is the same cell
+//! holding the `T`, and a `Lent` is the handle itself. The root objects of
+//! a `System` are the host's (`HostFs`, `HostClock`, ...), whose operations
+//! are the intrinsics `host.*` over [`crate::Host`]. The run's test clock is
+//! a virtual clock of the scheduler, made on first use.
+//!
+//! A handle is `Copy`, and each copy is counted (decision 237): a copy into
+//! a place, an aggregate, a closure's environment, a function's argument or
+//! an argument an intrinsic keeps adds a count, a drop takes one, and the
+//! last one's drop drops the object (running its `Drop`) and empties the
+//! cell. A `Lent` counts nothing.
 
 use crate::value::{DynVal, HEAP, HeapCell, Pointer, Value};
 use crate::{Interp, IoErrorKind, Unwind, ice};
@@ -30,6 +36,58 @@ impl Interp<'_, '_> {
             site: None,
         });
         id
+    }
+
+    /// Adds a count to every handle and `Cap` a value of type `ty` (when
+    /// it is known) holds: a copy of it was made (decision 237). A `Lent`
+    /// holds its handle without a count.
+    pub(crate) fn retain_caps(&mut self, v: &Value, ty: Option<&sir::Type>) {
+        if !holds_cap(v) || matches!(ty, Some(sir::Type::Named(n, _)) if n == "Lent") {
+            return;
+        }
+        match v {
+            Value::Cap(id) => {
+                if let Some(c) = self.heap.get_mut(*id as usize) {
+                    c.strong += 1;
+                }
+            }
+            Value::Struct(a) | Value::Variant(a) => {
+                let variant = matches!(v, Value::Variant(_)).then_some(a.variant);
+                for (i, f) in a.fields.iter().enumerate() {
+                    let ft = ty.and_then(|t| {
+                        sir::types::field_ty(&|n| self.types.get(n).copied(), t, variant, i as u32)
+                    });
+                    self.retain_caps(f, ft.as_ref());
+                }
+            }
+            Value::Tuple(xs) => {
+                for (i, x) in xs.iter().enumerate() {
+                    let et = match ty {
+                        Some(sir::Type::Tuple(ts)) => ts.get(i).cloned(),
+                        _ => None,
+                    };
+                    self.retain_caps(x, et.as_ref());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Takes a count from a handle's cell: the last one drops the object
+    /// (or the `Cap`'s value), queued as any drop is (decision 237).
+    pub(crate) fn release_cap(&mut self, id: u32) {
+        let Some(c) = self.heap.get_mut(id as usize) else { return };
+        if c.strong == 0 {
+            return;
+        }
+        c.strong -= 1;
+        if c.strong > 0 {
+            return;
+        }
+        let v = std::mem::replace(&mut c.value, Value::Moved);
+        let serial = c.serial;
+        self.mon_heap_freed(serial, id);
+        self.queue_drop(v, None);
     }
 
     /// A handle on one of the host's root objects.
@@ -422,5 +480,16 @@ impl Interp<'_, '_> {
             Ok(()) => Value::ok(Value::Unit),
             Err(k) => Value::err(self.io_error(k, path)),
         }
+    }
+}
+
+/// Whether a value holds a capability handle or a `Cap` (a `Lent` holds
+/// one too: its type says it is not counted).
+pub(crate) fn holds_cap(v: &Value) -> bool {
+    match v {
+        Value::Cap(_) => true,
+        Value::Struct(a) | Value::Variant(a) => a.fields.iter().any(holds_cap),
+        Value::Tuple(xs) => xs.iter().any(holds_cap),
+        _ => false,
     }
 }

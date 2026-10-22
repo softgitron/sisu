@@ -255,11 +255,9 @@ impl FnLower<'_, '_> {
         }
         let t = self.temp(&e.ty);
         self.into(Place::local(t), e);
-        if self.ctx.prog.is_copy_in(&e.ty, &self.bounds) || matches!(e.ty, Ty::Ref(..)) {
-            Operand::Copy(Place::local(t))
-        } else {
-            Operand::Move(Place::local(t))
-        }
+        // A temporary that holds a capability handle moves into what
+        // takes it, count and all (decision 237).
+        if self.needs_drop(&e.ty) { Operand::Move(Place::local(t)) } else { Operand::Copy(Place::local(t)) }
     }
 
     /// A reference to the expression's place (or to a temporary).
@@ -272,9 +270,9 @@ impl FnLower<'_, '_> {
     }
 
     /// An operand for reading without consuming: a copy of a `Copy`
-    /// value, a reference otherwise.
+    /// value that holds no capability handle, a reference otherwise.
     pub fn compare_operand(&mut self, e: &thir::Expr) -> Operand {
-        if self.ctx.prog.is_copy_in(&e.ty, &self.bounds) || matches!(e.ty, Ty::Ref(..)) {
+        if !self.needs_drop(&e.ty) {
             self.operand(e)
         } else {
             self.borrow_operand(e, false)
@@ -308,15 +306,38 @@ impl FnLower<'_, '_> {
     /// An argument as the callee takes it; `by_value` when the callee
     /// takes by value what the call passes by reference (a trait method
     /// resolved to the impl of a `Copy` type).
-    pub(crate) fn arg_operand_for(&mut self, a: &thir::Arg, by_value: bool) -> Operand {
+    /// `owned`: the parameter is taken with `own`.
+    pub(crate) fn arg_operand_for(&mut self, a: &thir::Arg, by_value: bool, owned: bool) -> Operand {
         if by_value && matches!(a.mode, ArgMode::Ref | ArgMode::Value) {
             if let Ty::Ref(..) = &a.expr.ty {
                 let p = self.place_of(&a.expr).project(Proj::Deref);
                 return Operand::Copy(p);
             }
-            return self.operand(&a.expr);
+            return if owned { self.operand(&a.expr) } else { self.lent_copy(&a.expr) };
+        }
+        if a.mode == ArgMode::Value && !owned && self.ctx.prog.is_copy_in(&a.expr.ty, &self.bounds) {
+            return self.lent_copy(&a.expr);
         }
         self.arg_operand(a)
+    }
+
+    /// Whether each parameter of a function (`self` first) is taken with
+    /// `own`.
+    pub(crate) fn owned_params(&self, def: sisu_resolve::DefId) -> Vec<bool> {
+        let Some(f) = self.ctx.prog.fn_info(def) else { return Vec::new() };
+        let own = sisu_syntax::ast::Mode::Own;
+        f.self_mode.iter().map(|m| *m == own).chain(f.params.iter().map(|p| p.mode == own)).collect()
+    }
+
+    /// A `Copy` value a callee borrows: a copy of it, or, for one that
+    /// holds a capability handle, a copy of its place, a temporary being
+    /// dropped with the statement's others, so that the handle outlives
+    /// the call whichever callee takes the copy (decision 237).
+    fn lent_copy(&mut self, e: &thir::Expr) -> Operand {
+        if self.needs_drop(&e.ty) {
+            return Operand::Copy(self.place_of(e));
+        }
+        self.operand(e)
     }
 
     /// A reference to the value of an expression: the expression itself
@@ -331,7 +352,7 @@ impl FnLower<'_, '_> {
             ArgMode::Value => self.operand(&a.expr),
             ArgMode::Borrow => {
                 if self.ctx.prog.is_copy_in(&a.expr.ty, &self.bounds) || matches!(a.expr.ty, Ty::Ref(..)) {
-                    self.operand(&a.expr)
+                    self.lent_copy(&a.expr)
                 } else {
                     self.borrow_operand(&a.expr, false)
                 }
@@ -420,12 +441,21 @@ impl FnLower<'_, '_> {
                     thir::Callee::Fn { def, type_args } => self.callee_for(*def, type_args),
                     thir::Callee::Value(f) => (Callee::Value(self.operand(f)), Vec::new()),
                 };
+                // A function value takes its arguments as its own.
+                let owned = match callee {
+                    thir::Callee::Fn { def, .. } => self.owned_params(*def),
+                    thir::Callee::Value(_) => vec![true; args.len()],
+                };
                 let later = self.leaving_after(args.iter().map(|a| self.may_leave(&a.expr)));
                 let mut held = Vec::new();
                 let mut ops = Vec::new();
                 for (i, a) in args.iter().enumerate() {
                     let mark = self.locals.len();
-                    let o = self.arg_operand_for(a, by_value.get(i).copied().unwrap_or(false));
+                    let o = self.arg_operand_for(
+                        a,
+                        by_value.get(i).copied().unwrap_or(false),
+                        owned.get(i).copied().unwrap_or(true),
+                    );
                     if later[i] {
                         self.hold(&o, mark, &a.expr.ty, &mut held);
                     }

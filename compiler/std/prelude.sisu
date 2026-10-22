@@ -266,10 +266,11 @@ struct TestClock:
 
 ## A `Copy` handle on a value that every copy shares (06: "a fake's state
 ## lives behind the handle"), the building block of capability objects
-## written in Sisu: fakes, caretakers, interceptors. The value is never
-## dropped, since a `Copy` handle has no last copy; it can be neither a view
-## nor must-consume, and changing it goes through a `Mutex` inside. A
-## `Cap[T]` is `Send` and `Sync` when `T` is `Sync`.
+## written in Sisu: fakes, caretakers, interceptors. Each copy is counted,
+## and the value is dropped with the last one, so a borrow of it (`get`)
+## borrows the handle it came through; it can be neither a view nor
+## must-consume, and changing it goes through a `Mutex` inside. A `Cap[T]`
+## is `Send` and `Sync` when `T` is `Sync`.
 @builtin("Cap")
 struct Cap[T]:
     pass
@@ -3138,7 +3139,7 @@ def shown[T: Debug](make: (Draws) -> T, d: Draws, steps: int) -> String:
 # The handle, and a `Lent` of it, implement the trait by forwarding each
 # call to the object: the intrinsic `cap.forward` is that call through the
 # trait, with the object as `self` (a result that borrows `self` borrows
-# the handle, behind which the object lives as long as the program).
+# the handle, whose last copy's drop drops the object).
 
 ## What `metadata` reports about a file or a directory.
 @derive(Copy, Eq)
@@ -3634,7 +3635,13 @@ impl System:
     @internal
     @intrinsic("System.assemble")
     def assemble(
-        fs: Fs, net: Net, clock: Clock, rand: Rand, env: Env, proc: Proc, stdin: Stdin
+        own fs: Fs,
+        own net: Net,
+        own clock: Clock,
+        own rand: Rand,
+        own env: Env,
+        own proc: Proc,
+        own stdin: Stdin,
     ) -> System
 
 ## What a transcript test's runs of `main` share (17, "Snapshots and

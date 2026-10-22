@@ -211,6 +211,39 @@ impl<'p> Types<'p> {
         }
     }
 
+    /// Whether a value of the type holds a capability handle or a `Cap`,
+    /// whose object goes with the handle's last copy (decision 237): a
+    /// result that points into the object borrows the place the call
+    /// copied the handle from. A `Lent` holds loans of its own instead.
+    pub fn holds_handle(&self, t: &Type) -> bool {
+        self.holds_handle_depth(t, 0)
+    }
+
+    fn holds_handle_depth(&self, t: &Type, depth: u32) -> bool {
+        if depth > 16 {
+            return false;
+        }
+        match t {
+            Type::Tuple(es) => es.iter().any(|e| self.holds_handle_depth(e, depth + 1)),
+            Type::Named(n, args) => match n.as_str() {
+                "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "System" | "Cap" => true,
+                "Lent" | "Shared" | "Weak" | "list" | "Array" | "dict" | "set" | "Iter" | "Entry" | "Iterable"
+                | "Cell" | "Mutex" | "MutexGuard" | "Arena" | "Slice" => false,
+                "Option" | "Result" => args.iter().any(|a| self.holds_handle_depth(a, depth + 1)),
+                _ => match self.decl(n) {
+                    Some(TypeDecl::Struct { fields, .. }) => {
+                        fields.iter().any(|f| self.holds_handle_depth(&f.ty.subst(args), depth + 1))
+                    }
+                    Some(TypeDecl::Enum { variants, .. }) => variants
+                        .iter()
+                        .any(|v| v.fields.iter().any(|(_, ft)| self.holds_handle_depth(&ft.subst(args), depth + 1))),
+                    None => false,
+                },
+            },
+            _ => false,
+        }
+    }
+
     /// The index of a variant of an enum, by name.
     pub fn variant_index(&self, name: &str, variant: &str) -> Option<u32> {
         match self.decl(name)? {

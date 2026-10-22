@@ -1,0 +1,6 @@
+18:41-18:41 E0406 borrow.does-not-live-long-enough name="Cap(Tally(count=2))" line="18" end="19"
+  label 18:16-18:41 borrow.borrowed-by borrower="gone"
+  label 19:5-19:22 borrow.later-used
+22:5-22:34 E0402 borrow.modify-while-borrowed name="swapped" line="21" end="23"
+  label 21:17-21:30 borrow.borrowed-by borrower="first"
+  label 23:5-23:23 borrow.later-used

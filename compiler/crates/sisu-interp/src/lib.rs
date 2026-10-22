@@ -56,6 +56,12 @@ use value::Value;
 /// live on the interpreter's own frame stack, not the host's.
 pub const MAX_DEPTH: usize = 100_000;
 
+/// The frames beyond [`MAX_DEPTH`] that the unwinding of a panic may
+/// push: the drops it runs call code of their own (a `Drop`), which must
+/// not overflow again where the stack overflowed (decision 234). A native
+/// stack keeps a floor below its probe limit for the same reason.
+pub const UNWIND_DEPTH: usize = 1_000;
+
 /// The interpreter runs on a thread with this much host stack. Sisu calls
 /// and drops do not use it (the run loop is a trampoline); the host's
 /// structural operations on deeply nested values (printing, comparing,
@@ -193,6 +199,9 @@ pub(crate) struct PanicInfo {
     /// Set when the panic is a property's case running past its budget of
     /// steps (`test.catch`): the budget.
     pub too_long: Option<u64>,
+    /// Not a panic: a generator dropped before its end unwinds its frames,
+    /// running their cleanup, and ends quietly (decision 236).
+    pub abandon: bool,
 }
 
 /// A catalog message (D-065): run-time messages are catalog entries too.
@@ -207,6 +216,7 @@ pub(crate) fn panic(id: MsgId, params: &[(&str, String)]) -> Unwind {
         hole: None,
         refinement: None,
         too_long: None,
+        abandon: false,
     }))
 }
 
@@ -246,6 +256,11 @@ pub(crate) struct Frame<'p> {
     /// A frame the scheduler pushed: a task's bottom, a scope's end, a
     /// shield (`sched.rs`).
     pub anchor: Option<sched::Anchor>,
+    /// How many locals past the function's own hold what the caller gave
+    /// its `Iterable[T]` parameters by value: the parameters refer to them,
+    /// and they are dropped when the frame returns or unwinds (decision
+    /// 235).
+    pub lent: u32,
 }
 
 pub struct Interp<'p, 'h> {
@@ -336,8 +351,9 @@ impl<'p, 'h> Interp<'p, 'h> {
         variants.insert(("Option", "None"), 1);
         variants.insert(("Result", "Ok"), 0);
         variants.insert(("Result", "Err"), 1);
-        // Dropping an owner of a `Shared` or a mutex guard is observable
-        // too (a count, a lock), as is any value holding one.
+        // Dropping an owner of a `Shared`, a mutex guard or a capability
+        // handle is observable too (a count, a lock), as is any value
+        // holding one.
         let mut any_drop = prog.functions.iter().any(|f| f.locals.iter().any(|l| mentions_counted(&l.ty)));
         for t in &prog.types {
             types.insert(t.name(), t);
@@ -555,7 +571,23 @@ fn mentions_counted(t: &sir::Type) -> bool {
         Type::Named(n, args) => {
             matches!(
                 n.as_str(),
-                "Shared" | "Weak" | "MutexGuard" | "Mutex" | "Cell" | "Arena" | "Sender" | "Receiver"
+                "Shared"
+                    | "Weak"
+                    | "MutexGuard"
+                    | "Mutex"
+                    | "Cell"
+                    | "Arena"
+                    | "Sender"
+                    | "Receiver"
+                    | "Cap"
+                    | "Fs"
+                    | "Net"
+                    | "Clock"
+                    | "Rand"
+                    | "Env"
+                    | "Proc"
+                    | "Stdin"
+                    | "System"
             ) || args.iter().any(mentions_counted)
         }
         Type::Tuple(es) | Type::Dyn(_, es) => es.iter().any(mentions_counted),
@@ -668,6 +700,9 @@ pub fn run_transcript(
         };
         let mut out = Vec::new();
         for (args, stdin) in runs {
+            // Each run's `System` holds a copy of the world's handles,
+            // counted (decision 237), so the world outlives the run.
+            i.retain_caps(&world, None);
             let status =
                 match i.call_by_name("transcript_system", vec![world.clone(), texts(args), texts(stdin)]) {
                     Ok(sys) => i.run_main_with(Some(sys)),

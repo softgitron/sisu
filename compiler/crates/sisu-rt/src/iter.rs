@@ -64,9 +64,12 @@ pub(crate) enum State {
         b_ty: u32,
     },
     /// The values the inner iterator's references point to, copied (a
-    /// `Copy` type's items from a borrowed collection).
+    /// `Copy` type's items from a borrowed collection), of type `item`
+    /// when it is known: each copy of a capability handle is counted
+    /// (decision 237).
     Decay {
         inner: Box<IterObj>,
+        item: Option<u32>,
     },
     /// References into a borrowed dict or set: its keys, values, pairs of
     /// both, or elements.
@@ -236,12 +239,13 @@ pub(crate) unsafe fn iterable(p: *mut u8, arg: u32, item: Option<u32>) -> Box<It
         || matches!(base.state, State::TableRef { part, .. } if part != Part::Items);
     let wants_ref = item.is_some_and(|t| matches!(ty(t).kind, Kind::Ref(_)));
     if yields_refs && !wants_ref {
-        let size = match (item, elem) {
-            (Some(t), _) => ty(t).size,
-            (None, Some(e)) => ty(e).size,
-            (None, None) => 8,
-        };
-        Box::new(IterObj { _live: mem::Live::new(), state: State::Decay { inner: base }, item_size: size })
+        let decayed = item.or(elem);
+        let size = decayed.map_or(8, |t| ty(t).size);
+        Box::new(IterObj {
+            _live: mem::Live::new(),
+            state: State::Decay { inner: base, item: decayed },
+            item_size: size,
+        })
     } else {
         base
     }
@@ -380,7 +384,7 @@ pub(crate) unsafe fn next(obj: &mut IterObj, out: *mut u8) -> u8 {
                     }
                 }
             }
-            State::Decay { inner } => {
+            State::Decay { inner, item } => {
                 let mut tmp = [0u64; 2];
                 let t = tmp.as_mut_ptr() as *mut u8;
                 let st = next(inner, t);
@@ -394,6 +398,9 @@ pub(crate) unsafe fn next(obj: &mut IterObj, out: *mut u8) -> u8 {
                 some(out);
                 let src = mem::word(t, 8) as *const u8;
                 mem::copy(out.add(8), src, obj.item_size as usize);
+                if let Some(item) = *item {
+                    value::retain_value(out.add(8), item);
+                }
             }
             State::TableRef { table, idx, part } => {
                 let t = &**table;
@@ -517,26 +524,66 @@ unsafe fn drop_state(st: State) -> u8 {
                 table.entries.len = 0;
                 value::after_part(status, crate::dict::drop_table(Box::into_raw(table)))
             }
-            State::Enumerate { inner, .. } | State::Decay { inner } => drop_state(inner.state),
+            State::Enumerate { inner, .. } | State::Decay { inner, .. } => drop_state(inner.state),
             State::Zip { a, b, .. } => {
                 let s = drop_state(a.state);
                 value::after_part(s, drop_state(b.state))
             }
-            // A generator dropped before its end is abandoned (decision 95).
-            State::Gen { task } => {
-                crate::tasks::abandon(task);
-                abi::OK
-            }
+            // A generator dropped before its end is closed (decision 236).
+            State::Gen { task } => crate::tasks::abandon(task),
             _ => abi::OK,
         }
     }
 }
 
-/// Every remaining item, in a new buffer of `item_size`-byte items.
+/// Every remaining item of an iterator an intrinsic owns (an `Iterable[T]`
+/// argument), of type `item` when the call says, in a new buffer; the
+/// iterator is dropped after, and when a panic stops it, with what it has
+/// left, and so are the items taken by then (decision 235).
+///
+/// # Safety
+/// As [`next`]; the items are of type `item`.
+pub(crate) unsafe fn collect_all(mut obj: Box<IterObj>, item: Option<u32>) -> Result<List, u8> {
+    // SAFETY: as the caller guarantees.
+    unsafe {
+        let r = collect(&mut obj);
+        let st = drop_iter(into_word(obj) as *mut u8);
+        match r {
+            Ok(l) if st == abi::OK => Ok(l),
+            Ok(l) => Err(value::after_part(st, drop_items(l, item))),
+            Err((s, l)) => {
+                let s = value::after_part(s, st);
+                Err(value::after_part(s, drop_items(l, item)))
+            }
+        }
+    }
+}
+
+/// Drops the items of a buffer of `item`s, first to last, and frees it.
+///
+/// # Safety
+/// The buffer holds that many items of type `item`.
+unsafe fn drop_items(l: List, item: Option<u32>) -> u8 {
+    let mut status = abi::OK;
+    // SAFETY: as the caller guarantees.
+    unsafe {
+        if let Some(item) = item.filter(|&t| rt::needs_drop(t)) {
+            let size = ty(item).size;
+            for i in 0..l.len {
+                status = value::after_part(status, value::drop_value(l.at(i, size), item));
+            }
+        }
+        mem::release(l.ptr);
+    }
+    status
+}
+
+/// Every remaining item, in a new buffer of `item_size`-byte items; when a
+/// panic stops the iterator, the status and the items taken by then.
 ///
 /// # Safety
 /// As [`next`].
-pub(crate) unsafe fn collect(obj: &mut IterObj) -> Result<List, u8> {
+pub(crate) unsafe fn collect(obj: &mut IterObj) -> Result<List, (u8, List)> {
     let size = obj.item_size;
     let mut out = List::empty();
     let mut tmp = vec![0u64; 1 + (size as usize).div_ceil(8)];
@@ -546,7 +593,7 @@ pub(crate) unsafe fn collect(obj: &mut IterObj) -> Result<List, u8> {
         unsafe {
             let st = next(obj, t);
             if st != abi::OK {
-                return Err(st);
+                return Err((st, out));
             }
             if mem::word(t, 0) != 0 {
                 return Ok(out);

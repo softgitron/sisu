@@ -57,7 +57,7 @@ unsafe extern "C" fn sisu_rt_start(
     types_len: u64,
     fns: *const usize,
     fns_len: u64,
-    max_frame: u64,
+    unprobed: u64,
 ) -> i32 {
     // SAFETY: the generated `main` passes its tables and the C runtime's
     // arguments.
@@ -79,10 +79,10 @@ unsafe extern "C" fn sisu_rt_start(
     let run = move || {
         // The root task runs on this thread's stack, whose probe limit is
         // near its bottom; spawned tasks get slots of the pool.
-        let max_frame = max_frame as usize;
-        let pool = crate::stack::Pool::new(crate::stack::reservation_from_env(), max_frame);
+        let unprobed = unprobed as usize;
+        let pool = crate::stack::Pool::new(crate::stack::reservation_from_env(), unprobed);
         let low = crate::stack::current_sp().saturating_sub(STACK_BYTES) + ROOT_MARGIN;
-        let root_limits = crate::stack::limits(low, pool.reserve, max_frame);
+        let root_limits = crate::stack::limits(low, pool.reserve, unprobed);
         // `sisu run --native --schedule-seed N` and `--stats` (decision 203).
         let seed =
             std::env::var("SISU_SCHEDULE_SEED").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(0);
@@ -294,8 +294,10 @@ extern "C" fn sisu_rt_panic_index(index: i64, len: i64, from_end: u64) -> u8 {
     })
 }
 
-/// Entering the function named `name` would nest more calls than the
-/// limit (decision 190): a stack overflow that names it (decision 234).
+/// Entering the function named `name` nests more calls than the limit
+/// (decision 190): a stack overflow that names it (decision 234), unless a
+/// panic's unwinding has room left beyond the limit, when the call goes on
+/// ([`abi::OK`]).
 ///
 /// # Safety
 /// The name is valid UTF-8 of this length.
@@ -304,7 +306,18 @@ unsafe extern "C" fn sisu_rt_panic_stack(name: *const u8, name_len: u64) -> u8 {
     // SAFETY: the generated code passes its static text.
     let name = unsafe { mem::Str { ptr: name, len: name_len }.bytes() };
     let function = String::from_utf8_lossy(name).into_owned();
-    system(|| rt::raise_msg(msg::PANIC_STACK_OVERFLOW, &[("function", function)]))
+    system(|| over_depth(&function))
+}
+
+/// The count of nested calls is past [`abi::MAX_DEPTH`]: [`abi::OK`] when a
+/// panic unwinds within [`abi::UNWIND_DEPTH`] more, else the overflow,
+/// raised.
+pub(crate) fn over_depth(function: &str) -> u8 {
+    let d = SISU_RT_DEPTH.load(std::sync::atomic::Ordering::Relaxed);
+    if d <= abi::MAX_DEPTH + abi::UNWIND_DEPTH && rt::unwinding() {
+        return abi::OK;
+    }
+    rt::raise_msg(msg::PANIC_STACK_OVERFLOW, &[("function", function.to_string())])
 }
 
 #[unsafe(no_mangle)]
@@ -419,23 +432,34 @@ extern "C" fn sisu_rt_task_env(bytes: u64, t: u32) -> *mut u8 {
     p as *mut u8
 }
 
-/// Frees an environment [`sisu_rt_task_env`] made; with `forget`, the
-/// values it holds first, running no Sisu code (a generator abandoned
-/// before it started, whose closure never took them).
-pub(crate) fn release_task_env(env: usize, forget: bool) {
+/// Frees an environment [`sisu_rt_task_env`] made; with `drop`, the
+/// values it holds are dropped first (a generator closed before it
+/// started, whose closure never took them, decision 236), and the status
+/// is their drop's.
+pub(crate) fn release_task_env(env: usize, drop: bool) -> u8 {
     if env == 0 {
-        return;
+        return abi::OK;
     }
     let p = env as *mut u8;
     // SAFETY: an environment is preceded by the word of its type, in the
     // block `sisu_rt_task_env` made.
     unsafe {
         let block = p.sub(8);
-        if forget {
-            value::forget_value(p, mem::word(block, 0) as u32);
-        }
+        let status = if drop { value::drop_value(p, mem::word(block, 0) as u32) } else { abi::OK };
         mem::release(block);
+        status
     }
+}
+
+/// A copy of the value at `p`, of type `t`, was made: each capability
+/// handle it holds counts one more (decision 237).
+///
+/// # Safety
+/// `p` must hold a value of type `t`.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_retain(p: *mut u8, t: u32) {
+    // SAFETY: as the caller guarantees.
+    unsafe { value::retain_value(p, t) }
 }
 
 /// Frees a block of `sisu_rt_alloc` whose value is gone (decision 216).

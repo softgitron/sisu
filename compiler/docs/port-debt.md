@@ -214,13 +214,13 @@ lowering's rule says it needs them (a type parameter only in the result,
 or an `Iterable[T]` parameter). *Pay*: pass every intrinsic its type
 arguments, which the untyped drops above also want.
 
-**Capability objects live as long as the run.** A capability handle's
-object and a `Cap`'s value live in a heap cell that every copy reaches
-and that nothing frees while the program runs, because a `Copy` handle
-has no last copy; a `Drop` of the object never runs. In the interpreter
-the cells go with the run; a native executable forgets them when the
-run ends, an arena per run (decisions 209 and 223). *Pay*: counting
-copies, which would make handles not `Copy`, or an arena per scope.
+**A handle an `own` closure captures lives as long as the run.** A
+capability's object goes with its handle's last copy (decision 237), but
+a function value's environment is never dropped (decision 224): a handle
+an `own` closure captures keeps its object until the run ends, when the
+cell is forgotten without its `Drop`. *Pay*: function values that drop
+their environment (a word naming the environment's type, copied and
+dropped as any value is), in both implementations.
 
 **Handles forward by dispatch.** A call on a capability handle or a
 `Lent` is a `call trait` that the dispatcher resolves by the object in
@@ -340,12 +340,14 @@ into the interpreter, a run is single-threaded, and a schedule is the
 seeded random, PCT or bounded exhaustive scheduler's (`sched.rs`): there
 is no M:N runtime and no work stealing, and the exhaustive search has no
 state hashing, so it runs again schedules that reach a state it has
-seen. A generator dropped before its end is abandoned; a receiver's or
-generator's iterator inside another iterator's adapter cannot wait
-(`R0091`); in a `pure` scope the lowest-index failure is reported, but a
-body that joins a later task first sees it in time order. *Pay*: the
-runtime of 12's profiles; state hashing in the explorer (18, Phase 6);
-the generator's frames dropped with it.
+seen. A generator dropped before its end is closed where its consumer
+dropped it, outside the schedule (decision 236), so its cleanup cannot
+wait (`R0129`); a receiver's or generator's iterator inside another
+iterator's adapter cannot wait (`R0091`); in a `pure` scope the
+lowest-index failure is reported, but a body that joins a later task
+first sees it in time order. *Pay*: the runtime of 12's profiles; state
+hashing in the explorer (18, Phase 6); a closing generator that runs as
+a task of its own, which may wait.
 
 **Faults are injected by the interpreter.** In the `sim` profile, the
 interpreter decides a fault at a trait call of `FsOps` or `NetOps` whose
@@ -470,7 +472,7 @@ have impls that the fast path respects.
 ## Stage 2: what the native backend leaves out
 
 The native debug backend (architecture.md, "Stage 2") compiles every
-program the conformance suite runs (`conformance/native.list`, 153
+program the conformance suite runs (`conformance/native.list`, 159
 cases), with the debug profile and the release one (decision 232), and
 every one of those runs frees what it allocated (decision 226). A
 construct it does not compile is `D0103` under `--native`, and the
@@ -501,22 +503,16 @@ leaves out:
 What round 2 (tasks, decisions 203 to 206; the rest of the suite,
 decisions 207 to 211) leaves:
 
-- **An owned value passed to an `Iterable[T]` parameter is dropped when
-  the call returns** (decision 210): an iterator the callee left part of
-  drops the rest, where the interpreter forgets the rest without running
-  its drops. Only an iterator of values with drop glue that the callee
-  does not finish shows it. *Pay*: the interpreter's frames dropping what
-  a parameter that is a reference was given by value, or lowering passing
-  such an argument by reference.
-
 - **A task's stack is finite natively.** The interpreter limits only the
   number of frames (decision 31); a native task has `SISU_TASK_STACK`
   (1 MiB) of stack, and the debug backend's frames are large (every
   temporary has a slot), so a recursion of a few thousand calls that the
-  interpreter runs in a task exhausts it natively (`R0123`; the root task
-  keeps 1 GiB). *Pay*: smaller frames (the entry on temporaries below), and
-  the default reservation from the corpus's histogram of depths (`--stats
-  stack-depth`), 8 MiB being the Phase 1 report's next step.
+  interpreter runs in a task overflows it natively (the same
+  `panic.stack-overflow` the interpreter raises at 100 000 frames,
+  decision 234; the root task keeps 1 GiB). *Pay*: smaller frames (the
+  entry on temporaries below), and the default reservation from the
+  corpus's histogram of depths (`--stats stack-depth`), 8 MiB being the
+  Phase 1 report's next step.
 - **Yield checks everywhere the interpreter has them**: at every
   function's entry and every back edge, so that a seed means the same
   schedule. The Phase 1 report found a slice of a few hundred microseconds
@@ -535,18 +531,13 @@ What round 1 does, and a later round must not copy:
 
 - **What still leaks natively** (decisions 213 to 218 free the first
   round's four leaks of decision 200 and what the interpreter's host frees
-  unseen, and decisions 220 to 225 what the second round left; the native
-  mode holds every case of the list at no allocation live at exit,
-  decision 226): a generator abandoned before its end whose cleanup runs
-  code of its own (a `defer`), whose frames are left as they are, since
-  unwinding them would run that code, which the interpreter's abandonment
-  does not (decision 223); and the objects of capabilities and the values
-  of `Cap`s, which are freed when the run ends, not when the last handle
-  goes, so a program that makes fakes in a loop grows until it ends.
-  *Pay*: the interpreter unwinding an abandoned generator's frames, its
-  `defer`s included, as Python's `close` runs `finally` (a decision of the
-  language, then both sides alike); handles that count their copies, or
-  an arena per scope.
+  unseen, decisions 220 to 225 what the second round left, and decisions
+  236 and 237 a generator closed before its end and the objects of
+  capabilities; the native mode holds every case of the list at no
+  allocation live at exit, decision 226): a capability handle an `own`
+  closure captures, whose object is freed when the run ends (above, "A
+  handle an `own` closure captures lives as long as the run"). *Pay*:
+  as there.
 - **Every part of a value is a word** (decision 188): a `u8` takes eight
   bytes, an option a word for its tag, a `bool` a word. *Pay*: in a
   release backend, each type its own width and alignment, and options

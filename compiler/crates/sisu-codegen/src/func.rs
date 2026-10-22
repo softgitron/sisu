@@ -93,6 +93,10 @@ struct Cx<'a, 'p> {
     cur: usize,
     /// The named locals, for the debug information.
     vars: Vec<crate::debug::Var>,
+    /// The parameters whose addresses are kept in slots of their own for
+    /// the debug information, stored after the probe: nothing below the
+    /// top of the frame is written before it (decision 234).
+    kept: Vec<(Value, ir::StackSlot)>,
 }
 
 /// Whether a type is a number, `bool`, `char` or `()`: one word or none,
@@ -138,6 +142,7 @@ impl<'a, 'p> Cx<'a, 'p> {
         let params: Vec<Value> = b.block_params(entry).to_vec();
         let mut locals = Vec::new();
         let mut vars = Vec::new();
+        let mut kept = Vec::new();
         let closure = matches!(f.kind, sir::FnKind::Closure(role) if role != sir::ClosureRole::Task);
         for (i, l) in f.locals.iter().enumerate() {
             let ty = cg.concrete(&l.ty, targs)?;
@@ -167,7 +172,7 @@ impl<'a, 'p> Cx<'a, 'p> {
                     Storage::Param(v) => {
                         let ss =
                             b.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3));
-                        b.ins().stack_store(*v, ss, 0);
+                        kept.push((*v, ss));
                         (ss, true)
                     }
                 };
@@ -222,6 +227,7 @@ impl<'a, 'p> Cx<'a, 'p> {
             glue,
             cur: 0,
             vars,
+            kept,
         };
         cx.prologue()?;
         Ok(cx)
@@ -306,6 +312,18 @@ impl<'a, 'p> Cx<'a, 'p> {
 
     fn concrete(&self, t: &Type) -> Result<Type, Error> {
         self.cg.concrete(t, self.targs)
+    }
+
+    /// Counts a copy of the value of type `ty` at `addr` when it holds
+    /// capability handles (decision 237).
+    fn count_at(&mut self, addr: Value, ty: &Type) -> Result<(), Error> {
+        if !self.cg.types.counted(ty)? {
+            return Ok(());
+        }
+        let id = self.type_id(ty)?;
+        let idv = self.i32const(id);
+        self.rt(sym::RETAIN, &[addr, idv])?;
+        Ok(())
     }
 
     fn size(&mut self, t: &Type) -> Result<u32, Error> {
@@ -397,13 +415,10 @@ impl<'a, 'p> Cx<'a, 'p> {
     /// of a call (decision 85: the interpreter's calls of Sisu functions).
     fn prologue(&mut self) -> Result<(), Error> {
         self.probe();
-        // A task's closure (a generator's) whose cleanup runs more than
-        // drops (a `defer`'s code) says so: abandoned, its frames are not
-        // unwound, since its cleanup would run Sisu code (decision 95).
-        if self.f.kind == sir::FnKind::Closure(sir::ClosureRole::Task) && cleanup_runs_code(self.f) {
-            let stack = self.data_addr(self.cg.stack);
-            let keep = self.iconst(abi::ABANDON_KEEP as i64);
-            self.store_word(keep, stack, abi::STACK_ABANDONED);
+        // The parameters' addresses, for a debugger, once the probe has
+        // passed.
+        for (v, ss) in std::mem::take(&mut self.kept) {
+            self.b.ins().stack_store(v, ss, 0);
         }
         if self.glue {
             let first = self.blocks[0];
@@ -416,13 +431,21 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.store_word(d1, a, 0);
         let over = self.b.ins().icmp_imm(IntCC::SignedGreaterThan, d1, abi::MAX_DEPTH);
         let overflow = self.b.create_block();
+        let refused = self.b.create_block();
         let counted = self.b.create_block();
         self.b.ins().brif(over, overflow, &[], counted, &[]);
+        self.b.set_cold_block(overflow);
         self.b.switch_to_block(overflow);
-        self.store_word(d, a, 0);
+        // Past the limit, the runtime raises the overflow, unless a panic's
+        // unwinding has room left beyond it (decision 234).
         let name = self.data_addr(self.name.0);
         let len = self.iconst(self.name.1 as i64);
         let st = self.rt_status(sym::PANIC_STACK, &[name, len])?;
+        self.b.ins().brif(st, refused, &[], counted, &[]);
+        self.b.set_cold_block(refused);
+        self.b.switch_to_block(refused);
+        let a = self.depth_addr();
+        self.store_word(d, a, 0);
         self.b.ins().return_(&[st]);
         self.b.switch_to_block(counted);
         self.yield_check()?;
@@ -676,6 +699,10 @@ impl<'a, 'p> Cx<'a, 'p> {
                 let v = self.rvalue(r, &dest)?;
                 let (addr, _) = self.dest_place(p)?;
                 self.write(addr, &v, size);
+                // A copy of a capability handle is counted (decision 237).
+                if let Rvalue::Use(Operand::Copy(_)) = r {
+                    self.count_at(addr, &dest)?;
+                }
                 Ok(())
             }
             StatementKind::Call { dest, callee, args } => self.call(dest, callee, args),
@@ -1116,6 +1143,11 @@ impl<'a, 'p> Cx<'a, 'p> {
             let fsize = self.size(&vt)?.min(self.size(&ft)?);
             let at = self.b.ins().iadd_imm(env, i64::from(off));
             self.write(at, &v, fsize);
+            // A capture of a capability handle is a counted copy (decision
+            // 237).
+            if matches!(o, Operand::Copy(_)) {
+                self.count_at(at, &vt)?;
+            }
         }
         Ok(Val::Mem(value))
     }
@@ -1392,6 +1424,9 @@ impl<'a, 'p> Cx<'a, 'p> {
                     let fsize = self.size(&vt)?.min(self.size(&ft)?);
                     let at = self.b.ins().iadd_imm(out, i64::from(off));
                     self.write(at, &v, fsize);
+                    if matches!(o, Operand::Copy(_)) {
+                        self.count_at(at, &vt)?;
+                    }
                 }
             }
             Aggregate::Variant(t, v) => {
@@ -1422,6 +1457,9 @@ impl<'a, 'p> Cx<'a, 'p> {
                     let fsize = self.size(&vt)?.min(self.size(&ft)?);
                     let at = self.b.ins().iadd_imm(out, i64::from(off));
                     self.write(at, &val, fsize);
+                    if matches!(o, Operand::Copy(_)) {
+                        self.count_at(at, &vt)?;
+                    }
                 }
             }
             Aggregate::List => {
@@ -1431,9 +1469,12 @@ impl<'a, 'p> Cx<'a, 'p> {
                 let bytes = self.iconst(n * i64::from(esize));
                 let data = self.rt_status(sym::ALLOC, &[bytes])?;
                 for (i, o) in ops.iter().enumerate() {
-                    let (v, _) = self.operand(o)?;
+                    let (v, vt) = self.operand(o)?;
                     let at = self.b.ins().iadd_imm(data, i as i64 * i64::from(esize));
                     self.write(at, &v, esize);
+                    if matches!(o, Operand::Copy(_)) {
+                        self.count_at(at, &vt)?;
+                    }
                 }
                 let len = self.iconst(n);
                 self.store_word(data, out, 0);
@@ -1634,6 +1675,13 @@ impl<'a, 'p> Cx<'a, 'p> {
             addr
         };
         let rest = self.arguments(&args[1..], 0, None)?;
+        // The method owns its arguments: copies of handles are counted
+        // here, and a by-value `self` by the dispatcher (decision 237).
+        for (o, (a, t)) in args[1..].iter().zip(&rest) {
+            if !matches!(o, Operand::Move(_)) && !matches!(t, Type::Ref(..)) {
+                self.count_at(*a, t)?;
+            }
+        }
         let ret_ty = self.place_type(dest)?;
         let arg_tys: Vec<Type> = rest.iter().map(|(_, t)| t.clone()).collect();
         let id = self.cg.dispatcher(name, tys, arg_tys, ret_ty.clone())?;
@@ -1676,6 +1724,18 @@ impl<'a, 'p> Cx<'a, 'p> {
         let ret_ty = self.cg.concrete(f.ret(), &targs)?;
         let id = self.cg.instance(name, targs)?;
         let mut argv = self.arguments(args, derefs, adapt.then_some(params.as_slice()))?;
+        // The callee owns its arguments: copies of handles, and a value
+        // read through a reference for a parameter that takes it, are
+        // counted (decision 237).
+        for (i, (a, t)) in argv.iter().enumerate() {
+            if matches!(args.get(i), Some(Operand::Move(_))) {
+                continue;
+            }
+            let p = params.get(i).cloned().unwrap_or_else(|| t.clone());
+            if !matches!(p, Type::Ref(..)) {
+                self.count_at(*a, &p)?;
+            }
+        }
         // An `Iterable[T]` parameter takes a reference to what the caller
         // passed, with its type (decision 210); a value moved in is the
         // callee's to read, and dropped when the call returns.
@@ -1706,14 +1766,41 @@ impl<'a, 'p> Cx<'a, 'p> {
         let r = self.func_ref(id);
         let call = self.b.ins().call(r, &call_args);
         let st = self.b.inst_results(call)[0];
-        self.check(st);
+        let mut dropped = Vec::new();
         for (addr, ty) in lent {
             if self.cg.types.needs_drop(&ty)? {
-                let idv = self.type_id(&ty)?;
-                let idv = self.i32const(idv);
-                let st = self.rt_status(sym::DROP, &[addr, idv])?;
-                self.check(st);
+                dropped.push((addr, self.type_id(&ty)?));
             }
+        }
+        if dropped.is_empty() || self.f.blocks[self.cur].cleanup {
+            self.check(st);
+        } else {
+            // A panic leaving the callee drops what it was lent too, as
+            // its unwinding goes on (decision 235): a drop that panics
+            // then aborts, as one in a cleanup block does.
+            let failed = self.b.create_block();
+            let cont = self.b.create_block();
+            self.b.ins().brif(st, failed, &[], cont, &[]);
+            self.b.switch_to_block(failed);
+            for &(addr, t) in &dropped {
+                let idv = self.i32const(t);
+                let st = self.rt_status(sym::DROP, &[addr, idv])?;
+                let abort = self.b.create_block();
+                let next = self.b.create_block();
+                self.b.ins().brif(st, abort, &[], next, &[]);
+                self.b.switch_to_block(abort);
+                self.rt(sym::ABORT_UNWIND, &[])?;
+                self.b.ins().trap(ir::TrapCode::unwrap_user(1));
+                self.b.switch_to_block(next);
+            }
+            let fail = self.fail_block();
+            self.b.ins().jump(fail, &[]);
+            self.b.switch_to_block(cont);
+        }
+        for (addr, t) in dropped {
+            let idv = self.i32const(t);
+            let st = self.rt_status(sym::DROP, &[addr, idv])?;
+            self.check(st);
         }
         let (daddr, dty) = self.place(dest, None)?;
         let dsize = self.size(&dty)?.min(rsize);
@@ -1741,6 +1828,18 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.cg.note_intrinsic(name, targs)?;
         let dest_ty = self.place_type(dest)?;
         let argv = self.arguments(args, derefs, None)?;
+        // What the intrinsic keeps (its `own` arguments) holds counted
+        // copies of capability handles; it only reads the others (decision
+        // 237).
+        if let Some(decl) = self.cg.prog.intrinsic(name) {
+            let own = decl.own.clone();
+            for k in own {
+                if let (Some(Operand::Copy(_)), Some((a, t))) = (args.get(k as usize), argv.get(k as usize)) {
+                    let (a, t) = (*a, t.clone());
+                    self.count_at(a, &t)?;
+                }
+            }
+        }
         if i.may_wait() {
             self.record_site();
         }
@@ -1806,6 +1905,13 @@ impl<'a, 'p> Cx<'a, 'p> {
         // The address of the environment the value holds (decision 224).
         let env = self.b.ins().iadd_imm(addr, i64::from(abi::WORD));
         let argv = self.arguments(args, 0, None)?;
+        // The callee owns its arguments: copies of handles are counted
+        // (decision 237).
+        for (o, (a, t)) in args.iter().zip(&argv) {
+            if !matches!(o, Operand::Move(_)) {
+                self.count_at(*a, t)?;
+            }
+        }
         let rsize = self.size(&ret_ty)?;
         let retp = self.slot(rsize);
         let mut call_args = vec![retp, env];
@@ -1874,17 +1980,6 @@ impl<'a, 'p> Cx<'a, 'p> {
 /// place in the source (a variable the program names `flag` has one).
 fn drop_flag(l: &sir::LocalDecl) -> bool {
     l.name.as_deref() == Some("flag") && l.loc.is_none()
-}
-
-/// Whether a cleanup block of the function does more than drop (and set
-/// the flags of drops): the code of a `defer`.
-fn cleanup_runs_code(f: &sir::Function) -> bool {
-    let flag = |p: &Place| p.proj.is_empty() && f.locals.get(p.local.0 as usize).is_some_and(drop_flag);
-    f.blocks.iter().filter(|b| b.cleanup).flat_map(|b| &b.stmts).any(|s| match &s.kind {
-        StatementKind::Drop { .. } | StatementKind::StorageDead(_) => false,
-        StatementKind::Assign(p, Rvalue::Use(Operand::Const(Const::Bool(_)))) => !flag(p),
-        _ => true,
-    })
 }
 
 /// A sized integer type's operation an intrinsic names (`u8.wrap_add`,

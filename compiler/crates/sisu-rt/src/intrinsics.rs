@@ -260,8 +260,8 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 c.set_word(iter::into_word(iter::zip(a, b, i == I::Zip, c.targ(0), c.targ(1))));
             }
             I::Reversed => {
-                let mut it = iter::iterable(c.arg(0), c.ty(0), c.item(0));
-                let mut items = match iter::collect(&mut it) {
+                let it = iter::iterable(c.arg(0), c.ty(0), c.item(0));
+                let mut items = match iter::collect_all(it, Some(c.targ(0))) {
                     Ok(l) => l,
                     Err(s) => return s,
                 };
@@ -269,16 +269,16 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 c.set_word(iter::into_word(iter::items(items, c.targ(0))));
             }
             I::IterableList => {
-                let mut it = iter::iterable(c.arg(0), c.ty(0), c.item(0));
-                match iter::collect(&mut it) {
+                let it = iter::iterable(c.arg(0), c.ty(0), c.item(0));
+                match iter::collect_all(it, c.item(0)) {
                     Ok(l) => (c.ret as *mut List).write(l),
                     Err(s) => return s,
                 }
             }
             I::Sorted => {
                 let t = c.targ(0);
-                let mut it = iter::iterable(c.arg(0), c.ty(0), Some(t));
-                let mut items = match iter::collect(&mut it) {
+                let it = iter::iterable(c.arg(0), c.ty(0), Some(t));
+                let mut items = match iter::collect_all(it, Some(t)) {
                     Ok(l) => l,
                     Err(s) => return s,
                 };
@@ -297,7 +297,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 loop {
                     let st = iter::next(&mut it, t);
                     if st != abi::OK {
-                        return st;
+                        return value::after_part(st, iter::drop_iter(iter::into_word(it) as *mut u8));
                     }
                     if mem::word(t, 0) != 0 {
                         c.set_bool(!want);
@@ -1607,13 +1607,12 @@ unsafe fn min_max(c: &Call<'_>, min: bool) -> u8 {
 unsafe fn sum(c: &Call<'_>) -> u8 {
     // SAFETY: the arguments are of their types.
     unsafe {
-        let mut it = iter::iterable(c.arg(0), c.ty(0), c.item(0));
+        let it = iter::iterable(c.arg(0), c.ty(0), c.item(0));
         let size = it.item_size;
-        let items = match iter::collect(&mut it) {
+        let items = match iter::collect_all(it, c.item(0)) {
             Ok(l) => l,
             Err(s) => return s,
         };
-        let _ = iter::drop_iter(iter::into_word(it) as *mut u8);
         let words: Vec<u64> = (0..items.len).map(|k| mem::word(items.at(k, size), 0)).collect();
         mem::release(items.ptr);
         match ty(c.ret_ty).kind {

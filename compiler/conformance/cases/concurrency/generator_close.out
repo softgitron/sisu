@@ -1,0 +1,25 @@
+0
+drop first's item 0
+1
+drop first's item 1
+2
+drop first's item 2
+first's defer runs
+drop first's guard
+after the first loop
+0
+drop inner's item 0
+10
+drop inner's item 1
+inner's defer runs
+drop inner's guard
+outer's defer runs
+after the nested loop
+made a generator that never runs
+drop unwound's item 0
+drop unwound's item 1
+unwound's defer runs
+drop unwound's guard
+stop at 1
+end
+drop captured

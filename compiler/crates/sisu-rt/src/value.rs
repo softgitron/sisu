@@ -226,7 +226,61 @@ pub(crate) unsafe fn drop_value(p: *mut u8, t: u32) -> u8 {
                 let decl = concrete(p, t);
                 if decl == t { abi::OK } else { drop_value(p, decl) }
             }
+            // A copy of a capability handle, or of a `Cap`: one count
+            // fewer (decision 237).
+            Kind::Opaque(n) if counted(n) => crate::caps::release_cell(mem::word(p, 0) as *mut u8),
             _ => abi::OK,
+        }
+    }
+}
+
+/// Whether a type the runtime knows by its name is a counted handle
+/// ([`abi::counted_handle`]).
+pub(crate) fn counted(name: &str) -> bool {
+    abi::counted_handle(name)
+}
+
+/// One more count for every handle the value at `p` of type `t` holds: a
+/// copy of it was made (decision 237).
+///
+/// # Safety
+/// `p` must hold a value of type `t`.
+pub(crate) unsafe fn retain_value(p: *mut u8, t: u32) {
+    if !rt::needs_drop(t) {
+        return;
+    }
+    let entry = ty(t);
+    // SAFETY: the parts are where the type says.
+    unsafe {
+        match &entry.kind {
+            Kind::Opaque(n) if counted(n) => crate::caps::retain_cell(mem::word(p, 0) as *mut u8),
+            Kind::Option(payload) => {
+                if tag(p, entry) == 0 {
+                    retain_value(p.add(8), *payload);
+                }
+            }
+            Kind::Result(ok, err) => {
+                let part = if tag(p, entry) == 0 { *ok } else { *err };
+                retain_value(p.add(8), part);
+            }
+            Kind::Tuple(slots) => {
+                for s in slots {
+                    retain_value(p.add(s.offset as usize), s.ty);
+                }
+            }
+            Kind::Struct { fields, .. } => {
+                for f in fields {
+                    retain_value(p.add(f.offset as usize), f.ty);
+                }
+            }
+            Kind::Enum { variants, .. } => {
+                if let Some(v) = variants.get(tag(p, entry) as usize) {
+                    for f in &v.fields {
+                        retain_value(p.add(f.offset as usize), f.ty);
+                    }
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -386,6 +440,11 @@ pub(crate) unsafe fn copy_value(dst: *mut u8, src: *mut u8, t: u32) {
             }
             Kind::Cell(v) => copy_value(dst, src, *v),
             Kind::Arena(_) => crate::cells::copy_arena(dst, src),
+            // Another copy of a handle (decision 237).
+            Kind::Opaque(n) if counted(n) => {
+                mem::copy(dst, src, 8);
+                crate::caps::retain_cell(mem::word(src, 0) as *mut u8);
+            }
             // An unlocked mutex holding a copy of the value.
             Kind::Mutex(v) => {
                 mem::set_word(dst, abi::MUTEX_LOCKED, 0);
@@ -837,8 +896,9 @@ pub(crate) unsafe fn debug(out: &mut Vec<u8>, p: *mut u8, t: u32) {
             Kind::Fn => out.extend_from_slice(b"<fn>"),
             Kind::Iter(_) => out.extend_from_slice(b"<iter>"),
             // A test clock shows as the interpreter's clocks do.
-            Kind::Opaque(n) if n == "TestClock" => out.extend_from_slice(b"Clock"),
-            Kind::Opaque(n) => out.extend_from_slice(n.as_bytes()),
+            Kind::Opaque(n) if n == "TestClock" || n == "Lent TestClock" => out.extend_from_slice(b"Clock"),
+            // A `Lent` shows as its handle.
+            Kind::Opaque(n) => out.extend_from_slice(n.strip_prefix("Lent ").unwrap_or(n).as_bytes()),
             Kind::Const(n) => out.extend_from_slice(n.to_string().as_bytes()),
         }
     }

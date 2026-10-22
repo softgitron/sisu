@@ -1527,11 +1527,15 @@ trampoline: a call to a SIR function pushes a frame and the loop
 continues in it; a return pops it and stores the result in the caller's
 destination. Sisu calls never recurse on the host stack (a test runs
 50 000 nested calls on a small test thread); deeper than 100 000 frames
-is a stack-overflow panic. No intrinsic calls back into Sisu (the
-functions that take closures are written in Sisu) except `cli.parse`,
-which runs a field's default; the host's structural operations recurse
-over deeply nested values. The run happens on a thread with a 256 MiB
-stack so that both are safe.
+(`MAX_DEPTH`) is a stack overflow, a panic that names the function whose
+frame does not fit (`panic.stack-overflow`), with the message and exit
+status of a native stack's overflow; the unwinding that follows may push
+1 000 frames more (`UNWIND_DEPTH`) for the drops it runs, and a
+generator's frames count on top of its consumer's (decision 234). No
+intrinsic calls back into Sisu (the functions that take closures are
+written in Sisu) except `cli.parse`, which runs a field's default; the
+host's structural operations recurse over deeply nested values. The run
+happens on a thread with a 256 MiB stack so that both are safe.
 
 **Values** are a tagged enum: `int` (and every sized integer type but
 `u64`, `u128` and `i128`, kept in its type's range), `u64`, `u128`,
@@ -1544,7 +1548,8 @@ D-074 and 11 require, with a hash index), function values, closures
 (function, type arguments and captures), `dyn` values (a value and its
 type), `Shared` and `Weak` handles on a heap cell, `Cell`, `Mutex` and
 its guard, `Arena`, iterators, dict entries, capability handles and
-`Cap`s (a heap cell nothing frees), clocks, host sockets, the task
+`Cap`s (a heap cell that counts the handle's copies, decision 237),
+clocks, host sockets, the task
 handles (scopes, task handles, cancellations, channel halves, timers),
 references, and `Moved`. A `Slice` is a `list` of its values (a copy,
 like `str`'s; port-debt.md), and an `Array` a `list` of exactly its
@@ -1978,10 +1983,17 @@ then all of them advance by the smallest wait among their timers (17,
 
 **Generators.** A function whose body yields returns an `Iter` whose
 items come from a task-like closure run on demand: `next` switches to it
-until its next `yield`, which hands the item over and switches back. An
-abandoned generator is dropped with its iterator (port-debt.md). A
-receiver's or generator's iterator inside another iterator's adapter
-cannot wait (`R0091`).
+until its next `yield`, which hands the item over and switches back. A
+generator runs only when its consumer asks, never because a scope's
+cancellation woke the tasks that wait. One dropped before its end is
+closed, as Python's `close` closes one (decision 236): suspended at a
+`yield`, it unwinds from there at once, outside the schedule, running its
+frames' drops and `defer`s before the consumer goes on; one that never
+started drops what its closure captured. A panic while it cleans up
+aborts the program (`panic.during-abandon`), as a panic during unwinding
+does, and so does an operation that would wait there
+(`panic.abandoned-wait`). A receiver's or generator's iterator inside
+another iterator's adapter cannot wait (`R0091`).
 
 **`log`** writes records to the standard error with their level and,
 for a task, the task's path (`R0085`), which stands in for the trace
@@ -2053,8 +2065,10 @@ A capability is a `Copy` handle (`Fs`, `Net`, `Clock`, `Rand`, `Env`,
 `Proc`) on an object that implements the capability's operations trait
 (`FsOps`, `NetOps`, `ClockOps`, `RandOps`, `EnvOps`, `ProcOps`; 06, "The
 rule"). The object lives in a heap cell that every copy of the handle
-reaches and nothing frees; copying the handle grants nothing new, and a
-fake's state, behind the handle, is seen by every copy. The handle
+reaches; copying the handle grants nothing new, and a fake's state,
+behind the handle, is seen by every copy. The cell counts the copies, and
+the last one's drop drops the object and empties the cell (see
+"Counting copies" below). The handle
 implements the trait by forwarding: its impl's methods are the intrinsic
 `cap.forward`, which lowering turns into a call through the trait whose
 `Self` the dispatcher replaces by the object in the cell, so the object's
@@ -2064,11 +2078,32 @@ own method (Sisu or intrinsic) runs with `self` pointing into the cell.
 another type that implements its operations trait becomes one
 (`Coercion::ToCap`, lowered to `call intrinsic cap.new[T, Handle]`, which
 puts the value in a new cell). The value must own what it holds (a view
-is `E0421`), must not be must-consume, since the handle never drops it
-(`E0422`), and must be `Send` and `Sync`, since a handle may reach every
-task (`E0700`). A result that borrows `self` borrows the handle, whose
-object outlives every use: a handle, a `Cap` and a `Lent` lend nothing of
-their own to the ownership checker.
+is `E0421`), must not be must-consume, since the handle drops it unseen,
+with its last copy (`E0422`), and must be `Send` and `Sync`, since a
+handle may reach every task (`E0700`). A result reached through a
+handle, a `Cap` or a `Lent` (`c.get()`, `env.args()`, `fs.lend()`)
+borrows the place the call copied the handle from, since the object goes
+with the handle's last copy: a parameter holding a handle counts as
+borrowed for the elision rules, and the ownership checker gives the
+result a loan of that place (decision 237).
+
+**Counting copies.** A handle is `Copy` (Q-51), and each copy is counted
+(decision 237). Lowering drops a value whose type holds a handle or a
+`Cap` (`holds_capability`; a `Lent` holds none) as it drops one that is
+not `Copy`, and a value whose type is `Copy` only by a bound, whose type
+parameter may stand for a handle; a temporary of such a type moves into
+what takes it, an argument a callee borrows is a copy of a place (a
+temporary's dropped with the statement's others), and a comparison or an
+interpolation borrows it. The interpreter adds a count to the cell for
+each copy made into a place, an aggregate, a closure's environment, a
+function's argument or an argument an intrinsic keeps, and each drop
+takes one; the last drop drops the object, running its `Drop`, and
+empties the cell, after which a reference into it dangles
+(`panic.dangling`), which the checker's loans keep a program from
+reaching. A `Lent` counts nothing. A function value's environment is
+never dropped (decision 224), so a handle an `own` closure captures keeps
+its object until the run ends. `capabilities/object_drops` and
+`ownership/handle_borrows` pin the two halves.
 
 **The root objects** are the host's: `HostFs`, `HostNet`, `HostClock`,
 `HostRand`, `HostEnv` and `HostProc`, builtin types that no code can
@@ -2963,9 +2998,9 @@ where the parts are:
 | an `error` enum, a union of error sets | 3 + the largest variant | its own type's number, its return trace, the tag, then the fields |
 | a function value | 1 + K | the code's address, then its closure's environment, K words, the largest an `own` closure of the program needs and at least one, or the address of a larger environment of references (decision 224) |
 | `dict[K, V]`, `set[T]`, `Iter[T]` | 1 | the address of a runtime object |
-| a capability handle | 1 | the address of a cell that holds its object as a `dyn` holds its value: the object's type, its address, then the object (decision 209) |
+| a capability handle | 1 | the address of a cell that holds its object as a `dyn` holds its value: the object's type, its address, then the object (decision 209), after a word counting the handle's copies (decision 237) |
 | `Lent[T]` | T | the handle (or test clock) it lends |
-| `Cap[T]` | 1 | the address of a heap cell holding the value, which nothing frees |
+| `Cap[T]` | 1 | the address of a heap cell holding the value, after a word counting the `Cap`'s copies (decision 237) |
 | `TestClock` | 1 | the number of the run's test clock in the scheduler |
 | `HostStream`, `HostListener` | 1 | the socket's number in the runtime's table |
 | `System` | 7 | its handles, in decision 101's order |
@@ -3012,11 +3047,16 @@ trace and exits with 1; otherwise 0.
 
 Every function but drop glue counts itself in `SISU_RT_DEPTH` on entry and
 out on return; past 100 000 nested calls a call panics with the
-interpreter's `panic.stack-overflow`. The program runs on a thread with a
-1 GiB stack, so that the limit, and not the machine's stack, is what a
-deep recursion meets (decision 190). Before that count, every function's
-entry probes its stack (section "Tasks"), and after it, but in drop glue,
-passes a yield point.
+interpreter's `panic.stack-overflow`, which names the function, unless a
+panic's unwinding has room left within 1 000 more (decision 234). The
+program runs on a thread with a 1 GiB stack, so that the limit, and not
+the machine's stack, is what a deep recursion meets (decision 190).
+Before that count, every function's entry probes its stack (section
+"Tasks"), and after it, but in drop glue, passes a yield point. A panic's
+trace deeper than a hundred frames shows the fifty innermost and the
+fifty outermost, with a line for the rest between them, in the
+interpreter as natively, so that what an overflow prints does not depend
+on how deep each one's stack lets it go (decision 234).
 
 ### Each SIR construct
 
@@ -3087,22 +3127,28 @@ captures, held in the function value itself and copied with it: a
 function value has as many words of environment as the largest `own`
 closure of the program needs, at least one, so that nothing is allocated
 and nothing needs freeing (a function value is `Copy` and SIR never drops
-one). Which size that is only compiling finds, so a program with a larger
-`own` environment is compiled again with wider function values. A call
-passes the callee the address of the environment's words in the value;
-a closure of references whose environment is larger than they are cannot
-outlive the frame it is made in, so its environment is a slot of that
-frame, whose address is the value's first word of environment (decision
-224). A task's closure (or a generator's) keeps a heap cell, which the
-runtime frees (decision 206). A named function used as a value is a thunk
-that takes an environment and ignores it, so every function value is
-called as a closure is (decision 195); a generic one, or one that
-borrows a parameter, is a closure of its value wrapper (decision 225).
+one, so a handle an `own` closure captures is counted until the run
+ends, decision 237). Which size that is only compiling finds, so a
+program with a larger `own` environment is compiled again with wider
+function values. A call passes the callee the address of the
+environment's words in the value; a closure of references whose
+environment is larger than they are cannot outlive the frame it is made
+in, so its environment is a slot of that frame, whose address is the
+value's first word of environment (decision 224). A task's closure (or a
+generator's) keeps a heap cell, which the runtime frees (decision 206). A
+named function used as a value is a thunk that takes an environment and
+ignores it, so every function value is called as a closure is (decision
+195); a generic one, or one that borrows a parameter, is a closure of its
+value wrapper (decision 225).
 
 `main(sys: System)` receives seven handles, each on an object of the host
 the runtime keeps. A handle is a cell that holds its object as a `dyn`
 holds its value, made by `cap.new[T, H]` for a fake, an attenuation, a
-caretaker or an interceptor, and by the runtime for the host's objects; a
+caretaker or an interceptor, and by the runtime for the host's objects,
+with the count of its copies in the word before it: the compiled code
+adds one for each copy it makes (`sisu_rt_retain`, for a by-value `self`
+in the dispatcher), each drop takes one, and the last frees the cell
+after dropping the object (decision 237); a
 `Lent` is its handle, and a test clock (`Clock.fake`) the number of a
 virtual clock of the scheduler, which becomes a `Clock` through `cap.new`
 as any other object does. A call through a handle (the prelude's
@@ -3118,7 +3164,8 @@ tests and their fakes, which `main` does not run, do not count.
 A parameter of type `Iterable[T]` takes whatever iterable the caller has:
 the caller passes a reference to it together with the number of its type,
 as a reference to a `dyn` is passed, and the runtime iterates by that type
-(decision 210).
+(decision 210). A value the caller moved in is dropped, with whatever the
+callee left of it, when the call returns or unwinds (decision 235).
 
 ### The runtime
 
@@ -3126,14 +3173,15 @@ The runtime's entry points (`abi::sym`) are the boundary:
 
 | Entry point | What it does |
 |---|---|
-| `sisu_rt_start(argc, argv, entry, flags, ret_ty, types, types_len, fns, fns_len, max_frame) -> i32` | decodes the type table, keeps the function table, starts the scheduler (the probe reserve holds `max_frame`, the program's largest frame), runs `main` on its thread (with a `System` when `flags` says so) and gives the exit status |
+| `sisu_rt_start(argc, argv, entry, flags, ret_ty, types, types_len, fns, fns_len, unprobed) -> i32` | decodes the type table, keeps the function table, starts the scheduler (the probe reserve holds `unprobed`, the most a call may write below a probe limit before a probe sees it), runs `main` on its thread (with a `System` when `flags` says so) and gives the exit status |
 | `sisu_rt_frame(name, len, file, len, line, col)` | adds a line to the stack trace of the panic in flight |
 | `sisu_rt_abort_unwind()` | a panic reached a frame running cleanup: abort |
 | `sisu_rt_panic_overflow`, `_index`, `_stack`, `_unreachable` | raise those panics |
 | `sisu_rt_int_op(op, x, y, out) -> u8`, `sisu_rt_float_op(op, x, y) -> f64` | the arithmetic that is not one instruction |
 | `sisu_rt_alloc(bytes) -> ptr` | heap memory for a list or a box |
-| `sisu_rt_task_env(bytes, ty) -> ptr` | the environment of a task's closure (or a generator's), of type `ty`, which the runtime frees when the closure returns (decision 223) |
+| `sisu_rt_task_env(bytes, ty) -> ptr` | the environment of a task's closure (or a generator's), of type `ty`, which the runtime frees when the closure returns, and drops for a generator closed before it started (decision 236) |
 | `sisu_rt_drop(value, ty) -> u8`, `sisu_rt_copy(dst, src, ty)` | the drop and `.copy()` of a value by its type |
+| `sisu_rt_retain(value, ty)` | a copy of a value of type `ty` that holds capability handles was made: each handle's cell counts one more (decision 237) |
 | `sisu_rt_binary(op, out, a, a_ty, b, b_ty) -> u8` | equality, order, `in` and concatenation of values that are not numbers |
 | `sisu_rt_intrinsic(desc, ret, args) -> u8` | a call of an intrinsic |
 | `sisu_rt_sized(kind, op, flags, x, y, out) -> u8`, `sisu_rt_wide(kind, op, x, x_ty, y, y_ty, out) -> u8` | an operation of a sized integer type, of one word or of 128 bits |
@@ -3145,7 +3193,7 @@ The runtime's entry points (`abi::sym`) are the boundary:
 | `sisu_rt_yield()` | a yield point found the budget spent: the scheduler may switch tasks |
 | `SISU_RT_DEPTH` | the counter of nested calls |
 | `SISU_RT_BUDGET` | the yield points left before the scheduler is asked |
-| `SISU_RT_STACK` | the running task's stack limits: the probe's, the real one, the unwinding floor, and the watermark's and the failure's flags; and whether it is a generator being abandoned (decision 223) |
+| `SISU_RT_STACK` | the running task's stack limits: the probe's, the real one, the unwinding floor, and the watermark's and the failure's flags; and whether it is a generator being closed (decision 236) |
 | `SISU_RT_SITE` | where the running code last called an intrinsic that may wait, and whether its function is `pure` |
 
 What a program allocates is freed when its value is dropped, as the
@@ -3162,9 +3210,9 @@ values whose fields hold lists, dicts, sets, texts and boxes (decision
 229). What the interpreter's host
 lets go of without dropping it, the runtime frees without running Sisu
 code (forgetting: no drop glue, no `Drop`, no guard's check, decision
-223): the error a `main` returned and the objects of capabilities and the
-values of `Cap`s, which live as long as the run (an arena per run), when
-the run ends; and the frames of an abandoned generator (section "Tasks").
+223) when the run ends: the error a `main` returned, and the cells of
+capabilities and `Cap`s that a copy of their handle kept to the end, one
+a function value's environment holds (decision 237).
 
 The type table is encoded by `abi::encode` into the object's read-only
 data and decoded once when the program starts; the function table holds
@@ -3203,19 +3251,30 @@ the usable stack, 1 MiB unless `SISU_TASK_STACK` says otherwise (`512K`,
 keeps a task inside its slot is the probe at the entry of every function:
 the stack pointer, below the frame the prologue made, against the task's
 limit (`SISU_RT_STACK`). Cranelift allocates a frame before any code of
-ours runs, so the limit leaves room for the program's largest frame on
-top of the policy's 5 KiB, and a function whose probe fails marks the
-failure, lowers the limit to an unwinding floor and returns
-`UNWINDING` at once, calling nothing; the runtime raises the panic
-(`panic.stack-exhausted`, `R0123`) the next time it looks at the panics
-in flight, and the task unwinds with its drops. When a task waits, the
-pages of its stack below the stack pointer it parked at, less 2 KiB for
-the switch, are given back (`madvise`), and a slot is given back when it
-returns to the pool but for its top page. The probe doubles as the
-decommit watermark: after a decommit the task's limit is the decommit
-point, so a probe fires only when the stack grows below it again, marks
-the task dirty and lowers the limit, and a task that parks at the same
-depth again makes no system call.
+ours runs, but writes only its top there (the saved registers, and the
+spill slots the register allocator may fill at the entry), never the
+stack slots below them, and the code generator keeps the parameters'
+addresses for the debugger only after the probe: comparing the stack
+pointer after the prologue is the Phase 1 report's comparison of the
+stack pointer less the frame, for all of the frame but its top. So the
+limit leaves the policy's 5 KiB below it, and room for what a call may
+write before a probe sees it: the largest top of a probed frame and the
+largest frame of a function without a probe (a dispatcher, a thunk),
+which the code generator measures (for stage 1, 1.2 KiB rather than its
+largest frame's 69 KiB; decision 234). A function whose probe fails
+records its name, lowers the limit to an unwinding floor and returns
+`UNWINDING` at once, calling nothing; the runtime raises the stack
+overflow, which names the function (`panic.stack-overflow`), the next
+time it looks at the panics in flight, and the task unwinds with its
+drops, which may use the reserve down to the floor. `SISU_TASK_STACK` is
+where the reservation is set: 06 and 10 name no option for it. When a
+task waits, the pages of its stack below the stack pointer it parked at,
+less 2 KiB for the switch, are given back (`madvise`), and a slot is
+given back when it returns to the pool but for its top page. The probe
+doubles as the decommit watermark: after a decommit the task's limit is
+the decommit point, so a probe fires only when the stack grows below it
+again, marks the task dirty and lowers the limit, and a task that parks
+at the same depth again makes no system call.
 
 **The system stack.** Runtime code called from a task runs on the root
 task's stack, as Go's `systemstack` does, so that a task's stack holds
@@ -3260,19 +3319,19 @@ interpreter prints under every seed tried, for programs whose output is
 their schedule (`sisu-driver/tests/schedules`) and for the concurrency
 cases.
 
-**Abandoned generators.** A generator whose iterator is dropped before
-its end is abandoned (decision 95), and what its frames hold is let go
-of as the interpreter's host lets it go, running no Sisu code (decision
-223). One suspended at a `yield` is resumed there and then, outside the
-schedule, with its `SISU_RT_STACK` word of abandonment set: its yield
-returns `UNWINDING` without a panic, and its frames unwind through their
-cleanup blocks, whose drops forget what they drop; meanwhile the running
-task's state, its panics in flight and the values it moved aside are kept
-apart. One that never started forgets what its environment holds, by the
-type its block carries (`sisu_rt_task_env`), and an item it yielded that
-nobody took is forgotten too. A generator whose cleanup runs code of its
-own (a `defer`'s), which no drop may skip, says so when it starts, and is
-left as it is, its frames and environment with it.
+**Closing generators.** A generator whose iterator is dropped before its
+end is closed, as the interpreter closes it (decision 236). One suspended
+at a `yield` is resumed there and then, outside the schedule, with its
+`SISU_RT_STACK` word of abandonment set: its yield returns `UNWINDING`
+without a panic, and its frames unwind through their cleanup blocks,
+running their drops and `defer`s; meanwhile the running task's state, its
+panics in flight and the values it moved aside are kept apart. A panic
+there aborts the program (`panic.during-abandon`), and an operation that
+would wait raises one (`panic.abandoned-wait`). One that never started
+drops what its environment holds, by the type its block carries
+(`sisu_rt_task_env`), and an item it yielded that nobody took is dropped
+too. A generator runs only when its consumer asks: a scope's
+cancellation does not wake one.
 
 **Deadlock.** When nothing is ready and no timer is pending, the program
 stops with the interpreter's report (`R0080`, `R0081`) and status 134; a
@@ -3367,16 +3426,18 @@ it beside the native mode.
 ### Coverage
 
 `conformance/native.list` names the cases the backend builds and runs:
-153 of them, every case of the suite that runs a program (the others are
+159 of them, every case of the suite that runs a program (the others are
 diagnostics, `sisu test` files, and the tools' cases: `--watch`, the
-REPL, worksheets, tokens, SIR and documentation). Among them are every case of `concurrency/` that
-runs (tasks, scopes, cancellation, channels, `select`, races, generators,
-`log`, mutexes across tasks, the deadlock report), all 40 of `run/` that
-have a `main` (`run/testing` is a test file without one), the 35 of
+REPL, worksheets, tokens, SIR and documentation). Among them are every
+case of `concurrency/` that runs (tasks, scopes, cancellation, channels,
+`select`, races, generators and their closing, `log`, mutexes across
+tasks, the deadlock report, a task's stack overflow), all 42 of `run/`
+that have a `main` (`run/testing` is a test file without one), the 35 of
 `ownership/` that run (with `Mutex`, `Shared`, `Weak`, `Cell` and
-`Arena`), and the 9 of `capabilities/` (fakes, attenuations, caretakers,
-interceptors, `cap.lend`, the test clock, the host's processes and an
-in-process network), with `replay/network` on the host's real network.
+`Arena`), and the 10 of `capabilities/` (fakes, attenuations, caretakers,
+interceptors, `cap.lend`, the test clock, the host's processes, an
+in-process network and the drops of objects with their handles' last
+copies), with `replay/network` on the host's real network.
 `sisu-conformance --native conformance/native.list` builds each with
 `sisu build --native`, runs the executable as the runner runs `sisu` (its
 arguments, standard input, an environment holding only `SISU_RT_ALLOCS=1`),
@@ -3592,7 +3653,8 @@ open to revision; the conformance cases pin the current choice.
     (panic), 134 (abort, including an ownership violation under the
     monitor).
 31. Sisu frames are limited to 100 000; beyond that is a panic, not a
-    crash.
+    crash (decision 234: the stack overflow names the function, natively
+    as in the interpreter).
 32. A typed hole run by `sisu run` panics; in `sisu test` the test is
     reported as blocked, and blocked tests do not fail the run.
 
@@ -3821,7 +3883,8 @@ open to revision; the conformance cases pin the current choice.
     captures are not in its type; a server's handler is a trait object
     or a generic parameter instead (`http.Handler`).
 95. A generator dropped before its end is abandoned with its iterator;
-    its frames are dropped without running to completion.
+    its frames are dropped without running to completion (decision 236:
+    it is closed, its drops and `defer`s running).
 96. `log` records carry the task's path, not a span identifier: the
     trace context of D-075 is that path until Phase 8's tooling.
 
@@ -3835,7 +3898,7 @@ open to revision; the conformance cases pin the current choice.
     over; a `Copy` one is copied).
 98. An object must own what it holds, not be must-consume, and be `Send`
     and `Sync`, since a handle can be stored and can reach every task;
-    nothing frees it (port-debt.md).
+    nothing frees it (decision 237: it goes with the handle's last copy).
 99. `Lent[T]` implements the capability's trait but never becomes a
     handle: a parameter that accepts the lent form is generic
     (`[F: FsOps]`), not of the handle's type, which could be stored.
@@ -4396,7 +4459,7 @@ what transcribing the Rust type checker found in stage 0)
      even when it holds only references, since the task runs after the
      statement that made it and the next iteration of a loop would reuse a
      slot of the frame; the runtime frees the cell when the closure
-     returns, or when the generator is abandoned.
+     returns, or when the generator is abandoned (closed, decision 236).
 
 **Stage 2, round 2, continued** (the rest of the suite; section "Stage 2")
 
@@ -4606,7 +4669,10 @@ what transcribing the Rust type checker found in stage 0)
      the type its block carries (`sisu_rt_task_env`). A generator whose
      cleanup runs code of its own (a `defer`) cannot unwind without
      running it, which the interpreter does not, so it says so when it
-     starts and is left as it was (port-debt.md).
+     starts and is left as it was (port-debt.md). Decision 236 closes an
+     abandoned generator instead, running its drops and `defer`s in both,
+     and decision 237 frees a capability's cell with its handle's last
+     copy.
 224. A function value holds its closure's environment itself: one word
      of code and K words of environment, K being the largest environment
      an `own` closure of the program needs, at least one. Only compiling
@@ -4752,3 +4818,115 @@ what transcribing the Rust type checker found in stage 0)
      instructions (1.22 s against 1.63 s), its batch of the conformance
      files takes 1.6 s against 2.2 s, and its lowering of its own package
      46.6 s against 48.8 s, with the same output.
+
+**Stage 2, round 4: the runtime** (section "Stage 2"; "The interpreter")
+
+234. A stack overflow is one panic, `panic.stack-overflow` (`R0032`), whose
+     message names the function whose frame did not fit (the intrinsic,
+     for the anchor of a `task.scope`, `race` or `shield`), with the
+     same text and exit status in the interpreter and natively, as the
+     Phase 1 verdict means it: a clean Sisu panic, never a crash. Where it
+     happens is each implementation's: the interpreter's 100 000 frames
+     (`MAX_DEPTH`), a native task's stack (1 MiB, `SISU_TASK_STACK`,
+     since neither 06 nor 10 names an option for it) at the probe of a
+     function's entry, and the root task's 100 000 calls (decision 190)
+     on its 1 GiB. So nothing a run prints may depend on the depth: a
+     panic's trace deeper than a hundred frames shows the fifty innermost
+     and the fifty outermost, as Go's tracebacks do, with one line between
+     them that gives no count (`run.trace-elided`), in a panic's report
+     and in `TaskPanicked`'s trace alike, and `run/stack_overflow` and
+     `concurrency/stack_overflow` hold the two to the same output. The
+     unwinding that follows an overflow runs drops, and a `Drop` is a
+     call: the interpreter lets it push 1 000 frames beyond the limit
+     (`UNWIND_DEPTH`), native code counts 1 000 calls beyond it, and a
+     native stack keeps its floor below the probe limit, so that an
+     overflow with a `Drop` in each frame unwinds instead of aborting as a
+     panic during unwinding. A generator's frames count on top of its
+     consumer's (the consumer's depth when it last asked for an item, in
+     both), so a recursion through generators overflows as one through
+     calls does, where each generator's own stack let it grow until the
+     memory ran out. The probe compares the stack pointer after
+     Cranelift's prologue, which writes only the top of the frame (the
+     saved registers and the spill slots, above the stack slots); the
+     parameters' addresses kept for the debugger are stored after the
+     probe; so the probe is the Phase 1 report's comparison of the stack
+     pointer less the frame for all of the frame but its top, and the
+     reserve below the limit holds the policy's 5 KiB and the most a call
+     may write before a probe sees it (the largest top of a probed frame
+     and the largest frame without a probe, a dispatcher's or a thunk's),
+     not the program's largest frame: 1.2 KiB rather than 69 KiB for
+     stage 1. `R0123` (`panic.stack-exhausted`) is retired. The monitor
+     finds a reference's frame by the index the reference carries rather
+     than by walking the stack, which made a deep recursion's run under
+     it quadratic (33 s rather than 0.7 s for `run/stack_overflow`).
+235. A value moved into an `Iterable[T]` parameter (`f(reversed(xs))`, a
+     receiver) is dropped, with whatever the callee left of it, when the
+     call returns and when it unwinds, in the interpreter as natively: the
+     parameter is a reference (decision 210), so the caller owns what it
+     moved in, and 04 drops every value once. The interpreter let the
+     value go once the callee began, so the rest of an iterator the callee
+     did not finish was never dropped and a `Drop` that should have run
+     did not; native code dropped it after a return but not after a panic.
+     Now the interpreter keeps the value in a local past the callee's own
+     (the parameter refers to it, as native code passes the caller's
+     memory) and drops it when the frame goes, and native code drops it on
+     the panic path too. An intrinsic given such a parameter
+     (`iterable_list`, `zip`, `sum`, `sorted`, ...) takes what is left of
+     the iterator and leaves it ended, as native code does, so a second
+     pass sees nothing; one that a panic stops drops what it took and what
+     it left (`zip` of different lengths). `run/iterable_rest` holds the
+     two to the same output.
+236. A generator dropped before its end is closed, as Python's `close`
+     closes one, in the interpreter as natively: suspended at a `yield`,
+     it is resumed there at once, outside the schedule, with a panic that
+     nothing reports, and its frames unwind running their drops and
+     `defer`s before the consumer goes on; one that never started drops
+     what its closure captured, and an item it yielded that nobody took is
+     dropped. 04 drops every value and 02's `defer` runs at the end of its
+     block, and a generator left at a `yield` leaves its blocks; the
+     two implementations let its frames go without running a `Drop` or a
+     `defer` (decisions 95 and 223), and the native runtime kept the frames
+     of one whose cleanup ran a `defer`. The cleanup runs where the
+     consumer dropped the generator, which cannot take a panic: a panic
+     there aborts the program with status 134 (`panic.during-abandon`,
+     `R0128`), as a panic during unwinding does, and so does an operation
+     that would wait (`panic.abandoned-wait`, `R0129`), since the consumer
+     is not a task the scheduler could switch away from. A generator runs
+     only when its consumer asks: a scope's cancellation, which wakes the
+     tasks that wait, no longer wakes a suspended generator, which then ran
+     its body on by itself. `concurrency/generator_close` and
+     `concurrency/generator_close_panic` hold the two to the same output.
+237. A capability's object, and a `Cap`'s value, goes with the last copy
+     of its handle, in the interpreter as natively: each copy of a handle
+     is counted, and the drop of the last runs the object's `Drop` and
+     frees its cell, where the cell lived as long as the run and the
+     `Drop` never ran (decision 98), so a program that made fakes or
+     attenuations in a loop grew until it ended. Handles stay `Copy`
+     (Q-51); a copy is counted where it is made (a variable, a field, an
+     aggregate, a closure's environment, a function's argument, an
+     argument an intrinsic keeps, `sisu_rt_retain` natively) and a move
+     is not; a `Lent` counts nothing. This changes rules of the front end,
+     which stage 1 transcribes. Lowering's `needs_drop` holds for a value
+     whose type holds a handle or a `Cap` (`holds_capability`) and for one
+     whose type is `Copy` only by a bound (a generic function's `T: Copy`
+     may be a handle; the drop of an `int` does nothing); a temporary of
+     such a type is moved into what takes it, an argument a callee borrows
+     (not `own`) is a copy of a place, a temporary's being dropped with
+     the statement's others, and a comparison or an interpolation borrows
+     it. SIR's `drops_something` holds for the handles, `System` and
+     `Cap`, so drop glue drops them. A parameter holding a handle counts as
+     borrowed for the elision rules, only a `TestClock` lends nothing of
+     its own (`is_run_handle`), and the ownership checker gives a call's
+     result that may point into a handle's object (its `from`) a loan of
+     the place the call copied the handle from, which a `return` may carry
+     for a parameter in its `from`: `let v = Cap(x).get()` is `E0406` and
+     replacing a handle while a borrow of its object is used is `E0402`
+     (`ownership/handle_borrows`), where both ran with the object kept
+     alive. `System.assemble` takes its handles `own`, and the
+     interpreter's transcript runs give each run's `System` its own counts
+     of the world's handles. A function value's environment is never
+     dropped (decision 224), so a handle an `own` closure captures keeps
+     its object until the run ends, when the runtime forgets the cells
+     left (decision 223), a registry of live cells by address that a
+     release finds in logarithmic time. `capabilities/object_drops` holds
+     the two implementations to the same drops.

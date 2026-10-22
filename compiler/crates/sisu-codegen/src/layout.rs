@@ -279,10 +279,14 @@ impl<'p> Types<'p> {
             "Cap" | "TestClock" | "HostStream" | "HostListener" => {
                 return simple(Kind::Opaque(n.to_string()), w);
             }
-            // A lent capability is its handle (or test clock), at no cost.
+            // A lent capability is its handle (or test clock), at no cost,
+            // but not counted: its name says it is lent (decision 237).
             "Lent" => {
                 let inner = self.id(&arg(0))?;
                 return match self.entries.get(inner as usize) {
+                    Some(Some(TypeEntry { size, kind: Kind::Opaque(n) })) => {
+                        Ok(TypeEntry { size: *size, kind: Kind::Opaque(format!("Lent {n}")) })
+                    }
                     Some(Some(e)) => Ok(e.clone()),
                     _ => Err(Error::unsupported("a `Lent` of a type that holds itself")),
                 };
@@ -531,6 +535,8 @@ impl<'p> Types<'p> {
             | Kind::Shared(_)
             | Kind::Weak(_)
             | Kind::Arena(_) => true,
+            // A capability handle's copies are counted (decision 237).
+            Kind::Opaque(n) => abi::counted_handle(&n),
             Kind::Mutex(v) | Kind::Cell(v) => match self.type_of_id(v) {
                 Some(vt) => self.needs_drop_in(&vt, seen)?,
                 None => false,
@@ -571,6 +577,36 @@ impl<'p> Types<'p> {
             }
             _ => false,
         })
+    }
+
+    /// Whether a value of the type holds a capability handle or a `Cap` by
+    /// value, through options, results, tuples, structs and enums: a copy
+    /// of it counts (decision 237). A `Lent` holds none.
+    pub(crate) fn counted(&mut self, t: &Type) -> Result<bool, Error> {
+        if !self.needs_drop(t)? {
+            return Ok(false);
+        }
+        let mut seen = Vec::new();
+        let id = self.id(t)?;
+        Ok(self.counted_in(id, &mut seen))
+    }
+
+    fn counted_in(&self, id: u32, seen: &mut Vec<u32>) -> bool {
+        if seen.contains(&id) {
+            return false;
+        }
+        seen.push(id);
+        let Some(Some(e)) = self.entries.get(id as usize) else { return false };
+        let parts: Vec<u32> = match &e.kind {
+            Kind::Opaque(n) => return abi::counted_handle(n),
+            Kind::Option(p) => vec![*p],
+            Kind::Result(a, b) => vec![*a, *b],
+            Kind::Tuple(slots) => slots.iter().map(|s| s.ty).collect(),
+            Kind::Struct { fields, .. } => fields.iter().map(|f| f.ty).collect(),
+            Kind::Enum { variants, .. } => variants.iter().flat_map(|v| v.fields.iter().map(|f| f.ty)).collect(),
+            _ => return false,
+        };
+        parts.into_iter().any(|p| self.counted_in(p, seen))
     }
 
     /// The type a number stands for.

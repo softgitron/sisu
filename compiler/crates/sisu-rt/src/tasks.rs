@@ -256,7 +256,7 @@ pub(crate) unsafe fn clock_of(c: &Call<'_>) -> u32 {
     // SAFETY: the first argument is the clock's object or handle.
     let (p, t) = unsafe { c.place(0) };
     match &ty(t).kind {
-        Kind::Opaque(n) if n == "HostClock" || n == "Clock" => 0,
+        Kind::Opaque(n) if matches!(n.strip_prefix("Lent ").unwrap_or(n), "HostClock" | "Clock") => 0,
         // SAFETY: a test clock's handle is a word, its clock's number.
         _ => unsafe { mem::word(p, 0) as u32 },
     }
@@ -500,9 +500,8 @@ fn drop_queued(queue: Vec<(Box<[u64]>, u32)>) -> u8 {
 /// which names the intrinsic that opened the anchor (decision 234).
 fn enter_anchor(name: &str) -> bool {
     let d = crate::entry::SISU_RT_DEPTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-    if d > abi::MAX_DEPTH {
+    if d > abi::MAX_DEPTH && system(|| crate::entry::over_depth(name)) != abi::OK {
         crate::entry::SISU_RT_DEPTH.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-        system(|| rt::raise_msg(msg::PANIC_STACK_OVERFLOW, &[("function", name.to_string())]));
         return false;
     }
     true
@@ -854,7 +853,7 @@ fn task_main(t: u32, y: &Yielder<(), sched::Suspend>, generator: bool) {
     let status = sched::neutral(|| unsafe { std::mem::transmute::<usize, Body0>(code)(out, env as *mut u8) });
     // The closure dropped what its environment held; its cell is the
     // runtime's to free.
-    system(|| crate::entry::release_task_env(env, false));
+    let _ = system(|| crate::entry::release_task_env(env, false));
     // An abandoned generator's frames have unwound (decision 95): nothing
     // waits for it.
     if sched::abandoning() {
@@ -1186,15 +1185,15 @@ unsafe fn gen_new(c: &Call<'_>) -> u8 {
 }
 
 /// `yield v` in a generator: hands `v` to the consumer and waits to be
-/// asked for the next.
+/// asked for the next (closed while it waits, it returns
+/// [`abi::UNWINDING`], decision 236).
 unsafe fn gen_yield(c: &Call<'_>) -> u8 {
     let (vp, vt) = (c.arg(0), c.ty(0));
     let site = Site::current();
     let mut handed = false;
     sched::blocking(|| {
         if handed {
-            // Abandoned while it waited here: its frames unwind.
-            return Attempt::Done(if sched::abandoning() { abi::UNWINDING } else { abi::OK });
+            return Attempt::Done(abi::OK);
         }
         handed = true;
         with(|s| {
@@ -1243,6 +1242,12 @@ unsafe fn iter_next(c: &Call<'_>) -> u8 {
                         }
                     };
                 }
+                // The generator's calls count on top of the consumer's
+                // (decision 234).
+                let depth = crate::entry::SISU_RT_DEPTH.load(std::sync::atomic::Ordering::Relaxed);
+                let g = s.task(t);
+                g.ctx.depth += depth - g.depth_base;
+                g.depth_base = depth;
                 s.wake(t);
                 s.block_on(Wait::Join(t), &[Key::Task(t)], None, site);
                 Attempt::Wait
@@ -1279,12 +1284,13 @@ unsafe fn iter_next(c: &Call<'_>) -> u8 {
 }
 
 /// A generator's iterator was dropped before its end: the generator is
-/// abandoned (decisions 95 and 223). What its frames hold is let go of as the
-/// interpreter's host lets it go, running no Sisu code: a generator
-/// suspended at a `yield` unwinds its frames with their drops forgetting
-/// (`sched::unwind_abandoned`); one that never started forgets the values
-/// its environment holds. Its stack goes back to the pool.
-pub(crate) fn abandon(t: u32) {
+/// closed (decision 236), as the interpreter closes it. One suspended at a
+/// `yield` unwinds its frames, running their drops and `defer`s
+/// (`sched::unwind_abandoned`); then an item it yielded that nobody took
+/// is dropped, and the values the environment of one that never started
+/// holds. Its stack goes back to the pool. The status is that of those
+/// drops.
+pub(crate) fn abandon(t: u32) -> u8 {
     let started = with(|s| {
         let task = s.task(t);
         task.co.as_ref()?;
@@ -1313,13 +1319,15 @@ pub(crate) fn abandon(t: u32) {
         let env = std::mem::take(&mut task.body).1;
         (env, task.yielded.take().map(|v| (v, task.item_ty)))
     });
+    let mut status = abi::OK;
     if let Some((mut words, item_ty)) = item {
         // SAFETY: the words hold an item of the generator's type.
-        unsafe { crate::value::forget_value(words.as_mut_ptr() as *mut u8, item_ty) };
+        status = unsafe { value::drop_value(words.as_mut_ptr() as *mut u8, item_ty) };
     }
     if started == Some(false) {
-        crate::entry::release_task_env(env, true);
+        status = value::after_part(status, crate::entry::release_task_env(env, true));
     }
+    status
 }
 
 // ------------------------------------------------------------------ mutexes

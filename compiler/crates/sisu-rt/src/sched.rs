@@ -225,6 +225,11 @@ pub(crate) struct Task {
     /// A generator's item, yielded and not taken yet.
     pub yielded: Option<Box<[u64]>>,
     pub generator: bool,
+    /// For a generator, the count of nested calls of its consumer when it
+    /// last asked for an item: a generator's calls count on top of its
+    /// consumer's, as the interpreter's frames do (decision 234). 0 for any
+    /// other task.
+    pub depth_base: i64,
     /// The type of a generator's items.
     pub item_ty: u32,
     /// The anchors of its stack, innermost last.
@@ -387,6 +392,7 @@ pub(crate) fn start(seed: u64, keep_stats: bool, pool: Pool, root_limits: [u64; 
         yielded: None,
         item_ty: 0,
         generator: false,
+        depth_base: 0,
         anchors: Vec::new(),
         site: Site::default(),
         ready_wall: None,
@@ -569,7 +575,16 @@ pub(crate) fn blocking(mut attempt: impl FnMut() -> Attempt) -> u8 {
                 if st != abi::OK {
                     return st;
                 }
+                // A generator dropped before its end cleans up without
+                // waiting (decision 236).
+                if abandoning() {
+                    return system(|| rt::raise_msg(msg::PANIC_ABANDONED_WAIT, &[]));
+                }
                 switch(Suspend::Park(0));
+                // Woken to be closed: the call fails, and the frames unwind.
+                if abandoning() {
+                    return abi::UNWINDING;
+                }
             }
         }
     }
@@ -687,33 +702,20 @@ fn run_loop() {
     }
 }
 
-/// Runs the frames of a generator abandoned while suspended at a `yield`
-/// to their end, here and now, outside the schedule: its yield returns
-/// [`abi::UNWINDING`] (the task's [`abi::STACK_ABANDONED`] is set), and its
-/// frames unwind with their drops forgetting what they drop, so no Sisu
-/// code runs (decisions 95 and 223). The running task's state, its panics in flight
-/// and what it moved aside are kept apart meanwhile. Returns whether the
-/// generator ended; its stack goes back to the pool either way.
+/// Closes a generator dropped while suspended in a call (a `yield`): it
+/// runs here and now, outside the schedule, the call returning
+/// [`abi::UNWINDING`] without a panic (the task's [`abi::STACK_ABANDONED`]
+/// is set), and its frames unwind running their drops and `defer`s, as
+/// the interpreter's do (decision 236); a panic there, or a wait, aborts.
+/// The running task's state, its panics in flight and what it moved aside
+/// are kept apart meanwhile. Returns whether the generator ended; its
+/// stack goes back to the pool either way.
 pub(crate) fn unwind_abandoned(t: u32) -> bool {
     let taken = with(|s| {
         let task = &mut s.tasks[t as usize];
         task.co.take().map(|co| (co, std::mem::replace(&mut task.ctx, empty_ctx()), task.yielder))
     });
     let Some((mut co, mut ctx, yielder)) = taken else { return false };
-    // A closure whose cleanup runs code of its own keeps its frames.
-    if ctx.stack[(abi::STACK_ABANDONED / 8) as usize] == abi::ABANDON_KEEP {
-        // SAFETY: the generator is suspended and never resumed again.
-        unsafe { co.force_reset() };
-        let stack = co.into_stack();
-        with(|s| {
-            let task = &mut s.tasks[t as usize];
-            let mark = task.mark;
-            task.region = None;
-            task.state = TState::Done;
-            s.pool.release(stack.0, mark);
-        });
-        return false;
-    }
     let mut mine = empty_ctx();
     save_ctx(&mut mine);
     let (my_yielder, on_system) = (YIELDER.with(Cell::get), ON_SYSTEM.with(Cell::get));
@@ -723,7 +725,7 @@ pub(crate) fn unwind_abandoned(t: u32) -> bool {
     load_ctx(&mut ctx);
     YIELDER.with(|c| c.set(yielder));
     ON_SYSTEM.with(|c| c.set(false));
-    let r = crate::value::forget(|| co.resume(()));
+    let r = co.resume(());
     save_ctx(&mut ctx);
     YIELDER.with(|c| c.set(my_yielder));
     ON_SYSTEM.with(|c| c.set(on_system));
@@ -804,6 +806,7 @@ impl Sched {
             ret_ty: 0,
             yielded: None,
             generator: false,
+            depth_base: 0,
             item_ty: 0,
             anchors: vec![Anchor::Task],
             site: Site::default(),
@@ -1040,9 +1043,14 @@ impl Sched {
         }
     }
 
+    /// Wakes every blocked task to look at its cancellation again, but for
+    /// generators, which run only when their consumer asks for an item
+    /// (decision 236).
     pub(crate) fn wake_all_blocked(&mut self) {
         for t in 0..self.tasks.len() as u32 {
-            self.wake(t);
+            if !self.tasks[t as usize].generator {
+                self.wake(t);
+            }
         }
     }
 
