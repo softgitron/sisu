@@ -17,6 +17,31 @@ use crate::sched::with;
 /// [`abi::CAPABILITIES`]: a root handle's cell holds the address of one.
 static HOST_OBJECTS: [u64; 7] = [0; 7];
 
+/// The cells of the program's objects (a handle's on an object, a `Cap`'s
+/// value), in the order they were made: each one's address, the type of
+/// what it holds and where in it that is. They live as long as the run
+/// (every copy of a handle reaches its cell), which ends by freeing them.
+static KEPT: std::sync::Mutex<Vec<(usize, u32, usize)>> = std::sync::Mutex::new(Vec::new());
+
+fn keep(cell: *mut u8, t: u32, at: usize) {
+    if let Ok(mut k) = KEPT.lock() {
+        k.push((cell as usize, t, at));
+    }
+}
+
+/// The run is over: frees the objects of capabilities and the values of
+/// `Cap`s, last made first, running no Sisu code, as the interpreter's
+/// host lets them go (an arena per run, decision 223).
+pub(crate) fn release_kept() {
+    let cells = KEPT.lock().map(|mut k| std::mem::take(&mut *k)).unwrap_or_default();
+    for (cell, t, at) in cells.into_iter().rev() {
+        // SAFETY: the cell holds a value of type `t` at `at`, which no code
+        // reaches any more.
+        unsafe { crate::value::forget_value((cell as *mut u8).add(at), t) };
+        mem::free_kept(cell as *mut u8);
+    }
+}
+
 /// A new cell holding the `size` bytes at `src` (moved in) as a `dyn` of
 /// type `t` holds its value: the handle.
 ///
@@ -76,12 +101,14 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> Option<u8> {
             I::CapNew => {
                 let t = c.targ(0);
                 let h = handle_cell(u64::from(t), c.arg(0), ty(t).size);
+                keep(h as *mut u8, t, 16);
                 c.set_word(h);
             }
             I::CapCellNew => {
                 let size = ty(c.ty(0)).size;
                 let cell = mem::alloc_kept((size as usize).max(8));
                 mem::copy(cell, c.arg(0), size as usize);
+                keep(cell, c.ty(0), 0);
                 c.set_word(cell as u64);
             }
             // The value a `Cap`'s cell holds, by reference.

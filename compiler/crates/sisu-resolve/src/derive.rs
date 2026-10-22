@@ -53,20 +53,196 @@ struct Shape {
     body: Body,
 }
 
+/// What declaring a module's derived impls does, in the order it does it:
+/// a [`Plan`]'s steps.
+enum Act {
+    Report(Diagnostic),
+    /// A derived or delegated impl to check once every impl is known: the
+    /// type, the trait, where it was asked for, and the field delegated to.
+    Check(String, String, Span, Option<String>),
+    /// The text of a delegated impl.
+    Delegate(String),
+    /// The impl the plan's job `job` unfolds, of the trait for the type,
+    /// asked for at `span`.
+    Derive {
+        trait_name: String,
+        ty: String,
+        span: Span,
+        job: usize,
+    },
+}
+
+/// One run of a trait's derive template for a type.
+struct Job {
+    template: std::rc::Rc<ast::FnDef>,
+    /// The module the template is written in, and its source.
+    module: ModuleId,
+    source: std::rc::Rc<str>,
+    head: String,
+    name: String,
+    written: String,
+    body: Body,
+}
+
+/// A module's derived and delegated impls, planned without declaring
+/// anything: what the templates are run for, then what is done with their
+/// texts. Planning reads only the module's items and the templates, which
+/// every module's items are declared with, so the plans of all the
+/// program's modules are made first and their templates run on threads
+/// (decision 228).
+pub(crate) struct Plan {
+    module: ModuleId,
+    acts: Vec<Act>,
+    jobs: Vec<Job>,
+}
+
+/// The texts each job's template unfolds to, or why it failed.
+pub(crate) type Unfolded = Vec<Result<String, crate::template::Failure>>;
+
+impl Plan {
+    /// The text of the delegated impls and of the derived ones, given the
+    /// plan's unfolded templates.
+    fn texts(&self, unfolded: &[Result<String, crate::template::Failure>]) -> (String, String) {
+        let mut delegate = String::new();
+        let mut text = String::new();
+        for act in &self.acts {
+            match act {
+                Act::Delegate(t) => delegate.push_str(t),
+                Act::Derive { job, .. } => {
+                    if let Some(Ok(t)) = unfolded.get(*job) {
+                        text.push_str(t);
+                    }
+                }
+                Act::Report(_) | Act::Check(..) => {}
+            }
+        }
+        (delegate, text)
+    }
+}
+
+/// Runs the jobs of the plans, on as many threads as the machine runs at
+/// once (at most 8) when there are enough of them; each plan's results in
+/// the order of its jobs. A template is a pure function of the type's
+/// shape, so the texts are the same however the threads ran.
+pub(crate) fn unfold_plans(plans: &[Plan]) -> Vec<Unfolded> {
+    // The reference-counted templates stay on this thread; the threads
+    // get plain references.
+    let work: Vec<(&ast::FnDef, &str, &str, Target<'_>)> = plans
+        .iter()
+        .flat_map(|p| &p.jobs)
+        .map(|j| {
+            (
+                &*j.template,
+                &*j.source,
+                j.head.as_str(),
+                Target { name: &j.name, written: &j.written, body: &j.body },
+            )
+        })
+        .collect();
+    let run = |(template, source, head, target): &(&ast::FnDef, &str, &str, Target<'_>)| {
+        crate::template::unfold(template, source, head, target)
+    };
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8).min(work.len() / 8);
+    let mut all: Vec<Result<String, crate::template::Failure>> = if threads <= 1 {
+        work.iter().map(run).collect()
+    } else {
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let each = || {
+            let mut done = Vec::new();
+            loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(w) = work.get(i) else { break };
+                done.push((i, run(w)));
+            }
+            done
+        };
+        let mut out: Vec<Option<Result<String, crate::template::Failure>>> =
+            std::iter::repeat_with(|| None).take(work.len()).collect();
+        std::thread::scope(|s| {
+            let others: Vec<_> =
+                (1..threads).filter_map(|_| std::thread::Builder::new().spawn_scoped(s, each).ok()).collect();
+            let mut done = each();
+            for w in others {
+                match w.join() {
+                    Ok(theirs) => done.extend(theirs),
+                    // A panic in a template is the resolver's own: raised
+                    // again here, as one on this thread would be.
+                    Err(e) => std::panic::resume_unwind(e),
+                }
+            }
+            for (i, r) in done {
+                out[i] = Some(r);
+            }
+        });
+        out.into_iter().map(|r| r.unwrap_or_else(|| Ok(String::new()))).collect()
+    };
+    let mut per_plan = Vec::with_capacity(plans.len());
+    for p in plans.iter().rev() {
+        let rest = all.len() - p.jobs.len();
+        per_plan.push(all.split_off(rest));
+    }
+    per_plan.reverse();
+    per_plan
+}
+
 impl Resolver<'_> {
     /// Declares the derived impls of the structs and enums among `items`.
     pub fn declare_derived(&mut self, module: ModuleId, items: &[ast::Item]) {
+        let plans = vec![self.plan_derived(module, items)];
+        let unfolded = unfold_plans(&plans);
+        for (plan, u) in plans.into_iter().zip(unfolded) {
+            self.apply_derived(plan, &u);
+        }
+    }
+
+    /// The texts a plan declares, parsed ahead (on threads, when there are
+    /// many), so that declaring them finds them parsed.
+    pub(crate) fn parse_ahead(plans: &[Plan], unfolded: &[Unfolded]) {
+        let texts: Vec<String> = plans
+            .iter()
+            .zip(unfolded)
+            .flat_map(|(p, u)| {
+                let (delegate, text) = p.texts(u);
+                [delegate, text]
+            })
+            .filter(|t| !t.is_empty())
+            .collect();
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8).min(texts.len());
+        if threads <= 1 {
+            return;
+        }
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let each = || {
+            loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(t) = texts.get(i) else { break };
+                let _ = crate::collect::parse_generated(t);
+            }
+        };
+        std::thread::scope(|s| {
+            let others: Vec<_> =
+                (1..threads).filter_map(|_| std::thread::Builder::new().spawn_scoped(s, each).ok()).collect();
+            each();
+            for w in others {
+                if let Err(e) = w.join() {
+                    std::panic::resume_unwind(e);
+                }
+            }
+        });
+    }
+
+    /// Plans the derived impls of the structs and enums among `items`.
+    pub(crate) fn plan_derived(&self, module: ModuleId, items: &[ast::Item]) -> Plan {
         let file = self.file(module);
-        let source = self.sources.get(file).map(|f| f.text.clone()).unwrap_or_default();
-        let mut text = String::new();
-        let mut delegate = String::new();
-        let mut checks: Vec<(String, String, Span, Option<String>)> = Vec::new();
+        let source = self.sources.get(file).map(|f| f.text.as_str()).unwrap_or_default();
+        let mut acts: Vec<Act> = Vec::new();
+        let mut jobs: Vec<Job> = Vec::new();
         for item in items {
             let (shape, builtin) = match &item.kind {
                 ItemKind::Struct(s) => (
                     Shape {
                         name: s.name.text.clone(),
-                        generics: generics_text(&s.generics, &source),
+                        generics: generics_text(&s.generics, source),
                         used: used_params(&s.generics, s.fields.iter().map(|f| &f.ty)),
                         body: Body::Struct(s.fields.iter().map(|f| f.name.text.clone()).collect()),
                     },
@@ -75,7 +251,7 @@ impl Resolver<'_> {
                 ItemKind::Enum(e) => (
                     Shape {
                         name: e.name.text.clone(),
-                        generics: generics_text(&e.generics, &source),
+                        generics: generics_text(&e.generics, source),
                         used: used_params(
                             &e.generics,
                             e.variants.iter().flat_map(|v| v.fields.iter().map(|f| &f.ty)),
@@ -115,7 +291,7 @@ impl Resolver<'_> {
                     match &arg.value.kind {
                         // A flag on the type, checked against its fields.
                         ExprKind::Name(n) if n == "Copy" => {
-                            checks.push((shape.name.clone(), "Copy".into(), span, None));
+                            acts.push(Act::Check(shape.name.clone(), "Copy".into(), span, None));
                         }
                         ExprKind::Name(n)
                             if DERIVABLE.contains(&n.as_str())
@@ -127,16 +303,18 @@ impl Resolver<'_> {
                         }
                         _ => {
                             let name = self.source_of(span);
-                            self.report(Diagnostic::new(msg::RESOLVE_NOT_DERIVABLE, span).with("name", name));
+                            acts.push(Act::Report(
+                                Diagnostic::new(msg::RESOLVE_NOT_DERIVABLE, span).with("name", name),
+                            ));
                         }
                     }
                 }
             }
             // `@delegate(Trait, ..., to="field")`: impls that forward to a field.
-            let delegated = self.delegations(module, item, &shape);
+            let delegated = self.delegations(module, item, &shape, &mut acts);
             for (t, field, span) in &delegated {
-                delegate.push_str(&delegate_text(&shape, t, field));
-                checks.push((shape.name.clone(), t.clone(), *span, Some(field.clone())));
+                acts.push(Act::Delegate(delegate_text(&shape, t, field)));
+                acts.push(Act::Check(shape.name.clone(), t.clone(), *span, Some(field.clone())));
             }
             // `Ord` brings `PartialOrd`, which it determines.
             if let Some((_, span)) = wanted.iter().find(|(w, _)| w == "Ord").cloned()
@@ -155,32 +333,55 @@ impl Resolver<'_> {
                 wanted.push(("Debug".into(), span));
             }
             for (t, span) in wanted {
-                match self.derive_template(module, &t) {
-                    // The trait's own derive, run at compile time.
-                    Some((tm, template)) => {
-                        let (head, written) = header(&shape, &t);
-                        let target = Target { name: &shape.name, written: &written, body: &shape.body };
-                        let source =
-                            self.template_sources.get(&tm).cloned().unwrap_or_else(|| std::rc::Rc::from(""));
-                        match crate::template::unfold(&template, &source, &head, &target) {
-                            Ok(impl_text) => text.push_str(&impl_text),
-                            Err((range, reason)) => {
-                                let at = self.span(tm, range);
-                                self.report(
-                                    Diagnostic::new(msg::COMPTIME_DERIVE_FAILED, span)
-                                        .with("trait", t.clone())
-                                        .with("ty", shape.name.clone())
-                                        .with("reason", reason)
-                                        .label(at, msg::COMPTIME_DERIVE_HERE, Vec::new()),
-                                );
-                                continue;
-                            }
-                        }
+                // The trait's own derive, run at compile time; every trait
+                // `@derive` knows has one in the prelude.
+                let Some((tm, template)) = self.derive_template(module, &t) else { continue };
+                let (head, written) = header(&shape, &t);
+                let source = self.template_sources.get(&tm).cloned().unwrap_or_else(|| std::rc::Rc::from(""));
+                acts.push(Act::Derive { trait_name: t, ty: shape.name.clone(), span, job: jobs.len() });
+                jobs.push(Job {
+                    template,
+                    module: tm,
+                    source,
+                    head,
+                    name: shape.name.clone(),
+                    written,
+                    body: shape.body.clone(),
+                });
+            }
+        }
+        Plan { module, acts, jobs }
+    }
+
+    /// Does what a plan says, with the texts its templates unfolded to.
+    pub(crate) fn apply_derived(
+        &mut self,
+        plan: Plan,
+        unfolded: &[Result<String, crate::template::Failure>],
+    ) {
+        let (delegate, text) = plan.texts(unfolded);
+        let module = plan.module;
+        let mut checks: Vec<(String, String, Span, Option<String>)> = Vec::new();
+        for act in plan.acts {
+            match act {
+                Act::Report(d) => self.report(d),
+                Act::Check(ty, t, span, field) => checks.push((ty, t, span, field)),
+                Act::Delegate(_) => {}
+                Act::Derive { trait_name, ty, span, job } => match unfolded.get(job) {
+                    Some(Ok(_)) => checks.push((ty, trait_name, span, None)),
+                    Some(Err((range, reason))) => {
+                        let tm = plan.jobs.get(job).map_or(module, |j| j.module);
+                        let at = self.span(tm, *range);
+                        self.report(
+                            Diagnostic::new(msg::COMPTIME_DERIVE_FAILED, span)
+                                .with("trait", trait_name)
+                                .with("ty", ty)
+                                .with("reason", reason.clone())
+                                .label(at, msg::COMPTIME_DERIVE_HERE, Vec::new()),
+                        );
                     }
-                    // Every trait `@derive` knows has one in the prelude.
-                    None => continue,
-                }
-                checks.push((shape.name.clone(), t, span, None));
+                    None => {}
+                },
             }
         }
         // Delegated impls are ordinary impls, written by the compiler.
@@ -249,10 +450,11 @@ impl Resolver<'_> {
     /// The traits a struct's `@delegate` forwards, with the field, after
     /// checking the attribute.
     fn delegations(
-        &mut self,
+        &self,
         module: ModuleId,
         item: &ast::Item,
         shape: &Shape,
+        acts: &mut Vec<Act>,
     ) -> Vec<(String, String, Span)> {
         let mut out = Vec::new();
         for a in item.attrs.iter().filter(|a| a.name == "delegate") {
@@ -268,7 +470,9 @@ impl Resolver<'_> {
             };
             let Some(field) = field.filter(|f| fields.contains(f)) else {
                 let span = to.map(|arg| self.span(module, arg.range)).unwrap_or(attr_span);
-                self.report(Diagnostic::new(msg::RESOLVE_DELEGATE_TO, span).with("ty", shape.name.clone()));
+                acts.push(Act::Report(
+                    Diagnostic::new(msg::RESOLVE_DELEGATE_TO, span).with("ty", shape.name.clone()),
+                ));
                 continue;
             };
             for arg in a.args.iter().filter(|arg| arg.name.is_none()) {
@@ -277,12 +481,12 @@ impl Resolver<'_> {
                     ExprKind::Name(n) if DELEGABLE.contains(&n.as_str()) => {
                         let returns_self = DELEGABLE[..6].contains(&n.as_str());
                         if returns_self && fields.len() != 1 {
-                            self.report(
+                            acts.push(Act::Report(
                                 Diagnostic::new(msg::RESOLVE_DELEGATE_SELF, span)
                                     .with("trait", n.clone())
                                     .with("ty", shape.name.clone())
                                     .with("field", field.clone()),
-                            );
+                            ));
                             continue;
                         }
                         if !out.iter().any(|(t, _, _): &(String, String, Span)| t == n) {
@@ -291,7 +495,9 @@ impl Resolver<'_> {
                     }
                     _ => {
                         let name = self.source_of(span);
-                        self.report(Diagnostic::new(msg::RESOLVE_NOT_DELEGABLE, span).with("name", name));
+                        acts.push(Act::Report(
+                            Diagnostic::new(msg::RESOLVE_NOT_DELEGABLE, span).with("name", name),
+                        ));
                     }
                 }
             }

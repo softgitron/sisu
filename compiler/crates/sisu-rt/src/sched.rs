@@ -225,6 +225,8 @@ pub(crate) struct Task {
     /// A generator's item, yielded and not taken yet.
     pub yielded: Option<Box<[u64]>>,
     pub generator: bool,
+    /// The type of a generator's items.
+    pub item_ty: u32,
     /// The anchors of its stack, innermost last.
     pub anchors: Vec<Anchor>,
     /// Where it waits.
@@ -383,6 +385,7 @@ pub(crate) fn start(seed: u64, keep_stats: bool, pool: Pool, root_limits: [u64; 
         returns_result: false,
         ret_ty: 0,
         yielded: None,
+        item_ty: 0,
         generator: false,
         anchors: Vec::new(),
         site: Site::default(),
@@ -509,14 +512,30 @@ pub(crate) unsafe fn defer(p: *mut u8, t: u32) -> u8 {
     let mut words = vec![0u64; size.div_ceil(8)].into_boxed_slice();
     // SAFETY: `p` holds `size` bytes, and the buffer has room for them.
     unsafe { crate::mem::copy(words.as_mut_ptr() as *mut u8, p, size) };
-    DEFERRED.with(|d| d.borrow_mut().push((words, t)));
+    DEFERRED.with(|d| {
+        let mut d = d.borrow_mut();
+        d.push((words, t));
+        PENDING.store(d.len(), Relaxed);
+    });
     abi::OK
 }
 
+/// How many values [`DEFERRED`] holds: what [`drain`] reads first, since
+/// most runtime code moves nothing aside and the program's one thread of
+/// Sisu code is the only one that runs it.
+static PENDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// Drops what the runtime code just run moved aside, on the task's stack,
 /// in the order it was moved; `status` is that code's.
-pub(crate) fn drain(mut status: u8) -> u8 {
+#[inline]
+pub(crate) fn drain(status: u8) -> u8 {
+    if PENDING.load(Relaxed) == 0 { status } else { drain_pending(status) }
+}
+
+#[inline(never)]
+fn drain_pending(mut status: u8) -> u8 {
     let batch = DEFERRED.with(|d| std::mem::take(&mut *d.borrow_mut()));
+    PENDING.store(0, Relaxed);
     for (mut words, t) in batch {
         // SAFETY: the words hold the value moved aside, dropped once here.
         let st = unsafe { crate::value::drop_value(words.as_mut_ptr() as *mut u8, t) };
@@ -669,6 +688,71 @@ fn run_loop() {
     }
 }
 
+/// Runs the frames of a generator abandoned while suspended at a `yield`
+/// to their end, here and now, outside the schedule: its yield returns
+/// [`abi::UNWINDING`] (the task's [`abi::STACK_ABANDONED`] is set), and its
+/// frames unwind with their drops forgetting what they drop, so no Sisu
+/// code runs (decisions 95 and 223). The running task's state, its panics in flight
+/// and what it moved aside are kept apart meanwhile. Returns whether the
+/// generator ended; its stack goes back to the pool either way.
+pub(crate) fn unwind_abandoned(t: u32) -> bool {
+    let taken = with(|s| {
+        let task = &mut s.tasks[t as usize];
+        task.co.take().map(|co| (co, std::mem::replace(&mut task.ctx, empty_ctx()), task.yielder))
+    });
+    let Some((mut co, mut ctx, yielder)) = taken else { return false };
+    // A closure whose cleanup runs code of its own keeps its frames.
+    if ctx.stack[(abi::STACK_ABANDONED / 8) as usize] == abi::ABANDON_KEEP {
+        // SAFETY: the generator is suspended and never resumed again.
+        unsafe { co.force_reset() };
+        let stack = co.into_stack();
+        with(|s| {
+            let task = &mut s.tasks[t as usize];
+            let mark = task.mark;
+            task.region = None;
+            task.state = TState::Done;
+            s.pool.release(stack.0, mark);
+        });
+        return false;
+    }
+    let mut mine = empty_ctx();
+    save_ctx(&mut mine);
+    let (my_yielder, on_system) = (YIELDER.with(Cell::get), ON_SYSTEM.with(Cell::get));
+    let deferred = DEFERRED.with(|d| std::mem::take(&mut *d.borrow_mut()));
+    PENDING.store(0, Relaxed);
+    ctx.stack[(abi::STACK_ABANDONED / 8) as usize] = 1;
+    load_ctx(&mut ctx);
+    YIELDER.with(|c| c.set(yielder));
+    ON_SYSTEM.with(|c| c.set(false));
+    let r = crate::value::forget(|| co.resume(()));
+    save_ctx(&mut ctx);
+    YIELDER.with(|c| c.set(my_yielder));
+    ON_SYSTEM.with(|c| c.set(on_system));
+    PENDING.store(deferred.len(), Relaxed);
+    DEFERRED.with(|d| *d.borrow_mut() = deferred);
+    load_ctx(&mut mine);
+    let ended = matches!(r, CoroutineResult::Return(()));
+    if !ended {
+        // SAFETY: the generator is suspended and never resumed again; its
+        // frames own nothing left to free.
+        unsafe { co.force_reset() };
+    }
+    let stack = co.into_stack();
+    with(|s| {
+        let task = &mut s.tasks[t as usize];
+        let mark = task.mark;
+        task.region = None;
+        task.state = TState::Done;
+        s.pool.release(stack.0, mark);
+    });
+    ended
+}
+
+/// Whether the running task is a generator being abandoned.
+pub(crate) fn abandoning() -> bool {
+    SISU_RT_STACK[(abi::STACK_ABANDONED / 8) as usize].load(Relaxed) == 1
+}
+
 fn empty_ctx() -> Ctx {
     Ctx { depth: 0, stack: [0; abi::STACK_WORDS], panics: Vec::new() }
 }
@@ -721,6 +805,7 @@ impl Sched {
             ret_ty: 0,
             yielded: None,
             generator: false,
+            item_ty: 0,
             anchors: vec![Anchor::Task],
             site: Site::default(),
             ready_wall: None,

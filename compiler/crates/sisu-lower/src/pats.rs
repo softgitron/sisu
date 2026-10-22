@@ -2,7 +2,7 @@
 //! Testing happens first and binds nothing, so a failed test leaves the
 //! scrutinee as it was.
 
-use crate::func::FnLower;
+use crate::func::{DropEntry, FnLower};
 use sisu_resolve::Ty;
 use sisu_sir as sir;
 use sisu_sir::{BlockId, Const, Operand, Place, Proj, Rvalue, StatementKind, Terminator};
@@ -107,12 +107,15 @@ impl FnLower<'_, '_> {
             }
             PatKind::Variant { def, variant, fields } => {
                 // A value of a union of error sets is a variant of one of
-                // them: test which before testing the variant index.
+                // them: test which before testing the variant index, then
+                // test the rest through a reference of that set's type, so
+                // that its fields are the set's own (decision 221).
+                let mut place = place.clone();
                 if matches!(&pat.ty, Ty::ErrSet(ms) if ms.len() > 1) {
-                    let r = self.temp_sir(sir::Type::Ref(Box::new(self.ctx.ty(&pat.ty)), false));
+                    let decl = sir::Type::Named(self.ctx.type_name(*def), Vec::new());
+                    let r = self.temp_sir(sir::Type::Ref(Box::new(decl.clone()), false));
                     self.assign(Place::local(r), Rvalue::Ref(place.clone(), false), loc);
                     let is = self.temp_sir(sir::Type::Bool);
-                    let decl = sir::Type::Named(self.ctx.type_name(*def), Vec::new());
                     self.emit(
                         StatementKind::Call {
                             dest: Place::local(is),
@@ -131,7 +134,9 @@ impl FnLower<'_, '_> {
                         loc,
                     );
                     self.switch_to(ok);
+                    place = Place::local(r).project(Proj::Deref);
                 }
+                let place = &place;
                 let d = self.temp_sir(sir::Type::Int);
                 self.assign(Place::local(d), Rvalue::Discriminant(place.clone()), loc);
                 let ok = self.new_block();
@@ -227,15 +232,37 @@ impl FnLower<'_, '_> {
     /// Binds, registering drops in the scope `below` levels under the
     /// innermost (a `let` registers in its block, not its statement).
     pub fn bind_below(&mut self, pat: &thir::Pat, place: &Place, below: usize) {
-        self.bind_with(pat, place, Some(below));
+        self.bind_with(pat, place, Some(below), below);
     }
 
     /// Assigns a pattern's bindings without registering them, for a
     /// binding made on several paths and registered once where they join
     /// ([`FnLower::register_bindings`]): the alternatives of `|`, and the
-    /// two paths of `let PATTERN = e else: fallback`.
-    pub fn bind_values(&mut self, pat: &thir::Pat, place: &Place) {
-        self.bind_with(pat, place, None);
+    /// two paths of `let PATTERN = e else: fallback`. An error value the
+    /// pattern moves fields out of is registered at once, in the scope
+    /// `below` levels under the innermost, where the bindings will be.
+    pub fn bind_values(&mut self, pat: &thir::Pat, place: &Place, below: usize) {
+        self.bind_with(pat, place, None, below);
+    }
+
+    /// Whether binding the pattern moves a value out of the place it
+    /// matched: a value binding of a type that is not `Copy`.
+    fn moves_out(&self, pat: &thir::Pat) -> bool {
+        match &pat.kind {
+            PatKind::Bind { mode: BindMode::Value, .. } => {
+                !self.ctx.prog.is_copy_in(&pat.ty, &self.bounds) && !matches!(pat.ty, Ty::Ref(..))
+            }
+            PatKind::Variant { fields, .. } | PatKind::Struct { fields, .. } | PatKind::Tuple(fields) => {
+                fields.iter().any(|f| self.moves_out(f))
+            }
+            PatKind::Or(alts) => alts.iter().any(|a| self.moves_out(a)),
+            PatKind::Bind { .. }
+            | PatKind::Deref(_)
+            | PatKind::List { .. }
+            | PatKind::Wild
+            | PatKind::Lit(_)
+            | PatKind::Error => false,
+        }
     }
 
     /// Registers the bindings of a pattern that [`FnLower::bind_values`]
@@ -295,7 +322,9 @@ impl FnLower<'_, '_> {
         }
     }
 
-    fn bind_with(&mut self, pat: &thir::Pat, place: &Place, reg: Option<usize>) {
+    /// `below`: the scope temporaries of the binding are registered in
+    /// (an error value whose fields it moves out).
+    fn bind_with(&mut self, pat: &thir::Pat, place: &Place, reg: Option<usize>, below: usize) {
         let loc = self.ctx.loc(pat.span);
         match &pat.kind {
             PatKind::Bind { local, mode } => {
@@ -321,18 +350,42 @@ impl FnLower<'_, '_> {
                     }
                 }
             }
-            PatKind::Variant { variant, fields, .. } => {
+            PatKind::Variant { def, variant, fields } => {
+                // An error value is never partly moved: a pattern that moves
+                // fields out of one takes the value out whole first, as its
+                // set's own type, and moves them out of that, which is then
+                // dropped with the bindings. A union's value is read through
+                // a reference of its set's type, as it was tested (decision
+                // 221).
+                let decl = || sir::Type::Named(self.ctx.type_name(*def), Vec::new());
+                let base = if self.ctx.prog.is_error_set(*def) && fields.iter().any(|f| self.moves_out(f)) {
+                    let m = self.add_local(decl(), None);
+                    self.scope_local(below, m);
+                    self.assign(Place::local(m), Rvalue::Use(Operand::Move(place.clone())), loc);
+                    self.register_below(below, DropEntry::Local(m));
+                    self.split();
+                    Place::local(m)
+                } else if matches!(&pat.ty, Ty::ErrSet(ms) if ms.len() > 1)
+                    && !sisu_typeck::pattern_bindings(pat).is_empty()
+                {
+                    let r = self.add_local(sir::Type::Ref(Box::new(decl()), false), None);
+                    self.scope_local(below, r);
+                    self.assign(Place::local(r), Rvalue::Ref(place.clone(), false), loc);
+                    Place::local(r).project(Proj::Deref)
+                } else {
+                    place.clone()
+                };
                 for (i, f) in fields.iter().enumerate() {
-                    let sub = place.project(Proj::Downcast(*variant)).project(Proj::Field(i as u32));
-                    self.bind_with(f, &sub, reg);
+                    let sub = base.project(Proj::Downcast(*variant)).project(Proj::Field(i as u32));
+                    self.bind_with(f, &sub, reg, below);
                 }
             }
             PatKind::Struct { fields, .. } | PatKind::Tuple(fields) => {
                 for (i, f) in fields.iter().enumerate() {
-                    self.bind_with(f, &place.project(Proj::Field(i as u32)), reg);
+                    self.bind_with(f, &place.project(Proj::Field(i as u32)), reg, below);
                 }
             }
-            PatKind::Deref(inner) => self.bind_with(inner, &place.project(Proj::Deref), reg),
+            PatKind::Deref(inner) => self.bind_with(inner, &place.project(Proj::Deref), reg, below),
             // The alternatives bind the same locals: test again which one
             // matched (testing binds nothing and changes nothing) and bind
             // from it; the bindings are registered once, after the join.
@@ -342,11 +395,11 @@ impl FnLower<'_, '_> {
                     if i + 1 < alts.len() {
                         let next = self.new_block();
                         self.test(alt, place, next);
-                        self.bind_values(alt, place);
+                        self.bind_values(alt, place, below);
                         self.goto(done);
                         self.switch_to(next);
                     } else {
-                        self.bind_values(alt, place);
+                        self.bind_values(alt, place, below);
                         self.goto(done);
                     }
                 }
@@ -358,7 +411,7 @@ impl FnLower<'_, '_> {
             PatKind::List { prefix, rest, suffix } => {
                 for (i, p) in prefix.iter().enumerate() {
                     let sub = self.element(place, i, false);
-                    self.bind_with(p, &sub, reg);
+                    self.bind_with(p, &sub, reg, below);
                 }
                 if let Some(Some(r)) = rest {
                     let l = self.local_for(*r);
@@ -381,7 +434,7 @@ impl FnLower<'_, '_> {
                 }
                 for (j, p) in suffix.iter().enumerate() {
                     let sub = self.element(place, suffix.len() - j, true);
-                    self.bind_with(p, &sub, reg);
+                    self.bind_with(p, &sub, reg, below);
                 }
             }
             PatKind::Wild | PatKind::Lit(_) | PatKind::Or(_) | PatKind::Error => {}

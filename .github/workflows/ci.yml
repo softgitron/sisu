@@ -139,6 +139,9 @@ jobs:
         # The path a self-hosted front end takes (decision 212): each case
         # built from its own `.sir`, else from what `sisu sir` prints.
         run: ./target/debug/sisu-conformance --sisu target/debug/sisu --native-from-sir conformance/native.list
+      - name: Native conformance, release profile (`--release`)
+        # Cranelift's optimisations, every contract checked (decision 232).
+        run: ./target/debug/sisu-conformance --sisu target/debug/sisu --native-release conformance/native.list
       - name: Stage 1 compiled natively (informational, never fails)
         # The bootstrap path: stage 1 built by the backend, its token
         # stream and tree of the prelude against stage 0's.

@@ -269,7 +269,7 @@ impl FnLower<'_, '_> {
                         let v = self.copy_or_move(payload, &pat.ty);
                         self.assign(Place::local(l), Rvalue::Use(v), loc);
                     }
-                    None => self.bind_values(pat, &payload),
+                    None => self.bind_values(pat, &payload, 1),
                 }
                 self.goto(join);
                 self.switch_to(other);
@@ -290,7 +290,7 @@ impl FnLower<'_, '_> {
                             Some((_, l)) => self.into(Place::local(l), value),
                             None => {
                                 let p = self.place_of(value);
-                                self.bind_values(pat, &p);
+                                self.bind_values(pat, &p, 1);
                             }
                         }
                         self.pop_scope();

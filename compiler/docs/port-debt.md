@@ -195,14 +195,18 @@ memo to disk keyed by the interface and the items' texts (the typed bodies
 and SIR functions it holds are plain data), or a resident server the
 command line asks.
 
-**Only some steps of a build use the machine's cores.** A program's files
+**Some steps of a build still run on one thread.** A program's files
 are parsed, the bodies the memo lacks checked, its functions put through
-the ownership checker and compiled by Cranelift on threads (decision 219),
-but resolution, lowering and the code generator's writing of IR run on
-one, about half of what a clean native build of stage 1 takes (4.4 s on 4
-cores for 53 000 lines with std), and a package's dependencies are not
-built apart and at once across the graph, as 10 plans. *Pay*: lowering and
-the writing of IR per function on threads, and 10's builds per package.
+the ownership checker and compiled by Cranelift on threads (decision
+219), and the derived impls' templates run and the bodies lowered on
+threads too (decision 228); what is left on one thread is the rest of
+resolution (0.13 s of a clean native build of stage 1, 3.9 s on 4 cores
+for 59 000 lines with std), lowering's worklist, and the code generator's
+writing of IR (0.6 s), which numbers types, functions and data in the
+order it meets them. A package's dependencies are not built apart and at
+once across the graph, as 10 plans. *Pay*: IR written on threads into
+functions whose numbers are given and rewritten in order when each is
+taken, and 10's builds per package.
 
 **Intrinsics get type arguments by a rule.** Generic Sisu functions get
 every type argument at run time; an intrinsic gets them only when
@@ -210,13 +214,13 @@ lowering's rule says it needs them (a type parameter only in the result,
 or an `Iterable[T]` parameter). *Pay*: pass every intrinsic its type
 arguments, which the untyped drops above also want.
 
-**Capability objects are never freed.** A capability handle's object and
-a `Cap`'s value live in a heap cell that every copy reaches and that
-nothing frees, because a `Copy` handle has no last copy; a `Drop` of the
-object never runs. In the interpreter the cells go with the run, and in
-a native executable with the process (decision 209). *Pay*: a lifetime
-for them: an arena per run (they are few), or counting copies, which
-would make handles not `Copy`.
+**Capability objects live as long as the run.** A capability handle's
+object and a `Cap`'s value live in a heap cell that every copy reaches
+and that nothing frees while the program runs, because a `Copy` handle
+has no last copy; a `Drop` of the object never runs. In the interpreter
+the cells go with the run; a native executable forgets them when the
+run ends, an arena per run (decisions 209 and 223). *Pay*: counting
+copies, which would make handles not `Copy`, or an arena per scope.
 
 **Handles forward by dispatch.** A call on a capability handle or a
 `Lent` is a `call trait` that the dispatcher resolves by the object in
@@ -466,23 +470,25 @@ have impls that the fast path respects.
 ## Stage 2: what the native backend leaves out
 
 The native debug backend (architecture.md, "Stage 2") compiles every
-program the conformance suite runs (`conformance/native.list`, 151
-cases). A construct it does not compile is `D0103` under `--native`, and
-the program runs as before without it (`sisu-conformance --native-survey
+program the conformance suite runs (`conformance/native.list`, 153
+cases), with the debug profile and the release one (decision 232), and
+every one of those runs frees what it allocated (decision 226). A
+construct it does not compile is `D0103` under `--native`, and the
+program runs as before without it (`sisu-conformance --native-survey
 conformance/native.list` tries the cases outside the list). What it
 leaves out:
 
 - **Intrinsics the runtime does not have**, which no runnable case
-  reaches: `bytes.as_slice` among them, since a `Slice[u8]` is a view of
-  words and `bytes` holds bytes (decision 208); `sisu_rt::abi::Intrinsic`
-  lists the ones it has. *Pay*: each one, as the construct guide's step 8
-  says; for `bytes.as_slice`, a `Slice` of bytes as a kind of its own.
-- **A field of a union of error sets whose members lay it out
-  differently** (beyond a `String` in one and a `Path` in another,
-  decision 211), and a generic function used as a value, which SIR's
-  `const` of a function cannot name with its type arguments (the front
-  end refuses one in a program, `E0350`). *Pay*: a read through a switch
-  on the member; a thunk per instance.
+  reaches; `sisu_rt::abi::Intrinsic` lists the ones it has. *Pay*: each
+  one, as the construct guide's step 8 says.
+- **A field of a union of error sets read through the union**, which
+  stage 0's lowering no longer emits (a pattern reads a member's fields
+  through a place of the member's type, decision 221), but SIR from
+  elsewhere may: members that lay the field out differently (beyond a
+  `String` in one and a `Path` in another, decision 211) are `D0103`, and
+  so is a function's constant naming a generic function (stage 0 makes a
+  closure of its value wrapper instead, decision 225). *Pay*: a read
+  through a switch on the member, if another front end needs one.
 - **The interpreter's modes**: the ownership monitor, the counterexample
   mode, the capability log and replay, hot replacement, `--stats
   stack-depth` and `--stats shared`, the schedulers other than the
@@ -524,34 +530,23 @@ decisions 207 to 211) leaves:
   scheduler; decision 204). Only a stack exhausted or 100 000 calls deep
   at that very call shows it. *Pay*: the yield point before the probe,
   which needs the probe's reserve to hold the scheduler's call.
-- **A view of a temporary sent through a channel** (`tx.send("a{i}")` on a
-  `channel[str]`) passes the ownership checker, though 06 says a channel
-  carries no view. The interpreter's `str` owns its text, so it prints
-  the text; natively the view dangles once the temporary is dropped.
-  Found by the native backend; the checker is stage 0's (and stage 1's)
-  front end. *Pay*: the checker refuses a view as a channel's element
-  type, or the loan of a sent view outliving the statement.
 
 What round 1 does, and a later round must not copy:
 
 - **What still leaks natively** (decisions 213 to 218 free the first
   round's four leaks of decision 200 and what the interpreter's host frees
-  unseen; `SISU_RT_ALLOCS` counts what is left at exit): the heap
-  environment of an `own` closure whose captures take more than one word
-  (a function value is `Copy` and SIR never drops one); the locals of a
-  generator abandoned before its end, whose frames are forgotten (decision
-  95); the error `main` returns; and a value whose drop SIR leaves out
-  because nothing observes it, which the native code has no drop to run
-  for. The last is the front
-  end's: drop elaboration opens a partly moved union of error sets into no
-  parts (`elaborate.rs`, `open`), so after a `match` on a result whose arm
-  moves a field out of one member's variant, an arm that moves nothing
-  drops nothing either; and the cleanup block of that arm drops the error
-  whole, the moved field with it, which the interpreter's moved marker
-  makes harmless and which natively frees the field twice if a panic leaves
-  the arm. *Pay*: drops for function values (with environments counted or
-  owned), an abandoned generator's frames unwound by the runtime, and the
-  elaboration opening a union's payload by its member.
+  unseen, and decisions 220 to 225 what the second round left; the native
+  mode holds every case of the list at no allocation live at exit,
+  decision 226): a generator abandoned before its end whose cleanup runs
+  code of its own (a `defer`), whose frames are left as they are, since
+  unwinding them would run that code, which the interpreter's abandonment
+  does not (decision 223); and the objects of capabilities and the values
+  of `Cap`s, which are freed when the run ends, not when the last handle
+  goes, so a program that makes fakes in a loop grows until it ends.
+  *Pay*: the interpreter unwinding an abandoned generator's frames, its
+  `defer`s included, as Python's `close` runs `finally` (a decision of the
+  language, then both sides alike); handles that count their copies, or
+  an arena per scope.
 - **Every part of a value is a word** (decision 188): a `u8` takes eight
   bytes, an option a word for its tag, a `bool` a word. *Pay*: in a
   release backend, each type its own width and alignment, and options
@@ -568,11 +563,27 @@ What round 1 does, and a later round must not copy:
   it on every call (decision 192), as the interpreter's walk its values.
   *Pay*: a release backend generates them per type where profiling says
   so.
-- **No debug information**: the executable has no DWARF for the Sisu
-  source, so a debugger shows the runtime's frames and addresses; a
-  panic's stack trace is the runtime's own. *Pay*: line tables from SIR's
-  locations, and DWARF types from the type table (10, "Debugging and
-  profiling").
+- **Debug information is partial** (decision 227): the line table, the
+  locals and parameters with their types, and the frames are there, but
+  a local is described at its slot for the whole function, not from its
+  `let` to the end of its scope, so a debugger shows one not yet
+  assigned with what its slot holds, and two locals of one name in
+  different scopes side by side; function values, dictionaries, sets,
+  iterators, channels and tasks are opaque words or addresses; a lent
+  parameter is a reference; lldb without a Rust plugin prints a variant
+  part raw; there is no `sisu run --profile` (10, "Debugging and
+  profiling"). *Pay*: lexical blocks from the code of each scope, and
+  descriptions of the runtime's structures from the type table.
+- **The release profile is Cranelift's optimisation level** (decision
+  232), not 09's LLVM: nothing a contract proves removes a check, every
+  SIR local stays in a stack slot, which Cranelift does not keep in
+  registers, and the runtime's calls cost what they cost in a debug build,
+  so stage 1 runs no faster (arithmetic loops 8 to 20% faster), and there
+  is no `release-size`. *Pay*: scalar locals in Cranelift variables, the
+  integer division and the commonest intrinsics inline, an intrinsic's
+  call without the descriptor read again and its arguments decoded on
+  every call (decision 233 cut only the dispatch), and LLVM for release
+  builds (18, stage 2).
 - **The runtime trusts the generated code**: an address or a type number
   that breaks the runtime's rules is not checked everywhere, and where it
   is, it is `R0122` and status 134, not a diagnostic of the program.
@@ -711,8 +722,8 @@ and profiling", "REPL and scripts"):
   whole program. Resolving the package (or caching its error sets) would
   make the two agree.
 - **Hot replacement** swaps bodies only; resuming from a chosen frame
-  after a fix (10's stated goal of the debug ABI) and DWARF-level
-  debugging are a backend's.
+  after a fix (10's stated goal of the debug ABI) is a backend's, and
+  DWARF-level debugging is the native backend's (decision 227).
 - **The REPL** runs a session's inputs in the run interpreter, by
   replay, not in the comptime interpreter as 10 says; it has no
   completion and no `:type` or `:doc`.

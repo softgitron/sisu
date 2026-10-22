@@ -219,6 +219,11 @@ impl Zonker<'_> {
                     self.expr(&mut a.expr);
                 }
             }
+            ExprKind::FnRef(_, type_args) => {
+                for t in type_args {
+                    self.ty(t);
+                }
+            }
             ExprKind::Variant { args, .. }
             | ExprKind::Tuple(args)
             | ExprKind::List(args)

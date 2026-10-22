@@ -1,0 +1,17 @@
+# What a channel carries reaches its receiver, which may keep it longer
+# than what it borrows lives, so it may not be a view (E0421); and the
+# checker does not see where the receiver drops it, so it may not be
+# must-consume (E0422). Send an owned value instead: `String` for `str`.
+
+@must_consume
+struct Receipt:
+    amount: int
+
+view struct Word:
+    text: str
+
+def main():
+    let texts = channel[str](capacity=1)
+    let words = channel[Word](capacity=1)
+    let receipts = channel[Receipt](capacity=1)
+    let owned = channel[String](capacity=1)

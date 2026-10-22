@@ -39,6 +39,9 @@ pub struct Package {
     /// active on this target or not, so the lockfile is the same on every
     /// target.
     pub locked_deps: Vec<String>,
+    /// Its manifest's `[profile.release] contracts`: what a release build
+    /// checks (07).
+    pub release_contracts: Option<String>,
 }
 
 /// A module of the program: its path, its file and its package.
@@ -265,6 +268,7 @@ impl Loader {
             application: false,
             manifest: Some(file),
             locked_deps: m.dependencies.iter().filter(|d| !d.dev).map(|d| d.name.clone()).collect(),
+            release_contracts: m.release_contracts.clone(),
         });
         self.dirs.push(canon.clone());
         self.modules_of(index, &canon, &info.name, file);

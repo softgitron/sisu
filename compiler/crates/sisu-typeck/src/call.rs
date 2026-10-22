@@ -1075,13 +1075,16 @@ impl Checker<'_> {
                 name.split('(').next().unwrap_or("").split_whitespace().next().unwrap_or("").to_string();
             ret = self.task_rules(tc, &out, ret, spawns_before, span, &name);
         }
-        // What a `Shared`, `Cell` or `Mutex` owns can be neither a view nor
-        // must-consume (checked when the type is known).
+        // What a `Shared`, `Cell`, `Mutex` or channel owns can be neither a
+        // view nor must-consume (checked when the type is known): a
+        // channel's receiver may keep what was sent longer than what it
+        // borrows lives (decision 230).
         let owner = match prog.fn_info(d).and_then(|f| f.intrinsic.as_deref()) {
             Some("Shared.new") => Some("Shared"),
             Some("Cell.new") => Some("Cell"),
             Some("Mutex.new") => Some("Mutex"),
             Some("Cap.new") => Some("Cap"),
+            Some("channel") => Some("channel"),
             _ => None,
         };
         if let (Some(owner), Some(t)) = (owner, sig.type_args.first()) {

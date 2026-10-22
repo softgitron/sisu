@@ -6,7 +6,8 @@
 
 use cranelift_codegen::control::ControlPlane;
 use cranelift_codegen::isa::TargetIsa;
-use cranelift_codegen::{Context, ir};
+use cranelift_codegen::isa::unwind::UnwindInfo;
+use cranelift_codegen::{CompiledCode, Context, ir};
 use cranelift_module::{FuncId, ModuleError, ModuleReloc};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,18 +22,40 @@ pub(crate) struct Job {
 }
 
 /// A function compiled: its machine code and what the object file needs
-/// to place it, or Cranelift's error, as the module would report it.
+/// to place it, or Cranelift's error, as the module would report it; and
+/// what the debug information needs of it (decision 227).
 pub(crate) struct Code {
     pub bytes: Vec<u8>,
     pub alignment: u64,
     pub relocs: Vec<ModuleReloc>,
     pub frame_size: u32,
+    pub debug: Compiled,
 }
 
-/// Compiles one function, as `Module::define_function` would before it
-/// places the code.
-pub(crate) fn compile(isa: &dyn TargetIsa, id: FuncId, func: ir::Function) -> Result<Code, String> {
-    let mut ctx = Context::for_function(func);
+/// What the debug information needs of a compiled function: the source
+/// location of each run of its code, each stack slot's offset, and how to
+/// unwind it.
+pub(crate) struct Compiled {
+    pub lines: Vec<(u32, u32, u32)>,
+    pub slots: Vec<u32>,
+    pub unwind: Option<UnwindInfo>,
+}
+
+impl Compiled {
+    pub(crate) fn of(code: &CompiledCode, isa: &dyn TargetIsa) -> Compiled {
+        Compiled {
+            lines: code.buffer.get_srclocs_sorted().iter().map(|s| (s.start, s.end, s.loc.bits())).collect(),
+            slots: code.sized_stackslot_offsets.values().copied().collect(),
+            unwind: code.create_unwind_info(isa).ok().flatten(),
+        }
+    }
+}
+
+/// Compiles one function in `ctx`, as `Module::define_function` would
+/// before it places the code. The context is the thread's own, cleared
+/// and used again for each function, which keeps what Cranelift allocated
+/// for the last one.
+pub(crate) fn compile(isa: &dyn TargetIsa, ctx: &mut Context, id: FuncId) -> Result<Code, String> {
     let alignment = match ctx.compile(isa, &mut ControlPlane::default()) {
         Ok(code) => u64::from(code.buffer.alignment),
         Err(e) => return Err(format!("{:?}", ModuleError::from(e))),
@@ -40,7 +63,13 @@ pub(crate) fn compile(isa: &dyn TargetIsa, id: FuncId, func: ir::Function) -> Re
     let Some(code) = ctx.compiled_code() else { return Err("no code".to_string()) };
     let relocs =
         code.buffer.relocs().iter().map(|r| ModuleReloc::from_mach_reloc(r, &ctx.func, id)).collect();
-    Ok(Code { bytes: code.buffer.data().to_vec(), alignment, relocs, frame_size: code.frame_size })
+    Ok(Code {
+        bytes: code.buffer.data().to_vec(),
+        alignment,
+        relocs,
+        frame_size: code.frame_size,
+        debug: Compiled::of(code, isa),
+    })
 }
 
 /// How many threads compile: as many as the machine runs at once, at most
@@ -50,19 +79,25 @@ pub(crate) fn count() -> usize {
 }
 
 /// The channels between the code generator and the threads: where jobs
-/// go and the threads take them, and where the results come back.
+/// go and the threads take them, where the results come back, and where
+/// the functions they compiled go back, cleared, for the code generator
+/// to write the next ones into (their memory, made on its thread, is used
+/// again rather than freed on another).
 pub(crate) struct Channels {
     pub jobs: Sender<Job>,
     pub queue: Mutex<Receiver<Job>>,
     pub results: Sender<(usize, Result<Code, String>)>,
     pub done: Receiver<(usize, Result<Code, String>)>,
+    pub spare: Sender<ir::Function>,
+    pub spares: Receiver<ir::Function>,
 }
 
 impl Channels {
     pub fn new() -> Channels {
         let (jobs, queue) = channel();
         let (results, done) = channel();
-        Channels { jobs, queue: Mutex::new(queue), results, done }
+        let (spare, spares) = channel();
+        Channels { jobs, queue: Mutex::new(queue), results, done, spare, spares }
     }
 }
 
@@ -72,8 +107,10 @@ pub(crate) fn work(
     isa: &dyn TargetIsa,
     queue: &Mutex<Receiver<Job>>,
     results: &Sender<(usize, Result<Code, String>)>,
+    spare: &Sender<ir::Function>,
     stop: &AtomicBool,
 ) {
+    let mut ctx = Context::new();
     loop {
         if stop.load(Ordering::Relaxed) {
             return;
@@ -83,7 +120,14 @@ pub(crate) fn work(
             Err(_) => return,
         };
         let Ok(Job { order, id, func }) = job else { return };
-        if results.send((order, compile(isa, id, func))).is_err() {
+        ctx.clear();
+        ctx.func = func;
+        let code = compile(isa, &mut ctx, id);
+        let mut done = std::mem::replace(&mut ctx.func, ir::Function::new());
+        done.clear();
+        // The code generator may have stopped taking them back.
+        let _ = spare.send(done);
+        if results.send((order, code)).is_err() {
             return;
         }
     }

@@ -1,0 +1,4 @@
+panic: boom
+  at boom (drop_moved_parts.sisu:79:5)
+  at explode (drop_moved_parts.sisu:85:52)
+  at main (drop_moved_parts.sisu:105:5)

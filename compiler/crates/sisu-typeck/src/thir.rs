@@ -497,7 +497,9 @@ pub enum ExprKind {
     Unit,
     Local(LocalId),
     Const(DefId),
-    FnRef(DefId),
+    /// A function as a value, with the type arguments of a generic one
+    /// (inferred where it is used).
+    FnRef(DefId, Vec<Ty>),
     Call {
         callee: Callee,
         args: Vec<Arg>,

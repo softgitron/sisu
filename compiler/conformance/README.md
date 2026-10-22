@@ -153,15 +153,19 @@ run, one per line as the runner names them (`run/arithmetic`); `#`
 starts a comment. With `--native LIST` the runner builds each case with
 `sisu build --native --output EXE NAME.sisu` (a package case without the
 file) in the case's sandbox, runs the executable as it runs `sisu run`
-(with the case's `.args`, `.stdin` and `.cwd`, an empty environment and
-the time limit), and compares:
+(with the case's `.args`, `.stdin` and `.cwd`, the time limit, and an
+environment holding only `SISU_RT_ALLOCS=1`), and compares:
 
 - standard output with `NAME.out`;
 - the exit status with `NAME.status` (absent means `0`);
 - standard error with `NAME.err` (absent means empty), except that when
   the build printed warnings, which a `sisu run` prints before the
   program's own standard error, the program's must be the end of
-  `NAME.err`.
+  `NAME.err`;
+- the runtime's report of its allocations live at exit, the last line of
+  the program's standard error (`allocations: N of the runtime's live at
+  exit`), which must say 0 and is left out of the comparison above; a
+  program that aborts (status 134) ends without one.
 
 The expectations are the interpreter's: the native mode reads no file of
 its own and does not bless. With `--native-from-sir LIST` the runner
@@ -169,8 +173,12 @@ builds each case from serialised SIR instead, `sisu build --native
 --from-sir NAME.sir`, with the case's own `NAME.sir` where it has one and
 what `sisu sir` prints for it otherwise (whose warnings stand for the
 build's), and compares the same way: the path a self-hosted front end's
-SIR takes to native code. `cargo test -p sisu-driver --test native` runs
-the list both ways, and CI runs both on every push. `--native-survey
+SIR takes to native code. With `--native-release LIST` it builds each case
+with the release profile, `sisu build --native --release
+--contracts=all`: every contract checked, as the interpreter checks them,
+so that what is compared is what Cranelift's optimisations do. `cargo
+test -p sisu-driver --test native` runs the list all three ways, and CI
+runs them on every push. `--native-survey
 LIST` builds and runs every runnable case the list leaves out (one with
 an `.out`, `.err` or `.status`) and prints `pass` or the first thing that
 stopped it, which is how the list grows:
@@ -178,6 +186,7 @@ stopped it, which is how the list grows:
 ```text
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-from-sir conformance/native.list
+cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-release conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-survey conformance/native.list
 ```
 
@@ -207,7 +216,10 @@ and the time spent building and running them.
   names), loops, closures, errors and traces, options (`let_else_copy`),
   `Drop` order on normal and unwinding paths (`drop_panic_fields`: a
   `Drop` that panics; `drop_chain`: a long chain dropped at constant
-  depth), panics and their exit statuses, capabilities, and tests.
+  depth; `drop_moved_parts`: what is left of a value once a part moves
+  out, error values a pattern takes fields out of, and the operands a `?`
+  or a panic abandons), panics and their exit statuses, capabilities, and
+  tests.
 - `traits/` is traits and impls (18, Phase 4): provided methods,
   associated types, supertraits, coherence and the orphan rule, sealed
   traits, method resolution and ambiguity, `dyn Trait` and object safety,
@@ -215,7 +227,9 @@ and the time spent building and running them.
   diagnostics.
 - `generics/` is user generics: functions and types with bounds checked
   at the definition, defaults, type arguments at run time, views through
-  generic parameters, `Drop` for a generic type, and `const` parameters
+  generic parameters, `Drop` for a generic type, functions as values
+  (`function_values`: generic ones and ones that borrow a parameter;
+  `function_value_errors`), and `const` parameters
   with `Array[T, N]` (`const_generic`, `const_generic_errors`) and
   constant arguments written as expressions, `Array[T, W * H]`
   (`const_expressions`, `const_expression_errors`).
@@ -276,8 +290,9 @@ and the time spent building and running them.
   panics in tasks, cancellation at the blocking points, shields and
   deadlines, channels, `select`, races, mutexes across tasks with guards
   dropped by unwinding, the lowest-index rule of `pure` scopes, deadlock
-  reports, generators, `log`, and the diagnostics of `Send`, `Sync` and
-  what a task may borrow.
+  reports, generators, `log`, and the diagnostics of `Send`, `Sync`,
+  what a task may borrow and what a channel may carry
+  (`channel_owner_errors`: neither a view nor must-consume).
 - `capabilities/` is std.cap (06): attenuations, lent capabilities and
   their diagnostics, caretakers, interceptors (of the standard
   capabilities and, `wrap_trait`, of a program's own trait), the fakes

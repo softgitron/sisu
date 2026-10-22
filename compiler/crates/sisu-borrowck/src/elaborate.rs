@@ -10,7 +10,11 @@
 //! - partly moved: opened into drops of the parts that remain, fields in
 //!   reverse declaration order (04, rule 6), each decided the same way. A
 //!   type that implements `Drop` is never opened (moving out of one is an
-//!   error), so its `Drop` always sees the whole value.
+//!   error), so its `Drop` always sees the whole value. A value one of
+//!   whose parts is moved or dropped on its own somewhere in the function
+//!   ("split") is opened whenever it may be uninitialised, even where
+//!   every part has the same two bits as the whole: one flag cannot say
+//!   whether a path moved the whole or only that part (decision 220).
 //!
 //! Flags are set after every statement that initialises their path (or a
 //! path containing it) and cleared before every statement that moves, drops
@@ -37,13 +41,25 @@ pub fn elaborate(f: &mut Function, a: &Analysis, types: &Types) {
     if f.blocks.is_empty() {
         return;
     }
+    // The paths with a part below them that a statement moves or drops on
+    // its own.
+    let mut split = vec![false; a.paths.len()];
+    for b in &f.blocks {
+        for s in &b.stmts {
+            for p in a.removed_paths(s) {
+                for up in a.paths.ancestors(p) {
+                    split[up] = true;
+                }
+            }
+        }
+    }
+    let cx = Cx { a, types, f, split: &split };
     let mut decisions: HashMap<(usize, usize), Decision> = HashMap::new();
     for b in 0..f.blocks.len() {
         let states = a.states(f, types, b);
         for (si, s) in f.blocks[b].stmts.iter().enumerate() {
             if let StatementKind::Drop { place, flag: None } = &s.kind {
-                let d =
-                    if a.reachable[b] { decide(a, types, f, &states[si], place) } else { Decision::Remove };
+                let d = if a.reachable[b] { decide(&cx, &states[si], place) } else { Decision::Remove };
                 decisions.insert((b, si), d);
             }
         }
@@ -225,7 +241,17 @@ fn prepend_to_entry(f: &mut Function, stmts: Vec<Statement>) {
     }
 }
 
-fn decide(a: &Analysis, types: &Types, f: &Function, st: &State, place: &Place) -> Decision {
+/// What the decisions read: the analysis, the types, the function, and
+/// which paths are split.
+struct Cx<'c> {
+    a: &'c Analysis,
+    types: &'c Types<'c>,
+    f: &'c Function,
+    split: &'c [bool],
+}
+
+fn decide(cx: &Cx, st: &State, place: &Place) -> Decision {
+    let (a, types, f) = (cx.a, cx.types, cx.f);
     let (id, cover) = a.paths.lookup(place);
     if cover != Cover::Exact {
         // A place through a reference, index or key always holds a value.
@@ -244,12 +270,13 @@ fn decide(a: &Analysis, types: &Types, f: &Function, st: &State, place: &Place) 
         return Decision::Keep;
     }
     let own = (st.mi.contains(id), st.mu.contains(id));
-    let uniform = a.paths.descendants(id).iter().all(|d| (st.mi.contains(*d), st.mu.contains(*d)) == own);
+    let uniform = !cx.split.get(id).copied().unwrap_or(false)
+        && a.paths.descendants(id).iter().all(|d| (st.mi.contains(*d), st.mu.contains(*d)) == own);
     let ty = types.place_ty(f, place);
     match ty {
         Some(t) if !uniform && !types.implements_drop(&t) => {
             let mut parts = Vec::new();
-            open(a, types, f, st, place, &t, &mut parts);
+            open(cx, st, place, &t, &mut parts);
             Decision::Parts(parts)
         }
         _ => Decision::Flag(id),
@@ -257,15 +284,8 @@ fn decide(a: &Analysis, types: &Types, f: &Function, st: &State, place: &Place) 
 }
 
 /// The parts of a partly moved value that may still hold something.
-fn open(
-    a: &Analysis,
-    types: &Types,
-    f: &Function,
-    st: &State,
-    place: &Place,
-    ty: &Type,
-    out: &mut Vec<(Place, Option<PathId>)>,
-) {
+fn open(cx: &Cx, st: &State, place: &Place, ty: &Type, out: &mut Vec<(Place, Option<PathId>)>) {
+    let (a, types, f) = (cx.a, cx.types, cx.f);
     let mut part_places: Vec<Place> = Vec::new();
     match types.variant_count(ty) {
         Some(n) => {
@@ -289,7 +309,7 @@ fn open(
         }
         let (qid, cover) = a.paths.lookup(&q);
         if cover == Cover::Exact {
-            match decide(a, types, f, st, &q) {
+            match decide(cx, st, &q) {
                 Decision::Keep => out.push((q, None)),
                 Decision::Remove => {}
                 Decision::Flag(p) => out.push((q, Some(p))),

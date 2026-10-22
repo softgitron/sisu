@@ -904,7 +904,7 @@ fn target_in(c: &crate::db::Checked, file: FileId, offset: usize) -> Option<Targ
     }
     let (e, _) = Server::expr_at(&c.typed, file, offset)?;
     Some(match &e.kind {
-        ExprKind::Const(d) | ExprKind::FnRef(d) => Target::Def(*d),
+        ExprKind::Const(d) | ExprKind::FnRef(d, _) => Target::Def(*d),
         ExprKind::Call { callee: Callee::Fn { def, .. }, .. } => Target::Def(*def),
         ExprKind::Struct { def, .. } | ExprKind::Variant { def, .. } => Target::Def(*def),
         _ => return None,

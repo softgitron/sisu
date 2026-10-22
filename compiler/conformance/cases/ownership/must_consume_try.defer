@@ -43,9 +43,10 @@ fn settle(2) source 0 own 1 @25:5-25:11 {
     _6 = discriminant _5 @26:5-26:26
     switch copy _6 [0: bb7, else: bb8] @26:5-26:26
   bb6 (cleanup):
-    drop _5 if _14
+    drop _5.as(0).0 if _14
     goto bb3
   bb7 (unwind bb6):
+    _14 = const false
     _7 = move _5.as(0).0 @26:9-26:10
     _9 = call fn repay(copy _1, move _7) @27:9-27:27
     _15 = const true

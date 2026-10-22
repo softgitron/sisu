@@ -755,7 +755,7 @@ fn template_requests(
                     out.push(q);
                 }
             }
-            thir::ExprKind::FnRef(def) if is_template(def) => {
+            thir::ExprKind::FnRef(def, _) if is_template(def) => {
                 diags.push(
                     Diagnostic::new(msg::COMPTIME_TEMPLATE_VALUE, e.span)
                         .with("name", prog.def(*def).name.clone()),

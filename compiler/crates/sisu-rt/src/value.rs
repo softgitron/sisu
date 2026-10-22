@@ -73,6 +73,38 @@ pub(crate) unsafe fn concrete(p: *const u8, t: u32) -> u32 {
 
 // --------------------------------------------------------------------- drop
 
+/// Whether drops only free memory: no drop glue, no `Drop`, no check of a
+/// guard's invariant ([`forget_value`]).
+static FORGETTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the values being dropped are forgotten rather than dropped.
+pub(crate) fn forgetting() -> bool {
+    FORGETTING.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Runs `f` with drops forgetting: what they free is freed, and no Sisu
+/// code runs (no drop glue, no `Drop`, no guard's check). It is how the
+/// interpreter's host lets go of values no program can see again: the
+/// error `main` returned, the objects of capabilities when the run ends,
+/// and the frames of an abandoned generator (decisions 95 and 223).
+pub(crate) fn forget<R>(f: impl FnOnce() -> R) -> R {
+    let was = FORGETTING.swap(true, std::sync::atomic::Ordering::Relaxed);
+    let r = f();
+    FORGETTING.store(was, std::sync::atomic::Ordering::Relaxed);
+    r
+}
+
+/// Frees what the value at `p` of type `t` owns, running no Sisu code.
+///
+/// # Safety
+/// `p` must hold a value of type `t`, which is dead afterwards.
+pub(crate) unsafe fn forget_value(p: *mut u8, t: u32) {
+    // SAFETY: as the caller guarantees.
+    forget(|| unsafe {
+        let _ = drop_value(p, t);
+    });
+}
+
 /// Drops the value at `p`, of type `t`, and every value it owns, in the
 /// order the interpreter does: a list's elements first to last, a tuple's
 /// last to first, a struct or enum by its drop glue. A part whose drop
@@ -151,14 +183,18 @@ pub(crate) unsafe fn drop_value(p: *mut u8, t: u32) -> u8 {
             // Glue is Sisu code: on the system stack, the value is moved
             // aside and dropped on the task's stack (`sched::defer`).
             Kind::Struct { glue: Some(_), .. } | Kind::Enum { glue: Some(_), .. } | Kind::Guard(..)
-                if crate::sched::deferring() =>
+                if crate::sched::deferring() && !forgetting() =>
             {
                 crate::sched::defer(p, t)
             }
             // The glue (Sisu code: the `Drop` impl, then the fields whose drop
             // is observed), then the fields it leaves out (decision 218); an
-            // error lets go of its return trace (decision 215).
+            // error lets go of its return trace (decision 215). Forgetting,
+            // every field is freed and no glue runs.
             Kind::Struct { glue, fields, .. } => {
+                if forgetting() {
+                    return drop_fields(p, fields, false);
+                }
                 let status = run_glue(*glue, p);
                 after_part(status, drop_silent(p, fields))
             }
@@ -167,12 +203,17 @@ pub(crate) unsafe fn drop_value(p: *mut u8, t: u32) -> u8 {
                     crate::intrinsics::release_trace(mem::word(p, abi::ERROR_TRACE));
                     mem::set_word(p, abi::ERROR_TRACE, 0);
                 }
+                let v = variants.get(tag(p, entry) as usize);
+                if forgetting() {
+                    return v.map_or(abi::OK, |v| drop_fields(p, &v.fields, false));
+                }
                 let status = run_glue(*glue, p);
-                match variants.get(tag(p, entry) as usize) {
+                match v {
                     Some(v) => after_part(status, drop_silent(p, &v.fields)),
                     None => status,
                 }
             }
+            Kind::Guard(..) if forgetting() => abi::OK,
             Kind::Guard(_, check) => crate::tasks::unlock(mem::word(p, 0) as *mut u8, *check),
             Kind::Mutex(v) => drop_value(p.add(abi::MUTEX_HEADER as usize), *v),
             Kind::Sender(_) => crate::tasks::drop_channel_end(mem::word(p, 0) as u32, false),
@@ -212,8 +253,18 @@ unsafe fn run_glue(glue: Option<u32>, p: *mut u8) -> u8 {
 /// # Safety
 /// `p` must hold the fields at their offsets.
 unsafe fn drop_silent(p: *mut u8, fields: &[abi::Field]) -> u8 {
+    // SAFETY: as the caller guarantees.
+    unsafe { drop_fields(p, fields, true) }
+}
+
+/// Drops the fields at `p`, last to first: those the glue leaves out
+/// (`silent`), or every one.
+///
+/// # Safety
+/// `p` must hold the fields at their offsets.
+unsafe fn drop_fields(p: *mut u8, fields: &[abi::Field], silent: bool) -> u8 {
     let mut status = abi::OK;
-    for f in fields.iter().rev().filter(|f| !f.glue) {
+    for f in fields.iter().rev().filter(|f| !(silent && f.glue)) {
         // SAFETY: the field is where the type says.
         status = after_part(status, unsafe { drop_value(p.add(f.offset as usize), f.ty) });
     }

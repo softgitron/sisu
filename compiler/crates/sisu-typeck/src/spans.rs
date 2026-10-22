@@ -304,7 +304,7 @@ fn expr(e: &mut Expr, f: &mut dyn FnMut(&mut Span)) {
         | ExprKind::Unit
         | ExprKind::Local(_)
         | ExprKind::Const(_)
-        | ExprKind::FnRef(_)
+        | ExprKind::FnRef(..)
         | ExprKind::Closure(_)
         | ExprKind::Comptime(_)
         | ExprKind::Generator(_)

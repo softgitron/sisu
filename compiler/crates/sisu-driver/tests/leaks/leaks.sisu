@@ -1,7 +1,8 @@
-# What the native backend's first round leaked (decision 200), and what
-# the interpreter's host frees without the program seeing it, each made in
-# a loop: under `SISU_RT_ALLOCS` a native run reports the runtime's
-# allocations live at exit, which must be none.
+# What the native backend's first round leaked (decision 200), what the
+# interpreter's host frees without the program seeing it, and what the
+# second round left (decisions 220 to 225), each made in a loop: under
+# `SISU_RT_ALLOCS` a native run reports the runtime's allocations live at
+# exit, which must be none.
 
 trait Shape:
     def area(self) -> int
@@ -41,6 +42,33 @@ def twice(text: str) -> int ! ParseError:
 
 def adder(n: int) -> (int) -> int:
     return own (x) -> x + n
+
+def line(a: int, b: int, c: int) -> (int) -> int:
+    return own (x) -> a * x * x + b * x + c
+
+def words(own prefix: String) -> Iter[String]:
+    var i = 0
+    let tail = "{prefix}!"
+    while True:
+        yield "{prefix}{i}{tail}"
+        i += 1
+
+error LoadError:
+    Missing(path: String)
+    Denied(path: String, who: String)
+
+def load(i: int) -> int ! {ParseError, LoadError}:
+    if i % 3 == 0:
+        return Err(Denied(path="p{i}", who="w{i}"))
+    if i % 3 == 1:
+        return Err(Bad(text="b{i}"))
+    return Err(Missing(path="m{i}"))
+
+def pair(i: int) -> (String, int) ! ParseError:
+    return Ok(("first{i}", twice("t{i}")?))
+
+def count_of[T](xs: list[T]) -> int:
+    return len(xs)
 
 def main():
     var total = 0
@@ -82,6 +110,37 @@ def main():
         # (decision 218).
         let loud = Loud(name="n{i}", tags=["t".to_string()])
         total += len(loud.name)
+        # A closure whose environment is three words, a generator left
+        # after two items and one never started, a capability's object, a
+        # union of error sets a pattern takes a field out of, and an operand
+        # a `?` after it leaves behind (decisions 221 to 224).
+        let f3 = line(i, 2, 1)
+        total += f3(2)
+        for w in words("w{i}").take(2):
+            total += len(w)
+        let unstarted = words("u{i}")
+        let fs = Fs.in_memory({"f{i}": "text"})
+        let read = fs.read_to_string(Path.new("f{i}")) else: "none"
+        total += len(read)
+        match load(i):
+            case Err(Denied(path, _)):
+                total += len(path)
+            case Err(Bad(text)):
+                total += len(text)
+            case _:
+                total += 1
+        match pair(i):
+            case Ok(p):
+                total += p.1
+            case Err(e):
+                total += len("{e}")
+        # A `Slice` of a `bytes`, which holds copies of its bytes, and a
+        # generic function as a value (decision 225).
+        let raw = "r{i}".encode()
+        let bytes_seen = raw.as_slice()
+        total += len(bytes_seen) + bytes_seen[0].to_int()
+        let count: (list[String]) -> int = count_of
+        total += count(["p{i}".to_string(), "q".to_string()])
         print("{total}")
     let last = Loud(name="last", tags=["x".to_string(), "y".to_string()])
     print(len(last.name))

@@ -215,6 +215,12 @@ struct Opts {
     output: Option<String>,
     /// `--native --from-sir FILE`: the input is a serialised SIR program.
     from_sir: bool,
+    /// `--native --release`: the native backend's release profile (09,
+    /// decision 232).
+    release: bool,
+    /// `--contracts` was given, which a release build's manifest does not
+    /// override.
+    contracts_given: bool,
 }
 
 /// What a command works on, read from disk (09): a file, or the root
@@ -240,6 +246,11 @@ pub(crate) struct Input {
     /// Every file of the program, by its name, with its path on disk (what
     /// `sisu run --watch` watches).
     disks: Vec<(String, std::path::PathBuf)>,
+    /// A package's: the directory of its lockfile, its workspace's or its
+    /// own, under which its native builds go (`build/PROFILE/NAME`).
+    build_root: Option<std::path::PathBuf>,
+    /// The root package's `[profile.release] contracts` (07).
+    release_contracts: Option<String>,
 }
 
 impl Input {
@@ -253,6 +264,8 @@ impl Input {
             modules: 1,
             shown: file.to_string(),
             disks: vec![(file.to_string(), std::path::PathBuf::from(file))],
+            build_root: None,
+            release_contracts: None,
         }
     }
 
@@ -504,12 +517,19 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
         "run" | "check" | "sir" | "test" | "bench" | "build" | "tokens" | "parse" => {
             let p = split_args(rest);
             let allowed: &[&str] = match cmd.as_str() {
-                "run" => {
-                    &["--sir", "--monitor", "--defer-borrow", "--stats", "--locked", "--watch", "--native"]
-                }
+                "run" => &[
+                    "--sir",
+                    "--monitor",
+                    "--defer-borrow",
+                    "--stats",
+                    "--locked",
+                    "--watch",
+                    "--native",
+                    "--release",
+                ],
                 "test" => &["--no-monitor", "--defer-borrow", "--sim", "--update", "--locked", "--std"],
                 "check" => &["--format=ids", "--format=human", "--explain", "--locked"],
-                "build" => &["--locked", "--native"],
+                "build" => &["--locked", "--native", "--release"],
                 "bench" => &["--locked"],
                 "tokens" => &["--trivia"],
                 "parse" => &["--tree", "--print", "--trivia", "--shape", "--ast"],
@@ -526,7 +546,9 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 !matches!(cmd.as_str(), "run" | "test" | "bench")
                     && !(*k == "--contracts" && cmd == "sir")
                     && !(*k == "--diary" && cmd == "check")
-                    && !(*k == "--output" && cmd == "build" && p.flags.contains(&"--native"))
+                    && !(matches!(*k, "--output" | "--contracts")
+                        && cmd == "build"
+                        && p.flags.contains(&"--native"))
                     && !(*k == "--from-sir" && cmd == "build")
             }) {
                 host.stderr(&plain_error(
@@ -548,6 +570,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
             // `--contracts=off|preconditions|all` (07): what a run checks;
             // a test checks everything.
             let mut level = sisu_lower::ContractLevel::All;
+            let mut contracts_given = false;
             let (mut record, mut redact, mut token) = (None, Vec::new(), None);
             let (mut scheduler, mut depth, mut faults) = ("random", None, None);
             let mut jobs = 0;
@@ -657,7 +680,10 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                         return EXIT_USAGE;
                     }
                     match sisu_lower::ContractLevel::parse(v) {
-                        Some(l) => level = l,
+                        Some(l) => {
+                            level = l;
+                            contracts_given = true;
+                        }
                         None => {
                             host.stderr(&plain_error(
                                 msg::CLI_BAD_CONTRACT_LEVEL,
@@ -689,6 +715,13 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
             // follows it is the program's arguments.
             if from_sir.is_some() && !p.flags.contains(&"--native") {
                 host.stderr(&plain_error(msg::NATIVE_FROM_SIR, &[]));
+                return EXIT_USAGE;
+            }
+            // `--release` is the native backend's release profile (09,
+            // decision 232); the interpreter has no profiles.
+            let release = p.flags.contains(&"--release");
+            if release && !p.flags.contains(&"--native") {
+                host.stderr(&plain_error(msg::NATIVE_RELEASE, &[]));
                 return EXIT_USAGE;
             }
             let (target, program_args) = match from_sir {
@@ -736,7 +769,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                     .map(|o| o.to_string())
                     .or_else(|| p.stats.map(|k| format!("--stats {k}")))
                     .or_else(|| {
-                        ["--record", "--scheduler", "--contracts"]
+                        ["--record", "--scheduler"]
                             .iter()
                             .find(|o| p.values.iter().any(|(k, _)| k == *o))
                             .map(|o| o.to_string())
@@ -775,6 +808,8 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 diary,
                 output,
                 from_sir: from_sir.is_some(),
+                release,
+                contracts_given,
             };
             // Each member of a workspace in turn (09); the worst status wins.
             let mut status = exit::OK;
@@ -843,18 +878,21 @@ fn from_sir(
         return exit::ERROR;
     }
     stage.set("the native backend");
+    let profile = crate::native::Profile::of(opts.release);
     if cmd == "build" {
         let output = match &opts.output {
             Some(o) => std::path::PathBuf::from(o),
-            None => crate::native::output_for(&input.disk, None),
+            None => crate::native::output_for(&input.disk, None, None, profile),
         };
-        return crate::native::build_command(&prog, &output, host);
+        return crate::native::build_command(&prog, &output, profile, host);
     }
     let name = input.disk.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let how = crate::native::Run {
         seed: opts.seeds.first,
         explore: opts.seeds.explore,
         stats: flags.contains(&"--stats"),
+        profile,
+        keep: None,
     };
     crate::native::run_command(&prog, &name, &args, &how, host)
 }
@@ -1132,6 +1170,8 @@ pub(crate) fn input_with_root(
         modules: layout.modules.iter().filter(|m| m.package == 0).count(),
         shown,
         disks: layout.modules.iter().map(|m| (m.name.clone(), m.disk.clone())).collect(),
+        build_root: layout.lock.as_ref().and_then(|(p, _)| p.parent()).map(std::path::Path::to_path_buf),
+        release_contracts: layout.packages.first().and_then(|p| p.release_contracts.clone()),
     })
 }
 
@@ -1266,7 +1306,15 @@ fn command(
     let source = input.source.as_str();
     let has = |f: &str| flags.contains(&f);
     let seeds = opts.seeds;
-    let level = opts.level;
+    // A release build checks what `--contracts` or the root package's
+    // `[profile.release] contracts` says, preconditions by default (07).
+    let level = match (opts.release && !opts.contracts_given, input.release_contracts.as_deref()) {
+        (true, Some(l)) => {
+            sisu_lower::ContractLevel::parse(l).unwrap_or(sisu_lower::ContractLevel::Preconditions)
+        }
+        (true, None) => sisu_lower::ContractLevel::Preconditions,
+        (false, _) => opts.level,
+    };
     if opts.from_sir {
         return from_sir(cmd, flags, opts, input, args, host, stage);
     }
@@ -1471,14 +1519,17 @@ fn command(
                 // build is the plain one.
                 "build" if has("--native") && prog.entry.is_some() => {
                     stage.set("the native backend");
+                    let profile = crate::native::Profile::of(opts.release);
                     let output = match &opts.output {
                         Some(o) => std::path::PathBuf::from(o),
                         None => crate::native::output_for(
                             &input.disk,
                             input.package.as_ref().map(|(n, _)| n.as_str()),
+                            input.build_root.as_deref(),
+                            profile,
                         ),
                     };
-                    crate::native::build_command(&prog, &output, host)
+                    crate::native::build_command(&prog, &output, profile, host)
                 }
                 "build" => {
                     let line = match input.package.clone() {
@@ -1707,10 +1758,19 @@ fn command(
                                 .map(|s| s.to_string_lossy().into_owned())
                                 .unwrap_or_default()
                         });
+                        let profile = crate::native::Profile::of(opts.release);
                         let how = crate::native::Run {
                             seed: seeds.first,
                             explore: seeds.explore,
                             stats: has("--stats"),
+                            profile,
+                            // A package's executable stays where its builds
+                            // go; a file's is built aside and removed.
+                            keep: input.build_root.as_ref().and_then(|root| {
+                                input.package.as_ref().map(|(n, _)| {
+                                    crate::native::output_for(&input.disk, Some(n), Some(root), profile)
+                                })
+                            }),
                         };
                         return crate::native::run_command(&prog, &name, &args, &how, host);
                     }
@@ -2620,6 +2680,8 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
         diary: None,
         output: None,
         from_sir: false,
+        release: false,
+        contracts_given: true,
     };
     let stage = std::cell::Cell::new("the front end");
     let flags: Vec<&str> = p.flags.clone();
@@ -2642,6 +2704,8 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
                 modules: 0,
                 shown: ".".into(),
                 disks: Vec::new(),
+                build_root: None,
+                release_contracts: None,
             }
         }
         None => Input::single(&file, source.clone()),

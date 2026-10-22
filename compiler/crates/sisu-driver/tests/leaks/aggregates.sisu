@@ -1,0 +1,121 @@
+# Structs, enums and tuples whose fields hold what the runtime allocates
+# (lists, dicts, sets, texts, boxes), made and dropped in a loop of as many
+# rounds as the first argument says: dropping the whole frees every part,
+# with drop glue or without (decision 218). Under `SISU_RT_ALLOCS=peak` a
+# native run reports the most of its allocations live at once, which must
+# not grow with the rounds, and none live at exit (decision 229).
+
+struct State:
+    mi: list[bool]
+    mu: list[bool]
+
+impl State:
+    pure def bottom(n: int) -> State:
+        var mi: list[bool] = []
+        var mu: list[bool] = []
+        for _ in range(n):
+            mi.push(False)
+            mu.push(False)
+        return State(mi=mi, mu=mu)
+
+    pure def join(mut self, o: State) -> bool:
+        var changed = False
+        for i in range(len(o.mi)):
+            if o.mi[i] and not self.mi[i]:
+                self.mi[i] = True
+                changed = True
+        return changed
+
+struct Bag:
+    flags: list[bool]
+    names: dict[String, int]
+    seen: set[int]
+    label: String
+    boxed: Box[list[int]]
+
+struct Loud:
+    name: String
+    items: list[String]
+
+impl Drop for Loud:
+    def drop(mut self):
+        pass
+
+enum Shape:
+    Bits(flags: list[bool])
+    Table(names: dict[String, list[int]])
+    Pair(bag: Bag, loud: Loud)
+    Nothing
+
+struct Wrap[T]:
+    value: T
+    more: list[T]
+
+def bag(i: int) -> Bag:
+    var flags: list[bool] = []
+    for k in range(100):
+        flags.push(k % 2 == i % 2)
+    return Bag(flags=flags, names={"a{i}": i}, seen={i, i + 1}, label="b{i}", boxed=Box([i]))
+
+def loud(i: int) -> Loud:
+    return Loud(name="l{i}", items=["x{i}", "y"])
+
+def push_state(t: int, s: State, mut entry: list[State], mut work: list[int]):
+    if entry[t].join(s):
+        work.push(t)
+
+def main(sys: System):
+    let args = sys.env.args()
+    var rounds = 10
+    if len(args) > 0:
+        rounds = args[0].parse_int() ?? 10
+    var total = 0
+    var entry: list[State] = []
+    for _ in range(4):
+        entry.push(State.bottom(1000))
+    var work: list[int] = []
+    var held = bag(0)
+    var shapes: list[Shape] = []
+    var table: dict[int, Bag] = {}
+    var maybe: Bag? = None
+    for i in range(rounds):
+        # A struct holding lists, dropped whole: made, copied, joined.
+        let st = State.bottom(1000)
+        total += len(st.mi)
+        var copies: list[State] = []
+        copies.push(entry[i % 4].copy())
+        copies.push(st.copy())
+        for s in copies:
+            push_state((i + 1) % 4, s, mut entry, mut work)
+        var s = entry[i % 4].copy()
+        s.mi[i % 1000] = True
+        push_state(i % 4, s, mut entry, mut work)
+        entry[(i + 2) % 4] = State.bottom(1000)
+        # Every kind of part, and parts replaced by assignment.
+        let b = bag(i)
+        total += len(b.flags) + len(b.label)
+        held = bag(i + 1)
+        held.flags = [True]
+        held.label = "changed".to_string()
+        held.boxed = Box([1, 2, 3])
+        let t = (bag(i), loud(i), [bag(i)], "t{i}")
+        total += len(t.3)
+        shapes.push(Bits(flags=[True, False]))
+        shapes.push(Table(names={"k": [1, 2]}))
+        shapes.push(Pair(bag=bag(i), loud=loud(i)))
+        shapes.push(Nothing)
+        if len(shapes) > 8:
+            shapes = []
+        table[i % 3] = bag(i)
+        maybe = Some(bag(i))
+        let w = Wrap(value=bag(i), more=[bag(i), bag(i + 1)])
+        total += len(w.more)
+        let ws = Wrap(value="s{i}".to_string(), more=["a".to_string()])
+        total += len(ws.value)
+        let r: Result[Bag, String] = Ok(bag(i))
+        match r:
+            case Ok(x):
+                total += len(x.label)
+            case Err(e):
+                total += len(e)
+    print("{total} {len(work)} {len(held.label)} {len(table)} {maybe.is_some()}")

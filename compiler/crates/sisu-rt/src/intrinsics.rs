@@ -185,18 +185,6 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
     use Intrinsic as I;
     // SAFETY: the arguments are of the types the descriptor gives.
     unsafe {
-        if let Some(st) = crate::cells::call(i, c) {
-            return st;
-        }
-        if let Some(st) = crate::bytes::call(i, c) {
-            return st;
-        }
-        if let Some(st) = crate::caps::call(i, c) {
-            return st;
-        }
-        if let Some(st) = crate::host::call_system(i, c) {
-            return st;
-        }
         match i {
             I::Print | I::PrintErr => {
                 let mut out = Vec::new();
@@ -1172,9 +1160,26 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                     &[("detail", format!("`{}` is not in the native runtime yet", i.name()))],
                 );
             }
+            // The cells', the bytes', the capabilities' and the host's are
+            // their modules', asked after the commonest here (each module
+            // tells by a match of its own whether it has the intrinsic).
             // Tasks, channels, timers, generators and mutexes are `tasks`'s,
             // called before this one (`sisu_rt_intrinsic`).
-            _ => rt::internal("a task intrinsic outside the task module"),
+            _ => {
+                if let Some(st) = crate::cells::call(i, c) {
+                    return st;
+                }
+                if let Some(st) = crate::bytes::call(i, c) {
+                    return st;
+                }
+                if let Some(st) = crate::caps::call(i, c) {
+                    return st;
+                }
+                if let Some(st) = crate::host::call_system(i, c) {
+                    return st;
+                }
+                rt::internal("a task intrinsic outside the task module")
+            }
         }
     }
     abi::OK

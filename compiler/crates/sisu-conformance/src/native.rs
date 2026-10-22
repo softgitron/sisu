@@ -10,6 +10,12 @@
 //! instead, with `sisu build --native --from-sir`: the case's own `NAME.sir`
 //! where it has one, else what `sisu sir` prints for it. It checks the
 //! path a self-hosted front end takes, whose SIR the backend compiles.
+//!
+//! Either way, the executable runs with `SISU_RT_ALLOCS=1`, which makes
+//! the runtime report how many of its allocations are live when the
+//! program ends (decisions 217 and 226): the report must say none, and is left out
+//! of the standard error compared. Only a program that aborts (status
+//! 134) ends without one.
 
 use crate::{Case, Failure, Output, Sandbox, diff, discover, invoke_with_input};
 use std::path::Path;
@@ -23,6 +29,8 @@ pub struct NativeReport {
     /// In the mode from SIR: the cases built from their own `.sir`
     /// expectation (the others from `sisu sir`'s output).
     pub from_sir: Option<usize>,
+    /// Built with the release profile.
+    pub release: bool,
     pub failures: Vec<Failure>,
     /// Time spent building (the front end, the backend and the linker)
     /// and running the executables, over every case.
@@ -40,6 +48,7 @@ impl NativeReport {
         }
         let what = match self.from_sir {
             Some(own) => format!("native from SIR: {} cases ({own} from their own `.sir`)", self.cases),
+            None if self.release => format!("native, release: {} cases ({} lines)", self.cases, self.lines),
             None => format!("native: {} cases ({} lines)", self.cases, self.lines),
         };
         out.push_str(&format!(
@@ -64,17 +73,25 @@ pub fn read_list(text: &str) -> Vec<String> {
 /// Builds and runs every case of `list` natively, on as many threads as
 /// the machine has (at most eight).
 pub fn run_native(sisu: &Path, root: &Path, list: &[String]) -> NativeReport {
-    run_list(sisu, root, list, false)
+    run_list(sisu, root, list, false, false)
 }
 
 /// [`run_native`], each case built from serialised SIR (decision 212).
 pub fn run_native_from_sir(sisu: &Path, root: &Path, list: &[String]) -> NativeReport {
-    run_list(sisu, root, list, true)
+    run_list(sisu, root, list, true, false)
 }
 
-fn run_list(sisu: &Path, root: &Path, list: &[String], from_sir: bool) -> NativeReport {
+/// [`run_native`], each case built with the release profile and every
+/// contract checked (`sisu build --native --release --contracts=all`,
+/// decision 232): Cranelift's optimisations must not change what a program
+/// does.
+pub fn run_native_release(sisu: &Path, root: &Path, list: &[String]) -> NativeReport {
+    run_list(sisu, root, list, false, true)
+}
+
+fn run_list(sisu: &Path, root: &Path, list: &[String], from_sir: bool, release: bool) -> NativeReport {
     let all = discover(root);
-    let mut report = NativeReport::default();
+    let mut report = NativeReport { release, ..NativeReport::default() };
     let mut cases = Vec::new();
     for name in list {
         match all.iter().find(|c| c.name == *name) {
@@ -86,7 +103,7 @@ fn run_list(sisu: &Path, root: &Path, list: &[String], from_sir: bool) -> Native
             }),
         }
     }
-    let results = parallel(&cases, |case, n| native_case(sisu, case, n, from_sir));
+    let results = parallel(&cases, |case, n| native_case(sisu, case, n, from_sir, release));
     if from_sir {
         report.from_sir = Some(results.iter().filter(|r| r.own_sir).count());
     }
@@ -107,7 +124,7 @@ pub fn survey(sisu: &Path, root: &Path, list: &[String]) -> Vec<(String, String)
         .into_iter()
         .filter(|c| !list.contains(&c.name) && ["out", "err", "status"].iter().any(|e| c.path(e).exists()))
         .collect();
-    let results = parallel(&cases, |case, n| native_case(sisu, case, n, false));
+    let results = parallel(&cases, |case, n| native_case(sisu, case, n, false, false));
     cases
         .iter()
         .zip(results)
@@ -153,7 +170,7 @@ struct CaseResult {
     own_sir: bool,
 }
 
-fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool) -> CaseResult {
+fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool, release: bool) -> CaseResult {
     let mut r = CaseResult {
         failures: Vec::new(),
         build: Duration::ZERO,
@@ -164,8 +181,15 @@ fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool) -> CaseResult
     let fail = |r: &mut CaseResult, check: &str, detail: String| {
         r.failures.push(Failure { case: case.name.clone(), check: check.to_string(), detail });
     };
-    // The two modes may run at once (`cargo test`): sandboxes of their own.
-    let sandbox = match Sandbox::new(case, if from_sir { 2_000_000 } else { 1_000_000 } + n) {
+    // The modes may run at once (`cargo test`): sandboxes of their own.
+    let mode = if from_sir {
+        2_000_000
+    } else if release {
+        3_000_000
+    } else {
+        1_000_000
+    };
+    let sandbox = match Sandbox::new(case, mode + n) {
         Ok(s) => s,
         Err(e) => {
             fail(&mut r, "setup", e.to_string());
@@ -175,6 +199,13 @@ fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool) -> CaseResult
     let exe = sandbox.dir.join("native-program");
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
     let mut build_args = s(&["build", "--native", "--output", &exe.display().to_string()]);
+    // The release profile with every contract checked, as the
+    // interpreter's runs check them, so that the expectations hold: what
+    // is compared is what Cranelift's optimisations do.
+    if release {
+        build_args.push("--release".to_string());
+        build_args.push("--contracts=all".to_string());
+    }
     if !case.package {
         build_args.push(format!("{}.sisu", case.stem));
         r.lines = std::fs::read_to_string(case.source()).map(|t| t.lines().count()).unwrap_or(0);
@@ -224,8 +255,15 @@ fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool) -> CaseResult
         case.expected("args").map(|a| a.lines().map(str::to_string).collect()).unwrap_or_default();
     let input = case.expected("stdin");
     let start = Instant::now();
-    let ran = run_exe(&exe, &cwd, &args, input.as_deref());
+    let mut ran = run_exe(&exe, &cwd, &args, input.as_deref());
     r.run = start.elapsed();
+    // What the runtime left allocated: nothing.
+    match take_allocations(&mut ran.stderr) {
+        Some(0) => {}
+        Some(n) => fail(&mut r, "allocations", format!("{n} of the runtime's allocations live at exit")),
+        None if ran.status == ABORTED => {}
+        None => fail(&mut r, "allocations", "the run did not report its live allocations".into()),
+    }
     let expected = case.expected("out").unwrap_or_default();
     if expected != ran.stdout {
         fail(&mut r, "stdout", diff::diff(&expected, &ran.stdout));
@@ -245,13 +283,34 @@ fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool) -> CaseResult
     r
 }
 
-/// Runs an executable as the runner runs `sisu`: in `cwd`, with an empty
-/// environment, killed past the time limit.
+/// The exit status of a program that aborted (a deadlock, a panic during
+/// unwinding), which ends without its report of live allocations.
+const ABORTED: i32 = 134;
+
+/// Takes the runtime's report of its live allocations off the end of a
+/// run's standard error (`allocations: N of the runtime's live at exit`),
+/// and gives N.
+fn take_allocations(stderr: &mut String) -> Option<u64> {
+    let body = stderr.strip_suffix('\n')?;
+    let start = body.rfind('\n').map_or(0, |i| i + 1);
+    let n = body[start..]
+        .strip_prefix("allocations: ")?
+        .strip_suffix(" of the runtime's live at exit")?
+        .parse()
+        .ok()?;
+    stderr.truncate(start);
+    Some(n)
+}
+
+/// Runs an executable as the runner runs `sisu`: in `cwd`, with an
+/// environment that only asks the runtime for its live allocations at exit,
+/// killed past the time limit.
 fn run_exe(exe: &Path, cwd: &Path, args: &[String], input: Option<&str>) -> Output {
     let spawned = Command::new(exe)
         .args(args)
         .current_dir(cwd)
         .env_clear()
+        .env("SISU_RT_ALLOCS", "1")
         .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
