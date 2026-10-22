@@ -1,0 +1,87 @@
+# What the native backend's first round leaked (decision 200), and what
+# the interpreter's host frees without the program seeing it, each made in
+# a loop: under `SISU_RT_ALLOCS` a native run reports the runtime's
+# allocations live at exit, which must be none.
+
+trait Shape:
+    def area(self) -> int
+    def consume(own self) -> int
+
+struct Square:
+    side: int
+    label: String
+
+impl Shape for Square:
+    def area(self) -> int:
+        return self.side * self.side
+    def consume(own self) -> int:
+        return len(self.label)
+
+struct Loud:
+    name: String
+    tags: list[String]
+
+impl Drop for Loud:
+    def drop(mut self):
+        if self.name == "last":
+            print("dropped {self.name} with {len(self.tags)} tags")
+
+error ParseError:
+    Empty
+    Bad(text: String)
+
+def parse(text: str) -> int ! ParseError:
+    if text.is_empty():
+        return Err(Empty)
+    return Err(Bad(text=text.to_string()))
+
+def twice(text: str) -> int ! ParseError:
+    let n = parse(text)?
+    return Ok(n)
+
+def adder(n: int) -> (int) -> int:
+    return own (x) -> x + n
+
+def main():
+    var total = 0
+    for i in range(40):
+        # A closure that holds a value (decision 213).
+        let f = adder(i)
+        total += f(1)
+        # A `*rest` pattern (decision 214).
+        let xs = ["a".to_string(), "b".to_string(), "c{i}".to_string()]
+        match xs:
+            case [first, *rest]:
+                total += len(first) + len(rest)
+            case _:
+                pass
+        # Return traces, copied, dropped, and taken apart (decision 215).
+        let e = twice("x{i}")
+        let copy = e.copy()
+        total += len("{e}") + len("{copy}")
+        match twice("z{i}"):
+            case Err(Bad(text)):
+                total += len(text)
+            case Err(Empty):
+                total += 1
+            case Ok(n):
+                total += n
+        # A box whose value moves into a `dyn`, a `dyn` whose value an
+        # `own self` method takes, and a box given a value again (decision
+        # 216).
+        let b: Box[Square] = Box(Square(side=i, label="sq".to_string()))
+        let d: Box[dyn Shape] = b
+        total += d.area()
+        let g: Box[dyn Shape] = Box(Square(side=2, label="abc".to_string()))
+        total += g.consume()
+        var r = Box("one".to_string())
+        let s = r.boxed
+        r.boxed = "two{s}".to_string()
+        total += len(r.boxed)
+        # Fields the drop glue leaves out, and text an intrinsic is given
+        # (decision 218).
+        let loud = Loud(name="n{i}", tags=["t".to_string()])
+        total += len(loud.name)
+        print("{total}")
+    let last = Loud(name="last", tags=["x".to_string(), "y".to_string()])
+    print(len(last.name))

@@ -176,16 +176,49 @@ pub(crate) fn memo_body(
     sources: &SourceMap,
     memo: &mut Option<Session>,
 ) -> (Arc<Body>, Vec<Diagnostic>, Vec<DefId>) {
-    let at = region(prog, sources, def, &kind);
+    match memo_lookup(prog, inferred, def, &kind, sources, memo) {
+        Lookup::Hit(found) => found,
+        Lookup::Miss(slot) => {
+            let checked = check_body(prog, inferred, def, &kind, sources);
+            memo_store(inferred, def, kind, sources, memo, slot, checked)
+        }
+    }
+}
+
+/// What the memo holds for a body: what a check gave, or where to keep
+/// what checking it gives (none when it cannot be kept).
+pub(crate) enum Lookup {
+    Hit((Arc<Body>, Vec<Diagnostic>, Vec<DefId>)),
+    Miss(Option<Slot>),
+}
+
+/// Where a body's check is kept: the item's place and a hash of its text.
+pub(crate) struct Slot {
+    file: FileId,
+    start: u32,
+    end: u32,
+    content: u64,
+}
+
+/// The memo's entry for a body, moved to where its item now is, or the
+/// slot for one.
+pub(crate) fn memo_lookup(
+    prog: &Program,
+    inferred: &HashMap<DefId, Vec<DefId>>,
+    def: DefId,
+    kind: &BodyKind,
+    sources: &SourceMap,
+    memo: &mut Option<Session>,
+) -> Lookup {
+    let at = region(prog, sources, def, kind);
     let (Some(m), Some((file, start, end))) = (memo.as_mut(), at) else {
-        let (b, d, a, _) = check_body(prog, inferred, def, &kind, sources);
-        return (Arc::new(b), d, a);
+        return Lookup::Miss(None);
     };
     let text = sources.get(file).map(|f| f.text.as_str()).unwrap_or("");
     // An instance of a template is told apart by what it instantiates too:
     // two instances may unfold to the same text with other types behind
     // its names.
-    let instance = match &kind {
+    let instance = match kind {
         BodyKind::Fn => prog.fn_info(def).and_then(|f| f.instance_of.clone()),
         BodyKind::ParamDefault(f, _) => prog.fn_info(*f).and_then(|f| f.instance_of.clone()),
         _ => None,
@@ -207,10 +240,30 @@ pub(crate) fn memo_body(
         e.start = start;
         e.used = generation;
         m.cache.reused += 1;
-        return (e.body.clone(), e.diags.clone(), e.absorbed.clone());
+        return Lookup::Hit((e.body.clone(), e.diags.clone(), e.absorbed.clone()));
     }
-    let (mut body, mut diags, absorbed, reads) = check_body(prog, inferred, def, &kind, sources);
+    Lookup::Miss(Some(Slot { file, start, end, content }))
+}
+
+/// Keeps what checking a body gave in its slot, when there is one and the
+/// check can move with the item; the body, its diagnostics and the error
+/// set it absorbed.
+pub(crate) fn memo_store(
+    inferred: &HashMap<DefId, Vec<DefId>>,
+    def: DefId,
+    kind: BodyKind,
+    sources: &SourceMap,
+    memo: &mut Option<Session>,
+    slot: Option<Slot>,
+    checked: (Body, Vec<Diagnostic>, Vec<DefId>, Vec<DefId>),
+) -> (Arc<Body>, Vec<Diagnostic>, Vec<DefId>) {
+    let (mut body, mut diags, absorbed, reads) = checked;
+    let (Some(m), Some(Slot { file, start, end, content })) = (memo.as_mut(), slot) else {
+        return (Arc::new(body), diags, absorbed);
+    };
     m.cache.checked += 1;
+    let generation = m.cache.generation;
+    let key = (m.iface, def, kind.clone());
     let reads: Vec<(DefId, Vec<DefId>)> =
         reads.into_iter().map(|d| (d, inferred.get(&d).cloned().unwrap_or_default())).collect();
     if movable(&mut body, &mut diags, sources, (file, start, end)) {
@@ -236,7 +289,7 @@ pub(crate) fn memo_body(
 }
 
 /// Checks a body without the memo: with the inferred error sets it read.
-fn check_body(
+pub(crate) fn check_body(
     prog: &Program,
     inferred: &HashMap<DefId, Vec<DefId>>,
     def: DefId,

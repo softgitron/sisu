@@ -61,29 +61,28 @@ fn the_sir_of_every_native_case_reads_back_byte_for_byte() {
                     let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let Some(name) = list.get(i) else { break };
                     let path = root.join(name);
-                    let (dir, args, temporary) = if path.with_extension("pkg").is_dir() {
-                        let pkg = path.with_extension("pkg");
+                    // The case as the runner's sandbox has it: a package's
+                    // directory (whose lockfile `sisu sir` writes), or the
+                    // source with its files (`NAME.files/`).
+                    let sandbox = scratch(&format!("sir-{}", name.replace('/', "-")));
+                    let (dir, args) = if path.with_extension("pkg").is_dir() {
+                        copy_dir(&path.with_extension("pkg"), &sandbox);
                         let cwd = std::fs::read_to_string(path.with_extension("cwd")).unwrap_or_default();
-                        (pkg.join(cwd.trim()), vec!["sir".to_string()], false)
+                        (sandbox.join(cwd.trim()), vec!["sir".to_string()])
                     } else {
-                        // The case's source with its files (`NAME.files/`), as
-                        // the runner's sandbox has them.
                         let file =
                             path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
-                        let dir = scratch(&format!("sir-{}", name.replace('/', "-")));
-                        std::fs::copy(path.with_extension("sisu"), dir.join(format!("{file}.sisu")))
+                        std::fs::copy(path.with_extension("sisu"), sandbox.join(format!("{file}.sisu")))
                             .expect("the case's source");
-                        copy_dir(&path.with_extension("files"), &dir);
-                        (dir, vec!["sir".to_string(), format!("{file}.sisu")], true)
+                        copy_dir(&path.with_extension("files"), &sandbox);
+                        (sandbox.clone(), vec!["sir".to_string(), format!("{file}.sisu")])
                     };
                     let out = std::process::Command::new(&sisu)
                         .args(&args)
                         .current_dir(&dir)
                         .output()
                         .expect("sisu runs");
-                    if temporary {
-                        let _ = std::fs::remove_dir_all(&dir);
-                    }
+                    let _ = std::fs::remove_dir_all(&sandbox);
                     let printed = String::from_utf8_lossy(&out.stdout).into_owned();
                     let problem = match sisu_sir::read(&printed) {
                         Ok(p) if sisu_sir::write(&p) == printed => None,
@@ -128,6 +127,43 @@ fn building_from_sir_gives_the_same_executable() {
         let b = std::fs::read(dir.join("from-sir")).expect("the second executable");
         assert!(a == b, "{case}: the executables differ");
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// What a program allocates is freed by its end (decisions 213 to 218):
+/// `tests/leaks/leaks.sisu` makes, in a loop, each thing the first round
+/// leaked (decision 200) and each part the interpreter's host frees unseen.
+/// Natively, under `SISU_RT_ALLOCS`, the runtime reports none of its
+/// allocations live at exit, and the program prints what the interpreter
+/// prints.
+#[test]
+fn nothing_the_program_allocates_is_live_at_exit() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = scratch("leaks");
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/leaks/leaks.sisu");
+    std::fs::copy(&fixture, dir.join("leaks.sisu")).expect("the fixture");
+    let interpreted = std::process::Command::new(&sisu)
+        .args(["run", "leaks.sisu"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu runs");
+    let (expected, _, status) = outcome(interpreted);
+    assert_eq!(status, Some(0));
+    let built = std::process::Command::new(&sisu)
+        .args(["build", "--native", "--output", "leaks", "leaks.sisu"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu builds");
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let ran = std::process::Command::new(dir.join("leaks"))
+        .env("SISU_RT_ALLOCS", "1")
+        .current_dir(&dir)
+        .output()
+        .expect("the program runs");
+    let (out, err, status) = outcome(ran);
+    assert_eq!(status, Some(0));
+    assert_eq!(out, expected);
+    assert_eq!(err, "allocations: 0 of the runtime's live at exit\n");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

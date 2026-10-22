@@ -466,7 +466,7 @@ fn lower_reaching(
         roots.extend(all);
     }
     let mut functions = lower_reached(&mut ctx, typed, &bodies, &roots, &mut cache);
-    let types = collect_types(&ctx, &functions);
+    let types = collect_types(&ctx, &functions, &HashSet::new());
     functions.extend(glue::glue_functions(&types));
     let intrinsics = intrinsic_decls(prog, &functions);
     let (trait_methods, impls) = trait_decls(&ctx, &functions);
@@ -765,8 +765,10 @@ fn lower_reached(
             reach_from(ctx, f, &mut work, &mut dispatched);
             // Defaults and drops of declared types are reached through the
             // types, and so is a type's invariant check, which the run time
-            // calls when unwinding drops a mutex guard (D-077).
-            for t in collect_types(ctx, std::slice::from_ref(f)) {
+            // calls when unwinding drops a mutex guard (D-077). The types
+            // met already are not looked at again: what their fields reach
+            // was met with them.
+            for t in collect_types(ctx, std::slice::from_ref(f), &typed_names) {
                 if !typed_names.insert(t.name().to_string()) {
                     continue;
                 }
@@ -901,8 +903,9 @@ fn refs_in_operands(ops: &[sir::Operand], work: &mut Vec<String>) {
 }
 
 /// The declarations of every non-builtin type the functions mention, in
-/// definition order.
-fn collect_types(ctx: &Ctx, functions: &[sir::Function]) -> Vec<sir::TypeDecl> {
+/// definition order, but for those named in `known` and the types their
+/// fields reach (which `known` must hold as well).
+fn collect_types(ctx: &Ctx, functions: &[sir::Function], known: &HashSet<String>) -> Vec<sir::TypeDecl> {
     let prog = ctx.prog;
     let mut names: HashSet<String> = HashSet::new();
     fn walk(t: &sir::Type, out: &mut HashSet<String>) {
@@ -963,7 +966,10 @@ fn collect_types(ctx: &Ctx, functions: &[sir::Function]) -> Vec<sir::TypeDecl> {
     let mut queue: Vec<String> = names.into_iter().collect();
     queue.sort();
     while let Some(n) = queue.pop() {
-        if !done.insert(n.clone()) || sisu_sir::validate::BUILTIN_TYPES.contains(&n.as_str()) {
+        if known.contains(&n)
+            || !done.insert(n.clone())
+            || sisu_sir::validate::BUILTIN_TYPES.contains(&n.as_str())
+        {
             continue;
         }
         let Some(&d) = ctx.type_defs.get(&n) else {

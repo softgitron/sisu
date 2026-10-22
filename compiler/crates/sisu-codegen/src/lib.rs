@@ -16,6 +16,7 @@
 
 mod func;
 mod layout;
+mod workers;
 
 use cranelift_codegen::ir::MemFlags;
 use cranelift_codegen::ir::{self, AbiParam, InstBuilder, types};
@@ -114,15 +115,49 @@ fn compile_with(prog: &sir::Program, survey: bool) -> Result<(Compiled, Vec<(Str
     };
     let mut cg = Codegen::new(prog)?;
     cg.survey = survey;
-    let main_id = cg.instance(&entry.function, Vec::new())?;
-    cg.complete()?;
-    let ret = prog.function(&entry.function).map(|f| f.ret().clone()).unwrap_or(Type::Unit);
-    let ret_ty = cg.types.id(&cg.concrete(&ret, &[])?)?;
-    cg.complete()?;
-    let mut flags = if entry.returns_result { abi::ENTRY_RESULT } else { 0 };
-    if entry.takes_system {
-        flags |= abi::ENTRY_SYSTEM;
-    }
+    let threads = workers::count();
+    let (main_id, flags, ret_ty) = if threads > 1 {
+        let workers::Channels { jobs, queue, results, done } = workers::Channels::new();
+        // A thread fewer than the machine runs while this one writes the
+        // IR; then it compiles too.
+        let senders: Vec<_> = (1..threads).map(|_| results.clone()).collect();
+        let isa = cg.isa.clone();
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        cg.jobs = Some(jobs);
+        std::thread::scope(|s| {
+            // A thread that cannot be made leaves its share to the others,
+            // and to this one.
+            let handles: Vec<_> = senders
+                .into_iter()
+                .filter_map(|r| {
+                    let (isa, queue, stop) = (&isa, &queue, &stop);
+                    std::thread::Builder::new()
+                        .spawn_scoped(s, move || workers::work(&**isa, queue, &r, stop))
+                        .ok()
+                })
+                .collect();
+            let generated = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cg.generate(entry)));
+            // Closing the queue lets the threads finish what is in it; a
+            // failure stops them, since nothing they compile will be used.
+            cg.jobs = None;
+            if matches!(generated, Ok(Ok(_))) {
+                workers::work(&*isa, &queue, &results, &stop);
+            } else {
+                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            drop(results);
+            for h in handles {
+                if let Err(e) = h.join() {
+                    std::panic::resume_unwind(e);
+                }
+            }
+            let main = generated.unwrap_or_else(|e| std::panic::resume_unwind(e))?;
+            cg.place(done.try_iter().collect())?;
+            Ok::<_, Error>(main)
+        })?
+    } else {
+        cg.generate(entry)?
+    };
     cg.define_main(main_id, flags, ret_ty)?;
     let functions = cg.compiled;
     let statements = cg.statements;
@@ -240,6 +275,15 @@ pub(crate) struct Codegen<'p> {
     /// way a closure is.
     thunks: HashMap<String, (FuncId, Type)>,
     fbctx: FunctionBuilderContext,
+    /// The target, which the threads that compile share (decision 219).
+    isa: cranelift_codegen::isa::OwnedTargetIsa,
+    /// Where the functions go to be compiled on those threads; none when
+    /// each is compiled as it is made.
+    jobs: Option<std::sync::mpsc::Sender<workers::Job>>,
+    /// The functions handed to the threads, in the order they were made:
+    /// each one's id, what an error in it is called, and whether its frame
+    /// counts towards `max_frame`.
+    handed: Vec<(FuncId, String, bool)>,
     /// Surveying (`survey`): a function with a construct the backend does
     /// not compile is recorded in `missing` and given a body that stops.
     survey: bool,
@@ -309,6 +353,7 @@ impl<'p> Codegen<'p> {
             .finish(settings::Flags::new(flags))
             .map_err(|e| Error::internal(format!("this machine: {e}")))?;
         let call_conv = isa.default_call_conv();
+        let shared = isa.clone();
         let builder = ObjectBuilder::new(isa, "sisu_program", cranelift_module::default_libcall_names())
             .map_err(|e| Error::internal(format!("the object file: {e}")))?;
         let mut module = ObjectModule::new(builder);
@@ -340,6 +385,9 @@ impl<'p> Codegen<'p> {
             thunks: HashMap::new(),
             foreign: foreign_objects(prog, &reachable(prog)),
             fbctx: FunctionBuilderContext::new(),
+            isa: shared,
+            jobs: None,
+            handed: Vec::new(),
             survey: false,
             missing: Vec::new(),
             carried: HashMap::new(),
@@ -625,18 +673,71 @@ impl<'p> Codegen<'p> {
             b.finalize();
         }
         self.fbctx = fbctx;
-        self.module.define_function(id, &mut ctx).map_err(|e| {
-            Error::internal(format!("the dispatcher of `{}`: {e:?}", self.dispatchers[i].name))
-        })?;
-        self.note_frame(&ctx);
+        let what = format!("the dispatcher of `{}`", self.dispatchers[i].name);
+        self.define(id, ctx, what, true)
+    }
+
+    /// Defines function `id` with the body in `ctx`: compiled here, or
+    /// handed to the threads that compile (decision 219), whose code
+    /// [`Codegen::place`] defines. `what` names the function in an error;
+    /// `frame`: whether its frame counts towards `max_frame` (a task may
+    /// run it).
+    fn define(&mut self, id: FuncId, mut ctx: Context, what: String, frame: bool) -> Result<(), Error> {
+        if let Some(jobs) = &self.jobs {
+            let job = workers::Job { order: self.handed.len(), id, func: ctx.func };
+            if jobs.send(job).is_err() {
+                return Err(Error::internal(format!("{what}: the threads that compile stopped")));
+            }
+            self.handed.push((id, what, frame));
+            return Ok(());
+        }
+        self.module.define_function(id, &mut ctx).map_err(|e| Error::internal(format!("{what}: {e:?}")))?;
+        if frame && let Some(code) = ctx.compiled_code() {
+            self.max_frame = self.max_frame.max(code.frame_size);
+        }
         Ok(())
     }
 
-    /// Notes the frame of a function just compiled.
-    fn note_frame(&mut self, ctx: &Context) {
-        if let Some(code) = ctx.compiled_code() {
-            self.max_frame = self.max_frame.max(code.frame_size);
+    /// Defines the functions the threads compiled, in the order they were
+    /// made, so the object file is the same however the threads ran.
+    fn place(&mut self, done: Vec<(usize, Result<workers::Code, String>)>) -> Result<(), Error> {
+        let mut codes: Vec<Option<Result<workers::Code, String>>> =
+            std::iter::repeat_with(|| None).take(self.handed.len()).collect();
+        for (order, code) in done {
+            if let Some(c) = codes.get_mut(order) {
+                *c = Some(code);
+            }
         }
+        for ((id, what, frame), code) in std::mem::take(&mut self.handed).into_iter().zip(codes) {
+            let code = match code {
+                Some(Ok(code)) => code,
+                Some(Err(e)) => return Err(Error::internal(format!("{what}: {e}"))),
+                None => return Err(Error::internal(format!("{what}: no code came back"))),
+            };
+            self.module
+                .define_function_bytes(id, code.alignment, &code.bytes, &code.relocs)
+                .map_err(|e| Error::internal(format!("{what}: {e:?}")))?;
+            if frame {
+                self.max_frame = self.max_frame.max(code.frame_size);
+            }
+        }
+        Ok(())
+    }
+
+    /// Everything but `main`: the instances the entry reaches, the
+    /// dispatchers and the drop glue; the entry's id, `main`'s flags and
+    /// the number of the entry's result type.
+    fn generate(&mut self, entry: &sir::Entry) -> Result<(FuncId, u32, u32), Error> {
+        let main_id = self.instance(&entry.function, Vec::new())?;
+        self.complete()?;
+        let ret = self.prog.function(&entry.function).map(|f| f.ret().clone()).unwrap_or(Type::Unit);
+        let ret_ty = self.types.id(&self.concrete(&ret, &[])?)?;
+        self.complete()?;
+        let mut flags = if entry.returns_result { abi::ENTRY_RESULT } else { 0 };
+        if entry.takes_system {
+            flags |= abi::ENTRY_SYSTEM;
+        }
+        Ok((main_id, flags, ret_ty))
     }
 
     /// Compiles every queued instance, and the drop glue the type table
@@ -680,10 +781,7 @@ impl<'p> Codegen<'p> {
         // in use: the next function starts from a fresh one.
         self.fbctx = if result.is_ok() { fbctx } else { FunctionBuilderContext::new() };
         result?;
-        self.module
-            .define_function(id, &mut ctx)
-            .map_err(|e| Error::internal(format!("Cranelift rejected `{name}`: {e:?}")))?;
-        self.note_frame(&ctx);
+        self.define(id, ctx, format!("Cranelift rejected `{name}`"), true)?;
         self.compiled += 1;
         Ok(())
     }
@@ -736,10 +834,7 @@ impl<'p> Codegen<'p> {
             b.finalize();
         }
         self.fbctx = fbctx;
-        self.module
-            .define_function(id, &mut ctx)
-            .map_err(|e| Error::internal(format!("{name} as a value: {e:?}")))?;
-        self.note_frame(&ctx);
+        self.define(id, ctx, format!("{name} as a value"), true)?;
         self.thunks.insert(name.to_string(), (id, ty.clone()));
         Ok((id, ty))
     }
@@ -761,7 +856,7 @@ impl<'p> Codegen<'p> {
             b.finalize();
         }
         self.fbctx = fbctx;
-        self.module.define_function(id, &mut ctx).map_err(|e| Error::internal(format!("{name}: {e:?}")))
+        self.define(id, ctx, name.to_string(), false)
     }
 
     /// A runtime entry point, declared once with its signature.
@@ -1061,8 +1156,7 @@ impl<'p> Codegen<'p> {
             b.finalize();
         }
         self.fbctx = fbctx;
-        self.module.define_function(main, &mut ctx).map_err(|e| Error::internal(format!("main: {e:?}")))?;
-        Ok(())
+        self.define(main, ctx, "main".to_string(), false)
     }
 }
 

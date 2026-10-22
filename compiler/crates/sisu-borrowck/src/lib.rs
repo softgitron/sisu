@@ -228,12 +228,14 @@ impl FnCache {
 /// everything the analysis of one function reads besides its own SIR (the
 /// interface of the program and the contract level). The result is the
 /// same as [`check`]'s.
+///
+/// Each function is analysed on its own (decision 219): the analyses run
+/// on threads, and their findings and checked functions are taken in the
+/// program's order, so the result is the same as on one thread.
 pub fn check_with(p: &sir::Program, opts: &Options, mut memo: Option<(&mut FnCache, u64)>) -> Checked {
-    let types = types::Types::new(p);
     let mut findings = Vec::new();
-    let mut functions = Vec::new();
-    // Which functions the memo answered.
-    let mut reused: Vec<bool> = Vec::new();
+    // The checked function the memo gave for each function it answered.
+    let mut reused: Vec<Option<sir::Function>> = Vec::with_capacity(p.functions.len());
     let mut kept: std::collections::HashMap<String, (u64, sir::Function, sir::Function)> =
         std::collections::HashMap::new();
     if let Some((cache, _)) = memo.as_mut() {
@@ -247,44 +249,80 @@ pub fn check_with(p: &sir::Program, opts: &Options, mut memo: Option<(&mut FnCac
             && input == *f
         {
             cache.reused += 1;
-            functions.push(output.clone());
+            reused.push(Some(output.clone()));
             kept.insert(f.name.clone(), (c, input, output));
-            reused.push(true);
             continue;
+        }
+        reused.push(None);
+    }
+    let answered: Vec<bool> = reused.iter().map(Option::is_some).collect();
+    // Moves and drop placement.
+    let placed = each_function(p, &p.functions, |i, f, types| {
+        if answered[i] {
+            return None;
         }
         let mut f = f.clone();
-        let init = init::Analysis::run(&f, &types);
-        if opts.on(Rule::Moves) {
-            findings.extend(init.findings(&f, &types));
+        let init = init::Analysis::run(&f, types);
+        let found = if opts.on(Rule::Moves) { init.findings(&f, types) } else { Vec::new() };
+        elaborate::elaborate(&mut f, &init, types);
+        Some((found, f))
+    });
+    let mut functions = Vec::with_capacity(p.functions.len());
+    for (placed, given) in placed.into_iter().zip(&mut reused) {
+        match (placed, given.take()) {
+            (Some((found, f)), _) => {
+                findings.extend(found);
+                functions.push(f);
+            }
+            (None, Some(f)) => functions.push(f),
+            (None, None) => {}
         }
-        elaborate::elaborate(&mut f, &init, &types);
-        functions.push(f);
-        reused.push(false);
     }
-    let mut program = p.clone();
-    program.functions = functions;
-    for (i, f) in program.functions.iter().enumerate() {
-        if reused[i] {
-            continue;
+    let mut program = sir::Program {
+        sources: p.sources.clone(),
+        entry: p.entry.clone(),
+        types: p.types.clone(),
+        intrinsics: p.intrinsics.clone(),
+        functions,
+        tests: p.tests.clone(),
+        trait_methods: p.trait_methods.clone(),
+        impls: p.impls.clone(),
+    };
+    let memoizing = memo.is_some();
+    // Loans, escapes and must-consume, on the program with its drops.
+    let checked = each_function(p, &program.functions, |i, f, types| {
+        if answered[i] {
+            return None;
         }
         let trusted =
             opts.trust_std && program.sources.get(f.source as usize).is_some_and(|s| s.starts_with("<std>/"));
         let mut found = Vec::new();
         let mut alone = true;
         if !trusted {
-            let a = loans::Analysis::run_with(&program, f, &types, opts.on(Rule::Escapes));
-            found.extend(a.findings(&program, f, &types, opts));
+            let a = loans::Analysis::run_with(&program, f, types, opts.on(Rule::Escapes));
+            found.extend(a.findings(&program, f, types, opts));
             if opts.on(Rule::MustConsume) {
-                let (fs, own) = consume::check(f, &types);
+                let (fs, own) = consume::check(f, types);
                 found.extend(fs);
                 alone = own;
             }
         }
+        // What the memo keeps of a function it may take, copied here
+        // rather than one by one after.
+        let copies = (memoizing && found.is_empty() && alone).then(|| (p.functions[i].clone(), f.clone()));
+        Some((found, alone, copies))
+    });
+    for (i, r) in checked.into_iter().enumerate() {
+        let Some((found, alone, copies)) = r else { continue };
+        let f = &program.functions[i];
         if let Some((cache, ctx)) = memo.as_mut() {
             cache.checked += 1;
             let clean = found.is_empty() && !findings.iter().any(|x: &Finding| x.function == f.name);
-            if clean && alone {
-                kept.insert(f.name.clone(), (*ctx, p.functions[i].clone(), f.clone()));
+            if clean
+                && alone
+                && let Some((input, output)) = copies
+            {
+                kept.insert(f.name.clone(), (*ctx, input, output));
             }
         }
         findings.extend(found);
@@ -300,6 +338,56 @@ pub fn check_with(p: &sir::Program, opts: &Options, mut memo: Option<(&mut FnCac
         shared::SharedStats::default()
     };
     Checked { program, findings, shared }
+}
+
+/// `work` for each of `fs`, by index, on as many threads as the machine
+/// runs at once (at most 8; this one is one of them, and works alone if no
+/// other can be made), each with its own view of the program's types; the
+/// results in the order of `fs`.
+fn each_function<T: Send>(
+    p: &sir::Program,
+    fs: &[sir::Function],
+    work: impl Fn(usize, &sir::Function, &types::Types) -> Option<T> + Sync,
+) -> Vec<Option<T>> {
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8).min(fs.len());
+    if threads <= 1 {
+        let types = types::Types::new(p);
+        return fs.iter().enumerate().map(|(i, f)| work(i, f, &types)).collect();
+    }
+    // The largest first, so that no thread is left with a long one at the
+    // end.
+    let mut order: Vec<usize> = (0..fs.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(fs[i].blocks.iter().map(|b| b.stmts.len() + 1).sum::<usize>()));
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let run = || {
+        let types = types::Types::new(p);
+        let mut done = Vec::new();
+        loop {
+            let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let Some(&i) = order.get(k) else { break };
+            let Some(f) = fs.get(i) else { break };
+            done.push((i, work(i, f, &types)));
+        }
+        done
+    };
+    let mut out: Vec<Option<T>> = std::iter::repeat_with(|| None).take(fs.len()).collect();
+    std::thread::scope(|s| {
+        let others: Vec<_> =
+            (1..threads).filter_map(|_| std::thread::Builder::new().spawn_scoped(s, run).ok()).collect();
+        let mut done = run();
+        for w in others {
+            match w.join() {
+                Ok(theirs) => done.extend(theirs),
+                // A panic in an analysis is the checker's own: raised
+                // again here, as one on this thread would be.
+                Err(e) => std::panic::resume_unwind(e),
+            }
+        }
+        for (i, r) in done {
+            out[i] = r;
+        }
+    });
+    out
 }
 
 fn dedup(fs: &mut Vec<Finding>) {

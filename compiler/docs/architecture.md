@@ -60,15 +60,15 @@ architecture"); data flows down the table.
 | `sisu-parser` | 3552 | Error-tolerant recursive descent that always returns a tree |
 | `sisu-fmt` | 1868 | The formatter: the lossless tree regrouped into logical lines, laid out by a Wadler-style group printer, with the comments and blank lines placed between them; the shape a formatted file must keep (`sisu parse --shape`) and the unused imports it removes |
 | `sisu-resolve` | 11125 | Loads the Sisu-written std (`compiler/std/`), declares every item, resolves signatures to types, registers methods; traits, impls, coherence and the trait solver; derives (unfolding each trait's `comptime def derive`), delegation and the instances of templates; the generators and generated tests of property testing, the interceptors and fakes of the program's traits; the borrow rules about declarations |
-| `sisu-typeck` | 11358 | The bidirectional checker, with method resolution through traits and `comptime` expressions; produces the typed tree (THIR) for every body, broken or not |
-| `sisu-sir` | 3066 | SIR: the data model, the text writer and reader, the validator, the types of places, and the jump threading of the SIR that runs |
-| `sisu-lower` | 5444 | THIR to SIR: control flow, scopes and their drops, unwind edges, closure conversion, trait calls and their static resolution, drop glue, `comptime` functions, the borrow facts of signatures |
-| `sisu-borrowck` | 5266 | The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, the task rules, escapes, must-consume, purity, `explain-borrow`, and the `Shared` escape analysis |
-| `sisu-interp` | 13320 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the task scheduler (random, PCT, bounded exhaustive) and the `sim` profile's faults, capabilities and the host's objects, the capability log, hot replacement in epochs, the parallel test runner, the dynamic ownership monitor, and the compile-time evaluator |
-| `sisu-rt` | 10385 | Stage 2's runtime, linked into every native executable: the shared ABI (the value layout, the type table's encoding, the entry points), panics and stack traces, allocation, the structural operations on values, iterators, dicts and sets, the intrinsics, the scheduler of tasks on pooled stacks, the library types, capabilities, and the host's files, network and processes |
-| `sisu-codegen` | 3600 | Stage 2's debug backend: SIR to Cranelift IR, one instance per function and list of type arguments, with trait calls resolved at compile time; the object file and the link |
-| `sisu-driver` | 10473 | The query layer and the `sisu` command line; manifests (a TOML reader of its own), the package layout and the lockfile; the counterexample mode, `audit --ownership`, `check --explain`, replay tokens, snapshot files and transcripts, the `sim` build check; `fmt`, the REPL and worksheets, `run --watch`'s rebuilds, and the language server with its JSON; `build --native` and `run --native`; the soundness tests (fault injection, mutation fuzzing), the language server's protocol tests and the native conformance test |
-| `sisu-conformance` | 1267 | The language-agnostic conformance runner, and its native mode |
+| `sisu-typeck` | 11569 | The bidirectional checker, with method resolution through traits and `comptime` expressions; produces the typed tree (THIR) for every body, broken or not |
+| `sisu-sir` | 3093 | SIR: the data model, the text writer and reader, the validator, the types of places, and the jump threading of the SIR that runs |
+| `sisu-lower` | 5427 | THIR to SIR: control flow, scopes and their drops, unwind edges, closure conversion, trait calls and their static resolution, drop glue, `comptime` functions, the borrow facts of signatures |
+| `sisu-borrowck` | 5476 | The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, the task rules, escapes, must-consume, purity, `explain-borrow`, and the `Shared` escape analysis |
+| `sisu-interp` | 13342 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the task scheduler (random, PCT, bounded exhaustive) and the `sim` profile's faults, capabilities and the host's objects, the capability log, hot replacement in epochs, the parallel test runner, the dynamic ownership monitor, and the compile-time evaluator |
+| `sisu-rt` | 10668 | Stage 2's runtime, linked into every native executable: the shared ABI (the value layout, the type table's encoding, the entry points), panics and stack traces, allocation, the structural operations on values, iterators, dicts and sets, the intrinsics, the scheduler of tasks on pooled stacks, the library types, capabilities, and the host's files, network and processes |
+| `sisu-codegen` | 3965 | Stage 2's debug backend: SIR to Cranelift IR, one instance per function and list of type arguments, with trait calls resolved at compile time; the object file and the link |
+| `sisu-driver` | 10635 | The query layer and the `sisu` command line; manifests (a TOML reader of its own), the package layout and the lockfile; the counterexample mode, `audit --ownership`, `check --explain`, replay tokens, snapshot files and transcripts, the `sim` build check; `fmt`, the REPL and worksheets, `run --watch`'s rebuilds, and the language server with its JSON; `build --native` and `run --native`; the soundness tests (fault injection, mutation fuzzing), the language server's protocol tests and the native conformance test |
+| `sisu-conformance` | 1337 | The language-agnostic conformance runner, and its native mode |
 
 Line counts are of each crate's `src`, unit tests included. Besides the crates:
 `catalog/messages.catalog` (every message); the standard library, in
@@ -1230,9 +1230,10 @@ object in the handle's cell.
 pipeline step 6, "Checkers on SIR"). It takes lowering's SIR, in which
 every drop is unconditional, and returns the SIR that runs, with its
 drops placed, together with its findings. It works on one function at a
-time and never looks at THIR: everything it needs about a callee is in
-SIR (`pure`, `from`, `inner`, the intrinsic declarations), so the stage-1
-front end gets the same checker by emitting the same SIR.
+time (so it analyses the functions on threads, decision 219) and never
+looks at THIR: everything it needs about a callee is in SIR (`pure`,
+`from`, `inner`, the intrinsic declarations), so the stage-1 front end
+gets the same checker by emitting the same SIR.
 
 The rule it follows throughout is that **the checker is sound before it
 is complete**: where it cannot tell, it rejects, and each such case is a
@@ -2658,9 +2659,10 @@ over its standard streams, one per feature.
 
 ## The query layer and the driver
 
-`sisu_driver::Db` memoises `parsed` per file and `checked` and `lowered`
-(the SIR through the ownership checker, with its findings as diagnostics)
-per program, on hashes of the texts of its files and manifests, the
+`sisu_driver::Db` memoises `parsed` per file (a program's files parsed
+at once, on threads, decision 219) and `checked` and `lowered` (the SIR
+through the ownership checker, with its findings as diagnostics) per
+program, on hashes of the texts of its files and manifests, the
 skeleton of 18's query pipeline; inside a program's query, checking,
 lowering and the ownership checker are memoised **per item** (10,
 "Compile speed as a requirement": a body edit never invalidates what does
@@ -2709,7 +2711,8 @@ the ownership analyses and taken as checked).
   again, every span moved by as many bytes as the item moved. A body with a
   span outside its item (a label at another definition) is not kept. The
   rounds of a check share the memo, so the bodies are checked once per
-  check, not once per round.
+  check, not once per round. The functions' bodies the memo does not
+  give are checked on threads, then kept in order (decision 219).
 - **Lowering** (`sisu_lower::lower_cached`): a body's SIR functions by its
   checking key, the line its item starts on and the contract level. SIR's
   locations are lines and columns, so a body that moved to another line is
@@ -2850,7 +2853,9 @@ Two crates hold it, and they carry the workspace's only external
 dependencies (decisions 186 and 203):
 
 - `sisu-codegen` compiles a `sisu_sir::Program` to an object file that
-  defines the C `main`, and links it.
+  defines the C `main`, and links it. It writes each function's Cranelift
+  IR on the calling thread and compiles the IR on threads, defining the
+  machine code in the order it made the functions (decision 219).
 - `sisu-rt` is the runtime: a static library (`libsisu_rt.a`) linked into
   every executable, and a Rust library whose `abi` module the code
   generator shares, so that both sides of the boundary are one
@@ -2909,7 +2914,7 @@ where the parts are:
 | a tuple or a struct | the sum | the parts in order |
 | an enum | 1 + the largest variant | the tag (the variant's index), then the variant's fields |
 | an `error` enum, a union of error sets | 3 + the largest variant | its own type's number, its return trace, the tag, then the fields |
-| a function value | 2 | the code's address and the environment's |
+| a function value | 2 | the code's address, and the environment's or its one word (decision 213) |
 | `dict[K, V]`, `set[T]`, `Iter[T]` | 1 | the address of a runtime object |
 | a capability handle | 1 | the address of a cell that holds its object as a `dyn` holds its value: the object's type, its address, then the object (decision 209) |
 | `Lent[T]` | T | the handle (or test clock) it lends |
@@ -3030,12 +3035,15 @@ type and no new dispatcher appears, then writes the dispatchers (decision
 202). The structural operations look through a `dyn` to its value, as the
 interpreter's do.
 
-A closure is its function's code and the address of its environment. One
-whose captures are all references cannot outlive the frame it is made in,
-so its environment is a slot of that frame; one that holds values (`own`)
-gets a heap cell, which round 1 never frees. A named function used as a
-value is a thunk that takes an environment and ignores it, so every
-function value is called as a closure is (decision 195).
+A closure is its function's code and the address of its environment. An
+environment of one word is that word itself instead, copied with the
+function value (decision 213). A larger one whose captures are all
+references cannot outlive the frame it is made in, so it is a slot of that
+frame; a larger one that holds values (`own`) gets a heap cell, which is
+never freed, since a function value is `Copy` and SIR never drops one. A
+named function used as a value is a thunk that takes an environment and
+ignores it, so every function value is called as a closure is (decision
+195).
 
 `main(sys: System)` receives seven handles, each on an object of the host
 the runtime keeps. A handle is a cell that holds its object as a `dyn`
@@ -3077,11 +3085,21 @@ The runtime's entry points (`abi::sym`) are the boundary:
 | `sisu_rt_table(ty, items, n, out) -> u8`, `sisu_rt_dict_slot(dict, key, key_ty, mode, out) -> u8` | a dict or set literal; a dict's value for a key |
 | `sisu_rt_arena_slot(arena, key, mode, out) -> u8` | the address of the value an arena holds for a key; a stale key panics (`R0072`), but for a drop, which does nothing |
 | `sisu_rt_shared_touch(value)` | a `Shared`'s cell reached through `*`: counts it for `--stats` when another task than its maker reaches it |
+| `sisu_rt_free(ptr)` | frees a box's or a `dyn`'s cell whose value was moved out (decision 216) |
+| `sisu_rt_trace_release(error)` | a field was moved out of an error value, which is never dropped whole: it lets go of its return trace (decision 215) |
 | `sisu_rt_yield()` | a yield point found the budget spent: the scheduler may switch tasks |
 | `SISU_RT_DEPTH` | the counter of nested calls |
 | `SISU_RT_BUDGET` | the yield points left before the scheduler is asked |
 | `SISU_RT_STACK` | the running task's stack limits: the probe's, the real one, the unwinding floor, and the watermark's and the failure's flags |
 | `SISU_RT_SITE` | where the running code last called an intrinsic that may wait, and whether its function is `pure` |
+
+What a program allocates is freed when its value is dropped, as the
+interpreter's host frees it (decisions 213 to 218): the runtime counts its
+live allocations of values (heap blocks, and the runtime objects of
+iterators, tables, arenas and return traces), and `SISU_RT_ALLOCS=1` makes
+a native run report the count at exit (`R0125`), which a test holds at 0
+for a program that makes everything the first round leaked. The cells of
+capabilities and `Cap`s, which live as long as the run, are not counted.
 
 The type table is encoded by `abi::encode` into the object's read-only
 data and decoded once when the program starts; the function table holds
@@ -3256,21 +3274,24 @@ these and what the backend leaks.
 
 ### Compile time and run time
 
-Measured on one machine (4 cores, shared, so times vary by a tenth),
-with the release `sisu`, the best of three. Stage 1 (`compiler/stage1`, 28 659
-lines of Sisu, with the standard library it uses) builds natively in
-6.2 s: its front end takes 3.9 s (`sisu check` takes 3.8), code
-generation 2.19 s for 1 204 function instances and 100 809 SIR statements
-(22 microseconds a statement), and the link 0.12 s; the executable is
-11 MB. That is 0.22 s for each thousand lines of stage 1, so a clean
-debug build of 100 kLOC would take about 22 s against 10's target of 10
-s. The backend's own share, code generation and the link, is 0.08 s per
-thousand lines, 8 s for 100 kLOC, within the target alone; the rest is the
-stage-0 front end, which checks a package on one thread and from scratch.
-With a debug `sisu`, whose Cranelift checks every function it is given,
-code generation takes 4.1 s. A small program builds in 0.15 to 0.21 s, of
-which code generation is 1 to 33 ms and the link 60 to 70 ms; the rest is
-the front end, which `sisu run` spends as well.
+Measured on one machine (4 cores, shared, so times vary by a third from
+one run to the next), with the release `sisu`, the best of five runs
+taken in turn with the compiler before decision 219. Stage 1
+(`compiler/stage1`, 46 293 lines of Sisu, with the 6 434 of the standard
+library) builds natively in 4.4 s, against 13.3 s before (medians 4.6 and
+14.1 s): its front end takes 2.5 s (`sisu check`; 7.4 s before), code
+generation 1.3 s for 1 847 function instances and 173 916 SIR statements
+(5.3 s before), and the link 0.10 s; the executable, 16 MB, is the same
+file byte for byte. Most of the gain is the four cores, the rest is less
+work: on one core the build takes 10.6 s against 12.9. That is 0.08 s for
+each thousand lines, so a clean debug build of 100 kLOC would take about
+8 s, within 10's target of 10 s. What still runs on one thread is
+resolution, lowering, and the code generator's writing of IR, about half
+of the time left. With a debug `sisu`, whose Cranelift checks every
+function it is given, code generation takes 3.5 s. A small program
+builds in 0.18 to 0.20 s (0.21 to 0.30 before), of which code generation
+is 1 to 3 ms and the link 80 to 100 ms; the rest is the front end, which
+`sisu run` spends as well.
 
 The executables run 10 to 30 times as fast as the interpreter. On stage
 1's commands, from `compiler/stage1`, with byte-identical output:
@@ -4326,3 +4347,78 @@ what transcribing the Rust type checker found in stage 0)
      where it has one and from `sisu sir`'s output otherwise, and CI runs
      it beside the native mode, so the path from serialised SIR to native
      code is checked on every push.
+
+**Stage 2, round 2: what the first round leaked** (section "Stage 2",
+"The runtime")
+
+213. An environment of one word (a closure that captures one `int`, one
+     handle, one reference) is the word itself, in the function value's
+     second word, rather than the address of a cell: the call passes it as
+     it passes an address, and the closure's code stores it in a slot of
+     its frame, so the body reads its captures as before. A function value
+     is `Copy` and SIR never drops one, so a heap environment could never
+     be freed; the suite's and stage 1's `own` closures all have
+     environments of one word. A task's closure keeps its cell, which the
+     runtime frees when the task ends (decision 206).
+214. A `*rest` pattern binds a view of the elements in place rather than a
+     reference to a list of copies: a header of a list's three words (a
+     capacity of 0 marking a view) and the address of the buffer it views,
+     on the heap, freed when that buffer is (the ownership checker keeps
+     the binding from outliving the list). A view of a view views the same
+     buffer; an empty view is one header kept for the run.
+215. A node of an error's return trace counts what holds it: the errors
+     whose trace it is (a copy of an error holds it once more) and the
+     node pushed after it. Dropping an error lets go of its trace, and the
+     nodes nothing holds are freed. So every `error` enum needs a drop,
+     with or without glue. Moving a field out of an error value, which
+     then is never dropped whole, lets go of its trace there
+     (`sisu_rt_trace_release`).
+216. Moving the value out of a `Box` frees the box's cell and leaves the
+     box holding none (an assignment to the box's value makes a new cell,
+     and a box without one drops nothing); a `dyn` moved into a method that
+     takes `own self` has its cell freed after the call, the method having
+     taken the value (`sisu_rt_free`). This covers lowering's coercion of a
+     `Box[T]` to a `Box[dyn Trait]`, which moves the value out of the first
+     box.
+217. The runtime counts its live allocations of values, and
+     `SISU_RT_ALLOCS=1` makes a native run report the count at exit
+     (`R0125`): heap blocks of `sisu_rt::mem`, and the runtime objects of
+     iterators, tables, arenas and trace nodes, but not the cells kept for
+     the run (capabilities, `Cap`s, the empty view). An environment
+     variable rather than an option, since `sisu run --native` compares
+     what it prints with the interpreter's.
+218. What the interpreter leaves to its host to free, which no program can
+     observe, the runtime frees: SIR's drop glue leaves out a field whose
+     drop nothing observes (a `String`), and a type whose fields are all
+     such has no glue, so the type table marks each field the glue drops
+     (`abi::Field::glue`, computed by SIR's `drops_something`, now in
+     `sisu_sir::types` for lowering and the code generator alike) and the
+     runtime drops the others after the glue, last to first. A value moved
+     into a parameter of an intrinsic that neither owns it nor lets its
+     result hold it (`print` of a text a format made) is dropped after the
+     call, also when the call panicked, when its drop is unobservable; one
+     whose drop a program would observe is left alone, as the interpreter's
+     host leaves it.
+219. The compiler's costliest steps run on threads where their parts are
+     independent, and take the results in the program's order, so that
+     what it prints and writes is the same as on one thread, byte for
+     byte (10, "Compile speed as a requirement": bodies are checked
+     independently and in parallel). The query layer parses a program's
+     files at once; the type checker checks the bodies its memo does not
+     hold; the ownership checker analyses each function on its own (moves
+     and drop placement, then loans, escapes and must-consume), the
+     largest first; and the code generator hands each function's
+     Cranelift IR to threads that compile it while it writes the next, and
+     defines the machine code in the order it made the functions, so the
+     object file does not depend on which thread finished first. As many
+     threads as the machine runs at once (`available_parallelism`), at
+     most 8; on one, nothing changes. A panic on a thread is raised again
+     on the calling one, so an internal error is reported as before; an
+     error Cranelift returns is reported once every function is made,
+     after a construct the backend does not compile. Besides the threads:
+     the ownership checker keeps its answer about a type's drop glue,
+     finds functions by name through an index, and gives a loans state a
+     row only for the locals whose type can hold a loan (nothing is stored
+     in another's); lowering does not collect again the types it has
+     already met; and a command frees its query database on a thread of
+     its own, since the process exits without waiting for it.

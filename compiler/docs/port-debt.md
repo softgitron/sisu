@@ -195,6 +195,15 @@ memo to disk keyed by the interface and the items' texts (the typed bodies
 and SIR functions it holds are plain data), or a resident server the
 command line asks.
 
+**Only some steps of a build use the machine's cores.** A program's files
+are parsed, the bodies the memo lacks checked, its functions put through
+the ownership checker and compiled by Cranelift on threads (decision 219),
+but resolution, lowering and the code generator's writing of IR run on
+one, about half of what a clean native build of stage 1 takes (4.4 s on 4
+cores for 53 000 lines with std), and a package's dependencies are not
+built apart and at once across the graph, as 10 plans. *Pay*: lowering and
+the writing of IR per function on threads, and 10's builds per package.
+
 **Intrinsics get type arguments by a rule.** Generic Sisu functions get
 every type argument at run time; an intrinsic gets them only when
 lowering's rule says it needs them (a type parameter only in the result,
@@ -525,18 +534,24 @@ decisions 207 to 211) leaves:
 
 What round 1 does, and a later round must not copy:
 
-- **Four leaks** (decision 200): the heap environment of a closure that
-  holds values (`own` captures), the list of copies a `*rest` pattern
-  borrows from, the nodes of error return traces, and the cell of a `Box`
-  or a `dyn` whose value was moved out (lowering's coercion of a
-  `Box[T]` to a `Box[dyn Trait]` moves the value out of the first box,
-  and a method that takes `own self` takes it out of its `dyn`). Each
-  grows with what the program makes and none changes what it prints.
-  *Pay*: a closure's environment dropped
-  with the closure (a drop for function values, which SIR does not have);
-  `*rest` as a view, a pointer and a length, once `Slice` is one; traces
-  freed with the last error that holds them; and SIR ending the storage
-  of a box or a `dyn` whose value was moved, so that the cell is freed.
+- **What still leaks natively** (decisions 213 to 218 free the first
+  round's four leaks of decision 200 and what the interpreter's host frees
+  unseen; `SISU_RT_ALLOCS` counts what is left at exit): the heap
+  environment of an `own` closure whose captures take more than one word
+  (a function value is `Copy` and SIR never drops one); the locals of a
+  generator abandoned before its end, whose frames are forgotten (decision
+  95); the error `main` returns; and a value whose drop SIR leaves out
+  because nothing observes it, which the native code has no drop to run
+  for. The last is the front
+  end's: drop elaboration opens a partly moved union of error sets into no
+  parts (`elaborate.rs`, `open`), so after a `match` on a result whose arm
+  moves a field out of one member's variant, an arm that moves nothing
+  drops nothing either; and the cleanup block of that arm drops the error
+  whole, the moved field with it, which the interpreter's moved marker
+  makes harmless and which natively frees the field twice if a panic leaves
+  the arm. *Pay*: drops for function values (with environments counted or
+  owned), an abandoned generator's frames unwound by the runtime, and the
+  elaboration opening a union's payload by its member.
 - **Every part of a value is a word** (decision 188): a `u8` takes eight
   bytes, an option a word for its tag, a `bool` a word. *Pay*: in a
   release backend, each type its own width and alignment, and options

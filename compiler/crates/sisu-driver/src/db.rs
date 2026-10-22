@@ -321,6 +321,16 @@ pub struct Db {
     pub contracts: sisu_lower::ContractLevel,
 }
 
+/// A file's text parsed, its tree built and its interface hashed.
+fn parse_file(name: &str, text: &str) -> Parsed {
+    let mut map = SourceMap::new();
+    let file = map.add(name, text);
+    let parse = sisu_parser::parse(file, text);
+    let module = ast::build::module(&parse.tree);
+    let iface = crate::items::interface_hash(&parse.tree, &module);
+    Parsed { map, file, parse, module, iface }
+}
+
 fn hash(text: &str) -> u64 {
     let mut h = DefaultHasher::new();
     text.hash(&mut h);
@@ -387,14 +397,57 @@ impl Db {
             return Some(p.clone());
         }
         self.counters.parse += 1;
-        let mut map = SourceMap::new();
-        let file = map.add(name, &*text);
-        let parse = sisu_parser::parse(file, &text);
-        let module = ast::build::module(&parse.tree);
-        let iface = crate::items::interface_hash(&parse.tree, &module);
-        let p = Arc::new(Parsed { map, file, parse, module, iface });
+        let p = Arc::new(parse_file(name, &text));
         self.parsed.insert(name.to_string(), (h, p.clone()));
         Some(p)
+    }
+
+    /// [`Db::parsed`] for each of `names` in turn, up to the first without
+    /// a text, but the files not parsed yet parsed on threads (decision
+    /// 219): each file is parsed on its own.
+    fn parse_all(&mut self, names: &[&str]) {
+        let mut todo: Vec<(&str, Arc<str>, u64)> = Vec::new();
+        for name in names {
+            let Some(text) = self.texts.get(*name) else { break };
+            let h = hash(text);
+            let fresh = !self.parsed.get(*name).is_some_and(|(k, _)| *k == h);
+            if fresh && !todo.iter().any(|(n, _, _)| n == name) {
+                todo.push((name, text.clone(), h));
+            }
+        }
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8).min(todo.len());
+        if threads <= 1 {
+            return;
+        }
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let run = || {
+            let mut out = Vec::new();
+            loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some((name, text, _)) = todo.get(i) else { break };
+                out.push((i, parse_file(name, text)));
+            }
+            out
+        };
+        // This thread parses too, alone if no other can be made.
+        let parsed: Vec<(usize, Parsed)> = std::thread::scope(|s| {
+            let others: Vec<_> =
+                (1..threads).filter_map(|_| std::thread::Builder::new().spawn_scoped(s, run).ok()).collect();
+            let mut all = run();
+            for w in others {
+                match w.join() {
+                    Ok(out) => all.extend(out),
+                    Err(e) => std::panic::resume_unwind(e),
+                }
+            }
+            all
+        });
+        for (i, p) in parsed {
+            if let Some((name, _, h)) = todo.get(i) {
+                self.counters.parse += 1;
+                self.parsed.insert(name.to_string(), (*h, Arc::new(p)));
+            }
+        }
     }
 
     pub fn checked(&mut self, name: &str) -> Option<Arc<Checked>> {
@@ -405,6 +458,8 @@ impl Db {
             return Some(c.clone());
         }
         let program = self.program(name);
+        let names: Vec<&str> = program.modules.iter().map(|(_, file, _)| file.as_str()).collect();
+        self.parse_all(&names);
         let mut files = Vec::new();
         for (_, file, _) in &program.modules {
             files.push(self.parsed(file)?);

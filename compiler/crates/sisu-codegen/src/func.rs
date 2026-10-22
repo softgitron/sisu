@@ -996,7 +996,8 @@ impl<'a, 'p> Cx<'a, 'p> {
     }
 
     /// A closure value: its function's code and the address of its
-    /// environment, the tuple of its captures. A closure that captures
+    /// environment, the tuple of its captures, or the environment itself
+    /// when it is one word (decision 213). A closure that captures
     /// references cannot leave the frame of what it captures, so its
     /// environment is a slot of this frame; one that copies its captures
     /// (`own`) may, and its environment is on the heap, never freed
@@ -1702,7 +1703,8 @@ impl<'a, 'p> Cx<'a, 'p> {
         // (decision 218), also when the call panicked. Such a drop only
         // frees memory, so it cannot panic itself.
         if let Some(decl) = self.cg.prog.intrinsic(name) {
-            let held: Vec<u32> = [&decl.own, &decl.from, &decl.inner, &decl.keeps].into_iter().flatten().copied().collect();
+            let held: Vec<u32> =
+                [&decl.own, &decl.from, &decl.inner, &decl.keeps].into_iter().flatten().copied().collect();
             for (k, (o, (a, t))) in args.iter().zip(&argv).enumerate() {
                 let Operand::Move(p) = o else { continue };
                 if held.contains(&(k as u32))

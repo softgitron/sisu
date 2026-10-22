@@ -151,6 +151,10 @@ pub struct Analysis {
     pub live_in: Vec<BitSet>,
     nloc: usize,
     nloans: usize,
+    /// Where each local's loans are in a state's rows: only a local whose
+    /// type can hold a loan has a row, since nothing is stored in another's
+    /// (see [`Analysis::write`]).
+    slots: std::sync::Arc<[u32]>,
 }
 
 /// One operand's loans: what the value holds, which of those are the
@@ -303,6 +307,20 @@ impl Analysis {
             live_in: vec![BitSet::new(nloc); f.blocks.len()],
             nloc,
             nloans,
+            slots: {
+                let mut kept = 0;
+                f.locals
+                    .iter()
+                    .map(|l| {
+                        if types.may_hold(&l.ty) {
+                            kept += 1;
+                            kept - 1
+                        } else {
+                            crate::bitset::LEFT_OUT
+                        }
+                    })
+                    .collect()
+            },
         };
         if f.blocks.is_empty() {
             return a;
@@ -322,8 +340,10 @@ impl Analysis {
         a.entry[0] = Some(init);
         let mut work: Vec<usize> = a.cfg.order.iter().rev().copied().collect();
         let mut queued = vec![true; f.blocks.len()];
-        // The state through the block, copied into one buffer each time.
+        // The state through the block, and the one its unwinding block may
+        // start from, each copied into one buffer each time.
         let mut st = a.empty_state();
+        let mut unwind = a.empty_state();
         while let Some(b) = work.pop() {
             queued[b] = false;
             let Some(entry) = &a.entry[b] else { continue };
@@ -331,15 +351,17 @@ impl Analysis {
             let block = &f.blocks[b];
             // The unwinding block may start from the block's entry or from
             // after any of its statements: the join of all of them.
-            let mut unwind = block.unwind.map(|_| entry.clone());
+            if block.unwind.is_some() {
+                unwind.clone_from(entry);
+            }
             for (si, s) in block.stmts.iter().enumerate() {
                 a.transfer(p, f, types, b, si, s, &mut st);
-                if let Some(u) = &mut unwind {
-                    u.join(&st);
+                if block.unwind.is_some() {
+                    unwind.join(&st);
                 }
             }
             let succ = targets(block).into_iter().map(|t| (t, &st));
-            let unwinding = block.unwind.zip(unwind.as_ref()).map(|(u, s)| (u.0 as usize, s));
+            let unwinding = block.unwind.map(|u| (u.0 as usize, &unwind));
             for (t, s) in succ.chain(unwinding) {
                 if t >= f.blocks.len() {
                     continue;
@@ -390,7 +412,7 @@ impl Analysis {
 
     fn empty_state(&self) -> State {
         State {
-            holds: Rows::new(self.nloc, self.nloans),
+            holds: Rows::with_slots(self.slots.clone(), self.nloans),
             direct: vec![None; self.nloc],
             activated: BitSet::new(self.nloans),
             pinned: BitSet::new(self.nloans),
@@ -527,6 +549,7 @@ impl Analysis {
     fn call_result(
         &self,
         p: &Program,
+        types: &Types,
         callee: &Callee,
         ops: &[OpLoans],
         callee_loans: Option<&OpLoans>,
@@ -553,7 +576,9 @@ impl Analysis {
                 }
             },
             Callee::Fn(name, _) => {
-                if let Some(g) = p.function(name) {
+                // The callee's `from` and `inner`, which placing the drops
+                // leaves as they were.
+                if let Some(g) = types.function(name) {
                     for &i in &g.from {
                         if let Some(o) = ops.get(i as usize) {
                             out.union(&o.holds);
@@ -668,12 +693,12 @@ impl Analysis {
                     Callee::Value(o) => Some(self.op_loans(st, made, args.len(), o)),
                     _ => None,
                 };
-                let result = self.call_result(p, callee, &ops, callee_loans.as_ref());
+                let result = self.call_result(p, types, callee, &ops, callee_loans.as_ref());
                 // A callee may store an argument it takes by value (with
                 // `own`, or a view) through a `mut` one.
                 let kept = match callee {
                     Callee::Intrinsic(name, _) => Some(kept_args(p, name, ops.len())),
-                    Callee::Fn(name, _) => Some(match p.function(name) {
+                    Callee::Fn(name, _) => Some(match types.function(name) {
                         Some(g) => (0..ops.len()).filter(|&i| lent_by_value(g, i as u32)).collect(),
                         None => (0..ops.len()).collect(),
                     }),

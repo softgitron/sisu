@@ -1224,6 +1224,34 @@ pub(crate) fn check_to_run(db: &mut Db, file: &str, keep: &[&str]) -> Result<sis
     Ok(sir)
 }
 
+/// A command's query database, freed on a thread of its own when the
+/// command is done (decision 219): a large program's memory takes a good
+/// part of a second to free, which a process about to exit need not wait
+/// for.
+struct FreedAside(Db);
+
+impl std::ops::Deref for FreedAside {
+    type Target = Db;
+    fn deref(&self) -> &Db {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for FreedAside {
+    fn deref_mut(&mut self) -> &mut Db {
+        &mut self.0
+    }
+}
+
+impl Drop for FreedAside {
+    fn drop(&mut self) {
+        let db = std::mem::take(&mut self.0);
+        // Where no thread can be made, the database is freed here, with
+        // the closure that holds it.
+        let _ = std::thread::Builder::new().spawn(move || drop(db));
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn command(
     cmd: &str,
@@ -1259,7 +1287,7 @@ fn command(
         };
         return run_main_seeds(&prog, &mut h, &options, seeds, opts.bound);
     }
-    let mut db = Db::new();
+    let mut db = FreedAside(Db::new());
     db.contracts = level;
     input.load(&mut db);
     // `sisu test --std`: the standard library's doc examples run too.
@@ -1703,7 +1731,7 @@ fn command(
                         let mut rep = sisu_interp::record::Replayer::new(log, host);
                         // A run under `--watch` replays its saves too.
                         let report = if log.header.watch {
-                            let mut rebuild = Rebuilder::of(input, std::mem::take(&mut db));
+                            let mut rebuild = Rebuilder::of(input, std::mem::take(&mut *db));
                             sisu_interp::run_watch((*prog).clone(), &mut rep, &options, &mut rebuild)
                         } else {
                             sisu_interp::run_main_report(&prog, &mut rep, &options)
@@ -1752,7 +1780,7 @@ fn command(
                         };
                         let mut rec = sisu_interp::record::Recorder::new(&mut h, opts.redact.clone());
                         let report = if watch {
-                            let mut rebuild = Rebuilder::of(input, std::mem::take(&mut db));
+                            let mut rebuild = Rebuilder::of(input, std::mem::take(&mut *db));
                             sisu_interp::run_watch((*prog).clone(), &mut rec, &options, &mut rebuild)
                         } else {
                             sisu_interp::run_main_report(&prog, &mut rec, &options)
@@ -1769,7 +1797,7 @@ fn command(
                         return report.status;
                     }
                     let report = if watch {
-                        let mut rebuild = Rebuilder::of(input, std::mem::take(&mut db));
+                        let mut rebuild = Rebuilder::of(input, std::mem::take(&mut *db));
                         sisu_interp::run_watch((*prog).clone(), &mut h, &options, &mut rebuild)
                     } else {
                         sisu_interp::run_main_report(&prog, &mut h, &options)

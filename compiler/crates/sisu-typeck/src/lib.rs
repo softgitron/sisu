@@ -24,7 +24,7 @@ mod zonk;
 
 use check::{Checker, RetCtx};
 pub use memo::BodyCache;
-use memo::{Session, memo_body};
+use memo::{Lookup, Session, check_body, memo_body, memo_lookup, memo_store};
 pub use pat::pattern_bindings;
 use sisu_diag::{Diagnostic, SourceMap, msg};
 use sisu_resolve::{Answer, DefId, DefKind, Program, Ty};
@@ -598,8 +598,23 @@ pub fn check_with(
     }
     let mut typed = Typed { bodies: Vec::new(), inferred: inferred.clone(), requests: Vec::new() };
     let mut diags = Vec::new();
-    for d in &fns {
-        let (body, mut ds, _) = memo_body(prog, &inferred, *d, BodyKind::Fn, sources, &mut memo);
+    // Each body is checked on its own (decision 219): the ones the memo
+    // does not have are checked on threads, and taken in order.
+    let looked: Vec<Lookup> =
+        fns.iter().map(|d| memo_lookup(prog, &inferred, *d, &BodyKind::Fn, sources, &mut memo)).collect();
+    let missed: Vec<bool> = looked.iter().map(|l| matches!(l, Lookup::Miss(_))).collect();
+    let mut checked =
+        each_body(&fns, |i, d| missed[i].then(|| check_body(prog, &inferred, *d, &BodyKind::Fn, sources)))
+            .into_iter();
+    for (d, look) in fns.iter().zip(looked) {
+        let fresh = checked.next().flatten();
+        let (body, mut ds, _) = match look {
+            Lookup::Hit(found) => found,
+            Lookup::Miss(slot) => {
+                let fresh = fresh.unwrap_or_else(|| check_body(prog, &inferred, *d, &BodyKind::Fn, sources));
+                memo_store(&inferred, *d, BodyKind::Fn, sources, &mut memo, slot, fresh)
+            }
+        };
         typed.bodies.push(body);
         // A function the compiler wrote from code checked elsewhere too
         // reports nothing of its own.
@@ -662,6 +677,44 @@ pub fn check_with(
     diags.append(&mut ds);
     diags.extend(generic_asserts::check_calls(&typed));
     (typed, diags)
+}
+
+/// `work` for each of `items`, by index, on as many threads as the machine
+/// runs at once (at most 8; this one is one of them, and works alone if no
+/// other can be made); the results in the order of `items`.
+fn each_body<T: Sync, R: Send>(items: &[T], work: impl Fn(usize, &T) -> Option<R> + Sync) -> Vec<Option<R>> {
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8).min(items.len());
+    if threads <= 1 {
+        return items.iter().enumerate().map(|(i, x)| work(i, x)).collect();
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let run = || {
+        let mut done = Vec::new();
+        loop {
+            let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let Some(x) = items.get(i) else { break };
+            done.push((i, work(i, x)));
+        }
+        done
+    };
+    let mut out: Vec<Option<R>> = std::iter::repeat_with(|| None).take(items.len()).collect();
+    std::thread::scope(|s| {
+        let others: Vec<_> =
+            (1..threads).filter_map(|_| std::thread::Builder::new().spawn_scoped(s, run).ok()).collect();
+        let mut done = run();
+        for w in others {
+            match w.join() {
+                Ok(theirs) => done.extend(theirs),
+                // A panic in a check is the checker's own: raised again
+                // here, as one on this thread would be.
+                Err(e) => std::panic::resume_unwind(e),
+            }
+        }
+        for (i, r) in done {
+            out[i] = r;
+        }
+    });
+    out
 }
 
 /// What the bodies ask of the next resolution (08, "Reflection"): an
