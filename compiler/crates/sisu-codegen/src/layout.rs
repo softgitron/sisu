@@ -138,14 +138,16 @@ impl<'p> Types<'p> {
                     // The values of tasks and channels are numbers in the
                     // runtime's scheduler; a guard is the address of the
                     // value its mutex holds.
-                    "Scope" | "Handle" | "Cancellation" | "Sender" | "Receiver" | "MutexGuard" => w,
+                    "Scope" | "Handle" | "Cancellation" | "Sender" | "Receiver" | "MutexGuard"
+                    | "ReadGuard" => w,
                     "Timer" => 2 * w,
-                    "Mutex" => abi::MUTEX_HEADER + self.size(&arg(0))?,
+                    "Mutex" | "RwLock" => abi::MUTEX_HEADER + self.size(&arg(0))?,
                     // A `Shared` (or `Weak`) is the address of the value in
                     // its cell, an `Arena` the address of its slots, a
                     // `Cell` its value.
                     "Shared" | "Weak" | "Arena" => w,
-                    "Cell" => self.size(&arg(0))?,
+                    // An `Atomic` is a `Cell` that tasks may share.
+                    "Cell" | "Atomic" => self.size(&arg(0))?,
                     // A `Cap` is the address of its value's cell, a test
                     // clock its clock's number, and a `Lent` its handle.
                     "Cap" | "TestClock" | "HostStream" | "HostListener" => w,
@@ -369,6 +371,14 @@ impl<'p> Types<'p> {
                 let (e, size) = self.part(&arg(0))?;
                 return simple(Kind::Mutex(e), abi::MUTEX_HEADER + size);
             }
+            "RwLock" => {
+                let (e, size) = self.part(&arg(0))?;
+                return simple(Kind::RwLock(e), abi::MUTEX_HEADER + size);
+            }
+            "ReadGuard" => {
+                let e = self.id(&arg(0))?;
+                return simple(Kind::ReadGuard(e), w);
+            }
             "Shared" => {
                 let e = self.id(&arg(0))?;
                 return simple(Kind::Shared(e), w);
@@ -381,7 +391,7 @@ impl<'p> Types<'p> {
                 let e = self.id(&arg(0))?;
                 return simple(Kind::Arena(e), w);
             }
-            "Cell" => {
+            "Cell" | "Atomic" => {
                 let (e, size) = self.part(&arg(0))?;
                 return simple(Kind::Cell(e), size);
             }
@@ -532,12 +542,13 @@ impl<'p> Types<'p> {
             | Kind::Sender(_)
             | Kind::Receiver(_)
             | Kind::Guard(..)
+            | Kind::ReadGuard(_)
             | Kind::Shared(_)
             | Kind::Weak(_)
             | Kind::Arena(_) => true,
             // A capability handle's copies are counted (decision 237).
             Kind::Opaque(n) => abi::counted_handle(&n),
-            Kind::Mutex(v) | Kind::Cell(v) => match self.type_of_id(v) {
+            Kind::Mutex(v) | Kind::RwLock(v) | Kind::Cell(v) => match self.type_of_id(v) {
                 Some(vt) => self.needs_drop_in(&vt, seen)?,
                 None => false,
             },

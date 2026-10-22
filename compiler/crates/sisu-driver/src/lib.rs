@@ -6,6 +6,7 @@
 
 pub mod assist;
 pub mod audit;
+pub mod cfg;
 pub mod cli;
 pub mod db;
 pub mod diary;
@@ -21,6 +22,7 @@ pub mod repl;
 pub mod replay;
 pub mod sim;
 pub mod snap;
+pub mod testcache;
 pub mod toml;
 pub mod transcript;
 

@@ -213,9 +213,10 @@ pub(crate) unsafe fn drop_value(p: *mut u8, t: u32) -> u8 {
                     None => status,
                 }
             }
-            Kind::Guard(..) if forgetting() => abi::OK,
+            Kind::Guard(..) | Kind::ReadGuard(_) if forgetting() => abi::OK,
             Kind::Guard(_, check) => crate::tasks::unlock(mem::word(p, 0) as *mut u8, *check),
-            Kind::Mutex(v) => drop_value(p.add(abi::MUTEX_HEADER as usize), *v),
+            Kind::ReadGuard(_) => crate::tasks::read_unlock(mem::word(p, 0) as *mut u8),
+            Kind::Mutex(v) | Kind::RwLock(v) => drop_value(p.add(abi::MUTEX_HEADER as usize), *v),
             Kind::Sender(_) => crate::tasks::drop_channel_end(mem::word(p, 0) as u32, false),
             Kind::Receiver(_) => crate::tasks::drop_channel_end(mem::word(p, 0) as u32, true),
             Kind::Shared(v) => crate::cells::drop_shared(mem::word(p, 0) as *mut u8, *v),
@@ -446,7 +447,7 @@ pub(crate) unsafe fn copy_value(dst: *mut u8, src: *mut u8, t: u32) {
                 crate::caps::retain_cell(mem::word(src, 0) as *mut u8);
             }
             // An unlocked mutex holding a copy of the value.
-            Kind::Mutex(v) => {
+            Kind::Mutex(v) | Kind::RwLock(v) => {
                 mem::set_word(dst, abi::MUTEX_LOCKED, 0);
                 mem::set_word(dst, abi::MUTEX_HOLDER, 0);
                 mem::set_word(dst, abi::MUTEX_POISONED, mem::word(src, abi::MUTEX_POISONED));
@@ -877,7 +878,17 @@ pub(crate) unsafe fn debug(out: &mut Vec<u8>, p: *mut u8, t: u32) {
                 }
                 out.push(b')');
             }
-            Kind::Guard(v, _) => debug(out, mem::word(p, 0) as *mut u8, *v),
+            // Readers leave the value to be read; a writer does not.
+            Kind::RwLock(v) => {
+                out.extend_from_slice(b"RwLock(");
+                if mem::word(p, abi::MUTEX_LOCKED) == 1 {
+                    out.extend_from_slice(b"<locked>");
+                } else {
+                    debug(out, p.add(abi::MUTEX_HEADER as usize), *v);
+                }
+                out.push(b')');
+            }
+            Kind::Guard(v, _) | Kind::ReadGuard(v) => debug(out, mem::word(p, 0) as *mut u8, *v),
             Kind::Shared(v) => {
                 let cell = mem::word(p, 0) as *mut u8;
                 if crate::cells::alive(cell) {

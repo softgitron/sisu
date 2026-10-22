@@ -26,13 +26,15 @@ pub fn drops_something(t: &Type, needs: &HashMap<&str, bool>) -> bool {
         Type::Named(n, args) => match n.as_str() {
             // A capability handle's and a `Cap`'s copies are counted, and
             // the last one's drop drops the object (decision 237).
-            "Shared" | "Weak" | "MutexGuard" | "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin"
-            | "System" | "Cap" => true,
+            "Shared" | "Weak" | "MutexGuard" | "ReadGuard" | "Fs" | "Net" | "Clock" | "Rand" | "Env"
+            | "Proc" | "Stdin" | "System" | "Cap" => true,
             "String" | "Path" | "DateTime" | "HostFs" | "HostNet" | "HostClock" | "HostRand" | "HostEnv"
             | "HostProc" | "HostStdin" | "TestClock" | "Lent" | "f32" | "u8" | "u16" | "u32" | "u64"
             | "u128" | "i8" | "i16" | "i32" | "i128" | "bytes" | "Slice" => false,
             "list" | "Array" | "dict" | "set" | "Iter" | "Entry" | "Iterable" | "Option" | "Result"
-            | "Cell" | "Mutex" | "Arena" => args.iter().any(|a| drops_something(a, needs)),
+            | "Cell" | "Atomic" | "Mutex" | "RwLock" | "Arena" => {
+                args.iter().any(|a| drops_something(a, needs))
+            }
             other => needs.get(other).copied().unwrap_or(true),
         },
     }
@@ -47,8 +49,10 @@ pub fn place_ty<'d>(decl: &dyn Fn(&str) -> Option<&'d TypeDecl>, f: &Function, p
         t = match proj {
             Proj::Deref => match t {
                 Type::Ref(inner, _) => *inner,
-                // A `Shared` and a mutex guard lead to the value.
-                Type::Named(n, args) if n == "Shared" || n == "MutexGuard" => args.into_iter().next()?,
+                // A `Shared` and a mutex or read guard lead to the value.
+                Type::Named(n, args) if n == "Shared" || n == "MutexGuard" || n == "ReadGuard" => {
+                    args.into_iter().next()?
+                }
                 _ => return None,
             },
             Proj::Downcast(v) => {

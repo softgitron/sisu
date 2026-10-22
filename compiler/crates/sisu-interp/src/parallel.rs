@@ -145,7 +145,7 @@ fn run_one(
 /// Whether the test function takes the real `System` (in the `sim`
 /// profile its `System` is simulated, so it runs with the others).
 fn takes_real_system(prog: &sir::Program, options: &Options, function: &str) -> bool {
-    options.sim.is_none() && prog.functions.iter().any(|f| f.name == function && f.param_count == 1)
+    options.sim.is_none() && prog.functions.iter().any(|f| f.name == function && sir::takes_real_system(f))
 }
 
 /// Runs the tests at these indices (in declaration order); see the
@@ -211,9 +211,11 @@ pub(crate) fn run(
     // Each test's output, in declaration order, then the results.
     let mut out = Vec::new();
     for (k, (name, _)) in tests.into_iter().enumerate() {
-        let Some((r, report, o, e)) = done[k].take() else { continue };
+        let Some((r, mut report, o, e)) = done[k].take() else { continue };
         host.stdout(&o);
         host.stderr(&e);
+        report.out = o;
+        report.err = e;
         out.push((name, r, report));
     }
     out

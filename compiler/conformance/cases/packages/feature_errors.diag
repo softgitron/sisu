@@ -1,0 +1,6 @@
+src/main.sisu:9:14-9:20 W0006 resolve.unknown-feature name="slow"
+sisu.toml:8:44-8:52 E1018 package.unknown-feature name="colour" package="render"
+sisu.toml:8:74-8:78 E1003 package.bad-value key="default-features" expected="`true` or `false`" found="`\"no\"`"
+sisu.toml:11:12-11:18 E1018 package.unknown-feature name="fats" package="app"
+sisu.toml:13:28-13:36 E1018 package.unknown-feature name="nope/x" package="app"
+sisu.toml:13:38-13:54 E1018 package.unknown-feature name="shadows" package="render"

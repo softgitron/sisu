@@ -141,8 +141,11 @@ impl<'p> Interp<'p, '_> {
             return r;
         }
         learn(self, Route::Rest);
-        if name == "Mutex.lock" {
+        if name == "Mutex.lock" || name == "RwLock.write" {
             return self.lock(&mut args);
+        }
+        if name == "RwLock.read" {
+            return self.read_lock(&mut args);
         }
         // `Array.filled(value)`: `N` (its second type argument) copies.
         if name == "Array.filled" {
@@ -199,7 +202,9 @@ impl<'p> Interp<'p, '_> {
                 "set" => self.set_method(method, &mut a),
                 "Shared" | "Weak" => self.shared_method(owner, method, &mut a),
                 "Cell" => self.cell_method(method, &mut a),
-                "Mutex" => self.mutex_method(method, &mut a),
+                "Atomic" => self.atomic_method(method, &mut a),
+                // An `RwLock` is a mutex that counts its readers too.
+                "Mutex" | "RwLock" => self.mutex_method(owner == "RwLock", method, &mut a),
                 "Arena" => self.arena_method(method, &mut a),
                 "Iter" => {
                     if method == "next" {
@@ -1377,14 +1382,45 @@ impl Interp<'_, '_> {
         }
     }
 
+    /// `Atomic`, a `Cell` tasks may share: its operations beyond the
+    /// cell's. `compare_exchange` gives `Ok` with the value before and puts
+    /// the new one in when the value equals `current` (as values compare),
+    /// and `Err` with a copy of the value found otherwise, dropping the new
+    /// one.
+    fn atomic_method(&mut self, method: &str, a: &mut Args) -> Result<Value, Unwind> {
+        match method {
+            "compare_exchange" => {
+                let p = self.pointer_of(a.get(0)?)?;
+                let current = self.target(a.get(1)?)?.clone();
+                let new = a.take(2)?;
+                let found = match self.read(&p)? {
+                    Value::Cell(v) => (**v).clone(),
+                    other => return Err(ice(format!("Atomic.compare_exchange on {other:?}"))),
+                };
+                if self.equal(&found, &current)? {
+                    if let Value::Cell(v) = self.write(&p)? {
+                        **v = new;
+                    }
+                    return Ok(Value::Variant(Value::adt("Result", 0, vec![found])));
+                }
+                self.retain_caps(&found, None);
+                self.queue_drop(new, None);
+                Ok(Value::Variant(Value::adt("Result", 1, vec![found])))
+            }
+            other => Err(ice(format!("unknown intrinsic `Atomic.{other}`"))),
+        }
+    }
+
     /// `Mutex` in one task (06; D-077 for a guard dropped by unwinding).
-    fn mutex_method(&mut self, method: &str, a: &mut Args) -> Result<Value, Unwind> {
+    fn mutex_method(&mut self, rw: bool, method: &str, a: &mut Args) -> Result<Value, Unwind> {
         match method {
             "new" => Ok(Value::Mutex(Box::new(crate::value::MutexVal {
                 value: a.take(0)?,
                 locked: false,
                 holder: 0,
                 poisoned: false,
+                readers: 0,
+                rw,
             }))),
             "lock" => {
                 let p = self.pointer_of(a.get(0)?)?;

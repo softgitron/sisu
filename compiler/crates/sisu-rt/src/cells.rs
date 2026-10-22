@@ -420,6 +420,28 @@ pub(crate) unsafe fn call(i: abi::Intrinsic, c: &Call<'_>) -> Option<u8> {
                     value::drop_value(old.as_mut_ptr() as *mut u8, v)
                 }
             }
+            // An `Atomic` is a `Cell` tasks may share: `Ok` with the value
+            // before and the new one in when the value equals `current` (as
+            // values compare), `Err` with a copy of the value found and the
+            // new one dropped otherwise.
+            I::AtomicCompareExchange => {
+                let (p, t) = c.place(0);
+                let Kind::Cell(v) = ty(t).kind else {
+                    rt::internal("`Atomic.compare_exchange` of something not an atomic")
+                };
+                let size = ty(v).size as usize;
+                if value::equal(p, v, c.arg(1), c.ty(1)) {
+                    mem::set_word(c.ret, 0, 0);
+                    mem::copy(c.ret.add(8), p, size);
+                    mem::copy(p, c.arg(2), size);
+                    abi::OK
+                } else {
+                    mem::set_word(c.ret, 0, 1);
+                    mem::copy(c.ret.add(8), p, size);
+                    crate::value::retain_value(c.ret.add(8), v);
+                    value::drop_value(c.arg(2), v)
+                }
+            }
             I::ArenaNew => {
                 let Kind::Arena(elem) = ty(c.ret_ty).kind else {
                     rt::internal("an arena of an unknown type")

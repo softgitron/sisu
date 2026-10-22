@@ -475,6 +475,13 @@ pub enum Kind {
     /// of `T`'s `invariant` check, which a guard dropped by unwinding runs
     /// (D-077).
     Guard(u32, Option<u32>),
+    /// `RwLock[T]`: a `Mutex[T]` whose header's lock word is 0 when free, 1
+    /// while a task writes ([`MUTEX_HOLDER`] then the writer) and 2 while
+    /// tasks read ([`MUTEX_HOLDER`] then their number).
+    RwLock(u32),
+    /// `ReadGuard[T]`: one word, the address of the value inside the
+    /// `RwLock`; dropping it counts one reader fewer.
+    ReadGuard(u32),
     /// `Shared[T]` and `Weak[T]`: one word, the address of the value in its
     /// heap cell, whose header ([`SHARED_HEADER`] bytes: the owners, the
     /// weak handles, the task that made it, and flags) is just before it.
@@ -615,6 +622,8 @@ const K_CELL: u8 = 40;
 const K_ARENA: u8 = 41;
 const K_BYTES: u8 = 42;
 const K_DATETIME: u8 = 43;
+const K_RW_LOCK: u8 = 44;
+const K_READ_GUARD: u8 = 45;
 
 struct Writer(Vec<u8>);
 
@@ -780,6 +789,14 @@ pub fn encode(table: &[TypeEntry]) -> Vec<u8> {
                 w.u32(*t);
                 w.opt(*check);
             }
+            Kind::RwLock(t) => {
+                w.u8(K_RW_LOCK);
+                w.u32(*t);
+            }
+            Kind::ReadGuard(t) => {
+                w.u8(K_READ_GUARD);
+                w.u32(*t);
+            }
             Kind::Shared(t) => {
                 w.u8(K_SHARED);
                 w.u32(*t);
@@ -924,6 +941,8 @@ pub fn decode(bytes: &[u8]) -> Option<Vec<TypeEntry>> {
             K_TIMER => Kind::Timer,
             K_MUTEX => Kind::Mutex(r.u32()?),
             K_GUARD => Kind::Guard(r.u32()?, r.opt()?),
+            K_RW_LOCK => Kind::RwLock(r.u32()?),
+            K_READ_GUARD => Kind::ReadGuard(r.u32()?),
             K_SHARED => Kind::Shared(r.u32()?),
             K_WEAK => Kind::Weak(r.u32()?),
             K_CELL => Kind::Cell(r.u32()?),
@@ -1184,6 +1203,11 @@ intrinsics! {
     MutexLock = "Mutex.lock",
     MutexIsPoisoned = "Mutex.is_poisoned",
     MutexIntoInner = "Mutex.into_inner",
+    RwLockNew = "RwLock.new",
+    RwLockRead = "RwLock.read",
+    RwLockWrite = "RwLock.write",
+    RwLockIsPoisoned = "RwLock.is_poisoned",
+    RwLockIntoInner = "RwLock.into_inner",
     SharedNew = "Shared.new",
     SharedNewAtomic = "Shared.new_atomic",
     SharedGet = "Shared.get",
@@ -1194,6 +1218,7 @@ intrinsics! {
     CellGet = "Cell.get",
     CellSet = "Cell.set",
     CellReplace = "Cell.replace",
+    AtomicCompareExchange = "Atomic.compare_exchange",
     ArenaNew = "Arena.new",
     ArenaInsert = "Arena.insert",
     ArenaGet = "Arena.get",
@@ -1258,6 +1283,8 @@ impl Intrinsic {
                 | Intrinsic::SelectWait
                 | Intrinsic::GenYield
                 | Intrinsic::MutexLock
+                | Intrinsic::RwLockRead
+                | Intrinsic::RwLockWrite
                 | Intrinsic::IterNext
         )
     }
@@ -1327,6 +1354,8 @@ mod tests {
             Kind::Mutex(5),
             Kind::Guard(5, Some(2)),
             Kind::Guard(5, None),
+            Kind::RwLock(5),
+            Kind::ReadGuard(5),
             Kind::Shared(6),
             Kind::Weak(6),
             Kind::Cell(7),

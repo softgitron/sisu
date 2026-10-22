@@ -370,6 +370,9 @@ pub(crate) struct Codegen<'p> {
     /// way a closure is.
     thunks: fx::FxMap<String, (FuncId, Type)>,
     fbctx: FunctionBuilderContext,
+    /// The release profile (decision 232): besides Cranelift's
+    /// optimisations, scalars in registers (decision 246).
+    pub release: bool,
     /// The target, which the threads that compile share (decision 219).
     isa: cranelift_codegen::isa::OwnedTargetIsa,
     /// Where the functions go to be compiled on those threads; none when
@@ -512,6 +515,7 @@ impl<'p> Codegen<'p> {
             thunks: fx::FxMap::default(),
             foreign: foreign_objects(prog, &reachable(prog)),
             fbctx: FunctionBuilderContext::new(),
+            release,
             isa: shared,
             jobs: None,
             spares: None,

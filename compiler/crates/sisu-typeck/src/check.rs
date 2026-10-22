@@ -171,6 +171,22 @@ impl<'p> Checker<'p> {
         self.report(d);
     }
 
+    /// `E0900` for compile-time code that unfolds (`what`) where nothing
+    /// unfolds it: a function or a method that has it is a template, made
+    /// for its type arguments (decision 244), and the other places are
+    /// named.
+    pub fn no_unfolding(&mut self, range: TextRange, what: &str) {
+        let (place, places) = match self.prog.fn_info(self.def) {
+            Some(f) if matches!(f.kind, sisu_resolve::FnKind::Test(_)) => ("a test", "tests"),
+            Some(f) if f.comptime => ("a `comptime def`", "`comptime def`s"),
+            Some(f) if f.trait_.is_some() => ("a trait's own method", "a trait's own methods"),
+            Some(f) if f.impl_.is_some() => ("a method of a generic trait impl", "generic trait impls"),
+            Some(_) => ("this function", "more places"),
+            None => ("a constant or a default", "constants and defaults"),
+        };
+        self.unsupported(range, &format!("{what} in {place}"), &format!("reflection in {places} (Phase 8)"));
+    }
+
     /// A function only the standard library may call (`@internal`): the
     /// forwarding of lent capabilities, the assembling of a `System`.
     pub fn check_internal(&mut self, d: DefId, range: TextRange) {
@@ -840,11 +856,7 @@ impl<'p> Checker<'p> {
                     out.push(Stmt::Expr(x));
                 }
                 _ => {
-                    self.unsupported(
-                        s.range,
-                        "`comptime for` and `comptime if` outside a derive or a generic function",
-                        "compile-time code in methods and non-generic functions (Phase 8)",
-                    );
+                    self.no_unfolding(s.range, "`comptime for` and `comptime if`");
                     out.push(Stmt::Error(span));
                 }
             },
@@ -1190,8 +1202,17 @@ impl<'p> Checker<'p> {
                     // function change what the caller lends.
                     // Through the reference the parameter is.
                     let mut base = e;
+                    let mut read_guard = false;
                     while let ExprKind::Deref(inner) | ExprKind::Field { base: inner, .. } = &base.kind {
+                        if matches!(&base.kind, ExprKind::Deref(_))
+                            && matches!(self.infer.resolve(&inner.ty), Ty::Adt(g, _) if self.prog.builtin(g) == Some("ReadGuard"))
+                        {
+                            read_guard = true;
+                        }
                         base = inner;
+                    }
+                    if read_guard {
+                        d = d.note(msg::TYPE_READ_GUARD_VALUE, Vec::new());
                     }
                     if let Some(root) = base.place_root()
                         && let Some(p) = self.prog.fn_info(self.def).and_then(|f| {
@@ -1500,8 +1521,11 @@ pub(crate) fn mutable_root_problem(
             Ty::Ref(_, true) => None,
             Ty::Ref(_, false) => Some(Problem::BehindSharedRef),
             // A `Shared` value is changed only through a `Cell` or a
-            // `Mutex` in it; a mutex guard's value is the guard's to change.
-            Ty::Adt(d, _) if prog.builtin(d) == Some("Shared") => Some(Problem::BehindSharedRef),
+            // `Mutex` in it, and a read guard's value by nobody; a mutex
+            // guard's value is the guard's to change.
+            Ty::Adt(d, _) if matches!(prog.builtin(d), Some("Shared" | "ReadGuard")) => {
+                Some(Problem::BehindSharedRef)
+            }
             _ => None,
         },
         _ => None,

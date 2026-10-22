@@ -1,0 +1,14 @@
+test "a fresh in-memory Fs" ... ok
+test "the next test's Fs is empty" ... ok
+test "a clock that stands still, a seeded Rand and empty fakes" ... ok
+test "the test clock moves when told" ... ok
+test "a network of its own" ... ok
+test "a failing one shows its fakes are its own" ... FAILED
+
+test "a failing one shows its fakes are its own" ... FAILED
+panic: assertion failed: fs.exists("note")
+  message: nothing another test wrote is here
+  at test "a failing one shows its fakes are its own" (named_capabilities.sisu:39:5)
+replay: sisu test --replay 1-b36c677c13bde335-0.0.1-t5-s0-r0 named_capabilities.sisu
+
+5 passed, 1 failed, 0 blocked

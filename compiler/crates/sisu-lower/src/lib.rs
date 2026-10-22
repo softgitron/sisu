@@ -58,8 +58,13 @@ impl Ctx<'_> {
             if let sisu_resolve::FnKind::Predicate(r) = f.kind {
                 return format!("{}#where", prog.qualified_name(r));
             }
-            // An instance of a template: `to_json#Point` (08).
+            // An instance of a template: `to_json#Point` (08); the one
+            // instance of a template without type parameters takes its
+            // name, so whatever names the template runs it (decision 244).
             if let Some((t, args)) = &f.instance_of {
+                if args.is_empty() {
+                    return self.fn_name(*t);
+                }
                 let shown: Vec<String> = args.iter().map(|a| prog.display(a)).collect();
                 let key: String = shown
                     .join(",")
@@ -481,9 +486,12 @@ fn lower_reaching(
     roots.extend(tests.iter().map(|(_, f)| f.clone()));
     roots.extend(extra.iter().map(|s| s.to_string()));
     // A test that declares a `System` gets `System.sim` in the `sim`
-    // profile, which the run time calls (17).
-    if prog.tests.iter().any(|d| prog.fn_info(*d).is_some_and(|f| f.params.len() == 1)) {
+    // profile, which the run time calls (17); one that names capabilities
+    // gets the fakes `System.fake` makes, a fake network and the test
+    // clock (decision 241), or the simulated ones.
+    if prog.tests.iter().any(|d| prog.fn_info(*d).is_some_and(|f| !f.params.is_empty())) {
         roots.push("System.sim".to_string());
+        roots.extend(["System.fake", "Net.fake"].map(String::from));
     }
     // A constant is computed even when nothing uses it: a `comptime` in it
     // that fails is an error of the program (08).

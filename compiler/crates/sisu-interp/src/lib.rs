@@ -170,6 +170,10 @@ pub struct RunReport {
     pub snapshots: Vec<(String, String)>,
     /// The steps the run took: statements and terminators, of every task.
     pub steps: u64,
+    /// What a test printed to standard output and to standard error, held
+    /// while the tests ran (the test cache keeps it, decision 242).
+    pub out: String,
+    pub err: String,
 }
 
 /// Why execution left a frame other than by returning.
@@ -525,11 +529,20 @@ impl<'p, 'h> Interp<'p, 'h> {
         self.test_name =
             self.prog.tests.iter().find(|(_, f)| f == function).map(|(n, _)| n.clone()).unwrap_or_default();
         // A test that declares a `System` receives the real one, as `main`
-        // does (17, "Isolation and parallelism"); the others make the
-        // fakes they need.
-        let takes_system = self.func(fi).is_some_and(|f| f.param_count == 1);
+        // does (17, "Isolation and parallelism"); one that names
+        // capabilities receives fresh fakes of them (decision 241); the
+        // others make the fakes they need.
+        let takes_system = self.func(fi).is_some_and(sir::takes_real_system);
+        let named = self.func(fi).map_or(0, |f| f.param_count);
         // In the `sim` profile it receives a simulated one instead (17).
-        let args = if !takes_system {
+        let args = if !takes_system && named > 0 {
+            match self.test_fakes(fi) {
+                Ok(args) => args,
+                Err(Unwind::Panic(p)) => return TestResult::Failed(panic_report(&p)),
+                Err(Unwind::Abort(m)) => return TestResult::Failed(m),
+                Err(_) => return TestResult::Failed("the test's fakes could not be made".into()),
+            }
+        } else if !takes_system {
             Vec::new()
         } else if self.sim.is_some() {
             match self.call_by_name("System.sim", vec![Value::Int(self.case_seed as i64)]) {
@@ -557,6 +570,37 @@ impl<'p, 'h> Interp<'p, 'h> {
 }
 
 impl<'p> Interp<'p, '_> {
+    /// The fakes a test that names capabilities receives, one per
+    /// parameter, from a fresh `System.fake` (a `System.sim` in the `sim`
+    /// profile), a fake network and the run's test clock (decision 241).
+    fn test_fakes(&mut self, fi: usize) -> Result<Vec<Value>, Unwind> {
+        let Some(f) = self.func(fi) else { return Ok(Vec::new()) };
+        let maker = if self.sim.is_some() { "System.sim" } else { "System.fake" };
+        let mut fields = match self.call_by_name(maker, vec![Value::Int(self.case_seed as i64)])? {
+            Value::Struct(a) => a.fields,
+            other => return Err(ice(format!("{maker} made {other:?}"))),
+        };
+        let mut args = Vec::new();
+        for l in f.locals.iter().skip(1).take(f.param_count as usize) {
+            let name = match &l.ty {
+                sir::Type::Named(n, _) => n.as_str(),
+                _ => "",
+            };
+            let field =
+                ["Fs", "Net", "Clock", "Rand", "Env", "Proc", "Stdin"].iter().position(|h| *h == name);
+            let v = match (name, field) {
+                // Without the `sim` profile, a network of its own rather
+                // than `System.fake`'s, which reaches nothing.
+                ("Net", _) if self.sim.is_none() => self.call_by_name("Net.fake", Vec::new())?,
+                ("TestClock", _) => self.intrinsic("Clock.fake", &[], Vec::new(), None)?,
+                (_, Some(k)) => std::mem::replace(&mut fields[k], Value::Moved),
+                _ => return Err(ice(format!("a test that takes a `{name}`"))),
+            };
+            args.push(v);
+        }
+        Ok(args)
+    }
+
     /// The body at index `i` of the run's function table.
     pub(crate) fn func(&self, i: usize) -> Option<&'p sir::Function> {
         self.funcs.get(i).copied()
@@ -575,7 +619,10 @@ fn mentions_counted(t: &sir::Type) -> bool {
                     | "Weak"
                     | "MutexGuard"
                     | "Mutex"
+                    | "RwLock"
+                    | "ReadGuard"
                     | "Cell"
+                    | "Atomic"
                     | "Arena"
                     | "Sender"
                     | "Receiver"

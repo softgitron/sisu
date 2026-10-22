@@ -596,6 +596,13 @@ pub fn value_wrapper(f: &Function, takes: &[Type]) -> Function {
     }
 }
 
+/// Whether a test function takes the real `System` (17): one parameter,
+/// a `System`. A test that names capabilities instead receives fakes of
+/// them (decision 241).
+pub fn takes_real_system(f: &Function) -> bool {
+    f.param_count == 1 && matches!(f.locals.get(1).map(|l| &l.ty), Some(Type::Named(n, _)) if n == "System")
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct BasicBlock {
     pub stmts: Vec<Statement>,

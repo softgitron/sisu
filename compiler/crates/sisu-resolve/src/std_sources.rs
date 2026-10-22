@@ -19,6 +19,8 @@ pub const TEST: &str = include_str!("../../../std/test.sisu");
 pub const COLLECTIONS: &str = include_str!("../../../std/collections.sisu");
 pub const NUM: &str = include_str!("../../../std/num.sisu");
 pub const LIVE: &str = include_str!("../../../std/live.sisu");
+pub const STRING: &str = include_str!("../../../std/string.sisu");
+pub const FMT: &str = include_str!("../../../std/fmt.sisu");
 
 /// `target` (08, "Conditional compilation"): the build target's facts as
 /// constants. Stage 0's target is the interpreter on the host, so they are
@@ -58,6 +60,9 @@ pub const MODULE_PATHS: &[&str] = &[
     "std.collections",
     "std.num",
     "std.live",
+    "std.core",
+    "std.string",
+    "std.fmt",
 ];
 
 /// The std module an import path names, as (module name, source).
@@ -77,6 +82,10 @@ pub fn module_for(path: &[&str]) -> Option<(&'static str, &'static str)> {
         ["std", "collections"] => Some(("collections", COLLECTIONS)),
         ["std", "num"] => Some(("num", NUM)),
         ["std", "live"] => Some(("live", LIVE)),
+        // The prelude is `std.core` (11).
+        ["std", "core"] => Some(("prelude", PRELUDE)),
+        ["std", "string"] => Some(("string", STRING)),
+        ["std", "fmt"] => Some(("fmt", FMT)),
         _ => None,
     }
 }
@@ -87,6 +96,7 @@ pub const DOCUMENTED: &[(&str, &str)] = &[
     ("cap", CAP),
     ("cli", CLI),
     ("collections", COLLECTIONS),
+    ("fmt", FMT),
     ("live", LIVE),
     ("num", NUM),
     ("http", HTTP),
@@ -95,6 +105,7 @@ pub const DOCUMENTED: &[(&str, &str)] = &[
     ("math", MATH),
     ("net", NET),
     ("sim", SIM),
+    ("string", STRING),
     ("task", TASK),
     ("test", TEST),
     ("time", TIME),
@@ -143,6 +154,8 @@ pub fn reexports(module: &str) -> &'static [&'static str] {
             "Num", "u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32", "i128", "f32", "bytes", "abs",
             "min", "max", "sum",
         ],
+        "string" => &["String"],
+        "fmt" => &["Display", "Debug", "Formatter", "Spec"],
         _ => &[],
     }
 }

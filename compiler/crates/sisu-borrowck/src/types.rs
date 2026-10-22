@@ -65,7 +65,8 @@ const PLAIN_BUILTINS: &[&str] = &[
 
 /// The builtin types whose values may borrow whatever their arguments are:
 /// an iterator walks a collection it may borrow, an entry borrows its dict.
-const BORROWING_BUILTINS: &[&str] = &["Iter", "Entry", "Iterable", "MutexGuard", "Lent", "Slice"];
+const BORROWING_BUILTINS: &[&str] =
+    &["Iter", "Entry", "Iterable", "MutexGuard", "ReadGuard", "Lent", "Slice"];
 
 impl<'p> Types<'p> {
     pub fn new(p: &'p Program) -> Types<'p> {
@@ -228,7 +229,8 @@ impl<'p> Types<'p> {
             Type::Named(n, args) => match n.as_str() {
                 "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "System" | "Cap" => true,
                 "Lent" | "Shared" | "Weak" | "list" | "Array" | "dict" | "set" | "Iter" | "Entry"
-                | "Iterable" | "Cell" | "Mutex" | "MutexGuard" | "Arena" | "Slice" => false,
+                | "Iterable" | "Cell" | "Atomic" | "Mutex" | "RwLock" | "MutexGuard" | "ReadGuard"
+                | "Arena" | "Slice" => false,
                 "Option" | "Result" => args.iter().any(|a| self.holds_handle_depth(a, depth + 1)),
                 _ => match self.decl(n) {
                     Some(TypeDecl::Struct { fields, .. }) => {
@@ -317,7 +319,7 @@ impl<'p> Types<'p> {
             Type::Tuple(es) => es.iter().any(|e| self.drop_glue_in(e, depth + 1, w)),
             Type::Named(n, args) => {
                 // Dropping a guard unlocks its mutex, through its loan.
-                if n == "MutexGuard" {
+                if n == "MutexGuard" || n == "ReadGuard" {
                     return true;
                 }
                 if let Some(r) = w.done.get(t) {

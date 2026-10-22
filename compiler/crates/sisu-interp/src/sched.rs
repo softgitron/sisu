@@ -2030,7 +2030,8 @@ impl<'p> Interp<'p, '_> {
 
     // ---------------------------------------------------------------- mutexes
 
-    /// `Mutex.lock` across tasks: waits while another task holds it.
+    /// `Mutex.lock` across tasks: waits while another task holds it. An
+    /// `RwLock`'s `write` is the same, and waits for its readers too.
     pub(crate) fn lock(&mut self, args: &mut Vec<Value>) -> Result<Value, Unwind> {
         let p = self.pointer_of(&args[0])?;
         let cur = self.sched.cur;
@@ -2045,7 +2046,7 @@ impl<'p> Interp<'p, '_> {
                 }
                 return Err(panic(msg::PANIC_MUTEX_HELD, &[]));
             }
-            Value::Mutex(m) if m.locked => true,
+            Value::Mutex(m) if m.locked || m.readers > 0 => true,
             Value::Mutex(m) => {
                 m.locked = true;
                 m.holder = cur;
@@ -2062,6 +2063,37 @@ impl<'p> Interp<'p, '_> {
             })));
         }
         Ok(Value::Guard(Box::new(p)))
+    }
+
+    /// `RwLock.read`: waits while a task holds the write lock, then counts
+    /// one more reader.
+    pub(crate) fn read_lock(&mut self, args: &mut Vec<Value>) -> Result<Value, Unwind> {
+        let p = self.pointer_of(&args[0])?;
+        let cur = self.sched.cur;
+        let wait = match self.write(&p)? {
+            Value::Mutex(m) if m.poisoned => return Err(panic(msg::PANIC_MUTEX_POISONED, &[])),
+            Value::Mutex(m) if m.locked && m.holder == cur => {
+                if self.sched.checking {
+                    self.sched.check_skipped = true;
+                }
+                return Err(panic(msg::PANIC_MUTEX_HELD, &[]));
+            }
+            Value::Mutex(m) if m.locked => true,
+            Value::Mutex(m) => {
+                m.readers += 1;
+                false
+            }
+            other => return Err(ice(format!("RwLock.read on {other:?}"))),
+        };
+        if wait {
+            return Err(Unwind::Block(Box::new(Blocked {
+                args: std::mem::take(args),
+                wait: Wait::Lock,
+                keys: vec![Key::Lock],
+                timer: None,
+            })));
+        }
+        Ok(Value::ReadGuard(Box::new(p)))
     }
 
     /// The tasks a `Shared` cell was touched by: under the monitor, a cell

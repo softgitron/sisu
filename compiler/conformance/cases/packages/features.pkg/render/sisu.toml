@@ -1,0 +1,10 @@
+[package]
+name = "render"
+version = "0.2.0"
+
+[features]
+default = ["ascii"]
+ascii = []
+color = ["unicode"]
+unicode = []
+borders = []

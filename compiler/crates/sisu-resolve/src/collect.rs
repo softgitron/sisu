@@ -106,6 +106,15 @@ pub(crate) struct Resolver<'a> {
     pub instances_asked: usize,
     /// Whether it was asked for more than that, which is reported once.
     pub instances_bounded: bool,
+    /// How many instances this resolution declared: the next one's number.
+    pub instances_declared: usize,
+    /// The modules that hold an instance, whose functions are never
+    /// templates themselves.
+    pub instance_modules: std::collections::HashSet<ModuleId>,
+    /// The instances that are methods, found once their impls are resolved:
+    /// the module, the instance's name, the template, its type arguments
+    /// and where the program needs it.
+    pub method_instances: Vec<(ModuleId, String, DefId, Vec<Ty>, Span)>,
     /// The definitions whose `from` clauses are checked already.
     pub borrow_checked: usize,
 }
@@ -166,6 +175,9 @@ pub struct Sources<'a> {
     /// Also declare the standard library's doc examples as tests, every
     /// std module loaded (`sisu test --std`).
     pub std_doc_tests: bool,
+    /// The program is built with its tests, so the root package's doc
+    /// examples are tests of it (decision 243).
+    pub tests: bool,
 }
 
 /// The package id of [`Sources::packages`]`[k]` in the resolved program,
@@ -194,7 +206,7 @@ pub fn resolve_with(
     let packages = [SourcePackage { name: String::new(), deps: Vec::new(), trusted: true }];
     resolve_program(
         sources,
-        Sources { modules: &modules, packages: &packages, std_doc_tests: false },
+        Sources { modules: &modules, packages: &packages, std_doc_tests: false, tests: true },
         requests,
         embedded,
     )
@@ -282,6 +294,9 @@ pub fn resolve_session<'a>(
         std_items: HashMap::new(),
         instances_asked: 0,
         instances_bounded: false,
+        instances_declared: 0,
+        instance_modules: std::collections::HashSet::new(),
+        method_instances: Vec::new(),
         borrow_checked: 0,
     };
     r.prog.embedded = embedded.clone();
@@ -365,8 +380,9 @@ pub fn resolve_session<'a>(
         let items = r.own_items(m);
         let prefix = r.test_prefix(m);
         r.declare_items(id, &items, &prefix);
-        // The root package's doc examples are its tests too (10).
-        if m.package == 0 {
+        // The root package's doc examples are its tests too (10), when the
+        // program is built with its tests.
+        if m.package == 0 && program.tests {
             r.declare_doc_tests(id, &items, &prefix);
         }
     }
@@ -2074,13 +2090,23 @@ impl Resolver<'_> {
             info.kind = k.clone();
         }
         info.quiet = self.quiet_fns.contains(&def);
-        // A free generic function that reflects on its type parameters, or
-        // was promoted for calling one with them, is a template (08).
-        info.template = !f.generics.is_empty()
-            && info.owner.is_none()
-            && info.trait_.is_none()
-            && info.impl_.is_none()
-            && (crate::instances::reflects(f) || self.promoted.contains(&def));
+        // A function whose body runs code at compile time by unfolding, or
+        // that was promoted for calling a template with its own type
+        // parameters, is a template (08, "Reflection"; decision 244): a
+        // free function, a method of a type or of an inherent impl, or a
+        // method of a trait impl without type parameters. It is made for
+        // each list of type arguments it is called with, and once, before
+        // anything calls it, when it has none. A trait's own methods and a
+        // `comptime def` are not templates.
+        let unfolding = crate::instances::unfolds(f, &names) || self.promoted.contains(&def);
+        info.template = unfolding
+            && !f.is_comptime
+            && !self.instance_modules.contains(&module)
+            && match &owner {
+                None | Some(Owner::Type(_)) | Some(Owner::Inherent { .. }) => true,
+                Some(Owner::Impl(_)) => info.generics.is_empty(),
+                Some(Owner::Trait(_)) | Some(Owner::Refinement(_)) => false,
+            };
         if info.template {
             self.template_asts.insert(def, f.clone());
         }

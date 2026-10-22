@@ -8,8 +8,10 @@
 //! when `T` is `Sync`; `ref mut T` is `Send` when `T` is `Send` and `Sync`
 //! when `T` is `Sync`. A `Cell[T]` is `Send` when `T` is and never `Sync`;
 //! a `Mutex[T]`, a channel half and a task handle are both when `T` is
-//! `Send`; a mutex guard is never `Send` (it unlocks in the task that
-//! locked) and `Sync` when `T` is; a `Shared[T]` and a `Weak[T]` are both
+//! `Send`, and so is an `Atomic[T]`; an `RwLock[T]` is `Send` when `T`
+//! is and `Sync` when `T` is both, since its readers share the value; a
+//! mutex guard and a read guard are never `Send` (they unlock in the task
+//! that locked) and `Sync` when `T` is; a `Shared[T]` and a `Weak[T]` are both
 //! when `T` is `Sync`, and so are a `Cap[T]` and a `Lent[T]`, which every
 //! copy shares. A function or closure value is neither, since its
 //! captures are not in its type; a `dyn Trait` is what its trait's
@@ -120,10 +122,16 @@ impl Program {
                         }
                         elem(both(self, &arg(0), Auto::Send, seen))
                     }
-                    Some("Mutex" | "Sender" | "Receiver" | "Handle") => {
+                    Some("Mutex" | "Atomic" | "Sender" | "Receiver" | "Handle") => {
                         elem(both(self, &arg(0), Auto::Send, seen))
                     }
-                    Some("MutexGuard") => {
+                    // Readers share the value: `Sync` asks it to be `Sync`
+                    // too.
+                    Some("RwLock") => {
+                        elem(both(self, &arg(0), Auto::Send, seen))?;
+                        if auto == Auto::Sync { elem(both(self, &arg(0), Auto::Sync, seen)) } else { Ok(()) }
+                    }
+                    Some("MutexGuard" | "ReadGuard") => {
                         if auto == Auto::Send {
                             return no();
                         }

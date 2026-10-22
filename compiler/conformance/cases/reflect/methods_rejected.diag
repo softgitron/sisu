@@ -1,0 +1,9 @@
+14:9-15:29 E0900 stage0.unsupported construct="`comptime for` and `comptime if` in a trait's own method" phase="reflection in a trait's own methods (Phase 8)"
+26:16-26:26 E0900 stage0.unsupported construct="a field named by a compile-time value (`x.[f]`) in a method of a generic trait impl" phase="reflection in generic trait impls (Phase 8)"
+29:16-29:23 E0900 stage0.unsupported construct="`reflect` in a `comptime def`" phase="reflection in `comptime def`s (Phase 8)"
+29:34-29:39 E0350 type.not-a-value name="Point" kind="type"
+31:24-31:31 E0900 stage0.unsupported construct="`reflect` in a constant or a default" phase="reflection in constants and defaults (Phase 8)"
+31:42-31:47 E0350 type.not-a-value name="Point" kind="type"
+33:5-33:12 E0609 comptime.instance-failed name="unknown" reason="`p` is not known at compile time"
+  label 34:41-34:42 comptime.instance-here
+39:5-40:28 E0900 stage0.unsupported construct="`comptime for` and `comptime if` in a test" phase="reflection in tests (Phase 8)"

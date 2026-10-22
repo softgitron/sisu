@@ -239,7 +239,8 @@ and the time spent building and running them.
 - `comptime/` is compile-time evaluation: constants computed by the
   compiler (`baked` pins the SIR built from literals), `comptime assert`,
   `comptime def`, budgets, the evaluation errors, and derives written as
-  compile-time Sisu, with `proposal_derive`, the user-defined derive of
+  compile-time Sisu (`derive_default` and `derive_default_errors`: the
+  prelude's `Default`), with `proposal_derive`, the user-defined derive of
   `proposal/examples/comptime.sisu`, and `proposal_arrays`, its CRC table
   and ring buffer, each kept identical by a test; `generic_assert` is a
   `comptime assert` over a `const` parameter, checked at the call.
@@ -295,7 +296,9 @@ and the time spent building and running them.
   `select`, races, mutexes across tasks with guards dropped by unwinding,
   the lowest-index rule of `pure` scopes, deadlock reports, generators
   (`generator_close`: one dropped before its end runs its drops and
-  `defer`s; `generator_close_panic`: a panic there aborts), `log`, and
+  `defer`s; `generator_close_panic`: a panic there aborts), the sync
+  types beside `Mutex` (`sync_types`: `Atomic`, `Once`, `Condvar` and
+  `RwLock`; `sync_errors`), `log`, and
   the diagnostics of `Send`, `Sync`, what a task may borrow and what a
   channel may carry (`channel_owner_errors`: neither a view nor
   must-consume).

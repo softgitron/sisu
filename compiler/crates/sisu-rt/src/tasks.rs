@@ -53,6 +53,11 @@ pub(crate) fn handles(i: Intrinsic) -> bool {
             | I::MutexLock
             | I::MutexIsPoisoned
             | I::MutexIntoInner
+            | I::RwLockNew
+            | I::RwLockRead
+            | I::RwLockWrite
+            | I::RwLockIsPoisoned
+            | I::RwLockIntoInner
             | I::IterNext
     )
 }
@@ -204,7 +209,7 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
             }),
             I::GenNew => system(|| gen_new(c)),
             I::GenYield => gen_yield(c),
-            I::MutexNew => system(|| {
+            I::MutexNew | I::RwLockNew => system(|| {
                 let (_, t) = (c.arg(0), c.ty(0));
                 mem::set_word(c.ret, abi::MUTEX_LOCKED, 0);
                 mem::set_word(c.ret, abi::MUTEX_HOLDER, 0);
@@ -212,15 +217,16 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
                 mem::copy(c.ret.add(abi::MUTEX_HEADER as usize), c.arg(0), ty(t).size as usize);
                 abi::OK
             }),
-            I::MutexLock => lock(c),
-            I::MutexIsPoisoned => {
+            I::MutexLock | I::RwLockWrite => lock(c),
+            I::RwLockRead => read_lock(c),
+            I::MutexIsPoisoned | I::RwLockIsPoisoned => {
                 let (p, _) = c.place(0);
                 c.set_bool(mem::word(p, abi::MUTEX_POISONED) != 0);
                 abi::OK
             }
-            I::MutexIntoInner => sched::system_status(|| {
+            I::MutexIntoInner | I::RwLockIntoInner => sched::system_status(|| {
                 let (p, t) = (c.arg(0), c.ty(0));
-                let Kind::Mutex(v) = ty(t).kind else {
+                let (Kind::Mutex(v) | Kind::RwLock(v)) = ty(t).kind else {
                     rt::internal("`into_inner` of something not a mutex")
                 };
                 let value = p.add(abi::MUTEX_HEADER as usize);
@@ -1332,8 +1338,9 @@ pub(crate) fn abandon(t: u32) -> u8 {
 
 // ------------------------------------------------------------------ mutexes
 
-/// `Mutex.lock`: waits while another task holds the mutex, and cannot be
-/// cancelled; panics when this task holds it, or it is poisoned.
+/// `Mutex.lock`, and an `RwLock`'s `write`: waits while another task holds
+/// the lock, or reads it, and cannot be cancelled; panics when this task
+/// holds it, or it is poisoned.
 unsafe fn lock(c: &Call<'_>) -> u8 {
     // SAFETY: the argument is a mutex, through a reference.
     let (p, _) = unsafe { c.place(0) };
@@ -1346,8 +1353,11 @@ unsafe fn lock(c: &Call<'_>) -> u8 {
                 if mem::word(p, abi::MUTEX_POISONED) != 0 {
                     return Attempt::Done(rt::raise_msg(msg::PANIC_MUTEX_POISONED, &[]));
                 }
-                if mem::word(p, abi::MUTEX_LOCKED) != 0 {
-                    if mem::word(p, abi::MUTEX_HOLDER) == u64::from(cur) {
+                let state = mem::word(p, abi::MUTEX_LOCKED);
+                if state != 0 {
+                    // A lock word of 2 is an `RwLock`'s readers: its holder
+                    // word counts them.
+                    if state == 1 && mem::word(p, abi::MUTEX_HOLDER) == u64::from(cur) {
                         return Attempt::Done(rt::raise_msg(msg::PANIC_MUTEX_HELD, &[]));
                     }
                     s.block_on(Wait::Lock, &[Key::Lock], None, site);
@@ -1360,6 +1370,59 @@ unsafe fn lock(c: &Call<'_>) -> u8 {
             Attempt::Done(abi::OK)
         })
     })
+}
+
+/// `RwLock.read`: waits while a task writes (panics when this task does,
+/// or the lock is poisoned), then counts one more reader.
+unsafe fn read_lock(c: &Call<'_>) -> u8 {
+    // SAFETY: the argument is an `RwLock`, through a reference.
+    let (p, _) = unsafe { c.place(0) };
+    let site = Site::current();
+    sched::blocking(|| {
+        with(|s| {
+            let cur = s.cur;
+            // SAFETY: the lock's header is its first words.
+            unsafe {
+                if mem::word(p, abi::MUTEX_POISONED) != 0 {
+                    return Attempt::Done(rt::raise_msg(msg::PANIC_MUTEX_POISONED, &[]));
+                }
+                match mem::word(p, abi::MUTEX_LOCKED) {
+                    1 if mem::word(p, abi::MUTEX_HOLDER) == u64::from(cur) => {
+                        return Attempt::Done(rt::raise_msg(msg::PANIC_MUTEX_HELD, &[]));
+                    }
+                    1 => {
+                        s.block_on(Wait::Lock, &[Key::Lock], None, site);
+                        return Attempt::Wait;
+                    }
+                    0 => {
+                        mem::set_word(p, abi::MUTEX_LOCKED, 2);
+                        mem::set_word(p, abi::MUTEX_HOLDER, 1);
+                    }
+                    _ => mem::set_word(p, abi::MUTEX_HOLDER, mem::word(p, abi::MUTEX_HOLDER) + 1),
+                }
+                c.set_word(p.add(abi::MUTEX_HEADER as usize) as u64);
+            }
+            Attempt::Done(abi::OK)
+        })
+    })
+}
+
+/// Drops a read guard: one reader fewer, and the last one frees the lock.
+///
+/// # Safety
+/// `value` must be the address of a read-locked `RwLock`'s value.
+pub(crate) unsafe fn read_unlock(value: *mut u8) -> u8 {
+    // SAFETY: the header is just before the value.
+    unsafe {
+        let header = value.sub(abi::MUTEX_HEADER as usize);
+        let readers = mem::word(header, abi::MUTEX_HOLDER).saturating_sub(1);
+        mem::set_word(header, abi::MUTEX_HOLDER, readers);
+        if readers == 0 {
+            mem::set_word(header, abi::MUTEX_LOCKED, 0);
+        }
+    }
+    system(|| with(|s| s.wake_key(Key::Lock)));
+    abi::OK
 }
 
 /// Drops a mutex guard: unlocks the mutex. When a panic is unwinding, the

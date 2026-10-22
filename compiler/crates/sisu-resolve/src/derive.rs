@@ -244,7 +244,9 @@ impl Resolver<'_> {
                         name: s.name.text.clone(),
                         generics: generics_text(&s.generics, source),
                         used: used_params(&s.generics, s.fields.iter().map(|f| &f.ty)),
-                        body: Body::Struct(s.fields.iter().map(|f| f.name.text.clone()).collect()),
+                        body: Body::Struct(
+                            s.fields.iter().map(|f| (f.name.text.clone(), f.default.is_some())).collect(),
+                        ),
                     },
                     item.attrs.iter().any(|a| a.name == "builtin"),
                 ),
@@ -464,8 +466,8 @@ impl Resolver<'_> {
                 ExprKind::Str(parts) => Some(ast::build::plain_text(parts)),
                 _ => None,
             });
-            let fields = match &shape.body {
-                Body::Struct(fields) => fields.clone(),
+            let fields: Vec<String> = match &shape.body {
+                Body::Struct(fields) => fields.iter().map(|(n, _)| n.clone()).collect(),
                 Body::Enum(_) => Vec::new(),
             };
             let Some(field) = field.filter(|f| fields.contains(f)) else {
@@ -522,9 +524,11 @@ impl Resolver<'_> {
                 continue;
             };
             // A derive of the language's traits needs the trait of every
-            // field; another trait's derive needs what its code uses, which
-            // checking the derived impl finds.
-            let structural = DERIVABLE.contains(&c.trait_name.as_str()) || c.field.is_some();
+            // field, the prelude's `Default` of every field without a
+            // default of its own; another trait's derive needs what its code
+            // uses, which checking the derived impl finds.
+            let default = self.prog.lookup(self.prog.prelude, "Default") == Some(trait_def);
+            let structural = DERIVABLE.contains(&c.trait_name.as_str()) || c.field.is_some() || default;
             let generated = |prog: &Program, i: DefId| {
                 let m = &prog.modules[prog.def(i).module.0 as usize].name;
                 m.starts_with("<derive>/") || m.starts_with("<delegate>/")
@@ -541,7 +545,12 @@ impl Resolver<'_> {
             let Some(info) = self.prog.impl_info(imp).cloned() else { continue };
             let env = self.prog.elaborate_env(&info.predicates);
             let fields: Vec<(String, Ty)> = match &self.prog.def(c.ty).kind {
-                DefKind::Struct(s) => s.fields.iter().map(|f| (f.name.clone(), f.ty.clone())).collect(),
+                DefKind::Struct(s) => s
+                    .fields
+                    .iter()
+                    .filter(|f| !default || f.default.is_none())
+                    .map(|f| (f.name.clone(), f.ty.clone()))
+                    .collect(),
                 DefKind::Enum(e) => e
                     .variants
                     .iter()

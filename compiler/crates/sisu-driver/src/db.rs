@@ -176,6 +176,9 @@ pub struct ProgramSource {
     /// `sisu test --std`: the standard library's doc examples are tests of
     /// the program too.
     pub std_doc_tests: bool,
+    /// Each package's features, as `packages` numbers them, for `@cfg`
+    /// (decision 243).
+    pub features: Vec<crate::cfg::Features>,
 }
 
 impl ProgramSource {
@@ -197,6 +200,14 @@ impl ProgramSource {
             script: l.script,
             base: l.base.clone(),
             std_doc_tests: false,
+            features: l
+                .packages
+                .iter()
+                .map(|p| crate::cfg::Features {
+                    declared: p.features.iter().map(|f| f.name.clone()).collect(),
+                    on: p.on.clone(),
+                })
+                .collect(),
         }
     }
 
@@ -205,7 +216,8 @@ impl ProgramSource {
     pub fn write(&self) -> String {
         use crate::toml::quote;
         let mut out = format!("script = {}\n", self.script);
-        for p in &self.packages {
+        let list = |xs: &[String]| xs.iter().map(|x| quote(x)).collect::<Vec<_>>().join(", ");
+        for (k, p) in self.packages.iter().enumerate() {
             let deps: Vec<String> = p.deps.iter().map(|(n, d)| format!("[{}, {d}]", quote(n))).collect();
             out.push_str(&format!(
                 "\n[[package]]\nname = {}\ntrusted = {}\ndeps = [{}]\n",
@@ -213,6 +225,11 @@ impl ProgramSource {
                 p.trusted,
                 deps.join(", ")
             ));
+            if let Some(f) = self.features.get(k)
+                && !f.declared.is_empty()
+            {
+                out.push_str(&format!("declared = [{}]\nfeatures = [{}]\n", list(&f.declared), list(&f.on)));
+            }
         }
         for (path, file, package) in &self.modules {
             let path: Vec<String> = path.iter().map(|x| quote(x)).collect();
@@ -253,6 +270,13 @@ impl ProgramSource {
                 deps,
                 trusted: matches!(t.get("trusted")?.value, Value::Bool(true)),
             });
+            let names = |key: &str| match t.get(key).map(|v| &v.value) {
+                Some(Value::Array(xs)) => {
+                    xs.iter().filter_map(|x| x.value.as_str().map(str::to_string)).collect()
+                }
+                _ => Vec::new(),
+            };
+            p.features.push(crate::cfg::Features { declared: names("declared"), on: names("features") });
         }
         for m in items("module") {
             let t = m.value.as_table()?;
@@ -286,6 +310,7 @@ impl ProgramSource {
         }
         self.script.hash(&mut h);
         self.std_doc_tests.hash(&mut h);
+        self.features.hash(&mut h);
         h.finish()
     }
 }
@@ -319,6 +344,11 @@ pub struct Db {
     /// Which contracts the lowered program checks (07); part of the
     /// lowered query's key.
     pub contracts: sisu_lower::ContractLevel,
+    /// The program is built without its tests (`sisu run`, `sisu build`,
+    /// `sisu sir`): `@cfg(test)` does not hold, and its `test`, `suite`
+    /// and `bench` items and its doc examples are left out (decision
+    /// 244). Part of every query's key.
+    pub no_tests: bool,
 }
 
 /// A file's text parsed, its tree built and its interface hashed.
@@ -376,14 +406,16 @@ impl Db {
     /// program rooted at it reads: every module's text and the layout.
     fn key(&self, name: &str) -> Option<(Arc<str>, u64)> {
         let t = self.texts.get(name)?.clone();
-        let Some(p) = self.programs.get(name) else {
-            let h = hash(&t);
-            return Some((t, h));
-        };
         let mut h = DefaultHasher::new();
-        p.key().hash(&mut h);
-        for (_, file, _) in &p.modules {
-            self.texts.get(file).map(|x| hash(x)).hash(&mut h);
+        self.no_tests.hash(&mut h);
+        match self.programs.get(name) {
+            None => hash(&t).hash(&mut h),
+            Some(p) => {
+                p.key().hash(&mut h);
+                for (_, file, _) in &p.modules {
+                    self.texts.get(file).map(|x| hash(x)).hash(&mut h);
+                }
+            }
         }
         Some((t, h.finish()))
     }
@@ -492,15 +524,25 @@ impl Db {
                 embedded.entry(k).or_insert(v);
             }
         }
+        // Each module as this build compiles it (decision 243).
+        let built: Vec<(Option<ast::Module>, Vec<crate::cfg::Problem>)> = program
+            .modules
+            .iter()
+            .zip(&files)
+            .map(|((_, _, package), p)| {
+                crate::cfg::filter(&p.module, !self.no_tests, program.features.get(*package))
+            })
+            .collect();
         let modules: Vec<sisu_resolve::SourceModule> = program
             .modules
             .iter()
             .zip(&files)
+            .zip(&built)
             .enumerate()
-            .map(|(i, ((path, _, package), p))| sisu_resolve::SourceModule {
+            .map(|(i, (((path, _, package), p), (b, _)))| sisu_resolve::SourceModule {
                 path,
                 file: FileId(i as u32),
-                ast: &p.module,
+                ast: b.as_ref().unwrap_or(&p.module),
                 package: *package,
             })
             .collect();
@@ -508,12 +550,14 @@ impl Db {
             modules: &modules,
             packages: &program.packages,
             std_doc_tests: program.std_doc_tests,
+            tests: !self.no_tests,
         };
         // The program's interface: everything resolution reads (the
         // layout, each module's interface, the files `embed` names), and
         // in each round the instances asked for.
         let mut base = DefaultHasher::new();
         program.key().hash(&mut base);
+        self.no_tests.hash(&mut base);
         for p in &files {
             p.iface.hash(&mut base);
         }
@@ -642,6 +686,21 @@ impl Db {
                     .with("package", pkg.name.clone())
                     .with("what", what),
                 );
+            }
+        }
+        for (i, (_, problems)) in built.iter().enumerate() {
+            for p in problems {
+                let file = FileId(i as u32);
+                diagnostics.push(match p {
+                    crate::cfg::Problem::NotACondition(at) => {
+                        Diagnostic::new(sisu_diag::msg::RESOLVE_BAD_CFG, sisu_diag::Span::new(file, *at))
+                    }
+                    crate::cfg::Problem::UnknownFeature(at, name) => Diagnostic::new(
+                        sisu_diag::msg::RESOLVE_UNKNOWN_FEATURE,
+                        sisu_diag::Span::new(file, *at),
+                    )
+                    .with("name", name.clone()),
+                });
             }
         }
         diagnostics.extend(r.diagnostics.into_iter().filter(|d| !on_broken_line(d)));

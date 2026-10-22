@@ -412,12 +412,14 @@ impl Program {
                     };
                     fields.iter().all(rec) && iargs.iter().all(rec)
                 } else if module.is_std
-                    && (self.builtin(*d).is_some()
+                    && (self.builtin(*d).is_some_and(|b| b != "Atomic")
                         || matches!(self.def(*d).name.as_str(), "Option" | "Result" | "Ordering" | "Box"))
                 {
                     // std's impls of the host-backed types and the core
                     // enums render as the host does; another std type's
-                    // own impl (`Duration`'s `Display`) is its own.
+                    // own impl (`Duration`'s `Display`, `Atomic`'s `Debug`,
+                    // which the host would show as the `Cell` it is) is its
+                    // own.
                     args.iter().all(rec)
                 } else {
                     false

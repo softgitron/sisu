@@ -4,10 +4,11 @@
 //!
 //! A trait's `comptime def derive(T: type) -> impl Trait for T` returns the
 //! impl the trait derives for `T`, written `return impl Trait for T:` with
-//! methods. A generic function whose body asks about its type parameters
-//! (`if comptime reflect.is_struct(T):`, `comptime for f in
+//! methods. A function or a method whose body asks about types (`if
+//! comptime reflect.is_struct(T):`, `comptime for f in
 //! reflect.fields_of(T):`, `value.[f]`) is made once for each list of type
-//! arguments it is called with (an instance). Stage 0 evaluates both by
+//! arguments it is called with (an instance), and once when it has none
+//! (`instances.rs`). Stage 0 evaluates both by
 //! unfolding: the code that runs at compile time (`comptime for`, `comptime
 //! if`, `if comptime`, the same two among a `match`'s arms, `comptime
 //! panic`, and every expression made only of compile-time values) is
@@ -45,8 +46,8 @@ use sisu_syntax::ast::{
 /// The shape of the type being derived for.
 #[derive(Clone)]
 pub(crate) enum Body {
-    /// Field names.
-    Struct(Vec<String>),
+    /// Field names, each with whether the field has a default.
+    Struct(Vec<(String, bool)>),
     /// Variant names, each with its field names (`None` for positional).
     Enum(Vec<(String, Vec<Option<String>>)>),
 }
@@ -123,8 +124,10 @@ impl TypeShape {
         match t.body {
             Body::Struct(fields) => {
                 s.kind = Kind::Struct;
-                s.fields =
-                    fields.iter().map(|n| FieldShape { name: n.clone(), ty: None, default: false }).collect();
+                s.fields = fields
+                    .iter()
+                    .map(|(n, default)| FieldShape { name: n.clone(), ty: None, default: *default })
+                    .collect();
             }
             Body::Enum(vs) => {
                 s.kind = Kind::Enum;
@@ -260,20 +263,25 @@ pub(crate) fn unfold(
     Ok(out)
 }
 
-/// The source of the instance of the generic function `f` (from the file
-/// whose text is `source`) for these type arguments, named `name`: its
+/// The source of the instance of the template `f` (from the file whose
+/// text is `source`) for these type arguments, named `name`: its
 /// signature with each type parameter replaced, and its body unfolded.
+/// `types` are the other types its compile-time code names, known to it
+/// but not replaced in its text. A method's instance is a method of an
+/// inherent impl of `within`, its type.
 pub(crate) fn unfold_fn(
     f: &ast::FnDef,
     source: &str,
     params: Vec<(String, TypeShape)>,
+    types: Vec<(String, TypeShape)>,
     name: &str,
+    within: Option<&str>,
 ) -> Result<String, Failure> {
     let Some(body) = &f.body else {
         return Err((f.name.range, "a function without a body has no instance".into()));
     };
     let mut u = Unfold { source, params: params.clone(), env: Vec::new(), arms: Vec::new() };
-    for (p, shape) in params {
+    for (p, shape) in params.into_iter().chain(types) {
         u.env.push((p, Value::Type(Box::new(shape))));
     }
     // `def name[T: B](params) -> R:` becomes `def NAME(params) -> R:`.
@@ -306,9 +314,16 @@ pub(crate) fn unfold_fn(
     };
     let pure = if f.is_pure { "pure " } else { "" };
     let mut out = String::new();
-    line(&mut out, 0, &format!("{pure}def {name}{}", u.substitute_param(&rest)));
-    if u.stmts(&body.stmts, 1, &mut out)? == 0 {
-        line(&mut out, 1, "pass");
+    let depth = match within {
+        Some(ty) => {
+            line(&mut out, 0, &format!("impl {ty}:"));
+            1
+        }
+        None => 0,
+    };
+    line(&mut out, depth, &format!("{pure}def {name}{}", u.substitute_param(&rest)));
+    if u.stmts(&body.stmts, depth + 1, &mut out)? == 0 {
+        line(&mut out, depth + 1, "pass");
     }
     Ok(out)
 }
@@ -467,6 +482,7 @@ impl<'a> Unfold<'a> {
         let mut found = false;
         walk(e, &mut |x| match &x.kind {
             ExprKind::Name(n) => found |= self.lookup(n).is_some() || n == "reflect",
+            ExprKind::SelfType => found |= self.lookup("Self").is_some(),
             ExprKind::FieldOf { .. } | ExprKind::Comptime(_) => found = true,
             _ => {}
         });
@@ -477,6 +493,7 @@ impl<'a> Unfold<'a> {
     fn is_static(&self, e: &Expr) -> bool {
         match &e.kind {
             ExprKind::Name(n) => self.lookup(n).is_some() || n == "True" || n == "False",
+            ExprKind::SelfType => self.lookup("Self").is_some(),
             ExprKind::Int { .. } => true,
             ExprKind::Str(parts) => parts.iter().all(|p| match p {
                 StrPart::Text(_) => true,
@@ -569,6 +586,10 @@ impl<'a> Unfold<'a> {
     fn eval(&self, e: &Expr) -> R<Value> {
         let fail = |why: String| Err((e.range, why));
         match &e.kind {
+            ExprKind::SelfType => match self.lookup("Self") {
+                Some(v) => Ok(v.clone()),
+                None => fail("`Self` is not known at compile time".into()),
+            },
             ExprKind::Name(n) => match self.lookup(n) {
                 Some(v) => Ok(v.clone()),
                 None if n == "True" => Ok(Value::Bool(true)),

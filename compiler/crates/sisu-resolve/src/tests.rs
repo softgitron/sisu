@@ -207,3 +207,22 @@ fn a_template_that_cannot_unfold_is_reported_where_it_stops() {
         vec!["E0607"]
     );
 }
+
+#[test]
+fn a_default_derive_leaves_out_the_fields_with_defaults() {
+    let text = derived_text("@derive(Default)\nstruct C:\n    name: String\n    retries: int = 3\n");
+    assert!(
+        text.contains(
+            "impl Default for C:\n    pure def default() -> Self:\n        return C(name=Default.default())\n"
+        ),
+        "{text}"
+    );
+    let (r, _) = run("@derive(Default)\nenum Mode:\n    Fast\n    Slow\n");
+    let msgs: Vec<String> = r.diagnostics.iter().map(|d| format!("{} {}", d.code(), d.message())).collect();
+    assert_eq!(msgs.len(), 1, "{}", msgs.join("\n"));
+    assert!(
+        msgs[0].starts_with("E0608 ") && msgs[0].contains("its default is one of its variants"),
+        "{}",
+        msgs[0]
+    );
+}

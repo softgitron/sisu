@@ -1,0 +1,3 @@
+panic: a shift by 64 is out of range; shifts take 0 to 63
+  at shl (integer_division.sisu:13:12)
+  at main (integer_division.sisu:36:11)

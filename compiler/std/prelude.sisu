@@ -311,6 +311,25 @@ struct Shared[T]:
 struct Weak[T]:
     pass
 
+## A value tasks share and change one step at a time (06; 11's sync
+## primitives): `load`, `store`, `swap` and, for numbers and `bool`, the
+## read-modify-write operations each read and write the value in one step
+## that no other task interleaves with. `Shared(Atomic(0))` is a counter
+## tasks share. An `Atomic` is `Send` and `Sync` when its value is `Send`.
+@builtin("Atomic")
+struct Atomic[T]:
+    pass
+
+## The memory orders of the C++11 model, which atomics follow (06). The
+## runtime runs one task at a time, so every atomic operation is one step
+## of the program and each order acts as `SeqCst`.
+enum MemoryOrder:
+    Relaxed
+    Acquire
+    Release
+    AcqRel
+    SeqCst
+
 ## A value replaced through a shared reference, in one task (04, rule 5):
 ## no reference into it is ever given out, so replacing it invalidates none.
 ## A `Cell` is never `Sync`: tasks cannot share one.
@@ -858,7 +877,8 @@ trait Default:
             pure def default() -> Self:
                 if comptime reflect.is_struct(T):
                     return reflect.construct(
-                        T, {f.name: Default.default() for f in reflect.fields_of(T) if not f.default}
+                        T,
+                        {f.name: Default.default() for f in reflect.fields_of(T) if not f.default},
                     )
                 else:
                     comptime panic(
@@ -2146,6 +2166,57 @@ impl[T: Eq] Eq for Shared[T]:
 impl[T] Debug for Weak[T]:
     @intrinsic("structural.debug")
     pure def fmt_debug(self, mut f: Formatter)
+
+impl[T: Copy] Atomic[T]:
+    @intrinsic("Cell.new")
+    pure def new(own value: T) -> Atomic[T]
+    ## The value.
+    @intrinsic("Cell.get")
+    def load(self, order: MemoryOrder = SeqCst) -> T
+    ## Replaces the value.
+    @intrinsic("Cell.set")
+    def store(self, own value: T, order: MemoryOrder = SeqCst)
+    ## Replaces the value and returns the one before.
+    @intrinsic("Cell.replace")
+    def swap(self, own value: T, order: MemoryOrder = SeqCst) -> T
+    ## Stores `new` when the value is `current`, the two compared as values
+    ## are (C++ compares their bytes): `Ok` with the value before when it
+    ## was, `Err` with the value found otherwise.
+    @intrinsic("Atomic.compare_exchange")
+    def compare_exchange(
+        self,
+        current: T,
+        own new: T,
+        success: MemoryOrder = SeqCst,
+        failure: MemoryOrder = SeqCst,
+    ) -> Result[T, T]
+    ## The value, for `Debug`, which is `pure`.
+    @internal
+    @intrinsic("Cell.get")
+    pure def peek(self) -> T
+
+# The read-modify-write operations read and write in one step: between the
+# two intrinsics there is no call of Sisu code (an omitted argument's
+# default would be one) and no loop, so no yield point at which another
+# task could run.
+impl Atomic[int]:
+    ## Adds `n` and returns the value before; an overflow panics, as `+`
+    ## does.
+    def fetch_add(self, n: int, order: MemoryOrder = SeqCst) -> int:
+        let old = self.load(order)
+        self.store(old + n, order)
+        return old
+    ## Subtracts `n` and returns the value before.
+    def fetch_sub(self, n: int, order: MemoryOrder = SeqCst) -> int:
+        let old = self.load(order)
+        self.store(old - n, order)
+        return old
+
+impl[T: Debug + Copy] Debug for Atomic[T]:
+    pure def fmt_debug(self, mut f: Formatter):
+        f.write("Atomic(")
+        self.peek().fmt_debug(mut f)
+        f.write(")")
 
 impl[T] Debug for Cell[T]:
     @intrinsic("structural.debug")
@@ -3945,3 +4016,101 @@ impl Num for f64:
 
 impl Num for f32:
     pass
+
+# ------------------------------------------------------------------ defaults
+# The builtin types with a natural first value implement `Default`: the
+# numbers' zero, `False`, the empty text and collections, `None`, and a
+# tuple of its elements' defaults. A capability, a channel or a `Mutex`
+# has none (D-051: a zero file handle is not fine).
+
+impl Default for int:
+    pure def default() -> int:
+        return 0
+
+impl Default for f64:
+    pure def default() -> f64:
+        return 0.0
+
+impl Default for f32:
+    pure def default() -> f32:
+        return 0.0
+
+impl Default for u8:
+    pure def default() -> u8:
+        return 0
+
+impl Default for u16:
+    pure def default() -> u16:
+        return 0
+
+impl Default for u32:
+    pure def default() -> u32:
+        return 0
+
+impl Default for u64:
+    pure def default() -> u64:
+        return 0
+
+impl Default for u128:
+    pure def default() -> u128:
+        return 0
+
+impl Default for i8:
+    pure def default() -> i8:
+        return 0
+
+impl Default for i16:
+    pure def default() -> i16:
+        return 0
+
+impl Default for i32:
+    pure def default() -> i32:
+        return 0
+
+impl Default for i128:
+    pure def default() -> i128:
+        return 0
+
+impl Default for bool:
+    pure def default() -> bool:
+        return False
+
+impl Default for str:
+    pure def default() -> str:
+        return ""
+
+impl Default for String:
+    pure def default() -> String:
+        return String.new()
+
+impl[T] Default for list[T]:
+    pure def default() -> list[T]:
+        return []
+
+impl[K: Hash, V] Default for dict[K, V]:
+    pure def default() -> dict[K, V]:
+        return dict()
+
+impl[T: Hash] Default for set[T]:
+    pure def default() -> set[T]:
+        return set()
+
+impl[T] Default for T?:
+    pure def default() -> T?:
+        return None
+
+impl[T0: Default] Default for (T0,):
+    pure def default() -> (T0,):
+        return (T0.default(),)
+
+impl[T0: Default, T1: Default] Default for (T0, T1):
+    pure def default() -> (T0, T1):
+        return (T0.default(), T1.default())
+
+impl[T0: Default, T1: Default, T2: Default] Default for (T0, T1, T2):
+    pure def default() -> (T0, T1, T2):
+        return (T0.default(), T1.default(), T2.default())
+
+impl[T0: Default, T1: Default, T2: Default, T3: Default] Default for (T0, T1, T2, T3):
+    pure def default() -> (T0, T1, T2, T3):
+        return (T0.default(), T1.default(), T2.default(), T3.default())

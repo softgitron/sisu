@@ -1511,6 +1511,8 @@ impl<'p> Interp<'p, '_> {
                 locked: false,
                 holder: 0,
                 poisoned: m.poisoned,
+                readers: 0,
+                rw: m.rw,
             })),
             Value::Sender(_) | Value::Receiver(_) => {
                 self.copy_channel_end(v);

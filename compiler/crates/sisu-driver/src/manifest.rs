@@ -61,6 +61,22 @@ pub struct Dependency {
     pub when: Option<When>,
     /// A dev-dependency: only the package's tests may import it.
     pub dev: bool,
+    /// `features = [...]`: the dependency's features this package turns
+    /// on (09).
+    pub features: Vec<(String, TextRange)>,
+    /// `default-features = false` leaves the dependency's `default`
+    /// features off, as far as this package is concerned.
+    pub default_features: bool,
+}
+
+/// A feature of `[features]`: its name, where it is named, and what it
+/// turns on, each a feature of the package or `DEP/FEATURE`, a feature of
+/// a dependency (09).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Feature {
+    pub name: String,
+    pub range: TextRange,
+    pub on: Vec<(String, TextRange)>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -83,9 +99,9 @@ pub struct Manifest {
     pub trust_unsafe: Vec<(String, TextRange)>,
     /// `[workspace] members`: the members' directories, as written.
     pub members: Option<Vec<(String, TextRange)>>,
-    /// `[features]`: each feature and what it turns on. Recorded, and used
-    /// by nothing yet: stage 0 has no conditional compilation on features.
-    pub features: Vec<(String, Vec<String>)>,
+    /// `[features]`: each feature and what it turns on, for `@cfg`
+    /// (decision 243).
+    pub features: Vec<Feature>,
     /// `[profile.release] contracts`.
     pub release_contracts: Option<String>,
 }
@@ -258,14 +274,21 @@ impl Reader {
             let mut path = None;
             let mut when = None;
             let mut registry = false;
+            let mut features = Vec::new();
+            let mut default_features = true;
             for (sk, sv) in &spec.entries {
                 match sk.value.as_str() {
                     "path" => path = self.string("path", sv).map(|p| (p, sv.range)),
                     "when" => when = self.when(sv),
                     "version" | "git" | "rev" | "branch" | "tag" => registry = true,
-                    // Additive booleans of the dependency (09); recorded by
-                    // nothing yet.
-                    "features" | "default-features" | "optional" => {}
+                    // The dependency's features this package turns on (09).
+                    "features" => features = self.strings("features", sv),
+                    "default-features" => match sv.value {
+                        Value::Bool(b) => default_features = b,
+                        _ => self.bad("default-features", sv, "`true` or `false`"),
+                    },
+                    // Optional dependencies arrive with a registry.
+                    "optional" => {}
                     _ => self.unknown(sk, &format!("{table} {}", k.value)),
                 }
             }
@@ -277,6 +300,8 @@ impl Reader {
                     path_range,
                     when,
                     dev,
+                    features,
+                    default_features,
                 }),
                 None => {
                     let _ = registry;
@@ -373,8 +398,8 @@ pub fn read(file: FileId, text: &str) -> (Option<Manifest>, Vec<Diagnostic>) {
             "features" => {
                 if let Some(t) = r.table("features", v) {
                     for (fk, fv) in &t.entries {
-                        let on = r.strings(&fk.value, fv).into_iter().map(|(s, _)| s).collect();
-                        m.features.push((fk.value.clone(), on));
+                        let on = r.strings(&fk.value, fv);
+                        m.features.push(Feature { name: fk.value.clone(), range: fk.range, on });
                     }
                 }
             }

@@ -37,15 +37,15 @@ and tests in parallel; the capability log (`sisu run --record`, `sisu
 replay`) and replay tokens; PCT and bounded exhaustive scheduling and the
 `sim` profile; compile-time reflection in generic functions
 (instantiated per type), `embed` and `target`, with `std.x.cli`'s parser
-written over it; and the tools of 10: the formatter (`sisu fmt`), hot
-replacement in epochs (`sisu run --watch`), the REPL (`sisu repl`, with
-`:back` and `:why`), worksheets (`sisu ws`) and the language server
-(`sisu lsp`). Not here: from Phase 6, `RwLock`, `Atomic`,
-`Condvar`, TLS and `sisu audit --caps`; the checked string DSLs, `@cfg`
-and foreign functions (Phase 8). Their syntax parses, and using them is a
-diagnostic (`E0900 stage0.unsupported`). Stage 2, a native
-debug backend (`sisu build --native`) that compiles every program the
-conformance suite runs, is described in its own section, "Stage 2".
+written over it, and conditional compilation (`@cfg`, decision 243); and
+the tools of 10: the formatter (`sisu fmt`), hot replacement in epochs
+(`sisu run --watch`), the REPL (`sisu repl`, with `:back` and `:why`),
+worksheets (`sisu ws`) and the language server (`sisu lsp`). Not here:
+from Phase 6, TLS; the checked string DSLs and foreign functions (Phase
+8). Their syntax parses, and using them is a diagnostic (`E0900
+stage0.unsupported`). Stage 2, a native debug backend (`sisu build
+--native`) that compiles every program the conformance suite runs, is
+described in its own section, "Stage 2".
 
 ## Crate map
 
@@ -67,7 +67,7 @@ architecture"); data flows down the table.
 | `sisu-interp` | 13342 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the task scheduler (random, PCT, bounded exhaustive) and the `sim` profile's faults, capabilities and the host's objects, the capability log, hot replacement in epochs, the parallel test runner, the dynamic ownership monitor, and the compile-time evaluator |
 | `sisu-rt` | 10668 | Stage 2's runtime, linked into every native executable: the shared ABI (the value layout, the type table's encoding, the entry points), panics and stack traces, allocation, the structural operations on values, iterators, dicts and sets, the intrinsics, the scheduler of tasks on pooled stacks, the library types, capabilities, and the host's files, network and processes |
 | `sisu-codegen` | 3965 | Stage 2's debug backend: SIR to Cranelift IR, one instance per function and list of type arguments, with trait calls resolved at compile time; the object file and the link |
-| `sisu-driver` | 10635 | The query layer and the `sisu` command line; manifests (a TOML reader of its own), the package layout and the lockfile; the counterexample mode, `audit --ownership`, `check --explain`, replay tokens, snapshot files and transcripts, the `sim` build check; `fmt`, the REPL and worksheets, `run --watch`'s rebuilds, and the language server with its JSON; `build --native` and `run --native`; the soundness tests (fault injection, mutation fuzzing), the language server's protocol tests and the native conformance test |
+| `sisu-driver` | 10635 | The query layer and the `sisu` command line; manifests (a TOML reader of its own), the package layout and the lockfile; the counterexample mode, `audit --ownership` and `--caps`, `check --explain`, replay tokens, snapshot files and transcripts, the `sim` build check; `fmt`, the REPL and worksheets, `run --watch`'s rebuilds, and the language server with its JSON; `build --native` and `run --native`; the soundness tests (fault injection, mutation fuzzing), the language server's protocol tests and the native conformance test |
 | `sisu-conformance` | 1337 | The language-agnostic conformance runner, and its native mode |
 
 Line counts are of each crate's `src`, unit tests included. Besides the crates:
@@ -84,9 +84,10 @@ network), `std/collections.sisu` (308: std.collections), `std/num.sisu`
 `std/http.sisu` (299: std.x.http), `std/test.sisu` (snapshots,
 benchmarks), `std/json.sisu` (`encode` over reflection), `std/live.sisu`
 (hot replacement's boundaries), `std/task.sisu`, `std/log.sisu`,
-`std/net.sisu` (`Url`), `std/time.sisu` and `std/math.sisu`; and
-`conformance/` (the
-suite, described in its own [README](../conformance/README.md)).
+`std/net.sisu` (`Url`), `std/time.sisu`, `std/math.sisu`, and
+`std/string.sisu` and `std/fmt.sisu`, which name the prelude's text and
+formatting (decision 245); and `conformance/` (the suite, described in
+its own [README](../conformance/README.md)).
 
 The workspace forbids `unsafe` and denies `unwrap`, `expect`, `panic`,
 `todo`, `unimplemented` and `unreachable` outside tests (18, Phase 0,
@@ -377,8 +378,8 @@ function means only std may call it (`E0701`). All seven are reserved
 for std (`E0225`). A std module may name prelude items too
 (`std_sources::reexports`), so `from std.time import DateTime` finds the
 prelude's. The prelude declares the core traits (`Display`,
-`Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, `Len`, `Copy`, `Num`, `Drop`,
-`Iterator`, the operator traits, `FromLiteral`), their impls for the
+`Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, `Default`, `Len`, `Copy`,
+`Num`, `Drop`, `Iterator`, the operator traits, `FromLiteral`), their impls for the
 builtin types, and the generic code over them; the impls of the leaf
 types and of tuples are generated (`<std>/builtin_impls.sisu`, from
 `sisu-resolve/src/std_sources.rs`).
@@ -463,7 +464,8 @@ apart).
 with an optional `when = { os = ..., arch = ..., runtime = ... }` over the
 build target's facts (`E1011`); `[trust] unsafe = [...]`, the dependencies
 that may contain `unsafe` and `extern` (`E1015`); `[workspace] members`;
-`[features]`;
+`[features]`, with a dependency's `features` and `default-features`,
+which `@cfg(feature="NAME")` reads (decision 243);
 `[profile.release] contracts`. A mistake is a diagnostic at its place in
 the file (`E1000`-`E1017`), an unknown key a warning (`W0005`). A
 dependency is a path (`E1010`: there is no registry), named by its own
@@ -622,11 +624,12 @@ hashed the other way.
 
 **Derive and delegation.** `@derive(T)` runs `T`'s `comptime def derive`
 at compile time (section "Compile-time evaluation"); `Debug`, `Eq`,
-`PartialOrd`, `Ord` and `Hash` are written that way in the prelude, and
-any trait may declare one. The derived impl of a generic type bounds each
-parameter that a field uses by the trait (`impl[T: Eq] Eq for P[T]`), and
-the fields of a type deriving one of the language's traits must
-implement it (`E0244`). `@delegate(Trait, ..., to="field")` writes impls
+`PartialOrd`, `Ord`, `Hash` and `Default` are written that way in the
+prelude, and any trait may declare one. The derived impl of a generic
+type bounds each parameter that a field uses by the trait (`impl[T: Eq]
+Eq for P[T]`), and the fields of a type deriving one of the language's
+traits must implement it (`E0244`), for `Default` those without a
+default of their own (decision 238). `@delegate(Trait, ..., to="field")` writes impls
 that forward to a field (03, "cheap newtypes and delegation"): the
 operator traits (when the field is the type's only one, since they
 return `Self`), `Eq`, the orders, `Hash`, `Display`, `Debug` and `Len`
@@ -697,7 +700,8 @@ and `if comptime c:` (decided), the same two among a `match`'s arms
 values: the type `T`; reflection, the compile-time module `reflect`, with
 `name_of(T)`, `is_struct(T)`, `is_enum(T)`, `fields_of(T)` and
 `variants_of(T)`; a field's `name` (its position for a positional variant
-field), `index` and `named`; a variant's `name`, `index` and `fields`;
+field), `index`, `named` and `default` (whether a struct's field has
+one); a variant's `name`, `index` and `fields`;
 integers, text and booleans with `enumerate`, `len`, arithmetic,
 comparisons, `and`, `or`, `not`, and interpolation into text. `x.[f]` is
 the field `f` of `x`; a variant's field is reached inside an arm `case
@@ -768,8 +772,25 @@ read is `E0612`, with a reason that is the same on every machine.
 "windows":` is decided when the program is compiled and both branches are
 checked.
 
-Outside derives and templates (a method, a non-generic function),
-`reflect`, `x.[f]`, `comptime for` and `return impl` are `E0900`.
+**`@cfg(...)`** leaves out the items whose condition does not hold before
+names are resolved (`cfg.rs` in the driver, over each module's syntax
+tree; decision 243): `test`, `feature="NAME"`, `not` and a condition, and
+`all(...)` and `any(...)` of conditions. `sisu run`, `sisu build` and
+`sisu sir` build the program without its tests (`Db::no_tests`), so
+there `test` does not hold and the tests, suites, benchmarks and doc
+examples are left out as well.
+
+A function or a method whose body has such code is a template too
+(decision 244): one without type parameters (a function or a method that
+reflects on the program's own types, `main` included) is made once,
+before anything calls it, and its instance takes its name, so a call, a
+trait's call, `dyn` and a function value all run it; a method's instance
+is a method of an inherent impl of its type, whose compile-time code
+names the type `Self`; and a method of a generic type is made for each
+type argument it is called with. A trait's own methods, the methods of a
+generic trait impl, a `comptime def`, a constant and a test have no
+instances, so `reflect`, `x.[f]` and `comptime for` there are `E0900`,
+naming the place, as is `return impl` outside a derive.
 
 ### The interceptors and fakes of a program's traits
 
@@ -830,8 +851,9 @@ body yields a THIR body, with ill-typed parts typed `Error`.
   what it captures in (copies what is `Copy`), cannot change it
   (`E0424`), and so may be stored and returned. A task's captures are
   "Send, Sync and what a task captures".
-- What a `Shared`, `Cell`, `Mutex`, `Cap`, capability handle or channel
-  owns can be neither a view (`E0421`) nor must-consume (`E0422`, which
+- What a `Shared`, `Cell`, `Atomic`, `Mutex`, `RwLock`, `Cap`,
+  capability handle or channel owns can be neither a view (`E0421`) nor
+  must-consume (`E0422`, which
   looks through fields), checked once the type is known (a channel's
   receiver may keep what was sent longer than what it borrows lives,
   decision 230); a `Shared` value is reached through the owner, and
@@ -1607,7 +1629,13 @@ into the heap cell. `Cell` replaces its value through a shared reference
 and never gives out a reference into it. `Mutex.lock` gives a guard
 through which the value is reached; locking a mutex another task holds
 waits, locking one the task itself holds panics (`R0073`), as does
-locking a poisoned one (`R0074`). An `Arena[T]` holds
+locking a poisoned one (`R0074`). An `RwLock` (std.task) is a mutex that
+also counts its readers: `read` gives a `ReadGuard` whose value is only
+read, and waits while a task writes; `write` gives the guard a `Mutex`
+gives, and waits while any task reads or writes. An `Atomic` is a `Cell`
+that tasks may share, each of whose operations is one step; `Once` and
+`Condvar` are Sisu in std.task over a `Mutex` and channels (decision
+239). An `Arena[T]` holds
 slots with generations; `insert` gives a `Key[T]` (a `Copy` struct of the
 slot and its generation), `remove` frees the slot for reuse under a new
 generation, and a stale key gives `None` from `get` and panics when
@@ -2010,8 +2038,10 @@ import (Q-6, Q-5), as is `cap` (std.cap, which grants nothing by itself).
 asks for them. The leaves (numbers, text, paths, times, bytes, the
 capability handles, scopes) are both. `ref T` is both when `T` is
 `Sync`; `ref mut T` is `Send` when `T` is and `Sync` when `T` is.
-`Cell[T]` is `Send` when `T` is and never `Sync`; `Mutex[T]`, a channel
-half and a task handle are both when `T` is `Send`; a mutex guard is
+`Cell[T]` is `Send` when `T` is and never `Sync`; `Mutex[T]`,
+`Atomic[T]`, a channel half and a task handle are both when `T` is
+`Send`; `RwLock[T]` is `Send` when `T` is and `Sync` when `T` is both,
+since its readers share the value; a mutex guard and a read guard are
 never `Send` and `Sync` when `T` is; `Shared[T]`, `Weak[T]`, `Cap[T]`,
 `Lent[T]` and `Slice[T]` are both when `T` is `Sync`. A function or
 closure value is neither (its captures are not in its type); a `dyn
@@ -2271,14 +2301,23 @@ otherwise, with the reason).
 ## Testing
 
 `sisu test FILE` (17) runs the `test` blocks, under the monitor unless
-`--no-monitor`. Each test runs in an interpreter of its own; those that
-take no `System` run at the same time on up to `--jobs N` threads (8 by
-default, `sisu-interp/src/parallel.rs`), and those that take the real
-`System` one at a time after them. Each is seeded as when they ran one
-after another, nothing but the host's clock and output is shared, and
-each test's output is held and written in declaration order, so a run
-prints the same at any number of threads (the conformance runner checks
-`--jobs 1` against every `.test`).
+`--no-monitor`. A test takes nothing, the real `System` (`sys: System`),
+or the capabilities it names, one of each (`fs: Fs, clock: Clock`), and
+receives fresh fakes of those: an empty in-memory `Fs`, a network of its
+own, the run's test clock as a `Clock` or as the `TestClock` that moves
+it, `Rand.seeded` with the test's seed, and `Env`, `Proc` and `Stdin`
+fakes (`System.fake`'s, and under `--sim` `System.sim`'s; decision 241).
+Each test runs in an interpreter of its own; those that do not take the
+real `System` run at the same time on up to `--jobs N` threads (8 by
+default, `sisu-interp/src/parallel.rs`), and those that take it one at a
+time after them. Each is seeded as when they ran one after another,
+nothing but the host's clock and output is shared, and each test's
+output is held and written in declaration order, so a run prints the
+same at any number of threads (the conformance runner checks `--jobs 1`
+against every `.test`). A test that passed is not run again while its
+code is the same (`PROGRAM.test-cache` beside the program, or
+`build/test-cache` in a package; `--no-cache` runs everything; decision
+242): it prints what it printed when it ran.
 
 - **Parametrised tests**: `test "name" for x, y in [(1, 2), (3, 4)]:` over
   a list written out is a test per element, named `name (1, 2)`, whose
@@ -2840,7 +2879,7 @@ sisu sir [FILE]              the serialised SIR, drops placed and `comptime` val
                              (also for a program the ownership checker rejects)
 sisu test [FILE]             run the tests (and `tests/*.transcript`) under the monitor: ok,
                              FAILED, or blocked by a hole; `--no-monitor`, `--defer-borrow`,
-                             `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`,
+                             `--no-cache`, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`,
                              `--update` (snapshots and transcripts), `--replay TOKEN`,
                              `--sim [--faults P]`, `--std` (the standard library's doc examples)
 sisu bench [FILE]            run the benchmarks; `--iterations N`
@@ -2858,6 +2897,7 @@ sisu parse FILE              `--tree` the syntax tree, `--ast` the AST built fro
 sisu explain CODE            the catalog entry for a code or identifier
 sisu explain-borrow FILE:LINE  every borrow live on the line
 sisu audit --ownership FILE...  per file, the uses of the ownership model's escape hatches
+sisu audit --caps FILE...    per program, the capabilities its I/O takes and threads
 ```
 
 Without `FILE`, a command works on the package of the current
@@ -2874,6 +2914,20 @@ a `.`, and not in a file that declares the name itself), calls of
 `.copy()`, and the keyword `unsafe`; `lines` counts the lines on which a
 token other than trivia and layout starts. A file need not check to be
 counted.
+
+`sisu audit --caps` is Phase 6's count (18; 20's T2.1, T2.3 and the
+threading depth), read from the program's SIR once it checks (decision
+240). Each line starts with the file's name: `function NAME caps=N
+io=direct|calls depth=D` for each function of the program that does I/O
+(it calls an operation of a capability, or a function that does), `N`
+its parameters that hold a capability (a handle, a `System`, a `Lent`, a
+struct or collection holding one, or a type parameter an operation is
+called on) and `D` the fewest calls from `main` (`-` when `main` does not
+reach it); `use FUNCTION OPERATION depth=D` for each operation of a
+capability a function calls; `struct NAME caps=N TYPES` for each of the
+program's structs whose fields hold three or more capability types
+besides a whole `System`; and `summary functions=N median=M max=K uses=U
+deepest=D structs=S`.
 
 `sisu check --diary LOG` (18, Phase 3: "appends every diagnostic with a
 timestamp and code to a per-author JSONL log for the friction
@@ -3009,6 +3063,9 @@ where the parts are:
 | `Timer` | 2 | the number of its clock, and the moment in nanoseconds on it |
 | `Mutex[T]` | 3 + T | whether it is locked, the task holding it, whether it is poisoned, then the value |
 | `MutexGuard[T]` | 1 | the address of the value inside its mutex |
+| `RwLock[T]` | 3 + T | a `Mutex[T]` whose lock word is 2 while tasks read, its holder word then their number (decision 239) |
+| `ReadGuard[T]` | 1 | the address of the value inside its `RwLock` |
+| `Atomic[T]` | T | the value, as a `Cell[T]` |
 | `Shared[T]`, `Weak[T]` | 1 | the address of the value in a heap cell, after a header of four words: the owners, the weak handles, the task that made it, its flags (decision 207) |
 | `Cell[T]` | T | the value |
 | `Arena[T]` | 1 | the address of a runtime object holding the slots, each a generation, whether it holds a value, and the value |
@@ -3028,7 +3085,10 @@ every argument live in memory, the function gets their addresses, and it
 returns 0, or 1 when a panic is leaving it (decision 189). The caller puts
 each argument in memory of its own, which the callee owns as the
 interpreter's callee owns its locals. Every local has a stack slot except
-the result and the parameters.
+the result and the parameters; in the release profile, a local of one
+word (a number, a `bool`, a `char`, or a reference that is an address)
+whose own memory no code needs is a Cranelift variable instead, a
+parameter's value read once at the entry (decision 246).
 
 Unwinding is the cleanup blocks of SIR run as ordinary control flow, with
 no unwinder. Each statement that can panic (a call, a drop, an overflow or
@@ -3373,7 +3433,8 @@ code, as 10 asks of the debug backend ("Debugging and profiling"):
   locals and parameters, each at its stack slot and of its Sisu type. A
   parameter's memory is the caller's, so its address is kept in a slot of
   its own, through which the debugger finds it. Drop elaboration's flags
-  are left out.
+  are left out, and so is a release build's local in a register (decision
+  246).
 - `.debug_frame`, from Cranelift's unwind information, lets a debugger
   unwind through Sisu frames into the runtime's.
 
@@ -3426,12 +3487,12 @@ it beside the native mode.
 ### Coverage
 
 `conformance/native.list` names the cases the backend builds and runs:
-159 of them, every case of the suite that runs a program (the others are
+165 of them, every case of the suite that runs a program (the others are
 diagnostics, `sisu test` files, and the tools' cases: `--watch`, the
 REPL, worksheets, tokens, SIR and documentation). Among them are every
 case of `concurrency/` that runs (tasks, scopes, cancellation, channels,
 `select`, races, generators and their closing, `log`, mutexes across
-tasks, the deadlock report, a task's stack overflow), all 42 of `run/`
+tasks, the deadlock report, a task's stack overflow), all 43 of `run/`
 that have a `main` (`run/testing` is a test file without one), the 35 of
 `ownership/` that run (with `Mutex`, `Shared`, `Weak`, `Cell` and
 `Arena`), and the 10 of `capabilities/` (fakes, attenuations, caretakers,
@@ -4930,3 +4991,248 @@ what transcribing the Rust type checker found in stage 0)
      left (decision 223), a registry of live cells by address that a
      release finds in logarithmic time. `capabilities/object_drops` holds
      the two implementations to the same drops.
+
+**Stage 2, round 4, continued: the language** (section "Traits and
+generics"; "Compile-time evaluation")
+
+238. `@derive(Default)` is the prelude's trait `Default` (11's core
+     traits; D-051 makes it a trait and no language rule) with a derive
+     written in Sisu: `T.default()` is the struct with each field's own
+     default where it has one and its type's `default()` otherwise,
+     through `reflect.construct`, which leaves out the fields with
+     defaults. A derive template's `reflect.fields_of(T)` now says which
+     struct fields have defaults (`default`, which was always false
+     there), and the derive's field check (`E0244`) asks `Default` of the
+     fields without one. An enum's default is one of its variants, which
+     only an impl can name (as Rust's `#[default]` marks), so deriving it
+     for an enum is `E0608` with the template's reason. The prelude
+     implements it for the numbers (zero), `bool` (`False`), `str` and
+     `String` (empty), `list`, `dict` and `set` (empty), options (`None`)
+     and tuples of up to four elements; a capability, a channel or a
+     `Mutex` has no natural first value and no impl.
+     `comptime/derive_default` and `comptime/derive_default_errors` pin it.
+239. The sync types of 11 beside `Mutex`: `Atomic[T]` in the prelude
+     (01's `Shared(Atomic(0))`), and `RwLock[T]`, `ReadGuard[T]`, `Once`
+     and `Condvar` in std.task. A generic library type cannot own a
+     `Mutex[T]` of its parameter (known over-rejection 14), so `Atomic`
+     and `RwLock` are builtin types of the runtime, and `Once` and
+     `Condvar`, which are not generic, are Sisu. `Atomic[T]` (for a
+     `Copy` `T`) is a `Cell` that tasks may share, `Send` and `Sync` when
+     `T` is `Send`: `load`, `store` and `swap` are the cell's intrinsics,
+     `compare_exchange` one of its own that compares as values compare
+     (C++ compares bytes), and `Atomic[int]`'s `fetch_add` and
+     `fetch_sub` are Sisu with no yield point between the read and the
+     write. The runtime runs one task at a time, so each operation is one
+     step of the program; the C++11 memory orders of 06 are accepted
+     (`MemoryOrder`, every operation's last argument) and all act as
+     `SeqCst`. `RwLock[T]` is a mutex that counts its readers: `read`
+     gives a `ReadGuard[T]`, a view whose `value` nobody may change
+     (`E0341`, with a note naming `write`), and waits while a task
+     writes; `write` gives a `MutexGuard[T]` and waits while any task
+     reads or writes; neither wait is a point of cancellation, a task
+     that writes and asks again panics (`R0073`), and a write guard
+     dropped by unwinding poisons the lock as a mutex's does (D-077).
+     Readers that keep coming keep a writer waiting. It is `Send` when
+     `T` is, and `Sync` when `T` is also `Sync`. `Once.call_once` runs
+     its function under a `Mutex[bool]`, so a caller that comes while it
+     runs waits; a call that panics leaves it not done. `Condvar.wait`
+     takes the mutex and its guard, registers a channel of its own, lets
+     the guard go, waits for a notify on the channel and locks the mutex
+     again; `wait_while` loops on a condition; `notify_one` passes over a
+     waiter that has gone. The panics of a held or poisoned lock now say
+     "lock" rather than "mutex" (`R0073`, `R0074`, `R0090`), since an
+     `RwLock` raises them too. The front end learns the new builtins
+     where it knows `Mutex`, `MutexGuard` and `Cell` (their auto traits,
+     a read guard as a view and a smart pointer whose value is read-only,
+     the owner checks, `Atomic`'s own `Debug`), which stage 1 transcribes.
+     `concurrency/sync_types` (under thirty schedules) and
+     `concurrency/sync_errors` pin them.
+240. `sisu audit --caps FILE...` is 18's Phase 6 audit, read from SIR as
+     18 says, with the choices it leaves open made so: a function does
+     I/O when it calls an operation of a capability (a method of an
+     operations trait, or any other call whose first argument is a
+     handle, a `System`, a `TestClock` or a `Lent`, an attenuation
+     included, but not `lend`, which passes it on), or calls a function
+     of the program that does, a closure counting as called where it is
+     made and a call through a trait as a call of each of the program's
+     impls of the method; a capability parameter is one whose type holds a
+     capability, through references, fields of the program's structs and
+     enums, tuples, options and collections, or a type parameter that an
+     operation is called on (`[F: FsOps]`, the form that takes a `Lent`);
+     the threading depth of a use is the fewest calls from `main` to its
+     function (a breadth-first walk of the same call graph), `-` when
+     `main` does not reach it (a test's code); and a bundle is a struct of
+     the program whose fields hold three or more distinct capability
+     types, a `System` among them not counting, since bundling them all is
+     the language's composition root. The output is data, a line per
+     function, use and bundle and a summary with the median and the
+     largest number of capability parameters, so that 20's thresholds
+     (a median above 2, a maximum above 4, any bundle of four) read off
+     it. `sisu-driver`'s tests hold it to a program of each kind.
+241. A test declares the capabilities it needs by naming them as
+     parameters, one of each of `Fs`, `Net`, `Clock`, `TestClock`, `Rand`,
+     `Env`, `Proc` and `Stdin` (17's open question, "How a test declares
+     the capabilities it needs so that parallel-versus-serial and the
+     cache key are known without a signature burden"), and receives a
+     fresh fake of each: `System.fake`'s in-memory `Fs`, the run's test
+     clock, `Rand.seeded` with the test's seed, and `Env`, `Proc` and
+     `Stdin` fakes, a network of its own (`Net.fake`, where `System.fake`
+     has one that reaches nothing: 17 gives "no `Net` unless requested"),
+     and the test clock as a `TestClock` for a test that moves time; under
+     `--sim` the simulated system's objects. A test that takes `sys:
+     System` still receives the real one and runs alone; a test may not
+     mix the two, name a capability twice, or take anything else
+     (`E0702`). A test that names capabilities touches nothing outside
+     itself, so it runs in parallel and may be cached (decision 242).
+     This changes a rule of the type checker (the test signature) and of
+     lowering (`System.fake` and `Net.fake` are kept for such a run), which
+     stage 1 transcribes. `testing/named_capabilities` and
+     `capabilities/test_signature` pin it.
+242. `sisu test` keeps a cache of the tests that passed (17, "Output and
+     caching"), in `PROGRAM.test-cache` beside a file, as its native
+     executable goes beside it (decision 231), or `build/debug/test-cache`
+     in a package, beside its debug executable. A test's key hashes the
+     toolchain, the options that decide a run (the seed, the monitor, the
+     fuel, the stored snapshots), its name, the program's declarations
+     (types, intrinsics, trait methods, impls), what runs without a call
+     (drop glue, `Drop`s, invariants, the fakes a test receives), and the
+     SIR of every function the test reaches (calls, closures, functions used
+     as values, each impl of a trait method it calls), without source
+     positions and with the test's own number left out: a comment, a
+     reordering, a new test or an edit of code the test does not reach
+     reruns nothing, and an edit of what it reaches reruns it. A test that
+     takes the real `System` touches the world and is never cached, and
+     neither is one that failed. The cache is used only when the results are
+     the code's and the seed's: not under `--explore`, `--sim`, another
+     scheduler, `--update`, `--defer-borrow` or `--replay`, and not with
+     `--no-cache`. A cached test prints what it printed when it ran, so
+     nothing printed depends on the cache (Go 1.10 marks a cached result;
+     here a run is the same either way, which the conformance runner's
+     repeated run, with `--no-cache`, still checks). The keys are FNV-1a
+     over 64 bits, as the replay tokens' hashes are: a collision would reuse
+     a result, which a cache of passing results accepts.
+243. Conditional compilation (08, "`@cfg` on items and `if comptime` in
+     bodies"): an item, an item of a suite or an `extern` block, or a
+     method of an impl or a trait whose `@cfg` does not hold is left out
+     before names are resolved, as if it were not written; the driver
+     filters each module's syntax tree (`cfg.rs`), and a tool that shows
+     the file shows it whole. A condition is `test`, `feature="NAME"`,
+     `not` and a condition, or `all(...)` or `any(...)` of conditions,
+     and several in one `@cfg` must all hold. Sisu's `not` is the
+     operator, so `@cfg(not test)` is the canonical form, and a feature
+     that is off is `not any(feature="tls")`: `feature="tls"` is an
+     argument, not an expression, so `not(feature="tls")` does not
+     parse. Anything else is `E0266`, and its item is kept. `test` holds
+     when the program is built with its tests: `sisu test`, `sisu bench`,
+     `sisu check` and the tools that check (the language server, the
+     REPL, `sisu audit`). `sisu run`, `sisu build` and `sisu sir` build it
+     without them, and leave out its `test`, `suite` and `bench` items and
+     its doc examples too, as Rust's `cfg(test)` leaves out `#[test]`
+     functions: a test may use an `@cfg(test)` helper, and a run does not
+     stop at a mistake in a test. A feature belongs to a package (09):
+     the root package's `default` is on, and each dependency's unless
+     every entry that reaches it says `default-features = false`; an
+     entry's `features` are on; and what a feature that is on lists is
+     on in turn, a feature of its own package or (`DEP/FEATURE`) of a
+     dependency. These are Cargo's rules, without optional dependencies,
+     which arrive with a registry. A name a feature list gives that is no
+     feature is `E1018`, and a `feature="NAME"` whose package declares no
+     such feature is `W0006` (a single file declares none), the mistake
+     `rustc`'s `unexpected_cfgs` lint exists for. There is no
+     command-line switch for features yet (Cargo's `--features`). The
+     features are part of the program's layout, so a recorded run
+     replays with them. This changes rules stage 1 transcribes: the
+     filter and its diagnostics, a build without tests (the driver's
+     filter, and the resolver's `Sources::tests` for doc examples), the
+     manifest's `features` and `default-features` and the check of
+     feature names. `comptime/cfg`, `comptime/cfg_errors`,
+     `packages/features` and `packages/feature_errors` pin it.
+244. Reflection beyond generic functions (08, "Reflection"; 18's Phase 8):
+     a function or a method whose body runs code at compile time by
+     unfolding (a `reflect` query, `x.[f]`, a `comptime for` or `comptime
+     if` among statements or arms, or a `comptime` expression over a type
+     parameter) is a template, as a generic function that reflects
+     already was: a free function, generic or not, a method declared in a
+     type or in an inherent impl, or a method of a trait impl without type
+     parameters. Its instances are made the way a generic function's are
+     (`template.rs`, `instances.rs`), with three additions. A template
+     without type parameters is asked for once by the type checker,
+     whether anything calls it or not, and its instance's SIR function
+     takes the template's name, so whatever names the template (a call, a
+     trait's dispatch to the impl's method, a vtable, a function value,
+     `main` as the entry) runs the instance, and nothing else changes. A
+     method's instance is a method of an inherent impl of its type (the
+     type's alias in the instance's module), with `Self` bound to the
+     type's shape, so `reflect.fields_of(Self)` and `self.[f]` work in it.
+     And the types the compile-time code names that are not type
+     parameters (`reflect.fields_of(Point)`, a non-generic struct, enum,
+     error set or alias in the function's scope) are known to the
+     unfolding without being replaced in the code's text. A generic method
+     that calls a template with its own type parameters is promoted as a
+     generic function is. An instance is never a template itself (its
+     module is an instance's), so code an instance could not unfold is an
+     error of the instance, not another instance. A trait's own methods
+     and the methods of a generic trait impl would need an instance for
+     each implementing type that a trait's call resolves to, at run time
+     behind `dyn`; a `comptime def`, a constant and a test are evaluated
+     or checked directly; all of them keep `E0900`, which now names the
+     place. An error in an instance's code is reported in the instance's
+     text (`<NAME>/FILE`), as a generic template's always was; the
+     reflection over a trait's methods and a `comptime def` in a trait
+     other than its derive are not here (port-debt.md). This changes rules
+     of the resolver (which functions are templates, `Self` and named
+     types in the unfolding, the instance's form) and of the type checker
+     (the eager request, a template without type parameters as a value,
+     the `E0900` texts) that stage 1 transcribes. `reflect/methods` and
+     `reflect/methods_rejected` pin it.
+245. `std.core`, `std.string` and `std.fmt` are modules an import names,
+     as 11's table of `std` lists them: `std.core` is the prelude itself
+     (`from std.core import Option`, or `import std.core` and
+     `core.Option`), and `std.string` (`String`) and `std.fmt`
+     (`Display`, `Debug`, `Formatter`, `Spec`) name the prelude's items, as
+     `std.collections`, `std.num`, `std.time`, `std.net`, `std.cap` and
+     `std.task` already named theirs. Their code stays in the prelude: 11
+     makes the prelude `std.core`, and the prelude's types and traits are
+     what every program sees without an import, so moving them into
+     modules would only add an import to every program. `str` and `char`
+     are built-in names, not items, so no module names them. The
+     resolver's table of std's modules (`std_sources.rs`) is the rule
+     that changes, which stage 1 transcribes; `std/modules` pins it.
+246. The release profile keeps scalars in registers and computes integer
+     division inline, the first two of what port-debt.md's "Stage 2"
+     gave decision 232 to pay. A local of one word (a number, a `bool`, a
+     `char`, a drop flag, or a reference that is an address rather than a
+     `dyn`'s two words) is a Cranelift variable rather than a stack slot
+     when no code needs its own memory: no statement borrows it, projects
+     it other than through its reference, or names a key with it; a
+     parameter's value is read from the caller's memory once, at the
+     entry, and the result stays in the caller's memory. Code that takes
+     such a local's address anyway (a call's result, a value the runtime
+     reads) gets a slot the variable is copied to, and a call's result is
+     read back from it after the call. A reference in a variable reaches
+     what it refers to at the address it holds. The debug profile keeps
+     every local in its slot, which its debug information describes; a
+     release build's variables have none. In both profiles, `//`, `%`,
+     `<<` and `>>` on `int` are instructions (a truncating division
+     adjusted to round down, a remainder adjusted to the divisor's sign,
+     a shift), and the runtime is called only on a cold path for the
+     operands it raises a panic for (a divisor of zero, `MIN // -1`, a
+     shift by less than 0 or more than 63; `MIN % -1`, which is 0, too),
+     so every message and status is the runtime's as before. Built by a
+     release-built `sisu` and run natively in release, best of five:
+     the longest Collatz chain under 10^6 takes 0.73 s against 2.09 s,
+     trial division of the numbers under 2*10^6 0.64 s against 1.47 s,
+     Euclid over 12 million pairs 0.68 s against 1.02 s, a product of
+     400x400 matrices 0.30 s against 0.47 s, a sieve of 5*10^6 0.22 s
+     against 0.29 s, and `fib(37)` 0.36 s against 0.43 s; in the debug
+     profile, the inline division alone takes Collatz to 1.86 s from 2.35
+     s and trial division to 1.19 s from 1.67 s. Stage 1, built in
+     release from a copy of its package, gains less, since its time is
+     the runtime's intrinsics' (half of its instructions are in
+     `sisu_rt_intrinsic`, a third of them in decoding and dispatching the
+     call): its check of its own package takes 56.1 s against 59.1 s, its
+     SIR of `examples/wordcount` 0.82 s against 0.85 s, its tokens and
+     tree of the prelude 0.12 s and 0.19 s as before, each output byte
+     for byte the same. `run/integer_division` pins every sign of `//`
+     and `%`, the ends of `int` and the shifts, natively in both
+     profiles. This changes no front-end rule.

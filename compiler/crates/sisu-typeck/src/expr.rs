@@ -549,6 +549,7 @@ impl Checker<'_> {
             Ty::Adt(d, _) => match self.prog.builtin(d) {
                 Some("Shared") => Some("Shared"),
                 Some("MutexGuard") => Some("MutexGuard"),
+                Some("ReadGuard") => Some("ReadGuard"),
                 _ => None,
             },
             _ => None,
@@ -701,11 +702,7 @@ impl Checker<'_> {
             ast::ExprKind::Match { scrutinee, arms } => self.match_expr(scrutinee, arms, e.range, expected),
             ast::ExprKind::Comptime(inner) => self.comptime_expr(inner, expected, e.range),
             ast::ExprKind::FieldOf { .. } => {
-                self.unsupported(
-                    e.range,
-                    "a field named by a compile-time value (`x.[f]`) outside a derive or a generic function",
-                    "compile-time code in methods and non-generic functions (Phase 8)",
-                );
+                self.no_unfolding(e.range, "a field named by a compile-time value (`x.[f]`)");
                 Expr::error(span)
             }
             ast::ExprKind::Unsupported(what) => {
@@ -1117,14 +1114,10 @@ impl Checker<'_> {
             return Expr::error(span);
         }
         // The compile-time module `reflect` (08) exists only in a derive's
-        // template and in a generic function, which is made for each call.
+        // template and in a template, which is made for its type arguments.
         match n {
             "reflect" => {
-                self.unsupported(
-                    range,
-                    "`reflect` outside a derive or a generic function",
-                    "compile-time code in methods and non-generic functions (Phase 8)",
-                );
+                self.no_unfolding(range, "`reflect`");
                 return Expr::error(span);
             }
             "target" => {
@@ -2236,16 +2229,13 @@ impl Checker<'_> {
     }
 
     /// Arms made by `comptime for` or `comptime if` exist only in a
-    /// derive's template (08); anywhere else they are reported.
+    /// derive's template and in a template (08); anywhere else they are
+    /// reported.
     fn arm_made_at_compile_time(&mut self, a: &ast::Arm) -> bool {
         if a.generated.is_none() {
             return false;
         }
-        self.unsupported(
-            a.range,
-            "arms made at compile time outside a derive or a generic function",
-            "compile-time code in methods and non-generic functions (Phase 8)",
-        );
+        self.no_unfolding(a.range, "arms made at compile time");
         true
     }
 
@@ -2659,9 +2649,9 @@ impl Checker<'_> {
                     b = self.deref_smart(b);
                     b = self.auto_deref(b);
                 }
-                Some("MutexGuard") if name.text == "value" => return self.deref_smart(b),
+                Some("MutexGuard" | "ReadGuard") if name.text == "value" => return self.deref_smart(b),
                 // Any other field is the value's.
-                Some("MutexGuard") => {
+                Some("MutexGuard" | "ReadGuard") => {
                     b = self.deref_smart(b);
                     b = self.auto_deref(b);
                 }

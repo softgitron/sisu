@@ -1,0 +1,43 @@
+# Where compile-time code that unfolds is not made (decision 244): a
+# trait's own method, a method of a generic trait impl, a `comptime def`,
+# a constant and a test (`E0900`, each naming its place). A template
+# without type parameters is made where it is declared, so code that
+# cannot be unfolded stops there (`E0609`).
+
+struct Point:
+    x: int
+    y: int
+
+trait Named:
+    def names(self) -> list[String]:
+        var out: list[String] = []
+        comptime for f in reflect.fields_of(Self):
+            out.push(f.name)
+        return out
+
+struct Pair[A]:
+    a: A
+
+trait Size:
+    def size(self) -> int
+
+impl[A] Size for Pair[A]:
+    def size(self) -> int:
+        return self.a.[0]
+
+comptime def count() -> int:
+    return 1 + reflect.fields_of(Point)
+
+const LIMIT: int = len(reflect.fields_of(Point))
+
+def unknown(p: Point) -> int:
+    comptime for f in reflect.fields_of(p):
+        print(f.name)
+    return 0
+
+test "reflecting":
+    comptime for f in reflect.fields_of(Point):
+        assert f.name != ""
+
+def main():
+    print(LIMIT)

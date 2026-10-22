@@ -3,6 +3,10 @@
 //! Every local has a stack slot, except the result and the parameters,
 //! whose memory the caller provides; a place is an address computed from
 //! its local by its projections; an operand is the words at an address.
+//! In the release profile, a local of one word that is a number, a `bool`
+//! or a `char` and that no code borrows is a Cranelift variable instead,
+//! which lives in a register (decision 246); code that needs its address
+//! anyway (a call's result, a key) gets a slot it is copied to and from.
 //! Each statement that can panic (a call, a drop, an overflow, an index)
 //! is followed by a test of its status, which leads to the failure path of
 //! its block: a line of the stack trace, then the block's cleanup, or the
@@ -54,6 +58,9 @@ enum Storage {
     /// The caller's memory, at this address.
     Param(Value),
     Slot(ir::StackSlot),
+    /// A variable, with the slot its value is copied to when code needs
+    /// its address, made the first time.
+    Var(Variable, Option<ir::StackSlot>),
 }
 
 struct Local {
@@ -97,6 +104,9 @@ struct Cx<'a, 'p> {
     /// the debug information, stored after the probe: nothing below the
     /// top of the frame is written before it (decision 234).
     kept: Vec<(Value, ir::StackSlot)>,
+    /// The variables whose slot the statement being translated writes
+    /// (a call's result): each is read back from its slot after it.
+    reload: Vec<usize>,
 }
 
 /// Whether a type is a number, `bool`, `char` or `()`: one word or none,
@@ -144,9 +154,23 @@ impl<'a, 'p> Cx<'a, 'p> {
         let mut vars = Vec::new();
         let mut kept = Vec::new();
         let closure = matches!(f.kind, sir::FnKind::Closure(role) if role != sir::ClosureRole::Task);
-        for (i, l) in f.locals.iter().enumerate() {
-            let ty = cg.concrete(&l.ty, targs)?;
-            let storage = if i == 1 && closure && cg.types.size(&ty)? > cg.types.env_words * abi::WORD {
+        let tys: Vec<Type> = f.locals.iter().map(|l| cg.concrete(&l.ty, targs)).collect::<Result<_, _>>()?;
+        let in_registers =
+            if cg.release { register_locals(f, &tys, closure) } else { vec![false; tys.len()] };
+        for (i, (l, ty)) in f.locals.iter().zip(tys).enumerate() {
+            let storage = if in_registers[i] {
+                let var = b.declare_var(types::I64);
+                // A parameter's value is read once; another local starts
+                // as zero, which nothing reads before it is assigned.
+                let first = match params.get(i) {
+                    Some(p) if i <= f.param_count as usize => {
+                        b.ins().load(types::I64, MemFlags::trusted(), *p, 0)
+                    }
+                    _ => b.ins().iconst(types::I64, 0),
+                };
+                b.def_var(var, first);
+                Storage::Var(var, None)
+            } else if i == 1 && closure && cg.types.size(&ty)? > cg.types.env_words * abi::WORD {
                 // A closure's environment is in the function value, whose
                 // words after its code the call passes the address of; one
                 // larger than they are is a slot of the frame that made the
@@ -164,7 +188,7 @@ impl<'a, 'p> Cx<'a, 'p> {
             };
             // A named local is described by its slot; a parameter's (and the
             // environment's) address is kept in a slot of its own, so that
-            // a debugger finds the value through it.
+            // a debugger finds the value through it. A variable has neither.
             if let Some(name) = l.name.as_deref().filter(|_| !drop_flag(l)) {
                 let name = name.split('(').next().unwrap_or(name).to_string();
                 let (slot, indirect) = match &storage {
@@ -174,6 +198,10 @@ impl<'a, 'p> Cx<'a, 'p> {
                             b.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3));
                         kept.push((*v, ss));
                         (ss, true)
+                    }
+                    Storage::Var(..) => {
+                        locals.push(Local { ty, storage });
+                        continue;
                     }
                 };
                 let param = i >= 1 && i <= f.param_count as usize;
@@ -223,6 +251,7 @@ impl<'a, 'p> Cx<'a, 'p> {
             cur: 0,
             vars,
             kept,
+            reload: Vec::new(),
         };
         cx.prologue()?;
         Ok(cx)
@@ -283,7 +312,47 @@ impl<'a, 'p> Cx<'a, 'p> {
                 let ss = *ss;
                 Ok(self.b.ins().stack_addr(types::I64, ss, 0))
             }
+            // A variable's value, copied to its slot.
+            Some(Storage::Var(var, slot)) => {
+                let (var, slot) = (*var, *slot);
+                let ss = match slot {
+                    Some(ss) => ss,
+                    None => {
+                        let ss = self.b.create_sized_stack_slot(StackSlotData::new(
+                            StackSlotKind::ExplicitSlot,
+                            8,
+                            3,
+                        ));
+                        if let Some(x) = self.locals.get_mut(l.0 as usize) {
+                            x.storage = Storage::Var(var, Some(ss));
+                        }
+                        ss
+                    }
+                };
+                let v = self.b.use_var(var);
+                self.b.ins().stack_store(v, ss, 0);
+                Ok(self.b.ins().stack_addr(types::I64, ss, 0))
+            }
             None => Err(Error::internal(format!("no local _{}", l.0))),
+        }
+    }
+
+    /// The variable a local is kept in, if it is one.
+    fn var_of(&self, l: sir::LocalId) -> Option<Variable> {
+        match self.locals.get(l.0 as usize).map(|x| &x.storage) {
+            Some(Storage::Var(v, _)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// The variables whose slots the statement wrote, read back.
+    fn reload_vars(&mut self) {
+        for l in std::mem::take(&mut self.reload) {
+            if let Some(Local { storage: Storage::Var(var, Some(ss)), .. }) = self.locals.get(l) {
+                let (var, ss) = (*var, *ss);
+                let v = self.b.ins().stack_load(types::I64, ss, 0);
+                self.b.def_var(var, v);
+            }
         }
     }
 
@@ -624,6 +693,7 @@ impl<'a, 'p> Cx<'a, 'p> {
                     self.set_loc(loc);
                 }
                 self.statement(&s.kind)?;
+                self.reload_vars();
             }
             self.cg.statements += 1;
             if let Some(loc) = block.loc {
@@ -694,6 +764,18 @@ impl<'a, 'p> Cx<'a, 'p> {
 
     fn statement(&mut self, s: &StatementKind) -> Result<(), Error> {
         match s {
+            StatementKind::Assign(p, r) if p.proj.is_empty() && self.var_of(p.local).is_some() => {
+                let dest = self.place_type(p)?;
+                let v = self.rvalue(r, &dest)?;
+                let w = match &v {
+                    Val::Words(ws) if ws.is_empty() => self.iconst(0),
+                    _ => self.first_word(&v)?,
+                };
+                if let Some(var) = self.var_of(p.local) {
+                    self.b.def_var(var, w);
+                }
+                Ok(())
+            }
             StatementKind::Assign(p, r) => {
                 let dest = self.place_type(p)?;
                 let size = self.size(&dest)?;
@@ -706,7 +788,14 @@ impl<'a, 'p> Cx<'a, 'p> {
                 }
                 Ok(())
             }
-            StatementKind::Call { dest, callee, args } => self.call(dest, callee, args),
+            StatementKind::Call { dest, callee, args } => {
+                // A call's result goes to its destination's memory: a
+                // variable's slot, read back after the call.
+                if dest.proj.is_empty() && self.var_of(dest.local).is_some() {
+                    self.reload.push(dest.local.0 as usize);
+                }
+                self.call(dest, callee, args)
+            }
             StatementKind::Drop { place, flag } => self.drop_stmt(place, *flag),
             StatementKind::StorageDead(_) => Ok(()),
         }
@@ -791,10 +880,28 @@ impl<'a, 'p> Cx<'a, 'p> {
     }
 
     fn place_in(&mut self, p: &Place, skip: Option<Block>, write: bool) -> Result<(Value, Type), Error> {
-        let mut addr = self.local_addr(p.local)?;
         let mut ty = self.locals[p.local.0 as usize].ty.clone();
+        let mut projs: &[Proj] = &p.proj;
+        let mut addr = match self.var_of(p.local) {
+            // A reference in a variable: what it refers to is at the
+            // address it holds.
+            Some(var) if projs.first() == Some(&Proj::Deref) && matches!(ty, Type::Ref(..)) => {
+                projs = &projs[1..];
+                ty = deref_type(&ty)?;
+                self.b.use_var(var)
+            }
+            // A variable written through its slot is read back after the
+            // statement.
+            Some(_) => {
+                if write && !self.reload.contains(&(p.local.0 as usize)) {
+                    self.reload.push(p.local.0 as usize);
+                }
+                self.local_addr(p.local)?
+            }
+            None => self.local_addr(p.local)?,
+        };
         let mut variant: Option<u32> = None;
-        for proj in &p.proj {
+        for proj in projs {
             match proj {
                 Proj::Deref => {
                     let shared = matches!(&ty, Type::Named(n, _) if n == "Shared");
@@ -924,6 +1031,11 @@ impl<'a, 'p> Cx<'a, 'p> {
     fn operand(&mut self, o: &Operand) -> Result<(Val, Type), Error> {
         match o {
             Operand::Const(c) => self.constant(c),
+            Operand::Copy(p) | Operand::Move(p) if p.proj.is_empty() && self.var_of(p.local).is_some() => {
+                let ty = self.locals[p.local.0 as usize].ty.clone();
+                let var = self.var_of(p.local).ok_or_else(|| Error::internal("a variable without one"))?;
+                Ok((Val::Words(vec![self.b.use_var(var)]), ty))
+            }
             Operand::Copy(p) | Operand::Move(p) => {
                 let (addr, ty) = self.place(p, None)?;
                 let size = self.size(&ty)?;
@@ -1344,11 +1456,10 @@ impl<'a, 'p> Cx<'a, 'p> {
             _ => None,
         };
         if let Some(iop) = runtime {
-            let out = self.slot(8);
-            let code = self.i32const(iop as u32);
-            let st = self.rt_status(sym::INT_OP, &[code, x, y, out])?;
-            self.check(st);
-            return Ok(self.load(out, 0));
+            if iop != IntOp::Pow {
+                return self.inline_int_op(iop, x, y);
+            }
+            return self.runtime_int_op(iop, x, y);
         }
         Ok(match op {
             BinOp::WrapAdd => self.b.ins().iadd(x, y),
@@ -1379,6 +1490,70 @@ impl<'a, 'p> Cx<'a, 'p> {
             BinOp::BitXor => self.b.ins().bxor(x, y),
             other => return Err(Error::unsupported(format!("`{}` on integers", other.name()))),
         })
+    }
+
+    /// The runtime's integer operation (`sisu_rt_int_op`): its result, or
+    /// its panic.
+    fn runtime_int_op(&mut self, iop: IntOp, x: Value, y: Value) -> Result<Value, Error> {
+        let out = self.slot(8);
+        let code = self.i32const(iop as u32);
+        let st = self.rt_status(sym::INT_OP, &[code, x, y, out])?;
+        self.check(st);
+        Ok(self.load(out, 0))
+    }
+
+    /// `//`, `%`, `<<` and `>>` as instructions (decision 246), and, on a
+    /// cold path, as the runtime's call for the operands it raises a panic
+    /// for: a divisor of zero, `MIN // -1` (which does not fit; `MIN % -1`
+    /// is 0, which the runtime gives), and a shift by less than 0 or more
+    /// than 63. The quotient rounds down and the remainder takes the
+    /// divisor's sign, as the runtime's do.
+    fn inline_int_op(&mut self, iop: IntOp, x: Value, y: Value) -> Result<Value, Error> {
+        let slow_case = match iop {
+            IntOp::Shl | IntOp::Shr => self.b.ins().icmp_imm(IntCC::UnsignedGreaterThanOrEqual, y, 64),
+            _ => {
+                let zero = self.b.ins().icmp_imm(IntCC::Equal, y, 0);
+                let minus_one = self.b.ins().icmp_imm(IntCC::Equal, y, -1);
+                let min = self.b.ins().icmp_imm(IntCC::Equal, x, i64::MIN);
+                let overflow = self.b.ins().band(minus_one, min);
+                self.b.ins().bor(zero, overflow)
+            }
+        };
+        let (fast, slow, join) = (self.b.create_block(), self.b.create_block(), self.b.create_block());
+        self.b.append_block_param(join, types::I64);
+        self.b.ins().brif(slow_case, slow, &[], fast, &[]);
+        self.b.switch_to_block(fast);
+        let v = match iop {
+            IntOp::Shl => self.b.ins().ishl(x, y),
+            IntOp::Shr => self.b.ins().sshr(x, y),
+            IntOp::Mod => {
+                let r = self.b.ins().srem(x, y);
+                let signs = self.b.ins().bxor(r, y);
+                let differ = self.b.ins().icmp_imm(IntCC::SignedLessThan, signs, 0);
+                let nonzero = self.b.ins().icmp_imm(IntCC::NotEqual, r, 0);
+                let adjust = self.b.ins().band(differ, nonzero);
+                let up = self.b.ins().iadd(r, y);
+                self.b.ins().select(adjust, up, r)
+            }
+            _ => {
+                let q = self.b.ins().sdiv(x, y);
+                let qy = self.b.ins().imul(q, y);
+                let r = self.b.ins().isub(x, qy);
+                let signs = self.b.ins().bxor(r, y);
+                let differ = self.b.ins().icmp_imm(IntCC::SignedLessThan, signs, 0);
+                let nonzero = self.b.ins().icmp_imm(IntCC::NotEqual, r, 0);
+                let adjust = self.b.ins().band(differ, nonzero);
+                let one = self.b.ins().uextend(types::I64, adjust);
+                self.b.ins().isub(q, one)
+            }
+        };
+        self.b.ins().jump(join, &[v.into()]);
+        self.b.set_cold_block(slow);
+        self.b.switch_to_block(slow);
+        let v = self.runtime_int_op(iop, x, y)?;
+        self.b.ins().jump(join, &[v.into()]);
+        self.b.switch_to_block(join);
+        Ok(self.b.block_params(join)[0])
     }
 
     fn float_op(&mut self, op: BinOp, x: Value, y: Value) -> Result<Value, Error> {
@@ -1556,13 +1731,25 @@ impl<'a, 'p> Cx<'a, 'p> {
         }
         let done = self.b.create_block();
         if let Some(fl) = flag {
-            let a = self.local_addr(fl)?;
-            let set = self.load(a, 0);
+            let var = self.var_of(fl);
+            let a = match var {
+                Some(_) => None,
+                None => Some(self.local_addr(fl)?),
+            };
+            let set = match (var, a) {
+                (Some(v), _) => self.b.use_var(v),
+                (None, Some(a)) => self.load(a, 0),
+                (None, None) => self.iconst(0),
+            };
             let go = self.b.create_block();
             self.b.ins().brif(set, go, &[], done, &[]);
             self.b.switch_to_block(go);
             let zero = self.iconst(0);
-            self.store_word(zero, a, 0);
+            match (var, a) {
+                (Some(v), _) => self.b.def_var(v, zero),
+                (None, Some(a)) => self.store_word(zero, a, 0),
+                (None, None) => {}
+            }
         }
         let (addr, ty) = self.place(place, Some(done))?;
         let id = self.type_id(&ty)?;
@@ -1979,6 +2166,109 @@ impl<'a, 'p> Cx<'a, 'p> {
 
 /// Whether a local is a flag of drop elaboration's: named `flag`, with no
 /// place in the source (a variable the program names `flag` has one).
+/// Whether a local of type `t` is one word the release profile may keep
+/// in a variable: a number, a `bool`, a `char`, or a reference that is an
+/// address (not a `dyn`'s two words).
+fn one_word(t: &Type) -> bool {
+    match t {
+        Type::Ref(inner, _) => !crate::layout::fat(inner),
+        _ => matches!(
+            scalar_kind(t),
+            Some(Scalar::Int | Scalar::U64 | Scalar::Float | Scalar::F32 | Scalar::Bool | Scalar::Char)
+        ),
+    }
+}
+
+/// The locals the release profile keeps in variables (decision 246): the
+/// parameters and other locals (not the result, not a closure's
+/// environment) of one word ([`one_word`]) whose own memory no code needs:
+/// none borrows one, projects one other than a reference through it, or
+/// uses one as a key.
+fn register_locals(f: &sir::Function, tys: &[Type], closure: bool) -> Vec<bool> {
+    let mut u = Uses {
+        ok: tys.iter().enumerate().map(|(i, t)| i >= 1 && !(closure && i == 1) && one_word(t)).collect(),
+        is_ref: tys.iter().map(|t| matches!(t, Type::Ref(..))).collect(),
+    };
+    for b in &f.blocks {
+        for st in &b.stmts {
+            match &st.kind {
+                StatementKind::Assign(p, r) => {
+                    u.place(p);
+                    match r {
+                        Rvalue::Use(o) | Rvalue::Unary(_, o) => u.operand(o),
+                        Rvalue::Binary(_, x, y) => {
+                            u.operand(x);
+                            u.operand(y);
+                        }
+                        Rvalue::Aggregate(_, os) | Rvalue::Closure(_, _, os) => {
+                            os.iter().for_each(|o| u.operand(o))
+                        }
+                        // These take the place's address: the local's own
+                        // memory, unless through its reference.
+                        Rvalue::Ref(q, _)
+                        | Rvalue::Discriminant(q)
+                        | Rvalue::CopyOf(q)
+                        | Rvalue::StrView(q) => {
+                            if q.proj.is_empty() {
+                                u.no(q.local);
+                            }
+                            u.place(q);
+                        }
+                    }
+                }
+                StatementKind::Call { dest, callee, args } => {
+                    u.place(dest);
+                    if let Callee::Value(o) = callee {
+                        u.operand(o);
+                    }
+                    args.iter().for_each(|o| u.operand(o));
+                }
+                StatementKind::Drop { place, .. } => u.place(place),
+                StatementKind::StorageDead(_) => {}
+            }
+        }
+        if let Terminator::Switch { value, .. } = &b.term {
+            u.operand(value);
+        }
+    }
+    u.ok
+}
+
+/// Which locals may be variables, as [`register_locals`] finds them out.
+struct Uses {
+    ok: Vec<bool>,
+    is_ref: Vec<bool>,
+}
+
+impl Uses {
+    fn no(&mut self, l: sir::LocalId) {
+        if let Some(x) = self.ok.get_mut(l.0 as usize) {
+            *x = false;
+        }
+    }
+
+    /// A place reaches its local's memory unless it is the local itself
+    /// (read or written whole) or what a reference in it refers to.
+    fn place(&mut self, p: &Place) {
+        let through =
+            p.proj.first() == Some(&Proj::Deref) && self.is_ref.get(p.local.0 as usize) == Some(&true);
+        if !p.proj.is_empty() && !through {
+            self.no(p.local);
+        }
+        for q in &p.proj {
+            if let Proj::Key(k) = q {
+                self.no(*k);
+            }
+        }
+    }
+
+    fn operand(&mut self, o: &Operand) {
+        if let Operand::Copy(p) | Operand::Move(p) = o {
+            self.place(p);
+        }
+    }
+}
+
 fn drop_flag(l: &sir::LocalDecl) -> bool {
     l.name.as_deref() == Some("flag") && l.loc.is_none()
 }
@@ -2011,7 +2301,7 @@ fn wide_op(name: &str) -> Option<(u32, SizedOp)> {
 fn deref_type(t: &Type) -> Result<Type, Error> {
     match t {
         Type::Ref(inner, _) => Ok((**inner).clone()),
-        Type::Named(n, a) if n == "MutexGuard" || n == "Shared" => {
+        Type::Named(n, a) if n == "MutexGuard" || n == "ReadGuard" || n == "Shared" => {
             Ok(a.first().cloned().unwrap_or(Type::Unit))
         }
         other => Err(Error::unsupported(format!("dereferencing a `{}`", sir::write::ty(other)))),

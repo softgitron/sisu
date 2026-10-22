@@ -1,0 +1,57 @@
+# Conditional compilation (08, "Conditional compilation"; decision 243):
+# an item whose `@cfg` does not hold is left out before the program is
+# resolved, as if it were not written. `sisu run` builds the program
+# without its tests, so `test` does not hold there and the tests are left
+# out too; `sisu test` and `sisu check` build it with them.
+
+struct Config:
+    retries: int
+
+@cfg(test)
+def config() -> Config:
+    return Config(retries=0)
+
+@cfg(not test)
+def config() -> Config:
+    return Config(retries=3)
+
+impl Config:
+    @cfg(test)
+    def describe(self) -> String:
+        return "a test configuration with {self.retries} retries"
+
+    @cfg(not test)
+    def describe(self) -> String:
+        return "a configuration with {self.retries} retries"
+
+# Several conditions in one `@cfg` must all hold, `all` and `any` combine
+# them, `not` turns one around, and parentheses group.
+@cfg(any(all(test, not test), (test)), test)
+def setting() -> String:
+    return "tested"
+
+@cfg(not any(test))
+def setting() -> String:
+    return "running"
+
+# Only a test calls it, so only a build with the tests declares it.
+@cfg(test)
+def fixture() -> list[int]:
+    return [1, 2, 3]
+
+def main():
+    print(config().describe())
+    print(setting())
+
+test "a test sees the test configuration":
+    assert config().retries == 0
+    assert config().describe() == "a test configuration with 0 retries"
+    assert setting() == "tested"
+
+suite "fixtures":
+    @cfg(not test)
+    test "never declared":
+        assert False
+
+    test "the fixture is there":
+        assert fixture().len() == 3

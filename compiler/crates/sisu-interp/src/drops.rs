@@ -56,6 +56,7 @@ fn owns_anything(v: &Value) -> bool {
             | Value::Cell(_)
             | Value::Mutex(_)
             | Value::Guard(_)
+            | Value::ReadGuard(_)
             | Value::Arena(_)
             | Value::Sender(_)
             | Value::Receiver(_)
@@ -202,6 +203,7 @@ impl<'p> Interp<'p, '_> {
             Value::Cell(v) => self.queue_drop(*v, arg(&ty, 0)),
             Value::Mutex(m) => self.queue_drop(m.value, arg(&ty, 0)),
             Value::Guard(p) => self.unlock(p, arg(&ty, 0))?,
+            Value::ReadGuard(p) => self.read_unlock(&p)?,
             Value::Arena(a) => {
                 let t = arg(&ty, 0);
                 self.queue_drops(a.slots.into_iter().map(|(_, x)| (x, t.clone())).collect());
@@ -242,6 +244,16 @@ impl<'p> Interp<'p, '_> {
             }
         }
         self.finish_unlock(&p, true)
+    }
+
+    /// Dropping a read guard counts one reader fewer on its `RwLock`.
+    fn read_unlock(&mut self, p: &Pointer) -> Result<(), Unwind> {
+        match self.write(p)? {
+            Value::Mutex(m) => m.readers = m.readers.saturating_sub(1),
+            other => return Err(ice(format!("a read guard on {other:?}"))),
+        }
+        self.wake_key(crate::sched::Key::Lock);
+        Ok(())
     }
 
     /// Unlocks the mutex a guard held, poisoning it when its invariant did

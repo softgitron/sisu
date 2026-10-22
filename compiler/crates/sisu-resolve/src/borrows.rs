@@ -62,7 +62,10 @@ impl Program {
             Ty::Tuple(es, _) => es.iter().any(|t| self.is_view_type(t)),
             Ty::Adt(d, args) => match &self.def(*d).kind {
                 DefKind::Struct(s)
-                    if matches!(s.builtin.as_deref(), Some("MutexGuard" | "Lent" | "Slice")) =>
+                    if matches!(
+                        s.builtin.as_deref(),
+                        Some("MutexGuard" | "ReadGuard" | "Lent" | "Slice")
+                    ) =>
                 {
                     true
                 }
@@ -91,7 +94,9 @@ impl Program {
             Ty::Tuple(es, _) => es.iter().any(|t| self.can_borrow(t)),
             Ty::Adt(d, args) => match &self.def(*d).kind {
                 DefKind::Struct(s) => match s.builtin.as_deref() {
-                    Some("Iter" | "Entry" | "Iterable" | "MutexGuard" | "Lent" | "Slice") => true,
+                    Some("Iter" | "Entry" | "Iterable" | "MutexGuard" | "ReadGuard" | "Lent" | "Slice") => {
+                        true
+                    }
                     Some(_) => args.iter().any(|t| self.can_borrow(t)),
                     None => s.view || args.iter().any(|t| self.can_borrow(t)),
                 },
@@ -123,7 +128,9 @@ impl Program {
                 Ty::Tuple(es, _) => es.iter().any(|t| deep(p, t)),
                 Ty::Adt(d, args) => match &p.def(*d).kind {
                     DefKind::Struct(s) => match s.builtin.as_deref() {
-                        Some("Iter" | "Entry" | "Iterable" | "MutexGuard" | "Lent" | "Slice") => true,
+                        Some(
+                            "Iter" | "Entry" | "Iterable" | "MutexGuard" | "ReadGuard" | "Lent" | "Slice",
+                        ) => true,
                         Some(_) => args.iter().any(|t| deep(p, t)),
                         None => s.view || args.iter().any(|t| deep(p, t)),
                     },
