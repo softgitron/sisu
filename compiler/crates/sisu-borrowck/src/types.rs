@@ -3,7 +3,15 @@
 //! loan, which must be consumed, and which implement `Drop`.
 
 use sisu_sir::{Function, Place, Program, Type, TypeDecl};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+/// The state of one look at a type and what it reaches: the types being
+/// looked at, and the answers for those done.
+#[derive(Default)]
+struct Walk {
+    open: Vec<Type>,
+    done: HashMap<Type, bool>,
+}
 
 pub struct Types<'p> {
     decls: HashMap<&'p str, &'p TypeDecl>,
@@ -238,39 +246,54 @@ impl<'p> Types<'p> {
     /// Whether dropping a value of the type runs a user `Drop` (its own or
     /// a part's), which may read the references the value holds.
     pub fn has_drop_glue(&self, t: &Type) -> bool {
-        self.drop_glue_depth(t, 0)
+        self.drop_glue_in(t, 0, &mut Walk::default())
     }
 
-    fn drop_glue_depth(&self, t: &Type, depth: u32) -> bool {
+    /// A type met again while it is being looked at is a recursive type,
+    /// which counts as having glue (the depth bound's answer); one already
+    /// looked at gives what it gave, so a recursive type takes one look per
+    /// type it reaches.
+    fn drop_glue_in(&self, t: &Type, depth: u32, w: &mut Walk) -> bool {
         if depth > 32 {
             return true;
         }
         match t {
             // Its type argument, or the value behind a `dyn`, may have one.
             Type::Param(_) | Type::Assoc(..) | Type::Dyn(..) => true,
-            Type::Tuple(es) => es.iter().any(|e| self.drop_glue_depth(e, depth + 1)),
+            Type::Tuple(es) => es.iter().any(|e| self.drop_glue_in(e, depth + 1, w)),
             Type::Named(n, args) => {
                 // Dropping a guard unlocks its mutex, through its loan.
-                if n == "MutexGuard" || args.iter().any(|a| self.drop_glue_depth(a, depth + 1)) {
+                if n == "MutexGuard" {
                     return true;
                 }
-                // The fields with the type's arguments in them.
-                match self.decl(n) {
-                    Some(TypeDecl::Struct { drop, fields, .. }) => {
-                        drop.is_some()
-                            || fields.iter().any(|f| self.drop_glue_depth(&f.ty.subst(args), depth + 1))
-                    }
-                    Some(TypeDecl::Enum { drop, variants, .. }) => {
-                        drop.is_some()
-                            || variants.iter().any(|v| {
-                                v.fields.iter().any(|(_, t)| self.drop_glue_depth(&t.subst(args), depth + 1))
-                            })
-                    }
-                    None => false,
+                if let Some(r) = w.done.get(t) {
+                    return *r;
                 }
+                if w.open.contains(t) {
+                    return true;
+                }
+                w.open.push(t.clone());
+                // The fields with the type's arguments in them.
+                let r = args.iter().any(|a| self.drop_glue_in(a, depth + 1, w))
+                    || match self.decl(n) {
+                        Some(TypeDecl::Struct { drop, fields, .. }) => {
+                            drop.is_some()
+                                || fields.iter().any(|f| self.drop_glue_in(&f.ty.subst(args), depth + 1, w))
+                        }
+                        Some(TypeDecl::Enum { drop, variants, .. }) => {
+                            drop.is_some()
+                                || variants.iter().any(|v| {
+                                    v.fields.iter().any(|(_, t)| self.drop_glue_in(&t.subst(args), depth + 1, w))
+                                })
+                        }
+                        None => false,
+                    };
+                w.open.pop();
+                w.done.insert(t.clone(), r);
+                r
             }
             Type::ErrSet(ms) => {
-                ms.iter().any(|m| self.drop_glue_depth(&Type::Named(m.clone(), Vec::new()), depth))
+                ms.iter().any(|m| self.drop_glue_in(&Type::Named(m.clone(), Vec::new()), depth, w))
             }
             _ => false,
         }
@@ -296,27 +319,31 @@ impl<'p> Types<'p> {
     /// The `Drop` functions dropping a value of the type may run.
     pub fn drop_fns(&self, t: &Type) -> Vec<String> {
         let mut out = Vec::new();
-        self.drop_fns_into(t, &mut out, 0);
+        self.drop_fns_into(t, &mut out, 0, &mut HashSet::new());
         out
     }
 
-    fn drop_fns_into(&self, t: &Type, out: &mut Vec<String>, depth: u32) {
+    /// `seen`: the types looked at already, each once.
+    fn drop_fns_into(&self, t: &Type, out: &mut Vec<String>, depth: u32, seen: &mut HashSet<Type>) {
         if depth > 32 {
             return;
         }
         match t {
-            Type::Tuple(es) => es.iter().for_each(|e| self.drop_fns_into(e, out, depth + 1)),
+            Type::Tuple(es) => es.iter().for_each(|e| self.drop_fns_into(e, out, depth + 1, seen)),
             Type::Named(n, args) => {
-                args.iter().for_each(|a| self.drop_fns_into(a, out, depth + 1));
+                if !seen.insert(t.clone()) {
+                    return;
+                }
+                args.iter().for_each(|a| self.drop_fns_into(a, out, depth + 1, seen));
                 match self.decl(n) {
                     Some(TypeDecl::Struct { drop, fields, .. }) => {
                         out.extend(drop.iter().filter(|d| !out.contains(d)).cloned().collect::<Vec<_>>());
-                        fields.iter().for_each(|f| self.drop_fns_into(&f.ty, out, depth + 1));
+                        fields.iter().for_each(|f| self.drop_fns_into(&f.ty, out, depth + 1, seen));
                     }
                     Some(TypeDecl::Enum { drop, variants, .. }) => {
                         out.extend(drop.iter().filter(|d| !out.contains(d)).cloned().collect::<Vec<_>>());
                         for v in variants {
-                            v.fields.iter().for_each(|(_, t)| self.drop_fns_into(t, out, depth + 1));
+                            v.fields.iter().for_each(|(_, t)| self.drop_fns_into(t, out, depth + 1, seen));
                         }
                     }
                     None => {}
@@ -324,7 +351,7 @@ impl<'p> Types<'p> {
             }
             Type::ErrSet(ms) => {
                 for m in ms {
-                    self.drop_fns_into(&Type::Named(m.clone(), Vec::new()), out, depth + 1);
+                    self.drop_fns_into(&Type::Named(m.clone(), Vec::new()), out, depth + 1, seen);
                 }
             }
             _ => {}
@@ -346,38 +373,42 @@ impl<'p> Types<'p> {
     /// value of a marked type, or a collection, option, tuple, iterator or
     /// aggregate holding one. A reference never is: it owns nothing.
     pub fn must_consume(&self, t: &Type) -> bool {
-        self.must_consume_depth(t, 0)
+        self.must_consume_in(t, 0, &mut HashSet::new())
     }
 
-    fn must_consume_depth(&self, t: &Type, depth: u32) -> bool {
+    /// `seen`: the types looked at already. One met again adds nothing:
+    /// it is being looked at (a recursive type), or it was and is not
+    /// (else the answer is already known), so a recursive type takes one
+    /// look per type it reaches.
+    fn must_consume_in(&self, t: &Type, depth: u32, seen: &mut HashSet<Type>) -> bool {
         if depth > 32 {
             return false;
         }
         match t {
             Type::Ref(..) => false,
-            Type::Tuple(es) => es.iter().any(|e| self.must_consume_depth(e, depth + 1)),
+            Type::Tuple(es) => es.iter().any(|e| self.must_consume_in(e, depth + 1, seen)),
             Type::Named(n, args) => {
-                if PLAIN_BUILTINS.contains(&n.as_str()) {
+                if PLAIN_BUILTINS.contains(&n.as_str()) || !seen.insert(t.clone()) {
                     return false;
                 }
-                if args.iter().any(|a| self.must_consume_depth(a, depth + 1)) {
+                if args.iter().any(|a| self.must_consume_in(a, depth + 1, seen)) {
                     return true;
                 }
                 match self.decl(n) {
                     Some(TypeDecl::Struct { must_consume, fields, .. }) => {
-                        *must_consume || fields.iter().any(|f| self.must_consume_depth(&f.ty, depth + 1))
+                        *must_consume || fields.iter().any(|f| self.must_consume_in(&f.ty, depth + 1, seen))
                     }
                     Some(TypeDecl::Enum { must_consume, variants, .. }) => {
                         *must_consume
                             || variants
                                 .iter()
-                                .any(|v| v.fields.iter().any(|(_, t)| self.must_consume_depth(t, depth + 1)))
+                                .any(|v| v.fields.iter().any(|(_, t)| self.must_consume_in(t, depth + 1, seen)))
                     }
                     None => false,
                 }
             }
             Type::ErrSet(ms) => {
-                ms.iter().any(|m| self.must_consume_depth(&Type::Named(m.clone(), Vec::new()), depth + 1))
+                ms.iter().any(|m| self.must_consume_in(&Type::Named(m.clone(), Vec::new()), depth + 1, seen))
             }
             _ => false,
         }
