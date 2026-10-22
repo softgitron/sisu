@@ -197,6 +197,7 @@ E0347 error   type.bound-not-satisfied    `{ty}` does not implement `{bound}`
 E0349 error   type.not-generic            `{name}` does not take type arguments
 E0350 error   type.not-a-value            `{name}` is a {kind}, not a value
 E0351 error   type.unknown-associated     `{ty}` has no associated function `{name}`
+E0352 error   type.value-returns-borrow   `{name}` cannot be a value: it returns a borrow of its parameter `{param}`, which a function value takes by value
 E0353 error   type.closure-parameter-count  wrong number of closure parameters: expected {expected}, found {found}
 E0356 error   type.open-set-needs-wildcard  `{ty}` is an open error set; matching it needs a `case _` arm
 E0358 error   type.let-needs-type         `let {name}` without a value needs a type annotation

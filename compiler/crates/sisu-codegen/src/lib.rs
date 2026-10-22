@@ -14,9 +14,12 @@
 //! of SIR run as ordinary control flow. docs/architecture.md, "Stage 2",
 //! has the mapping of each construct.
 
+mod debug;
 mod func;
 mod layout;
 mod workers;
+
+pub use debug::Sources;
 
 use cranelift_codegen::ir::MemFlags;
 use cranelift_codegen::ir::{self, AbiParam, InstBuilder, types};
@@ -87,9 +90,16 @@ pub struct Compiled {
     pub statements: usize,
 }
 
-/// Compiles a program to an object file defining the C `main`.
+/// Compiles a program to an object file defining the C `main`, with debug
+/// information whose source paths are relative to the current directory.
 pub fn compile(prog: &sir::Program) -> Result<Compiled, Error> {
-    compile_with(prog, false).map(|(c, _)| c)
+    let comp_dir = std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default();
+    compile_for(prog, &Sources { comp_dir, std_dir: None })
+}
+
+/// [`compile`], with the debug information saying where the sources are.
+pub fn compile_for(prog: &sir::Program, sources: &Sources) -> Result<Compiled, Error> {
+    compile_with(prog, false, sources).map(|(c, _)| c)
 }
 
 /// Every construct of the program that the backend does not compile yet,
@@ -97,7 +107,7 @@ pub fn compile(prog: &sir::Program) -> Result<Compiled, Error> {
 /// the first: how far a program is from compiling (a function is left at
 /// its first such construct).
 pub fn survey(prog: &sir::Program) -> Result<Vec<(String, String, usize)>, Error> {
-    let (_, missing) = compile_with(prog, true)?;
+    let (_, missing) = compile_with(prog, true, &Sources::default())?;
     let mut counted: Vec<(String, String, usize)> = Vec::new();
     for (what, function) in missing {
         match counted.iter_mut().find(|(w, _, _)| *w == what) {
@@ -109,11 +119,39 @@ pub fn survey(prog: &sir::Program) -> Result<Vec<(String, String, usize)>, Error
     Ok(counted)
 }
 
-fn compile_with(prog: &sir::Program, survey: bool) -> Result<(Compiled, Vec<(String, String)>), Error> {
+fn compile_with(
+    prog: &sir::Program,
+    survey: bool,
+    sources: &Sources,
+) -> Result<(Compiled, Vec<(String, String)>), Error> {
+    // A function value holds its closure's environment, as many words as
+    // the largest `own` closure's (decision 224), which only compiling
+    // finds: a program that needs more is compiled again with them.
+    let mut env_words = 1;
+    loop {
+        match compile_once(prog, survey, env_words, sources)? {
+            Ok(done) => return Ok(done),
+            Err(more) => env_words = more,
+        }
+    }
+}
+
+/// Compiles the program with function values of `env_words` words of
+/// environment; `Err` with the words it needs when an `own` closure's
+/// environment is larger.
+#[allow(clippy::type_complexity)]
+fn compile_once(
+    prog: &sir::Program,
+    survey: bool,
+    env_words: u32,
+    sources: &Sources,
+) -> Result<Result<(Compiled, Vec<(String, String)>), u32>, Error> {
     let Some(entry) = &prog.entry else {
         return Err(Error::unsupported("a program without `main`"));
     };
-    let mut cg = Codegen::new(prog)?;
+    let mut tt = std::time::Instant::now();
+    let mut cg = Codegen::new(prog, env_words)?;
+    tphase("codegen new", &mut tt);
     cg.survey = survey;
     let threads = workers::count();
     let (main_id, flags, ret_ty) = if threads > 1 {
@@ -137,6 +175,7 @@ fn compile_with(prog: &sir::Program, survey: bool) -> Result<(Compiled, Vec<(Str
                 })
                 .collect();
             let generated = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cg.generate(entry)));
+            tphase("generate (IR writing)", &mut tt);
             // Closing the queue lets the threads finish what is in it; a
             // failure stops them, since nothing they compile will be used.
             cg.jobs = None;
@@ -151,20 +190,41 @@ fn compile_with(prog: &sir::Program, survey: bool) -> Result<(Compiled, Vec<(Str
                     std::panic::resume_unwind(e);
                 }
             }
+            tphase("drain workers", &mut tt);
             let main = generated.unwrap_or_else(|e| std::panic::resume_unwind(e))?;
             cg.place(done.try_iter().collect())?;
+            tphase("place", &mut tt);
             Ok::<_, Error>(main)
         })?
     } else {
         cg.generate(entry)?
     };
+    if cg.env_needed > env_words {
+        return Ok(Err(cg.env_needed));
+    }
     cg.define_main(main_id, flags, ret_ty)?;
     let functions = cg.compiled;
     let statements = cg.statements;
     let missing = std::mem::take(&mut cg.missing);
-    let product = cg.module.finish();
+    tphase("define main", &mut tt);
+    let mut product = cg.module.finish();
+    tphase("finish", &mut tt);
+    debug::write(&mut product, prog, &cg.debug, &mut cg.types, sources, &*cg.isa)?;
+    tphase("debug", &mut tt);
     let object = product.emit().map_err(|e| Error::internal(format!("writing the object file: {e}")))?;
-    Ok((Compiled { object, functions, statements }, missing))
+    tphase("emit", &mut tt);
+    Ok(Ok((Compiled { object, functions, statements }, missing)))
+}
+
+static COMPILE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+fn tphase(name: &str, t: &mut std::time::Instant) {
+    if std::env::var_os("SISU_PHASES").is_some() && COMPILE_NS.load(std::sync::atomic::Ordering::Relaxed) > 0 {
+        eprintln!("  (cranelift compile so far: {:.1} ms)", COMPILE_NS.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e6);
+    }
+    if std::env::var_os("SISU_PHASES").is_some() {
+        eprintln!("phase {name}: {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
+    }
+    *t = std::time::Instant::now();
 }
 
 /// The system libraries a Rust static library needs on this target.
@@ -281,9 +341,13 @@ pub(crate) struct Codegen<'p> {
     /// each is compiled as it is made.
     jobs: Option<std::sync::mpsc::Sender<workers::Job>>,
     /// The functions handed to the threads, in the order they were made:
-    /// each one's id, what an error in it is called, and whether its frame
-    /// counts towards `max_frame`.
-    handed: Vec<(FuncId, String, bool)>,
+    /// each one's id, what an error in it is called, whether its frame
+    /// counts towards `max_frame`, and what the debug information says of
+    /// it.
+    handed: Vec<(FuncId, String, bool, debug::FnDebug)>,
+    /// What the debug information says of the functions defined, in the
+    /// order they were made (decision 227).
+    debug: Vec<debug::FnDebug>,
     /// Surveying (`survey`): a function with a construct the backend does
     /// not compile is recorded in `missing` and given a body that stops.
     survey: bool,
@@ -301,6 +365,9 @@ pub(crate) struct Codegen<'p> {
     names: usize,
     pub compiled: usize,
     pub statements: usize,
+    /// The words of environment the largest `own` closure compiled needs,
+    /// beyond what a function value holds: the program is compiled again.
+    pub env_needed: u32,
 }
 
 /// What a call adds to the callee's frame beyond what Cranelift reports
@@ -340,7 +407,7 @@ struct Dispatcher {
 }
 
 impl<'p> Codegen<'p> {
-    fn new(prog: &'p sir::Program) -> Result<Codegen<'p>, Error> {
+    fn new(prog: &'p sir::Program, env_words: u32) -> Result<Codegen<'p>, Error> {
         let mut flags = settings::builder();
         let set = |f: &mut settings::Builder, k: &str, v: &str| {
             f.set(k, v).map_err(|e| Error::internal(format!("the setting `{k}`: {e}")))
@@ -369,7 +436,7 @@ impl<'p> Codegen<'p> {
         Ok(Codegen {
             prog,
             module,
-            types: Types::new(prog),
+            types: Types::new(prog, env_words),
             call_conv,
             instances: HashMap::new(),
             queue: VecDeque::new(),
@@ -388,6 +455,7 @@ impl<'p> Codegen<'p> {
             isa: shared,
             jobs: None,
             handed: Vec::new(),
+            debug: Vec::new(),
             survey: false,
             missing: Vec::new(),
             carried: HashMap::new(),
@@ -397,6 +465,7 @@ impl<'p> Codegen<'p> {
             names: 0,
             compiled: 0,
             statements: 0,
+            env_needed: 0,
         })
     }
 
@@ -674,7 +743,8 @@ impl<'p> Codegen<'p> {
         }
         self.fbctx = fbctx;
         let what = format!("the dispatcher of `{}`", self.dispatchers[i].name);
-        self.define(id, ctx, what, true)
+        let dbg = debug::FnDebug::new(id, format!("{}#dispatch", self.dispatchers[i].name));
+        self.define(id, ctx, what, true, dbg)
     }
 
     /// Defines function `id` with the body in `ctx`: compiled here, or
@@ -682,18 +752,31 @@ impl<'p> Codegen<'p> {
     /// [`Codegen::place`] defines. `what` names the function in an error;
     /// `frame`: whether its frame counts towards `max_frame` (a task may
     /// run it).
-    fn define(&mut self, id: FuncId, mut ctx: Context, what: String, frame: bool) -> Result<(), Error> {
+    fn define(
+        &mut self,
+        id: FuncId,
+        mut ctx: Context,
+        what: String,
+        frame: bool,
+        dbg: debug::FnDebug,
+    ) -> Result<(), Error> {
         if let Some(jobs) = &self.jobs {
             let job = workers::Job { order: self.handed.len(), id, func: ctx.func };
             if jobs.send(job).is_err() {
                 return Err(Error::internal(format!("{what}: the threads that compile stopped")));
             }
-            self.handed.push((id, what, frame));
+            self.handed.push((id, what, frame, dbg));
             return Ok(());
         }
+        let t0 = std::time::Instant::now();
         self.module.define_function(id, &mut ctx).map_err(|e| Error::internal(format!("{what}: {e:?}")))?;
-        if frame && let Some(code) = ctx.compiled_code() {
-            self.max_frame = self.max_frame.max(code.frame_size);
+        COMPILE_NS.fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        if let Some(code) = ctx.compiled_code() {
+            if frame {
+                self.max_frame = self.max_frame.max(code.frame_size);
+            }
+            let size = code.buffer.data().len() as u32;
+            self.debug.push(dbg.compiled(size, workers::Compiled::of(code, &*self.isa)));
         }
         Ok(())
     }
@@ -708,7 +791,7 @@ impl<'p> Codegen<'p> {
                 *c = Some(code);
             }
         }
-        for ((id, what, frame), code) in std::mem::take(&mut self.handed).into_iter().zip(codes) {
+        for ((id, what, frame, dbg), code) in std::mem::take(&mut self.handed).into_iter().zip(codes) {
             let code = match code {
                 Some(Ok(code)) => code,
                 Some(Err(e)) => return Err(Error::internal(format!("{what}: {e}"))),
@@ -720,6 +803,7 @@ impl<'p> Codegen<'p> {
             if frame {
                 self.max_frame = self.max_frame.max(code.frame_size);
             }
+            self.debug.push(dbg.compiled(code.bytes.len() as u32, code.debug));
         }
         Ok(())
     }
@@ -780,8 +864,17 @@ impl<'p> Codegen<'p> {
         // A translation that stopped halfway leaves the builder's context
         // in use: the next function starts from a fresh one.
         self.fbctx = if result.is_ok() { fbctx } else { FunctionBuilderContext::new() };
-        result?;
-        self.define(id, ctx, format!("Cranelift rejected `{name}`"), true)?;
+        let vars = result?;
+        let mut shown = name.to_string();
+        if !targs.is_empty() {
+            let args: Vec<String> = targs.iter().map(sir::write::ty).collect();
+            shown = format!("{shown}[{}]", args.join(", "));
+        }
+        let mut dbg = debug::FnDebug::new(id, shown);
+        dbg.source = Some(f.source);
+        dbg.line = f.loc.map_or(0, |l| l.line);
+        dbg.vars = vars;
+        self.define(id, ctx, format!("Cranelift rejected `{name}`"), true, dbg)?;
         self.compiled += 1;
         Ok(())
     }
@@ -834,7 +927,13 @@ impl<'p> Codegen<'p> {
             b.finalize();
         }
         self.fbctx = fbctx;
-        self.define(id, ctx, format!("{name} as a value"), true)?;
+        self.define(
+            id,
+            ctx,
+            format!("{name} as a value"),
+            true,
+            debug::FnDebug::new(id, format!("{name}#thunk")),
+        )?;
         self.thunks.insert(name.to_string(), (id, ty.clone()));
         Ok((id, ty))
     }
@@ -856,7 +955,7 @@ impl<'p> Codegen<'p> {
             b.finalize();
         }
         self.fbctx = fbctx;
-        self.define(id, ctx, name.to_string(), false)
+        self.define(id, ctx, name.to_string(), false, debug::FnDebug::new(id, name.to_string()))
     }
 
     /// A runtime entry point, declared once with its signature.
@@ -878,6 +977,7 @@ impl<'p> Codegen<'p> {
             sym::INT_OP => (&[i32_, i64_, i64_, i64_], &[i8_]),
             sym::FLOAT_OP => (&[i32_, f64_, f64_], &[f64_]),
             sym::ALLOC => (&[i64_], &[i64_]),
+            sym::TASK_ENV => (&[i64_, i32_], &[i64_]),
             sym::FREE | sym::TRACE_RELEASE => (&[i64_], &[]),
             sym::DROP => (&[i64_, i32_], &[i8_]),
             sym::COPY => (&[i64_, i64_, i32_], &[]),
@@ -1156,7 +1256,7 @@ impl<'p> Codegen<'p> {
             b.finalize();
         }
         self.fbctx = fbctx;
-        self.define(main, ctx, "main".to_string(), false)
+        self.define(main, ctx, "main".to_string(), false, debug::FnDebug::new(main, "main".to_string()))
     }
 }
 

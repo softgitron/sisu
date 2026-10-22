@@ -127,13 +127,22 @@ unsafe extern "C" fn sisu_rt_start(
         } else {
             EXIT_OK
         };
+        // The run is over: what the interpreter's host lets go of without
+        // dropping it is freed, and no Sisu code runs: the result of a
+        // `main` that returned, and the objects of capabilities (decision
+        // 223).
+        if status == abi::OK {
+            // SAFETY: `main` returned its result into `ret`.
+            unsafe { value::forget_value(r, ret_ty) };
+        }
+        crate::caps::release_kept();
         if let Some(stats) = crate::sched::finish() {
             rt::stderr(&stats_report(&stats));
         }
         // `SISU_RT_ALLOCS`: what the program left allocated (decision 217).
         if std::env::var_os("SISU_RT_ALLOCS").is_some() {
             let line = rt::render(msg::RUN_LIVE_ALLOCATIONS, &[("count", mem::live().to_string())]);
-            rt::stderr(&format!("{line}\n{}", mem::dbg_report()));
+            rt::stderr(&format!("{line}\n"));
         }
         rt::flush();
         code
@@ -378,6 +387,42 @@ pub(crate) fn float_mod(x: f64, y: f64) -> f64 {
 extern "C" fn sisu_rt_alloc(bytes: u64) -> *mut u8 {
     let p = system(|| mem::alloc(bytes as usize) as usize);
     p as *mut u8
+}
+
+/// The environment of a task's closure (or a generator's), `bytes` long,
+/// of type `t`: a block whose word before the environment holds the type,
+/// which a generator abandoned before it starts needs to forget what the
+/// environment holds ([`release_task_env`] frees it).
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_task_env(bytes: u64, t: u32) -> *mut u8 {
+    let p = system(|| {
+        let p = mem::alloc(bytes as usize + 8);
+        // SAFETY: the block has room for the type's word and the value.
+        unsafe {
+            mem::set_word(p, 0, u64::from(t));
+            p.add(8) as usize
+        }
+    });
+    p as *mut u8
+}
+
+/// Frees an environment [`sisu_rt_task_env`] made; with `forget`, the
+/// values it holds first, running no Sisu code (a generator abandoned
+/// before it started, whose closure never took them).
+pub(crate) fn release_task_env(env: usize, forget: bool) {
+    if env == 0 {
+        return;
+    }
+    let p = env as *mut u8;
+    // SAFETY: an environment is preceded by the word of its type, in the
+    // block `sisu_rt_task_env` made.
+    unsafe {
+        let block = p.sub(8);
+        if forget {
+            value::forget_value(p, mem::word(block, 0) as u32);
+        }
+        mem::release(block);
+    }
 }
 
 /// Frees a block of `sisu_rt_alloc` whose value is gone (decision 216).

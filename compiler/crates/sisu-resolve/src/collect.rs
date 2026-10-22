@@ -378,9 +378,23 @@ pub fn resolve_session<'a>(
             _ => {}
         }
     }
-    for (i, m) in program.modules.iter().enumerate() {
+    // Each module's derived impls: planned for every module first, their
+    // templates run and their texts parsed on threads, then declared in
+    // the modules' order (decision 228).
+    let plans: Vec<crate::derive::Plan> = program
+        .modules
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let items = r.own_items(m);
+            r.plan_derived(ids[i], &items)
+        })
+        .collect();
+    let unfolded = crate::derive::unfold_plans(&plans);
+    Resolver::parse_ahead(&plans, &unfolded);
+    for ((i, m), (plan, u)) in program.modules.iter().enumerate().zip(plans.into_iter().zip(unfolded)) {
+        r.apply_derived(plan, &u);
         let items = r.own_items(m);
-        r.declare_derived(ids[i], &items);
         r.declare_generators(ids[i], &items);
     }
     r.resolve_pending();
@@ -498,17 +512,17 @@ impl Resolver<'_> {
     /// The items of a module that this build declares: a dependency's
     /// tests and benchmarks are its own package's business (09). A
     /// script's top-level statements are its `main` (10).
-    fn own_items(&mut self, m: &SourceModule) -> Vec<ast::Item> {
+    fn own_items<'m>(&mut self, m: &SourceModule<'m>) -> std::borrow::Cow<'m, [ast::Item]> {
         let dependency = m.package != 0;
-        let items: Vec<ast::Item> = m
-            .ast
-            .items
-            .iter()
-            .filter(|i| {
-                !(dependency && matches!(i.kind, ItemKind::Test(_) | ItemKind::Suite(_) | ItemKind::Bench(_)))
-            })
-            .cloned()
-            .collect();
+        let left_out = |i: &ast::Item| {
+            dependency && matches!(i.kind, ItemKind::Test(_) | ItemKind::Suite(_) | ItemKind::Bench(_))
+        };
+        // The module's own items, copied only when some are left out.
+        let items: std::borrow::Cow<'m, [ast::Item]> = if m.ast.items.iter().any(left_out) {
+            std::borrow::Cow::Owned(m.ast.items.iter().filter(|i| !left_out(i)).cloned().collect())
+        } else {
+            std::borrow::Cow::Borrowed(&m.ast.items)
+        };
         let script = self.sources.get(m.file).is_some_and(|f| f.text.starts_with("#!"));
         if !script || !items.iter().any(|i| matches!(i.kind, ItemKind::Stmt(_))) {
             return items;
@@ -527,7 +541,7 @@ impl Resolver<'_> {
         let mut out: Vec<ast::Item> =
             items.iter().filter(|i| !matches!(i.kind, ItemKind::Stmt(_))).cloned().collect();
         out.extend(script_main(&items));
-        out
+        std::borrow::Cow::Owned(out)
     }
 
     /// The prefix of the names of a module's tests: its path within its

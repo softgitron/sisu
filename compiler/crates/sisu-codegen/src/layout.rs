@@ -39,10 +39,13 @@ pub(crate) struct Types<'p> {
     glue_index: HashMap<(String, Vec<Type>), u32>,
     /// Which declared types have drop glue, by name.
     with_glue: HashMap<&'p str, bool>,
+    /// The words of a function value's environment: the largest an `own`
+    /// closure of the program needs, at least one (decision 224).
+    pub env_words: u32,
 }
 
 impl<'p> Types<'p> {
-    pub(crate) fn new(prog: &'p sir::Program) -> Types<'p> {
+    pub(crate) fn new(prog: &'p sir::Program, env_words: u32) -> Types<'p> {
         let decls = prog.types.iter().map(|t| (t.name(), t)).collect();
         let with_glue = prog
             .types
@@ -60,6 +63,7 @@ impl<'p> Types<'p> {
             sizing: Vec::new(),
             glue: Vec::new(),
             glue_index: HashMap::new(),
+            env_words,
         }
     }
 
@@ -101,7 +105,8 @@ impl<'p> Types<'p> {
         Ok(match t {
             Type::Ref(inner, _) if fat(inner) => 2 * w,
             Type::Int | Type::Float | Type::Bool | Type::Char | Type::Ref(..) => w,
-            Type::Str | Type::Fn(..) | Type::Dyn(..) => 2 * w,
+            Type::Str | Type::Dyn(..) => 2 * w,
+            Type::Fn(..) => (1 + self.env_words) * w,
             Type::Unit | Type::Never | Type::Const(_) => 0,
             Type::Tuple(items) => {
                 let mut n = 0;
@@ -175,6 +180,12 @@ impl<'p> Types<'p> {
         })
     }
 
+    /// The number of a concrete type, if a value of it was made (the code
+    /// interned it).
+    pub(crate) fn known_id(&self, t: &Type) -> Option<u32> {
+        self.ids.get(t).copied()
+    }
+
     /// The number of a concrete type, interning it (and its parts).
     pub(crate) fn id(&mut self, t: &Type) -> Result<u32, Error> {
         if let Some(&id) = self.ids.get(t) {
@@ -217,7 +228,7 @@ impl<'p> Types<'p> {
                 simple(Kind::Ref(target), size)
             }
             Type::Dyn(..) => simple(Kind::Dyn, 2 * w),
-            Type::Fn(..) => simple(Kind::Fn, 2 * w),
+            Type::Fn(..) => simple(Kind::Fn, (1 + self.env_words) * w),
             Type::Tuple(items) => {
                 let mut slots = Vec::new();
                 let mut off = 0;

@@ -10,6 +10,12 @@
 //! instead, with `sisu build --native --from-sir`: the case's own `NAME.sir`
 //! where it has one, else what `sisu sir` prints for it. It checks the
 //! path a self-hosted front end takes, whose SIR the backend compiles.
+//!
+//! Either way, the executable runs with `SISU_RT_ALLOCS=1`, which makes
+//! the runtime report how many of its allocations are live when the
+//! program ends (decisions 217 and 226): the report must say none, and is left out
+//! of the standard error compared. Only a program that aborts (status
+//! 134) ends without one.
 
 use crate::{Case, Failure, Output, Sandbox, diff, discover, invoke_with_input};
 use std::path::Path;
@@ -224,8 +230,15 @@ fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool) -> CaseResult
         case.expected("args").map(|a| a.lines().map(str::to_string).collect()).unwrap_or_default();
     let input = case.expected("stdin");
     let start = Instant::now();
-    let ran = run_exe(&exe, &cwd, &args, input.as_deref());
+    let mut ran = run_exe(&exe, &cwd, &args, input.as_deref());
     r.run = start.elapsed();
+    // What the runtime left allocated: nothing.
+    match take_allocations(&mut ran.stderr) {
+        Some(0) => {}
+        Some(n) => fail(&mut r, "allocations", format!("{n} of the runtime's allocations live at exit")),
+        None if ran.status == ABORTED => {}
+        None => fail(&mut r, "allocations", "the run did not report its live allocations".into()),
+    }
     let expected = case.expected("out").unwrap_or_default();
     if expected != ran.stdout {
         fail(&mut r, "stdout", diff::diff(&expected, &ran.stdout));
@@ -245,13 +258,34 @@ fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool) -> CaseResult
     r
 }
 
-/// Runs an executable as the runner runs `sisu`: in `cwd`, with an empty
-/// environment, killed past the time limit.
+/// The exit status of a program that aborted (a deadlock, a panic during
+/// unwinding), which ends without its report of live allocations.
+const ABORTED: i32 = 134;
+
+/// Takes the runtime's report of its live allocations off the end of a
+/// run's standard error (`allocations: N of the runtime's live at exit`),
+/// and gives N.
+fn take_allocations(stderr: &mut String) -> Option<u64> {
+    let body = stderr.strip_suffix('\n')?;
+    let start = body.rfind('\n').map_or(0, |i| i + 1);
+    let n = body[start..]
+        .strip_prefix("allocations: ")?
+        .strip_suffix(" of the runtime's live at exit")?
+        .parse()
+        .ok()?;
+    stderr.truncate(start);
+    Some(n)
+}
+
+/// Runs an executable as the runner runs `sisu`: in `cwd`, with an
+/// environment that only asks the runtime for its live allocations at exit,
+/// killed past the time limit.
 fn run_exe(exe: &Path, cwd: &Path, args: &[String], input: Option<&str>) -> Output {
     let spawned = Command::new(exe)
         .args(args)
         .current_dir(cwd)
         .env_clear()
+        .env("SISU_RT_ALLOCS", "1")
         .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

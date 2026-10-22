@@ -472,7 +472,7 @@ impl Checker<'_> {
             return;
         }
         let callee = match &x.kind {
-            ExprKind::FnRef(d) if !self.prog.fn_info(*d).is_some_and(|i| i.pure) => {
+            ExprKind::FnRef(d, _) if !self.prog.fn_info(*d).is_some_and(|i| i.pure) => {
                 Some(self.prog.def(*d).name.clone())
             }
             ExprKind::Closure(c) => self
@@ -1176,7 +1176,9 @@ impl Checker<'_> {
         let prog = self.prog;
         match &prog.def(d).kind {
             DefKind::Fn(f) => {
-                if !f.generics.is_empty() || f.self_mode.is_some() {
+                // A generic intrinsic has no body to make an instance of.
+                let generic_intrinsic = !f.generics.is_empty() && f.intrinsic.is_some();
+                if f.self_mode.is_some() || generic_intrinsic {
                     let kind = if f.self_mode.is_some() { "method" } else { "generic function" };
                     let diag = self.error(msg::TYPE_NOT_A_VALUE, range).with("name", n).with("kind", kind);
                     self.report(diag);
@@ -1187,13 +1189,43 @@ impl Checker<'_> {
                     self.report(diag);
                 }
                 self.check_internal(d, range);
+                // A function value takes its arguments by value, so a
+                // function that returns a borrow of a parameter it borrows
+                // cannot be one (decision 225).
+                let env = prog.elaborate_env(&f.predicates);
+                let deep = prog.result_borrows_of(f).deep;
+                let lent_and_kept = f.params.iter().enumerate().find(|(i, p)| {
+                    deep.contains(&(*i as u32))
+                        && !matches!(p.ty, Ty::Ref(..))
+                        && matches!(crate::param_local_ty(prog, &p.ty, p.mode, &env), Ty::Ref(..))
+                });
+                if let Some((_, p)) = lent_and_kept {
+                    let diag = self
+                        .error(msg::TYPE_VALUE_RETURNS_BORROW, range)
+                        .with("name", n)
+                        .with("param", p.name.clone());
+                    self.report(diag);
+                    return Expr::error(span);
+                }
+                // A generic function's type arguments are inferred where the
+                // value is used, and its bounds required of them, as a
+                // call's are (decision 225).
+                if !f.generics.is_empty() {
+                    let sig = self.instantiate(d, None, range);
+                    let ty = Ty::Fn(Box::new(FnTy {
+                        params: sig.params.iter().map(|p| p.ty.clone()).collect(),
+                        ret: sig.ret,
+                        pure: f.pure,
+                    }));
+                    return Expr::new(ExprKind::FnRef(d, sig.type_args), ty, span);
+                }
                 let ret = self.fn_ret(d);
                 let ty = Ty::Fn(Box::new(FnTy {
                     params: f.params.iter().map(|p| p.ty.clone()).collect(),
                     ret,
                     pure: f.pure,
                 }));
-                Expr::new(ExprKind::FnRef(d), ty, span)
+                Expr::new(ExprKind::FnRef(d, Vec::new()), ty, span)
             }
             DefKind::Const(c) => Expr::new(ExprKind::Const(d), c.ty.clone(), span),
             other => {

@@ -408,6 +408,7 @@ dependencies = [
  "cranelift-module",
  "cranelift-native",
  "cranelift-object",
+ "gimli",
  "sisu-rt",
  "sisu-sir",
 ]

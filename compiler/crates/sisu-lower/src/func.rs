@@ -82,10 +82,9 @@ pub(crate) struct FnLower<'c, 'a> {
 }
 
 /// Lowers a body and its closures to SIR functions.
-pub(crate) fn lower_body(ctx: &mut Ctx, body: &thir::Body) -> Vec<sir::Function> {
+pub(crate) fn lower_body(ctx: &Ctx, body: &thir::Body) -> Vec<sir::Function> {
     let name = ctx.body_name(body);
-    let source = ctx.source_index(body.span.file);
-    let ctx: &Ctx = ctx;
+    let source = ctx.source_of(body.span.file);
     let mut out = Vec::new();
     let fn_info = match &body.kind {
         thir::BodyKind::Fn => ctx.prog.fn_info(body.def),
@@ -122,7 +121,15 @@ pub(crate) fn lower_body(ctx: &mut Ctx, body: &thir::Body) -> Vec<sir::Function>
     let mut main = FnLower::new(ctx, body, None, &name);
     main.type_params = type_params.clone();
     main.bounds = env.clone();
-    out.push(main.run(kind, source, pure, (from, inner), own));
+    let lowered = main.run(kind, source, pure, (from, inner), own);
+    // What the function is as a value, when it is not its constant: a
+    // generic one, or one that borrows a parameter a function value takes
+    // (decision 225).
+    if let Some(f) = fn_info.filter(|f| kind == sir::FnKind::Normal && value_wrapped(ctx, f)) {
+        let takes: Vec<sir::Type> = f.params.iter().map(|p| ctx.ty(&p.ty)).collect();
+        out.push(sir::value_wrapper(&lowered, &takes));
+    }
+    out.push(lowered);
     for (i, cl) in body.closures.iter().enumerate() {
         let id = thir::ClosureId(i as u32);
         if cl.comptime {
@@ -158,6 +165,24 @@ pub(crate) fn lower_body(ctx: &mut Ctx, body: &thir::Body) -> Vec<sir::Function>
         out.push(fl.run(sir::FnKind::Closure(role), source, pure, (from, Vec::new()), Vec::new()));
     }
     out
+}
+
+/// Whether a function is its value wrapper as a value (`f#value`) rather
+/// than its constant: a generic one, whose constant cannot name type
+/// arguments, and one that borrows a parameter, which a function value
+/// takes (decision 225). A method is not a value.
+pub(crate) fn value_wrapped(ctx: &Ctx, f: &sisu_resolve::FnInfo) -> bool {
+    if f.self_mode.is_some() || f.intrinsic.is_some() {
+        return false;
+    }
+    if !f.generics.is_empty() {
+        return true;
+    }
+    let env = ctx.prog.elaborate_env(&f.predicates);
+    f.params.iter().any(|p| {
+        !matches!(p.ty, Ty::Ref(..))
+            && matches!(sisu_typeck::param_local_ty(ctx.prog, &p.ty, p.mode, &env), Ty::Ref(..))
+    })
 }
 
 pub(crate) fn closure_name(owner: &str, id: thir::ClosureId) -> String {
@@ -458,6 +483,43 @@ impl<'c, 'a> FnLower<'c, 'a> {
         if let Some(s) = self.scopes.last_mut() {
             s.entries.push(e);
         }
+    }
+
+    /// Holds the temporary an operand was just evaluated into (`mark`: the
+    /// number of locals before it was), when it is one that needs drop:
+    /// registered, so that a later operand of the same statement that
+    /// leaves (a `?`, a `return`, a panic) drops it, until [`release`]
+    /// gives it to the statement that takes it (decision 222).
+    ///
+    /// [`release`]: FnLower::release
+    pub fn hold(&mut self, op: &sir::Operand, mark: usize, ty: &Ty, held: &mut Vec<sir::LocalId>) {
+        if let sir::Operand::Move(p) = op
+            && p.proj.is_empty()
+            && p.local.0 as usize == mark
+            && self.needs_drop(ty)
+            && *ty != Ty::Never
+        {
+            self.register(DropEntry::Local(p.local));
+            self.split();
+            held.push(p.local);
+        }
+    }
+
+    /// Lets go of the temporaries [`FnLower::hold`] registered: the
+    /// statement that takes them starts a block without their drops.
+    pub fn release(&mut self, held: &[sir::LocalId]) {
+        if held.is_empty() {
+            return;
+        }
+        for scope in self.scopes.iter_mut().rev() {
+            scope.entries.retain(|e| !matches!(e, DropEntry::Local(l) if held.contains(l)));
+        }
+        self.split();
+    }
+
+    /// Whether a value of `l` is registered to be dropped.
+    pub fn is_registered(&self, l: sir::LocalId) -> bool {
+        self.scopes.iter().any(|s| s.entries.contains(&DropEntry::Local(l)))
     }
 
     /// Registers in the scope `n` levels below the innermost.

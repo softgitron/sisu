@@ -167,6 +167,88 @@ fn nothing_the_program_allocates_is_live_at_exit() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The executable carries DWARF for the Sisu source (decision 227): a
+/// debugger stops at a line of a Sisu file, names the Sisu functions and
+/// lines of the frames it unwinds, and shows the locals and parameters
+/// with their Sisu types. Under `gdb --batch` where there is one, else
+/// `lldb`, else the line table as `readelf` decodes it.
+#[test]
+fn a_debugger_names_sisu_lines_and_locals() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = scratch("debug-info");
+    let program = "struct Point:\n    x: int\n    y: int\n\nerror Problem:\n    TooBig(limit: int)\n\ndef check(n: int) -> int ! Problem:\n    if n > 2:\n        return Err(TooBig(limit=2))\n    return Ok(n)\n\ndef area(p: Point, scale: int) -> int:\n    let w = p.x * scale\n    let h = p.y * scale\n    return w * h\n\ndef main():\n    let name = \"corner\".to_string()\n    let p = Point(x=3, y=4)\n    let xs = [1, 2, 3]\n    let r = check(5)\n    let a = area(p, 2)\n    print(\"{name} {a} {xs} {r:?}\")\n";
+    std::fs::write(dir.join("shapes.sisu"), program).expect("the program");
+    let built = std::process::Command::new(&sisu)
+        .args(["build", "--native", "shapes.sisu"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu builds");
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let have = |tool: &str| {
+        std::process::Command::new(tool).arg("--version").output().is_ok_and(|o| o.status.success())
+    };
+    let run = |tool: &str, args: &[&str]| {
+        let out =
+            std::process::Command::new(tool).args(args).current_dir(&dir).output().expect("the tool runs");
+        format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+    };
+    if have("gdb") {
+        let commands = [
+            "break area",
+            "run",
+            "info args",
+            "print *p",
+            "break shapes.sisu:15",
+            "continue",
+            "bt 2",
+            "info locals",
+            "frame 1",
+            "info locals",
+        ];
+        let mut args = vec!["--batch"];
+        for c in commands {
+            args.extend(["-ex", c]);
+        }
+        args.push("./shapes");
+        let out = run("gdb", &args);
+        // A breakpoint on a function stops after its prologue, with its
+        // parameters in place (a lent one is a reference).
+        assert!(out.contains("area (p=") && out.contains("scale=2) at shapes.sisu:13"), "{out}");
+        assert!(out.contains("scale = 2\n$1 = Point {x: 3, y: 4}"), "{out}");
+        assert!(out.contains("scale=2) at shapes.sisu:15"), "{out}");
+        assert!(out.contains("main () at shapes.sisu:23"), "{out}");
+        assert!(out.contains("w = 6"), "{out}");
+        assert!(out.contains("text: \"corner\""), "{out}");
+        assert!(out.contains("[1, 2, 3]"), "{out}");
+        assert!(out.contains("r = Err(TooBig{limit: 2})"), "{out}");
+    } else if have("lldb") {
+        let out = run(
+            "lldb",
+            &[
+                "--batch",
+                "-o",
+                "breakpoint set --file shapes.sisu --line 15",
+                "-o",
+                "run",
+                "-o",
+                "bt 2",
+                "-o",
+                "frame variable",
+                "./shapes",
+            ],
+        );
+        assert!(out.contains("shapes.sisu:15"), "{out}");
+        assert!(out.contains("shapes.sisu:23"), "{out}");
+    } else {
+        let out = run("readelf", &["--debug-dump=decodedline", "./shapes"]);
+        assert!(
+            out.lines().any(|l| l.starts_with("shapes.sisu") && l.split_whitespace().nth(1) == Some("15")),
+            "{out}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `sisu run --native` builds a program, runs it with its arguments and
 /// gives its exit status; the executable is gone afterwards.
 #[test]

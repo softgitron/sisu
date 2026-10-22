@@ -511,7 +511,9 @@ fn leave_anchor() {
     crate::entry::SISU_RT_DEPTH.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// The code and environment of the closure value an argument holds.
+/// The code and environment of the task's closure (or a generator's) an
+/// argument holds: a function value is its code, then its environment,
+/// for a task's closure the address of a block the runtime frees.
 ///
 /// # Safety
 /// Argument `i` must be (or refer to) a function value.
@@ -523,10 +525,25 @@ unsafe fn closure(c: &Call<'_>, i: usize) -> (usize, usize) {
     }
 }
 
+/// The code of the closure an argument holds and the address of the
+/// environment the value holds, as a call of a function value passes it
+/// (decision 224): a body the runtime calls at once (`task.scope`,
+/// `task.shield`).
+///
+/// # Safety
+/// Argument `i` must be (or refer to) a function value.
+unsafe fn closure_here(c: &Call<'_>, i: usize) -> (usize, usize) {
+    // SAFETY: a function value is its code, then its environment.
+    unsafe {
+        let (p, _) = c.place(i);
+        (mem::word(p, 0) as usize, p as usize + abi::WORD as usize)
+    }
+}
+
 /// `task.shield(body)`: the body under a context that is never cancelled.
 unsafe fn shield(c: &Call<'_>) -> u8 {
     // SAFETY: the argument is the body.
-    let (code, env) = unsafe { closure(c, 0) };
+    let (code, env) = unsafe { closure_here(c, 0) };
     if !enter_anchor() {
         return abi::UNWINDING;
     }
@@ -548,7 +565,7 @@ unsafe fn shield(c: &Call<'_>) -> u8 {
 unsafe fn scope(c: &Call<'_>, race: bool) -> u8 {
     let site = Site::current();
     // SAFETY: the argument is the body.
-    let (code, env) = unsafe { closure(c, 0) };
+    let (code, env) = unsafe { closure_here(c, 0) };
     let ret_ty = c.ret_ty;
     let s = system(|| {
         with(|sc| {
@@ -836,7 +853,12 @@ fn task_main(t: u32, y: &Yielder<(), sched::Suspend>, generator: bool) {
     let status = sched::neutral(|| unsafe { std::mem::transmute::<usize, Body0>(code)(out, env as *mut u8) });
     // The closure dropped what its environment held; its cell is the
     // runtime's to free.
-    system(|| mem::release(env as *mut u8));
+    system(|| crate::entry::release_task_env(env, false));
+    // An abandoned generator's frames have unwound (decision 95): nothing
+    // waits for it.
+    if sched::abandoning() {
+        return;
+    }
     let outcome = if status == abi::OK {
         Outcome::Value(ret)
     } else {
@@ -1151,6 +1173,7 @@ unsafe fn gen_new(c: &Call<'_>) -> u8 {
         let mut task = s.new_task(None, 0, path);
         task.state = TState::Blocked(Wait::Join(t));
         task.generator = true;
+        task.item_ty = item;
         task.body = body;
         s.tasks.push(task);
         make_coroutine(s, t, true);
@@ -1169,7 +1192,8 @@ unsafe fn gen_yield(c: &Call<'_>) -> u8 {
     let mut handed = false;
     sched::blocking(|| {
         if handed {
-            return Attempt::Done(abi::OK);
+            // Abandoned while it waited here: its frames unwind.
+            return Attempt::Done(if sched::abandoning() { abi::UNWINDING } else { abi::OK });
         }
         handed = true;
         with(|s| {
@@ -1254,23 +1278,47 @@ unsafe fn iter_next(c: &Call<'_>) -> u8 {
 }
 
 /// A generator's iterator was dropped before its end: the generator is
-/// abandoned, its frames left as they are (decision 95) and its stack given
-/// back.
+/// abandoned (decisions 95 and 223). What its frames hold is let go of as the
+/// interpreter's host lets it go, running no Sisu code: a generator
+/// suspended at a `yield` unwinds its frames with their drops forgetting
+/// (`sched::unwind_abandoned`); one that never started forgets the values
+/// its environment holds. Its stack goes back to the pool.
 pub(crate) fn abandon(t: u32) {
-    with(|s| {
-        let Some(mut co) = s.task(t).co.take() else { return };
-        // SAFETY: the generator is suspended (or never started) and is never
-        // resumed again; its frames are Sisu code and the runtime's, which
-        // own nothing that must run on the way out.
-        unsafe { co.force_reset() };
-        let stack = co.into_stack();
-        let mark = s.task(t).mark;
-        s.task(t).region = None;
-        s.pool.release(stack.0, mark);
-        let env = s.task(t).body.1;
-        mem::release(env as *mut u8);
-        s.task(t).body = (0, 0);
+    let started = with(|s| {
+        let task = s.task(t);
+        task.co.as_ref()?;
+        Some(!task.yielder.is_null())
     });
+    match started {
+        None => {}
+        Some(true) => {
+            sched::unwind_abandoned(t);
+        }
+        Some(false) => with(|s| {
+            let Some(mut co) = s.task(t).co.take() else { return };
+            // SAFETY: the generator never started, and is never resumed.
+            unsafe { co.force_reset() };
+            let stack = co.into_stack();
+            let mark = s.task(t).mark;
+            s.task(t).region = None;
+            s.task(t).state = TState::Done;
+            s.pool.release(stack.0, mark);
+        }),
+    }
+    // An item it handed over and nobody took, and the environment of a
+    // closure that never started, which never took what it holds.
+    let (env, item) = with(|s| {
+        let task = s.task(t);
+        let env = std::mem::take(&mut task.body).1;
+        (env, task.yielded.take().map(|v| (v, task.item_ty)))
+    });
+    if let Some((mut words, item_ty)) = item {
+        // SAFETY: the words hold an item of the generator's type.
+        unsafe { crate::value::forget_value(words.as_mut_ptr() as *mut u8, item_ty) };
+    }
+    if started == Some(false) {
+        crate::entry::release_task_env(env, true);
+    }
 }
 
 // ------------------------------------------------------------------ mutexes

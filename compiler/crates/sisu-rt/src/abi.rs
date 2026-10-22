@@ -55,6 +55,11 @@ pub mod sym {
     /// `sisu_rt_free(ptr)`: frees what `sisu_rt_alloc` gave, once its
     /// value is gone (a box's or a `dyn`'s cell whose value was moved out).
     pub const FREE: &str = "sisu_rt_free";
+    /// `sisu_rt_task_env(bytes, ty) -> ptr`: the environment of a task's
+    /// closure (or a generator's), of type `ty`, which the runtime frees
+    /// when the closure returns, and whose values it forgets when a
+    /// generator is abandoned before it starts.
+    pub const TASK_ENV: &str = "sisu_rt_task_env";
     /// `sisu_rt_trace_release(error)`: a field was moved out of the error
     /// value at `error`, which is never dropped whole: it lets go of its
     /// return trace.
@@ -91,9 +96,10 @@ pub mod sym {
     /// A 64-bit counter of the yield points the running task may pass
     /// before the scheduler is asked (`sisu_rt_yield` when it reaches 0).
     pub const BUDGET: &str = "SISU_RT_BUDGET";
-    /// The running task's stack limits, five words ([`super::STACK_PROBE`]
+    /// The running task's stack limits, six words ([`super::STACK_PROBE`]
     /// and the others): what the probe at a function's entry compares the
-    /// stack pointer with.
+    /// stack pointer with, and whether the task is a generator being
+    /// abandoned ([`super::STACK_ABANDONED`]).
     pub const STACK: &str = "SISU_RT_STACK";
     /// Where the running code calls an intrinsic that may wait, four words
     /// ([`super::SITE_FILE`] and the others): the deadlock report names it.
@@ -121,8 +127,16 @@ pub const STACK_REAL: u32 = 8;
 pub const STACK_FLOOR: u32 = 16;
 pub const STACK_DIRTY: u32 = 24;
 pub const STACK_FAILED: u32 = 32;
+/// 1 while the running task is a generator being abandoned: its yield
+/// returns [`UNWINDING`] without a panic, and its frames unwind running
+/// their drops, which forget what they drop (decisions 95 and 223). A generator's
+/// closure whose cleanup runs code of its own (a `defer`) sets it to
+/// [`ABANDON_KEEP`] when it starts: its frames are left as they are.
+pub const STACK_ABANDONED: u32 = 40;
+/// See [`STACK_ABANDONED`].
+pub const ABANDON_KEEP: u64 = 2;
 /// The words of [`sym::STACK`].
-pub const STACK_WORDS: usize = 5;
+pub const STACK_WORDS: usize = 6;
 
 /// The words of [`sym::SITE`]: the address and length of the file's name,
 /// the line and column of the call, and flags ([`SITE_PURE`]).
@@ -1181,6 +1195,7 @@ intrinsics! {
     BytesCut = "bytes.cut",
     BytesIter = "bytes.iter",
     BytesToList = "bytes.to_list",
+    BytesAsSlice = "bytes.as_slice",
     BytesFind = "bytes.find",
     BytesStartsWith = "bytes.starts_with",
     BytesEndsWith = "bytes.ends_with",

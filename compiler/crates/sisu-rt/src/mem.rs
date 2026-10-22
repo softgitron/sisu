@@ -42,38 +42,8 @@ pub(crate) fn alloc(bytes: usize) -> *mut u8 {
     let p = alloc_kept(bytes);
     if !p.is_null() {
         LIVE.fetch_add(1, Relaxed);
-        dbg_track(p, bytes);
     }
     p
-}
-
-static TRACK: std::sync::Mutex<Option<std::collections::HashMap<usize, (usize, u64)>>> = std::sync::Mutex::new(None);
-static SEQ: AtomicI64 = AtomicI64::new(0);
-fn dbg_on() -> bool {
-    std::env::var("SISU_RT_ALLOCS").is_ok_and(|v| v == "2")
-}
-fn dbg_track(p: *mut u8, bytes: usize) {
-    if !dbg_on() { return; }
-    let n = SEQ.fetch_add(1, Relaxed) as u64;
-    if let Ok(mut t) = TRACK.lock() { t.get_or_insert_with(Default::default).insert(p as usize, (bytes, n)); }
-}
-fn dbg_untrack(p: *mut u8) {
-    if !dbg_on() { return; }
-    if let Ok(mut t) = TRACK.lock() { if let Some(m) = t.as_mut() { m.remove(&(p as usize)); } }
-}
-pub(crate) fn dbg_report() -> String {
-    let mut out = String::new();
-    if let Ok(t) = TRACK.lock() && let Some(m) = t.as_ref() {
-        let mut v: Vec<_> = m.iter().collect();
-        v.sort_by_key(|(_, (_, n))| *n);
-        for (p, (size, n)) in v {
-            // SAFETY: debugging only
-            let bytes = unsafe { std::slice::from_raw_parts(*p as *const u8, (*size).min(48)) };
-            let text: String = bytes.iter().map(|b| if b.is_ascii_graphic() || *b == b' ' { *b as char } else { '.' }).collect();
-            out.push_str(&format!("  live #{n} {size} bytes: {text:?}\n"));
-        }
-    }
-    out
 }
 
 /// A heap block that lives as long as the run and is not counted: the
@@ -91,6 +61,14 @@ pub(crate) fn alloc_kept(bytes: usize) -> *mut u8 {
     p
 }
 
+/// Frees a block [`alloc_kept`] made.
+pub(crate) fn free_kept(p: *mut u8) {
+    if !p.is_null() {
+        // SAFETY: `p` is a block of this module, freed once.
+        unsafe { free(p) }
+    }
+}
+
 /// Grows (or makes) a heap block.
 pub(crate) fn grow(p: *mut u8, bytes: usize) -> *mut u8 {
     if bytes == 0 {
@@ -103,17 +81,13 @@ pub(crate) fn grow(p: *mut u8, bytes: usize) -> *mut u8 {
     }
     if p.is_null() {
         LIVE.fetch_add(1, Relaxed);
-    } else {
-        dbg_untrack(p);
     }
-    dbg_track(q, bytes);
     q
 }
 
 pub(crate) fn release(p: *mut u8) {
     if !p.is_null() {
         LIVE.fetch_sub(1, Relaxed);
-        dbg_untrack(p);
         crate::views::released(p);
         // SAFETY: `p` is a block this module allocated, released once.
         unsafe { free(p) }

@@ -30,6 +30,18 @@ fn text(id: msg::MsgId, params: &[(&str, String)]) -> String {
     format!("{}\n", sisu_diag::Catalog::builtin().render(id.id(), params))
 }
 
+/// Where the debug information says the sources are (decision 227): the
+/// program's paths are relative to the directory the command runs in, and
+/// the standard library's are in the tree this compiler was built from,
+/// when it is still there.
+fn sources() -> sisu_codegen::Sources {
+    let comp_dir = std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default();
+    let std_dir = std::fs::canonicalize(concat!(env!("CARGO_MANIFEST_DIR"), "/../../std"))
+        .ok()
+        .map(|d| d.display().to_string());
+    sisu_codegen::Sources { comp_dir, std_dir }
+}
+
 /// Compiles the program and links it at `output`. On failure the message
 /// is reported to `host` and the exit status returned.
 pub(crate) fn build(prog: &sisu_sir::Program, output: &Path, host: &mut dyn Host) -> Result<(), i32> {
@@ -54,7 +66,7 @@ pub(crate) fn build(prog: &sisu_sir::Program, output: &Path, host: &mut dyn Host
         }
     }
     let start = std::time::Instant::now();
-    let compiled = match sisu_codegen::compile(prog) {
+    let compiled = match sisu_codegen::compile_for(prog, &sources()) {
         Ok(c) => c,
         Err(e) => return Err(report(e, output, host)),
     };

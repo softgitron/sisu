@@ -525,7 +525,7 @@ impl Server {
         let bi = c.typed.bodies.iter().position(|b| std::ptr::eq(&**b, body))?;
         Some(match &e.kind {
             ExprKind::Local(l) => Target::Local(bi, l.0 as usize),
-            ExprKind::Const(d) | ExprKind::FnRef(d) => Target::Def(*d),
+            ExprKind::Const(d) | ExprKind::FnRef(d, _) => Target::Def(*d),
             ExprKind::Call { callee: sisu_typeck::Callee::Fn { def, .. }, .. } => Target::Def(*def),
             ExprKind::Struct { def, .. } | ExprKind::Variant { def, .. } => Target::Def(*def),
             ExprKind::Field { base, index } => match strip_refs(&base.ty) {

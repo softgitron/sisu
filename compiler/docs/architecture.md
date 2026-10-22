@@ -734,8 +734,9 @@ lowering redirects every call of the template to its instance. An
 instance that cannot be made is reported at the call that first needed it
 in the program's own code (an instance needed by another inherits its
 site), with a label where a program's template stopped (`E0609`); a
-template used as a value is `E0611` (generic functions are not values in
-stage 0 anyway, `E0350`).
+template used as a value is `E0611`, since only a call makes an instance
+of it (a generic function that is not a template is a value, decision
+225).
 
 Reflection in templates adds to a derive's: `is_int`, `is_float`,
 `is_bool`, `is_char`, `is_str` (`str` or `String`), `is_list`,
@@ -1100,7 +1101,15 @@ closures). The rules, so that another front end produces the same SIR:
   when it is initialised, and dropped when the scope ends, in reverse
   order of registration. `return`, `break`, `continue` and `?` drop every
   scope they leave, innermost first. Temporaries of a statement live until
-  the end of the statement. Every drop is unconditional, whether or not
+  the end of the statement. The operands of one statement (a call's
+  arguments, an aggregate's parts) are evaluated in order, and one held in
+  a temporary that needs drop is registered from its evaluation until the
+  statement takes it, when an operand after it may leave the statement (a
+  `?`, a `return`, a panic: anything but literals, locals, functions,
+  closures, and the parts, borrows and aggregates of such, a struct with
+  an invariant or a field's default excepted); a struct with an invariant
+  is registered while the check after its construction runs (decision
+  222). Every drop is unconditional, whether or not
   the value was moved: the ownership checker decides which drops stay,
   which go and which need a flag. A scope's drops carry the location of
   its end (the end of its last statement, as a point), and after them
@@ -1133,7 +1142,12 @@ closures). The rules, so that another front end produces the same SIR:
 - **`match`** tests each arm's pattern in order, binding nothing until it
   has matched, so a failed test leaves the scrutinee as it was; guards are
   tested after binding. A variant pattern on a union of error sets first
-  calls `error.is[Decl]` to learn which declaration the value belongs to.
+  calls `error.is[Decl]` to learn which declaration the value belongs to,
+  through a reference of that declaration's type, and tests and binds the
+  rest through it. A variant pattern on an error value that moves a field
+  out takes the value out whole first, into a local of its declaration's
+  type, and moves the fields out of that, which is dropped with the
+  bindings: an error value is never partly moved (decision 221).
   The arms at the start that test only which variant the value is (a
   variant whose fields cannot fail, or a choice of such variants), and
   have no guard, share one `switch` on the discriminant with a case per
@@ -1156,6 +1170,16 @@ closures). The rules, so that another front end produces the same SIR:
   those references, so the ownership checker keeps it from escaping the
   frame of what it captures. An `own` closure's tuple holds copies
   instead, and no loan.
+- **Functions as values.** A function used as a value is its constant,
+  `const fn NAME`, unless it is generic, or borrows a parameter (a
+  function value takes its arguments by value): then it is a closure of
+  its value wrapper, `closure NAME#value[TYPES]()`, with the type
+  arguments inferred where the value is used. The wrapper, made with the
+  function's body by `sisu_sir::value_wrapper`, is generic as the function
+  is, takes an empty environment and the parameters as the function's
+  type has them, lends those the function borrows, calls the function,
+  and drops what it lent; a function that returns a borrow of a parameter
+  it borrows is not a value (`E0352`, decision 225).
 - **Interpolation** builds a `String` with `fmt.new`, then `fmt.text` per
   text part, and per value: without a spec, `fmt.display` or `fmt.debug`
   when the value's impl is structural (the host writes its plain text);
@@ -1288,7 +1312,11 @@ Each unconditional drop is decided by the initialisation state before it:
   be active: opened into the drops of the parts that may hold something,
   fields in reverse declaration order (04, rule 6), each decided the same
   way. A type that implements `Drop` is never opened (moving out of it is
-  `E0416`), so its `Drop` always sees the whole value.
+  `E0416`), so its `Drop` always sees the whole value. A value one of
+  whose parts some statement moves or drops on its own is opened wherever
+  it may be uninitialised, even where its parts have its own two bits:
+  one flag cannot tell a path that moved the whole from one that moved
+  the part (decision 220).
 
 A drop outside a cleanup block still ends its block (the lowering
 invariant), so placing drops splits blocks; statements the checker adds
@@ -2914,7 +2942,7 @@ where the parts are:
 | a tuple or a struct | the sum | the parts in order |
 | an enum | 1 + the largest variant | the tag (the variant's index), then the variant's fields |
 | an `error` enum, a union of error sets | 3 + the largest variant | its own type's number, its return trace, the tag, then the fields |
-| a function value | 2 | the code's address, and the environment's or its one word (decision 213) |
+| a function value | 1 + K | the code's address, then its closure's environment, K words, the largest an `own` closure of the program needs and at least one, or the address of a larger environment of references (decision 224) |
 | `dict[K, V]`, `set[T]`, `Iter[T]` | 1 | the address of a runtime object |
 | a capability handle | 1 | the address of a cell that holds its object as a `dyn` holds its value: the object's type, its address, then the object (decision 209) |
 | `Lent[T]` | T | the handle (or test clock) it lends |
@@ -3035,15 +3063,22 @@ type and no new dispatcher appears, then writes the dispatchers (decision
 202). The structural operations look through a `dyn` to its value, as the
 interpreter's do.
 
-A closure is its function's code and the address of its environment. An
-environment of one word is that word itself instead, copied with the
-function value (decision 213). A larger one whose captures are all
-references cannot outlive the frame it is made in, so it is a slot of that
-frame; a larger one that holds values (`own`) gets a heap cell, which is
-never freed, since a function value is `Copy` and SIR never drops one. A
-named function used as a value is a thunk that takes an environment and
-ignores it, so every function value is called as a closure is (decision
-195).
+A closure is its function's code and its environment, the tuple of its
+captures, held in the function value itself and copied with it: a
+function value has as many words of environment as the largest `own`
+closure of the program needs, at least one, so that nothing is allocated
+and nothing needs freeing (a function value is `Copy` and SIR never drops
+one). Which size that is only compiling finds, so a program with a larger
+`own` environment is compiled again with wider function values. A call
+passes the callee the address of the environment's words in the value;
+a closure of references whose environment is larger than they are cannot
+outlive the frame it is made in, so its environment is a slot of that
+frame, whose address is the value's first word of environment (decision
+224). A task's closure (or a generator's) keeps a heap cell, which the
+runtime frees (decision 206). A named function used as a value is a thunk
+that takes an environment and ignores it, so every function value is
+called as a closure is (decision 195); a generic one, or one that
+borrows a parameter, is a closure of its value wrapper (decision 225).
 
 `main(sys: System)` receives seven handles, each on an object of the host
 the runtime keeps. A handle is a cell that holds its object as a `dyn`
@@ -3077,7 +3112,8 @@ The runtime's entry points (`abi::sym`) are the boundary:
 | `sisu_rt_abort_unwind()` | a panic reached a frame running cleanup: abort |
 | `sisu_rt_panic_overflow`, `_index`, `_stack`, `_unreachable` | raise those panics |
 | `sisu_rt_int_op(op, x, y, out) -> u8`, `sisu_rt_float_op(op, x, y) -> f64` | the arithmetic that is not one instruction |
-| `sisu_rt_alloc(bytes) -> ptr` | heap memory for a list, a box or an environment |
+| `sisu_rt_alloc(bytes) -> ptr` | heap memory for a list or a box |
+| `sisu_rt_task_env(bytes, ty) -> ptr` | the environment of a task's closure (or a generator's), of type `ty`, which the runtime frees when the closure returns (decision 223) |
 | `sisu_rt_drop(value, ty) -> u8`, `sisu_rt_copy(dst, src, ty)` | the drop and `.copy()` of a value by its type |
 | `sisu_rt_binary(op, out, a, a_ty, b, b_ty) -> u8` | equality, order, `in` and concatenation of values that are not numbers |
 | `sisu_rt_intrinsic(desc, ret, args) -> u8` | a call of an intrinsic |
@@ -3090,16 +3126,22 @@ The runtime's entry points (`abi::sym`) are the boundary:
 | `sisu_rt_yield()` | a yield point found the budget spent: the scheduler may switch tasks |
 | `SISU_RT_DEPTH` | the counter of nested calls |
 | `SISU_RT_BUDGET` | the yield points left before the scheduler is asked |
-| `SISU_RT_STACK` | the running task's stack limits: the probe's, the real one, the unwinding floor, and the watermark's and the failure's flags |
+| `SISU_RT_STACK` | the running task's stack limits: the probe's, the real one, the unwinding floor, and the watermark's and the failure's flags; and whether it is a generator being abandoned (decision 223) |
 | `SISU_RT_SITE` | where the running code last called an intrinsic that may wait, and whether its function is `pure` |
 
 What a program allocates is freed when its value is dropped, as the
-interpreter's host frees it (decisions 213 to 218): the runtime counts its
-live allocations of values (heap blocks, and the runtime objects of
-iterators, tables, arenas and return traces), and `SISU_RT_ALLOCS=1` makes
-a native run report the count at exit (`R0125`), which a test holds at 0
-for a program that makes everything the first round leaked. The cells of
-capabilities and `Cap`s, which live as long as the run, are not counted.
+interpreter's host frees it (decisions 213 to 218 and 220 to 225): the
+runtime counts its live allocations of values (heap blocks, and the
+runtime objects of iterators, tables, arenas and return traces), and
+`SISU_RT_ALLOCS=1` makes a native run report the count at exit (`R0125`),
+which the native mode of the conformance runner holds at 0 for every run
+that does not abort (decision 226), as a test does for a program that
+makes everything the first two rounds leaked. What the interpreter's host
+lets go of without dropping it, the runtime frees without running Sisu
+code (forgetting: no drop glue, no `Drop`, no guard's check, decision
+223): the error a `main` returned and the objects of capabilities and the
+values of `Cap`s, which live as long as the run (an arena per run), when
+the run ends; and the frames of an abandoned generator (section "Tasks").
 
 The type table is encoded by `abi::encode` into the object's read-only
 data and decoded once when the program starts; the function table holds
@@ -3195,6 +3237,20 @@ interpreter prints under every seed tried, for programs whose output is
 their schedule (`sisu-driver/tests/schedules`) and for the concurrency
 cases.
 
+**Abandoned generators.** A generator whose iterator is dropped before
+its end is abandoned (decision 95), and what its frames hold is let go
+of as the interpreter's host lets it go, running no Sisu code (decision
+223). One suspended at a `yield` is resumed there and then, outside the
+schedule, with its `SISU_RT_STACK` word of abandonment set: its yield
+returns `UNWINDING` without a panic, and its frames unwind through their
+cleanup blocks, whose drops forget what they drop; meanwhile the running
+task's state, its panics in flight and the values it moved aside are kept
+apart. One that never started forgets what its environment holds, by the
+type its block carries (`sisu_rt_task_env`), and an item it yielded that
+nobody took is forgotten too. A generator whose cleanup runs code of its
+own (a `defer`'s), which no drop may skip, says so when it starts, and is
+left as it is, its frames and environment with it.
+
 **Deadlock.** When nothing is ready and no timer is pending, the program
 stops with the interpreter's report (`R0080`, `R0081`) and status 134; a
 call that may wait records where it is (`SISU_RT_SITE`) for it.
@@ -3213,6 +3269,50 @@ in an empty environment (decision 198). The runtime is the
 it up; without one the build is `D0104` (decision 199). An executable is
 mostly the runtime: 6 MB for a small program with the release runtime, 9
 MB with the debug one.
+
+### Debug information
+
+The executable carries DWARF 4 for its Sisu code (decision 227), which
+`sisu-codegen/src/debug.rs` writes with gimli into the object beside the
+code, as 10 asks of the debug backend ("Debugging and profiling"):
+
+- A line table maps each function's code to the file, line and column of
+  the SIR statement it was compiled from. Cranelift carries a statement's
+  location to the instructions made for it (a `SourceLoc` of a 20-bit line
+  and a 12-bit column), and with no optimisation each statement's code is
+  its own, so single steps go statement by statement. The code before the
+  first statement (the prologue, and the keeping of the parameters'
+  addresses) is the declaration's line, and the first statement's row is
+  marked as the prologue's end, so a breakpoint on a function stops with
+  its parameters in place. A standard library file is named in the
+  directory of the `std` the compiler read, the program's own files
+  relative to the directory of the build.
+- A subprogram for each function instance names it, with its named
+  locals and parameters, each at its stack slot and of its Sisu type. A
+  parameter's memory is the caller's, so its address is kept in a slot of
+  its own, through which the debugger finds it. Drop elaboration's flags
+  are left out.
+- `.debug_frame`, from Cranelift's unwind information, lets a debugger
+  unwind through Sisu frames into the runtime's.
+
+The unit says its language is Rust, the closest one gdb and lldb know: a
+text is described as `&str`, a list's items as a slice, an enum, an option,
+a result and an error as a struct with a variant part (an error's type
+number and trace are artificial words before it), and an error set of
+several errors as a variant part chosen by the number of the error's type,
+so gdb prints `r = Err(TooBig{limit: 2})` and `Err(Problem(Missing{what:
+...}))`. A lent parameter is a reference, as Rust's is. lldb (18) has no
+Rust plugin and prints a variant part as its raw variants. A panic's
+message is not the debugger's business: the code keeps the location of
+each call as it runs, and the runtime prints the Sisu functions and lines
+the interpreter prints. `crates/sisu-driver/tests/native.rs` builds a
+program and runs it under `gdb --batch` (else `lldb`, else it reads the
+line table with `readelf`): a breakpoint on a function and one on a line,
+the Sisu functions and lines of the backtrace, and the locals and
+parameters with their values. For stage 1 the debug information is 1.2
+MB of the 18 MB executable and adds about 8% to the build (medians 6.6
+against 6.1 s on a loaded machine), 0.1 s of it writing the DWARF and the
+rest emitting and linking the larger object.
 
 ### From serialised SIR
 
@@ -3244,11 +3344,11 @@ it beside the native mode.
 ### Coverage
 
 `conformance/native.list` names the cases the backend builds and runs:
-151 of them, every case of the suite that runs a program (the others are
+153 of them, every case of the suite that runs a program (the others are
 diagnostics, `sisu test` files, and the tools' cases: `--watch`, the
 REPL, worksheets, tokens, SIR and documentation). Among them are every case of `concurrency/` that
 runs (tasks, scopes, cancellation, channels, `select`, races, generators,
-`log`, mutexes across tasks, the deadlock report), all 39 of `run/` that
+`log`, mutexes across tasks, the deadlock report), all 40 of `run/` that
 have a `main` (`run/testing` is a test file without one), the 35 of
 `ownership/` that run (with `Mutex`, `Shared`, `Weak`, `Cell` and
 `Arena`), and the 9 of `capabilities/` (fakes, attenuations, caretakers,
@@ -3256,21 +3356,20 @@ interceptors, `cap.lend`, the test clock, the host's processes and an
 in-process network), with `replay/network` on the host's real network.
 `sisu-conformance --native conformance/native.list` builds each with
 `sisu build --native`, runs the executable as the runner runs `sisu` (its
-arguments, standard input, an empty environment), and compares its
-standard output, exit status and standard error with the files the
-interpreter meets; `cargo test` does the same
+arguments, standard input, an environment holding only `SISU_RT_ALLOCS=1`),
+compares its standard output, exit status and standard error with the
+files the interpreter meets, and requires the runtime's report to say
+that nothing it allocated is live at exit (decision 226); `cargo test`
+does the same
 (`crates/sisu-driver/tests/native.rs`), from source and from serialised
 SIR, and CI runs both on every push. `--native-survey LIST` tries every
 runnable case the list leaves out and says which would pass, or the first
 construct that stops each.
 
-What the backend does not compile yet, though no runnable case needs it:
-`bytes.as_slice` (a `Slice[u8]` of a `bytes`, whose bytes are not words),
-and a generic function used as a value (SIR names the function without
-its type arguments). The interpreter's modes have no native counterpart:
-the ownership monitor, the counterexample mode, the capability log and
-replay, hot replacement, and `sisu test`. port-debt.md ("Stage 2") lists
-these and what the backend leaks.
+The interpreter's modes have no native counterpart: the ownership
+monitor, the counterexample mode, the capability log and replay, hot
+replacement, and `sisu test`. port-debt.md ("Stage 2") lists these and
+what the backend still leaves out.
 
 ### Compile time and run time
 
@@ -4422,3 +4521,112 @@ what transcribing the Rust type checker found in stage 0)
      in another's); lowering does not collect again the types it has
      already met; and a command frees its query database on a thread of
      its own, since the process exits without waiting for it.
+
+**Stage 2, round 3: what the second round left** (section "Stage 2";
+"Lowering"; "The ownership checker")
+
+220. Drop elaboration opens a value one of whose parts some statement
+     moves or drops on its own ("split") wherever the value may be
+     uninitialised, instead of guarding the whole by one flag when every
+     part has the whole's two bits: a path that moved the part and a path
+     that moved the whole give the same bits, and the flag, which a move
+     of the part leaves set, dropped the whole after the part had gone
+     (in `Iterator.collect`'s cleanup, and in a struct one branch takes a
+     field of and another moves), which the interpreter's moved markers
+     hid and a native run freed twice. A part with a path of its own is
+     decided by its own state and flag; one without is in its closest
+     path's. Only drops whose value is split and may be uninitialised
+     change, and stage 1's elaboration follows.
+221. A variant pattern on an error value that moves a field out first
+     moves the whole value into a local of its declaration's type, moves
+     the fields out of that, and drops it with the bindings; a variant
+     pattern on a union of error sets tests the variant, the fields and
+     binds through a reference of the declaration's type, once
+     `error.is[D]` has chosen it. An error value is then never partly
+     moved, so elaboration never opens one: a union's parts are its
+     member's (elaboration gave a union no parts at all, which leaked the
+     value an arm took nothing from, `examples/errors`), and the return
+     trace, which no SIR place names, is let go of with the value or at
+     the move out of the member's local (decision 215). The native
+     backend reads every field of a union's variant at its member's
+     offset, so members that lay a field out differently compile. Stage
+     1's lowering follows.
+222. The operands of one statement (a call's arguments, an aggregate's
+     parts) are evaluated in order, and one held in a temporary that needs
+     drop is registered for drop from its evaluation until the statement
+     takes it, when an operand after it may leave the statement (a `?`, a
+     `return`, a panic); a struct with an invariant is registered while
+     its check runs. A value made for a statement that a later operand
+     abandons is therefore dropped, as 04 asks of every value: the
+     interpreter did not drop it, so a `Drop` that should have run did
+     not (`Pair(a=Loud(...), b=f()?)`), and natively it leaked
+     (`reflect/cli`). "May leave" is anything but literals, locals,
+     functions, closures, and the fields, borrows, tuples, lists, variants
+     and structs of such (a struct with an invariant, or with a field's
+     default, may); the operand that is last, or before only such
+     operands, is not registered, so most statements lower as before.
+     Stage 1's lowering follows.
+223. What the interpreter's host lets go of without dropping it, the
+     runtime frees by forgetting: a drop that frees memory and runs no
+     Sisu code (no drop glue, no `Drop`, no guard's check or unlock). The
+     error a `main` returned and the objects of capabilities and values
+     of `Cap`s (an arena per run) are forgotten when the run ends. A
+     generator abandoned at a `yield` (decision 95) is resumed there,
+     outside the schedule, its yield returning `UNWINDING` without a
+     panic, and its frames unwind through their cleanup blocks with their
+     drops forgetting; one that never started forgets its environment by
+     the type its block carries (`sisu_rt_task_env`). A generator whose
+     cleanup runs code of its own (a `defer`) cannot unwind without
+     running it, which the interpreter does not, so it says so when it
+     starts and is left as it was (port-debt.md).
+224. A function value holds its closure's environment itself: one word
+     of code and K words of environment, K being the largest environment
+     an `own` closure of the program needs, at least one. Only compiling
+     finds K (an environment's size depends on the instance), so a
+     program whose `own` closure needs more is compiled again with wider
+     function values, which no case of the suite or stage 1 needs. A
+     call passes the address of the value's environment words; a closure
+     of references whose environment is larger cannot outlive its frame,
+     and keeps it in a slot of the frame, the value holding its address;
+     a task's closure keeps its heap cell. Nothing is allocated for a
+     closure, so nothing needs freeing, where an `own` environment of more
+     than one word (decision 213) had a heap cell nothing could free.
+225. A function used as a value is its constant when that will do;
+     otherwise it is a closure of its value wrapper, `NAME#value`
+     (`sisu_sir::value_wrapper`), made with the function's body: for a
+     generic function, whose type arguments the type checker infers where
+     the value goes and whose bounds it requires of them, as for a call
+     (it was `E0350`); and for one that borrows a parameter, since a
+     function value takes its arguments by value (a call through one
+     passed an owned value where the function expected a reference, and
+     the interpreter stopped with an internal error). The wrapper is
+     generic as the function is, takes an empty environment and the
+     parameters as the function's type has them, lends those the function
+     borrows and drops them after the call; a function returning a borrow
+     of such a parameter cannot be a value (`E0352`), and a generic
+     intrinsic has no body to wrap (`E0350`). `bytes.as_slice` compiles
+     natively as the interpreter runs it: a `Slice[u8]` of copies of the
+     bytes, each a word.
+226. The native mode of the conformance runner runs every executable
+     with `SISU_RT_ALLOCS=1` and requires its report to say that nothing
+     the runtime allocated is live at exit, leaving the report out of the
+     standard error it compares; only a program that aborts (status 134)
+     ends without one. Every case of `native.list`, both from source and
+     from serialised SIR, is then a leak test, in `cargo test` and in CI.
+227. The native executable's debug information is DWARF 4 that the code
+     generator writes with gimli (a dependency of `sisu-codegen` only): a
+     line table from SIR's locations, which Cranelift carries to the
+     machine code; a subprogram for each function instance with its named
+     locals at their stack slots and of their Sisu types, each parameter's
+     address kept in a slot of its own; and `.debug_frame` from Cranelift's
+     unwind information. The unit's language is Rust, the closest one gdb
+     and lldb know, whose conventions for texts, slices and variant parts
+     make them print a Sisu value as Sisu shows it. The code before a
+     function's first statement is its declaration's line and the
+     prologue's end is marked, so a breakpoint on the function stops after
+     the parameters' addresses are kept. A drop flag is a local named
+     `flag` with no place in the source, so a variable a program names
+     `flag` is described (and a `defer` that assigns it is code of its
+     own, decision 223). A panic's message needs none of this: it names
+     the Sisu functions and lines as the interpreter's does, from the
+     locations the code keeps as it runs.

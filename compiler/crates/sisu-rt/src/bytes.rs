@@ -110,7 +110,9 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> Option<u8> {
             }
             // The iterator owns a copy: `bytes.iter` borrows nothing.
             I::BytesIter => c.set_word(iter::into_word(iter::owned_bytes(arg(c, 0).to_vec()))),
-            I::BytesToList => {
+            // A `Slice` holds copies of what it views, as the interpreter's
+            // does (decision 225): of bytes, each a `u8` of a word.
+            I::BytesToList | I::BytesAsSlice => {
                 let b = arg(c, 0);
                 let mut l = List::empty();
                 l.reserve(b.len() as u64, 8);

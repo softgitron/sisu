@@ -9,6 +9,7 @@
 //! The rules are written down in docs/architecture.md ("Lowering"), so a
 //! front end in another language produces the same SIR.
 
+mod ahead;
 mod contracts;
 mod exprs;
 mod func;
@@ -235,6 +236,12 @@ impl Ctx<'_> {
         i
     }
 
+    /// The number of a file [`Ctx::source_index`] has numbered: every
+    /// body's is, before any body is lowered.
+    pub fn source_of(&self, file: sisu_diag::FileId) -> u32 {
+        self.files.get(&file).copied().unwrap_or(0)
+    }
+
     /// The source range of a span, without the line breaks and
     /// indentation a statement's range ends with.
     pub fn loc(&self, span: sisu_diag::Span) -> Option<sir::Loc> {
@@ -330,26 +337,21 @@ impl LowerCache {
     }
 }
 
-/// Lowers a body, through the memo when there is one. An entry is kept
-/// only when every location in its functions lies on the lines of the
-/// body's own item, so that the same key always gives the same SIR.
-fn lower_body_memo(ctx: &mut Ctx, body: &Body, cache: &mut Option<&mut LowerCache>) -> Vec<sir::Function> {
-    let Some(cache) = cache.as_mut() else { return func::lower_body(ctx, body) };
+/// A body's key in the memo, and the last line of its item: none for a
+/// body the memo does not keep.
+fn memo_key(ctx: &Ctx, body: &Body) -> Option<((u64, u32, ContractLevel), u32)> {
     let m = body.memo;
-    let Some(f) = ctx.sources.get(m.file).filter(|_| m.key != 0) else {
-        cache.lowered += 1;
-        return func::lower_body(ctx, body);
-    };
+    let f = ctx.sources.get(m.file).filter(|_| m.key != 0)?;
     let (first, last) = (f.line_col(m.start).line, f.line_col(m.end).line);
-    let key = (m.key, first, ctx.level);
-    let generation = cache.generation;
-    if let Some((fs, used)) = cache.entries.get_mut(&key) {
-        *used = generation;
-        cache.reused += 1;
-        return fs.clone();
-    }
-    cache.lowered += 1;
+    Some(((m.key, first, ctx.level), last))
+}
+
+/// A body's functions, and the copy of them the memo keeps when it may:
+/// when every location in them lies on the lines of the body's own item,
+/// so that the same key always gives the same SIR.
+pub(crate) fn lower_kept(ctx: &Ctx, body: &Body, memoizing: bool) -> (Vec<sir::Function>, Option<Vec<sir::Function>>) {
     let fs = func::lower_body(ctx, body);
+    let Some(((_, first, _), last)) = memo_key(ctx, body).filter(|_| memoizing) else { return (fs, None) };
     let inside =
         |l: &Option<sir::Loc>| l.is_none_or(|l| first <= l.line && l.line <= last && l.end_line <= last);
     let keep = fs.iter().all(|f| {
@@ -357,8 +359,34 @@ fn lower_body_memo(ctx: &mut Ctx, body: &Body, cache: &mut Option<&mut LowerCach
             && f.locals.iter().all(|l| inside(&l.loc))
             && f.blocks.iter().all(|b| inside(&b.loc) && b.stmts.iter().all(|s| inside(&s.loc)))
     });
-    if keep {
-        cache.entries.insert(key, (fs.clone(), generation));
+    let copy = keep.then(|| fs.clone());
+    (fs, copy)
+}
+
+/// Lowers a body, through the memo when there is one: `lower` lowers it
+/// when the memo does not hold it ([`lower_kept`], told whether the memo
+/// may keep it).
+fn lower_body_memo(
+    ctx: &Ctx,
+    body: &Body,
+    cache: &mut Option<&mut LowerCache>,
+    lower: impl FnOnce(bool) -> (Vec<sir::Function>, Option<Vec<sir::Function>>),
+) -> Vec<sir::Function> {
+    let Some(cache) = cache.as_mut() else { return lower(false).0 };
+    let Some((key, _)) = memo_key(ctx, body) else {
+        cache.lowered += 1;
+        return lower(false).0;
+    };
+    let generation = cache.generation;
+    if let Some((fs, used)) = cache.entries.get_mut(&key) {
+        *used = generation;
+        cache.reused += 1;
+        return fs.clone();
+    }
+    cache.lowered += 1;
+    let (fs, copy) = lower(true);
+    if let Some(copy) = copy {
+        cache.entries.insert(key, (copy, generation));
     }
     fs
 }
@@ -465,7 +493,7 @@ fn lower_reaching(
         all.sort();
         roots.extend(all);
     }
-    let mut functions = lower_reached(&mut ctx, typed, &bodies, &roots, &mut cache);
+    let mut functions = lower_reached(&ctx, typed, &bodies, &roots, &mut cache);
     let types = collect_types(&ctx, &functions, &HashSet::new());
     functions.extend(glue::glue_functions(&types));
     let intrinsics = intrinsic_decls(prog, &functions);
@@ -713,7 +741,12 @@ fn owner_body(name: &str, bodies: &HashMap<String, usize>) -> Option<usize> {
         if let Some(&i) = bodies.get(n) {
             return Some(i);
         }
-        let cut = n.rfind("#closure").into_iter().chain(n.rfind("#comptime")).max()?;
+        let cut = n
+            .rfind("#closure")
+            .into_iter()
+            .chain(n.rfind("#comptime"))
+            .chain(n.rfind(sir::VALUE_WRAPPER))
+            .max()?;
         n = &n[..cut];
     }
 }
@@ -722,13 +755,47 @@ fn owner_body(name: &str, bodies: &HashMap<String, usize>) -> Option<usize> {
 /// the functions it calls or names, the defaults, drops and invariant
 /// checks of the types it uses, and the methods of the impls of the
 /// traits it calls through `call trait` for the types the kept functions
-/// mention. The functions come in the order of their bodies.
+/// mention. The functions come in the order of their bodies. The bodies
+/// are lowered on as many threads as the machine runs at once (at most 8,
+/// this one among them), ahead of the worklist (decision 228).
 fn lower_reached(
-    ctx: &mut Ctx,
+    ctx: &Ctx,
     typed: &Typed,
     bodies: &HashMap<String, usize>,
     roots: &[String],
     cache: &mut Option<&mut LowerCache>,
+) -> Vec<sir::Function> {
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8);
+    if threads <= 1 {
+        return reach(ctx, typed, bodies, roots, cache, None);
+    }
+    let ahead = ahead::Ahead::new(ctx, &typed.bodies, cache.is_some());
+    std::thread::scope(|s| {
+        let others: Vec<_> = (1..threads)
+            .filter_map(|_| std::thread::Builder::new().spawn_scoped(s, || ahead.work()).ok())
+            .collect();
+        let reached = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            reach(ctx, typed, bodies, roots, cache, Some(&ahead))
+        }));
+        ahead.close();
+        for w in others {
+            if let Err(e) = w.join() {
+                std::panic::resume_unwind(e);
+            }
+        }
+        reached.unwrap_or_else(|e| std::panic::resume_unwind(e))
+    })
+}
+
+/// [`lower_reached`]'s worklist, which hands each body it will lower to
+/// `ahead`'s threads as soon as a name of it is on the list.
+fn reach(
+    ctx: &Ctx,
+    typed: &Typed,
+    bodies: &HashMap<String, usize>,
+    roots: &[String],
+    cache: &mut Option<&mut LowerCache>,
+    ahead: Option<&ahead::Ahead>,
 ) -> Vec<sir::Function> {
     let prog = ctx.prog;
     let mut lowered: HashMap<usize, Vec<sir::Function>> = HashMap::new();
@@ -739,8 +806,32 @@ fn lower_reached(
     let mut mentioned: HashSet<String> = HashSet::new();
     let mut typed_names: HashSet<String> = HashSet::new();
     let mut work: Vec<String> = roots.to_vec();
+    // The bodies handed to the threads: each one the worklist will lower,
+    // unless the memo holds it.
+    let mut asked: HashSet<usize> = HashSet::new();
+    let mut seen = 0;
     loop {
-        while let Some(n) = work.pop() {
+        loop {
+            if let Some(ahead) = ahead {
+                for n in work.get(seen..).unwrap_or_default() {
+                    if keep.contains(n) || where_is.contains_key(n) {
+                        continue;
+                    }
+                    let Some(b) = owner_body(n, bodies) else { continue };
+                    if lowered.contains_key(&b) || asked.contains(&b) {
+                        continue;
+                    }
+                    let held = cache.as_ref().is_some_and(|c| {
+                        memo_key(ctx, &typed.bodies[b]).is_some_and(|(k, _)| c.entries.contains_key(&k))
+                    });
+                    if !held {
+                        asked.insert(b);
+                        ahead.ask(b);
+                    }
+                }
+            }
+            let Some(n) = work.pop() else { break };
+            seen = work.len();
             if !keep.insert(n.clone()) {
                 continue;
             }
@@ -748,7 +839,11 @@ fn lower_reached(
                 && let Some(b) = owner_body(&n, bodies)
                 && !lowered.contains_key(&b)
             {
-                let fs = lower_body_memo(ctx, &typed.bodies[b], cache);
+                let body = &typed.bodies[b];
+                let fs = lower_body_memo(ctx, body, cache, |memoizing| match ahead {
+                    Some(a) if asked.contains(&b) => a.take(b),
+                    _ => lower_kept(ctx, body, memoizing),
+                });
                 for f in &fs {
                     where_is.insert(f.name.clone(), b);
                 }

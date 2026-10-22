@@ -153,7 +153,11 @@ impl FnLower<'_, '_> {
             ExprKind::Char(c) => Const::Char(*c),
             ExprKind::Unit => Const::Unit,
             ExprKind::Str(s) if e.ty == Ty::Str => Const::Str(s.clone()),
-            ExprKind::FnRef(d) => Const::Fn(self.ctx.fn_name(*d)),
+            ExprKind::FnRef(d, _)
+                if !self.ctx.prog.fn_info(*d).is_some_and(|f| crate::func::value_wrapped(self.ctx, f)) =>
+            {
+                Const::Fn(self.ctx.fn_name(*d))
+            }
             _ => return None,
         })
     }
@@ -172,6 +176,72 @@ impl FnLower<'_, '_> {
             }
             _ => None,
         }
+    }
+
+    /// Whether evaluating an expression may leave the statement it is part
+    /// of before the statement runs: by a `?`, a `return`, a `break`, or a
+    /// panic (a call, an index, arithmetic, a contract). Only literals,
+    /// locals, functions, closures, and the parts, borrows and aggregates of
+    /// such cannot; a struct with an invariant or a field's default can.
+    pub fn may_leave(&self, e: &thir::Expr) -> bool {
+        match &e.kind {
+            ExprKind::Int(_)
+            | ExprKind::WideInt(_)
+            | ExprKind::Float(_)
+            | ExprKind::Bool(_)
+            | ExprKind::Char(_)
+            | ExprKind::Str(_)
+            | ExprKind::Bytes(_)
+            | ExprKind::Unit
+            | ExprKind::Local(_)
+            | ExprKind::FnRef(..)
+            | ExprKind::Closure(_) => false,
+            ExprKind::Field { base, .. } => self.may_leave(base),
+            ExprKind::Deref(inner) => self.may_leave(inner),
+            ExprKind::Borrow { place, .. } => self.may_leave(place),
+            ExprKind::Tuple(xs) | ExprKind::List(xs) | ExprKind::Variant { args: xs, .. } => {
+                xs.iter().any(|x| self.may_leave(x))
+            }
+            ExprKind::Struct { def, fields } => {
+                self.ctx.prog.invariant_check(*def).is_some()
+                    || fields.iter().any(|f| match f {
+                        FieldInit::Value(x) => self.may_leave(x),
+                        FieldInit::Default(_) => true,
+                    })
+            }
+            _ => true,
+        }
+    }
+
+    /// The values of expressions as the operands of one statement, in
+    /// order: each held while the ones after it are evaluated, when one of
+    /// them may leave ([`FnLower::hold`]), so that leaving drops it.
+    pub fn operands<'x>(&mut self, es: impl Iterator<Item = &'x thir::Expr>) -> Vec<Operand> {
+        let es: Vec<&thir::Expr> = es.collect();
+        let later = self.leaving_after(es.iter().map(|e| self.may_leave(e)));
+        let mut held = Vec::new();
+        let mut ops = Vec::new();
+        for (e, hold) in es.into_iter().zip(later) {
+            let mark = self.locals.len();
+            let o = self.operand(e);
+            if hold {
+                self.hold(&o, mark, &e.ty, &mut held);
+            }
+            ops.push(o);
+        }
+        self.release(&held);
+        ops
+    }
+
+    /// For each of a statement's operands, whether one after it may leave
+    /// the statement, from whether each may.
+    pub fn leaving_after(&self, may: impl Iterator<Item = bool>) -> Vec<bool> {
+        let may: Vec<bool> = may.collect();
+        let mut out = vec![false; may.len()];
+        for i in (0..may.len().saturating_sub(1)).rev() {
+            out[i] = out[i + 1] || may[i + 1];
+        }
+        out
     }
 
     /// The value of an expression as an operand.
@@ -350,26 +420,45 @@ impl FnLower<'_, '_> {
                     thir::Callee::Fn { def, type_args } => self.callee_for(*def, type_args),
                     thir::Callee::Value(f) => (Callee::Value(self.operand(f)), Vec::new()),
                 };
-                let ops = args
-                    .iter()
-                    .enumerate()
-                    .map(|(i, a)| self.arg_operand_for(a, by_value.get(i).copied().unwrap_or(false)))
-                    .collect();
+                let later = self.leaving_after(args.iter().map(|a| self.may_leave(&a.expr)));
+                let mut held = Vec::new();
+                let mut ops = Vec::new();
+                for (i, a) in args.iter().enumerate() {
+                    let mark = self.locals.len();
+                    let o = self.arg_operand_for(a, by_value.get(i).copied().unwrap_or(false));
+                    if later[i] {
+                        self.hold(&o, mark, &a.expr.ty, &mut held);
+                    }
+                    ops.push(o);
+                }
+                self.release(&held);
                 self.emit(StatementKind::Call { dest, callee: c, args: ops }, loc);
                 if e.ty == Ty::Never {
                     self.terminate(Terminator::Unreachable, loc);
                 }
             }
             ExprKind::Variant { def, variant, args } => {
-                let ops = args.iter().map(|a| self.operand(a)).collect();
+                let ops = self.operands(args.iter());
                 let (t, v) = self.variant_names(*def, *variant);
                 self.assign(dest, Rvalue::Aggregate(sir::Aggregate::Variant(t, v), ops), loc);
             }
             ExprKind::Struct { def, fields } => {
                 let mut ops = Vec::new();
+                let mut held = Vec::new();
+                let later = self.leaving_after(fields.iter().map(|f| match f {
+                    FieldInit::Value(x) => self.may_leave(x),
+                    FieldInit::Default(_) => true,
+                }));
                 for (i, f) in fields.iter().enumerate() {
+                    let mark = self.locals.len();
                     match f {
-                        FieldInit::Value(x) => ops.push(self.operand(x)),
+                        FieldInit::Value(x) => {
+                            let o = self.operand(x);
+                            if later[i] {
+                                self.hold(&o, mark, &x.ty, &mut held);
+                            }
+                            ops.push(o);
+                        }
                         FieldInit::Default(fi) => {
                             let fty = prog
                                 .struct_info(*def)
@@ -386,44 +475,58 @@ impl FnLower<'_, '_> {
                                 },
                                 loc,
                             );
-                            ops.push(if prog.is_copy(&fty) {
+                            let o = if prog.is_copy(&fty) {
                                 Operand::Copy(Place::local(t))
                             } else {
                                 Operand::Move(Place::local(t))
-                            });
+                            };
+                            if later[i] {
+                                self.hold(&o, mark, &fty, &mut held);
+                            }
+                            ops.push(o);
                         }
                     }
                 }
+                self.release(&held);
                 self.assign(
                     dest.clone(),
                     Rvalue::Aggregate(sir::Aggregate::Struct(self.ctx.type_name(*def)), ops),
                     loc,
                 );
-                // A struct with an invariant checks it once built (07).
+                // A struct with an invariant checks it once built (07); a
+                // panic of the check drops it.
                 let args = match &e.ty {
                     Ty::Adt(_, a) => a.clone(),
                     _ => Vec::new(),
                 };
+                let unheld = match &dest {
+                    Place { local, proj } if proj.is_empty() && !self.is_registered(*local) => Some(*local),
+                    _ => None,
+                }
+                .filter(|_| self.needs_drop(&e.ty) && self.ctx.prog.invariant_check(*def).is_some());
+                if let Some(l) = unheld {
+                    self.register(DropEntry::Local(l));
+                    self.split();
+                }
                 self.invariant_after_construction(&dest, *def, &args, loc);
+                if let Some(l) = unheld {
+                    self.release(&[l]);
+                }
             }
             ExprKind::Tuple(xs) => {
-                let ops = xs.iter().map(|x| self.operand(x)).collect();
+                let ops = self.operands(xs.iter());
                 self.assign(dest, Rvalue::Aggregate(sir::Aggregate::Tuple, ops), loc);
             }
             ExprKind::List(xs) => {
-                let ops = xs.iter().map(|x| self.operand(x)).collect();
+                let ops = self.operands(xs.iter());
                 self.assign(dest, Rvalue::Aggregate(sir::Aggregate::List, ops), loc);
             }
             ExprKind::Set(xs) => {
-                let ops = xs.iter().map(|x| self.operand(x)).collect();
+                let ops = self.operands(xs.iter());
                 self.assign(dest, Rvalue::Aggregate(sir::Aggregate::Set, ops), loc);
             }
             ExprKind::Dict(kv) => {
-                let mut ops = Vec::new();
-                for (k, v) in kv {
-                    ops.push(self.operand(k));
-                    ops.push(self.operand(v));
-                }
+                let ops = self.operands(kv.iter().flat_map(|(k, v)| [k, v]));
                 self.assign(dest, Rvalue::Aggregate(sir::Aggregate::Dict, ops), loc);
             }
             ExprKind::Slice { base, lo, hi } => {
@@ -1043,7 +1146,15 @@ impl FnLower<'_, '_> {
                 self.refine_try(dest, value, *refinement, type_args, loc)
             }
             ExprKind::Error => self.terminate(Terminator::Unreachable, loc),
-            ExprKind::Bool(_) | ExprKind::Char(_) | ExprKind::Unit | ExprKind::FnRef(_) => {}
+            // A function that is its value wrapper as a value (`f#value`): a
+            // closure of it with nothing in its environment, for the type
+            // arguments (decision 225).
+            ExprKind::FnRef(d, type_args) => {
+                let name = format!("{}{}", self.ctx.fn_name(*d), sir::VALUE_WRAPPER);
+                let tys = type_args.iter().map(|t| self.ctx.ty(t)).collect();
+                self.assign(dest, Rvalue::Closure(name, tys, Vec::new()), loc);
+            }
+            ExprKind::Bool(_) | ExprKind::Char(_) | ExprKind::Unit => {}
         }
     }
 
@@ -1396,11 +1507,17 @@ impl FnLower<'_, '_> {
                     );
                 }
                 CompKind::Dict => {
+                    let mark = self.locals.len();
                     let k = self.operand(c.elem);
+                    let mut held = Vec::new();
+                    if c.value.is_some_and(|v| self.may_leave(v)) {
+                        self.hold(&k, mark, &c.elem.ty, &mut held);
+                    }
                     let v = match c.value {
                         Some(v) => self.operand(v),
                         None => Operand::Const(Const::Unit),
                     };
+                    self.release(&held);
                     let vty = c.item_tys.1.clone().unwrap_or(Ty::Unit);
                     let opt =
                         self.ctx.prog.wk.option.map(|o| Ty::Adt(o, vec![vty.clone()])).unwrap_or(Ty::Unit);

@@ -489,6 +489,113 @@ impl Function {
     }
 }
 
+/// The end of the name of a function's value wrapper (`first#value`).
+pub const VALUE_WRAPPER: &str = "#value";
+
+/// The value wrapper of `f`, generic as `f` is: what `f` is as a value
+/// when its constant would not do (a generic function, whose constant
+/// cannot name type arguments; one that borrows a parameter, which a
+/// function value takes). It is a closure that takes an empty environment
+/// and `takes` (the parameters as `f`'s function type has them), and calls
+/// `f`'s instance for its own type arguments: a parameter `f` borrows is
+/// lent, and dropped once the call returns or panics; any other is moved
+/// in.
+pub fn value_wrapper(f: &Function, takes: &[Type]) -> Function {
+    let n = f.param_count as usize;
+    let mut locals =
+        vec![LocalDecl::new(f.ret().clone(), None), LocalDecl::new(Type::Unit, Some("env".to_string()))];
+    // How each parameter goes to `f`: lent (with the mutability of `f`'s
+    // reference) or moved.
+    let mut lent: Vec<Option<bool>> = Vec::new();
+    for (i, l) in f.locals.iter().skip(1).take(n).enumerate() {
+        let mut decl = l.clone();
+        let how = match (&l.ty, takes.get(i)) {
+            (Type::Ref(inner, m), Some(t)) if **inner == *t && !matches!(t, Type::Ref(..)) => {
+                decl.ty = t.clone();
+                Some(*m)
+            }
+            _ => None,
+        };
+        lent.push(how);
+        locals.push(decl);
+    }
+    let mut stmts = Vec::new();
+    let mut args = Vec::new();
+    for (i, how) in lent.iter().enumerate() {
+        let param = Place::local(LocalId(i as u32 + 2));
+        match how {
+            Some(m) => {
+                let r = LocalId(locals.len() as u32);
+                locals.push(LocalDecl::new(Type::Ref(Box::new(locals[i + 2].ty.clone()), *m), None));
+                stmts.push(Statement {
+                    kind: StatementKind::Assign(Place::local(r), Rvalue::Ref(param, *m)),
+                    loc: f.loc,
+                });
+                args.push(Operand::Copy(Place::local(r)));
+            }
+            None => args.push(Operand::Move(param)),
+        }
+    }
+    let tys = (0..f.type_params.len() as u32).map(Type::Param).collect();
+    stmts.push(Statement {
+        kind: StatementKind::Call {
+            dest: Place::local(LocalId(0)),
+            callee: Callee::Fn(f.name.clone(), tys),
+            args,
+        },
+        loc: f.loc,
+    });
+    // The lent parameters are dropped after the call, last first, each in
+    // a block of its own, and by a cleanup block when the call panics.
+    let dropped: Vec<Place> = lent
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, how)| how.is_some())
+        .map(|(i, _)| Place::local(LocalId(i as u32 + 2)))
+        .collect();
+    let block = |stmts: Vec<Statement>, term: Terminator, unwind: Option<BlockId>, cleanup: bool| {
+        BasicBlock { stmts, term, unwind, cleanup, loc: None }
+    };
+    let drop =
+        |p: &Place| Statement { kind: StatementKind::Drop { place: p.clone(), flag: None }, loc: f.loc };
+    let mut blocks = Vec::new();
+    if dropped.is_empty() {
+        blocks.push(block(stmts, Terminator::Return, None, false));
+    } else {
+        let cleanup = BlockId(dropped.len() as u32 + 2);
+        blocks.push(block(stmts, Terminator::Goto(BlockId(1)), Some(cleanup), false));
+        for (k, p) in dropped.iter().enumerate() {
+            blocks.push(block(vec![drop(p)], Terminator::Goto(BlockId(k as u32 + 2)), None, false));
+        }
+        blocks.push(block(Vec::new(), Terminator::Return, None, false));
+        blocks.push(block(dropped.iter().map(drop).collect(), Terminator::Resume, None, true));
+    }
+    // What the result may borrow from, a place further on (the
+    // environment is argument 0): a lent parameter whose values' loans it
+    // may hold is a parameter of the wrapper that holds them.
+    let is_lent = |i: &u32| lent.get(*i as usize).is_some_and(Option::is_some);
+    let mut from: Vec<u32> = f.from.iter().filter(|i| !is_lent(i)).map(|i| i + 1).collect();
+    from.extend(f.inner.iter().filter(|i| is_lent(i)).map(|i| i + 1));
+    from.sort_unstable();
+    from.dedup();
+    let inner = f.inner.iter().filter(|i| !is_lent(i)).map(|i| i + 1).collect();
+    Function {
+        name: format!("{}{VALUE_WRAPPER}", f.name),
+        type_params: f.type_params.clone(),
+        kind: FnKind::Closure(ClosureRole::Plain),
+        param_count: f.param_count + 1,
+        pure: f.pure,
+        from,
+        inner,
+        own: Vec::new(),
+        locals,
+        blocks,
+        loc: f.loc,
+        source: f.source,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct BasicBlock {
     pub stmts: Vec<Statement>,

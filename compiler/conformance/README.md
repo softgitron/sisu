@@ -153,15 +153,19 @@ run, one per line as the runner names them (`run/arithmetic`); `#`
 starts a comment. With `--native LIST` the runner builds each case with
 `sisu build --native --output EXE NAME.sisu` (a package case without the
 file) in the case's sandbox, runs the executable as it runs `sisu run`
-(with the case's `.args`, `.stdin` and `.cwd`, an empty environment and
-the time limit), and compares:
+(with the case's `.args`, `.stdin` and `.cwd`, the time limit, and an
+environment holding only `SISU_RT_ALLOCS=1`), and compares:
 
 - standard output with `NAME.out`;
 - the exit status with `NAME.status` (absent means `0`);
 - standard error with `NAME.err` (absent means empty), except that when
   the build printed warnings, which a `sisu run` prints before the
   program's own standard error, the program's must be the end of
-  `NAME.err`.
+  `NAME.err`;
+- the runtime's report of its allocations live at exit, the last line of
+  the program's standard error (`allocations: N of the runtime's live at
+  exit`), which must say 0 and is left out of the comparison above; a
+  program that aborts (status 134) ends without one.
 
 The expectations are the interpreter's: the native mode reads no file of
 its own and does not bless. With `--native-from-sir LIST` the runner
@@ -207,7 +211,10 @@ and the time spent building and running them.
   names), loops, closures, errors and traces, options (`let_else_copy`),
   `Drop` order on normal and unwinding paths (`drop_panic_fields`: a
   `Drop` that panics; `drop_chain`: a long chain dropped at constant
-  depth), panics and their exit statuses, capabilities, and tests.
+  depth; `drop_moved_parts`: what is left of a value once a part moves
+  out, error values a pattern takes fields out of, and the operands a `?`
+  or a panic abandons), panics and their exit statuses, capabilities, and
+  tests.
 - `traits/` is traits and impls (18, Phase 4): provided methods,
   associated types, supertraits, coherence and the orphan rule, sealed
   traits, method resolution and ambiguity, `dyn Trait` and object safety,
@@ -215,7 +222,9 @@ and the time spent building and running them.
   diagnostics.
 - `generics/` is user generics: functions and types with bounds checked
   at the definition, defaults, type arguments at run time, views through
-  generic parameters, `Drop` for a generic type, and `const` parameters
+  generic parameters, `Drop` for a generic type, functions as values
+  (`function_values`: generic ones and ones that borrow a parameter;
+  `function_value_errors`), and `const` parameters
   with `Array[T, N]` (`const_generic`, `const_generic_errors`) and
   constant arguments written as expressions, `Array[T, W * H]`
   (`const_expressions`, `const_expression_errors`).

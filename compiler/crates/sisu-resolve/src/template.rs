@@ -43,6 +43,7 @@ use sisu_syntax::ast::{
 };
 
 /// The shape of the type being derived for.
+#[derive(Clone)]
 pub(crate) enum Body {
     /// Field names.
     Struct(Vec<String>),
@@ -615,10 +616,18 @@ impl<'a> Unfold<'a> {
                 got.map_or_else(|| fail(format!("{} has no `{}`", describe(&b), name.text)), Ok)
             }
             ExprKind::Call { callee, args, .. } => {
+                // `len(reflect.variants_of(T))` counts without making the
+                // list, which a derive asks for in each arm it writes.
+                if let (ExprKind::Name(n), [a]) = (&callee.kind, args.as_slice())
+                    && n == "len"
+                    && let Some(count) = self.count_of(&a.value)?
+                {
+                    return Ok(Value::Int(count as i64));
+                }
                 let vals: Vec<Value> = args.iter().map(|a| self.eval(&a.value)).collect::<R<_>>()?;
-                let one = || match vals.as_slice() {
-                    [v] => Ok(v.clone()),
-                    _ => Err((e.range, "this takes one argument".to_string())),
+                let one = |vals: Vec<Value>| match <[Value; 1]>::try_from(vals) {
+                    Ok([v]) => Ok(v),
+                    Err(_) => Err((e.range, "this takes one argument".to_string())),
                 };
                 match &callee.kind {
                     ExprKind::Field { name, .. } => {
@@ -637,7 +646,7 @@ impl<'a> Unfold<'a> {
                         self.reflect(&name.text, t)
                             .ok_or((e.range, format!("`reflect` has no `{}`", name.text)))
                     }
-                    ExprKind::Name(n) if n == "enumerate" => match one()? {
+                    ExprKind::Name(n) if n == "enumerate" => match one(vals)? {
                         Value::List(xs) => Ok(Value::List(
                             xs.into_iter()
                                 .enumerate()
@@ -646,7 +655,7 @@ impl<'a> Unfold<'a> {
                         )),
                         other => fail(format!("`enumerate` of {}", describe(&other))),
                     },
-                    ExprKind::Name(n) if n == "len" => match one()? {
+                    ExprKind::Name(n) if n == "len" => match one(vals)? {
                         Value::List(xs) => Ok(Value::Int(xs.len() as i64)),
                         Value::Str(s) => Ok(Value::Int(s.chars().count() as i64)),
                         other => fail(format!("`len` of {}", describe(&other))),
@@ -722,6 +731,23 @@ impl<'a> Unfold<'a> {
             }
             _ => fail("this cannot be evaluated at compile time".into()),
         }
+    }
+
+    /// The length of the list `reflect.fields_of(T)`, `variants_of(T)` or
+    /// `attributes_of(T)` gives, when `e` is one of them of a type: what
+    /// `len` of it is, without making the list.
+    fn count_of(&self, e: &Expr) -> R<Option<usize>> {
+        let ExprKind::Call { callee, args, .. } = &e.kind else { return Ok(None) };
+        let (ExprKind::Field { name, .. }, [a]) = (&callee.kind, args.as_slice()) else { return Ok(None) };
+        if !matches!(name.text.as_str(), "fields_of" | "variants_of" | "attributes_of") {
+            return Ok(None);
+        }
+        let Value::Type(t) = self.eval(&a.value)? else { return Ok(None) };
+        Ok(Some(match name.text.as_str() {
+            "fields_of" => t.fields.len(),
+            "variants_of" => t.variants.len(),
+            _ => t.attrs.len(),
+        }))
     }
 
     /// `reflect.f(t)`.

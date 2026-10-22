@@ -6,7 +6,8 @@
 
 use cranelift_codegen::control::ControlPlane;
 use cranelift_codegen::isa::TargetIsa;
-use cranelift_codegen::{Context, ir};
+use cranelift_codegen::isa::unwind::UnwindInfo;
+use cranelift_codegen::{CompiledCode, Context, ir};
 use cranelift_module::{FuncId, ModuleError, ModuleReloc};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,12 +22,33 @@ pub(crate) struct Job {
 }
 
 /// A function compiled: its machine code and what the object file needs
-/// to place it, or Cranelift's error, as the module would report it.
+/// to place it, or Cranelift's error, as the module would report it; and
+/// what the debug information needs of it (decision 227).
 pub(crate) struct Code {
     pub bytes: Vec<u8>,
     pub alignment: u64,
     pub relocs: Vec<ModuleReloc>,
     pub frame_size: u32,
+    pub debug: Compiled,
+}
+
+/// What the debug information needs of a compiled function: the source
+/// location of each run of its code, each stack slot's offset, and how to
+/// unwind it.
+pub(crate) struct Compiled {
+    pub lines: Vec<(u32, u32, u32)>,
+    pub slots: Vec<u32>,
+    pub unwind: Option<UnwindInfo>,
+}
+
+impl Compiled {
+    pub(crate) fn of(code: &CompiledCode, isa: &dyn TargetIsa) -> Compiled {
+        Compiled {
+            lines: code.buffer.get_srclocs_sorted().iter().map(|s| (s.start, s.end, s.loc.bits())).collect(),
+            slots: code.sized_stackslot_offsets.values().copied().collect(),
+            unwind: code.create_unwind_info(isa).ok().flatten(),
+        }
+    }
 }
 
 /// Compiles one function, as `Module::define_function` would before it
@@ -40,7 +62,13 @@ pub(crate) fn compile(isa: &dyn TargetIsa, id: FuncId, func: ir::Function) -> Re
     let Some(code) = ctx.compiled_code() else { return Err("no code".to_string()) };
     let relocs =
         code.buffer.relocs().iter().map(|r| ModuleReloc::from_mach_reloc(r, &ctx.func, id)).collect();
-    Ok(Code { bytes: code.buffer.data().to_vec(), alignment, relocs, frame_size: code.frame_size })
+    Ok(Code {
+        bytes: code.buffer.data().to_vec(),
+        alignment,
+        relocs,
+        frame_size: code.frame_size,
+        debug: Compiled::of(code, isa),
+    })
 }
 
 /// How many threads compile: as many as the machine runs at once, at most

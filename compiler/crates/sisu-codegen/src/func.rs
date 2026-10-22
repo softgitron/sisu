@@ -27,15 +27,27 @@ use std::collections::HashMap;
 /// than as words.
 const MAX_WORDS: u32 = 16;
 
+/// Translates `f`'s instance for `targs`, and gives the named locals the
+/// debug information describes (each one's name, type, stack slot, and
+/// whether the slot holds its address rather than the value).
 pub(crate) fn translate(
     cg: &mut Codegen<'_>,
     b: FunctionBuilder<'_>,
     f: &sir::Function,
     targs: &[Type],
-) -> Result<(), Error> {
+) -> Result<Vec<crate::debug::Var>, Error> {
     let mut cx = Cx::new(cg, b, f, targs)?;
     cx.body()?;
-    cx.finish()
+    let vars = std::mem::take(&mut cx.vars);
+    cx.finish()?;
+    Ok(vars)
+}
+
+/// The source location of the code that follows, as Cranelift carries it
+/// to the machine code: the line in the high 20 bits, the column in the
+/// low 12 (clamped), for the debug information's line table.
+pub(crate) fn srcloc(line: u32, col: u32) -> ir::SourceLoc {
+    ir::SourceLoc::new((line.min(0xF_FFFF) << 12) | col.min(0xFFF))
 }
 
 enum Storage {
@@ -76,6 +88,8 @@ struct Cx<'a, 'p> {
     glue: bool,
     /// The SIR block being translated.
     cur: usize,
+    /// The named locals, for the debug information.
+    vars: Vec<crate::debug::Var>,
 }
 
 /// Whether a type is a number, `bool`, `char` or `()`: one word or none,
@@ -95,15 +109,6 @@ fn scalar_kind(t: &Type) -> Option<Scalar> {
         },
         _ => None,
     }
-}
-
-/// Whether a closure's environment of `size` bytes is passed as its one
-/// word rather than its address (decision 213): an environment of one word
-/// is copied with the function value, so it needs no cell, which nothing
-/// could free (function values are `Copy` and never dropped). A task's
-/// keeps its cell, which the runtime frees when the task ends.
-fn inline_env(kind: sir::FnKind, size: u32) -> bool {
-    size == 8 && matches!(kind, sir::FnKind::Closure(role) if role != sir::ClosureRole::Task)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,14 +134,16 @@ impl<'a, 'p> Cx<'a, 'p> {
         b.switch_to_block(entry);
         let params: Vec<Value> = b.block_params(entry).to_vec();
         let mut locals = Vec::new();
+        let mut vars = Vec::new();
+        let closure = matches!(f.kind, sir::FnKind::Closure(role) if role != sir::ClosureRole::Task);
         for (i, l) in f.locals.iter().enumerate() {
             let ty = cg.concrete(&l.ty, targs)?;
-            let storage = if i == 1 && inline_env(f.kind, cg.types.size(&ty)?) {
-                // The environment came as its one word (decision 213): it
-                // gets a slot, as an argument has memory of its own.
-                let slot = b.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3));
-                b.ins().stack_store(params[1], slot, 0);
-                Storage::Slot(slot)
+            let storage = if i == 1 && closure && cg.types.size(&ty)? > cg.types.env_words * abi::WORD {
+                // A closure's environment is in the function value, whose
+                // words after its code the call passes the address of; one
+                // larger than they are is a slot of the frame that made the
+                // closure, whose address is the first of them (decision 224).
+                Storage::Param(b.ins().load(types::I64, MemFlags::trusted(), params[1], 0))
             } else if i <= f.param_count as usize {
                 Storage::Param(params[i])
             } else {
@@ -147,7 +154,36 @@ impl<'a, 'p> Cx<'a, 'p> {
                     3,
                 )))
             };
+            // A named local is described by its slot; a parameter's (and the
+            // environment's) address is kept in a slot of its own, so that
+            // a debugger finds the value through it.
+            if let Some(name) = l.name.as_deref().filter(|_| !drop_flag(l)) {
+                let name = name.split('(').next().unwrap_or(name).to_string();
+                let (slot, indirect) = match &storage {
+                    Storage::Slot(ss) => (*ss, false),
+                    Storage::Param(v) => {
+                        let ss =
+                            b.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3));
+                        b.ins().stack_store(*v, ss, 0);
+                        (ss, true)
+                    }
+                };
+                let param = i >= 1 && i <= f.param_count as usize;
+                vars.push(crate::debug::Var {
+                    name,
+                    ty: ty.clone(),
+                    slot,
+                    indirect,
+                    param,
+                    line: l.loc.map(|l| l.line),
+                });
+            }
             locals.push(Local { ty, storage });
+        }
+        // The code so far is the prologue's, in the debug information: the
+        // parameters' addresses are kept before the body begins.
+        if let Some(l) = f.loc {
+            b.set_srcloc(srcloc(l.line, l.col));
         }
         let line = b.declare_var(types::I64);
         let col = b.declare_var(types::I64);
@@ -185,6 +221,7 @@ impl<'a, 'p> Cx<'a, 'p> {
             file: file_text,
             glue,
             cur: 0,
+            vars,
         };
         cx.prologue()?;
         Ok(cx)
@@ -340,6 +377,7 @@ impl<'a, 'p> Cx<'a, 'p> {
     }
 
     fn set_loc(&mut self, loc: sir::Loc) {
+        self.b.set_srcloc(srcloc(loc.line, loc.col));
         let l = self.iconst(i64::from(loc.line));
         self.b.def_var(self.line, l);
         let c = self.iconst(i64::from(loc.col));
@@ -359,6 +397,14 @@ impl<'a, 'p> Cx<'a, 'p> {
     /// of a call (decision 85: the interpreter's calls of Sisu functions).
     fn prologue(&mut self) -> Result<(), Error> {
         self.probe();
+        // A task's closure (a generator's) whose cleanup runs more than
+        // drops (a `defer`'s code) says so: abandoned, its frames are not
+        // unwound, since its cleanup would run Sisu code (decision 95).
+        if self.f.kind == sir::FnKind::Closure(sir::ClosureRole::Task) && cleanup_runs_code(self.f) {
+            let stack = self.data_addr(self.cg.stack);
+            let keep = self.iconst(abi::ABANDON_KEEP as i64);
+            self.store_word(keep, stack, abi::STACK_ABANDONED);
+        }
         if self.glue {
             let first = self.blocks[0];
             self.b.ins().jump(first, &[]);
@@ -508,6 +554,9 @@ impl<'a, 'p> Cx<'a, 'p> {
             let Some(fb) = self.fails[i] else { continue };
             self.b.switch_to_block(fb);
             let block = &self.f.blocks[i];
+            if let Some(l) = block.loc.or(self.f.loc) {
+                self.b.set_srcloc(srcloc(l.line, l.col));
+            }
             if block.cleanup {
                 self.rt(sym::ABORT_UNWIND, &[])?;
                 self.b.ins().trap(ir::TrapCode::unwrap_user(1));
@@ -913,8 +962,11 @@ impl<'a, 'p> Cx<'a, 'p> {
                 let (thunk, ty) = self.cg.fn_value(n)?;
                 let r = self.func_ref(thunk);
                 let code = self.b.ins().func_addr(types::I64, r);
-                let env = self.iconst(0);
-                (Val::Words(vec![code, env]), ty)
+                let mut words = vec![code];
+                for _ in 0..self.cg.types.env_words {
+                    words.push(self.iconst(0));
+                }
+                (Val::Words(words), ty)
             }
         })
     }
@@ -995,13 +1047,16 @@ impl<'a, 'p> Cx<'a, 'p> {
         }
     }
 
-    /// A closure value: its function's code and the address of its
-    /// environment, the tuple of its captures, or the environment itself
-    /// when it is one word (decision 213). A closure that captures
-    /// references cannot leave the frame of what it captures, so its
-    /// environment is a slot of this frame; one that copies its captures
-    /// (`own`) may, and its environment is on the heap, never freed
-    /// (docs/port-debt.md, "Stage 2").
+    /// A closure value: its function's code, then its environment, the
+    /// tuple of its captures, in the value's other words (decision 224).
+    /// An `own` closure copies its captures, which are `Copy`, and the
+    /// value holds them however far it goes; the program is compiled again
+    /// with wider function values when one needs more words than they
+    /// have. A closure that captures references cannot leave the frame of
+    /// what it captures, so a larger environment of references is a slot
+    /// of this frame, whose address is the value's second word. A task's
+    /// closure (or a generator's) runs after the statement that makes it,
+    /// with an environment the runtime frees when it returns.
     fn closure(&mut self, name: &str, tys: &[Type], ops: &[Operand]) -> Result<Val, Error> {
         let targs: Vec<Type> = tys.iter().map(|t| self.concrete(t)).collect::<Result<_, _>>()?;
         let f = self
@@ -1017,42 +1072,48 @@ impl<'a, 'p> Cx<'a, 'p> {
         let r = self.func_ref(id);
         let code = self.b.ins().func_addr(types::I64, r);
         let size = self.size(&env_ty)?;
-        // A task's closure (and a generator's) runs after the statement that
-        // makes it, with its own environment: a heap cell, which the
-        // runtime frees when the task ends.
+        let held = self.cg.types.env_words * abi::WORD;
+        let value = self.slot(abi::WORD + held);
+        self.store_word(code, value, 0);
+        for k in 0..self.cg.types.env_words {
+            let zero = self.iconst(0);
+            self.store_word(zero, value, abi::WORD * (k + 1));
+        }
         let task = f.kind == sir::FnKind::Closure(sir::ClosureRole::Task);
+        let all_refs =
+            matches!(&env_ty, Type::Tuple(items) if items.iter().all(|t| matches!(t, Type::Ref(..))));
         let env = if size == 0 {
-            self.iconst(0)
-        } else if inline_env(f.kind, size) {
-            // One word of captures is the environment itself (decision 213).
-            let mut word = self.iconst(0);
-            for (i, o) in ops.iter().enumerate() {
-                let (_, ft) = self.field_of(&env_ty, None, i as u32)?;
-                if self.size(&ft)? == 8 {
-                    let (v, _) = self.operand(o)?;
-                    word = self.first_word(&v)?;
-                }
-            }
-            word
-        } else {
-            let all_refs =
-                matches!(&env_ty, Type::Tuple(items) if items.iter().all(|t| matches!(t, Type::Ref(..))));
-            let env = if all_refs && !task {
-                self.slot(size)
-            } else {
-                let bytes = self.iconst(i64::from(size));
-                self.rt_status(sym::ALLOC, &[bytes])?
-            };
-            for (i, o) in ops.iter().enumerate() {
-                let (off, ft) = self.field_of(&env_ty, None, i as u32)?;
-                let (v, vt) = self.operand(o)?;
-                let fsize = self.size(&vt)?.min(self.size(&ft)?);
-                let at = self.b.ins().iadd_imm(env, i64::from(off));
-                self.write(at, &v, fsize);
-            }
+            return Ok(Val::Mem(value));
+        } else if task {
+            // The runtime frees it when the closure returns, and forgets
+            // what it holds for a generator abandoned before it starts, by
+            // its type.
+            let bytes = self.iconst(i64::from(size));
+            let id = self.type_id(&env_ty)?;
+            let idv = self.i32const(id);
+            let cell = self.rt_status(sym::TASK_ENV, &[bytes, idv])?;
+            self.store_word(cell, value, abi::WORD);
+            cell
+        } else if size <= held {
+            self.b.ins().iadd_imm(value, i64::from(abi::WORD))
+        } else if all_refs {
+            let env = self.slot(size);
+            self.store_word(env, value, abi::WORD);
             env
+        } else {
+            // An `own` environment larger than a function value holds: the
+            // program is compiled again with wider ones.
+            self.cg.env_needed = self.cg.env_needed.max(size.div_ceil(abi::WORD));
+            return Ok(Val::Mem(value));
         };
-        Ok(Val::Words(vec![code, env]))
+        for (i, o) in ops.iter().enumerate() {
+            let (off, ft) = self.field_of(&env_ty, None, i as u32)?;
+            let (v, vt) = self.operand(o)?;
+            let fsize = self.size(&vt)?.min(self.size(&ft)?);
+            let at = self.b.ins().iadd_imm(env, i64::from(off));
+            self.write(at, &v, fsize);
+        }
+        Ok(Val::Mem(value))
     }
 
     fn unary(&mut self, op: UnOp, a: &Operand) -> Result<Val, Error> {
@@ -1739,7 +1800,8 @@ impl<'a, 'p> Cx<'a, 'p> {
         };
         let ret_ty = (**ret).clone();
         let code = self.load(addr, 0);
-        let env = self.load(addr, 8);
+        // The address of the environment the value holds (decision 224).
+        let env = self.b.ins().iadd_imm(addr, i64::from(abi::WORD));
         let argv = self.arguments(args, 0, None)?;
         let rsize = self.size(&ret_ty)?;
         let retp = self.slot(rsize);
@@ -1803,6 +1865,23 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.copy_bytes(addr, out, size);
         Ok(())
     }
+}
+
+/// Whether a local is a flag of drop elaboration's: named `flag`, with no
+/// place in the source (a variable the program names `flag` has one).
+fn drop_flag(l: &sir::LocalDecl) -> bool {
+    l.name.as_deref() == Some("flag") && l.loc.is_none()
+}
+
+/// Whether a cleanup block of the function does more than drop (and set
+/// the flags of drops): the code of a `defer`.
+fn cleanup_runs_code(f: &sir::Function) -> bool {
+    let flag = |p: &Place| p.proj.is_empty() && f.locals.get(p.local.0 as usize).is_some_and(drop_flag);
+    f.blocks.iter().filter(|b| b.cleanup).flat_map(|b| &b.stmts).any(|s| match &s.kind {
+        StatementKind::Drop { .. } | StatementKind::StorageDead(_) => false,
+        StatementKind::Assign(p, Rvalue::Use(Operand::Const(Const::Bool(_)))) => !flag(p),
+        _ => true,
+    })
 }
 
 /// A sized integer type's operation an intrinsic names (`u8.wrap_add`,

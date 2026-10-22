@@ -43,6 +43,7 @@ examples/wordcount
 generics/const_expressions
 generics/const_generic
 generics/drop_generic
+generics/function_values
 generics/functions
 generics/types
 generics/views_through_params
@@ -109,6 +110,7 @@ run/declarations
 run/divide_by_zero
 run/double_panic
 run/drop_chain
+run/drop_moved_parts
 run/drop_order
 run/drop_panic_fields
 run/drop_torture
