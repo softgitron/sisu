@@ -1,30 +1,80 @@
 ##! Expressions (stage 0's `sisu-typeck/src/expr.rs`): literals, names,
-##! operators, collections, interpolation, `if` expressions, `?`, fields,
-##! and the coercions between them. `match`, closures, comprehensions,
-##! `??`, `?.`, indexing and the coercions to `dyn` are beyond the slice.
+##! operators, collections, interpolation, `if` and `match` expressions,
+##! closures, `?`, `??`, `?.`, fields and indexing, and the coercions
+##! between them.
 
 from stage1.diag import Diagnostic, Edit, Msg, TextRange
-from stage1.syntax.ast import BinOp, CmpOp, ExprId, ExprKind, IndexArg, Mode, Name, StrPart, UnOp
+from stage1.syntax.ast import (
+    Arg,
+    Arm,
+    ArmBody,
+    BinOp,
+    Block,
+    Closure,
+    ClosureBody,
+    CmpOp,
+    CompClause,
+    CompKind,
+    ExprId,
+    ExprKind,
+    IndexArg,
+    Mode,
+    Name,
+    StrPart,
+    TypeExprId,
+    UnOp,
+)
 from stage1.syntax.ast import build
-from stage1.typeck.check import Checker, Cx, first_of
+from stage1.typeck.check import Checker, Cx, RetCtx, first_of
 from stage1.typeck.program import Answer, DefKind, FnInfo
 from stage1.typeck.std_sources import int_width, sized, widens
-from stage1.typeck.thir import Coercion, TExprId, TExprKind
+from stage1.typeck.thir import (
+    ArgMode,
+    BlockId,
+    Callee,
+    Capture,
+    ClosureId,
+    ClosureRole,
+    Coercion,
+    ForMode,
+    IndexKind,
+    InterpPart,
+    TArg,
+    TArm,
+    TArmBody,
+    TClosure,
+    TCompClause,
+    TCompKind,
+    TExprId,
+    TExprKind,
+    TStmt,
+    TryKind,
+)
 from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, TyKey, is_subset
 
-## How a `for` loop takes its items.
-@derive(Eq, Copy)
-pub enum ForMode:
-    Borrow
-    Mut
-    Own
-    Iter
-    Trait
+## The body of a closure being checked.
+pub enum ClosureSource:
+    Expr(ExprId)
+    Block(Block)
+
+## A parameter of a closure being checked: its name, its written type,
+## where it is written.
+pub struct ClosureParamSrc:
+    pub name: String
+    pub ty: TypeExprId?
+    pub range: TextRange
 
 impl Checker:
     ## Checks an expression against a type: infer with the type as a hint,
     ## then coerce.
     pub pure def check_expr(mut self, cx: Cx, e: ExprId, ty: Ty) -> TExprId:
+        # A constant where a refinement is expected is checked at compile
+        # time (07); it is written as a value of the base.
+        if let Some((d, args, base)) = self.refinement_of(cx, ty):
+            if self.is_constant(cx, e):
+                let x = self.check_expr(cx, e, base)
+                let exp = self.resolved(ty)
+                return self.refine_constant(cx, x, d, args, exp)
         let x = self.infer_expr(cx, e, Some(ty))
         return self.coerce(cx, x, ty)
 
@@ -33,6 +83,8 @@ impl Checker:
     pub pure def check_expr_because(
         mut self, cx: Cx, e: ExprId, ty: Ty, because: TextRange
     ) -> TExprId:
+        if self.refinement_of(cx, ty).is_some() and self.is_constant(cx, e):
+            return self.check_expr(cx, e, ty)
         let x = self.infer_expr(cx, e, Some(ty))
         self.because = Some(because)
         let y = self.coerce(cx, x, ty)
@@ -56,6 +108,43 @@ impl Checker:
         if self.infer.try_unify(self.types, actual, exp):
             self.check_purity_coercion(cx, x, exp)
             return x
+        # A refinement where its base (or anything its base becomes) is
+        # expected: the same value.
+        if let Some((d, _, _)) = self.refinement_of(cx, actual):
+            var same = False
+            if let TyData.Adt(e, _) = self.types.data(exp):
+                same = e == d
+            if not same:
+                let y = self.unrefined_once(cx, x)
+                return self.coerce(cx, y, exp)
+        # A value of the base where a refinement is expected: only a
+        # constant is checked where it is written; anything else is
+        # checked where it runs, with `X.try_from` (07).
+        if let Some((d, _, base)) = self.refinement_of(cx, exp):
+            var same = False
+            if let TyData.Adt(a, _) = self.types.data(actual):
+                same = a == d
+            if not same:
+                var under = [base]
+                var walking = True
+                while walking:
+                    walking = False
+                    let last = under[len(under) - 1]
+                    if let TyData.Adt(b, args) = self.types.data(last).copy():
+                        if len(under) < 64:
+                            if let Some(t) = cx.prog.refinement_base(mut self.types, b, args):
+                                under.push(t)
+                                walking = True
+                var base_ok = False
+                for b in under:
+                    let snap = self.infer.snapshot()
+                    if self.infer.unify(self.types, actual, b):
+                        base_ok = True
+                    self.infer.rollback(snap)
+                if base_ok or actual == Ty.never():
+                    # `refine.needs-try-from`.
+                    self.other()
+                    return self.wrap(x, Coercion.Mismatch, exp)
         let ad = self.types.data(actual).copy()
         let ed = self.types.data(exp).copy()
         let exp_is_str = exp == Ty.str()
@@ -91,16 +180,108 @@ impl Checker:
                     if let TyData.ErrSet(b) = self.data(e2):
                         if is_subset(a, b) and self.infer.try_unify(self.types, t1, t2):
                             return self.wrap(x, Coercion.Widen, exp)
-        # To `dyn Trait`, to a `Slice`, to a capability, to an `Iterable`:
-        # beyond the slice.
-        if self.coerces_beyond(cx, ad, ed):
-            self.go_beyond("a coercion to `dyn`, a slice, a capability or an iterable")
-            return self.wrap(x, Coercion.Mismatch, exp)
+        # A value of a type that implements a trait, as `dyn Trait`; a
+        # `ref T` as a `ref dyn Trait`; a `Box[T]` as a `Box[dyn Trait]`.
+        if let TyData.Ref(inner, m1) = ad:
+            if let TyData.Ref(target, m2) = ed:
+                if m1 or not m2:
+                    if let TyData.Dyn(tr) = self.data(target):
+                        var concrete_ok = True
+                        match self.data(inner):
+                            case TyData.Dyn(_) | TyData.Var(_):
+                                concrete_ok = False
+                            case _:
+                                pass
+                        if concrete_ok:
+                            let concrete = self.resolved(inner)
+                            return self.coerce_to_dyn(cx, x, concrete, tr, exp, Coercion.RefToDyn)
+        if let TyData.Dyn(tr) = ed:
+            var concrete_ok = True
+            match ad:
+                case TyData.Dyn(_) | TyData.Var(_):
+                    concrete_ok = False
+                case _:
+                    pass
+            if concrete_ok:
+                # A `dyn` expected by value was reported where it is
+                # written (E0395); a reference to one is no second error.
+                if let TyData.Ref(inner, _) = ad:
+                    if let TyData.Dyn(_) = self.data(inner):
+                        return self.wrap(x, Coercion.Mismatch, exp)
+                return self.coerce_to_dyn(cx, x, actual, tr, exp, Coercion.ToDyn)
+        if let TyData.Adt(d1, a1) = ad:
+            if let TyData.Adt(d2, a2) = ed:
+                if d1 == d2
+                        and Some(d1) == cx.prog.wk.boxed
+                        and not a1.is_empty()
+                        and not a2.is_empty():
+                    if let TyData.Dyn(tr) = self.data(a2[0]):
+                        var concrete_ok = True
+                        match self.data(a1[0]):
+                            case TyData.Dyn(_) | TyData.Var(_):
+                                concrete_ok = False
+                            case _:
+                                pass
+                        if concrete_ok:
+                            let inner = self.resolved(a1[0])
+                            return self.coerce_to_dyn(cx, x, inner, tr, exp, Coercion.BoxToDyn)
+        # A `list[T]` as a `Slice[T]`, and `bytes` as a `Slice[u8]`: a view.
+        if let TyData.Adt(sd, sargs) = ed:
+            if cx.prog.is_builtin(sd, "Slice"):
+                let stripped = self.resolved(self.types.strip_ref(actual))
+                if let TyData.Adt(src, srcargs) = self.types.data(stripped).copy():
+                    let elem = first_of(sargs) ?? Ty.error()
+                    var ok = False
+                    if cx.prog.is_builtin(src, "bytes"):
+                        let u8_ty = self.sized_ty(cx, "u8")
+                        ok = self.infer.try_unify(self.types, elem, u8_ty)
+                    elif cx.prog.is_builtin(src, "list"):
+                        if let Some(t) = first_of(srcargs):
+                            ok = self.infer.try_unify(self.types, t, elem)
+                    if ok:
+                        let src_ty = self.types.adt(src, srcargs)
+                        if let Some(call) = self.builtin_call(cx, x, src_ty, "as_slice", exp):
+                            return call
         # An integer as a wider integer type that holds all its values.
         if let Some(a) = self.int_kind(cx, actual):
             if let Some(b) = self.int_kind(cx, exp):
                 if widens(a, b):
                     return self.wrap(x, Coercion.IntWiden, exp)
+        # A value of a type that implements a capability's operations
+        # trait, as the capability (06).
+        if let TyData.Adt(d, _) = ed:
+            if let Some(ops) = cx.prog.capability_ops(d):
+                var y = x
+                var concrete = actual
+                if let TyData.Ref(inner, _) = ad:
+                    if self.is_copy(cx, inner):
+                        let inner_r = self.resolved(inner)
+                        y = self.wrap(x, Coercion.DerefCopy, inner_r)
+                        concrete = inner_r
+                let z = self.infer.zonk(mut self.types, concrete)
+                let norm = cx.prog.normalize(mut self.types, z, self.env)
+                if norm == exp:
+                    return y
+                let tr = TraitRef(def_=ops, args=[])
+                var is_var = False
+                if let TyData.Var(_) = self.types.data(norm):
+                    is_var = True
+                if not is_var
+                        and cx.prog.implements(mut self.types, norm, tr, self.env) != Answer.No:
+                    return self.coerce_to_cap(cx, y, norm, tr, exp)
+                let found_s = self.show(cx, norm)
+                let expected_s = self.show(cx, exp)
+                let dd = self.error(cx, Msg.TypeMismatch, self.span_of(y))
+                self.report(dd.with("expected", expected_s).with("found", found_s))
+                return self.wrap(y, Coercion.Mismatch, exp)
+        # `Iterable[T]` accepts any collection or iterator of `T`.
+        if let TyData.Adt(d, args) = ed:
+            if Some(d) == cx.prog.wk.iterable:
+                if let Some((item, _)) = self.iteration_item(cx, actual, Mode.Borrow):
+                    let it = self.decay_ty(cx, item)
+                    if let Some(t) = first_of(args):
+                        if self.infer.try_unify(self.types, it, t):
+                            return x
         let range = self.span_of(x)
         # An error the expected error set does not include.
         var sets: (list[DefId], list[DefId])? = None
@@ -150,28 +331,6 @@ impl Checker:
         d = d.with("from", shown_from).with("to", shown_to)
         return d.fix_edits(Msg.TypeAddErrorSet, [])
 
-    ## Whether converting `ad` to `ed` takes a rule beyond the slice: to
-    ## `dyn Trait` (by value, by reference or in a `Box`), to a `Slice`, to
-    ## a capability, or to an `Iterable`.
-    pure def coerces_beyond(mut self, cx: Cx, ad: TyData, ed: TyData) -> bool:
-        if let TyData.Dyn(_) = ed:
-            return True
-        if let TyData.Ref(_, _) = ad:
-            if let TyData.Ref(target, _) = ed:
-                if let TyData.Dyn(_) = self.data(target):
-                    return True
-        if let TyData.Adt(d, args) = ed:
-            if Some(d) == cx.prog.wk.boxed:
-                if let Some(a) = args.first():
-                    if let TyData.Dyn(_) = self.data(a):
-                        return True
-            if cx.prog.is_builtin(d, "Slice") or Some(d) == cx.prog.wk.iterable:
-                return True
-            for b in ["Fs", "Net", "Clock", "Rand", "Env", "Proc", "Stdin"]:
-                if cx.prog.is_builtin(d, b):
-                    return True
-        return False
-
     ## The fix of a value of the wrong type, where one is plain: a number
     ## written as text loses its quotes; a value whose type has a method of
     ## no arguments giving the type expected gets the call (`.count()` of an
@@ -180,6 +339,8 @@ impl Checker:
         mut self, cx: Cx, own d: Diagnostic, x: TExprId, actual: Ty, exp: Ty
     ) -> Diagnostic:
         let r = self.span_of(x)
+        if r.start < 0 or r.end > cx.source.byte_len() or r.start > r.end:
+            return d
         let text = cx.source.byte_slice(r.start, r.end)
         var literal = False
         match self.exprs[x.index].kind:
@@ -195,9 +356,11 @@ impl Checker:
                     if number and not s.is_empty():
                         return d.fix_at(Msg.TypeUnquote, r.start, r.end, s)
                 literal = True
-            case TExprKind.Int(_) | TExprKind.Float(_) | TExprKind.Bool(_) | TExprKind.Char(_):
+            case TExprKind.Int(_) | TExprKind.WideInt(_) | TExprKind.Float(_) | TExprKind.Bool(_):
                 literal = True
-            case TExprKind.Interp | TExprKind.List | TExprKind.Tuple | TExprKind.Unit:
+            case TExprKind.Char(_) | TExprKind.Bytes(_) | TExprKind.Interp(_) | TExprKind.List(_):
+                literal = True
+            case TExprKind.Tuple(_) | TExprKind.Unit:
                 literal = True
             case _:
                 pass
@@ -231,14 +394,9 @@ impl Checker:
             if wanted.is_empty():
                 continue
             let tr = TraitRef(def_=t, args=[])
-            match cx.prog.implements(mut self.types, actual, tr, self.env):
-                case Answer.Yes(_):
-                    for w in wanted:
-                        found.push(w.copy())
-                case Answer.Unknown:
-                    self.go_beyond("a trait stage 1 cannot decide")
-                case Answer.No:
-                    pass
+            if cx.prog.implements(mut self.types, actual, tr, self.env).holds():
+                for w in wanted:
+                    found.push(w.copy())
         found.sort()
         let m = found.first() else:
             return d
@@ -256,13 +414,66 @@ impl Checker:
         ]
         return d.fix_edits(Msg.TypeCallConversion, edits)
 
-    ## A function passed where a `pure` one is required must be pure; the
-    ## purity of what is passed is beyond the slice.
+    ## A coercion to `dyn Trait` of a value of type `concrete`: it must
+    ## implement the trait, and it must own what it holds (04, "Views").
+    pure def coerce_to_dyn(
+        mut self, cx: Cx, x: TExprId, concrete_in: Ty, tr: TraitRef, exp: Ty, kind: Coercion
+    ) -> TExprId:
+        let z = self.infer.zonk(mut self.types, concrete_in)
+        let concrete = cx.prog.normalize(mut self.types, z, self.env)
+        if cx.prog.can_borrow(mut self.types, concrete) and not self.types.contains_error(concrete):
+            let shown = self.show(cx, concrete)
+            let dyn_ty = self.types.intern(TyData.Dyn(tr.copy()))
+            let shown_dyn = self.show(cx, dyn_ty)
+            let d = self.error(cx, Msg.TypeViewToDyn, self.span_of(x)).with("ty", shown).with(
+                "dyn", shown_dyn
+            )
+            self.report(d)
+            return self.wrap(x, Coercion.Mismatch, exp)
+        self.bounds.push((concrete, tr.copy(), self.span_of(x)))
+        return self.wrap(x, kind, exp)
+
+    ## A value as a capability handle: it implements the operations trait,
+    ## owns what it holds, is not must-consume, and is `Send` and `Sync`
+    ## (checked once types are known).
+    pure def coerce_to_cap(
+        mut self, cx: Cx, x: TExprId, concrete: Ty, tr: TraitRef, exp: Ty
+    ) -> TExprId:
+        let cap_name = self.show(cx, exp)
+        var owner = "Proc".to_string()
+        if let TyData.Adt(d, _) = self.types.data(exp):
+            let b = cx.prog.builtin(d) ?? String.new()
+            if b == "Fs" or b == "Net" or b == "Clock" or b == "Rand" or b == "Env" or b == "Stdin":
+                owner = b
+        self.bounds.push((concrete, tr.copy(), self.span_of(x)))
+        self.owner_checks.push((concrete, owner, self.span_of(x)))
+        self.cap_checks.push((concrete, cap_name, self.span_of(x)))
+        return self.wrap(x, Coercion.ToCap, exp)
+
+    ## A function passed where a `pure` one is required must be pure.
     pure def check_purity_coercion(mut self, cx: Cx, x: TExprId, expected: Ty):
         let z = self.infer.zonk(mut self.types, expected)
-        if let TyData.Fn(_, _, True) = self.types.data(z):
-            if let TExprKind.FnRef(_) = self.exprs[x.index].kind:
-                self.go_beyond("a function passed where a pure one is required")
+        let TyData.Fn(_, _, True) = self.types.data(z) else:
+            return
+        var callee: String? = None
+        match self.exprs[x.index].kind:
+            case TExprKind.FnRef(d):
+                var pure = False
+                if let Some(i) = cx.prog.fn_info(d):
+                    pure = i.pure
+                if not pure:
+                    callee = Some(cx.prog.defs[d.index].name.copy())
+            case TExprKind.Closure(c):
+                var body: BlockId? = None
+                if let Some(cl) = self.closures[c.index]:
+                    body = Some(cl.body)
+                if let Some(b) = body:
+                    callee = self.first_impure_in_block(cx, b)
+            case _:
+                pass
+        if let Some(name) = callee:
+            let d = self.error(cx, Msg.TypeImpureArgument, self.span_of(x)).with("callee", name)
+            self.report(d)
 
     ## A `ref T` of a `Copy` type used as a value becomes the `T`.
     pub pure def decay(mut self, cx: Cx, x: TExprId) -> TExprId:
@@ -308,13 +519,39 @@ impl Checker:
             return Some(d) == cx.prog.wk.boxed
         return False
 
-    ## Whether the type is one of the std's pointer-like types.
-    pub pure def is_smart_pointer(self, cx: Cx, ty: Ty) -> bool:
-        return self.is_builtin(cx, ty, "Shared") or self.is_builtin(cx, ty, "MutexGuard")
+    ## The builtin name of the type, when it is one of the std's
+    ## pointer-like types (`Shared`, `MutexGuard`).
+    pub pure def smart_pointer(self, cx: Cx, ty: Ty) -> String?:
+        if let TyData.Adt(d, _) = self.data(ty):
+            if cx.prog.is_builtin(d, "Shared"):
+                return Some("Shared".to_string())
+            if cx.prog.is_builtin(d, "MutexGuard"):
+                return Some("MutexGuard".to_string())
+        return None
+
+    ## The value a `Shared` owns or a mutex guard holds, as a place.
+    pub pure def deref_smart(mut self, x: TExprId) -> TExprId:
+        var inner = Ty.error()
+        if let TyData.Adt(_, a) = self.data(self.ty_of(x)):
+            inner = first_of(a) ?? Ty.error()
+        let span = self.span_of(x)
+        return self.add(TExprKind.Deref(x), inner, span)
+
+    ## The value a `Box` holds, as a place inside it.
+    pub pure def unbox(mut self, x: TExprId) -> TExprId:
+        var inner = Ty.error()
+        if let TyData.Adt(_, a) = self.data(self.ty_of(x)):
+            inner = first_of(a) ?? Ty.error()
+        let span = self.span_of(x)
+        return self.add(TExprKind.Field(base=x, index=0), inner, span)
 
     # ---------------------------------------------------------------- inference
 
-    pub pure def infer_expr(mut self, cx: Cx, e: ExprId, expected: Ty?) -> TExprId:
+    pub pure def infer_expr(mut self, cx: Cx, e_in: ExprId, expected: Ty?) -> TExprId:
+        var e = e_in
+        if let Some((from_, to)) = self.stand_in:
+            if from_ == e_in:
+                e = to
         let node = cx.ast.expr(e)
         let span = node.range
         match node.kind:
@@ -326,7 +563,7 @@ impl Checker:
             case ExprKind.Float(_, value, suffix):
                 if let Some(s) = suffix:
                     if s != "f64":
-                        self.go_beyond("a sized float")
+                        self.unsupported()
                 let x = self.add(TExprKind.Float(value), Ty.float(), span)
                 if suffix.is_none():
                     return self.literal_via_trait(cx, x, expected)
@@ -337,15 +574,16 @@ impl Checker:
                 return self.string_literal(cx, parts, span, expected)
             case ExprKind.RawStr(s):
                 return self.plain_string(cx, s, span, expected)
-            case ExprKind.ByteStr(_):
+            case ExprKind.ByteStr(b):
                 var ty = Ty.error()
                 if let Some(d) = cx.prog.lookup_in(cx.prog.prelude, "bytes"):
                     ty = self.types.adt(d, [])
-                return self.add(TExprKind.Other, ty, span)
+                return self.add(TExprKind.Bytes(b.copy()), ty, span)
             case ExprKind.Name(n):
                 return self.name_expr(cx, n, span, expected)
             case ExprKind.SelfValue:
                 if let Some(l) = self.lookup_local("self"):
+                    self.note_use(l, False)
                     return self.add(TExprKind.Local(l), self.local_ty(l), span)
                 if not self.quiet_unknown_names:
                     let d = self.error(cx, Msg.TypeNoSelf, span)
@@ -368,9 +606,46 @@ impl Checker:
                     if let TyData.Adt(d, a) = self.data(t):
                         if Some(d) == cx.prog.wk.list:
                             elem = first_of(a)
-                let ty = self.homogeneous(cx, items, elem)
+                let (elems, ty) = self.homogeneous(cx, items, elem)
                 let list_ty = self.list_of(cx, ty)
-                return self.add(TExprKind.List, list_ty, span)
+                return self.add(TExprKind.List(elems), list_ty, span)
+            case ExprKind.Set(items):
+                var elem: Ty? = None
+                if let Some(t) = expected:
+                    if let TyData.Adt(d, a) = self.data(t):
+                        if Some(d) == cx.prog.wk.set:
+                            elem = first_of(a)
+                let (elems, ty) = self.homogeneous(cx, items, elem)
+                self.require(ty, cx.prog.wk.hash, span)
+                var set_ty = Ty.error()
+                if let Some(s) = cx.prog.wk.set:
+                    set_ty = self.types.adt(s, [ty])
+                return self.add(TExprKind.Set(elems), set_ty, span)
+            case ExprKind.Dict(entries):
+                var kt: Ty? = None
+                var vt: Ty? = None
+                if let Some(t) = expected:
+                    if let TyData.Adt(d, a) = self.data(t):
+                        if Some(d) == cx.prog.wk.dict and len(a) == 2:
+                            kt = Some(a[0])
+                            vt = Some(a[1])
+                var keys: list[ExprId] = []
+                var values: list[ExprId] = []
+                for (k, v) in entries:
+                    keys.push(k)
+                    values.push(v)
+                let (ks, k_ty) = self.homogeneous(cx, keys, kt)
+                let (vs, v_ty) = self.homogeneous(cx, values, vt)
+                self.require(k_ty, cx.prog.wk.hash, span)
+                var ty = Ty.error()
+                if let Some(d) = cx.prog.wk.dict:
+                    ty = self.types.adt(d, [k_ty, v_ty])
+                var pairs: list[(TExprId, TExprId)] = []
+                for i in range(len(ks)):
+                    pairs.push((ks[i], vs[i]))
+                return self.add(TExprKind.Dict(pairs), ty, span)
+            case ExprKind.Comprehension(kind, elem, value, clauses):
+                return self.comprehension(cx, kind, elem, value, clauses, span)
             case ExprKind.Binary(op, lhs, rhs):
                 return self.binary_expr(cx, op, lhs, rhs, span, expected)
             case ExprKind.Compare(first, rest):
@@ -386,26 +661,41 @@ impl Checker:
                     self.require_mutable(cx, x, cx.ast.expr(inner).range)
                 let ty = self.types.ref_(self.ty_of(x), mutable)
                 return self.add(TExprKind.Borrow(place=x, mutable=mutable), ty, span)
+            case ExprKind.FromEnd(_):
+                let d = self.error(cx, Msg.TypeFromEndOutsideIndex, span)
+                self.report(d)
+                return self.error_expr(span)
             case ExprKind.Call(callee, args, trailing):
-                if trailing.is_some():
-                    self.go_beyond("a trailing block")
-                return self.call_expr(cx, callee, args, span, expected)
+                return self.call_expr(cx, callee, args, trailing, span, expected)
             case ExprKind.Field(base, name):
                 return self.field_expr(cx, base, name, span)
+            case ExprKind.OptField(base, name):
+                return self.opt_chain(cx, base, name, None, None, span)
+            case ExprKind.Index(base, args):
+                if self.generator_kind(cx, base).is_some():
+                    return self.generator_site(cx, e, base, args, None, span, expected)
+                return self.index_expr(cx, base, args, span)
             case ExprKind.Try(inner):
                 return self.try_expr(cx, inner, span)
-            case ExprKind.Index(base, args):
-                if let ExprKind.Name(n) = cx.ast.expr(base).kind:
-                    if (n == "arbitrary" or n == "exhaustive") and self.lookup_local(n).is_none():
-                        self.go_beyond("a generator of test values")
-                        return self.error_expr(span)
-                return self.index_expr(cx, base, args, span)
+            case ExprKind.Closure(c):
+                var fn_ty: Ty? = None
+                if let Some(t) = expected:
+                    if let TyData.Fn(_, _, _) = self.data(t):
+                        fn_ty = Some(self.resolved(t))
+                return self.check_closure(cx, c, fn_ty)
             case ExprKind.If(branches, else_):
                 return self.if_expr(cx, branches, else_, span, expected)
-            case ExprKind.Error:
+            case ExprKind.Match(scrutinee, arms):
+                return self.match_expr(cx, scrutinee, arms, span, expected)
+            case ExprKind.Comptime(inner):
+                return self.comptime_expr(cx, inner, expected, span)
+            case ExprKind.FieldOf(_, _):
+                self.unsupported()
                 return self.error_expr(span)
-            case other:
-                self.go_beyond(expr_form(other))
+            case ExprKind.Unsupported(_):
+                self.unsupported()
+                return self.error_expr(span)
+            case ExprKind.Error:
                 return self.error_expr(span)
 
     pure def int_literal(
@@ -442,7 +732,7 @@ impl Checker:
                     f = -f
                 return self.add(TExprKind.Float(f), Ty.float(), range)
             if s != "int" and s != "i64":
-                self.go_beyond("a numeric suffix of a later phase")
+                self.unsupported()
                 return self.error_expr(range)
         var to_float = False
         if suffix.is_none():
@@ -452,9 +742,12 @@ impl Checker:
         match value:
             case Some(v):
                 if v <= limit:
-                    let n = u128_to_int(v, negative)
                     if to_float:
-                        return self.add(TExprKind.Float(n.to_f64()), Ty.float(), range)
+                        var f = u128_to_float(v)
+                        if negative:
+                            f = -f
+                        return self.add(TExprKind.Float(f), Ty.float(), range)
+                    let n = u128_to_int(v, negative)
                     return self.add(TExprKind.Int(n), Ty.int(), range)
             case None:
                 pass
@@ -463,7 +756,8 @@ impl Checker:
         self.report(d)
         return self.error_expr(range)
 
-    ## An integer literal of the sized type `k`, checked to fit.
+    ## An integer literal of the sized type `k`, checked to fit. A `u64`
+    ## literal is its 64-bit pattern.
     pure def sized_literal(
         mut self, cx: Cx, k: str, value: u128?, text: str, negative: bool, range: TextRange
     ) -> TExprId:
@@ -488,13 +782,56 @@ impl Checker:
             let d = self.error(cx, Msg.TypeLiteralOutOfRange, range).with("text", t).with("ty", k)
             self.report(d)
             return self.error_expr(range)
-        return self.add(TExprKind.Other, ty, range)
+        let v = value ?? (0.to_u128() ?? one())
+        # A 128-bit literal beyond `int` keeps its 128 bits.
+        if bits == 128:
+            if negative:
+                if v <= pow2(63):
+                    return self.add(TExprKind.Int(u128_to_int(v, True)), ty, range)
+                # Its two's complement: `2^128 - v`.
+                let wide = (pow2(127) - v) + pow2(127)
+                return self.add(TExprKind.WideInt(wide), ty, range)
+            if v <= pow2(63) - one():
+                return self.add(TExprKind.Int(u128_to_int(v, False)), ty, range)
+            return self.add(TExprKind.WideInt(v), ty, range)
+        if negative:
+            return self.add(TExprKind.Int(u128_to_int(v, True)), ty, range)
+        if v <= pow2(63) - one():
+            return self.add(TExprKind.Int(u128_to_int(v, False)), ty, range)
+        # A `u64` above `int`'s range: its 64-bit pattern, `v - 2^64`.
+        return self.add(TExprKind.Int(u128_to_int(pow2(64) - v, True)), ty, range)
 
     ## The sized integer type named `k` (`u8`).
     pub pure def sized_ty(mut self, cx: Cx, k: str) -> Ty:
         let d = cx.prog.lookup_in(cx.prog.prelude, k) else:
             return Ty.error()
         return self.types.adt(d, [])
+
+    ## An expression as the borrowed receiver of a builtin method: a
+    ## reference is passed on, a `Copy` value copied, anything else
+    ## borrowed.
+    pub pure def receiver_arg(mut self, cx: Cx, x: TExprId) -> TArg:
+        var mode = ArgMode.Borrow
+        if let TyData.Ref(_, _) = self.data(self.ty_of(x)):
+            mode = ArgMode.Value
+        elif self.is_copy(cx, self.resolved(self.ty_of(x))):
+            mode = ArgMode.Value
+        return TArg(expr=x, mode=mode)
+
+    ## A call of the builtin method `name` of `owner` on `recv`, with the
+    ## owner's type arguments and the result type `ret`.
+    pub pure def builtin_call(
+        mut self, cx: Cx, recv: TExprId, owner: Ty, name: str, ret: Ty
+    ) -> TExprId?:
+        let TyData.Adt(d, a) = self.types.data(owner).copy() else:
+            return None
+        let m = cx.prog.method(TyKey.Adt(d), name) else:
+            return None
+        let span = self.span_of(recv)
+        let r = self.receiver_arg(cx, recv)
+        return Some(
+            self.add(TExprKind.Call(callee=Callee.Fn(def_=m, type_args=a), args=[r]), ret, span)
+        )
 
     ## `int` for `int`, the type's name for a sized integer type.
     pub pure def int_kind(self, cx: Cx, t: Ty) -> String?:
@@ -525,9 +862,9 @@ impl Checker:
             return self.literal_via_trait(cx, x, expected)
         return x
 
-    ## A literal whose expected type implements `FromLiteral[L]` for the
-    ## literal's type `L`: the call `FromLiteral.from_literal(x)`, beyond
-    ## the slice.
+    ## A literal whose expected type is not the literal's own but
+    ## implements `FromLiteral[L]` for the literal's type `L`: the call
+    ## `FromLiteral.from_literal(x)` (02, "Literals").
     pure def literal_via_trait(mut self, cx: Cx, x: TExprId, expected: Ty?) -> TExprId:
         let exp_in = expected else:
             return x
@@ -542,10 +879,17 @@ impl Checker:
                 return x
         if self.ty_of(x) == Ty.error():
             return x
-        let tr = TraitRef(def_=tr_def, args=[self.ty_of(x)])
-        if cx.prog.implements(mut self.types, exp, tr, self.env).holds():
-            self.go_beyond("a literal of a type that implements `FromLiteral`")
-        return x
+        let lit = self.ty_of(x)
+        let tr = TraitRef(def_=tr_def, args=[lit])
+        if not cx.prog.implements(mut self.types, exp, tr, self.env).holds():
+            return x
+        let m = cx.prog.trait_method(tr_def, "from_literal") else:
+            return x
+        let span = self.span_of(x)
+        let call = TExprKind.Call(
+            callee=Callee.Fn(def_=m, type_args=[exp, lit]), args=[TArg(expr=x, mode=ArgMode.Ref)]
+        )
+        return self.add(call, exp, span)
 
     pure def string_literal(
         mut self, cx: Cx, parts: list[StrPart], range: TextRange, expected: Ty?
@@ -556,43 +900,48 @@ impl Checker:
                 plain = False
         if plain:
             return self.plain_string(cx, build.plain_text(parts), range, expected)
+        var out: list[InterpPart] = []
         for p in parts:
-            if let StrPart.Interp(expr, debug, spec_in, _) = p:
-                let x = self.infer_expr(cx, expr, None)
-                let spec = spec_in.copy() ?? String.new()
-                # A spec ending in `?` asks for `Debug` (`{x:>8?}`).
-                var wanted = cx.prog.wk.debug
-                if debug.is_none() and not spec.ends_with("?"):
-                    wanted = cx.prog.wk.display
-                let at = cx.ast.expr(expr).range
-                self.require(self.ty_of(x), wanted, at)
-                let stripped = self.types.strip_ref(self.ty_of(x))
-                let is_time = self.is_builtin(cx, stripped, "DateTime")
-                if not spec.is_empty() and not is_time and not is_format_spec(spec):
-                    let d = self.error(cx, Msg.TypeBadFormatSpec, at).with("spec", spec)
-                    self.report(d)
-                elif not is_time and not spec.is_empty():
-                    let letter = spec.byte_slice(spec.byte_len() - 1, spec.byte_len())
-                    if "boxXdeEfF%".contains(letter):
-                        # The spec's letter must fit a value whose rendering
-                        # the compiler knows (E0380).
-                        let t = self.resolved(stripped)
-                        let integers_only = "boxXd".contains(letter)
-                        var wrong = self.is_string(cx, t)
-                        match self.types.data(t):
-                            case TyData.Float:
-                                wrong = integers_only
-                            case TyData.Bool | TyData.Char | TyData.Str:
-                                wrong = True
-                            case _:
-                                pass
-                        if wrong:
-                            let shown = self.show(cx, t)
-                            var d = self.error(cx, Msg.TypeNoDisplay, at)
-                            d = d.with("ty", shown).with("spec", spec)
-                            self.report(d)
+            match p:
+                case StrPart.Text(t):
+                    out.push(InterpPart.Text(t.copy()))
+                case StrPart.Interp(expr, debug, spec_in, _):
+                    let x = self.infer_expr(cx, expr, None)
+                    let spec = spec_in.copy() ?? String.new()
+                    # A spec ending in `?` asks for `Debug` (`{x:>8?}`).
+                    var wanted = cx.prog.wk.debug
+                    if debug.is_none() and not spec.ends_with("?"):
+                        wanted = cx.prog.wk.display
+                    let at = cx.ast.expr(expr).range
+                    self.require(self.ty_of(x), wanted, at)
+                    let stripped = self.types.strip_ref(self.ty_of(x))
+                    let is_time = self.is_builtin(cx, stripped, "DateTime")
+                    if not spec.is_empty() and not is_time and not is_format_spec(spec):
+                        let d = self.error(cx, Msg.TypeBadFormatSpec, at).with("spec", spec)
+                        self.report(d)
+                    elif not is_time and not spec.is_empty():
+                        let letter = last_char(spec)
+                        if "boxXdeEfF%".contains(letter):
+                            # The spec's letter must fit a value whose
+                            # rendering the compiler knows (E0380).
+                            let t = self.resolved(stripped)
+                            let integers_only = "boxXd".contains(letter)
+                            var wrong = self.is_string(cx, t)
+                            match self.types.data(t):
+                                case TyData.Float:
+                                    wrong = integers_only
+                                case TyData.Bool | TyData.Char | TyData.Str:
+                                    wrong = True
+                                case _:
+                                    pass
+                            if wrong:
+                                let shown = self.show(cx, t)
+                                var d = self.error(cx, Msg.TypeNoDisplay, at)
+                                d = d.with("ty", shown).with("spec", spec)
+                                self.report(d)
+                    out.push(InterpPart.Value(expr=x, debug=debug.copy(), spec=spec))
         let s = self.string_ty(cx)
-        return self.add(TExprKind.Interp, s, range)
+        return self.add(TExprKind.Interp(out), s, range)
 
     pure def tuple_expr(
         mut self, cx: Cx, items: list[ExprId], at: TextRange, expected: Ty?
@@ -606,6 +955,7 @@ impl Checker:
                 if len(ts) == len(items):
                     exp = Some(ts.copy())
                     labels = l.copy()
+        var elems: list[TExprId] = []
         var tys: list[Ty] = []
         for i in range(len(items)):
             var x = TExprId(index=0)
@@ -616,43 +966,48 @@ impl Checker:
                     let y = self.infer_expr(cx, items[i], None)
                     x = self.decay(cx, y)
             let m = self.check_movable(cx, x)
+            elems.push(m)
             tys.push(self.ty_of(m))
         let ty = self.types.intern(TyData.Tuple(elems=tys, labels=labels))
-        return self.add(TExprKind.Tuple, ty, at)
+        return self.add(TExprKind.Tuple(elems), ty, at)
 
     ## Elements that share one type: the expected one, or the first's.
-    pure def homogeneous(mut self, cx: Cx, items: list[ExprId], elem: Ty?) -> Ty:
+    pure def homogeneous(mut self, cx: Cx, items: list[ExprId], elem: Ty?) -> (list[TExprId], Ty):
         var ty = elem
+        var out: list[TExprId] = []
         for it in items:
             match ty:
                 case Some(t):
                     let x = self.check_expr(cx, it, t)
-                    _ = self.check_movable(cx, x)
+                    out.push(self.check_movable(cx, x))
                 case None:
                     let y = self.infer_expr(cx, it, None)
                     let x = self.decay(cx, y)
                     ty = Some(self.ty_of(x))
-                    _ = self.check_movable(cx, x)
-        return ty ?? self.infer.fresh(mut self.types)
+                    out.push(self.check_movable(cx, x))
+        let t = ty ?? self.infer.fresh(mut self.types)
+        return (out, t)
 
     # ---------------------------------------------------------------- names
 
     pure def name_expr(mut self, cx: Cx, n: str, at: TextRange, expected: Ty?) -> TExprId:
         if let Some(l) = self.lookup_local(n):
+            self.note_use(l, False)
             return self.add(TExprKind.Local(l), self.local_ty(l), at)
         if n == "True":
             return self.add(TExprKind.Bool(True), Ty.bool(), at)
         if n == "False":
             return self.add(TExprKind.Bool(False), Ty.bool(), at)
         if n == "it":
-            self.go_beyond("`it`")
+            let d = self.error(cx, Msg.TypeItOutsideClosure, at)
+            self.report(d)
             return self.error_expr(at)
         # A `const` generic parameter is an `int`.
         for i in range(len(self.generic_names)):
             if self.generic_names[i] == n
                     and i < len(self.const_generics)
                     and self.const_generics[i]:
-                return self.add(TExprKind.Other, Ty.int(), at)
+                return self.add(TExprKind.ConstParam(i), Ty.int(), at)
         # A variant of the expected type wins over a declaration.
         if let Some(exp) = expected:
             if let Some((def_, vi)) = self.variant_in(cx, exp, n):
@@ -661,7 +1016,12 @@ impl Checker:
             return self.def_value(cx, d, n, at)
         if let Some((def_, vi)) = self.global_variant(cx, n, at):
             return self.unit_variant(cx, def_, vi, expected, at)
-        # A name nothing declares: the name pass's to report.
+        if self.quiet_unknown_names or cx.prog.poisoned.contains(n.to_string()):
+            return self.error_expr(at)
+        # `reflect` and `target` outside a template, another field of the
+        # struct whose default this is, or a name nothing declares: all
+        # errors of other families.
+        self.other()
         return self.error_expr(at)
 
     ## A declaration used as a value.
@@ -675,9 +1035,9 @@ impl Checker:
                     self.report(diag)
                     return self.error_expr(range)
                 if f.comptime_ and not self.in_comptime:
-                    self.go_beyond("a `comptime def`")
-                if f.internal:
-                    self.go_beyond("an `@internal` function")
+                    # `comptime.only`.
+                    self.other()
+                self.check_internal(cx, d)
                 let ret = self.fn_ret(cx, d)
                 var params: list[Ty] = []
                 for p in f.params:
@@ -701,14 +1061,17 @@ impl Checker:
         self.report(diag)
         return self.error_expr(range)
 
-    ## The result type of a function. An inferred error set (`T !`) is
-    ## beyond the slice.
+    ## The result type of a function, with its inferred error set filled in.
     pub pure def fn_ret(mut self, cx: Cx, d: DefId) -> Ty:
         let f = cx.prog.fn_info(d) else:
             return Ty.error()
         if f.err_inferred:
-            self.go_beyond("a function whose error set is inferred")
-            return Ty.error()
+            if let TyData.Adt(r, a) = self.types.data(f.ret).copy():
+                if Some(r) == cx.prog.wk.result and len(a) == 2:
+                    var set: list[DefId] = []
+                    if let Some(s) = cx.inferred.get(d):
+                        set = s.copy()
+                    return self.result_of(cx, a[0], set)
         return f.ret
 
     ## The variant `name` of an expected enum, error set, option or result.
@@ -728,7 +1091,8 @@ impl Checker:
                         return Some((d, i))
         return None
 
-    ## A variant found by its unqualified name alone.
+    ## A variant found by its unqualified name alone; ambiguity is the name
+    ## pass's to report.
     pub pure def global_variant(mut self, cx: Cx, name: str, range: TextRange) -> (DefId, int)?:
         let candidates = cx.prog.variants.get(name.to_string()) else:
             return None
@@ -743,7 +1107,8 @@ impl Checker:
                             seen = True
             if seen:
                 visible.push((d, vi))
-        # A variant declared in this module wins over one from the prelude.
+        # A variant declared in this module wins over one from the prelude
+        # or an imported module.
         var local: list[(DefId, int)] = []
         for (d, vi) in visible:
             if cx.prog.defs[d.index].module == self.module:
@@ -753,8 +1118,9 @@ impl Checker:
         if visible.is_empty():
             return None
         if len(visible) > 1:
-            # Ambiguous: the name pass's to report.
-            self.go_beyond("an ambiguous variant")
+            # `resolve.ambiguous-variant`.
+            self.other()
+        _ = range
         return Some(visible[0])
 
     ## The type of a value of an enum or error-set definition, with fresh
@@ -790,7 +1156,7 @@ impl Checker:
             self.report(d)
             return self.error_expr(range)
         let (ty, _) = self.variant_owner_ty(cx, def_, expected)
-        return self.add(TExprKind.Other, ty, range)
+        return self.add(TExprKind.Variant(def_=def_, variant=vi, args=[]), ty, range)
 
     # ---------------------------------------------------------------- operators
 
@@ -798,19 +1164,19 @@ impl Checker:
         mut self, cx: Cx, op: BinOp, lhs: ExprId, rhs: ExprId, range: TextRange, expected: Ty?
     ) -> TExprId:
         if op == BinOp.And or op == BinOp.Or:
-            _ = self.check_condition_expr(cx, lhs)
-            _ = self.check_condition_expr(cx, rhs)
-            return self.add(TExprKind.Other, Ty.bool(), range)
+            let l = self.check_condition_expr(cx, lhs)
+            let r = self.check_condition_expr(cx, rhs)
+            return self.add(TExprKind.Logic(and_=op == BinOp.And, lhs=l, rhs=r), Ty.bool(), range)
         if op == BinOp.Coalesce:
-            self.go_beyond("`??`")
-            return self.error_expr(range)
+            return self.coalesce(cx, lhs, rhs, range, expected)
         var hint: Ty? = None
         if let Some(t) = expected:
             let r = self.resolved(t)
             if r == Ty.int() or r == Ty.float() or self.int_kind(cx, r).is_some():
                 hint = Some(r)
         let l0 = self.infer_expr(cx, lhs, hint)
-        var l = self.decay(cx, l0)
+        let l1 = self.decay(cx, l0)
+        var l = self.unrefined(cx, l1)
         let lt = self.resolved(self.ty_of(l))
         var rhint: Ty? = None
         if lt == Ty.int() or lt == Ty.float() or self.int_kind(cx, lt).is_some():
@@ -822,7 +1188,8 @@ impl Checker:
             if let TyData.Ref(inner, _) = self.data(self.ty_of(r0)):
                 if let TyData.Var(_) = self.data(inner):
                     _ = self.infer.unify(self.types, inner, num)
-        var r = self.decay(cx, r0)
+        let r1 = self.decay(cx, r0)
+        var r = self.unrefined(cx, r1)
         # A literal on the left takes the type of a float on the right.
         if let TExprKind.Int(n) = self.exprs[l.index].kind:
             if self.resolved(self.ty_of(r)) == Ty.float():
@@ -843,29 +1210,34 @@ impl Checker:
                 elif a != b and widens(b, a):
                     let to = self.resolved(self.ty_of(l))
                     r = self.wrap(r, Coercion.IntWiden, to)
-        if self.operator_call(cx, op, l, Some(r), range).is_some():
-            return self.error_expr(range)
+        if let Some(call) = self.operator_call(cx, op, l, Some(r), range):
+            return call
         let (ty, _) = self.binary_result(cx, op, l, r, range)
         if ty == Ty.str() or self.is_string(cx, ty):
             # String concatenation views both sides as `str`.
-            _ = self.coerce(cx, l, Ty.str())
-            _ = self.coerce(cx, r, Ty.str())
-        return self.add(TExprKind.Other, ty, range)
+            l = self.coerce(cx, l, Ty.str())
+            r = self.coerce(cx, r, Ty.str())
+        return self.add(TExprKind.Binary(op=op, lhs=l, rhs=r), ty, range)
 
-    ## The trait behind an operator of the fixed set (D-022).
-    pub pure def operator_trait(self, cx: Cx, op: BinOp) -> DefId?:
+    ## The trait behind an operator of the fixed set (D-022), and its method.
+    pub pure def operator_trait(self, cx: Cx, op: BinOp) -> (DefId, String)?:
+        let wk = ref cx.prog.wk
         return match op:
-            case BinOp.Add: cx.prog.wk.add
-            case BinOp.Sub: cx.prog.wk.sub
-            case BinOp.Mul: cx.prog.wk.mul
-            case BinOp.Div: cx.prog.wk.div
-            case BinOp.Mod: cx.prog.wk.rem
+            case BinOp.Add: pair(wk.add, "add")
+            case BinOp.Sub: pair(wk.sub, "sub")
+            case BinOp.Mul: pair(wk.mul, "mul")
+            case BinOp.Div: pair(wk.div, "div")
+            case BinOp.Mod: pair(wk.rem, "rem")
             case _: None
 
+    pure def operand_base(mut self, cx: Cx, t: Ty) -> Ty:
+        let stripped = self.types.strip_ref(self.resolved(t))
+        let z = self.infer.zonk(mut self.types, stripped)
+        return cx.prog.normalize(mut self.types, z, self.env)
+
     ## `l op r` (or `-l`, for `r` = `None`) on a type that is not a number
-    ## or text: a call of the operator's trait method when the type
-    ## implements the trait, which is beyond the slice (`Some`). `None`
-    ## leaves it to the builtin operators.
+    ## or text: a call of the operator's trait method, when the type
+    ## implements the trait. `None` leaves it to the builtin operators.
     pub pure def operator_call(
         mut self, cx: Cx, op: BinOp, l: TExprId, r: TExprId?, range: TextRange
     ) -> TExprId?:
@@ -879,26 +1251,50 @@ impl Checker:
                 pass
         if self.is_string(cx, lt):
             return None
-        var tdef: DefId? = None
-        var args: list[Ty] = []
+        var tdef = DefId(index=0)
+        var method = String.new()
+        var rt: Ty? = None
         match r:
             case Some(x):
-                tdef = self.operator_trait(cx, op)
-                args.push(self.operand_base(cx, self.ty_of(x)))
+                let operator = self.operator_trait(cx, op) else:
+                    return None
+                let (d, m) = operator
+                tdef = d
+                method = m
+                rt = Some(self.operand_base(cx, self.ty_of(x)))
             case None:
-                tdef = cx.prog.wk.neg
-        let t = tdef else:
-            return None
-        let tr = TraitRef(def_=t, args=args)
+                let d = cx.prog.wk.neg else:
+                    return None
+                tdef = d
+                method = "neg".to_string()
+        var targs: list[Ty] = []
+        if let Some(t) = rt:
+            targs.push(t)
+        let tr = TraitRef(def_=tdef, args=targs)
         if cx.prog.implements(mut self.types, lt, tr, self.env) == Answer.No:
             return None
-        self.go_beyond("an operator of a trait")
-        return Some(self.error_expr(range))
+        let m = cx.prog.trait_method(tdef, method) else:
+            return None
+        let sig = self.instantiate(cx, m, None, range)
+        if let Some(v) = sig.type_args.first():
+            _ = self.infer.try_unify(self.types, v, lt)
+        if let Some(t) = rt:
+            if len(sig.type_args) > 1:
+                _ = self.infer.try_unify(self.types, sig.type_args[1], t)
+        var args = [self.as_ref_arg(l)]
+        if let Some(x) = r:
+            args.push(self.as_ref_arg(x))
+        let z = self.infer.zonk(mut self.types, sig.ret)
+        let ret = cx.prog.normalize(mut self.types, z, self.env)
+        let call = TExprKind.Call(
+            callee=Callee.Fn(def_=m, type_args=sig.type_args.copy()), args=args
+        )
+        return Some(self.add(call, ret, range))
 
-    pure def operand_base(mut self, cx: Cx, t: Ty) -> Ty:
-        let stripped = self.types.strip_ref(self.resolved(t))
-        let z = self.infer.zonk(mut self.types, stripped)
-        return cx.prog.normalize(mut self.types, z, self.env)
+    pure def as_ref_arg(self, x: TExprId) -> TArg:
+        if let TyData.Ref(_, _) = self.data(self.ty_of(x)):
+            return TArg(expr=x, mode=ArgMode.Value)
+        return TArg(expr=x, mode=ArgMode.Ref)
 
     ## The type of `lhs op rhs`, reporting a misuse.
     pub pure def binary_result(
@@ -1080,10 +1476,11 @@ impl Checker:
                 if r == Ty.int() or r == Ty.float():
                     hint = Some(r)
             let y = self.infer_expr(cx, inner, hint)
-            x = self.decay(cx, y)
+            let z = self.decay(cx, y)
+            x = self.unrefined(cx, z)
         if op == UnOp.Neg:
-            if self.operator_call(cx, BinOp.Sub, x, None, range).is_some():
-                return self.error_expr(range)
+            if let Some(call) = self.operator_call(cx, BinOp.Sub, x, None, range):
+                return call
         let t = self.resolved(self.ty_of(x))
         var ty = Ty.error()
         if t == Ty.error():
@@ -1101,20 +1498,24 @@ impl Checker:
             var d = self.error(cx, Msg.TypeUnaryOperator, range)
             d = d.with("op", op.text()).with("ty", shown)
             self.report(d)
-        return self.add(TExprKind.Other, ty, range)
+        return self.add(TExprKind.Unary(op=op, operand=x), ty, range)
 
     pure def compare_expr(
         mut self, cx: Cx, first: ExprId, rest: list[(CmpOp, ExprId)], range: TextRange
     ) -> TExprId:
-        let f = self.infer_expr(cx, first, None)
+        let f0 = self.infer_expr(cx, first, None)
+        let f = self.unrefined(cx, f0)
         var prev = f
+        var out: list[(CmpOp, TExprId)] = []
         for (op, e) in rest:
             let pt = self.decay_ty(cx, self.ty_of(prev))
             let hint = if op == CmpOp.In or op == CmpOp.NotIn: None else: Some(pt)
-            let x = self.infer_expr(cx, e, hint)
+            let x0 = self.infer_expr(cx, e, hint)
+            let x = self.unrefined(cx, x0)
             self.check_comparison(cx, op, prev, x, range)
             prev = x
-        return self.add(TExprKind.Other, Ty.bool(), range)
+            out.push((op, x))
+        return self.add(TExprKind.Compare(first=f, rest=out), Ty.bool(), range)
 
     pure def strip_text(mut self, cx: Cx, t: Ty) -> Ty:
         let s = self.resolved(self.types.strip_ref(t))
@@ -1186,11 +1587,12 @@ impl Checker:
                 let tr = TraitRef(def_=def_, args=[])
                 ordered = cx.prog.implements(mut self.types, t, tr, self.env) != Answer.No
             if not ordered:
-                if let TyData.Param(_) = self.types.data(t):
-                    self.go_beyond("the bound fix of a type parameter")
                 let shown = self.show(cx, t)
                 var d = self.error(cx, Msg.TypeNotOrdered, range)
                 d = d.with("ty", shown).with("op", op.text())
+                if let TyData.Param(i) = self.types.data(t):
+                    if let Some(edit) = self.bound_edit(cx, i, "PartialOrd"):
+                        d = d.fix_edits(Msg.TypeAddBound, [edit])
                 self.report(d)
         elif let TyData.Fn(_, _, _) = self.data(a):
             let shown_l = self.show(cx, lt)
@@ -1201,11 +1603,210 @@ impl Checker:
         else:
             self.require(a, cx.prog.wk.eq, range)
 
-    pure def branch_expr(mut self, cx: Cx, e: ExprId, ty: Ty, first: TextRange?) -> TExprId:
-        let f = first else:
+    pure def coalesce(
+        mut self, cx: Cx, lhs: ExprId, rhs: ExprId, range: TextRange, expected: Ty?
+    ) -> TExprId:
+        # An open expected type (a generic call's parameter) says nothing
+        # yet.
+        var opt_hint: Ty? = None
+        if let Some(t) = expected:
+            if not is_var_data(self.data(t)):
+                opt_hint = Some(self.option_of(cx, t))
+        let o = self.infer_expr(cx, lhs, opt_hint)
+        let inner = self.as_option(cx, self.ty_of(o)) else:
+            if self.ty_of(o) != Ty.error():
+                let shown = self.show(cx, self.ty_of(o))
+                let d = self.error(cx, Msg.TypeCoalesce, cx.ast.expr(lhs).range).with("ty", shown)
+                self.report(d)
+            let r = self.infer_expr(cx, rhs, None)
+            let kind = TExprKind.Coalesce(opt=o, default=r, deref=False)
+            return self.add(kind, self.ty_of(r), range)
+        let inner_r = self.resolved(inner)
+        # `a ?? b ?? c`: an optional default keeps the option.
+        let d = self.infer_expr(cx, rhs, Some(inner_r))
+        if self.as_option(cx, self.ty_of(d)).is_some()
+                and self.infer.try_unify(self.types, self.ty_of(d), self.ty_of(o)):
+            let ty = self.ty_of(o)
+            return self.add(TExprKind.Coalesce(opt=o, default=d, deref=False), ty, range)
+        if let TyData.Ref(target, _) = self.types.data(inner_r).copy():
+            if self.is_copy(cx, target):
+                let dd = self.coerce(cx, d, target)
+                return self.add(TExprKind.Coalesce(opt=o, default=dd, deref=True), target, range)
+            if self.is_string(cx, target) and self.resolved(self.ty_of(d)) == Ty.str():
+                let shown = self.show(cx, inner_r)
+                let e = self.error(cx, Msg.TypeMismatch, cx.ast.expr(rhs).range)
+                self.report(e.with("expected", shown).with("found", "str"))
+                return self.error_expr(range)
+        let dd = self.coerce(cx, d, inner_r)
+        return self.add(TExprKind.Coalesce(opt=o, default=dd, deref=False), inner_r, range)
+
+    # ---------------------------------------------------------------- collections
+
+    ## The items a `for` loop over a value of type `ty` yields, and how.
+    pub pure def iteration_item(mut self, cx: Cx, ty: Ty, mode: Mode) -> (Ty, ForMode)?:
+        let t = self.resolved(self.types.strip_ref(self.resolved(ty)))
+        if let Some((_, _, base)) = self.refinement_of(cx, t):
+            var b = base
+            if let TyData.Ref(_, m) = self.data(ty):
+                b = self.types.ref_(base, m)
+            return self.iteration_item(cx, b, mode)
+        var behind_ref = False
+        if let TyData.Ref(_, _) = self.data(ty):
+            behind_ref = True
+        let TyData.Adt(d, args) = self.types.data(t).copy() else:
+            if t == Ty.error():
+                return Some((Ty.error(), ForMode.Borrow))
+            return self.iterator_item(cx, t)
+        let fmode = match mode:
+            case Mode.Borrow: ForMode.Borrow
+            case Mode.Mut: ForMode.Mut
+            case Mode.Own: ForMode.Own
+        let b = cx.prog.builtin(d) ?? String.new()
+        if b == "list" or b == "set" or b == "Array":
+            let el = first_of(args) ?? Ty.error()
+            let m = if behind_ref and fmode == ForMode.Own: ForMode.Borrow else: fmode
+            return Some((self.wrap_item(el, m), m))
+        if b == "dict":
+            let k = first_of(args) ?? Ty.error()
+            let v = if len(args) > 1: args[1] else: Ty.error()
+            let m = if behind_ref and fmode == ForMode.Own: ForMode.Borrow else: fmode
+            var item = Ty.error()
+            match m:
+                case ForMode.Own:
+                    item = self.types.tuple([k, v])
+                case ForMode.Mut:
+                    let rk = self.types.ref_(k, False)
+                    let rv = self.types.ref_(v, True)
+                    item = self.types.tuple([rk, rv])
+                case _:
+                    let rk = self.types.ref_(k, False)
+                    let rv = self.types.ref_(v, False)
+                    item = self.types.tuple([rk, rv])
+            return Some((item, m))
+        if b == "Iter":
+            return Some((first_of(args) ?? Ty.error(), ForMode.Iter))
+        if b == "Receiver":
+            return Some((first_of(args) ?? Ty.error(), ForMode.Borrow))
+        return self.iterator_item(cx, t)
+
+    pure def wrap_item(mut self, t: Ty, m: ForMode) -> Ty:
+        return match m:
+            case ForMode.Borrow: self.types.ref_(t, False)
+            case ForMode.Mut: self.types.ref_(t, True)
+            case _: t
+
+    ## The item of a type that implements `Iterator`, which a `for` loop
+    ## drives through the trait.
+    pure def iterator_item(mut self, cx: Cx, t: Ty) -> (Ty, ForMode)?:
+        let def_ = cx.prog.wk.iterator else:
+            return None
+        let tr = TraitRef(def_=def_, args=[])
+        let z = self.infer.zonk(mut self.types, t)
+        let n = cx.prog.normalize(mut self.types, z, self.env)
+        if not cx.prog.implements(mut self.types, n, tr, self.env).holds():
+            return None
+        let item = self.types.intern(TyData.Assoc(self_ty=n, trait_=tr, name="Item".to_string()))
+        return Some((cx.prog.normalize(mut self.types, item, self.env), ForMode.Trait))
+
+    ## The iterable of a `for` loop or comprehension clause.
+    pub pure def check_iterable(
+        mut self, cx: Cx, iter: ExprId, mode: Mode
+    ) -> (TExprId, ForMode, Ty):
+        var x = self.infer_expr(cx, iter, None)
+        # `bytes` and a `Slice` are iterated through their iterators.
+        let base = self.resolved(self.types.strip_ref(self.ty_of(x)))
+        if let TyData.Adt(d, a) = self.types.data(base).copy():
+            if cx.prog.is_builtin(d, "bytes") or cx.prog.is_builtin(d, "Slice"):
+                var item = Ty.error()
+                if cx.prog.is_builtin(d, "bytes"):
+                    item = self.sized_ty(cx, "u8")
+                else:
+                    item = self.types.ref_(first_of(a) ?? Ty.error(), False)
+                var iter_ty = Ty.error()
+                if let Some(i) = cx.prog.wk.iter:
+                    iter_ty = self.types.adt(i, [item])
+                if let Some(call) = self.builtin_call(cx, x, base, "iter", iter_ty):
+                    x = call
+        match self.iteration_item(cx, self.ty_of(x), mode):
+            case Some((item, fmode)):
+                match fmode:
+                    case ForMode.Own | ForMode.Iter | ForMode.Trait:
+                        x = self.check_movable(cx, x)
+                    case ForMode.Mut:
+                        self.require_mutable(cx, x, cx.ast.expr(iter).range)
+                    case ForMode.Borrow:
+                        pass
+                return (x, fmode, item)
+            case None:
+                let range = cx.ast.expr(iter).range
+                if not is_var_data(self.data(self.ty_of(x))):
+                    let shown = self.show(cx, self.ty_of(x))
+                    let d = self.error(cx, Msg.TypeNotIterable, range).with("ty", shown)
+                    self.report(d)
+                else:
+                    let text = self.source_text(cx, range)
+                    let d = self.error(cx, Msg.TypeCannotInfer, range).with("name", text)
+                    self.report(d)
+                return (x, ForMode.Borrow, Ty.error())
+
+    pure def comprehension(
+        mut self,
+        cx: Cx,
+        kind: CompKind,
+        elem: ExprId,
+        value: ExprId?,
+        clauses: list[CompClause],
+        range: TextRange,
+    ) -> TExprId:
+        self.push_scope()
+        var out: list[TCompClause] = []
+        for c in clauses:
+            match c:
+                case CompClause.For(pat, iter):
+                    let (x, mode, item) = self.check_iterable(cx, iter, Mode.Borrow)
+                    let p = self.check_pat(cx, pat, item, None)
+                    out.push(TCompClause.For(pat=p, iter=x, mode=mode, item=item))
+                case CompClause.If(e):
+                    let cnd = self.check_condition_expr(cx, e)
+                    out.push(TCompClause.If(cnd))
+        let el0 = self.infer_expr(cx, elem, None)
+        let el1 = self.decay(cx, el0)
+        let el = self.check_movable(cx, el1)
+        var val: TExprId? = None
+        if let Some(v) = value:
+            let x0 = self.infer_expr(cx, v, None)
+            let x1 = self.decay(cx, x0)
+            val = Some(self.check_movable(cx, x1))
+        self.pop_scope()
+        var tkind = TCompKind.List
+        var ty = Ty.error()
+        if kind == CompKind.Dict and val.is_some():
+            tkind = TCompKind.Dict
+            if let Some(d) = cx.prog.wk.dict:
+                let vt = self.ty_of(val ?? el)
+                ty = self.types.adt(d, [self.ty_of(el), vt])
+        elif kind == CompKind.Set:
+            tkind = TCompKind.Set
+            if let Some(d) = cx.prog.wk.set:
+                ty = self.types.adt(d, [self.ty_of(el)])
+        else:
+            if kind == CompKind.Gen:
+                self.unsupported()
+            ty = self.list_of(cx, self.ty_of(el))
+        let k = TExprKind.Comprehension(kind=tkind, clauses=out, elem=el, value=val)
+        return self.add(k, ty, range)
+
+    # ---------------------------------------------------------------- if and match expressions
+
+    ## A later branch of an `if` or `match`, checked against `ty`: the type
+    ## expected of the whole, or with `first` the type of the first branch.
+    pure def branch_expr(
+        mut self, cx: Cx, e: ExprId, ty: Ty, first: (String, TextRange)?
+    ) -> TExprId:
+        if first.is_none():
             return self.check_expr(cx, e, ty)
         let x = self.infer_expr(cx, e, Some(ty))
-        self.branch = Some(("if".to_string(), f))
+        self.branch = first.copy()
         let y = self.coerce(cx, x, ty)
         self.branch = None
         return y
@@ -1219,6 +1820,7 @@ impl Checker:
         expected: Ty?,
     ) -> TExprId:
         var target = expected
+        var conds: list[TExprId] = []
         var values: list[TExprId] = []
         var all: list[ExprId] = []
         for (_, v) in branches:
@@ -1226,14 +1828,17 @@ impl Checker:
         if let Some(e) = else_:
             all.push(e)
         for (c, _) in branches:
-            _ = self.check_condition_expr(cx, c)
+            conds.push(self.check_condition_expr(cx, c))
         # The branch whose type the later ones must have, when no type is
         # expected.
         var first: TextRange? = None
         for v in all:
             match target:
                 case Some(t):
-                    values.push(self.branch_expr(cx, v, t, first))
+                    var keyed: (String, TextRange)? = None
+                    if let Some(r) = first:
+                        keyed = Some(("if".to_string(), r))
+                    values.push(self.branch_expr(cx, v, t, keyed))
                 case None:
                     let y = self.infer_expr(cx, v, None)
                     let x = self.decay(cx, y)
@@ -1242,22 +1847,319 @@ impl Checker:
                         first = Some(cx.ast.expr(v).range)
                     values.push(x)
         let ty = target ?? Ty.never()
-        # The chain from the end: each value converted to the type.
+        # Build the chain from the end: `if c1: v1 elif c2: v2 else: v3`.
+        var acc = TExprId(index=0)
         var k = len(branches) - 1
+        if else_.is_some():
+            acc = values[len(values) - 1]
+        else:
+            acc = self.error_expr(range)
         while k >= 0:
-            _ = self.coerce(cx, values[k], ty)
+            let v = self.coerce(cx, values[k], ty)
+            acc = self.add(TExprKind.If(cond=conds[k], then=v, else_=acc), ty, range)
             k -= 1
-        if else_.is_none():
-            return self.add(TExprKind.Error, ty, range)
-        return self.add(TExprKind.Other, ty, range)
+        return acc
+
+    pure def match_expr(
+        mut self, cx: Cx, scrutinee: ExprId, arms: list[Arm], rng: TextRange, expected: Ty?
+    ) -> TExprId:
+        let scrutinee_end = cx.ast.expr(scrutinee).range.end
+        let s = self.infer_expr(cx, scrutinee, None)
+        let by_ref = self.scrutinee_by_ref(s)
+        let sty = self.ty_of(s)
+        var target = expected
+        var first: TextRange? = None
+        var out: list[TArm] = []
+        for a in arms:
+            if self.arm_made_at_compile_time(a):
+                continue
+            self.push_scope()
+            let p = self.check_pat(cx, a.pat, sty, by_ref)
+            var guard: TExprId? = None
+            if let Some(g) = a.guard:
+                guard = Some(self.check_condition_expr(cx, g))
+            var body = TArmBody.Expr(TExprId(index=0))
+            match a.body:
+                case ArmBody.Expr(e):
+                    match target:
+                        case Some(t):
+                            var keyed: (String, TextRange)? = None
+                            if let Some(r) = first:
+                                keyed = Some(("match".to_string(), r))
+                            body = TArmBody.Expr(self.branch_expr(cx, e, t, keyed))
+                        case None:
+                            let y = self.infer_expr(cx, e, None)
+                            let x = self.decay(cx, y)
+                            if self.resolved(self.ty_of(x)) != Ty.never():
+                                target = Some(self.ty_of(x))
+                                first = Some(cx.ast.expr(e).range)
+                            body = TArmBody.Expr(x)
+                case ArmBody.Block(b):
+                    let d = self.error(cx, Msg.TypeArmNeedsExpression, b.range)
+                    self.report(d)
+                    body = TArmBody.Block(self.check_block(cx, b))
+            self.pop_scope()
+            out.push(TArm(pat=p, guard=guard, body=body, span=a.range))
+        let ty = target ?? Ty.never()
+        for i in range(len(out)):
+            if let TArmBody.Expr(x) = out[i].body:
+                let y = self.coerce(cx, x, ty)
+                out[i].body = TArmBody.Expr(y)
+        self.check_exhaustive(cx, sty, out, TextRange.new(rng.start, scrutinee_end))
+        return self.add(TExprKind.Match(scrutinee=s, arms=out), ty, rng)
+
+    ## Arms made by `comptime for` or `comptime if` exist only in a
+    ## derive's template (08); anywhere else they are reported.
+    pure def arm_made_at_compile_time(mut self, a: Arm) -> bool:
+        if a.generated.is_none():
+            return False
+        self.unsupported()
+        return True
+
+    ## A `match` in statement position: arms may hold blocks.
+    pub pure def check_match_stmt(
+        mut self, cx: Cx, scrutinee: ExprId, arms: list[Arm], range: TextRange
+    ) -> TStmt:
+        let s = self.infer_expr(cx, scrutinee, None)
+        let by_ref = self.scrutinee_by_ref(s)
+        let sty = self.ty_of(s)
+        var out: list[TArm] = []
+        for a in arms:
+            if self.arm_made_at_compile_time(a):
+                continue
+            self.push_scope()
+            let p = self.check_pat(cx, a.pat, sty, by_ref)
+            var guard: TExprId? = None
+            if let Some(g) = a.guard:
+                guard = Some(self.check_condition_expr(cx, g))
+            var body = TArmBody.Expr(TExprId(index=0))
+            match a.body:
+                case ArmBody.Expr(e):
+                    body = TArmBody.Expr(self.infer_expr(cx, e, None))
+                case ArmBody.Block(b):
+                    body = TArmBody.Block(self.check_block(cx, b))
+            self.pop_scope()
+            out.push(TArm(pat=p, guard=guard, body=body, span=a.range))
+        let end = cx.ast.expr(scrutinee).range.end
+        self.check_exhaustive(cx, sty, out, TextRange.new(range.start, end))
+        return TStmt.Match(scrutinee=s, arms=out, span=range)
+
+    ## How a scrutinee's bindings take their parts: a place is borrowed
+    ## (`Some(False)`), a temporary is moved (`None`).
+    pub pure def scrutinee_by_ref(self, s: TExprId) -> bool?:
+        if self.is_place(s):
+            return Some(False)
+        return None
+
+    # ---------------------------------------------------------------- closures
+
+    ## Checks a closure literal or `do` block against an expected function
+    ## type, if one is known.
+    pub pure def check_closure(mut self, cx: Cx, c: Closure, expected: Ty?) -> TExprId:
+        var names: list[ClosureParamSrc] = []
+        if c.implicit_param:
+            if let Some(f) = expected:
+                if let TyData.Fn(ps, _, _) = self.types.data(f):
+                    if len(ps) == 1:
+                        names.push(ClosureParamSrc(name="it".to_string(), ty=None, range=c.range))
+        else:
+            for p in c.params:
+                names.push(ClosureParamSrc(name=p.name.text.copy(), ty=p.ty, range=p.name.range))
+        var body = ClosureSource.Expr(ExprId(index=0))
+        match c.body:
+            case ClosureBody.Expr(e):
+                body = ClosureSource.Expr(e)
+            case ClosureBody.Block(b):
+                body = ClosureSource.Block(b.copy())
+        let x = self.closure_from_parts(cx, names, body, expected, c.range)
+        if c.own_:
+            if let TExprKind.Closure(id) = self.exprs[x.index].kind:
+                self.own_closure(id, c.range)
+        return x
+
+    ## `comptime e` (08): `e` is checked as the body of a closure that takes
+    ## nothing, which must capture nothing and name none of the function's
+    ## type parameters.
+    pub pure def comptime_expr(
+        mut self, cx: Cx, inner: ExprId, expected: Ty?, range: TextRange
+    ) -> TExprId:
+        var ret = Ty.error()
+        match expected:
+            case Some(t):
+                ret = t
+            case None:
+                ret = self.infer.fresh(mut self.types)
+        let fn_ty = self.types.fn_([], ret, True)
+        let was = self.in_comptime
+        self.in_comptime = True
+        let x = self.closure_from_parts(cx, [], ClosureSource.Expr(inner), Some(fn_ty), range)
+        self.in_comptime = was
+        let TExprKind.Closure(id) = self.exprs[x.index].kind else:
+            return self.error_expr(range)
+        self.comptime_closure(id, range)
+        return self.add(TExprKind.Comptime(id), ret, range)
+
+    ## `comptime assert c, m` and other statements run at compile time: a
+    ## `comptime` closure whose body is the statement.
+    pub pure def comptime_block(mut self, cx: Cx, b: Block, range: TextRange) -> TExprId:
+        let fn_ty = self.types.fn_([], Ty.unit(), True)
+        let was = self.in_comptime
+        self.in_comptime = True
+        let x = self.closure_from_parts(cx, [], ClosureSource.Block(b.copy()), Some(fn_ty), range)
+        self.in_comptime = was
+        let TExprKind.Closure(id) = self.exprs[x.index].kind else:
+            return self.error_expr(range)
+        self.comptime_closure(id, range)
+        return self.add(TExprKind.Comptime(id), Ty.unit(), range)
+
+    pure def comptime_closure(mut self, id: ClosureId, range: TextRange):
+        if let Some(cl) = self.closures[id.index]:
+            if not cl.captures.is_empty():
+                # `comptime.not-constant`.
+                self.other()
+        if let Some(cl) = ref mut self.closures[id.index]:
+            cl.comptime_ = True
+        self.comptime_sites.push((id, range))
+
+    ## An `own` closure keeps what it captures (04, "Closures").
+    pure def own_closure(mut self, id: ClosureId, range: TextRange):
+        if let Some(cl) = ref mut self.closures[id.index]:
+            cl.own_ = True
+        self.own_checks.push((id, range))
+
+    ## The captures of `own` closures: a task's are moved in; any other
+    ## `own` closure copies them, so each must be `Copy`, and it cannot
+    ## change one.
+    pub pure def check_own_closures(mut self, cx: Cx):
+        let checks = self.own_checks.copy()
+        self.own_checks = []
+        for (id, range) in checks:
+            var caps: list[Capture2] = []
+            var task = False
+            if let Some(cl) = self.closures[id.index]:
+                task = cl.role == ClosureRole.Task
+                for cap in cl.captures:
+                    caps.push(Capture2(local=cap.local, mutable=cap.mutable))
+            if task:
+                continue
+            for cap in caps:
+                let name = self.locals[cap.local].name.copy()
+                let ty = self.locals[cap.local].ty
+                if cap.mutable:
+                    let d = self.error(cx, Msg.TypeOwnClosureChanges, range).with("name", name)
+                    self.report(d)
+                elif not self.is_copy(cx, ty) and self.infer.zonk(mut self.types, ty) != Ty.error():
+                    let shown = self.show(cx, ty)
+                    let d = self.error(cx, Msg.TypeOwnClosureCapture, range).with(
+                        "name", name
+                    ).with("ty", shown)
+                    self.report(d)
+
+    pub pure def closure_from_parts(
+        mut self,
+        cx: Cx,
+        names: list[ClosureParamSrc],
+        body: ClosureSource,
+        expected: Ty?,
+        rng: TextRange,
+    ) -> TExprId:
+        var expected_params: list[Ty]? = None
+        var expected_ret: Ty? = None
+        if let Some(f) = expected:
+            if let TyData.Fn(ps, r, _) = self.types.data(f):
+                expected_params = Some(ps.copy())
+                expected_ret = Some(r)
+        if let Some(ps) = expected_params:
+            if len(ps) != len(names):
+                var d = self.error(cx, Msg.TypeClosureParameterCount, rng)
+                d = d.with("found", "{len(names)}").with("expected", "{len(ps)}")
+                self.report(d)
+        let id = ClosureId(index=len(self.closures))
+        self.closures.push(None)
+        let ret = expected_ret ?? self.infer.fresh(mut self.types)
+        let first_local = len(self.locals)
+        self.ret.push(
+            RetCtx(ty=ret, closure=Some(id), first_local=first_local, loops=0, captures=[])
+        )
+        self.push_scope()
+        var params: list[int] = []
+        var ptys: list[Ty] = []
+        for i in range(len(names)):
+            let p = ref names[i]
+            var ty = Ty.error()
+            match p.ty:
+                case Some(t):
+                    ty = self.resolve_ty(cx, t)
+                case None:
+                    var given: Ty? = None
+                    if let Some(ps) = expected_params:
+                        if i < len(ps):
+                            given = Some(ps[i])
+                    ty = given ?? self.infer.fresh(mut self.types)
+            let l = self.new_local(p.name, ty, False, p.range)
+            self.declare(p.name, l)
+            params.push(l)
+            ptys.push(ty)
+        var block = BlockId(index=0)
+        match body:
+            case ClosureSource.Expr(e):
+                let x0 = self.check_expr(cx, e, ret)
+                let x = self.check_movable(cx, x0)
+                let er = cx.ast.expr(e).range
+                block = self.new_block([TStmt.Return(value=Some(x), span=er)], er)
+            case ClosureSource.Block(b):
+                block = self.check_block_in_scope(cx, b)
+                let r = self.resolved(ret)
+                if is_var_data(self.types.data(r)):
+                    _ = self.infer.unify(self.types, r, Ty.unit())
+                elif r != Ty.unit() and r != Ty.error() and not self.block_diverges(block):
+                    let shown = self.show(cx, r)
+                    var d = self.error(cx, Msg.TypeMissingReturn, b.range)
+                    d = d.with("name", "this closure").with("ty", shown)
+                    self.report(d)
+        self.pop_scope()
+        var captures: list[Capture] = []
+        if let Some(ctx) = self.ret.pop():
+            captures = ctx.captures
+        let pure = self.first_impure_in_block(cx, block).is_none()
+        let fn_ty = self.types.fn_(ptys, ret, pure)
+        self.closures[id.index] = Some(
+            TClosure(
+                params=params,
+                captures=captures,
+                own_=False,
+                ret=ret,
+                body=block,
+                span=rng,
+                fn_ty=fn_ty,
+                comptime_=False,
+                role=ClosureRole.Plain,
+            )
+        )
+        return self.add(TExprKind.Closure(id), fn_ty, rng)
+
+    # ---------------------------------------------------------------- `?`, `?.`
 
     pure def try_expr(mut self, cx: Cx, inner: ExprId, range: TextRange) -> TExprId:
         let x = self.infer_expr(cx, inner, None)
         if self.ty_of(x) == Ty.error():
             return self.error_expr(range)
         let ret = self.ret_ty()
-        if let TyData.Var(_) = self.data(ret):
-            self.go_beyond("`?` where the result is inferred")
+        # A closure whose result is not known yet returns what `?` needs:
+        # an option for an option, a result for a result.
+        if is_var_data(self.data(ret)) and not self.infer.is_absorbing(self.types, ret):
+            var shape: Ty? = None
+            if self.as_option(cx, self.ty_of(x)).is_some():
+                if let Some(o) = cx.prog.wk.option:
+                    let v = self.infer.fresh(mut self.types)
+                    shape = Some(self.types.adt(o, [v]))
+            elif self.as_result(cx, self.ty_of(x)).is_some():
+                if let Some(r) = cx.prog.wk.result:
+                    let v1 = self.infer.fresh(mut self.types)
+                    let v2 = self.infer.fresh(mut self.types)
+                    shape = Some(self.types.adt(r, [v1, v2]))
+            if let Some(s) = shape:
+                _ = self.infer.unify(self.types, ret, s)
         if let Some(t) = self.as_option(cx, self.ty_of(x)):
             if self.as_option(cx, ret).is_none() and self.resolved(ret) != Ty.error():
                 let shown = self.show(cx, self.ty_of(x))
@@ -1265,69 +2167,144 @@ impl Checker:
                 var d = self.error(cx, Msg.TypeTryContext, range)
                 d = d.with("ty", shown).with("needed", "T?").with("found", shown_ret)
                 self.report(d)
-            return self.add(TExprKind.Other, t, range)
+            return self.add(TExprKind.Try(expr=x, kind=TryKind.Option), t, range)
         if let Some((t, e)) = self.as_result(cx, self.ty_of(x)):
-            var fe: Ty? = None
-            if let Some((_, f)) = self.as_result(cx, ret):
-                fe = Some(f)
-            let to_set = fe else:
+            let parts = self.as_result(cx, ret) else:
                 if self.resolved(ret) != Ty.error():
                     let shown = self.show(cx, self.ty_of(x))
                     let shown_ret = self.show(cx, ret)
                     var d = self.error(cx, Msg.TypeTryContext, range)
                     d = d.with("ty", shown).with("needed", "T ! E").with("found", shown_ret)
                     self.report(d)
-                return self.add(TExprKind.Other, t, range)
+                return self.add(
+                    TExprKind.Try(expr=x, kind=TryKind.Result(from_=[], to=[])), t, range
+                )
+            let (_, fe) = parts
             var from_: list[DefId] = []
             if let TyData.ErrSet(m) = self.data(e):
                 from_ = m.copy()
-            if self.infer.is_absorbing(self.types, to_set):
-                self.go_beyond("an inferred error set")
-                return self.add(TExprKind.Other, t, range)
+            if self.infer.is_absorbing(self.types, fe):
+                let set = self.types.err_set(from_.copy())
+                _ = self.infer.unify(self.types, fe, set)
+                let k = TryKind.Result(from_=from_.copy(), to=from_.copy())
+                return self.add(TExprKind.Try(expr=x, kind=k), t, range)
             var to: list[DefId] = []
-            match self.data(to_set):
+            match self.data(fe):
                 case TyData.ErrSet(m):
                     to = m.copy()
                 case TyData.Var(_):
                     let set = self.types.err_set(from_.copy())
-                    _ = self.infer.unify(self.types, to_set, set)
+                    _ = self.infer.unify(self.types, fe, set)
                     to = from_.copy()
                 case _:
                     pass
             if not is_subset(from_, to):
                 let d = self.error_not_in_set(cx, range, from_, to)
                 self.report(d)
-            return self.add(TExprKind.Other, t, range)
+            return self.add(
+                TExprKind.Try(expr=x, kind=TryKind.Result(from_=from_, to=to)), t, range
+            )
         let shown = self.show(cx, self.ty_of(x))
         let d = self.error(cx, Msg.TypeTryNeedsFallible, range).with("ty", shown)
         self.report(d)
         return self.error_expr(range)
 
+    ## `base?.name` and `base?.name(args)`.
+    pub pure def opt_chain(
+        mut self,
+        cx: Cx,
+        base: ExprId,
+        name: Name,
+        args: list[Arg]?,
+        trailing: Closure?,
+        range: TextRange,
+    ) -> TExprId:
+        let b = self.infer_expr(cx, base, None)
+        let inner = self.as_option(cx, self.ty_of(b)) else:
+            if self.ty_of(b) != Ty.error():
+                let shown = self.show(cx, self.ty_of(b))
+                let d = self.error(cx, Msg.TypeOptionalChain, cx.ast.expr(base).range).with(
+                    "ty", shown
+                )
+                self.report(d)
+            return self.error_expr(range)
+        self.push_scope()
+        let binder = self.new_local("?", inner, False, self.span_of(b))
+        let recv = self.add(TExprKind.Local(binder), inner, self.span_of(b))
+        var then = TExprId(index=0)
+        match args:
+            case None:
+                then = self.field_of(cx, recv, name, range)
+            case Some(a):
+                then = self.method_call_on(cx, recv, name, a, trailing, range, None)
+        self.pop_scope()
+        then = self.decay(cx, then)
+        # Through a reference, a field that is not `Copy` cannot be moved
+        # out: the chain borrows it, a `String` as a `str` view.
+        if self.is_place(then)
+                and self.is_behind_ref(then)
+                and not self.is_copy(cx, self.ty_of(then)):
+            let ty = self.resolved(self.ty_of(then))
+            if self.is_string(cx, ty):
+                then = self.wrap(then, Coercion.StrView, Ty.str())
+            elif ty != Ty.error():
+                let span = self.span_of(then)
+                let rt = self.types.ref_(ty, False)
+                then = self.add(TExprKind.Borrow(place=then, mutable=False), rt, span)
+        let flatten = self.as_option(cx, self.ty_of(then)).is_some()
+        var ty = self.ty_of(then)
+        if not flatten:
+            ty = self.option_of(cx, self.ty_of(then))
+        let k = TExprKind.OptChain(base=b, binder=binder, then=then, flatten=flatten)
+        return self.add(k, ty, range)
+
+    # ---------------------------------------------------------------- fields and indexing
+
     pure def field_expr(mut self, cx: Cx, base: ExprId, name: Name, range: TextRange) -> TExprId:
         # `module.item`, `Type.Variant`, `Type.function`.
         if let Some(path) = self.static_path(cx, base):
-            return self.static_value(cx, path, name, range)
+            return self.static_member(cx, path, name, range, None, None, None)
         let b = self.infer_expr(cx, base, None)
         return self.field_of(cx, b, name, range)
 
     ## Field `name` of a value (through references).
     pub pure def field_of(mut self, cx: Cx, b0: TExprId, name: Name, at: TextRange) -> TExprId:
-        let b = self.auto_deref(b0)
-        if self.is_box(cx, self.ty_of(b)) or self.is_smart_pointer(cx, self.ty_of(b)):
-            self.go_beyond("a field through a `Box` or a shared pointer")
-            return self.error_expr(at)
+        let b1 = self.auto_deref(b0)
+        var b = self.unrefined(cx, b1)
+        # A `Box` lends its fields to its value: `boxed` is its own. So does
+        # a `Shared`, and a mutex guard's `value` is the value.
+        var looping = True
+        while looping:
+            looping = False
+            if self.is_box(cx, self.ty_of(b)) and name.text != "boxed":
+                b = self.unbox(b)
+                b = self.auto_deref(b)
+                looping = True
+                continue
+            match self.smart_pointer(cx, self.ty_of(b)):
+                case Some(p):
+                    if p == "MutexGuard" and name.text == "value":
+                        return self.deref_smart(b)
+                    b = self.deref_smart(b)
+                    b = self.auto_deref(b)
+                    looping = True
+                case None:
+                    pass
         let t = self.resolved(self.ty_of(b))
         match self.types.data(t).copy():
             case TyData.Error:
                 return self.error_expr(at)
             case TyData.Tuple(elems, labels):
-                var idx: int? = name.text.parse_int()
+                var idx: int? = None
+                if let Some(n) = name.text.parse_int():
+                    if n >= 0 and is_all_digits(name.text):
+                        idx = Some(n)
                 if idx.is_none():
                     for i in range(len(labels)):
                         if labels[i] == name.text and idx.is_none():
                             idx = Some(i)
                 if let Some(i) = idx:
-                    if i >= 0 and i < len(elems):
+                    if i < len(elems):
                         return self.add(TExprKind.Field(base=b, index=i), elems[i], at)
                 let shown = self.show(cx, t)
                 var d = self.error(cx, Msg.TypeTupleIndex, name.range)
@@ -1338,9 +2315,7 @@ impl Checker:
                 if let Some(s) = cx.prog.struct_info(d):
                     for i in range(len(s.fields)):
                         if s.fields[i].name == name.text:
-                            let owner = cx.prog.defs[d.index].module
-                            if owner != self.module and not cx.prog.modules[owner.index].is_std:
-                                self.go_beyond("a field of another module")
+                            self.check_field_vis(cx, d, i)
                             let ty = self.types.subst(s.fields[i].ty, args)
                             return self.add(TExprKind.Field(base=b, index=i), ty, at)
             case TyData.Var(_):
@@ -1367,6 +2342,60 @@ impl Checker:
         self.report(d)
         return self.error_expr(at)
 
+    ## The edit that bounds the function's own type parameter `i` by `bound`
+    ## in its header (`[T]` becomes `[T: Ord]`, `[T: Hash]` becomes
+    ## `[T: Hash + Ord]`); `None` for an impl's parameter or a header that
+    ## does not read as expected.
+    pub pure def bound_edit(self, cx: Cx, i: int, bound: str) -> Edit?:
+        let f = cx.prog.fn_info(self.def_) else:
+            return None
+        if i < f.impl_generics or i >= len(f.generics):
+            return None
+        let name = f.generics[i].name.copy()
+        let after = cx.prog.defs[self.def_.index].span.end
+        if after >= cx.source.byte_len() or cx.source.byte_at(after) != 91:
+            return None
+        # The parameter list, split at its top-level commas.
+        var depth = 0
+        var seg_start = after + 1
+        var segments: list[(int, int)] = []
+        var k = after
+        let n = cx.source.byte_len()
+        var done = False
+        while k < n and not done:
+            let c = cx.source.byte_at(k)
+            if c == 91 or c == 40:
+                depth += 1
+            elif c == 93 or c == 41:
+                depth -= 1
+                if depth == 0:
+                    segments.push((seg_start, k))
+                    done = True
+            elif c == 44 and depth == 1:
+                segments.push((seg_start, k))
+                seg_start = k + 1
+            k += 1
+        for (a, b) in segments:
+            let seg = cx.source.byte_slice(a, b)
+            let trimmed = seg.trim_start()
+            let lead = seg.byte_len() - trimmed.byte_len()
+            let word = leading_word(trimmed)
+            if word != name:
+                continue
+            let name_end = a + lead + word.byte_len()
+            match seg.find(":"):
+                case None:
+                    return Some(Edit(start=name_end, end=name_end, text=": {bound}"))
+                case Some(_):
+                    # After the last bound, before a default.
+                    var end = b
+                    if let Some(eq) = seg.find("="):
+                        end = a + eq
+                    let text = cx.source.byte_slice(a, end)
+                    let at = a + text.trim_end().byte_len()
+                    return Some(Edit(start=at, end=at, text=" + {bound}"))
+        return None
+
     ## The field or method of a type closest to a misspelt one.
     pub pure def similar_member(self, cx: Cx, t: Ty, n: str) -> String?:
         var names: list[String] = []
@@ -1384,28 +2413,54 @@ impl Checker:
                 names.push(k.1.copy())
         return cx.prog.closest(n, names)
 
+    ## A field of a struct of another module is reached only when it is
+    ## `pub` (09).
+    pub pure def check_field_vis(mut self, cx: Cx, d: DefId, i: int):
+        let s = cx.prog.struct_info(d) else:
+            return
+        if i >= len(s.fields):
+            return
+        if not cx.prog.vis_allows(s.fields[i].vis, cx.prog.defs[d.index].module, self.module):
+            # `resolve.private-field`.
+            self.other()
+
+    ## A method or associated function of a type of another module is
+    ## called only when it is `pub` (09).
+    pub pure def check_method_vis(mut self, cx: Cx, m: DefId):
+        let f = cx.prog.fn_info(m) else:
+            return
+        if f.trait_.is_some() or f.impl_.is_some() or cx.prog.visible_from(m, self.module):
+            return
+        # `resolve.private-method`.
+        self.other()
+
     pure def index_expr(
         mut self, cx: Cx, base: ExprId, args: list[IndexArg], at: TextRange
     ) -> TExprId:
         let b0 = self.infer_expr(cx, base, None)
-        let b = self.auto_deref(b0)
+        let b1 = self.auto_deref(b0)
+        let b = self.unrefined(cx, b1)
         let t = self.resolved(self.ty_of(b))
         if t == Ty.error():
             for a in args:
                 if let IndexArg.Expr(e) = a:
                     _ = self.infer_expr(cx, e, None)
             return self.error_expr(at)
-        let arg = args.first() else:
+        if args.is_empty():
             return self.error_expr(at)
+        let arg = ref args[0]
         if let TyData.Adt(d, a) = self.types.data(t).copy():
             let elem = first_of(a) ?? Ty.error()
             let list = cx.prog.is_builtin(d, "list")
             match arg:
                 case IndexArg.Expr(e):
                     if list or cx.prog.is_builtin(d, "Array"):
+                        var idx = TExprId(index=0)
+                        var kind = IndexKind.List
                         match cx.ast.expr(e).kind:
                             case ExprKind.FromEnd(inner):
-                                _ = self.check_expr(cx, inner, Ty.int())
+                                idx = self.check_expr(cx, inner, Ty.int())
+                                kind = IndexKind.ListFromEnd
                             case ExprKind.Unary(UnOp.Neg, inner):
                                 if let ExprKind.Int(_, _, _) = cx.ast.expr(inner).kind:
                                     # `xs[-1]` does not compile (D-062).
@@ -1417,30 +2472,76 @@ impl Checker:
                                     self.report(
                                         d2.fix_at(Msg.TypeFromEndIndex, r.start, r.end, "^{digits}")
                                     )
-                                    _ = self.check_expr(cx, inner, Ty.int())
+                                    idx = self.check_expr(cx, inner, Ty.int())
+                                    kind = IndexKind.ListFromEnd
                                 else:
-                                    _ = self.check_expr(cx, e, Ty.int())
+                                    idx = self.check_expr(cx, e, Ty.int())
                             case _:
-                                _ = self.check_expr(cx, e, Ty.int())
-                        return self.add(TExprKind.Index(b), elem, at)
+                                idx = self.check_expr(cx, e, Ty.int())
+                        return self.add(TExprKind.Index(base=b, index=idx, kind=kind), elem, at)
+                    if cx.prog.is_builtin(d, "Arena"):
+                        var key = Ty.error()
+                        if let Some(kd) = cx.prog.lookup_in(cx.prog.prelude, "Key"):
+                            key = self.types.adt(kd, [elem])
+                        let idx = self.check_expr(cx, e, key)
+                        return self.add(
+                            TExprKind.Index(base=b, index=idx, kind=IndexKind.Dict), elem, at
+                        )
                     if cx.prog.is_builtin(d, "dict"):
                         let k = elem
                         let v = if len(a) > 1: a[1] else: Ty.error()
                         self.require(k, cx.prog.wk.hash, at)
-                        _ = self.check_expr(cx, e, k)
-                        return self.add(TExprKind.Index(b), v, at)
+                        let idx = self.check_expr(cx, e, k)
+                        return self.add(
+                            TExprKind.Index(base=b, index=idx, kind=IndexKind.Dict), v, at
+                        )
                 case IndexArg.Slice(lo, hi):
                     if list:
+                        var l: TExprId? = None
+                        var h: TExprId? = None
                         if let Some(x) = lo:
-                            _ = self.check_expr(cx, x, Ty.int())
+                            l = Some(self.check_expr(cx, x, Ty.int()))
                         if let Some(x) = hi:
-                            _ = self.check_expr(cx, x, Ty.int())
-                        return self.add(TExprKind.Other, t, at)
-            if cx.prog.is_builtin(d, "Arena")
-                    or cx.prog.is_builtin(d, "bytes")
-                    or cx.prog.is_builtin(d, "Slice"):
-                self.go_beyond("indexing an arena, `bytes` or a slice")
-                return self.error_expr(at)
+                            h = Some(self.check_expr(cx, x, Ty.int()))
+                        let ty = self.types.adt(d, a)
+                        return self.add(TExprKind.Slice(base=b, lo=l, hi=h), ty, at)
+            # `b[i]` and `s[i]`: a byte, a reference to a value; `b[i:j]` and
+            # `s[i:j]`: a copy of the bytes, a view of the values.
+            if cx.prog.is_builtin(d, "bytes") or cx.prog.is_builtin(d, "Slice"):
+                var name = "at"
+                var call_args: list[TExprId] = []
+                match arg:
+                    case IndexArg.Expr(e):
+                        call_args.push(self.check_expr(cx, e, Ty.int()))
+                    case IndexArg.Slice(lo, hi):
+                        name = "cut"
+                        match lo:
+                            case Some(x):
+                                call_args.push(self.check_expr(cx, x, Ty.int()))
+                            case None:
+                                call_args.push(
+                                    self.add(TExprKind.Int(-9223372036854775807 - 1), Ty.int(), at)
+                                )
+                        match hi:
+                            case Some(x):
+                                call_args.push(self.check_expr(cx, x, Ty.int()))
+                            case None:
+                                call_args.push(
+                                    self.add(TExprKind.Int(-9223372036854775807 - 1), Ty.int(), at)
+                                )
+                let m = cx.prog.method(TyKey.Adt(d), name) else:
+                    return self.error_expr(at)
+                var ret = t
+                if name == "at":
+                    if cx.prog.is_builtin(d, "bytes"):
+                        ret = self.sized_ty(cx, "u8")
+                    else:
+                        ret = self.types.ref_(elem, False)
+                var targs: list[TArg] = [self.receiver_arg(cx, b)]
+                for x in call_args:
+                    targs.push(TArg(expr=x, mode=ArgMode.Value))
+                let call = TExprKind.Call(callee=Callee.Fn(def_=m, type_args=a), args=targs)
+                return self.add(call, ret, at)
         if t == Ty.str() or self.is_string(cx, t):
             let shown = self.show(cx, t)
             let d = self.error(cx, Msg.TypeStrNotIndexable, at).with("ty", shown)
@@ -1451,101 +2552,11 @@ impl Checker:
         self.report(d)
         return self.error_expr(at)
 
-    # ---------------------------------------------------------------- iteration
-
-    ## The item type of iterating a value of type `ty`, and how.
-    pub pure def iteration_item(mut self, cx: Cx, ty: Ty, mode: Mode) -> (Ty, ForMode)?:
-        let t = self.resolved(self.types.strip_ref(self.resolved(ty)))
-        var behind_ref = False
-        if let TyData.Ref(_, _) = self.data(ty):
-            behind_ref = True
-        let TyData.Adt(d, args) = self.types.data(t).copy() else:
-            if t == Ty.error():
-                return Some((Ty.error(), ForMode.Borrow))
-            return self.iterator_item(cx, t)
-        let fmode = match mode:
-            case Mode.Borrow: ForMode.Borrow
-            case Mode.Mut: ForMode.Mut
-            case Mode.Own: ForMode.Own
-        let b = cx.prog.builtin(d) ?? String.new()
-        if b == "list" or b == "set" or b == "Array":
-            let el = args.first() ?? Ty.error()
-            let m = if behind_ref and fmode == ForMode.Own: ForMode.Borrow else: fmode
-            return Some((self.wrap_item(el, m), m))
-        if b == "dict":
-            self.go_beyond("iterating a `dict`")
-            return Some((Ty.error(), fmode))
-        if b == "Iter":
-            return Some((args.first() ?? Ty.error(), ForMode.Iter))
-        if b == "Receiver":
-            return Some((args.first() ?? Ty.error(), ForMode.Borrow))
-        return self.iterator_item(cx, t)
-
-    pure def wrap_item(mut self, t: Ty, m: ForMode) -> Ty:
-        return match m:
-            case ForMode.Borrow: self.types.ref_(t, False)
-            case ForMode.Mut: self.types.ref_(t, True)
-            case _: t
-
-    ## The item of a type that implements `Iterator`, which a `for` loop
-    ## drives through the trait.
-    pure def iterator_item(mut self, cx: Cx, t: Ty) -> (Ty, ForMode)?:
-        let def_ = cx.prog.wk.iterator else:
-            return None
-        let tr = TraitRef(def_=def_, args=[])
-        let z = self.infer.zonk(mut self.types, t)
-        let n = cx.prog.normalize(mut self.types, z, self.env)
-        match cx.prog.implements(mut self.types, n, tr, self.env):
-            case Answer.Yes(_):
-                pass
-            case Answer.Unknown:
-                self.go_beyond("an iterator stage 1 cannot decide")
-                return None
-            case Answer.No:
-                return None
-        let item = self.types.intern(TyData.Assoc(self_ty=n, trait_=tr, name="Item".to_string()))
-        return Some((cx.prog.normalize(mut self.types, item, self.env), ForMode.Trait))
-
-    ## The iterable of a `for` loop: its item type.
-    pub pure def check_iterable(mut self, cx: Cx, iter: ExprId, mode: Mode) -> Ty:
-        let x = self.infer_expr(cx, iter, None)
-        let base = self.resolved(self.types.strip_ref(self.ty_of(x)))
-        if self.is_builtin(cx, base, "bytes") or self.is_builtin(cx, base, "Slice"):
-            self.go_beyond("iterating `bytes` or a slice")
-            return Ty.error()
-        match self.iteration_item(cx, self.ty_of(x), mode):
-            case Some((item, fmode)):
-                match fmode:
-                    case ForMode.Own | ForMode.Iter | ForMode.Trait:
-                        _ = self.check_movable(cx, x)
-                    case ForMode.Mut:
-                        self.require_mutable(cx, x, cx.ast.expr(iter).range)
-                    case ForMode.Borrow:
-                        pass
-                return item
-            case None:
-                if let TyData.Var(_) = self.data(self.ty_of(x)):
-                    let range = cx.ast.expr(iter).range
-                    let text = self.source_text(cx, range)
-                    let d = self.error(cx, Msg.TypeCannotInfer, range).with("name", text)
-                    self.report(d)
-                else:
-                    self.go_beyond("a value that is not iterable")
-                return Ty.error()
-
-## What an expression beyond the slice is, for saying why.
-pure def expr_form(kind: ExprKind) -> str:
-    return match kind:
-        case ExprKind.Set(_): "a set literal"
-        case ExprKind.Dict(_): "a dict literal"
-        case ExprKind.Comprehension(_, _, _, _): "a comprehension"
-        case ExprKind.FromEnd(_): "`^` outside an index"
-        case ExprKind.OptField(_, _): "`?.`"
-        case ExprKind.Closure(_): "a closure"
-        case ExprKind.Match(_, _): "`match`"
-        case ExprKind.Comptime(_): "`comptime`"
-        case ExprKind.FieldOf(_, _): "a field named by a compile-time value"
-        case _: "a construct of a later phase"
+## A capture as `check_own_closures` reads it.
+@derive(Copy)
+struct Capture2:
+    local: int
+    mutable: bool
 
 ## Whether a method gives the type `exp` without arguments: what the fix
 ## of a mismatch may call.
@@ -1559,10 +2570,15 @@ pure def gives(f: FnInfo, exp: Ty) -> bool:
         and not f.err_inferred
         and f.ret == exp
 
-pure def is_var_data(d: TyData) -> bool:
+pub pure def is_var_data(d: TyData) -> bool:
     if let TyData.Var(_) = d:
         return True
     return False
+
+pure def pair(d: DefId?, m: str) -> (DefId, String)?:
+    let x = d else:
+        return None
+    return Some((x, m.to_string()))
 
 ## The text inside the quotes of a plain string literal.
 pure def literal_inside(t: str) -> String?:
@@ -1572,6 +2588,32 @@ pure def literal_inside(t: str) -> String?:
     if inner.contains("\"") or inner.contains("{{"):
         return None
     return Some(inner.to_string())
+
+## The last character of a text, as a text.
+pure def last_char(s: str) -> String:
+    var last = String.new()
+    for c in s.chars():
+        last = String.new()
+        last.push_char(c)
+    return last
+
+## The name a text starts with: its letters, digits and `_`.
+pure def leading_word(s: str) -> String:
+    var out = String.new()
+    for c in s.chars():
+        if c.is_alphabetic() or c.is_digit() or c == '_':
+            out.push_char(c)
+        else:
+            return out
+    return out
+
+pure def is_all_digits(s: str) -> bool:
+    if s.is_empty():
+        return False
+    for b in s.bytes():
+        if not is_digit(b):
+            return False
+    return True
 
 ## Whether `spec` is a format spec (03, "Strings"):
 ## `[[fill]align][sign][#][0][width][,|_][.precision][type]`.
@@ -1609,7 +2651,7 @@ pure def is_spec_type(c: char) -> bool:
     return False
 
 ## Whether `name` is a sized integer type.
-pure def is_sized(name: str) -> bool:
+pub pure def is_sized(name: str) -> bool:
     return sized().contains(name)
 
 pure def is_align(c: char) -> bool:

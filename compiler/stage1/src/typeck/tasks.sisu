@@ -1,0 +1,447 @@
+##! The typing rules of tasks (stage 0's `sisu-typeck/src/tasks.rs`; 06,
+##! "Tasks and scopes"), which the signatures in `std/task.sisu` and the
+##! prelude cannot say:
+##!
+##! - the body of `task.scope`, `task.race` and `task.shield`, and the task
+##!   of `spawn`, are written at the call, so the checker sees what they
+##!   capture;
+##! - a scope whose body returns `T ! E` returns `T ! {E, TaskError}`
+##!   widened by the error sets of the tasks spawned on it in the body;
+##! - a race returns its tasks' result, flattened as `join` flattens it;
+##! - `Handle[U ! E].join()` is `U ! {E, TaskError}`, and `Handle[T].join()`
+##!   is `T ! TaskError` for any other `T`;
+##! - a scope's body cannot return its scope or a handle of its tasks.
+##!
+##! The messages of these rules are not the type checker's own (`task.`);
+##! stage 1 notes that one is reported (`Checker.other`).
+
+from stage1.diag import Msg, TextRange
+from stage1.syntax.ast import ArmBody, Block, ExprId, ExprKind, SelectArm, StmtId, StmtKind
+from stage1.syntax.ast import Ast
+from stage1.typeck.check import Checker, Cx, SpawnSite, pattern_is_refutable
+from stage1.typeck.program import Auto
+from stage1.typeck.thir import (
+    Callee,
+    ClosureId,
+    ClosureRole,
+    PatId,
+    SelectOp,
+    TArg,
+    TExprId,
+    TExprKind,
+    TPatKind,
+    TSelectArm,
+    TStmt,
+)
+from stage1.typeck.ty import DefId, Ty, TyData, union
+
+## The calls the rules apply to, by intrinsic.
+@derive(Eq, Copy)
+pub enum TaskCall:
+    Scope
+    Race
+    Shield
+    ## `spawn`, with the index of the task argument.
+    Spawn(int)
+    Join
+
+pub pure def task_call(intrinsic: str) -> TaskCall?:
+    return match intrinsic:
+        case "task.scope": Some(TaskCall.Scope)
+        case "task.race": Some(TaskCall.Race)
+        case "task.shield": Some(TaskCall.Shield)
+        case "Scope.spawn": Some(TaskCall.Spawn(1))
+        case "Scope.spawn_with": Some(TaskCall.Spawn(2))
+        case "Handle.join": Some(TaskCall.Join)
+        case _: None
+
+impl Checker:
+    ## The closure an argument is, under coercions.
+    pure def closure_of(self, e: TExprId) -> ClosureId?:
+        match self.exprs[e.index].kind:
+            case TExprKind.Closure(id):
+                return Some(id)
+            case TExprKind.Coerce(x, _):
+                return self.closure_of(x)
+            case _:
+                return None
+
+    ## The local an expression reaches a value through: `s`, `ref s`, `*s`.
+    pure def root_local(self, e: TExprId) -> int?:
+        match self.exprs[e.index].kind:
+            case TExprKind.Local(l):
+                return Some(l)
+            case TExprKind.Borrow(place, _):
+                return self.root_local(place)
+            case TExprKind.Deref(x):
+                return self.root_local(x)
+            case TExprKind.Coerce(x, _):
+                return self.root_local(x)
+            case _:
+                return None
+
+    ## Applies the rules to a call just checked: `args` are the checked
+    ## arguments (the receiver first for a method), `ret` the type the
+    ## signature gave. Returns the call's type.
+    pub pure def task_rules(
+        mut self,
+        cx: Cx,
+        call: TaskCall,
+        args: list[TArg],
+        ret: Ty,
+        spawns_before: int,
+        span: TextRange,
+        function: str,
+    ) -> Ty:
+        match call:
+            case TaskCall.Scope | TaskCall.Race | TaskCall.Shield:
+                var id: ClosureId? = None
+                if let Some(a) = args.first():
+                    id = self.closure_of(a.expr)
+                let cid = id else:
+                    var first_arg: TArg? = None
+                    if let Some(a) = args.first():
+                        first_arg = Some(TArg(expr=a.expr, mode=a.mode))
+                    self.closure_needed(first_arg, function)
+                    return ret
+                if call == TaskCall.Shield:
+                    return ret
+                self.set_role(cid, ClosureRole.ScopeBody)
+                var param: int? = None
+                var body_ret0 = Ty.error()
+                match self.closures[cid.index]:
+                    case Some(cl):
+                        if let Some(p) = cl.params.first():
+                            param = Some(p.copy())
+                        body_ret0 = cl.ret
+                    case None:
+                        return ret
+                let body_ret = self.infer.zonk(mut self.types, body_ret0)
+                # A scope's body cannot hand its scope or a task's handle out.
+                if self.mentions_scope(cx, body_ret):
+                    # `task.scope-escapes`.
+                    self.other()
+                var sites: list[ClosureId] = []
+                for i in range(spawns_before, len(self.spawn_sites)):
+                    let s = ref self.spawn_sites[i]
+                    if s.scope.is_some() and s.scope == param:
+                        sites.push(s.closure)
+                if call == TaskCall.Race:
+                    let t = self.infer.fresh(mut self.types)
+                    for site in sites:
+                        var r: Ty? = None
+                        if let Some(c) = self.closures[site.index]:
+                            r = Some(c.ret)
+                        if let Some(rt) = r:
+                            if not self.infer.unify(self.types, t, rt):
+                                # `task.race-types`.
+                                self.other()
+                    return self.flatten_join(cx, t, span)
+                # The scope's result carries the failures nobody joined.
+                var sets: list[DefId] = []
+                for site in sites:
+                    var r: Ty? = None
+                    if let Some(c) = self.closures[site.index]:
+                        r = Some(c.ret)
+                    if let Some(rt) = r:
+                        if let Some((_, e)) = self.as_result(cx, rt):
+                            if let TyData.ErrSet(m) = self.data(e):
+                                sets = union(sets, m)
+                return self.widen_scope(cx, body_ret, sets)
+            case TaskCall.Spawn(k):
+                var id: ClosureId? = None
+                if k < len(args):
+                    id = self.closure_of(args[k].expr)
+                let cid = id else:
+                    var arg: TArg? = None
+                    if k < len(args):
+                        arg = Some(args[k])
+                    self.closure_needed(arg, function)
+                    return ret
+                self.set_role(cid, ClosureRole.Task)
+                var scope: int? = None
+                if let Some(a) = args.first():
+                    scope = self.root_local(a.expr)
+                self.spawn_sites.push(SpawnSite(scope=scope, closure=cid))
+                self.spawn_checks.push((cid, span))
+                return ret
+            case TaskCall.Join:
+                if args.is_empty():
+                    return ret
+                let a = args[0]
+                let stripped = self.types.strip_ref(self.ty_of(a.expr))
+                let TyData.Adt(_, targs) = self.data(stripped) else:
+                    return ret
+                match targs.first():
+                    case Some(t):
+                        return self.flatten_join(cx, t, span)
+                    case None:
+                        return ret
+
+    pure def set_role(mut self, id: ClosureId, role: ClosureRole):
+        if let Some(c) = ref mut self.closures[id.index]:
+            c.role = role
+
+    pure def closure_needed(mut self, arg: TArg?, function: str):
+        if let Some(a) = arg:
+            if self.ty_of(a.expr) == Ty.error():
+                return
+        _ = function
+        # `task.closure-literal`.
+        self.other()
+
+    ## Whether a type holds a `Scope` or a `Handle`, which end with their
+    ## scope.
+    pure def mentions_scope(self, cx: Cx, t: Ty) -> bool:
+        let scope = cx.prog.lookup_in(cx.prog.prelude, "Scope")
+        let handle = cx.prog.lookup_in(cx.prog.prelude, "Handle")
+        for x in self.types.walk(t):
+            if let TyData.Adt(d, _) = self.types.data(x):
+                if Some(d) == scope or Some(d) == handle:
+                    return True
+        return False
+
+    pure def task_error_set(self, cx: Cx) -> list[DefId]:
+        if let Some(d) = cx.prog.lookup_in(cx.prog.prelude, "TaskError"):
+            return [d]
+        return []
+
+    ## `join`'s type for a task returning `t`.
+    pub pure def flatten_join(mut self, cx: Cx, t: Ty, span: TextRange) -> Ty:
+        let te = self.task_error_set(cx)
+        if let Some((ok, e)) = self.as_result(cx, t):
+            var m: list[DefId] = []
+            match self.data(e):
+                case TyData.ErrSet(x):
+                    m = x.copy()
+                case TyData.Var(_):
+                    let empty = self.types.err_set([])
+                    _ = self.infer.unify(self.types, e, empty)
+                case _:
+                    pass
+            return self.result_of(cx, ok, union(m, te))
+        match self.data(t):
+            case TyData.Var(_):
+                # `task.result-unknown`.
+                self.other()
+                _ = span
+                return Ty.error()
+            case TyData.Error:
+                return Ty.error()
+            case _:
+                return self.result_of(cx, self.resolved(t), te)
+
+    ## A scope's type for a body returning `body`: a result is widened by
+    ## `TaskError` and the error sets of its tasks.
+    pure def widen_scope(mut self, cx: Cx, body: Ty, sets: list[DefId]) -> Ty:
+        let parts = self.as_result(cx, body) else:
+            return body
+        let (ok, e) = parts
+        var m: list[DefId] = []
+        match self.data(e):
+            case TyData.ErrSet(x):
+                m = x.copy()
+            case TyData.Var(_):
+                let empty = self.types.err_set([])
+                _ = self.infer.unify(self.types, e, empty)
+            case _:
+                pass
+        let m2 = union(m, sets)
+        let m3 = union(m2, self.task_error_set(cx))
+        return self.result_of(cx, ok, m3)
+
+    ## Once types are known: what each task keeps by value. An `own`
+    ## closure keeps everything; a task keeps the `Copy` values it does not
+    ## change, and borrows the rest.
+    pub pure def decide_captures(mut self, cx: Cx):
+        for i in range(len(self.closures)):
+            var owns = False
+            var role = ClosureRole.Plain
+            var caps: list[(int, bool)] = []
+            match self.closures[i]:
+                case Some(c):
+                    owns = c.own_
+                    role = c.role
+                    for cap in c.captures:
+                        caps.push((cap.local, cap.mutable))
+                case None:
+                    continue
+            var by_value: list[bool] = []
+            for (l, m) in caps:
+                let ty = self.infer.zonk(mut self.types, self.local_ty(l))
+                let copy = cx.prog.is_copy(mut self.types, ty)
+                by_value.push(owns or (role == ClosureRole.Task and not m and copy))
+            if let Some(c) = ref mut self.closures[i]:
+                for k in range(len(c.captures)):
+                    if k < len(by_value):
+                        c.captures[k].by_value = by_value[k]
+
+    ## The `Send` and `Sync` checks of the tasks the body spawns, once types
+    ## are known (06): their messages are `task.`, so only whether one is
+    ## reported matters here.
+    pub pure def check_spawns(mut self, cx: Cx):
+        let checks = self.spawn_checks.copy()
+        self.spawn_checks = []
+        for (id, _) in checks:
+            var caps: list[(int, bool, bool)] = []
+            var ret = Ty.error()
+            match self.closures[id.index]:
+                case Some(c):
+                    for cap in c.captures:
+                        caps.push((cap.local, cap.mutable, cap.by_value))
+                    ret = c.ret
+                case None:
+                    continue
+            for (l, m, by_value) in caps:
+                let z = self.infer.zonk(mut self.types, self.local_ty(l))
+                let ty = cx.prog.normalize(mut self.types, z, self.env)
+                if self.infer.has_vars(mut self.types, ty) or self.types.contains_error(ty):
+                    continue
+                var auto = Auto.Sync
+                if by_value or m:
+                    auto = Auto.Send
+                if not cx.prog.auto_trait(mut self.types, ty, auto, self.env):
+                    self.other()
+            let zr = self.infer.zonk(mut self.types, ret)
+            let r = cx.prog.normalize(mut self.types, zr, self.env)
+            if not self.infer.has_vars(mut self.types, r) and not self.types.contains_error(r):
+                if not cx.prog.auto_trait(mut self.types, r, Auto.Send, self.env):
+                    self.other()
+
+    ## A value made into a capability handle must be `Send` and `Sync`.
+    pub pure def check_capabilities(mut self, cx: Cx):
+        let checks = self.cap_checks.copy()
+        self.cap_checks = []
+        for (ty0, _, _) in checks:
+            let z = self.infer.zonk(mut self.types, ty0)
+            let ty = cx.prog.normalize(mut self.types, z, self.env)
+            if self.infer.has_vars(mut self.types, ty) or self.types.contains_error(ty):
+                continue
+            if not cx.prog.auto_trait(mut self.types, ty, Auto.Send, self.env):
+                self.other()
+            elif not cx.prog.auto_trait(mut self.types, ty, Auto.Sync, self.env):
+                self.other()
+
+    ## What a `Shared`, `Cell`, `Mutex` or handle owns can be neither a view
+    ## nor must-consume (`borrow.`).
+    pub pure def check_owners(mut self, cx: Cx):
+        let checks = self.owner_checks.copy()
+        self.owner_checks = []
+        for (ty0, _, _) in checks:
+            let z = self.infer.zonk(mut self.types, ty0)
+            let t = cx.prog.normalize(mut self.types, z, self.env)
+            if self.infer.has_vars(mut self.types, t) or self.types.contains_error(t):
+                continue
+            if cx.prog.can_borrow(mut self.types, t)
+                    or cx.prog.must_consume_ty(mut self.types, t, 0):
+                self.other()
+
+    ## `select:` (06, "Channels and select"): each arm waits for a call of
+    ## `recv`, `send` or `join`, or for a `Timer` or a `Cancellation`; its
+    ## pattern binds what the call returns and cannot fail to match.
+    pub pure def check_select(mut self, cx: Cx, arms: list[SelectArm], range: TextRange) -> TStmt:
+        if self.body_is_pure(cx):
+            self.owner_go_beyond("a `select` in a pure function")
+        var out: list[TSelectArm] = []
+        for a in arms:
+            let x = self.infer_expr(cx, a.op, None)
+            let (op, bound) = self.select_op(cx, x)
+            self.push_scope()
+            var pat = PatId(index=0)
+            if pattern_is_refutable(cx.ast, a.pat):
+                let d = self.error(cx, Msg.TypeRefutableLet, cx.ast.pattern(a.pat).range)
+                self.report(d)
+                pat = self.add_pat(TPatKind.Error, Ty.error(), cx.ast.pattern(a.pat).range)
+            else:
+                pat = self.check_pat(cx, a.pat, bound, None)
+            let body = self.check_block(cx, a.body)
+            self.pop_scope()
+            out.push(TSelectArm(op=op, pat=pat, body=body, span=a.range))
+        return TStmt.Select(arms=out, span=range)
+
+    pure def select_op(mut self, cx: Cx, x: TExprId) -> (SelectOp, Ty):
+        if let TExprKind.Call(Callee.Fn(def_, _), _) = self.exprs[x.index].kind:
+            let ty = self.ty_of(x)
+            var intrinsic = String.new()
+            if let Some(f) = cx.prog.fn_info(def_):
+                intrinsic = f.intrinsic.copy() ?? String.new()
+            if intrinsic == "Receiver.recv":
+                return (SelectOp.Recv(x), ty)
+            if intrinsic == "Sender.send":
+                return (SelectOp.Send(x), ty)
+            if intrinsic == "Handle.join":
+                return (SelectOp.Join(x), ty)
+        if self.is_builtin(cx, self.ty_of(x), "Timer"):
+            return (SelectOp.Timer(x), Ty.unit())
+        if self.is_builtin(cx, self.ty_of(x), "Cancellation"):
+            return (SelectOp.Cancelled(x), Ty.unit())
+        if self.ty_of(x) != Ty.error():
+            # `task.select-arm`.
+            self.other()
+        let span = self.span_of(x)
+        return (SelectOp.Timer(self.error_expr(span)), Ty.error())
+
+    ## `yield e` in a generator: `e` is an item of the `Iter` the function
+    ## returns.
+    pub pure def check_yield(mut self, cx: Cx, value: ExprId?, range: TextRange) -> TStmt:
+        let in_closure = len(self.ret) > 1
+        var item: Ty? = None
+        if not in_closure:
+            item = self.generator
+        let it = item else:
+            let d = self.error(cx, Msg.TypeYieldOutsideGenerator, range)
+            self.report(d)
+            if let Some(v) = value:
+                _ = self.infer_expr(cx, v, None)
+            return TStmt.Error(range)
+        var v = TExprId(index=0)
+        match value:
+            case Some(e):
+                let x = self.check_expr(cx, e, it)
+                v = self.check_movable(cx, x)
+            case None:
+                v = self.add(TExprKind.Unit, Ty.unit(), range)
+        return TStmt.Yield(value=v, span=range)
+
+## Whether a function body yields: a `yield` outside the closures in it.
+pub pure def has_yield(ast: Ast, b: Block) -> bool:
+    for s in b.stmts:
+        if stmt_yields(ast, s):
+            return True
+    return False
+
+pure def stmt_yields(ast: Ast, s: StmtId) -> bool:
+    match ast.stmt(s).kind:
+        case StmtKind.Yield(_):
+            return True
+        case StmtKind.If(branches, else_block):
+            for (_, b) in branches:
+                if has_yield(ast, b):
+                    return True
+            if let Some(b) = else_block:
+                return has_yield(ast, b)
+            return False
+        case StmtKind.While(_, body):
+            return has_yield(ast, body)
+        case StmtKind.For(_, _, _, body):
+            return has_yield(ast, body)
+        case StmtKind.Defer(body):
+            return has_yield(ast, body)
+        case StmtKind.With(_, _, body):
+            return has_yield(ast, body)
+        case StmtKind.Select(arms):
+            for a in arms:
+                if has_yield(ast, a.body):
+                    return True
+            return False
+        case StmtKind.Expr(e):
+            if let ExprKind.Match(_, arms) = ast.expr(e).kind:
+                for a in arms:
+                    if let ArmBody.Block(b) = a.body:
+                        if has_yield(ast, b):
+                            return True
+            return False
+        case StmtKind.Comptime(inner):
+            return stmt_yields(ast, inner)
+        case _:
+            return False

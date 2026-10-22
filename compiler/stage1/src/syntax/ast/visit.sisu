@@ -1,0 +1,307 @@
+##! A walk over every expression of a module, parents before children
+##! (stage 0's `sisu-syntax/src/ast/visit.rs`): what the compiler needs
+##! when it writes code for what a module mentions. Where the Rust calls a
+##! function on each expression, this walk appends each to a list.
+
+from stage1.syntax.ast import (
+    Arm,
+    ArmBody,
+    ArmGen,
+    Ast,
+    Block,
+    ClosureBody,
+    CompClause,
+    CondPart,
+    ElseBody,
+    ExprId,
+    ExprKind,
+    FnDef,
+    IndexArg,
+    ItemId,
+    ItemKind,
+    ParamKind,
+    StmtId,
+    StmtKind,
+    StrPart,
+)
+
+## Every expression in the items, parents first.
+pub pure def exprs_in_items(ast: Ast, items: list[ItemId]) -> list[ExprId]:
+    var out: list[ExprId] = []
+    for it in items:
+        item(ast, it, mut out)
+    return out
+
+## Every expression of `e` and inside it, `e` first.
+pub pure def exprs_of(ast: Ast, e: ExprId) -> list[ExprId]:
+    var out: list[ExprId] = []
+    expr(ast, e, mut out)
+    return out
+
+## Every expression in a block, parents first.
+pub pure def exprs_in_block(ast: Ast, b: Block) -> list[ExprId]:
+    var out: list[ExprId] = []
+    block(ast, b, mut out)
+    return out
+
+pure def item(ast: Ast, it: ItemId, mut out: list[ExprId]):
+    let node = ast.item(it)
+    for a in node.attrs:
+        for x in a.args:
+            expr(ast, x.value, mut out)
+    match node.kind:
+        case ItemKind.Fn(d):
+            fn_def(ast, d, mut out)
+        case ItemKind.Struct(s):
+            for fd in s.fields:
+                if let Some(e) = fd.default:
+                    expr(ast, e, mut out)
+            for m in s.methods:
+                fn_def(ast, m, mut out)
+            for c in s.invariants:
+                expr(ast, c.expr, mut out)
+            for c in s.consts:
+                if let Some(e) = c.value:
+                    expr(ast, e, mut out)
+        case ItemKind.Enum(e):
+            for m in e.methods:
+                fn_def(ast, m, mut out)
+        case ItemKind.ErrorSet(e):
+            for m in e.methods:
+                fn_def(ast, m, mut out)
+        case ItemKind.Impl(i):
+            for m in i.methods:
+                fn_def(ast, m, mut out)
+            for c in i.consts:
+                if let Some(e) = c.value:
+                    expr(ast, e, mut out)
+        case ItemKind.Trait(t):
+            for m in t.methods:
+                fn_def(ast, m, mut out)
+        case ItemKind.Test(t):
+            if let Some((_, e)) = t.cases:
+                expr(ast, e, mut out)
+            if let Some(b) = t.body:
+                block(ast, b, mut out)
+        case ItemKind.Bench(t):
+            if let Some((_, e)) = t.cases:
+                expr(ast, e, mut out)
+            if let Some(b) = t.body:
+                block(ast, b, mut out)
+        case ItemKind.Suite(s):
+            for x in s.items:
+                item(ast, x, mut out)
+        case ItemKind.Const(c):
+            if let Some(e) = c.value:
+                expr(ast, e, mut out)
+        case ItemKind.TypeAlias(a):
+            if let Some(e) = a.predicate:
+                expr(ast, e, mut out)
+        case ItemKind.Extern(items):
+            for x in items:
+                item(ast, x, mut out)
+        case ItemKind.Stmt(s):
+            stmt(ast, s, mut out)
+        case _:
+            pass
+
+pure def fn_def(ast: Ast, d: FnDef, mut out: list[ExprId]):
+    for p in d.params:
+        if let ParamKind.Named(_, _, Some(e)) = p.kind:
+            expr(ast, e, mut out)
+    if let Some(b) = d.body:
+        block(ast, b, mut out)
+
+pure def block(ast: Ast, b: Block, mut out: list[ExprId]):
+    for s in b.stmts:
+        stmt(ast, s, mut out)
+
+pure def stmt(ast: Ast, s: StmtId, mut out: list[ExprId]):
+    match ast.stmt(s).kind:
+        case StmtKind.Let(_, _, _, init, else_):
+            if let Some(e) = init:
+                expr(ast, e, mut out)
+            if let Some(le) = else_:
+                match le.body:
+                    case ElseBody.Expr(e):
+                        expr(ast, e, mut out)
+                    case ElseBody.Diverge(st):
+                        stmt(ast, st, mut out)
+                    case ElseBody.Block(b):
+                        block(ast, b, mut out)
+        case StmtKind.Assign(target, _, value):
+            expr(ast, target, mut out)
+            expr(ast, value, mut out)
+        case StmtKind.Expr(e):
+            expr(ast, e, mut out)
+        case StmtKind.Expect(e):
+            expr(ast, e, mut out)
+        case StmtKind.Return(e):
+            if let Some(x) = e:
+                expr(ast, x, mut out)
+        case StmtKind.Yield(e):
+            if let Some(x) = e:
+                expr(ast, x, mut out)
+        case StmtKind.If(branches, else_block):
+            for (c, b) in branches:
+                for p in c.parts:
+                    match p:
+                        case CondPart.Expr(e):
+                            expr(ast, e, mut out)
+                        case CondPart.Let(_, e):
+                            expr(ast, e, mut out)
+                block(ast, b, mut out)
+            if let Some(b) = else_block:
+                block(ast, b, mut out)
+        case StmtKind.While(c, body):
+            for p in c.parts:
+                match p:
+                    case CondPart.Expr(e):
+                        expr(ast, e, mut out)
+                    case CondPart.Let(_, e):
+                        expr(ast, e, mut out)
+            block(ast, body, mut out)
+        case StmtKind.For(_, _, iter, body):
+            expr(ast, iter, mut out)
+            block(ast, body, mut out)
+        case StmtKind.Assert(c, message):
+            expr(ast, c, mut out)
+            if let Some(m) = message:
+                expr(ast, m, mut out)
+        case StmtKind.Defer(b):
+            block(ast, b, mut out)
+        case StmtKind.With(value, _, body):
+            expr(ast, value, mut out)
+            block(ast, body, mut out)
+        case StmtKind.Item(it):
+            item(ast, it, mut out)
+        case StmtKind.Comptime(inner):
+            stmt(ast, inner, mut out)
+        case StmtKind.ReturnImpl(i):
+            for m in i.methods:
+                fn_def(ast, m, mut out)
+        case StmtKind.Select(arms):
+            for a in arms:
+                expr(ast, a.op, mut out)
+                block(ast, a.body, mut out)
+        case StmtKind.Contract(c):
+            expr(ast, c.expr, mut out)
+        case _:
+            pass
+
+pure def expr(ast: Ast, e: ExprId, mut out: list[ExprId]):
+    out.push(e)
+    match ast.expr(e).kind:
+        case ExprKind.Str(parts):
+            for p in parts:
+                if let StrPart.Interp(x, _, _, _) = p:
+                    expr(ast, x, mut out)
+        case ExprKind.Paren(x):
+            expr(ast, x, mut out)
+        case ExprKind.FromEnd(x):
+            expr(ast, x, mut out)
+        case ExprKind.Try(x):
+            expr(ast, x, mut out)
+        case ExprKind.Comptime(x):
+            expr(ast, x, mut out)
+        case ExprKind.Unary(_, x):
+            expr(ast, x, mut out)
+        case ExprKind.Ref(_, x):
+            expr(ast, x, mut out)
+        case ExprKind.Tuple(xs):
+            for x in xs:
+                expr(ast, x, mut out)
+        case ExprKind.List(xs):
+            for x in xs:
+                expr(ast, x, mut out)
+        case ExprKind.Set(xs):
+            for x in xs:
+                expr(ast, x, mut out)
+        case ExprKind.Dict(kv):
+            for (k, v) in kv:
+                expr(ast, k, mut out)
+                expr(ast, v, mut out)
+        case ExprKind.Comprehension(_, elem, value, clauses):
+            expr(ast, elem, mut out)
+            if let Some(v) = value:
+                expr(ast, v, mut out)
+            for c in clauses:
+                match c:
+                    case CompClause.For(_, iter):
+                        expr(ast, iter, mut out)
+                    case CompClause.If(x):
+                        expr(ast, x, mut out)
+        case ExprKind.Binary(_, lhs, rhs):
+            expr(ast, lhs, mut out)
+            expr(ast, rhs, mut out)
+        case ExprKind.Compare(first, rest):
+            expr(ast, first, mut out)
+            for (_, x) in rest:
+                expr(ast, x, mut out)
+        case ExprKind.Call(callee, args, trailing):
+            expr(ast, callee, mut out)
+            for a in args:
+                expr(ast, a.value, mut out)
+            if let Some(c) = trailing:
+                match c.body:
+                    case ClosureBody.Expr(x):
+                        expr(ast, x, mut out)
+                    case ClosureBody.Block(b):
+                        block(ast, b, mut out)
+        case ExprKind.Field(base, _):
+            expr(ast, base, mut out)
+        case ExprKind.OptField(base, _):
+            expr(ast, base, mut out)
+        case ExprKind.Index(base, args):
+            expr(ast, base, mut out)
+            for a in args:
+                match a:
+                    case IndexArg.Expr(x):
+                        expr(ast, x, mut out)
+                    case IndexArg.Slice(lo, hi):
+                        if let Some(x) = lo:
+                            expr(ast, x, mut out)
+                        if let Some(x) = hi:
+                            expr(ast, x, mut out)
+        case ExprKind.Closure(c):
+            match c.body:
+                case ClosureBody.Expr(x):
+                    expr(ast, x, mut out)
+                case ClosureBody.Block(b):
+                    block(ast, b, mut out)
+        case ExprKind.If(branches, else_):
+            for (c, v) in branches:
+                expr(ast, c, mut out)
+                expr(ast, v, mut out)
+            if let Some(x) = else_:
+                expr(ast, x, mut out)
+        case ExprKind.Match(scrutinee, arms):
+            expr(ast, scrutinee, mut out)
+            for a in arms:
+                arm(ast, a, mut out)
+        case ExprKind.FieldOf(base, field):
+            expr(ast, base, mut out)
+            expr(ast, field, mut out)
+        case _:
+            pass
+
+pure def arm(ast: Ast, a: Arm, mut out: list[ExprId]):
+    if let Some(g) = a.guard:
+        expr(ast, g, mut out)
+    match a.body:
+        case ArmBody.Expr(x):
+            expr(ast, x, mut out)
+        case ArmBody.Block(b):
+            block(ast, b, mut out)
+    if let Some(g) = a.generated:
+        match ast.arm_gen(g):
+            case ArmGen.For(_, iter, arms):
+                expr(ast, iter, mut out)
+                for x in arms:
+                    arm(ast, x, mut out)
+            case ArmGen.If(c, then, else_):
+                expr(ast, c, mut out)
+                for x in then:
+                    arm(ast, x, mut out)
+                for x in else_:
+                    arm(ast, x, mut out)

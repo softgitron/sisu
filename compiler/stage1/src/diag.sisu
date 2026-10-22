@@ -162,6 +162,33 @@ pub enum Msg:
     TypeMissingField
     TypeNoConstructor
     TypeUnknownAssociated
+    TypeAmbiguousMethod
+    TypeArmNeedsExpression
+    TypeBindingsInOrPattern
+    TypeClosureParameterCount
+    TypeCoalesce
+    TypeConstPattern
+    TypeItOutsideClosure
+    TypeNonExhaustive
+    TypeNotAStructPattern
+    TypeNotIterable
+    TypeOpenSetNeedsWildcard
+    TypeOptionalChain
+    TypeOwnClosureCapture
+    TypeOwnClosureChanges
+    TypePatternFieldCount
+    TypePatternMismatch
+    TypeRestOutsideArguments
+    TypeSelfTypeOutside
+    TypeStarOutsideList
+    TypeUnknownVariant
+    TypeUnpackCount
+    TypeUnreachableArm
+    TypeViewToDyn
+    TypeYieldOutsideGenerator
+    TypeRemovePure
+    TypeGeneratorResult
+    TypeStructuralOnly
 
 impl Msg:
     ## The catalog identifier.
@@ -317,6 +344,33 @@ impl Msg:
             case TypeMissingField: "type.missing-field"
             case TypeNoConstructor: "type.no-constructor"
             case TypeUnknownAssociated: "type.unknown-associated"
+            case TypeAmbiguousMethod: "type.ambiguous-method"
+            case TypeArmNeedsExpression: "type.arm-needs-expression"
+            case TypeBindingsInOrPattern: "type.bindings-in-or-pattern"
+            case TypeClosureParameterCount: "type.closure-parameter-count"
+            case TypeCoalesce: "type.coalesce"
+            case TypeConstPattern: "type.const-pattern"
+            case TypeItOutsideClosure: "type.it-outside-closure"
+            case TypeNonExhaustive: "type.non-exhaustive"
+            case TypeNotAStructPattern: "type.not-a-struct-pattern"
+            case TypeNotIterable: "type.not-iterable"
+            case TypeOpenSetNeedsWildcard: "type.open-set-needs-wildcard"
+            case TypeOptionalChain: "type.optional-chain"
+            case TypeOwnClosureCapture: "type.own-closure-capture"
+            case TypeOwnClosureChanges: "type.own-closure-changes"
+            case TypePatternFieldCount: "type.pattern-field-count"
+            case TypePatternMismatch: "type.pattern-mismatch"
+            case TypeRestOutsideArguments: "type.rest-outside-arguments"
+            case TypeSelfTypeOutside: "type.self-type-outside"
+            case TypeStarOutsideList: "type.star-outside-list"
+            case TypeUnknownVariant: "type.unknown-variant"
+            case TypeUnpackCount: "type.unpack-count"
+            case TypeUnreachableArm: "type.unreachable-arm"
+            case TypeViewToDyn: "type.view-to-dyn"
+            case TypeYieldOutsideGenerator: "type.yield-outside-generator"
+            case TypeRemovePure: "type.remove-pure"
+            case TypeGeneratorResult: "type.generator-result"
+            case TypeStructuralOnly: "type.structural-only"
 
 ## A byte range of a text: from `start` up to, not including, `end`.
 @derive(Eq, Hash, Debug, Copy)
