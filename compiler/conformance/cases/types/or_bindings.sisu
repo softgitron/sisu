@@ -1,0 +1,25 @@
+# Every alternative of `|` binds the same names, of the same types.
+
+enum Shape:
+    Circle(r: int, label: String)
+    Square(side: int)
+    Named(label: String)
+
+def missing(s: Shape) -> int:
+    match s:
+        case Shape.Circle(r, _) | Shape.Square(side):
+            return 1
+        case Shape.Named(_):
+            return 2
+
+def mismatched(s: Shape) -> int:
+    match s:
+        case Shape.Square(x) | Shape.Named(x):
+            return 1
+        case _:
+            return 2
+
+def not_exhaustive(s: Shape) -> int:
+    match s:
+        case Shape.Circle(n, _) | Shape.Square(n):
+            return n

@@ -9,6 +9,7 @@
 //! `compiler/conformance/README.md`.
 
 pub mod diff;
+pub mod native;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -171,12 +172,22 @@ pub fn invoke_with_input(sisu: &Path, cwd: &Path, args: &[String], input: Option
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn();
+    wait_output(spawned, input, sisu)
+}
+
+/// Waits for a spawned command (killing it past [`TIMEOUT`]), feeding it
+/// `input`, and collects what it printed.
+pub(crate) fn wait_output(
+    spawned: std::io::Result<std::process::Child>,
+    input: Option<&str>,
+    program: &Path,
+) -> Output {
     let mut child = match spawned {
         Ok(c) => c,
         Err(e) => {
             return Output {
                 stdout: String::new(),
-                stderr: format!("cannot run {}: {e}", sisu.display()),
+                stderr: format!("cannot run {}: {e}", program.display()),
                 status: -1,
             };
         }

@@ -47,8 +47,14 @@ impl Checker<'_> {
                     }
                     _ => (t.clone(), BindMode::Value),
                 };
+                // A later alternative of `|` binds the first one's locals.
+                if let Some(l) = self.or_alt_local(&n.text, &lty, n.range) {
+                    return Pat { kind: PatKind::Bind { local: l, mode }, ty: t, span };
+                }
                 let l = self.new_local(&n.text, lty.clone(), mutable, self.span(n.range));
-                self.declare(&n.text, l, warn, n.range);
+                if self.or_alt.is_none() {
+                    self.declare(&n.text, l, warn, n.range);
+                }
                 return Pat { kind: PatKind::Bind { local: l, mode }, ty: t, span };
             }
             ast::PatKind::Literal(e) => self.literal_pat(e, &t),
@@ -111,8 +117,13 @@ impl Checker<'_> {
                         let binding = name.as_ref().map(|n| {
                             let lt = Ty::Ref(Box::new(t.clone()), false);
                             let lt = if by_ref.is_some() { lt } else { t.clone() };
+                            if let Some(l) = self.or_alt_local(&n.text, &lt, n.range) {
+                                return l;
+                            }
                             let l = self.new_local(&n.text, lt, mutable, self.span(n.range));
-                            self.declare(&n.text, l, warn, n.range);
+                            if self.or_alt.is_none() {
+                                self.declare(&n.text, l, warn, n.range);
+                            }
                             l
                         });
                         rest = Some(binding);
@@ -134,17 +145,62 @@ impl Checker<'_> {
                 PatKind::Error
             }
             ast::PatKind::Or(ps) => {
-                let before = self.locals.len();
-                let pats: Vec<Pat> =
-                    ps.iter().map(|sp| self.check_pat_with(sp, &t, by_ref, mutable, warn)).collect();
-                if self.locals.len() > before {
-                    let d = self.error(msg::TYPE_BINDINGS_IN_OR_PATTERN, p.range);
-                    self.report(d);
+                // Every alternative binds the same names, of the same types
+                // (PEP 634, D-055): the first declares them, and each later
+                // one binds the same locals, so the arm sees one of each.
+                let mut pats: Vec<Pat> = Vec::new();
+                let mut names: Vec<(String, LocalId)> = Vec::new();
+                for (i, sp) in ps.iter().enumerate() {
+                    if i == 0 {
+                        let pat = self.check_pat_with(sp, &t, by_ref, mutable, warn);
+                        for l in pattern_bindings(&pat) {
+                            names.push((self.locals[l.0 as usize].name.clone(), l));
+                        }
+                        pats.push(pat);
+                        continue;
+                    }
+                    let outer =
+                        self.or_alt.replace(OrAlt { names: names.clone(), seen: vec![false; names.len()] });
+                    let pat = self.check_pat_with(sp, &t, by_ref, mutable, warn);
+                    let alt = std::mem::replace(&mut self.or_alt, outer);
+                    // A name of the first alternative this one does not bind.
+                    if let Some(alt) = alt
+                        && let Some(k) = alt.seen.iter().position(|s| !s)
+                    {
+                        let d = self
+                            .error(msg::TYPE_BINDINGS_IN_OR_PATTERN, sp.range)
+                            .with("name", alt.names[k].0.clone());
+                        self.report(d);
+                    }
+                    pats.push(pat);
                 }
                 PatKind::Or(pats)
             }
         };
         Pat { kind, ty: t, span }
+    }
+
+    /// In an alternative of `|` after the first, the local the first bound
+    /// for `name`, its type unified with this binding's; a name the first
+    /// did not bind is reported, and gets a local the arm cannot see.
+    fn or_alt_local(&mut self, name: &str, lty: &Ty, range: TextRange) -> Option<LocalId> {
+        let alt = self.or_alt.as_mut()?;
+        let Some(k) = alt.names.iter().position(|(n, _)| n == name) else {
+            let d = self.error(msg::TYPE_BINDINGS_IN_OR_PATTERN, range).with("name", name.to_string());
+            self.report(d);
+            return None;
+        };
+        alt.seen[k] = true;
+        let l = alt.names[k].1;
+        let first = self.locals[l.0 as usize].ty.clone();
+        if !self.infer.try_unify(&first, lty) {
+            let d = self
+                .error(msg::TYPE_MISMATCH, range)
+                .with("expected", self.show(&first))
+                .with("found", self.show(lty));
+            self.report(d);
+        }
+        Some(l)
     }
 
     fn literal_pat(&mut self, e: &ast::Expr, t: &Ty) -> PatKind {
@@ -372,4 +428,48 @@ fn path_expr(names: &[ast::Name]) -> ast::ExprKind {
         kind = ast::ExprKind::Field { base: Box::new(base), name: n.clone() };
     }
     kind
+}
+
+/// The names an alternative of `|` must bind in each of the others: the
+/// first alternative's.
+pub(crate) struct OrAlt {
+    pub names: Vec<(String, LocalId)>,
+    pub seen: Vec<bool>,
+}
+
+/// The locals a pattern binds, in order (an or-pattern's are its first
+/// alternative's, which every alternative binds).
+pub fn pattern_bindings(p: &Pat) -> Vec<LocalId> {
+    let mut out = Vec::new();
+    collect_bindings(p, &mut out);
+    out
+}
+
+fn collect_bindings(p: &Pat, out: &mut Vec<LocalId>) {
+    match &p.kind {
+        PatKind::Bind { local, .. } => out.push(*local),
+        PatKind::Variant { fields, .. } | PatKind::Struct { fields, .. } | PatKind::Tuple(fields) => {
+            for f in fields {
+                collect_bindings(f, out);
+            }
+        }
+        PatKind::Deref(inner) => collect_bindings(inner, out),
+        PatKind::Or(alts) => {
+            if let Some(first) = alts.first() {
+                collect_bindings(first, out);
+            }
+        }
+        PatKind::List { prefix, rest, suffix } => {
+            for f in prefix {
+                collect_bindings(f, out);
+            }
+            if let Some(Some(r)) = rest {
+                out.push(*r);
+            }
+            for f in suffix {
+                collect_bindings(f, out);
+            }
+        }
+        PatKind::Wild | PatKind::Lit(_) | PatKind::Error => {}
+    }
 }

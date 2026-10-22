@@ -15,6 +15,7 @@ pub mod items;
 pub mod json;
 pub mod lsp;
 pub mod manifest;
+mod native;
 pub mod package;
 pub mod repl;
 pub mod replay;

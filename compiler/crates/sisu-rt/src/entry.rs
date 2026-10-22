@@ -1,0 +1,442 @@
+//! The runtime's entry points, as the code generator calls them
+//! ([`crate::abi::sym`]). Each takes raw addresses that the generated code
+//! guarantees, as its documentation in `abi` describes.
+
+use crate::abi::{self, IntOp, Kind, ValueOp};
+use crate::mem::{self, Text};
+use crate::rt::{self, ty};
+use crate::value;
+use sisu_diag::msg;
+use std::ffi::{CStr, c_char};
+use std::sync::atomic::AtomicI64;
+
+pub(crate) const EXIT_OK: i32 = 0;
+pub(crate) const EXIT_ERROR: i32 = 1;
+pub(crate) const EXIT_PANIC: i32 = 101;
+pub(crate) const EXIT_ABORT: i32 = 134;
+
+/// The host stack the program runs on: native frames are larger than the
+/// interpreter's, and 100 000 of them must fit (`abi::MAX_DEPTH`).
+const STACK_BYTES: usize = 1 << 30;
+
+/// The nested calls of the program, counted by the generated code.
+#[unsafe(no_mangle)]
+pub static SISU_RT_DEPTH: AtomicI64 = AtomicI64::new(0);
+
+/// The program's arguments, after its name.
+static ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+pub(crate) fn args() -> &'static [String] {
+    ARGS.get().map(Vec::as_slice).unwrap_or(&[])
+}
+
+type EntryFn = unsafe extern "C" fn(*mut u8) -> u8;
+type SystemEntryFn = unsafe extern "C" fn(*mut u8, *mut u8) -> u8;
+
+/// The host's objects behind the root capabilities: their addresses are
+/// the handles of the `System` `main` receives (the backend calls the
+/// host's operations on them directly).
+static HOST_OBJECTS: [u64; 7] = [0; 7];
+
+/// Runs the program: decodes its type table, runs `entry` on a thread
+/// with a large stack, and reports how it ended, as the interpreter does.
+///
+/// # Safety
+/// The arguments are the generated `main`'s: the process's arguments, the
+/// entry function, and the program's tables.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+unsafe extern "C" fn sisu_rt_start(
+    argc: i32,
+    argv: *const *const c_char,
+    entry: usize,
+    flags: u32,
+    ret_ty: u32,
+    types: *const u8,
+    types_len: u64,
+    fns: *const usize,
+    fns_len: u64,
+) -> i32 {
+    // SAFETY: the generated `main` passes its tables and the C runtime's
+    // arguments.
+    let (table, fns, args) = unsafe {
+        let bytes = std::slice::from_raw_parts(types, types_len as usize);
+        let fns = std::slice::from_raw_parts(fns, fns_len as usize).to_vec();
+        let mut args = Vec::new();
+        for i in 1..argc.max(0) as usize {
+            let a = *argv.add(i);
+            if !a.is_null() {
+                args.push(CStr::from_ptr(a).to_string_lossy().into_owned());
+            }
+        }
+        (crate::abi::decode(bytes), fns, args)
+    };
+    let Some(table) = table else { rt::internal("the program's type table does not decode") };
+    rt::init(table, fns);
+    let _ = ARGS.set(args);
+    let run = move || {
+        let size = ty(ret_ty).size.max(8) as usize;
+        let mut ret = vec![0u64; size.div_ceil(8)];
+        let r = ret.as_mut_ptr() as *mut u8;
+        let status = if flags & abi::ENTRY_SYSTEM != 0 {
+            let mut sys: Vec<u64> = HOST_OBJECTS.iter().map(|o| o as *const u64 as u64).collect();
+            // SAFETY: `entry` is the program's `main`, taking a `System`.
+            let f = unsafe { std::mem::transmute::<usize, SystemEntryFn>(entry) };
+            // SAFETY: `ret` has room for `main`'s result and `sys` holds a
+            // `System`'s seven handles.
+            unsafe { f(r, sys.as_mut_ptr() as *mut u8) }
+        } else {
+            // SAFETY: `entry` is the program's `main`, of this signature.
+            let f = unsafe { std::mem::transmute::<usize, EntryFn>(entry) };
+            // SAFETY: `ret` has room for `main`'s result.
+            unsafe { f(r) }
+        };
+        let code = if status != abi::OK {
+            match rt::take_panic() {
+                Some(p) => {
+                    let mut text = rt::render(msg::RUN_PANIC_HEADER, &[("message", p.message)]);
+                    text.push('\n');
+                    for line in &p.stack {
+                        text.push_str("  ");
+                        text.push_str(line);
+                        text.push('\n');
+                    }
+                    rt::stderr(&text);
+                }
+                None => rt::internal("a panic left `main` without its message"),
+            }
+            EXIT_PANIC
+        } else if flags & abi::ENTRY_RESULT != 0 {
+            // SAFETY: the result is a `Result` of type `ret_ty`.
+            unsafe { main_result(r, ret_ty) }
+        } else {
+            EXIT_OK
+        };
+        rt::flush();
+        code
+    };
+    match std::thread::Builder::new().name("sisu-main".into()).stack_size(STACK_BYTES).spawn(run) {
+        Ok(h) => h.join().unwrap_or(EXIT_ABORT),
+        Err(_) => rt::internal("the program's thread could not start"),
+    }
+}
+
+/// The exit status of a `main` that returned `T ! E`: an error is printed
+/// with its `Debug` text and its return trace (decision 22).
+///
+/// # Safety
+/// `r` must hold a `Result` of type `t`.
+unsafe fn main_result(r: *mut u8, t: u32) -> i32 {
+    let Kind::Result(_, err) = ty(t).kind else { return EXIT_OK };
+    // SAFETY: the tag and the payload are where a result has them.
+    unsafe {
+        if mem::word(r, 0) == 0 {
+            return EXIT_OK;
+        }
+        let e = r.add(8);
+        let mut out = Vec::new();
+        value::debug(&mut out, e, err);
+        let mut text =
+            rt::render(msg::RUN_ERROR_RETURNED, &[("error", String::from_utf8_lossy(&out).into_owned())]);
+        text.push('\n');
+        for line in crate::intrinsics::trace_lines(e, err) {
+            text.push_str("  ");
+            text.push_str(&rt::render(msg::RUN_TRACE_LINE, &[("location", line)]));
+            text.push('\n');
+        }
+        rt::stderr(&text);
+    }
+    EXIT_ERROR
+}
+
+/// A panic leaves a frame of the program: a line of its stack trace.
+///
+/// # Safety
+/// The texts are valid UTF-8 of these lengths.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_frame(
+    name: *const u8,
+    name_len: u64,
+    file: *const u8,
+    file_len: u64,
+    line: u64,
+    col: u64,
+) {
+    // SAFETY: the generated code passes its static texts.
+    let (name, file) = unsafe {
+        (mem::Str { ptr: name, len: name_len }.bytes(), mem::Str { ptr: file, len: file_len }.bytes())
+    };
+    let file = String::from_utf8_lossy(file);
+    let location = if line == 0 { file.into_owned() } else { format!("{file}:{line}:{col}") };
+    let text = rt::render(
+        msg::RUN_FRAME,
+        &[("function", String::from_utf8_lossy(name).into_owned()), ("location", location)],
+    );
+    rt::add_frame(text);
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_abort_unwind() {
+    rt::abort_unwinding()
+}
+
+/// Integer overflow in `x op y` (or `op x` for a unary one).
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_panic_overflow(op: u32, x: i64, y: i64) -> u8 {
+    let expr = match IntOp::from_code(op) {
+        Some(IntOp::Neg) => format!("-({x})"),
+        Some(IntOp::Abs) => format!("abs({x})"),
+        Some(o) => format!("{x} {} {y}", o.symbol()),
+        None => format!("{x} ? {y}"),
+    };
+    rt::raise_msg(msg::PANIC_OVERFLOW, &[("expr", expr)])
+}
+
+/// An index outside a list of `len` elements (`from_end` for `xs[^i]`).
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_panic_index(index: i64, len: i64, from_end: u64) -> u8 {
+    if index < 0 && from_end == 0 {
+        return rt::raise_msg(msg::PANIC_NEGATIVE_INDEX, &[("index", index.to_string())]);
+    }
+    let shown = if from_end != 0 { format!("^{index}") } else { index.to_string() };
+    rt::raise_msg(msg::PANIC_INDEX_OUT_OF_BOUNDS, &[("len", len.to_string()), ("index", shown)])
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_panic_stack() -> u8 {
+    rt::raise_msg(msg::PANIC_STACK_OVERFLOW, &[("depth", abi::MAX_DEPTH.to_string())])
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_panic_unreachable() -> u8 {
+    rt::raise_msg(msg::PANIC_UNREACHABLE_PLAIN, &[])
+}
+
+/// `x op y` for the operations that can fail other than by overflow, with
+/// the interpreter's rules (`//` floors, `%` takes the divisor's sign).
+///
+/// # Safety
+/// `out` must be a word.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_int_op(op: u32, x: i64, y: i64, out: *mut i64) -> u8 {
+    match int_op(op, x, y) {
+        Ok(v) => {
+            // SAFETY: `out` is a word.
+            unsafe { out.write(v) };
+            abi::OK
+        }
+        Err(status) => status,
+    }
+}
+
+pub(crate) fn int_op(op: u32, x: i64, y: i64) -> Result<i64, u8> {
+    let Some(o) = IntOp::from_code(op) else { rt::internal("an unknown integer operation") };
+    let overflow = || sisu_rt_panic_overflow(op, x, y);
+    match o {
+        IntOp::Add => x.checked_add(y).ok_or_else(overflow),
+        IntOp::Sub => x.checked_sub(y).ok_or_else(overflow),
+        IntOp::Mul => x.checked_mul(y).ok_or_else(overflow),
+        IntOp::Neg => x.checked_neg().ok_or_else(overflow),
+        IntOp::Abs => x.checked_abs().ok_or_else(overflow),
+        IntOp::FloorDiv | IntOp::Mod if y == 0 => Err(rt::raise_msg(msg::PANIC_DIVIDE_BY_ZERO, &[])),
+        IntOp::FloorDiv => {
+            let q = x.checked_div(y).ok_or_else(overflow)?;
+            Ok(if x % y != 0 && ((x < 0) != (y < 0)) { q - 1 } else { q })
+        }
+        IntOp::Mod => {
+            let r = x.checked_rem(y).unwrap_or(0);
+            Ok(if r != 0 && ((r < 0) != (y < 0)) { r + y } else { r })
+        }
+        IntOp::Pow => {
+            if y < 0 {
+                return Err(rt::raise_msg(msg::PANIC_NEGATIVE_EXPONENT, &[("expr", format!("{x} ** {y}"))]));
+            }
+            match u32::try_from(y) {
+                Ok(e) => x.checked_pow(e).ok_or_else(overflow),
+                Err(_) => match x {
+                    0 | 1 => Ok(x),
+                    -1 => Ok(if y % 2 == 0 { 1 } else { -1 }),
+                    _ => Err(overflow()),
+                },
+            }
+        }
+        IntOp::Shl | IntOp::Shr => {
+            if !(0..64).contains(&y) {
+                return Err(rt::raise_msg(msg::PANIC_SHIFT_OUT_OF_RANGE, &[("amount", y.to_string())]));
+            }
+            Ok(if o == IntOp::Shl { x << y } else { x >> y })
+        }
+    }
+}
+
+/// `%`, `**` and `//` on `f64` (decision 18 for `%`).
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_float_op(op: u32, x: f64, y: f64) -> f64 {
+    match op {
+        abi::FLOAT_MOD => float_mod(x, y),
+        abi::FLOAT_POW => x.powf(y),
+        _ => (x / y).floor(),
+    }
+}
+
+pub(crate) fn float_mod(x: f64, y: f64) -> f64 {
+    let r = x % y;
+    if r == 0.0 {
+        0.0f64.copysign(y)
+    } else if (r < 0.0) != (y < 0.0) {
+        r + y
+    } else {
+        r
+    }
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_alloc(bytes: u64) -> *mut u8 {
+    mem::alloc(bytes as usize)
+}
+
+/// Drops the value at `p` of type `t`.
+///
+/// # Safety
+/// `p` must hold a value of type `t`, dead afterwards.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_drop(p: *mut u8, t: u32) -> u8 {
+    // SAFETY: as the caller guarantees.
+    unsafe { value::drop_value(p, t) }
+}
+
+/// `.copy()`.
+///
+/// # Safety
+/// `src` must hold a value of type `t` and `dst` have room for one.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_copy(dst: *mut u8, src: *mut u8, t: u32) {
+    // SAFETY: as the caller guarantees.
+    unsafe { value::copy_value(dst, src, t) }
+}
+
+/// An operator on values that are not numbers: the comparisons write a
+/// `bool` word at `dst`, `+` on texts a `String`.
+///
+/// # Safety
+/// `a` and `b` must hold values of their types, and `dst` have room for
+/// the result.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_binary(op: u32, dst: *mut u8, a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> u8 {
+    let Some(o) = ValueOp::from_code(op) else { rt::internal("an unknown operator") };
+    // SAFETY: as the caller guarantees.
+    unsafe {
+        let r = match o {
+            ValueOp::Eq => value::equal(a, ta, b, tb),
+            ValueOp::Ne => !value::equal(a, ta, b, tb),
+            ValueOp::Lt | ValueOp::Le | ValueOp::Gt | ValueOp::Ge => match value::compare(a, ta, b, tb) {
+                None => false,
+                Some(c) => match o {
+                    ValueOp::Lt => c.is_lt(),
+                    ValueOp::Le => c.is_le(),
+                    ValueOp::Gt => c.is_gt(),
+                    _ => c.is_ge(),
+                },
+            },
+            ValueOp::In => crate::intrinsics::contains(b, tb, a, ta),
+            ValueOp::Concat => {
+                let x = value::text(a, ta).unwrap_or(&[]);
+                let y = value::text(b, tb).unwrap_or(&[]);
+                let mut t = Text::from_bytes(x);
+                t.push(y);
+                (dst as *mut Text).write(t);
+                return abi::OK;
+            }
+        };
+        mem::set_word(dst, 0, u64::from(r));
+    }
+    abi::OK
+}
+
+/// A call of an intrinsic: `desc` says which and the types of its
+/// result, arguments and type arguments ([`abi::CallDesc`]); `args` holds
+/// the arguments' addresses.
+///
+/// # Safety
+/// The descriptor and the addresses are the generated code's.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_intrinsic(desc: *const u32, ret: *mut u8, args: *const *mut u8) -> u8 {
+    // SAFETY: as the caller guarantees.
+    unsafe { crate::intrinsics::call(desc, ret, args) }
+}
+
+/// A `dict` or `set` (of type `t`) from a literal's `n` entries, moved in
+/// from `items` (each the key's words, then the value's): a key given again
+/// replaces the value and is itself dropped, as `insert` does.
+///
+/// # Safety
+/// `items` must hold `n` entries of the type's key and value, and `out`
+/// have room for a word.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_table(t: u32, items: *mut u8, n: u64, out: *mut u8) -> u8 {
+    let (k, v) = match ty(t).kind {
+        Kind::Dict(k, v) => (k, v),
+        Kind::Set(e) => (e, u32::MAX),
+        _ => rt::internal("a table literal of an unknown type"),
+    };
+    let mut table = crate::dict::Table::new(k, v);
+    let (ksize, vsize) = (table.ksize as usize, table.vsize as usize);
+    let mut status = abi::OK;
+    // SAFETY: the entries are in `items`.
+    unsafe {
+        for i in 0..n as usize {
+            let key = items.add(i * (ksize + vsize));
+            let val = key.add(ksize);
+            match table.position(key, k) {
+                Some(j) => {
+                    status = value::after_part(status, value::drop_value(table.val_at(j), v));
+                    mem::copy(table.val_at(j), val, vsize);
+                    status = value::after_part(status, value::drop_value(key, k));
+                }
+                None => {
+                    let j = table.push_key(key);
+                    mem::copy(table.val_at(j), val, vsize);
+                }
+            }
+        }
+        mem::set_word(out, 0, crate::dict::into_word(table));
+    }
+    status
+}
+
+/// The address of the value the dict at `d` holds for the key at `key`
+/// (`d{k}`), written at `out`: a missing key panics (`SLOT_READ`), is
+/// inserted, with a copy of the key and the value left to the caller
+/// (`SLOT_WRITE`), or gives null (`SLOT_DROP`).
+///
+/// # Safety
+/// `d` must hold a dict, `key` a key of type `key_ty`, and `out` be a word.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_dict_slot(d: *mut u8, key: *mut u8, key_ty: u32, mode: u32, out: *mut u8) -> u8 {
+    // SAFETY: as the caller guarantees.
+    unsafe {
+        let t = crate::dict::table(d);
+        let at = match t.position(key, key_ty) {
+            Some(i) => t.val_at(i),
+            None if mode == abi::SLOT_WRITE => {
+                let mut k = vec![0u64; (t.ksize as usize).div_ceil(8)];
+                let kp = k.as_mut_ptr() as *mut u8;
+                crate::dict::copy_key(kp, key, key_ty);
+                let i = t.push_key(kp);
+                t.val_at(i)
+            }
+            None if mode == abi::SLOT_DROP => std::ptr::null_mut(),
+            None => {
+                let mut shown = Vec::new();
+                let (p, kt) = value::target(key, key_ty);
+                value::debug(&mut shown, p, kt);
+                return rt::raise_msg(
+                    msg::PANIC_MISSING_KEY,
+                    &[("key", String::from_utf8_lossy(&shown).into_owned())],
+                );
+            }
+        };
+        mem::set_word(out, 0, at as u64);
+    }
+    abi::OK
+}

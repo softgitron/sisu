@@ -250,13 +250,26 @@ impl FnLower<'_, '_> {
                     _ => None,
                 };
                 self.switch_to(ok);
-                let payload = t.project(sir::Proj::Downcast(0)).project(sir::Proj::Field(0));
+                let mut payload = t.project(sir::Proj::Downcast(0)).project(sir::Proj::Field(0));
+                // The checker decays the target as a plain `let` does: a
+                // `Copy` value behind a reference (`xs.first()` of a list
+                // of `Copy` structs) is bound as a copy of the value.
+                let payload_is_ref = match self.ctx.ty(&init.ty) {
+                    sir::Type::Named(_, args) => matches!(args.first(), Some(sir::Type::Ref(..))),
+                    _ => false,
+                };
+                if payload_is_ref && !matches!(self.ctx.ty(&pat.ty), sir::Type::Ref(..)) {
+                    payload = payload.project(sir::Proj::Deref);
+                }
+                // A pattern's bindings, like a name's, are made on both
+                // paths and registered once where they join, in the block
+                // around the statement.
                 match binding {
                     Some((_, l)) => {
                         let v = self.copy_or_move(payload, &pat.ty);
                         self.assign(Place::local(l), Rvalue::Use(v), loc);
                     }
-                    None => self.bind(pat, &payload),
+                    None => self.bind_values(pat, &payload),
                 }
                 self.goto(join);
                 self.switch_to(other);
@@ -277,7 +290,7 @@ impl FnLower<'_, '_> {
                             Some((_, l)) => self.into(Place::local(l), value),
                             None => {
                                 let p = self.place_of(value);
-                                self.bind(pat, &p);
+                                self.bind_values(pat, &p);
                             }
                         }
                         self.pop_scope();
@@ -301,8 +314,9 @@ impl FnLower<'_, '_> {
                     }
                 }
                 self.switch_to(join);
-                if let Some((tl, l)) = binding {
-                    self.bind_registered(tl, l, &pat.ty, 1);
+                match binding {
+                    Some((tl, l)) => self.bind_registered(tl, l, &pat.ty, 1),
+                    None => self.register_bindings(pat, 1),
                 }
             }
             (None, Some(e)) => {
@@ -387,8 +401,12 @@ impl FnLower<'_, '_> {
         };
         let loc = self.ctx.loc(head);
         self.push_scope();
-        // A type that implements `Iterator` is driven through the trait.
-        let iter_ty = if mode == ForMode::Trait {
+        // A type that implements `Iterator` is driven through the trait. An
+        // `Iter` behind a reference (a borrowed parameter) is driven through
+        // the reference: the loop's local holds the reference, and the
+        // caller keeps (and drops) the iterator.
+        let borrowed_iter = mode == ForMode::Iter && matches!(iter.ty, Ty::Ref(..));
+        let iter_ty = if mode == ForMode::Trait || borrowed_iter {
             self.ctx.ty(&iter.ty)
         } else {
             sir::Type::Named("Iter".into(), vec![self.ctx.ty(item)])
@@ -432,8 +450,10 @@ impl FnLower<'_, '_> {
             }
             ForMode::Iter | ForMode::Trait => self.into(Place::local(it), iter),
         }
-        self.register(DropEntry::Local(it));
-        self.split();
+        if !borrowed_iter {
+            self.register(DropEntry::Local(it));
+            self.split();
+        }
         let head = self.new_block();
         let exit = self.new_block();
         self.goto(head);

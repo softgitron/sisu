@@ -92,6 +92,9 @@ pub(crate) struct Checker<'p> {
     /// The `T !` functions whose inferred error set the body read: what
     /// the per-item query of the body depends on besides the interface.
     pub inferred_reads: std::cell::RefCell<Vec<DefId>>,
+    /// While an alternative of `|` after the first is checked: the names
+    /// the first bound, which this one must bind to the same locals.
+    pub or_alt: Option<crate::pat::OrAlt>,
 }
 
 impl<'p> Checker<'p> {
@@ -138,6 +141,7 @@ impl<'p> Checker<'p> {
             cap_checks: Vec::new(),
             ensures: None,
             inferred_reads: std::cell::RefCell::new(Vec::new()),
+            or_alt: None,
         }
     }
 

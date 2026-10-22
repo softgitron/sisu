@@ -1,0 +1,211 @@
+//! Raw memory: the heap, and the headers of texts and lists as
+//! [`crate::abi`] lays them out.
+
+unsafe extern "C" {
+    fn malloc(size: usize) -> *mut u8;
+    fn realloc(p: *mut u8, size: usize) -> *mut u8;
+    fn free(p: *mut u8);
+    fn memmove(dst: *mut u8, src: *const u8, n: usize) -> *mut u8;
+}
+
+/// `bytes` of heap memory, aligned for a word; null for none.
+pub(crate) fn alloc(bytes: usize) -> *mut u8 {
+    if bytes == 0 {
+        return std::ptr::null_mut();
+    }
+    // SAFETY: malloc may be called with any size; it returns memory
+    // aligned for any scalar or null.
+    let p = unsafe { malloc(bytes) };
+    if p.is_null() {
+        crate::rt::abort("out of memory");
+    }
+    p
+}
+
+/// Grows (or makes) a heap block.
+pub(crate) fn grow(p: *mut u8, bytes: usize) -> *mut u8 {
+    if bytes == 0 {
+        return p;
+    }
+    // SAFETY: `p` is null or a block this module allocated.
+    let q = unsafe { realloc(p, bytes) };
+    if q.is_null() {
+        crate::rt::abort("out of memory");
+    }
+    q
+}
+
+pub(crate) fn release(p: *mut u8) {
+    if !p.is_null() {
+        // SAFETY: `p` is a block this module allocated, released once.
+        unsafe { free(p) }
+    }
+}
+
+/// Copies `n` bytes; the regions may overlap.
+///
+/// # Safety
+/// Both regions must be valid for `n` bytes.
+pub(crate) unsafe fn copy(dst: *mut u8, src: *const u8, n: usize) {
+    if n > 0 && !std::ptr::eq(dst, src) {
+        // SAFETY: the caller guarantees both regions.
+        unsafe {
+            memmove(dst, src, n);
+        }
+    }
+}
+
+/// Reads the word at `p + off`.
+///
+/// # Safety
+/// `p + off` must be a valid, aligned word.
+pub(crate) unsafe fn word(p: *const u8, off: u32) -> u64 {
+    // SAFETY: the caller guarantees the word.
+    unsafe { (p.add(off as usize) as *const u64).read() }
+}
+
+/// Writes the word at `p + off`.
+///
+/// # Safety
+/// `p + off` must be a valid, aligned word.
+pub(crate) unsafe fn set_word(p: *mut u8, off: u32, v: u64) {
+    // SAFETY: the caller guarantees the word.
+    unsafe { (p.add(off as usize) as *mut u64).write(v) }
+}
+
+/// A `str`: a pointer to UTF-8 bytes and their length.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(crate) struct Str {
+    pub ptr: *const u8,
+    pub len: u64,
+}
+
+/// A `String` or a `Path`: a heap buffer, its length and capacity.
+#[repr(C)]
+pub(crate) struct Text {
+    pub ptr: *mut u8,
+    pub len: u64,
+    pub cap: u64,
+}
+
+/// A `list`: a heap buffer of elements, their number and the capacity.
+#[repr(C)]
+pub(crate) struct List {
+    pub ptr: *mut u8,
+    pub len: u64,
+    pub cap: u64,
+}
+
+impl Str {
+    /// The bytes it views.
+    ///
+    /// # Safety
+    /// The viewed bytes must outlive the slice.
+    pub(crate) unsafe fn bytes<'a>(self) -> &'a [u8] {
+        if self.len == 0 || self.ptr.is_null() {
+            return &[];
+        }
+        // SAFETY: the caller guarantees the bytes.
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len as usize) }
+    }
+}
+
+impl Text {
+    pub(crate) fn empty() -> Text {
+        Text { ptr: std::ptr::null_mut(), len: 0, cap: 0 }
+    }
+
+    /// A new text holding these bytes.
+    pub(crate) fn from_bytes(b: &[u8]) -> Text {
+        let mut t = Text::empty();
+        t.push(b);
+        t
+    }
+
+    pub(crate) fn push(&mut self, b: &[u8]) {
+        if b.is_empty() {
+            return;
+        }
+        let need = self.len + b.len() as u64;
+        if need > self.cap {
+            let cap = need.max(self.cap * 2).max(16);
+            self.ptr = grow(self.ptr, cap as usize);
+            self.cap = cap;
+        }
+        // SAFETY: the buffer holds `need` bytes, and `b` is not in it
+        // (a view of this text cannot be pushed onto it).
+        unsafe {
+            copy(self.ptr.add(self.len as usize), b.as_ptr(), b.len());
+        }
+        self.len = need;
+    }
+
+    /// The bytes it holds.
+    ///
+    /// # Safety
+    /// The text must outlive the slice and not change meanwhile.
+    pub(crate) unsafe fn bytes<'a>(&self) -> &'a [u8] {
+        if self.len == 0 || self.ptr.is_null() {
+            return &[];
+        }
+        // SAFETY: the caller guarantees the buffer.
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len as usize) }
+    }
+
+    pub(crate) fn release(&mut self) {
+        release(self.ptr);
+        *self = Text::empty();
+    }
+}
+
+impl List {
+    pub(crate) fn empty() -> List {
+        List { ptr: std::ptr::null_mut(), len: 0, cap: 0 }
+    }
+
+    /// The address of element `i` of elements of `size` bytes.
+    pub(crate) fn at(&self, i: u64, size: u32) -> *mut u8 {
+        // SAFETY: the caller indexes within the buffer (or one past it).
+        unsafe { self.ptr.add((i * u64::from(size)) as usize) }
+    }
+
+    /// Room for `extra` more elements.
+    pub(crate) fn reserve(&mut self, extra: u64, size: u32) {
+        let need = self.len + extra;
+        if need > self.cap {
+            let cap = need.max(self.cap * 2).max(4);
+            self.ptr = grow(self.ptr, (cap * u64::from(size.max(1))) as usize);
+            self.cap = cap;
+        }
+    }
+
+    /// Appends the element at `src`, moving its bytes in.
+    ///
+    /// # Safety
+    /// `src` must hold `size` bytes outside the list's buffer.
+    pub(crate) unsafe fn push(&mut self, src: *const u8, size: u32) {
+        self.reserve(1, size);
+        // SAFETY: there is room for one more element.
+        unsafe { copy(self.at(self.len, size), src, size as usize) };
+        self.len += 1;
+    }
+}
+
+/// The value at `p` as a reference to `T`.
+///
+/// # Safety
+/// `p` must point to a valid, aligned `T`.
+pub(crate) unsafe fn at<'a, T>(p: *mut u8) -> &'a mut T {
+    // SAFETY: the caller guarantees the value.
+    unsafe { &mut *(p as *mut T) }
+}
+
+/// The `str` at `p`.
+///
+/// # Safety
+/// `p` must hold a `str`.
+pub(crate) unsafe fn str_at(p: *const u8) -> Str {
+    // SAFETY: the caller guarantees the value.
+    unsafe { (p as *const Str).read() }
+}
