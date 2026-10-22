@@ -52,6 +52,9 @@ pub mod sym {
     pub const FLOAT_OP: &str = "sisu_rt_float_op";
     /// `sisu_rt_alloc(bytes) -> ptr`: heap memory for a list or a box.
     pub const ALLOC: &str = "sisu_rt_alloc";
+    /// `sisu_rt_free(ptr)`: frees what `sisu_rt_alloc` gave, once its
+    /// value is gone (a box's or a `dyn`'s cell whose value was moved out).
+    pub const FREE: &str = "sisu_rt_free";
     /// `sisu_rt_drop(value, ty) -> u8`: drops a value of a builtin type.
     pub const DROP: &str = "sisu_rt_drop";
     /// `sisu_rt_copy(dst, src, ty)`: `.copy()`.
@@ -91,6 +94,13 @@ pub mod sym {
     /// Where the running code calls an intrinsic that may wait, four words
     /// ([`super::SITE_FILE`] and the others): the deadlock report names it.
     pub const SITE: &str = "SISU_RT_SITE";
+    /// `sisu_rt_arena_slot(arena, key, mode, out) -> u8`: the address of
+    /// the value an arena holds for a key (`a{k}`), by the modes of
+    /// [`DICT_SLOT`]: a stale key panics, or gives null for a drop.
+    pub const ARENA_SLOT: &str = "sisu_rt_arena_slot";
+    /// `sisu_rt_shared_touch(value)`: code reached a `Shared`'s value, for
+    /// the cells another task than their maker reaches (`--stats`).
+    pub const SHARED_TOUCH: &str = "sisu_rt_shared_touch";
 }
 
 /// The words of [`sym::STACK`]. The probe at a function's entry compares
@@ -351,6 +361,12 @@ pub enum Kind {
     String,
     /// `Path`: as `String`.
     Path,
+    /// `bytes`: as `String`, a pointer to a heap buffer of the bytes, their
+    /// number and the capacity (decision 208).
+    Bytes,
+    /// `DateTime`: one word, nanoseconds since the epoch, which shows as
+    /// RFC 3339 text in UTC.
+    DateTime,
     /// `ref T`: one word, the address of the value; a reference to a
     /// `dyn` is two words, the `dyn`'s own, borrowed.
     Ref(u32),
@@ -369,11 +385,20 @@ pub enum Kind {
     Box(u32),
     /// A declared struct: its fields in order, and its drop glue (an
     /// index into the program's function table) when it has one.
-    Struct { name: String, fields: Vec<Field>, glue: Option<u32> },
+    Struct {
+        name: String,
+        fields: Vec<Field>,
+        glue: Option<u32>,
+    },
     /// A declared enum: a tag word, then the payload of the variant it
     /// holds; an error set's (`error`) starts with the number of its own
     /// type and a word for its return trace, and its tag follows them.
-    Enum { name: String, variants: Vec<Variant>, glue: Option<u32>, error: bool },
+    Enum {
+        name: String,
+        variants: Vec<Variant>,
+        glue: Option<u32>,
+        error: bool,
+    },
     /// A union of error sets: a value of one of the member enums (the
     /// numbers of their types), as that enum lays it out.
     ErrSet(Vec<u32>),
@@ -415,7 +440,29 @@ pub enum Kind {
     /// of `T`'s `invariant` check, which a guard dropped by unwinding runs
     /// (D-077).
     Guard(u32, Option<u32>),
+    /// `Shared[T]` and `Weak[T]`: one word, the address of the value in its
+    /// heap cell, whose header ([`SHARED_HEADER`] bytes: the owners, the
+    /// weak handles, the task that made it, and flags) is just before it.
+    Shared(u32),
+    Weak(u32),
+    /// `Cell[T]`: the value itself.
+    Cell(u32),
+    /// `Arena[T]`: one word, the address of a runtime object holding the
+    /// slots.
+    Arena(u32),
 }
+
+/// The bytes of a `Shared` cell's header, before its value, and its words
+/// from the start of the cell.
+pub const SHARED_HEADER: u32 = 32;
+pub const SHARED_STRONG: u32 = 0;
+pub const SHARED_WEAK: u32 = 8;
+pub const SHARED_CREATOR: u32 = 16;
+pub const SHARED_FLAGS: u32 = 24;
+/// [`SHARED_FLAGS`]: made by a site the escape analysis tagged may-cross;
+/// reached by another task than its maker.
+pub const SHARED_ATOMIC: u64 = 1;
+pub const SHARED_CROSSED: u64 = 2;
 
 /// The bytes of a `Mutex`'s header, before its value.
 pub const MUTEX_HEADER: u32 = 24;
@@ -438,6 +485,10 @@ pub struct Field {
     pub name: Option<String>,
     pub offset: u32,
     pub ty: u32,
+    /// Whether the type's drop glue drops the field. The glue leaves out a
+    /// field whose drop nothing observes (a `String`), which the runtime
+    /// drops itself after the glue (decision 217).
+    pub glue: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -523,6 +574,12 @@ const K_RECEIVER: u8 = 34;
 const K_TIMER: u8 = 35;
 const K_MUTEX: u8 = 36;
 const K_GUARD: u8 = 37;
+const K_SHARED: u8 = 38;
+const K_WEAK: u8 = 39;
+const K_CELL: u8 = 40;
+const K_ARENA: u8 = 41;
+const K_BYTES: u8 = 42;
+const K_DATETIME: u8 = 43;
 
 struct Writer(Vec<u8>);
 
@@ -552,6 +609,7 @@ impl Writer {
             }
             self.u32(f.offset);
             self.u32(f.ty);
+            self.u8(u8::from(f.glue));
         }
     }
 }
@@ -580,6 +638,8 @@ pub fn encode(table: &[TypeEntry]) -> Vec<u8> {
             Kind::Str => w.u8(K_STR),
             Kind::String => w.u8(K_STRING),
             Kind::Path => w.u8(K_PATH),
+            Kind::Bytes => w.u8(K_BYTES),
+            Kind::DateTime => w.u8(K_DATETIME),
             Kind::Ref(t) => {
                 w.u8(K_REF);
                 w.u32(*t);
@@ -685,6 +745,22 @@ pub fn encode(table: &[TypeEntry]) -> Vec<u8> {
                 w.u32(*t);
                 w.opt(*check);
             }
+            Kind::Shared(t) => {
+                w.u8(K_SHARED);
+                w.u32(*t);
+            }
+            Kind::Weak(t) => {
+                w.u8(K_WEAK);
+                w.u32(*t);
+            }
+            Kind::Cell(t) => {
+                w.u8(K_CELL);
+                w.u32(*t);
+            }
+            Kind::Arena(t) => {
+                w.u8(K_ARENA);
+                w.u32(*t);
+            }
         }
     }
     w.0
@@ -723,7 +799,8 @@ impl Reader<'_> {
             let name = if self.u8()? == 1 { Some(self.text()?) } else { None };
             let offset = self.u32()?;
             let ty = self.u32()?;
-            out.push(Field { name, offset, ty });
+            let glue = self.u8()? == 1;
+            out.push(Field { name, offset, ty, glue });
         }
         Some(out)
     }
@@ -751,6 +828,8 @@ pub fn decode(bytes: &[u8]) -> Option<Vec<TypeEntry>> {
             K_STR => Kind::Str,
             K_STRING => Kind::String,
             K_PATH => Kind::Path,
+            K_BYTES => Kind::Bytes,
+            K_DATETIME => Kind::DateTime,
             K_REF => Kind::Ref(r.u32()?),
             K_LIST => Kind::List(r.u32()?),
             K_ITER => Kind::Iter(r.u32()?),
@@ -810,6 +889,10 @@ pub fn decode(bytes: &[u8]) -> Option<Vec<TypeEntry>> {
             K_TIMER => Kind::Timer,
             K_MUTEX => Kind::Mutex(r.u32()?),
             K_GUARD => Kind::Guard(r.u32()?, r.opt()?),
+            K_SHARED => Kind::Shared(r.u32()?),
+            K_WEAK => Kind::Weak(r.u32()?),
+            K_CELL => Kind::Cell(r.u32()?),
+            K_ARENA => Kind::Arena(r.u32()?),
             _ => return None,
         };
         out.push(TypeEntry { size, kind });
@@ -936,6 +1019,7 @@ intrinsics! {
     StringClear = "String.clear",
     StringLen = "String.len",
     ListNew = "list.new",
+    ListWithCapacity = "list.with_capacity",
     ListPush = "list.push",
     ListPop = "list.pop",
     ListLast = "list.last",
@@ -1065,6 +1149,60 @@ intrinsics! {
     MutexLock = "Mutex.lock",
     MutexIsPoisoned = "Mutex.is_poisoned",
     MutexIntoInner = "Mutex.into_inner",
+    SharedNew = "Shared.new",
+    SharedNewAtomic = "Shared.new_atomic",
+    SharedGet = "Shared.get",
+    SharedDowngrade = "Shared.downgrade",
+    SharedCount = "Shared.count",
+    WeakUpgrade = "Weak.upgrade",
+    CellNew = "Cell.new",
+    CellGet = "Cell.get",
+    CellSet = "Cell.set",
+    CellReplace = "Cell.replace",
+    ArenaNew = "Arena.new",
+    ArenaInsert = "Arena.insert",
+    ArenaGet = "Arena.get",
+    ArenaGetMut = "Arena.get_mut",
+    ArenaRemove = "Arena.remove",
+    ArenaTake = "Arena.take",
+    ArenaContains = "Arena.contains",
+    ArenaKeys = "Arena.keys",
+    BytesNew = "bytes.new",
+    BytesFromHex = "bytes.from_hex",
+    BytesFromList = "bytes.from_list",
+    BytesAt = "bytes.at",
+    BytesGet = "bytes.get",
+    BytesIsEmpty = "bytes.is_empty",
+    BytesSlice = "bytes.slice",
+    BytesCut = "bytes.cut",
+    BytesIter = "bytes.iter",
+    BytesToList = "bytes.to_list",
+    BytesFind = "bytes.find",
+    BytesStartsWith = "bytes.starts_with",
+    BytesEndsWith = "bytes.ends_with",
+    BytesDecode = "bytes.decode",
+    BytesConcat = "bytes.concat",
+    StrEncode = "str.encode",
+    HostFsRead = "host.fs.read",
+    HostFsWrite = "host.fs.write",
+    CapNew = "cap.new",
+    CapCellNew = "Cap.new",
+    CapGet = "Cap.get",
+    CapLend = "cap.lend",
+    SystemAssemble = "System.assemble",
+    ClockFake = "Clock.fake",
+    TestClockAdvance = "TestClock.advance",
+    TestClockSet = "TestClock.set",
+    FmtStrftime = "fmt.strftime",
+    HostNetConnect = "host.net.connect",
+    HostNetListen = "host.net.listen",
+    HostNetAccept = "host.net.accept",
+    HostNetRead = "host.net.read",
+    HostNetWrite = "host.net.write",
+    HostNetClose = "host.net.close",
+    HostProcRun = "host.proc.run",
+    LiveBoundary = "live.boundary",
+    LiveEpoch = "live.epoch",
 }
 
 impl Intrinsic {
@@ -1098,7 +1236,7 @@ mod tests {
     #[test]
     fn the_type_table_round_trips() {
         let field =
-            |name: Option<&str>, offset: u32, ty: u32| Field { name: name.map(str::to_string), offset, ty };
+            |name: Option<&str>, offset: u32, ty: u32| Field { name: name.map(str::to_string), offset, ty, glue: ty % 2 == 0 };
         let kinds = vec![
             Kind::Unit,
             Kind::Int,
@@ -1113,6 +1251,8 @@ mod tests {
             Kind::Str,
             Kind::String,
             Kind::Path,
+            Kind::Bytes,
+            Kind::DateTime,
             Kind::Ref(1),
             Kind::List(2),
             Kind::Iter(3),
@@ -1147,6 +1287,10 @@ mod tests {
             Kind::Mutex(5),
             Kind::Guard(5, Some(2)),
             Kind::Guard(5, None),
+            Kind::Shared(6),
+            Kind::Weak(6),
+            Kind::Cell(7),
+            Kind::Arena(8),
         ];
         let table: Vec<TypeEntry> =
             kinds.into_iter().enumerate().map(|(i, kind)| TypeEntry { size: 8 * i as u32, kind }).collect();

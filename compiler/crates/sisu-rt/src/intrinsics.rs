@@ -146,7 +146,11 @@ impl Call<'_> {
 ///
 /// # Safety
 /// As `sisu_rt_intrinsic`.
-pub(crate) unsafe fn decode<'a>(desc: *const u32, ret: *mut u8, args: *const *mut u8) -> (Intrinsic, Call<'a>) {
+pub(crate) unsafe fn decode<'a>(
+    desc: *const u32,
+    ret: *mut u8,
+    args: *const *mut u8,
+) -> (Intrinsic, Call<'a>) {
     // SAFETY: the descriptor is `CallDesc::encode`'s and `args` holds one
     // address per argument.
     let c = unsafe {
@@ -181,6 +185,18 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
     use Intrinsic as I;
     // SAFETY: the arguments are of the types the descriptor gives.
     unsafe {
+        if let Some(st) = crate::cells::call(i, c) {
+            return st;
+        }
+        if let Some(st) = crate::bytes::call(i, c) {
+            return st;
+        }
+        if let Some(st) = crate::caps::call(i, c) {
+            return st;
+        }
+        if let Some(st) = crate::host::call_system(i, c) {
+            return st;
+        }
         match i {
             I::Print | I::PrintErr => {
                 let mut out = Vec::new();
@@ -200,7 +216,9 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                         String::from_utf8_lossy(b).chars().count() as u64
                     }
                     Kind::List(_) => mem::at::<List>(p).len,
+                    Kind::Bytes => mem::at::<Text>(p).len,
                     Kind::Dict(..) | Kind::Set(_) => crate::dict::table(p).len(),
+                    Kind::Arena(_) => crate::cells::arena_len(p),
                     _ => rt::internal("len of something without a length"),
                 };
                 c.set_word(n);
@@ -355,6 +373,9 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                     }
                     Kind::Set(_) => {
                         c.set_word(iter::into_word(iter::table_ref(crate::dict::table(p), iter::Part::Keys)))
+                    }
+                    Kind::Receiver(e) => {
+                        c.set_word(iter::into_word(iter::receiver(mem::word(p, 0) as u32, e)))
                     }
                     _ => rt::internal("iterating over a borrowed value that is not a collection"),
                 }
@@ -595,8 +616,9 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
             I::ErrorTracePush => {
                 let (p, _) = c.place(0);
                 let loc = c.text(1).to_vec().into_boxed_slice();
-                let prev = mem::word(p, abi::ERROR_TRACE) as *const TraceNode;
-                let node = Box::into_raw(Box::new(TraceNode { loc, prev }));
+                // The error's hold on its trace passes to the new node.
+                let prev = mem::word(p, abi::ERROR_TRACE) as *mut TraceNode;
+                let node = Box::into_raw(Box::new(TraceNode { refs: 1, loc, prev, _live: mem::Live::new() }));
                 mem::set_word(p, abi::ERROR_TRACE, node as u64);
             }
             I::ErrorTrace => {
@@ -745,6 +767,13 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 }
             }
             I::ListNew => (c.ret as *mut List).write(List::empty()),
+            I::ListWithCapacity => {
+                let mut l = List::empty();
+                if let Kind::List(e) = ty(c.ret_ty).kind {
+                    l.reserve(u64::try_from(c.int(0)).unwrap_or(0).min(1 << 20), ty(e).size);
+                }
+                (c.ret as *mut List).write(l);
+            }
             I::ListPush => {
                 let (l, e) = c.list(0);
                 l.push(c.arg(1), ty(e).size);
@@ -868,14 +897,13 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                     let lo = pre.min(l.len);
                     (lo, l.len.saturating_sub(suf).max(lo))
                 };
-                let copy = copies(l, e, lo, hi);
                 if matches!(ty(c.ret_ty).kind, Kind::Ref(_)) {
-                    // A `*rest` binding is a reference to a list of copies,
-                    // which lives on the heap and is never freed
-                    // (docs/port-debt.md, "Stage 2").
-                    c.set_word(Box::into_raw(Box::new(copy)) as u64);
+                    // A `*rest` binding views the elements in place
+                    // (decision 213).
+                    let (p, _) = c.place(0);
+                    c.set_word(crate::views::view(p, ty(e).size, lo, hi) as u64);
                 } else {
-                    (c.ret as *mut List).write(copy);
+                    (c.ret as *mut List).write(copies(l, e, lo, hi));
                 }
             }
             I::ListContains => c.set_bool(contains(c.arg(0), c.ty(0), c.arg(1), c.ty(1))),
@@ -1018,9 +1046,20 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                     Err(e) => io_error(c, io_kind(&e), &path),
                 }
             }
-            I::HostFsWriteText | I::HostFsRemove | I::HostFsCreateDir | I::HostFsSync => {
+            I::HostFsRead => {
+                let path = String::from_utf8_lossy(c.text(1)).into_owned();
+                match std::fs::read(&path) {
+                    Ok(b) => {
+                        mem::set_word(c.ret, 0, 0);
+                        crate::bytes::write(c.ret.add(8), &b);
+                    }
+                    Err(e) => io_error(c, io_kind(&e), &path),
+                }
+            }
+            I::HostFsWrite | I::HostFsWriteText | I::HostFsRemove | I::HostFsCreateDir | I::HostFsSync => {
                 let path = String::from_utf8_lossy(c.text(1)).into_owned();
                 let r = match i {
+                    I::HostFsWrite => std::fs::write(&path, crate::bytes::arg(c, 2)),
                     I::HostFsWriteText => std::fs::write(&path, c.text(2)),
                     I::HostFsRemove => std::fs::remove_file(&path),
                     I::HostFsCreateDir => std::fs::create_dir_all(&path),
@@ -1082,13 +1121,19 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 }
             }
             I::ClockNow => {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0);
+                let clock = crate::tasks::clock_of(c);
+                let now = crate::sched::with(|s| s.clock_now(clock));
                 c.set_word(i64::try_from(now).unwrap_or(i64::MAX) as u64);
             }
             I::DateTimeFromUnixNanos | I::DateTimeUnixNanos => c.set_word(c.word(0)),
+            // A native run has no hot replacement (`--watch` runs the
+            // interpreter): every task stays in epoch 0.
+            I::LiveBoundary => {}
+            I::LiveEpoch => c.set_word(0),
+            I::FmtStrftime => {
+                let pattern = String::from_utf8_lossy(c.text(1)).into_owned();
+                c.set_string(value::strftime(c.int(0), &pattern).as_bytes());
+            }
             I::GenericValue => match ty(c.targ(0)).kind {
                 Kind::Const(n) => c.set_word(n as u64),
                 _ => rt::internal("a `const` parameter without a constant"),
@@ -1127,6 +1172,9 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                     &[("detail", format!("`{}` is not in the native runtime yet", i.name()))],
                 );
             }
+            // Tasks, channels, timers, generators and mutexes are `tasks`'s,
+            // called before this one (`sisu_rt_intrinsic`).
+            _ => rt::internal("a task intrinsic outside the task module"),
         }
     }
     abi::OK
@@ -1240,6 +1288,67 @@ unsafe fn io_error(c: &Call<'_>, kind: IoKind, path: &str) {
     }
 }
 
+/// A field of a value a runtime operation writes: a word, or the text of
+/// a `String` or `Path`.
+pub(crate) enum Part<'a> {
+    Word(u64),
+    Text(&'a [u8]),
+}
+
+/// Writes `parts` at the fields of `fields` from `p`.
+///
+/// # Safety
+/// `p` must have room for the fields, which must be of the parts' kinds.
+pub(crate) unsafe fn write_parts(p: *mut u8, fields: &[abi::Field], parts: &[Part<'_>]) {
+    for (f, part) in fields.iter().zip(parts) {
+        // SAFETY: as the caller guarantees.
+        unsafe {
+            match part {
+                Part::Word(w) => mem::set_word(p, f.offset, *w),
+                Part::Text(t) => value::write_string(p.add(f.offset as usize), t),
+            }
+        }
+    }
+}
+
+/// Writes `Err(e)` at the result, `e` the variant `variant` of the error
+/// set `set` with its fields (the result's error type is `set` or a union
+/// holding it).
+///
+/// # Safety
+/// The result must be a `Result` whose error can be a `set`, and the
+/// parts of the variant's fields' kinds.
+pub(crate) unsafe fn write_err(c: &Call<'_>, set: &str, variant: &str, parts: &[Part<'_>]) {
+    let Kind::Result(_, err) = ty(c.ret_ty).kind else {
+        rt::internal("an error result that is not a result")
+    };
+    let named = |t: u32| matches!(&ty(t).kind, Kind::Enum { name, .. } if name == set);
+    let decl = match &ty(err).kind {
+        Kind::Enum { .. } if named(err) => err,
+        Kind::ErrSet(members) => members
+            .iter()
+            .copied()
+            .find(|m| named(*m))
+            .unwrap_or_else(|| rt::internal("a result that cannot hold its error")),
+        _ => rt::internal("a result that cannot hold its error"),
+    };
+    let Kind::Enum { variants, .. } = &ty(decl).kind else {
+        rt::internal("an error set that is not an enum")
+    };
+    let Some(tag) = variants.iter().position(|v| v.name == variant) else {
+        rt::internal("an error variant missing")
+    };
+    // SAFETY: the payload is an error set's value.
+    unsafe {
+        mem::set_word(c.ret, 0, 1);
+        let e = c.ret.add(8);
+        mem::set_word(e, abi::ERROR_DECL, u64::from(decl));
+        mem::set_word(e, abi::ERROR_TRACE, 0);
+        mem::set_word(e, abi::ERROR_TAG, tag as u64);
+        write_parts(e, &variants[tag].fields, parts);
+    }
+}
+
 /// The type of a set's values: a set is a table of keys without them.
 fn unit_type() -> u32 {
     u32::MAX
@@ -1265,11 +1374,47 @@ fn random_bits() -> u64 {
 }
 
 /// A node of an error's return trace: the location and the trace before
-/// it. Traces are shared by copies of an error and never change, so a node
-/// is never freed (docs/port-debt.md, "Stage 2").
+/// it. Copies of an error share their trace, which never changes, so a
+/// node counts what holds it (errors and the next nodes) and is freed with
+/// the last (decision 214).
 struct TraceNode {
+    refs: u64,
     loc: Box<[u8]>,
-    prev: *const TraceNode,
+    prev: *mut TraceNode,
+    _live: mem::Live,
+}
+
+/// Another holder of the trace whose newest node is at `node` (0 for none).
+///
+/// # Safety
+/// `node` must be 0 or a live trace node.
+pub(crate) unsafe fn retain_trace(node: u64) {
+    let n = node as *mut TraceNode;
+    if !n.is_null() {
+        // SAFETY: as the caller guarantees.
+        unsafe { (*n).refs += 1 };
+    }
+}
+
+/// A holder of the trace at `node` is gone: the nodes nothing holds any
+/// more are freed, newest first.
+///
+/// # Safety
+/// `node` must be 0 or a live trace node the caller held.
+pub(crate) unsafe fn release_trace(node: u64) {
+    let mut n = node as *mut TraceNode;
+    // SAFETY: as the caller guarantees; a node is freed once, when its
+    // count reaches 0.
+    unsafe {
+        while !n.is_null() {
+            (*n).refs -= 1;
+            if (*n).refs > 0 {
+                return;
+            }
+            let b = Box::from_raw(n);
+            n = b.prev;
+        }
+    }
 }
 
 /// The locations an error passed through, oldest first.

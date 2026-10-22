@@ -45,7 +45,7 @@ use corosensei::{Coroutine, CoroutineResult, Yielder};
 use sisu_diag::msg;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering::Relaxed};
 
 /// The root task's number.
 pub(crate) const ROOT: u32 = 0;
@@ -112,6 +112,8 @@ pub(crate) enum Wait {
     Timer,
     Select,
     Cancellation,
+    /// A socket that was not ready, tried again a millisecond later.
+    Io,
 }
 
 /// What a waiting task is registered under, so an event wakes only the
@@ -186,7 +188,8 @@ impl Site {
         }
         // SAFETY: the address and length are of a file name in the
         // program's read-only data, which lives as long as the program.
-        let name = unsafe { crate::mem::Str { ptr: self.file as *const u8, len: self.file_len as u64 }.bytes() };
+        let name =
+            unsafe { crate::mem::Str { ptr: self.file as *const u8, len: self.file_len as u64 }.bytes() };
         format!("{}:{}:{}", String::from_utf8_lossy(name), self.line, self.col)
     }
 }
@@ -248,8 +251,6 @@ pub(crate) struct ScopeRec {
     pub ended: bool,
     pub first_failure: Option<u32>,
     pub winner: Option<u32>,
-    /// The type of the scope's result.
-    pub result_ty: u32,
 }
 
 /// A bounded channel; its values are kept as words.
@@ -277,6 +278,11 @@ pub(crate) struct Stats {
     pub switches: u64,
     pub max_live: u64,
     pub latency_micros: Vec<u64>,
+    /// `Shared` cells made by construction sites tagged task-local and
+    /// may-cross, and cells reached by another task than their creator.
+    pub shared_local: u64,
+    pub shared_crossing: u64,
+    pub shared_crossed: u64,
 }
 
 pub(crate) struct Sched {
@@ -298,14 +304,29 @@ pub(crate) struct Sched {
     /// A [`neutral`] call whose entry will reach the scheduler.
     pub neutral_armed: bool,
     pub pool: Pool,
-    /// The type numbers of `TaskError` and `ChannelError`, when the
-    /// program has them.
-    pub task_error: Option<u32>,
-    pub channel_error: Option<u32>,
+    /// The run's test clock (`Clock.fake`), once made.
+    pub fake_clock: Option<u32>,
+}
+
+/// The type numbers of `TaskError` and `ChannelError` (`u32::MAX` when the
+/// program has none).
+static TASK_ERROR: AtomicU32 = AtomicU32::new(u32::MAX);
+static CHANNEL_ERROR: AtomicU32 = AtomicU32::new(u32::MAX);
+
+pub(crate) fn task_error() -> Option<u32> {
+    Some(TASK_ERROR.load(Relaxed)).filter(|&t| t != u32::MAX)
+}
+
+pub(crate) fn channel_error() -> Option<u32> {
+    Some(CHANNEL_ERROR.load(Relaxed)).filter(|&t| t != u32::MAX)
 }
 
 thread_local! {
-    static SCHED: RefCell<Option<Sched>> = const { RefCell::new(None) };
+    /// The scheduler. Never dropped: the program exits with coroutines
+    /// suspended (a deadlock's abort, a generator nobody finished), whose
+    /// frames are Sisu code and must not be unwound.
+    static SCHED: std::mem::ManuallyDrop<RefCell<Option<Sched>>> =
+        const { std::mem::ManuallyDrop::new(RefCell::new(None)) };
     /// The running coroutine's yielder; null in the root task.
     static YIELDER: Cell<*const Yielder<(), Suspend>> = const { Cell::new(std::ptr::null()) };
     /// Runtime code of a task runs on the system stack ([`system`]).
@@ -389,9 +410,10 @@ pub(crate) fn start(seed: u64, keep_stats: bool, pool: Pool, root_limits: [u64; 
         starved: false,
         neutral_armed: false,
         pool,
-        task_error: error_type("TaskError"),
-        channel_error: error_type("ChannelError"),
+        fake_clock: None,
     };
+    TASK_ERROR.store(error_type("TaskError").unwrap_or(u32::MAX), Relaxed);
+    CHANNEL_ERROR.store(error_type("ChannelError").unwrap_or(u32::MAX), Relaxed);
     SCHED.with(|s| *s.borrow_mut() = Some(sched));
 }
 
@@ -561,6 +583,11 @@ pub(crate) fn neutral<R>(f: impl FnOnce() -> R) -> R {
 }
 
 // -------------------------------------------------------------- switching
+
+/// A task's coroutine starts: `y` is its yielder.
+pub(crate) fn enter_coroutine(y: &Yielder<(), Suspend>) {
+    YIELDER.with(|c| c.set(y as *const Yielder<(), Suspend>));
+}
 
 /// The running task gives way (it is in the ready list) or waits (it is
 /// registered): other tasks run until the scheduler picks it again.
@@ -792,7 +819,8 @@ impl Sched {
         let mut real: Option<i128> = None;
         for &(c, at, _) in &self.timers {
             let delta = at - self.clock_now(c);
-            let slot = if self.clocks.get(c as usize).is_some_and(|k| k.virtual_) { &mut virt } else { &mut real };
+            let slot =
+                if self.clocks.get(c as usize).is_some_and(|k| k.virtual_) { &mut virt } else { &mut real };
             if slot.is_none_or(|d| delta < d) {
                 *slot = Some(delta);
             }
@@ -842,7 +870,10 @@ impl Sched {
             };
             let what = match w {
                 Wait::Join(x) => {
-                    format!("join task {}", self.tasks.get(x as usize).map(|t| t.path.as_str()).unwrap_or("?"))
+                    format!(
+                        "join task {}",
+                        self.tasks.get(x as usize).map(|t| t.path.as_str()).unwrap_or("?")
+                    )
                 }
                 Wait::ScopeEnd => "the end of a scope".into(),
                 Wait::Recv => "recv".into(),
@@ -851,6 +882,7 @@ impl Sched {
                 Wait::Timer => "a timer".into(),
                 Wait::Select => "select".into(),
                 Wait::Cancellation => "a cancellation".into(),
+                Wait::Io => "the network".into(),
             };
             lines.push(format!(
                 "  {}",
@@ -861,6 +893,18 @@ impl Sched {
             ));
         }
         lines.join("\n")
+    }
+
+    /// The run's test clock, made at the epoch on first use (the
+    /// interpreter's `fake_clock`).
+    pub(crate) fn fake_clock(&mut self) -> u32 {
+        if let Some(c) = self.fake_clock {
+            return c;
+        }
+        let c = self.clocks.len() as u32;
+        self.clocks.push(RtClock { virtual_: true, now: 0 });
+        self.fake_clock = Some(c);
+        c
     }
 
     pub(crate) fn clock_now(&self, c: u32) -> i128 {
@@ -923,15 +967,12 @@ impl Sched {
     /// The cancellation context of the running code: its innermost scope
     /// or shield, else its task (none at the top of the root task).
     pub(crate) fn context(&self) -> Option<Node> {
-        let task = self.tasks.get(self.cur as usize)?;
-        for a in task.anchors.iter().rev() {
-            match a {
-                Anchor::Scope(s) => return Some(Node::Scope(*s)),
-                Anchor::Shield => return None,
-                Anchor::Task => return Some(Node::Task(self.cur)),
-            }
+        // Every anchor stops the search, so the innermost decides.
+        match self.tasks.get(self.cur as usize)?.anchors.last()? {
+            Anchor::Scope(s) => Some(Node::Scope(*s)),
+            Anchor::Shield => None,
+            Anchor::Task => Some(Node::Task(self.cur)),
         }
-        None
     }
 
     fn deadline_passed(&self, d: Option<(u32, i128)>) -> bool {

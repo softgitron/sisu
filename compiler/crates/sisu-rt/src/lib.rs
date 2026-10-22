@@ -17,12 +17,20 @@
 //! unwinding is ordinary control flow, with no unwinder.
 
 pub mod abi;
+mod bytes;
+mod caps;
+mod cells;
 mod dict;
 mod entry;
+mod host;
 mod intrinsics;
 mod iter;
 mod mem;
 mod rt;
+mod sched;
 mod sized;
+mod stack;
+mod tasks;
 mod value;
+mod views;
 mod wide;

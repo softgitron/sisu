@@ -123,6 +123,13 @@ unsafe extern "C" fn sisu_rt_wide(
     yt: u32,
     out: *mut u8,
 ) -> u8 {
+    // SAFETY: as the caller guarantees.
+    crate::sched::system(|| unsafe { wide_op(kind, op, x, xt, y, yt, out) })
+}
+
+/// # Safety
+/// As `sisu_rt_wide`.
+unsafe fn wide_op(kind: u32, op: u32, x: *mut u8, xt: u32, y: *mut u8, yt: u32, out: *mut u8) -> u8 {
     let Some(kind) = WIDE_TYPES.get(kind as usize).copied() else {
         rt::internal("an unknown 128-bit integer type")
     };

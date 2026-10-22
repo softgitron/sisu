@@ -704,13 +704,17 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 host.stderr(&plain_error(msg::CLI_WATCH_ALONE, &[("option", other)]));
                 return EXIT_USAGE;
             }
+            // A native run takes the seed of its schedule, `--explore` and
+            // the scheduler's `--stats` (decision 203); the interpreter's
+            // other modes are its own.
             if p.flags.contains(&"--native")
-                && let Some(other) = ["--sir", "--monitor", "--defer-borrow", "--stats", "--watch"]
+                && let Some(other) = ["--sir", "--monitor", "--defer-borrow", "--watch"]
                     .iter()
                     .find(|o| p.flags.contains(o))
                     .map(|o| o.to_string())
+                    .or_else(|| p.stats.map(|k| format!("--stats {k}")))
                     .or_else(|| {
-                        ["--record", "--explore", "--schedule-seed", "--scheduler", "--contracts"]
+                        ["--record", "--scheduler", "--contracts"]
                             .iter()
                             .find(|o| p.values.iter().any(|(k, _)| k == *o))
                             .map(|o| o.to_string())
@@ -1597,7 +1601,12 @@ fn command(
                                 .map(|s| s.to_string_lossy().into_owned())
                                 .unwrap_or_default()
                         });
-                        return crate::native::run_command(&prog, &name, &args, host);
+                        let how = crate::native::Run {
+                            seed: seeds.first,
+                            explore: seeds.explore,
+                            stats: has("--stats"),
+                        };
+                        return crate::native::run_command(&prog, &name, &args, &how, host);
                     }
                     let options = Options {
                         monitor: defer || has("--monitor"),

@@ -549,6 +549,15 @@ R0121 runtime run.stats-tag-crossing      may-cross
 # A natively compiled program broke a rule its runtime relies on (stage 2;
 # docs/architecture.md, "Stage 2").
 R0122 runtime run.native-internal         internal error in the native runtime: {detail}
+# A task's stack ran out (stage 2, decision 203): the probe at a function's
+# entry found it below its limit.
+R0123 runtime panic.stack-exhausted       stack overflow: the stack of {bytes} bytes is used up (`SISU_TASK_STACK` sets a task's)
+# `--stats` of a native run: the latency in microseconds (native code counts
+# no statements).
+R0124 runtime run.stats-latency-native    stats: scheduling latency p50 {p50us} p99 {p99us} microseconds (native code counts no statements)
+# A native run under `SISU_RT_ALLOCS` (stage 2, decision 216): the runtime's
+# allocations of values still live when the program ends.
+R0125 runtime run.live-allocations        allocations: {count} of the runtime's live at exit
 
 # ---------------------------------------------------------------- driver
 

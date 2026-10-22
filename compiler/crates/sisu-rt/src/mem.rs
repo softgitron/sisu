@@ -1,5 +1,34 @@
 //! Raw memory: the heap, and the headers of texts and lists as
-//! [`crate::abi`] lays them out.
+//! [`crate::abi`] lays them out; the count of the program's allocations
+//! that are live, which `SISU_RT_ALLOCS` reports at exit.
+
+use std::sync::atomic::{AtomicI64, Ordering::Relaxed};
+
+/// The blocks of this module and the runtime objects of values
+/// (iterators, tables, arenas, the nodes of return traces) that are live.
+/// The cells kept for the whole run ([`alloc_kept`]) are not counted.
+static LIVE: AtomicI64 = AtomicI64::new(0);
+
+/// The number of the program's allocations live now.
+pub(crate) fn live() -> i64 {
+    LIVE.load(Relaxed)
+}
+
+/// A runtime object of a value counts itself live while it exists.
+pub(crate) struct Live(());
+
+impl Live {
+    pub(crate) fn new() -> Live {
+        LIVE.fetch_add(1, Relaxed);
+        Live(())
+    }
+}
+
+impl Drop for Live {
+    fn drop(&mut self) {
+        LIVE.fetch_sub(1, Relaxed);
+    }
+}
 
 unsafe extern "C" {
     fn malloc(size: usize) -> *mut u8;
@@ -10,6 +39,16 @@ unsafe extern "C" {
 
 /// `bytes` of heap memory, aligned for a word; null for none.
 pub(crate) fn alloc(bytes: usize) -> *mut u8 {
+    let p = alloc_kept(bytes);
+    if !p.is_null() {
+        LIVE.fetch_add(1, Relaxed);
+    }
+    p
+}
+
+/// A heap block that lives as long as the run and is not counted: the
+/// cells of capability handles and of `Cap`s (decision 209).
+pub(crate) fn alloc_kept(bytes: usize) -> *mut u8 {
     if bytes == 0 {
         return std::ptr::null_mut();
     }
@@ -32,11 +71,16 @@ pub(crate) fn grow(p: *mut u8, bytes: usize) -> *mut u8 {
     if q.is_null() {
         crate::rt::abort("out of memory");
     }
+    if p.is_null() {
+        LIVE.fetch_add(1, Relaxed);
+    }
     q
 }
 
 pub(crate) fn release(p: *mut u8) {
     if !p.is_null() {
+        LIVE.fetch_sub(1, Relaxed);
+        crate::views::released(p);
         // SAFETY: `p` is a block this module allocated, released once.
         unsafe { free(p) }
     }

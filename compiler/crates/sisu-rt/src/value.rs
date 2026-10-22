@@ -89,7 +89,7 @@ pub(crate) unsafe fn drop_value(p: *mut u8, t: u32) -> u8 {
     // SAFETY: the parts are where the type says, each dropped once.
     unsafe {
         match &entry.kind {
-            Kind::String | Kind::Path => {
+            Kind::String | Kind::Path | Kind::Bytes => {
                 mem::at::<Text>(p).release();
                 abi::OK
             }
@@ -138,19 +138,49 @@ pub(crate) unsafe fn drop_value(p: *mut u8, t: u32) -> u8 {
                 }
                 status
             }
+            // A box whose value was moved out has no cell (decision 215).
             Kind::Box(inner) => {
                 let cell = mem::word(p, 0) as *mut u8;
+                if cell.is_null() {
+                    return abi::OK;
+                }
                 let status = drop_value(cell, *inner);
                 mem::release(cell);
                 status
             }
-            Kind::Struct { glue: Some(g), .. } | Kind::Enum { glue: Some(g), .. } => match rt::function(*g) {
-                Some(f) => {
-                    let mut unit = 0u64;
-                    f(&mut unit as *mut u64 as *mut u8, p)
+            // Glue is Sisu code: on the system stack, the value is moved
+            // aside and dropped on the task's stack (`sched::defer`).
+            Kind::Struct { glue: Some(_), .. } | Kind::Enum { glue: Some(_), .. } | Kind::Guard(..)
+                if crate::sched::deferring() =>
+            {
+                crate::sched::defer(p, t)
+            }
+            // The glue (Sisu code: the `Drop` impl, then the fields whose drop
+            // is observed), then the fields it leaves out (decision 217); an
+            // error lets go of its return trace (decision 214).
+            Kind::Struct { glue, fields, .. } => {
+                let status = run_glue(*glue, p);
+                after_part(status, drop_silent(p, fields))
+            }
+            Kind::Enum { glue, variants, error, .. } => {
+                if *error {
+                    crate::intrinsics::release_trace(mem::word(p, abi::ERROR_TRACE));
+                    mem::set_word(p, abi::ERROR_TRACE, 0);
                 }
-                None => rt::internal("drop glue missing from the function table"),
-            },
+                let status = run_glue(*glue, p);
+                match variants.get(tag(p, entry) as usize) {
+                    Some(v) => after_part(status, drop_silent(p, &v.fields)),
+                    None => status,
+                }
+            }
+            Kind::Guard(_, check) => crate::tasks::unlock(mem::word(p, 0) as *mut u8, *check),
+            Kind::Mutex(v) => drop_value(p.add(abi::MUTEX_HEADER as usize), *v),
+            Kind::Sender(_) => crate::tasks::drop_channel_end(mem::word(p, 0) as u32, false),
+            Kind::Receiver(_) => crate::tasks::drop_channel_end(mem::word(p, 0) as u32, true),
+            Kind::Shared(v) => crate::cells::drop_shared(mem::word(p, 0) as *mut u8, *v),
+            Kind::Weak(_) => crate::cells::drop_weak(mem::word(p, 0) as *mut u8),
+            Kind::Cell(v) => drop_value(p, *v),
+            Kind::Arena(_) => crate::cells::drop_arena(p),
             Kind::ErrSet(_) => {
                 let decl = concrete(p, t);
                 if decl == t { abi::OK } else { drop_value(p, decl) }
@@ -158,6 +188,36 @@ pub(crate) unsafe fn drop_value(p: *mut u8, t: u32) -> u8 {
             _ => abi::OK,
         }
     }
+}
+
+/// Runs a struct's or enum's drop glue on the value at `p`, if it has one.
+///
+/// # Safety
+/// `p` must hold a value of the type whose glue `glue` is.
+unsafe fn run_glue(glue: Option<u32>, p: *mut u8) -> u8 {
+    match glue.map(rt::function) {
+        None => abi::OK,
+        Some(Some(f)) => {
+            let mut unit = 0u64;
+            // SAFETY: the glue takes the value's address.
+            unsafe { f(&mut unit as *mut u64 as *mut u8, p) }
+        }
+        Some(None) => rt::internal("drop glue missing from the function table"),
+    }
+}
+
+/// Drops the fields at `p` that the type's glue leaves out, last to first
+/// as the glue drops its own; none of them runs Sisu code.
+///
+/// # Safety
+/// `p` must hold the fields at their offsets.
+unsafe fn drop_silent(p: *mut u8, fields: &[abi::Field]) -> u8 {
+    let mut status = abi::OK;
+    for f in fields.iter().rev().filter(|f| !f.glue) {
+        // SAFETY: the field is where the type says.
+        status = after_part(status, unsafe { drop_value(p.add(f.offset as usize), f.ty) });
+    }
+    status
 }
 
 /// The status after dropping one more part: once a part's drop has
@@ -181,7 +241,7 @@ pub(crate) unsafe fn copy_value(dst: *mut u8, src: *mut u8, t: u32) {
     // SAFETY: the parts are where the type says.
     unsafe {
         match &entry.kind {
-            Kind::String | Kind::Path => {
+            Kind::String | Kind::Path | Kind::Bytes => {
                 let b = mem::at::<Text>(src).bytes();
                 (dst as *mut Text).write(Text::from_bytes(b));
             }
@@ -236,10 +296,14 @@ pub(crate) unsafe fn copy_value(dst: *mut u8, src: *mut u8, t: u32) {
                 }
             }
             Kind::Enum { variants, error, .. } => {
-                // The number of its type and its trace (shared: a trace is
-                // never changed in place), then the variant's fields.
+                // The number of its type and its trace (shared, and held
+                // once more: a trace is never changed in place), then the
+                // variant's fields.
                 let off = entry.kind.tag_offset();
                 mem::copy(dst, src, off as usize);
+                if *error {
+                    crate::intrinsics::retain_trace(mem::word(dst, abi::ERROR_TRACE));
+                }
                 let tg = tag(src, entry);
                 mem::set_word(dst, off, tg);
                 if let Some(v) = variants.get(tg as usize) {
@@ -247,7 +311,6 @@ pub(crate) unsafe fn copy_value(dst: *mut u8, src: *mut u8, t: u32) {
                         copy_value(dst.add(f.offset as usize), src.add(f.offset as usize), f.ty);
                     }
                 }
-                let _ = error;
             }
             Kind::ErrSet(_) => {
                 let decl = concrete(src, t);
@@ -256,6 +319,29 @@ pub(crate) unsafe fn copy_value(dst: *mut u8, src: *mut u8, t: u32) {
                 } else {
                     copy_value(dst, src, decl);
                 }
+            }
+            // Another sender (or receiver) of the same channel.
+            Kind::Sender(_) | Kind::Receiver(_) => {
+                mem::copy(dst, src, 8);
+                crate::tasks::copy_channel_end(
+                    mem::word(src, 0) as u32,
+                    matches!(entry.kind, Kind::Receiver(_)),
+                );
+            }
+            // Another owner (or weak handle) of the same cell.
+            Kind::Shared(_) | Kind::Weak(_) => {
+                mem::copy(dst, src, 8);
+                crate::cells::copy_handle(mem::word(src, 0) as *mut u8, matches!(entry.kind, Kind::Weak(_)));
+            }
+            Kind::Cell(v) => copy_value(dst, src, *v),
+            Kind::Arena(_) => crate::cells::copy_arena(dst, src),
+            // An unlocked mutex holding a copy of the value.
+            Kind::Mutex(v) => {
+                mem::set_word(dst, abi::MUTEX_LOCKED, 0);
+                mem::set_word(dst, abi::MUTEX_HOLDER, 0);
+                mem::set_word(dst, abi::MUTEX_POISONED, mem::word(src, abi::MUTEX_POISONED));
+                let off = abi::MUTEX_HEADER as usize;
+                copy_value(dst.add(off), src.add(off), *v);
             }
             _ => mem::copy(dst, src, entry.size as usize),
         }
@@ -289,6 +375,8 @@ pub(crate) unsafe fn equal(a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> bool {
             (Kind::Float, Kind::Float) => f64::from_bits(mem::word(a, 0)) == f64::from_bits(mem::word(b, 0)),
             (Kind::F32, Kind::F32) => f32_at(a) == f32_at(b),
             (Kind::Unit, Kind::Unit) => true,
+            (Kind::DateTime, Kind::DateTime) => mem::word(a, 0) == mem::word(b, 0),
+            (Kind::Bytes, Kind::Bytes) => mem::at::<Text>(a).bytes() == mem::at::<Text>(b).bytes(),
             (Kind::Tuple(xs), Kind::Tuple(ys)) => {
                 xs.len() == ys.len()
                     && xs
@@ -400,6 +488,8 @@ pub(crate) unsafe fn compare(a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> Option
             }
             (Kind::F32, Kind::F32) => f32_at(a).partial_cmp(&f32_at(b)),
             (Kind::Unit, Kind::Unit) => Some(Ordering::Equal),
+            (Kind::DateTime, Kind::DateTime) => Some((mem::word(a, 0) as i64).cmp(&(mem::word(b, 0) as i64))),
+            (Kind::Bytes, Kind::Bytes) => Some(mem::at::<Text>(a).bytes().cmp(mem::at::<Text>(b).bytes())),
             (Kind::Tuple(xs), Kind::Tuple(ys)) => {
                 for (x, y) in xs.iter().zip(ys) {
                     match compare(a.add(x.offset as usize), x.ty, b.add(y.offset as usize), y.ty) {
@@ -489,6 +579,22 @@ pub(crate) unsafe fn display(out: &mut Vec<u8>, p: *mut u8, t: u32) {
         }
         match ty(t).kind {
             Kind::Char => push_char(out, mem::word(p, 0) as u32),
+            // std's `Contextual` (prelude): `message: cause`.
+            Kind::Enum { .. } | Kind::ErrSet(_) => {
+                let decl = concrete(p, t);
+                let entry = ty(decl);
+                if let Kind::Enum { name, variants, .. } = &entry.kind
+                    && name == "Contextual"
+                    && let Some(v) = variants.get(tag(p, entry) as usize)
+                    && let [message, cause] = v.fields.as_slice()
+                {
+                    display(out, p.add(message.offset as usize), message.ty);
+                    out.extend_from_slice(b": ");
+                    display(out, p.add(cause.offset as usize), cause.ty);
+                    return;
+                }
+                debug(out, p, t)
+            }
             _ => debug(out, p, t),
         }
     }
@@ -527,6 +633,8 @@ pub(crate) unsafe fn debug(out: &mut Vec<u8>, p: *mut u8, t: u32) {
                 let b = text(p, t).unwrap_or(&[]);
                 out.extend_from_slice(quote_str(&String::from_utf8_lossy(b)).as_bytes());
             }
+            Kind::Bytes => out.extend_from_slice(quote_bytes(mem::at::<Text>(p).bytes()).as_bytes()),
+            Kind::DateTime => out.extend_from_slice(datetime_text(mem::word(p, 0) as i64).as_bytes()),
             Kind::Ref(_) | Kind::Dyn => {
                 let (q, t) = target(p, t);
                 debug(out, q, t)
@@ -641,8 +749,44 @@ pub(crate) unsafe fn debug(out: &mut Vec<u8>, p: *mut u8, t: u32) {
                 }
             }
             Kind::Entry(..) => out.extend_from_slice(b"<entry>"),
+            Kind::Scope => out.extend_from_slice(b"<scope>"),
+            Kind::Handle(_) => {
+                let path = crate::tasks::task_path(mem::word(p, 0) as u32);
+                out.extend_from_slice(format!("<task {path}>").as_bytes());
+            }
+            Kind::Cancellation => out.extend_from_slice(b"<cancellation>"),
+            Kind::Sender(_) => out.extend_from_slice(b"<sender>"),
+            Kind::Receiver(_) => out.extend_from_slice(b"<receiver>"),
+            Kind::Timer => out.extend_from_slice(b"<timer>"),
+            Kind::Mutex(v) => {
+                out.extend_from_slice(b"Mutex(");
+                if mem::word(p, abi::MUTEX_LOCKED) != 0 {
+                    out.extend_from_slice(b"<locked>");
+                } else {
+                    debug(out, p.add(abi::MUTEX_HEADER as usize), *v);
+                }
+                out.push(b')');
+            }
+            Kind::Guard(v, _) => debug(out, mem::word(p, 0) as *mut u8, *v),
+            Kind::Shared(v) => {
+                let cell = mem::word(p, 0) as *mut u8;
+                if crate::cells::alive(cell) {
+                    debug(out, cell, *v);
+                } else {
+                    out.extend_from_slice(b"<dropped>");
+                }
+            }
+            Kind::Weak(_) => out.extend_from_slice(b"(Weak)"),
+            Kind::Cell(v) => {
+                out.extend_from_slice(b"Cell(");
+                debug(out, p, *v);
+                out.push(b')');
+            }
+            Kind::Arena(_) => crate::cells::debug_arena(out, p),
             Kind::Fn => out.extend_from_slice(b"<fn>"),
             Kind::Iter(_) => out.extend_from_slice(b"<iter>"),
+            // A test clock shows as the interpreter's clocks do.
+            Kind::Opaque(n) if n == "TestClock" => out.extend_from_slice(b"Clock"),
             Kind::Opaque(n) => out.extend_from_slice(n.as_bytes()),
             Kind::Const(n) => out.extend_from_slice(n.to_string().as_bytes()),
         }
@@ -686,6 +830,91 @@ pub(crate) fn quote_str(s: &str) -> String {
     }
     q.push('"');
     q
+}
+
+/// The civil date of a day counted from 1970-01-01 (Howard Hinnant's
+/// `civil_from_days`, the interpreter's `civil`).
+fn civil(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    (y, m, d)
+}
+
+/// The RFC 3339 text of a time in nanoseconds since the epoch, in UTC,
+/// with the fraction of a second when there is one (the interpreter's
+/// `datetime_text`).
+pub(crate) fn datetime_text(nanos: i64) -> String {
+    let mut s = strftime(nanos, "%Y-%m-%dT%H:%M:%S");
+    let frac = nanos.rem_euclid(1_000_000_000);
+    if frac != 0 {
+        let digits = format!("{frac:09}");
+        s.push('.');
+        s.push_str(digits.trim_end_matches('0'));
+    }
+    s.push('Z');
+    s
+}
+
+/// A time by the `strftime` directives `%Y %y %m %d %H %M %S %F %T %%`, in
+/// UTC; other characters are copied (the interpreter's `strftime`).
+pub(crate) fn strftime(nanos: i64, pattern: &str) -> String {
+    let secs = nanos.div_euclid(1_000_000_000);
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (y, m, d) = civil(days);
+    let (hh, mm, ss) = (rem / 3600, (rem / 60) % 60, rem % 60);
+    let mut out = String::new();
+    let mut cs = pattern.chars();
+    while let Some(c) = cs.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        match cs.next() {
+            Some('Y') => out.push_str(&format!("{y:04}")),
+            Some('y') => out.push_str(&format!("{:02}", y.rem_euclid(100))),
+            Some('m') => out.push_str(&format!("{m:02}")),
+            Some('d') => out.push_str(&format!("{d:02}")),
+            Some('H') => out.push_str(&format!("{hh:02}")),
+            Some('M') => out.push_str(&format!("{mm:02}")),
+            Some('S') => out.push_str(&format!("{ss:02}")),
+            Some('F') => out.push_str(&format!("{y:04}-{m:02}-{d:02}")),
+            Some('T') => out.push_str(&format!("{hh:02}:{mm:02}:{ss:02}")),
+            Some('%') => out.push('%'),
+            Some(other) => {
+                out.push('%');
+                out.push(other);
+            }
+            None => out.push('%'),
+        }
+    }
+    out
+}
+
+/// `b"..."`: the printable ASCII bytes as they are, the others escaped
+/// (the interpreter's `quote_bytes`).
+pub(crate) fn quote_bytes(b: &[u8]) -> String {
+    let mut out = String::from("b\"");
+    for &x in b {
+        match x {
+            b'\n' => out.push_str("\\n"),
+            b'\t' => out.push_str("\\t"),
+            b'\r' => out.push_str("\\r"),
+            b'\\' => out.push_str("\\\\"),
+            b'"' => out.push_str("\\\""),
+            0x20..=0x7e => out.push(x as char),
+            _ => out.push_str(&format!("\\x{x:02x}")),
+        }
+    }
+    out.push('"');
+    out
 }
 
 pub(crate) fn quote_char(c: char) -> String {

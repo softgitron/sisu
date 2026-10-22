@@ -5,6 +5,7 @@
 use crate::abi::{self, IntOp, Kind, ValueOp};
 use crate::mem::{self, Text};
 use crate::rt::{self, ty};
+use crate::sched::{system, system_status};
 use crate::value;
 use sisu_diag::msg;
 use std::ffi::{CStr, c_char};
@@ -16,8 +17,13 @@ pub(crate) const EXIT_PANIC: i32 = 101;
 pub(crate) const EXIT_ABORT: i32 = 134;
 
 /// The host stack the program runs on: native frames are larger than the
-/// interpreter's, and 100 000 of them must fit (`abi::MAX_DEPTH`).
-const STACK_BYTES: usize = 1 << 30;
+/// interpreter's, and 100 000 of them must fit (`abi::MAX_DEPTH`). It is
+/// the root task's stack, and the system stack runtime code runs on.
+pub(crate) const STACK_BYTES: usize = 1 << 30;
+
+/// Of the program's thread's stack, what is kept below its probe limit
+/// beyond the reserve: the thread's guard and what the system put there.
+const ROOT_MARGIN: usize = 256 * 1024;
 
 /// The nested calls of the program, counted by the generated code.
 #[unsafe(no_mangle)]
@@ -32,11 +38,6 @@ pub(crate) fn args() -> &'static [String] {
 
 type EntryFn = unsafe extern "C" fn(*mut u8) -> u8;
 type SystemEntryFn = unsafe extern "C" fn(*mut u8, *mut u8) -> u8;
-
-/// The host's objects behind the root capabilities: their addresses are
-/// the handles of the `System` `main` receives (the backend calls the
-/// host's operations on them directly).
-static HOST_OBJECTS: [u64; 7] = [0; 7];
 
 /// Runs the program: decodes its type table, runs `entry` on a thread
 /// with a large stack, and reports how it ended, as the interpreter does.
@@ -56,6 +57,7 @@ unsafe extern "C" fn sisu_rt_start(
     types_len: u64,
     fns: *const usize,
     fns_len: u64,
+    max_frame: u64,
 ) -> i32 {
     // SAFETY: the generated `main` passes its tables and the C runtime's
     // arguments.
@@ -75,21 +77,34 @@ unsafe extern "C" fn sisu_rt_start(
     rt::init(table, fns);
     let _ = ARGS.set(args);
     let run = move || {
+        // The root task runs on this thread's stack, whose probe limit is
+        // near its bottom; spawned tasks get slots of the pool.
+        let max_frame = max_frame as usize;
+        let pool = crate::stack::Pool::new(crate::stack::reservation_from_env(), max_frame);
+        let low = crate::stack::current_sp().saturating_sub(STACK_BYTES) + ROOT_MARGIN;
+        let root_limits = crate::stack::limits(low, pool.reserve, max_frame);
+        // `sisu run --native --schedule-seed N` and `--stats` (decision 203).
+        let seed =
+            std::env::var("SISU_SCHEDULE_SEED").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(0);
+        let keep_stats = std::env::var_os("SISU_STATS").is_some();
+        crate::sched::start(seed, keep_stats, pool, root_limits);
         let size = ty(ret_ty).size.max(8) as usize;
         let mut ret = vec![0u64; size.div_ceil(8)];
         let r = ret.as_mut_ptr() as *mut u8;
+        // The interpreter pushes `main`'s frame itself: its entry is not a
+        // yield point.
         let status = if flags & abi::ENTRY_SYSTEM != 0 {
-            let mut sys: Vec<u64> = HOST_OBJECTS.iter().map(|o| o as *const u64 as u64).collect();
+            let mut sys = crate::caps::root_system();
             // SAFETY: `entry` is the program's `main`, taking a `System`.
             let f = unsafe { std::mem::transmute::<usize, SystemEntryFn>(entry) };
             // SAFETY: `ret` has room for `main`'s result and `sys` holds a
             // `System`'s seven handles.
-            unsafe { f(r, sys.as_mut_ptr() as *mut u8) }
+            crate::sched::neutral(|| unsafe { f(r, sys.as_mut_ptr() as *mut u8) })
         } else {
             // SAFETY: `entry` is the program's `main`, of this signature.
             let f = unsafe { std::mem::transmute::<usize, EntryFn>(entry) };
             // SAFETY: `ret` has room for `main`'s result.
-            unsafe { f(r) }
+            crate::sched::neutral(|| unsafe { f(r) })
         };
         let code = if status != abi::OK {
             match rt::take_panic() {
@@ -112,6 +127,14 @@ unsafe extern "C" fn sisu_rt_start(
         } else {
             EXIT_OK
         };
+        if let Some(stats) = crate::sched::finish() {
+            rt::stderr(&stats_report(&stats));
+        }
+        // `SISU_RT_ALLOCS`: what the program left allocated (decision 216).
+        if std::env::var_os("SISU_RT_ALLOCS").is_some() {
+            let line = rt::render(msg::RUN_LIVE_ALLOCATIONS, &[("count", mem::live().to_string())]);
+            rt::stderr(&format!("{line}\n"));
+        }
         rt::flush();
         code
     };
@@ -119,6 +142,53 @@ unsafe extern "C" fn sisu_rt_start(
         Ok(h) => h.join().unwrap_or(EXIT_ABORT),
         Err(_) => rt::internal("the program's thread could not start"),
     }
+}
+
+/// The `--stats` report of a native run (decision 203): the interpreter's
+/// tasks, the most alive at once and the switches, which a seeded run
+/// shares with it; the latency in microseconds, the one of the
+/// interpreter's two measures native code has (it counts no statements).
+fn stats_report(s: &crate::sched::Stats) -> String {
+    let pct = |v: &[u64], p: f64| -> u64 {
+        if v.is_empty() {
+            return 0;
+        }
+        let mut v = v.to_vec();
+        v.sort_unstable();
+        let i = ((v.len() as f64 - 1.0) * p).round() as usize;
+        v[i.min(v.len() - 1)]
+    };
+    let lines = [
+        rt::render(
+            msg::RUN_STATS_TASKS,
+            &[
+                ("tasks", s.tasks.to_string()),
+                ("max", s.max_live.to_string()),
+                ("switches", s.switches.to_string()),
+            ],
+        ),
+        rt::render(
+            msg::RUN_STATS_LATENCY_NATIVE,
+            &[
+                ("p50us", pct(&s.latency_micros, 0.5).to_string()),
+                ("p99us", pct(&s.latency_micros, 0.99).to_string()),
+            ],
+        ),
+        rt::render(
+            msg::RUN_STATS_SHARED,
+            &[
+                ("local", s.shared_local.to_string()),
+                ("crossing", s.shared_crossing.to_string()),
+                ("crossed", s.shared_crossed.to_string()),
+            ],
+        ),
+    ];
+    let mut out = String::new();
+    for l in lines {
+        out.push_str(&l);
+        out.push('\n');
+    }
+    out
 }
 
 /// The exit status of a `main` that returned `T ! E`: an error is printed
@@ -168,21 +238,27 @@ unsafe extern "C" fn sisu_rt_frame(
     };
     let file = String::from_utf8_lossy(file);
     let location = if line == 0 { file.into_owned() } else { format!("{file}:{line}:{col}") };
-    let text = rt::render(
-        msg::RUN_FRAME,
-        &[("function", String::from_utf8_lossy(name).into_owned()), ("location", location)],
-    );
-    rt::add_frame(text);
+    system(|| {
+        let text = rt::render(
+            msg::RUN_FRAME,
+            &[("function", String::from_utf8_lossy(name).into_owned()), ("location", location)],
+        );
+        rt::add_frame(text);
+    });
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn sisu_rt_abort_unwind() {
-    rt::abort_unwinding()
+    system(|| rt::abort_unwinding())
 }
 
 /// Integer overflow in `x op y` (or `op x` for a unary one).
 #[unsafe(no_mangle)]
 extern "C" fn sisu_rt_panic_overflow(op: u32, x: i64, y: i64) -> u8 {
+    system(|| overflow(op, x, y))
+}
+
+fn overflow(op: u32, x: i64, y: i64) -> u8 {
     let expr = match IntOp::from_code(op) {
         Some(IntOp::Neg) => format!("-({x})"),
         Some(IntOp::Abs) => format!("abs({x})"),
@@ -195,21 +271,23 @@ extern "C" fn sisu_rt_panic_overflow(op: u32, x: i64, y: i64) -> u8 {
 /// An index outside a list of `len` elements (`from_end` for `xs[^i]`).
 #[unsafe(no_mangle)]
 extern "C" fn sisu_rt_panic_index(index: i64, len: i64, from_end: u64) -> u8 {
-    if index < 0 && from_end == 0 {
-        return rt::raise_msg(msg::PANIC_NEGATIVE_INDEX, &[("index", index.to_string())]);
-    }
-    let shown = if from_end != 0 { format!("^{index}") } else { index.to_string() };
-    rt::raise_msg(msg::PANIC_INDEX_OUT_OF_BOUNDS, &[("len", len.to_string()), ("index", shown)])
+    system(|| {
+        if index < 0 && from_end == 0 {
+            return rt::raise_msg(msg::PANIC_NEGATIVE_INDEX, &[("index", index.to_string())]);
+        }
+        let shown = if from_end != 0 { format!("^{index}") } else { index.to_string() };
+        rt::raise_msg(msg::PANIC_INDEX_OUT_OF_BOUNDS, &[("len", len.to_string()), ("index", shown)])
+    })
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn sisu_rt_panic_stack() -> u8 {
-    rt::raise_msg(msg::PANIC_STACK_OVERFLOW, &[("depth", abi::MAX_DEPTH.to_string())])
+    system(|| rt::raise_msg(msg::PANIC_STACK_OVERFLOW, &[("depth", abi::MAX_DEPTH.to_string())]))
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn sisu_rt_panic_unreachable() -> u8 {
-    rt::raise_msg(msg::PANIC_UNREACHABLE_PLAIN, &[])
+    system(|| rt::raise_msg(msg::PANIC_UNREACHABLE_PLAIN, &[]))
 }
 
 /// `x op y` for the operations that can fail other than by overflow, with
@@ -231,14 +309,16 @@ unsafe extern "C" fn sisu_rt_int_op(op: u32, x: i64, y: i64, out: *mut i64) -> u
 
 pub(crate) fn int_op(op: u32, x: i64, y: i64) -> Result<i64, u8> {
     let Some(o) = IntOp::from_code(op) else { rt::internal("an unknown integer operation") };
-    let overflow = || sisu_rt_panic_overflow(op, x, y);
+    let overflow = || system(|| overflow(op, x, y));
     match o {
         IntOp::Add => x.checked_add(y).ok_or_else(overflow),
         IntOp::Sub => x.checked_sub(y).ok_or_else(overflow),
         IntOp::Mul => x.checked_mul(y).ok_or_else(overflow),
         IntOp::Neg => x.checked_neg().ok_or_else(overflow),
         IntOp::Abs => x.checked_abs().ok_or_else(overflow),
-        IntOp::FloorDiv | IntOp::Mod if y == 0 => Err(rt::raise_msg(msg::PANIC_DIVIDE_BY_ZERO, &[])),
+        IntOp::FloorDiv | IntOp::Mod if y == 0 => {
+            Err(system(|| rt::raise_msg(msg::PANIC_DIVIDE_BY_ZERO, &[])))
+        }
         IntOp::FloorDiv => {
             let q = x.checked_div(y).ok_or_else(overflow)?;
             Ok(if x % y != 0 && ((x < 0) != (y < 0)) { q - 1 } else { q })
@@ -249,7 +329,9 @@ pub(crate) fn int_op(op: u32, x: i64, y: i64) -> Result<i64, u8> {
         }
         IntOp::Pow => {
             if y < 0 {
-                return Err(rt::raise_msg(msg::PANIC_NEGATIVE_EXPONENT, &[("expr", format!("{x} ** {y}"))]));
+                return Err(system(|| {
+                    rt::raise_msg(msg::PANIC_NEGATIVE_EXPONENT, &[("expr", format!("{x} ** {y}"))])
+                }));
             }
             match u32::try_from(y) {
                 Ok(e) => x.checked_pow(e).ok_or_else(overflow),
@@ -262,7 +344,9 @@ pub(crate) fn int_op(op: u32, x: i64, y: i64) -> Result<i64, u8> {
         }
         IntOp::Shl | IntOp::Shr => {
             if !(0..64).contains(&y) {
-                return Err(rt::raise_msg(msg::PANIC_SHIFT_OUT_OF_RANGE, &[("amount", y.to_string())]));
+                return Err(system(|| {
+                    rt::raise_msg(msg::PANIC_SHIFT_OUT_OF_RANGE, &[("amount", y.to_string())])
+                }));
             }
             Ok(if o == IntOp::Shl { x << y } else { x >> y })
         }
@@ -292,17 +376,32 @@ pub(crate) fn float_mod(x: f64, y: f64) -> f64 {
 
 #[unsafe(no_mangle)]
 extern "C" fn sisu_rt_alloc(bytes: u64) -> *mut u8 {
-    mem::alloc(bytes as usize)
+    let p = system(|| mem::alloc(bytes as usize) as usize);
+    p as *mut u8
 }
 
-/// Drops the value at `p` of type `t`.
+/// Frees a block of `sisu_rt_alloc` whose value is gone (decision 215).
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_free(p: *mut u8) {
+    let p = p as usize;
+    system(|| mem::release(p as *mut u8));
+}
+
+/// Drops the value at `p` of type `t`: by its glue (Sisu code) on the
+/// task's stack, or structurally on the system stack.
 ///
 /// # Safety
 /// `p` must hold a value of type `t`, dead afterwards.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sisu_rt_drop(p: *mut u8, t: u32) -> u8 {
-    // SAFETY: as the caller guarantees.
-    unsafe { value::drop_value(p, t) }
+    match ty(t).kind {
+        // SAFETY: as the caller guarantees.
+        Kind::Struct { glue: Some(_), .. } | Kind::Enum { glue: Some(_), .. } | Kind::Guard(..) => unsafe {
+            value::drop_value(p, t)
+        },
+        // SAFETY: as the caller guarantees.
+        _ => system_status(|| unsafe { value::drop_value(p, t) }),
+    }
 }
 
 /// `.copy()`.
@@ -312,7 +411,7 @@ unsafe extern "C" fn sisu_rt_drop(p: *mut u8, t: u32) -> u8 {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sisu_rt_copy(dst: *mut u8, src: *mut u8, t: u32) {
     // SAFETY: as the caller guarantees.
-    unsafe { value::copy_value(dst, src, t) }
+    system(|| unsafe { value::copy_value(dst, src, t) })
 }
 
 /// An operator on values that are not numbers: the comparisons write a
@@ -323,6 +422,13 @@ unsafe extern "C" fn sisu_rt_copy(dst: *mut u8, src: *mut u8, t: u32) {
 /// the result.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sisu_rt_binary(op: u32, dst: *mut u8, a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> u8 {
+    // SAFETY: as the caller guarantees.
+    system(|| unsafe { binary(op, dst, a, ta, b, tb) })
+}
+
+/// # Safety
+/// As `sisu_rt_binary`.
+unsafe fn binary(op: u32, dst: *mut u8, a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> u8 {
     let Some(o) = ValueOp::from_code(op) else { rt::internal("an unknown operator") };
     // SAFETY: as the caller guarantees.
     unsafe {
@@ -362,7 +468,17 @@ unsafe extern "C" fn sisu_rt_binary(op: u32, dst: *mut u8, a: *mut u8, ta: u32, 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sisu_rt_intrinsic(desc: *const u32, ret: *mut u8, args: *const *mut u8) -> u8 {
     // SAFETY: as the caller guarantees.
-    unsafe { crate::intrinsics::call(desc, ret, args) }
+    let (i, c) = unsafe { crate::intrinsics::decode(desc, ret, args) };
+    if crate::tasks::handles(i) {
+        // SAFETY: as the caller guarantees.
+        return unsafe { crate::tasks::call(i, &c) };
+    }
+    if crate::host::handles(i) {
+        // SAFETY: as the caller guarantees.
+        return unsafe { crate::host::call(i, &c) };
+    }
+    // SAFETY: as the caller guarantees.
+    system_status(|| unsafe { crate::intrinsics::call(i, &c) })
 }
 
 /// A `dict` or `set` (of type `t`) from a literal's `n` entries, moved in
@@ -374,6 +490,13 @@ unsafe extern "C" fn sisu_rt_intrinsic(desc: *const u32, ret: *mut u8, args: *co
 /// have room for a word.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sisu_rt_table(t: u32, items: *mut u8, n: u64, out: *mut u8) -> u8 {
+    // SAFETY: as the caller guarantees.
+    system_status(|| unsafe { table(t, items, n, out) })
+}
+
+/// # Safety
+/// As `sisu_rt_table`.
+unsafe fn table(t: u32, items: *mut u8, n: u64, out: *mut u8) -> u8 {
     let (k, v) = match ty(t).kind {
         Kind::Dict(k, v) => (k, v),
         Kind::Set(e) => (e, u32::MAX),
@@ -413,6 +536,13 @@ unsafe extern "C" fn sisu_rt_table(t: u32, items: *mut u8, n: u64, out: *mut u8)
 /// `d` must hold a dict, `key` a key of type `key_ty`, and `out` be a word.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sisu_rt_dict_slot(d: *mut u8, key: *mut u8, key_ty: u32, mode: u32, out: *mut u8) -> u8 {
+    // SAFETY: as the caller guarantees.
+    system(|| unsafe { dict_slot(d, key, key_ty, mode, out) })
+}
+
+/// # Safety
+/// As `sisu_rt_dict_slot`.
+unsafe fn dict_slot(d: *mut u8, key: *mut u8, key_ty: u32, mode: u32, out: *mut u8) -> u8 {
     // SAFETY: as the caller guarantees.
     unsafe {
         let t = crate::dict::table(d);

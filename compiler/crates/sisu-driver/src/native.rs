@@ -115,29 +115,110 @@ pub(crate) fn build_command(prog: &sisu_sir::Program, output: &Path, host: &mut 
     }
 }
 
+/// How `sisu run --native` runs the executable: the seed of its schedule
+/// (`--schedule-seed`), `--explore N`, and whether it reports the
+/// scheduler's numbers (`--stats`), which the runtime reads from
+/// `SISU_SCHEDULE_SEED` and `SISU_STATS` (decision 203).
+pub(crate) struct Run {
+    pub seed: u64,
+    pub explore: Option<u64>,
+    pub stats: bool,
+}
+
 /// `sisu run --native`: the executable, built in a directory of its own
 /// under the system's temporary directory, run with the program's
 /// arguments and this process's standard streams and environment, and
-/// removed; its exit status is the run's.
-pub(crate) fn run_command(prog: &sisu_sir::Program, name: &str, args: &[String], host: &mut dyn Host) -> i32 {
+/// removed; its exit status is the run's. Under `--explore N` it runs
+/// under the seeds from `--schedule-seed` on, as the interpreter's runs do,
+/// and reports the first seed whose run fails.
+pub(crate) fn run_command(
+    prog: &sisu_sir::Program,
+    name: &str,
+    args: &[String],
+    how: &Run,
+    host: &mut dyn Host,
+) -> i32 {
     let dir = std::env::temp_dir().join(format!("sisu-native-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     let exe = dir.join(if name.is_empty() { "program" } else { name });
     let code = match build(prog, &exe, host) {
-        Ok(()) => match std::process::Command::new(&exe).args(args).status() {
-            Ok(st) => exit_code(st),
-            Err(e) => {
-                host.stderr(&text(
-                    msg::NATIVE_CANNOT_RUN,
-                    &[("path", exe.display().to_string()), ("reason", e.to_string())],
-                ));
-                EXIT_ERROR
-            }
+        Ok(()) => match how.explore {
+            None => run_once(&exe, args, how.seed, how.stats, host),
+            Some(n) => explore(&exe, args, how, n, host),
         },
         Err(code) => code,
     };
     let _ = std::fs::remove_dir_all(&dir);
     code
+}
+
+fn command(exe: &Path, args: &[String], seed: u64, stats: bool) -> std::process::Command {
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(args);
+    if seed != 0 {
+        cmd.env("SISU_SCHEDULE_SEED", seed.to_string());
+    }
+    if stats {
+        cmd.env("SISU_STATS", "1");
+    }
+    cmd
+}
+
+fn cannot_run(exe: &Path, e: &std::io::Error, host: &mut dyn Host) -> i32 {
+    host.stderr(&text(
+        msg::NATIVE_CANNOT_RUN,
+        &[("path", exe.display().to_string()), ("reason", e.to_string())],
+    ));
+    EXIT_ERROR
+}
+
+fn run_once(exe: &Path, args: &[String], seed: u64, stats: bool, host: &mut dyn Host) -> i32 {
+    match command(exe, args, seed, stats).status() {
+        Ok(st) => exit_code(st),
+        Err(e) => cannot_run(exe, &e, host),
+    }
+}
+
+/// `--explore N`: the runs under `N` seeds, each with its output captured;
+/// the first that fails is reported with its output, and when none fails
+/// the first run's output is printed with a summary (the interpreter's
+/// `run_main_seeds`).
+fn explore(exe: &Path, args: &[String], how: &Run, n: u64, host: &mut dyn Host) -> i32 {
+    let mut first: Option<(String, String)> = None;
+    for k in 0..n {
+        let seed = how.seed.wrapping_add(k);
+        let out = match command(exe, args, seed, how.stats).stdin(std::process::Stdio::null()).output() {
+            Ok(o) => o,
+            Err(e) => return cannot_run(exe, &e, host),
+        };
+        let status = exit_code(out.status);
+        let (stdout, stderr) = (
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        );
+        if status != 0 {
+            host.stdout(&stdout);
+            host.stderr(&stderr);
+            host.stderr(&text(
+                msg::CLI_EXPLORE_FAILED,
+                &[("seed", seed.to_string()), ("count", n.to_string()), ("status", status.to_string())],
+            ));
+            return status;
+        }
+        if first.is_none() {
+            first = Some((stdout, stderr));
+        }
+    }
+    if let Some((out, err)) = first {
+        host.stdout(&out);
+        host.stderr(&err);
+    }
+    let last = how.seed.wrapping_add(n - 1);
+    host.stderr(&text(
+        msg::CLI_EXPLORE_OK,
+        &[("count", n.to_string()), ("first", how.seed.to_string()), ("last", last.to_string())],
+    ));
+    0
 }
 
 /// A child's exit status; one a signal ended is 128 and its number.

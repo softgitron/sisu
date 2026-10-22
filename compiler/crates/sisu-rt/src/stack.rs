@@ -246,7 +246,8 @@ fn reserve(len: usize) -> Option<usize> {
     let flags = libc::MAP_PRIVATE | libc::MAP_ANON | libc::MAP_NORESERVE;
     // SAFETY: an anonymous private mapping with no address hint overlaps
     // nothing the program owns.
-    let p = unsafe { libc::mmap(std::ptr::null_mut(), len, libc::PROT_READ | libc::PROT_WRITE, flags, -1, 0) };
+    let p =
+        unsafe { libc::mmap(std::ptr::null_mut(), len, libc::PROT_READ | libc::PROT_WRITE, flags, -1, 0) };
     if p == libc::MAP_FAILED {
         return None;
     }

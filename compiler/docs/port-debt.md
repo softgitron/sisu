@@ -204,18 +204,19 @@ arguments, which the untyped drops above also want.
 **Capability objects are never freed.** A capability handle's object and
 a `Cap`'s value live in a heap cell that every copy reaches and that
 nothing frees, because a `Copy` handle has no last copy; a `Drop` of the
-object never runs. In the interpreter the cells go with the run. *Pay*:
-the backend needs a lifetime for them: an arena per run (they are few),
-or counting copies, which would make handles not `Copy`.
+object never runs. In the interpreter the cells go with the run, and in
+a native executable with the process (decision 209). *Pay*: a lifetime
+for them: an arena per run (they are few), or counting copies, which
+would make handles not `Copy`.
 
 **Handles forward by dispatch.** A call on a capability handle or a
 `Lent` is a `call trait` that the dispatcher resolves by the object in
 the handle's cell (`cap.forward` in the prelude, a special case in
 lowering's `callee_for` and in `dispatch.rs`), since the object's type is
-known only at run time. *Pay*: none for the interpreter; a backend
-compiles a handle as a `dyn` of its trait. The native backend's first
-round compiles a call through a handle to the host's object, and only
-when nothing `main` reaches makes another (decision 194).
+known only at run time. *Pay*: none for the interpreter. The native
+backend compiles a handle as a `dyn` of its trait where the program makes
+objects for its type (decision 209), and a call through any other
+handle to the host's object (decision 194).
 
 **`Wrap` and `Fake` are written by the compiler.** 06 builds `Wrap[T]`
 from the reflection behind `Fake[T]`. std.cap writes `Wrap`'s impl for
@@ -229,9 +230,9 @@ with a reflected signature (Q-27); then one generic impl and `Fake[T]` as
 std code, for every trait.
 
 **The host's network is polled.** A host socket that would block makes
-its task wait one millisecond on the host's clock and try again; there is
-no event loop, and a host socket is closed only by `close` (dropping a
-`Conn` does not). *Pay*: an event loop (`epoll` or `kqueue`) behind the
+its task wait one millisecond on the host's clock and try again, in the
+interpreter and natively (decision 209); there is no event loop, and a
+host socket is closed only by `close` (dropping a `Conn` does not). *Pay*: an event loop (`epoll` or `kqueue`) behind the
 host contract, and a `Drop` for the host's streams.
 
 **`Slice` is a copy, and not `Copy`.** A `Slice[T]` is a list of copies
@@ -315,9 +316,11 @@ represents (`sisu-interp/src/value.rs`), with their contracts in the
 prelude; a `Shared`'s value lives in a heap of cells that are never
 reused, and the monitor sees a mutex's interior through the guard's
 path. The escape analysis tags each `Shared` site atomic or not, but the
-interpreter's counts are never contended. *Pay*: write them in Sisu over
-raw memory and atomics (stage 1 and the backend), with the tags choosing
-the counting.
+interpreter's counts are never contended. The native runtime has them as
+objects of its own too, in Rust (decision 207), freeing a `Shared` cell
+with its last handle, and its counts are never contended either. *Pay*:
+write them in Sisu over raw memory and atomics (stage 1 and the backend),
+with the tags choosing the counting.
 
 **The scheduler is the interpreter's.** Tasks are frame stacks swapped
 into the interpreter, a run is single-threaded, and a schedule is the
@@ -451,46 +454,74 @@ in the host's display text (`format.rs`) because error sets display
 structurally. *Pay*: a `Display` impl in the prelude, when error sets can
 have impls that the fast path respects.
 
-## Stage 2, round 1: what the native backend leaves out
+## Stage 2: what the native backend leaves out
 
-The native debug backend (architecture.md, "Stage 2") compiles the subset
-`conformance/native.list` covers. A program outside it is `D0103` under
-`--native` and runs as before without it. In the order of how many of the
-suite's cases need each (`sisu-conformance --native-survey
-conformance/native.list` lists them):
+The native debug backend (architecture.md, "Stage 2") compiles every
+program the conformance suite runs (`conformance/native.list`, 151
+cases). A construct it does not compile is `D0103` under `--native`, and
+the program runs as before without it (`sisu-conformance --native-survey
+conformance/native.list` tries the cases outside the list). What it
+leaves out:
 
-- **The library types the interpreter implements**: `Mutex`, `Shared`,
-  `Weak`, `Cell` and `Arena`. *Pay*: runtime objects with their
-  contracts, or Sisu over raw storage (the entry above on their drops).
-- **Tasks and the scheduler**: `task.scope`, `task.race`, channels,
-  `select` and generators. The scheduler is interpreter code. *Pay*: a
-  native scheduler with the seeded order of the interpreter's (tasks on
-  stacks of their own, switched at the same yield points), the next
-  round's first item.
-- **Capabilities other than the host's**: fakes, attenuations,
-  interceptors, `cap.lend`, `Clock.fake` and the `sim` profile, because a
-  call through a handle is compiled to the host's object (decision 194);
-  and of the host's operations, the network, processes and reading a file
-  as `bytes`, with `bytes` itself. *Pay*: handles as `dyn` values of
-  their traits (the entry "Handles forward by dispatch" above), which the
-  backend has (decision 202), and the remaining host operations in the
-  runtime.
-- **Intrinsics the runtime does not have**: `fmt.strftime` among those the
-  suite reaches; `sisu_rt::abi::Intrinsic` lists the ones it has. *Pay*:
-  each one, as the construct guide's step 8 says.
-- **A function with a parameter of type `Iterable[T]`** (`sorted` of a
-  type with its own `Ord`, which runs the Sisu `sorted` rather than the
-  intrinsic): `Iterable[T]` stands for any iterable argument and has no
-  layout. *Pay*: instances keyed by the argument's own type, or lowering
-  giving the parameter the argument's type.
+- **Intrinsics the runtime does not have**, which no runnable case
+  reaches: `bytes.as_slice` among them, since a `Slice[u8]` is a view of
+  words and `bytes` holds bytes (decision 208); `sisu_rt::abi::Intrinsic`
+  lists the ones it has. *Pay*: each one, as the construct guide's step 8
+  says; for `bytes.as_slice`, a `Slice` of bytes as a kind of its own.
 - **A field of a union of error sets whose members lay it out
-  differently**, and a generic function used as a value. *Pay*: a read
-  through a switch on the member; a thunk per instance.
+  differently** (beyond a `String` in one and a `Path` in another,
+  decision 211), and a generic function used as a value, which SIR's
+  `const` of a function cannot name with its type arguments (the front
+  end refuses one in a program, `E0350`). *Pay*: a read through a switch
+  on the member; a thunk per instance.
 - **The interpreter's modes**: the ownership monitor, the counterexample
-  mode, the capability log and replay, hot replacement, `--stats`, the
-  schedulers' options, and `sisu test`, whose tests the backend does not
-  compile. *Pay*: `sisu test --native`, once tasks are native (tests run
-  in parallel tasks).
+  mode, the capability log and replay, hot replacement, `--stats
+  stack-depth` and `--stats shared`, the schedulers other than the
+  seeded one (`--scheduler pct`, `exhaustive`), and `sisu test`, whose
+  tests the backend does not compile. *Pay*: `sisu test --native`, now
+  that tasks are native (tests run in parallel tasks); PCT and the
+  bounded search as the runtime's other ways to pick (decision 204 keeps
+  the generator's draws in one place).
+
+What round 2 (tasks, decisions 203 to 206; the rest of the suite,
+decisions 207 to 211) leaves:
+
+- **An owned value passed to an `Iterable[T]` parameter is dropped when
+  the call returns** (decision 210): an iterator the callee left part of
+  drops the rest, where the interpreter forgets the rest without running
+  its drops. Only an iterator of values with drop glue that the callee
+  does not finish shows it. *Pay*: the interpreter's frames dropping what
+  a parameter that is a reference was given by value, or lowering passing
+  such an argument by reference.
+
+- **A task's stack is finite natively.** The interpreter limits only the
+  number of frames (decision 31); a native task has `SISU_TASK_STACK`
+  (1 MiB) of stack, and the debug backend's frames are large (every
+  temporary has a slot), so a recursion of a few thousand calls that the
+  interpreter runs in a task exhausts it natively (`R0123`; the root task
+  keeps 1 GiB). *Pay*: smaller frames (the entry on temporaries below), and
+  the default reservation from the corpus's histogram of depths (`--stats
+  stack-depth`), 8 MiB being the Phase 1 report's next step.
+- **Yield checks everywhere the interpreter has them**: at every
+  function's entry and every back edge, so that a seed means the same
+  schedule. The Phase 1 report found a slice of a few hundred microseconds
+  enough against starvation and the check on every back edge costly on one
+  machine. *Pay*: a release backend checks less often (a counter on back
+  edges, none in leaf loops that cannot run long), and a seed then names a
+  schedule of its own.
+- **A function entered without its count whose entry fails** its probe or
+  its count of nested calls before its yield point leaves the budget one
+  higher than the interpreter's (only when it would not have reached the
+  scheduler; decision 204). Only a stack exhausted or 100 000 calls deep
+  at that very call shows it. *Pay*: the yield point before the probe,
+  which needs the probe's reserve to hold the scheduler's call.
+- **A view of a temporary sent through a channel** (`tx.send("a{i}")` on a
+  `channel[str]`) passes the ownership checker, though 06 says a channel
+  carries no view. The interpreter's `str` owns its text, so it prints
+  the text; natively the view dangles once the temporary is dropped.
+  Found by the native backend; the checker is stage 0's (and stage 1's)
+  front end. *Pay*: the checker refuses a view as a channel's element
+  type, or the loan of a sent view outliving the statement.
 
 What round 1 does, and a later round must not copy:
 

@@ -19,6 +19,7 @@ pub(crate) struct Table {
     pub vsize: u32,
     pub entries: List,
     index: HashMap<u64, Vec<u64>>,
+    _live: crate::mem::Live,
 }
 
 impl Table {
@@ -30,6 +31,7 @@ impl Table {
             vsize: ty(val).size,
             entries: List::empty(),
             index: HashMap::new(),
+            _live: crate::mem::Live::new(),
         })
     }
 
@@ -170,7 +172,17 @@ unsafe fn hash_into(h: &mut impl Hasher, p: *mut u8, t: u32) {
                 1u8.hash(h);
                 value::text(p, t).unwrap_or(&[]).hash(h);
             }
-            Kind::Int | Kind::Sized(_) | Kind::U64 | Kind::Bool | Kind::Char | Kind::Float => {
+            Kind::Bytes => {
+                2u8.hash(h);
+                mem::at::<crate::mem::Text>(p).bytes().hash(h);
+            }
+            Kind::Int
+            | Kind::Sized(_)
+            | Kind::U64
+            | Kind::Bool
+            | Kind::Char
+            | Kind::Float
+            | Kind::DateTime => {
                 mem::word(p, 0).hash(h);
             }
             Kind::F32 => (mem::word(p, 0) as u32).hash(h),

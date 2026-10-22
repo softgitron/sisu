@@ -33,6 +33,11 @@ pub(crate) fn ty(id: u32) -> &'static TypeEntry {
     TYPES.get().and_then(|t| t.get(id as usize)).unwrap_or(&UNIT)
 }
 
+/// The type numbered `id`, if the table has it.
+pub(crate) fn ty_checked(id: u32) -> Option<&'static TypeEntry> {
+    TYPES.get().and_then(|t| t.get(id as usize))
+}
+
 pub(crate) fn needs_drop(id: u32) -> bool {
     NEEDS_DROP.get().and_then(|t| t.get(id as usize)).copied().unwrap_or(false)
 }
@@ -62,17 +67,30 @@ fn needs_drop_table(types: &[TypeEntry]) -> Vec<bool> {
             let n = match &t.kind {
                 Kind::String
                 | Kind::Path
+                | Kind::Bytes
                 | Kind::List(_)
                 | Kind::Iter(_)
                 | Kind::Box(_)
                 | Kind::Dict(..)
                 | Kind::Set(_)
-                | Kind::Dyn => true,
+                | Kind::Dyn
+                | Kind::Sender(_)
+                | Kind::Receiver(_)
+                | Kind::Guard(..)
+                | Kind::Shared(_)
+                | Kind::Weak(_)
+                | Kind::Arena(_) => true,
+                Kind::Mutex(v) | Kind::Cell(v) => get(*v),
                 Kind::Entry(k, _) => get(*k),
                 Kind::Option(p) => get(*p),
                 Kind::Result(a, b) => get(*a) || get(*b),
                 Kind::Tuple(slots) => slots.iter().any(|s| get(s.ty)),
-                Kind::Struct { glue, .. } | Kind::Enum { glue, .. } => glue.is_some(),
+                // An error holds its return trace (decision 214).
+                Kind::Enum { error: true, .. } => true,
+                Kind::Struct { glue: Some(_), .. } | Kind::Enum { glue: Some(_), .. } => true,
+                // The fields the glue leaves out (decision 217).
+                Kind::Struct { fields, .. } => fields.iter().any(|f| get(f.ty)),
+                Kind::Enum { variants, .. } => variants.iter().any(|v| v.fields.iter().any(|f| get(f.ty))),
                 Kind::ErrSet(members) => members.iter().any(|m| get(*m)),
                 _ => false,
             };
