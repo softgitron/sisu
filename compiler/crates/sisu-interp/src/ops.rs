@@ -180,6 +180,7 @@ impl Interp<'_, '_> {
             Value::Path(p) => Key::Path(p.clone()),
             Value::DateTime(t) => Key::Int(*t),
             Value::Tuple(xs) => Key::Tuple(xs.iter().map(|x| self.key_of(x)).collect::<Result<_, _>>()?),
+            Value::List(xs) => Key::List(xs.iter().map(|x| self.key_of(x)).collect::<Result<_, _>>()?),
             Value::Struct(a) | Value::Variant(a) => Key::Adt(
                 a.ty.clone(),
                 a.variant,

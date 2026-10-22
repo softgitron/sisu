@@ -1,0 +1,35 @@
+# Directly recursive types: an enum whose variants hold the enum itself
+# through lists, several times over, and a struct holding a list of
+# itself. The ownership checker looks once at each type a type reaches,
+# so these check at once rather than in time exponential in the variants.
+
+enum Expr:
+    Lit(int)
+    Minus(list[Expr])
+    Plus(list[Expr], list[Expr])
+    Times(list[Expr], list[Expr])
+    Call(String, list[Expr])
+
+struct Tree:
+    value: int
+    children: list[Tree]
+
+def eval(e: Expr) -> int:
+    return match e:
+        case Lit(n): n
+        case Minus(xs): -eval(xs[0])
+        case Plus(a, b): eval(a[0]) + eval(b[0])
+        case Times(a, b): eval(a[0]) * eval(b[0])
+        case Call(_, args): len(args)
+
+def total(t: Tree) -> int:
+    var sum = t.value
+    for c in t.children:
+        sum += total(c)
+    return sum
+
+def main():
+    print(eval(Plus([Lit(1)], [Times([Lit(2)], [Minus([Lit(3)])])])))
+    print(eval(Call("f".to_string(), [Lit(1), Lit(2)])))
+    let leaves = [Tree(value=2, children=[]), Tree(value=3, children=[])]
+    print(total(Tree(value=1, children=leaves)))

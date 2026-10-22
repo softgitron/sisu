@@ -139,6 +139,9 @@ pub enum Key {
     Path(Rc<str>),
     Bytes(Rc<[u8]>),
     Tuple(Vec<Key>),
+    /// A `list` or an `Array` (the prelude's `impl[T: Hash] Hash for
+    /// list[T]`), its elements in order.
+    List(Vec<Key>),
     Adt(Rc<str>, u32, Vec<Key>),
     Handle,
 }
