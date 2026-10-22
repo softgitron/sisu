@@ -127,16 +127,8 @@ pub(crate) fn unfold_plans(plans: &[Plan]) -> Vec<Unfolded> {
         .flat_map(|p| &p.jobs)
         .map(|j| (&*j.template, &*j.source, j.head.as_str(), Target { name: &j.name, written: &j.written, body: &j.body }))
         .collect();
-    let maxj = std::sync::atomic::AtomicU64::new(0);
     let run = |(template, source, head, target): &(&ast::FnDef, &str, &str, Target<'_>)| {
-        let t0 = std::time::Instant::now();
-        let r = crate::template::unfold(template, source, head, target);
-        maxj.fetch_max(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
-        if t0.elapsed().as_millis() > 2 {
-            let n = match target.body { Body::Struct(f) => f.len(), Body::Enum(v) => v.len() };
-            eprintln!("    slow unfold {} {} ({} parts): {:.1} ms, {} bytes", head.trim().lines().next().unwrap_or(""), target.name, n, t0.elapsed().as_secs_f64() * 1e3, r.as_ref().map_or(0, |t| t.len()));
-        }
-        r
+        crate::template::unfold(template, source, head, target)
     };
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8).min(work.len() / 8);
     let mut all: Vec<Result<String, crate::template::Failure>> = if threads <= 1 {
@@ -172,7 +164,6 @@ pub(crate) fn unfold_plans(plans: &[Plan]) -> Vec<Unfolded> {
         });
         out.into_iter().map(|r| r.unwrap_or_else(|| Ok(String::new()))).collect()
     };
-    eprintln!("  unfold: {} jobs, {} threads, longest {:.1} ms", work.len(), threads, maxj.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e6);
     let mut per_plan = Vec::with_capacity(plans.len());
     for p in plans.iter().rev() {
         let rest = all.len() - p.jobs.len();
@@ -213,9 +204,7 @@ impl Resolver<'_> {
             loop {
                 let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let Some(t) = texts.get(i) else { break };
-                let t0 = std::time::Instant::now();
                 let _ = crate::collect::parse_generated(t);
-                eprintln!("    parse {} bytes {:.1} ms", t.len(), t0.elapsed().as_secs_f64() * 1e3);
             }
         };
         std::thread::scope(|s| {
