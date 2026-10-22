@@ -89,17 +89,46 @@ fn needs_drop_table(types: &[TypeEntry]) -> Vec<bool> {
 
 /// A panic in flight: its message and the lines of its stack trace,
 /// innermost first.
+#[derive(Clone, Debug)]
 pub(crate) struct Panic {
     pub message: String,
     pub stack: Vec<String>,
 }
 
 thread_local! {
-    /// The panics in flight, the newest last: a second one is raised while
-    /// the first unwinds, and reaching a frame that runs cleanup aborts.
+    /// The panics in flight of the running task, the newest last: a second
+    /// one is raised while the first unwinds, and reaching a frame that
+    /// runs cleanup aborts. A task switch swaps them with the next task's
+    /// (`sched`).
     static PANICS: RefCell<Vec<Panic>> = const { RefCell::new(Vec::new()) };
     /// Standard output, written in large pieces.
     static OUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The panics in flight, after raising the one a failed stack probe left
+/// pending: the probe returns at once, calling nothing, so its panic is
+/// raised here, before any other, the first time the runtime looks.
+fn with_panics<R>(f: impl FnOnce(&mut Vec<Panic>) -> R) -> R {
+    let failed = crate::sched::take_stack_failure();
+    PANICS.with(|p| {
+        let mut p = p.borrow_mut();
+        if let Some(message) = failed {
+            p.push(Panic { message, stack: Vec::new() });
+        }
+        f(&mut p)
+    })
+}
+
+/// Exchanges the panics in flight with `other`: a task switch keeps each
+/// task's own.
+pub(crate) fn swap_panics(other: &mut Vec<Panic>) {
+    PANICS.with(|p| std::mem::swap(&mut *p.borrow_mut(), other));
+}
+
+/// Whether a panic is in flight in the running task (a mutex guard dropped
+/// then checks its value's invariant, D-077).
+pub(crate) fn unwinding() -> bool {
+    with_panics(|p| !p.is_empty())
 }
 
 /// A catalog message (D-065), as the interpreter renders run-time ones.
@@ -110,7 +139,13 @@ pub(crate) fn render(id: MsgId, params: &[(&str, String)]) -> String {
 /// Raises a panic with this message; the caller returns
 /// [`crate::abi::UNWINDING`].
 pub(crate) fn raise(message: String) -> u8 {
-    PANICS.with(|p| p.borrow_mut().push(Panic { message, stack: Vec::new() }));
+    with_panics(|p| p.push(Panic { message, stack: Vec::new() }));
+    crate::abi::UNWINDING
+}
+
+/// Raises a panic another task's failure carried here, with its trace.
+pub(crate) fn raise_panic(panic: Panic) -> u8 {
+    with_panics(|p| p.push(panic));
     crate::abi::UNWINDING
 }
 
@@ -121,8 +156,8 @@ pub(crate) fn raise_msg(id: MsgId, params: &[(&str, String)]) -> u8 {
 
 /// Adds a line to the stack trace of the newest panic.
 pub(crate) fn add_frame(line: String) {
-    PANICS.with(|p| {
-        if let Some(last) = p.borrow_mut().last_mut() {
+    with_panics(|p| {
+        if let Some(last) = p.last_mut() {
             last.stack.push(line);
         }
     });
@@ -130,14 +165,13 @@ pub(crate) fn add_frame(line: String) {
 
 /// The newest panic, taken.
 pub(crate) fn take_panic() -> Option<Panic> {
-    PANICS.with(|p| p.borrow_mut().pop())
+    with_panics(|p| p.pop())
 }
 
 /// A panic reached a frame that runs cleanup for an earlier one: the
 /// program aborts with both messages (05, "Panics").
 pub(crate) fn abort_unwinding() -> ! {
-    let (first, message) = PANICS.with(|p| {
-        let p = p.borrow();
+    let (first, message) = with_panics(|p| {
         let n = p.len();
         let first = if n >= 2 { p[n - 2].message.clone() } else { String::new() };
         let message = p.last().map(|x| x.message.clone()).unwrap_or_default();

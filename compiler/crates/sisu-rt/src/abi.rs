@@ -28,7 +28,9 @@ pub const WORD: u32 = 8;
 /// The symbols of the runtime that generated code refers to.
 pub mod sym {
     /// `sisu_rt_start(argc, argv, entry, flags, ret_ty, types, types_len,
-    /// fns, fns_len) -> i32`: runs the program and gives its exit status.
+    /// fns, fns_len, max_frame) -> i32`: runs the program and gives its
+    /// exit status; `max_frame` is the largest native frame of the program,
+    /// which the probe reserve of a task's stack must hold.
     pub const START: &str = "sisu_rt_start";
     /// `sisu_rt_frame(name, name_len, file, file_len, line, col)`: a panic
     /// leaves a frame of the program; one line of its stack trace.
@@ -76,7 +78,49 @@ pub mod sym {
     pub const DICT_SLOT: &str = "sisu_rt_dict_slot";
     /// A 64-bit counter of the nested calls of the program.
     pub const DEPTH: &str = "SISU_RT_DEPTH";
+    /// `sisu_rt_yield()`: a yield point found the budget of the running
+    /// task spent; the scheduler may switch tasks.
+    pub const YIELD: &str = "sisu_rt_yield";
+    /// A 64-bit counter of the yield points the running task may pass
+    /// before the scheduler is asked (`sisu_rt_yield` when it reaches 0).
+    pub const BUDGET: &str = "SISU_RT_BUDGET";
+    /// The running task's stack limits, five words ([`super::STACK_PROBE`]
+    /// and the others): what the probe at a function's entry compares the
+    /// stack pointer with.
+    pub const STACK: &str = "SISU_RT_STACK";
+    /// Where the running code calls an intrinsic that may wait, four words
+    /// ([`super::SITE_FILE`] and the others): the deadlock report names it.
+    pub const SITE: &str = "SISU_RT_SITE";
 }
+
+/// The words of [`sym::STACK`]. The probe at a function's entry compares
+/// the stack pointer, below the function's frame, with `STACK_PROBE`; when
+/// it is lower, a stack pointer at or above `STACK_REAL` only crossed the
+/// decommit watermark (set `STACK_DIRTY`, lower `STACK_PROBE` to
+/// `STACK_REAL`, go on), and one below it has exhausted the stack: the
+/// function sets `STACK_FAILED`, lowers `STACK_PROBE` to `STACK_FLOOR`
+/// (the part of the reserve kept for unwinding) and returns
+/// [`UNWINDING`] at once, calling nothing; the runtime raises the panic
+/// when it next looks at the panics in flight.
+pub const STACK_PROBE: u32 = 0;
+pub const STACK_REAL: u32 = 8;
+pub const STACK_FLOOR: u32 = 16;
+pub const STACK_DIRTY: u32 = 24;
+pub const STACK_FAILED: u32 = 32;
+/// The words of [`sym::STACK`].
+pub const STACK_WORDS: usize = 5;
+
+/// The words of [`sym::SITE`]: the address and length of the file's name,
+/// the line and column of the call, and flags ([`SITE_PURE`]).
+pub const SITE_FILE: u32 = 0;
+pub const SITE_FILE_LEN: u32 = 8;
+pub const SITE_LINE: u32 = 16;
+pub const SITE_COL: u32 = 24;
+pub const SITE_FLAGS: u32 = 32;
+pub const SITE_WORDS: usize = 5;
+/// [`SITE_FLAGS`]: the function making the call is `pure` (a scope opened
+/// there reports the lowest-index failure, 06 "Effects").
+pub const SITE_PURE: u64 = 1;
 
 /// Nested calls beyond this many panic (the interpreter's limit).
 pub const MAX_DEPTH: i64 = 100_000;
@@ -351,7 +395,34 @@ pub enum Kind {
     /// holds and the address of a heap cell holding the value, which the
     /// `dyn` owns.
     Dyn,
+    /// `Scope`: one word, the scope's number in the scheduler.
+    Scope,
+    /// `Handle[T]`: one word, the task's number; `T` is its result.
+    Handle(u32),
+    /// `Cancellation`: one word, the number of the scope it waits for.
+    Cancellation,
+    /// `Sender[T]` and `Receiver[T]`: one word, the channel's number.
+    Sender(u32),
+    Receiver(u32),
+    /// `Timer`: two words, the clock's number and the moment, in
+    /// nanoseconds on that clock.
+    Timer,
+    /// `Mutex[T]`: [`MUTEX_HEADER`] bytes (whether it is locked, the task
+    /// holding it, whether it is poisoned), then the value.
+    Mutex(u32),
+    /// `MutexGuard[T]`: one word, the address of the value inside the
+    /// mutex (its header is just before it), and the function-table index
+    /// of `T`'s `invariant` check, which a guard dropped by unwinding runs
+    /// (D-077).
+    Guard(u32, Option<u32>),
 }
+
+/// The bytes of a `Mutex`'s header, before its value.
+pub const MUTEX_HEADER: u32 = 24;
+/// The words of a `Mutex`'s header, from its start.
+pub const MUTEX_LOCKED: u32 = 0;
+pub const MUTEX_HOLDER: u32 = 8;
+pub const MUTEX_POISONED: u32 = 16;
 
 /// A part of a tuple: its offset and type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -444,6 +515,14 @@ const K_ENTRY: u8 = 26;
 const K_I128: u8 = 27;
 const K_U128: u8 = 28;
 const K_DYN: u8 = 29;
+const K_SCOPE: u8 = 30;
+const K_HANDLE: u8 = 31;
+const K_CANCELLATION: u8 = 32;
+const K_SENDER: u8 = 33;
+const K_RECEIVER: u8 = 34;
+const K_TIMER: u8 = 35;
+const K_MUTEX: u8 = 36;
+const K_GUARD: u8 = 37;
 
 struct Writer(Vec<u8>);
 
@@ -582,6 +661,30 @@ pub fn encode(table: &[TypeEntry]) -> Vec<u8> {
                 w.u32(*k);
                 w.u32(*v);
             }
+            Kind::Scope => w.u8(K_SCOPE),
+            Kind::Handle(t) => {
+                w.u8(K_HANDLE);
+                w.u32(*t);
+            }
+            Kind::Cancellation => w.u8(K_CANCELLATION),
+            Kind::Sender(t) => {
+                w.u8(K_SENDER);
+                w.u32(*t);
+            }
+            Kind::Receiver(t) => {
+                w.u8(K_RECEIVER);
+                w.u32(*t);
+            }
+            Kind::Timer => w.u8(K_TIMER),
+            Kind::Mutex(t) => {
+                w.u8(K_MUTEX);
+                w.u32(*t);
+            }
+            Kind::Guard(t, check) => {
+                w.u8(K_GUARD);
+                w.u32(*t);
+                w.opt(*check);
+            }
         }
     }
     w.0
@@ -699,6 +802,14 @@ pub fn decode(bytes: &[u8]) -> Option<Vec<TypeEntry>> {
             K_DICT => Kind::Dict(r.u32()?, r.u32()?),
             K_SET => Kind::Set(r.u32()?),
             K_ENTRY => Kind::Entry(r.u32()?, r.u32()?),
+            K_SCOPE => Kind::Scope,
+            K_HANDLE => Kind::Handle(r.u32()?),
+            K_CANCELLATION => Kind::Cancellation,
+            K_SENDER => Kind::Sender(r.u32()?),
+            K_RECEIVER => Kind::Receiver(r.u32()?),
+            K_TIMER => Kind::Timer,
+            K_MUTEX => Kind::Mutex(r.u32()?),
+            K_GUARD => Kind::Guard(r.u32()?, r.opt()?),
             _ => return None,
         };
         out.push(TypeEntry { size, kind });
@@ -924,6 +1035,58 @@ intrinsics! {
     GenericValue = "generic.value",
     ArrayFilled = "Array.filled",
     ArrayToList = "Array.to_list",
+    TaskScope = "task.scope",
+    TaskRace = "task.race",
+    TaskShield = "task.shield",
+    TaskYieldNow = "task.yield_now",
+    TaskIsCancelled = "task.is_cancelled",
+    TaskCheckpoint = "task.checkpoint",
+    ScopeSpawn = "Scope.spawn",
+    ScopeSpawnWith = "Scope.spawn_with",
+    ScopeCancel = "Scope.cancel",
+    ScopeIsCancelled = "Scope.is_cancelled",
+    ScopeCancelled = "Scope.cancelled",
+    HandleJoin = "Handle.join",
+    HandleIsFinished = "Handle.is_finished",
+    CancellationWait = "Cancellation.wait",
+    Channel = "channel",
+    SenderSend = "Sender.send",
+    SenderTrySend = "Sender.try_send",
+    SenderClose = "Sender.close",
+    ReceiverRecv = "Receiver.recv",
+    ReceiverTryRecv = "Receiver.try_recv",
+    ClockAfter = "clock.after",
+    TimerWait = "Timer.wait",
+    SelectWait = "select.wait",
+    LogWrite = "log.write",
+    GenNew = "gen.new",
+    GenYield = "gen.yield",
+    MutexNew = "Mutex.new",
+    MutexLock = "Mutex.lock",
+    MutexIsPoisoned = "Mutex.is_poisoned",
+    MutexIntoInner = "Mutex.into_inner",
+}
+
+impl Intrinsic {
+    /// Whether a call may make its task wait (or, for a scope, wait at the
+    /// scope's end): the code generator records where the call is before
+    /// it ([`sym::SITE`]), for the deadlock report.
+    pub fn may_wait(self) -> bool {
+        matches!(
+            self,
+            Intrinsic::TaskScope
+                | Intrinsic::TaskRace
+                | Intrinsic::HandleJoin
+                | Intrinsic::CancellationWait
+                | Intrinsic::SenderSend
+                | Intrinsic::ReceiverRecv
+                | Intrinsic::TimerWait
+                | Intrinsic::SelectWait
+                | Intrinsic::GenYield
+                | Intrinsic::MutexLock
+                | Intrinsic::IterNext
+        )
+    }
 }
 
 #[cfg(test)]
@@ -975,6 +1138,15 @@ mod tests {
             Kind::Set(1),
             Kind::Entry(1, 2),
             Kind::Dyn,
+            Kind::Scope,
+            Kind::Handle(3),
+            Kind::Cancellation,
+            Kind::Sender(4),
+            Kind::Receiver(4),
+            Kind::Timer,
+            Kind::Mutex(5),
+            Kind::Guard(5, Some(2)),
+            Kind::Guard(5, None),
         ];
         let table: Vec<TypeEntry> =
             kinds.into_iter().enumerate().map(|(i, kind)| TypeEntry { size: 8 * i as u32, kind }).collect();

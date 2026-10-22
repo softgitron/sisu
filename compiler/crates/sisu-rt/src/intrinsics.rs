@@ -15,24 +15,24 @@ use crate::value::{self, target};
 use sisu_diag::msg;
 use std::cmp::Ordering;
 
-struct Call<'a> {
-    ret: *mut u8,
-    ret_ty: u32,
-    args: &'a [*mut u8],
-    tys: &'a [u32],
-    targs: &'a [u32],
+pub(crate) struct Call<'a> {
+    pub ret: *mut u8,
+    pub ret_ty: u32,
+    pub args: &'a [*mut u8],
+    pub tys: &'a [u32],
+    pub targs: &'a [u32],
 }
 
 impl Call<'_> {
-    fn arg(&self, i: usize) -> *mut u8 {
+    pub(crate) fn arg(&self, i: usize) -> *mut u8 {
         self.args.get(i).copied().unwrap_or_else(|| rt::internal("an intrinsic missing an argument"))
     }
 
-    fn ty(&self, i: usize) -> u32 {
+    pub(crate) fn ty(&self, i: usize) -> u32 {
         self.tys.get(i).copied().unwrap_or(0)
     }
 
-    fn targ(&self, i: usize) -> u32 {
+    pub(crate) fn targ(&self, i: usize) -> u32 {
         self.targs.get(i).copied().unwrap_or_else(|| rt::internal("an intrinsic missing a type argument"))
     }
 
@@ -42,17 +42,17 @@ impl Call<'_> {
     }
 
     /// The value argument `i` is or refers to, and its type.
-    unsafe fn place(&self, i: usize) -> (*mut u8, u32) {
+    pub(crate) unsafe fn place(&self, i: usize) -> (*mut u8, u32) {
         // SAFETY: the argument holds a value of its type.
         unsafe { target(self.arg(i), self.ty(i)) }
     }
 
-    unsafe fn word(&self, i: usize) -> u64 {
+    pub(crate) unsafe fn word(&self, i: usize) -> u64 {
         // SAFETY: as `place`.
         unsafe { mem::word(self.place(i).0, 0) }
     }
 
-    unsafe fn int(&self, i: usize) -> i64 {
+    pub(crate) unsafe fn int(&self, i: usize) -> i64 {
         // SAFETY: as `place`.
         unsafe { self.word(i) as i64 }
     }
@@ -72,7 +72,7 @@ impl Call<'_> {
         unsafe { self.set_word(u64::from(f.to_bits())) }
     }
 
-    unsafe fn bool(&self, i: usize) -> bool {
+    pub(crate) unsafe fn bool(&self, i: usize) -> bool {
         // SAFETY: as `place`.
         unsafe { self.word(i) != 0 }
     }
@@ -82,7 +82,7 @@ impl Call<'_> {
         char::from_u32(unsafe { self.word(i) } as u32).unwrap_or('\u{fffd}')
     }
 
-    unsafe fn text<'b>(&self, i: usize) -> &'b [u8] {
+    pub(crate) unsafe fn text<'b>(&self, i: usize) -> &'b [u8] {
         // SAFETY: as `place`.
         unsafe { value::text(self.arg(i), self.ty(i)).unwrap_or(&[]) }
     }
@@ -101,12 +101,12 @@ impl Call<'_> {
         }
     }
 
-    unsafe fn set_word(&self, v: u64) {
+    pub(crate) unsafe fn set_word(&self, v: u64) {
         // SAFETY: the result has room for a word.
         unsafe { mem::set_word(self.ret, 0, v) }
     }
 
-    unsafe fn set_bool(&self, b: bool) {
+    pub(crate) unsafe fn set_bool(&self, b: bool) {
         // SAFETY: as `set_word`.
         unsafe { self.set_word(u64::from(b)) }
     }
@@ -116,7 +116,7 @@ impl Call<'_> {
         unsafe { value::write_string(self.ret, b) }
     }
 
-    unsafe fn none(&self) {
+    pub(crate) unsafe fn none(&self) {
         // SAFETY: the result is an option.
         unsafe { mem::set_word(self.ret, 0, 1) }
     }
@@ -141,9 +141,12 @@ impl Call<'_> {
     }
 }
 
+/// The call a descriptor and its arguments' addresses describe, and the
+/// intrinsic.
+///
 /// # Safety
 /// As `sisu_rt_intrinsic`.
-pub(crate) unsafe fn call(desc: *const u32, ret: *mut u8, args: *const *mut u8) -> u8 {
+pub(crate) unsafe fn decode<'a>(desc: *const u32, ret: *mut u8, args: *const *mut u8) -> (Intrinsic, Call<'a>) {
     // SAFETY: the descriptor is `CallDesc::encode`'s and `args` holds one
     // address per argument.
     let c = unsafe {
@@ -161,8 +164,17 @@ pub(crate) unsafe fn call(desc: *const u32, ret: *mut u8, args: *const *mut u8) 
     // SAFETY: as above.
     let id = unsafe { *desc };
     let Some(i) = Intrinsic::from_id(id) else { rt::internal("an unknown intrinsic") };
+    (i, c)
+}
+
+/// A call of an intrinsic that neither waits nor runs Sisu code itself:
+/// on the system stack.
+///
+/// # Safety
+/// As `sisu_rt_intrinsic`.
+pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
     // SAFETY: each intrinsic reads its arguments as their types say.
-    unsafe { dispatch(i, &c) }
+    unsafe { dispatch(i, c) }
 }
 
 unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {

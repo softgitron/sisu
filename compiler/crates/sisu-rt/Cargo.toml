@@ -15,6 +15,12 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 sisu-diag.workspace = true
+# Tasks run on stacks of their own (docs/architecture.md, "Stage 2",
+# decision 203): corosensei is the context switch of the Phase 1 harness
+# (taskbench, policy 2), and libc gives the memory calls of its pooled
+# stacks (`mmap`, `madvise`).
+corosensei = { version = "0.3.4", default-features = false, features = ["unwind"] }
+libc = "0.2"
 
 # The workspace's lints, except that this crate is where native code meets
 # Rust: its entry points take raw pointers, so `unsafe` is allowed here and
