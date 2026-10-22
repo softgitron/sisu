@@ -721,7 +721,10 @@ impl<'p> Interp<'p, '_> {
     fn panicked_err(&self, p: &PanicInfo) -> Value {
         Value::err(self.task_error(
             "TaskPanicked",
-            vec![Value::String(p.message.clone()), Value::String(sisu_diag::trace::shown(&p.stack).join("\n"))],
+            vec![
+                Value::String(p.message.clone()),
+                Value::String(sisu_diag::trace::shown(&p.stack).join("\n")),
+            ],
         ))
     }
 

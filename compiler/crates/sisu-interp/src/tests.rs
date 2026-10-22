@@ -228,7 +228,7 @@ fn main(0) source 0 {{
     assert_eq!(lines.len(), 2 + sisu_diag::trace::INNER + sisu_diag::trace::OUTER, "{err}");
     assert_eq!(lines[1 + sisu_diag::trace::INNER], "  ... (frames left out)");
     assert_eq!(lines.last(), Some(&"  at main (t.sisu)"));
-    assert!(MAX_DEPTH > sisu_diag::trace::INNER + sisu_diag::trace::OUTER);
+    const { assert!(MAX_DEPTH > sisu_diag::trace::INNER + sisu_diag::trace::OUTER) };
 }
 
 #[test]

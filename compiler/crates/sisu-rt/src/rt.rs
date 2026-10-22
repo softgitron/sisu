@@ -201,7 +201,9 @@ pub(crate) fn abort_unwinding() -> ! {
         // A generator dropped before its end cleans up without a panic of
         // its own (decision 236).
         None if crate::sched::abandoning() => render(msg::PANIC_DURING_ABANDON, &[("message", message)]),
-        first => render(msg::PANIC_DURING_UNWIND, &[("first", first.unwrap_or_default()), ("message", message)]),
+        first => {
+            render(msg::PANIC_DURING_UNWIND, &[("first", first.unwrap_or_default()), ("message", message)])
+        }
     };
     abort(&text)
 }

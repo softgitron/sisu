@@ -844,6 +844,27 @@ trait Hash(Eq):
                                 comptime for field in V.fields:
                                     self.[field].hash(mut h)
 
+## A value to start from, `T.default()` (D-051: nothing is made without
+## being given its value; a type that has a natural first value says so
+## with this trait).
+trait Default:
+    pure def default() -> Self
+
+    ## The derived impl (08, "Derive"): the struct with each field's own
+    ## default where it has one, and its type's `default()` otherwise. An
+    ## enum's default is one of its variants, which an impl names.
+    comptime def derive(T: type) -> impl Default for T:
+        return impl Default for T:
+            pure def default() -> Self:
+                if comptime reflect.is_struct(T):
+                    return reflect.construct(
+                        T, {f.name: Default.default() for f in reflect.fields_of(T) if not f.default}
+                    )
+                else:
+                    comptime panic(
+                        "`{reflect.name_of(T)}` is an enum: its default is one of its variants, which an impl names"
+                    )
+
 ## A number of items, `len(x)`.
 trait Len:
     pure def len(self) -> int

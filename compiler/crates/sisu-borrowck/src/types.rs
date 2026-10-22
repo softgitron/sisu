@@ -227,16 +227,16 @@ impl<'p> Types<'p> {
             Type::Tuple(es) => es.iter().any(|e| self.holds_handle_depth(e, depth + 1)),
             Type::Named(n, args) => match n.as_str() {
                 "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "System" | "Cap" => true,
-                "Lent" | "Shared" | "Weak" | "list" | "Array" | "dict" | "set" | "Iter" | "Entry" | "Iterable"
-                | "Cell" | "Mutex" | "MutexGuard" | "Arena" | "Slice" => false,
+                "Lent" | "Shared" | "Weak" | "list" | "Array" | "dict" | "set" | "Iter" | "Entry"
+                | "Iterable" | "Cell" | "Mutex" | "MutexGuard" | "Arena" | "Slice" => false,
                 "Option" | "Result" => args.iter().any(|a| self.holds_handle_depth(a, depth + 1)),
                 _ => match self.decl(n) {
                     Some(TypeDecl::Struct { fields, .. }) => {
                         fields.iter().any(|f| self.holds_handle_depth(&f.ty.subst(args), depth + 1))
                     }
-                    Some(TypeDecl::Enum { variants, .. }) => variants
-                        .iter()
-                        .any(|v| v.fields.iter().any(|(_, ft)| self.holds_handle_depth(&ft.subst(args), depth + 1))),
+                    Some(TypeDecl::Enum { variants, .. }) => variants.iter().any(|v| {
+                        v.fields.iter().any(|(_, ft)| self.holds_handle_depth(&ft.subst(args), depth + 1))
+                    }),
                     None => false,
                 },
             },

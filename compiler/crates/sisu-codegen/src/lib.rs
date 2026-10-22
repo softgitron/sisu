@@ -1357,7 +1357,13 @@ impl<'p> Codegen<'p> {
             b.finalize();
         }
         self.fbctx = fbctx;
-        self.define(main, ctx, "main".to_string(), Frame::Outside, debug::FnDebug::new(main, "main".to_string()))
+        self.define(
+            main,
+            ctx,
+            "main".to_string(),
+            Frame::Outside,
+            debug::FnDebug::new(main, "main".to_string()),
+        )
     }
 }
 

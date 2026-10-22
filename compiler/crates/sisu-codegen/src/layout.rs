@@ -603,7 +603,9 @@ impl<'p> Types<'p> {
             Kind::Result(a, b) => vec![*a, *b],
             Kind::Tuple(slots) => slots.iter().map(|s| s.ty).collect(),
             Kind::Struct { fields, .. } => fields.iter().map(|f| f.ty).collect(),
-            Kind::Enum { variants, .. } => variants.iter().flat_map(|v| v.fields.iter().map(|f| f.ty)).collect(),
+            Kind::Enum { variants, .. } => {
+                variants.iter().flat_map(|v| v.fields.iter().map(|f| f.ty)).collect()
+            }
             _ => return false,
         };
         parts.into_iter().any(|p| self.counted_in(p, seen))

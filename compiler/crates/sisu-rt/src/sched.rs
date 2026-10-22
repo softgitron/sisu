@@ -452,8 +452,9 @@ pub(crate) fn take_stack_failure() -> Option<String> {
     let len = SISU_RT_STACK[(abi::STACK_FAILED_LEN / 8) as usize].load(Relaxed);
     // SAFETY: the probe that failed stored the address and length of its
     // function's name, a text of the program's read-only data.
-    let function =
-        unsafe { String::from_utf8_lossy(crate::mem::Str { ptr: name as *const u8, len }.bytes()).into_owned() };
+    let function = unsafe {
+        String::from_utf8_lossy(crate::mem::Str { ptr: name as *const u8, len }.bytes()).into_owned()
+    };
     Some(rt::render(msg::PANIC_STACK_OVERFLOW, &[("function", function)]))
 }
 

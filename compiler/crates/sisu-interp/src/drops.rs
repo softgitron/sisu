@@ -209,11 +209,7 @@ impl<'p> Interp<'p, '_> {
             v @ (Value::Sender(_) | Value::Receiver(_)) => self.drop_channel_end(&v),
             // A copy of a handle goes: its count with it (decision 237); a
             // `Lent` held none.
-            Value::Cap(id) => {
-                if !matches!(&ty, Some(Type::Named(n, _)) if n == "Lent") {
-                    self.release_cap(id);
-                }
-            }
+            Value::Cap(id) if !matches!(&ty, Some(Type::Named(n, _)) if n == "Lent") => self.release_cap(id),
             _ => {}
         }
         Ok(())

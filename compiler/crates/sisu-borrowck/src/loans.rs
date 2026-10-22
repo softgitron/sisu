@@ -90,7 +90,9 @@ struct Made {
 
 impl Made {
     fn makes(&self, l: LoanId) -> bool {
-        self.rvalue == Some(l) || self.reborrows.values().any(|v| *v == l) || self.handles.values().any(|v| *v == l)
+        self.rvalue == Some(l)
+            || self.reborrows.values().any(|v| *v == l)
+            || self.handles.values().any(|v| *v == l)
     }
 }
 
@@ -1932,7 +1934,11 @@ fn handle_sources(p: &Program, types: &Types, callee: &Callee, n: usize, dest: &
         Callee::Intrinsic(name, _) => p.intrinsic(name).map(|d| d.from.as_slice()).unwrap_or_default(),
         Callee::Trait(name, _) => p.trait_method(name).map(|d| d.from.as_slice()).unwrap_or_default(),
         Callee::Value(_) => {
-            return if dest.as_ref().is_some_and(|t| types.may_hold(t)) { (0..n).collect() } else { Vec::new() };
+            return if dest.as_ref().is_some_and(|t| types.may_hold(t)) {
+                (0..n).collect()
+            } else {
+                Vec::new()
+            };
         }
     };
     from.iter().map(|i| *i as usize).filter(|i| *i < n).collect()

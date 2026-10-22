@@ -188,11 +188,6 @@ impl<'a, 'p> Cx<'a, 'p> {
             }
             locals.push(Local { ty, storage });
         }
-        // The code so far is the prologue's, in the debug information: the
-        // parameters' addresses are kept before the body begins.
-        if let Some(l) = f.loc {
-            b.set_srcloc(srcloc(l.line, l.col));
-        }
         let line = b.declare_var(types::I64);
         let col = b.declare_var(types::I64);
         let start = f.loc.map(|l| (i64::from(l.line), i64::from(l.col))).unwrap_or((0, 0));
@@ -416,9 +411,15 @@ impl<'a, 'p> Cx<'a, 'p> {
     fn prologue(&mut self) -> Result<(), Error> {
         self.probe();
         // The parameters' addresses, for a debugger, once the probe has
-        // passed.
+        // passed. The code so far is the prologue's in the debug
+        // information, with no line of its own: the declaration's line
+        // begins after it, where a debugger's breakpoint on the function
+        // stops with the parameters in place.
         for (v, ss) in std::mem::take(&mut self.kept) {
             self.b.ins().stack_store(v, ss, 0);
+        }
+        if let Some(l) = self.f.loc {
+            self.b.set_srcloc(srcloc(l.line, l.col));
         }
         if self.glue {
             let first = self.blocks[0];

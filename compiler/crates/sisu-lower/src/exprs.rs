@@ -272,11 +272,7 @@ impl FnLower<'_, '_> {
     /// An operand for reading without consuming: a copy of a `Copy`
     /// value that holds no capability handle, a reference otherwise.
     pub fn compare_operand(&mut self, e: &thir::Expr) -> Operand {
-        if !self.needs_drop(&e.ty) {
-            self.operand(e)
-        } else {
-            self.borrow_operand(e, false)
-        }
+        if !self.needs_drop(&e.ty) { self.operand(e) } else { self.borrow_operand(e, false) }
     }
 
     /// The expression as a `str` value.

@@ -435,10 +435,15 @@ impl<'p> Interp<'p, '_> {
                 // A generator dropped before its end cleans up without a
                 // panic of its own (decision 236).
                 let text = match first {
-                    Some(q) if q.abandon => render(msg::PANIC_DURING_ABANDON, &[("message", p.message.clone())]),
+                    Some(q) if q.abandon => {
+                        render(msg::PANIC_DURING_ABANDON, &[("message", p.message.clone())])
+                    }
                     _ => render(
                         msg::PANIC_DURING_UNWIND,
-                        &[("first", first.map(|q| q.message.clone()).unwrap_or_default()), ("message", p.message.clone())],
+                        &[
+                            ("first", first.map(|q| q.message.clone()).unwrap_or_default()),
+                            ("message", p.message.clone()),
+                        ],
                     ),
                 };
                 if self.sched.cur == root {
@@ -1448,7 +1453,9 @@ impl<'p> Interp<'p, '_> {
         }
         let own: Vec<u32> = self.prog.intrinsic(name).map(|d| d.own.clone()).unwrap_or_default();
         for i in own {
-            let (Some(Operand::Copy(q)), Some(v)) = (ops.get(i as usize), vals.get(i as usize)) else { continue };
+            let (Some(Operand::Copy(q)), Some(v)) = (ops.get(i as usize), vals.get(i as usize)) else {
+                continue;
+            };
             if crate::caps::holds_cap(v) {
                 let t = self.place_type(q);
                 self.retain_caps(v, t.as_ref());

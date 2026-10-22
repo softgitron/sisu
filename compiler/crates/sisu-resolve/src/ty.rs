@@ -430,7 +430,9 @@ impl Program {
                 Some("Lent") => false,
                 _ => args.iter().any(|a| self.holds_capability_depth(a, depth + 1)),
             },
-            DefKind::Struct(s) => s.fields.iter().any(|f| self.holds_capability_depth(&f.ty.subst(args), depth)),
+            DefKind::Struct(s) => {
+                s.fields.iter().any(|f| self.holds_capability_depth(&f.ty.subst(args), depth))
+            }
             DefKind::Enum(e) | DefKind::ErrorSet(e) => e
                 .variants
                 .iter()
