@@ -238,6 +238,29 @@ pub enum Msg:
     BorrowUseOwnClosure
     TaskUseOwn
     BorrowAddFrom
+    # The manifests and the module trees of a program of several modules
+    # (`sisu-driver`'s `manifest.rs` and `package.rs`).
+    PackageTomlSyntax
+    PackageTomlDuplicate
+    PackageMissingKey
+    PackageBadValue
+    PackageBadName
+    PackageNoManifest
+    PackageRenamedDependency
+    PackageCycle
+    PackageNoRootModule
+    PackageTwoRootModules
+    PackageNotAPath
+    PackageBadWhen
+    PackageModuleName
+    PackageNoMember
+    PackageScriptMetadata
+    PackageTrustUnknown
+    PackageNoPackage
+    PackageReservedName
+    PackageDependsHere
+    PackageUnknownKey
+    CapUntrusted
     BorrowDeclareView
 
 impl Msg:
@@ -469,6 +492,27 @@ impl Msg:
             case BorrowUseOwnClosure: "borrow.use-own-closure"
             case TaskUseOwn: "task.use-own"
             case BorrowAddFrom: "borrow.add-from"
+            case PackageTomlSyntax: "package.toml-syntax"
+            case PackageTomlDuplicate: "package.toml-duplicate"
+            case PackageMissingKey: "package.missing-key"
+            case PackageBadValue: "package.bad-value"
+            case PackageBadName: "package.bad-name"
+            case PackageNoManifest: "package.no-manifest"
+            case PackageRenamedDependency: "package.renamed-dependency"
+            case PackageCycle: "package.cycle"
+            case PackageNoRootModule: "package.no-root-module"
+            case PackageTwoRootModules: "package.two-root-modules"
+            case PackageNotAPath: "package.not-a-path"
+            case PackageBadWhen: "package.bad-when"
+            case PackageModuleName: "package.module-name"
+            case PackageNoMember: "package.no-member"
+            case PackageScriptMetadata: "package.script-metadata"
+            case PackageTrustUnknown: "package.trust-unknown"
+            case PackageNoPackage: "package.no-package"
+            case PackageReservedName: "package.reserved-name"
+            case PackageDependsHere: "package.depends-here"
+            case PackageUnknownKey: "package.unknown-key"
+            case CapUntrusted: "cap.untrusted"
             case BorrowDeclareView: "borrow.declare-view"
 
 ## A byte range of a text: from `start` up to, not including, `end`.
@@ -850,22 +894,33 @@ pub pure def quote(value: str) -> String:
 ##   label 1:5-1:8 lex.opened-here
 ## ```
 pub pure def render_ids(text: str, diags: list[Diagnostic], catalog: Catalog) -> String:
+    return render_ids_in("", text, diags, catalog)
+
+## `render_ids` for a file of a program of several files, named `name`
+## (stage 0's `render_ids_with_files`): every position has the file's name
+## first. An empty name leaves positions as `render_ids` writes them.
+pub pure def render_ids_in(
+    name: str, text: str, diags: list[Diagnostic], catalog: Catalog
+) -> String:
     let lines = Lines.of(text)
+    var file = String.new()
+    if not name.is_empty():
+        file = "{name}:"
     var out = String.new()
     for d in diags:
-        out.push("{lines.span(text, d.start, d.end)} {catalog.code(d.msg)} {d.msg.id()}")
+        out.push("{file}{lines.span(text, d.start, d.end)} {catalog.code(d.msg)} {d.msg.id()}")
         for p in d.params:
             out.push(" {p.name}={quote(p.value)}")
         out.push("\n")
         for l in d.labels:
-            out.push("  label {lines.span(text, l.start, l.end)} {l.msg.id()}")
+            out.push("  label {file}{lines.span(text, l.start, l.end)} {l.msg.id()}")
             for p in l.params:
                 out.push(" {p.name}={quote(p.value)}")
             out.push("\n")
         for f in d.fixes:
             out.push("  fix {f.msg.id()}")
             for e in f.edits:
-                out.push(" {lines.span(text, e.start, e.end)} {quote(e.text)}")
+                out.push(" {file}{lines.span(text, e.start, e.end)} {quote(e.text)}")
             out.push("\n")
     return out
 

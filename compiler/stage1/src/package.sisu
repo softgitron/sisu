@@ -1,0 +1,543 @@
+##! What a program is made of (stage 0's `sisu-driver/src/package.rs`; 09,
+##! "Modules" and "Package manifest"): a single file, a script with its
+##! inline metadata, a package with its dependencies, or a workspace's
+##! members. `load_package` reads the manifests and walks the module trees,
+##! and gives a `Layout`: every module's path, file and package, every
+##! package's dependencies and trust, and the problems found.
+##!
+##! The module tree mirrors the file tree under `src/`: the root module is
+##! `src/main.sisu` (an application) or `src/lib.sisu` (a library), named by
+##! the package's name; `src/parser.sisu` is `PACKAGE.parser`; a directory
+##! `src/net/` is the module `PACKAGE.net`, whose children are the files and
+##! directories in it, and a file `src/net.sisu` beside it gives that module
+##! items of its own.
+##!
+##! Paths are texts with `/` between their parts. Stage 0 compares
+##! directories by their canonical form; stage 1 is given absolute paths and
+##! normalises them by their text (`.` and `..` resolved), which is the same
+##! where no symbolic link is involved. Stage 1 does not write the lockfile.
+
+import stage1.manifest
+from stage1.diag import Catalog, Diagnostic, Label, Msg, Param, TextRange
+from stage1.manifest import Dependency, is_module_name, target_facts
+
+## A package of the program.
+pub struct Package:
+    ## Its `[package] name`; empty for a single file or a script.
+    pub name: String
+    pub version: String
+    ## Its directory.
+    pub dir: String
+    ## The packages its imports may name: its active dependencies, by name,
+    ## as indices of `Layout.packages`.
+    pub deps: list[(String, int)]
+    ## Whether it may contain `unsafe` and `extern`: the root package, and
+    ## the dependencies the root package's `[trust] unsafe` lists.
+    pub trusted: bool
+    ## Its root module is `src/main.sisu`, or it is a single file: it has a
+    ## `main` to run.
+    pub application: bool
+    ## Its manifest, as `Layout.files` numbers them.
+    pub manifest: int?
+
+## A module of the program: its path, its file and its package.
+pub struct ModuleFile:
+    ## `["weather", "parser"]`; empty for a single file.
+    pub path: list[String]
+    ## The file as diagnostics name it: relative to the root package's
+    ## directory, with `/` separators; a single file as it was given.
+    pub name: String
+    pub disk: String
+    ## An index of `Layout.packages`.
+    pub package: int
+
+## A diagnostic of the layout, with the files its spans are in: the
+## manifest it is about and, for each label, the manifest the label points
+## into (stage 0's spans carry their file), as `Layout.files` numbers them.
+pub struct Problem:
+    pub file: int
+    pub diag: Diagnostic
+    pub label_files: list[int]
+
+## A program's layout.
+pub struct Layout:
+    ## The packages, the root package first.
+    pub packages: list[Package]
+    ## The modules, the root module first.
+    pub modules: list[ModuleFile]
+    ## The manifests read (the name diagnostics show, the text): the files
+    ## `problems` point into.
+    pub files: list[(String, String)]
+    ## The problems found in the manifests and the module trees.
+    pub problems: list[Problem]
+    ## The directory the files' names are relative to.
+    pub base: String
+    ## The root package is a script: a single file with a `#!` line.
+    pub script: bool
+
+impl Layout:
+    pub pure def new(base: str) -> Layout:
+        return Layout(
+            packages=[], modules=[], files=[], problems=[], base=base.to_string(), script=False
+        )
+
+    pub pure def has_errors(self, catalog: Catalog) -> bool:
+        for p in self.problems:
+            if catalog.is_error(p.diag.msg):
+                return True
+        return False
+
+## What a command works on.
+pub enum Target:
+    ## One file, as given.
+    File(String)
+    ## A package's directory.
+    Package(String)
+    ## A workspace's directory and its members' directories.
+    Workspace(String, list[String])
+
+## The manifest file of a directory.
+pub const MANIFEST: str = "sisu.toml"
+
+## `rel` joined to the directory `dir`: itself when it is absolute.
+pub pure def join(dir: str, rel: str) -> String:
+    if rel.starts_with("/"):
+        return rel.to_string()
+    if dir.is_empty():
+        return rel.to_string()
+    return "{dir}/{rel}"
+
+## An absolute path with its `.` and `..` parts resolved and no `/` at its
+## end (stage 0's `fs::canonicalize`, for paths without symbolic links).
+pub pure def canonical(p: str) -> String:
+    var parts: list[String] = []
+    for part in p.split("/"):
+        if part.is_empty() or part == ".":
+            continue
+        if part == "..":
+            _ = parts.pop()
+            continue
+        parts.push(part.to_string())
+    return "/{parts.join("/")}"
+
+## The directory a path is in.
+pub pure def parent(p: str) -> String:
+    var cut = -1
+    for i in range(p.byte_len()):
+        if p.byte_at(i) == 47:
+            cut = i
+    if cut <= 0:
+        return "/".to_string()
+    return p.byte_slice(0, cut).to_string()
+
+## The last part of a path.
+pub pure def file_name(p: str) -> String:
+    var cut = -1
+    for i in range(p.byte_len()):
+        if p.byte_at(i) == 47:
+            cut = i
+    return p.byte_slice(cut + 1, p.byte_len()).to_string()
+
+## `to` relative to the directory `from`, with `/` separators (both
+## canonical).
+pub pure def relative(from_: str, to: str) -> String:
+    var a: list[String] = []
+    for part in from_.split("/"):
+        if not part.is_empty():
+            a.push(part.to_string())
+    var b: list[String] = []
+    for part in to.split("/"):
+        if not part.is_empty():
+            b.push(part.to_string())
+    var common = 0
+    while common < len(a) and common < len(b) and a[common] == b[common]:
+        common += 1
+    var parts: list[String] = []
+    for _ in range(common, len(a)):
+        parts.push("..".to_string())
+    for i in range(common, len(b)):
+        parts.push(b[i].copy())
+    if parts.is_empty():
+        return ".".to_string()
+    return parts.join("/")
+
+## Whether a file is there (and is not a directory).
+pub def is_file(fs: Fs, p: str) -> bool:
+    return match fs.metadata(Path.new(p)):
+        case Ok(m): not m.is_dir
+        case Err(_): False
+
+pub def is_dir(fs: Fs, p: str) -> bool:
+    return match fs.metadata(Path.new(p)):
+        case Ok(m): m.is_dir
+        case Err(_): False
+
+pub def read_text(fs: Fs, p: str) -> String?:
+    return match fs.read_to_string(Path.new(p)):
+        case Ok(t): Some(t)
+        case Err(_): None
+
+## What the command's argument names: a `.sisu` file, or a directory with a
+## manifest; `None` when it is neither (stage 0's `locate` with an
+## argument, which names the directory itself, not one above it). `arg` is
+## absolute.
+pub def locate(fs: Fs, arg: str) -> Target?:
+    if is_file(fs, arg) or not is_dir(fs, arg):
+        return Some(Target.File(arg.to_string()))
+    let m = join(arg, MANIFEST)
+    if not is_file(fs, m):
+        return None
+    let text = read_text(fs, m) ?? String.new()
+    let (parsed, _) = manifest.read(text)
+    if let Some(found) = parsed:
+        if found.package.is_none():
+            if let Some(members) = found.members:
+                var dirs: list[String] = []
+                for (p, _) in members:
+                    dirs.push(join(arg, p))
+                return Some(Target.Workspace(arg.to_string(), dirs))
+    return Some(Target.Package(arg.to_string()))
+
+struct Loader:
+    layout: Layout
+    target: list[(String, String)]
+    ## Each package's canonical directory, by index.
+    dirs: list[String]
+    ## For each package on the loader's stack, the dependency entry that led
+    ## to it (none for the first), to label a cycle's edges: the manifest and
+    ## the range of the dependency's name in it.
+    edges: list[(int, TextRange)?]
+
+impl Loader:
+    pure def add_file(mut self, name: str, text: str) -> int:
+        self.layout.files.push((name.to_string(), text.to_string()))
+        return len(self.layout.files) - 1
+
+    pure def report(mut self, file: int, own d: Diagnostic):
+        self.layout.problems.push(Problem(file=file, diag=d, label_files=[]))
+
+    pure def shown(self, p: str) -> String:
+        return relative(self.layout.base, canonical(p))
+
+    pure def manifest_file(self, package: int) -> int:
+        if package < len(self.layout.packages):
+            if let Some(m) = self.layout.packages[package].manifest:
+                return m
+        return 0
+
+    ## Reads the package in `dir` (once), its modules and, depth first, its
+    ## dependencies. `stack` is the path of packages to it, for a cycle's
+    ## report; `via` the dependency that names it.
+    def package(mut self, fs: Fs, dir: str, mut stack: list[int], via: (int, Dependency)?) -> int?:
+        let canon = canonical(dir)
+        var known: int? = None
+        for i in range(len(self.dirs)):
+            if self.dirs[i] == canon:
+                known = Some(i)
+        if let Some(i) = known:
+            var pos: int? = None
+            for k in range(len(stack)):
+                if stack[k] == i and pos.is_none():
+                    pos = Some(k)
+            let start = pos else:
+                return Some(i)
+            var names: list[String] = []
+            for k in range(start, len(stack)):
+                names.push("`{self.layout.packages[stack[k]].name}`")
+            names.push("`{self.layout.packages[i].name}`")
+            let cycle = names.join(" -> ")
+            var file = 0
+            var at = TextRange.empty(0)
+            if let Some((from_, dep)) = via:
+                file = self.manifest_file(from_)
+                at = dep.name_range
+            var d = Diagnostic.new(Msg.PackageCycle, at.start, at.end).with("cycle", cycle)
+            var label_files: list[int] = []
+            # The other edges of the cycle, each where its manifest names the
+            # next package.
+            for k in range(start + 1, len(stack)):
+                if k < len(self.edges):
+                    if let Some((edge_file, edge_at)) = self.edges[k]:
+                        let name = self.layout.packages[stack[k - 1]].name.copy()
+                        let dep = self.layout.packages[stack[k]].name.copy()
+                        let params = [
+                            Param(name="name".to_string(), value=name),
+                            Param(name="dep".to_string(), value=dep),
+                        ]
+                        d.labels.push(
+                            Label(
+                                msg=Msg.PackageDependsHere,
+                                start=edge_at.start,
+                                end=edge_at.end,
+                                params=params,
+                            )
+                        )
+                        label_files.push(edge_file)
+            self.layout.problems.push(Problem(file=file, diag=d, label_files=label_files))
+            return None
+        let manifest_path = join(dir, MANIFEST)
+        let text = read_text(fs, manifest_path) else:
+            if let Some((from_, dep)) = via:
+                let path = self.shown(dir)
+                let d = Diagnostic.new(
+                    Msg.PackageNoManifest, dep.path_range.start, dep.path_range.end
+                )
+                self.report(self.manifest_file(from_), d.with("name", dep.name).with("path", path))
+            return None
+        let shown = self.shown(manifest_path)
+        let file = self.add_file(shown, text)
+        let (read, diags) = manifest.read(text)
+        for d in diags:
+            self.report(file, d.copy())
+        let m = read else:
+            return None
+        let info = m.package.copy() else:
+            if let Some((from_, dep)) = via:
+                let path = self.shown(dir)
+                let d = Diagnostic.new(
+                    Msg.PackageNoPackage, dep.name_range.start, dep.name_range.end
+                )
+                self.report(self.manifest_file(from_), d.with("path", path))
+            return None
+        if let Some((from_, dep)) = via:
+            if dep.name != info.name:
+                let d = Diagnostic.new(
+                    Msg.PackageRenamedDependency, dep.name_range.start, dep.name_range.end
+                )
+                let named = d.with("name", dep.name).with("found", info.name)
+                self.report(self.manifest_file(from_), named)
+        let index = len(self.layout.packages)
+        self.layout.packages.push(
+            Package(
+                name=info.name.copy(),
+                version=info.version.copy(),
+                dir=canon.copy(),
+                deps=[],
+                trusted=index == 0,
+                application=False,
+                manifest=Some(file),
+            )
+        )
+        self.dirs.push(canon.copy())
+        self.modules_of(fs, index, canon, info.name, file)
+        stack.push(index)
+        match via:
+            case Some((from_, dep)):
+                self.edges.push(Some((self.manifest_file(from_), dep.name_range)))
+            case None:
+                self.edges.push(None)
+        for dep in m.dependencies:
+            # A dev-dependency is the package's own tests' business: only
+            # the root package's are built.
+            if dep.dev and index != 0:
+                continue
+            var active = True
+            if let Some(w) = dep.when:
+                active = w.holds(self.target)
+            let found = self.package(
+                fs, join(canon, dep.path), mut stack, Some((index, dep.copy()))
+            )
+            let d = found else:
+                continue
+            if active:
+                self.layout.packages[index].deps.push((dep.name.copy(), d))
+            if index == 0:
+                for (t, _) in m.trust_unsafe:
+                    if t == dep.name:
+                        self.layout.packages[d].trusted = True
+        _ = stack.pop()
+        _ = self.edges.pop()
+        return Some(index)
+
+    ## The modules under `dir/src`, the root module first, then the others
+    ## by path.
+    def modules_of(mut self, fs: Fs, package: int, dir: str, name: str, manifest_file: int):
+        let src = join(dir, "src")
+        let main = join(src, "main.sisu")
+        let lib = join(src, "lib.sisu")
+        let has_main = is_file(fs, main)
+        let has_lib = is_file(fs, lib)
+        var root = main.copy()
+        if has_main and has_lib:
+            let d = Diagnostic.new(Msg.PackageTwoRootModules, 0, 0).with("name", name)
+            self.report(manifest_file, d)
+        elif has_lib:
+            root = lib.copy()
+        elif not has_main:
+            let d = Diagnostic.new(Msg.PackageNoRootModule, 0, 0).with("name", name)
+            self.report(manifest_file, d)
+            return
+        self.layout.packages[package].application = root.ends_with("main.sisu")
+        let shown = self.shown(root)
+        self.layout.modules.push(
+            ModuleFile(path=[name.to_string()], name=shown, disk=root.copy(), package=package)
+        )
+        var others: list[ModuleFile] = []
+        self.walk(fs, src, [name.to_string()], package, manifest_file, True, mut others)
+        others.sort_by((a, b) -> a.path.cmp(b.path))
+        for m in others:
+            self.layout.modules.push(m.copy())
+
+    def walk(
+        mut self,
+        fs: Fs,
+        dir: str,
+        prefix: list[String],
+        package: int,
+        manifest_file: int,
+        top: bool,
+        mut out: list[ModuleFile],
+    ):
+        let entries = fs.list_dir(Path.new(dir)) else:
+            return
+        var paths: list[String] = []
+        for e in entries:
+            paths.push(e.as_str().to_string())
+        paths.sort()
+        for p in paths:
+            let file = file_name(p)
+            if file.starts_with("."):
+                continue
+            let directory = is_dir(fs, p)
+            var stem = file.copy()
+            if not directory:
+                if not file.ends_with(".sisu"):
+                    continue
+                stem = file.byte_slice(0, file.byte_len() - 5).to_string()
+                if top and (stem == "main" or stem == "lib"):
+                    continue
+            if not is_module_name(stem):
+                let shown = self.shown(p)
+                let d = Diagnostic.new(Msg.PackageModuleName, 0, 0).with("file", shown).with(
+                    "name", stem
+                )
+                self.report(manifest_file, d)
+                continue
+            var path = prefix.copy()
+            path.push(stem)
+            if directory:
+                self.walk(fs, p, path, package, manifest_file, False, mut out)
+            else:
+                let shown = self.shown(p)
+                out.push(ModuleFile(path=path, name=shown, disk=p.copy(), package=package))
+
+## The layout of a package in `dir`, with file names relative to `base`
+## (both absolute).
+pub def load_package(fs: Fs, dir: str, base: str) -> Layout:
+    var l = Loader(layout=Layout.new(canonical(base)), target=target_facts(), dirs=[], edges=[])
+    var stack: list[int] = []
+    _ = l.package(fs, dir, mut stack, None)
+    return l.layout
+
+## The layout of a single file: one module, in a package of its own with no
+## name. A script (`#!` on its first line) may declare dependencies in its
+## inline metadata, by paths relative to its directory. `disk` is the file's
+## absolute path and `name` the name diagnostics give it.
+pub def load_file(fs: Fs, name: str, disk: str, text: str) -> Layout:
+    var layout = Layout.new(parent(disk))
+    layout.script = text.starts_with("#!")
+    layout.packages.push(
+        Package(
+            name=String.new(),
+            version=String.new(),
+            dir=parent(disk),
+            deps=[],
+            trusted=True,
+            application=True,
+            manifest=None,
+        )
+    )
+    layout.modules.push(
+        ModuleFile(path=[], name=name.to_string(), disk=disk.to_string(), package=0)
+    )
+    if not layout.script:
+        return layout
+    let (meta, broken) = manifest.script_metadata(text)
+    if let Some(at) = broken:
+        layout.files.push((name.to_string(), text.to_string()))
+        layout.problems.push(
+            Problem(
+                file=0,
+                diag=Diagnostic.new(Msg.PackageScriptMetadata, at.start, at.end),
+                label_files=[],
+            )
+        )
+        return layout
+    let found = meta else:
+        return layout
+    # The script is the first package on the stack, reached by no edge.
+    var l = Loader(layout=layout, target=target_facts(), dirs=[String.new()], edges=[None])
+    l.layout.files.push((name.to_string(), found.copy()))
+    let (read, diags) = manifest.read(found)
+    for d in diags:
+        l.report(0, d.copy())
+    l.layout.packages[0].manifest = Some(0)
+    let m = read else:
+        return l.layout
+    let dir = l.layout.packages[0].dir.copy()
+    var stack = [0]
+    for dep in m.dependencies:
+        var active = True
+        if let Some(w) = dep.when:
+            active = w.holds(l.target)
+        let d = l.package(fs, join(dir, dep.path), mut stack, Some((0, dep.copy()))) else:
+            continue
+        if active:
+            l.layout.packages[0].deps.push((dep.name.copy(), d))
+        for (t, _) in m.trust_unsafe:
+            if t == dep.name:
+                l.layout.packages[d].trusted = True
+    return l.layout
+
+## The layouts a command works on, read as stage 0's `sisu check` and
+## `sisu sir` read them (`cli.rs`): a package's, or each member's of a
+## workspace (for `sir`, the one member with a `main`). A workspace member
+## without a manifest is the only problem (its `Layout` holds the
+## workspace's manifest and nothing else); a workspace whose `sir` names no
+## single application gives no layout.
+pub def load_target(fs: Fs, target: Target, sir: bool) -> list[Layout]:
+    match target:
+        case Target.File(f):
+            let text = read_text(fs, f) ?? String.new()
+            return [load_file(fs, file_name(f), f, text)]
+        case Target.Package(d):
+            return [load_package(fs, d, d)]
+        case Target.Workspace(root, members):
+            let m = join(root, MANIFEST)
+            let text = read_text(fs, m) ?? String.new()
+            let (parsed, _) = manifest.read(text)
+            var listed: list[(String, TextRange)] = []
+            if let Some(found) = parsed:
+                listed = found.members.copy() ?? []
+            var missing = Layout.new(root)
+            missing.files.push((MANIFEST.to_string(), text.copy()))
+            for (p, at) in listed:
+                if not is_file(fs, join(join(root, p), MANIFEST)):
+                    let d = Diagnostic.new(Msg.PackageNoMember, at.start, at.end).with("path", p)
+                    missing.problems.push(Problem(file=0, diag=d, label_files=[]))
+            if not missing.problems.is_empty():
+                return [missing]
+            var dirs = members.copy()
+            if sir:
+                var apps: list[String] = []
+                for d in members:
+                    if is_file(fs, join(d, "src/main.sisu")):
+                        apps.push(d.copy())
+                if len(apps) != 1:
+                    return []
+                dirs = apps
+            var out: list[Layout] = []
+            for d in dirs:
+                out.push(load_package(fs, d, d))
+            return out
+
+# ------------------------------------------------------------------ tests
+
+test "paths":
+    assert canonical("/a/b/../c/./d/") == "/a/c/d"
+    assert relative("/a/b", "/a/b/src/x.sisu") == "src/x.sisu"
+    assert relative("/a/b", "/a/c/src") == "../c/src"
+    assert relative("/a/b", "/a/b") == "."
+    assert parent("/a/b/c.sisu") == "/a/b"
+    assert file_name("/a/b/c.sisu") == "c.sisu"
+    assert join("/a", "../b") == "/a/../b"

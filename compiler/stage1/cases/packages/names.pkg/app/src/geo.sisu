@@ -1,0 +1,2 @@
+def point() -> int:
+    return 1

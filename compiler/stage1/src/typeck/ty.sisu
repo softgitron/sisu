@@ -132,6 +132,14 @@ impl Types:
     pub pure def count(self) -> int:
         return len(self.data)
 
+    ## The structures of the types made from index `n` on, in the order
+    ## they were made.
+    pub pure def made_since(self, n: int) -> list[TyData]:
+        var out: list[TyData] = []
+        for i in range(n, len(self.data)):
+            out.push(self.data[i].copy())
+        return out
+
     ## The structure of a type.
     pub pure def data(self, t: Ty) -> ref TyData:
         return ref self.data[t.index]

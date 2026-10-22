@@ -40,7 +40,9 @@ from stage1.syntax.ast import (
 )
 from stage1.syntax.ast import visit
 from stage1.typeck.consts import ConstScope
+from stage1.typeck.generic_asserts import ConstCall, Fold, const_calls, fold_tree
 from stage1.typeck.infer import InferTable
+from stage1.typeck.pat import OrAlt
 from stage1.typeck.program import DefKind, FnKind, ModuleId, Predicate, Program, Request
 from stage1.typeck.thir import (
     BindMode,
@@ -128,6 +130,10 @@ pub struct Finished:
     pub requests: list[Request]
     ## The typed body, when lowering asked for it.
     pub typed: TBody?
+    ## The conditions of its asserts on `const` generic parameters, and its
+    ## calls with constant type arguments, which decide them.
+    pub asserts: list[Fold]
+    pub const_calls: list[ConstCall]
 
 pub struct Checker:
     pub types: Types
@@ -202,9 +208,13 @@ pub struct Checker:
     pub body_ret: Ty
     ## The function's contract, when it checks something.
     pub contracts: TContracts?
-    ## The body asserts at compile time on `const` generic parameters,
-    ## which stage 0 decides at each call with constant arguments.
-    pub generic_asserts: bool
+    ## The conditions of the body's asserts at compile time on `const`
+    ## generic parameters, which each call with constant arguments decides
+    ## (`typeck.generic_asserts`).
+    pub generic_asserts: list[TExprId]
+    ## While an alternative of `|` after the first is checked: the names
+    ## the first bound, which this one must bind to the same locals.
+    pub or_alt: OrAlt?
 
 impl Checker:
     pub pure def new(cx: Cx, own types: Types, def_: DefId) -> Checker:
@@ -256,11 +266,16 @@ impl Checker:
             params=[],
             body_ret=Ty.error(),
             contracts=None,
-            generic_asserts=False,
+            generic_asserts=[],
+            or_alt=None,
         )
 
     pub pure def finish(own self) -> Finished:
         let absorbed = self.infer.absorbed()
+        var asserts: list[Fold] = []
+        for c in self.generic_asserts:
+            asserts.push(fold_tree(self.exprs, c))
+        let calls = const_calls(self.exprs, self.types)
         return Finished(
             types=self.types,
             diags=self.diags,
@@ -270,6 +285,8 @@ impl Checker:
             absorbed=absorbed,
             requests=self.requests,
             typed=None,
+            asserts=asserts,
+            const_calls=calls,
         )
 
     ## The body as lowering reads it (stage 0's `Body` once `zonk.rs` has
@@ -362,7 +379,6 @@ impl Checker:
             span=span,
             generator=generator,
             contracts=contracts,
-            generic_asserts=self.generic_asserts,
             exprs=self.exprs.copy(),
             blocks=self.blocks.copy(),
             pats=self.pats.copy(),
@@ -1122,8 +1138,8 @@ impl Checker:
                     # An assert on `const` generic parameters: decided at each
                     # call with constant arguments (stage 0's
                     # `generic_asserts.rs`), whose messages are `comptime.`.
-                    self.generic_asserts = True
-                    _ = self.check_condition_expr(cx, cond)
+                    let c = self.check_condition_expr(cx, cond)
+                    self.generic_asserts.push(c)
                     if let Some(m) = message:
                         _ = self.check_expr(cx, m, Ty.str())
                     return

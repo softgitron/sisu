@@ -162,6 +162,88 @@ struct Scope:
     ## What each name a `from` import binds names, as `module.name`
     ## (`test.arbitrary` for `from std.test import arbitrary`).
     from_imports: dict[String, String]
+    ## What each name the module binds is, so that binding it again to the
+    ## same thing binds nothing new (stage 0 compares definitions): `item
+    ## M.NAME` for a declaration of the program's module `M`, `module M`
+    ## for a module of the program, `std NAME` for a std module and `std
+    ## NAME.ITEM` for an item of one.
+    identity: dict[String, String]
+    ## The child modules bound in the module (09: a directory's files and
+    ## directories, a file's directory), as indices of the program's
+    ## modules; not the modules an import bound.
+    children: dict[String, int]
+
+impl Scope:
+    pure def new() -> Scope:
+        return Scope(
+            items={},
+            variants=set(),
+            poisoned=set(),
+            refinements=set(),
+            types=set(),
+            imports={},
+            from_imports={},
+            identity={},
+            children={},
+        )
+
+## What an import path names.
+enum ImportTarget:
+    ## A module of the program, by its index.
+    Program(int)
+    ## A module of the standard library, by the name it loads under.
+    Std(String)
+    ## Nothing; reported, with the path of a similar module when there is
+    ## one.
+    Failed(String?)
+
+## A program's modules as imports see them (stage 0's module data and
+## `PackageData`, 09): each module's path and package, and what it binds,
+## the modules of files first (in the program's order), then those of
+## directories without a file of their own; and each package's name,
+## dependencies and root module.
+struct Tables:
+    paths: list[list[String]]
+    packages_of: list[int]
+    scopes: list[Scope]
+    packages: list[PackageNames]
+
+struct PackageNames:
+    name: String
+    deps: list[(String, int)]
+    root: int?
+
+impl Tables:
+    ## The module at `path`, made (as a directory's module, whose items
+    ## are its children) when no file is (stage 0's `module_at`).
+    pure def module_at(mut self, path: list[String], package: int) -> int:
+        for i in range(len(self.paths)):
+            if self.paths[i] == path:
+                return i
+        let id = len(self.paths)
+        self.paths.push(path.copy())
+        self.packages_of.push(package)
+        self.scopes.push(Scope.new())
+        self.link(id, path, package)
+        return id
+
+    ## Makes the module `id` the child of the module its path's prefix
+    ## names, and a package's first module of one word its root (stage 0's
+    ## `link_module`): the child is bound without a check for a name bound
+    ## twice, at the start of the parent's file.
+    pure def link(mut self, id: int, path: list[String], package: int):
+        if len(path) == 1:
+            if package < len(self.packages) and self.packages[package].root.is_none():
+                self.packages[package].root = Some(id)
+            return
+        if len(path) < 2:
+            return
+        var prefix = path.copy()
+        let last = prefix.pop() ?? String.new()
+        let parent = self.module_at(prefix, package)
+        _ = self.scopes[parent].items.insert(last.copy(), (0, 0))
+        _ = self.scopes[parent].identity.insert(last.copy(), "module {id}")
+        _ = self.scopes[parent].children.insert(last, id)
 
 view struct Resolver:
     text: str
@@ -195,50 +277,134 @@ view struct Resolver:
     ## The module's own traits' methods.
     local_traits: dict[String, dict[String, Signature]]
     diags: list[Diagnostic]
+    ## The program's modules, for the imports that name them, and this
+    ## module's index among them.
+    tables: ref Tables
+    index: int
+    ## The module is a dependency's: its tests and benchmarks are its own
+    ## package's business (stage 0's `own_items`).
+    dependency: bool
+    ## The module's imports, which wait until every module of the program
+    ## is declared (09: the modules of a package may name each other
+    ## freely).
+    deferred: list[int]
 
 ## The name diagnostics of the module whose tree is `tree`, sorted, without
 ## those on a line that has one of the syntax diagnostics `syntax`.
 pub pure def resolve(
     text: str, tree: Tree, syntax: list[Diagnostic], env: Environment, catalog: Catalog
 ) -> list[Diagnostic]:
-    var r = Resolver(
-        text=text,
-        tree=tree,
-        env=env,
-        module=Scope(
-            items={},
-            variants=set(),
-            poisoned=set(),
-            refinements=set(),
-            types=set(),
-            imports={},
-            from_imports={},
-        ),
-        locals=[],
-        generics=[],
-        const_generics=[],
-        in_body=False,
-        ast=None,
-        assoc=[],
-        has_self=False,
-        quiet=False,
-        comptime_for=False,
-        result_labels=[],
-        local_traits=ModuleNames.of(text, tree).traits,
-        diags=[],
+    let tables = Tables(
+        paths=[[]],
+        packages_of=[0],
+        scopes=[Scope.new()],
+        packages=[PackageNames(name=String.new(), deps=[], root=None)],
     )
-    r.declare_module()
+    var r = Resolver.new(text, tree, env, tables, 0, Scope.new(), False)
+    r.declare_items()
+    r.declare_imports()
     r.check_module()
+    return kept_diagnostics(text, syntax, r.diags, catalog)
+
+## The diagnostics but those on a line with a syntax error, sorted.
+pure def kept_diagnostics(
+    text: str, syntax: list[Diagnostic], diags: list[Diagnostic], catalog: Catalog
+) -> list[Diagnostic]:
     let lines = Lines.of(text)
     var broken: set[int] = set()
     for d in syntax:
         _ = broken.add(lines.index(d.start))
     var kept: list[Diagnostic] = []
-    for d in own r.diags:
+    for d in diags:
         if not broken.contains(lines.index(d.start)):
-            kept.push(d)
+            kept.push(d.copy())
     sort_unique(mut kept, catalog)
     return kept
+
+## A module of a program for the name pass: its text, tree and syntax
+## diagnostics, its path (`["atlas", "geo", "point"]`) and its package (an
+## index of the program's packages, the root package first).
+pub struct NamedModule:
+    pub text: String
+    pub tree: Tree
+    pub syntax: list[Diagnostic]
+    pub path: list[String]
+    pub package: int
+
+## The name diagnostics of each module of a program of several modules (09),
+## in the modules' order, as stage 0's resolver and type checker find them:
+## every module is declared, then every module's imports are resolved in
+## order (so the modules of a package may name each other freely), then each
+## module's bodies are resolved. `packages` gives each package's name and
+## dependencies (by name, as package indices). A failed import's name, and
+## the names the root module's top-level code that did not parse would
+## have declared, go unreported in every module, as stage 0's one set of
+## poisoned names does.
+pub pure def resolve_program(
+    modules: list[NamedModule],
+    packages: list[(String, list[(String, int)])],
+    env: Environment,
+    catalog: Catalog,
+) -> list[list[Diagnostic]]:
+    var tables = Tables(paths=[], packages_of=[], scopes=[], packages=[])
+    for (name, deps) in packages:
+        tables.packages.push(PackageNames(name=name.copy(), deps=deps.copy(), root=None))
+    for m in modules:
+        tables.paths.push(m.path.copy())
+        tables.packages_of.push(m.package)
+        tables.scopes.push(Scope.new())
+    for i in range(len(modules)):
+        tables.link(i, modules[i].path, modules[i].package)
+    var diags: list[list[Diagnostic]] = []
+    # Every module's items.
+    for i in range(len(modules)):
+        let m = ref modules[i]
+        let scope = tables.scopes[i].copy()
+        var r = Resolver.new(m.text, m.tree, env, tables, i, scope, m.package != 0)
+        r.declare_items()
+        var declared = r.module
+        # Only the root module's broken names are poisoned (stage 0's
+        # `poisoned` is the root's `broken_names`).
+        if i != 0:
+            declared.poisoned = set()
+        let found = r.diags
+        tables.scopes[i] = declared
+        diags.push(found)
+    # Every variant of the program is a name a body may write: the name
+    # pass has no expected type to find one by.
+    var variants: set[String] = set()
+    for scope in tables.scopes:
+        for v in scope.variants:
+            _ = variants.add(v.copy())
+    for i in range(len(modules)):
+        for v in variants:
+            _ = tables.scopes[i].variants.add(v.copy())
+    # Every module's imports, in the program's order.
+    var poisoned: set[String] = set()
+    for i in range(len(modules)):
+        let m = ref modules[i]
+        let scope = tables.scopes[i].copy()
+        var r = Resolver.new(m.text, m.tree, env, tables, i, scope, m.package != 0)
+        r.collect_imports()
+        r.declare_imports()
+        let imported = r.module
+        for d in r.diags:
+            diags[i].push(d.copy())
+        for p in imported.poisoned:
+            _ = poisoned.add(p.copy())
+        tables.scopes[i] = imported
+    # Each module's bodies.
+    var out: list[list[Diagnostic]] = []
+    for i in range(len(modules)):
+        let m = ref modules[i]
+        var scope = tables.scopes[i].copy()
+        scope.poisoned = poisoned.copy()
+        var r = Resolver.new(m.text, m.tree, env, tables, i, scope, m.package != 0)
+        r.check_module()
+        for d in r.diags:
+            diags[i].push(d.copy())
+        out.push(kept_diagnostics(m.text, m.syntax, diags[i], catalog))
+    return out
 
 # ------------------------------------------------------------------ the tree
 
@@ -560,15 +726,78 @@ impl Resolver:
     pure def report(mut self, own d: Diagnostic):
         self.diags.push(d)
 
+    pure def new(
+        text: str,
+        tree: Tree,
+        env: Environment,
+        tables: Tables,
+        index: int,
+        own scope: Scope,
+        dependency: bool,
+    ) -> Resolver from text, tree, env, tables:
+        return Resolver(
+            text=text,
+            tree=tree,
+            env=env,
+            module=scope,
+            locals=[],
+            generics=[],
+            const_generics=[],
+            in_body=False,
+            ast=None,
+            assoc=[],
+            has_self=False,
+            quiet=False,
+            comptime_for=False,
+            result_labels=[],
+            local_traits=ModuleNames.of(text, tree).traits,
+            diags=[],
+            tables=tables,
+            index=index,
+            dependency=dependency,
+            deferred=[],
+        )
+
     ## Declares every item of the module, as stage 0's `declare_items`,
-    ## and the names of top-level code that did not parse as a declaration.
-    pure def declare_module(mut self):
+    ## and the names of top-level code that did not parse as a declaration;
+    ## the imports wait in `deferred`.
+    pure def declare_items(mut self):
         let script = self.text.starts_with("#!")
         for n in child_nodes(self.tree, self.tree.root):
             let kind = self.kind(n)
             if not script and not is_item(kind):
                 self.poison(n)
             self.declare(n)
+
+    ## The module's imports, in order, without declaring anything (for a
+    ## module whose items another resolver declared).
+    pure def collect_imports(mut self):
+        for n in child_nodes(self.tree, self.tree.root):
+            self.collect_import(n)
+
+    pure def collect_import(mut self, n: int):
+        match self.kind(n):
+            case ImportItem | FromImport:
+                self.deferred.push(n)
+            case Block:
+                for m in child_nodes(self.tree, n):
+                    self.collect_import(m)
+            case SuiteDef if not self.dependency:
+                if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
+                    for m in child_nodes(self.tree, b):
+                        self.collect_import(m)
+            case _:
+                pass
+
+    ## The imports that waited, in order.
+    pure def declare_imports(mut self):
+        let deferred = self.deferred.copy()
+        self.deferred = []
+        for n in deferred:
+            if self.kind(n) == SyntaxKind.ImportItem:
+                self.import(n)
+            else:
+                self.import_from(n)
 
     ## Every name in `n`'s subtree becomes poisoned.
     pure def poison(mut self, n: int):
@@ -588,14 +817,12 @@ impl Resolver:
                 # module's (and its names were poisoned above).
                 for m in child_nodes(self.tree, n):
                     self.declare(m)
-            case SuiteDef:
+            case SuiteDef if not self.dependency:
                 if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
                     for m in child_nodes(self.tree, b):
                         self.declare(m)
-            case ImportItem:
-                self.import(n)
-            case FromImport:
-                self.import_from(n)
+            case ImportItem | FromImport:
+                self.deferred.push(n)
             case EnumDef | ErrorDef:
                 self.bind_item(n)
                 if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
@@ -616,19 +843,32 @@ impl Resolver:
 
     pure def bind_item(mut self, n: int):
         if let Some((start, end)) = item_name(self.tree, n):
+            let name = self.text.byte_slice(start, end).to_string()
             if declares_type(self.kind(n)):
-                _ = self.module.types.add(self.text.byte_slice(start, end).to_string())
-            self.bind(self.text.byte_slice(start, end).to_string(), start, end)
+                _ = self.module.types.add(name.copy())
+            let identity = "item {self.index}.{name}"
+            self.bind(name, identity, start, end)
 
     ## Declares `name`, reporting a second declaration of it.
-    pure def bind(mut self, own name: String, start: int, end: int):
+    pure def bind(mut self, own name: String, own identity: String, start: int, end: int):
         if name.is_empty():
             return
         if let Some((first_start, first_end)) = self.module.items.get(name.copy()):
             let d = Diagnostic.new(Msg.ResolveDuplicateDefinition, start, end).with("name", name)
             self.report(d.label(Msg.ResolveFirstDefined, first_start, first_end))
             return
+        _ = self.module.identity.insert(name.copy(), identity)
         _ = self.module.items.insert(name, (start, end))
+
+    ## Records that an import bound `name` (stage 0's `bind_import`):
+    ## binding a name again to what it already names binds nothing new
+    ## (a child module imported by its path, a name imported twice);
+    ## another binding of a name is a second declaration of it.
+    pure def bind_import(mut self, own name: String, own identity: String, start: int, end: int):
+        if let Some(old) = self.module.identity.get(name.copy()):
+            if old == identity:
+                return
+        self.bind(name, identity, start, end)
 
     ## The words of a module path and its byte range.
     pure def module_path(self, n: int) -> (String, int, int):
@@ -663,23 +903,28 @@ impl Resolver:
                 if let Leaf(t) = e:
                     if self.tree.tokens[t].kind == SyntaxKind.Ident:
                         bound = Some(t)
-        let module = std_module(words) else:
-            let similar = self.unknown_import(words, start, end)
-            if let Some(t) = bound:
-                self.poison_import(self.text_of(t), similar)
-            return
-        self.load(module)
-        if let Some(t) = bound:
-            _ = self.module.imports.insert(self.text_of(t), module.copy())
-            self.bind(self.text_of(t), self.tree.tokens[t].start, self.tree.tokens[t].end)
+        match self.import_target(words, start, end):
+            case ImportTarget.Program(m):
+                if let Some(t) = bound:
+                    let (at, to) = (self.tree.tokens[t].start, self.tree.tokens[t].end)
+                    self.bind_import(self.text_of(t), "module {m}", at, to)
+            case ImportTarget.Std(module):
+                self.load(module)
+                if let Some(t) = bound:
+                    _ = self.module.imports.insert(self.text_of(t), module.copy())
+                    let (at, to) = (self.tree.tokens[t].start, self.tree.tokens[t].end)
+                    self.bind_import(self.text_of(t), "std {module}", at, to)
+            case ImportTarget.Failed(similar):
+                if let Some(t) = bound:
+                    self.poison_import(self.text_of(t), similar)
 
     ## `from a.b import c, d as e` binds `c` and `e`.
     pure def import_from(mut self, n: int):
         let path = first_child(self.tree, n, SyntaxKind.ModulePath) else:
             return
         let (words, start, end) = self.module_path(path)
-        let module = std_module(words) else:
-            let similar = self.unknown_import(words, start, end)
+        let target = self.import_target(words, start, end)
+        if let ImportTarget.Failed(similar) = target:
             for name in child_nodes(self.tree, n):
                 if self.kind(name) != SyntaxKind.ImportName:
                     continue
@@ -691,7 +936,8 @@ impl Resolver:
                 if let Some(t) = bound:
                     self.poison_import(self.text_of(t), similar.copy())
             return
-        self.load(module)
+        if let ImportTarget.Std(module) = target:
+            self.load(module)
         for imported in child_nodes(self.tree, n):
             if self.kind(imported) != SyntaxKind.ImportName:
                 continue
@@ -703,13 +949,84 @@ impl Resolver:
                         if first == None:
                             first = Some(t)
                         bound = Some(t)
-            if let Some(t) = bound:
-                let name = self.text_of(t)
-                if self.std_declares_type(module, name):
-                    _ = self.module.types.add(name.copy())
-                if let Some(f) = first:
-                    _ = self.module.from_imports.insert(name.copy(), "{module}.{self.text_of(f)}")
-                self.bind(name, self.tree.tokens[t].start, self.tree.tokens[t].end)
+            let t = bound else:
+                continue
+            let f = first ?? t
+            let name = self.text_of(t)
+            let (at, to) = (self.tree.tokens[t].start, self.tree.tokens[t].end)
+            match target:
+                case ImportTarget.Std(module):
+                    if self.std_declares_type(module, name):
+                        _ = self.module.types.add(name.copy())
+                    let source = "{module}.{self.text_of(f)}"
+                    _ = self.module.from_imports.insert(name.copy(), source.copy())
+                    self.bind_import(name, "std {source}", at, to)
+                case ImportTarget.Program(m):
+                    # What the module binds under the name (a name it does
+                    # not bind is `resolve.not-in-module`, not the name
+                    # pass's).
+                    let member = self.text_of(f)
+                    var identity: String? = None
+                    var is_type = False
+                    if m == self.index:
+                        if let Some(x) = self.module.identity.get(member.copy()):
+                            identity = Some(x.copy())
+                        is_type = self.module.types.contains(member.copy())
+                    else:
+                        let scope = ref self.tables.scopes[m]
+                        if let Some(x) = scope.identity.get(member.copy()):
+                            identity = Some(x.copy())
+                        is_type = scope.types.contains(member.copy())
+                    if let Some(id) = identity:
+                        if is_type:
+                            _ = self.module.types.add(name.copy())
+                        self.bind_import(name, id.copy(), at, to)
+                case ImportTarget.Failed(_):
+                    pass
+
+    ## The module an import path names (stage 0's `import_target`): a module
+    ## of the importing package, by the package's own name, of one of its
+    ## dependencies, by the dependency's name, or of the standard library;
+    ## after reporting why when it names none (an unknown module is
+    ## `E0220`, with the closest module path as a fix; the others are not
+    ## the name pass's messages).
+    pure def import_target(mut self, words: str, start: int, end: int) -> ImportTarget:
+        var parts: list[String] = []
+        for w in words.split("."):
+            parts.push(w.to_string())
+        let first = parts[0].copy()
+        let package = self.tables.packages_of[self.index]
+        let this = ref self.tables.packages[package]
+        var root: int? = None
+        if not this.name.is_empty() and this.name == first:
+            root = this.root
+        else:
+            for (dep, d) in this.deps:
+                if dep == first and root.is_none():
+                    root = self.tables.packages[d].root
+        let found = root else:
+            # A package of the program that this package does not depend
+            # on (`resolve.not-a-dependency`).
+            if std_module(words).is_none():
+                for k in range(1, len(self.tables.packages)):
+                    if self.tables.packages[k].name == first:
+                        return ImportTarget.Failed(None)
+            if let Some(module) = std_module(words):
+                return ImportTarget.Std(module)
+            return ImportTarget.Failed(self.unknown_import(words, start, end))
+        var m = found
+        for i in range(1, len(parts)):
+            var child: int? = None
+            if m == self.index:
+                if let Some(c) = self.module.children.get(parts[i].copy()):
+                    child = Some(c)
+            elif let Some(c) = self.tables.scopes[m].children.get(parts[i].copy()):
+                child = Some(c)
+            # A path that names no module (`resolve.unknown-module`).
+            let c = child else:
+                return ImportTarget.Failed(None)
+            m = c
+        return ImportTarget.Program(m)
 
     ## Whether the std module `module` declares a type `name`.
     pure def std_declares_type(self, module: str, name: str) -> bool:
@@ -723,8 +1040,12 @@ impl Resolver:
         var candidates: list[String] = []
         for p in MODULE_PATHS:
             candidates.push(p.to_string())
-        # The packages of the program: a program of one file has only std.
+        # The packages of the program, std among them (a program of one file
+        # has only std).
         candidates.push("std".to_string())
+        for k in self.tables.packages:
+            if not k.name.is_empty():
+                candidates.push(k.name.copy())
         let similar = closest(words, candidates)
         var d = Diagnostic.new(Msg.ResolveImportUnknown, start, end).with("name", words)
         if let Some(path) = similar.copy():
@@ -1166,9 +1487,11 @@ impl Resolver:
                 self.exprs_in(n)
                 self.has_self = saved_self
                 self.pop_scope()
-            case TestDef | BenchDef:
+            # A dependency's tests and benchmarks are its own package's
+            # business.
+            case TestDef | BenchDef if not self.dependency:
                 self.test(n)
-            case SuiteDef:
+            case SuiteDef if not self.dependency:
                 if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
                     for m in child_nodes(self.tree, b):
                         if is_item(self.kind(m)):

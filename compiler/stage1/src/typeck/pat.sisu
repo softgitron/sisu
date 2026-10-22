@@ -8,7 +8,7 @@ from stage1.syntax.ast import ExprId, Name, PatArg, PatKind, PatternId
 from stage1.typeck.call import StaticPath
 from stage1.typeck.check import Checker, Cx
 from stage1.typeck.program import DefKind
-from stage1.typeck.thir import BindMode, Lit, PatId, TExprKind, TPatKind
+from stage1.typeck.thir import BindMode, Lit, PatId, TExprKind, TPat, TPatKind
 from stage1.typeck.ty import DefId, Ty, TyData
 
 impl Checker:
@@ -47,8 +47,12 @@ impl Checker:
                     if not self.is_copy(cx, t):
                         lty = self.types.ref_(t, m)
                         mode = if m: BindMode.RefMut else: BindMode.Ref
+                # A later alternative of `|` binds the first one's locals.
+                if let Some(l) = self.or_alt_local(cx, n.text, lty, n.range):
+                    return self.add_pat(TPatKind.Bind(local=l, mode=mode), t, span)
                 let l = self.new_local(n.text, lty, mutable, n.range)
-                self.declare(n.text, l)
+                if self.or_alt.is_none():
+                    self.declare(n.text, l)
                 return self.add_pat(TPatKind.Bind(local=l, mode=mode), t, span)
             case PatKind.Literal(e):
                 let k = self.literal_pat(cx, e, t)
@@ -116,9 +120,14 @@ impl Checker:
                             var lt = self.types.ref_(t, False)
                             if by_ref.is_none():
                                 lt = t
-                            let l = self.new_local(n.text, lt, mutable, n.range)
-                            self.declare(n.text, l)
-                            rest = Some(l)
+                            match self.or_alt_local(cx, n.text, lt, n.range):
+                                case Some(l):
+                                    rest = Some(l)
+                                case None:
+                                    let l = self.new_local(n.text, lt, mutable, n.range)
+                                    if self.or_alt.is_none():
+                                        self.declare(n.text, l)
+                                    rest = Some(l)
                         has_rest = True
                         continue
                     let pat = self.check_pat_with(cx, sp, elem, by_ref, mutable)
@@ -137,14 +146,60 @@ impl Checker:
                 self.report(d)
                 return self.add_pat(TPatKind.Error, t, span)
             case PatKind.Or(ps):
-                let before = len(self.locals)
+                # Every alternative binds the same names, of the same types
+                # (PEP 634, D-055): the first declares them, and each later
+                # one binds the same locals, so the arm sees one of each.
                 var pats: list[PatId] = []
-                for sp in ps:
-                    pats.push(self.check_pat_with(cx, sp, t, by_ref, mutable))
-                if len(self.locals) > before:
-                    let d = self.error(cx, Msg.TypeBindingsInOrPattern, span)
-                    self.report(d)
+                var names: list[(String, int)] = []
+                for i in range(len(ps)):
+                    let sp = ps[i]
+                    if i == 0:
+                        let pat = self.check_pat_with(cx, sp, t, by_ref, mutable)
+                        for l in pattern_bindings(self.pats, pat):
+                            names.push((self.locals[l].name.copy(), l))
+                        pats.push(pat)
+                        continue
+                    var seen: list[bool] = []
+                    for _ in names:
+                        seen.push(False)
+                    let outer = self.or_alt.copy()
+                    self.or_alt = Some(OrAlt(names=names.copy(), seen=seen))
+                    let pat = self.check_pat_with(cx, sp, t, by_ref, mutable)
+                    let alt = self.or_alt.copy()
+                    self.or_alt = outer
+                    # A name of the first alternative this one does not bind.
+                    if let Some(a) = alt:
+                        if let Some(k) = first_unseen(a.seen):
+                            let at = cx.ast.pattern(sp).range
+                            let d = self.error(cx, Msg.TypeBindingsInOrPattern, at)
+                            self.report(d.with("name", a.names[k].0))
+                    pats.push(pat)
                 return self.add_pat(TPatKind.Or(pats), t, span)
+
+    ## In an alternative of `|` after the first, the local the first bound
+    ## for `name`, its type unified with this binding's; a name the first
+    ## did not bind is reported, and gets a local the arm cannot see.
+    pure def or_alt_local(mut self, cx: Cx, name: str, lty: Ty, at: TextRange) -> int?:
+        let alt = self.or_alt.copy() else:
+            return None
+        var found: int? = None
+        for k in range(len(alt.names)):
+            if found.is_none() and alt.names[k].0 == name:
+                found = Some(k)
+        let k = found else:
+            let d = self.error(cx, Msg.TypeBindingsInOrPattern, at).with("name", name)
+            self.report(d)
+            return None
+        if let Some(a) = ref mut self.or_alt:
+            a.seen[k] = True
+        let l = alt.names[k].1
+        let first = self.locals[l].ty
+        if not self.infer.try_unify(mut self.types, first, lty):
+            let expected = self.show(cx, first)
+            let found_ty = self.show(cx, lty)
+            let d = self.error(cx, Msg.TypeMismatch, at)
+            self.report(d.with("expected", expected).with("found", found_ty))
+        return Some(l)
 
     pure def literal_pat(mut self, cx: Cx, e: ExprId, t: Ty) -> TPatKind:
         let x = self.infer_expr(cx, e, Some(t))
@@ -380,3 +435,50 @@ impl Checker:
                 case None:
                     out.push(self.add_pat(TPatKind.Wild, ftys[i], rng))
         return out
+
+## The names an alternative of `|` must bind in each of the others: the
+## first alternative's, and which of them this one bound.
+pub struct OrAlt:
+    pub names: list[(String, int)]
+    pub seen: list[bool]
+
+pure def first_unseen(seen: list[bool]) -> int?:
+    for k in range(len(seen)):
+        if not seen[k]:
+            return Some(k)
+    return None
+
+## The locals a pattern binds, in order (an or-pattern's are its first
+## alternative's, which every alternative binds).
+pub pure def pattern_bindings(pats: list[TPat], p: PatId) -> list[int]:
+    var out: list[int] = []
+    collect_bindings(pats, p, mut out)
+    return out
+
+pure def collect_bindings(pats: list[TPat], p: PatId, mut out: list[int]):
+    match pats[p.index].kind:
+        case TPatKind.Bind(local, _):
+            out.push(local)
+        case TPatKind.Variant(_, _, fields):
+            for f in fields:
+                collect_bindings(pats, f, mut out)
+        case TPatKind.Struct(_, fields):
+            for f in fields:
+                collect_bindings(pats, f, mut out)
+        case TPatKind.Tuple(fields):
+            for f in fields:
+                collect_bindings(pats, f, mut out)
+        case TPatKind.Deref(inner):
+            collect_bindings(pats, inner, mut out)
+        case TPatKind.Or(alts):
+            if let Some(first) = alts.first():
+                collect_bindings(pats, first, mut out)
+        case TPatKind.List(prefix, _, rest, suffix):
+            for f in prefix:
+                collect_bindings(pats, f, mut out)
+            if let Some(r) = rest:
+                out.push(r)
+            for f in suffix:
+                collect_bindings(pats, f, mut out)
+        case TPatKind.Wild | TPatKind.Lit(_) | TPatKind.Error:
+            pass

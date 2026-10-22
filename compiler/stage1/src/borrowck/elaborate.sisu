@@ -247,7 +247,7 @@ pure def decide(a: Analysis, types: Types, f: Function, st: State, place: Place)
     var vacuous = False
     for i in range(1, len(below)):
         let d = below[i]
-        if not st.mi[d] and not st.mu[d]:
+        if not st.mi.contains(d) and not st.mu.contains(d):
             vacuous = True
     let ty = types.place_ty(f, place)
     if a.fully_init(st, id):
@@ -257,11 +257,11 @@ pure def decide(a: Analysis, types: Types, f: Function, st: State, place: Place)
                 opened = not types.implements_drop(t)
         if not opened:
             return Decision.Keep
-    let own_mi = st.mi[id]
-    let own_mu = st.mu[id]
+    let own_mi = st.mi.contains(id)
+    let own_mu = st.mu.contains(id)
     var uniform = True
     for d in below:
-        if st.mi[d] != own_mi or st.mu[d] != own_mu:
+        if st.mi.contains(d) != own_mi or st.mu.contains(d) != own_mu:
             uniform = False
     if let Some(t) = ty:
         if not uniform and not types.implements_drop(t):
@@ -313,8 +313,8 @@ pure def open_parts(
                         out.push(x.copy())
             continue
         # No path of its own: it is in the state of its closest path.
-        let mi = st.mi[qid]
-        let mu = st.mu[qid]
+        let mi = st.mi.contains(qid)
+        let mu = st.mu.contains(qid)
         if mi and not mu:
             out.push((q.copy(), None))
         elif mi and mu:

@@ -18,7 +18,6 @@
 ##! reaches a body stage 1 has not checked is beyond the slice of lowering,
 ##! and says which (`Lowered.beyond`).
 
-import stage1.lower.contracts
 import stage1.lower.stmts
 import stage1.typeck.borrows
 from stage1.diag import Catalog
@@ -45,8 +44,17 @@ from stage1.sir import (
     VariantDecl,
 )
 from stage1.syntax.ast import Mode
-from stage1.typeck import Base, Typed, base_from, check_file, check_std_body, std_text
-from stage1.typeck.program import DefKind, EnumInfo, FnInfo
+from stage1.typeck import (
+    Base,
+    StdBodies,
+    Typed,
+    base_from,
+    check_file,
+    check_std_body,
+    std_lines,
+    std_text,
+)
+from stage1.typeck.program import DefKind, EnumInfo, FnInfo, ModuleId
 from stage1.typeck.program import Program as Resolved
 from stage1.typeck.thir import BodyKind, TBody
 from stage1.typeck.ty import DefId, TyData, Types
@@ -60,80 +68,19 @@ pub pure def is_builtin_type(n: str) -> bool:
         case "System" | "Option" | "Result" | "Iterable": True
         case _: False
 
-## What the program uses that stage 1's lowering does not have: the
-## parts of the SIR stage 0 writes from what stage 1 does not keep or
-## write.
-pure def beyond_lowering(prog: Resolved, typed: Typed) -> list[String]:
-    var out: list[String] = []
-    for b in typed.bodies:
-        for cl in b.closures:
-            if cl.comptime_:
-                push_once(
-                    mut out, "a `comptime` expression, whose value stage 0 computes into the SIR"
-                )
-        if b.generic_asserts:
-            push_once(
-                mut out,
-                "a `comptime assert` on `const` parameters, which stage 0 decides at each call",
-            )
-    if typed.refines:
-        push_once(
-            mut out,
-            "a `@refines` property, which stage 0 checks with generators stage 1 does not write",
-        )
-    for i in range(len(prog.defs)):
-        if prog.defs[i].module != prog.root:
-            continue
-        # A function of the program with a contract gets a test of it, from
-        # generators stage 1 does not write (`<arbitrary>/main.sisu`); so
-        # does a `mut self` method of a type with an `invariant`, which
-        # holds when it returns.
-        if let DefKind.Fn(f) = prog.defs[i].kind:
-            var keeps_invariant = False
-            if f.self_mode == Some(Mode.Mut):
-                if let Some(o) = f.owner:
-                    if let TyData.Adt(d, _) = typed.types.data(o):
-                        keeps_invariant = prog.invariant_check(d).is_some()
-            if f.contracts or keeps_invariant:
-                push_once(
-                    mut out,
-                    "a contract, whose test stage 0 writes with generators stage 1 does not",
-                )
-    if not prog.generator_sites.is_empty():
-        push_once(
-            mut out, "a generator of `arbitrary` or `exhaustive`, which stage 1 does not write"
-        )
-    if not typed.delegated.is_empty():
-        push_once(mut out, "an impl of `@delegate`, whose methods stage 1 declares as headers")
-    return out
-
-pure def push_once(mut out: list[String], why: str):
-    let w = why.to_string()
-    if not out.contains(w):
-        out.push(w)
-
-## A program of nothing.
-pure def empty_program() -> Program:
-    return Program(
-        sources=[],
-        entry=None,
-        types=[],
-        intrinsics=[],
-        functions=[],
-        tests=[],
-        trait_methods=[],
-        impls=[],
-    )
-
 ## A program lowered, or why it is beyond the slice of lowering.
 pub struct Lowered:
     pub program: Program
     pub beyond: list[String]
+    ## The module whose file each of the program's sources is.
+    pub source_modules: list[ModuleId]
 
 ## Lowers a checked program (stage 0's `lower_reaching` for `sisu sir`):
 ## what the entry, the tests and the root module's functions and constants
 ## reach, every contract checked. `path` is the program's file as given.
-pub pure def lower(own typed: Typed, base: Base, path: str, catalog: Catalog) -> Lowered:
+pub pure def lower(
+    own typed: Typed, base: Base, path: str, catalog: Catalog, mut kept: StdBodies
+) -> Lowered:
     let prog = ref typed.prog
     var types = typed.types.copy()
     var ctx = Ctx(
@@ -240,25 +187,37 @@ pub pure def lower(own typed: Typed, base: Base, path: str, catalog: Catalog) ->
         if prog.defs[b.def_.index].module == prog.root:
             if b.kind == BodyKind.Fn or b.kind == BodyKind.Const:
                 roots.push(ctx.body_name(prog, types, b))
-    var beyond = beyond_lowering(prog, typed)
-    if not beyond.is_empty():
-        return Lowered(program=empty_program(), beyond=beyond)
+    var beyond: list[String] = []
     var all = typed.bodies.copy()
     let (reached, t) = lower_reached(
-        mut ctx, typed, base, catalog, types, mut all, mut bodies, pending, roots, mut beyond
+        mut ctx,
+        typed,
+        base,
+        catalog,
+        types,
+        mut all,
+        mut bodies,
+        pending,
+        roots,
+        mut beyond,
+        mut kept,
     )
     types = t
     var functions = reached
     let decls = collect_types(ctx, prog, mut types, functions)
     for g in glue_functions(decls):
         functions.push(g.copy())
-    if shared_may_cross(functions):
-        beyond.push(
-            "a `Shared` that may cross to another task, which stage 0's escape analysis tags"
-        )
     let intrinsics = intrinsic_decls(prog, mut types, functions)
     let (trait_methods, impls) = trait_decls(ctx, prog, mut types, functions)
-    let sources = renumber_sources(ctx.file_names, mut functions)
+    let (sources, renumbered) = renumber_sources(ctx.file_names, mut functions)
+    var source_modules: list[ModuleId] = []
+    for _ in sources:
+        source_modules.push(prog.root)
+    for (m, old) in ctx.files.items():
+        if let Some(i) = renumbered.get(old):
+            if i < len(source_modules) and source_modules[i] == prog.root:
+                source_modules[i] = m
+    source_modules[0] = prog.root
     let program = Program(
         sources=sources,
         entry=entry,
@@ -269,27 +228,7 @@ pub pure def lower(own typed: Typed, base: Base, path: str, catalog: Catalog) ->
         trait_methods=trait_methods,
         impls=impls,
     )
-    return Lowered(program=program, beyond=beyond)
-
-## Whether a `Shared` is made where a task, a channel or a generator may
-## take it elsewhere (stage 0's `shared::tag_sites` then decides which
-## sites are atomic).
-pure def shared_may_cross(functions: list[Function]) -> bool:
-    var crossing = False
-    var shared = False
-    for f in functions:
-        for b in f.blocks:
-            for s in b.stmts:
-                if let StatementKind.Call(_, Callee.Intrinsic(n, _), _) = s.kind:
-                    let ns: str = n
-                    match ns:
-                        case "Scope.spawn" | "Scope.spawn_with" | "Sender.send" | "Sender.try_send" | "gen.new":
-                            crossing = True
-                        case "Shared.new":
-                            shared = True
-                        case _:
-                            pass
-    return crossing and shared
+    return Lowered(program=program, beyond=beyond, source_modules=source_modules)
 
 ## The trait methods the functions call through `call trait`, with their
 ## facts, and the impls of their traits, which the interpreter dispatches
@@ -633,6 +572,7 @@ pure def lower_reached(
     pending: dict[String, (DefId, BodyKind)],
     roots: list[String],
     mut beyond: list[String],
+    mut kept: StdBodies,
 ) -> (list[Function], Types):
     var types = types_in
     let prog = ref typed.prog
@@ -645,26 +585,11 @@ pure def lower_reached(
     var mentioned: set[String] = set()
     var typed_names: set[String] = set()
     var work: list[String] = roots.copy()
-    # The prefixes of the methods of the impls the standard library derives
-    # (`Result.Debug`), which stage 1 declares as headers.
-    var derived: set[String] = set()
-    for i in prog.impls:
-        let info = prog.impl_info(i) else:
-            continue
-        if info.derived and prog.modules[prog.defs[i.index].module.index].is_std:
-            if let Some(p) = ctx.impl_names.get(i):
-                _ = derived.add(p.copy())
     while True:
         while let Some(n) = work.pop():
             if keep.contains(n):
                 continue
             _ = keep.add(n.copy())
-            if let Some(cut) = last_index_of(n, "."):
-                if derived.contains(n.byte_slice(0, cut).to_string()):
-                    push_once(
-                        mut beyond,
-                        "an impl the standard library derives, whose methods stage 1 does not write",
-                    )
             if not where_is.contains(n) and owner_body(n, bodies).is_none():
                 # A body of the standard library, checked now.
                 if let Some(owner) = pending_owner(n, pending):
@@ -672,15 +597,14 @@ pure def lower_reached(
                         _ = tried.add(owner.copy())
                         let (d, kind) = pending.get(owner.copy())
                             ?? (DefId(index=0), BodyKind.Const)
-                        let (tb, t) = check_std_body(base, typed, types, d, kind, catalog)
+                        let (tb, t) = check_std_body(base, typed, types, d, kind, catalog, mut kept)
                         types = t
                         match tb:
                             case Some(b):
                                 let m = prog.defs[d.index].module
                                 if not ctx.texts.contains(m):
-                                    let text = std_text(base, prog, m)
-                                    _ = ctx.lines.insert(m, Lines.of(text))
-                                    _ = ctx.texts.insert(m, text)
+                                    _ = ctx.lines.insert(m, std_lines(base, prog, m))
+                                    _ = ctx.texts.insert(m, std_text(base, prog, m))
                                 all.push(b.copy())
                                 _ = bodies.insert(owner.copy(), len(all) - 1)
                             case None:
@@ -740,13 +664,6 @@ pure def lower_reached(
                 _ = added_impls.add(i)
                 for (_, m) in info.methods:
                     work.push(ctx.fn_name(prog, types, m))
-                # The impls the prelude derives for its own types are headers
-                # in stage 1: stage 0 writes their bodies from the templates.
-                if info.derived and prog.modules[prog.defs[i.index].module.index].is_std:
-                    push_once(
-                        mut beyond,
-                        "an impl the standard library derives, whose methods stage 1 does not write",
-                    )
         if work.is_empty():
             break
     # In stage 0's order of the typed bodies.
@@ -837,7 +754,9 @@ pure def reach_from(
 ## The sources the kept functions come from: the root module's file first,
 ## then the others in the order they were first met; each function's index
 ## is rewritten to match.
-pure def renumber_sources(names: list[String], mut functions: list[Function]) -> list[String]:
+pure def renumber_sources(
+    names: list[String], mut functions: list[Function]
+) -> (list[String], dict[int, int]):
     var map: dict[int, int] = {}
     var out: list[String] = []
     if not names.is_empty():
@@ -854,7 +773,7 @@ pure def renumber_sources(names: list[String], mut functions: list[Function]) ->
             out.push(names[i].copy())
     for k in range(len(functions)):
         functions[k].source = map.get(functions[k].source) ?? 0
-    return out
+    return (out, map)
 
 pure def refs_in_operands(ops: list[Operand], mut work: list[String]):
     for o in ops:
@@ -1046,15 +965,13 @@ pure def beyond_of(program: str) -> list[String]:
         return checked.beyond
     let typed = checked.typed else:
         return ["nothing to lower"]
-    return lower(typed, base, "main.sisu", catalog).beyond
+    var kept = StdBodies.new()
+    return lower(typed, base, "main.sisu", catalog, mut kept).beyond
 
-test "a program beyond the slice of lowering says why":
+test "comptime expressions and contracts are within the slice of lowering":
     assert beyond_of("def main():\n    let x = 1\n").is_empty()
-    let folded = "def main():\n    let x = comptime 6 * 7\n"
-    assert beyond_of(folded)
-        == ["a `comptime` expression, whose value stage 0 computes into the SIR"]
+    assert beyond_of("def main():\n    let x = comptime 6 * 7\n").is_empty()
     var kept: String = "struct Account:\n    balance: int\n    invariant self.balance >= 0\n\n"
     kept.push("    def set(mut self, b: int):\n        self.balance = b\n\n")
     kept.push("def main():\n    var a = Account(balance=1)\n    a.set(2)\n")
-    assert beyond_of(kept)
-        == ["a contract, whose test stage 0 writes with generators stage 1 does not"]
+    assert beyond_of(kept).is_empty()

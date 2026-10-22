@@ -294,13 +294,28 @@ impl FnLower:
         if let TPatKind.Bind(local, _) = cx.body.pats[pat.index].kind:
             binding = Some((local, self.local_for(cx, local)))
         self.switch_to(cx, ok)
-        let payload = t.project(Proj.Downcast(0)).project(Proj.Field(0))
+        var payload = t.project(Proj.Downcast(0)).project(Proj.Field(0))
+        # The checker decays the target as a plain `let` does: a `Copy`
+        # value behind a reference (`xs.first()` of a list of `Copy`
+        # structs) is bound as a copy of the value.
+        var payload_is_ref = False
+        if let Type.Named(_, args) = self.ty(cx, cx.body.exprs[init.index].ty):
+            if let Some(Type.Ref(_, _)) = args.first():
+                payload_is_ref = True
+        var pat_is_ref = False
+        if let Type.Ref(_, _) = self.ty(cx, pty):
+            pat_is_ref = True
+        if payload_is_ref and not pat_is_ref:
+            payload = payload.project(Proj.Deref)
+        # A pattern's bindings, like a name's, are made on both paths and
+        # registered once where they join, in the block around the
+        # statement.
         match binding:
             case Some((_, l)):
                 let v = self.copy_or_move(cx, payload, pty)
                 self.assign(cx, Place.local(l), Rvalue.Use(v), loc)
             case None:
-                self.bind(cx, pat, payload)
+                self.bind_values(cx, pat, payload)
         self.goto(join)
         self.switch_to(cx, other)
         match e:
@@ -312,7 +327,7 @@ impl FnLower:
                         self.into(cx, Place.local(l), value)
                     case None:
                         let p = self.place_of(cx, value)
-                        self.bind(cx, pat, p)
+                        self.bind_values(cx, pat, p)
                 self.pop_scope(cx)
                 self.goto(join)
             case TLetElse.Diverge(eb, body):
@@ -322,8 +337,11 @@ impl FnLower:
                 self.pop_scope(cx)
                 self.terminate(Terminator.Unreachable, None)
         self.switch_to(cx, join)
-        if let Some((tl, l)) = binding:
-            self.bind_registered(cx, tl, l, pty, 1)
+        match binding:
+            case Some((tl, l)):
+                self.bind_registered(cx, tl, l, pty, 1)
+            case None:
+                self.register_bindings(cx, pat, 1)
 
     ## `else as e:` on a result binds the error.
     pure def else_binding(mut self, cx: Cx, eb: int?, t: Place, unwrap: Unwrap?, loc: Loc?):
@@ -382,9 +400,16 @@ impl FnLower:
             head_span = TextRange.new(span.start, ispan.end)
         let loc = cx.loc(head_span)
         self.push_scope()
-        # A type that implements `Iterator` is driven through the trait.
+        # A type that implements `Iterator` is driven through the trait. An
+        # `Iter` behind a reference (a borrowed parameter) is driven through
+        # the reference: the loop's local holds the reference, and the
+        # caller keeps (and drops) the iterator.
+        var borrowed_iter = False
+        if mode == ForMode.Iter:
+            if let TyData.Ref(_, _) = self.types.data(ity):
+                borrowed_iter = True
         var iter_ty = Type.Unit
-        if mode == ForMode.Trait:
+        if mode == ForMode.Trait or borrowed_iter:
             iter_ty = self.ty(cx, ity)
         else:
             iter_ty = Type.Named(name="Iter", args=[self.ty(cx, item)])
@@ -428,8 +453,9 @@ impl FnLower:
                 )
             case ForMode.Iter | ForMode.Trait:
                 self.into(cx, Place.local(it), iter)
-        self.register(DropEntry.Local(it))
-        self.split(cx)
+        if not borrowed_iter:
+            self.register(DropEntry.Local(it))
+            self.split(cx)
         let head = self.new_block()
         let exit = self.new_block()
         self.goto(head)

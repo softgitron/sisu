@@ -49,19 +49,25 @@
 ##! `../catalog/messages.catalog`.
 
 import stage1.borrowck
+import stage1.interp
 import stage1.lower
+import stage1.package
 import stage1.sir.simplify
 import stage1.sir.write
 import stage1.typeck
-from stage1.diag import Catalog, quote, render_ids
+from stage1.diag import Catalog, Diagnostic, quote, render_ids, render_ids_in, sort_unique
 from stage1.lexer import Lexed, lex
 from stage1.mutants import Rng, mutate
+from stage1.package import Layout, Target
 from stage1.parser import parse, parse_lexed
-from stage1.resolve import Environment, ModuleNames, imported_std_modules
+from stage1.resolve import Environment, ModuleNames, NamedModule, imported_std_modules
 from stage1.syntax.ast import ExprKind, StrPart, build
 from stage1.syntax.ast import visit
 from stage1.syntax.ast.dump import module_debug
 from stage1.syntax.kinds import KindNames
+from stage1.syntax.kinds import SyntaxKind
+from stage1.typeck.collect import SourcePackage
+from stage1.typeck.program import ModuleId
 from stage1.typeck.std_sources import importable
 
 error UsageError:
@@ -164,8 +170,7 @@ def main(sys: System) -> ! {IoError, UsageError}:
         return Ok(())
     if command == "names" and len(rest) == 2:
         var env = environment(sys)?
-        let text = sys.fs.read_to_string(Path.new(rest[1].copy()))?
-        let out = names(sys, text, mut env, catalog)?
+        let out = names_of(sys, rest[1], mut env, catalog)?
         emit(out, "")
         return Ok(())
     if command == "names-batch" and len(rest) == 3:
@@ -177,8 +182,7 @@ def main(sys: System) -> ! {IoError, UsageError}:
             if path.is_empty():
                 continue
             n += 1
-            let text = sys.fs.read_to_string(Path.new(path))?
-            let out = names(sys, text, mut env, catalog)?
+            let out = names_of(sys, path, mut env, catalog)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.names"), out)?
         return Ok(())
     if command == "ast-batch" and len(rest) == 3:
@@ -196,18 +200,20 @@ def main(sys: System) -> ! {IoError, UsageError}:
         return Ok(())
     if command == "types" and len(rest) == 2:
         let base = typeck.base(std_texts(sys)?)
+        var kept = typeck.StdBodies.new()
         var env = environment(sys)?
-        let text = sys.fs.read_to_string(Path.new(rest[1].copy()))?
-        let named = name_error(sys, text, mut env, catalog)?
-        let embedded = embedded_files(sys, rest[1], text, catalog)
-        let checked = typeck.check_file(base, text, catalog, named, embedded, False)
+        var out = String.new()
         var why = String.new()
-        for b in checked.beyond:
-            why.push("beyond the slice: {b}\n")
-        emit(typeck.render(text, checked, catalog), why)
+        for input in inputs_of(sys, rest[1], False, mut env, catalog)?:
+            let checked = types_of(base, input, catalog, mut kept)
+            out.push(typeck.render(input.modules[0].text, checked, catalog))
+            for b in checked.beyond:
+                why.push("beyond the slice: {b}\n")
+        emit(out, why)
         return Ok(())
     if command == "types-batch" and len(rest) == 3:
         let base = typeck.base(std_texts(sys)?)
+        var kept = typeck.StdBodies.new()
         var env = environment(sys)?
         let out_dir = rest[1].copy()
         let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
@@ -216,26 +222,26 @@ def main(sys: System) -> ! {IoError, UsageError}:
             if path.is_empty():
                 continue
             n += 1
-            let text = sys.fs.read_to_string(Path.new(path))?
-            let named = name_error(sys, text, mut env, catalog)?
-            let embedded = embedded_files(sys, path, text, catalog)
-            let checked = typeck.check_file(base, text, catalog, named, embedded, False)
+            var out = String.new()
             var why = String.new()
-            for b in checked.beyond:
-                why.push("{b}\n")
-            sys.fs.write_text(
-                Path.new("{out_dir}/{n}.types"), typeck.render(text, checked, catalog)
-            )?
+            for input in inputs_of(sys, path, False, mut env, catalog)?:
+                let checked = types_of(base, input, catalog, mut kept)
+                out.push(typeck.render(input.modules[0].text, checked, catalog))
+                for b in checked.beyond:
+                    why.push("{b}\n")
+            sys.fs.write_text(Path.new("{out_dir}/{n}.types"), out)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.beyond"), why)?
         return Ok(())
-    if command == "sir" and len(rest) == 2:
+    if command == "sir" and (len(rest) == 2 or (len(rest) == 3 and rest[1] == "--partial")):
         let base = typeck.base(std_texts(sys)?)
+        var kept = typeck.StdBodies.new()
         var env = environment(sys)?
-        let path = rest[1].copy()
-        let text = sys.fs.read_to_string(Path.new(path))?
-        let named = name_error(sys, text, mut env, catalog)?
-        let embedded = embedded_files(sys, path, text, catalog)
-        let done = sir_of(base, text, path, catalog, named, embedded)
+        var times = SirTimes(check=0, lower=0, ownership=0)
+        # `--partial`: the SIR of what lowering reached, also of a program
+        # beyond its slice (for comparing a package's modules one by one).
+        let partial = len(rest) == 3
+        let path = rest[len(rest) - 1].copy()
+        let done = lowering_of(sys, path, base, mut env, catalog, mut times, partial, mut kept)?
         var errs = String.new()
         for b in done.beyond:
             errs.push("beyond the slice: {b}\n")
@@ -243,12 +249,10 @@ def main(sys: System) -> ! {IoError, UsageError}:
         return Ok(())
     if command == "ownership" and len(rest) == 2:
         let base = typeck.base(std_texts(sys)?)
+        var kept = typeck.StdBodies.new()
         var env = environment(sys)?
-        let path = rest[1].copy()
-        let text = sys.fs.read_to_string(Path.new(path))?
-        let named = name_error(sys, text, mut env, catalog)?
-        let embedded = embedded_files(sys, path, text, catalog)
-        let done = sir_of(base, text, path, catalog, named, embedded)
+        var times = SirTimes(check=0, lower=0, ownership=0)
+        let done = lowering_of(sys, rest[1], base, mut env, catalog, mut times, False, mut kept)?
         var errs = String.new()
         for b in done.beyond:
             errs.push("beyond the slice: {b}\n")
@@ -256,6 +260,7 @@ def main(sys: System) -> ! {IoError, UsageError}:
         return Ok(())
     if command == "sir-batch" and len(rest) == 3:
         let base = typeck.base(std_texts(sys)?)
+        var kept = typeck.StdBodies.new()
         var env = environment(sys)?
         let out_dir = rest[1].copy()
         let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
@@ -265,25 +270,7 @@ def main(sys: System) -> ! {IoError, UsageError}:
             if path.is_empty():
                 continue
             n += 1
-            let text = sys.fs.read_to_string(Path.new(path))?
-            let named = name_error(sys, text, mut env, catalog)?
-            let embedded = embedded_files(sys, path, text, catalog)
-            # The pipeline of `sir_of`, a step at a time, timed.
-            let t0 = now(sys)
-            let (checked, early) = front_of(base, text, catalog, named, embedded)
-            let t1 = now(sys)
-            let ended = early.is_some()
-            var done = early ?? Lowering(sir=String.new(), ownership=String.new(), beyond=[])
-            var t2 = t1
-            if not ended:
-                if let Some(lowered) = lower_of(checked, base, path, catalog):
-                    t2 = now(sys)
-                    done = finish_of(lowered, text, catalog)
-            let t3 = now(sys)
-            times.check += t1 - t0
-            times.lower += t2 - t1
-            if t2 != t1:
-                times.ownership += t3 - t2
+            let done = lowering_of(sys, path, base, mut env, catalog, mut times, False, mut kept)?
             var reasons = String.new()
             for b in done.beyond:
                 reasons.push("{b}\n")
@@ -310,47 +297,275 @@ def main(sys: System) -> ! {IoError, UsageError}:
         return Ok(())
     return Err(Usage(text=usage()))
 
-## What stage 1 makes of a file for `sisu sir` and for the ownership
+## What stage 1 makes of a program for `sisu sir` and for the ownership
 ## checker's part of `sisu check`: the SIR (nothing when the front end
 ## finds an error), the ownership checker's diagnostics as `sisu check
-## --format=ids` prints them, and why the file is beyond the slice of
+## --format=ids` prints them, and why the program is beyond the slice of
 ## lowering, when it is (then neither is stage 0's).
 struct Lowering:
     sir: String
     ownership: String
     beyond: list[String]
 
-pure def sir_of(
+## A program as the front end reads it (stage 0's `ProgramSource`): its
+## modules and packages, whether stage 0 reports an error about it that is
+## not the type checker's (a name's, a manifest's, an untrusted package's
+## `unsafe`), the files its `embed` calls name, and whether it is a program
+## of several files, whose diagnostics name their file.
+struct Input:
+    modules: list[typeck.InputModule]
+    packages: list[SourcePackage]
+    named: bool
+    embedded: dict[String, bool]
+    multi: bool
+
+## The programs the argument names, read: a file's, or each layout's that
+## has modules (stage 0 reports the others' problems and checks nothing).
+def inputs_of(
+    sys: System, arg: str, sir: bool, mut env: Environment, catalog: Catalog
+) -> list[Input] ! IoError:
+    let layouts = layouts_of(sys, arg, sir) else:
+        let text = sys.fs.read_to_string(Path.new(arg))?
+        let named = name_error(sys, text, mut env, catalog)?
+        let module = typeck.InputModule(path=[], file=arg.to_string(), text=text.copy(), package=0)
+        let package = SourcePackage(name=String.new(), deps=[], trusted=True)
+        return Ok(
+            [
+                Input(
+                    modules=[module],
+                    packages=[package],
+                    named=named,
+                    embedded=embedded_files(sys, arg, text, catalog),
+                    multi=False,
+                ),
+            ]
+        )
+    var out: list[Input] = []
+    for layout in layouts:
+        if layout.modules.is_empty():
+            continue
+        out.push(layout_input(sys, layout, mut env, catalog)?)
+    return Ok(out)
+
+## A layout's program, read.
+def layout_input(
+    sys: System, layout: Layout, mut env: Environment, catalog: Catalog
+) -> Input ! IoError:
+    let named = named_modules(sys, layout, mut env, catalog)?
+    var modules: list[typeck.InputModule] = []
+    var embedded: dict[String, bool] = {}
+    for i in range(len(layout.modules)):
+        let m = ref layout.modules[i]
+        let text = named[i].text.copy()
+        modules.push(
+            typeck.InputModule(
+                path=m.path.copy(), file=m.name.copy(), text=text.copy(), package=m.package
+            )
+        )
+        # The files `embed` names, relative to each module's file; the first
+        # module that names one decides.
+        for (k, v) in embedded_files(sys, m.disk, text, catalog).items():
+            if not embedded.contains(k.copy()):
+                _ = embedded.insert(k.copy(), v)
+    var packages: list[SourcePackage] = []
+    for p in layout.packages:
+        packages.push(SourcePackage(name=p.name.copy(), deps=p.deps.copy(), trusted=p.trusted))
+    # Stage 0's errors that are not the type checker's: the manifests' and
+    # the module trees' problems, a name that names nothing, and `unsafe` or
+    # `extern` in a dependency `[trust]` does not list (`cap.untrusted`).
+    var other = layout.has_errors(catalog)
+    let found = resolve.resolve_program(named, packages_of(layout), env, catalog)
+    for ds in found:
+        for d in ds:
+            if catalog.is_error(d.msg):
+                other = True
+    for i in range(len(layout.modules)):
+        let k = layout.modules[i].package
+        if k == 0 or layout.packages[k].trusted:
+            continue
+        for t in lex(named[i].text).tokens:
+            if t.kind == SyntaxKind.UnsafeKw or t.kind == SyntaxKind.ExternKw:
+                other = True
+    return Ok(Input(modules=modules, packages=packages, named=other, embedded=embedded, multi=True))
+
+## The type checker's verdict on a program.
+pure def check_input(
+    base: typeck.Base, input: Input, catalog: Catalog, keep: bool
+) -> typeck.Checked:
+    return typeck.check_program(
+        base,
+        input.modules,
+        input.packages,
+        catalog,
+        input.named,
+        input.embedded,
+        keep,
+        input.multi,
+    )
+
+## The type diagnostics of a program, with the ownership checker's `type.`
+## messages when a body may get one: stage 0 reports them with the type
+## checker's when the front end finds no error.
+pure def types_of(
+    base: typeck.Base, input: Input, catalog: Catalog, mut kept: typeck.StdBodies
+) -> typeck.Checked:
+    let checked = check_input(base, input, catalog, False)
+    if checked.owner_beyond.is_empty() or checked.has_error:
+        return checked
+    for b in checked.beyond:
+        if not checked.owner_beyond.contains(b):
+            return checked
+    let per_file = ownership_types(base, input, catalog, mut kept) else:
+        return checked
+    var done = checked
+    for k in range(len(per_file)):
+        for d in per_file[k]:
+            if k == 0:
+                done.diagnostics.push(d.copy())
+            elif k - 1 < len(done.files):
+                done.files[k - 1].1.push(d.copy())
+    sort_unique(mut done.diagnostics, catalog)
+    for k in range(len(done.files)):
+        sort_unique(mut done.files[k].1, catalog)
+    done.beyond = []
+    done.owner_beyond = []
+    return done
+
+## The ownership checker's `type.` messages for a program, each file's;
+## `None` when lowering leaves part of the program out or a finding is in
+## a file that is not the program's.
+pure def ownership_types(
+    base: typeck.Base, input: Input, catalog: Catalog, mut kept: typeck.StdBodies
+) -> list[list[Diagnostic]]?:
+    let checked = check_input(base, input, catalog, True)
+    let files = program_files(input, checked)
+    let lowered = lower_of(checked, base, input.modules[0].file, catalog, mut kept) else:
+        return None
+    if not lowered.beyond.is_empty():
+        return None
+    let done = borrowck.check_with(lowered.program, True)
+    let by_source = files_by_source(lowered, files)
+    let per_file = borrowck.diagnostics_by_file(done.findings, by_source, len(files), catalog) else:
+        return None
+    var out: list[list[Diagnostic]] = []
+    for ds in per_file:
+        var types: list[Diagnostic] = []
+        for d in ds:
+            if d.msg.id().starts_with("type."):
+                types.push(d.copy())
+        out.push(types)
+    return Some(out)
+
+## The program's files, for the ownership checker's diagnostics.
+pure def program_files(input: Input, checked: typeck.Checked) -> list[ProgramFile]:
+    var files: list[ProgramFile] = []
+    if let Some(typed) = checked.typed:
+        for i in range(len(input.modules)):
+            if i < len(typed.prog.user_modules):
+                let m = typed.prog.user_modules[i]
+                var name = String.new()
+                if input.multi:
+                    name = input.modules[i].file.copy()
+                files.push(ProgramFile(module=m, name=name, text=input.modules[i].text.copy()))
+    return files
+
+## For each source of the SIR, the file of the program it is, with the
+## file's text.
+pure def files_by_source(lowered: lower.Lowered, files: list[ProgramFile]) -> list[(int, String)?]:
+    var by_source: list[(int, String)?] = []
+    for m in lowered.source_modules:
+        var found: (int, String)? = None
+        for k in range(len(files)):
+            if files[k].module == m and found.is_none():
+                found = Some((k, files[k].text.copy()))
+        by_source.push(found)
+    return by_source
+
+## What stage 1 makes of the program `arg` names for `sisu sir` and the
+## ownership checker, adding where the time went to `times`: for a
+## workspace, the SIR of its one application, and every member's ownership
+## diagnostics, as `sisu check` checks each member.
+def lowering_of(
+    sys: System,
+    arg: str,
     base: typeck.Base,
-    text: str,
-    path: str,
+    mut env: Environment,
     catalog: Catalog,
-    named: bool,
-    embedded: dict[String, bool],
+    mut times: SirTimes,
+    partial: bool,
+    mut kept: typeck.StdBodies,
+) -> Lowering ! IoError:
+    let checks = inputs_of(sys, arg, False, mut env, catalog)?
+    var done = Lowering(sir=String.new(), ownership=String.new(), beyond=[])
+    var app: Input? = None
+    if let Some(layouts) = layouts_of(sys, arg, True):
+        if len(layouts) == 1 and not layouts[0].modules.is_empty():
+            app = Some(layout_input(sys, layouts[0], mut env, catalog)?)
+    elif let Some(first) = checks.first():
+        app = Some(first.copy())
+    for input in checks:
+        let one = sir_of(sys, base, input, catalog, mut times, partial, mut kept)
+        done.ownership.push(one.ownership)
+        for b in one.beyond:
+            done.beyond.push(b.copy())
+        if len(checks) == 1:
+            done.sir = one.sir.copy()
+    if len(checks) != 1:
+        if let Some(input) = app:
+            let one = sir_of(sys, base, input, catalog, mut times, partial, mut kept)
+            done.sir = one.sir.copy()
+    return Ok(done)
+
+## The pipeline for one program, a step at a time, timed.
+def sir_of(
+    sys: System,
+    base: typeck.Base,
+    input: Input,
+    catalog: Catalog,
+    mut times: SirTimes,
+    partial: bool,
+    mut kept: typeck.StdBodies,
 ) -> Lowering:
-    let (checked, early) = front_of(base, text, catalog, named, embedded)
-    if let Some(done) = early:
-        return done.copy()
-    let lowered = lower_of(checked, base, path, catalog) else:
+    let t0 = now(sys)
+    let checked = check_input(base, input, catalog, True)
+    let t1 = now(sys)
+    times.check += t1 - t0
+    if let Some(done) = front_of(checked):
+        return done
+    # The program's files, for the ownership checker's diagnostics.
+    let files = program_files(input, checked)
+    let lowered = lower_of(checked, base, input.modules[0].file, catalog, mut kept) else:
         return Lowering(
             sir=String.new(), ownership=String.new(), beyond=["nothing to lower".to_string()]
         )
-    return finish_of(lowered, text, catalog)
+    let t2 = now(sys)
+    times.lower += t2 - t1
+    let done = finish_of(lowered, files, catalog, partial)
+    times.ownership += now(sys) - t2
+    return done
 
-## Lowering's part, for a file the front end checked whole.
+## A file of the program, for the ownership checker's diagnostics: its
+## module, its name (empty in a program of one file) and its text.
+struct ProgramFile:
+    module: ModuleId
+    name: String
+    text: String
+
+## Lowering's part, for a program the front end checked whole.
 pure def lower_of(
-    own checked: typeck.Checked, base: typeck.Base, path: str, catalog: Catalog
+    own checked: typeck.Checked,
+    base: typeck.Base,
+    path: str,
+    catalog: Catalog,
+    mut kept: typeck.StdBodies,
 ) -> lower.Lowered?:
     let typed = checked.typed else:
         return None
-    return Some(lower.lower(typed, base, path, catalog))
+    return Some(lower.lower(typed, base, path, catalog, mut kept))
 
-## The front end's part: the checked file, and what `sir_of` gives when it
-## ends there (beyond the type checker's slice, or a front-end error).
-pure def front_of(
-    base: typeck.Base, text: str, catalog: Catalog, named: bool, embedded: dict[String, bool]
-) -> (typeck.Checked, Lowering?):
-    let checked = typeck.check_file(base, text, catalog, named, embedded, True)
+## What `sir_of` gives when the front end ends it: beyond the type
+## checker's slice, or a front-end error.
+pure def front_of(checked: typeck.Checked) -> Lowering?:
     # A body that may get one of the ownership checker's `type.` messages
     # is typed whole: the ownership checker here decides them.
     var why: list[String] = []
@@ -358,36 +573,54 @@ pure def front_of(
         if not checked.owner_beyond.contains(b):
             why.push("beyond the type checker's slice: {b}")
     if not why.is_empty():
-        return (checked, Some(Lowering(sir=String.new(), ownership=String.new(), beyond=why)))
+        return Some(Lowering(sir=String.new(), ownership=String.new(), beyond=why))
     # `sisu sir` prints nothing for a program with a front-end error, and
     # the ownership checker does not run.
     if checked.has_error:
-        return (checked, Some(Lowering(sir=String.new(), ownership=String.new(), beyond=[])))
+        return Some(Lowering(sir=String.new(), ownership=String.new(), beyond=[]))
     if checked.typed.is_none():
-        return (
-            checked,
-            Some(
-                Lowering(
-                    sir=String.new(),
-                    ownership=String.new(),
-                    beyond=["nothing to lower".to_string()],
-                )
-            ),
+        return Some(
+            Lowering(
+                sir=String.new(),
+                ownership=String.new(),
+                beyond=["nothing to lower".to_string()],
+            )
         )
-    return (checked, None)
+    return None
 
-## The ownership checker's part, and the SIR's text.
-pure def finish_of(lowered: lower.Lowered, text: str, catalog: Catalog) -> Lowering:
-    if not lowered.beyond.is_empty():
+## The ownership checker's part, and the SIR's text: the diagnostics of
+## each of the program's files, in their order, each with its name.
+pure def finish_of(
+    lowered: lower.Lowered, files: list[ProgramFile], catalog: Catalog, partial: bool
+) -> Lowering:
+    if not lowered.beyond.is_empty() and not partial:
         return Lowering(sir=String.new(), ownership=String.new(), beyond=lowered.beyond.copy())
-    var done = borrowck.check(lowered.program)
+    # A partial SIR is wanted for its statements: the drops the ownership
+    # checker places, not its findings.
+    var done = borrowck.check_with(lowered.program, not partial)
     simplify.program(mut done.program)
-    let diags = borrowck.diagnostics(done.findings, text, catalog) else:
-        let elsewhere = "an ownership finding in a file of the standard library or one the compiler wrote"
-        return Lowering(sir=String.new(), ownership=String.new(), beyond=[elsewhere.to_string()])
-    return Lowering(
-        sir=write.write(done.program), ownership=render_ids(text, diags, catalog), beyond=[]
-    )
+    # The compiler runs the `comptime` expressions of a program the
+    # ownership checker accepts (08), and bakes their values into it.
+    if done.findings.is_empty():
+        let evaluated = interp.evaluate(mut done.program)
+        if not evaluated.beyond.is_empty() and not partial:
+            var reasons = lowered.beyond.copy()
+            for why in evaluated.beyond:
+                reasons.push(why.copy())
+            return Lowering(sir=String.new(), ownership=String.new(), beyond=reasons)
+    let by_source = files_by_source(lowered, files)
+    let elsewhere = "an ownership finding in a file of the standard library or one the compiler wrote"
+    let per_file = borrowck.diagnostics_by_file(done.findings, by_source, len(files), catalog) else:
+        var reasons = lowered.beyond.copy()
+        reasons.push(elsewhere.to_string())
+        var sir = String.new()
+        if partial:
+            sir = write.write(done.program)
+        return Lowering(sir=sir, ownership=String.new(), beyond=reasons)
+    var out = String.new()
+    for k in range(len(files)):
+        out.push(render_ids_in(files[k].name, files[k].text, per_file[k], catalog))
+    return Lowering(sir=write.write(done.program), ownership=out, beyond=lowered.beyond.copy())
 
 ## Where `sir-batch` spends its time, in nanoseconds: the front end, the
 ## lowering, and the ownership checker with the writing of the SIR.
@@ -488,6 +721,79 @@ def name_error(sys: System, text: str, mut env: Environment, catalog: Catalog) -
         if catalog.is_error(d.msg):
             return Ok(True)
     return Ok(False)
+
+## The absolute form of a path given on the command line: relative to the
+## working directory, which the shell's `PWD` names.
+def absolute(sys: System, p: str) -> String:
+    if p.starts_with("/"):
+        return package.canonical(p)
+    let cwd = sys.env.get("PWD") ?? "."
+    return package.canonical(package.join(cwd, p))
+
+## The layouts of the program a command's argument names, when it is a
+## program of several modules or packages (stage 0's `locate`,
+## `load_package` and `load_file`): a package's directory, a workspace's
+## (each member's, or for `sir` the one application's), or a script with
+## dependencies or broken metadata. `None` for a file that is a program of
+## one module on its own.
+def layouts_of(sys: System, arg: str, sir: bool) -> list[Layout]?:
+    let abs = absolute(sys, arg)
+    let target = package.locate(sys.fs, abs) else:
+        return Some([])
+    if let Target.File(f) = target:
+        let text = package.read_text(sys.fs, f) ?? String.new()
+        let layout = package.load_file(sys.fs, package.file_name(f), f, text)
+        if len(layout.packages) == 1 and layout.problems.is_empty():
+            return None
+        return Some([layout])
+    return Some(package.load_target(sys.fs, target, sir))
+
+## The modules of a layout, read and parsed, after loading the std modules
+## they import into `env`.
+def named_modules(
+    sys: System, layout: Layout, mut env: Environment, catalog: Catalog
+) -> list[NamedModule] ! IoError:
+    var out: list[NamedModule] = []
+    for m in layout.modules:
+        let text = sys.fs.read_to_string(Path.new(m.disk))?
+        let parsed = parse(text, catalog)
+        for module in imported_std_modules(text, parsed.tree):
+            if not env.std.contains(module.copy()):
+                let source = sys.fs.read_to_string(Path.new("../std/{module}.sisu"))?
+                let names = ModuleNames.of(source, parse(source, catalog).tree)
+                _ = env.std.insert(module.copy(), names)
+        out.push(
+            NamedModule(
+                text=text.copy(),
+                tree=parsed.tree,
+                syntax=parsed.diagnostics,
+                path=m.path.copy(),
+                package=m.package,
+            )
+        )
+    return Ok(out)
+
+## Each package of a layout: its name and its dependencies.
+pure def packages_of(layout: Layout) -> list[(String, list[(String, int)])]:
+    var out: list[(String, list[(String, int)])] = []
+    for p in layout.packages:
+        out.push((p.name.copy(), p.deps.copy()))
+    return out
+
+## The name diagnostics of the program `arg` names, a file or a package, in
+## the conformance form: those of a program of several modules each with
+## its file's name, in the modules' order.
+def names_of(sys: System, arg: str, mut env: Environment, catalog: Catalog) -> String ! IoError:
+    let layouts = layouts_of(sys, arg, False) else:
+        let text = sys.fs.read_to_string(Path.new(arg))?
+        return names(sys, text, mut env, catalog)
+    var out = String.new()
+    for layout in layouts:
+        let modules = named_modules(sys, layout, mut env, catalog)?
+        let found = resolve.resolve_program(modules, packages_of(layout), env, catalog)
+        for i in range(len(found)):
+            out.push(render_ids_in(layout.modules[i].name, modules[i].text, found[i], catalog))
+    return Ok(out)
 
 ## The name diagnostics of `text` in the conformance form, after loading the
 ## std modules it imports into `env`.

@@ -1,0 +1,655 @@
+##! The TOML that `sisu.toml` is written in (stage 0's
+##! `sisu-driver/src/toml.rs`; 09, "Package manifest": the manifest stays
+##! data, D-063). A reader of the subset the manifest needs, keeping every
+##! key's and value's position for diagnostics.
+##!
+##! Accepted: `#` comments; `[table]` and `[a.b]` headers and `[[array]]`
+##! headers; `key = value` with bare, quoted and dotted keys; basic strings
+##! (`"..."` with the escapes `\" \\ \n \t \r \uXXXX \UXXXXXXXX`), literal
+##! strings (`'...'`), multi-line basic strings (`"""..."""`); integers with
+##! `_` separators; floats; `true` and `false`; arrays (over several lines,
+##! with a trailing comma and comments); inline tables (`{ k = v, ... }`).
+##! Dates and times are not part of the subset: nothing in the manifest
+##! takes one.
+
+from stage1.diag import TextRange
+from stage1.text import char_at
+
+## A value with the range of its text.
+pub struct Spanned[T]:
+    pub value: T
+    pub range: TextRange
+
+pub enum Value:
+    Str(String)
+    Int(int)
+    Float(f64)
+    Bool(bool)
+    Array(list[Spanned[Value]])
+    Table(Table)
+
+impl Value:
+    ## How the value is described in a diagnostic.
+    pub pure def describe(self) -> str:
+        return match self:
+            case Str(_): "a string"
+            case Int(_): "an integer"
+            case Float(_): "a float"
+            case Bool(_): "a boolean"
+            case Array(_): "an array"
+            case Table(_): "a table"
+
+    pub pure def as_str(self) -> String?:
+        if let Str(s) = self:
+            return Some(s.copy())
+        return None
+
+## A table: its entries in the order written. A table made by a header
+## records where the header is.
+pub struct Table:
+    pub entries: list[(Spanned[String], Spanned[Value])]
+    ## Defined by a `[header]` (rather than implicitly by a dotted key or a
+    ## longer header), so a second `[header]` is a duplicate.
+    pub explicit: bool
+
+impl Table:
+    pub pure def new() -> Table:
+        return Table(entries=[], explicit=False)
+
+    pub pure def get(self, key: str) -> Spanned[Value]?:
+        for (k, v) in self.entries:
+            if k.value == key:
+                return Some(v.copy())
+        return None
+
+    ## The index of the entry of `key`.
+    pure def position(self, key: str) -> int?:
+        for i in range(len(self.entries)):
+            if self.entries[i].0.value == key:
+                return Some(i)
+        return None
+
+## What stops reading: a syntax error (where, and what was expected and
+## found, as the parameters of `E1000`), or a key given twice (its second
+## occurrence and the table's name).
+pub error Problem:
+    Syntax(range: TextRange, expected: String, found: String)
+    Duplicate(range: TextRange, key: String, table: String)
+
+## The runs of characters the reader takes whole: letters and digits, and
+## what a bare key (`_`, `-`) or a number (`+`, `.`, and `-` and `_`) adds.
+@derive(Eq, Copy)
+enum CharKind:
+    Alnum
+    Bare
+    Number
+    Other
+
+view struct Reader:
+    text: str
+    pos: int
+
+impl Reader:
+    pure def peek(self) -> char?:
+        if self.pos >= self.text.byte_len():
+            return None
+        return Some(char_at(self.text, self.pos))
+
+    ## The character `n` characters after the current one.
+    pure def peek_at(self, n: int) -> char?:
+        var at = self.pos
+        for _ in range(n):
+            if at >= self.text.byte_len():
+                return None
+            at += char_at(self.text, at).len_utf8()
+        if at >= self.text.byte_len():
+            return None
+        return Some(char_at(self.text, at))
+
+    ## What the current character is, for the loops over a run of them.
+    pure def peek_kind(self) -> CharKind:
+        let c = self.peek() else:
+            return CharKind.Other
+        if is_ascii_alphanumeric(c):
+            return CharKind.Alnum
+        if c == '_' or c == '-':
+            return CharKind.Bare
+        if c == '+' or c == '.':
+            return CharKind.Number
+        return CharKind.Other
+
+    pure def bump(mut self) -> char?:
+        let c = self.peek() else:
+            return None
+        self.pos += c.len_utf8()
+        return Some(c)
+
+    pure def starts_with(self, s: str) -> bool:
+        return self.text.byte_slice(self.pos, self.text.byte_len()).starts_with(s)
+
+    pure def range_from(self, start: int) -> TextRange:
+        return TextRange.new(start, self.pos)
+
+    ## What is at the position, for an error.
+    pure def found(self) -> String:
+        return match self.peek():
+            case None: "the end of the file".to_string()
+            case Some('\n') | Some('\r'): "the end of the line".to_string()
+            case Some(c): "`{c}`"
+
+    pure def error(self, expected: str) -> Problem:
+        # A line break is found where the line ends, an empty range.
+        let width = match self.peek():
+            case None | Some('\n') | Some('\r'): 0
+            case Some(c): c.len_utf8()
+        let end = self.pos + width
+        return Syntax(
+            range=TextRange.new(self.pos, end), expected=expected.to_string(), found=self.found()
+        )
+
+    ## Spaces and tabs.
+    pure def skip_blank(mut self):
+        while self.peek() == Some(' ') or self.peek() == Some('\t'):
+            self.pos += 1
+
+    ## Spaces, tabs, comments and line breaks.
+    pure def skip_space(mut self):
+        while True:
+            self.skip_blank()
+            match self.peek():
+                case Some('#'):
+                    self.skip_comment()
+                case Some('\n'):
+                    self.pos += 1
+                case Some('\r') if self.peek_at(1) == Some('\n'):
+                    self.pos += 2
+                case _:
+                    return
+
+    pure def skip_comment(mut self):
+        while let Some(c) = self.peek():
+            if c == '\n':
+                break
+            self.pos += c.len_utf8()
+
+    ## The end of a line: blanks, an optional comment, then a line break or
+    ## the end of the file.
+    pure def end_of_line(mut self) -> () ! Problem:
+        self.skip_blank()
+        if self.peek() == Some('#'):
+            self.skip_comment()
+        match self.peek():
+            case None:
+                return Ok(())
+            case Some('\n'):
+                self.pos += 1
+                return Ok(())
+            case Some('\r') if self.peek_at(1) == Some('\n'):
+                self.pos += 2
+                return Ok(())
+            case _:
+                return Err(self.error("the end of the line"))
+
+    pure def key_part(mut self) -> Spanned[String] ! Problem:
+        let start = self.pos
+        match self.peek():
+            case Some('"'):
+                let s = self.basic_string()?
+                return Ok(Spanned(value=s, range=self.range_from(start)))
+            case Some('\''):
+                let s = self.literal_string()?
+                return Ok(Spanned(value=s, range=self.range_from(start)))
+            case Some(c) if is_bare(c):
+                while self.peek_kind() == CharKind.Bare or self.peek_kind() == CharKind.Alnum:
+                    self.pos += 1
+                let value = self.text.byte_slice(start, self.pos).to_string()
+                return Ok(Spanned(value=value, range=self.range_from(start)))
+            case _:
+                return Err(self.error("a key"))
+
+    ## `a.b.c`, as its parts.
+    pure def key(mut self) -> list[Spanned[String]] ! Problem:
+        var parts = [self.key_part()?]
+        while True:
+            self.skip_blank()
+            if self.peek() != Some('.'):
+                return Ok(parts)
+            self.pos += 1
+            self.skip_blank()
+            parts.push(self.key_part()?)
+
+    pure def basic_string(mut self) -> String ! Problem:
+        if self.starts_with("\"\"\""):
+            return self.multiline_string()
+        self.pos += 1
+        var out = String.new()
+        while True:
+            match self.peek():
+                case None | Some('\n'):
+                    return Err(self.error("`\"`, the end of the string"))
+                case Some('"'):
+                    self.pos += 1
+                    return Ok(out)
+                case Some('\\'):
+                    out.push_char(self.escape()?)
+                case Some(c):
+                    self.pos += c.len_utf8()
+                    out.push_char(c)
+
+    pure def multiline_string(mut self) -> String ! Problem:
+        self.pos += 3
+        # A line break right after the opening quotes is not part of it.
+        if self.peek() == Some('\n'):
+            self.pos += 1
+        elif self.starts_with("\r\n"):
+            self.pos += 2
+        var out = String.new()
+        while True:
+            if self.starts_with("\"\"\""):
+                self.pos += 3
+                return Ok(out)
+            match self.peek():
+                case None:
+                    return Err(self.error("`\"\"\"`, the end of the string"))
+                case Some('\\'):
+                    out.push_char(self.escape()?)
+                case Some(c):
+                    self.pos += c.len_utf8()
+                    out.push_char(c)
+
+    pure def escape(mut self) -> char ! Problem:
+        let start = self.pos
+        self.pos += 1
+        let wrong = "an escape: `\\\"`, `\\\\`, `\\n`, `\\t`, `\\r` or `\\uXXXX`"
+        let c = match self.bump():
+            case Some('"'): '"'
+            case Some('\\'): '\\'
+            case Some('n'): '\n'
+            case Some('t'): '\t'
+            case Some('r'): '\r'
+            case Some('b'): '\u{8}'
+            case Some('f'): '\u{c}'
+            case Some('u') | Some('U'): self.unicode_escape(start)?
+            case _: self.escape_error(start, wrong)?
+        return Ok(c)
+
+    ## The digits of `\uXXXX` or `\UXXXXXXXX`, after the letter.
+    pure def unicode_escape(mut self, start: int) -> char ! Problem:
+        let wrong = "an escape: `\\\"`, `\\\\`, `\\n`, `\\t`, `\\r` or `\\uXXXX`"
+        let n = if self.text.byte_at(self.pos - 1) == 117: 4 else: 8
+        let end = min(self.pos + n, self.text.byte_len())
+        # Hex digits only: `u32::from_str_radix` would take a sign.
+        var code = 0
+        var hex = end - self.pos == n
+        for i in range(self.pos, end):
+            let b = self.text.byte_at(i).to_int()
+            var d = -1
+            if b >= 48 and b <= 57:
+                d = b - 48
+            elif b >= 97 and b <= 102:
+                d = b - 87
+            elif b >= 65 and b <= 70:
+                d = b - 55
+            if d < 0:
+                hex = False
+            else:
+                code = code * 16 + d
+        if hex:
+            if let Some(c) = char.from_code(code):
+                self.pos += n
+                return Ok(c)
+        return self.escape_error(start, wrong)
+
+    pure def escape_error(mut self, start: int, wrong: str) -> char ! Problem:
+        self.pos = start
+        return Err(self.error(wrong))
+
+    pure def literal_string(mut self) -> String ! Problem:
+        self.pos += 1
+        let start = self.pos
+        while True:
+            match self.peek():
+                case None | Some('\n'):
+                    return Err(self.error("`'`, the end of the string"))
+                case Some('\''):
+                    let s = self.text.byte_slice(start, self.pos).to_string()
+                    self.pos += 1
+                    return Ok(s)
+                case Some(c):
+                    self.pos += c.len_utf8()
+
+    pure def value(mut self) -> Spanned[Value] ! Problem:
+        let start = self.pos
+        let any = "a value: a string, a number, `true`, `false`, an array or a table"
+        var value = Value.Bool(False)
+        match self.peek():
+            case Some('"'):
+                value = Value.Str(self.basic_string()?)
+            case Some('\''):
+                value = Value.Str(self.literal_string()?)
+            case Some('['):
+                self.pos += 1
+                var items: list[Spanned[Value]] = []
+                while True:
+                    self.skip_space()
+                    if self.peek() == Some(']'):
+                        self.pos += 1
+                        break
+                    items.push(self.value()?)
+                    self.skip_space()
+                    match self.peek():
+                        case Some(','):
+                            self.pos += 1
+                        case Some(']'):
+                            self.pos += 1
+                            break
+                        case _:
+                            return Err(self.error("`,` or `]`"))
+                value = Value.Array(items)
+            case Some('{'):
+                self.pos += 1
+                var table = Table.new()
+                self.skip_blank()
+                if self.peek() == Some('}'):
+                    self.pos += 1
+                else:
+                    while True:
+                        self.skip_blank()
+                        let key = self.key()?
+                        self.skip_blank()
+                        if self.peek() != Some('='):
+                            return Err(self.error("`=`"))
+                        self.pos += 1
+                        self.skip_blank()
+                        let v = self.value()?
+                        insert(mut table, key, v, "")?
+                        self.skip_blank()
+                        match self.peek():
+                            case Some(','):
+                                self.pos += 1
+                            case Some('}'):
+                                self.pos += 1
+                                break
+                            case _:
+                                return Err(self.error("`,` or `}}`"))
+                value = Value.Table(table)
+            case Some(c) if c.is_digit() or c == '-' or c == '+':
+                while self.peek_kind() != CharKind.Other:
+                    self.pos += 1
+                var text = String.new()
+                for x in self.text.byte_slice(start, self.pos).chars():
+                    if x != '_':
+                        text.push_char(x)
+                var has_digit = False
+                for x in text.chars():
+                    if x.is_digit():
+                        has_digit = True
+                if let Some(n) = text.parse_int():
+                    value = Value.Int(n)
+                elif text.parse_float().is_some() and has_digit:
+                    value = Value.Float(text.parse_float() ?? 0.0)
+                else:
+                    self.pos = start
+                    return Err(self.error("a number"))
+            case Some(c) if is_ascii_alphabetic(c):
+                while self.peek_kind() == CharKind.Alnum:
+                    self.pos += 1
+                match self.text.byte_slice(start, self.pos):
+                    case "true":
+                        value = Value.Bool(True)
+                    case "false":
+                        value = Value.Bool(False)
+                    case _:
+                        self.pos = start
+                        return Err(self.error(any))
+            case _:
+                return Err(self.error(any))
+        return Ok(Spanned(value=value, range=self.range_from(start)))
+
+pure def is_ascii_alphabetic(c: char) -> bool:
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z')
+
+pure def is_ascii_alphanumeric(c: char) -> bool:
+    return is_ascii_alphabetic(c) or c.is_digit()
+
+pure def is_bare(c: char) -> bool:
+    return is_ascii_alphanumeric(c) or c == '_' or c == '-'
+
+## Inserts `value` at the dotted `key` of `table`, making the tables on the
+## way; `name` is the table's own name, for a duplicate's report.
+pure def insert(
+    mut table: Table, key: list[Spanned[String]], own value: Spanned[Value], name: str
+) -> () ! Problem:
+    if key.is_empty():
+        return Ok(())
+    return insert_from(mut table, key, 0, value, name.to_string())
+
+## `insert` from the part `i` of the key on, into `t`, whose name so far is
+## `full`.
+pure def insert_from(
+    mut t: Table, key: list[Spanned[String]], i: int, own value: Spanned[Value], own full: String
+) -> () ! Problem:
+    let last = len(key) - 1
+    if i == last:
+        if t.position(key[i].value).is_some():
+            return Err(Duplicate(range=key[i].range, key=key[i].value.copy(), table=full))
+        t.entries.push((key[i].copy(), value))
+        return Ok(())
+    let part = key[i].copy()
+    var name = full
+    if not name.is_empty():
+        name.push(".")
+    name.push(part.value)
+    if t.position(part.value).is_none():
+        let made = Spanned(value=Value.Table(Table.new()), range=part.range)
+        t.entries.push((part.copy(), made))
+    let at = t.position(part.value) ?? 0
+    let Value.Table(found) = t.entries[at].1.value.copy() else:
+        return Err(Duplicate(range=part.range, key=part.value.copy(), table=name))
+    var inner = found
+    let done = insert_from(mut inner, key, i + 1, value, name)
+    t.entries[at].1.value = Value.Table(inner)
+    return done
+
+## Makes the table a `[header]` names when missing; for `[[header]]`, a new
+## table appended to the array at the header.
+pure def header_table(mut root: Table, key: list[Spanned[String]], array: bool) -> () ! Problem:
+    return header_from(mut root, key, 0, array, String.new())
+
+pure def header_from(
+    mut t: Table, key: list[Spanned[String]], i: int, array: bool, own full_in: String
+) -> () ! Problem:
+    if i >= len(key):
+        return Ok(())
+    let part = key[i].copy()
+    let last = i + 1 == len(key)
+    var full = full_in
+    if not full.is_empty():
+        full.push(".")
+    full.push(part.value)
+    if t.position(part.value).is_none():
+        let v = if last and array: Value.Array([]) else: Value.Table(Table.new())
+        t.entries.push((part.copy(), Spanned(value=v, range=part.range)))
+    let at = t.position(part.value) ?? 0
+    let dup = Duplicate(range=part.range, key=part.value.copy(), table=full.copy())
+    match t.entries[at].1.value.copy():
+        case Value.Table(found):
+            var inner = found
+            if last:
+                if array or inner.explicit:
+                    return Err(dup)
+                inner.explicit = True
+            let done = header_from(mut inner, key, i + 1, array, full)
+            t.entries[at].1.value = Value.Table(inner)
+            return done
+        case Value.Array(found):
+            var items = found
+            if last and not array:
+                return Err(dup)
+            if last:
+                let made = Table(entries=[], explicit=True)
+                items.push(Spanned(value=Value.Table(made), range=part.range))
+            let n = len(items)
+            let Value.Table(table) = items[n - 1].value.copy() else:
+                return Err(dup)
+            var inner = table
+            let done = header_from(mut inner, key, i + 1, array, full)
+            items[n - 1].value = Value.Table(inner)
+            t.entries[at].1.value = Value.Array(items)
+            return done
+        case _:
+            return Err(dup)
+
+## Reads a TOML document.
+pub pure def parse(text: str) -> Table ! Problem:
+    var r = Reader(text=text, pos=0)
+    var root = Table(entries=[], explicit=True)
+    # The header the following keys belong to.
+    var current: list[Spanned[String]] = []
+    while True:
+        r.skip_space()
+        let c = r.peek() else:
+            break
+        if c == '[':
+            let array = r.starts_with("[[")
+            r.pos += if array: 2 else: 1
+            r.skip_blank()
+            let key = r.key()?
+            r.skip_blank()
+            let close = if array: "]]" else: "]"
+            if not r.starts_with(close):
+                return Err(r.error(if array: "`]]`" else: "`]`"))
+            r.pos += close.byte_len()
+            r.end_of_line()?
+            header_table(mut root, key, array)?
+            current = key
+            continue
+        let key = r.key()?
+        r.skip_blank()
+        if r.peek() != Some('='):
+            return Err(r.error("`=`"))
+        r.pos += 1
+        r.skip_blank()
+        if r.peek().is_none() or r.peek() == Some('\n'):
+            return Err(r.error("a value: a string, a number, `true`, `false`, an array or a table"))
+        let value = r.value()?
+        r.end_of_line()?
+        var names: list[String] = []
+        for k in current:
+            names.push(k.value.copy())
+        let name = names.join(".")
+        insert_current(mut root, current, 0, key, value, name)?
+    return Ok(root)
+
+## Inserts a key of the table the keys after a header go into: the header
+## made it, so the path is there (what is missing is made, as the header
+## would).
+pure def insert_current(
+    mut t: Table,
+    header: list[Spanned[String]],
+    i: int,
+    key: list[Spanned[String]],
+    own value: Spanned[Value],
+    name: str,
+) -> () ! Problem:
+    if i >= len(header):
+        return insert(mut t, key, value, name)
+    let first = header[i].copy()
+    var at = len(t.entries)
+    if let Some(k) = t.position(first.value):
+        at = k
+    else:
+        let v = Spanned(value=Value.Table(Table.new()), range=first.range)
+        t.entries.push((first.copy(), v))
+    match t.entries[at].1.value.copy():
+        case Value.Array(found):
+            var items = found
+            var last_is_table = False
+            if let Some(x) = items.last():
+                if let Value.Table(_) = x.value:
+                    last_is_table = True
+            if not last_is_table:
+                items.push(Spanned(value=Value.Table(Table.new()), range=first.range))
+            let n = len(items)
+            let Value.Table(table) = items[n - 1].value.copy() else:
+                return Ok(())
+            var inner = table
+            let done = insert_current(mut inner, header, i + 1, key, value, name)
+            items[n - 1].value = Value.Table(inner)
+            t.entries[at].1.value = Value.Array(items)
+            return done
+        case Value.Table(found):
+            var inner = found
+            let done = insert_current(mut inner, header, i + 1, key, value, name)
+            t.entries[at].1.value = Value.Table(inner)
+            return done
+        case _:
+            var inner = Table.new()
+            let done = insert_current(mut inner, header, i + 1, key, value, name)
+            t.entries[at].1.value = Value.Table(inner)
+            return done
+
+# ------------------------------------------------------------------ tests
+
+pure def str_of(t: Table, key: str) -> String:
+    let v = t.get(key) else:
+        return String.new()
+    return v.value.as_str() ?? String.new()
+
+pure def table_of(t: Table, key: str) -> Table:
+    let v = t.get(key) else:
+        return Table.new()
+    if let Value.Table(x) = v.value:
+        return x.copy()
+    return Table.new()
+
+test "reads a manifest":
+    let text = "# a comment\n[package]\nname = \"weather\"   # trailing\nversion = '0.3.1'\n\n[dependencies]\nmylib = {{ path = \"../mylib\" }}\nwinapi = {{ path = \"w\", when = {{ os = \"windows\" }} }}\n\n[trust]\nunsafe = [\n  \"mylib\",  # ok\n]\n"
+    let t = parse(text).expect("parses")
+    let p = table_of(t, "package")
+    assert str_of(p, "name") == "weather"
+    assert str_of(p, "version") == "0.3.1"
+    let d = table_of(t, "dependencies")
+    let w = table_of(d, "winapi")
+    let when = table_of(w, "when")
+    assert str_of(when, "os") == "windows"
+    let trust = table_of(t, "trust")
+    var unsafe_count = 0
+    if let Some(v) = trust.get("unsafe"):
+        if let Value.Array(a) = v.value:
+            unsafe_count = len(a)
+    assert unsafe_count == 1
+
+test "dotted keys and arrays of tables":
+    let text = "a.b = 1\n[[package]]\nname = \"x\"\n[[package]]\nname = \"y\"\n"
+    let t = parse(text).expect("parses")
+    let a = table_of(t, "a")
+    var b = 0
+    if let Some(v) = a.get("b"):
+        if let Value.Int(n) = v.value:
+            b = n
+    assert b == 1
+    var packages = 0
+    if let Some(v) = t.get("package"):
+        if let Value.Array(ps) = v.value:
+            packages = len(ps)
+    assert packages == 2
+
+test "reports where":
+    match parse("[package]\nname \"x\"\n"):
+        case Err(Syntax(range, expected, _)):
+            assert range.start == 15
+            assert expected == "`=`"
+        case _:
+            assert False
+    match parse("[package]\nname = \"x\"\nname = \"y\"\n"):
+        case Err(Duplicate(_, key, _)):
+            assert key == "name"
+        case _:
+            assert False
+    assert parse("[a]\n[a]\n").is_err()
+    assert parse("x = \"open\n").is_err()
+
+test "escapes":
+    let t = parse("x = \"a\\\"b\\\\c\\n\\u00e9\"\n").expect("parses")
+    assert str_of(t, "x") == "a\"b\\c\né"

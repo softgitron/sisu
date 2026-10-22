@@ -19,15 +19,20 @@
 ##! `__T0`, `__T1`, ... there, so the unfolded code names the argument
 ##! whatever module it comes from.
 ##!
-##! The std modules' derived impls stay headers (`declare_derived`): no std
-##! body is checked. The attributes of a std type, which the base does not
-##! keep the text of, are none to `reflect.attributes_of`.
+##! The std modules' derived impls are unfolded from the prelude's templates
+##! too, into `<derive>/NAME.sisu` modules of the standard library, whose
+##! bodies lowering checks when it reaches them. The base makes the text of
+##! every std module's, the modules a program may import included
+##! (`Resolver.std_derived`): a program that imports one declares that
+##! text, as the templates are the base's and not copied for each file. The
+##! attributes of a std type, which the base does not keep the text of, are
+##! none to `reflect.attributes_of`.
 
 from stage1.diag import TextRange
 from stage1.parser import parse
 from stage1.syntax.ast import Attr, ExprKind, FnDef, GenericParam, ItemId, ItemKind, TypeExprId, Vis
 from stage1.syntax.ast import build
-from stage1.typeck.collect import Pending, Resolver
+from stage1.typeck.collect import Resolver
 from stage1.typeck.program import Answer, DefKind, ModuleId, Request, VariantInfo, derivable
 from stage1.typeck.template import (
     Body,
@@ -68,23 +73,31 @@ impl Resolver:
     pure def derive_template(
         self, module: ModuleId, name: str, templates: Templates
     ) -> DeriveSource?:
-        if module == self.prog.root
-                and not self.is_std(module)
-                and self.derive_templates.contains(name.to_string()):
+        if not self.is_std(module)
+                and self.derive_templates.contains((module.index, name.to_string())):
             return Some(DeriveSource.Own)
         if templates.derives.contains(name.to_string()):
             return Some(DeriveSource.Prelude)
         return None
 
-    ## The derived impls of the root module's structs and enums (stage 0's
+    ## The derived impls of the structs and enums among `items` (stage 0's
     ## `declare_derived`): each `@derive`d trait's, `PartialOrd` with `Ord`,
     ## and `Debug` for every type without its own, unfolded from the trait's
-    ## template into one text, declared as `<derive>/main.sisu`; and each
-    ## `@delegate`d trait's, as a header.
-    pub pure def declare_derived_root(
+    ## template into one text, declared as `<derive>/NAME.sisu`; and before
+    ## them each `@delegate`d trait's, which forwards to a field, declared as
+    ## `<delegate>/NAME.sisu`. A std module whose text the base made
+    ## (`std_derived`) declares that text.
+    pub pure def declare_derived(
         mut self, module: ModuleId, items: list[ItemId], templates: Templates
     ):
+        let std = self.is_std(module)
+        let module_name = self.prog.modules[module.index].name.copy()
+        var made: String? = None
+        if std:
+            if let Some(t) = self.std_derived.get(module_name.copy()):
+                made = Some(t.copy())
         var text = String.new()
+        var delegate = String.new()
         for id in items:
             let item = self.sources[module.index].ast.item(id).copy()
             var name = String.new()
@@ -130,12 +143,16 @@ impl Resolver:
             let ty = self.prog.lookup_in(module, name) else:
                 continue
             let used = self.used_params(module, gps, field_tys)
+            # The parameters with the text of their bounds, which the base
+            # has the std modules' texts for.
             var generics: list[(String, list[String])] = []
             for g in gps:
                 var bounds: list[String] = []
                 for b in g.bounds:
+                    if made.is_some():
+                        break
                     let r = self.ast(module).type_expr(b).range
-                    let written = self.root_text.byte_slice(r.start, r.end).to_string()
+                    let written = self.text_in(module, r)
                     if not written.is_empty():
                         bounds.push(written)
                 generics.push((g.name.text.copy(), bounds))
@@ -167,19 +184,10 @@ impl Resolver:
                         # `resolve.not-derivable`.
                         self.other_error = True
             # `@delegate(Trait, ..., to="field")`: impls that forward to a
-            # field, declared as headers.
+            # field.
             let delegated = self.delegations(module, item.attrs, is_struct, field_names)
-            for (t, field, at) in delegated:
-                self.pending.push(
-                    Pending.Derived(
-                        ty=ty,
-                        module=module,
-                        trait_=t.copy(),
-                        derived=False,
-                        used=used.copy(),
-                        range=at,
-                    )
-                )
+            for (t, field, _) in delegated:
+                delegate.push(delegate_text(name, generics, used, t, field))
                 self.derive_checks.push(
                     DeriveCheck(ty=ty, trait_name=t.copy(), field=Some(field.copy()))
                 )
@@ -206,6 +214,9 @@ impl Resolver:
             if not builtin and not debug and not self.has_impl(module, items, "Debug", name):
                 wanted.push(("Debug".to_string(), TextRange.empty(item.range.start)))
             for (t, _) in wanted:
+                if made.is_some():
+                    self.derive_checks.push(DeriveCheck(ty=ty, trait_name=t.copy(), field=None))
+                    continue
                 let source = self.derive_template(module, t, templates) else:
                     continue
                 let (head, written) = header(name, generics, used, t)
@@ -213,9 +224,10 @@ impl Resolver:
                 var unfolded: String? = None
                 match source:
                     case DeriveSource.Own:
-                        if let Some(f) = self.derive_templates.get(t.copy()):
+                        if let Some(f) = self.derive_templates.get((module.index, t.copy())):
+                            let module_text = self.text_of_module(module)
                             let src = Src(
-                                ast=ref self.sources[module.index].ast, source=self.root_text
+                                ast=ref self.sources[module.index].ast, source=module_text
                             )
                             if let Ok(x) = unfold(src, f, head, target):
                                 unfolded = Some(x)
@@ -232,12 +244,21 @@ impl Resolver:
                         self.other_error = True
                         continue
                 self.derive_checks.push(DeriveCheck(ty=ty, trait_name=t.copy(), field=None))
+        # Delegated impls are ordinary impls, written by the compiler.
+        if not delegate.is_empty():
+            _ = self.declare_generated_in(module, "<delegate>", delegate)
+        if let Some(x) = made:
+            text = x.copy()
+        elif std:
+            _ = self.std_derived.insert(module_name, text.copy())
         if not text.is_empty():
             _ = self.declare_generated_in(module, "<derive>", text)
 
     ## Declares generated code in a module of its own, with the generated
     ## text as its source file and `module` as its scope; its bodies are
-    ## checked with that text.
+    ## checked with that text, but those of the impls the standard library
+    ## derives, which lowering checks when it reaches them, as it does the
+    ## standard library's other bodies.
     pub pure def declare_generated_in(mut self, module: ModuleId, dir: str, text: str) -> ModuleId:
         let name = "{dir}/{self.prog.modules[module.index].name}.sisu"
         let is_std = self.prog.modules[module.index].is_std
@@ -249,7 +270,11 @@ impl Resolver:
         let items = generated.items.copy()
         let id = self.add_module(name, is_std, generated)
         self.prog.modules[id.index].parent = Some(module)
-        self.generated.push((id, text.to_string()))
+        self.prog.modules[id.index].package = self.prog.modules[module.index].package
+        if not is_std:
+            _ = self.module_texts.insert(id, text.to_string())
+        if not is_std or dir != "<derive>":
+            self.generated.push((id, text.to_string()))
         self.declare_items(id, items, "")
         return id
 
@@ -276,7 +301,8 @@ impl Resolver:
                 let info = self.prog.impl_info(i) else:
                     continue
                 let module_name = ref self.prog.modules[self.prog.defs[i.index].module.index].name
-                let generated = module_name.starts_with("<derive>/") or self.delegated.contains(i)
+                let generated = module_name.starts_with("<derive>/")
+                    or module_name.starts_with("<delegate>/")
                 if not generated or info.trait_ref.def_ != td:
                     continue
                 if let TyData.Adt(d, _) = self.types.data(info.self_ty):
@@ -395,7 +421,7 @@ impl Resolver:
             let shape = self.shape(args[i], "__T{i}", 0, mut aliases)
             params.push((generics[i].copy(), shape))
         let inst = "__instance_{len(self.prog.instances)}"
-        var source = self.root_text.copy()
+        var source = self.text_of_module(module)
         if self.is_std(module):
             source = String.new()
             if let Some(t) = self.std_texts.get(self.prog.modules[module.index].name):
@@ -559,6 +585,55 @@ pure def header(
         ty = "{name}[{names.join(", ")}]"
         params = "[{ps.join(", ")}]"
     return ("impl{params} {trait_name} for {ty}:\n", ty)
+
+## The source of one delegated impl (stage 0's `delegate_text`): the
+## trait's method on the field, the result wrapped back into the type when
+## the trait returns `Self`.
+pure def delegate_text(
+    name: str,
+    generics: list[(String, list[String])],
+    used: list[bool],
+    trait_name: str,
+    field: str,
+) -> String:
+    let (head, ty) = header(name, generics, used, trait_name)
+    let v = field
+    var body = "    pure def len(self) -> int:\n        return len(self.{v})\n"
+    match trait_name:
+        case "Add":
+            body = delegate_op(name, ty, v, "+", "add")
+        case "Sub":
+            body = delegate_op(name, ty, v, "-", "sub")
+        case "Mul":
+            body = delegate_op(name, ty, v, "*", "mul")
+        case "Div":
+            body = delegate_op(name, ty, v, "/", "div")
+        case "Rem":
+            body = delegate_op(name, ty, v, "%", "rem")
+        case "Neg":
+            body = "    pure def neg(self) -> {ty}:\n        return {name}({v}=-self.{v})\n"
+        case "Eq":
+            body = "    pure def eq(self, other: {ty}) -> bool:\n        return self.{v} == other.{v}\n"
+        case "PartialOrd":
+            body = "    pure def partial_cmp(self, other: {ty}) -> Ordering?:\n"
+            body.push("        return self.{v}.partial_cmp(other.{v})\n")
+        case "Ord":
+            body = "    pure def cmp(self, other: {ty}) -> Ordering:\n"
+            body.push("        return self.{v}.cmp(other.{v})\n")
+        case "Hash":
+            body = "    pure def hash(self, mut h: Hasher):\n        self.{v}.hash(mut h)\n"
+        case "Display":
+            body = "    pure def fmt(self, mut f: Formatter):\n        self.{v}.fmt(mut f)\n"
+        case "Debug":
+            body = "    pure def fmt_debug(self, mut f: Formatter):\n"
+            body.push("        self.{v}.fmt_debug(mut f)\n")
+        case _:
+            pass
+    return "\n{head}{body}"
+
+## A delegated operator: the field's operation, wrapped back into the type.
+pure def delegate_op(name: str, ty: str, v: str, sym: str, method: str) -> String:
+    return "    pure def {method}(self, other: {ty}) -> {ty}:\n        return {name}({v}=self.{v} {sym} other.{v})\n"
 
 ## Whether an attribute list has `@builtin`.
 pure def has_builtin(attrs: list[Attr]) -> bool:

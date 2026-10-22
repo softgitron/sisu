@@ -1,0 +1,568 @@
+##! `sisu.toml`, the package manifest (stage 0's
+##! `sisu-driver/src/manifest.rs`; 09, "Package manifest"), as data: its
+##! tables read into a `Manifest`, every mistake a diagnostic with its
+##! position in the file.
+##!
+##! The manifest stays data (D-063): no conditionals or expressions. A
+##! dependency that applies only on some targets says so with a structured
+##! condition over the build target's facts, `when = { os = "windows" }`,
+##! which is data too: the build compares it with `target`'s constants.
+##! Stage 0 has no registry, so every dependency is a `path`.
+
+import stage1.toml
+from stage1.diag import Diagnostic, Msg, TextRange
+from stage1.syntax.kinds import keyword_kind
+from stage1.toml import Spanned, Table, Value
+
+## The build target's facts a `when` condition may name: `target.os`,
+## `target.arch` and `target.runtime` (08, "Conditional compilation").
+const TARGET_FACTS: list[str] = ["os", "arch", "runtime"]
+
+## What a dependency's `when` asks of the target: for each fact named, the
+## values that admit it.
+pub struct When:
+    pub facts: list[(String, list[String])]
+
+impl When:
+    ## Whether the target with these facts meets the condition.
+    pub pure def holds(self, target: list[(String, String)]) -> bool:
+        for (fact, values) in self.facts:
+            var met = False
+            for (f, v) in target:
+                if f == fact and values.contains(v.copy()):
+                    met = True
+            if not met:
+                return False
+        return True
+
+## The facts of the target stage 0 builds for: the host it runs on, and
+## the interpreter. Stage 1 knows the host by what stage 0's build of it
+## reports, Linux on x86-64 here.
+pub pure def target_facts() -> list[(String, String)]:
+    return [
+        ("os".to_string(), "linux".to_string()),
+        ("arch".to_string(), "x86_64".to_string()),
+        ("runtime".to_string(), "interpreter".to_string()),
+    ]
+
+pub struct Dependency:
+    ## The name the package's imports name it by: its key.
+    pub name: String
+    pub name_range: TextRange
+    ## The directory of its package, as written (relative to the manifest).
+    pub path: String
+    pub path_range: TextRange
+    pub when: When?
+    ## A dev-dependency: only the package's tests may import it.
+    pub dev: bool
+
+pub struct PackageInfo:
+    pub name: String
+    pub name_range: TextRange
+    pub version: String
+    pub edition: String?
+    pub description: String?
+    pub license: String?
+
+pub struct Manifest:
+    ## `[package]`; a workspace's own manifest may have none.
+    pub package: PackageInfo?
+    pub dependencies: list[Dependency]
+    ## `[trust] unsafe`: the dependencies that may contain `unsafe` and
+    ## `extern` (09).
+    pub trust_unsafe: list[(String, TextRange)]
+    ## `[workspace] members`: the members' directories, as written.
+    pub members: list[(String, TextRange)]?
+    ## `[features]`: each feature and what it turns on, recorded only.
+    pub features: list[(String, list[String])]
+    ## `[profile.release] contracts`.
+    pub release_contracts: String?
+
+impl Manifest:
+    pub pure def new() -> Manifest:
+        return Manifest(
+            package=None,
+            dependencies=[],
+            trust_unsafe=[],
+            members=None,
+            features=[],
+            release_contracts=None,
+        )
+
+## The names stage 0's standard library answers `import NAME` with, which
+## no package of a program may take (09; the stage-0 short names of std's
+## modules).
+const RESERVED: list[str] = [
+    "std",
+    "cli",
+    "math",
+    "task",
+    "log",
+    "cap",
+    "net",
+    "time",
+    "http",
+    "sim",
+    "json",
+    "test",
+]
+
+## Whether `name` can name a package or a module: lowercase letters, digits
+## and `_`, starting with a letter, and not a keyword.
+pub pure def is_module_name(name: str) -> bool:
+    var first = True
+    for c in name.chars():
+        let lower = c >= 'a' and c <= 'z'
+        if first:
+            if not lower:
+                return False
+            first = False
+        elif not (lower or c.is_digit() or c == '_'):
+            return False
+    return not first and keyword_kind(name).is_none()
+
+pure def is_reserved(name: str) -> bool:
+    for r in RESERVED:
+        if r == name:
+            return True
+    return False
+
+struct Reader:
+    diags: list[Diagnostic]
+
+impl Reader:
+    pure def unknown(mut self, key: Spanned[String], table: str):
+        let d = Diagnostic.new(Msg.PackageUnknownKey, key.range.start, key.range.end)
+        self.diags.push(d.with("key", key.value).with("table", table))
+
+    ## A value of the wrong kind, or of the right kind but not one the key
+    ## takes (then shown as written).
+    pure def bad(mut self, key: str, v: Spanned[Value], expected: str):
+        var found = v.value.describe().to_string()
+        if let Value.Str(s) = v.value:
+            if expected != "a list of strings" and expected != "a table" and expected != "a string":
+                found = "`{quote(s)}`"
+        let d = Diagnostic.new(Msg.PackageBadValue, v.range.start, v.range.end)
+        self.diags.push(d.with("key", key).with("expected", expected).with("found", found))
+
+    pure def string(mut self, key: str, v: Spanned[Value]) -> String?:
+        if let Value.Str(s) = v.value:
+            return Some(s.copy())
+        self.bad(key, v, "a string")
+        return None
+
+    pure def strings(mut self, key: str, v: Spanned[Value]) -> list[(String, TextRange)]:
+        let Value.Array(items) = v.value.copy() else:
+            self.bad(key, v, "a list of strings")
+            return []
+        var out: list[(String, TextRange)] = []
+        for i in items:
+            match i.value:
+                case Value.Str(s):
+                    out.push((s.copy(), i.range))
+                case _:
+                    self.bad(key, i, "a list of strings")
+        return out
+
+    pure def table(mut self, key: str, v: Spanned[Value]) -> Table?:
+        if let Value.Table(t) = v.value:
+            return Some(t.copy())
+        self.bad(key, v, "a table")
+        return None
+
+    pure def package(mut self, t: Table, header: TextRange) -> PackageInfo?:
+        var info = PackageInfo(
+            name=String.new(),
+            name_range=TextRange.empty(0),
+            version=String.new(),
+            edition=None,
+            description=None,
+            license=None,
+        )
+        var name = False
+        var version = False
+        for (k, v) in t.entries:
+            match as_text(k.value):
+                case "name":
+                    if let Some(s) = self.string("name", v):
+                        info.name = s
+                        info.name_range = v.range
+                        name = True
+                        self.check_name(info.name, v.range)
+                case "version":
+                    if let Some(s) = self.string("version", v):
+                        if is_version(s):
+                            info.version = s
+                            version = True
+                        else:
+                            let expected = "a version `MAJOR.MINOR.PATCH`, as in `\"0.3.1\"`"
+                            self.bad("version", v, expected)
+                case "edition":
+                    if let Some(s) = self.string("edition", v):
+                        if s.byte_len() == 4 and all_digits(s):
+                            info.edition = Some(s)
+                        else:
+                            self.bad("edition", v, "a year, as in `\"2027\"`")
+                case "description":
+                    info.description = self.string("description", v)
+                case "license":
+                    info.license = self.string("license", v)
+                # Recorded by `sisu publish` in a later stage.
+                case "authors" | "repository" | "readme" | "keywords" | "profile":
+                    pass
+                case _:
+                    self.unknown(k, "[package]")
+        for (missing, key) in [(not name, "name"), (not version, "version")]:
+            if missing:
+                let d = Diagnostic.new(Msg.PackageMissingKey, header.start, header.end)
+                self.diags.push(d.with("table", "[package]").with("key", key))
+        if name and version:
+            return Some(info)
+        return None
+
+    pure def check_name(mut self, name: str, at: TextRange):
+        if is_reserved(name):
+            let d = Diagnostic.new(Msg.PackageReservedName, at.start, at.end)
+            self.diags.push(d.with("name", name))
+        elif not is_module_name(name):
+            let why = "a package is named in lowercase letters, digits and `_`, starting with a letter, as a module is"
+            let d = Diagnostic.new(Msg.PackageBadName, at.start, at.end)
+            self.diags.push(d.with("name", name).with("why", why))
+
+    pure def dependencies(mut self, t: Table, dev: bool, mut out: list[Dependency]):
+        let table = if dev: "[dev-dependencies]" else: "[dependencies]"
+        for (k, v) in t.entries:
+            self.check_name(k.value, k.range)
+            let Value.Table(spec) = v.value.copy() else:
+                let d = Diagnostic.new(Msg.PackageNotAPath, v.range.start, v.range.end)
+                self.diags.push(d.with("name", k.value))
+                continue
+            var path: (String, TextRange)? = None
+            var when: When? = None
+            for (sk, sv) in spec.entries:
+                match as_text(sk.value):
+                    case "path":
+                        if let Some(p) = self.string("path", sv):
+                            path = Some((p, sv.range))
+                        else:
+                            path = None
+                    case "when":
+                        when = self.when(sv)
+                    case "version" | "git" | "rev" | "branch" | "tag":
+                        pass
+                    # Additive booleans of the dependency (09); recorded by
+                    # nothing yet.
+                    case "features" | "default-features" | "optional":
+                        pass
+                    case _:
+                        self.unknown(sk, "{table} {k.value}")
+            match path:
+                case Some((p, path_range)):
+                    out.push(
+                        Dependency(
+                            name=k.value.copy(),
+                            name_range=k.range,
+                            path=p.copy(),
+                            path_range=path_range,
+                            when=when,
+                            dev=dev,
+                        )
+                    )
+                case None:
+                    let d = Diagnostic.new(Msg.PackageNotAPath, v.range.start, v.range.end)
+                    self.diags.push(d.with("name", k.value))
+
+    pure def when(mut self, v: Spanned[Value]) -> When?:
+        let Value.Table(t) = v.value.copy() else:
+            self.bad_when(v)
+            return None
+        var facts: list[(String, list[String])] = []
+        for (k, x) in t.entries:
+            var known = False
+            for f in TARGET_FACTS:
+                if f == k.value:
+                    known = True
+            if not known:
+                self.bad_when(v)
+                return None
+            var values: list[String] = []
+            match x.value:
+                case Value.Str(s):
+                    values.push(s.copy())
+                case Value.Array(items):
+                    for i in items:
+                        match i.value:
+                            case Value.Str(s):
+                                values.push(s.copy())
+                            case _:
+                                self.bad_when(v)
+                                return None
+                case _:
+                    self.bad_when(v)
+                    return None
+            facts.push((k.value.copy(), values))
+        return Some(When(facts=facts))
+
+    pure def bad_when(mut self, v: Spanned[Value]):
+        self.diags.push(Diagnostic.new(Msg.PackageBadWhen, v.range.start, v.range.end))
+
+pure def is_version(s: str) -> bool:
+    var parts: list[str] = []
+    for p in s.split("."):
+        parts.push(p)
+    if len(parts) != 3:
+        return False
+    for p in parts:
+        if p.is_empty() or not all_digits(p):
+            return False
+    return True
+
+pure def all_digits(s: str) -> bool:
+    for c in s.chars():
+        if not c.is_digit():
+            return False
+    return True
+
+## A string as TOML writes it: a basic string with the escapes it needs
+## (stage 0's `toml::quote`).
+pub pure def quote(s: str) -> String:
+    var out = "\"".to_string()
+    for c in s.chars():
+        match c:
+            case '"':
+                out.push("\\\"")
+            case '\\':
+                out.push("\\\\")
+            case '\n':
+                out.push("\\n")
+            case '\t':
+                out.push("\\t")
+            case '\r':
+                out.push("\\r")
+            case _:
+                if c.code() < 32:
+                    let digits = "0123456789ABCDEF"
+                    let n = c.code()
+                    out.push("\\u00")
+                    out.push(digits.byte_slice(n // 16, n // 16 + 1))
+                    out.push(digits.byte_slice(n % 16, n % 16 + 1))
+                else:
+                    out.push_char(c)
+    out.push("\"")
+    return out
+
+## Whether a contract level is one `[profile] contracts` takes.
+pure def is_contract_level(s: str) -> bool:
+    return s == "off" or s == "preconditions" or s == "all"
+
+## Reads a manifest. A syntax error leaves nothing to read, so it is the
+## only diagnostic; otherwise every table is read and every mistake
+## reported.
+pub pure def read(text: str) -> (Manifest?, list[Diagnostic]):
+    var r = Reader(diags=[])
+    var doc = Table.new()
+    match toml.parse(text):
+        case Ok(t):
+            doc = t
+        case Err(toml.Problem.Syntax(at, expected, found)):
+            let d = Diagnostic.new(Msg.PackageTomlSyntax, at.start, at.end)
+            return (None, [d.with("expected", expected).with("found", found)])
+        case Err(toml.Problem.Duplicate(at, key, table)):
+            let name = if table.is_empty(): "sisu.toml".to_string() else: "[{table}]"
+            let d = Diagnostic.new(Msg.PackageTomlDuplicate, at.start, at.end)
+            return (None, [d.with("key", key).with("table", name)])
+    var m = Manifest.new()
+    for (k, v) in doc.entries:
+        match as_text(k.value):
+            case "package":
+                if let Some(t) = r.table("package", v):
+                    m.package = r.package(t, k.range)
+            case "dependencies" | "dev-dependencies":
+                if let Some(t) = r.table(k.value, v):
+                    r.dependencies(t, k.value == "dev-dependencies", mut m.dependencies)
+            case "trust":
+                if let Some(t) = r.table("trust", v):
+                    for (tk, tv) in t.entries:
+                        match as_text(tk.value):
+                            case "unsafe":
+                                m.trust_unsafe = r.strings("unsafe", tv)
+                            case _:
+                                r.unknown(tk, "[trust]")
+            case "workspace":
+                if let Some(t) = r.table("workspace", v):
+                    var members: list[(String, TextRange)] = []
+                    for (wk, wv) in t.entries:
+                        match as_text(wk.value):
+                            case "members":
+                                members = r.strings("members", wv)
+                            case _:
+                                r.unknown(wk, "[workspace]")
+                    m.members = Some(members)
+            case "features":
+                if let Some(t) = r.table("features", v):
+                    for (fk, fv) in t.entries:
+                        var on: list[String] = []
+                        for (s, _) in r.strings(fk.value, fv):
+                            on.push(s.copy())
+                        m.features.push((fk.value.copy(), on))
+            case "profile":
+                if let Some(t) = r.table("profile", v):
+                    for (pk, pv) in t.entries:
+                        let pt = r.table(pk.value, pv) else:
+                            continue
+                        for (ck, cv) in pt.entries:
+                            let known = (pk.value == "release" or pk.value == "debug")
+                                and ck.value == "contracts"
+                            if not known:
+                                r.unknown(ck, "[profile.{pk.value}]")
+                                continue
+                            if let Some(s) = r.string("contracts", cv):
+                                if is_contract_level(s):
+                                    if pk.value == "release":
+                                        m.release_contracts = Some(s)
+                                else:
+                                    r.bad("contracts", cv, "`off`, `preconditions` or `all`")
+            # The review gate of 10 is data the toolchain reads later.
+            case "review":
+                pass
+            case _:
+                r.unknown(k, "sisu.toml")
+    # `[trust]` names dependencies.
+    for (name, at) in m.trust_unsafe:
+        var known = False
+        for d in m.dependencies:
+            if d.name == name:
+                known = True
+        if not known:
+            let d = Diagnostic.new(Msg.PackageTrustUnknown, at.start, at.end)
+            r.diags.push(d.with("name", name))
+    return (Some(m), r.diags)
+
+## The inline metadata of a script (10, "REPL and scripts"; PEP 723's
+## shape): after the `#!` line, a comment block that opens with `# ///
+## script` and closes with `# ///`, whose lines with `# ` taken off are a
+## manifest. Gives the manifest's text, with each line where it is in the
+## script (so a diagnostic's position is the script's), `None` without a
+## block, or the position of a block that never closes as the error.
+pub pure def script_metadata(text: str) -> (String?, TextRange?):
+    var out = String.new()
+    var offset = 0
+    var open: int? = None
+    for line in split_inclusive(text):
+        let start = offset
+        offset += line.byte_len()
+        let bare = without_line_break(line)
+        let ending = line.byte_slice(bare.byte_len(), line.byte_len())
+        match open:
+            case None:
+                if start == 0 and bare.starts_with("#!"):
+                    out.push(blank(line))
+                    continue
+                if bare.trim_end() == "# /// script":
+                    open = Some(start)
+                    out.push(blank(line))
+                    continue
+                if not bare.starts_with("#") and not bare.trim().is_empty():
+                    return (None, None)
+                out.push(blank(line))
+            case Some(at):
+                if bare.trim_end() == "# ///":
+                    return (Some(out), None)
+                let opener = TextRange.new(at, at + "# /// script".byte_len())
+                # `# key = value`: the two characters become spaces, so the
+                # manifest's columns are the script's.
+                if bare.starts_with("# "):
+                    out.push("  ")
+                    out.push(bare.byte_slice(2, bare.byte_len()))
+                elif bare == "#":
+                    out.push(" ")
+                else:
+                    return (None, Some(opener))
+                out.push(ending)
+    if let Some(at) = open:
+        return (None, Some(TextRange.new(at, at + "# /// script".byte_len())))
+    return (None, None)
+
+## A text as a view, for matching it against literals.
+pure def as_text(s: str) -> str from s:
+    return s
+
+## A line without the `\n` and `\r` it ends with.
+pure def without_line_break(line: str) -> str from line:
+    var end = line.byte_len()
+    while end > 0 and (line.byte_at(end - 1) == 10 or line.byte_at(end - 1) == 13):
+        end -= 1
+    return line.byte_slice(0, end)
+
+## A line as spaces of the same length, keeping its line break, so the
+## manifest's offsets are the script's.
+pure def blank(line: str) -> String:
+    let body = without_line_break(line)
+    var out = String.new()
+    for _ in range(body.byte_len()):
+        out.push(" ")
+    out.push(line.byte_slice(body.byte_len(), line.byte_len()))
+    return out
+
+## The lines of `text`, each with its line break (Rust's
+## `split_inclusive('\n')`).
+pure def split_inclusive(text: str) -> list[String]:
+    var out: list[String] = []
+    var start = 0
+    let n = text.byte_len()
+    for i in range(n):
+        if text.byte_at(i) == 10:
+            out.push(text.byte_slice(start, i + 1).to_string())
+            start = i + 1
+    if start < n:
+        out.push(text.byte_slice(start, n).to_string())
+    return out
+
+# ------------------------------------------------------------------ tests
+
+pure def ids(diags: list[Diagnostic]) -> list[String]:
+    var out: list[String] = []
+    for d in diags:
+        out.push(d.msg.id().to_string())
+    return out
+
+test "reads the proposal's shape":
+    let text = "[package]\nname = \"weather\"\nversion = \"0.3.1\"\nedition = \"2027\"\ndescription = \"Fetches\"\nlicense = \"MIT\"\n\n[dependencies]\nmylib = {{ path = \"../mylib\" }}\nwinapi = {{ path = \"../winapi\", when = {{ os = \"windows\" }} }}\n\n[trust]\nunsafe = [\"mylib\"]\n\n[profile.release]\ncontracts = \"preconditions\"\n"
+    let (m, d) = read(text)
+    assert d.is_empty()
+    let manifest = m.expect("read")
+    let p = manifest.package.expect("a package")
+    assert p.name == "weather" and p.version == "0.3.1" and p.edition == Some("2027".to_string())
+    assert len(manifest.dependencies) == 2
+    let w = manifest.dependencies[1].when.copy().expect("a condition")
+    assert not w.holds([("os".to_string(), "linux".to_string())])
+    assert w.holds([("os".to_string(), "windows".to_string())])
+    assert len(manifest.trust_unsafe) == 1
+    assert manifest.release_contracts == Some("preconditions".to_string())
+
+test "reports mistakes":
+    let text = "[package]\nname = \"Bad-Name\"\nfrob = 1\n\n[dependencies]\nhttp2 = \"1.2\"\n"
+    let (_, d) = read(text)
+    let found = ids(d)
+    assert found.contains("package.bad-name".to_string())
+    assert found.contains("package.unknown-key".to_string())
+    assert found.contains("package.missing-key".to_string())
+    assert found.contains("package.not-a-path".to_string())
+    let (_, d2) = read("[package]\nname = \"json\"\nversion = \"1.0.0\"\n")
+    assert ids(d2) == ["package.reserved-name".to_string()]
+    let (_, d3) = read("[package]\nname = 3\n")
+    assert ids(d3).contains("package.bad-value".to_string())
+
+test "script metadata keeps positions":
+    let s = "#!/usr/bin/env sisu\n# /// script\n# [dependencies]\n# a = {{ path = \"a\" }}\n# ///\nprint(1)\n"
+    let (m, e) = script_metadata(s)
+    assert e.is_none()
+    let text = m.expect("metadata")
+    var lines: list[str] = []
+    for l in text.lines():
+        lines.push(l)
+    assert lines[2] == "  [dependencies]"
+    let (none, e2) = script_metadata("#!/usr/bin/env sisu\nprint(1)\n")
+    assert none.is_none() and e2.is_none()
+    let (_, e3) = script_metadata("# /// script\n# [package]\n")
+    assert e3.is_some()

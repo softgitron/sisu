@@ -1,0 +1,10 @@
+# The names of a program of several modules and packages (09, "Modules"):
+# a child module is a name of its parent, a package's modules import each
+# other by the package's name and a dependency's by the dependency's, and a
+# dependency's tests are its own package's business.
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+util = { path = "../util" }
