@@ -959,7 +959,7 @@ pure def walk_type(t: Type, mut out: set[String]):
 ## lowering's.
 pure def beyond_of(program: str) -> list[String]:
     let catalog = Catalog.parse("")
-    let base = base_from("@builtin(\"String\")\nstruct String:\n    pass\n")
+    let base = base_from("@builtin(\"String\")\nstruct String:\n    pass\n", catalog)
     let checked = check_file(base, program, catalog, False, {}, True)
     if not checked.beyond.is_empty():
         return checked.beyond

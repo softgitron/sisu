@@ -43,12 +43,17 @@ sisu run -- batch OUT LIST                  # tokens, trees and ASTs for every f
 sisu run -- ast-batch OUT LIST              # the AST of every file LIST names, into OUT
 sisu run -- names-batch OUT LIST            # the name diagnostics of every file LIST names, into OUT
 sisu run -- types-batch OUT LIST            # the type diagnostics of every file LIST names, into OUT
-sisu run -- sir [--partial] FILE            # what `sisu sir FILE` prints: the program's SIR
+sisu run -- sir [--partial] [PATH]          # what `sisu sir [PATH]` prints: the whole program's SIR
 sisu run -- ownership FILE                  # the ownership checker's diagnostics of `sisu check --format=ids FILE`
 sisu run -- sir-batch OUT LIST              # both, for every file LIST names, into OUT
+sisu run -- check [--format=ids] [PATH]     # what `sisu check [--format=ids] [PATH]` prints: every diagnostic
+sisu run -- check-batch OUT LIST            # both forms, for every file LIST names, into OUT
+sisu run -- build --native [PATH] [--output OUT]  # an executable: stage 1's SIR, built by stage 0's backend
 sisu run -- mutate SEED COUNT OUT LIST      # mutants of the files LIST names
 sisu run -- profile FILE                    # the time lexing, parsing and each dump of FILE take
-./check.sh [--native] [--self] [--mutants N] [--seed S] [--names] [--types] [--sir] [--keep DIR]
+./check.sh [--native] [--self] [--mutants N] [--seed S] [--names] [--types] [--sir] [--check] [--keep DIR]
+./bootstrap.sh [--keep DIR]                 # the fixed point alone (below, "The bootstrap")
+./sisu1 (check | sir | build --native | run) [PATH] ...  # stage 1 as the compiler's front end, from anywhere
 ```
 
 A `FILE` of `names`, `types`, `sir` and `ownership` (and a line of a
@@ -56,7 +61,9 @@ batch's `LIST`) may also be the directory of a package, with its
 `sisu.toml`, or of a workspace: stage 1 reads the package as `sisu check`
 does when run in that directory (below, "Programs of several modules"),
 and for a workspace prints each member's diagnostics and its one
-application's SIR. `sir --partial` prints the SIR of what lowering reached
+application's SIR. `sir` without a path reads the package of the working
+directory, as `sisu sir` does, so `sisu run -- sir` here prints stage 1's
+own SIR. `sir --partial` prints the SIR of what lowering reached
 even for a program beyond its slice, which it then names (the class
 `self` compares stage 1's own package that way, module by module).
 
@@ -66,10 +73,13 @@ in the conformance form (`--format=ids`), as stage 0 does; `names` and
 and `types` then prints on standard error why parts of the file are beyond
 the slice it checks; `sir` and `ownership` print on standard error why
 the file is beyond the slice of lowering, when it is. It reads the
-message catalog at run time, by default `../catalog/messages.catalog`
-(`--catalog PATH` names another), and the standard library's sources from
-`../std/`, so it is run from this directory; the tests read the catalog and
-the proposal's examples the same way.
+message catalog and the standard library's sources at run time, from the
+compiler's directory, `--home DIR`, by default `..`
+(`DIR/catalog/messages.catalog`, which `--catalog PATH` replaces, and
+`DIR/std/`), so it is run from this directory unless `--home` says where
+that is; the tests read the catalog and the proposal's examples the same
+way. `check`, `build` and `sisu1` are the driver (below, "Stage 1 as the
+compiler's front end").
 
 `check.sh` builds stage 0 in release mode, makes stage 0's outputs for
 every file (four at a time), runs stage 1 once per class of files
@@ -117,44 +127,56 @@ listed discrepancy. Stage 0 writes a package's `sisu.lock` when it checks
 it; `check.sh` removes the ones its run wrote.
 
 With `--native` it builds stage 1 once with stage 0's native backend
-(`sisu build --native --output WORK/stage1`, about 18 s for its 2700-odd SIR
+(`sisu build --native --output WORK/stage1`, about 5 s for its 2850 SIR
 functions) and runs that executable for every batch instead of `sisu run
 --` on the interpreter; nothing else changes. The two paths give the same
 outputs: a run of each over every class but `self`, kept (`--keep`) and
 compared file by file, differs in nothing but the timings of the summary
-(below), and stage 1 over its own package on the interpreter (`names`,
+(below; the classes of `check`, added since, were compared natively
+only), and stage 1 over its own package on the interpreter (`names`,
 `types` and `sir --partial`, 83 s, 460 s and 1123 s, at a peak of 2.5 GB
-of memory) prints what the native executable prints. The native run takes
-about five minutes, the interpreter's about half an hour, and an hour with
-`--self`.
+of memory) prints what the native executable prints. The native run, with
+the classes `self`, `fixed` and those of `check`, takes about seven
+minutes; the interpreter's without them about half an hour, and an hour
+with `--self`.
 
 ## Results
 
-`./check.sh --native --names --types --sir` (`--native` implies `--self`):
+`./check.sh --native --names --types --sir` (`--native` implies `--self` and
+`--check`):
 
 ```text
 stage 1 against stage 0 (tokens, tree, trivia-tree, print, ast):
-  conformance   405 files,  405 identical,   0 differing as listed,   0 differing otherwise; stage 1    2.4s (265940 bytes; lex 157 ms, parse 187 ms, dumps 880 ms, ast 696 ms)
-  std            15 files,   15 identical,   0 differing as listed,   0 differing otherwise; stage 1    1.6s (238695 bytes; lex 84 ms, parse 110 ms, dumps 621 ms, ast 433 ms)
-  examples       11 files,   11 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.2s (27495 bytes; lex 17 ms, parse 14 ms, dumps 70 ms, ast 59 ms)
-  cases          31 files,   31 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.1s (14501 bytes; lex 7 ms, parse 9 ms, dumps 41 ms, ast 31 ms)
+  conformance   405 files,  405 identical,   0 differing as listed,   0 differing otherwise; stage 1    2.2s (265940 bytes; lex 182 ms, parse 218 ms, dumps 877 ms, ast 737 ms)
+  std            15 files,   15 identical,   0 differing as listed,   0 differing otherwise; stage 1    1.6s (238695 bytes; lex 115 ms, parse 151 ms, dumps 623 ms, ast 556 ms)
+  examples       11 files,   11 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.2s (27495 bytes; lex 19 ms, parse 21 ms, dumps 92 ms, ast 80 ms)
+  cases          31 files,   31 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.2s (14501 bytes; lex 18 ms, parse 23 ms, dumps 88 ms, ast 63 ms)
 stage 1's name resolution against stage 0's (names):
-  names          53 files,   53 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.4s
-  corpus-names  369 files,  369 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.8s
+  names          53 files,   53 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.6s
+  corpus-names  369 files,  369 identical,   0 differing as listed,   0 differing otherwise; stage 1    1.2s
 stage 1's type checker against stage 0's (types):
-  types         400 files,  400 identical,   0 beyond the slice and a subset,   0 differing as listed,   0 otherwise; stage 1    8.0s
-  corpus-types  397 files,  397 identical,   0 beyond the slice and a subset,   0 differing as listed,   0 otherwise; stage 1    8.2s
+  types         400 files,  400 identical,   0 beyond the slice and a subset,   0 differing as listed,   0 otherwise; stage 1    6.6s
+  corpus-types  397 files,  397 identical,   0 beyond the slice and a subset,   0 differing as listed,   0 otherwise; stage 1    6.1s
 stage 1's lowering against stage 0's (sir):
-  sir           400 files,  400 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1   21.6s (front end 6s, lowering 6s, ownership 7s)
-  corpus-sir    397 files,  397 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1   20.3s (front end 6s, lowering 5s, ownership 7s)
+  sir           400 files,  400 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1   17.5s (front end 4s, lowering 6s, ownership 5s)
+  corpus-sir    397 files,  397 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1   17.4s (front end 4s, lowering 6s, ownership 5s)
 stage 1's ownership checker against stage 0's (ownership):
   ownership     400 files,  400 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
   corpus-own    397 files,  397 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
+stage 1's check against stage 0's (every diagnostic, in the human and the conformance form):
+  human          41 files,   41 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1    1.5s
+  corpus-check  397 files,  360 identical,  37 beyond the slice,   0 differing as listed,   0 otherwise; stage 1   18.0s
+  corpus-human  397 files,  360 identical,  37 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
 stage 1 over its own package against stage 0 (self: names, types, the SIR by source file):
   self-names   identical
   self-types   identical
-  self-sir      135 files,  135 identical,   0 beyond the slice,   0 otherwise; stage 1   64.7s
-total: 3412 files checked, 3412 identical, 0 differing (0 listed in DISCREPANCIES.md, 0 not)
+  self-sir      135 files,  135 identical,   0 beyond the slice,   0 otherwise; stage 1   72.0s
+the fixed point (fixed: stage1-A built by stage 0, stage1-B by the backend from stage1-A's SIR):
+  fixed-sir0   identical: stage1-A's SIR of its own package and stage 0's (15691319 bytes)
+  fixed-sir    identical: stage1-B's SIR of the package and stage1-A's (15691319 bytes)
+  fixed-exe    identical: stage1-B and stage1-A (19320960 bytes)
+  stage1-A 81.5s, the backend 1.9s, stage1-B 83.0s
+total: 4250 files checked, 4176 identical, 74 with an error stage 1 does not render, 0 differing (0 listed in DISCREPANCIES.md, 0 not)
 ```
 
 On the interpreter, `./check.sh --names --types --sir` (without
@@ -205,11 +227,165 @@ stage 0's name diagnostics, its type diagnostics (the ownership checker's
 exactly; `types.list` and `sir.list` name the 397 and stage 1's three
 cases of type rules. Of the 400 of `sir.list`, 240 are lowered, 43 of them
 with diagnostics of the ownership checker, and 160 have a front-end error,
-for which both print nothing. And stage 1 over its own package, 52 000
+for which both print nothing. And stage 1 over its own package, 54 000
 lines in 72 modules, gets stage 0's name and type diagnostics (none) and
 stage 0's SIR, function for function, for all 135 of its source files: its
 own 72, the 57 the compiler writes for their derived impls, the 5 of the
 standard library it reaches, and the declarations.
+
+## The bootstrap: the fixed point
+
+D-078's fixed point holds: stage 1 compiled with itself as its front end is
+the executable stage 0 compiles, byte for byte. `bootstrap.sh` checks it
+alone, and `check.sh --self` (which `--native` implies) as its class
+`fixed`:
+
+1. stage 0 builds stage 1 natively (`sisu build --native`: the Rust front
+   end, then the backend): stage1-A;
+2. stage1-A prints the SIR of its own package (`sir`, run in this
+   directory, which without a path reads the package of the working
+   directory as `sisu sir` does): the whole program in one file, every
+   module and the standard library's functions it reaches in stage 0's
+   order, the types, impls and intrinsics, exactly what `sisu sir` prints
+   of the package;
+3. the backend alone builds that SIR (`sisu build --native --from-sir`,
+   decision 212): stage1-B, stage 1 compiled with stage 1 as its front end;
+4. stage1-B prints the SIR of the package again, which is stage1-A's byte
+   for byte;
+5. and stage1-B is stage1-A byte for byte: the backend is deterministic,
+   and nothing in the executable depends on where or when it was built
+   (its build ID is a hash of its contents; the one path in it is a source
+   file of a crate the runtime links, in both).
+
+```text
+  stage1-A   19320960 bytes  sha256 4bc10daf71c2df0cc61b5b1719464666926e5783207bb099597c2e1500918d57  built by stage 0 (4.7 s)
+  A.sir      15691319 bytes  sha256 b4dc152f27cc36024b974569755a1bb5e04ca6cabd6b440ff538e58b4a611d35  printed by stage1-A (79.2 s)
+  stage1-B   19320960 bytes  sha256 4bc10daf71c2df0cc61b5b1719464666926e5783207bb099597c2e1500918d57  built by the backend from A.sir (2.0 s)
+  B.sir      15691319 bytes  sha256 b4dc152f27cc36024b974569755a1bb5e04ca6cabd6b440ff538e58b4a611d35  printed by stage1-B (88.5 s)
+  stage0     15691319 bytes  sha256 b4dc152f27cc36024b974569755a1bb5e04ca6cabd6b440ff538e58b4a611d35  printed by stage 0 (sisu sir)
+
+the SIR, A.sir and B.sir: identical
+the executables, stage1-A and stage1-B: identical
+stage 1's SIR and stage 0's, A.sir and sisu sir: identical
+the fixed point holds
+```
+
+Since the two executables are one file, the compiler compiled by itself
+gives the output of the compiler compiled by stage 2 on everything, on
+itself and on the corpus, which is how D-078 states the fixed point; and
+stage 1's SIR is stage 0's for every program of the corpus (the classes
+`sir` and `corpus-sir`, whose package and workspace cases are whole
+programs of several modules, printed as `sir PACKAGE` prints one).
+
+What the fixed point covers is the front end: lexing, parsing, names,
+types and templates, lowering, the ownership checker with drop placement,
+jump threading and compile-time evaluation, which stage 1 runs on itself.
+What stage 0 still does that stage 1 does not:
+
+- **the backend and the runtime**, in Rust (`sisu-codegen` over Cranelift,
+  and `sisu-rt`), as the plan expects of stage 2;
+- **running SIR**: the interpreter (`sisu run`, `sisu test` with the
+  ownership monitor, `sisu bench`, the counterexample mode, replay,
+  simulation, hot replacement), of which stage 1 has the part compile-time
+  code needs; stage 1's own tests run on it (`sisu test`), since the
+  backend builds programs, not test runs;
+- **the driver's other commands**: the formatter (`sisu fmt`), `sisu doc`
+  and `check --explain`, the language server, the REPL and worksheets,
+  `explain-borrow` (stage 1 has the ownership checker but its
+  `explain.rs`), `audit`, `new`, `replay`, and the lockfile, which stage 1
+  reads packages without writing; `sisu sir`'s `--contracts` levels
+  (stage 1 lowers with every contract checked, the default);
+- **some of `sisu check`'s diagnostics**: those of stage 0's front end that
+  are neither the name pass's, the type checker's nor the ownership
+  checker's (`resolve.` rules about declarations and impls, `comptime.`,
+  `contract.`, `refine.`, `task.`, `cap.`, the resolver's `borrow.`
+  rules, `test.`, manifests), which stage 1 notes, so that it agrees on
+  whether a program has an error and so on what SIR to print, without
+  rendering them;
+- **speed**: stage1-A prints its own SIR in about 85 s, stage 0 in 4 s
+  (below, "Where the time goes").
+
+## Stage 1 as the compiler's front end
+
+`sisu1` (a script in this directory) runs stage 1 as the front end of a
+`sisu`-like command, from any directory:
+
+```text
+sisu1 check [--format=ids] [PATH]            every diagnostic, as `sisu check` prints them
+sisu1 sir [PATH]                             the whole program's SIR, as `sisu sir` prints it
+sisu1 build --native [PATH] [--output OUT]   an executable, where `sisu build --native` puts it
+sisu1 run [PATH] [-- ARGS...]                the program built into a temporary directory and run
+```
+
+`PATH` is a file or the directory of a package or workspace, by default
+the package of the working directory. The first use builds stage 1 with
+stage 0 (`sisu build --native`) into `compiler/target/stage1/`, and so does
+the first after a source of stage 1 changed; stage 1's other commands pass
+through. `check`, `sir` and `build` are stage 1's own commands; `build`
+checks the program as `check` does, stops where `sisu build` stops (at the
+front end's errors, with the line `error[D0006]: the program was not run:
+errors found (N)`, then at the ownership checker's, with `D0021`), writes
+the SIR beside the executable and hands it to stage 0's backend (`sisu
+build --native --from-sir`), which prints `built PATH`; `run` builds and
+runs the executable with the arguments, standard streams and exit status
+of the command. For a program of one file the executable is the one stage
+0 builds from the source, byte for byte, as the fixed point has it for
+stage 1 itself. Stage 0 does the rest: the backend, the runtime and the
+link.
+
+`check` prints what `sisu check` prints: the syntax diagnostics of each
+module, the manifests' problems, `cap.untrusted`, the name pass's and the
+type checker's diagnostics, sorted and without repeats, and, when the front
+end found no error, the ownership checker's (with the note of `sisu
+check`'s driver that names the methods consuming a must-consume value),
+in the order of stage 0's files (the modules', the manifests', then those
+the compiler wrote). With `--format=ids` it prints the conformance form on
+standard output; otherwise the human form on standard error, the
+diagnostics with their source lines, labels (a label in another file says
+which), notes and fixes, `diag.render_human_files`, transcribed from
+`sisu-diag`'s `render_human`. Rendering it brought the parts of a
+diagnostic the conformance form never printed under test: the notes of the
+type checker (`type.missing-patterns`, the ranges of a literal's type,
+`type.truthiness` and a dozen more) and of the name pass
+(`resolve.rename-duplicate`), and the parameters of the fixes
+(`type.add-hole`'s `name`, `type.add-bound`'s `param` and `bound`), which
+stage 1 did not have and now does. A program exits with status 1 only by
+returning an error from `main`, which the run time then prints, so a
+failing `check` or `build` ends with the line `error: Failed`.
+
+The front end of stage 0 reports some errors that stage 1 knew of only as
+a flag, so that it agreed on whether a program has an error (and so on the
+SIR to print) without rendering them. Each such place now names its rule,
+and many render it, as the transcription of stage 0's: `stage0.unsupported`,
+`cap.internal`, the impls' checks (`resolve.sealed-trait`,
+`resolve.orphan-impl`, `resolve.not-a-trait-method`,
+`resolve.missing-assoc-type`, `resolve.supertrait-missing`,
+`resolve.missing-trait-method` with the signatures to write),
+`resolve.field-default-order`, `borrow.from-required`, the views in plain
+structs and enums, the `Send` and `Sync` of what a task captures and
+returns and of what a capability handle holds (with the part of the type
+in the way, from `auto_obstacle`, which now returns it as stage 0's
+`auto_trait` does), the views and must-consume values in an owner, and a
+contract's condition that does not only read. A program with an error
+stage 1 still only notes is beyond what `check` renders: `check` prints
+what it has, names the rules on standard error (`beyond the slice: stage 0
+reports resolve.private-item, which stage 1 notes without rendering it`)
+and fails; `build` stops.
+
+`check.sh` compares both forms. The class `human`, the 41 wrong programs
+of `conformance/cases/wrong/`, each a single mistake written to read well
+in the human form, compares what `sisu check FILE` prints on standard
+error with what stage 1 prints, and every one must be within the slice and
+match. With `--check` (which `--native` implies) the classes `corpus-check`
+and `corpus-human` compare the whole of `sisu check --format=ids` and the
+human form for every program of the corpus: a program within the slice
+must match, and one beyond it may only report fewer of stage 0's
+diagnostics. 37 of the 397 are beyond it: each has an error of a rule
+stage 1 notes without rendering, in most of them the resolver's checks of
+declarations and impls (`resolve.`, in 18) or compile-time evaluation's
+(`comptime.`, in 12, one of them in both); in the other 8 rules of tasks,
+tests and contracts, the resolver's `borrow.` rules and
+`stage0.unsupported`.
 
 ## Name resolution
 
@@ -591,7 +767,7 @@ two steps; the transcription keeps the rule.
 |---|---:|---|---|
 | `syntax.kinds` | 538 | `SyntaxKind` (246 kinds), the keyword and punctuation tables, kind predicates, names in dumps | `sisu-syntax/src/kinds.rs` |
 | `syntax.tree` | 338 | `Token`, the arena tree, the builder with checkpoints, the dumps, the reprint, stable identities | `sisu-syntax/src/tree.rs` |
-| `diag` | 977 | `Msg` (the catalog identifiers stage 1 reports), diagnostics with labels, fixes and notes, the catalog reader and its templates, positions, `render_ids`, `quote`, the stable sort and `sort_unique` | `sisu-diag` (the parts the front end uses) |
+| `diag` | 1363 | `Msg` (the catalog identifiers stage 1 reports), diagnostics with labels, fixes and notes, the catalog reader and its templates, positions, `render_ids`, the human form (`render_human_files`: source lines, labels, notes and fixes), `quote`, the stable sort and `sort_unique` | `sisu-diag` (the parts the front end uses, and `render.rs`) |
 | `text`, `text.unicode` | 369 | UTF-8 decoding, `is_alphanumeric`, Rust's `Debug` quoting, and the Unicode tables it needs (pinned, Unicode 17.0.0) | the host's `char` methods and `{:?}` |
 | `lexer` | 262 | `lex`, and stage 0's lexer tests | `sisu-lexer/src/lib.rs`, `tests.rs` |
 | `lexer.scan` | 558 | the raw scanner: every byte a token, strings and interpolation as tokens | `sisu-lexer/src/scan.rs` |
@@ -603,31 +779,31 @@ two steps; the transcription keeps the rule.
 | `syntax.ast.build` | 2149 | `build.module`, the AST of a tree as a total function, and the decoding of literals | `sisu-syntax/src/ast/build.rs` |
 | `syntax.ast.dump` | 1398 | the AST in the notation of Rust's derived `Debug`, laid out as `{:#?}`, for `check.sh` | Rust's `{:#?}`, which `sisu parse --ast` prints |
 | `syntax.ast.visit` | 307 | the expressions of items, blocks and expressions, each before the ones inside it | `sisu-syntax/src/ast/visit.rs` |
-| `resolve` | 2388 | the names of a program of one module or of several modules and packages: declarations, imports, scopes, the prelude's and std's names, and the name diagnostics | `sisu-resolve/src/collect.rs` and `types.rs`, and the name lookups of `sisu-typeck` |
+| `resolve` | 2389 | the names of a program of one module or of several modules and packages: declarations, imports, scopes, the prelude's and std's names, and the name diagnostics | `sisu-resolve/src/collect.rs` and `types.rs`, and the name lookups of `sisu-typeck` |
 | `toml`, `manifest`, `package` | 1766 | the TOML subset of manifests, the manifest's tables and their diagnostics, and a program's layout: its packages, their dependencies and trust, and the module trees | `toml.rs`, `manifest.rs` and `package.rs` of `sisu-driver` |
-| `sir`, `sir.types`, `sir.write`, `sir.simplify` | 1466 | SIR: programs, functions, blocks, statements and types, with the operations a type's constant argument may compute; the types of places; the text form `sisu sir` prints; jump threading | `lib.rs`, `types.rs`, `write.rs` and `simplify.rs` of `sisu-sir` |
+| `sir`, `sir.types`, `sir.write`, `sir.simplify` | 1479 | SIR: programs, functions, blocks, statements and types, with the operations a type's constant argument may compute; the types of places; the text form `sisu sir` prints; jump threading | `lib.rs`, `types.rs`, `write.rs` and `simplify.rs` of `sisu-sir` |
 | `typeck.ty` | 384 | types, interned in a table | `sisu-resolve/src/ty.rs` |
-| `typeck.program` | 1964 | the resolved program, the spelling of types, `Copy`, the trait solver, `Send` and `Sync`, visibility, views and must-consume types | `program.rs`, `ty.rs`, `solve.rs` and `auto.rs` of `sisu-resolve` |
+| `typeck.program` | 2007 | the resolved program, the spelling of types, `Copy`, the trait solver, `Send` and `Sync`, visibility, views and must-consume types | `program.rs`, `ty.rs`, `solve.rs` and `auto.rs` of `sisu-resolve` |
 | `typeck.borrows` | 386 | what a signature borrows: the parameters a result may borrow from (`from`, and the elision rules), the borrowed-signature errors | `sisu-resolve/src/borrows.rs` |
 | `typeck.std_sources` | 441 | `target` and `builtin_impls`, the std text stage 0 writes, and the import paths of the std modules | `sisu-resolve/src/std_sources.rs` |
-| `typeck.collect` | 3803 | declarations, signatures, imports, traits and impls of a program of several modules and packages, resolved, and what the compiler writes: interceptors and fakes, invariants, predicates, a script's `main`, test cases, doc tests | `collect.rs`, `types.rs`, `traits.rs`, `shims.rs`, `tests_of.rs` and `doctests.rs` of `sisu-resolve` |
+| `typeck.collect` | 3977 | declarations, signatures, imports, traits and impls of a program of several modules and packages, resolved, and what the compiler writes: interceptors and fakes, invariants, predicates, a script's `main`, test cases, doc tests | `collect.rs`, `types.rs`, `traits.rs`, `shims.rs`, `tests_of.rs` and `doctests.rs` of `sisu-resolve` |
 | `typeck.template` | 1972 | the evaluator of compile-time code that unfolds a template (a `comptime def derive`, a generic function that reflects on its type parameters) into source text | `sisu-resolve/src/template.rs` |
-| `typeck.instances` | 643 | the impls `@derive` and `@delegate` make, the program's and the standard library's, and the instances of templates, declared in modules of their own | `derive.rs` and `instances.rs` of `sisu-resolve` |
+| `typeck.instances` | 650 | the impls `@derive` and `@delegate` make, the program's and the standard library's, and the instances of templates, declared in modules of their own | `derive.rs` and `instances.rs` of `sisu-resolve` |
 | `typeck.arbitrary` | 1273 | the generators of property tests, and the tests of contracts and `@refines` | `sisu-resolve/src/arbitrary.rs` |
 | `typeck.consts`, `typeck.folding` | 341 | a type's constant argument written as an expression, folded where it is written; an expression as folding reads it | `sisu-resolve/src/consts.rs` |
 | `typeck.infer`, `typeck.thir` | 765 | inference variables and unification; the typed tree | `infer.rs` and `thir.rs` of `sisu-typeck` |
-| `typeck.check`, `.expr`, `.call`, `.pat` | 6760 | the body checker: statements, expressions, calls, patterns | `check.rs`, `expr.rs`, `call.rs` and `pat.rs` of `sisu-typeck` |
+| `typeck.check`, `.expr`, `.call`, `.pat` | 6901 | the body checker: statements, expressions, calls, patterns | `check.rs`, `expr.rs`, `call.rs` and `pat.rs` of `sisu-typeck` |
 | `typeck.exhaustive` | 572 | exhaustiveness and unreachable arms of `match` | `sisu-typeck/src/exhaustive.rs` |
-| `typeck.contracts`, `.purity`, `.tasks` | 1338 | contracts and refinements, `pure`, structured concurrency and generators | `contracts.rs`, `purity.rs` and `tasks.rs` of `sisu-typeck` |
+| `typeck.contracts`, `.purity`, `.tasks` | 1413 | contracts and refinements, `pure`, structured concurrency and generators | `contracts.rs`, `purity.rs` and `tasks.rs` of `sisu-typeck` |
 | `typeck.generic_asserts` | 247 | `comptime assert` on `const` parameters, decided at each call | `sisu-typeck/src/generic_asserts.rs` |
-| `typeck` | 1681 | a body's checks, a program's, the inferred error sets, the driver, the typed bodies lowering reads, and the standard library's bodies kept once per process | `sisu-typeck/src/lib.rs` |
+| `typeck` | 1732 | a body's checks, a program's, the inferred error sets, the driver, the typed bodies lowering reads, and the standard library's bodies kept once per process | `sisu-typeck/src/lib.rs` |
 | `lower`, `lower.names`, `.func`, `.stmts`, `.exprs`, `.pats`, `.contracts`, `.glue` | 5589 | lowering the typed bodies to SIR: what `main` and the tests reach, names, functions and closures, statements, expressions, patterns, contracts, drop glue | `lib.rs`, `func.rs`, `stmts.rs`, `exprs.rs`, `pats.rs`, `contracts.rs` and `glue.rs` of `sisu-lower` |
-| `borrowck`, `borrowck.paths`, `.init`, `.elaborate`, `.loans`, `.consume`, `.purity`, `.shared`, `.names`, `.types`, `.bitset`, `.finding` | 5132 | the ownership checker: move paths, initialisation and moves, drop placement, loans, must-consume, purity, the `Shared` escape analysis, places in source terms, and the findings as diagnostics | `sisu-borrowck` (but `explain.rs`) |
+| `borrowck`, `borrowck.paths`, `.init`, `.elaborate`, `.loans`, `.consume`, `.purity`, `.shared`, `.names`, `.types`, `.bitset`, `.finding` | 5576 | the ownership checker: move paths, initialisation and moves, drop placement (the standard library's kept once per process), loans, must-consume, purity, the `Shared` escape analysis, places in source terms, and the findings as diagnostics | `sisu-borrowck` (but `explain.rs`) |
 | `interp` | 1449 | compile-time evaluation: the `comptime` functions run on SIR and their values baked into it | `sisu-interp/src/comptime.rs`, with what it needs of `exec.rs`, `place.rs`, `ops.rs`, `dispatch.rs`, `intrinsics.rs` and `sized.rs` |
 | `mutants` | 109 | a seeded generator and the mutations of stage 0's robustness test | `sisu-driver/src/tests.rs` |
-| `main` | 848 | the command line | `sisu-driver/src/cli.rs`, `tokens`, `parse`, `check` and `sir` |
+| `main` | 1427 | the command line, and the driver: `check` in both forms, the SIR of a whole program, `build --native` through stage 0's backend | `sisu-driver/src/cli.rs`, `tokens`, `parse`, `check`, `sir` and `build` |
 
-52441 lines in all, about 1200 of them tests; the Rust the lexer and the
+54355 lines in all, about 1200 of them tests; the Rust the lexer and the
 parser transcribe (`sisu-lexer`, `sisu-parser`, and `kinds.rs` and
 `tree.rs` of `sisu-syntax`) is 5717 lines with its tests, the AST and its
 builder 2782, `sisu-resolve` and `sisu-typeck`, of which stage 1
@@ -828,16 +1004,18 @@ consequential first.
     parameters of those names become `owns`, `defaults` and `from_`; so is
     `comptime`, so the module of compile-time evaluation is `interp`,
     after its crate.
-22. **A struct dropped in native code does not free its lists.** Compiled
+22. **A struct dropped in native code did not free its lists.** Compiled
     by the native backend, dropping a value of a struct with a `list` field
-    leaves the list allocated: 2000 rounds of making and dropping a struct
-    that holds a `list[bool]` of 10 000 elements peak at 159 MB natively
+    left the list allocated: 2000 rounds of making and dropping a struct
+    that holds a `list[bool]` of 10 000 elements peaked at 159 MB natively
     and 29 MB on the interpreter, 20 000 rounds at 1.5 GB. Lowering stage
     1's own package natively ran out of memory until the initialisation
     dataflow kept its sets as `BitSet`s (as stage 0's `init.rs` does) and
     `sir --partial` left out the loans, must-consume and purity, whose
-    findings change no statement; it peaks at about 3.4 GB. A candidate for
-    the native runtime's port debt.
+    findings change no statement, and then peaked at about 3.4 GB. The
+    native runtime frees them now: both programs peak at 11 MB, and stage
+    1 prints the SIR of its own package, the loans and all, at a peak of
+    about 690 MB.
 23. **Two walks over types were exponential on stage 1's own types.**
     Whether a drop may run impure code (`drops_impure`) and whether a type
     must be consumed (`must_consume_ty`) followed fields with no memory of
@@ -884,9 +1062,10 @@ Costs measured on the stage-0 interpreter (release build):
 The lexer spends its time reading bytes (several reads per byte, each a
 method call and an intrinsic call); the parser in the precedence climb
 (fourteen rule functions and a dozen kind tests per operand); the dumps in
-building their lines. Reading the text into a `list[int]` once, with
-sentinels past the end, would roughly halve the lexer; it was not done, to
-keep the scanner a transcription.
+building their lines. Reading the text into a `list[int]` once was tried,
+and gains nothing measurable, natively (about 50 ms for the prelude either
+way) or on the interpreter (about a second): building the list costs what
+the reads it replaces did, so the scanner stays a transcription.
 
 The type checker adds its own costs: resolving the prelude, the four
 ambient std modules and `builtin_impls`, parsing the ten std modules a
@@ -908,13 +1087,15 @@ ownership checker and the writing of the SIR 187 s).
 Compiled by stage 0's native backend (`sisu build --native`, `check.sh
 --native`), stage 1 runs 20 to 60 times faster: the base (the prelude and
 the std modules resolved, and their derived impls unfolded) takes about a
-second, `types-batch` checks the 397 programs of the corpus in 8 s, and
-`sir-batch` lowers them and runs the ownership checker in 20 s (the front
-end 6 s, lowering 5 s, the ownership checker and the writing of the SIR
-7 s); stage 1 over its own package takes about 65 s, most of it lowering
-and drop placement for its 2700-odd SIR functions, at a peak of about
-3.4 GB of memory (item 22 above). `./check.sh --native --names --types
---sir` takes about five minutes, two of them stage 0's outputs.
+second, `types-batch` checks the 397 programs of the corpus in 6 s, and
+`sir-batch` lowers them and runs the ownership checker in 17 s (the front
+end 4 s, lowering 6 s, the ownership checker and the writing of the SIR
+5 s); stage 1 prints the SIR of its own package in about 85 s (stage 0 in
+4 s), a little over half of it the ownership checker over its 2850 SIR
+functions, at a peak of about 690 MB of memory (`sir --partial`, which
+leaves out the loans, must-consume and purity, in about 50 s at 550 MB).
+`./check.sh --native --names --types --sir` takes about seven minutes,
+three of them the fixed point.
 
 A body of the standard library is type-checked when lowering first
 reaches it. Each program's table of types is its own, so a body typed for
@@ -928,30 +1109,65 @@ library's bodies are checked once per process, as stage 0 parses the
 standard library once and keeps each item's checked body, and the
 answers are the same; it took lowering's part of `sir-batch` from 8.7 s
 to 5.8 s natively. The lines of the std modules' texts are counted once
-too, in the base. A profile of `sir-batch` (callgrind, ten programs) shows
-where the rest goes: the base is two fifths of a short batch (parsing the
-240 KB of std text, a byte at a time); of each program, lowering two
-fifths, the ownership checker and the writing two fifths (initialisation
-and drop placement for every function the program reaches, most of them
-the standard library's), and the front end a fifth. Deep copies are a
-third of every instruction: the resolver is copied for each program and
-each round of instances.
+too, in the base.
+
+This round took stage 1's SIR of its own package from over 190 s to about
+85 s, and `check.sh --native` with its new classes from twelve and a half
+minutes to seven, with the same outputs (every class of `check.sh`), by:
+
+- **the loans dataflow as stage 0 keeps it since decision 219**: a row of
+  its bit sets only for each local whose type can hold a loan, the others
+  left out (`bitset.Rows`, `LEFT_OUT`), with the slots shared by every
+  state of a function (stage 0's `Arc`, a `Shared` here); states joined in
+  place, and a block's unwinding state copied only for a block that
+  unwinds; each statement's uses of locals worked out once a function; a
+  function found by name in a `dict` (`Types.function`); must-consume's
+  state holding only the iterators it follows;
+- **loops without intrinsics**: natively, each step of a `for` loop calls
+  the intrinsic `Iter.next`, and `is_some` is one too, each through the
+  run time's dispatch, which costs more than the rest of a step; the bit
+  sets, the dataflows' walks over a block's statements and the join of two
+  states are `while` loops over indices and `match`es;
+- **the standard library's initialisation and drop placement once per
+  process** (`borrowck.Placed`, as `typeck.StdBodies` keeps the typed
+  bodies): a function of the standard library whose SIR and the
+  declarations its places reach are the same as for an earlier program
+  takes the body placed then, which took the ownership checker's part of
+  `sir-batch` from 7.2 s to 5.3 s;
+- **the resolver copied for each program and each round of instances
+  shares what no program changes**: the std modules a program may import,
+  parsed once, and the message catalog, as `Shared` values, whose copy is
+  another owner, which took the front end's part of `sir-batch` from
+  about 5.5 s to 4.3 s;
+- `diag.Lines` finds the line and column of a position in ASCII text
+  without decoding it.
+
+A profile of stage 1 printing its own SIR (gdb samples) shows where the
+rest goes: the ownership checker a little over half of it (the loans
+dataflow a quarter: copying the state for each statement it checks, and
+joining the states of an unwinding block after each statement, as stage 0
+does), lowering a sixth and the front end a quarter. The run time's
+copies and drops of values are about a fifth of the time; it copies a list
+an element at a time.
 
 ## What is next
 
-1. **The second half of the fixed point** (D-078): stage 1's SIR of its
-   own package is stage 0's, so stage 0's native backend can build stage 1
-   from stage 1's SIR, and that stage 1 must make the same SIR again. Then
-   **running SIR**: the rest of the interpreter (tasks, capabilities, the
+1. **Running SIR**: the rest of the interpreter (tasks, capabilities, the
    host), of which `interp` has what compile-time code needs, where stage
-   1 becomes the oracle.
-2. **Speed** where it pays: the ownership checker's initialisation and drop
-   placement for the standard library's functions could be kept once per
-   process as the typed bodies are; copying the resolver for each program
-   and each round of instances; the scanner over a byte list and dumps
-   without interpolation; and, in the interpreter, views that do not copy.
-3. **The native runtime's leak** (item 22 above), which decides how large
-   a program stage 1 can lower natively.
+   1 becomes the oracle; the backend and the runtime stay stage 0's, as
+   the plan expects of stage 2.
+2. **The errors stage 1 notes without rendering**, so that `check` covers
+   the 37 programs of the corpus beyond it: the resolver's checks of
+   declarations and impls, compile-time evaluation's, and the rules of
+   tasks, tests, contracts and refinements (above, "Stage 1 as the
+   compiler's front end").
+3. **Speed** where it pays: lowering the standard library's functions once
+   per process, as their typed bodies and their drop placement are, since
+   lowering is now the largest part of a small program's time; the resolved
+   program copied for each program; in the native runtime, a list of plain
+   values copied at once rather than an element at a time, and intrinsics
+   called without the dispatch; in the interpreter, views that do not
+   copy.
 4. **The discrepancies**: none is listed; the first five were decided for
    the documents and stage 0 changed (D-079). A new one is listed from D6
    on and decided the same way.

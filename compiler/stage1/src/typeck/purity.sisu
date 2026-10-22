@@ -8,6 +8,7 @@
 ##! The walks go over the typed tree in the order the Rust visitor takes:
 ##! each expression before the ones inside it.
 
+from stage1.diag import Msg
 from stage1.typeck.check import Checker, Cx
 from stage1.typeck.thir import (
     ArgMode,
@@ -313,7 +314,13 @@ impl Checker:
         match self.reading_problem(cx, e):
             case None:
                 return True
-            case Some(_):
+            case Some(p):
                 if report:
-                    self.other()
+                    let range = self.span_of(e)
+                    match p:
+                        case Reading.Calls(name):
+                            let d = self.error(cx, Msg.ContractNotPure, range)
+                            self.report_other(d.with("callee", name))
+                        case Reading.Changes:
+                            self.report_other(self.error(cx, Msg.ContractChanges, range))
                 return False

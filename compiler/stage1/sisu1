@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Stage 1 as the front end of a `sisu`-like command: the program is read,
+# checked, lowered and ownership-checked by stage 1, the front end written
+# in Sisu, and its SIR is built by stage 0's native backend (`sisu build
+# --native --from-sir`, decision 212).
+#
+#   sisu1 check [--format=ids] [PATH]            every diagnostic, as `sisu check` prints them
+#   sisu1 sir [PATH]                             the whole program's SIR, as `sisu sir` prints it
+#   sisu1 build --native [PATH] [--output OUT]   an executable, where `sisu build --native` puts it
+#   sisu1 run [PATH] [-- ARGS...]                the program built into a temporary directory and
+#                                                run with ARGS, with its exit status
+#
+# PATH is a file or a package's directory; without one, the package of the
+# working directory. Stage 1's other commands (`tokens`, `parse`, `names`,
+# `types`, ...) pass through as well. The first use builds stage 1 with
+# stage 0 (`sisu build --native`) into compiler/target/stage1/, and so
+# does a use after a source of stage 1 changed.
+set -uo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+compiler=$(dirname "$here")
+sisu="$compiler/target/release/sisu"
+exe="$compiler/target/stage1/sisu1"
+if [ ! -x "$sisu" ]; then
+    echo "sisu1: stage 0 is not built (cargo build --release in $compiler)" >&2
+    exit 1
+fi
+if [ ! -x "$exe" ] || [ -n "$(find "$here/src" -name '*.sisu' -newer "$exe" -print -quit)" ]; then
+    mkdir -p "$(dirname "$exe")"
+    if ! (cd "$here" && "$sisu" build --native --output "$exe" > /dev/null); then
+        echo "sisu1: stage 1 does not build" >&2
+        exit 1
+    fi
+fi
+if [ "${1:-}" != run ]; then
+    exec "$exe" --home "$compiler" "$@"
+fi
+shift
+path="."
+if [ $# -gt 0 ] && [ "$1" != "--" ]; then
+    path="$1"
+    shift
+fi
+[ "${1:-}" = "--" ] && shift
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+"$exe" --home "$compiler" build --native "$path" --output "$tmp/program" > /dev/null || exit $?
+"$tmp/program" "$@"
+exit $?

@@ -283,6 +283,7 @@ pub struct Entry:
     pub takes_system: bool
     pub returns_result: bool
 
+@derive(Eq)
 pub enum TypeDecl:
     Struct(
         name: String,
@@ -313,12 +314,14 @@ impl TypeDecl:
             case Struct(_, p, _, _, _, _): ref p
             case Enum(_, p, _, _, _, _, _): ref p
 
+@derive(Eq)
 pub struct FieldDecl:
     pub name: String
     pub ty: Type
     ## The function that computes the default.
     pub default: String?
 
+@derive(Eq)
 pub struct VariantDecl:
     pub name: String
     pub fields: list[(String?, Type)]
@@ -456,6 +459,7 @@ pub struct LocalId:
 pub struct BlockId:
     pub index: int
 
+@derive(Eq)
 pub struct LocalDecl:
     pub ty: Type
     ## The source name.
@@ -502,6 +506,7 @@ pub struct Function:
     ## Index into `Program.sources` for statement locations.
     pub source: int
 
+@derive(Eq)
 pub struct BasicBlock:
     pub stmts: list[Statement]
     pub term: Terminator
@@ -525,10 +530,12 @@ impl Loc:
     pub pure def has_end(self) -> bool:
         return self.end_line != 0
 
+@derive(Eq)
 pub struct Statement:
     pub kind: StatementKind
     pub loc: Loc?
 
+@derive(Eq)
 pub enum StatementKind:
     Assign(place: Place, value: Rvalue)
     Call(dest: Place, callee: Callee, args: list[Operand])
@@ -537,6 +544,7 @@ pub enum StatementKind:
     ## The local's storage ends.
     StorageDead(LocalId)
 
+@derive(Eq)
 pub enum Callee:
     ## A function, with its type arguments.
     Fn(name: String, args: list[Type])
@@ -545,6 +553,7 @@ pub enum Callee:
     Trait(name: String, args: list[Type])
     Value(Operand)
 
+@derive(Eq)
 pub enum Terminator:
     Goto(BlockId)
     ## Branches on an integer.
@@ -581,11 +590,13 @@ pub enum Proj:
     ## A dict entry at the key a local holds.
     Key(LocalId)
 
+@derive(Eq)
 pub enum Operand:
     Copy(Place)
     Move(Place)
     Const(Const)
 
+@derive(Eq)
 pub enum Const:
     Int(int)
     Float(f64)
@@ -667,6 +678,7 @@ impl UnOp:
             case Not: "not"
             case BitNot: "bitnot"
 
+@derive(Eq)
 pub enum Aggregate:
     Tuple
     Struct(String)
@@ -679,6 +691,7 @@ pub enum Aggregate:
     ## A `dyn` value holding the operand, whose type is given.
     Dyn(Type)
 
+@derive(Eq)
 pub enum Rvalue:
     Use(Operand)
     Ref(place: Place, mutable: bool)

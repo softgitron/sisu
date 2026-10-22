@@ -183,6 +183,7 @@ impl Resolver:
                     else:
                         # `resolve.not-derivable`.
                         self.other_error = True
+                        self.noted.push("resolve.not-derivable".to_string())
             # `@delegate(Trait, ..., to="field")`: impls that forward to a
             # field.
             let delegated = self.delegations(module, item.attrs, is_struct, field_names)
@@ -242,6 +243,7 @@ impl Resolver:
                     case None:
                         # `comptime.derive-failed`.
                         self.other_error = True
+                        self.noted.push("comptime.derive-failed".to_string())
                         continue
                 self.derive_checks.push(DeriveCheck(ty=ty, trait_name=t.copy(), field=None))
         # Delegated impls are ordinary impls, written by the compiler.
@@ -262,10 +264,11 @@ impl Resolver:
     pub pure def declare_generated_in(mut self, module: ModuleId, dir: str, text: str) -> ModuleId:
         let name = "{dir}/{self.prog.modules[module.index].name}.sisu"
         let is_std = self.prog.modules[module.index].is_std
-        let parsed = parse(text, self.catalog)
+        let parsed = parse(text, Shared.get(self.catalog))
         for d in parsed.diagnostics:
             if self.catalog.is_error(d.msg):
                 self.other_error = True
+                self.noted.push("a syntax error in code the compiler wrote".to_string())
         let generated = build.module(parsed.tree)
         let items = generated.items.copy()
         let id = self.add_module(name, is_std, generated)
@@ -343,12 +346,14 @@ impl Resolver:
                 if self.prog.implements(mut self.types, info.self_ty, st, env) == Answer.No:
                     # `resolve.supertrait-missing`.
                     self.other_error = True
+                    self.noted.push("resolve.supertrait-missing".to_string())
             for (_, fty) in fields:
                 if self.types.contains_error(fty) or not structural:
                     continue
                 if self.prog.implements(mut self.types, fty, tr, env) == Answer.No:
                     # `resolve.derive-field` or `resolve.delegate-field`.
                     self.other_error = True
+                    self.noted.push("resolve.derive-field or resolve.delegate-field".to_string())
                     # The generated body would only repeat the error.
                     for (_, m) in info.methods:
                         if let DefKind.Fn(f) = ref mut self.prog.defs[m.index].kind:
@@ -383,6 +388,7 @@ impl Resolver:
                 self.instances_bounded = True
                 # `comptime.instances-unbounded`.
                 self.other_error = True
+                self.noted.push("comptime.instances-unbounded".to_string())
                 break
             self.instances_asked += 1
             made += 1
@@ -434,6 +440,7 @@ impl Resolver:
         let text = unfolded else:
             # `comptime.instance-failed`, at the call that needed it.
             self.other_error = True
+            self.noted.push("comptime.instance-failed".to_string())
             return
         let m = self.declare_generated_in(module, "<{what}>", text)
         # The types, by the names the unfolded code uses.

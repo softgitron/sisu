@@ -67,15 +67,19 @@ impl MovePaths:
                     let n = types.variant_count(ty) else:
                         continue
                     let base = mp.add(t)
+                    let depth = len(t.proj)
                     for v in range(n):
-                        var proj = t.proj.copy()
-                        proj.push(Proj.Downcast(v))
-                        let place = Place(local=t.local, proj=proj)
+                        # A child of `base` has its projections and one
+                        # more: only that one tells it apart.
+                        let last = Proj.Downcast(v)
                         var found = False
                         for c in mp.paths[base].children:
-                            if mp.paths[c].place == place:
+                            if ends_with(mp.paths[c].place.proj, depth, last):
                                 found = True
                         if not found:
+                            var proj = t.proj.copy()
+                            proj.push(last)
+                            let place = Place(local=t.local, proj=proj)
                             let id = len(mp.paths)
                             mp.paths.push(PathData(place=place, parent=Some(base), children=[]))
                             mp.paths[base].children.push(id)
@@ -124,27 +128,32 @@ impl MovePaths:
     ## Adds the path for a place (and its prefixes), returning it.
     pure def add(mut self, p: Place) -> int:
         var cur = self.roots[p.local.index]
-        for i in range(len(p.proj)):
+        let n = len(p.proj)
+        var i = 0
+        while i < n:
             if let Proj.Downcast(_) = p.proj[i]:
-                if i + 1 == len(p.proj):
+                if i + 1 == n:
                     break
-            var prefix_proj: list[Proj] = []
-            for k in range(i + 1):
-                prefix_proj.push(p.proj[k])
-            let prefix = Place(local=p.local, proj=prefix_proj)
+            # The children of the path of the first `i` projections have
+            # them too: only the next one tells them apart.
             var found: int? = None
             for c in self.paths[cur].children:
-                if self.paths[c].place == prefix:
+                if ends_with(self.paths[c].place.proj, i, p.proj[i]):
                     found = Some(c)
                     break
             match found:
                 case Some(c):
                     cur = c
                 case None:
+                    var prefix_proj: list[Proj] = []
+                    for k in range(i + 1):
+                        prefix_proj.push(p.proj[k])
+                    let prefix = Place(local=p.local, proj=prefix_proj)
                     let id = len(self.paths)
                     self.paths.push(PathData(place=prefix, parent=Some(cur), children=[]))
                     self.paths[cur].children.push(id)
                     cur = id
+            i += 1
         return cur
 
     ## The deepest path that is a prefix of `p`, and how much of `p` it
@@ -158,7 +167,7 @@ impl MovePaths:
                 case Proj.Field(_) | Proj.Downcast(_):
                     var found: int? = None
                     for c in self.paths[cur].children:
-                        if same_prefix(self.paths[c].place.proj, p.proj, i + 1):
+                        if ends_with(self.paths[c].place.proj, i, p.proj[i]):
                             found = Some(c)
                             break
                     match found:
@@ -201,11 +210,34 @@ impl MovePaths:
     pub pure def local_of(self, id: int) -> LocalId:
         return self.paths[id].place.local
 
-## Whether `a` is exactly the first `n` projections of `b`.
-pure def same_prefix(a: list[Proj], b: list[Proj], n: int) -> bool:
-    if len(a) != n:
+## Whether `a` is `n` projections and then `last`: for a child of the path
+## of a place's first `n` projections, whether it is the path of its first
+## `n + 1` (the child has the first `n` already).
+pure def ends_with(a: list[Proj], n: int, last: Proj) -> bool:
+    if len(a) != n + 1:
         return False
-    for i in range(n):
-        if a[i] != b[i]:
-            return False
-    return True
+    return same_proj(a[n], last)
+
+## Whether two projections are the same, without the run time's
+## structural equality.
+pure def same_proj(a: Proj, b: Proj) -> bool:
+    match a:
+        case Proj.Deref:
+            if let Proj.Deref = b:
+                return True
+        case Proj.Field(i):
+            if let Proj.Field(j) = b:
+                return i == j
+        case Proj.Downcast(i):
+            if let Proj.Downcast(j) = b:
+                return i == j
+        case Proj.Index(x):
+            if let Proj.Index(y) = b:
+                return x.index == y.index
+        case Proj.IndexFromEnd(x):
+            if let Proj.IndexFromEnd(y) = b:
+                return x.index == y.index
+        case Proj.Key(x):
+            if let Proj.Key(y) = b:
+                return x.index == y.index
+    return False

@@ -92,7 +92,7 @@ impl Checker:
         if is_test:
             # `contract.not-in-test`, for each clause.
             if not clauses.is_empty():
-                self.other()
+                self.other("contract.not-in-test")
             return
         for c in clauses:
             if c.kind == ContractKind.Requires:
@@ -104,7 +104,7 @@ impl Checker:
         if ensures.is_empty() or self.generator.is_some():
             if not ensures.is_empty():
                 # `contract.generator-ensures`.
-                self.other()
+                self.other("contract.generator-ensures")
             self.keep_contracts(out)
             return
         # `result` (and a labelled result's labels) name the value
@@ -166,14 +166,16 @@ impl Checker:
                     out.push(TStmt.Contract(check))
                 else:
                     # A loop invariant is reserved (07, "What is deferred").
-                    self.unsupported()
+                    let what = "a loop invariant (`invariant` in a body)"
+                    self.unsupported(cx, range, what, "the contract verifier (after version 1)")
                     out.push(TStmt.Error(range))
             case ContractKind.Requires | ContractKind.Ensures:
                 # `contract.not-in-test` or `contract.misplaced`.
-                self.other()
+                self.other("contract.not-in-test or contract.misplaced")
                 out.push(TStmt.Error(range))
             case ContractKind.Decreases:
-                self.unsupported()
+                let what = "a termination measure (`decreases`)"
+                self.unsupported(cx, range, what, "the contract verifier (after version 1)")
                 out.push(TStmt.Error(range))
 
     ## `old(e)` in `ensures`: `e` as it was on entry, saved in a local then
@@ -187,17 +189,17 @@ impl Checker:
                 scope = ctx.scope
             case None:
                 # `contract.old-outside`.
-                self.other()
+                self.other("contract.old-outside")
                 self.check_args_loosely(cx, args)
                 return self.error_expr(at)
         if len(args) != 1:
             # `contract.old-arguments`.
-            self.other()
+            self.other("contract.old-arguments")
             self.check_args_loosely(cx, args)
             return self.error_expr(at)
         let arg = ref args[0]
         if arg.name.is_some() or trailing.is_some():
-            self.other()
+            self.other("contract.old-arguments")
             return self.error_expr(at)
         # `result` does not exist on entry.
         let hidden = self.scopes[scope].copy()
@@ -387,7 +389,7 @@ impl Checker:
                                 own_method = o == d
                         if cx.prog.invariant_check(d).is_some() and not own_method:
                             # `contract.invariant-field`.
-                            self.other()
+                            self.other("contract.invariant-field")
                             return
                     cur = base
                 case TExprKind.Index(base, _, _):
@@ -399,13 +401,13 @@ impl Checker:
                                 own_method = o == d
                         if cx.prog.invariant_check(d).is_some() and not own_method:
                             # `contract.invariant-field`.
-                            self.other()
+                            self.other("contract.invariant-field")
                             return
                     cur = base
                 case TExprKind.Coerce(inner, Coercion.Unrefine):
                     if self.refinement_of(cx, self.ty_of(inner)).is_some():
                         # `refine.change-through-base`.
-                        self.other()
+                        self.other("refine.change-through-base")
                     return
                 case TExprKind.Deref(inner):
                     cur = inner
@@ -461,7 +463,7 @@ impl Checker:
                     one = False
         if not one:
             # `parse.expected-type`.
-            self.other()
+            self.other("parse.expected-type")
             return self.error_expr(range)
         var key = String.new()
         for c in self.source_text(cx, cx.ast.expr(t).range).chars():
@@ -474,7 +476,7 @@ impl Checker:
         if not found or replacement.is_none():
             # `test.no-generator`: a `Gen` of nothing known, so what uses its
             # cases is not reported again.
-            self.other()
+            self.other("test.no-generator")
             if let Some(args) = call:
                 self.check_args_loosely(cx, args)
             var ty = Ty.error()
@@ -508,13 +510,13 @@ impl Checker:
                     path = Some(build.plain_text(parts))
         let p = path else:
             # `comptime.embed-path`.
-            self.other()
+            self.other("comptime.embed-path")
             return self.error_expr(range)
         if let Some(read) = cx.prog.embedded.get(p):
             if read:
                 return self.add(TExprKind.Str(String.new()), Ty.str(), range)
         # `comptime.embed-failed`.
-        self.other()
+        self.other("comptime.embed-failed")
         return self.error_expr(range)
 
     ## Whether an expression is a constant: a literal (a number, possibly

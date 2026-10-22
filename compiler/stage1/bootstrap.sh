@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# The bootstrap's fixed point (proposal/18-next-steps.md, "Bootstrapping",
+# D-078), on its own; `check.sh --self` runs it as its class `fixed`:
+#
+#   stage1-A   stage 1 as stage 0 builds it (`sisu build --native`: the
+#              Rust front end, then the native backend)
+#   A.sir      the SIR stage1-A prints of stage 1's own package (`sir`, run
+#              in this directory, as `sisu sir` is)
+#   stage1-B   A.sir built by the backend alone (`sisu build --native
+#              --from-sir A.sir`): stage 1 compiled by itself as its front
+#              end
+#   B.sir      the SIR stage1-B prints of the package
+#
+# The fixed point holds when B.sir is A.sir byte for byte; the backend is
+# deterministic, so stage1-B must then be stage1-A byte for byte too. It
+# also compares A.sir with what stage 0 prints of the package (`sisu sir`).
+# It prints the size and SHA-256 of each file, and exits non-zero when a
+# pair differs.
+#
+# Usage: compiler/stage1/bootstrap.sh [--keep DIR]
+#
+#   --keep DIR   leave the executables and the SIR files in DIR instead of
+#                a temporary directory
+set -uo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+compiler=$(dirname "$here")
+sisu="$compiler/target/release/sisu"
+keep=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --keep) keep="$2"; shift 2 ;;
+        *) echo "usage: $0 [--keep DIR]" >&2; exit 2 ;;
+    esac
+done
+
+echo "building stage 0 (cargo build --release)"
+if ! (cd "$compiler" && cargo build --release --quiet); then
+    echo "bootstrap.sh: stage 0 does not build" >&2
+    exit 1
+fi
+if [ -n "$keep" ]; then
+    work="$keep"
+    rm -rf "$work"
+    mkdir -p "$work"
+else
+    work=$(mktemp -d)
+    trap 'rm -rf "$work"' EXIT
+fi
+
+seconds() { awk "BEGIN { printf \"%.1f\", $2 - $1 }"; }
+step() {
+    # step LOG COMMAND...: runs COMMAND, its output into LOG, and stops on
+    # a failure.
+    local log="$1"
+    shift
+    if ! "$@" > "$log" 2>&1; then
+        cat "$log" >&2
+        echo "bootstrap.sh: failed: $*" >&2
+        exit 1
+    fi
+}
+
+t0=$(date +%s.%N)
+echo "stage1-A: stage 0 builds stage 1 (sisu build --native)"
+step "$work/A.log" bash -c 'cd "$1" && "$2" build --native --output "$3"' _ "$here" "$sisu" "$work/stage1-A"
+t1=$(date +%s.%N)
+echo "A.sir: stage1-A prints the SIR of its own package (sir)"
+if ! (cd "$here" && "$work/stage1-A" sir > "$work/A.sir" 2> "$work/A.err"); then
+    cat "$work/A.err" >&2
+    echo "bootstrap.sh: stage1-A failed printing the SIR" >&2
+    exit 1
+fi
+t2=$(date +%s.%N)
+echo "stage1-B: the backend builds A.sir (sisu build --native --from-sir)"
+step "$work/B.log" "$sisu" build --native --from-sir "$work/A.sir" --output "$work/stage1-B"
+t3=$(date +%s.%N)
+echo "B.sir: stage1-B prints the SIR of the package (sir)"
+if ! (cd "$here" && "$work/stage1-B" sir > "$work/B.sir" 2> "$work/B.err"); then
+    cat "$work/B.err" >&2
+    echo "bootstrap.sh: stage1-B failed printing the SIR" >&2
+    exit 1
+fi
+t4=$(date +%s.%N)
+(cd "$here" && "$sisu" sir 2> /dev/null) > "$work/stage0.sir"
+
+describe() {
+    # describe NAME FILE WHAT
+    printf '  %-9s %9d bytes  sha256 %s  %s\n' "$1" "$(wc -c < "$2" | tr -d ' ')" \
+        "$(sha256sum "$2" | cut -d ' ' -f 1)" "$3"
+}
+echo
+describe stage1-A "$work/stage1-A" "built by stage 0 ($(seconds "$t0" "$t1") s)"
+describe A.sir "$work/A.sir" "printed by stage1-A ($(seconds "$t1" "$t2") s)"
+describe stage1-B "$work/stage1-B" "built by the backend from A.sir ($(seconds "$t2" "$t3") s)"
+describe B.sir "$work/B.sir" "printed by stage1-B ($(seconds "$t3" "$t4") s)"
+describe stage0 "$work/stage0.sir" "printed by stage 0 (sisu sir)"
+echo
+same() {
+    # same FILE FILE: whether both exist, are not empty and are equal.
+    [ -s "$1" ] && cmp -s "$1" "$2"
+}
+failed=0
+verdict() {
+    # verdict WHAT FILE FILE
+    if same "$2" "$3"; then
+        echo "$1: identical"
+    else
+        echo "$1: DIFFERENT"
+        failed=1
+    fi
+}
+verdict "the SIR, A.sir and B.sir" "$work/A.sir" "$work/B.sir"
+verdict "the executables, stage1-A and stage1-B" "$work/stage1-A" "$work/stage1-B"
+verdict "stage 1's SIR and stage 0's, A.sir and sisu sir" "$work/A.sir" "$work/stage0.sir"
+if [ "$failed" = 0 ]; then
+    echo "the fixed point holds"
+else
+    [ -z "$keep" ] && echo "(run with --keep DIR to inspect the files)"
+    echo "the fixed point does not hold"
+fi
+exit "$failed"

@@ -855,7 +855,8 @@ impl Resolver:
             return
         if let Some((first_start, first_end)) = self.module.items.get(name.copy()):
             let d = Diagnostic.new(Msg.ResolveDuplicateDefinition, start, end).with("name", name)
-            self.report(d.label(Msg.ResolveFirstDefined, first_start, first_end))
+            let labelled = d.label(Msg.ResolveFirstDefined, first_start, first_end)
+            self.report(labelled.note(Msg.ResolveRenameDuplicate))
             return
         _ = self.module.identity.insert(name.copy(), identity)
         _ = self.module.items.insert(name, (start, end))

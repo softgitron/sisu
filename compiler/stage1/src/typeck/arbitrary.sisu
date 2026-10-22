@@ -792,31 +792,31 @@ impl Resolver:
                             ulps = self.ulps_of(module, x.value)
                 # `test.refines-mismatch`, each reason a report of its own.
                 let rname = reference else:
-                    self.note_error(module)
+                    self.note_error(module, "test.refines-mismatch")
                     continue
                 let found = fns.get(rname.copy()) else:
-                    self.note_error(module)
+                    self.note_error(module, "test.refines-mismatch")
                     continue
                 let g = found.copy()
                 if tolerance and ulps.is_none():
-                    self.note_error(module)
+                    self.note_error(module, "test.refines-mismatch")
                     continue
                 let mine = self.signature_of(module, f) else:
-                    self.note_error(module)
+                    self.note_error(module, "test.refines-mismatch")
                     continue
                 let theirs = self.signature_of(module, g) else:
-                    self.note_error(module)
+                    self.note_error(module, "test.refines-mismatch")
                     continue
                 let (ps, ret) = mine
                 let (qs, gret) = theirs
                 if not f.generics.is_empty() or not g.generics.is_empty() or ps.is_empty():
-                    self.note_error(module)
+                    self.note_error(module, "test.refines-mismatch")
                     continue
                 if ps != qs or ret != gret:
-                    self.note_error(module)
+                    self.note_error(module, "test.refines-mismatch")
                     continue
                 if tolerance and ret != "f64":
-                    self.note_error(module)
+                    self.note_error(module, "test.refines-mismatch")
                     continue
                 var tys: list[TypeExprId] = []
                 for p in f.params:
@@ -827,7 +827,7 @@ impl Resolver:
                     if not w.type_ok(self.ast(module), t, []):
                         all_ok = False
                 if not all_ok:
-                    self.note_error(module)
+                    self.note_error(module, "test.refines-mismatch")
                     continue
                 let n = k
                 k += 1

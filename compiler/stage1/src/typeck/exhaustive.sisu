@@ -423,7 +423,7 @@ impl Checker:
                 self.report(d)
             else:
                 let d = self.error(cx, Msg.TypeNonExhaustive, range).with("missing", missing)
-                self.report(d)
+                self.report(d.note_with(Msg.TypeMissingPatterns, "missing", missing))
 
     pure def useful(
         mut self, cx: Cx, mut sp: Spaces, rows: list[list[int]], v: list[int], tys: list[Ty]

@@ -42,12 +42,68 @@ from stage1.borrowck.finding import Finding, dedup, to_diagnostic
 from stage1.borrowck.init import Analysis
 from stage1.borrowck.types import Types
 from stage1.diag import Catalog, Diagnostic, Lines, render_ids, sort_unique
-from stage1.sir import Function, Program
+from stage1.sir import Function, Program, TypeDecl
 
 ## The checked program: SIR with its drops placed, and the findings.
 pub struct Checked:
     pub program: Program
     pub findings: list[Finding]
+
+## The functions of the standard library as initialisation and drop
+## placement left them, kept from one program to the next of a run (stage
+## 0 keeps them from one check of a program to the next, its `FnCache`): a
+## function lowered as before, whose places reach declared types declared
+## as before, gets the drops it got before, and no finding.
+pub struct Placed:
+    entries: dict[String, PlacedFn]
+
+struct PlacedFn:
+    ## The function as lowering gave it, without its source's number.
+    input: Function
+    decls: list[TypeDecl]
+    ## The function with its drops.
+    output: Function
+    ## Whether the moves were checked too (none was found).
+    checked: bool
+
+impl Placed:
+    pub pure def new() -> Placed:
+        return Placed(entries={})
+
+    ## What was made of `f` before, if it may be taken again.
+    pure def reuse(self, f: Function, types: Types, findings_too: bool) -> Function?:
+        let e = self.entries.get(f.name.copy()) else:
+            return None
+        if findings_too and not e.checked:
+            return None
+        if not same_function(e.input, f):
+            return None
+        if e.decls != types.reached_decls(f):
+            return None
+        var g = e.output.copy()
+        g.source = f.source
+        return Some(g)
+
+    pure def keep(mut self, f: Function, types: Types, g: Function, checked: bool):
+        let entry = PlacedFn(
+            input=f.copy(), decls=types.reached_decls(f), output=g.copy(), checked=checked
+        )
+        _ = self.entries.insert(f.name.copy(), entry)
+
+## Whether two functions are the same but for the number of their source,
+## which depends on the program's other files.
+pure def same_function(a: Function, b: Function) -> bool:
+    return a.name == b.name
+        and a.type_params == b.type_params
+        and a.kind == b.kind
+        and a.param_count == b.param_count
+        and a.pure == b.pure
+        and a.from_ == b.from_
+        and a.inner == b.inner
+        and a.owns == b.owns
+        and a.loc == b.loc
+        and a.locals == b.locals
+        and a.blocks == b.blocks
 
 ## Checks a lowered program and places its drops (stage 0's `check_with`,
 ## without its memo and without the loans). The standard library's
@@ -55,22 +111,34 @@ pub struct Checked:
 ## (`trust_std`): their drops are placed and their moves checked, but
 ## must-consume is not checked again for every program.
 pub pure def check(p: Program) -> Checked:
-    return check_with(p, True)
+    var placed = Placed.new()
+    return check_with(p, True, mut placed)
 
 ## `check`, or with `findings` false only its drop placement (what the SIR
 ## shows: the initialisation dataflow and the drops it places), without
 ## the loans, must-consume and purity, whose findings change no statement.
-pub pure def check_with(p: Program, findings_too: bool) -> Checked:
-    let types = Types.new(p.types)
+## The standard library's functions whose drops `placed` placed before for
+## another program are taken from it.
+pub pure def check_with(p: Program, findings_too: bool, mut placed: Placed) -> Checked:
+    let types = Types.of(p)
     var findings: list[Finding] = []
     var functions: list[Function] = []
     for f in p.functions:
+        let std_fn = f.source < len(p.sources) and p.sources[f.source].starts_with("<std>/")
+        if std_fn:
+            if let Some(g) = placed.reuse(f, types, findings_too):
+                functions.push(g)
+                continue
         var g = f.copy()
         let init = Analysis.run(g, types)
+        var found = 0
         if findings_too:
             for x in init.findings(g, types, p):
                 findings.push(x.copy())
+                found += 1
         elaborate.elaborate(mut g, init, types)
+        if std_fn and found == 0:
+            placed.keep(f, types, g, findings_too)
         functions.push(g)
     var program = Program(
         sources=p.sources.copy(),
@@ -150,7 +218,7 @@ pure def test_prelude() -> String:
 ## threading, as `sisu sir` writes it; or why there is none.
 pure def function_text(program: str, name: str) -> String:
     let catalog = Catalog.parse("")
-    let base = typeck.base_from(test_prelude())
+    let base = typeck.base_from(test_prelude(), catalog)
     let checked = typeck.check_file(base, program, catalog, False, {}, True)
     if checked.has_error or not checked.beyond.is_empty():
         return "not lowered"
@@ -182,7 +250,7 @@ pure def ownership_of(program: str) -> String:
     codes.push("E0400 error borrow.use-after-move x\nE0405 error borrow.mut-while-borrowed x\n")
     codes.push("E0407 error borrow.return-local x\nE0417 error borrow.must-consume x\n")
     let catalog = Catalog.parse(codes)
-    let base = typeck.base_from(test_prelude())
+    let base = typeck.base_from(test_prelude(), catalog)
     let checked = typeck.check_file(base, program, catalog, False, {}, True)
     if checked.has_error:
         return "not lowered"
