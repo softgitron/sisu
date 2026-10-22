@@ -41,7 +41,8 @@ pub mod sym {
     pub const PANIC_OVERFLOW: &str = "sisu_rt_panic_overflow";
     /// `sisu_rt_panic_index(index, len, from_end) -> u8`: a bad index.
     pub const PANIC_INDEX: &str = "sisu_rt_panic_index";
-    /// `sisu_rt_panic_stack() -> u8`: too many nested calls.
+    /// `sisu_rt_panic_stack(name, name_len) -> u8`: entering the function
+    /// so named would nest more calls than the limit.
     pub const PANIC_STACK: &str = "sisu_rt_panic_stack";
     /// `sisu_rt_panic_unreachable() -> u8`: `unreachable` was reached.
     pub const PANIC_UNREACHABLE: &str = "sisu_rt_panic_unreachable";
@@ -96,7 +97,7 @@ pub mod sym {
     /// A 64-bit counter of the yield points the running task may pass
     /// before the scheduler is asked (`sisu_rt_yield` when it reaches 0).
     pub const BUDGET: &str = "SISU_RT_BUDGET";
-    /// The running task's stack limits, six words ([`super::STACK_PROBE`]
+    /// The running task's stack limits, seven words ([`super::STACK_PROBE`]
     /// and the others): what the probe at a function's entry compares the
     /// stack pointer with, and whether the task is a generator being
     /// abandoned ([`super::STACK_ABANDONED`]).
@@ -118,10 +119,11 @@ pub mod sym {
 /// it is lower, a stack pointer at or above `STACK_REAL` only crossed the
 /// decommit watermark (set `STACK_DIRTY`, lower `STACK_PROBE` to
 /// `STACK_REAL`, go on), and one below it has exhausted the stack: the
-/// function sets `STACK_FAILED`, lowers `STACK_PROBE` to `STACK_FLOOR`
-/// (the part of the reserve kept for unwinding) and returns
-/// [`UNWINDING`] at once, calling nothing; the runtime raises the panic
-/// when it next looks at the panics in flight.
+/// function sets `STACK_FAILED` to the address of its name (as a trace
+/// shows it) and `STACK_FAILED_LEN` to its length, lowers `STACK_PROBE` to
+/// `STACK_FLOOR` (the part of the reserve kept for unwinding) and returns
+/// [`UNWINDING`] at once, calling nothing; the runtime raises the panic,
+/// which names the function, when it next looks at the panics in flight.
 pub const STACK_PROBE: u32 = 0;
 pub const STACK_REAL: u32 = 8;
 pub const STACK_FLOOR: u32 = 16;
@@ -135,8 +137,10 @@ pub const STACK_FAILED: u32 = 32;
 pub const STACK_ABANDONED: u32 = 40;
 /// See [`STACK_ABANDONED`].
 pub const ABANDON_KEEP: u64 = 2;
+/// See [`STACK_PROBE`].
+pub const STACK_FAILED_LEN: u32 = 48;
 /// The words of [`sym::STACK`].
-pub const STACK_WORDS: usize = 6;
+pub const STACK_WORDS: usize = 7;
 
 /// The words of [`sym::SITE`]: the address and length of the file's name,
 /// the line and column of the call, and flags ([`SITE_PURE`]).

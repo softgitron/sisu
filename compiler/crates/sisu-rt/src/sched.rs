@@ -438,18 +438,17 @@ pub(crate) fn finish() -> Option<Stats> {
 /// left it pending ([`abi::STACK_FAILED`]).
 pub(crate) fn take_stack_failure() -> Option<String> {
     let w = &SISU_RT_STACK[(abi::STACK_FAILED / 8) as usize];
-    if w.load(Relaxed) == 0 {
+    let name = w.load(Relaxed);
+    if name == 0 {
         return None;
     }
     w.store(0, Relaxed);
-    let bytes = if YIELDER.with(Cell::get).is_null() {
-        crate::entry::STACK_BYTES as u64
-    } else {
-        SCHED
-            .with(|s| s.try_borrow().ok().and_then(|g| g.as_ref().map(|s| s.pool.reservation as u64)))
-            .unwrap_or(0)
-    };
-    Some(rt::render(msg::PANIC_STACK_EXHAUSTED, &[("bytes", bytes.to_string())]))
+    let len = SISU_RT_STACK[(abi::STACK_FAILED_LEN / 8) as usize].load(Relaxed);
+    // SAFETY: the probe that failed stored the address and length of its
+    // function's name, a text of the program's read-only data.
+    let function =
+        unsafe { String::from_utf8_lossy(crate::mem::Str { ptr: name as *const u8, len }.bytes()).into_owned() };
+    Some(rt::render(msg::PANIC_STACK_OVERFLOW, &[("function", function)]))
 }
 
 fn load_ctx(ctx: &mut Ctx) {

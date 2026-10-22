@@ -460,7 +460,7 @@ R0026 runtime run.assert-right            right: {value}
 R0029 runtime panic.unreachable-plain     entered unreachable code
 R0030 runtime panic.expect-none           called `expect` on `None`
 R0031 runtime panic.expect-error          called `expect` on an error: {value}
-R0032 runtime panic.stack-overflow        stack overflow: more than {depth} nested calls
+R0032 runtime panic.stack-overflow        stack overflow in `{function}`: the calls nest deeper than the stack holds
 R0033 runtime panic.moved-value           use of a value after it was moved
 R0034 runtime panic.dangling              use of a reference to a value that no longer exists
 R0037 runtime panic.insert-out-of-bounds  insert index {index} is out of bounds for a list of length {len}
@@ -550,9 +550,6 @@ R0121 runtime run.stats-tag-crossing      may-cross
 # A natively compiled program broke a rule its runtime relies on (stage 2;
 # docs/architecture.md, "Stage 2").
 R0122 runtime run.native-internal         internal error in the native runtime: {detail}
-# A task's stack ran out (stage 2, decision 203): the probe at a function's
-# entry found it below its limit.
-R0123 runtime panic.stack-exhausted       stack overflow: the stack of {bytes} bytes is used up (`SISU_TASK_STACK` sets a task's)
 # `--stats` of a native run: the latency in microseconds (native code counts
 # no statements).
 R0124 runtime run.stats-latency-native    stats: scheduling latency p50 {p50us} p99 {p99us} microseconds (native code counts no statements)
@@ -562,6 +559,9 @@ R0125 runtime run.live-allocations        allocations: {count} of the runtime's 
 # A native run under `SISU_RT_ALLOCS=peak` (decision 229): the most of the
 # runtime's allocations of values that were live at once, before R0125.
 R0126 runtime run.peak-allocations        allocations: at most {count} of the runtime's live at once
+# A panic's stack trace deeper than its innermost and outermost frames
+# shows (decision 234): the line that stands for the frames between.
+R0127 runtime run.trace-elided            ... (frames left out)
 
 # ---------------------------------------------------------------- driver
 

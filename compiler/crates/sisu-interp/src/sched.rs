@@ -518,6 +518,20 @@ impl<'p> Interp<'p, '_> {
         }
     }
 
+    /// The intrinsic that pushed an anchor, which names a stack overflow at
+    /// it (decision 234).
+    pub(crate) fn anchor_name(&self, a: &Anchor) -> String {
+        match a {
+            Anchor::Task => "task.spawn",
+            Anchor::Scope(s) if self.sched.scopes.get(*s as usize).is_some_and(|r| r.race) => "task.race",
+            Anchor::Scope(_) => "task.scope",
+            Anchor::Shield => "task.shield",
+            Anchor::Catch => "test.catch",
+            Anchor::Always => "sim.always",
+        }
+        .to_string()
+    }
+
     /// A frame the scheduler pushes, with one slot for a result.
     fn anchor_frame(&mut self, anchor: Anchor, ret: Option<&'p sir::Place>) -> Frame<'p> {
         self.serial += 1;
@@ -689,7 +703,7 @@ impl<'p> Interp<'p, '_> {
     fn panicked_err(&self, p: &PanicInfo) -> Value {
         Value::err(self.task_error(
             "TaskPanicked",
-            vec![Value::String(p.message.clone()), Value::String(p.stack.join("\n"))],
+            vec![Value::String(p.message.clone()), Value::String(sisu_diag::trace::shown(&p.stack).join("\n"))],
         ))
     }
 

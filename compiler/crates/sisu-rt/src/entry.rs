@@ -111,7 +111,7 @@ unsafe extern "C" fn sisu_rt_start(
                 Some(p) => {
                     let mut text = rt::render(msg::RUN_PANIC_HEADER, &[("message", p.message)]);
                     text.push('\n');
-                    for line in &p.stack {
+                    for line in &sisu_diag::trace::shown(&p.stack) {
                         text.push_str("  ");
                         text.push_str(line);
                         text.push('\n');
@@ -294,9 +294,17 @@ extern "C" fn sisu_rt_panic_index(index: i64, len: i64, from_end: u64) -> u8 {
     })
 }
 
+/// Entering the function named `name` would nest more calls than the
+/// limit (decision 190): a stack overflow that names it (decision 234).
+///
+/// # Safety
+/// The name is valid UTF-8 of this length.
 #[unsafe(no_mangle)]
-extern "C" fn sisu_rt_panic_stack() -> u8 {
-    system(|| rt::raise_msg(msg::PANIC_STACK_OVERFLOW, &[("depth", abi::MAX_DEPTH.to_string())]))
+unsafe extern "C" fn sisu_rt_panic_stack(name: *const u8, name_len: u64) -> u8 {
+    // SAFETY: the generated code passes its static text.
+    let name = unsafe { mem::Str { ptr: name, len: name_len }.bytes() };
+    let function = String::from_utf8_lossy(name).into_owned();
+    system(|| rt::raise_msg(msg::PANIC_STACK_OVERFLOW, &[("function", function)]))
 }
 
 #[unsafe(no_mangle)]

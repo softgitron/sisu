@@ -209,7 +209,13 @@ impl<'p> Interp<'p, '_> {
 
     pub(crate) fn push_built(&mut self, mut fr: Frame<'p>) -> Result<(), Unwind> {
         if self.frames.len() >= MAX_DEPTH {
-            return Err(panic(msg::PANIC_STACK_OVERFLOW, &[("depth", MAX_DEPTH.to_string())]));
+            // The frame that does not fit names the overflow (decision 234):
+            // its function, or the intrinsic that opened an anchor.
+            let function = match fr.func.and_then(|i| self.func(i)) {
+                Some(f) => display_fn_name(&f.name, self.prog),
+                None => fr.anchor.as_ref().map(|a| self.anchor_name(a)).unwrap_or_default(),
+            };
+            return Err(panic(msg::PANIC_STACK_OVERFLOW, &[("function", function)]));
         }
         if self.stats_kind == crate::StatsKind::StackDepth && self.sched.keep_stats {
             fr.stack_bytes =

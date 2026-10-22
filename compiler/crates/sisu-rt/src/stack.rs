@@ -109,8 +109,6 @@ pub(crate) struct Mark {
 
 /// The pool of slots.
 pub(crate) struct Pool {
-    /// Usable bytes of a task's stack.
-    pub reservation: usize,
     /// Bytes below the probe limit: [`PROBE_RESERVE`] and the largest
     /// frame.
     pub reserve: usize,
@@ -132,7 +130,6 @@ impl Pool {
         let reserve = round_up(PROBE_RESERVE + max_frame, 16);
         let slot = round_up(reservation + reserve, page);
         Pool {
-            reservation: slot - reserve,
             reserve,
             max_frame,
             slot,

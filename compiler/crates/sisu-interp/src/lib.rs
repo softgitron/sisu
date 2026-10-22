@@ -569,7 +569,7 @@ fn mentions_counted(t: &sir::Type) -> bool {
 fn panic_report(p: &PanicInfo) -> String {
     let mut text = render(msg::RUN_PANIC_HEADER, &[("message", p.message.clone())]);
     text.push('\n');
-    for line in &p.stack {
+    for line in &sisu_diag::trace::shown(&p.stack) {
         text.push_str("  ");
         text.push_str(line);
         text.push('\n');

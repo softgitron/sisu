@@ -440,7 +440,7 @@ impl sched::Sched {
                     }
                 }
                 Some(Outcome::Panic(p)) => {
-                    let trace = p.stack.join("\n");
+                    let trace = sisu_diag::trace::shown(&p.stack).join("\n");
                     write_task_error(ret, ret_ty, "TaskPanicked", Some((&p.message, &trace)));
                 }
                 None => rt::internal("a finished task without an outcome"),
@@ -496,12 +496,13 @@ fn drop_queued(queue: Vec<(Box<[u64]>, u32)>) -> u8 {
 // ------------------------------------------------------------------ scopes
 
 /// Counts an anchor frame toward the limit of nested calls (the
-/// interpreter's anchors are frames); false past it, with the panic raised.
-fn enter_anchor() -> bool {
+/// interpreter's anchors are frames); false past it, with the panic raised,
+/// which names the intrinsic that opened the anchor (decision 234).
+fn enter_anchor(name: &str) -> bool {
     let d = crate::entry::SISU_RT_DEPTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     if d > abi::MAX_DEPTH {
         crate::entry::SISU_RT_DEPTH.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-        rt::raise_msg(msg::PANIC_STACK_OVERFLOW, &[("depth", abi::MAX_DEPTH.to_string())]);
+        system(|| rt::raise_msg(msg::PANIC_STACK_OVERFLOW, &[("function", name.to_string())]));
         return false;
     }
     true
@@ -544,7 +545,7 @@ unsafe fn closure_here(c: &Call<'_>, i: usize) -> (usize, usize) {
 unsafe fn shield(c: &Call<'_>) -> u8 {
     // SAFETY: the argument is the body.
     let (code, env) = unsafe { closure_here(c, 0) };
-    if !enter_anchor() {
+    if !enter_anchor("task.shield") {
         return abi::UNWINDING;
     }
     system(|| with(|s| s.task(s.cur).anchors.push(Anchor::Shield)));
@@ -587,7 +588,7 @@ unsafe fn scope(c: &Call<'_>, race: bool) -> u8 {
             id
         })
     });
-    if !enter_anchor() {
+    if !enter_anchor(if race { "task.race" } else { "task.scope" }) {
         system(|| {
             with(|sc| {
                 sc.task(sc.cur).anchors.pop();
@@ -726,7 +727,7 @@ unsafe fn scope_end(c: &Call<'_>, s: u32, status: u8, body: Box<[u64]>, body_ty:
     match outcome {
         Some(Outcome::Panic(p)) => {
             if sched::task_error().is_some_and(|te| carries(ret_ty, te)) {
-                let trace = p.stack.join("\n");
+                let trace = sisu_diag::trace::shown(&p.stack).join("\n");
                 // SAFETY: the scope's result carries `TaskError`.
                 system(|| unsafe {
                     write_task_error(c.ret, ret_ty, "TaskPanicked", Some((&p.message, &trace)))

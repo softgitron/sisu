@@ -13,6 +13,7 @@ pub mod msg;
 pub mod render;
 pub mod source;
 pub mod span;
+pub mod trace;
 
 pub use catalog::{Catalog, Entry, Kind};
 pub use diagnostic::{Diagnostic, Edit, Fix, Label, Note, Severity};

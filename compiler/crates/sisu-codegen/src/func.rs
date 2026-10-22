@@ -83,6 +83,9 @@ struct Cx<'a, 'p> {
     /// The function's name and file for its stack trace lines; `None` for
     /// drop glue and the standard library, which traces leave out.
     trace: Option<(DataId, usize, DataId, usize)>,
+    /// The function's name as a trace shows it, for the stack overflow
+    /// its entry may report (decision 234).
+    name: (DataId, usize),
     /// The function's file, for the site of a call that may wait.
     file: (DataId, usize),
     glue: bool,
@@ -197,13 +200,9 @@ impl<'a, 'p> Cx<'a, 'p> {
         let file = cg.prog.sources.get(f.source as usize).cloned().unwrap_or_default();
         let std = file.starts_with("<std>/") || file.starts_with("<shims>/");
         let file_text = (cg.text(file.as_bytes())?, file.len());
-        let trace = if glue || std {
-            None
-        } else {
-            let name = display_fn_name(&f.name, cg.prog);
-            let n = cg.text(name.as_bytes())?;
-            Some((n, name.len(), file_text.0, file.len()))
-        };
+        let shown = display_fn_name(&f.name, cg.prog);
+        let name = (cg.text(shown.as_bytes())?, shown.len());
+        let trace = if glue || std { None } else { Some((name.0, name.1, file_text.0, file.len())) };
         let fails = vec![None; f.blocks.len()];
         let mut cx = Cx {
             cg,
@@ -218,6 +217,7 @@ impl<'a, 'p> Cx<'a, 'p> {
             funcs: FxMap::default(),
             data: FxMap::default(),
             trace,
+            name,
             file: file_text,
             glue,
             cur: 0,
@@ -420,7 +420,9 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.b.ins().brif(over, overflow, &[], counted, &[]);
         self.b.switch_to_block(overflow);
         self.store_word(d, a, 0);
-        let st = self.rt_status(sym::PANIC_STACK, &[])?;
+        let name = self.data_addr(self.name.0);
+        let len = self.iconst(self.name.1 as i64);
+        let st = self.rt_status(sym::PANIC_STACK, &[name, len])?;
         self.b.ins().return_(&[st]);
         self.b.switch_to_block(counted);
         self.yield_check()?;
@@ -433,10 +435,11 @@ impl<'a, 'p> Cx<'a, 'p> {
     /// the prologue made, against the task's limit. Under it, a stack
     /// pointer at or above the real limit only crossed the decommit
     /// watermark: the task is marked dirty and the limit lowered. One below
-    /// it has exhausted the stack: the function marks the failure, lowers
-    /// the limit to the unwinding floor, and returns at once, calling
-    /// nothing and writing nothing below its frame (the runtime raises the
-    /// panic when it next looks at the panics in flight).
+    /// it has exhausted the stack: the function marks the failure with its
+    /// name, which the panic's message gives (decision 234), lowers the
+    /// limit to the unwinding floor, and returns at once, calling nothing
+    /// and writing nothing below its frame (the runtime raises the panic
+    /// when it next looks at the panics in flight).
     fn probe(&mut self) {
         let sp = self.b.ins().get_stack_pointer(types::I64);
         let stack = self.data_addr(self.cg.stack);
@@ -459,8 +462,10 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.b.ins().jump(cont, &[]);
         self.b.set_cold_block(fail);
         self.b.switch_to_block(fail);
-        let one = self.iconst(1);
-        self.store_word(one, stack, abi::STACK_FAILED);
+        let name = self.data_addr(self.name.0);
+        self.store_word(name, stack, abi::STACK_FAILED);
+        let len = self.iconst(self.name.1 as i64);
+        self.store_word(len, stack, abi::STACK_FAILED_LEN);
         let floor = self.load(stack, abi::STACK_FLOOR);
         self.store_word(floor, stack, abi::STACK_PROBE);
         let st = self.b.ins().iconst(types::I8, i64::from(abi::UNWINDING));
