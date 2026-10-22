@@ -164,7 +164,8 @@ one body: `testing/parametrised_once`).
   their bytes (`text_bytes`: the text methods written in Sisu over the
   bytes; `char_boundary`), formatting (`format_specs`: the spec
   mini-language, written in Sisu),
-  collections, `match`, loops, closures, errors and traces, options,
+  collections, `match` (`or_bindings`: alternatives of `|` that bind
+  names), loops, closures, errors and traces, options (`let_else_copy`),
   `Drop` order on normal and unwinding paths (`drop_panic_fields`: a
   `Drop` that panics; `drop_chain`: a long chain dropped at constant
   depth), panics and their exit statuses, capabilities, and tests.
@@ -252,6 +253,8 @@ one body: `testing/parametrised_once`).
   placement on every path (`drop_torture` is the drop-order torture
   program), the parameter conventions, non-lexical and two-phase borrows,
   returned borrows and `from`, views, closures, the three iteration modes,
+  `let` with a pattern and `else` (`let_else_tuple`), a reference passed
+  on from a parameter that only reads (`shared_param_passed_on`),
   `@must_consume`, the library types (`Box`, `Shared` and `Weak`,
   `Cell`, a `Mutex` with D-077's poisoning, `Arena` with generational
   keys), `own` closures, and `proposal_core`, `proposal_shared` and

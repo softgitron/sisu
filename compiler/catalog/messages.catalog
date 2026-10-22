@@ -229,7 +229,7 @@ E0381 error   type.return-in-test         a test returns nothing
 E0382 error   type.self-type-outside      `Self` exists only inside a type's declaration
 E0383 error   type.from-end-outside-index  `^` counts from the end and appears only inside an index, as in `xs[^1]`
 E0384 error   type.arm-needs-expression   an arm of a `match` that has a value holds one expression, not a block
-E0385 error   type.bindings-in-or-pattern  the alternatives of `|` cannot bind names yet
+E0385 error   type.bindings-in-or-pattern  `{name}` is bound in some alternatives of `|` but not in all; every alternative must bind the same names
 E0386 error   type.variant-needs-fields   `{name}` has fields; write `{name}(...)`
 E0387 error   type.star-outside-list      `*name` collects the rest of a list and appears only in a list pattern
 E0388 error   type.rest-outside-arguments  `..` skips the remaining fields and appears only inside `Name(...)`

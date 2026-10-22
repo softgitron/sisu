@@ -1132,7 +1132,12 @@ closures). The rules, so that another front end produces the same SIR:
   variant, an earlier arm taking a variant first; the other arms are
   tested in turn from its default. A `match` over many variants without
   payloads is then two steps whatever the variant, where a test per arm
-  and per alternative took two steps each (decision 175).
+  and per alternative took two steps each (decision 175). An or-pattern
+  that binds names binds from the alternative that matched: the
+  alternatives but the last are tested again in order (a test reads and
+  changes nothing), each binding its names into the same locals, and the
+  bindings are registered once where the alternatives join (decision
+  182).
 - **`?`** switches on the discriminant; the error path moves the payload
   out, calls `error.trace_push` with the location text `file:line:col`,
   stores `Err(e)` (or `None`) in `_0`, drops every scope and returns.
@@ -1696,8 +1701,12 @@ the concrete place it borrows (a frame, a local and a path, so `xs[0]`
 and `xs[1]` are different places), and every reference and every `str`
 view carries the loan it was made by, its *tag*. A copy of a `ref mut`
 is a reborrow: a new loan whose parent is the copied reference's loan,
-so loans form a tree per place. Pieces of a view (`split_whitespace`,
-`trim`, `lines`, `split_once`) carry the view's tag.
+so loans form a tree per place. Whether a copy is a reborrow is decided
+by the type of the place it copies, as the checker decides it: a copy of
+a shared `ref` passes its loan on, even when a `mut` borrow made it (a
+`mut self` passed to a parameter that only reads; decision 185). Pieces
+of a view (`split_whitespace`, `trim`, `lines`, `split_once`) carry the
+view's tag.
 
 **Accesses.** Every access goes through the reference it uses, and
 checks first that the reference's loan and all its ancestors are still
@@ -2892,7 +2901,8 @@ open to revision; the conformance cases pin the current choice.
 7. A variant is looked up in the expected type, then among declarations,
    then in the current module, then everything visible; a remaining tie
    is `E0211`.
-8. Or-patterns cannot bind names yet (`E0385`).
+8. The alternatives of `|` bind the same names, of the same types
+   (decision 182; until then they could bind none, `E0385`).
 9. `print` and `print_err` take exactly one argument (the prelude signature
    `print(x)`); several values print as a tuple.
 10. `f64` is not `Ord` (NaN), so `max(2.5, 1.5)` is an error and floats
@@ -3548,3 +3558,39 @@ what the stage-1 work found in stage 0)
      elements are, as the prelude's `Hash` impls for them declare: the
      host keys it by its elements in order, as it keys a tuple, so equal
      lists are one key, alone or inside a tuple, an option or a struct.
+
+**Stage 1's findings, continued** (the stage-1 README, items 18 to 20:
+what transcribing the Rust type checker found in stage 0)
+
+182. The alternatives of `|` bind the same names, of the same types:
+     D-055 adopts Python's or-patterns, and PEP 634 requires every
+     alternative to bind the same set of names, as Rust does. The first
+     alternative declares the names; each later one binds the same
+     locals, its types unified with the first's (`E0300` when they
+     differ); a name that some alternative does not bind is `E0385`,
+     naming it. Exhaustiveness is unchanged (a binding matches anything).
+     Lowering tests again which alternative matched and binds from it
+     (section "Lowering"), so the interpreter and the ownership checker
+     see ordinary SIR.
+183. `let x = e else:` decays its target as a plain `let` does: a `Copy`
+     value behind a reference (an element that `points.first()` gives
+     for a `list[Point]` of `Copy` structs, or a tuple of numbers from
+     `pairs.get(i)`) is bound as a copy, read through the reference
+     (`copy _2.as(0).0.*`). The binding used to keep the reference under
+     the value's type, and the first read of a field stopped the
+     interpreter.
+184. A `let` with a pattern and `else` (`let (name, i) = e else:`) makes
+     its bindings on the matching path, and on the fallback's, without
+     registering them, and registers them once where the paths join, in
+     the block around the statement, as a single name's binding is. They
+     used to be registered in the statement's own scope, dropped at its
+     end, so the first use after it was a use after a move.
+185. The monitor decides whether a copied reference is a reborrow by the
+     type of the place it copies, as the checker does: a copy of a `ref
+     mut` is a `mut` reborrow; a copy of a shared `ref` passes its loan
+     on, whatever borrow made the reference. It used to look at the loan
+     the value carried, so a `mut self` passed to a parameter that only
+     reads (`c: Cx`), and passed on from there, ended the shared loans of
+     what had been read through it (`case Kind.Items(fields)` on
+     `c.nodes[i].kind`), and a later read of `fields` was a violation the
+     checker had rightly not reported.

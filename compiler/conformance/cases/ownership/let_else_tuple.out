@@ -1,0 +1,8 @@
+b at 1
+1
+-1
+got r2 and 2
+got fallback and 0
+end of main
+drop fallback
+drop r2

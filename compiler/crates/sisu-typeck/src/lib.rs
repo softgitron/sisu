@@ -25,6 +25,7 @@ mod zonk;
 use check::{Checker, RetCtx};
 pub use memo::BodyCache;
 use memo::{Session, memo_body};
+pub use pat::pattern_bindings;
 use sisu_diag::{Diagnostic, SourceMap, msg};
 use sisu_resolve::{Answer, DefId, DefKind, Program, Ty};
 use std::collections::HashMap;

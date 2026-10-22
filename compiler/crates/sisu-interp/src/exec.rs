@@ -854,16 +854,33 @@ impl<'p> Interp<'p, '_> {
         for o in ops {
             vals.push(self.operand_value(o)?);
         }
-        for v in vals.iter_mut() {
-            self.mon_copied(v)?;
+        for (o, v) in ops.iter().zip(vals.iter_mut()) {
+            if !self.copies_shared_ref(o) {
+                self.mon_copied(v)?;
+            }
         }
         Ok(vals)
     }
 
     pub(crate) fn operand(&mut self, o: &'p Operand) -> Result<Value, Unwind> {
         let mut v = self.operand_value(o)?;
-        self.mon_copied(&mut v)?;
+        if !self.copies_shared_ref(o) {
+            self.mon_copied(&mut v)?;
+        }
         Ok(v)
+    }
+
+    /// Whether an operand copies a place whose type is a shared `ref`,
+    /// under the monitor. Such a copy is not a reborrow, as the checker
+    /// has it, even when the reference was made by a `mut` borrow (a `ref
+    /// mut` passed to a parameter that only reads): it passes the loan on.
+    fn copies_shared_ref(&self, o: &Operand) -> bool {
+        match o {
+            Operand::Copy(p) if self.monitor.is_some() => {
+                matches!(self.place_type(p), Some(sir::Type::Ref(_, false)))
+            }
+            _ => false,
+        }
     }
 
     /// The value an operand copies, read in place outside the monitor;

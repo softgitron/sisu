@@ -227,6 +227,75 @@ impl FnLower<'_, '_> {
     /// Binds, registering drops in the scope `below` levels under the
     /// innermost (a `let` registers in its block, not its statement).
     pub fn bind_below(&mut self, pat: &thir::Pat, place: &Place, below: usize) {
+        self.bind_with(pat, place, Some(below));
+    }
+
+    /// Assigns a pattern's bindings without registering them, for a
+    /// binding made on several paths and registered once where they join
+    /// ([`FnLower::register_bindings`]): the alternatives of `|`, and the
+    /// two paths of `let PATTERN = e else: fallback`.
+    pub fn bind_values(&mut self, pat: &thir::Pat, place: &Place) {
+        self.bind_with(pat, place, None);
+    }
+
+    /// Registers the bindings of a pattern that [`FnLower::bind_values`]
+    /// assigned, in the scope `below` levels under the innermost.
+    pub fn register_bindings(&mut self, pat: &thir::Pat, below: usize) {
+        match &pat.kind {
+            PatKind::Bind { local, mode } => {
+                let l = self.local_for(*local);
+                match mode {
+                    BindMode::Value => {
+                        let ty = pat.ty.clone();
+                        self.bind_registered(*local, l, &ty, below);
+                    }
+                    BindMode::Ref | BindMode::RefMut => self.scope_local(below, l),
+                }
+            }
+            PatKind::Variant { fields, .. } | PatKind::Struct { fields, .. } | PatKind::Tuple(fields) => {
+                for f in fields {
+                    self.register_bindings(f, below);
+                }
+            }
+            PatKind::Deref(inner) => self.register_bindings(inner, below),
+            PatKind::Or(alts) => {
+                if let Some(first) = alts.first() {
+                    self.register_bindings(first, below);
+                }
+            }
+            PatKind::List { prefix, rest, suffix } => {
+                for p in prefix {
+                    self.register_bindings(p, below);
+                }
+                if let Some(Some(r)) = rest {
+                    let l = self.local_for(*r);
+                    let ty = self.body.locals[r.0 as usize].ty.clone();
+                    self.bind_registered(*r, l, &ty, below);
+                }
+                for p in suffix {
+                    self.register_bindings(p, below);
+                }
+            }
+            PatKind::Wild | PatKind::Lit(_) | PatKind::Error => {}
+        }
+    }
+
+    /// Binds a value binding, registering it in the scope `below` levels
+    /// down, or, when `reg` is `None`, ending the block after a value that
+    /// needs drop (the lowering invariant) and leaving its registration to
+    /// the caller.
+    fn bind_value(&mut self, local: thir::LocalId, l: sir::LocalId, ty: &Ty, reg: Option<usize>) {
+        match reg {
+            Some(below) => self.bind_registered(local, l, ty, below),
+            None => {
+                if self.needs_drop(ty) {
+                    self.split();
+                }
+            }
+        }
+    }
+
+    fn bind_with(&mut self, pat: &thir::Pat, place: &Place, reg: Option<usize>) {
         let loc = self.ctx.loc(pat.span);
         match &pat.kind {
             PatKind::Bind { local, mode } => {
@@ -236,34 +305,60 @@ impl FnLower<'_, '_> {
                         let v = self.copy_or_move(place.clone(), &pat.ty);
                         self.assign(Place::local(l), Rvalue::Use(v), loc);
                         let ty = pat.ty.clone();
-                        self.bind_registered(*local, l, &ty, below);
+                        self.bind_value(*local, l, &ty, reg);
                     }
                     BindMode::Ref => {
                         self.assign(Place::local(l), Rvalue::Ref(place.clone(), false), loc);
-                        self.scope_local(below, l);
+                        if let Some(below) = reg {
+                            self.scope_local(below, l);
+                        }
                     }
                     BindMode::RefMut => {
                         self.assign(Place::local(l), Rvalue::Ref(place.clone(), true), loc);
-                        self.scope_local(below, l);
+                        if let Some(below) = reg {
+                            self.scope_local(below, l);
+                        }
                     }
                 }
             }
             PatKind::Variant { variant, fields, .. } => {
                 for (i, f) in fields.iter().enumerate() {
                     let sub = place.project(Proj::Downcast(*variant)).project(Proj::Field(i as u32));
-                    self.bind_below(f, &sub, below);
+                    self.bind_with(f, &sub, reg);
                 }
             }
             PatKind::Struct { fields, .. } | PatKind::Tuple(fields) => {
                 for (i, f) in fields.iter().enumerate() {
-                    self.bind_below(f, &place.project(Proj::Field(i as u32)), below);
+                    self.bind_with(f, &place.project(Proj::Field(i as u32)), reg);
                 }
             }
-            PatKind::Deref(inner) => self.bind_below(inner, &place.project(Proj::Deref), below),
+            PatKind::Deref(inner) => self.bind_with(inner, &place.project(Proj::Deref), reg),
+            // The alternatives bind the same locals: test again which one
+            // matched (testing binds nothing and changes nothing) and bind
+            // from it; the bindings are registered once, after the join.
+            PatKind::Or(alts) if !sisu_typeck::pattern_bindings(pat).is_empty() => {
+                let done = self.new_block();
+                for (i, alt) in alts.iter().enumerate() {
+                    if i + 1 < alts.len() {
+                        let next = self.new_block();
+                        self.test(alt, place, next);
+                        self.bind_values(alt, place);
+                        self.goto(done);
+                        self.switch_to(next);
+                    } else {
+                        self.bind_values(alt, place);
+                        self.goto(done);
+                    }
+                }
+                self.switch_to(done);
+                if let (Some(below), Some(first)) = (reg, alts.first()) {
+                    self.register_bindings(first, below);
+                }
+            }
             PatKind::List { prefix, rest, suffix } => {
                 for (i, p) in prefix.iter().enumerate() {
                     let sub = self.element(place, i, false);
-                    self.bind_below(p, &sub, below);
+                    self.bind_with(p, &sub, reg);
                 }
                 if let Some(Some(r)) = rest {
                     let l = self.local_for(*r);
@@ -282,11 +377,11 @@ impl FnLower<'_, '_> {
                         loc,
                     );
                     let ty = self.body.locals[r.0 as usize].ty.clone();
-                    self.bind_registered(*r, l, &ty, below);
+                    self.bind_value(*r, l, &ty, reg);
                 }
                 for (j, p) in suffix.iter().enumerate() {
                     let sub = self.element(place, suffix.len() - j, true);
-                    self.bind_below(p, &sub, below);
+                    self.bind_with(p, &sub, reg);
                 }
             }
             PatKind::Wild | PatKind::Lit(_) | PatKind::Or(_) | PatKind::Error => {}

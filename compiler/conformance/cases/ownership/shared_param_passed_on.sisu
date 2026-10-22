@@ -1,0 +1,48 @@
+# A `mut self` passed to a parameter that only reads (`c: Cx`) is a
+# reference that callee may pass on to another function: the copy is not a
+# `mut` borrow of what it points to, so what was read through it before the
+# call stays readable after it, under the monitor as for the checker.
+
+enum Kind:
+    Items(fields: list[int])
+    Leaf
+
+struct Node:
+    kind: Kind
+
+struct Cx:
+    nodes: list[Node]
+    runs: int
+
+impl Cx:
+    def run(mut self) -> list[int]:
+        self.runs += 1
+        var w = Walker(count=0)
+        return w.expand(self, 0)
+
+struct Walker:
+    count: int
+
+impl Walker:
+    def expand(mut self, c: Cx, i: int) -> list[int]:
+        match c.nodes[i].kind:
+            case Kind.Items(fields):
+                var out: list[int] = []
+                for n in self.product(c, 2):
+                    out.push(n + len(fields))
+                return out
+            case Kind.Leaf:
+                return []
+
+    def product(mut self, c: Cx, k: int) -> list[int]:
+        self.count += k
+        return [len(c.nodes) * k]
+
+def main():
+    var c = Cx(nodes=[Node(kind=Kind.Items(fields=[1, 2])), Node(kind=Kind.Leaf)], runs=0)
+    print(c.run())
+    print(c.runs)
+
+test "the fields stay readable after the call":
+    var c = Cx(nodes=[Node(kind=Kind.Items(fields=[1, 2, 3]))], runs=0)
+    assert c.run() == [5]

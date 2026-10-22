@@ -1,0 +1,2 @@
+test "the fields stay readable after the call" ... ok
+1 passed, 0 failed, 0 blocked

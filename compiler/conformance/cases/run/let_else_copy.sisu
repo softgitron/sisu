@@ -1,0 +1,43 @@
+# `let x = e else:` binds the value of an option or a result. A `Copy`
+# value behind a reference (an element of a list) is bound as a copy, as a
+# plain `let` binds it.
+
+@derive(Copy)
+struct Point:
+    x: int
+    y: int
+
+def first_x(points: list[Point]) -> int:
+    let p = points.first() else:
+        return -1
+    return p.x
+
+def last_sum(points: list[Point]) -> int:
+    let p = points.last() else:
+        return 0
+    return p.x + p.y
+
+def pair_at(pairs: list[(int, int)], i: int) -> int:
+    let (a, b) = pairs.get(i) else:
+        return -1
+    return a * b
+
+def parse_or(text: str, fallback: int) -> int:
+    let n = text.parse_int() else:
+        return fallback
+    return n
+
+def main():
+    let points = [Point(x=1, y=2), Point(x=3, y=4)]
+    print(first_x(points))
+    print(last_sum(points))
+    print(first_x([]))
+    print(pair_at([(2, 3), (4, 5)], 1))
+    print(pair_at([], 0))
+    print(parse_or("42", 0))
+    print(parse_or("x", 7))
+    let q = points.first() else:
+        return
+    var r = q
+    r.x = 10
+    print("{q.x} {r.x} {points[0].x}")
