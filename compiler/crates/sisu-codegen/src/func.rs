@@ -98,7 +98,7 @@ fn scalar_kind(t: &Type) -> Option<Scalar> {
 }
 
 /// Whether a closure's environment of `size` bytes is passed as its one
-/// word rather than its address (decision 212): an environment of one word
+/// word rather than its address (decision 213): an environment of one word
 /// is copied with the function value, so it needs no cell, which nothing
 /// could free (function values are `Copy` and never dropped). A task's
 /// keeps its cell, which the runtime frees when the task ends.
@@ -132,7 +132,7 @@ impl<'a, 'p> Cx<'a, 'p> {
         for (i, l) in f.locals.iter().enumerate() {
             let ty = cg.concrete(&l.ty, targs)?;
             let storage = if i == 1 && inline_env(f.kind, cg.types.size(&ty)?) {
-                // The environment came as its one word (decision 212): it
+                // The environment came as its one word (decision 213): it
                 // gets a slot, as an argument has memory of its own.
                 let slot = b.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3));
                 b.ins().stack_store(params[1], slot, 0);
@@ -742,7 +742,7 @@ impl<'a, 'p> Cx<'a, 'p> {
                         ty = a.first().cloned().unwrap_or(Type::Unit);
                         if write {
                             // A box whose value was moved out gets a new cell
-                            // (decision 215).
+                            // (decision 216).
                             let cell = self.load(addr, 0);
                             let (make, have) = (self.b.create_block(), self.b.create_block());
                             self.b.ins().brif(cell, have, &[], make, &[]);
@@ -848,6 +848,7 @@ impl<'a, 'p> Cx<'a, 'p> {
                 let v = self.read(addr, size);
                 if matches!(o, Operand::Move(_)) {
                     self.moved_out_of_box(p)?;
+                    self.moved_out_of_error(p)?;
                 }
                 Ok((v, ty))
             }
@@ -856,7 +857,7 @@ impl<'a, 'p> Cx<'a, 'p> {
 
     /// A value moved out of a `Box` (a local's, or a field's of one) leaves
     /// the box without a value: its cell is freed and the box holds none,
-    /// until an assignment gives it one (decision 215).
+    /// until an assignment gives it one (decision 216).
     fn moved_out_of_box(&mut self, p: &Place) -> Result<(), Error> {
         let Some((Proj::Field(0), base)) = p.proj.split_last() else { return Ok(()) };
         if !base.iter().all(|q| matches!(q, Proj::Field(_))) {
@@ -871,6 +872,27 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.rt(sym::FREE, &[cell])?;
         let zero = self.iconst(0);
         self.store_word(zero, at, 0);
+        Ok(())
+    }
+
+    /// A field moved out of an error value (`e.as(v).k`) leaves the value
+    /// never dropped whole: it lets go of its return trace now (decision
+    /// 215).
+    fn moved_out_of_error(&mut self, p: &Place) -> Result<(), Error> {
+        for (i, proj) in p.proj.iter().enumerate() {
+            if !matches!(proj, Proj::Downcast(_)) || !matches!(p.proj.get(i + 1), Some(Proj::Field(_))) {
+                continue;
+            }
+            let base = Place { local: p.local, proj: p.proj[..i].to_vec() };
+            if !base.proj.iter().all(|q| matches!(q, Proj::Field(_) | Proj::Downcast(_))) {
+                continue;
+            }
+            let ty = self.place_type(&base)?;
+            if self.cg.types.is_error(&ty) {
+                let (at, _) = self.place(&base, None)?;
+                self.rt(sym::TRACE_RELEASE, &[at])?;
+            }
+        }
         Ok(())
     }
 
@@ -1001,7 +1023,7 @@ impl<'a, 'p> Cx<'a, 'p> {
         let env = if size == 0 {
             self.iconst(0)
         } else if inline_env(f.kind, size) {
-            // One word of captures is the environment itself (decision 212).
+            // One word of captures is the environment itself (decision 213).
             let mut word = self.iconst(0);
             for (i, o) in ops.iter().enumerate() {
                 let (_, ft) = self.field_of(&env_ty, None, i as u32)?;
@@ -1557,7 +1579,7 @@ impl<'a, 'p> Cx<'a, 'p> {
         let call = self.b.ins().call(r, &call_args);
         let st = self.b.inst_results(call)[0];
         // A `dyn` moved into the call (`own self`) gave its value to the
-        // method: its cell is empty (decision 215).
+        // method: its cell is empty (decision 216).
         if matches!(ty, Type::Dyn(..)) {
             let cell = self.load(addr, 8);
             self.rt(sym::FREE, &[cell])?;
@@ -1674,6 +1696,27 @@ impl<'a, 'p> Cx<'a, 'p> {
         let rsize = self.size(&dest_ty)?;
         let ret = self.slot(rsize);
         let st = self.rt_status(sym::INTRINSIC, &[daddr, ret, arr])?;
+        // A value moved into a parameter the intrinsic neither owns nor
+        // lets its result hold was only read: it is dropped now, when
+        // nothing observes its drop, as the interpreter's host drops it
+        // (decision 218), also when the call panicked. Such a drop only
+        // frees memory, so it cannot panic itself.
+        if let Some(decl) = self.cg.prog.intrinsic(name) {
+            let held: Vec<u32> = [&decl.own, &decl.from, &decl.inner, &decl.keeps].into_iter().flatten().copied().collect();
+            for (k, (o, (a, t))) in args.iter().zip(&argv).enumerate() {
+                let Operand::Move(p) = o else { continue };
+                if held.contains(&(k as u32))
+                    || self.place_type(p)? != *t
+                    || !self.cg.types.needs_drop(t)?
+                    || self.cg.types.observable_drop(t)
+                {
+                    continue;
+                }
+                let id = self.type_id(t)?;
+                let idv = self.i32const(id);
+                self.rt_status(sym::DROP, &[*a, idv])?;
+            }
+        }
         self.check(st);
         let (addr, _) = self.place(dest, None)?;
         self.copy_bytes(addr, ret, rsize);

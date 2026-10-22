@@ -44,8 +44,11 @@ pub(crate) struct Types<'p> {
 impl<'p> Types<'p> {
     pub(crate) fn new(prog: &'p sir::Program) -> Types<'p> {
         let decls = prog.types.iter().map(|t| (t.name(), t)).collect();
-        let with_glue =
-            prog.types.iter().map(|t| (t.name(), prog.function(&sir::types::glue_name(t.name())).is_some())).collect();
+        let with_glue = prog
+            .types
+            .iter()
+            .map(|t| (t.name(), prog.function(&sir::types::glue_name(t.name())).is_some()))
+            .collect();
         Types {
             with_glue,
             prog,
@@ -277,7 +280,12 @@ impl<'p> Types<'p> {
                 let mut fields = Vec::new();
                 for (i, (cap, _)) in abi::CAPABILITIES.iter().enumerate() {
                     let ty = self.id(&Type::Named(cap.to_string(), Vec::new()))?;
-                    fields.push(Field { name: Some(cap.to_lowercase()), offset: i as u32 * w, ty, glue: false });
+                    fields.push(Field {
+                        name: Some(cap.to_lowercase()),
+                        offset: i as u32 * w,
+                        ty,
+                        glue: false,
+                    });
                 }
                 return simple(
                     Kind::Struct { name: "System".into(), fields, glue: None },
@@ -374,7 +382,7 @@ impl<'p> Types<'p> {
         };
         let glue = self.glue_of(n, args);
         // What the glue drops is decided on the declared types, so a field
-        // of a type parameter is the glue's (decision 217).
+        // of a type parameter is the glue's (decision 218).
         let by_glue = |t: &Type| glue.is_some() && sir::types::drops_something(t, &self.with_glue);
         let flags: Vec<Vec<bool>> = match decl {
             sir::TypeDecl::Struct { fields, .. } => vec![fields.iter().map(|f| by_glue(&f.ty)).collect()],
@@ -457,6 +465,13 @@ impl<'p> Types<'p> {
         Some(i)
     }
 
+    /// Whether a program can observe a value's drop: a `Drop` runs, a
+    /// count changes, a mutex is unlocked (SIR's `drops_something`). Any
+    /// other drop only frees memory.
+    pub(crate) fn observable_drop(&self, t: &Type) -> bool {
+        sir::types::drops_something(t, &self.with_glue)
+    }
+
     /// Whether dropping a value of the type can do anything.
     pub(crate) fn needs_drop(&mut self, t: &Type) -> Result<bool, Error> {
         let mut seen = Vec::new();
@@ -493,11 +508,11 @@ impl<'p> Types<'p> {
                 Some(vt) => self.needs_drop_in(&vt, seen)?,
                 None => false,
             },
-            // An error holds its return trace (decision 214).
+            // An error holds its return trace (decision 215).
             Kind::Enum { error: true, .. } => true,
             Kind::Struct { glue: Some(_), .. } | Kind::Enum { glue: Some(_), .. } => true,
             // A field the glue leaves out, or every field without glue, is
-            // the runtime's to drop (decision 217).
+            // the runtime's to drop (decision 218).
             Kind::Entry(..)
             | Kind::Option(_)
             | Kind::Result(..)
@@ -511,7 +526,9 @@ impl<'p> Types<'p> {
                     Kind::Tuple(slots) => slots.iter().map(|s| s.ty).collect(),
                     Kind::ErrSet(m) => m,
                     Kind::Struct { fields, .. } => fields.iter().map(|f| f.ty).collect(),
-                    Kind::Enum { variants, .. } => variants.iter().flat_map(|v| v.fields.iter().map(|f| f.ty)).collect(),
+                    Kind::Enum { variants, .. } => {
+                        variants.iter().flat_map(|v| v.fields.iter().map(|f| f.ty)).collect()
+                    }
                     _ => Vec::new(),
                 };
                 let mut any = false;

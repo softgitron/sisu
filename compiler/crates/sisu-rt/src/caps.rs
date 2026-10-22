@@ -23,7 +23,7 @@ static HOST_OBJECTS: [u64; 7] = [0; 7];
 /// # Safety
 /// `src` must hold `size` bytes.
 unsafe fn handle_cell(t: u64, src: *const u8, size: u32) -> u64 {
-    let cell = mem::alloc(16 + size as usize);
+    let cell = mem::alloc_kept(16 + size as usize);
     // SAFETY: the cell has room for two words and the value.
     unsafe {
         mem::set_word(cell, 0, t);
@@ -80,7 +80,7 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> Option<u8> {
             }
             I::CapCellNew => {
                 let size = ty(c.ty(0)).size;
-                let cell = mem::alloc((size as usize).max(8));
+                let cell = mem::alloc_kept((size as usize).max(8));
                 mem::copy(cell, c.arg(0), size as usize);
                 c.set_word(cell as u64);
             }

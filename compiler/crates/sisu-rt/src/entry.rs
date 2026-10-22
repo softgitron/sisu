@@ -130,7 +130,7 @@ unsafe extern "C" fn sisu_rt_start(
         if let Some(stats) = crate::sched::finish() {
             rt::stderr(&stats_report(&stats));
         }
-        // `SISU_RT_ALLOCS`: what the program left allocated (decision 216).
+        // `SISU_RT_ALLOCS`: what the program left allocated (decision 217).
         if std::env::var_os("SISU_RT_ALLOCS").is_some() {
             let line = rt::render(msg::RUN_LIVE_ALLOCATIONS, &[("count", mem::live().to_string())]);
             rt::stderr(&format!("{line}\n"));
@@ -380,11 +380,27 @@ extern "C" fn sisu_rt_alloc(bytes: u64) -> *mut u8 {
     p as *mut u8
 }
 
-/// Frees a block of `sisu_rt_alloc` whose value is gone (decision 215).
+/// Frees a block of `sisu_rt_alloc` whose value is gone (decision 216).
 #[unsafe(no_mangle)]
 extern "C" fn sisu_rt_free(p: *mut u8) {
     let p = p as usize;
     system(|| mem::release(p as *mut u8));
+}
+
+/// A field was moved out of the error value at `p`: the value is never
+/// dropped whole, so it lets go of its return trace now (decision 215).
+///
+/// # Safety
+/// `p` must hold an error value.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_trace_release(p: *mut u8) {
+    let p = p as usize;
+    // SAFETY: as the caller guarantees.
+    system(|| unsafe {
+        let p = p as *mut u8;
+        crate::intrinsics::release_trace(mem::word(p, abi::ERROR_TRACE));
+        mem::set_word(p, abi::ERROR_TRACE, 0);
+    });
 }
 
 /// Drops the value at `p` of type `t`: by its glue (Sisu code) on the

@@ -164,14 +164,20 @@ the time limit), and compares:
   `NAME.err`.
 
 The expectations are the interpreter's: the native mode reads no file of
-its own and does not bless. `cargo test -p sisu-driver --test native`
-runs the list, and CI runs it on every push. `--native-survey LIST`
-builds and runs every runnable case the list leaves out (one with an
-`.out`, `.err` or `.status`) and prints `pass` or the first thing that
+its own and does not bless. With `--native-from-sir LIST` the runner
+builds each case from serialised SIR instead, `sisu build --native
+--from-sir NAME.sir`, with the case's own `NAME.sir` where it has one and
+what `sisu sir` prints for it otherwise (whose warnings stand for the
+build's), and compares the same way: the path a self-hosted front end's
+SIR takes to native code. `cargo test -p sisu-driver --test native` runs
+the list both ways, and CI runs both on every push. `--native-survey
+LIST` builds and runs every runnable case the list leaves out (one with
+an `.out`, `.err` or `.status`) and prints `pass` or the first thing that
 stopped it, which is how the list grows:
 
 ```text
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native conformance/native.list
+cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-from-sir conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-survey conformance/native.list
 ```
 

@@ -55,6 +55,10 @@ pub mod sym {
     /// `sisu_rt_free(ptr)`: frees what `sisu_rt_alloc` gave, once its
     /// value is gone (a box's or a `dyn`'s cell whose value was moved out).
     pub const FREE: &str = "sisu_rt_free";
+    /// `sisu_rt_trace_release(error)`: a field was moved out of the error
+    /// value at `error`, which is never dropped whole: it lets go of its
+    /// return trace.
+    pub const TRACE_RELEASE: &str = "sisu_rt_trace_release";
     /// `sisu_rt_drop(value, ty) -> u8`: drops a value of a builtin type.
     pub const DROP: &str = "sisu_rt_drop";
     /// `sisu_rt_copy(dst, src, ty)`: `.copy()`.
@@ -487,7 +491,7 @@ pub struct Field {
     pub ty: u32,
     /// Whether the type's drop glue drops the field. The glue leaves out a
     /// field whose drop nothing observes (a `String`), which the runtime
-    /// drops itself after the glue (decision 217).
+    /// drops itself after the glue (decision 218).
     pub glue: bool,
 }
 
@@ -1235,8 +1239,12 @@ mod tests {
     /// runtime reads.
     #[test]
     fn the_type_table_round_trips() {
-        let field =
-            |name: Option<&str>, offset: u32, ty: u32| Field { name: name.map(str::to_string), offset, ty, glue: ty % 2 == 0 };
+        let field = |name: Option<&str>, offset: u32, ty: u32| Field {
+            name: name.map(str::to_string),
+            offset,
+            ty,
+            glue: ty.is_multiple_of(2),
+        };
         let kinds = vec![
             Kind::Unit,
             Kind::Int,

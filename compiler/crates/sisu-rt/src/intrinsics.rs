@@ -899,7 +899,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 };
                 if matches!(ty(c.ret_ty).kind, Kind::Ref(_)) {
                     // A `*rest` binding views the elements in place
-                    // (decision 213).
+                    // (decision 214).
                     let (p, _) = c.place(0);
                     c.set_word(crate::views::view(p, ty(e).size, lo, hi) as u64);
                 } else {
@@ -1376,7 +1376,7 @@ fn random_bits() -> u64 {
 /// A node of an error's return trace: the location and the trace before
 /// it. Copies of an error share their trace, which never changes, so a
 /// node counts what holds it (errors and the next nodes) and is freed with
-/// the last (decision 214).
+/// the last (decision 215).
 struct TraceNode {
     refs: u64,
     loc: Box<[u8]>,

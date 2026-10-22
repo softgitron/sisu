@@ -25,6 +25,112 @@ fn native_conformance() {
     assert!(report.failures.is_empty(), "{}", report.render());
 }
 
+/// The same cases built from serialised SIR (decision 212): each from its
+/// own `.sir` expectation, or from what `sisu sir` prints for it, with
+/// `sisu build --native --from-sir`, the front end not run.
+#[test]
+fn native_conformance_from_sir() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let root = compiler_dir().join("conformance/cases");
+    let text =
+        std::fs::read_to_string(compiler_dir().join("conformance/native.list")).expect("the coverage list");
+    let list = sisu_conformance::native::read_list(&text);
+    let report = sisu_conformance::native::run_native_from_sir(&sisu, &root, &list);
+    println!("{}", report.render());
+    assert!(report.cases > 0, "no cases in the coverage list");
+    assert!(report.failures.is_empty(), "{}", report.render());
+}
+
+/// The serialised SIR of every case the backend compiles reads back into
+/// a program that writes the same bytes (decision 212): the reader parses
+/// exactly what the writer prints, whole programs with the standard
+/// library's functions they reach.
+#[test]
+fn the_sir_of_every_native_case_reads_back_byte_for_byte() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let root = compiler_dir().join("conformance/cases");
+    let text =
+        std::fs::read_to_string(compiler_dir().join("conformance/native.list")).expect("the coverage list");
+    let list = sisu_conformance::native::read_list(&text);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let failures = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|s| {
+        for _ in 0..4 {
+            s.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(name) = list.get(i) else { break };
+                    let path = root.join(name);
+                    let (dir, args, temporary) = if path.with_extension("pkg").is_dir() {
+                        let pkg = path.with_extension("pkg");
+                        let cwd = std::fs::read_to_string(path.with_extension("cwd")).unwrap_or_default();
+                        (pkg.join(cwd.trim()), vec!["sir".to_string()], false)
+                    } else {
+                        // The case's source with its files (`NAME.files/`), as
+                        // the runner's sandbox has them.
+                        let file =
+                            path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+                        let dir = scratch(&format!("sir-{}", name.replace('/', "-")));
+                        std::fs::copy(path.with_extension("sisu"), dir.join(format!("{file}.sisu")))
+                            .expect("the case's source");
+                        copy_dir(&path.with_extension("files"), &dir);
+                        (dir, vec!["sir".to_string(), format!("{file}.sisu")], true)
+                    };
+                    let out = std::process::Command::new(&sisu)
+                        .args(&args)
+                        .current_dir(&dir)
+                        .output()
+                        .expect("sisu runs");
+                    if temporary {
+                        let _ = std::fs::remove_dir_all(&dir);
+                    }
+                    let printed = String::from_utf8_lossy(&out.stdout).into_owned();
+                    let problem = match sisu_sir::read(&printed) {
+                        Ok(p) if sisu_sir::write(&p) == printed => None,
+                        Ok(_) => Some("writes other bytes than it read".to_string()),
+                        Err(e) => Some(format!("line {}: {}", e.line, e.message)),
+                    };
+                    if let Some(p) = problem {
+                        failures.lock().expect("the failures").push(format!("{name}: {p}"));
+                    }
+                }
+            });
+        }
+    });
+    let failures = failures.into_inner().expect("the failures");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// A program built from the SIR `sisu sir` prints for it is byte for byte
+/// the executable its source gives (decision 212): the self-hosted check
+/// compares stage 1's SIR with stage 0's, and the same SIR makes the same
+/// code.
+#[test]
+fn building_from_sir_gives_the_same_executable() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = scratch("from-sir");
+    let cases = compiler_dir().join("conformance/cases");
+    for case in ["run/closures", "run/drop_order", "concurrency/channels", "capabilities/fakes"] {
+        let name = case.rsplit('/').next().unwrap_or(case);
+        let source = cases.join(format!("{case}.sisu"));
+        std::fs::copy(&source, dir.join(format!("{name}.sisu"))).expect("the case");
+        let run = |args: &[&str]| {
+            let out =
+                std::process::Command::new(&sisu).args(args).current_dir(&dir).output().expect("sisu runs");
+            assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            out.stdout
+        };
+        let sir = run(&["sir", &format!("{name}.sisu")]);
+        std::fs::write(dir.join(format!("{name}.sir")), sir).expect("the SIR");
+        run(&["build", "--native", "--output", "from-source", &format!("{name}.sisu")]);
+        run(&["build", "--native", "--from-sir", &format!("{name}.sir"), "--output", "from-sir"]);
+        let a = std::fs::read(dir.join("from-source")).expect("the first executable");
+        let b = std::fs::read(dir.join("from-sir")).expect("the second executable");
+        assert!(a == b, "{case}: the executables differ");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `sisu run --native` builds a program, runs it with its arguments and
 /// gives its exit status; the executable is gone afterwards.
 #[test]
@@ -51,6 +157,20 @@ fn run_native_runs_the_program() {
     assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
     assert!(dir.join("count").is_file());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Copies the files under `from` (if it is a directory) into `to`.
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(from) else { return };
+    for e in entries.flatten() {
+        let target = to.join(e.file_name());
+        if e.path().is_dir() {
+            std::fs::create_dir_all(&target).expect("a directory");
+            copy_dir(&e.path(), &target);
+        } else {
+            std::fs::copy(e.path(), &target).expect("a file");
+        }
+    }
 }
 
 /// A scratch directory for one test, removed by the caller.

@@ -18,11 +18,11 @@
 //! `std/prelude.sisu`).
 
 use sisu_sir as sir;
+use sisu_sir::types::drops_something;
 use sisu_sir::{
     BasicBlock, BlockId, Callee, FnKind, Function, LocalDecl, LocalId, Operand, Place, Proj, Rvalue,
     Statement, StatementKind, Terminator, Type, TypeDecl,
 };
-use sisu_sir::types::drops_something;
 use std::collections::HashMap;
 
 /// The host-backed types that have declarations in SIR (the others are

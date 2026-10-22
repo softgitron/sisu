@@ -168,6 +168,7 @@ const VALUE_FLAGS: &[&str] = &[
     "--iterations",
     "--diary",
     "--output",
+    "--from-sir",
 ];
 
 /// The most schedules a bounded exhaustive search runs of one test (or of
@@ -212,6 +213,8 @@ struct Opts {
     diary: Option<String>,
     /// `sisu build --native --output PATH`: where the executable goes.
     output: Option<String>,
+    /// `--native --from-sir FILE`: the input is a serialised SIR program.
+    from_sir: bool,
 }
 
 /// What a command works on, read from disk (09): a file, or the root
@@ -524,6 +527,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                     && !(*k == "--contracts" && cmd == "sir")
                     && !(*k == "--diary" && cmd == "check")
                     && !(*k == "--output" && cmd == "build" && p.flags.contains(&"--native"))
+                    && !(*k == "--from-sir" && cmd == "build")
             }) {
                 host.stderr(&plain_error(
                     msg::CLI_UNKNOWN_OPTION,
@@ -551,6 +555,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
             let mut select = Select::default();
             let mut diary = None;
             let mut output = None;
+            let mut from_sir = None;
             for (k, v) in &p.values {
                 let only = match *k {
                     "--record" | "--redact" => Some("run"),
@@ -580,6 +585,10 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                     }
                     "--output" => {
                         output = Some(v.to_string());
+                        continue;
+                    }
+                    "--from-sir" if matches!(cmd.as_str(), "run" | "build") => {
+                        from_sir = Some(*v);
                         continue;
                     }
                     "--redact" => {
@@ -675,14 +684,27 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 }
             }
             let locked = p.flags.contains(&"--locked");
-            let inputs = match inputs_for(cmd, p.file, locked, has_ids(&p.flags), host) {
+            // `--from-sir FILE` reads a serialised SIR program and compiles
+            // it natively (decision 212): FILE is the program, and what
+            // follows it is the program's arguments.
+            if from_sir.is_some() && !p.flags.contains(&"--native") {
+                host.stderr(&plain_error(msg::NATIVE_FROM_SIR, &[]));
+                return EXIT_USAGE;
+            }
+            let (target, program_args) = match from_sir {
+                Some(f) => (Some(f), p.file.map(str::to_string).into_iter().chain(p.rest.clone()).collect()),
+                None => (p.file, p.rest.clone()),
+            };
+            let inputs = match inputs_for(cmd, target, locked, has_ids(&p.flags), from_sir.is_some(), host) {
                 Ok(i) => i,
                 Err(code) => return code,
             };
-            if cmd != "run" && !p.rest.is_empty() {
+            if cmd != "run"
+                && let Some(extra) = program_args.first()
+            {
                 host.stderr(&plain_error(
                     msg::CLI_UNKNOWN_OPTION,
-                    &[("option", p.rest[0].clone()), ("command", cmd.clone())],
+                    &[("option", extra.clone()), ("command", cmd.clone())],
                 ));
                 return EXIT_USAGE;
             }
@@ -752,11 +774,12 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 stats,
                 diary,
                 output,
+                from_sir: from_sir.is_some(),
             };
             // Each member of a workspace in turn (09); the worst status wins.
             let mut status = exit::OK;
             for input in &inputs {
-                let code = guarded(cmd, &p.flags, &opts, input, p.rest.clone(), host);
+                let code = guarded(cmd, &p.flags, &opts, input, program_args.clone(), host);
                 status = status.max(code);
             }
             status
@@ -773,6 +796,67 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
             EXIT_USAGE
         }
     }
+}
+
+/// A serialised SIR program (`sisu sir`'s form), read and validated; a
+/// text that is not one is reported.
+fn read_sir(source: &str, host: &mut dyn Host) -> Result<sisu_sir::Program, i32> {
+    let prog = match sisu_sir::read(source) {
+        Ok(p) => p,
+        Err(e) => {
+            host.stderr(&plain_error(
+                msg::SIR_PARSE,
+                &[("detail", format!("line {}: {}", e.line, e.message))],
+            ));
+            return Err(exit::ERROR);
+        }
+    };
+    if let Some(problem) = sisu_sir::validate(&prog).into_iter().next() {
+        let (function, detail) =
+            problem.split_once(": ").map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or_default();
+        host.stderr(&plain_error(msg::SIR_INVALID, &[("function", function), ("detail", detail)]));
+        return Err(exit::ERROR);
+    }
+    Ok(prog)
+}
+
+/// `sisu build --native --from-sir FILE` and `sisu run --native --from-sir
+/// FILE`: a serialised SIR program (what `sisu sir` prints, and what stage
+/// 1 emits) compiled by the native backend without the front end
+/// (decision 212). The executable is named by the file's stem.
+fn from_sir(
+    cmd: &str,
+    flags: &[&str],
+    opts: &Opts,
+    input: &Input,
+    args: Vec<String>,
+    host: &mut dyn Host,
+    stage: &std::cell::Cell<&'static str>,
+) -> i32 {
+    stage.set("the SIR reader");
+    let prog = match read_sir(&input.source, host) {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+    if prog.entry.is_none() {
+        host.stderr(&plain_error(msg::CLI_NO_MAIN, &[("file", input.file.clone())]));
+        return exit::ERROR;
+    }
+    stage.set("the native backend");
+    if cmd == "build" {
+        let output = match &opts.output {
+            Some(o) => std::path::PathBuf::from(o),
+            None => crate::native::output_for(&input.disk, None),
+        };
+        return crate::native::build_command(&prog, &output, host);
+    }
+    let name = input.disk.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let how = crate::native::Run {
+        seed: opts.seeds.first,
+        explore: opts.seeds.explore,
+        stats: flags.contains(&"--stats"),
+    };
+    crate::native::run_command(&prog, &name, &args, &how, host)
 }
 
 /// Whether diagnostics are asked for in the conformance form.
@@ -826,6 +910,7 @@ fn inputs_for(
     target: Option<&str>,
     locked: bool,
     ids: bool,
+    from_sir: bool,
     host: &mut dyn Host,
 ) -> Result<Vec<Input>, i32> {
     let cwd = std::env::current_dir().unwrap_or_default();
@@ -838,7 +923,9 @@ fn inputs_for(
             exit::ERROR
         })
     };
-    let file_level = matches!(cmd, "tokens" | "parse");
+    // A file of SIR is read as it is, as are the files `tokens` and `parse`
+    // take.
+    let file_level = matches!(cmd, "tokens" | "parse") || from_sir;
     if let Some(f) = target
         && (file_level || !cwd.join(f).is_dir())
     {
@@ -1152,24 +1239,15 @@ fn command(
     let has = |f: &str| flags.contains(&f);
     let seeds = opts.seeds;
     let level = opts.level;
+    if opts.from_sir {
+        return from_sir(cmd, flags, opts, input, args, host, stage);
+    }
     if cmd == "run" && has("--sir") {
         stage.set("the SIR reader");
-        let prog = match sisu_sir::read(source) {
+        let prog = match read_sir(source, host) {
             Ok(p) => p,
-            Err(e) => {
-                host.stderr(&plain_error(
-                    msg::SIR_PARSE,
-                    &[("detail", format!("line {}: {}", e.line, e.message))],
-                ));
-                return exit::ERROR;
-            }
+            Err(code) => return code,
         };
-        if let Some(problem) = sisu_sir::validate(&prog).into_iter().next() {
-            let (function, detail) =
-                problem.split_once(": ").map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or_default();
-            host.stderr(&plain_error(msg::SIR_INVALID, &[("function", function), ("detail", detail)]));
-            return exit::ERROR;
-        }
         stage.set("the interpreter");
         let mut h = WithArgs { inner: host, args, watch: Vec::new() };
         let options = Options {
@@ -2513,6 +2591,7 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
         stats: sisu_interp::StatsKind::Summary,
         diary: None,
         output: None,
+        from_sir: false,
     };
     let stage = std::cell::Cell::new("the front end");
     let flags: Vec<&str> = p.flags.clone();

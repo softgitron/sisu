@@ -2879,6 +2879,9 @@ backend does not compile yet is `D0103`, naming it and the function it is
 in; the program still runs without `--native`. `SISU_NATIVE_SURVEY=1`
 lists every such construct of a program with the number of functions
 that have it, and `SISU_NATIVE_TIMES=1` prints where a build's time went.
+`sisu build --native --from-sir FILE [--output PATH]` and `sisu run
+--native --from-sir FILE [ARGS...]` compile a file of serialised SIR
+instead, without the front end (section "From serialised SIR" below).
 
 ### Values
 
@@ -3193,6 +3196,33 @@ it up; without one the build is `D0104` (decision 199). An executable is
 mostly the runtime: 6 MB for a small program with the release runtime, 9
 MB with the debug one.
 
+### From serialised SIR
+
+The serialised SIR `sisu sir` prints is a whole program: the program's
+functions and the standard library's that it reaches, its types, impls
+and intrinsics. `sisu_sir::read` parses exactly what `sisu_sir::write`
+prints, so a program read back writes the same bytes again; a test does
+that for every `.sir` expectation of the suite, and another for the SIR of
+every case of `native.list`. `--from-sir FILE` hands such a file to the
+backend: the reader, the validator, then code generation and the link as
+for a program from source, the executable named by the file's stem. Code
+generation is deterministic, so the executable is byte for byte the one
+the program's source gives. `--from-sir` goes with `--native` only
+(`D0110`); the interpreter reads a SIR file with `sisu run --sir`
+(decision 212).
+
+This is the path of the self-hosted check of the bootstrap. Stage 1, the
+front end written in Sisu, is built natively and prints the SIR of a
+program; that text must be byte-identical to what stage 0's front end
+prints for the same program (`sisu sir`), and `sisu build --native
+--from-sir` turns it into the executable that building the program from
+its source gives. Stage 1 then stands in for stage 0's front end: the same
+SIR, the same native code. The runner's mode `sisu-conformance --native-from-sir
+conformance/native.list` builds every case of the list that way (from the
+case's own `.sir` where it has one, else from what `sisu sir` prints for
+it) and compares its runs with the interpreter's expectations, and CI runs
+it beside the native mode.
+
 ### Coverage
 
 `conformance/native.list` names the cases the backend builds and runs:
@@ -3211,9 +3241,10 @@ in-process network), with `replay/network` on the host's real network.
 arguments, standard input, an empty environment), and compares its
 standard output, exit status and standard error with the files the
 interpreter meets; `cargo test` does the same
-(`crates/sisu-driver/tests/native.rs`), and CI runs it on every push.
-`--native-survey LIST` tries every runnable case the list leaves out and
-says which would pass, or the first construct that stops each.
+(`crates/sisu-driver/tests/native.rs`), from source and from serialised
+SIR, and CI runs both on every push. `--native-survey LIST` tries every
+runnable case the list leaves out and says which would pass, or the first
+construct that stops each.
 
 What the backend does not compile yet, though no runnable case needs it:
 `bytes.as_slice` (a `Slice[u8]` of a `bytes`, whose bytes are not words),
@@ -4279,3 +4310,19 @@ what transcribing the Rust type checker found in stage 0)
      another agree, since the two are the same words and drop alike, and
      the field reads as the first such member's type. A `Contextual`
      error shows as `message: cause`, as the interpreter shows it.
+212. The backend compiles serialised SIR as well as the program the front
+     end hands it: `sisu build --native --from-sir FILE` and `sisu run
+     --native --from-sir FILE` read and validate the form `sisu sir`
+     prints, which stage 1 emits byte for byte, so stage 1's output is
+     compiled without stage 0's front end. The reader parses exactly what
+     the writer prints (a program read back writes the same bytes), which
+     the tests check on the suite's `.sir` expectations and on the whole
+     SIR of every case of `native.list`; code generation is deterministic,
+     so the executable is the one the source gives, byte for byte (a test
+     compares the two). `--from-sir` names its file, SIR
+     whatever its extension, and goes with `--native` only (`D0110`): the
+     interpreter keeps `sisu run --sir`. The runner's mode
+     `--native-from-sir` builds each case of the list from its own `.sir`
+     where it has one and from `sisu sir`'s output otherwise, and CI runs
+     it beside the native mode, so the path from serialised SIR to native
+     code is checked on every push.

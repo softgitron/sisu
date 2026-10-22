@@ -150,12 +150,20 @@ pub(crate) fn range(cur: i64, stop: i64, step: i64) -> Box<IterObj> {
 
 /// An iterator over the elements of a borrowed list: their addresses.
 pub(crate) fn list_ref(list: *mut List, elem: u32) -> Box<IterObj> {
-    Box::new(IterObj { _live: mem::Live::new(), state: State::ListRef { list, idx: 0, elem_size: ty(elem).size }, item_size: 8 })
+    Box::new(IterObj {
+        _live: mem::Live::new(),
+        state: State::ListRef { list, idx: 0, elem_size: ty(elem).size },
+        item_size: 8,
+    })
 }
 
 /// An iterator that owns a list's elements.
 pub(crate) fn items(list: List, elem: u32) -> Box<IterObj> {
-    Box::new(IterObj { _live: mem::Live::new(), state: State::Items { list, idx: 0, elem }, item_size: ty(elem).size })
+    Box::new(IterObj {
+        _live: mem::Live::new(),
+        state: State::Items { list, idx: 0, elem },
+        item_size: ty(elem).size,
+    })
 }
 
 pub(crate) fn chars(text: Str) -> Box<IterObj> {
@@ -209,7 +217,10 @@ pub(crate) unsafe fn iterable(p: *mut u8, arg: u32, item: Option<u32>) -> Box<It
                     // the reference does not own; take its remaining items.
                     let obj = mem::word(q, 0) as *mut IterObj;
                     let st = std::mem::replace(&mut (*obj).state, State::Done);
-                    (Box::new(IterObj { _live: mem::Live::new(), state: st, item_size: (*obj).item_size }), None)
+                    (
+                        Box::new(IterObj { _live: mem::Live::new(), state: st, item_size: (*obj).item_size }),
+                        None,
+                    )
                 }
                 _ => rt::internal("iterating over a reference to something that is not a list"),
             },

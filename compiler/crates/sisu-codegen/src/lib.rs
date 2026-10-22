@@ -783,7 +783,7 @@ impl<'p> Codegen<'p> {
             sym::INT_OP => (&[i32_, i64_, i64_, i64_], &[i8_]),
             sym::FLOAT_OP => (&[i32_, f64_, f64_], &[f64_]),
             sym::ALLOC => (&[i64_], &[i64_]),
-            sym::FREE => (&[i64_], &[]),
+            sym::FREE | sym::TRACE_RELEASE => (&[i64_], &[]),
             sym::DROP => (&[i64_, i32_], &[i8_]),
             sym::COPY => (&[i64_, i64_, i32_], &[]),
             sym::BINARY => (&[i32_, i64_, i64_, i32_, i64_, i32_], &[i8_]),

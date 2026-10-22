@@ -138,7 +138,7 @@ pub(crate) unsafe fn drop_value(p: *mut u8, t: u32) -> u8 {
                 }
                 status
             }
-            // A box whose value was moved out has no cell (decision 215).
+            // A box whose value was moved out has no cell (decision 216).
             Kind::Box(inner) => {
                 let cell = mem::word(p, 0) as *mut u8;
                 if cell.is_null() {
@@ -156,8 +156,8 @@ pub(crate) unsafe fn drop_value(p: *mut u8, t: u32) -> u8 {
                 crate::sched::defer(p, t)
             }
             // The glue (Sisu code: the `Drop` impl, then the fields whose drop
-            // is observed), then the fields it leaves out (decision 217); an
-            // error lets go of its return trace (decision 214).
+            // is observed), then the fields it leaves out (decision 218); an
+            // error lets go of its return trace (decision 215).
             Kind::Struct { glue, fields, .. } => {
                 let status = run_glue(*glue, p);
                 after_part(status, drop_silent(p, fields))

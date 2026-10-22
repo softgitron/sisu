@@ -85,10 +85,10 @@ fn needs_drop_table(types: &[TypeEntry]) -> Vec<bool> {
                 Kind::Option(p) => get(*p),
                 Kind::Result(a, b) => get(*a) || get(*b),
                 Kind::Tuple(slots) => slots.iter().any(|s| get(s.ty)),
-                // An error holds its return trace (decision 214).
+                // An error holds its return trace (decision 215).
                 Kind::Enum { error: true, .. } => true,
                 Kind::Struct { glue: Some(_), .. } | Kind::Enum { glue: Some(_), .. } => true,
-                // The fields the glue leaves out (decision 217).
+                // The fields the glue leaves out (decision 218).
                 Kind::Struct { fields, .. } => fields.iter().any(|f| get(f.ty)),
                 Kind::Enum { variants, .. } => variants.iter().any(|v| v.fields.iter().any(|f| get(f.ty))),
                 Kind::ErrSet(members) => members.iter().any(|m| get(*m)),

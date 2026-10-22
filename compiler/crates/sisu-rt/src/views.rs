@@ -1,4 +1,4 @@
-//! The views `*rest` patterns bind (decision 213): a `ref list[T]` to the
+//! The views `*rest` patterns bind (decision 214): a `ref list[T]` to the
 //! elements in place rather than to a list of copies. A view's header is
 //! a heap block (a list's three words, a capacity of 0 marking it, and the
 //! address of the buffer it views), freed when that buffer is: the
