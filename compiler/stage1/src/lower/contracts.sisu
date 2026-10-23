@@ -67,21 +67,36 @@ impl FnLower:
         if c.ensures.is_empty():
             return
         let ret = Place.local(LocalId(index=0))
+        let ret_ty = cx.prog.normalize(mut self.types, cx.body.ret, self.bounds)
         if let Some(r) = c.result:
             let rl = self.local_for(cx, r)
             var rv = Rvalue.Use(Operand.Copy(ret.copy()))
-            if let TyData.Ref(_, _) = self.types.data(cx.body.locals[r].ty):
+            if self.result_borrows(cx.body.locals[r].ty, ret_ty):
                 rv = Rvalue.Ref(place=ret.copy(), mutable=False)
             self.assign(cx, Place.local(rl), rv, loc)
         for (l, i) in c.labels:
             let ll = self.local_for(cx, l)
             let part = ret.project(Proj.Field(i))
+            var part_ty = Ty.error()
+            if let TyData.Tuple(elems, _) = self.types.data(ret_ty):
+                if i < len(elems):
+                    part_ty = elems[i]
             var rv = Rvalue.Use(Operand.Copy(part.copy()))
-            if let TyData.Ref(_, _) = self.types.data(cx.body.locals[l].ty):
+            if self.result_borrows(cx.body.locals[l].ty, part_ty):
                 rv = Rvalue.Ref(place=part, mutable=False)
             self.assign(cx, Place.local(ll), rv, loc)
         for e in c.ensures:
             self.contract_check(cx, e)
+
+    ## Whether `result` (or a named part of the result), a local of type
+    ## `local`, borrows the value returned, of type `value`: unless it is
+    ## `Copy`, or a reference, which it is itself (decision 255).
+    pure def result_borrows(self, local: Ty, value: Ty) -> bool:
+        if let TyData.Ref(_, _) = self.types.data(local):
+            if let TyData.Ref(_, _) = self.types.data(value):
+                return False
+            return True
+        return False
 
     ## The invariant check of a struct, on the value at `target`.
     pure def call_invariant(

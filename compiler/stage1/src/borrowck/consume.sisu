@@ -361,40 +361,29 @@ pure def check_body(f: Function, types: Types, p: Program) -> list[Finding]:
             if tracked > 0:
                 for s in f.blocks[b].stmts:
                     kill(s.kind, dense, mut st)
+            # Each successor's state is met into its entry as it is made,
+            # in the order of the edges: each is made from `st` alone.
             let it = iterators[b]
-            var succ: list[(int, list[bool])] = []
             match f.blocks[b].term:
                 case Terminator.Goto(t):
-                    succ.push((t.index, st.copy()))
+                    if meet_into(mut entry, t.index, st, tracked):
+                        changed = True
                 case Terminator.Switch(_, cases, default):
                     for (k, t) in cases:
                         var s2 = st.copy()
                         if let Some(i) = it:
                             s2[dense[i.index]] = k != 0
-                        succ.push((t.index, s2))
+                        if meet_into(mut entry, t.index, s2, tracked):
+                            changed = True
                     var s2 = st.copy()
                     if let Some(i) = it:
                         s2[dense[i.index]] = True
-                    succ.push((default.index, s2))
+                    if meet_into(mut entry, default.index, s2, tracked):
+                        changed = True
                 case _:
                     pass
             if let Some(u) = f.blocks[b].unwind:
-                succ.push((u.index, st.copy()))
-            for (t, s2) in succ:
-                if t >= n:
-                    continue
-                let e = entry[t].copy() else:
-                    entry[t] = Some(s2.copy())
-                    changed = True
-                    continue
-                var meet = e
-                var narrowed = False
-                for i in range(tracked):
-                    if meet[i] and not s2[i]:
-                        meet[i] = False
-                        narrowed = True
-                if narrowed:
-                    entry[t] = Some(meet)
+                if meet_into(mut entry, u.index, st, tracked):
                     changed = True
     # An intersection converges too; if the bound is reached anyway, no
     # iterator counts as exhausted, which only rejects more.
@@ -433,6 +422,23 @@ pure def check_body(f: Function, types: Types, p: Program) -> list[Finding]:
                             out.push(must_consume_finding(f, types, b, si, place, ty))
             kill(s.kind, dense, mut st)
     return out
+
+## Meets `s` into block `t`'s entry, in place, or makes it the entry of a
+## block not reached yet; returns whether the entry changed.
+pure def meet_into(mut entry: list[list[bool]?], t: int, s: list[bool], tracked: int) -> bool:
+    if t >= len(entry):
+        return False
+    if let Some(e) = ref mut entry[t]:
+        var narrowed = False
+        var i = 0
+        while i < tracked:
+            if e[i] and not s[i]:
+                e[i] = False
+                narrowed = True
+            i += 1
+        return narrowed
+    entry[t] = Some(s.copy())
+    return True
 
 ## The finding for a drop of a must-consume value: a consuming loop's
 ## iterator is described by the collection it consumes.

@@ -121,6 +121,17 @@ pub pure def std_module(path: str) -> String?:
         case "std.core": "prelude"
         case "std.string": "string"
         case "std.fmt": "fmt"
+        case "std.par": "par"
+        case "std.io": "io"
+        case "std.fs": "fs"
+        case "std.rand": "rand"
+        case "std.encoding": "encoding"
+        case "std.hash": "hash"
+        case "std.sort": "sort"
+        case "std.search": "search"
+        case "std.process": "process"
+        case "std.env": "env"
+        case "std.regex": "regex"
         case _: ""
     if name.is_empty():
         return None
@@ -488,6 +499,17 @@ const MODULE_PATHS: list[str] = [
     "std.core",
     "std.string",
     "std.fmt",
+    "std.par",
+    "std.io",
+    "std.fs",
+    "std.rand",
+    "std.encoding",
+    "std.hash",
+    "std.sort",
+    "std.search",
+    "std.process",
+    "std.env",
+    "std.regex",
 ]
 
 ## The scalar types a misspelt type name is compared with.
@@ -1624,10 +1646,15 @@ impl Resolver:
         self.push_scope()
         self.has_self = False
         let header_broken = error_outside_block(self.tree, n)
+        # A `comptime def`'s `T: type` parameters are type parameters, not
+        # parameters (decision 251).
+        var typed: list[String] = []
         if let Some(params) = first_child(self.tree, n, SyntaxKind.ParamList):
-            self.type_params(params)
+            typed = self.type_params(params)
+            if first_token(self.tree, n, SyntaxKind.ComptimeKw) == None:
+                typed = []
         if let Some(params) = first_child(self.tree, n, SyntaxKind.ParamList):
-            self.params(params, method)
+            self.params(params, method, typed)
         let saved_labels = self.result_labels.copy()
         self.result_labels.clear()
         for c in child_nodes(self.tree, n):
@@ -1666,8 +1693,9 @@ impl Resolver:
                             self.result_labels.push(self.text_of(name))
 
     ## A parameter of type `type` (a `comptime def`'s) names a type in the
-    ## rest of the signature and in the body.
-    pure def type_params(mut self, list: int):
+    ## rest of the signature and in the body; the names of those parameters.
+    pure def type_params(mut self, list: int) -> list[String]:
+        var names: list[String] = []
         for p in child_nodes(self.tree, list):
             if self.kind(p) != SyntaxKind.Param:
                 continue
@@ -1677,16 +1705,23 @@ impl Resolver:
                 continue
             if let Some(name) = first_token(self.tree, p, SyntaxKind.Ident):
                 self.generics.push(self.text_of(name))
+                names.push(self.text_of(name))
+        return names
 
-    ## The parameters of a function or test, declared in the current scope.
-    ## `self` is the receiver only as the first parameter of a method;
-    ## anywhere else stage 0 reports it (`E0215`, `E0218`) and the body
-    ## has no `self`.
-    pure def params(mut self, list: int, method: bool):
+    ## The parameters of a function or test, declared in the current scope,
+    ## but those named `typed` (a `comptime def`'s type parameters). `self`
+    ## is the receiver only as the first parameter of a method; anywhere
+    ## else stage 0 reports it (`E0215`, `E0218`) and the body has no
+    ## `self`.
+    pure def params(mut self, list: int, method: bool, typed: list[String]):
         var index = 0
         for p in child_nodes(self.tree, list):
             if self.kind(p) != SyntaxKind.Param:
                 continue
+            if let Some(t) = first_token(self.tree, p, SyntaxKind.Ident):
+                if typed.contains(self.text_of(t)):
+                    index += 1
+                    continue
             self.types_in(p)
             for c in child_nodes(self.tree, p):
                 if not is_type_kind(self.kind(c)):
@@ -1718,7 +1753,7 @@ impl Resolver:
         if let Some(p) = pattern:
             self.pattern(p, False)
         if let Some(params) = first_child(self.tree, n, SyntaxKind.ParamList):
-            self.params(params, False)
+            self.params(params, False, [])
         if let Some(body) = first_child(self.tree, n, SyntaxKind.Block):
             let saved_quiet = self.quiet
             let saved_body = self.in_body

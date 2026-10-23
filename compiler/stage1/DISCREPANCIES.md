@@ -57,3 +57,20 @@ difference is listed from D6 on.
   `panic.overflow` gives only `{expr}`, so no document decides; stage 1
   transcribes the code (`interp.sized_op`), and `-(-128) as i8` would read
   as the `int` form does.
+- **The `Escapable` rule's decision was unwritten for a round.**
+  `sisu-resolve/src/borrows.rs` (`can_borrow_in`) says a type parameter
+  bounded by `Escapable` holds no loan, since every type argument it stands
+  for must not, and the solver's `Escapable` and the owner checks of
+  `sisu-typeck` use it; the code cited a decision 256 that
+  docs/architecture.md did not carry. Stage 1 transcribes the rule
+  (`Program.can_borrow_in`), which no document contradicts (03 calls
+  `Escapable` structural); the coordinator has since written it as
+  decision 257 (256 is the structural hash).
+- **A test's instance is not a test once it is resolved.** Stage 0's
+  `record_instance` gives the instance of a test that reflects the test's
+  `FnKind::Test` (decision 251), but a function's instance is recorded
+  before it is resolved, and resolving it makes its `FnInfo` again, as a
+  free function's; only `instance_of` is carried over. Nothing `check`,
+  `sir` or `build` prints shows it (the instance is named `test#N` by its
+  template, which `prog.tests` lists); stage 1 does the same in the same
+  order.

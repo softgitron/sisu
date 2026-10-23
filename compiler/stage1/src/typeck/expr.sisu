@@ -282,14 +282,19 @@ impl Checker:
                 let dd = self.error(cx, Msg.TypeMismatch, self.span_of(y))
                 self.report(dd.with("expected", expected_s).with("found", found_s))
                 return self.wrap(y, Coercion.Mismatch, exp)
-        # `Iterable[T]` accepts any collection or iterator of `T`.
+        # `Iterable[T]` accepts any collection or iterator of `T`; a
+        # program's iterator through a generator that takes its items.
         if let TyData.Adt(d, args) = ed:
             if Some(d) == cx.prog.wk.iterable:
-                if let Some((item, _)) = self.iteration_item(cx, actual, Mode.Borrow):
+                if let Some((item, fmode)) = self.iteration_item(cx, actual, Mode.Borrow):
                     let it = self.decay_ty(cx, item)
                     if let Some(t) = first_of(args):
                         if self.infer.try_unify(mut self.types, it, t):
-                            return x
+                            if fmode != ForMode.Trait:
+                                return x
+                            let (call, made) = self.iter_from(cx, x, t)
+                            if made:
+                                return call
         let range = self.span_of(x)
         # An error the expected error set does not include.
         var sets: (list[DefId], list[DefId])? = None
@@ -514,6 +519,35 @@ impl Checker:
             if self.is_copy(cx, inner):
                 return inner
         return t
+
+    ## A value of a type that implements `Iterator` given to an
+    ## `Iterable[T]` parameter: `iter_from(x)` (the prelude), a generator
+    ## that takes the items from it as they are asked for, since the
+    ## functions that take an `Iterable[T]` iterate collections and `Iter`s
+    ## and never call the program's impls (decision 247). `item` is the
+    ## parameter's `T`. A reference to such an iterator is given back, with
+    ## `False`: it cannot be moved into the generator.
+    pub pure def iter_from(mut self, cx: Cx, x: TExprId, item: Ty) -> (TExprId, bool):
+        let ty = self.resolved(self.ty_of(x))
+        let f = cx.prog.lookup_in(cx.prog.prelude, "iter_from") else:
+            return (x, False)
+        let iter = cx.prog.wk.iter else:
+            return (x, False)
+        if let TyData.Ref(_, _) = self.types.data(ty):
+            return (x, False)
+        let (given0, _) = self.iterator_item(cx, ty) else:
+            return (x, False)
+        let given = self.decay_ty(cx, given0)
+        if not self.infer.try_unify(mut self.types, given, item):
+            return (x, False)
+        let (raw, _) = self.iterator_item(cx, ty) else:
+            return (x, False)
+        let span = self.span_of(x)
+        let moved = self.check_movable(cx, x)
+        let args = [TArg(expr=moved, mode=ArgMode.Value)]
+        let call = TExprKind.Call(callee=Callee.Fn(def_=f, type_args=[ty]), args=args)
+        let ret = self.types.adt(iter, [raw])
+        return (self.add(call, ret, span), True)
 
     ## Reports a move out of a borrowed place or an element.
     pub pure def check_movable(mut self, cx: Cx, x: TExprId) -> TExprId:
@@ -1721,10 +1755,72 @@ impl Checker:
             let hint = if op == CmpOp.In or op == CmpOp.NotIn: None else: Some(pt)
             let x0 = self.infer_expr(cx, e, hint)
             let x = self.unrefined(cx, x0)
+            # `x in xs` on a collection of a type's own is `xs.contains(x)`
+            # by its `Contains` impl (02; decision 252).
+            if len(rest) == 1 and (op == CmpOp.In or op == CmpOp.NotIn):
+                if let Some(call) = self.contains_call(cx, prev, x, op == CmpOp.NotIn, range):
+                    return call
             self.check_comparison(cx, op, prev, x, range)
             prev = x
             out.push((op, x))
         return self.add(TExprKind.Compare(first=f, rest=out), Ty.bool(), range)
+
+    ## `x in xs` (`not in` with `negate`) on a type that is not a builtin
+    ## collection or text: a call of its `Contains` method (02), when the
+    ## type implements `Contains`. `None` leaves the builtin ones to the
+    ## comparison.
+    pure def contains_call(
+        mut self, cx: Cx, x: TExprId, xs: TExprId, negate: bool, range: TextRange
+    ) -> TExprId?:
+        let tdef = cx.prog.wk.contains else:
+            return None
+        let cz = self.infer.zonk(
+            mut self.types, self.types.strip_ref(self.resolved(self.ty_of(xs)))
+        )
+        let ct = cx.prog.normalize(mut self.types, cz, self.env)
+        var builtin = False
+        match self.types.data(ct):
+            case TyData.Adt(d, _):
+                builtin = (
+                    Some(d) == cx.prog.wk.list
+                        or Some(d) == cx.prog.wk.set
+                        or Some(d) == cx.prog.wk.dict
+                        or cx.prog.is_builtin(d, "Array")
+                        or self.is_string(cx, ct)
+                )
+            case TyData.Str | TyData.Var(_) | TyData.Error:
+                builtin = True
+            case _:
+                pass
+        if builtin:
+            return None
+        let xz = self.infer.zonk(mut self.types, self.types.strip_ref(self.resolved(self.ty_of(x))))
+        let xt = cx.prog.normalize(mut self.types, xz, self.env)
+        let tr = TraitRef(def_=tdef, args=[xt])
+        if cx.prog.implements(mut self.types, ct, tr, self.env) == Answer.No:
+            return None
+        let m = cx.prog.trait_method(tdef, "contains") else:
+            return None
+        let sig = self.instantiate(cx, m, None, range)
+        if let Some(v) = sig.type_args.first():
+            _ = self.infer.try_unify(mut self.types, v, ct)
+        if len(sig.type_args) > 1:
+            _ = self.infer.try_unify(mut self.types, sig.type_args[1], xt)
+        let args = [self.contains_arg(xs), self.contains_arg(x)]
+        let call = TExprKind.Call(
+            callee=Callee.Fn(def_=m, type_args=sig.type_args.copy()), args=args
+        )
+        let made = self.add(call, Ty.bool(), range)
+        if negate:
+            return Some(self.add(TExprKind.Unary(op=UnOp.Not, operand=made), Ty.bool(), range))
+        return Some(made)
+
+    ## An operand of `contains_call`: a reference as it is, anything else
+    ## borrowed.
+    pure def contains_arg(self, e: TExprId) -> TArg:
+        if let TyData.Ref(_, _) = self.types.data(self.resolved(self.ty_of(e))):
+            return TArg(expr=e, mode=ArgMode.Value)
+        return TArg(expr=e, mode=ArgMode.Ref)
 
     pure def strip_text(mut self, cx: Cx, t: Ty) -> Ty:
         let s = self.resolved(self.types.strip_ref(t))

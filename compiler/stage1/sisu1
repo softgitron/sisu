@@ -13,6 +13,11 @@
 #   sisu1 run [PATH] [-- ARGS...]                the program built into a temporary directory and
 #                                                run with ARGS, with its exit status
 #
+# `check`, `build` and `run` take `--features NAMES` (the root package's
+# features to turn on, separated by commas or spaces, `DEP/FEATURE` for a
+# dependency's, any number of times) and `--no-default-features`, as `sisu`
+# does (decision 250).
+#
 # PATH is a file or the directory of a package or workspace (whose members
 # `build` builds in turn); without one, the package of the working
 # directory, whose lockfile `check`, `sir` and `build` write as `sisu`
@@ -52,6 +57,23 @@ if [ "${1:-}" != run ]; then
     exec "$exe" --home "$compiler" "$@"
 fi
 shift
+# The features the build turns on (decision 250), before the path, as
+# `sisu run` takes its options.
+features=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --features)
+            features+=("$1" "${2:-}")
+            shift
+            [ $# -gt 0 ] && shift
+            ;;
+        --features=*|--no-default-features)
+            features+=("$1")
+            shift
+            ;;
+        *) break ;;
+    esac
+done
 # Without a path, the package of the working directory or the nearest
 # one above it, as `sisu run` finds it.
 path=()
@@ -62,6 +84,7 @@ fi
 [ "${1:-}" = "--" ] && shift
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-"$exe" --home "$compiler" build --native ${path[@]+"${path[@]}"} --output "$tmp/program" > /dev/null || exit $?
+"$exe" --home "$compiler" build --native ${features[@]+"${features[@]}"} ${path[@]+"${path[@]}"} \
+    --output "$tmp/program" > /dev/null || exit $?
 "$tmp/program" "$@"
 exit $?

@@ -395,7 +395,7 @@ impl Checker:
             let t = cx.prog.normalize(mut self.types, z, self.env)
             if self.infer.has_vars(mut self.types, t) or self.types.contains_error(t):
                 continue
-            if cx.prog.can_borrow(mut self.types, t):
+            if cx.prog.can_borrow_in(mut self.types, t, self.env):
                 let shown = self.show(cx, t)
                 let d = Diagnostic.new(Msg.BorrowViewInOwner, span.start, span.end)
                 self.report_other(d.with("ty", shown).with("owner", owner))

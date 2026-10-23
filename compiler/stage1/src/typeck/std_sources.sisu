@@ -23,6 +23,17 @@ pub pure def importable() -> list[str]:
         "num",
         "string",
         "fmt",
+        "par",
+        "io",
+        "fs",
+        "rand",
+        "encoding",
+        "hash",
+        "sort",
+        "search",
+        "process",
+        "env",
+        "regex",
     ]
 
 ## The paths an import may name a std module by, for the fix of one that
@@ -47,6 +58,17 @@ pub pure def module_paths() -> list[String]:
         "std.core",
         "std.string",
         "std.fmt",
+        "std.par",
+        "std.io",
+        "std.fs",
+        "std.rand",
+        "std.encoding",
+        "std.hash",
+        "std.sort",
+        "std.search",
+        "std.process",
+        "std.env",
+        "std.regex",
     ]:
         out.push(p.to_string())
     return out
@@ -75,6 +97,17 @@ pub pure def module_for(words: list[String]) -> String?:
         case "std.core": Some("prelude".to_string())
         case "std.string": Some("string".to_string())
         case "std.fmt": Some("fmt".to_string())
+        case "std.par": Some("par".to_string())
+        case "std.io": Some("io".to_string())
+        case "std.fs": Some("fs".to_string())
+        case "std.rand": Some("rand".to_string())
+        case "std.encoding": Some("encoding".to_string())
+        case "std.hash": Some("hash".to_string())
+        case "std.sort": Some("sort".to_string())
+        case "std.search": Some("search".to_string())
+        case "std.process": Some("process".to_string())
+        case "std.env": Some("env".to_string())
+        case "std.regex": Some("regex".to_string())
         case _: None
 
 ## The prelude's names a std module re-exports (`from std.time import
@@ -137,6 +170,18 @@ pub pure def reexports(module: str) -> list[str]:
         return ["String"]
     if module == "fmt":
         return ["Display", "Debug", "Formatter", "Spec"]
+    if module == "io":
+        return ["Conn", "Stream", "IoError", "NetError", "Utf8Error", "Stdin"]
+    if module == "fs":
+        return ["Fs", "FsOps", "Path", "Metadata", "IoError"]
+    if module == "rand":
+        return ["Rand", "RandOps"]
+    if module == "encoding":
+        return ["Utf8Error"]
+    if module == "process":
+        return ["Proc", "ProcOps", "ProcOutput", "ProcError"]
+    if module == "env":
+        return ["Env", "EnvOps"]
     return []
 
 ## The sized integer types (03, "Numbers"), narrowest first in each kind.

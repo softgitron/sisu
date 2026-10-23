@@ -77,7 +77,7 @@ from stage1.diag import (
 from stage1.lexer import Lexed, lex
 from stage1.lower.names import CONTRACTS_ALL, CONTRACTS_OFF, CONTRACTS_PRECONDITIONS
 from stage1.mutants import Rng, mutate
-from stage1.package import Layout, Problem, Target
+from stage1.package import FeatureRequest, Layout, Problem, Target
 from stage1.parser import parse, parse_lexed
 from stage1.resolve import Environment, ModuleNames, NamedModule, imported_std_modules
 from stage1.syntax.ast import ExprKind, StrPart, build
@@ -240,7 +240,8 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         var env = environment(sys, home)?
         var out = String.new()
         var why = String.new()
-        for input in inputs_of(sys, home, rest[1], False, True, mut env, catalog)?:
+        let request = FeatureRequest.none()
+        for input in inputs_of(sys, home, rest[1], False, True, request, mut env, catalog)?:
             let checked = types_of(base, input, catalog, mut kept)
             out.push(typeck.render(input.modules[0].text, checked, catalog))
             for b in checked.beyond:
@@ -260,7 +261,8 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             n += 1
             var out = String.new()
             var why = String.new()
-            for input in inputs_of(sys, home, path, False, True, mut env, catalog)?:
+            let request = FeatureRequest.none()
+            for input in inputs_of(sys, home, path, False, True, request, mut env, catalog)?:
                 let checked = types_of(base, input, catalog, mut kept)
                 out.push(typeck.render(input.modules[0].text, checked, catalog))
                 for b in checked.beyond:
@@ -382,21 +384,29 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     if command == "check":
         # `--format=ids`: the conformance form on standard output; else
         # the human form on standard error, as `sisu check` prints them.
+        # `--features NAMES` and `--no-default-features` choose the root
+        # package's features (decision 250).
         let ids = rest.contains("--format=ids")
-        let flags = ["--format=ids", "--format=human", "--locked"]
-        var path = path_of(rest, flags) else:
+        let (request, words) = feature_request(rest)
+        let flags = ["--format=ids", "--format=human", "--locked", "--no-default-features"]
+        var path = path_of(words, flags) else:
             return Err(Usage(text=usage()))
-        if not names_path(rest, flags):
+        if not names_path(words, flags):
             let found = nearest_package(sys, "check", catalog) else:
                 return Err(Failed)
             path = found
+        if let Some(e) = unknown_feature(sys, path, request):
+            emit("", catalog.plain_error("cli.unknown-feature", e))
+            return Err(Failed)
         # `--locked` keeps the lockfile as it is, or stops the command.
-        if not write_lockfile(sys, path, False, rest.contains("--locked"), catalog)?:
+        if not write_lockfile(sys, path, False, words.contains("--locked"), catalog)?:
             return Err(Failed)
         let base = typeck.base(std_texts(sys, home)?, catalog)
         var kept = Kept.new()
         var env = environment(sys, home)?
-        let reports = reports_of(sys, home, path, path, True, base, mut env, catalog, mut kept)?
+        let reports = reports_of(
+            sys, home, path, path, True, request, base, mut env, catalog, mut kept
+        )?
         var out = String.new()
         var why = String.new()
         var failed = False
@@ -431,7 +441,9 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             # A program of one file is named by its file's name, as stage
             # 0 names it when run in the file's directory.
             let name = package.file_name(path)
-            let reports = reports_of(sys, home, path, name, True, base, mut env, catalog, mut kept)?
+            let reports = reports_of(
+                sys, home, path, name, True, FeatureRequest.none(), base, mut env, catalog, mut kept
+            )?
             var ids = String.new()
             var human = String.new()
             var why = String.new()
@@ -452,26 +464,27 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         # `--release`, decision 232).
         var output: String? = None
         var contracts: String? = None
+        let (request, given) = feature_request(rest)
         var words: list[String] = []
         var k = 0
-        while k < len(rest):
-            if rest[k] == "--output" and k + 1 < len(rest):
-                output = Some(rest[k + 1].copy())
+        while k < len(given):
+            if given[k] == "--output" and k + 1 < len(given):
+                output = Some(given[k + 1].copy())
                 k += 2
                 continue
-            if rest[k] == "--contracts" and k + 1 < len(rest):
-                contracts = Some(rest[k + 1].copy())
+            if given[k] == "--contracts" and k + 1 < len(given):
+                contracts = Some(given[k + 1].copy())
                 k += 2
                 continue
-            if rest[k].starts_with("--contracts="):
-                contracts = Some(rest[k].byte_slice(12, rest[k].byte_len()).to_string())
+            if given[k].starts_with("--contracts="):
+                contracts = Some(given[k].byte_slice(12, given[k].byte_len()).to_string())
                 k += 1
                 continue
-            words.push(rest[k].copy())
+            words.push(given[k].copy())
             k += 1
         let native = words.contains("--native")
         let release = words.contains("--release")
-        let flags = ["--native", "--release", "--locked"]
+        let flags = ["--native", "--release", "--locked", "--no-default-features"]
         var path = path_of(words, flags) else:
             return Err(Usage(text=usage()))
         if not names_path(words, flags):
@@ -504,8 +517,13 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         if release and not native:
             emit("", catalog.plain_error("native.release", []))
             return Err(Failed)
+        if let Some(e) = unknown_feature(sys, path, request):
+            emit("", catalog.plain_error("cli.unknown-feature", e))
+            return Err(Failed)
         let locked = words.contains("--locked")
-        return build_command(sys, home, path, native, release, locked, level, output, catalog)
+        return build_command(
+            sys, home, path, native, release, locked, level, output, request, catalog
+        )
     if command == "mutate" and len(rest) == 5:
         let seed = rest[1].parse_int() ?? 1
         let count = rest[2].parse_int() ?? 0
@@ -589,10 +607,11 @@ def inputs_of(
     arg: str,
     sir: bool,
     tests: bool,
+    request: FeatureRequest,
     mut env: Environment,
     catalog: Catalog,
 ) -> list[Input] ! IoError:
-    let layouts = layouts_of(sys, arg, sir) else:
+    let layouts = layouts_of(sys, arg, sir, request) else:
         let text = sys.fs.read_to_string(Path.new(arg))?
         let built = name_diagnostics(sys, home, text, tests, Features.none(), mut env, catalog)?
         let (syntax, names, cfg_diags) = built
@@ -869,7 +888,7 @@ def lowering_of(
     var done = Lowering(sir=String.new(), ownership=String.new(), beyond=[], entry=False)
     var checks: list[Input] = []
     if ownership:
-        checks = inputs_of(sys, home, arg, False, True, mut env, catalog)?
+        checks = inputs_of(sys, home, arg, False, True, FeatureRequest.none(), mut env, catalog)?
     let level = sir ?? CONTRACTS_ALL
     var sir_done = sir.is_none()
     for input in checks:
@@ -887,11 +906,12 @@ def lowering_of(
     # The program built without its tests: a file's, a package's, or a
     # workspace's one application.
     var app: Input? = None
-    if let Some(layouts) = layouts_of(sys, arg, True):
+    if let Some(layouts) = layouts_of(sys, arg, True, FeatureRequest.none()):
         if len(layouts) == 1 and not layouts[0].modules.is_empty():
             app = Some(layout_input(sys, home, layouts[0], False, mut env, catalog)?)
     else:
-        let built = inputs_of(sys, home, arg, False, False, mut env, catalog)?
+        let none = FeatureRequest.none()
+        let built = inputs_of(sys, home, arg, False, False, none, mut env, catalog)?
         if let Some(x) = built.first():
             app = Some(x.copy())
     if let Some(input) = app:
@@ -1122,14 +1142,15 @@ def reports_of(
     arg: str,
     name: str,
     tests: bool,
+    request: FeatureRequest,
     base: typeck.Base,
     mut env: Environment,
     catalog: Catalog,
     mut kept: Kept,
 ) -> list[Report] ! IoError:
     var out: list[Report] = []
-    let layouts = layouts_of(sys, arg, False) else:
-        for input in inputs_of(sys, home, arg, False, tests, mut env, catalog)?:
+    let layouts = layouts_of(sys, arg, False, request) else:
+        for input in inputs_of(sys, home, arg, False, tests, request, mut env, catalog)?:
             out.push(report_of(base, input, name, catalog, mut kept))
         return Ok(out)
     for layout in layouts:
@@ -1427,6 +1448,7 @@ def build_command(
     locked: bool,
     level: int?,
     output: String?,
+    request: FeatureRequest,
     catalog: Catalog,
 ) -> ! {IoError, CommandError}:
     if not write_lockfile(sys, path, False, locked, catalog)?:
@@ -1436,7 +1458,7 @@ def build_command(
     var env = environment(sys, home)?
     var programs: list[Input] = []
     var failed = False
-    match layouts_of(sys, path, False):
+    match layouts_of(sys, path, False, request):
         case Some(layouts):
             for layout in layouts:
                 if layout.modules.is_empty():
@@ -1446,7 +1468,7 @@ def build_command(
                     continue
                 programs.push(layout_input(sys, home, layout, False, mut env, catalog)?)
         case None:
-            for input in inputs_of(sys, home, path, False, False, mut env, catalog)?:
+            for input in inputs_of(sys, home, path, False, False, request, mut env, catalog)?:
                 programs.push(input.copy())
     for input in programs:
         if not build_program(
@@ -1962,17 +1984,80 @@ def absolute(sys: System, p: str) -> String:
 ## (each member's, or for `sir` the one application's), or a script with
 ## dependencies or broken metadata. `None` for a file that is a program of
 ## one module on its own.
-def layouts_of(sys: System, arg: str, sir: bool) -> list[Layout]?:
+def layouts_of(sys: System, arg: str, sir: bool, request: FeatureRequest) -> list[Layout]?:
     let abs = absolute(sys, arg)
     let target = package.locate(sys.fs, abs) else:
         return Some([])
     if let Target.File(f) = target:
         let text = package.read_text(sys.fs, f) ?? String.new()
-        let layout = package.load_file(sys.fs, package.file_name(f), f, text)
+        let layout = package.load_file_with(sys.fs, package.file_name(f), f, text, request)
         if len(layout.packages) == 1 and layout.problems.is_empty():
             return None
         return Some([layout])
-    return Some(package.load_target(sys.fs, target, sir))
+    return Some(package.load_target(sys.fs, target, sir, request))
+
+## The features the words of a command line ask for (`--features NAMES`,
+## any number of times, the names separated by commas or spaces;
+## `--no-default-features`; decision 250), and the words without
+## `--features` and its value.
+pure def feature_request(rest: list[String]) -> (FeatureRequest, list[String]):
+    var request = FeatureRequest.none()
+    var words: list[String] = []
+    var k = 0
+    while k < len(rest):
+        var value: String? = None
+        if rest[k] == "--features":
+            if k + 1 < len(rest):
+                value = Some(rest[k + 1].copy())
+            else:
+                value = Some(String.new())
+            k += 2
+        elif rest[k].starts_with("--features="):
+            value = Some(rest[k].byte_slice(11, rest[k].byte_len()).to_string())
+            k += 1
+        else:
+            if rest[k] == "--no-default-features":
+                request.no_default = True
+            words.push(rest[k].copy())
+            k += 1
+            continue
+        if let Some(v) = value:
+            var name = String.new()
+            for c in v.chars():
+                if c == ',' or c.is_whitespace():
+                    if not name.is_empty():
+                        request.names.push(name.copy())
+                    name = String.new()
+                else:
+                    name.push_char(c)
+            if not name.is_empty():
+                request.names.push(name)
+    return (request, words)
+
+## The first name `--features` gives that is not a feature of the package
+## it names (`cli.unknown-feature`, `D0112`, decision 250), with that
+## package, as stage 0's driver reports it before it writes a lockfile: a
+## file that is no script declares none, and is named as it was given.
+def unknown_feature(sys: System, arg: str, request: FeatureRequest) -> list[Param]?:
+    if request.names.is_empty():
+        return None
+    let target = package.locate(sys.fs, absolute(sys, arg)) else:
+        return None
+    var layouts: list[Layout] = []
+    if let Target.File(f) = target:
+        let text = package.read_text(sys.fs, f) ?? String.new()
+        layouts.push(package.load_file_with(sys.fs, arg, f, text, request))
+    else:
+        layouts = package.load_target(sys.fs, target, False, request)
+    for l in layouts:
+        if let Some((name, owner)) = l.unknown_requested.first():
+            return Some(
+                [
+                    Param(name="name".to_string(), value=name.copy()),
+                    Param(name="package".to_string(), value=owner.copy()),
+                ]
+            )
+    return None
 
 ## The modules of a layout, read and parsed, each as a build with or
 ## without its tests compiles it, after loading the std modules they import
@@ -2022,7 +2107,7 @@ pure def packages_of(layout: Layout) -> list[(String, list[(String, int)])]:
 def names_of(
     sys: System, home: str, arg: str, mut env: Environment, catalog: Catalog
 ) -> String ! IoError:
-    let layouts = layouts_of(sys, arg, False) else:
+    let layouts = layouts_of(sys, arg, False, FeatureRequest.none()) else:
         let text = sys.fs.read_to_string(Path.new(arg))?
         return names(sys, home, text, mut env, catalog)
     var out = String.new()

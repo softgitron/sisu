@@ -3,6 +3,7 @@
 # the directory of a package (or of a workspace), which stage 0 checks from
 # inside it.
 compiler/conformance/cases/capabilities/attenuation.sisu
+compiler/conformance/cases/capabilities/closure_drops.sisu
 compiler/conformance/cases/capabilities/datetime.sisu
 compiler/conformance/cases/capabilities/fake_rejected.sisu
 compiler/conformance/cases/capabilities/fakes.sisu
@@ -20,6 +21,7 @@ compiler/conformance/cases/capabilities/wrap_trait.sisu
 compiler/conformance/cases/comptime/baked.sisu
 compiler/conformance/cases/comptime/cfg.sisu
 compiler/conformance/cases/comptime/cfg_errors.sisu
+compiler/conformance/cases/comptime/comptime_defs.sisu
 compiler/conformance/cases/comptime/constants.sisu
 compiler/conformance/cases/comptime/derive_default.sisu
 compiler/conformance/cases/comptime/derive_default_errors.sisu
@@ -30,6 +32,7 @@ compiler/conformance/cases/comptime/evaluation_errors.sisu
 compiler/conformance/cases/comptime/generic_assert.sisu
 compiler/conformance/cases/comptime/proposal_arrays.sisu
 compiler/conformance/cases/comptime/proposal_derive.sisu
+compiler/conformance/cases/comptime/reflecting_values.sisu
 compiler/conformance/cases/concurrency/cancellation.sisu
 compiler/conformance/cases/concurrency/channel_owner_errors.sisu
 compiler/conformance/cases/concurrency/channels.sisu
@@ -37,6 +40,8 @@ compiler/conformance/cases/concurrency/deadlock.sisu
 compiler/conformance/cases/concurrency/failures.sisu
 compiler/conformance/cases/concurrency/generator_close.sisu
 compiler/conformance/cases/concurrency/generator_close_panic.sisu
+compiler/conformance/cases/concurrency/generator_driven.sisu
+compiler/conformance/cases/concurrency/generator_driven_wait.sisu
 compiler/conformance/cases/concurrency/generators.sisu
 compiler/conformance/cases/concurrency/join.sisu
 compiler/conformance/cases/concurrency/logging.sisu
@@ -44,6 +49,7 @@ compiler/conformance/cases/concurrency/mutex.sisu
 compiler/conformance/cases/concurrency/panics.sisu
 compiler/conformance/cases/concurrency/pure_scope.sisu
 compiler/conformance/cases/concurrency/race.sisu
+compiler/conformance/cases/concurrency/rwlock_writers.sisu
 compiler/conformance/cases/concurrency/select.sisu
 compiler/conformance/cases/concurrency/send_sync.sisu
 compiler/conformance/cases/concurrency/stack_overflow.sisu
@@ -61,6 +67,7 @@ compiler/conformance/cases/contracts/proposal_contracts.sisu
 compiler/conformance/cases/contracts/refinement_constants.sisu
 compiler/conformance/cases/contracts/refinement_errors.sisu
 compiler/conformance/cases/contracts/refinements.sisu
+compiler/conformance/cases/contracts/result_references.sisu
 compiler/conformance/cases/examples/capabilities.sisu
 compiler/conformance/cases/examples/concurrency.sisu
 compiler/conformance/cases/examples/errors.sisu
@@ -159,6 +166,7 @@ compiler/conformance/cases/ownership/pure_drop.sisu
 compiler/conformance/cases/ownership/push_while_borrowed.sisu
 compiler/conformance/cases/ownership/recursive_types.sisu
 compiler/conformance/cases/ownership/ref_field.sisu
+compiler/conformance/cases/ownership/reference_params.sisu
 compiler/conformance/cases/ownership/return_local.sisu
 compiler/conformance/cases/ownership/return_not_from.sisu
 compiler/conformance/cases/ownership/returned_borrows.sisu
@@ -203,16 +211,20 @@ compiler/conformance/cases/packages/watch.pkg
 compiler/conformance/cases/packages/workspace.pkg
 compiler/conformance/cases/reflect/cli.sisu
 compiler/conformance/cases/reflect/cli_rejected.sisu
+compiler/conformance/cases/reflect/closures.sisu
 compiler/conformance/cases/reflect/comptime_panic.sisu
 compiler/conformance/cases/reflect/embed.sisu
 compiler/conformance/cases/reflect/embed_rejected.sisu
 compiler/conformance/cases/reflect/json.sisu
 compiler/conformance/cases/reflect/methods.sisu
+compiler/conformance/cases/reflect/methods_of.sisu
 compiler/conformance/cases/reflect/methods_rejected.sisu
 compiler/conformance/cases/reflect/promotion.sisu
 compiler/conformance/cases/reflect/proposal_comptime.sisu
 compiler/conformance/cases/reflect/queries.sisu
 compiler/conformance/cases/reflect/target.sisu
+compiler/conformance/cases/reflect/tests.sisu
+compiler/conformance/cases/reflect/trait_methods.sisu
 compiler/conformance/cases/reflect/unbounded.sisu
 compiler/conformance/cases/replay/network.sisu
 compiler/conformance/cases/replay/panic.sisu
@@ -238,8 +250,10 @@ compiler/conformance/cases/run/errors.sisu
 compiler/conformance/cases/run/expect.sisu
 compiler/conformance/cases/run/f32.sisu
 compiler/conformance/cases/run/format_specs.sisu
+compiler/conformance/cases/run/inline_operations.sisu
 compiler/conformance/cases/run/integer_division.sisu
 compiler/conformance/cases/run/interpolation.sisu
+compiler/conformance/cases/run/iterable_iterator.sisu
 compiler/conformance/cases/run/iterable_rest.sisu
 compiler/conformance/cases/run/iterators.sisu
 compiler/conformance/cases/run/let_else_copy.sisu
@@ -277,8 +291,21 @@ compiler/conformance/cases/sir/straight_line.sisu
 compiler/conformance/cases/sir/try_operator.sisu
 compiler/conformance/cases/std/copied_receiver.sisu
 compiler/conformance/cases/std/doc_examples.sisu
+compiler/conformance/cases/std/encoding.sisu
+compiler/conformance/cases/std/fs.sisu
+compiler/conformance/cases/std/hash.sisu
+compiler/conformance/cases/std/io.sisu
+compiler/conformance/cases/std/json_decode.sisu
 compiler/conformance/cases/std/modules.sisu
+compiler/conformance/cases/std/num_exact.sisu
 compiler/conformance/cases/std/ord_impls.sisu
+compiler/conformance/cases/std/par.sisu
+compiler/conformance/cases/std/process_env.sisu
+compiler/conformance/cases/std/rand.sisu
+compiler/conformance/cases/std/regex.sisu
+compiler/conformance/cases/std/search.sisu
+compiler/conformance/cases/std/sort.sisu
+compiler/conformance/cases/std/text_math.sisu
 compiler/conformance/cases/syntax/bad_indent.sisu
 compiler/conformance/cases/syntax/broken_declaration.sisu
 compiler/conformance/cases/syntax/broken_header.sisu
@@ -318,6 +345,7 @@ compiler/conformance/cases/traits/assoc_errors.sisu
 compiler/conformance/cases/traits/assoc_types.sisu
 compiler/conformance/cases/traits/basics.sisu
 compiler/conformance/cases/traits/bound_not_satisfied.sisu
+compiler/conformance/cases/traits/contains.sisu
 compiler/conformance/cases/traits/custom_hash_key.sisu
 compiler/conformance/cases/traits/delegate.sisu
 compiler/conformance/cases/traits/delegate_errors.sisu

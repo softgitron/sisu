@@ -31,7 +31,7 @@
 ##! enum; and a value holding a loan may be stored through a `mut`
 ##! parameter only if the loan is that parameter's own.
 
-from stage1.borrowck.bitset import BitSet, LEFT_OUT, Rows, WORD
+from stage1.borrowck.bitset import BitSet, LEFT_OUT, Rows
 from stage1.borrowck.finding import Arg, Finding, FindingParam, param, text
 from stage1.borrowck.init import dest, index_locals, operands, targets
 from stage1.borrowck.names import is_named, is_overwrite, local_name, place_name
@@ -129,8 +129,13 @@ pub struct State:
     ## The loans each local may hold, a row per local.
     pub holds: Rows
     ## For a local holding a reference, the loans that are the reference
-    ## itself (rather than loans of what it points into), when known.
-    pub direct: list[BitSet?]
+    ## itself (rather than loans of what it points into), when known: its
+    ## row here, and its member of `known`. The row of a reference that is
+    ## not known is empty. Rows rather than a set per local: a copy of the
+    ## state copies their words at once, as it copies `holds`'s, where a
+    ## list of sets is copied a set at a time.
+    pub direct: Rows
+    pub known: BitSet
     ## Two-phase loans whose reference has been used.
     pub activated: BitSet
     ## Loans a task spawned on this scope holds: live until the body
@@ -150,15 +155,38 @@ impl State:
     ## block that does not unwind.
     pure def none() -> State:
         let none: list[int] = []
+        let slots = Shared(none)
         return State(
-            holds=Rows.with_slots(Shared(none), 0),
-            direct=[],
+            holds=Rows.with_slots(slots.copy(), 0),
+            direct=Rows.with_slots(slots, 0),
+            known=BitSet.new(0),
             activated=BitSet.new(0),
             pinned=BitSet.new(0),
             touched=[],
             log=[],
             logging=False,
         )
+
+    ## The reference of local `l`, when it is known.
+    pub pure def direct_of(self, l: int) -> BitSet?:
+        if self.known.contains(l):
+            return Some(self.direct.get(l))
+        return None
+
+    ## Whether the reference of local `l` is known.
+    pub pure def has_direct(self, l: int) -> bool:
+        return self.known.contains(l)
+
+    ## Makes the reference of local `l` `d`, or not known.
+    pub pure def set_direct(mut self, l: int, d: BitSet?):
+        match d:
+            case Some(s):
+                self.direct.set(l, s)
+                _ = self.known.insert(l)
+            case None:
+                if self.known.contains(l):
+                    self.known.remove(l)
+                    self.direct.clear_row(l)
 
     ## Records that a transfer writes the row and the reference of local
     ## `l`, and while `logging`, what they were before its first write.
@@ -172,9 +200,7 @@ impl State:
             if self.log[k].0 == l:
                 return
             k += 1
-        let row = self.holds.get(l)
-        let direct = self.direct[l].copy()
-        self.log.push((l, row, direct))
+        self.log.push((l, self.holds.get(l), self.direct_of(l)))
 
     ## Puts back the rows and references `log` kept, and the activated and
     ## pinned loans the state had when `logging` was set, and stops
@@ -182,52 +208,42 @@ impl State:
     pub pure def undo(mut self, own activated: BitSet, own pinned: BitSet):
         while let Some((l, row, direct)) = self.log.pop():
             self.holds.set(l, row)
-            self.direct[l] = direct
+            self.set_direct(l, direct)
         self.activated = activated
         self.pinned = pinned
         self.touched = []
         self.logging = False
 
-    ## A copy that keeps no log.
+    ## A copy that keeps no log: the rows, the references and the sets,
+    ## without the log and the touched locals.
     pure def detached(self) -> State:
-        var c = self.copy()
-        c.touched = []
-        c.log = []
-        c.logging = False
-        return c
+        return State(
+            holds=self.holds.copy(),
+            direct=self.direct.copy(),
+            known=self.known.copy(),
+            activated=self.activated.copy(),
+            pinned=self.pinned.copy(),
+            touched=[],
+            log=[],
+            logging=False,
+        )
 
-    ## Makes this state `o`, in place where it can: the rows' words, and
-    ## each reference into the set already there.
+    ## Makes this state `o`.
     pub pure def assign(mut self, o: State):
         self.holds.assign(o.holds)
-        let n = len(o.direct)
-        if len(self.direct) != n:
-            self.direct = o.direct.copy()
-        else:
-            var i = 0
-            while i < n:
-                self.assign_direct(i, o)
-                i += 1
+        self.direct.assign(o.direct)
+        self.known.assign(o.known)
         self.activated.assign(o.activated)
         self.pinned.assign(o.pinned)
         self.touched = []
 
-    ## Makes the reference of local `i` `o`'s, in place where it can.
+    ## Makes the reference of local `i` `o`'s.
     pure def assign_direct(mut self, i: int, o: State):
-        match o.direct[i]:
-            case Some(y):
-                var fresh = True
-                if let Some(x) = ref mut self.direct[i]:
-                    x.assign(y)
-                    fresh = False
-                if fresh:
-                    self.direct[i] = Some(y.copy())
-            case None:
-                var some = False
-                if let Some(_) = self.direct[i]:
-                    some = True
-                if some:
-                    self.direct[i] = None
+        self.direct.set_from(i, o.direct)
+        if o.known.contains(i):
+            _ = self.known.insert(i)
+        else:
+            self.known.remove(i)
 
     ## Brings this state, which was `o` before the transfers since
     ## `o.touched` was last cleared, up to `o`: only the rows and references
@@ -245,6 +261,18 @@ impl State:
             k += 1
         o.touched = []
 
+    ## Joins the reference of local `i` of `o` into this state's: the union
+    ## of two known ones, not known when either is not; returns whether it
+    ## changed.
+    pure def join_direct(mut self, i: int, o: State) -> bool:
+        if not self.known.contains(i):
+            return False
+        if o.known.contains(i):
+            return self.direct.union_from(i, o.direct)
+        self.known.remove(i)
+        self.direct.clear_row(i)
+        return True
+
     ## Joins `o` into this state; returns whether anything changed, and
     ## adds to `marks` each local whose row or reference did.
     pub pure def join(mut self, o: State, mut marks: BitSet) -> bool:
@@ -253,27 +281,20 @@ impl State:
             changed = True
         if self.holds.union_marking(o.holds, mut marks):
             changed = True
-        # Matched rather than asked `is_some`, here and in the other loops
-        # over every statement or local: natively, a call of an intrinsic
-        # (`is_some`, a `for` loop's `next`) costs more than the rest of a
-        # step.
-        let n = len(self.direct)
-        var i = 0
-        while i < n:
-            var gone = False
-            if let Some(x) = ref mut self.direct[i]:
-                match o.direct[i]:
-                    case Some(y):
-                        if x.union(y):
-                            _ = marks.insert(i)
-                            changed = True
-                    case None:
-                        gone = True
-            if gone:
-                self.direct[i] = None
-                _ = marks.insert(i)
-                changed = True
-            i += 1
+        # The known references, a word of locals at a time.
+        let n = len(self.known.words)
+        var k = 0
+        while k < n:
+            var w = self.known.words[k]
+            var i = k * 62
+            while w != 0:
+                if (w & 1) != 0:
+                    if self.join_direct(i, o):
+                        _ = marks.insert(i)
+                        changed = True
+                w = w >> 1
+                i += 1
+            k += 1
         if self.activated.union(o.activated):
             changed = True
         return changed
@@ -292,16 +313,7 @@ impl State:
         while k < n:
             let i = rows[k]
             var row_changed = self.holds.union_from(i, o.holds)
-            var gone = False
-            if let Some(x) = ref mut self.direct[i]:
-                match o.direct[i]:
-                    case Some(y):
-                        if x.union(y):
-                            row_changed = True
-                    case None:
-                        gone = True
-            if gone:
-                self.direct[i] = None
+            if self.join_direct(i, o):
                 row_changed = True
             if row_changed:
                 _ = marks.insert(i)
@@ -325,16 +337,7 @@ impl State:
         while k < n:
             let i = o.touched[k]
             var row_changed = self.holds.union_from(i, o.holds)
-            var gone = False
-            if let Some(x) = ref mut self.direct[i]:
-                match o.direct[i]:
-                    case Some(y):
-                        if x.union(y):
-                            row_changed = True
-                    case None:
-                        gone = True
-            if gone:
-                self.direct[i] = None
+            if self.join_direct(i, o):
                 row_changed = True
             if row_changed:
                 _ = marks.insert(i)
@@ -513,6 +516,8 @@ pub struct Analysis:
     pub live_in: list[BitSet]
     nloc: int
     nloans: int
+    ## The two-phase loans.
+    two_phase: BitSet
     ## Where each local's loans are in a state's rows: only a local whose
     ## type can hold a loan has a row, since nothing is stored in another's
     ## (see `write`). Every state of the function shares them.
@@ -521,6 +526,13 @@ pub struct Analysis:
     ## statement, found once for every pass of the dataflow and of
     ## liveness.
     uses: list[list[list[LocalId]]]
+    ## What each block reads before it writes it (its terminator too) and
+    ## what it writes (`defined_locals`): the locals live at its start are
+    ## those, what is live at its end but it writes, and what is live at
+    ## the start of its unwinding block, which `live_before_each` adds
+    ## after each statement.
+    gen: list[BitSet]
+    kill: list[BitSet]
 
 impl Analysis:
     pub pure def run(p: Program, f: Function, types: Types, pin: bool) -> Analysis:
@@ -611,6 +623,10 @@ impl Analysis:
         for _ in range(len(f.blocks)):
             entry.push(None)
             live_in.push(BitSet.new(nloc))
+        var two_phase = BitSet.new(nloans)
+        for id in range(nloans):
+            if loans[id].two_phase():
+                _ = two_phase.insert(id)
         var a = Analysis(
             loans=loans,
             pin=pin,
@@ -621,8 +637,11 @@ impl Analysis:
             live_in=live_in,
             nloc=nloc,
             nloans=nloans,
+            two_phase=two_phase,
             slots=Shared(slots),
             uses=[],
+            gen=[],
+            kill=[],
         )
         # Whether dropping a local runs a user `Drop`, asked once a local.
         var glue: dict[int, bool] = {}
@@ -631,6 +650,22 @@ impl Analysis:
             for s in block.stmts:
                 block_uses.push(a.used_locals(f, types, s, mut glue))
             a.uses.push(block_uses)
+        for b in range(len(f.blocks)):
+            let block = ref f.blocks[b]
+            var gen = BitSet.new(nloc)
+            var kill = BitSet.new(nloc)
+            for l in term_uses(block):
+                _ = gen.insert(l.index)
+            var k = len(block.stmts) - 1
+            while k >= 0:
+                if let Some(d) = defined_locals(block.stmts[k]):
+                    gen.remove(d.index)
+                    _ = kill.insert(d.index)
+                for l in a.uses[b][k]:
+                    _ = gen.insert(l.index)
+                k -= 1
+            a.gen.push(gen)
+            a.kill.push(kill)
         if f.blocks.is_empty():
             return a
         # Holds: forward.
@@ -641,7 +676,7 @@ impl Analysis:
                 if let Type.Ref(_, _) = f.locals[i + 1].ty:
                     var d = BitSet.new(nloans)
                     _ = d.insert(id)
-                    init.direct[i + 1] = Some(d)
+                    init.set_direct(i + 1, Some(d))
         a.entry[0] = Some(init)
         var work: list[int] = []
         var k = len(a.order) - 1
@@ -703,21 +738,16 @@ impl Analysis:
                 u = x.index
             let into_entry = u >= 0 and u < nblocks and u != b and not succ.contains(u)
             let in_place = (into_entry or u < 0) and not succ.contains(b)
-            var st = State.none()
+            var st = if in_place: a.take_entry(b, nblocks) else: a.entry_copy(b)
             var activated = BitSet.new(0)
             var pinned = BitSet.new(0)
             if in_place:
-                a.entry.swap(b, nblocks)
-                if let Some(Some(e)) = a.entry.pop():
-                    st = e
                 activated = st.activated.copy()
                 pinned = st.pinned.copy()
                 st.logging = True
-            elif let Some(e) = a.entry[b]:
-                st = e.copy()
             st.touched = []
             var unwind_changed = False
-            var unwind = State.none()
+            var unwind: State? = None
             if into_entry:
                 # A block whose entry is within its unwinding block's
                 # already (`within_unwind`) joins nothing there.
@@ -733,7 +763,7 @@ impl Analysis:
                     fresh[u] = True
                     unwind_changed = True
             elif u >= 0:
-                unwind = st.copy()
+                unwind = Some(st.detached())
             let count = len(block.stmts)
             var si = 0
             while si < count:
@@ -743,8 +773,8 @@ impl Analysis:
                     if let Some(e) = ref mut a.entry[u]:
                         if e.join_touched(st, start, mut dirty[u]):
                             unwind_changed = True
-                elif u >= 0:
-                    _ = unwind.join_touched(st, start, mut unmarked)
+                elif let Some(w) = ref mut unwind:
+                    _ = w.join_touched(st, start, mut unmarked)
                 si += 1
             # The rows the state at the end can differ in from the one the
             # last visit joined into the successors.
@@ -773,13 +803,15 @@ impl Analysis:
                 elif let Some(e) = ref mut a.entry[t]:
                     # Joined in place, as stage 0 joins it.
                     if from_unwind:
-                        changed = e.join(unwind, mut dirty[t])
+                        if let Some(w) = unwind:
+                            changed = e.join(w, mut dirty[t])
                     elif first:
                         changed = e.join(st, mut dirty[t])
                     else:
                         changed = e.join_rows(st, rows, mut dirty[t])
                 elif from_unwind:
-                    a.entry[t] = Some(unwind.detached())
+                    if let Some(w) = unwind:
+                        a.entry[t] = Some(w.detached())
                     fresh[t] = True
                     changed = True
                 else:
@@ -820,13 +852,30 @@ impl Analysis:
                 a.live_in[b] = all.copy()
         return a
 
+    ## Block `b`'s entry state, taken out of `entry` for a visit that
+    ## transfers it in place: its slot and the spare one past the last
+    ## block's change places, and the spare one is popped.
+    pure def take_entry(mut self, b: int, spare: int) -> State:
+        self.entry.swap(b, spare)
+        if let Some(Some(e)) = self.entry.pop():
+            return e
+        return State.none()
+
+    ## A copy of block `b`'s entry state, which keeps no log.
+    pure def entry_copy(self, b: int) -> State:
+        if let Some(e) = self.entry[b]:
+            return e.detached()
+        return State.none()
+
+    ## Whether local `l` has a row: whether its type can hold a loan.
+    pure def kept(self, l: int) -> bool:
+        return Shared.get(self.slots)[l] >= 0
+
     pure def empty_state(self) -> State:
-        var direct: list[BitSet?] = []
-        for _ in range(self.nloc):
-            direct.push(None)
         return State(
             holds=Rows.with_slots(self.slots.copy(), self.nloans),
-            direct=direct,
+            direct=Rows.with_slots(self.slots.copy(), self.nloans),
+            known=BitSet.new(self.nloc),
             activated=BitSet.new(self.nloans),
             pinned=BitSet.new(self.nloans),
             touched=[],
@@ -853,7 +902,7 @@ impl Analysis:
     ## What the referent of a reference local holds.
     pure def inner_of(self, st: State, r: LocalId) -> BitSet:
         var out = st.holds.get(r.index)
-        let direct = st.direct[r.index].copy() else:
+        let direct = st.direct_of(r.index) else:
             return out
         out.subtract(direct)
         for l in direct.items():
@@ -868,7 +917,6 @@ impl Analysis:
         return self.ref_places.contains(p)
 
     pure def op_loans(self, st: State, made: Made?, oi: int, o: Operand) -> OpLoans:
-        let empty = BitSet.new(self.nloans)
         var pl: Place? = None
         var copied = False
         match o:
@@ -880,7 +928,9 @@ impl Analysis:
             case _:
                 pass
         let p = pl else:
-            return OpLoans(holds=empty.copy(), direct=None, inner=empty)
+            return OpLoans(
+                holds=BitSet.new(self.nloans), direct=None, inner=BitSet.new(self.nloans)
+            )
         let inner = if p.proj.is_empty(): self.inner_of(st, p.local) else: self.value_loans(st, p)
         var r: int? = None
         if let Some(m) = made:
@@ -901,7 +951,7 @@ impl Analysis:
         # which includes what it holds.
         var direct: BitSet? = None
         if p.proj.is_empty():
-            direct = st.direct[p.local.index].copy()
+            direct = st.direct_of(p.local.index)
         elif copied and self.ref_typed(p):
             direct = Some(holds.copy())
         return OpLoans(holds=holds, direct=direct, inner=inner)
@@ -918,40 +968,32 @@ impl Analysis:
     ## Stores loans into a place: a whole local is replaced, a part of one is
     ## added to, and a place through a reference adds to what the reference
     ## points to.
-    pure def write(
-        self,
-        f: Function,
-        types: Types,
-        mut st: State,
-        d: Place,
-        own loans: BitSet,
-        own direct: BitSet?,
-    ):
+    pure def write(self, mut st: State, d: Place, own loans: BitSet, own direct: BitSet?):
+        # A local whose type can hold no loan has no row (`slots`), and
+        # writing its row writes nothing: what it would hold is left out.
         let l = d.local.index
         match first_deref(d):
             case None:
-                let add = filtered(f, types, l, loans)
                 st.touch(l)
                 if d.proj.is_empty():
-                    st.holds.set(l, add)
-                    st.direct[l] = direct
+                    st.holds.set(l, loans)
+                    st.set_direct(l, direct)
                 else:
-                    _ = st.holds.union_row(l, add)
-                    st.direct[l] = None
+                    _ = st.holds.union_row(l, loans)
+                    st.set_direct(l, None)
             case Some(k):
                 var tg: list[int] = []
-                if k == 0 and st.direct[l].is_some():
-                    tg = (st.direct[l].copy() ?? BitSet.new(0)).items()
+                if k == 0 and st.has_direct(l):
+                    tg = st.direct.row_items(l)
                 else:
                     tg = st.holds.row_items(l)
                 for t in tg:
                     if let LoanKind.Local(place, True, _) = self.loans[t].kind:
                         if first_deref(place).is_none():
                             let root = place.local.index
-                            let add = filtered(f, types, root, loans.copy())
                             st.touch(root)
-                            _ = st.holds.union_row(root, add)
-                            st.direct[root] = None
+                            _ = st.holds.union_row(root, loans)
+                            st.set_direct(root, None)
 
     ## The loans a call's result may hold.
     pure def call_result(
@@ -962,7 +1004,7 @@ impl Analysis:
         var inner: list[int] = []
         match callee:
             case Callee.Trait(name, _):
-                if let Some(d) = p.trait_method(name):
+                if let Some(d) = types.trait_method(p, name):
                     from_ = Some(d.from_.copy())
                     inner = d.inner.copy()
             case Callee.Fn(name, _):
@@ -973,7 +1015,7 @@ impl Analysis:
                     from_ = Some(g.from_.copy())
                     inner = g.inner.copy()
             case Callee.Intrinsic(name, _):
-                if let Some(d) = p.intrinsic(name):
+                if let Some(d) = types.intrinsic(p, name):
                     from_ = Some(d.from_.copy())
                     inner = d.inner.copy()
             case Callee.Value(_):
@@ -1000,10 +1042,12 @@ impl Analysis:
     ):
         let made = self.made_at(b, si)
         # A use of a reference activates its two-phase loans.
-        for l in self.uses[b][si]:
-            for x in st.holds.row_items(l.index):
-                if self.loans[x].two_phase():
-                    _ = st.activated.insert(x)
+        let used = ref self.uses[b][si]
+        let nused = len(used)
+        var j = 0
+        while j < nused:
+            st.holds.add_masked_to(used[j].index, self.two_phase, mut st.activated)
+            j += 1
         match s.kind:
             case StatementKind.Assign(d, rv):
                 var loans = BitSet.new(self.nloans)
@@ -1035,9 +1079,9 @@ impl Analysis:
                     if src.proj.is_empty():
                         st.touch(src.local.index)
                         st.holds.clear_row(src.local.index)
-                        st.direct[src.local.index] = None
+                        st.set_direct(src.local.index, None)
                 let written = self.with_keys(st, d, loans)
-                self.write(f, types, mut st, d, written, direct)
+                self.write(mut st, d, written, direct)
             case StatementKind.Call(d, callee, args):
                 var ops: list[OpLoans] = []
                 for oi in range(len(args)):
@@ -1051,7 +1095,7 @@ impl Analysis:
                 var kept: list[int]? = None
                 match callee:
                     case Callee.Intrinsic(name, _):
-                        kept = Some(kept_args(p, name, len(ops)))
+                        kept = Some(kept_args(p, types, name, len(ops)))
                     case Callee.Fn(name, _):
                         var k: list[int] = []
                         match types.function(name):
@@ -1084,16 +1128,16 @@ impl Analysis:
                             if let LoanKind.Local(place, True, _) = self.loans[t].kind:
                                 if first_deref(place).is_none():
                                     let root = place.local.index
-                                    if types.may_hold(f.locals[root].ty):
+                                    if self.kept(root):
                                         st.touch(root)
                                         _ = st.holds.union_row(root, stored)
-                                        st.direct[root] = None
+                                        st.set_direct(root, None)
                 for o in args:
                     if let Operand.Move(src) = o:
                         if src.proj.is_empty():
                             st.touch(src.local.index)
                             st.holds.clear_row(src.local.index)
-                            st.direct[src.local.index] = None
+                            st.set_direct(src.local.index, None)
                 # A task spawned on this body's own scope keeps what it
                 # borrows until the scope ends.
                 if self.pin:
@@ -1101,16 +1145,16 @@ impl Analysis:
                         if scope_body_spawn(f, args) and k < len(ops):
                             _ = st.pinned.union(ops[k].holds)
                 let written = self.with_keys(st, d, result)
-                self.write(f, types, mut st, d, written, None)
+                self.write(mut st, d, written, None)
             case StatementKind.Drop(place, _):
                 if place.proj.is_empty():
                     st.touch(place.local.index)
                     st.holds.clear_row(place.local.index)
-                    st.direct[place.local.index] = None
+                    st.set_direct(place.local.index, None)
             case StatementKind.StorageDead(l):
                 st.touch(l.index)
                 st.holds.clear_row(l.index)
-                st.direct[l.index] = None
+                st.set_direct(l.index, None)
 
     ## A borrow's loans: what the borrowed local holds and the new loan,
     ## which is the reference itself; a new borrow is reserved again until
@@ -1188,27 +1232,10 @@ impl Analysis:
         return out
 
     ## Live locals before each statement of a block, and before its
-    ## terminator (the last element); `out` is live at the block's end.
+    ## terminator (the last element); `out` is live at the block's end. The
+    ## block is walked backward from `out`, and what is live at the start
+    ## of its unwinding block is added after each statement.
     pure def live_before_each(self, f: Function, types: Types, b: int, out: BitSet) -> list[BitSet]:
-        let (_, seen) = self.live_backward(f, types, b, out, True)
-        var res: list[BitSet] = []
-        var k = len(seen) - 1
-        while k >= 0:
-            res.push(seen[k].copy())
-            k -= 1
-        return res
-
-    ## Live locals at the start of a block.
-    pure def live_at_start(self, f: Function, types: Types, b: int, out: BitSet) -> BitSet:
-        let (live, _) = self.live_backward(f, types, b, out, False)
-        return live
-
-    ## Walks a block backward from `out`, live at its end, keeping (when
-    ## `each`) what is live before its terminator and before each
-    ## statement, last first; returns what is live at its start.
-    pure def live_backward(
-        self, f: Function, types: Types, b: int, out: BitSet, each: bool
-    ) -> (BitSet, list[BitSet]):
         let block = ref f.blocks[b]
         var unwind_live: BitSet? = None
         if let Some(u) = block.unwind:
@@ -1219,9 +1246,7 @@ impl Analysis:
             _ = live.insert(l.index)
         if let Some(u) = unwind_live:
             _ = live.union(u)
-        var seen: list[BitSet] = []
-        if each:
-            seen.push(live.copy())
+        var seen: list[BitSet] = [live.copy()]
         var k = len(block.stmts) - 1
         while k >= 0:
             let s = ref block.stmts[k]
@@ -1235,10 +1260,21 @@ impl Analysis:
                 j += 1
             if let Some(u) = unwind_live:
                 _ = live.union(u)
-            if each:
-                seen.push(live.copy())
+            seen.push(live.copy())
             k -= 1
-        return (live, seen)
+        seen.reverse()
+        return seen
+
+    ## Live locals at the start of a block: what `live_before_each` finds
+    ## before its first statement, from the block's `gen` and `kill`.
+    pure def live_at_start(self, f: Function, types: Types, b: int, out: BitSet) -> BitSet:
+        var live = out.copy()
+        live.subtract(self.kill[b])
+        _ = live.union(self.gen[b])
+        if let Some(u) = f.blocks[b].unwind:
+            if u.index < len(self.live_in):
+                _ = live.union(self.live_in[u.index])
+        return live
 
     ## The holds state before each statement of a block (and at its end).
     pure def states(self, p: Program, f: Function, types: Types, b: int) -> list[State]?:
@@ -1257,18 +1293,7 @@ impl Analysis:
 
     pure def live_loans(self, st: State, live: BitSet) -> BitSet:
         var out = st.pinned.copy()
-        let rows = st.holds.len()
-        let n = len(live.words)
-        var k = 0
-        while k < n:
-            var w = live.words[k]
-            var l = k * WORD
-            while w != 0:
-                if (w & 1) != 0 and l < rows:
-                    st.holds.add_to(l, mut out)
-                w = w >> 1
-                l += 1
-            k += 1
+        st.holds.add_rows_to(live, mut out)
         return out
 
     # ---------------------------------------------------------------- checking
@@ -1729,8 +1754,8 @@ impl Analysis:
                     # A borrow through another reference: what that one
                     # points to.
                     var set: list[int] = []
-                    if k == 0 and st.direct[l].is_some():
-                        set = (st.direct[l].copy() ?? BitSet.new(0)).items()
+                    if k == 0 and st.has_direct(l):
+                        set = st.direct.row_items(l)
                     else:
                         set = st.holds.row_items(l)
                     for x in set:
@@ -1758,7 +1783,7 @@ impl Analysis:
             var ops: list[OpLoans] = []
             for oi in range(len(args)):
                 ops.push(self.op_loans(st, made, oi, args[oi]))
-            let kept = kept_args(p, name, len(ops))
+            let kept = kept_args(p, types, name, len(ops))
             for ai in range(len(ops)):
                 let i = self.caller_target(f, types, st, args[ai], ops[ai]) else:
                     continue
@@ -1881,8 +1906,8 @@ impl Analysis:
         if let Some(k) = first_deref(d):
             let r = d.local.index
             var tg: list[int] = []
-            if k == 0 and st.direct[r].is_some():
-                tg = (st.direct[r].copy() ?? BitSet.new(0)).items()
+            if k == 0 and st.has_direct(r):
+                tg = st.direct.row_items(r)
             else:
                 tg = st.holds.row_items(r)
             let i = self.caller_param(f, st, tg) else:
@@ -1991,8 +2016,8 @@ impl Analysis:
                         return False
                     let base = place.local.index
                     var set: list[int] = []
-                    if k == 0 and st.direct[base].is_some():
-                        set = (st.direct[base].copy() ?? BitSet.new(0)).items()
+                    if k == 0 and st.has_direct(base):
+                        set = st.direct.row_items(base)
                     else:
                         set = st.holds.row_items(base)
                     if set.is_empty():
@@ -2086,13 +2111,6 @@ pure def term_uses(block: BasicBlock) -> list[LocalId]:
         case _:
             return []
 
-## The loans a local may hold, none when its type cannot hold one.
-pure def filtered(f: Function, types: Types, local: int, own b: BitSet) -> BitSet:
-    var out = b
-    if not types.may_hold(f.locals[local].ty):
-        out.clear()
-    return out
-
 pure def is_mut_param(f: Function, i: int) -> bool:
     if i >= f.param_count:
         return False
@@ -2147,8 +2165,8 @@ pure def lent_by_value(f: Function, j: int) -> bool:
 
 ## The arguments of an intrinsic call it may keep: those it takes with
 ## `own`, or every argument of an intrinsic SIR does not declare.
-pure def kept_args(p: Program, name: str, n: int) -> list[int]:
-    if let Some(d) = p.intrinsic(name):
+pure def kept_args(p: Program, types: Types, name: str, n: int) -> list[int]:
+    if let Some(d) = types.intrinsic(p, name):
         return d.owns.copy()
     var out: list[int] = []
     for i in range(n):

@@ -391,6 +391,21 @@ impl Checker:
         trailing: Closure?,
         expected: Ty?,
     ) -> TExprId:
+        # A `comptime def` of the trait's, called through it (decision 251).
+        var comptime_fn: DefId? = None
+        if let Some(info) = cx.prog.trait_info(t):
+            for (n, fd) in info.comptime_fns:
+                if comptime_fn.is_none() and n == name.text:
+                    comptime_fn = Some(fd)
+        if let Some(fd) = comptime_fn:
+            match args_in:
+                case Some(given):
+                    let call_args = given.copy()
+                    return self.call_fn(cx, fd, None, None, None, call_args, trailing, at, expected)
+                case None:
+                    let fname = cx.prog.defs[fd.index].name.copy()
+                    self.report_other(self.error(cx, Msg.ComptimeOnly, at).with("name", fname))
+                    return self.error_expr(at)
         let m = cx.prog.trait_method(t, name.text) else:
             let tname = cx.prog.defs[t.index].name.copy()
             let diag = self.error(cx, Msg.TypeUnknownAssociated, name.range).with("ty", tname)
@@ -908,12 +923,57 @@ impl Checker:
             sig.params[i].ty = cx.prog.normalize(mut self.types, z, self.env)
         let zr = self.infer.zonk(mut self.types, sig.ret)
         sig.ret = cx.prog.normalize(mut self.types, zr, self.env)
+        # An associated type of a type the arguments have not told yet
+        # (`Iter[I.Item]` while `I` is unknown) cannot be compared with
+        # anything before it is normalised, so the expected type does not
+        # drive such a call (decision 252).
+        var unknown_projection = False
+        for x in self.types.walk(sig.ret):
+            if let TyData.Assoc(_, _, _) = self.types.data(x):
+                if self.infer.has_vars(mut self.types, x):
+                    unknown_projection = True
         if let Some(exp) = expected:
             # Let the expected type drive inference (`list()`, `todo()`).
-            if self.infer.has_vars(mut self.types, sig.ret):
+            if self.infer.has_vars(mut self.types, sig.ret) and not unknown_projection:
                 let snap = self.infer.snapshot()
                 if not self.infer.unify(mut self.types, sig.ret, exp):
                     self.infer.rollback(snap)
+        # A `comptime def`'s `T: type` parameters take types, which are the
+        # call's type arguments (decision 251): `field_names(Point)`.
+        var given_args = args.copy()
+        let typed = f.type_params.copy()
+        if not typed.is_empty():
+            var rest: list[Arg] = []
+            var given: list[bool] = []
+            for _ in typed:
+                given.push(False)
+            var position = 0
+            for a in args:
+                var k: int? = None
+                match a.name:
+                    case Some(n):
+                        for j in range(len(typed)):
+                            if k.is_none() and typed[j].1 == n.text:
+                                k = Some(j)
+                    case None:
+                        for j in range(len(typed)):
+                            if k.is_none() and typed[j].0 == position:
+                                k = Some(j)
+                        position += 1
+                match k:
+                    case Some(j):
+                        let t = self.expr_as_type(cx, a.value)
+                        if typed[j].2 < len(sig.type_args):
+                            _ = self.infer.try_unify(mut self.types, sig.type_args[typed[j].2], t)
+                        given[j] = True
+                    case None:
+                        rest.push(a.copy())
+            for j in range(len(typed)):
+                if not given[j]:
+                    var d_ = self.error(cx, Msg.TypeMissingArgument, at).with("arg", typed[j].1)
+                    self.report(d_.with("name", cx.prog.defs[d.index].name))
+                    break
+            given_args = rest
         var out: list[TArg] = []
         if let Some(r) = recv:
             out.push(r)
@@ -921,20 +981,21 @@ impl Checker:
         let spawns_before = len(self.spawn_sites)
         # `range(n)` is `range(0, n)` (02, "Prelude functions").
         if Some(d) == cx.prog.wk.range
-                and len(args) == 1
-                and args[0].name.is_none()
+                and len(given_args) == 1
+                and given_args[0].name.is_none()
                 and len(sig.params) >= 2:
             let p = sig.params[1].copy()
-            let zero = self.add(TExprKind.Int(0), Ty.int(), TextRange.empty(args[0].range.start))
+            let start = given_args[0].range.start
+            let zero = self.add(TExprKind.Int(0), Ty.int(), TextRange.empty(start))
             out.push(TArg(expr=zero, mode=ArgMode.Value))
-            out.push(self.check_arg(cx, arg_in(cx.ast, args[0]), p))
+            out.push(self.check_arg(cx, arg_in(cx.ast, given_args[0]), p))
             # The parameters after the two take their defaults, as for any
             # call that omits them.
             for i in range(2, len(sig.params)):
                 if sig.params[i].has_default:
                     out.push(self.default_arg(cx, sig, i, at))
         else:
-            for x in self.check_args(cx, sig, args, trailing, at):
+            for x in self.check_args(cx, sig, given_args, trailing, at):
                 out.push(x)
         let zret = self.infer.zonk(mut self.types, sig.ret)
         var ret = cx.prog.normalize(mut self.types, zret, self.env)
@@ -1291,9 +1352,21 @@ impl Checker:
                     let shown_x = self.show(cx, self.ty_of(x))
                     let d = self.error(cx, Msg.TypeMismatch, a.value_range)
                     self.report(d.with("expected", shown_p).with("found", shown_x))
-                if mode == ForMode.Iter:
-                    return TArg(expr=self.check_movable(cx, x), mode=ArgMode.Value)
-                return TArg(expr=x, mode=ArgMode.Borrow)
+                match mode:
+                    case ForMode.Iter:
+                        return TArg(expr=self.check_movable(cx, x), mode=ArgMode.Value)
+                    case ForMode.Trait:
+                        # A program's iterator, through a generator that
+                        # takes its items (`iter_from`).
+                        let (y, made) = self.iter_from(cx, x, item_ty)
+                        if not made:
+                            let shown_p = self.show(cx, pty)
+                            let shown_x = self.show(cx, self.ty_of(y))
+                            let d = self.error(cx, Msg.TypeMismatch, a.value_range)
+                            self.report(d.with("expected", shown_p).with("found", shown_x))
+                        return TArg(expr=y, mode=ArgMode.Value)
+                    case _:
+                        return TArg(expr=x, mode=ArgMode.Borrow)
             case None:
                 if self.ty_of(x) != Ty.error():
                     let shown_p = self.show(cx, pty)

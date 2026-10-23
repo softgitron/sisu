@@ -39,8 +39,9 @@ from stage1.diag import (
     sort_unique,
 )
 from stage1.parser import parse
-from stage1.syntax.ast import Ast, Block, ExprId, Mode, Module
+from stage1.syntax.ast import Ast, Block, ExprId, ExprKind, Mode, Module
 from stage1.syntax.ast import build
+from stage1.syntax.ast import visit
 from stage1.typeck.check import Checker, Cx, Finished, RetCtx
 from stage1.typeck.collect import Resolver, SourceModule, SourcePackage
 from stage1.typeck.contracts import leading_contracts
@@ -55,7 +56,8 @@ from stage1.typeck.program import (
     Program,
     Request,
 )
-from stage1.typeck.std_sources import builtin_impls, target
+from stage1.typeck.program import param_local_ty as local_ty_of_param
+from stage1.typeck.std_sources import builtin_impls, importable, target
 from stage1.typeck.tasks import has_yield
 from stage1.typeck.template import Templates
 from stage1.typeck.thir import (
@@ -91,14 +93,21 @@ pub struct Base:
     ## Where each line of each of `texts` starts, by name, for the
     ## locations of the std bodies lowering reaches.
     pub lines: dict[String, Lines]
+    ## The generic functions of each std module a program may import that
+    ## call a template with their own type parameters, by the module's name
+    ## (stage 0 checks every body of a program, the standard library's
+    ## among them, and promotes them in its first round).
+    pub std_promoted: dict[String, list[String]]
 
 ## The prelude and the std modules every file sees, resolved once: `texts`
 ## gives the source of each std module by name, to which the base adds the
 ## text of each one's derived impls, `<derive>/NAME.sisu`; `catalog` is the
 ## message catalog the programs checked against the base are checked with.
 pub pure def base(texts: dict[String, String], catalog: Catalog) -> Base:
-    var r = Resolver.base(texts)
+    let (made, everything) = Resolver.base_with_all(texts)
+    var r = made
     r.catalog = Shared(catalog.copy())
+    let promoted = std_promotions(everything, texts, catalog)
     let templates = r.std_derives.copy()
     r.std_derives = Templates.none()
     let std_syntax = r.std_kept.copy()
@@ -114,8 +123,83 @@ pub pure def base(texts: dict[String, String], catalog: Catalog) -> Base:
     _ = all.insert("target".to_string(), target())
     _ = all.insert("builtin_impls".to_string(), builtin_impls())
     return Base(
-        resolver=r, templates=templates, std_syntax=std_syntax, texts=all, lines=lines_of(all)
+        resolver=r,
+        templates=templates,
+        std_syntax=std_syntax,
+        texts=all,
+        lines=lines_of(all),
+        std_promoted=promoted,
     )
+
+## The generic functions of the std modules a program may import whose
+## bodies call a template with their own type parameters (stage 0's
+## `Request::Promote` of a std body), by module name, each module's in the
+## order of their definitions: `all` has every such module loaded. Only a
+## body that names a template can call one, so only those are checked.
+pure def std_promotions(
+    all: Resolver, texts: dict[String, String], catalog: Catalog
+) -> dict[String, list[String]]:
+    let prog = ref all.prog
+    var templates: set[String] = set()
+    for i in range(len(prog.defs)):
+        if let Some(f) = prog.fn_info(DefId(index=i)):
+            if f.template:
+                _ = templates.add(prog.defs[i].name.copy())
+    var out: dict[String, list[String]] = {}
+    let none: dict[DefId, list[DefId]] = {}
+    for i in range(len(prog.defs)):
+        let d = DefId(index=i)
+        let m = prog.defs[i].module
+        let module_name = prog.modules[m.index].name.copy()
+        if not importable().contains(module_name) or m.index >= len(all.sources):
+            continue
+        let f = prog.fn_info(d) else:
+            continue
+        if f.template or f.generics.is_empty():
+            continue
+        let body = f.body.copy() else:
+            continue
+        let ast = ref all.sources[m.index].ast
+        var names_one = False
+        for e in visit.exprs_in_block(ast, body):
+            match ast.expr(e).kind:
+                case ExprKind.Name(n):
+                    if templates.contains(n):
+                        names_one = True
+                case ExprKind.Field(_, n):
+                    if templates.contains(n.text):
+                        names_one = True
+                case _:
+                    pass
+        if not names_one:
+            continue
+        var text = String.new()
+        if let Some(t) = texts.get(module_name):
+            text = t.copy()
+        let done = check_one(prog, ast, text, none, all.types.copy(), d, catalog, False)
+        for q in done.requests:
+            if let Request.Promote(x) = q:
+                if x == d:
+                    var fs: list[String] = []
+                    if let Some(known) = out.get(module_name.copy()):
+                        fs = known.copy()
+                    fs.push(prog.defs[i].name.copy())
+                    _ = out.insert(module_name.copy(), fs)
+    return out
+
+## The promotions stage 0's first round asks for in the standard library
+## the program loaded (`Base.std_promoted`).
+pure def std_promotion_requests(base: Base, r: Resolver) -> list[Request]:
+    var out: list[Request] = []
+    for name in importable():
+        let fs = base.std_promoted.get(name.to_string()) else:
+            continue
+        let m = r.loaded(name) else:
+            continue
+        for f in fs:
+            if let Some(d) = r.prog.lookup_in(m, f):
+                out.push(Request.Promote(d))
+    return out
 
 ## Where the lines of each text start.
 pure def lines_of(texts: dict[String, String]) -> dict[String, Lines]:
@@ -138,6 +222,7 @@ pub pure def base_from(prelude_text: str, catalog: Catalog) -> Base:
         std_syntax=std_syntax,
         texts=texts.copy(),
         lines=lines_of(texts),
+        std_promoted={},
     )
 
 ## The type diagnostics of one file: those in the file, then those in each
@@ -387,6 +472,10 @@ pub pure def check_program(
     # `Db::checked`).
     var requests: list[Request] = []
     var rounds = 0
+    # The table of types the requests name, when the last resolution ended
+    # for a promotion: the next one makes its table again, and the types
+    # are carried into it.
+    var named_in: Types? = None
     while True:
         var r = base.resolver.copy()
         r.prog.embedded = embedded.copy()
@@ -421,6 +510,19 @@ pub pure def check_program(
                 template_bodies=[],
                 typed=None,
             )
+        if let Some(old) = named_in:
+            var carried: list[Request] = []
+            for q in requests:
+                match q:
+                    case Request.Instance(d, args, site):
+                        var moved: list[Ty] = []
+                        for t in args:
+                            moved.push(r.types.carried(old, t))
+                        carried.push(Request.Instance(def_=d, args=moved, site=site))
+                    case _:
+                        carried.push(q.copy())
+            requests = carried
+        named_in = None
         r.declare_instances(requests)
         var memo: dict[DefId, BodyResult] = {}
         var again = False
@@ -428,6 +530,12 @@ pub pure def check_program(
             let round = check_round(r, catalog, mut memo, keep)
             var fresh: list[Request] = []
             for q in round.requests:
+                if not has_request(requests, q) and not has_request(fresh, q):
+                    fresh.push(q.copy())
+            # The standard library's bodies, which stage 0 checks with the
+            # program's, ask for the promotion of those of its generic
+            # functions that call a template with their own type parameters.
+            for q in std_promotion_requests(base, r):
                 if not has_request(requests, q) and not has_request(fresh, q):
                     fresh.push(q.copy())
             rounds += 1
@@ -476,7 +584,9 @@ pub pure def check_program(
                 requests.push(q.copy())
                 if let Request.Promote(_) = q:
                     again = True
-            if not again:
+            if again:
+                named_in = Some(round.types.copy())
+            else:
                 r.types = round.types
                 r.declare_instances(fresh)
 
@@ -539,6 +649,16 @@ pure def check_round(
     var at_module: dict[ModuleId, int] = {}
     for i in range(len(modules)):
         _ = at_module.insert(modules[i].0, i)
+    # The same by the module's index, -1 for a module of none of the
+    # files, for the walks over every definition: a list is read without
+    # hashing the key.
+    var file_of: list[int] = []
+    for _ in range(len(prog.modules)):
+        file_of.push(-1)
+    for i in range(len(modules)):
+        let mi = modules[i].0.index
+        if mi < len(file_of):
+            file_of[mi] = i
     # Every function with a body, the root module's first (stage 0's
     # `functions_with_bodies`); a template is checked in its instances.
     var fns: list[DefId] = []
@@ -546,7 +666,9 @@ pure def check_round(
     for pass_ in range(2):
         for i in range(len(prog.defs)):
             let m = prog.defs[i].module
-            if not at_module.contains(m) or (m == root_id) != (pass_ == 0):
+            if m.index >= len(file_of) or file_of[m.index] < 0:
+                continue
+            if (m == root_id) != (pass_ == 0):
                 continue
             let d = DefId(index=i)
             let f = prog.fn_info(d) else:
@@ -626,8 +748,10 @@ pure def check_round(
     # Defaults of fields and parameters, and constants.
     for i in range(len(prog.defs)):
         let d = DefId(index=i)
-        let at = at_module.get(prog.defs[i].module) else:
+        let mi = prog.defs[i].module.index
+        if mi >= len(file_of) or file_of[mi] < 0:
             continue
+        let at = file_of[mi]
         var values: list[(ExprId, Ty, DefId?, BodyKind)] = []
         match prog.defs[i].kind():
             case DefKind.Struct(s):
@@ -644,34 +768,39 @@ pure def check_round(
             case _:
                 pass
         for (e, ty, field_of, kind) in values:
-            let (ast, src) = syntax_of(r, modules, at_module, d)
+            # A value that reflects is checked in the text its unfolding
+            # made, whose file its diagnostics are in (decision 251).
+            let vm = body_module(prog, d, kind)
+            let (ast, src) = syntax_in(r, modules, at_module, vm)
+            let vat = at_module.get(vm) ?? at
             let done = check_value(
                 prog, ast, src, inferred, types, d, e, ty, field_of, catalog, kind, keep
             )
             let x = result_of(done)
             types = done.types
             if reporting.contains(prog.defs[i].module):
-                files[at].add(x, False)
+                files[vat].add(x, False)
                 continue
             if let Some(t) = x.typed:
                 typed.push(t.copy())
             for c in x.const_calls:
-                calls.push((at, c.copy()))
+                calls.push((vat, c.copy()))
             for q in x.requests:
                 if not has_request(requests, q):
                     requests.push(q.copy())
-            files[at].add(x, False)
+            files[vat].add(x, False)
     # A template without type parameters (a function or a method that
     # reflects on the program's own types) is made once, whether anything
     # calls it or not: `main`, a method a trait's call reaches, a value
-    # (decision 244). In stage 0's order of `functions_with_bodies`: the
-    # root module's first, then by definition.
+    # (decision 244); so is a generic trait impl's method, as generic as
+    # the impl (decision 251). In stage 0's order of
+    # `functions_with_bodies`: the root module's first, then by definition.
     var eager: list[(int, DefId)] = []
     for i in range(len(prog.defs)):
         let d = DefId(index=i)
         let f = prog.fn_info(d) else:
             continue
-        if f.body.is_none() or not f.template or not f.generics.is_empty():
+        if f.body.is_none() or not f.made_once() or f.trait_.is_some():
             continue
         if instance_declared(prog, d, []):
             continue
@@ -788,6 +917,34 @@ pure def syntax_of(
     let m = r.prog.defs[d.index].module
     let at = at_module.get(m) ?? 0
     return (ref r.sources[m.index].ast, modules[at].1)
+
+## The syntax and the text of the checked module `m`.
+pure def syntax_in(
+    r: Resolver, modules: list[(ModuleId, String)], at_module: dict[ModuleId, int], m: ModuleId
+) -> (ref Ast, str) from r, modules:
+    let at = at_module.get(m) ?? 0
+    return (ref r.sources[m.index].ast, modules[at].1)
+
+## The module whose syntax and file the body of `def_` of `kind` is in
+## (stage 0's `Body::span.file`): its definition's, but for a value that
+## reflects, written in the text its unfolding made (decision 251).
+pub pure def body_module(prog: Program, def_: DefId, kind: BodyKind) -> ModuleId:
+    let home = prog.defs[def_.index].module
+    match kind:
+        case BodyKind.FieldDefault(_, i):
+            if let DefKind.Struct(s) = prog.defs[def_.index].kind():
+                if i < len(s.fields):
+                    return s.fields[i].default_module ?? home
+        case BodyKind.ParamDefault(_, i):
+            if let Some(f) = prog.fn_info(def_):
+                if i < len(f.params):
+                    return f.params[i].default_module ?? home
+        case BodyKind.Const:
+            if let DefKind.Const(c) = prog.defs[def_.index].kind():
+                return c.value_module ?? home
+        case _:
+            pass
+    return home
 
 ## The diagnostics of a file from its last round of checking: why parts of
 ## it are beyond the slice, those of the ownership checker's when the front
@@ -955,13 +1112,20 @@ pure def finish_file(
 ## index of its module among them (`Checked.template_bodies`).
 pure def template_bodies(prog: Program) -> list[(int, TextRange)]:
     var out: list[(int, TextRange)] = []
+    # A definition's module is asked first: one of the base's is in none of
+    # the program's own, and its kind is not looked at.
+    var users: set[int] = set()
+    for m in prog.user_modules:
+        _ = users.add(m.index)
     for i in range(len(prog.defs)):
+        let m = prog.defs[i].module
+        if not users.contains(m.index):
+            continue
         let f = prog.fn_info(DefId(index=i)) else:
             continue
         if not f.template:
             continue
         if let Some(b) = f.body:
-            let m = prog.defs[i].module
             for k in range(len(prog.user_modules)):
                 if prog.user_modules[k] == m:
                     out.push((k, b.range))
@@ -1338,8 +1502,11 @@ pure def prelude_derived(prog: Program, d: DefId) -> bool:
 
 ## Whether a definition is a template, checked in its instances.
 pure def is_template(prog: Program, d: DefId) -> bool:
+    # A trait's own method that reflects is made in the impls, never for a
+    # call, and a generic trait impl's method once, for all its type
+    # arguments (decision 251).
     if let Some(f) = prog.fn_info(d):
-        return f.template
+        return f.template and f.trait_.is_none() and (f.generics.is_empty() or not f.made_once())
     return False
 
 ## Whether the template `d` has an instance for `args`.
@@ -1638,31 +1805,14 @@ impl Checker:
             case _:
                 return t
 
-    ## The type of a parameter as a local of its function: a borrowed
-    ## parameter is a `ref T` unless `T` is `Copy` (04, rule 2). A borrowed
-    ## parameter whose type is a generic parameter, or an associated type
-    ## of one, is always a `ref` unless its bounds make it `Copy`.
+    ## The type of a parameter as a local of its function
+    ## (`program.param_local_ty`, in the body's environment of bounds): a
+    ## borrowed parameter is a `ref T` unless `T` is `Copy` (04, rule 2) or
+    ## a reference (decision 255). A borrowed parameter whose type is a
+    ## generic parameter, or an associated type of one, is always a `ref`
+    ## unless its bounds make it `Copy`.
     pub pure def param_local_ty(mut self, cx: Cx, ty: Ty, mode: Mode) -> Ty:
-        match mode:
-            case Mode.Own:
-                return ty
-            case Mode.Mut:
-                return self.types.ref_(ty, True)
-            case Mode.Borrow:
-                var opaque = False
-                match self.types.data(ty):
-                    case TyData.Param(_) | TyData.Assoc(_, _, _):
-                        opaque = True
-                    case _:
-                        pass
-                var copy = False
-                if opaque:
-                    copy = cx.prog.is_copy_in(mut self.types, ty, self.env)
-                else:
-                    copy = cx.prog.is_copy(mut self.types, ty)
-                if copy:
-                    return ty
-                return self.types.ref_(ty, False)
+        return local_ty_of_param(cx.prog, mut self.types, ty, mode, self.env)
 
     ## Checks the bounds the body's calls and constructs required, once
     ## inference is done: each type must implement its trait (03, "Generic

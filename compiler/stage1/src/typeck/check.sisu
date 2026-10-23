@@ -518,28 +518,23 @@ impl Checker:
         self.report_other(d.with("phase", phase))
 
     ## `E0900` for compile-time code that unfolds (`what`) where nothing
-    ## unfolds it: a function or a method that has it is a template, made
-    ## for its type arguments (decision 244), and the other places are
-    ## named.
+    ## unfolds it: a function, a method, a test or a `comptime def` that has
+    ## it is a template (decisions 244 and 251), a constant's or a default's
+    ## value is unfolded, and the places left are named.
     pub pure def no_unfolding(mut self, cx: Cx, range: TextRange, what: str):
         var place = "a constant or a default"
         var places = "constants and defaults"
         if let Some(f) = cx.prog.fn_info(self.def_):
-            if let FnKind.Test(_) = f.kind:
-                place = "a test"
-                places = "tests"
-            elif f.comptime_:
-                place = "a `comptime def`"
-                places = "`comptime def`s"
-            elif f.trait_.is_some():
-                place = "a trait's own method"
-                places = "a trait's own methods"
-            elif f.impl_.is_some():
-                place = "a method of a generic trait impl"
-                places = "generic trait impls"
-            else:
-                place = "this function"
-                places = "more places"
+            match f.kind:
+                case FnKind.Predicate(_):
+                    place = "a refinement's `where` clause"
+                    places = "refinements' `where` clauses"
+                case FnKind.Invariant(_):
+                    place = "an `invariant`"
+                    places = "invariants"
+                case _:
+                    place = "this function"
+                    places = "more places"
         self.unsupported(cx, range, "{what} in {place}", "reflection in {places} (Phase 8)")
 
     ## A function only the standard library may call (`@internal`): the
@@ -1160,7 +1155,9 @@ impl Checker:
     pub pure def check_block_in_scope(mut self, cx: Cx, b: Block) -> BlockId:
         var stmts: list[TStmt] = []
         var diverged = False
-        var warned = False
+        # An instance's code is what unfolding left of its template's, where
+        # a `comptime if` that holds may end what follows (decision 251).
+        var warned = cx.prog.instance_sites.contains(self.def_)
         for s in b.stmts:
             let stmt = cx.ast.stmt(s)
             var quiet = False

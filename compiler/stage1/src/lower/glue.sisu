@@ -88,10 +88,13 @@ pub pure def drops_something(t: Type, needs: dict[String, bool]) -> bool:
     match t:
         case Type.Int | Type.Float | Type.Bool | Type.Char | Type.Str | Type.Unit | Type.Never:
             return False
-        # A reference owns nothing; a closure holds references, or copies of
-        # `Copy` values (an `own` closure).
-        case Type.Ref(_, _) | Type.Fn(_, _, _) | Type.Const(_) | Type.ConstOp(_, _):
+        # A reference owns nothing.
+        case Type.Ref(_, _) | Type.Const(_) | Type.ConstOp(_, _):
             return False
+        # A closure holds references, or copies of `Copy` values (an `own`
+        # closure), which may be counted handles (decision 248).
+        case Type.Fn(_, _, _):
+            return True
         case Type.Tuple(es):
             for e in es:
                 if drops_something(e, needs):
