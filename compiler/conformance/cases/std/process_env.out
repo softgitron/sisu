@@ -1,0 +1,9 @@
+Ok("Sisu")
+Ok("2026-10-23")
+Err(NotFound(program="missing"))
+Err(Failed(program="tool", status=3, stderr="boom"))
+Some(["cp", "my file", "other \"file\"", "dir name"])
+None
+Ok(Some(8080)) Ok(True) ["/bin", "/usr/bin"]
+Err(Missing(name="EDITOR"))
+cd /home/ada && echo 8080

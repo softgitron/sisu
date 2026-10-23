@@ -690,8 +690,9 @@ D0106 cli     native.built                built `{output}`
 D0107 cli     native.internal             internal error in the native backend: {detail}
 D0108 cli     native.cannot-run           cannot run `{path}`: {reason}
 D0109 cli     native.alone                `--native` builds a native executable and runs it; it does not combine with `{option}`
-# `--from-sir FILE` without `--native` (decision 212).
-D0110 cli     native.from-sir             `--from-sir FILE` compiles a serialised SIR program with the native backend; it goes with `--native`
+# `sisu build --from-sir FILE` without `--native` (decisions 212 and 254):
+# `sisu run --from-sir FILE` interprets the program.
+D0110 cli     native.from-sir             `sisu build --from-sir FILE` compiles a serialised SIR program with the native backend; it goes with `--native`, and `sisu run --from-sir FILE` interprets it
 # `--release` without `--native` (decision 232): the profiles are the native
 # backend's.
 D0111 cli     native.release              `--release` builds with the native backend's release profile (09); it goes with `--native`

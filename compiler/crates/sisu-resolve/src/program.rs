@@ -388,6 +388,7 @@ pub struct WellKnown {
     pub ord: Option<DefId>,
     pub hash: Option<DefId>,
     pub len: Option<DefId>,
+    pub contains: Option<DefId>,
     pub copy: Option<DefId>,
     pub drop: Option<DefId>,
     pub iterator: Option<DefId>,

@@ -1,0 +1,25 @@
+# The smaller additions to `std.string`, `std.math` and
+# `std.collections` (11): a `Builder` that copies each piece once, the
+# IEEE functions with exact results and the constants, and `SortedSet`.
+import std.math
+from std.collections import SortedSet
+from std.string import Builder
+
+def main():
+    var b = Builder.new()
+    for i in range(3):
+        b.push("item {i}")
+        b.push_char(';')
+    b.push_joined(["x", "y"], "+")
+    print("{b.build()} {b.byte_len()}")
+    print(
+        "{math.sqrt(2.0) == math.SQRT_2} {math.round_even(2.5)} {math.round_even(3.5)} {math.trunc(-1.5)}"
+    )
+    print(
+        "{math.fmin(math.nan(), 1.0)} {math.clamp(7.5, 0.0, 5.0)} {math.is_infinite(math.MAX * 2.0)}"
+    )
+    print("{math.copysign(2.0, -0.0)} {math.fract(-3.75)} {math.signum(-0.25)}")
+    var s: SortedSet[str] = SortedSet.new()
+    for w in ["pear", "apple", "fig", "apple", "kiwi"]:
+        _ = s.insert(w)
+    print("{s.values()} {len(s)} {s.range("b", "l")} {s.first()} {s.last()}")

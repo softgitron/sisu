@@ -11,6 +11,11 @@
 //! where it has one, else what `sisu sir` prints for it. It checks the
 //! path a self-hosted front end takes, whose SIR the backend compiles.
 //!
+//! The interpreter's mode from SIR (decision 254) runs the same SIR with
+//! `sisu run --from-sir` instead of compiling it: the interpreter, given
+//! what a front end (stage 0's or stage 1's) serialised, must meet the
+//! expectations the source meets.
+//!
 //! Either way, the executable runs with `SISU_RT_ALLOCS=1`, which makes
 //! the runtime report how many of its allocations are live when the
 //! program ends (decisions 217 and 226): the report must say none, and is left out
@@ -31,6 +36,8 @@ pub struct NativeReport {
     pub from_sir: Option<usize>,
     /// Built with the release profile.
     pub release: bool,
+    /// Interpreted from serialised SIR rather than built.
+    pub interpreted: bool,
     pub failures: Vec<Failure>,
     /// Time spent building (the front end, the backend and the linker)
     /// and running the executables, over every case.
@@ -47,6 +54,9 @@ impl NativeReport {
             out.push_str(&format!("FAIL {} [{}]\n{}\n", f.case, f.check, f.detail));
         }
         let what = match self.from_sir {
+            Some(own) if self.interpreted => {
+                format!("interpreter from SIR: {} cases ({own} from their own `.sir`)", self.cases)
+            }
             Some(own) => format!("native from SIR: {} cases ({own} from their own `.sir`)", self.cases),
             None if self.release => format!("native, release: {} cases ({} lines)", self.cases, self.lines),
             None => format!("native: {} cases ({} lines)", self.cases, self.lines),
@@ -70,15 +80,27 @@ pub fn read_list(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// How [`run_list`] runs each case.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    Native,
+    /// Built from serialised SIR (decision 212).
+    FromSir,
+    /// Built with the release profile (decision 232).
+    Release,
+    /// Interpreted from serialised SIR (decision 254).
+    Interpreted,
+}
+
 /// Builds and runs every case of `list` natively, on as many threads as
 /// the machine has (at most eight).
 pub fn run_native(sisu: &Path, root: &Path, list: &[String]) -> NativeReport {
-    run_list(sisu, root, list, false, false)
+    run_list(sisu, root, list, Mode::Native)
 }
 
 /// [`run_native`], each case built from serialised SIR (decision 212).
 pub fn run_native_from_sir(sisu: &Path, root: &Path, list: &[String]) -> NativeReport {
-    run_list(sisu, root, list, true, false)
+    run_list(sisu, root, list, Mode::FromSir)
 }
 
 /// [`run_native`], each case built with the release profile and every
@@ -86,12 +108,22 @@ pub fn run_native_from_sir(sisu: &Path, root: &Path, list: &[String]) -> NativeR
 /// decision 232): Cranelift's optimisations must not change what a program
 /// does.
 pub fn run_native_release(sisu: &Path, root: &Path, list: &[String]) -> NativeReport {
-    run_list(sisu, root, list, false, true)
+    run_list(sisu, root, list, Mode::Release)
 }
 
-fn run_list(sisu: &Path, root: &Path, list: &[String], from_sir: bool, release: bool) -> NativeReport {
+/// Every case of `list` interpreted from serialised SIR (`sisu run
+/// --from-sir`, decision 254): the case's own `.sir`, else `sisu sir`'s.
+pub fn run_interpreted_from_sir(sisu: &Path, root: &Path, list: &[String]) -> NativeReport {
+    run_list(sisu, root, list, Mode::Interpreted)
+}
+
+fn run_list(sisu: &Path, root: &Path, list: &[String], mode: Mode) -> NativeReport {
     let all = discover(root);
-    let mut report = NativeReport { release, ..NativeReport::default() };
+    let mut report = NativeReport {
+        release: mode == Mode::Release,
+        interpreted: mode == Mode::Interpreted,
+        ..NativeReport::default()
+    };
     let mut cases = Vec::new();
     for name in list {
         match all.iter().find(|c| c.name == *name) {
@@ -103,8 +135,8 @@ fn run_list(sisu: &Path, root: &Path, list: &[String], from_sir: bool, release: 
             }),
         }
     }
-    let results = parallel(&cases, |case, n| native_case(sisu, case, n, from_sir, release));
-    if from_sir {
+    let results = parallel(&cases, |case, n| native_case(sisu, case, n, mode));
+    if matches!(mode, Mode::FromSir | Mode::Interpreted) {
         report.from_sir = Some(results.iter().filter(|r| r.own_sir).count());
     }
     for r in results {
@@ -124,7 +156,7 @@ pub fn survey(sisu: &Path, root: &Path, list: &[String]) -> Vec<(String, String)
         .into_iter()
         .filter(|c| !list.contains(&c.name) && ["out", "err", "status"].iter().any(|e| c.path(e).exists()))
         .collect();
-    let results = parallel(&cases, |case, n| native_case(sisu, case, n, false, false));
+    let results = parallel(&cases, |case, n| native_case(sisu, case, n, Mode::Native));
     cases
         .iter()
         .zip(results)
@@ -170,7 +202,8 @@ struct CaseResult {
     own_sir: bool,
 }
 
-fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool, release: bool) -> CaseResult {
+fn native_case(sisu: &Path, case: &Case, n: usize, mode: Mode) -> CaseResult {
+    let (from_sir, release) = (matches!(mode, Mode::FromSir | Mode::Interpreted), mode == Mode::Release);
     let mut r = CaseResult {
         failures: Vec::new(),
         build: Duration::ZERO,
@@ -182,14 +215,13 @@ fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool, release: bool
         r.failures.push(Failure { case: case.name.clone(), check: check.to_string(), detail });
     };
     // The modes may run at once (`cargo test`): sandboxes of their own.
-    let mode = if from_sir {
-        2_000_000
-    } else if release {
-        3_000_000
-    } else {
-        1_000_000
+    let offset = match mode {
+        Mode::Native => 1_000_000,
+        Mode::FromSir => 2_000_000,
+        Mode::Release => 3_000_000,
+        Mode::Interpreted => 4_000_000,
     };
-    let sandbox = match Sandbox::new(case, mode + n) {
+    let sandbox = match Sandbox::new(case, offset + n) {
         Ok(s) => s,
         Err(e) => {
             fail(&mut r, "setup", e.to_string());
@@ -244,6 +276,11 @@ fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool, release: bool
         }
         build_args = s(&["build", "--native", "--output", &exe.display().to_string(), "--from-sir"]);
         build_args.push(file.display().to_string());
+        if mode == Mode::Interpreted {
+            r.build = start.elapsed();
+            interpreted(sisu, case, &cwd, &file, warned_by_sir, &mut r);
+            return r;
+        }
     }
     let built = invoke_with_input(sisu, &cwd, &build_args, None);
     r.build = start.elapsed();
@@ -281,6 +318,36 @@ fn native_case(sisu: &Path, case: &Case, n: usize, from_sir: bool, release: bool
         fail(&mut r, "stderr", diff::diff(&err, &ran.stderr));
     }
     r
+}
+
+/// The interpreter's run of the SIR in `file` (`sisu run --from-sir`),
+/// compared with the case's expectations: the front end's warnings, which
+/// the source's run prints first, are not the program's.
+fn interpreted(sisu: &Path, case: &Case, cwd: &Path, file: &Path, warned: bool, r: &mut CaseResult) {
+    let mut fail = |check: &str, detail: String| {
+        r.failures.push(Failure { case: case.name.clone(), check: check.to_string(), detail });
+    };
+    let mut args = vec!["run".to_string(), "--from-sir".to_string(), file.display().to_string()];
+    args.extend(
+        case.expected("args").map(|a| a.lines().map(str::to_string).collect::<Vec<_>>()).unwrap_or_default(),
+    );
+    let input = case.expected("stdin");
+    let start = Instant::now();
+    let ran = invoke_with_input(sisu, cwd, &args, input.as_deref());
+    r.run = start.elapsed();
+    let expected = case.expected("out").unwrap_or_default();
+    if expected != ran.stdout {
+        fail("stdout", diff::diff(&expected, &ran.stdout));
+    }
+    let status = case.expected("status").map(|s| s.trim().to_string()).unwrap_or_else(|| "0".into());
+    if status != ran.status.to_string() {
+        fail("exit status", format!("expected {status}, found {}\n{}", ran.status, ran.stderr));
+    }
+    let err = case.expected("err").unwrap_or_default();
+    let same = if warned { err.ends_with(&ran.stderr) } else { err == ran.stderr };
+    if !same {
+        fail("stderr", diff::diff(&err, &ran.stderr));
+    }
 }
 
 /// The exit status of a program that aborted (a deadlock, a panic during

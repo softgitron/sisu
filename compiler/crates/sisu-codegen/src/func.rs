@@ -107,6 +107,9 @@ struct Cx<'a, 'p> {
     /// The variables whose slot the statement being translated writes
     /// (a call's result): each is read back from its slot after it.
     reload: Vec<usize>,
+    /// The slot of each local whose iterator lives in the frame
+    /// ([`frame_iterators`]).
+    frames: Vec<Option<ir::StackSlot>>,
 }
 
 /// Whether a type is a number, `bool`, `char` or `()`: one word or none,
@@ -157,6 +160,18 @@ impl<'a, 'p> Cx<'a, 'p> {
         let tys: Vec<Type> = f.locals.iter().map(|l| cg.concrete(&l.ty, targs)).collect::<Result<_, _>>()?;
         let in_registers =
             if cg.release { register_locals(f, &tys, closure) } else { vec![false; tys.len()] };
+        let frames = frame_iterators(f, &tys)
+            .into_iter()
+            .map(|framed| {
+                framed.then(|| {
+                    b.create_sized_stack_slot(StackSlotData::new(
+                        StackSlotKind::ExplicitSlot,
+                        abi::ITER_FRAME,
+                        3,
+                    ))
+                })
+            })
+            .collect();
         for (i, (l, ty)) in f.locals.iter().zip(tys).enumerate() {
             let storage = if in_registers[i] {
                 let var = b.declare_var(types::I64);
@@ -252,6 +267,7 @@ impl<'a, 'p> Cx<'a, 'p> {
             vars,
             kept,
             reload: Vec::new(),
+            frames,
         };
         cx.prologue()?;
         Ok(cx)
@@ -1357,6 +1373,44 @@ impl<'a, 'p> Cx<'a, 'p> {
             BinOp::Concat => Some(ValueOp::Concat),
             _ => None,
         };
+        // `==` and `!=` on two texts: their lengths, then their bytes
+        // (decision 253).
+        let text = |t: &Type| {
+            matches!(t, Type::Str) || matches!(t, Type::Named(n, _) if n == "String" || n == "Path")
+        };
+        if matches!(op, BinOp::Eq | BinOp::Ne) && text(&target_type(&ta)) && text(&target_type(&tb)) {
+            let (pa, ta) = self.operand_in_memory(a)?;
+            let (pb, tb) = self.operand_in_memory(b)?;
+            let (xa, _) = self.base_of(pa, &ta);
+            let (xb, _) = self.base_of(pb, &tb);
+            let (la, lb) = (self.load(xa, 8), self.load(xb, 8));
+            let same = self.b.ins().icmp(IntCC::Equal, la, lb);
+            let (bytes, join) = (self.b.create_block(), self.b.create_block());
+            self.b.append_block_param(join, types::I64);
+            let zero = self.iconst(0);
+            self.b.ins().brif(same, bytes, &[], join, &[zero.into()]);
+            self.b.switch_to_block(bytes);
+            let (da, db) = (self.load(xa, 0), self.load(xb, 0));
+            let eq = self.rt_status(sym::BYTES_EQ, &[da, db, la])?;
+            let eq = self.b.ins().uextend(types::I64, eq);
+            self.b.ins().jump(join, &[eq.into()]);
+            self.b.switch_to_block(join);
+            let r = self.b.block_params(join)[0];
+            let r = if op == BinOp::Ne { self.b.ins().bxor_imm(r, 1) } else { r };
+            return Ok(Val::Words(vec![r]));
+        }
+        // `==` and `!=` on two values of one enum: their tags, then the
+        // variant's fields (decision 253).
+        if matches!(op, BinOp::Eq | BinOp::Ne) {
+            let xt = target_type(&ta);
+            if xt == target_type(&tb)
+                && let Some(shape) = self.eq_shape(&xt)?
+            {
+                let r = self.enum_eq(a, b, &shape)?;
+                let r = if op == BinOp::Ne { self.b.ins().bxor_imm(r, 1) } else { r };
+                return Ok(Val::Words(vec![r]));
+            }
+        }
         // Operators on values that are not numbers: the runtime's.
         let scalars = ka.is_some() && kb.is_some();
         if let Some(vop) = value_op
@@ -1404,6 +1458,131 @@ impl<'a, 'p> Cx<'a, 'p> {
             }
         };
         Ok(Val::Words(vec![r]))
+    }
+
+    /// How `==` compares each variant of `t`, when `t` is an `Option` or
+    /// a declared enum other than an error set's; `None` for any other
+    /// type.
+    fn eq_shape(&mut self, t: &Type) -> Result<Option<Vec<Same>>, Error> {
+        let Type::Named(n, args) = t else { return Ok(None) };
+        let variants: Vec<Vec<Type>> = if n == "Option" {
+            vec![args.first().cloned().into_iter().collect(), Vec::new()]
+        } else {
+            match self.cg.types.decl(n) {
+                Some(sir::TypeDecl::Enum { variants, error: false, .. }) => {
+                    variants.iter().map(|v| v.fields.iter().map(|(_, ft)| ft.subst(args)).collect()).collect()
+                }
+                _ => return Ok(None),
+            }
+        };
+        let mut shape = Vec::new();
+        for fields in variants {
+            let (mut off, mut words, mut runtime) = (abi::WORD, Vec::new(), false);
+            for ft in &fields {
+                let size = self.size(ft)?;
+                if self.word_compared(ft) {
+                    words.push(off);
+                } else if size > 0 {
+                    runtime = true;
+                }
+                off += size;
+            }
+            shape.push(match (runtime, words.is_empty()) {
+                (true, _) => Same::Runtime,
+                (false, true) => Same::Tag,
+                (false, false) => Same::Words(words),
+            });
+        }
+        Ok(Some(shape))
+    }
+
+    /// Whether the runtime compares two values of type `t` by their one
+    /// word: an integer, a `bool`, a `char`, or an enum without fields.
+    fn word_compared(&self, t: &Type) -> bool {
+        match t {
+            Type::Int | Type::Bool | Type::Char => true,
+            Type::Named(n, _)
+                if matches!(n.as_str(), "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32") =>
+            {
+                true
+            }
+            Type::Named(n, _) => matches!(
+                self.cg.types.decl(n),
+                Some(sir::TypeDecl::Enum { variants, error: false, .. }) if variants.iter().all(|v| v.fields.is_empty())
+            ),
+            _ => false,
+        }
+    }
+
+    /// `==` on two values of one enum, whose variants compare as `shape`
+    /// says: a word, 1 when they are equal. Fields the runtime compares
+    /// are its, as `sisu_rt_binary` would.
+    fn enum_eq(&mut self, a: &Operand, b: &Operand, shape: &[Same]) -> Result<Value, Error> {
+        let (pa, ta) = self.operand_in_memory(a)?;
+        let (pb, tb) = self.operand_in_memory(b)?;
+        let (xa, _) = self.base_of(pa, &ta);
+        let (xb, _) = self.base_of(pb, &tb);
+        let (ga, gb) = (self.load(xa, 0), self.load(xb, 0));
+        let same = self.b.ins().icmp(IntCC::Equal, ga, gb);
+        if shape.iter().all(|s| matches!(s, Same::Tag)) {
+            return Ok(self.b.ins().uextend(types::I64, same));
+        }
+        let (fields, yes, join) = (self.b.create_block(), self.b.create_block(), self.b.create_block());
+        self.b.append_block_param(join, types::I64);
+        let zero = self.iconst(0);
+        self.b.ins().brif(same, fields, &[], join, &[zero.into()]);
+        self.b.switch_to_block(fields);
+        let mut sw = Switch::new();
+        let mut by_words = Vec::new();
+        let mut runtime = None;
+        for (v, s) in shape.iter().enumerate() {
+            match s {
+                Same::Tag => {}
+                Same::Words(offs) => {
+                    let blk = self.b.create_block();
+                    sw.set_entry(v as u128, blk);
+                    by_words.push((blk, offs));
+                }
+                Same::Runtime => {
+                    let blk = *runtime.get_or_insert_with(|| self.b.create_block());
+                    sw.set_entry(v as u128, blk);
+                }
+            }
+        }
+        sw.emit(&mut self.b, ga, yes);
+        self.b.switch_to_block(yes);
+        let one = self.iconst(1);
+        self.b.ins().jump(join, &[one.into()]);
+        for (blk, offs) in by_words {
+            self.b.switch_to_block(blk);
+            let mut all = None;
+            for &off in offs {
+                let (wa, wb) = (self.load(xa, off), self.load(xb, off));
+                let e = self.b.ins().icmp(IntCC::Equal, wa, wb);
+                all = Some(match all {
+                    Some(x) => self.b.ins().band(x, e),
+                    None => e,
+                });
+            }
+            let r = match all {
+                Some(x) => self.b.ins().uextend(types::I64, x),
+                None => self.iconst(1),
+            };
+            self.b.ins().jump(join, &[r.into()]);
+        }
+        if let Some(blk) = runtime {
+            self.b.switch_to_block(blk);
+            let out = self.slot(abi::WORD);
+            let (ia, ib) = (self.type_id(&ta)?, self.type_id(&tb)?);
+            let code = self.i32const(ValueOp::Eq as u32);
+            let (ia, ib) = (self.i32const(ia), self.i32const(ib));
+            let st = self.rt_status(sym::BINARY, &[code, out, pa, ia, pb, ib])?;
+            self.check(st);
+            let r = self.load(out, 0);
+            self.b.ins().jump(join, &[r.into()]);
+        }
+        self.b.switch_to_block(join);
+        Ok(self.b.block_params(join)[0])
     }
 
     fn operand_type(&mut self, o: &Operand) -> Result<Type, Error> {
@@ -1762,6 +1941,10 @@ impl<'a, 'p> Cx<'a, 'p> {
     // --------------------------------------------------------------- drops
 
     fn drop_stmt(&mut self, place: &Place, flag: Option<sir::LocalId>) -> Result<(), Error> {
+        // An iterator in the frame holds nothing to free.
+        if place.proj.is_empty() && self.frame_of(place.local).is_some() {
+            return Ok(());
+        }
         let ty = self.place_type(place)?;
         if !self.cg.types.needs_drop(&ty)? {
             return Ok(());
@@ -1799,6 +1982,30 @@ impl<'a, 'p> Cx<'a, 'p> {
             self.check(st);
             self.b.ins().jump(skip, &[]);
             self.b.switch_to_block(skip);
+            self.b.ins().jump(done, &[]);
+            self.b.switch_to_block(done);
+            return Ok(());
+        }
+        // A text, or a list of values with nothing to drop, frees its
+        // buffer, if it has one, and is left empty, as the runtime leaves
+        // it (decision 253).
+        let plain_list = match &ty {
+            Type::Named(n, a) if n == "list" => match a.first() {
+                Some(e) => !self.cg.types.needs_drop(e)?,
+                None => false,
+            },
+            _ => false,
+        };
+        if plain_list || matches!(&ty, Type::Named(n, _) if n == "String" || n == "Path" || n == "bytes") {
+            let ptr = self.load(addr, 0);
+            let free = self.b.create_block();
+            self.b.ins().brif(ptr, free, &[], done, &[]);
+            self.b.switch_to_block(free);
+            self.rt(sym::FREE, &[ptr])?;
+            let zero = self.iconst(0);
+            for off in [0, 8, 16] {
+                self.store_word(zero, addr, off);
+            }
             self.b.ins().jump(done, &[]);
             self.b.switch_to_block(done);
             return Ok(());
@@ -2079,6 +2286,17 @@ impl<'a, 'p> Cx<'a, 'p> {
                 }
             }
         }
+        // The commonest intrinsics run inline, the runtime called only
+        // where it raises a panic or keeps state of its own (decision 253).
+        let fast = match self.frame_iterator(i, dest, &argv)? {
+            Fast::No => self.inline_intrinsic(i, dest, &argv)?,
+            framed => framed,
+        };
+        let done = match fast {
+            Fast::Done => return Ok(()),
+            Fast::Slow(done) => Some(done),
+            Fast::No => None,
+        };
         if i.may_wait() {
             self.record_site();
         }
@@ -2125,10 +2343,404 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.check(st);
         let (addr, _) = self.place(dest, None)?;
         self.copy_bytes(addr, ret, rsize);
+        if let Some(done) = done {
+            self.b.ins().jump(done, &[]);
+            self.b.switch_to_block(done);
+        }
         Ok(())
     }
 
-    /// A call of a function value: its code with its environment first.
+    /// The slot of a local whose iterator lives in the frame.
+    fn frame_of(&self, l: sir::LocalId) -> Option<ir::StackSlot> {
+        self.frames.get(l.0 as usize).copied().flatten()
+    }
+
+    /// A range, or an iterator over a borrowed list's elements, made into
+    /// a local whose object lives in the frame ([`frame_iterators`]): the
+    /// header [`Cx::inline_intrinsic`] steps, in the local's slot, which
+    /// the local's word points to. A step of zero is the runtime's, which
+    /// raises the panic.
+    fn frame_iterator(&mut self, i: Intrinsic, dest: &Place, argv: &[(Value, Type)]) -> Result<Fast, Error> {
+        use Intrinsic as I;
+        let Some(slot) = dest.proj.is_empty().then(|| self.frame_of(dest.local)).flatten() else {
+            return Ok(Fast::No);
+        };
+        let word = |cx: &mut Self, k: usize| -> Result<Value, Error> {
+            let (a, t) = argv.get(k).cloned().ok_or_else(|| Error::internal("a range without its bounds"))?;
+            let (a, _) = cx.base_of(a, &t);
+            Ok(cx.load(a, 0))
+        };
+        match i {
+            I::Range => {
+                let (start, stop, step) = (word(self, 0)?, word(self, 1)?, word(self, 2)?);
+                let (fast, slow, done) =
+                    (self.b.create_block(), self.b.create_block(), self.b.create_block());
+                self.b.ins().brif(step, fast, &[], slow, &[]);
+                self.b.switch_to_block(fast);
+                let obj = self.b.ins().stack_addr(types::I64, slot, 0);
+                let kind = self.iconst(abi::ITER_RANGE as i64);
+                self.store_word(kind, obj, abi::ITER_KIND);
+                self.store_word(start, obj, abi::ITER_A);
+                self.store_word(stop, obj, abi::ITER_B);
+                self.store_word(step, obj, abi::ITER_C);
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(obj, d, 0);
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(slow);
+                Ok(Fast::Slow(done))
+            }
+            I::IterRef | I::IterMut | I::ListIter | I::SliceIter => {
+                let Some((a0, t0)) = argv.first().cloned() else { return Ok(Fast::No) };
+                let (list, lt) = self.base_of(a0, &t0);
+                let elem = element_type(&lt)?;
+                let size = self.size(&elem)?;
+                let obj = self.b.ins().stack_addr(types::I64, slot, 0);
+                let kind = self.iconst(abi::ITER_LIST_REF as i64);
+                let (zero, size) = (self.iconst(0), self.iconst(i64::from(size)));
+                self.store_word(kind, obj, abi::ITER_KIND);
+                self.store_word(list, obj, abi::ITER_A);
+                self.store_word(zero, obj, abi::ITER_B);
+                self.store_word(size, obj, abi::ITER_C);
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(obj, d, 0);
+                Ok(Fast::Done)
+            }
+            _ => Err(Error::internal(format!("an iterator in the frame made by `{}`", i.name()))),
+        }
+    }
+
+    /// What a reference argument refers to, through every reference, and
+    /// its type.
+    fn base_of(&mut self, mut addr: Value, ty: &Type) -> (Value, Type) {
+        let mut ty = ty.clone();
+        while let Type::Ref(inner, _) = ty {
+            addr = self.load(addr, 0);
+            ty = *inner;
+        }
+        (addr, ty)
+    }
+
+    /// The commonest intrinsics compiled inline (decision 253), as the
+    /// runtime runs them on the values' layouts: the length and the
+    /// elements of a list, the bytes of a text, a character's code, an
+    /// option's tag, and the next item of a range or of a borrowed list's
+    /// elements. Each reads only what is borrowed or `Copy`, so nothing is
+    /// left to drop. Where the runtime raises a panic (an index out of
+    /// bounds), grows a list, or keeps an iterator's state itself, the
+    /// code calls it after all.
+    fn inline_intrinsic(
+        &mut self,
+        i: Intrinsic,
+        dest: &Place,
+        argv: &[(Value, Type)],
+    ) -> Result<Fast, Error> {
+        use Intrinsic as I;
+        let named = |t: &Type, names: &[&str]| matches!(t, Type::Named(n, _) if names.contains(&n.as_str()));
+        let text = |t: &Type| matches!(t, Type::Str) || named(t, &["String", "Path"]);
+        let Some((a0, t0)) = argv.first().cloned() else { return Ok(Fast::No) };
+        // Only arguments read in place, or holding nothing to drop: a value
+        // moved into the call may be the runtime's to drop afterwards
+        // (decision 218).
+        let borrowed = matches!(t0, Type::Ref(..) | Type::Str) || !self.cg.types.needs_drop(&t0)?;
+        if !borrowed {
+            return Ok(Fast::No);
+        }
+        let (b, bt) = self.base_of(a0, &t0);
+        match i {
+            I::Len if named(&bt, &["list", "bytes"]) => {
+                let len = self.load(b, 8);
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(len, d, 0);
+                Ok(Fast::Done)
+            }
+            I::ListIsEmpty if named(&bt, &["list"]) => {
+                let len = self.load(b, 8);
+                let empty = self.b.ins().icmp_imm(IntCC::Equal, len, 0);
+                let w = self.b.ins().uextend(types::I64, empty);
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(w, d, 0);
+                Ok(Fast::Done)
+            }
+            I::StrByteLen if text(&bt) => {
+                let len = self.load(b, 8);
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(len, d, 0);
+                Ok(Fast::Done)
+            }
+            I::CharCode if matches!(bt, Type::Char) => {
+                let c = self.load(b, 0);
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(c, d, 0);
+                Ok(Fast::Done)
+            }
+            I::OptionIsSome | I::OptionIsNone if named(&bt, &["Option"]) => {
+                let tag = self.load(b, 0);
+                let cc = if i == I::OptionIsSome { IntCC::Equal } else { IntCC::NotEqual };
+                let is = self.b.ins().icmp_imm(cc, tag, 0);
+                let w = self.b.ins().uextend(types::I64, is);
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(w, d, 0);
+                Ok(Fast::Done)
+            }
+            I::ListFirst | I::ListLast if named(&bt, &["list"]) => {
+                let elem = element_type(&bt)?;
+                let size = self.size(&elem)?;
+                let len = self.load(b, 8);
+                let data = self.load(b, 0);
+                let (d, _) = self.place(dest, None)?;
+                let (some, none, done) =
+                    (self.b.create_block(), self.b.create_block(), self.b.create_block());
+                self.b.ins().brif(len, some, &[], none, &[]);
+                self.b.switch_to_block(some);
+                let at = if i == I::ListFirst { self.iconst(0) } else { self.b.ins().iadd_imm(len, -1) };
+                let off = self.b.ins().imul_imm(at, i64::from(size));
+                let item = self.b.ins().iadd(data, off);
+                let zero = self.iconst(0);
+                self.store_word(zero, d, 0);
+                self.store_word(item, d, 8);
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(none);
+                let one = self.iconst(1);
+                self.store_word(one, d, 0);
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(done);
+                Ok(Fast::Done)
+            }
+            I::ListPop if named(&bt, &["list"]) => {
+                let elem = element_type(&bt)?;
+                let size = self.size(&elem)?;
+                let len = self.load(b, 8);
+                let (d, _) = self.place(dest, None)?;
+                let (some, none, done) =
+                    (self.b.create_block(), self.b.create_block(), self.b.create_block());
+                self.b.ins().brif(len, some, &[], none, &[]);
+                self.b.switch_to_block(some);
+                let last = self.b.ins().iadd_imm(len, -1);
+                self.store_word(last, b, 8);
+                let data = self.load(b, 0);
+                let off = self.b.ins().imul_imm(last, i64::from(size));
+                let src = self.b.ins().iadd(data, off);
+                let zero = self.iconst(0);
+                self.store_word(zero, d, 0);
+                let payload = self.b.ins().iadd_imm(d, 8);
+                self.copy_bytes(payload, src, size);
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(none);
+                let one = self.iconst(1);
+                self.store_word(one, d, 0);
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(done);
+                Ok(Fast::Done)
+            }
+            I::StrByteAt if text(&bt) => {
+                let Some((a1, t1)) = argv.get(1).cloned() else { return Ok(Fast::No) };
+                let (ia, _) = self.base_of(a1, &t1);
+                let idx = self.load(ia, 0);
+                let len = self.load(b, 8);
+                let inside = self.b.ins().icmp(IntCC::UnsignedLessThan, idx, len);
+                let (d, _) = self.place(dest, None)?;
+                let (fast, slow, done) =
+                    (self.b.create_block(), self.b.create_block(), self.b.create_block());
+                self.b.ins().brif(inside, fast, &[], slow, &[]);
+                self.b.switch_to_block(fast);
+                let data = self.load(b, 0);
+                let at = self.b.ins().iadd(data, idx);
+                let byte = self.b.ins().uload8(types::I64, MemFlags::trusted(), at, 0);
+                self.store_word(byte, d, 0);
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(slow);
+                Ok(Fast::Slow(done))
+            }
+            I::StrByteSlice if text(&bt) => {
+                let (Some((a1, t1)), Some((a2, t2))) = (argv.get(1).cloned(), argv.get(2).cloned()) else {
+                    return Ok(Fast::No);
+                };
+                let (p1, _) = self.base_of(a1, &t1);
+                let (p2, _) = self.base_of(a2, &t2);
+                let (start, end) = (self.load(p1, 0), self.load(p2, 0));
+                let (data, len) = (self.load(b, 0), self.load(b, 8));
+                // `0 <= start <= end <= len`, as unsigned comparisons.
+                let x = self.b.ins().icmp(IntCC::UnsignedLessThanOrEqual, start, end);
+                let y = self.b.ins().icmp(IntCC::UnsignedLessThanOrEqual, end, len);
+                let inside = self.b.ins().band(x, y);
+                let (bounds, fast, slow, done) = (
+                    self.b.create_block(),
+                    self.b.create_block(),
+                    self.b.create_block(),
+                    self.b.create_block(),
+                );
+                self.b.ins().brif(inside, bounds, &[], slow, &[]);
+                self.b.switch_to_block(bounds);
+                // Each end at a character's first byte, or at either end.
+                let at_char = |cx: &mut Self, k: Value| {
+                    let before = cx.b.ins().icmp(IntCC::UnsignedLessThan, k, len);
+                    let byte = cx.b.ins().iadd(data, k);
+                    // A byte past the text is never read: the text's own
+                    // header stands in for it.
+                    let at = cx.b.ins().select(before, byte, b);
+                    let first = cx.b.ins().sload8(types::I64, MemFlags::trusted(), at, 0);
+                    let lead = cx.b.ins().icmp_imm(IntCC::SignedGreaterThanOrEqual, first, -0x40);
+                    let edge = cx.b.ins().icmp_imm(IntCC::Equal, k, 0);
+                    let end = cx.b.ins().icmp(IntCC::Equal, k, len);
+                    let either = cx.b.ins().bor(edge, end);
+                    cx.b.ins().bor(lead, either)
+                };
+                let (x, y) = (at_char(self, start), at_char(self, end));
+                let both = self.b.ins().band(x, y);
+                self.b.ins().brif(both, fast, &[], slow, &[]);
+                self.b.switch_to_block(fast);
+                let from = self.b.ins().iadd(data, start);
+                let n = self.b.ins().isub(end, start);
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(from, d, 0);
+                self.store_word(n, d, 8);
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(slow);
+                Ok(Fast::Slow(done))
+            }
+            I::CharFromCode if matches!(bt, Type::Int) => {
+                // A scalar value: at most U+10FFFF, not a surrogate.
+                let v = self.load(b, 0);
+                let below = self.b.ins().icmp_imm(IntCC::UnsignedLessThanOrEqual, v, 0x10FFFF);
+                let off = self.b.ins().iadd_imm(v, -0xD800);
+                let surrogate = self.b.ins().icmp_imm(IntCC::UnsignedLessThan, off, 0x800);
+                let valid = self.b.ins().band_not(below, surrogate);
+                let (some, none) = (self.iconst(0), self.iconst(1));
+                let tag = self.b.ins().select(valid, some, none);
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(tag, d, 0);
+                self.store_word(v, d, 8);
+                Ok(Fast::Done)
+            }
+            I::CharIsWhitespace | I::CharIsAlphabetic if matches!(bt, Type::Char) => {
+                // An ASCII character inline, any other the runtime's.
+                let c = self.load(b, 0);
+                let ascii = self.b.ins().icmp_imm(IntCC::UnsignedLessThan, c, 0x80);
+                let (fast, slow, done) =
+                    (self.b.create_block(), self.b.create_block(), self.b.create_block());
+                self.b.ins().brif(ascii, fast, &[], slow, &[]);
+                self.b.switch_to_block(fast);
+                let is = if i == I::CharIsWhitespace {
+                    // A space, or `\t`, `\n`, `\v`, `\f` and `\r`.
+                    let space = self.b.ins().icmp_imm(IntCC::Equal, c, 0x20);
+                    let k = self.b.ins().iadd_imm(c, -0x09);
+                    let control = self.b.ins().icmp_imm(IntCC::UnsignedLessThanOrEqual, k, 4);
+                    self.b.ins().bor(space, control)
+                } else {
+                    let lower = self.b.ins().bor_imm(c, 0x20);
+                    let k = self.b.ins().iadd_imm(lower, -i64::from(b'a'));
+                    self.b.ins().icmp_imm(IntCC::UnsignedLessThanOrEqual, k, 25)
+                };
+                let w = self.b.ins().uextend(types::I64, is);
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(w, d, 0);
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(slow);
+                Ok(Fast::Slow(done))
+            }
+            I::Max | I::Min if t0 == Type::Int && argv.get(1).is_some_and(|(_, t)| *t == Type::Int) => {
+                let Some((a1, _)) = argv.get(1).cloned() else { return Ok(Fast::No) };
+                let (x, y) = (self.load(b, 0), self.load(a1, 0));
+                // The first unless the second is the greater (`max`) or
+                // the less (`min`).
+                let cc = if i == I::Max { IntCC::SignedLessThan } else { IntCC::SignedGreaterThan };
+                let second = self.b.ins().icmp(cc, x, y);
+                let r = self.b.ins().select(second, y, x);
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(r, d, 0);
+                Ok(Fast::Done)
+            }
+            I::ListPush if named(&bt, &["list"]) => {
+                let Some((a1, _)) = argv.get(1).cloned() else { return Ok(Fast::No) };
+                let elem = element_type(&bt)?;
+                let size = self.size(&elem)?;
+                let len = self.load(b, 8);
+                let cap = self.load(b, 16);
+                let room = self.b.ins().icmp(IntCC::UnsignedLessThan, len, cap);
+                let (fast, slow, done) =
+                    (self.b.create_block(), self.b.create_block(), self.b.create_block());
+                self.b.ins().brif(room, fast, &[], slow, &[]);
+                self.b.switch_to_block(fast);
+                let data = self.load(b, 0);
+                let off = self.b.ins().imul_imm(len, i64::from(size));
+                let at = self.b.ins().iadd(data, off);
+                self.copy_bytes(at, a1, size);
+                let more = self.b.ins().iadd_imm(len, 1);
+                self.store_word(more, b, 8);
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(slow);
+                Ok(Fast::Slow(done))
+            }
+            I::IterNext if named(&bt, &["Iter"]) => {
+                let obj = self.load(b, 0);
+                let (d, _) = self.place(dest, None)?;
+                let blocks: Vec<Block> = (0..8).map(|_| self.b.create_block()).collect();
+                let (null_ok, range, not_range, more, list, list_some, none, slow) =
+                    (blocks[0], blocks[1], blocks[2], blocks[3], blocks[4], blocks[5], blocks[6], blocks[7]);
+                let done = self.b.create_block();
+                // A null iterator (one moved out) is the runtime's.
+                self.b.ins().brif(obj, null_ok, &[], slow, &[]);
+                self.b.switch_to_block(null_ok);
+                let kind = self.load(obj, abi::ITER_KIND);
+                let is_range = self.b.ins().icmp_imm(IntCC::Equal, kind, abi::ITER_RANGE as i64);
+                self.b.ins().brif(is_range, range, &[], not_range, &[]);
+                // A range: the current value, unless the step past it
+                // overflows, which the runtime turns into its end.
+                self.b.switch_to_block(range);
+                let cur = self.load(obj, abi::ITER_A);
+                let stop = self.load(obj, abi::ITER_B);
+                let step = self.load(obj, abi::ITER_C);
+                let up = self.b.ins().icmp_imm(IntCC::SignedGreaterThan, step, 0);
+                let below = self.b.ins().icmp(IntCC::SignedLessThan, cur, stop);
+                let above = self.b.ins().icmp(IntCC::SignedGreaterThan, cur, stop);
+                let left = self.b.ins().select(up, below, above);
+                self.b.ins().brif(left, more, &[], none, &[]);
+                self.b.switch_to_block(more);
+                let next = self.b.ins().iadd(cur, step);
+                // Overflow: the sum's sign differs from both operands'.
+                let x = self.b.ins().bxor(cur, next);
+                let y = self.b.ins().bxor(step, next);
+                let both = self.b.ins().band(x, y);
+                let over = self.b.ins().icmp_imm(IntCC::SignedLessThan, both, 0);
+                // Past the last value the type holds, the range ends: its
+                // current value becomes its end, as the runtime's ends it.
+                let next = self.b.ins().select(over, stop, next);
+                self.store_word(next, obj, abi::ITER_A);
+                let zero = self.iconst(0);
+                self.store_word(zero, d, 0);
+                self.store_word(cur, d, 8);
+                self.b.ins().jump(done, &[]);
+                // A borrowed list's elements: the address of the next one.
+                self.b.switch_to_block(not_range);
+                let is_list = self.b.ins().icmp_imm(IntCC::Equal, kind, abi::ITER_LIST_REF as i64);
+                self.b.ins().brif(is_list, list, &[], slow, &[]);
+                self.b.switch_to_block(list);
+                let l = self.load(obj, abi::ITER_A);
+                let idx = self.load(obj, abi::ITER_B);
+                let len = self.load(l, 8);
+                let has = self.b.ins().icmp(IntCC::UnsignedLessThan, idx, len);
+                self.b.ins().brif(has, list_some, &[], none, &[]);
+                self.b.switch_to_block(list_some);
+                let data = self.load(l, 0);
+                let size = self.load(obj, abi::ITER_C);
+                let off = self.b.ins().imul(idx, size);
+                let item = self.b.ins().iadd(data, off);
+                let next = self.b.ins().iadd_imm(idx, 1);
+                self.store_word(next, obj, abi::ITER_B);
+                let zero = self.iconst(0);
+                self.store_word(zero, d, 0);
+                self.store_word(item, d, 8);
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(none);
+                let one = self.iconst(1);
+                self.store_word(one, d, 0);
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(slow);
+                Ok(Fast::Slow(done))
+            }
+            _ => Ok(Fast::No),
+        }
+    }
     fn call_value(&mut self, dest: &Place, f: &Operand, args: &[Operand]) -> Result<(), Error> {
         let (v, mut ty) = self.operand(f)?;
         let size = self.size(&ty)?;
@@ -2181,9 +2793,39 @@ impl<'a, 'p> Cx<'a, 'p> {
         while words.len() < 2 {
             words.push(self.iconst(0));
         }
+        // The operations that can neither fail nor leave the type's range,
+        // on the words as they hold the values, inline (decision 253).
+        let (x, y) = (words[0], words[1]);
+        let unsigned = matches!(abi::SIZED_TYPES.get(kind as usize), Some(t) if t.starts_with('u'));
+        let fast = match op {
+            SizedOp::ToInt if flags == 0 => Some(x),
+            SizedOp::Widen => Some(x),
+            SizedOp::And => Some(self.b.ins().band(x, y)),
+            SizedOp::Or => Some(self.b.ins().bor(x, y)),
+            SizedOp::Xor => Some(self.b.ins().bxor(x, y)),
+            SizedOp::Cmp => {
+                // 0, 1 or 2: less, equal or greater.
+                let (lt, gt) = if flags != 0 {
+                    (IntCC::UnsignedLessThan, IntCC::UnsignedGreaterThan)
+                } else {
+                    (IntCC::SignedLessThan, IntCC::SignedGreaterThan)
+                };
+                let (lt, gt) = (self.b.ins().icmp(lt, x, y), self.b.ins().icmp(gt, x, y));
+                let (lt, gt) = (self.b.ins().uextend(types::I64, lt), self.b.ins().uextend(types::I64, gt));
+                let d = self.b.ins().isub(gt, lt);
+                Some(self.b.ins().iadd_imm(d, 1))
+            }
+            SizedOp::Not if !unsigned => Some(self.b.ins().bnot(x)),
+            _ => None,
+        };
+        if let Some(r) = fast {
+            let (addr, _) = self.place(dest, None)?;
+            self.store_word(r, addr, 0);
+            return Ok(());
+        }
         let out = self.slot(16);
         let (kv, ov, fv) = (self.i32const(kind), self.i32const(op as u32), self.i32const(flags));
-        let st = self.rt_status(sym::SIZED, &[kv, ov, fv, words[0], words[1], out])?;
+        let st = self.rt_status(sym::SIZED, &[kv, ov, fv, x, y, out])?;
         self.check(st);
         let (addr, ty) = self.place(dest, None)?;
         let size = self.size(&ty)?;
@@ -2321,6 +2963,154 @@ impl Uses {
     }
 }
 
+/// The locals whose iterators live in the frame (decision 253): an
+/// iterator made once, by `range` or over a borrowed list's elements, that
+/// nothing but `Iter.next` reads, through references made for it. It
+/// never leaves the function, the runtime never sees it, and dropping it
+/// frees nothing, so its object is a slot of the frame, made and stepped
+/// inline.
+fn frame_iterators(f: &sir::Function, tys: &[Type]) -> Vec<bool> {
+    let n = tys.len();
+    let iter = |t: &Type| matches!(t, Type::Named(name, _) if name == "Iter");
+    let mut fr = Frames {
+        ok: tys.iter().enumerate().map(|(i, t)| i > f.param_count as usize && iter(t)).collect(),
+        borrow: vec![None; n],
+    };
+    // The references that step them: `T = ref L`, and nothing else in T.
+    for b in &f.blocks {
+        for st in &b.stmts {
+            if let StatementKind::Assign(p, Rvalue::Ref(q, _)) = &st.kind
+                && p.proj.is_empty()
+                && q.proj.is_empty()
+                && fr.ok.get(q.local.0 as usize) == Some(&true)
+                && let Some(slot) = fr.borrow.get_mut(p.local.0 as usize)
+            {
+                match *slot {
+                    None => *slot = Some(q.local.0 as usize),
+                    Some(m) if m == q.local.0 as usize => {}
+                    Some(m) => {
+                        fr.no(m);
+                        fr.no(q.local.0 as usize);
+                    }
+                }
+            }
+        }
+    }
+    let mut made = vec![0u32; n];
+    let local_ty = |o: &Operand| match o {
+        Operand::Copy(p) | Operand::Move(p) if p.proj.is_empty() => {
+            tys.get(p.local.0 as usize).map(target_type)
+        }
+        _ => None,
+    };
+    let maker = |name: &str, args: &[Operand]| match Intrinsic::from_name(name) {
+        Some(Intrinsic::Range) => true,
+        Some(Intrinsic::IterRef | Intrinsic::IterMut | Intrinsic::ListIter | Intrinsic::SliceIter) => {
+            matches!(args.first().and_then(local_ty), Some(Type::Named(l, _)) if l == "list")
+        }
+        _ => false,
+    };
+    for b in &f.blocks {
+        for st in &b.stmts {
+            match &st.kind {
+                StatementKind::Assign(p, Rvalue::Ref(q, _))
+                    if p.proj.is_empty()
+                        && q.proj.is_empty()
+                        && fr.borrow.get(p.local.0 as usize).copied().flatten()
+                            == Some(q.local.0 as usize) => {}
+                StatementKind::Assign(p, r) => {
+                    fr.place(p);
+                    match r {
+                        Rvalue::Use(o) | Rvalue::Unary(_, o) => fr.operand(o),
+                        Rvalue::Binary(_, x, y) => {
+                            fr.operand(x);
+                            fr.operand(y);
+                        }
+                        Rvalue::Aggregate(_, os) | Rvalue::Closure(_, _, os) => {
+                            os.iter().for_each(|o| fr.operand(o))
+                        }
+                        Rvalue::Ref(q, _)
+                        | Rvalue::Discriminant(q)
+                        | Rvalue::CopyOf(q)
+                        | Rvalue::StrView(q) => fr.place(q),
+                    }
+                }
+                StatementKind::Call { dest, callee: Callee::Intrinsic(name, _), args }
+                    if name == Intrinsic::IterNext.name()
+                        && matches!(args.as_slice(), [Operand::Copy(p) | Operand::Move(p)]
+                            if p.proj.is_empty() && fr.borrow.get(p.local.0 as usize).copied().flatten().is_some()) =>
+                {
+                    fr.place(dest)
+                }
+                StatementKind::Call { dest, callee: Callee::Intrinsic(name, _), args }
+                    if dest.proj.is_empty()
+                        && fr.ok.get(dest.local.0 as usize) == Some(&true)
+                        && maker(name, args) =>
+                {
+                    if let Some(m) = made.get_mut(dest.local.0 as usize) {
+                        *m += 1;
+                    }
+                    args.iter().for_each(|o| fr.operand(o));
+                }
+                StatementKind::Call { dest, callee, args } => {
+                    fr.place(dest);
+                    if let Callee::Value(o) = callee {
+                        fr.operand(o);
+                    }
+                    args.iter().for_each(|o| fr.operand(o));
+                }
+                StatementKind::Drop { place, .. } if place.proj.is_empty() => {}
+                StatementKind::Drop { place, .. } => fr.place(place),
+                StatementKind::StorageDead(_) => {}
+            }
+        }
+        if let Terminator::Switch { value, .. } = &b.term {
+            fr.operand(value);
+        }
+    }
+    fr.ok.iter().zip(&made).map(|(ok, m)| *ok && *m == 1).collect()
+}
+
+/// What [`frame_iterators`] finds out as it goes: which locals may still
+/// hold an iterator in the frame, and which reference steps which.
+struct Frames {
+    ok: Vec<bool>,
+    borrow: Vec<Option<usize>>,
+}
+
+impl Frames {
+    fn no(&mut self, i: usize) {
+        if let Some(x) = self.ok.get_mut(i) {
+            *x = false;
+        }
+    }
+
+    /// A use of a local other than the ones allowed: an iterator, or the
+    /// iterator a reference steps, keeps its object on the heap.
+    fn mention(&mut self, l: sir::LocalId) {
+        let i = l.0 as usize;
+        self.no(i);
+        if let Some(m) = self.borrow.get(i).copied().flatten() {
+            self.no(m);
+        }
+    }
+
+    fn place(&mut self, p: &Place) {
+        self.mention(p.local);
+        for q in &p.proj {
+            if let Proj::Index(k) | Proj::IndexFromEnd(k) | Proj::Key(k) = q {
+                self.mention(*k);
+            }
+        }
+    }
+
+    fn operand(&mut self, o: &Operand) {
+        if let Operand::Copy(p) | Operand::Move(p) = o {
+            self.place(p);
+        }
+    }
+}
+
 fn drop_flag(l: &sir::LocalDecl) -> bool {
     l.name.as_deref() == Some("flag") && l.loc.is_none()
 }
@@ -2421,4 +3211,27 @@ fn display_fn_name(name: &str, prog: &sir::Program) -> String {
         Some((owner, _)) => format!("closure in {}", display_fn_name(owner, prog)),
         None => name.to_string(),
     }
+}
+
+/// How `==` compares two values of one variant of an enum compiled inline
+/// ([`Cx::eq_shape`]).
+enum Same {
+    /// By their tags alone: the variant has no fields that hold anything.
+    Tag,
+    /// By the words at these offsets, which hold the fields the runtime
+    /// compares as words.
+    Words(Vec<u32>),
+    /// By the runtime.
+    Runtime,
+}
+
+/// What [`Cx::inline_intrinsic`] did with a call.
+enum Fast {
+    /// Nothing: the runtime runs it.
+    No,
+    /// All of it: the result is written.
+    Done,
+    /// The common case, ending at the block given; the builder is at the
+    /// block where the runtime runs the rest.
+    Slow(Block),
 }

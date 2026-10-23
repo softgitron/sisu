@@ -1,0 +1,23 @@
+# `std.fs` (11): a path's parts from its text alone (`join`, `parent`,
+# `file_name`, `stem`, `extension`, `with_extension`, `components`,
+# `normalize`), and the operations made of several of the file system
+# capability's: walking a tree, copying, appending, reading lines.
+import std.fs
+from std.fs import Path
+
+def main():
+    for text in ["/usr/lib/libz.so.1", "notes.tar.gz", ".bashrc", "dir/", "/", "", "a/../b/./c"]:
+        let p = Path.new(text)
+        print(
+            "{text:?}: {fs.parent(p)} {fs.file_name(p)} {fs.stem(p)} {fs.extension(p)} {fs.components(p)} {fs.normalize(p)}"
+        )
+    print(fs.join(Path.new("src"), "main.sisu"))
+    print(fs.with_extension(Path.new("src/main.sisu"), "sir"))
+    let disk = Fs.in_memory(
+        {"proj/a.txt": "alpha\nbeta", "proj/sub/b.txt": "", "proj/sub/deeper/c.txt": "c"}
+    )
+    print(fs.walk(disk, Path.new("proj")))
+    print(fs.copy_file(disk, Path.new("proj/a.txt"), Path.new("proj/copy.txt")))
+    fs.append(disk, Path.new("proj/copy.txt"), b"\ngamma").expect("in memory")
+    print(fs.read_lines(disk, Path.new("proj/copy.txt")))
+    print(fs.read_lines(disk, Path.new("proj/missing.txt")))

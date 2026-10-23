@@ -340,7 +340,10 @@ impl Select {
     }
 }
 
-fn split_args(args: &[String]) -> Parsed<'_> {
+/// The flags, the values of the flags that take one, the file and what
+/// follows it. With `program_after_sir` (`sisu run`), what follows `--from-sir
+/// FILE` is the program's (decision 254), as what follows a source file is.
+fn split_args(args: &[String], program_after_sir: bool) -> Parsed<'_> {
     let mut flags = Vec::new();
     let mut values = Vec::new();
     let mut stats = None;
@@ -374,6 +377,9 @@ fn split_args(args: &[String]) -> Parsed<'_> {
             flags.push(a);
         }
         i += 1;
+        if program_after_sir && values.last().is_some_and(|(k, _)| *k == "--from-sir") {
+            return Parsed { flags, values, file: None, rest: args.get(i..).unwrap_or(&[]).to_vec(), stats };
+        }
     }
     let file = args.get(i).map(String::as_str);
     let rest = args.iter().skip(i + 1).cloned().collect();
@@ -516,7 +522,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
         "replay" => replay(rest, host),
         "audit" => audit(rest, host),
         "run" | "check" | "sir" | "test" | "bench" | "build" | "tokens" | "parse" => {
-            let p = split_args(rest);
+            let p = split_args(rest, cmd == "run");
             let allowed: &[&str] = match cmd.as_str() {
                 "run" => &[
                     "--sir",
@@ -737,10 +743,12 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 }
             }
             let locked = p.flags.contains(&"--locked");
-            // `--from-sir FILE` reads a serialised SIR program and compiles
-            // it natively (decision 212): FILE is the program, and what
-            // follows it is the program's arguments.
-            if from_sir.is_some() && !p.flags.contains(&"--native") {
+            // `--from-sir FILE` reads a serialised SIR program (decision
+            // 212): FILE is the program, and what follows it is the
+            // program's arguments. `sisu run` interprets it, or compiles it
+            // with `--native` (decision 254); `sisu build` compiles it, so
+            // only with `--native`.
+            if from_sir.is_some() && cmd == "build" && !p.flags.contains(&"--native") {
                 host.stderr(&plain_error(msg::NATIVE_FROM_SIR, &[]));
                 return EXIT_USAGE;
             }
@@ -771,7 +779,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 return EXIT_USAGE;
             }
             if record.is_some()
-                && let Some(other) = ["--explore", "--defer-borrow", "--sir"]
+                && let Some(other) = ["--explore", "--defer-borrow", "--sir", "--from-sir"]
                     .iter()
                     .find(|o| p.flags.contains(o) || p.values.iter().any(|(k, _)| k == *o))
             {
@@ -779,7 +787,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 return EXIT_USAGE;
             }
             if p.flags.contains(&"--watch")
-                && let Some(other) = ["--explore", "--defer-borrow", "--sir"]
+                && let Some(other) = ["--explore", "--defer-borrow", "--sir", "--from-sir"]
                     .iter()
                     .find(|o| p.flags.contains(o) || p.values.iter().any(|(k, _)| k == *o))
                     .map(|o| o.to_string())
@@ -887,7 +895,9 @@ fn read_sir(source: &str, host: &mut dyn Host) -> Result<sisu_sir::Program, i32>
 /// `sisu build --native --from-sir FILE` and `sisu run --native --from-sir
 /// FILE`: a serialised SIR program (what `sisu sir` prints, and what stage
 /// 1 emits) compiled by the native backend without the front end
-/// (decision 212). The executable is named by the file's stem.
+/// (decision 212). The executable is named by the file's stem. Without
+/// `--native`, `sisu run --from-sir FILE` interprets the program, as `sisu
+/// run --sir` does (decision 254).
 fn from_sir(
     cmd: &str,
     flags: &[&str],
@@ -905,6 +915,18 @@ fn from_sir(
     if prog.entry.is_none() {
         host.stderr(&plain_error(msg::CLI_NO_MAIN, &[("file", input.file.clone())]));
         return exit::ERROR;
+    }
+    if cmd == "run" && !flags.contains(&"--native") {
+        stage.set("the interpreter");
+        let mut h = WithArgs { inner: host, args, watch: Vec::new() };
+        let options = Options {
+            seed: opts.seeds.first,
+            stats: flags.contains(&"--stats"),
+            stats_kind: opts.stats,
+            strategy: opts.strategy.clone(),
+            ..Options::default()
+        };
+        return run_main_seeds(&prog, &mut h, &options, opts.seeds, opts.bound);
     }
     stage.set("the native backend");
     let profile = crate::native::Profile::of(opts.release);
@@ -2779,7 +2801,7 @@ fn audit_caps(files: &[&String], host: &mut dyn Host) -> i32 {
 /// program is the log's own copy of the source, checked at the level it
 /// was recorded at; `--monitor` runs it under the ownership monitor.
 fn replay(args: &[String], host: &mut dyn Host) -> i32 {
-    let p = split_args(args);
+    let p = split_args(args, false);
     if let Some(bad) = p.flags.iter().find(|f| **f != "--monitor") {
         host.stderr(&plain_error(
             msg::CLI_UNKNOWN_OPTION,

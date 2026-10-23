@@ -1,0 +1,23 @@
+"(\\w+)@(\\w+)\\.(com|org)" on "ada@lovelace.org, bob@ex.com": ["0-16 \"ada@lovelace.org\" [\"ada\", \"lovelace\", \"org\"]", "18-28 \"bob@ex.com\" [\"bob\", \"ex\", \"com\"]"]
+"a+?" on "aaa": ["0-1 \"a\" []", "1-2 \"a\" []", "2-3 \"a\" []"]
+"a{2,3}" on "aaaaaaa": ["0-3 \"aaa\" []", "3-6 \"aaa\" []"]
+"(a|ab)(c|bcd)(d*)" on "abcd": ["0-4 \"abcd\" [\"a\", \"bcd\", \"\"]"]
+"x*" on "abxd": ["0-0 \"\" []", "1-1 \"\" []", "2-3 \"x\" []", "4-4 \"\" []"]
+"\\bcat\\b" on "cat concat cat.": ["0-3 \"cat\" []", "11-14 \"cat\" []"]
+"^\\d+$" on "2026": ["0-4 \"2026\" []"]
+"[^aeiou\\s]+" on "sisu is fun": ["0-1 \"s\" []", "2-3 \"s\" []", "6-7 \"s\" []", "8-9 \"f\" []", "10-11 \"n\" []"]
+"(?:é+)(.)" on "ééa éb": ["0-5 \"ééa\" [\"a\"]", "6-9 \"éb\" [\"b\"]"]
+"(a)|(b)" on "ab": ["0-1 \"a\" [\"a\", \"-\"]", "1-2 \"b\" [\"-\", \"b\"]"]
+from 23.10.2026 to 01.11.2026
+["a", "b", "c", "d"]
+False
+Some(40)
+"a(b": Err(Syntax(at=1, message="an unclosed group"))
+"a)": Err(Syntax(at=1, message="a `)` without its `(`"))
+"*a": Err(Syntax(at=0, message="a repetition of nothing"))
+"a**": Err(Syntax(at=2, message="a repetition of a repetition"))
+"[z-a]": Err(Syntax(at=3, message="a range whose ends are reversed"))
+"a{3,2}": Err(Syntax(at=1, message="a repetition whose bounds are reversed"))
+"\\q": Err(Syntax(at=0, message="the escape `\\q`"))
+"[ab": Err(Syntax(at=0, message="an unclosed class"))
+"a{1001}": Err(Syntax(at=1, message="a repetition of more than 1000"))

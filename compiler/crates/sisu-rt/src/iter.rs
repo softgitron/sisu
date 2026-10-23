@@ -1,6 +1,9 @@
 //! Iterators (`Iter[T]`): a word holding the address of a heap object
 //! that yields items of a fixed size, as the interpreter's `IterState`
-//! does (`sisu-interp/src/iter.rs`).
+//! does (`sisu-interp/src/iter.rs`). The object starts with a header that
+//! compiled code reads (`abi::ITER_KIND`, decision 253): a range and a
+//! borrowed list's elements keep their state there, so that a loop over
+//! one steps without calling the runtime.
 
 use crate::abi::{self, Kind};
 use crate::dict::Table;
@@ -9,25 +12,43 @@ use crate::rt::{self, ty};
 use crate::value;
 use sisu_diag::msg;
 
+#[repr(C)]
 pub(crate) struct IterObj {
+    /// `abi::ITER_RANGE` (`a`, `b` and `c` are the current value, the end
+    /// and the step), `abi::ITER_LIST_REF` (the list's address, the next
+    /// index and the size of an element) or `abi::ITER_OTHER` (`state`
+    /// says).
+    pub kind: u64,
+    pub a: u64,
+    pub b: u64,
+    pub c: u64,
     _live: mem::Live,
     pub state: State,
     /// The bytes of each item.
     pub item_size: u32,
 }
 
+impl IterObj {
+    /// An iterator whose state the runtime keeps.
+    fn new(state: State, item_size: u32) -> Box<IterObj> {
+        Box::new(IterObj {
+            kind: abi::ITER_OTHER,
+            a: 0,
+            b: 0,
+            c: 0,
+            _live: mem::Live::new(),
+            state,
+            item_size,
+        })
+    }
+}
+
 pub(crate) enum State {
-    Range {
-        cur: i64,
-        stop: i64,
-        step: i64,
-    },
-    /// The addresses of the elements of a borrowed list.
-    ListRef {
-        list: *mut List,
-        idx: u64,
-        elem_size: u32,
-    },
+    /// A range of integers, whose state is in the header.
+    Range,
+    /// The addresses of the elements of a borrowed list, whose state is in
+    /// the header.
+    ListRef,
     /// Owned values, moved out one by one; what is left is dropped with
     /// the iterator.
     Items {
@@ -114,12 +135,12 @@ pub(crate) fn waits(obj: &IterObj) -> Option<Waits> {
 
 /// The iterator of the values a receiver gets.
 pub(crate) fn receiver(chan: u32, elem: u32) -> Box<IterObj> {
-    Box::new(IterObj { _live: mem::Live::new(), state: State::Recv { chan }, item_size: ty(elem).size })
+    IterObj::new(State::Recv { chan }, ty(elem).size)
 }
 
 /// The iterator of a generator's items, of `item_size` bytes.
 pub(crate) fn generator(task: u32, item_size: u32) -> Box<IterObj> {
-    Box::new(IterObj { _live: mem::Live::new(), state: State::Gen { task }, item_size })
+    IterObj::new(State::Gen { task }, item_size)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,13 +154,13 @@ pub(crate) enum Part {
 /// elements (`Keys`).
 pub(crate) fn table_ref(table: *mut Table, part: Part) -> Box<IterObj> {
     let item_size = if part == Part::Items { 16 } else { 8 };
-    Box::new(IterObj { _live: mem::Live::new(), state: State::TableRef { table, idx: 0, part }, item_size })
+    IterObj::new(State::TableRef { table, idx: 0, part }, item_size)
 }
 
 /// An iterator that owns a dict's or set's entries.
 pub(crate) fn table_own(table: Box<Table>) -> Box<IterObj> {
     let item_size = table.ksize + table.vsize;
-    Box::new(IterObj { _live: mem::Live::new(), state: State::TableOwn { table, idx: 0 }, item_size })
+    IterObj::new(State::TableOwn { table, idx: 0 }, item_size)
 }
 
 /// The heap object of a new iterator, as the word that holds it.
@@ -148,47 +169,55 @@ pub(crate) fn into_word(obj: Box<IterObj>) -> u64 {
 }
 
 pub(crate) fn range(cur: i64, stop: i64, step: i64) -> Box<IterObj> {
-    Box::new(IterObj { _live: mem::Live::new(), state: State::Range { cur, stop, step }, item_size: 8 })
+    Box::new(IterObj {
+        kind: abi::ITER_RANGE,
+        a: cur as u64,
+        b: stop as u64,
+        c: step as u64,
+        _live: mem::Live::new(),
+        state: State::Range,
+        item_size: 8,
+    })
 }
 
 /// An iterator over the elements of a borrowed list: their addresses.
 pub(crate) fn list_ref(list: *mut List, elem: u32) -> Box<IterObj> {
     Box::new(IterObj {
+        kind: abi::ITER_LIST_REF,
+        a: list as u64,
+        b: 0,
+        c: u64::from(ty(elem).size),
         _live: mem::Live::new(),
-        state: State::ListRef { list, idx: 0, elem_size: ty(elem).size },
+        state: State::ListRef,
         item_size: 8,
     })
 }
 
 /// An iterator that owns a list's elements.
 pub(crate) fn items(list: List, elem: u32) -> Box<IterObj> {
-    Box::new(IterObj {
-        _live: mem::Live::new(),
-        state: State::Items { list, idx: 0, elem },
-        item_size: ty(elem).size,
-    })
+    IterObj::new(State::Items { list, idx: 0, elem }, ty(elem).size)
 }
 
 pub(crate) fn chars(text: Str) -> Box<IterObj> {
-    Box::new(IterObj { _live: mem::Live::new(), state: State::Chars { text, pos: 0 }, item_size: 8 })
+    IterObj::new(State::Chars { text, pos: 0 }, 8)
 }
 
 pub(crate) fn bytes(text: Str) -> Box<IterObj> {
-    Box::new(IterObj { _live: mem::Live::new(), state: State::Bytes { text, pos: 0 }, item_size: 8 })
+    IterObj::new(State::Bytes { text, pos: 0 }, 8)
 }
 
 pub(crate) fn owned_bytes(data: Vec<u8>) -> Box<IterObj> {
-    Box::new(IterObj { _live: mem::Live::new(), state: State::OwnedBytes { data, pos: 0 }, item_size: 8 })
+    IterObj::new(State::OwnedBytes { data, pos: 0 }, 8)
 }
 
 pub(crate) fn enumerate(inner: Box<IterObj>) -> Box<IterObj> {
     let item_size = 8 + inner.item_size;
-    Box::new(IterObj { _live: mem::Live::new(), state: State::Enumerate { inner, n: 0 }, item_size })
+    IterObj::new(State::Enumerate { inner, n: 0 }, item_size)
 }
 
 pub(crate) fn zip(a: Box<IterObj>, b: Box<IterObj>, strict: bool, a_ty: u32, b_ty: u32) -> Box<IterObj> {
     let item_size = a.item_size + b.item_size;
-    Box::new(IterObj { _live: mem::Live::new(), state: State::Zip { a, b, strict, a_ty, b_ty }, item_size })
+    IterObj::new(State::Zip { a, b, strict, a_ty, b_ty }, item_size)
 }
 
 /// The items of an `Iterable[T]` argument (`p`, of type `arg`): a
@@ -220,10 +249,18 @@ pub(crate) unsafe fn iterable(p: *mut u8, arg: u32, item: Option<u32>) -> Box<It
                     // the reference does not own; take its remaining items.
                     let obj = mem::word(q, 0) as *mut IterObj;
                     let st = std::mem::replace(&mut (*obj).state, State::Done);
-                    (
-                        Box::new(IterObj { _live: mem::Live::new(), state: st, item_size: (*obj).item_size }),
-                        referent(e),
-                    )
+                    let (kind, a, b, c) = ((*obj).kind, (*obj).a, (*obj).b, (*obj).c);
+                    (*obj).kind = abi::ITER_OTHER;
+                    let taken = Box::new(IterObj {
+                        kind,
+                        a,
+                        b,
+                        c,
+                        _live: mem::Live::new(),
+                        state: st,
+                        item_size: (*obj).item_size,
+                    });
+                    (taken, referent(e))
                 }
                 _ => rt::internal("iterating over a reference to something that is not a list"),
             },
@@ -247,18 +284,14 @@ pub(crate) unsafe fn iterable(p: *mut u8, arg: u32, item: Option<u32>) -> Box<It
         Kind::Iter(e) => referent(e).is_some(),
         _ => false,
     };
-    let yields_refs = matches!(base.state, State::ListRef { .. })
+    let yields_refs = matches!(base.state, State::ListRef)
         || matches!(base.state, State::TableRef { part, .. } if part != Part::Items)
         || (iter_of_refs && !matches!(base.state, State::Decay { .. }));
     let wants_ref = item.is_some_and(|t| matches!(ty(t).kind, Kind::Ref(_)));
     if yields_refs && !wants_ref {
         let decayed = item.or(elem);
         let size = decayed.map_or(8, |t| ty(t).size);
-        Box::new(IterObj {
-            _live: mem::Live::new(),
-            state: State::Decay { inner: base, item: decayed },
-            item_size: size,
-        })
+        IterObj::new(State::Decay { inner: base, item: decayed }, size)
     } else {
         base
     }
@@ -282,29 +315,28 @@ pub(crate) unsafe fn next(obj: &mut IterObj, out: *mut u8) -> u8 {
         let some = |out: *mut u8| mem::set_word(out, 0, 0);
         let none = |out: *mut u8| mem::set_word(out, 0, 1);
         match &mut obj.state {
-            State::Range { cur, stop, step } => {
-                let more = if *step > 0 { *cur < *stop } else { *cur > *stop };
+            State::Range => {
+                let (cur, stop, step) = (obj.a as i64, obj.b as i64, obj.c as i64);
+                let more = if step > 0 { cur < stop } else { cur > stop };
                 if !more {
                     none(out);
                     return abi::OK;
                 }
-                let v = *cur;
-                match cur.checked_add(*step) {
-                    Some(n) => *cur = n,
-                    None => obj.state = State::Done,
-                }
+                // Past the last value an `int` holds, the range ends: its
+                // end becomes its current value, as compiled code ends it.
+                obj.a = cur.checked_add(step).unwrap_or(stop) as u64;
                 some(out);
-                mem::set_word(out, 8, v as u64);
+                mem::set_word(out, 8, cur as u64);
             }
-            State::ListRef { list, idx, elem_size } => {
-                let l = &**list;
-                if *idx >= l.len {
+            State::ListRef => {
+                let l = &*(obj.a as *const List);
+                if obj.b >= l.len {
                     none(out);
                     return abi::OK;
                 }
                 some(out);
-                mem::set_word(out, 8, l.at(*idx, *elem_size) as u64);
-                *idx += 1;
+                mem::set_word(out, 8, l.at(obj.b, obj.c as u32) as u64);
+                obj.b += 1;
             }
             State::Items { list, idx, elem } => {
                 if *idx >= list.len {

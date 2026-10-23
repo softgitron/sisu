@@ -83,6 +83,24 @@ fn the_sir_text_runs() {
 }
 
 #[test]
+fn run_from_sir_interprets_the_program_with_its_arguments() {
+    let f = temp_file(
+        "from_sir.sisu",
+        "def main(sys: System):\n    for a in sys.env.args():\n        print(a)\n",
+    );
+    let (code, host) = cli(&["sir", &f]);
+    assert_eq!(code, 0, "{}", host.err);
+    let s = temp_file("from_sir.sir", &host.out);
+    let (code, host) = cli(&["run", "--from-sir", &s, "x", "y z"]);
+    assert_eq!(code, 0, "{}", host.err);
+    assert_eq!(host.out, "x\ny z\n");
+    // A build is native code: `--from-sir` goes with `--native` there.
+    let (code, host) = cli(&["build", "--from-sir", &s]);
+    assert_eq!(code, crate::cli::EXIT_USAGE);
+    assert!(host.err.contains("error[D0110]"), "{}", host.err);
+}
+
+#[test]
 fn parse_print_is_lossless() {
     let text = "# comment\ndef  main( ):   # odd spacing\n    print( 1 )\n\n\n";
     let f = temp_file("lossless.sisu", text);

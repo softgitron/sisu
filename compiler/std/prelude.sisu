@@ -890,6 +890,12 @@ trait Default:
 trait Len:
     pure def len(self) -> int
 
+## A collection that can tell whether it holds a value: `x in xs` is
+## `xs.contains(x)` (02), for the builtin collections and for any type
+## that implements it.
+trait Contains[T]:
+    pure def contains(self, x: T) -> bool
+
 ## Values that are copied rather than moved (04, rule 1); `@derive(Copy)`
 ## opts a type in when all its fields are `Copy`.
 @marker
@@ -3877,6 +3883,13 @@ impl[T] Len for list[T]:
     @intrinsic("len")
     pure def len(self) -> int
 
+impl[T: Eq] Contains[T] for list[T]:
+    pure def contains(self, x: T) -> bool:
+        for v in self:
+            if v == x:
+                return True
+        return False
+
 impl[T: Debug, const N: int] Debug for Array[T, N]:
     pure def fmt_debug(self, mut f: Formatter):
         f.write("[")
@@ -3941,6 +3954,10 @@ impl[T] Len for set[T]:
     @intrinsic("len")
     pure def len(self) -> int
 
+impl[T: Hash] Contains[T] for set[T]:
+    pure def contains(self, x: T) -> bool:
+        return x in self
+
 impl[K: Debug, V: Debug] Debug for dict[K, V]:
     pure def fmt_debug(self, mut f: Formatter):
         f.write("{{")
@@ -3974,6 +3991,10 @@ impl[K: Hash, V: Eq] Eq for dict[K, V]:
 impl[K, V] Len for dict[K, V]:
     @intrinsic("len")
     pure def len(self) -> int
+
+impl[K: Hash, V] Contains[K] for dict[K, V]:
+    pure def contains(self, key: K) -> bool:
+        return key in self
 
 impl[T: Debug] Display for T?:
     pure def fmt(self, mut f: Formatter):

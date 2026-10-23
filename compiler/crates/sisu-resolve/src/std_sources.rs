@@ -29,6 +29,9 @@ pub const ENCODING: &str = include_str!("../../../std/encoding.sisu");
 pub const HASH: &str = include_str!("../../../std/hash.sisu");
 pub const SORT: &str = include_str!("../../../std/sort.sisu");
 pub const SEARCH: &str = include_str!("../../../std/search.sisu");
+pub const PROCESS: &str = include_str!("../../../std/process.sisu");
+pub const ENV: &str = include_str!("../../../std/env.sisu");
+pub const REGEX: &str = include_str!("../../../std/regex.sisu");
 
 /// `target` (08, "Conditional compilation"): the build target's facts as
 /// constants. Stage 0's target is the interpreter on the host, so they are
@@ -79,6 +82,9 @@ pub const MODULE_PATHS: &[&str] = &[
     "std.hash",
     "std.sort",
     "std.search",
+    "std.process",
+    "std.env",
+    "std.regex",
 ];
 
 /// The std module an import path names, as (module name, source).
@@ -110,6 +116,9 @@ pub fn module_for(path: &[&str]) -> Option<(&'static str, &'static str)> {
         ["std", "hash"] => Some(("hash", HASH)),
         ["std", "sort"] => Some(("sort", SORT)),
         ["std", "search"] => Some(("search", SEARCH)),
+        ["std", "process"] => Some(("process", PROCESS)),
+        ["std", "env"] => Some(("env", ENV)),
+        ["std", "regex"] => Some(("regex", REGEX)),
         _ => None,
     }
 }
@@ -121,6 +130,7 @@ pub const DOCUMENTED: &[(&str, &str)] = &[
     ("cli", CLI),
     ("collections", COLLECTIONS),
     ("encoding", ENCODING),
+    ("env", ENV),
     ("fmt", FMT),
     ("fs", FS),
     ("hash", HASH),
@@ -128,7 +138,9 @@ pub const DOCUMENTED: &[(&str, &str)] = &[
     ("live", LIVE),
     ("num", NUM),
     ("par", PAR),
+    ("process", PROCESS),
     ("rand", RAND),
+    ("regex", REGEX),
     ("http", HTTP),
     ("json", JSON),
     ("log", LOG),
@@ -192,6 +204,8 @@ pub fn reexports(module: &str) -> &'static [&'static str] {
         "fs" => &["Fs", "FsOps", "Path", "Metadata", "IoError"],
         "rand" => &["Rand", "RandOps"],
         "encoding" => &["Utf8Error"],
+        "process" => &["Proc", "ProcOps", "ProcOutput", "ProcError"],
+        "env" => &["Env", "EnvOps"],
         _ => &[],
     }
 }

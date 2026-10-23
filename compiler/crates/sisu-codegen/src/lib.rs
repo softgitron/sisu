@@ -1082,6 +1082,7 @@ impl<'p> Codegen<'p> {
             sym::DROP => (&[i64_, i32_], &[i8_]),
             sym::COPY => (&[i64_, i64_, i32_], &[]),
             sym::BINARY => (&[i32_, i64_, i64_, i32_, i64_, i32_], &[i8_]),
+            sym::BYTES_EQ => (&[i64_, i64_, i64_], &[i8_]),
             sym::INTRINSIC => (&[i64_, i64_, i64_], &[i8_]),
             sym::SIZED => (&[i32_, i32_, i32_, i64_, i64_, i64_], &[i8_]),
             sym::WIDE => (&[i32_, i32_, i64_, i32_, i64_, i32_, i64_], &[i8_]),

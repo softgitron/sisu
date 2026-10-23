@@ -681,6 +681,7 @@ impl Resolver<'_> {
             div: get(prog, "Div"),
             rem: get(prog, "Rem"),
             neg: get(prog, "Neg"),
+            contains: get(prog, "Contains"),
             num: get(prog, "Num"),
             from_literal: get(prog, "FromLiteral"),
             task_error: get(prog, "TaskError"),

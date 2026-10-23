@@ -1,0 +1,40 @@
+# `std.regex` (11): RE2's syntax matched by a Pike VM, leftmost-first
+# with Perl's preferences, in time linear in the text: the submatches of
+# groups, lazy and counted repetitions, classes and assertions, `find_all`
+# with RE2's treatment of empty matches, `replace_all` with group
+# references, `split`, byte positions in text that is not ASCII, the
+# patterns that make a backtracking engine take exponential time, and
+# what is not a pattern.
+from std.regex import Regex
+
+def show(pattern: str, text: str):
+    let re = Regex.new(pattern).expect("a pattern")
+    var parts: list[String] = []
+    for m in re.find_all(text):
+        var groups: list[String] = []
+        for i in range(1, re.groups() + 1):
+            groups.push(m.group(i) ?? String.new("-"))
+        parts.push("{m.start}-{m.end} {m.text:?} {groups}")
+    print("{pattern:?} on {text:?}: {parts}")
+
+def main():
+    show("(\\w+)@(\\w+)\\.(com|org)", "ada@lovelace.org, bob@ex.com")
+    show("a+?", "aaa")
+    show("a{{2,3}}", "aaaaaaa")
+    show("(a|ab)(c|bcd)(d*)", "abcd")
+    show("x*", "abxd")
+    show("\\bcat\\b", "cat concat cat.")
+    show("^\\d+$", "2026")
+    show("[^aeiou\\s]+", "sisu is fun")
+    show("(?:é+)(.)", "ééa éb")
+    show("(a)|(b)", "ab")
+    let dates = Regex.new("(\\d{{4}})-(\\d{{2}})-(\\d{{2}})").expect("a pattern")
+    print(dates.replace_all("from 2026-10-23 to 2026-11-01", "$3.$2.$1"))
+    print(Regex.new("\\s*[,;]\\s*").expect("a pattern").split("a , b;c ;d"))
+    var long = String.new()
+    for _ in range(40):
+        long.push("a")
+    print(Regex.new("(a*)*b").expect("a pattern").is_match(long))
+    print(Regex.new("(a|aa)+$").expect("a pattern").find(long).map((m) -> m.end))
+    for bad in ["a(b", "a)", "*a", "a**", "[z-a]", "a{{3,2}}", "\\q", "[ab", "a{{1001}}"]:
+        print("{bad:?}: {Regex.new(bad).map((r) -> r.groups())}")

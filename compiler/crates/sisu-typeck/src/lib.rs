@@ -47,9 +47,14 @@ pub fn param_local_ty(
         Mode::Own => ty.clone(),
         Mode::Mut => Ty::Ref(Box::new(ty.clone()), true),
         Mode::Borrow => {
-            // A generic parameter bounded by `Copy` is passed by value, as
-            // every type it stands for is.
-            if (!is_opaque(ty) && prog.is_copy(ty)) || (is_opaque(ty) && prog.is_copy_in(ty, env)) {
+            // A reference is passed as it is, a `ref mut T` too: the call
+            // passes the reference, not a borrow of it. A generic
+            // parameter bounded by `Copy` is passed by value, as every type
+            // it stands for is.
+            if matches!(ty, Ty::Ref(..))
+                || (!is_opaque(ty) && prog.is_copy(ty))
+                || (is_opaque(ty) && prog.is_copy_in(ty, env))
+            {
                 ty.clone()
             } else {
                 Ty::Ref(Box::new(ty.clone()), false)

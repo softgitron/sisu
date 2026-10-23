@@ -72,22 +72,28 @@ architecture"); data flows down the table.
 
 Line counts are of each crate's `src`, unit tests included. Besides the crates:
 `catalog/messages.catalog` (every message); the standard library, in
-Sisu: `std/prelude.sisu` (3919 lines: the builtin types, the core traits
+Sisu: `std/prelude.sisu` (4150 lines: the builtin types, the core traits
 and their derives, iterators, formatting, collections, the text methods,
 `Shared` and the other library types, tasks and channels, time, the sized
 integers and `bytes`, `Array`, the capabilities and their operations
 traits, property testing), `std/cap.sisu` (961: std.cap's attenuations,
 caretakers, fakes, interceptor and the `sim` profile's file system and
-network), `std/collections.sisu` (308: std.collections), `std/num.sisu`
-(211: std.num), `std/sim.sisu` (152: nodes, partitions, `choose`,
-`always`), `std/cli.sisu` (175: std.x.cli over reflection),
-`std/http.sisu` (299: std.x.http), `std/test.sisu` (snapshots,
-benchmarks), `std/json.sisu` (`encode` over reflection), `std/live.sisu`
+network), `std/collections.sisu` (441: std.collections), `std/num.sisu`
+(865: std.num, with `BigInt` and `Decimal`), `std/regex.sisu` (738: a
+Pike VM), `std/hash.sisu` (592: SipHash, FNV, CRC-32, SHA-2, BLAKE3),
+`std/json.sisu` (447: `encode` and `decode` over reflection, `parse`),
+`std/io.sisu` (319: readers and writers), `std/encoding.sisu` (306),
+`std/fs.sisu` (254), `std/sort.sisu` (228), `std/rand.sisu` (225:
+xoshiro256** and ChaCha20), `std/par.sisu` (209), `std/search.sisu`
+(198), `std/math.sisu` (178), `std/process.sisu` (132), `std/env.sisu`
+(125), `std/sim.sisu` (152: nodes, partitions, `choose`, `always`),
+`std/cli.sisu` (175: std.x.cli over reflection), `std/http.sisu` (299:
+std.x.http), `std/test.sisu` (snapshots, benchmarks), `std/live.sisu`
 (hot replacement's boundaries), `std/task.sisu`, `std/log.sisu`,
-`std/net.sisu` (`Url`), `std/time.sisu`, `std/math.sisu`, and
-`std/string.sisu` and `std/fmt.sisu`, which name the prelude's text and
-formatting (decision 245); and `conformance/` (the suite, described in
-its own [README](../conformance/README.md)).
+`std/net.sisu` (`Url`), `std/time.sisu`, and `std/string.sisu`
+(`Builder`) and `std/fmt.sisu`, which name the prelude's text and
+formatting (decisions 245 and 252); and `conformance/` (the suite,
+described in its own [README](../conformance/README.md)).
 
 The workspace forbids `unsafe` and denies `unwrap`, `expect`, `panic`,
 `todo`, `unimplemented` and `unreachable` outside tests (18, Phase 0,
@@ -367,20 +373,20 @@ above it is the intrinsic's contract, stated in Sisu terms; `@builtin`
 marks a type whose values the host represents. Five more attributes are
 std's: `@structural("name")` on a function with a body says that the
 intrinsic `name` computes the same result whenever the call's type
-arguments meet every bound with a structural impl (lowering then calls
-the intrinsic: `list.sort` and `join` are written in Sisu and run on the
-host for builtin elements); `@keeps(self, x)` on an intrinsic names the
-`own` and `mut` arguments whose every value it keeps or returns (the only
-ones that may take a must-consume value); `@sealed` on a trait means only
-std implements it (`Num`); `@marker` on a trait means it has no methods
-and is implemented by the language's rules (`Copy`); `@internal` on a
-function means only std may call it (`E0701`). All seven are reserved
-for std (`E0225`). A std module may name prelude items too
+arguments meet every bound with a structural impl (lowering then calls the
+intrinsic: `list.sort` and `join` are written in Sisu and run on the host
+for builtin elements); `@keeps(self, x)` on an intrinsic names the `own`
+and `mut` arguments whose every value it keeps or returns (the only ones
+that may take a must-consume value); `@sealed` on a trait means only std
+implements it (`Num`); `@marker` on a trait means it has no methods and is
+implemented by the language's rules (`Copy`); `@internal` on a function
+means only std may call it (`E0701`). All seven are reserved for std
+(`E0225`). A std module may name prelude items too
 (`std_sources::reexports`), so `from std.time import DateTime` finds the
-prelude's. The prelude declares the core traits (`Display`,
-`Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, `Default`, `Len`, `Copy`,
-`Num`, `Drop`, `Iterator`, the operator traits, `FromLiteral`), their impls for the
-builtin types, and the generic code over them; the impls of the leaf
+prelude's. The prelude declares the core traits (`Display`, `Debug`, `Eq`,
+`PartialOrd`, `Ord`, `Hash`, `Default`, `Len`, `Contains`, `Copy`, `Num`,
+`Drop`, `Iterator`, the operator traits, `FromLiteral`), their impls for
+the builtin types, and the generic code over them; the impls of the leaf
 types and of tuples are generated (`<std>/builtin_impls.sisu`, from
 `sisu-resolve/src/std_sources.rs`).
 
@@ -5428,3 +5434,67 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      `reflect/closures`, `comptime/comptime_defs`,
      `comptime/reflecting_values` and `reflect/methods_rejected` pin it,
      natively too but the last.
+252. The modules of 11's table that compiler/std lacked are written in Sisu,
+     in the table's order, each with its doc examples as tests (`sisu test
+     --std`) and a case under `std/`: `std.par` (`join`, the chunks a
+     reduction splits a list into, halves down to a grain, fixed by index,
+     and `reduce` over a `Reducer` whose views merge up that tree, `Sum` in
+     the prelude's pairwise shape, so a parallel sum is the sequential one
+     bit for bit; stage 0 runs the chunks in order on the asking task, 06's
+     serial elision); `std.io` (`Reader`, `Writer`, `Seek`, `BufReader`,
+     `BufWriter`, readers and writers over bytes and standard input, `Conn`
+     as both); `std.fs` (a path's parts from its text, walking a tree,
+     copying, appending, lines); `std.rand` (xoshiro256** and ChaCha20, RFC
+     8439, each a `Rand` every copy of the handle shares, and choosing and
+     sampling); `std.encoding` (hexadecimal, base64 in both alphabets,
+     LEB128 and zigzag varints, UTF-8 and UTF-16); `std.hash` (SipHash-2-4,
+     FNV-1a, CRC-32 with its table computed at compile time, SHA-256,
+     SHA-512, BLAKE3 with its chunk tree); `std.sort` (a stable merge sort
+     of positions applied by swaps, so any type sorts in place, and
+     introsort); `std.search` (`bisect_left`, `bisect_right`,
+     `binary_search`, `partition_point`, `select_nth`, and D-075's
+     `interleave`, `interleave_all`, `deepening` and `within` over any
+     iterator); `std.process` (`Command`, a shell's word splitting,
+     `checked`); `std.env` (variables as numbers, flags and lists,
+     `require`, `expand`); and `std.regex`, RE2's syntax compiled by
+     Thompson's construction and run by a Pike VM, linear in the text,
+     leftmost-first with Perl's preferences and RE2's treatment of empty
+     matches, a star whose body can match nothing compiled as Go does
+     (`(x+)?`), and checked against Go's `regexp` on 2400 generated patterns
+     and texts. The modules that existed grow: `std.num` has `BigInt` (limbs
+     of nine digits, Knuth's division) and `Decimal` (a `BigInt` scaled by a
+     power of ten, rounding only by `round` and `div` with a named
+     `Rounding`, a float literal read from its shortest digits), checked
+     against Python's `int` and `decimal`, and `checked_sub` and
+     `checked_pow`; `std.math` the functions IEEE 754 fixes exactly and the
+     constants; `std.json` `parse`, a `Json` value and `decode[T]` over
+     reflection, the type as the schema; `std.string` a `Builder`;
+     `std.collections` `SortedSet`. Host intrinsics are added for none of
+     them. `x in xs` is `xs.contains(x)` through the prelude's new
+     `Contains[T]` trait (02) on a type that is not a builtin collection or
+     text: the checker writes the call where it checks a comparison of one
+     `in` (`not in`, its negation), and the builtin collections and the std
+     ones implement it, for generic code. Two rules change with it, both
+     found by the modules: the expected type does not drive a call whose
+     result type holds an associated type of a type its arguments have not
+     told yet (`Iter[I.Item]` with `I` unknown), which bound the outer
+     call's type parameter to the projection before it could be normalised
+     (`within(deepening(f, 2), ...)` was `E0300`); and lowering counts the
+     types a call names as type arguments among those its function mentions,
+     since the callee may make one (`R.empty()` in a function generic over
+     `R`), whose impl's methods were pruned (an internal error at the call).
+     This changes rules of the type checker (`in` through `Contains`, the
+     expected type of a call) and of lowering (the types a function
+     mentions), and the prelude, which stage 1 transcribes. What 11 names
+     and std still lacks: `std.mem` (D-060's allocator parameter),
+     `std.reflect` as a module, `From` and `Range` in `std.core`, `SoaList`
+     and the `persistent` collections, grapheme iteration and the
+     normalisation forms (Unicode's tables), the elementary functions of
+     `std.math` (Q-23), pipes and signals and the working directory (the
+     host contract), time zones, decoding an enum from JSON (reflection
+     makes no variant), and a `BigInt` literal beyond `int` (port-debt.md).
+     `std/num_exact`, `std/par`, `std/io`, `std/fs`, `std/rand`,
+     `std/encoding`, `std/hash`, `std/sort`, `std/search`,
+     `std/process_env`, `std/json_decode`, `std/regex`, `std/text_math`,
+     `traits/contains` and `std/doc_examples` pin it, natively too but the
+     last.

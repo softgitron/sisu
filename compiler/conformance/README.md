@@ -228,8 +228,8 @@ and the time spent building and running them.
 - `traits/` is traits and impls (18, Phase 4): provided methods,
   associated types, supertraits, coherence and the orphan rule, sealed
   traits, method resolution and ambiguity, `dyn Trait` and object safety,
-  operator traits, `FromLiteral`, derives and delegation, and their
-  diagnostics.
+  operator traits, `FromLiteral`, `in` through `Contains` (`contains`),
+  derives and delegation, and their diagnostics.
 - `generics/` is user generics: functions and types with bounds checked
   at the definition, defaults, type arguments at run time, views through
   generic parameters, `Drop` for a generic type, functions as values
@@ -297,7 +297,12 @@ and the time spent building and running them.
 - `std/` is the standard library as modules (std.collections, std.num,
   std.time and the rest, imported by their paths), its doc examples run
   as tests by `sisu test --std`, and the functions of the prelude that
-  must respect a program's own `Ord`.
+  must respect a program's own `Ord`; a case for each module of 11 that
+  is written in Sisu over the prelude (decision 252): `num_exact`
+  (`BigInt`, `Decimal`), `par`, `io`, `fs`, `rand`, `encoding`, `hash`
+  (each digest against its reference), `sort`, `search`, `process_env`,
+  `json_decode`, `regex` (and its rejected patterns) and `text_math`
+  (`Builder`, `std.math`, `SortedSet`).
 - `concurrency/` is tasks (18, Phase 6), most cases under several
   schedules: joins and their error sets, failures and the scope's result,
   panics in tasks, a task's stack overflow (`stack_overflow`),

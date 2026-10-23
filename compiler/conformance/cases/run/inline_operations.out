@@ -1,0 +1,25 @@
+FTFTFTFTF
+TFFFFFFF FTFFFFFF FFTFFFFF FFFTFFFF FFFFTFFF FFFFFTFF FFFFFFTF FFFFFFFT 
+TFTTTTTT
+TFFTFT FTTFFT FTFTTF 
+TFF FTF FFT 
+TFF FTF FFT 
+TFFTTTF
+0 True None None None
+20 False Some(0) Some(361)
+2470 0 None
+Some("a") Some("c") Some("c") 2
+6 [104, 195, 169, 108, 108, 111]
+664
+[2, 1, 5, 3, 1, 2, 1, 0, 10, 6, 2]
+342
+["h", "é", "", "", "wörld"]
+0
+3986724
+(Some('A'), None, None, None)
+(Some(''), Some('􏿿'), None, Some('퟿'))
+(9, 3, -5, -7)
+(199, 8, 207, 2, 55)
+(200, -3, None, Greater, Greater, Equal)
+(255, 0, 255, -128, 255)
+(0, 127, Some(0), Less, Less, Greater)

@@ -74,6 +74,10 @@ pub mod sym {
     /// `sisu_rt_binary(op, dst, a, a_ty, b, b_ty) -> u8`: an operator on
     /// values that are not numbers (equality, order, `in`, `+` on text).
     pub const BINARY: &str = "sisu_rt_binary";
+    /// `sisu_rt_bytes_eq(a, b, n) -> u8`: whether the `n` bytes at `a` and
+    /// at `b` are the same, for `==` on two texts of one length, compiled
+    /// inline otherwise (decision 253); it runs on the caller's stack.
+    pub const BYTES_EQ: &str = "sisu_rt_bytes_eq";
     /// `sisu_rt_intrinsic(desc, ret, args) -> u8`: a call of an intrinsic;
     /// `desc` is a [`super::CallDesc`] and `args` the arguments' addresses.
     pub const INTRINSIC: &str = "sisu_rt_intrinsic";
@@ -508,6 +512,26 @@ pub const SHARED_FLAGS: u32 = 24;
 /// reached by another task than its maker.
 pub const SHARED_ATOMIC: u64 = 1;
 pub const SHARED_CROSSED: u64 = 2;
+
+/// The header of an iterator's object (`Iter[T]`'s word is its address),
+/// which compiled code reads to step a range or a borrowed list's elements
+/// itself, without calling the runtime (decision 253): the kind
+/// (`ITER_OTHER`, `ITER_RANGE` or `ITER_LIST_REF`) at offset 0, then three
+/// words, a range's current value, end and step, or a list's address, the
+/// next index and the size of an element; a range whose next step would
+/// overflow ends after its current value, its end becoming its current
+/// value. Any other kind keeps its state in the runtime.
+pub const ITER_KIND: u32 = 0;
+pub const ITER_A: u32 = 8;
+pub const ITER_B: u32 = 16;
+pub const ITER_C: u32 = 24;
+/// The bytes of an iterator's object that compiled code keeps in a slot
+/// of its frame, for a range or a borrowed list's elements that never
+/// leave the function: the header alone (decision 253).
+pub const ITER_FRAME: u32 = 32;
+pub const ITER_OTHER: u64 = 0;
+pub const ITER_RANGE: u64 = 1;
+pub const ITER_LIST_REF: u64 = 2;
 
 /// The bytes of a `Mutex`'s header, before its value.
 pub const MUTEX_HEADER: u32 = 32;

@@ -1810,11 +1810,75 @@ impl Checker<'_> {
             let hint = if matches!(op, CmpOp::In | CmpOp::NotIn) { None } else { Some(pt.clone()) };
             let x = self.infer_expr(e, hint.as_ref());
             let x = self.unrefined(x);
+            // `x in xs` on a collection of a type's own is `xs.contains(x)`
+            // by its `Contains` impl (02; decision 252).
+            if rest.len() == 1
+                && matches!(op, CmpOp::In | CmpOp::NotIn)
+                && let Some(call) = self.contains_call(prev.clone(), x.clone(), *op == CmpOp::NotIn, range)
+            {
+                return call;
+            }
             self.check_comparison(*op, &prev, &x, range);
             prev = x.clone();
             out.push((*op, x));
         }
         Expr::new(ExprKind::Compare { first: Box::new(f), rest: out }, Ty::Bool, span)
+    }
+
+    /// `x in xs` (`not in` with `negate`) on a type that is not a builtin
+    /// collection or text: a call of its `Contains` method (02), when the
+    /// type implements `Contains`. `None` leaves the builtin ones to the
+    /// comparison.
+    fn contains_call(&mut self, x: Expr, xs: Expr, negate: bool, range: TextRange) -> Option<Expr> {
+        let prog = self.prog;
+        let tdef = prog.wk.contains?;
+        let ct = prog.normalize(&self.infer.zonk(self.resolved(&xs.ty).strip_ref()), &self.env);
+        let builtin = match &ct {
+            Ty::Adt(d, _) => {
+                Some(*d) == prog.wk.list
+                    || Some(*d) == prog.wk.set
+                    || Some(*d) == prog.wk.dict
+                    || prog.builtin(*d) == Some("Array")
+                    || self.is_string(&ct)
+            }
+            Ty::Str | Ty::Var(_) | Ty::Error => true,
+            _ => false,
+        };
+        if builtin {
+            return None;
+        }
+        let xt = prog.normalize(&self.infer.zonk(self.resolved(&x.ty).strip_ref()), &self.env);
+        let tr = sisu_resolve::TraitRef { def: tdef, args: vec![xt.clone()] };
+        if prog.implements(&ct, &tr, &self.env) == sisu_resolve::Answer::No {
+            return None;
+        }
+        let m = prog.trait_method(tdef, "contains")?;
+        let span = self.span(range);
+        let sig = self.instantiate(m, None, range);
+        if let Some(v) = sig.type_args.first() {
+            self.infer.try_unify(v, &ct);
+        }
+        if let Some(v) = sig.type_args.get(1) {
+            self.infer.try_unify(v, &xt);
+        }
+        let as_ref = |c: &Self, e: Expr| match c.resolved(&e.ty) {
+            Ty::Ref(..) => Arg { expr: e, mode: ArgMode::Value },
+            _ => Arg { expr: e, mode: ArgMode::Ref },
+        };
+        let args = vec![as_ref(self, xs), as_ref(self, x)];
+        let call = Expr::new(
+            ExprKind::Call { callee: Callee::Fn { def: m, type_args: sig.type_args.clone() }, args },
+            Ty::Bool,
+            span,
+        );
+        if negate {
+            return Some(Expr::new(
+                ExprKind::Unary { op: UnOp::Not, operand: Box::new(call) },
+                Ty::Bool,
+                span,
+            ));
+        }
+        Some(call)
     }
 
     fn check_comparison(&mut self, op: CmpOp, l: &Expr, r: &Expr, range: TextRange) {

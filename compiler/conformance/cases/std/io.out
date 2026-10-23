@@ -1,0 +1,13 @@
+Ok(["one", "two", "", "three"])
+Ok(b"012") Ok(8) Ok(b"89") Err(Other(message="a seek to -1, before the start"))
+held 2
+held 4
+held 0
+held 1
+Ok("abcdefg")
+Ok(14)
+Ok("copied through")
+Ok(b"first ")
+Ok(Some("line"))
+Ok(b"second\n")
+Ok(Some("echo: hello"))

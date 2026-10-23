@@ -1,0 +1,6 @@
+panic: postcondition of `Shelf.get` failed: result.count >= 0
+    result.count >= 0
+    │
+    -1
+  at Shelf.get (result_references.sisu:12:17)
+  at main (result_references.sisu:27:11)

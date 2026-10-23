@@ -342,7 +342,7 @@ unsafe fn drop_silent(p: *mut u8, fields: &[abi::Field]) -> u8 {
 /// `p` must hold the fields at their offsets.
 unsafe fn drop_fields(p: *mut u8, fields: &[abi::Field], silent: bool) -> u8 {
     let mut status = abi::OK;
-    for f in fields.iter().rev().filter(|f| !(silent && f.glue)) {
+    for f in fields.iter().rev().filter(|f| !(silent && f.glue) && rt::needs_drop(f.ty)) {
         // SAFETY: the field is where the type says.
         status = after_part(status, unsafe { drop_value(p.add(f.offset as usize), f.ty) });
     }
@@ -361,6 +361,24 @@ pub(crate) fn after_part(before: u8, now: u8) -> u8 {
 
 // --------------------------------------------------------------------- copy
 
+/// Copies a part of a value: a word, or other bytes, when its copy is a
+/// copy of its bytes, without a call of [`copy_value`] for it.
+///
+/// # Safety
+/// As [`copy_value`].
+unsafe fn copy_part(dst: *mut u8, src: *mut u8, t: u32) {
+    // SAFETY: as the caller guarantees.
+    unsafe {
+        if !rt::plain(t) {
+            return copy_value(dst, src, t);
+        }
+        match ty(t).size {
+            8 => mem::set_word(dst, 0, mem::word(src, 0)),
+            n => mem::copy(dst, src, n as usize),
+        }
+    }
+}
+
 /// `.copy()`: writes at `dst` a deep copy of the value at `src`.
 ///
 /// # Safety
@@ -369,6 +387,10 @@ pub(crate) unsafe fn copy_value(dst: *mut u8, src: *mut u8, t: u32) {
     let entry = ty(t);
     // SAFETY: the parts are where the type says.
     unsafe {
+        if rt::plain(t) {
+            mem::copy(dst, src, entry.size as usize);
+            return;
+        }
         match &entry.kind {
             Kind::String | Kind::Path | Kind::Bytes => {
                 let b = mem::at::<Text>(src).bytes();
@@ -379,8 +401,12 @@ pub(crate) unsafe fn copy_value(dst: *mut u8, src: *mut u8, t: u32) {
                 let size = ty(*e).size;
                 let mut to = List::empty();
                 to.reserve(from.len, size);
-                for i in 0..from.len {
-                    copy_value(to.at(i, size), from.at(i, size), *e);
+                if rt::plain(*e) {
+                    mem::copy(to.ptr, from.ptr, (from.len * u64::from(size)) as usize);
+                } else {
+                    for i in 0..from.len {
+                        copy_value(to.at(i, size), from.at(i, size), *e);
+                    }
                 }
                 to.len = from.len;
                 (dst as *mut List).write(to);
@@ -389,17 +415,17 @@ pub(crate) unsafe fn copy_value(dst: *mut u8, src: *mut u8, t: u32) {
                 let tg = tag(src, entry);
                 mem::set_word(dst, 0, tg);
                 if tg == 0 {
-                    copy_value(dst.add(8), src.add(8), *payload);
+                    copy_part(dst.add(8), src.add(8), *payload);
                 }
             }
             Kind::Result(ok, err) => {
                 let tg = tag(src, entry);
                 mem::set_word(dst, 0, tg);
-                copy_value(dst.add(8), src.add(8), if tg == 0 { *ok } else { *err });
+                copy_part(dst.add(8), src.add(8), if tg == 0 { *ok } else { *err });
             }
             Kind::Tuple(slots) => {
                 for s in slots {
-                    copy_value(dst.add(s.offset as usize), src.add(s.offset as usize), s.ty);
+                    copy_part(dst.add(s.offset as usize), src.add(s.offset as usize), s.ty);
                 }
             }
             Kind::Dict(..) | Kind::Set(_) => {
@@ -421,7 +447,7 @@ pub(crate) unsafe fn copy_value(dst: *mut u8, src: *mut u8, t: u32) {
             }
             Kind::Struct { fields, .. } => {
                 for f in fields {
-                    copy_value(dst.add(f.offset as usize), src.add(f.offset as usize), f.ty);
+                    copy_part(dst.add(f.offset as usize), src.add(f.offset as usize), f.ty);
                 }
             }
             Kind::Enum { variants, error, .. } => {
@@ -437,7 +463,7 @@ pub(crate) unsafe fn copy_value(dst: *mut u8, src: *mut u8, t: u32) {
                 mem::set_word(dst, off, tg);
                 if let Some(v) = variants.get(tg as usize) {
                     for f in &v.fields {
-                        copy_value(dst.add(f.offset as usize), src.add(f.offset as usize), f.ty);
+                        copy_part(dst.add(f.offset as usize), src.add(f.offset as usize), f.ty);
                     }
                 }
             }

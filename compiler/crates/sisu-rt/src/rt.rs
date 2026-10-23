@@ -11,6 +11,8 @@ use std::sync::OnceLock;
 static TYPES: OnceLock<Vec<TypeEntry>> = OnceLock::new();
 /// Whether dropping a value of each type can do anything.
 static NEEDS_DROP: OnceLock<Vec<bool>> = OnceLock::new();
+/// Whether a copy of a value of each type is a copy of its bytes.
+static PLAIN: OnceLock<Vec<bool>> = OnceLock::new();
 /// The addresses of the program's functions the type table names (drop
 /// glue), as integers.
 static FNS: OnceLock<Vec<usize>> = OnceLock::new();
@@ -20,8 +22,10 @@ pub(crate) type ValueFn = unsafe extern "C" fn(*mut u8, *mut u8) -> u8;
 
 pub(crate) fn init(types: Vec<TypeEntry>, fns: Vec<usize>) {
     let needs = needs_drop_table(&types);
+    let plain = plain_table(&types, &needs);
     let _ = TYPES.set(types);
     let _ = NEEDS_DROP.set(needs);
+    let _ = PLAIN.set(plain);
     let _ = FNS.set(fns);
 }
 
@@ -42,6 +46,12 @@ pub(crate) fn needs_drop(id: u32) -> bool {
     NEEDS_DROP.get().and_then(|t| t.get(id as usize)).copied().unwrap_or(false)
 }
 
+/// Whether a copy of a value of type `id` is a copy of its bytes: it owns
+/// nothing and holds no lock, whose copy starts unlocked.
+pub(crate) fn plain(id: u32) -> bool {
+    PLAIN.get().and_then(|t| t.get(id as usize)).copied().unwrap_or(false)
+}
+
 /// The function at `index` of the function table.
 pub(crate) fn function(index: u32) -> Option<ValueFn> {
     let addr = *FNS.get()?.get(index as usize)?;
@@ -51,6 +61,38 @@ pub(crate) fn function(index: u32) -> Option<ValueFn> {
     // SAFETY: the code generator fills the table with the addresses of
     // functions of this signature.
     Some(unsafe { std::mem::transmute::<usize, ValueFn>(addr) })
+}
+
+/// Which types [`plain`] holds of: those with nothing to drop that hold no
+/// `Mutex` or `RwLock` in place, to a fixed point.
+fn plain_table(types: &[TypeEntry], needs: &[bool]) -> Vec<bool> {
+    let mut locks = vec![false; types.len()];
+    loop {
+        let mut changed = false;
+        for (i, t) in types.iter().enumerate() {
+            if locks[i] {
+                continue;
+            }
+            let get = |j: u32| locks.get(j as usize).copied().unwrap_or(false);
+            let l = match &t.kind {
+                Kind::Mutex(_) | Kind::RwLock(_) => true,
+                Kind::Cell(v) | Kind::Option(v) | Kind::Entry(v, _) => get(*v),
+                Kind::Result(a, b) => get(*a) || get(*b),
+                Kind::Tuple(slots) => slots.iter().any(|s| get(s.ty)),
+                Kind::Struct { fields, .. } => fields.iter().any(|f| get(f.ty)),
+                Kind::Enum { variants, .. } => variants.iter().any(|v| v.fields.iter().any(|f| get(f.ty))),
+                Kind::ErrSet(members) => members.iter().any(|m| get(*m)),
+                _ => false,
+            };
+            if l {
+                locks[i] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            return needs.iter().zip(&locks).map(|(n, l)| !n && !l).collect();
+        }
+    }
 }
 
 /// Which types own something a drop must release, to a fixed point (a

@@ -1,7 +1,11 @@
-##! std.json for stage 0 (11): the text of JSON values. `encode[T]` is a
-##! generic function over reflection (08, "Reflection"), made for each type
-##! it encodes; `quote` is the part every encoder shares. Decoding waits for
-##! `Decode` (11).
+##! std.json (11): JSON text and values. `encode[T]` writes a value as
+##! JSON and `decode[T]` reads one back, generic functions over reflection
+##! (08, "Reflection") made for each type, so the type is the schema: text
+##! that does not fit it is an error naming where (11: "parse, don't
+##! validate"). `parse` reads any JSON text into a `Json` value and `Json`
+##! writes itself back as text; `quote` is the part every encoder shares.
+##! Decoding a struct checks its invariants as constructing one does; an
+##! enum is encoded but not decoded yet, since reflection makes no variant.
 
 ## `s` as a JSON string: in double quotes, with `"`, `\` and the control
 ## characters escaped.
@@ -76,3 +80,368 @@ def encode[T](value: T) -> String:
                         return "{{{quote(V.name)}:{{{parts.join(",")}}}}}"
     else:
         comptime panic("json.encode: no JSON form for `{reflect.name_of(T)}`")
+
+## A JSON value: what `parse` reads. A number written without a fraction
+## or an exponent that fits `int` is an `Int`, any other a `Float`; an
+## object keeps its members in the order they are written.
+##
+## ```
+## let j = parse("{{\"a\": [1, 2.5, null], \"b\": \"x\"}}").expect("JSON")
+## assert "{j}" == "{{\"a\":[1,2.5,null],\"b\":\"x\"}}"
+## assert "{j.get("b").expect("a member")}" == "\"x\""
+## assert j.get("c") == None
+## ```
+@derive(Eq)
+pub enum Json:
+    Null
+    Bool(value: bool)
+    Int(value: int)
+    Float(value: f64)
+    Str(value: String)
+    Array(items: list[Json])
+    Object(members: list[(String, Json)])
+
+impl Json:
+    ## The member `name` of an object, or `None` (and for anything else).
+    pub pure def get(self, name: str) -> ref Json?:
+        match self:
+            case Object(members):
+                for i in range(len(members)):
+                    if members[i].0 == name:
+                        return Some(ref members[i].1)
+                return None
+            case _:
+                return None
+
+impl Display for Json:
+    ## The value as compact JSON text.
+    def fmt(self, mut f: Formatter):
+        match self:
+            case Null:
+                f.write("null")
+            case Bool(value):
+                f.write(if value: "true" else: "false")
+            case Int(value):
+                f.write("{value}")
+            case Float(value):
+                f.write("{value}")
+            case Str(value):
+                f.write(quote(value))
+            case Array(items):
+                var parts: list[String] = []
+                for x in items:
+                    parts.push("{x}")
+                f.write("[{parts.join(",")}]")
+            case Object(members):
+                var parts: list[String] = []
+                for (k, v) in members:
+                    parts.push("{quote(k)}:{v}")
+                f.write("{{{parts.join(",")}}}")
+
+## What `parse` and `decode` reject: text that is not JSON (`Syntax`, at a
+## character index), and JSON that does not fit the type (`Mismatch`), at
+## a path from the root (`$`, `$.name`, `$[2]`).
+pub error JsonError:
+    Syntax(at: int, expected: String)
+    Mismatch(path: String, expected: String)
+
+## The reader of `parse`: the text's characters and where it is.
+struct Reader:
+    cs: list[char]
+    at: int
+
+impl Reader:
+    pure def peek(self) -> char?:
+        return self.cs.get(self.at).copied()
+
+    pure def skip_space(mut self):
+        while let Some(c) = self.peek():
+            if c != ' ' and c != '\n' and c != '\t' and c != '\r':
+                return
+            self.at += 1
+
+    pure def fail(self, expected: str) -> JsonError:
+        return Syntax(at=self.at, expected=String.new(expected))
+
+    ## The next character, or `expected` at the end of the text.
+    pure def next(mut self, expected: str) -> char ! JsonError:
+        match self.peek():
+            case Some(c):
+                self.at += 1
+                return Ok(c)
+            case None:
+                return Err(self.fail(expected))
+
+    pure def expect(mut self, word: str) -> ! JsonError:
+        for c in word.chars():
+            if self.peek() != Some(c):
+                return Err(self.fail("`{word}`"))
+            self.at += 1
+        return Ok(())
+
+    pure def value(mut self, depth: int) -> Json ! JsonError:
+        if depth > 512:
+            return Err(self.fail("less nesting"))
+        self.skip_space()
+        match self.peek():
+            case Some('n'):
+                self.expect("null")?
+                return Ok(Null)
+            case Some('t'):
+                self.expect("true")?
+                return Ok(Bool(value=True))
+            case Some('f'):
+                self.expect("false")?
+                return Ok(Bool(value=False))
+            case Some('"'):
+                return Ok(Str(value=self.string()?))
+            case Some('['):
+                self.at += 1
+                var items: list[Json] = []
+                self.skip_space()
+                if self.peek() == Some(']'):
+                    self.at += 1
+                    return Ok(Array(items=items))
+                while True:
+                    items.push(self.value(depth + 1)?)
+                    self.skip_space()
+                    match self.peek():
+                        case Some(','):
+                            self.at += 1
+                        case Some(']'):
+                            self.at += 1
+                            return Ok(Array(items=items))
+                        case _:
+                            return Err(self.fail("`,` or `]`"))
+            case Some('{'):
+                self.at += 1
+                var members: list[(String, Json)] = []
+                self.skip_space()
+                if self.peek() == Some('}'):
+                    self.at += 1
+                    return Ok(Object(members=members))
+                while True:
+                    self.skip_space()
+                    if self.peek() != Some('"'):
+                        return Err(self.fail("a member's name"))
+                    let name = self.string()?
+                    self.skip_space()
+                    self.expect(":")?
+                    members.push((name, self.value(depth + 1)?))
+                    self.skip_space()
+                    match self.peek():
+                        case Some(','):
+                            self.at += 1
+                        case Some('}'):
+                            self.at += 1
+                            return Ok(Object(members=members))
+                        case _:
+                            return Err(self.fail("`,` or `}}`"))
+            case Some(c):
+                if c == '-' or c.is_digit():
+                    return self.number()
+                return Err(self.fail("a value"))
+            case None:
+                return Err(self.fail("a value"))
+
+    pure def digits(mut self) -> int:
+        let start = self.at
+        while let Some(c) = self.peek():
+            if not c.is_digit():
+                break
+            self.at += 1
+        return self.at - start
+
+    pure def number(mut self) -> Json ! JsonError:
+        let start = self.at
+        if self.peek() == Some('-'):
+            self.at += 1
+        if self.peek() == Some('0'):
+            self.at += 1
+        elif self.digits() == 0:
+            return Err(self.fail("a digit"))
+        var whole = True
+        if self.peek() == Some('.'):
+            self.at += 1
+            whole = False
+            if self.digits() == 0:
+                return Err(self.fail("a digit"))
+        if self.peek() == Some('e') or self.peek() == Some('E'):
+            self.at += 1
+            whole = False
+            if self.peek() == Some('+') or self.peek() == Some('-'):
+                self.at += 1
+            if self.digits() == 0:
+                return Err(self.fail("a digit"))
+        var text = String.new()
+        for i in range(start, self.at):
+            text.push_char(self.cs[i])
+        if whole:
+            if let Some(n) = text.parse_int():
+                return Ok(Int(value=n))
+        match text.parse_float():
+            case Some(x):
+                return Ok(Float(value=x))
+            case None:
+                return Err(Syntax(at=start, expected=String.new("a number")))
+
+    pure def hex4(mut self) -> int ! JsonError:
+        var n = 0
+        for _ in range(4):
+            let c = self.next("four hexadecimal digits")?
+            let code = c.code()
+            let d = if 48 <= code <= 57: code - 48 elif 97 <= code <= 102: code - 87 elif 65
+                <= code
+                <= 70: code - 55 else: -1
+            if d < 0:
+                return Err(Syntax(at=self.at - 1, expected=String.new("a hexadecimal digit")))
+            n = n * 16 + d
+        return Ok(n)
+
+    pure def string(mut self) -> String ! JsonError:
+        self.at += 1
+        var out = String.new()
+        while True:
+            let c = self.next("`\"`")?
+            if c == '"':
+                return Ok(out)
+            if c.code() < 32:
+                return Err(
+                    Syntax(at=self.at - 1, expected=String.new("an escaped control character"))
+                )
+            if c != '\\':
+                out.push_char(c)
+                continue
+            let e = self.next("an escape")?
+            match e:
+                case '"':
+                    out.push_char('"')
+                case '\\':
+                    out.push_char('\\')
+                case '/':
+                    out.push_char('/')
+                case 'b':
+                    out.push_char(char.from_code(8).expect("a character"))
+                case 'f':
+                    out.push_char(char.from_code(12).expect("a character"))
+                case 'n':
+                    out.push_char('\n')
+                case 'r':
+                    out.push_char('\r')
+                case 't':
+                    out.push_char('\t')
+                case 'u':
+                    var code = self.hex4()?
+                    if 0xd800 <= code <= 0xdbff:
+                        self.expect("\\u")?
+                        let low = self.hex4()?
+                        if not (0xdc00 <= low <= 0xdfff):
+                            return Err(self.fail("a low surrogate"))
+                        code = 0x10000 + ((code - 0xd800) << 10) + (low - 0xdc00)
+                    match char.from_code(code):
+                        case Some(ch):
+                            out.push_char(ch)
+                        case None:
+                            return Err(self.fail("a character's code"))
+                case _:
+                    return Err(Syntax(at=self.at - 1, expected=String.new("an escape")))
+
+## The JSON value `text` writes (RFC 8259), with nothing after it but
+## white space.
+##
+## ```
+## assert parse("[1, -2.5e3, true]") == Ok(Array(items=[Int(value=1), Float(value=-2500.0), Bool(value=True)]))
+## assert parse("\"\\u00e9\\ud83d\\ude00\"") == Ok(Str(value=String.new("é😀")))
+## assert parse("[1,]") == Err(Syntax(at=3, expected=String.new("a value")))
+## assert parse("01") == Err(Syntax(at=1, expected=String.new("the end of the text")))
+## ```
+pub pure def parse(text: str) -> Json ! JsonError:
+    var cs: list[char] = []
+    for c in text.chars():
+        cs.push(c)
+    var r = Reader(cs=cs, at=0)
+    let v = r.value(0)?
+    r.skip_space()
+    if r.peek() != None:
+        return Err(r.fail("the end of the text"))
+    return Ok(v)
+
+## The value of type `T` the JSON `text` writes, as `encode` writes one:
+## `Mismatch` where the text does not fit `T`, at the path from the root.
+## A struct's field that the text leaves out takes its default, and is
+## `Mismatch` when it has none.
+##
+## ```
+## assert decode[list[int]]("[1, 2, 3]") == Ok([1, 2, 3])
+## let bad = decode[list[int]]("[1, \"two\"]")
+## assert bad == Err(Mismatch(path=String.new("$[1]"), expected=String.new("an integer")))
+## ```
+pub def decode[T](text: str) -> T ! JsonError:
+    let j = parse(text)?
+    return from_json[T](j, "$")
+
+## The value of type `T` the JSON value `j`, at `path`, is.
+pub def from_json[T](j: Json, path: str) -> T ! JsonError:
+    if comptime reflect.is_bool(T):
+        if let Bool(value) = j:
+            return Ok(value)
+        return Err(Mismatch(path=String.new(path), expected=String.new("a boolean")))
+    elif comptime reflect.is_int(T):
+        if let Int(value) = j:
+            return Ok(value)
+        return Err(Mismatch(path=String.new(path), expected=String.new("an integer")))
+    elif comptime reflect.is_float(T):
+        match j:
+            case Int(value):
+                return Ok(value.to_f64())
+            case Float(value):
+                return Ok(value)
+            case _:
+                return Err(Mismatch(path=String.new(path), expected=String.new("a number")))
+    elif comptime reflect.is_str(T):
+        if let Str(value) = j:
+            return Ok(value.copy())
+        return Err(Mismatch(path=String.new(path), expected=String.new("a string")))
+    elif comptime reflect.is_list(T):
+        if let Array(items) = j:
+            var out: T = []
+            for (i, x) in enumerate(items):
+                out.push(from_json[reflect.elem_of(T)](x, "{path}[{i}]")?)
+            return Ok(out)
+        return Err(Mismatch(path=String.new(path), expected=String.new("an array")))
+    elif comptime reflect.is_option(T):
+        if j == Json.Null:
+            return Ok(None)
+        return Ok(Some(from_json[reflect.elem_of(T)](j, path)?))
+    elif comptime reflect.is_struct(T):
+        if let Object(members) = j:
+            return Ok(
+                reflect.construct(
+                    T,
+                    {
+                        f.name: if comptime f.default: (
+                            if j.get(f.name) != None: field[f.ty](
+                                j, path, f.name
+                            )? else: reflect.default_of(f)
+                        ) else: field[f.ty](j, path, f.name)?
+                        for f in reflect.fields_of(T)
+                    },
+                )
+            )
+        return Err(Mismatch(path=String.new(path), expected=String.new("an object")))
+    else:
+        comptime panic(
+            "json.decode: no JSON form for `{reflect.name_of(T)}` (an enum's variants are not made by reflection yet)"
+        )
+
+## The member `name` of the object `j`, at `path`, as a `T`; `Mismatch`
+## when it is missing (an option is `None` then).
+pub def field[T](j: Json, path: str, name: str) -> T ! JsonError:
+    let at = "{path}.{name}"
+    match j.get(name):
+        case Some(v):
+            return from_json[T](v, at)
+        case None:
+            if comptime reflect.is_option(T):
+                return from_json[T](Json.Null, at)
+            return Err(Mismatch(path=at, expected=String.new("a member")))

@@ -106,9 +106,13 @@ impl FnLower<'_, '_> {
             return;
         }
         let ret = Place::local(sir::LocalId(0));
+        // `result` borrows the value returned unless it is `Copy`, or a
+        // reference, which it is itself.
+        let borrows = |local: &Ty, value: &Ty| matches!(local, Ty::Ref(..)) && !matches!(value, Ty::Ref(..));
+        let ret_ty = self.ctx.prog.normalize(&body.ret, &self.bounds);
         if let Some(r) = c.result {
             let rl = self.local_for(r);
-            let rv = if matches!(body.locals[r.0 as usize].ty, Ty::Ref(..)) {
+            let rv = if borrows(&body.locals[r.0 as usize].ty, &ret_ty) {
                 Rvalue::Ref(ret.clone(), false)
             } else {
                 Rvalue::Use(Operand::Copy(ret.clone()))
@@ -118,7 +122,11 @@ impl FnLower<'_, '_> {
         for (l, i) in &c.labels {
             let ll = self.local_for(*l);
             let part = ret.project(Proj::Field(*i));
-            let rv = if matches!(body.locals[l.0 as usize].ty, Ty::Ref(..)) {
+            let part_ty = match &ret_ty {
+                Ty::Tuple(elems, _) => elems.get(*i as usize).cloned().unwrap_or(Ty::Error),
+                _ => Ty::Error,
+            };
+            let rv = if borrows(&body.locals[l.0 as usize].ty, &part_ty) {
                 Rvalue::Ref(part, false)
             } else {
                 Rvalue::Use(Operand::Copy(part))

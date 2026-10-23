@@ -97,6 +97,18 @@ impl[T] Len for Deque[T]:
     def len(self) -> int:
         return len(self.front) + len(self.back)
 
+impl[T: Eq] Contains[T] for Deque[T]:
+    ## Whether `x` is in the queue (`x in q`), looked for from the front.
+    ##
+    ## ```
+    ## var q: Deque[int] = Deque.new()
+    ## q.push_back(4)
+    ## q.push_front(2)
+    ## assert 4 in q and 2 in q and 3 not in q
+    ## ```
+    pure def contains(self, x: T) -> bool:
+        return x in self.front or x in self.back
+
 ## A priority queue: `pop` takes the smallest value first (a binary heap
 ## over a list, so `push` and `pop` take time logarithmic in its size).
 ##
@@ -256,6 +268,11 @@ impl[K: Ord, V] Len for SortedDict[K, V]:
     def len(self) -> int:
         return len(self.ks)
 
+impl[K: Ord, V] Contains[K] for SortedDict[K, V]:
+    ## Whether `key` has a value (`key in d`).
+    pure def contains(self, key: K) -> bool:
+        return self.holds(self.position(key), key)
+
 ## A set whose values are kept in order (11's B-tree set; stage 0's is a
 ## sorted list, searched by halves): `values` goes from the smallest up.
 ##
@@ -353,6 +370,17 @@ impl[T: Ord] Len for SortedSet[T]:
     def len(self) -> int:
         return len(self.items)
 
+impl[T: Ord] Contains[T] for SortedSet[T]:
+    ## Whether `x` is in the set (`x in s`).
+    ##
+    ## ```
+    ## var s: SortedSet[int] = SortedSet.new()
+    ## _ = s.insert(3)
+    ## assert 3 in s and 4 not in s
+    ## ```
+    pure def contains(self, x: T) -> bool:
+        return self.holds(self.position(x), x)
+
 ## A set of small non-negative integers, one bit each, in 64-bit words.
 ##
 ## ```
@@ -403,3 +431,11 @@ pub struct BitSet:
 impl Len for BitSet:
     def len(self) -> int:
         return len(self.members())
+
+impl Contains[int] for BitSet:
+    ## Whether `n` is in the set (`n in b`).
+    pure def contains(self, n: int) -> bool:
+        let w = n // 64
+        if n < 0 or w >= len(self.words):
+            return False
+        return self.words[w] & (1u64 << (n % 64).to_u64().expect("in range")) != 0u64

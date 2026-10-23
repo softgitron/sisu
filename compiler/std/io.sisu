@@ -244,6 +244,11 @@ pub struct BufReader[R: Reader]:
                 end -= 1
         return Ok(Some(raw.slice(0, end).decode()?))
 
+    ## The reader it reads from; what it read ahead and has not given out
+    ## is lost.
+    pub def into_inner(own self) -> R:
+        return self.inner
+
     ## Every line left, without their line breaks.
     ##
     ## ```

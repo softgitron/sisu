@@ -1,8 +1,9 @@
 ##! `std.search` (11; D-075): finding values. Binary search over a sorted
 ##! list (`bisect_left`, `bisect_right`, `binary_search`,
 ##! `partition_point`), selection of the `k`-th smallest value in place,
-##! and search combinators over the candidates an `Iter` gives, as LogicT
-##! has them: `interleave` takes from two searches in turn, so an endless
+##! and search combinators over the candidates an iterator gives (an
+##! `Iter`, a generator's, or an adapter's, each search of one type), as
+##! LogicT has them: `interleave` takes from two searches in turn, so an endless
 ##! one cannot starve the other (fair disjunction); `deepening` searches
 ##! again with a growing bound (iterative deepening); `within` stops
 ##! after a bounded number of candidates.
@@ -108,7 +109,7 @@ pure def pivot[T: Ord](mut xs: list[T], lo: int, hi: int) -> int:
 ## let naturals = interleave(range(0, 1000000000), iter_of([-1, -2]))
 ## assert naturals.take(6).collect() == [0, -1, 1, -2, 2, 3]
 ## ```
-pub def interleave[T](own a: Iter[T], own b: Iter[T]) -> Iter[T]:
+pub def interleave[I: Iterator](own a: I, own b: I) -> Iter[I.Item]:
     var first = a
     var second = b
     var first_done = False
@@ -133,10 +134,10 @@ pub def interleave[T](own a: Iter[T], own b: Iter[T]) -> Iter[T]:
 ## let all = interleave_all([iter_of([1, 4]), iter_of([2]), iter_of([3, 5, 6])])
 ## assert all.collect() == [1, 2, 3, 4, 5, 6]
 ## ```
-pub def interleave_all[T](own searches: list[Iter[T]]) -> Iter[T]:
+pub def interleave_all[I: Iterator](own searches: list[I]) -> Iter[I.Item]:
     var live = searches
     while not live.is_empty():
-        var next_round: list[Iter[T]] = []
+        var next_round: list[I] = []
         for s in own live:
             var it = s
             match it.next():
@@ -154,12 +155,11 @@ pub def interleave_all[T](own searches: list[Iter[T]]) -> Iter[T]:
 ## space.
 ##
 ## ```
-## # The sums of distinct powers of two below 8, by how many terms they have.
-## def by_terms(d: int) -> Iter[int]:
-##     return iter_of([x for x in range(8) if popcount(x) == d])
-## assert deepening(by_terms, 3).collect() == [0, 1, 2, 4, 3, 5, 6, 7]
+## # The numbers below 8 by how many bits they have set.
+## let by_bits = deepening((d) -> iter_of([x for x in range(8) if popcount(x) == d]), 3)
+## assert by_bits.collect() == [0, 1, 2, 4, 3, 5, 6, 7]
 ## ```
-pub def deepening[T](search: (int) -> Iter[T], limit: int) -> Iter[T]:
+pub def deepening[I: Iterator](search: (int) -> I, limit: int) -> Iter[I.Item]:
     requires limit >= 0
     for d in range(limit + 1):
         for x in own search(d):
@@ -183,7 +183,7 @@ pub pure def popcount(n: int) -> int:
 ## assert within(range(1, 1000000000), 100, (x) -> x * x > 50) == Some(8)
 ## assert within(range(1, 1000000000), 5, (x) -> x * x > 50) == None
 ## ```
-pub def within[T](own search: Iter[T], budget: int, accept: (ref T) -> bool) -> T?:
+pub def within[I: Iterator](own search: I, budget: int, accept: (ref I.Item) -> bool) -> I.Item?:
     requires budget >= 0
     var it = search
     var left = budget

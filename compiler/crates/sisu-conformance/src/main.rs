@@ -8,7 +8,9 @@
 //! own `.sir`, else what `sisu sir` prints), `--native-release LIST` with
 //! the release profile (`sisu build --native --release`), and
 //! `--native-survey LIST` tries every runnable case the list leaves out,
-//! printing which would pass.
+//! printing which would pass. `--interpreted-from-sir LIST` runs the
+//! list's cases in the interpreter from serialised SIR (`sisu run
+//! --from-sir`).
 
 use std::path::PathBuf;
 
@@ -20,6 +22,7 @@ fn main() {
     let mut survey = false;
     let mut from_sir = false;
     let mut release = false;
+    let mut interpreted = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -29,10 +32,15 @@ fn main() {
                     sisu = PathBuf::from(p);
                 }
             }
-            "--native" | "--native-survey" | "--native-from-sir" | "--native-release" => {
+            "--native"
+            | "--native-survey"
+            | "--native-from-sir"
+            | "--native-release"
+            | "--interpreted-from-sir" => {
                 survey = a == "--native-survey";
                 from_sir = a == "--native-from-sir";
                 release = a == "--native-release";
+                interpreted = a == "--interpreted-from-sir";
                 if let Some(p) = args.next() {
                     native = Some(PathBuf::from(p));
                 }
@@ -50,7 +58,9 @@ fn main() {
             }
             return;
         }
-        let report = if from_sir {
+        let report = if interpreted {
+            sisu_conformance::native::run_interpreted_from_sir(&sisu, &root, &names)
+        } else if from_sir {
             sisu_conformance::native::run_native_from_sir(&sisu, &root, &names)
         } else if release {
             sisu_conformance::native::run_native_release(&sisu, &root, &names)

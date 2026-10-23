@@ -657,14 +657,26 @@ From Phase 4 (18, "Phase 4: traits, generics, std in Sisu"):
 - **`std` as modules.** The core traits and their impls, the iterator
   adapters, the collection methods that take closures, formatting and
   `parse_int` and the text methods are written in Sisu in the prelude,
-  which 11 makes `std.core`; `std.core`, `std.collections`, `std.string`,
-  `std.fmt` and `std.num` are modules an import names (decision 245),
-  and the last four name the prelude's items besides their own. The
-  host-backed collections are intrinsics with their contracts there.
-  Most of 11's other modules (`std.io`, `std.fs`, `std.mem`, `std.par`,
-  `std.encoding`, `std.hash`, `std.sort`, `std.regex`, ...) are not
-  there, and neither are `std.string`'s graphemes, normalisation and
-  `Builder`.
+  which 11 makes `std.core`; 11's modules are modules an import names
+  (decisions 245 and 252), written in Sisu over the prelude's
+  intrinsics. What 11 names and is not there: `std.mem` (the `Allocator`
+  trait, `Region`, D-060's allocator parameter of the collections),
+  `std.reflect` as a module (reflection is the compile-time `reflect`),
+  `From` and a `Range` type in `std.core`, `SoaList` (Q-27's type
+  construction) and the `persistent` collections, `std.string`'s
+  graphemes and normalisation forms (Unicode's tables), `std.math`'s
+  elementary functions (Q-23), pipes, signals and the working directory
+  in `std.process` and `std.env` (the host contract runs a program
+  without input and has no current directory), time zones in
+  `std.time`, decoding an enum in `std.json` (reflection makes no
+  variant), and a `BigInt` literal beyond `int` (03: checked at compile
+  time; a literal reaches `FromLiteral[int]` only). `Decimal` reads a
+  float literal from its shortest digits, so one with more significant
+  digits than an `f64` holds is rounded; a `str` literal through
+  `Decimal.parse` is exact. The modules run their work on the asking
+  task, `std.par`'s chunks one after another, and `std.io` has no
+  stream over a file, since the file capability reads and writes whole
+  files.
 - **Reflection beyond templates** (Phase 8 in 18): `reflect`, `comptime
   for` and `x.[f]` work in functions, methods, a trait's own methods,
   the methods of trait impls, `comptime def`s (with `T: type`

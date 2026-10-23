@@ -1048,9 +1048,19 @@ impl Checker<'_> {
             p.ty = prog.normalize(&self.infer.zonk(&p.ty), &env);
         }
         sig.ret = prog.normalize(&self.infer.zonk(&sig.ret), &env);
+        // An associated type of a type the arguments have not told yet
+        // (`Iter[I.Item]` while `I` is unknown) cannot be compared with
+        // anything before it is normalised, so the expected type does not
+        // drive such a call (decision 252).
+        let mut unknown_projection = false;
+        sig.ret.walk(&mut |t| {
+            if matches!(t, Ty::Assoc(_)) && self.infer.has_vars(t) {
+                unknown_projection = true;
+            }
+        });
         if let Some(exp) = expected {
             // Let the expected type drive inference (`list()`, `todo()`).
-            if self.infer.has_vars(&sig.ret) {
+            if self.infer.has_vars(&sig.ret) && !unknown_projection {
                 let snap = self.infer.snapshot();
                 if !self.infer.unify(&sig.ret, exp) {
                     self.infer.rollback(snap);

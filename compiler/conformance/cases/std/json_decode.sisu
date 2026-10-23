@@ -1,0 +1,66 @@
+# `std.json`'s reading side (11): `parse` reads any JSON text (RFC 8259)
+# into a `Json` value, rejecting what is not JSON with where and what it
+# expected; `decode[T]` reads the value of a type back as `encode[T]`
+# writes it, the type being the schema: a field the text leaves out takes
+# its default, an option may be missing or `null`, and anything that does
+# not fit is an error naming its path.
+from json import decode, encode, parse
+
+struct Point:
+    x: int
+    y: int
+
+struct Route:
+    name: String
+    stops: list[Point]
+    speed: f64 = 1.5
+    note: String?
+
+def main():
+    for text in [
+        "null",
+        " true ",
+        "-0",
+        "12",
+        "-3.25e2",
+        "1E400",
+        "\"a\\tb\\u0041\"",
+        "[[], {{}}]",
+        "{{\"k\": [1, {{\"n\": null}}]}}",
+    ]:
+        print("{text} -> {parse(text)}")
+    for text in [
+        "",
+        "[1,]",
+        "{{\"a\" 1}}",
+        "01",
+        "1.",
+        "-",
+        "\"\\x\"",
+        "\"open",
+        "[1 2]",
+        "nul",
+        "{{\"a\":1}}x",
+        "\"\\ud800x\"",
+    ]:
+        print("{text} -> {parse(text)}")
+    let r = Route(
+        name=String.new("loop"), stops=[Point(x=1, y=2), Point(x=3, y=4)], speed=2.0, note=None
+    )
+    let text = encode(r)
+    print(text)
+    let back = decode[Route](text).expect("its own encoding")
+    print("{back.name} {len(back.stops)} {back.stops[1].y} {back.speed} {back.note}")
+    let short = decode[Route]("{{\"name\": \"short\", \"stops\": [], \"note\": \"hi\"}}").expect(
+        "defaults"
+    )
+    print("{short.speed} {short.note}")
+    print(
+        decode[Route]("{{\"name\": \"x\", \"stops\": [{{\"x\": 1, \"y\": \"2\"}}]}}").map(
+            (r) -> r.name
+        )
+    )
+    print(decode[Route]("{{\"name\": \"x\"}}").map((r) -> r.name))
+    print(decode[Route]("[]").map((r) -> r.name))
+    print(decode[list[Option[int]]]("[1, null, 3]"))
+    print(decode[f64]("7"))

@@ -8,7 +8,144 @@ use crate::mem::{self, List};
 use crate::rt::{self, ty};
 use crate::value::{self, target};
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
+use std::collections::hash_map::Entry;
+use std::hash::{BuildHasherDefault, Hash, Hasher};
+
+/// The index: each key hash's entries. A hash is its own key in it, so
+/// it is not hashed again (decision 253).
+type Index = HashMap<u64, Positions, BuildHasherDefault<Spread>>;
+
+/// The entries whose keys have one hash: almost always a single one,
+/// which needs no allocation of its own.
+enum Positions {
+    One(u64),
+    Many(Vec<u64>),
+}
+
+impl Positions {
+    fn as_slice(&self) -> &[u64] {
+        match self {
+            Positions::One(i) => std::slice::from_ref(i),
+            Positions::Many(v) => v,
+        }
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u64] {
+        match self {
+            Positions::One(i) => std::slice::from_mut(i),
+            Positions::Many(v) => v,
+        }
+    }
+
+    fn push(&mut self, i: u64) {
+        match self {
+            Positions::One(j) => *self = Positions::Many(vec![*j, i]),
+            Positions::Many(v) => v.push(i),
+        }
+    }
+
+    /// Takes entry `i` out; whether none is left.
+    fn remove(&mut self, i: u64) -> bool {
+        match self {
+            Positions::One(j) => *j == i,
+            Positions::Many(v) => {
+                v.retain(|&p| p != i);
+                v.is_empty()
+            }
+        }
+    }
+}
+
+/// Adds entry `i`, whose key's hash is `h`, to an index.
+fn index_add(index: &mut Index, h: u64, i: u64) {
+    match index.entry(h) {
+        Entry::Occupied(mut e) => e.get_mut().push(i),
+        Entry::Vacant(e) => {
+            e.insert(Positions::One(i));
+        }
+    }
+}
+
+/// The hasher of the index, whose keys are hashes already.
+#[derive(Default)]
+struct Spread(u64);
+
+impl Hasher for Spread {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.0 = (self.0.rotate_left(8) ^ u64::from(*b)).wrapping_mul(MIX);
+        }
+    }
+
+    fn write_u64(&mut self, n: u64) {
+        self.0 = n;
+    }
+}
+
+/// The multiplier of [`KeyHasher`]'s rounds.
+const MIX: u64 = 0x517c_c1b7_2722_0a95;
+
+/// The hasher of keys: a word at a time, multiplied in, then mixed so
+/// that every bit of the result depends on every bit of the input.
+#[derive(Default)]
+struct KeyHasher(u64);
+
+impl KeyHasher {
+    fn add(&mut self, w: u64) {
+        self.0 = (self.0.rotate_left(5) ^ w).wrapping_mul(MIX);
+    }
+}
+
+impl Hasher for KeyHasher {
+    fn finish(&self) -> u64 {
+        let mut h = self.0;
+        h ^= h >> 33;
+        h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+        h ^= h >> 33;
+        h = h.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+        h ^ (h >> 33)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        let mut words = bytes.chunks_exact(8);
+        for w in &mut words {
+            let mut b = [0u8; 8];
+            b.copy_from_slice(w);
+            self.add(u64::from_le_bytes(b));
+        }
+        let rest = words.remainder();
+        if !rest.is_empty() {
+            let mut b = [0u8; 8];
+            b[..rest.len()].copy_from_slice(rest);
+            self.add(u64::from_le_bytes(b) ^ ((rest.len() as u64) << 59));
+        }
+    }
+
+    fn write_u8(&mut self, n: u8) {
+        self.add(u64::from(n));
+    }
+
+    fn write_u32(&mut self, n: u32) {
+        self.add(u64::from(n));
+    }
+
+    fn write_u64(&mut self, n: u64) {
+        self.add(n);
+    }
+
+    fn write_u128(&mut self, n: u128) {
+        self.add(n as u64);
+        self.add((n >> 64) as u64);
+    }
+
+    fn write_usize(&mut self, n: usize) {
+        self.add(n as u64);
+    }
+}
 
 /// A dict's entries, each its key's bytes then its value's, in the order
 /// they were inserted; a set's are its elements (`val` is `()`).
@@ -18,7 +155,7 @@ pub(crate) struct Table {
     pub ksize: u32,
     pub vsize: u32,
     pub entries: List,
-    index: HashMap<u64, Vec<u64>>,
+    index: Index,
     _live: crate::mem::Live,
 }
 
@@ -30,7 +167,7 @@ impl Table {
             ksize: ty(key).size,
             vsize: ty(val).size,
             entries: List::empty(),
-            index: HashMap::new(),
+            index: Index::default(),
             _live: crate::mem::Live::new(),
         })
     }
@@ -63,7 +200,7 @@ impl Table {
         unsafe {
             let h = hash_value(k, kt);
             let candidates = self.index.get(&h)?;
-            candidates.iter().copied().find(|&i| key_equal(self.key_at(i), self.key, k, kt))
+            candidates.as_slice().iter().copied().find(|&i| key_equal(self.key_at(i), self.key, k, kt))
         }
     }
 
@@ -80,7 +217,7 @@ impl Table {
         unsafe {
             mem::copy(self.key_at(i), k, self.ksize as usize);
             let h = hash_value(self.key_at(i), self.key);
-            self.index.entry(h).or_default().push(i);
+            index_add(&mut self.index, h, i);
         }
         self.entries.len += 1;
         i
@@ -99,16 +236,15 @@ impl Table {
             mem::copy(out, self.key_at(i), size as usize);
             let rest = (self.entries.len - i - 1) * u64::from(size);
             mem::copy(self.key_at(i), self.key_at(i + 1), rest as usize);
-            if let Some(v) = self.index.get_mut(&h) {
-                v.retain(|&p| p != i);
-                if v.is_empty() {
-                    self.index.remove(&h);
-                }
+            if let Some(v) = self.index.get_mut(&h)
+                && v.remove(i)
+            {
+                self.index.remove(&h);
             }
         }
         self.entries.len -= 1;
         for v in self.index.values_mut() {
-            for p in v.iter_mut() {
+            for p in v.as_mut_slice() {
                 if *p > i {
                     *p -= 1;
                 }
@@ -150,7 +286,7 @@ unsafe fn key_equal(a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> bool {
 /// # Safety
 /// `p` must hold a value of type `t`.
 pub(crate) unsafe fn hash_value(p: *mut u8, t: u32) -> u64 {
-    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut h = KeyHasher::default();
     // SAFETY: as the caller guarantees.
     unsafe { hash_into(&mut h, p, t) };
     h.finish()
@@ -297,7 +433,7 @@ pub(crate) unsafe fn copy_table(t: &Table) -> Box<Table> {
             value::copy_value(out.key_at(j), t.key_at(i), t.key);
             value::copy_value(out.val_at(j), t.val_at(i), t.val);
             let h = hash_value(out.key_at(j), out.key);
-            out.index.entry(h).or_default().push(j);
+            index_add(&mut out.index, h, j);
             out.entries.len += 1;
         }
     }
