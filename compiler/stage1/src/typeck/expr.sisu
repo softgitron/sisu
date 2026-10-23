@@ -456,7 +456,7 @@ impl Checker:
             let d = self.error(cx, Msg.TypeViewToDyn, self.span_of(x)).with("ty", shown).with(
                 "dyn", shown_dyn
             )
-            self.report(d)
+            self.report(d.note(Msg.TypeDynOwned))
             return self.wrap(x, Coercion.Mismatch, exp)
         self.bounds.push((concrete, tr.copy(), self.span_of(x)))
         return self.wrap(x, kind, exp)
@@ -1223,7 +1223,7 @@ impl Checker:
                     if let TyData.Ref(_, _) = self.types.data(local):
                         var diag = self.error(cx, Msg.TypeValueReturnsBorrow, range)
                         diag = diag.with("name", n).with("param", p.name.copy())
-                        self.report(diag)
+                        self.report(diag.note(Msg.TypeCallInstead))
                         return self.error_expr(range)
                 # A generic function's type arguments are inferred where the
                 # value is used, and its bounds required of them, as a
@@ -2361,13 +2361,13 @@ impl Checker:
                 let ty = self.locals[cap.local].ty
                 if cap.mutable:
                     let d = self.error(cx, Msg.TypeOwnClosureChanges, range).with("name", name)
-                    self.report(d)
+                    self.report(d.note(Msg.TypePlainClosure))
                 elif not self.is_copy(cx, ty) and self.infer.zonk(mut self.types, ty) != Ty.error():
                     let shown = self.show(cx, ty)
                     let d = self.error(cx, Msg.TypeOwnClosureCapture, range).with(
                         "name", name
                     ).with("ty", shown)
-                    self.report(d)
+                    self.report(d.note(Msg.TypeCaptureCopy))
 
     pub pure def closure_from_parts(
         mut self,

@@ -1649,6 +1649,9 @@ impl Checker:
                             let edit = Edit(start=s.start, end=s.start, text="mut ".to_string())
                             let named = Param(name="name".to_string(), value=pname.copy())
                             d = d.fix_params(Msg.TypeTakeMut, [named], [edit])
+                # Otherwise it is a borrow that only reads.
+                if not read_guard and d.fixes.is_empty():
+                    d = d.note(Msg.TypeBorrowWithMut)
                 self.report(d)
             case None:
                 pass

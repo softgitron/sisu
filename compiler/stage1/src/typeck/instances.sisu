@@ -331,8 +331,10 @@ impl Resolver:
     ## every impl is known (stage 0's `check_derives`): the type implements
     ## the trait's supertraits itself, and a derive of the language's traits
     ## (or a delegation) needs the trait of every field (of the field), or the
-    ## generated bodies, which would only repeat the error, go.
-    pub pure def check_derives(mut self):
+    ## generated bodies, which would only repeat the error, go. The
+    ## definitions from `first` on are the program's, those before it the
+    ## base's (`first` is 0 for the base's own checks).
+    pub pure def check_derives(mut self, first: int):
         let checks = self.derive_checks.copy()
         self.derive_checks = []
         for c in checks:
@@ -352,6 +354,10 @@ impl Resolver:
             for i in self.prog.impls:
                 if found.is_some():
                     break
+                # An impl made before the type cannot be of it: the base's
+                # impls are none of a program's types'.
+                if i.index < first and c.ty.index >= first:
+                    continue
                 let info = self.prog.impl_info(i) else:
                     continue
                 let module_name = ref self.prog.modules[self.prog.defs[i.index].module.index].name
@@ -647,6 +653,7 @@ impl Resolver:
             if args.is_empty() and not t.generics.is_empty() and len(f.generics) == len(t.generics):
                 f.predicates = t.predicates.copy()
         self.prog.defs[d.index].set_kind(kind_now)
+        _ = self.instance_of.insert(d, (template, args.copy()))
 
     ## A constant's or a field default's value whose code runs at compile
     ## time by unfolding (decision 251), unfolded: the value with its

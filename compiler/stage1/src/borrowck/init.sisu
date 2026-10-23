@@ -492,11 +492,34 @@ impl Analysis:
                             all.push((strip_downcast(Place(local=d.local, proj=proj)), False))
                     else:
                         all.push((base_before_through(d), False))
+                # The operands are evaluated in order (decision 222): what one
+                # of them moves is gone for those after it (decision 261).
+                var moved_now: list[int] = []
+                var moves: list[int?] = []
+                for o in operands(s):
+                    match o:
+                        case Operand.Move(q):
+                            moves.push(Some(self.paths.lookup(q).0))
+                        case Operand.Copy(_):
+                            moves.push(None)
+                        case _:
+                            pass
+                var k = 0
                 for (q, whole) in all:
-                    if let Some(fd) = self.check_use(
-                        f, types, b, si, states[si], q, whole, mut reported
+                    match self.moved_by_statement(
+                        f, types, b, si, q, whole, moved_now, mut reported
                     ):
-                        out.push(fd)
+                        case Some(fd):
+                            out.push(fd)
+                        case None:
+                            if let Some(fd) = self.check_use(
+                                f, types, b, si, states[si], q, whole, mut reported
+                            ):
+                                out.push(fd)
+                    if k < len(uses) and k < len(moves):
+                        if let Some(id) = moves[k]:
+                            moved_now.push(id)
+                    k += 1
                 # A `let` declared without a value is assigned once per path.
                 if let Some(d) = dest(s):
                     if d.proj.is_empty()
@@ -509,7 +532,7 @@ impl Analysis:
                             let first = self.find_site(f, b, si, [root], Site.Init)
                             var fd = Finding.new(Msg.TypeReassignLet, f, s.loc).with(
                                 "name", name
-                            ).at(b, si)
+                            ).fix(Msg.TypeDeclareVar, [text("name", name)], None).at(b, si)
                             if let Some((fb, fs)) = first:
                                 # The same statement, run again by a loop.
                                 let again = fb == b and fs == si
@@ -579,9 +602,11 @@ impl Analysis:
             if types.implements_drop(t):
                 let ty = type_text(t)
                 return Some(
-                    Finding.new(Msg.BorrowMoveOutOfDrop, f, s.loc).with_arg(
-                        "part", place_name(types, f, q)
-                    ).with_arg("name", place_name(types, f, base)).with("ty", ty).label(
+                    Finding.new(Msg.BorrowMoveOutOfDrop, f, s.loc).note(
+                        Msg.BorrowCopyPart, []
+                    ).with_arg("part", place_name(types, f, q)).with_arg(
+                        "name", place_name(types, f, base)
+                    ).with("ty", ty).label(
                         types.drop_impl_loc(p, t), Msg.BorrowDropImplHere, [text("ty", ty)]
                     ).at(b, si)
                 )
@@ -637,7 +662,7 @@ impl Analysis:
                         decl = f.locals[q.local.index].loc
                     var fd = Finding.new(Msg.TypeUninitialized, f, loc).with_arg(
                         "name", used.copy()
-                    ).at(b, si)
+                    ).note(Msg.TypeAssignEveryPath, []).at(b, si)
                     if decl.is_some():
                         fd = fd.label(decl, Msg.BorrowDeclaredHere, [param("name", used)])
                     return Some(fd)
@@ -665,9 +690,71 @@ impl Analysis:
                         "name", whole_name
                     ).with_arg("part", part.copy()).with("line", "{line}").label(
                         mloc, Msg.BorrowMovedHere, [param("name", part)]
-                    ).at(b, si)
+                    ).note(Msg.BorrowCopyBeforeMove, []).at(b, si)
                 )
         return None
+
+    ## A use of `q` after an earlier operand of the same statement moved it,
+    ## or the value it is part of (`E0400`), or, for a use of the whole, a
+    ## part of it (`E0401`); the move is labelled at the statement.
+    pure def moved_by_statement(
+        self,
+        f: Function,
+        types: Types,
+        b: int,
+        si: int,
+        q: Place,
+        whole: bool,
+        moved_now: list[int],
+        mut reported: list[(int, (int, int)?)],
+    ) -> Finding?:
+        if moved_now.is_empty():
+            return None
+        let (id, cover) = self.paths.lookup(q)
+        let above = self.paths.ancestors(id)
+        var part: int? = None
+        var moved = False
+        for m in moved_now:
+            if m == id or above.contains(m):
+                moved = True
+                break
+        if not moved:
+            if not whole or not (cover == Cover.Exact or cover == Cover.Through):
+                return None
+            let below = self.paths.descendants(id)
+            for m in moved_now:
+                if below.contains(m):
+                    part = Some(m)
+                    break
+            if part.is_none():
+                return None
+        let key = (self.paths.roots[self.paths.local_of(id).index], Some((b, si)))
+        if reported.contains(key):
+            return None
+        reported.push(key)
+        var loc: Loc? = None
+        if si < len(f.blocks[b].stmts):
+            loc = f.blocks[b].stmts[si].loc
+        var line = 0
+        if let Some(l) = loc:
+            line = l.line
+        let used = place_name(types, f, self.paths.paths[id].place)
+        let d = part else:
+            return Some(
+                Finding.new(Msg.BorrowUseAfterMove, f, loc).with_arg("name", used.copy()).with(
+                    "line", "{line}"
+                ).label(loc, Msg.BorrowMovedHere, [param("name", used)]).note(
+                    Msg.BorrowCopyBeforeMove, []
+                ).at(b, si)
+            )
+        let moved_part = place_name(types, f, self.paths.paths[d].place)
+        return Some(
+            Finding.new(Msg.BorrowUseAfterPartialMove, f, loc).with_arg("name", used).with_arg(
+                "part", moved_part.copy()
+            ).with("line", "{line}").label(
+                loc, Msg.BorrowMovedHere, [param("name", moved_part)]
+            ).note(Msg.BorrowCopyBeforeMove, []).at(b, si)
+        )
 
     ## The paths whose move makes `id` uninitialised: itself, its ancestors
     ## and its descendants.

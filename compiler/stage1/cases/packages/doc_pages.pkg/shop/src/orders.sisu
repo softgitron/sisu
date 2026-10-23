@@ -1,0 +1,33 @@
+##! Orders of items.
+
+import money
+from shop.items import Item
+
+## Why an order fails.
+pub error OrderError:
+    Late
+    Empty
+
+## An order's lines.
+pub struct Order:
+    pub lines: list[int]
+
+impl Display for Item:
+    def fmt(self, mut f: Formatter):
+        f.write(self.name)
+
+## The total of an order, from errors of this module, of `money` and of the
+## prelude.
+pub def total(order: Order, fs: Fs, path: Path) -> int !:
+    if order.lines.is_empty():
+        return Err(Empty)
+    let text = fs.read_to_string(path)?
+    let c = money.cents(len(text))?
+    return Ok(c.value)
+
+## Totals an order that is late, through `total`.
+pub def late(order: Order, fs: Fs) -> int !:
+    let n = total(order, fs, Path.new("late"))?
+    if n > 100:
+        return Err(Late)
+    return Ok(n)

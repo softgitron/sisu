@@ -1,0 +1,36 @@
+##! Items, and what they cost.
+##!
+##! ```
+##! assert shop.items.LIMIT == 10
+##! ```
+
+from shop.items.prices import Price
+
+## The most items an order holds.
+pub const LIMIT: int = 10
+
+## A thing for sale.
+pub view struct Item:
+    ## What it is called.
+    pub name: str
+    price: int
+
+    ## Its price, in cents.
+    pub def cost(self) -> int:
+        return self.price
+
+    def secret(self) -> int:
+        return self.price * 2
+
+## What has a price.
+pub trait Priced:
+    ## The price.
+    def price(self) -> int
+
+impl Priced for Item:
+    def price(self) -> int:
+        return self.price
+
+## The price of `item`.
+pub def price_of(item: Item) -> Price:
+    return Price(cents=item.cost())

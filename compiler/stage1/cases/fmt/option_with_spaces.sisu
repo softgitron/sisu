@@ -1,4 +1,4 @@
 # `Option[ T ]`, with spaces inside its brackets, written `T?` as any other
-# (D7).
+# (decision 267; this was D7, where stage 0 refused its own output).
 def spaced(x: Option[ int ]) -> int:
     return 0

@@ -1,0 +1,97 @@
+##!
+##! The layout rules of `sisu doc` (decision 258) that the conformance
+##! suite leaves out: headers over several lines, contracts over several
+##! lines, attributes, inline code with backticks in it, the inferred
+##! sets that are empty or one member, the impls of types written `T?`
+##! and `ref T`, an inherent impl's constants, a refinement with
+##! parameters, and the capabilities reached through a `Lent`, a `dyn`, a
+##! tuple, an option and the payload of an enum.
+##!
+##!     an indented line stays as it is
+##!
+
+from std.time import Duration
+
+## An error of this file.
+error Broken:
+    ## Nothing to read.
+    Empty
+    ## What was read instead, kept as written.
+    ##
+    ## With an empty doc line inside.
+    Other(text: String)
+
+## A size in steps.
+@derive(Eq, Debug)
+struct Steps:
+    count: int
+
+    ## The size of nothing.
+    const NONE: Steps = Steps(count=0)
+
+impl Steps:
+    ## The size of one step.
+    const ONE: Steps = Steps(count=1)
+
+    ## A step more.
+    def more(self) -> Steps:
+        return Steps(count=self.count + 1)
+
+## Written for every optional size.
+trait Measured:
+    ## How big.
+    def size(self) -> int:
+        requires True
+        ensures result >= 0
+        return 0
+
+impl Measured for Steps?:
+    def size(self) -> int:
+        return 0
+
+impl Measured for ref Steps:
+    def size(self) -> int:
+        return 1
+
+## A list that is never empty, of any element.
+type NonEmpty[T] = list[T] where len(self) > 0
+
+## The handles a job holds, some of them maybe.
+enum Holding:
+    Files(fs: Fs)
+    Nothing
+
+## Reads nothing, and says so in no set at all.
+def nothing() -> int !:
+    return Ok(1)
+
+## Fails one way only.
+def broken(
+    flag: bool,  # why it fails
+    times: int,
+) -> int !:
+    requires times >= 0
+        and times < 100
+    if flag:
+        return Err(Empty)
+    return Ok(times)
+
+## Holds the world through many paths.
+@deprecated("use `nothing`")
+def many[N: NetOps](
+    lent: Lent[Fs],
+    net: N,
+    clock: ref dyn ClockOps,
+    pair: (Rand, Env),
+    maybe: Proc?,
+    holding: Holding,
+    wait: Duration,
+) -> int:
+    print(wait)
+    return todo("count `them`")
+
+## Not done, in two places.
+def half(x: int) -> int:
+    if x > 0:
+        return todo("`ticks`")
+    return todo()

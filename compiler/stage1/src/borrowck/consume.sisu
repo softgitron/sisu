@@ -163,7 +163,9 @@ pure def dropping_intrinsics(f: Function, types: Types, p: Program, mut out: lis
                 let shown_name = place_name(types, f, shown)
                 var fd = Finding.new(Msg.BorrowMustConsumeIntrinsic, f, s.loc).with(
                     "callee", name
-                ).with_arg("name", shown_name.copy()).with("ty", type_text(ty)).at(b, si)
+                ).with_arg("name", shown_name.copy()).with("ty", type_text(ty)).note(
+                    Msg.BorrowConsumeEach, []
+                ).at(b, si)
                 let decl = f.locals[shown.local.index].loc
                 if decl.is_some() and is_named(f, shown.local):
                     fd = fd.label(decl, Msg.BorrowDeclaredHere, [param("name", shown_name)])
@@ -243,7 +245,9 @@ pure def generic_calls(
                         out.push(
                             Finding.new(Msg.TypeMustConsumeArgument, f, s.loc).with(
                                 "ty", type_text(ty)
-                            ).with("param", param_name).at(b, si)
+                            ).with("param", param_name).note(Msg.BorrowConsumeBeforeCall, []).at(
+                                b, si
+                            )
                         )
     return alone
 

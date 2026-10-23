@@ -20,6 +20,9 @@
 ##! sisu run -- fmt-batch OUT LIST            # what it does of every file LIST names
 ##! sisu run -- fmt-profile LIST              # where the formatter's time goes over them
 ##! sisu run -- deform OUT LIST               # the files laid out otherwise, for the formatters
+##! sisu run -- doc [PATH] [--output DIR]     # what `sisu doc` does, its status as `Exit(status=N)`
+##! sisu run -- doc --std [MODULE...]         # the standard library's pages
+##! sisu run -- doc-batch OUT LIST            # what `doc` does of every program LIST names
 ##! ```
 ##!
 ##! `tokens` and `parse` print to standard output, and the diagnostics in
@@ -57,13 +60,20 @@
 ##! leaves) and `OUT/n.again` (empty when formatting that text again changes
 ##! nothing). `deform` writes `OUT/jN.sisu` and `OUT/sN.sisu`, the `N`th file
 ##! with the lines inside its brackets joined, and with a line break after
-##! each comma inside them (`mutants.joined`, `mutants.spread`).
+##! each comma inside them (`mutants.joined`, `mutants.spread`). `doc`
+##! writes a program's documentation, a Markdown page per module, as `sisu
+##! doc` does (`doc.sisu`); `doc-batch` writes, for the `n`th line (a
+##! program's path, or `--std` and the paths of std modules),
+##! `OUT/n.doc.out`, `OUT/n.doc.err` and `OUT/n.doc.status` (what `doc`
+##! prints and its status), and the pages `doc --output` writes into
+##! `OUT/n.pages/`, with `OUT/n.pages.err` and `OUT/n.pages.status`.
 ##! `--catalog PATH` names the message catalog, by default
 ##! `../catalog/messages.catalog`.
 
 import stage1.borrowck
 import stage1.cfg
 import stage1.diff
+import stage1.doc
 import stage1.fmt
 import stage1.format
 import stage1.interp
@@ -107,7 +117,7 @@ from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Tree
 from stage1.typeck.collect import SourcePackage
 from stage1.typeck.program import DefKind, Embedded, ModuleId, Program
-from stage1.typeck.std_sources import importable
+from stage1.typeck.std_sources import display_path, documented, importable
 from stage1.typeck.ty import TyKey
 
 error UsageError:
@@ -547,6 +557,59 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         return build_command(
             sys, home, path, native, release, locked, level, output, request, catalog
         )
+    if command == "doc":
+        # `doc [PATH] [--output DIR]` and `doc --std [MODULE...]`: what
+        # `sisu doc` does, its exit status given as `Exit(status=N)`.
+        let status = doc_command(sys, home, rest, catalog)?
+        if status != 0:
+            return Err(Exit(status=status))
+        return Ok(())
+    if command == "doc-batch" and len(rest) == 3:
+        # For the `n`th line of LIST, the arguments of a `doc` (a program's
+        # path, or `--std` and the paths of std modules): what it prints
+        # and its status, and the pages `--output` writes, into OUT.
+        let texts = std_texts(sys, home)?
+        let base = typeck.base(texts, catalog)
+        var env = environment(sys, home)?
+        let out_dir = rest[1].copy()
+        let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
+        var n = 0
+        for line in list.lines():
+            if line.is_empty():
+                continue
+            n += 1
+            var words = ["doc".to_string()]
+            for w in line.split_whitespace():
+                words.push(w.to_string())
+            let (asked, wrong) = doc_args(words, catalog)
+            let fine = wrong.is_empty()
+            var report = DocReport.failed(wrong, 2)
+            if fine:
+                # A program of one file is named by its file's name, as
+                # stage 0 names it when run in the file's directory.
+                var name: String? = None
+                if let Some(t) = asked.targets.first():
+                    if not asked.std_lib:
+                        name = Some(package.file_name(t))
+                report = doc_report(sys, home, asked, name, base, texts, mut env, catalog)?
+            var out = report.out.copy()
+            if report.status == 0:
+                out = doc.printed(report.pages)
+            sys.fs.write_text(Path.new("{out_dir}/{n}.doc.out"), out)?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.doc.err"), report.err)?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.doc.status"), "{report.status}\n")?
+            # `--output DIR`: each page written into a directory of its own.
+            var status = report.status
+            var errs = report.err.copy()
+            if report.status == 0:
+                let failed = write_pages(sys, "{out_dir}/{n}.pages", report.pages, catalog)
+                if not failed.is_empty():
+                    status = 1
+                    errs = failed
+            sys.fs.write_text(Path.new("{out_dir}/{n}.pages.err"), errs)?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.pages.status"), "{status}\n")?
+        print("files {n}")
+        return Ok(())
     if command == "fmt":
         # `fmt [--check] [PATH...]`: what `sisu fmt` does, its exit status
         # given as `Exit(status=N)`.
@@ -731,51 +794,56 @@ def inputs_of(
 ) -> list[Input] ! IoError:
     let layouts = layouts_of(sys, arg, sir, request) else:
         let text = sys.fs.read_to_string(Path.new(arg))?
-        let built = name_diagnostics(sys, home, text, tests, Features.none(), mut env, catalog)?
-        let (syntax, names, cfg_diags) = built
-        var named = False
-        var name_errors: list[(int, int)] = []
-        for d in names:
-            if catalog.is_error(d.msg):
-                name_errors.push((0, d.start))
-        for d in cfg_diags:
-            if catalog.is_error(d.msg):
-                named = True
-        let module = typeck.InputModule(path=[], file=arg.to_string(), text=text.copy(), package=0)
-        let package = SourcePackage(name=String.new(), deps=[], trusted=True)
-        return Ok(
-            [
-                Input(
-                    modules=[module],
-                    packages=[package],
-                    named=named,
-                    name_errors=name_errors,
-                    embedded=embedded_files(sys, arg, text, catalog),
-                    multi=False,
-                    tests=tests,
-                    features=[Features.none()],
-                    cfg=[cfg_diags],
-                    syntax=[syntax],
-                    names=[names],
-                    manifests=[],
-                    problems=[],
-                    untrusted=[],
-                    disk=arg.to_string(),
-                    package_name=String.new(),
-                    build_root=None,
-                    package_version=String.new(),
-                    own_modules=1,
-                    release_contracts=None,
-                    contracts=CONTRACTS_ALL,
-                ),
-            ]
-        )
+        return Ok([file_input(sys, home, arg, text, tests, mut env, catalog)?])
     var out: list[Input] = []
     for layout in layouts:
         if layout.modules.is_empty():
             continue
         out.push(layout_input(sys, home, layout, tests, mut env, catalog)?)
     return Ok(out)
+
+## The program of the one file `arg`, whose text is `text`, as a build
+## with or without its tests compiles it.
+def file_input(
+    sys: System, home: str, arg: str, text: str, tests: bool, mut env: Environment, catalog: Catalog
+) -> Input ! IoError:
+    let built = name_diagnostics(sys, home, text, tests, Features.none(), mut env, catalog)?
+    let (syntax, names, cfg_diags) = built
+    var named = False
+    var name_errors: list[(int, int)] = []
+    for d in names:
+        if catalog.is_error(d.msg):
+            name_errors.push((0, d.start))
+    for d in cfg_diags:
+        if catalog.is_error(d.msg):
+            named = True
+    let module = typeck.InputModule(path=[], file=arg.to_string(), text=text.to_string(), package=0)
+    let package = SourcePackage(name=String.new(), deps=[], trusted=True)
+    return Ok(
+        Input(
+            modules=[module],
+            packages=[package],
+            named=named,
+            name_errors=name_errors,
+            embedded=embedded_files(sys, arg, text, catalog),
+            multi=False,
+            tests=tests,
+            features=[Features.none()],
+            cfg=[cfg_diags],
+            syntax=[syntax],
+            names=[names],
+            manifests=[],
+            problems=[],
+            untrusted=[],
+            disk=arg.to_string(),
+            package_name=String.new(),
+            build_root=None,
+            package_version=String.new(),
+            own_modules=1,
+            release_contracts=None,
+            contracts=CONTRACTS_ALL,
+        )
+    )
 
 ## A layout's program, read, as a build with or without its tests
 ## compiles it.
@@ -1310,6 +1378,68 @@ pure def report_of(
     base: typeck.Base, input: Input, name: str, catalog: Catalog, mut kept: Kept
 ) -> Report:
     let checked = check_input(base, input, catalog, True)
+    var report = front_report(input, checked, name, catalog)
+    if report.has_error:
+        return report
+    # The ownership checker runs when the front end found no error.
+    let program = program_files(input, checked)
+    var consuming: dict[String, String] = {}
+    if let Some(typed) = checked.typed:
+        consuming = consuming_methods(typed.prog)
+    let lowered = lower_of(
+        checked, base, input.modules[0].file, input.contracts, catalog, mut kept
+    ) else:
+        return report
+    if not lowered.beyond.is_empty():
+        for b in lowered.beyond:
+            report.beyond.push("beyond the slice of lowering: {b}")
+        return report
+    var done = borrowck.check_with(lowered.program, True, mut kept.placed)
+    let by_source = files_by_source(lowered, program)
+    match borrowck.diagnostics_by_file(done.findings, by_source, len(program), catalog):
+        case Some(per_file):
+            for k in range(len(per_file)):
+                for d in per_file[k]:
+                    let with_note = consume_note(d, consuming)
+                    report.owned.push(Filed(file=k, diag=with_note, label_files=[]))
+        case None:
+            report.beyond.push(
+                "an ownership finding in a file of the standard library or one the compiler wrote"
+            )
+    # The compiler runs the `comptime` expressions of a program the
+    # ownership checker accepts (08); one that fails is an error at it.
+    if done.findings.is_empty():
+        simplify.program(mut done.program)
+        let evaluated = interp.evaluate(mut done.program, catalog)
+        for why in evaluated.beyond:
+            report.beyond.push(why.copy())
+        for e in evaluated.errors:
+            match comptime_diagnostic(e, done.program, by_source):
+                case Some((k, d)):
+                    report.failed.push(Filed(file=k, diag=d, label_files=[]))
+                case None:
+                    let why = "a failed `comptime` expression in a file of the standard library or one the compiler wrote"
+                    if not report.beyond.contains(why.to_string()):
+                        report.beyond.push(why.to_string())
+    sort_filed(mut report.owned, catalog, True)
+    sort_filed(mut report.failed, catalog, True)
+    for x in report.owned:
+        report.diags.push(x.copy())
+        if catalog.is_error(x.diag.msg):
+            report.has_error = True
+    for x in report.failed:
+        report.diags.push(x.copy())
+        if catalog.is_error(x.diag.msg):
+            report.has_error = True
+    sort_filed(mut report.diags, catalog, True)
+    return report
+
+## The front end's part of what `check` prints of a checked program
+## (stage 0's `Db::checked`): the syntax diagnostics of each module, the
+## manifests' problems, `cap.untrusted`, the name diagnostics and the type
+## checker's, sorted, and whether they hold an error, with why they are
+## not all of stage 0's when stage 1 knows that.
+pure def front_report(input: Input, checked: typeck.Checked, name: str, catalog: Catalog) -> Report:
     let n = len(input.modules)
     var files: list[(String, String)] = []
     for i in range(n):
@@ -1383,60 +1513,9 @@ pure def report_of(
     if errors > 0:
         report.has_error = True
     if errors > 0 or checked.has_error:
+        report.has_error = True
         if errors == 0 and noted.is_empty():
             report.beyond.push("an error stage 1 knows of without rendering it")
-        return report
-    # The ownership checker runs when the front end found no error.
-    let program = program_files(input, checked)
-    var consuming: dict[String, String] = {}
-    if let Some(typed) = checked.typed:
-        consuming = consuming_methods(typed.prog)
-    let lowered = lower_of(
-        checked, base, input.modules[0].file, input.contracts, catalog, mut kept
-    ) else:
-        return report
-    if not lowered.beyond.is_empty():
-        for b in lowered.beyond:
-            report.beyond.push("beyond the slice of lowering: {b}")
-        return report
-    var done = borrowck.check_with(lowered.program, True, mut kept.placed)
-    let by_source = files_by_source(lowered, program)
-    match borrowck.diagnostics_by_file(done.findings, by_source, len(program), catalog):
-        case Some(per_file):
-            for k in range(len(per_file)):
-                for d in per_file[k]:
-                    let with_note = consume_note(d, consuming)
-                    report.owned.push(Filed(file=k, diag=with_note, label_files=[]))
-        case None:
-            report.beyond.push(
-                "an ownership finding in a file of the standard library or one the compiler wrote"
-            )
-    # The compiler runs the `comptime` expressions of a program the
-    # ownership checker accepts (08); one that fails is an error at it.
-    if done.findings.is_empty():
-        simplify.program(mut done.program)
-        let evaluated = interp.evaluate(mut done.program, catalog)
-        for why in evaluated.beyond:
-            report.beyond.push(why.copy())
-        for e in evaluated.errors:
-            match comptime_diagnostic(e, done.program, by_source):
-                case Some((k, d)):
-                    report.failed.push(Filed(file=k, diag=d, label_files=[]))
-                case None:
-                    let why = "a failed `comptime` expression in a file of the standard library or one the compiler wrote"
-                    if not report.beyond.contains(why.to_string()):
-                        report.beyond.push(why.to_string())
-    sort_filed(mut report.owned, catalog, True)
-    sort_filed(mut report.failed, catalog, True)
-    for x in report.owned:
-        report.diags.push(x.copy())
-        if catalog.is_error(x.diag.msg):
-            report.has_error = True
-    for x in report.failed:
-        report.diags.push(x.copy())
-        if catalog.is_error(x.diag.msg):
-            report.has_error = True
-    sort_filed(mut report.diags, catalog, True)
     return report
 
 ## The file of a report a checked file is (`Label.file`): the root
@@ -2219,6 +2298,376 @@ pure def path_of(rest: list[String], flags: list[str]) -> String?:
     if len(paths) == 1:
         return Some(paths[0].copy())
     return None
+
+## What `sisu doc` is asked (stage 0's `doc`, its arguments): the paths
+## (a program's, or with `std_lib` the standard library's modules by their
+## import paths, all of them when it names none), where the pages go, and
+## the build's lockfile and features.
+struct DocArgs:
+    targets: list[String]
+    output: String?
+    std_lib: bool
+    locked: bool
+    request: FeatureRequest
+
+## What `sisu doc` printed of a program, its exit status, and the pages it
+## made (none when it failed).
+struct DocReport:
+    out: String
+    err: String
+    status: int
+    pages: list[doc.Page]
+
+impl DocReport:
+    pure def failed(own err: String, status: int) -> DocReport:
+        return DocReport(out=String.new(), err=err, status=status, pages=[])
+
+## The arguments of `doc` (the command's words, its name first), as stage
+## 0 reads them: `--std`, `--locked`, `--no-default-features`, `--output
+## DIR` or `--output=DIR`, `--features NAMES` or `--features=NAMES` (the
+## names separated by commas or spaces), and the paths; with the usage
+## error stage 0 reports, when there is one (`cli.unknown-option`, for an
+## option it does not take or a second path, and `doc.std-path`, `D0113`,
+## for a path that is no module of the standard library).
+pure def doc_args(rest: list[String], catalog: Catalog) -> (DocArgs, String):
+    var args = DocArgs(
+        targets=[], output=None, std_lib=False, locked=False, request=FeatureRequest.none()
+    )
+    var i = 1
+    while i < len(rest):
+        let a = rest[i].copy()
+        if a == "--std":
+            args.std_lib = True
+        elif a == "--locked":
+            args.locked = True
+        elif a == "--no-default-features":
+            args.request.no_default = True
+        elif a == "--output" or a.starts_with("--output="):
+            args.output = flag_value(rest, mut i, "--output")
+        elif a == "--features" or a.starts_with("--features="):
+            let names = flag_value(rest, mut i, "--features") ?? String.new()
+            var name = String.new()
+            for c in names.chars():
+                if c == ',' or c.is_whitespace():
+                    if not name.is_empty():
+                        args.request.names.push(name.copy())
+                    name = String.new()
+                else:
+                    name.push_char(c)
+            if not name.is_empty():
+                args.request.names.push(name)
+        elif a.starts_with("-"):
+            return (args, doc_option(a, catalog))
+        else:
+            args.targets.push(a)
+        i += 1
+    if args.std_lib:
+        for t in args.targets:
+            var known = t == "std.core"
+            for name in documented():
+                if display_path(name) == t:
+                    known = True
+            if not known:
+                let params = [Param(name="path".to_string(), value=t.copy())]
+                return (args, catalog.plain_error("doc.std-path", params))
+    elif len(args.targets) > 1:
+        return (args, doc_option(args.targets[1], catalog))
+    return (args, String.new())
+
+## `cli.unknown-option` for `doc`.
+pure def doc_option(option: str, catalog: Catalog) -> String:
+    let params = [
+        Param(name="option".to_string(), value=option.to_string()),
+        Param(name="command".to_string(), value="doc".to_string()),
+    ]
+    return catalog.plain_error("cli.unknown-option", params)
+
+## The value of the option `flag` that `rest[i]` is: after its `=`, or the
+## next word, which `i` then moves to (none when there is none).
+pure def flag_value(rest: list[String], mut i: int, flag: str) -> String?:
+    let a = rest[i].copy()
+    if a.byte_len() > flag.byte_len():
+        return Some(a.byte_slice(flag.byte_len() + 1, a.byte_len()).to_string())
+    i += 1
+    if i < len(rest):
+        return Some(rest[i].copy())
+    return None
+
+## `doc [PATH] [--output DIR]` and `doc --std [MODULE...]` (stage 0's `sisu
+## doc`; 09, "Documentation"; decision 258): every module of the program
+## the path names (a file, a package, each member of a workspace), or of
+## the standard library (the modules its import paths name, or all), as a
+## Markdown page, printed each after a line naming its file, or written
+## into `DIR`. The program is built as `sisu build` builds it, without its
+## tests (decision 243); one with an error is reported as `sisu check`
+## reports it, then `D0114`, and nothing is written. The exit status is
+## stage 0's: 0, 1 for a program with an error or a file that cannot be
+## read or written, 2 for a usage error.
+def doc_command(sys: System, home: str, rest: list[String], catalog: Catalog) -> int ! IoError:
+    let (args, wrong) = doc_args(rest, catalog)
+    if not wrong.is_empty():
+        emit("", wrong)
+        return Ok(2)
+    let texts = std_texts(sys, home)?
+    let base = typeck.base(texts, catalog)
+    var env = environment(sys, home)?
+    let report = doc_report(sys, home, args, None, base, texts, mut env, catalog)?
+    if report.status != 0:
+        emit(report.out, report.err)
+        return Ok(report.status)
+    let dir = args.output else:
+        emit(doc.printed(report.pages), "")
+        return Ok(0)
+    let failed = write_pages(sys, dir, report.pages, catalog)
+    if not failed.is_empty():
+        emit("", failed)
+        return Ok(1)
+    return Ok(0)
+
+## What `doc` makes of what it was asked (stage 0's `doc` and `doc_pages`):
+## the pages of the program the path names, or of the standard library, or
+## what stopped it, with stage 0's status. A program of one file is named
+## `name` in its diagnostics, or as it was given.
+def doc_report(
+    sys: System,
+    home: str,
+    args: DocArgs,
+    name: String?,
+    base: typeck.Base,
+    texts: dict[String, String],
+    mut env: Environment,
+    catalog: Catalog,
+) -> DocReport ! IoError:
+    if args.std_lib:
+        # The standard library: a program that imports each module, so that
+        # each is loaded.
+        let input = file_input(sys, home, "std.sisu", std_root(), False, mut env, catalog)?
+        return Ok(doc_program(base, input, "std.sisu", Some(args.targets.copy()), texts, catalog))
+    # The program's path, or the package of the working directory or the
+    # nearest one above it, as `sisu doc` finds it.
+    var path = String.new()
+    match args.targets.first():
+        case Some(t):
+            path = t.copy()
+            let abs = absolute(sys, t)
+            if package.is_dir(sys.fs, abs):
+                if package.locate(sys.fs, abs).is_none():
+                    let params = [
+                        Param(name="dir".to_string(), value=t.copy()),
+                        Param(name="command".to_string(), value="doc".to_string()),
+                    ]
+                    return Ok(DocReport.failed(catalog.plain_error("cli.no-package", params), 2))
+            elif let Err(e) = sys.fs.read_to_string(Path.new(t)):
+                return Ok(DocReport.failed(cannot_read(t, e, catalog), 1))
+        case None:
+            let found = nearest_package(sys, "doc", catalog) else:
+                return Ok(DocReport.failed(String.new(), 2))
+            path = found
+    if let Some(e) = unknown_feature(sys, path, args.request):
+        return Ok(DocReport.failed(catalog.plain_error("cli.unknown-feature", e), 2))
+    # `--locked` keeps the lockfile as it is, or stops the command.
+    if not write_lockfile(sys, path, False, args.locked, catalog)?:
+        return Ok(DocReport.failed(String.new(), 1))
+    var inputs: list[Input] = []
+    match layouts_of(sys, path, False, args.request):
+        case Some(layouts):
+            for layout in layouts:
+                if layout.modules.is_empty():
+                    # Manifests broken past reading a module: their problems.
+                    let shown = problems_report(layout, catalog).human(catalog)
+                    return Ok(DocReport.failed(shown, 1))
+                inputs.push(layout_input(sys, home, layout, False, mut env, catalog)?)
+        case None:
+            let text = sys.fs.read_to_string(Path.new(path))?
+            inputs.push(file_input(sys, home, path, text, False, mut env, catalog)?)
+    var named = path.copy()
+    if let Some(n) = name:
+        named = n.copy()
+    var pages: list[doc.Page] = []
+    for input in inputs:
+        let done = doc_program(base, input, named, None, texts, catalog)
+        if done.status != 0:
+            return Ok(done)
+        for p in done.pages:
+            pages.push(p.copy())
+    return Ok(DocReport(out=String.new(), err=String.new(), status=0, pages=pages))
+
+## The root module of the program `doc --std` documents: an import of every
+## module of the standard library, so that each is loaded.
+pure def std_root() -> String:
+    var text = String.new()
+    for name in documented():
+        text.push("import {display_path(name)} as std_{name}\n")
+    return text
+
+## The pages of one program (stage 0's `doc_pages`): the root package's
+## modules, or with `only` the standard library's, those it names if it
+## names some; or, for a program with an error, what `sisu check` prints of
+## it and `D0114`.
+pure def doc_program(
+    base: typeck.Base,
+    input: Input,
+    name: str,
+    only: list[String]?,
+    texts: dict[String, String],
+    catalog: Catalog,
+) -> DocReport:
+    let checked = check_input(base, input, catalog, True)
+    let report = front_report(input, checked, name, catalog)
+    let errors = report.errors(catalog)
+    var beyond = String.new()
+    for b in report.beyond:
+        beyond.push("beyond the slice: {b}\n")
+    if errors > 0:
+        var err = report.human(catalog)
+        let count = Param(name="count".to_string(), value="{errors}")
+        err.push(catalog.plain_error("doc.errors-found", [count]))
+        err.push(beyond)
+        return DocReport.failed(err, 1)
+    if report.has_error or not beyond.is_empty():
+        return DocReport.failed(beyond, 1)
+    let typed = checked.typed else:
+        return DocReport.failed("beyond the slice: nothing to document\n".to_string(), 1)
+    var pages: list[doc.Page] = []
+    match only:
+        case Some(paths):
+            pages = std_pages(typed, paths, texts, catalog)
+        case None:
+            pages = program_pages(input, typed, catalog)
+    return DocReport(out=String.new(), err=String.new(), status=0, pages=pages)
+
+## The pages of a program's root package: each of its modules as the build
+## has it, its `@cfg`s applied, named by its import path, or a single
+## file's by the file's stem. A package's pages show what another package
+## may name.
+pure def program_pages(input: Input, typed: typeck.Typed, catalog: Catalog) -> list[doc.Page]:
+    var sources: list[doc.Source] = []
+    for k in range(len(input.modules)):
+        let m = ref input.modules[k]
+        if m.package != 0 or k >= len(typed.prog.user_modules):
+            continue
+        # The tokens the parse reads are the page's, lexed once.
+        let lexed = lex(m.text)
+        let tokens = lexed.tokens.copy()
+        let parsed = build.module(parse_lexed(m.text, lexed, catalog).tree)
+        var features: Features? = None
+        if m.package < len(input.features):
+            features = Some(input.features[m.package].copy())
+        let module = cfg.filter(parsed, False, features).module ?? parsed
+        var shown = m.path.join(".")
+        if m.path.is_empty():
+            shown = file_stem(m.file)
+        sources.push(
+            doc.Source(
+                id=typed.prog.user_modules[k],
+                path=shown,
+                text=m.text.copy(),
+                tokens=tokens,
+                module=module,
+            )
+        )
+    sources.sort_by((a, b) -> a.path.cmp(b.path))
+    var public_only = False
+    if let Some(p) = typed.prog.packages.first():
+        public_only = not p.name.is_empty()
+    let docs = doc.Docs(
+        sources=ref sources,
+        prog=ref typed.prog,
+        types=ref typed.types,
+        inferred=ref typed.inferred,
+        public_only=public_only,
+    )
+    return doc.pages(docs)
+
+## The pages of the standard library: the prelude's (`std.core`) and those
+## of the modules of 11 (not `target`, whose facts are the host's), or of
+## those `only` names when it names some, each read from its text.
+pure def std_pages(
+    typed: typeck.Typed, only: list[String], texts: dict[String, String], catalog: Catalog
+) -> list[doc.Page]:
+    let prog = ref typed.prog
+    var names = ["prelude"]
+    for name in documented():
+        names.push(name)
+    var sources: list[doc.Source] = []
+    for name in names:
+        var id: ModuleId? = None
+        if name == "prelude":
+            id = Some(prog.prelude)
+        else:
+            for k in range(len(prog.modules)):
+                if id.is_none() and prog.modules[k].is_std and prog.modules[k].name == name:
+                    id = Some(ModuleId(index=k))
+        let found = id else:
+            continue
+        let path = display_path(name)
+        if not only.is_empty() and not only.contains(path):
+            continue
+        var text = String.new()
+        if let Some(t) = texts.get(name.to_string()):
+            text = t.copy()
+        let lexed = lex(text)
+        let tokens = lexed.tokens.copy()
+        let module = build.module(parse_lexed(text, lexed, catalog).tree)
+        sources.push(
+            doc.Source(id=found, path=path, text=text.copy(), tokens=tokens, module=module)
+        )
+    sources.sort_by((a, b) -> a.path.cmp(b.path))
+    let docs = doc.Docs(
+        sources=ref sources,
+        prog=ref typed.prog,
+        types=ref typed.types,
+        inferred=ref typed.inferred,
+        public_only=False,
+    )
+    return doc.pages(docs)
+
+## A file's name without its directory and its last extension (Rust's
+## `file_stem`): the whole name when it has no `.` but at its start.
+pure def file_stem(p: str) -> String:
+    let name = package.file_name(p)
+    var dot = -1
+    for i in range(name.byte_len()):
+        if name.byte_at(i) == 46:
+            dot = i
+    if dot <= 0:
+        return name
+    return name.byte_slice(0, dot).to_string()
+
+## Each page written into `dir`, made when it is missing (`doc --output
+## DIR`): `cli.cannot-write` for the first that could not be, or nothing.
+def write_pages(sys: System, dir: str, pages: list[doc.Page], catalog: Catalog) -> String:
+    for page in pages:
+        var path = page.file.copy()
+        if not dir.is_empty():
+            path = "{dir.strip_suffix("/")}/{page.file}"
+        var reason: String? = None
+        match make_dirs(sys, dir):
+            case Ok(_):
+                if let Err(e) = sys.fs.write_text(Path.new(path), page.text):
+                    reason = Some(io_reason(e))
+            case Err(e):
+                reason = Some(io_reason(e))
+        if let Some(r) = reason:
+            let params = [
+                Param(name="path".to_string(), value=path),
+                Param(name="reason".to_string(), value=r.copy()),
+            ]
+            return catalog.plain_error("cli.cannot-write", params)
+    return String.new()
+
+## Makes the directory `dir` and those above it that are missing.
+def make_dirs(sys: System, dir: str) -> ! IoError:
+    var at = 0
+    while at < dir.byte_len():
+        var end = at + 1
+        while end < dir.byte_len() and dir.byte_at(end) != 47:
+            end += 1
+        let prefix = dir.byte_slice(0, end)
+        if not package.is_dir(sys.fs, prefix):
+            sys.fs.create_dir(Path.new(prefix))?
+        at = end
+    return Ok(())
 
 ## Where a batch spends its time, in nanoseconds: lexing, parsing,
 ## writing the dumps, and building and writing the AST.

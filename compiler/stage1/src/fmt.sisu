@@ -197,10 +197,17 @@ test "option sugar"(sys: System):
     # Not when it would read as `??`.
     let kept = "def f(x: Option[int?]):\n    pass\n"
     assert formatted(kept, catalog) == kept
-    # The inner option of two (D6), and one with spaces inside (D7).
+    # Of an option of an option, the inner one (decision 267).
     assert formatted("def f(x: Option[Option[int]]):\n    pass\n", catalog) == kept
-    let spaced = formatted("def f(x: Option[ int ]):\n    pass\n", catalog)
-    assert spaced == "def f(x: int?):\n    pass\n"
+    let three = formatted("def f(x: Option[Option[Option[int]]]):\n    pass\n", catalog)
+    assert three == "def f(x: Option[int?]?):\n    pass\n"
+    let behind = formatted("def f(x: ref Option[Option[int]]):\n    pass\n", catalog)
+    assert behind == "def f(x: ref Option[int?]):\n    pass\n"
+    # Spaces and line breaks inside go; a comment keeps the brackets.
+    let spaced = formatted("def f(x: Option[ int ], y: Option[\n    str\n]):\n    pass\n", catalog)
+    assert spaced == "def f(x: int?, y: str?):\n    pass\n"
+    let commented = "def f(\n    x: Option[  # why\n        int\n    ]\n):\n    pass\n"
+    assert formatted(commented, catalog) == commented
 
 test "result sugar for error sets"(sys: System):
     let catalog = test_catalog(sys)

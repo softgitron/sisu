@@ -110,6 +110,48 @@ pub pure def module_for(words: list[String]) -> String?:
         case "std.regex": Some("regex".to_string())
         case _: None
 
+## The std modules whose doc examples `sisu test --std` runs and whose
+## pages `sisu doc --std` writes, besides the prelude's, in stage 0's order
+## (its `DOCUMENTED`).
+pub pure def documented() -> list[str]:
+    return [
+        "cap",
+        "cli",
+        "collections",
+        "encoding",
+        "env",
+        "fmt",
+        "fs",
+        "hash",
+        "io",
+        "live",
+        "num",
+        "par",
+        "process",
+        "rand",
+        "regex",
+        "http",
+        "json",
+        "log",
+        "math",
+        "net",
+        "search",
+        "sim",
+        "sort",
+        "string",
+        "task",
+        "test",
+        "time",
+    ]
+
+## A std module's path as an import names it: `std.x.http` for `http`,
+## and `std.core` for the prelude.
+pub pure def display_path(name: str) -> String:
+    return match name:
+        case "prelude": "std.core".to_string()
+        case "cli" | "http": "std.x.{name}"
+        case _: "std.{name}"
+
 ## The prelude's names a std module re-exports (`from std.time import
 ## Duration`).
 pub pure def reexports(module: str) -> list[str]:

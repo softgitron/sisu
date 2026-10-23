@@ -242,16 +242,13 @@ pure def result_sugar(src: Src, n: int, error_sets: set[String]) -> (int, int)?:
 
 ## `Option[T]`'s `T`, when the formatter writes it `T?`.
 pub pure def option_sugar(src: Src, n: int) -> int?:
-    return option_sugar_assuming(src, n, None)
+    return option_sugar_asked(src, n, None)
 
-## `option_sugar`, with the option `assumed` taken to be written `T?`.
-## Whether the inner option of `Option[Option[T]]` is written `T?` depends
-## on whether the outer one is, which depends on whether the inner one
-## is: the inner one, asking about the outer one, assumes it is (so the
-## outer one, whose `T` is optional, is not), and `Option[Option[T]]` is
-## written `Option[T?]`, as decision 152 has it (stage 0 asks without end
-## and overflows its stack, DISCREPANCIES.md's D6).
-pure def option_sugar_assuming(src: Src, n: int, assumed: int?) -> int?:
+## `option_sugar`, asked by the option `asking` inside this one, which is
+## taken to be written `T?`: of `Option[Option[T]]` the inner option is
+## written `T?` and the outer one is not, `Option[T?]` (decision 152), and
+## neither question asks the other again (decision 267).
+pure def option_sugar_asked(src: Src, n: int, asking: int?) -> int?:
     if src.kind(n) != SyntaxKind.PathType:
         return None
     let idents = src.child_tokens(n)
@@ -260,16 +257,16 @@ pure def option_sugar_assuming(src: Src, n: int, assumed: int?) -> int?:
     let args = src.first_child(n, SyntaxKind.GenericArgs) else:
         return None
     let ts = type_children(src, args)
-    if len(ts) != 1 or len(src.child_tokens(args)) != 2:
+    # `[` and `]`, and no trailing comma (the significant tokens); spaces
+    # and line breaks go, but a comment would have nowhere to go.
+    if len(ts) != 1
+            or len(src.child_tokens(args)) != 2
+            or has_comment(src, n)
+            or has_comment(src, args):
         return None
     let arg = ts[0]
-    # Nothing in it but the type and spaces: a comment would have nowhere
-    # to go. (Stage 0 refuses spaces too, and then its self-check refuses
-    # the file, D7.)
-    if has_comment(src, n) or has_comment(src, args):
-        return None
     var arg_kind = src.kind(arg)
-    if assumed == Some(arg) or option_sugar(src, arg).is_some():
+    if asking == Some(arg) or option_sugar_asked(src, arg, None).is_some():
         arg_kind = SyntaxKind.OptionType
     elif result_parts(src, arg).is_some():
         # `Result[T, E]?` would read `T ! E?` once written with `!`.
@@ -285,11 +282,12 @@ pure def option_sugar_assuming(src: Src, n: int, assumed: int?) -> int?:
             return None
         case _:
             pass
-    # `Option[Option[T]]` written `Option[T]?` would be `T??`.
+    # An option inside one written `T?` keeps its brackets, which `T??`
+    # would lose.
     if parent == Some(SyntaxKind.GenericArgs):
         if let Some(p) = src.parent(n):
             if let Some(outer) = src.parent(p):
-                if option_sugar_assuming(src, outer, Some(n)) == Some(n):
+                if option_sugar_asked(src, outer, Some(n)) == Some(n):
                     return None
     return Some(arg)
 

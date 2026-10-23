@@ -95,6 +95,17 @@
 #   fmt-mutants  with --mutants N, all three, of the mutants: the refusals of
 #                those that do not parse, and those that do formatted
 #
+# Then the documentation (decision 258), from one run of stage 1:
+#
+#   doc          `sisu doc`, standard output and error and the exit status,
+#                for every program of the corpus, stage 1's own cases and,
+#                with --self, stage 1's own package (a file run in its
+#                directory, a package inside it), for the standard library
+#                (`--std`, all of it and some modules) and for arguments it
+#                refuses
+#   doc-output   `sisu doc --output DIR`: the pages it writes into DIR, file
+#                for file, what it prints and its exit status, for the same
+#
 # A difference listed in DISCREPANCIES.md ("- Differs: `path`: outputs") is
 # expected; any other fails the check.
 #
@@ -179,7 +190,7 @@ fi
 # Stage 0 writes a package's `sisu.lock` beside its manifest when it checks
 # it (09); the run removes the ones it wrote, and leaves the cases as they
 # were.
-lock_dirs=("$compiler/conformance/cases/packages" "$here/cases/packages")
+lock_dirs=("$compiler/conformance/cases" "$here/cases/packages")
 locks_before=$(find "${lock_dirs[@]}" -name sisu.lock 2> /dev/null | sort)
 forget_locks() {
     find "${lock_dirs[@]}" -name sisu.lock 2> /dev/null | while read -r f; do
@@ -287,7 +298,20 @@ stage0_fmt() {
     mv "$3/$1.copy/file.sisu" "$3/$1.fmt"
     rmdir "$3/$1.copy"
 }
-export -f stage0_syntax check0 stage0_check stage0_sir stage0_human stage0_sir_level stage0_fmt
+# What `sisu doc` prints of a program (a file, run in its directory, or a
+# package, run inside it), its status, and the pages `sisu doc --output
+# DIR` writes, with what that prints and its status.
+stage0_doc() {
+    local dir="$2" what=()
+    if [ ! -d "$2" ]; then
+        dir=$(dirname "$2")
+        what=("$(basename "$2")")
+    fi
+    (cd "$dir" && "$sisu" doc "${what[@]}" > "$3/$1.doc.out" 2> "$3/$1.doc.err"; echo "$?" > "$3/$1.doc.status")
+    (cd "$dir" && "$sisu" doc "${what[@]}" --output "$3/$1.pages" > "$3/$1.pages.out" 2> "$3/$1.pages.err"
+     echo "$?" > "$3/$1.pages.status")
+}
+export -f stage0_syntax check0 stage0_check stage0_sir stage0_human stage0_sir_level stage0_fmt stage0_doc
 
 # The differences DISCREPANCIES.md lists, one "path output" per line.
 allowed="$work/allowed.txt"
@@ -305,11 +329,11 @@ find "$here/cases" -name '*.sisu' | sort > "$work/cases.list"
 # the conformance suite and of stage 1's own, a directory `NAME.pkg` (or the
 # one `NAME.cwd` names inside it), which stage 0 checks from inside it, and
 # the conformance suite's scripts beside them.
-for cases in "$compiler/conformance/cases/packages" "$here/cases/packages"; do
-    for d in "$cases"/*.pkg; do
-        [ -d "$d" ] || continue
-        if [ -f "${d%.pkg}.cwd" ]; then echo "$d/$(cat "${d%.pkg}.cwd")"; else echo "$d"; fi
-    done
+{
+    find "$compiler/conformance/cases" -name '*.pkg' -type d -prune | sort
+    find "$here/cases/packages" -maxdepth 1 -name '*.pkg' -type d | sort
+} | while read -r d; do
+    if [ -f "${d%.pkg}.cwd" ]; then echo "$d/$(cat "${d%.pkg}.cwd")"; else echo "$d"; fi
 done > "$work/packages.list"
 find "$compiler/conformance/cases/packages" -maxdepth 1 -name '*.sisu' | sort >> "$work/packages.list"
 classes="conformance std examples cases"
@@ -410,7 +434,7 @@ grep -v '/packages/' "$work/cases.list" | grep -v '/checker_names/' >> "$work/na
 cat "$work/packages.list" >> "$work/names.list"
 name_classes="names"
 if [ "$all_names" = 1 ]; then
-    find "$compiler/conformance/cases" -name '*.sisu' | grep -v '/packages/' | grep -v '/names/' | sort \
+    find "$compiler/conformance/cases" -name '*.sisu' | grep -v '/packages/' | grep -v '\.pkg/' | grep -v '/names/' | sort \
         > "$work/corpus-names.list"
     cat "$work/examples.list" >> "$work/corpus-names.list"
     name_classes="names corpus-names"
@@ -469,7 +493,7 @@ type_blocks() {
 sed -n 's/^\([^#].*\)$/\1/p' "$here/types.list" | while read -r p; do echo "$repo/$p"; done > "$work/types.list"
 type_classes="types"
 if [ "$all_types" = 1 ]; then
-    find "$compiler/conformance/cases" -name '*.sisu' | grep -v '/packages/' | sort > "$work/corpus-types.list"
+    find "$compiler/conformance/cases" -name '*.sisu' | grep -v '/packages/' | grep -v '\.pkg/' | sort > "$work/corpus-types.list"
     cat "$work/examples.list" "$work/packages.list" >> "$work/corpus-types.list"
     type_classes="types corpus-types"
 fi
@@ -543,7 +567,7 @@ own_ids='^(borrow\.(use-after-move|use-after-partial-move|modify-while-borrowed|
 sed -n 's/^\([^#].*\)$/\1/p' "$here/sir.list" | while read -r p; do echo "$repo/$p"; done > "$work/sir.list"
 sir_classes="sir"
 if [ "$all_sir" = 1 ]; then
-    find "$compiler/conformance/cases" -name '*.sisu' | grep -v '/packages/' | sort > "$work/corpus-sir.list"
+    find "$compiler/conformance/cases" -name '*.sisu' | grep -v '/packages/' | grep -v '\.pkg/' | sort > "$work/corpus-sir.list"
     cat "$work/examples.list" "$work/packages.list" >> "$work/corpus-sir.list"
     sir_classes="sir corpus-sir"
 fi
@@ -667,7 +691,7 @@ find "$compiler/conformance/cases/wrong" -name '*.sisu' | sort > "$work/human.li
 grep -v '/packages/' "$work/cases.list" > "$work/cases-check.list"
 check_classes="human cases-check"
 if [ "$all_check" = 1 ]; then
-    find "$compiler/conformance/cases" -name '*.sisu' | grep -v '/packages/' | sort > "$work/corpus-check.list"
+    find "$compiler/conformance/cases" -name '*.sisu' | grep -v '/packages/' | grep -v '\.pkg/' | sort > "$work/corpus-check.list"
     cat "$work/examples.list" "$work/packages.list" >> "$work/corpus-check.list"
     check_classes="human corpus-check cases-check"
 fi
@@ -814,13 +838,11 @@ fmt_summary="$fmt_summary\n$(printf '  %-12s %4d files, %4d unchanged, %3d other
     fmt-again "$n" "$same" "$differing")"
 # The same files laid out otherwise, which the formatters must break and
 # join again: a file's text, its verdict and stage 1's fixed point at once.
-# A difference is a listed discrepancy's when it has its mark: stage 0
-# overflowing its stack (D6), or refusing its own output (`D0076`) for a
-# file with an `Option[` that stage 1 formats (D7).
+# A difference is a listed discrepancy's when it has its mark (a test of
+# the outputs that only that discrepancy makes). None is listed now (D6
+# and D7, the formatter's, were decided by decision 267), so every file
+# must give identical outputs.
 fmt_explained() {
-    grep -q "has overflowed its stack" "$1.check.err" && return 0
-    grep -q '^error\[D0076\]' "$1.check.err" && ! grep -q '^error\[D0076\]' "$2.check.err" &&
-        grep -qF 'Option[' "$3" && return 0
     return 1
 }
 others=""
@@ -873,6 +895,84 @@ for class in $others; do
     listed=$((listed + class_listed)); unlisted=$((unlisted + class_unlisted))
     fmt_summary="$fmt_summary\n$(printf '  %-12s %4d files, %4d identical, %3d differing as listed, %3d otherwise; stage 1 %6ss' \
         "$class" "$n" "$same" "$class_listed" "$class_unlisted" "$seconds")"
+done
+
+# The documentation (decision 258): what `sisu doc` prints of each program
+# of the corpus, of stage 1's own cases and, with --self, of stage 1's own
+# package, with its status, and the pages `sisu doc --output DIR` writes,
+# against stage 1's `doc-batch`; then the same for the standard library's
+# pages (`--std`, all of them and some) and for arguments stage 0 refuses.
+doc_summary=""
+class=doc
+list="$work/doc.list"
+find "$compiler/conformance/cases" -name '*.sisu' | grep -v '/packages/' | grep -v '\.pkg/' | sort > "$list"
+cat "$work/examples.list" "$work/packages.list" >> "$list"
+grep -v '/packages/' "$work/cases.list" >> "$list"
+[ "$self_check" = 1 ] && echo "$here" >> "$list"
+programs=$(wc -l < "$list" | tr -d ' ')
+ref="$work/$class.stage0"; out="$work/$class.stage1"
+mkdir -p "$ref" "$out"
+parallel stage0_doc "$list" "$ref"
+# The arguments of a `doc` that names no program, run in this directory.
+i=$programs
+while read -r line; do
+    i=$((i + 1))
+    echo "$line" >> "$list"
+    # shellcheck disable=SC2086
+    (cd "$here" && "$sisu" doc $line > "$ref/$i.doc.out" 2> "$ref/$i.doc.err"; echo "$?" > "$ref/$i.doc.status"
+     "$sisu" doc $line --output "$ref/$i.pages" > "$ref/$i.pages.out" 2> "$ref/$i.pages.err"
+     echo "$?" > "$ref/$i.pages.status")
+done <<'ARGS'
+--std
+--std std.fmt std.string std.time std.collections
+--std std.core
+--std std.json std.nothing
+--bogus
+ARGS
+n=$(wc -l < "$list" | tr -d ' ')
+start=$(date +%s.%N)
+if ! stage1 doc-batch "$out" "$list" > "$work/$class.log" 2> "$work/$class.stderr"; then
+    cat "$work/$class.stderr" >&2
+    echo "check.sh: stage 1 failed documenting the $class programs" >&2
+    exit 1
+fi
+end=$(date +%s.%N)
+seconds=$(awk "BEGIN { printf \"%.1f\", $end - $start }")
+for output in doc doc-output; do
+    same=0; class_unlisted=0
+    i=0
+    while read -r f; do
+        i=$((i + 1))
+        rel="${f#"$repo"/}"
+        if [ "$output" = doc ]; then
+            cmp -s "$ref/$i.doc.out" "$out/$i.doc.out" && cmp -s "$ref/$i.doc.err" "$out/$i.doc.err" &&
+                cmp -s "$ref/$i.doc.status" "$out/$i.doc.status" && { same=$((same + 1)); continue; }
+            where="stage 0 in $ref/$i.doc.*, stage 1 in $out/$i.doc.*"
+        else
+            # What `--output` writes: the same pages, nothing printed but
+            # what stops it, and the same status.
+            if [ ! -s "$ref/$i.pages.out" ] && cmp -s "$ref/$i.pages.err" "$out/$i.pages.err" &&
+                cmp -s "$ref/$i.pages.status" "$out/$i.pages.status" &&
+                diff -r "$ref/$i.pages" "$out/$i.pages" > /dev/null 2>&1; then
+                same=$((same + 1)); continue
+            fi
+            if [ ! -e "$ref/$i.pages" ] && [ ! -e "$out/$i.pages" ] && [ ! -s "$ref/$i.pages.out" ] &&
+                cmp -s "$ref/$i.pages.err" "$out/$i.pages.err" &&
+                cmp -s "$ref/$i.pages.status" "$out/$i.pages.status"; then
+                same=$((same + 1)); continue
+            fi
+            where="stage 0 in $ref/$i.pages*, stage 1 in $out/$i.pages*"
+        fi
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: $rel: $output ($where)"
+    done < "$list"
+    total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
+    line="$(printf '  %-12s %4d programs, %4d identical, %3d otherwise' "$output" "$n" "$same" "$class_unlisted")"
+    if [ "$output" = doc ]; then
+        doc_summary="$doc_summary\n$line; stage 1 $(printf '%6s' "$seconds")s"
+    else
+        doc_summary="$doc_summary\n$line (the same run)"
+    fi
 done
 
 # What `build` makes (with --native): the executables of `sisu build
@@ -1123,6 +1223,8 @@ echo "stage 1's check against stage 0's (every diagnostic, in the human and the 
 printf "%b\n" "${check_summary#\\n}"
 echo "stage 1's formatter against stage 0's (fmt: the text \`sisu fmt\` leaves, what \`sisu fmt --check\` prints, and its fixed point):"
 printf "%b\n" "${fmt_summary#\\n}"
+echo "stage 1's documentation against stage 0's (doc: what \`sisu doc\` prints and its status, and the pages \`--output\` writes):"
+printf "%b\n" "${doc_summary#\\n}"
 if [ -n "$build_summary" ]; then
     echo "stage 1's build against stage 0's (build: the executables, the lockfile and what each prints):"
     printf "%b\n" "$build_summary"
