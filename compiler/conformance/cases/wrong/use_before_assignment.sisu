@@ -1,0 +1,9 @@
+# A wrong program: a variable declared without a value is used on a path
+# where nothing assigned it.
+
+def main():
+    let label: String
+    let big = len("long") > 3
+    if big:
+        label = "big".to_string()
+    print(label)

@@ -1214,7 +1214,8 @@ impl Resolver<'_> {
                             Diagnostic::new(msg::BORROW_FROM_NOT_A_PARAMETER, *span)
                                 .with("name", name.clone())
                                 .with("function", def.name.clone())
-                                .label(label.0, label.1, label.2),
+                                .label(label.0, label.1, label.2)
+                                .note(msg::BORROW_FROM_ONLY_PARAMETERS, Vec::new()),
                         );
                     }
                 }
@@ -1728,7 +1729,8 @@ impl Resolver<'_> {
                                         name_span,
                                         msg::BORROW_TYPE_DECLARED_HERE,
                                         vec![("ty", e.name.text.clone())],
-                                    ),
+                                    )
+                                    .note(msg::BORROW_OWNED_FIELD, Vec::new()),
                             );
                         }
                         fields.push((f.name.as_ref().map(|n| n.text.clone()), ty));
@@ -2230,6 +2232,13 @@ impl Resolver<'_> {
             self.template_asts.insert(def, f.clone());
         }
         info.instance_of = self.instance_of.get(&def).cloned();
+        // A test's instance is the test (decision 251), also once it is
+        // resolved, which makes its `FnInfo` again (decision 259).
+        if let Some((template, _)) = &info.instance_of
+            && let Some(kind @ FnKind::Test(_)) = self.prog.fn_info(*template).map(|t| &t.kind)
+        {
+            info.kind = kind.clone();
+        }
         self.prog.defs[def.0 as usize].kind = DefKind::Fn(Box::new(info));
     }
 

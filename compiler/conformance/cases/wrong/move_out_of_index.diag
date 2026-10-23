@@ -1,0 +1,2 @@
+5:17-5:25 E0338 type.move-out-of-borrow what="names[0]"
+  fix type.add-copy 5:25-5:25 ".copy()"

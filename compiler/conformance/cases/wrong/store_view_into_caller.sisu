@@ -1,0 +1,11 @@
+# A wrong program: a function stores a view of its own text in a list
+# that belongs to its caller.
+
+def remember(mut seen: list[str]):
+    let line = "line {len(seen)}"
+    seen.push(line)
+
+def main():
+    var seen: list[str] = []
+    remember(mut seen)
+    print(seen)

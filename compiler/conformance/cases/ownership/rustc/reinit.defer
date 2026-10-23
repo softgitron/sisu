@@ -1,0 +1,51 @@
+1
+["a"]
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+ownership violation: `x` was used while it holds no value: it was moved out, or never assigned
+  used at: reinit.sisu:13:11 (`_10 = ref _1`)
+  at main (reinit.sisu:13:11)
+SIR of `main`:
+fn main(0) source 0 @7:5-7:9 {
+    let _0: ()
+    let _1: list[String] "x" @8:9-8:10
+    let _2: String
+    let _3: list[String] "u" @9:9-9:10
+    let _4: list[String]
+    let _5: String
+    let _6: ()
+    let _7: ()
+    let _8: ref list[String]
+    let _9: ()
+    let _10: ref list[String]
+  bb0:
+    _2 = call intrinsic str.to_string(const "a") @8:14-8:29
+    _1 = list(move _2) @8:13-8:30
+    goto bb1
+  bb1 (unwind bb2):
+    _3 = move _1 @9:13-9:14
+    goto bb3
+  bb2 (cleanup):
+    resume
+  bb3 (unwind bb4):
+    _5 = call intrinsic str.to_string(const "b") @10:10-10:25
+    _4 = list(move _5) @10:9-10:26
+    _1 = move _4 @10:5-10:26
+    _6 = call fn drop_it(move _1) @11:5-11:15
+    _8 = ref _3 @12:11-12:12
+    _7 = call intrinsic print(copy _8) @12:5-12:13
+    _10 = ref _1 @13:11-13:12
+    _9 = call intrinsic print(copy _10) @13:5-13:13
+    _0 = const ()
+    goto bb5
+  bb4 (cleanup):
+    drop _3
+    resume
+  bb5 (unwind bb2):
+    drop _3 @13:13-13:13
+    goto bb6
+  bb6:
+    return
+}
+outcome: conflict reached; the run stopped at a concrete ownership conflict
+--- status 134

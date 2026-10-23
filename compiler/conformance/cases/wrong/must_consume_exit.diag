@@ -1,0 +1,2 @@
+14:9-14:15 E0418 borrow.must-consume-exit name="p" ty="Payment"
+  label 12:9-12:10 borrow.declared-here name="p"

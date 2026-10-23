@@ -348,9 +348,36 @@ impl Analysis {
                         }
                     }
                 }
-                for (p, whole) in uses.iter().chain(extra.iter()) {
-                    if let Some(fd) = self.check_use(f, types, b, si, st, p, *whole, &mut reported) {
-                        out.push(fd);
+                // The operands are evaluated in order (decision 222): what one
+                // of them moves is gone for those after it (decision 261).
+                let mut moved_now: Vec<PathId> = Vec::new();
+                let moves: Vec<Option<PathId>> = operands(s)
+                    .into_iter()
+                    .filter_map(|o| match o {
+                        Operand::Move(p) => Some(Some(self.paths.lookup(p).0)),
+                        Operand::Copy(_) => Some(None),
+                        Operand::Const(_) => None,
+                    })
+                    .chain(std::iter::repeat(None))
+                    .take(uses.len())
+                    .collect();
+                for (k, (p, whole)) in uses.iter().chain(extra.iter()).enumerate() {
+                    let found = match self.moved_by_statement(
+                        f,
+                        types,
+                        b,
+                        si,
+                        p,
+                        *whole,
+                        &moved_now,
+                        &mut reported,
+                    ) {
+                        Some(fd) => Some(fd),
+                        None => self.check_use(f, types, b, si, st, p, *whole, &mut reported),
+                    };
+                    out.extend(found);
+                    if let Some(Some(id)) = moves.get(k) {
+                        moved_now.push(*id);
                     }
                 }
                 // A `let` declared without a value is assigned once per path.
@@ -363,8 +390,10 @@ impl Analysis {
                     reported.push((self.paths.roots[d.local.0 as usize], None));
                     let name = names::local_name(f, d.local);
                     let first = self.find_site(f, b, si, &[self.paths.roots[d.local.0 as usize]], Site::Init);
-                    let mut fd =
-                        Finding::new(msg::TYPE_REASSIGN_LET, f, s.loc).with("name", name.clone()).at(b, si);
+                    let mut fd = Finding::new(msg::TYPE_REASSIGN_LET, f, s.loc)
+                        .with("name", name.clone())
+                        .fix(msg::TYPE_DECLARE_VAR, vec![("name", Arg::Text(name.clone()))], None)
+                        .at(b, si);
                     if let Some((fb, fs)) = first {
                         // The same statement, run again by a loop.
                         let again = (fb, fs) == (b, si);
@@ -433,6 +462,7 @@ impl Analysis {
                 let ty = sisu_sir::write::ty(&t);
                 return Some(
                     Finding::new(msg::BORROW_MOVE_OUT_OF_DROP, f, s.loc)
+                        .note(msg::BORROW_COPY_PART, Vec::new())
                         .with_arg("part", names::place_name(types, f, p))
                         .with_arg("name", names::place_name(types, f, &base))
                         .with("ty", ty.clone())
@@ -492,6 +522,7 @@ impl Analysis {
                     let decl = f.locals.get(p.local.0 as usize).and_then(|l| l.loc);
                     let mut fd = Finding::new(msg::TYPE_UNINITIALIZED, f, loc)
                         .with_arg("name", used.clone())
+                        .note(msg::TYPE_ASSIGN_EVERY_PATH, Vec::new())
                         .at(b, si);
                     if decl.is_some() {
                         fd = fd.label(decl, msg::BORROW_DECLARED_HERE, vec![("name", used)]);
@@ -518,12 +549,69 @@ impl Analysis {
                             .with_arg("part", part.clone())
                             .with("line", mloc.map(|l| l.line).unwrap_or(0).to_string())
                             .label(mloc, msg::BORROW_MOVED_HERE, vec![("name", part)])
+                            .note(msg::BORROW_COPY_BEFORE_MOVE, Vec::new())
                             .at(b, si),
                     );
                 }
             }
         }
         None
+    }
+
+    /// A use of `p` after an earlier operand of the same statement moved it,
+    /// or the value it is part of (`E0400`), or, for a use of the whole, a
+    /// part of it (`E0401`); the move is labelled at the statement.
+    #[allow(clippy::too_many_arguments)]
+    fn moved_by_statement(
+        &self,
+        f: &Function,
+        types: &Types,
+        b: usize,
+        si: usize,
+        p: &Place,
+        whole: bool,
+        moved_now: &[PathId],
+        reported: &mut Vec<(PathId, Option<(usize, usize)>)>,
+    ) -> Option<Finding> {
+        if moved_now.is_empty() {
+            return None;
+        }
+        let (id, cover) = self.paths.lookup(p);
+        let above = self.paths.ancestors(id);
+        let part = if moved_now.iter().any(|m| *m == id || above.contains(m)) {
+            None
+        } else if whole && matches!(cover, Cover::Exact | Cover::Through) {
+            let below = self.paths.descendants(id);
+            Some(*moved_now.iter().find(|m| below.contains(m))?)
+        } else {
+            return None;
+        };
+        let key = (self.paths.roots[self.paths.local_of(id).0 as usize], Some((b, si)));
+        if reported.contains(&key) {
+            return None;
+        }
+        reported.push(key);
+        let loc = f.blocks[b].stmts.get(si).and_then(|s| s.loc);
+        let line = loc.map(|l| l.line).unwrap_or(0).to_string();
+        let used = names::place_name(types, f, &self.paths.paths[id].place);
+        Some(match part {
+            None => Finding::new(msg::BORROW_USE_AFTER_MOVE, f, loc)
+                .with_arg("name", used.clone())
+                .with("line", line)
+                .label(loc, msg::BORROW_MOVED_HERE, vec![("name", used)])
+                .note(msg::BORROW_COPY_BEFORE_MOVE, Vec::new())
+                .at(b, si),
+            Some(d) => {
+                let part = names::place_name(types, f, &self.paths.paths[d].place);
+                Finding::new(msg::BORROW_USE_AFTER_PARTIAL_MOVE, f, loc)
+                    .with_arg("name", used)
+                    .with_arg("part", part.clone())
+                    .with("line", line)
+                    .label(loc, msg::BORROW_MOVED_HERE, vec![("name", part)])
+                    .note(msg::BORROW_COPY_BEFORE_MOVE, Vec::new())
+                    .at(b, si)
+            }
+        })
     }
 
     /// The paths whose move makes `id` uninitialised: itself, its

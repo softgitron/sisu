@@ -1,0 +1,2 @@
+6:5-6:27 E0407 borrow.return-local name="start" function="counter"
+  label 6:12-6:27 borrow.borrowed-here

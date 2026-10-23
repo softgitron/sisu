@@ -1,0 +1,12 @@
+# A wrong program: a task takes a function value, which is not `Send`.
+
+def double(x: int) -> int:
+    return x * 2
+
+def main():
+    let f = double
+    let r = task.scope do s:
+        let h = s.spawn do:
+            return f(2)
+        return h.join().expect("joined")
+    print(r)

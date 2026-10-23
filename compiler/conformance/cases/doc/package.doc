@@ -1,0 +1,184 @@
+<!-- geo.md -->
+# `geo`
+
+Geometry for the plane: shapes, and storing them.
+
+The root module's page lists the modules under it.
+
+## Modules
+
+- [`geo.shapes`](geo.shapes.md): Shapes and their areas.
+- [`geo.store`](geo.store.md): Keeping shapes in files.
+
+## Re-exports
+
+- `Figure`: [`geo.shapes.Shape`](geo.shapes.md#Shape)
+- `Meters`: `units.Meters`
+- `store`: [`geo.store`](geo.store.md)
+
+## Contents
+
+- [`EPSILON`](#EPSILON): How far apart two coordinates may be and still be the same.
+
+<a id="EPSILON"></a>
+## `EPSILON`
+
+```sisu
+const EPSILON: f64
+```
+
+How far apart two coordinates may be and still be the same.
+<!-- geo.shapes.md -->
+# `geo.shapes`
+
+Shapes and their areas.
+
+## Modules
+
+- [`geo.shapes.curves`](geo.shapes.curves.md): Curves, a module under `geo.shapes`.
+
+## Contents
+
+- [`Point`](#Point): A point in the plane.
+- [`Shape`](#Shape): A shape.
+- [`area`](#area): The area of a shape.
+
+<a id="Point"></a>
+## `Point`
+
+```sisu
+@derive(Eq)
+pub struct Point
+    ## Across.
+    pub x: f64
+    ## Up.
+    pub y: f64
+    # private fields
+
+impl Display for Point
+```
+
+A point in the plane.
+
+<a id="Point.distance"></a>
+### `Point.distance`
+
+```sisu
+pub def distance(self, other: Point) -> f64
+```
+
+The distance to `other`.
+
+<a id="Shape"></a>
+## `Shape`
+
+```sisu
+pub enum Shape
+    Circle(center: Point, radius: f64)
+    Square(corner: Point, side: f64)
+```
+
+A shape.
+
+<a id="area"></a>
+## `area`
+
+```sisu
+pub def area(s: Shape) -> f64
+```
+
+The area of a shape.
+<!-- geo.shapes.curves.md -->
+# `geo.shapes.curves`
+
+Curves, a module under `geo.shapes`.
+
+## Contents
+
+- [`Curve`](#Curve): A curve through its points.
+- [`length`](#length): The length of a curve, which is not written yet.
+
+<a id="Curve"></a>
+## `Curve`
+
+```sisu
+pub struct Curve
+    pub points: list[f64]
+```
+
+A curve through its points.
+
+<a id="length"></a>
+## `length`
+
+```sisu
+pub def length(c: Curve) -> f64
+```
+
+The length of a curve, which is not written yet.
+
+Unfinished: `todo("length")`.
+<!-- geo.store.md -->
+# `geo.store`
+
+Keeping shapes in files.
+
+## Contents
+
+- [`StoreError`](#StoreError): Why a stored shape could not be read back.
+- [`Store`](#Store): Where the shapes are kept: the file system stays private.
+- [`load`](#load): Reads the text of a stored shape through any file system.
+
+<a id="StoreError"></a>
+## `StoreError`
+
+```sisu
+pub error StoreError
+    Empty
+```
+
+Why a stored shape could not be read back.
+
+<a id="Store"></a>
+## `Store`
+
+```sisu
+pub struct Store
+    pub root: Path
+    # private fields
+```
+
+Where the shapes are kept: the file system stays private.
+
+<a id="Store.new"></a>
+### `Store.new`
+
+```sisu
+pub def new(fs: Fs, own root: Path) -> Store
+```
+
+A store under `root`.
+
+Capabilities: `fs` (`Fs`).
+
+<a id="Store.save"></a>
+### `Store.save`
+
+```sisu
+pub def save(self, name: Path, s: Shape) -> ! IoError
+```
+
+Writes a shape's area to `name`.
+
+Capabilities: `self` (`Fs`).
+
+<a id="load"></a>
+## `load`
+
+```sisu
+pub def load[F: FsOps](fs: F, path: Path) -> String ! {IoError, StoreError}  # inferred
+```
+
+Reads the text of a stored shape through any file system.
+
+Capabilities: `fs` (`Fs`).

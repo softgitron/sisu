@@ -1,0 +1,10 @@
+# A wrong program: a `from` clause names a parameter the function does not
+# have.
+
+def longer(a: str, b: str) -> str from a, c:
+    if len(b) > len(a):
+        return b
+    return a
+
+def main():
+    print(longer("one", "three"))

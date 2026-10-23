@@ -101,7 +101,10 @@ impl Checker<'_> {
                 let body_ret = self.infer.zonk(&cl.ret);
                 // A scope's body cannot hand its scope or a task's handle out.
                 if self.mentions_scope(&body_ret) {
-                    let d = self.error(msg::TASK_SCOPE_ESCAPES, span.range).with("ty", self.show(&body_ret));
+                    let d = self
+                        .error(msg::TASK_SCOPE_ESCAPES, span.range)
+                        .with("ty", self.show(&body_ret))
+                        .note(msg::TASK_JOIN_INSIDE, Vec::new());
                     self.report(d);
                 }
                 let sites: Vec<SpawnSite> = self.spawn_sites[spawns_before..]
@@ -176,7 +179,10 @@ impl Checker<'_> {
             return;
         }
         let at = arg.map(|a| a.expr.span).unwrap_or(span);
-        let d = self.error(msg::TASK_CLOSURE_LITERAL, at.range).with("function", function.to_string());
+        let d = self
+            .error(msg::TASK_CLOSURE_LITERAL, at.range)
+            .with("function", function.to_string())
+            .note(msg::TASK_WRITE_CLOSURE, Vec::new());
         self.report(d);
     }
 

@@ -477,7 +477,7 @@ have impls that the fast path respects.
 ## Stage 2: what the native backend leaves out
 
 The native debug backend (architecture.md, "Stage 2") compiles every
-program the conformance suite runs (`conformance/native.list`, 165
+program the conformance suite runs (`conformance/native.list`, 196
 cases), with the debug profile and the release one (decision 232), and
 every one of those runs frees what it allocated (decision 226). A
 construct it does not compile is `D0103` under `--native`, and the
@@ -549,9 +549,10 @@ What round 1 does, and a later round must not copy:
   budget. *Pay*: compile once per layout rather than per type where the
   code is the same.
 - **The type table is read at start**, and the structural operations walk
-  it on every call (decision 192), as the interpreter's walk its values.
-  *Pay*: a release backend generates them per type where profiling says
-  so.
+  it on every call (decision 192), as the interpreter's walk its values;
+  a copy and a drop of a struct, a tuple or an enum follow a list of its
+  parts made once per type (decisions 262 and 266). *Pay*: a release
+  backend generates them per type where profiling says so.
 - **Debug information is partial** (decision 227): the line table, the
   locals and parameters with their types, and the frames are there, but
   a local is described at its slot for the whole function, not from its
@@ -569,12 +570,16 @@ What round 1 does, and a later round must not copy:
   faster): nothing a contract proves removes a check, and the runtime's
   calls cost what they cost in a debug build, and there is no
   `release-size`. The commonest intrinsics are inline in both profiles
-  (decision 253: stage 1 twice as fast); the others still pass a
-  descriptor that the runtime decodes, and follow their arguments'
-  references by the type table, on every call. *Pay*: the rest of the
-  intrinsics stage 1 calls most (text building, a dict's reads and
-  writes, `.copy()` and drops of structured values) without the
-  descriptor, and LLVM for release builds (18, stage 2).
+  (decision 253: stage 1 twice as fast; `max` and `min`, decision 264),
+  and text building, a dict's and a set's lookups and a list's growth
+  call entries of the runtime of their own (decision 265); the others
+  still pass a descriptor that the runtime decodes, and follow their
+  arguments' references by the type table, on every call. *Pay*: a
+  dict's and a set's writes (`insert`, `add`, `remove`) without the
+  descriptor; a key hashed and compared by code made for its type (a
+  lookup walks the key's type to hash it and again to compare it, about
+  400 instructions in stage 1); and LLVM for release builds (18, stage
+  2).
 - **The runtime trusts the generated code**: an address or a type number
   that breaks the runtime's rules is not checked everywhere, and where it
   is, it is `R0122` and status 134, not a diagnostic of the program.
@@ -592,8 +597,9 @@ What round 1 does, and a later round must not copy:
   valid SIR for those that check), and the suite checks the reprint for
   every case. There is no coverage-guided fuzzer and no long run. (The
   wrong-program corpus Phase 2 asks for is `conformance/cases/wrong`:
-  forty programs with one mistake each, held by `tests/wrong.rs` to one
-  error that names its fix, each fix with edits applied and checked.)
+  ninety-three programs with one mistake each, held by `tests/wrong.rs`
+  to one error that names its fix, each fix with edits applied and
+  checked.)
 - **Benchmarks as a gate** (Phase 0). CI runs `cargo run --release -p
   sisu-driver --example speed` on every push and prints the front end's
   milliseconds per kLOC (text to the SIR that runs) and the
@@ -636,19 +642,24 @@ monitor"):
 
 - **The generation-checked reference type** behind a flag, if Phase 0
   triggered it.
-- **The corpora**: a translated slice of rustc's borrow-checker UI tests,
-  the referee's 20 adversarial programs, and the 60-file wrong-ownership
-  corpus with expected codes and named fixes. The suite has 74 ownership
-  cases (32 accepted, 42 rejected) and the soundness tests below.
+- **The corpora**: the referee's 20 adversarial programs, which need the
+  referee. ~~A translated slice of rustc's borrow-checker UI tests~~
+  (`ownership/rustc/`, thirteen of their shapes) ~~and the 60-file
+  wrong-ownership corpus with expected codes and named fixes~~ (sixty-two
+  programs of `wrong/`, counted by `tests/wrong.rs`; decision 263) are
+  done. The suite has 92 ownership cases (37 accepted, 55 rejected) and
+  the soundness tests below.
 - **24 hours of mutation fuzzing.** `sisu-driver/tests/soundness.rs` runs
   a deterministic mutation fuzz (statement reorderings of accepted
   programs' SIR) on every `cargo test`, and more with
   `SISU_FUZZ_MUTANTS`; the longest run so far is 27 000 mutants (8 054
   accepted by the checker, none tripping the monitor), not 24 hours, and
   it is not a CI job.
-- **Diagnostics that name the fix.** Most ownership diagnostics have a
-  note or a fix with an edit (`E0411`, `E0413`, `E0415`); the conflict
-  diagnostics' notes are prose, not edits.
+- **Diagnostics that name the fix.** Every ownership diagnostic the
+  wrong-ownership corpus reaches has a note or a fix (decision 263), a fix
+  with an edit where one is known (`E0338`, `E0339`, `E0340`, `E0411`,
+  `E0413`, `E0415`); the conflict diagnostics' notes are prose, not
+  edits.
 
 From Phase 4 (18, "Phase 4: traits, generics, std in Sisu"):
 
@@ -735,3 +746,13 @@ and profiling", "REPL and scripts"):
 - **The REPL** runs a session's inputs in the run interpreter, by
   replay, not in the comptime interpreter as 10 says; it has no
   completion and no `:type` or `:doc`.
+- **`sisu doc`** writes Markdown pages (decision 258) without what needs
+  more than the tree and the resolved names: 10's values of a doc
+  example's expression statements (N-25: they need the example run, which
+  `sisu test` does), `--open` (a local server), `--digest` (N-50's
+  plain-text digest of a package, planned for v1), `--worked` (N-28) and
+  N-66's diagrams; a signature is a code block, inside which Markdown has
+  no links, so the types it names link to nothing. *Pay*: run each
+  example in the interpreter as `sisu test` does and print each
+  expression statement's value after it; the digest is the pages' `pub`
+  signatures, contracts and first examples, from the same function.

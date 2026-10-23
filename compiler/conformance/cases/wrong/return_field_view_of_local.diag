@@ -1,0 +1,2 @@
+9:5-9:18 E0407 borrow.return-local name="c.name" function="default_name"
+  label 9:12-9:18 borrow.borrowed-here

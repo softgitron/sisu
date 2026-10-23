@@ -1,0 +1,8 @@
+# A wrong program: a list is sorted while a view of one of its elements is
+# still used.
+
+def main():
+    var words = ["pear".to_string(), "fig".to_string()]
+    let first = ref words[0]
+    words.sort()
+    print(first)

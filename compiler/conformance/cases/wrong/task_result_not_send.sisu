@@ -1,0 +1,12 @@
+# A wrong program: a task returns a function value, which is not `Send`,
+# so it cannot cross back to the task that joins it.
+
+def double(x: int) -> int:
+    return x * 2
+
+def main():
+    let f = task.scope do s:
+        let h = s.spawn do:
+            return double
+        return h.join().expect("joined")
+    print(f(2))

@@ -1,0 +1,12 @@
+# A wrong program: a function moves a text out of the value its parameter
+# refers to.
+
+struct User:
+    name: String
+
+def name_of(u: ref User) -> String:
+    return u.name
+
+def main():
+    let u = User(name="Roni".to_string())
+    print(name_of(ref u))

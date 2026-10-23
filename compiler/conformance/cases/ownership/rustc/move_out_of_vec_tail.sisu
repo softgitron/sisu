@@ -1,0 +1,15 @@
+# After rustc's `borrowck-move-out-of-vec-tail`: a value is moved out of
+# a list's element through a pattern (Rust's E0508).
+
+struct Foo:
+    string: String
+
+def main():
+    let xs = [Foo(string="foo".to_string()), Foo(string="bar".to_string())]
+    match xs:
+        case [first, *rest]:
+            let owned = first.string
+            print(owned)
+            print(len(rest))
+        case _:
+            pass

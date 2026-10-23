@@ -1,0 +1,37 @@
+##! Shapes and their areas.
+
+## A point in the plane.
+@derive(Eq)
+pub struct Point:
+    ## Across.
+    pub x: f64
+    ## Up.
+    pub y: f64
+    ## A private field: the page says only that there are some.
+    tag: int = 0
+
+    ## The distance to `other`.
+    pub def distance(self, other: Point) -> f64:
+        let dx = self.x - other.x
+        let dy = self.y - other.y
+        return (dx * dx + dy * dy).sqrt()
+
+    def tagged(self) -> int:
+        return self.tag
+
+impl Display for Point:
+    def fmt(self, mut f: Formatter):
+        f.write("({self.x}, {self.y})")
+
+## A shape.
+pub enum Shape:
+    Circle(center: Point, radius: f64)
+    Square(corner: Point, side: f64)
+
+## The area of a shape.
+pub def area(s: Shape) -> f64:
+    match s:
+        case Circle(radius=r, ..):
+            return 3.0 * r * r
+        case Square(side=a, ..):
+            return a * a

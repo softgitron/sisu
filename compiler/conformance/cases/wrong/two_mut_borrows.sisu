@@ -1,0 +1,9 @@
+# A wrong program: two `mut` borrows of one list are used at the same
+# time.
+
+def main():
+    var xs = [1, 2]
+    let a = ref mut xs
+    let b = ref mut xs
+    a.push(3)
+    b.push(4)

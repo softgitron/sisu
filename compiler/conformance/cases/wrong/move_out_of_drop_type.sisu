@@ -1,0 +1,14 @@
+# A wrong program: a field is moved out of a value whose type implements
+# `Drop`, which needs the whole value.
+
+struct Session:
+    user: String
+
+impl Drop for Session:
+    def drop(mut self):
+        print("closing {self.user}")
+
+def main():
+    let s = Session(user="roni".to_string())
+    let user = s.user
+    print(user)

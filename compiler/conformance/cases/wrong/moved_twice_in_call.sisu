@@ -1,0 +1,9 @@
+# A wrong program: the same value is given twice to parameters that both
+# take it.
+
+def pair(own a: String, own b: String) -> String:
+    return a + b
+
+def main():
+    let s = "ab".to_string()
+    print(pair(s, s))

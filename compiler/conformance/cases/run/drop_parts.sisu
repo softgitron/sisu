@@ -1,0 +1,59 @@
+# A tuple drops its elements last to first, through the tuples it holds,
+# and a part whose drop panics does not stop the others, which are
+# dropped as cleanup; a struct or an enum whose drop only frees memory is
+# dropped by its parts. Natively, both by a list of the parts that need a
+# drop, made once per type (decision 266).
+
+struct Loud:
+    name: String
+
+impl Drop for Loud:
+    def drop(mut self):
+        print("drop {self.name}")
+
+struct Bomb:
+    name: String
+
+impl Drop for Bomb:
+    def drop(mut self):
+        print("bomb {self.name} goes off")
+        panic("boom")
+
+# No `Drop`, and no part that runs one: dropping it frees its texts.
+struct Quiet:
+    n: int
+    label: String
+    tags: list[String]
+    inner: (String, int, String)
+
+enum Token:
+    Word(String)
+    Number(int)
+    Pair(Quiet, String?)
+
+def quiet(n: int) -> Quiet:
+    return Quiet(n=n, label="q{n}", tags=["a{n}", "b{n}"], inner=("x{n}", n, "y{n}"))
+
+def nested():
+    let t = (Loud(name="t.0"), (Loud(name="t.1.0"), 7, Loud(name="t.1.2")), Loud(name="t.2"))
+    let q = (quiet(1), Loud(name="after quiet"))
+    print("leaving nested")
+
+def tokens() -> int:
+    let ts = [
+        Token.Word("w"),
+        Token.Number(3),
+        Token.Pair(quiet(2), Some("s")),
+        Token.Pair(quiet(3), None),
+    ]
+    var qs: list[Quiet] = []
+    for n in range(3):
+        qs.push(quiet(n))
+    let copied = qs.copy()
+    return ts.len() + qs.len() + copied.len()
+
+def main():
+    nested()
+    print(tokens())
+    let last = (Loud(name="last.0"), Bomb(name="last.1"), Loud(name="last.2"))
+    print("end of main")

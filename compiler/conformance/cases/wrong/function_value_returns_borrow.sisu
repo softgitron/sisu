@@ -1,0 +1,9 @@
+# A wrong program: a function that returns a borrow of its parameter is
+# used as a value, which takes its arguments by value.
+
+def first(xs: list[String]) -> str:
+    return xs[0]
+
+def main():
+    let f = first
+    print(f(["a".to_string()]))

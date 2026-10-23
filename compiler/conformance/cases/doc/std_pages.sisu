@@ -1,0 +1,6 @@
+# `sisu doc --std` with the modules it names (decision 258): the standard
+# library's pages for `std.fmt`, which names the prelude's items, and for
+# `std.string`, `std.time` and `std.collections`, made as the whole
+# library's are.
+#
+# doc --std std.fmt std.string std.time std.collections

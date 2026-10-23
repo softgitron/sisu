@@ -1,0 +1,10 @@
+# A wrong program: a function returns a view of a parameter its `from`
+# clause does not name.
+
+def pick(a: str, b: str) -> str from a:
+    if len(b) > len(a):
+        return b
+    return a
+
+def main():
+    print(pick("one", "three"))

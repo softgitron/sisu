@@ -1230,6 +1230,10 @@ impl<'p> Checker<'p> {
                             vec![sisu_diag::Edit { span: at, text: "mut ".into() }],
                         );
                     }
+                    // Otherwise it is a borrow that only reads.
+                    if !read_guard && d.fixes.is_empty() {
+                        d = d.note(msg::TYPE_BORROW_WITH_MUT, Vec::new());
+                    }
                     self.report(d);
                 }
             }

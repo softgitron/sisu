@@ -94,6 +94,7 @@ ownership/recursive_types
 ownership/reference_params
 ownership/returned_borrows
 ownership/returned_views
+ownership/rustc/two_phase_allowed
 ownership/shared
 ownership/shared_param_passed_on
 ownership/str_views
@@ -126,6 +127,7 @@ run/capabilities
 run/char_boundary
 run/closures
 run/collections
+run/constant_reads
 run/control_flow
 run/declarations
 run/divide_by_zero
@@ -133,6 +135,7 @@ run/double_panic
 run/drop_chain
 run/drop_moved_parts
 run/drop_order
+run/drop_parts
 run/drop_panic_fields
 run/drop_torture
 run/errors

@@ -54,21 +54,21 @@ architecture"); data flows down the table.
 
 | Crate | Lines | Role |
 |---|---:|---|
-| `sisu-diag` | 903 | Spans, the source map (1-based lines, columns in characters), the message catalog, diagnostics with labels, notes and fixes, the human and `--format=ids` renderers |
+| `sisu-diag` | 955 | Spans, the source map (1-based lines, columns in characters), the message catalog, diagnostics with labels, notes and fixes, the human and `--format=ids` renderers |
 | `sisu-syntax` | 4112 | Token and node kinds, the lossless arena tree with stable node identities, and the AST built from the tree as a total function |
 | `sisu-lexer` | 1258 | Scanning (every byte a token, interpolation split into tokens) and layout (Python's INDENT/DEDENT algorithm) |
-| `sisu-parser` | 3552 | Error-tolerant recursive descent that always returns a tree |
+| `sisu-parser` | 3557 | Error-tolerant recursive descent that always returns a tree |
 | `sisu-fmt` | 1868 | The formatter: the lossless tree regrouped into logical lines, laid out by a Wadler-style group printer, with the comments and blank lines placed between them; the shape a formatted file must keep (`sisu parse --shape`) and the unused imports it removes |
-| `sisu-resolve` | 11125 | Loads the Sisu-written std (`compiler/std/`), declares every item, resolves signatures to types, registers methods; traits, impls, coherence and the trait solver; derives (unfolding each trait's `comptime def derive`), delegation and the instances of templates; the generators and generated tests of property testing, the interceptors and fakes of the program's traits; the borrow rules about declarations |
-| `sisu-typeck` | 11569 | The bidirectional checker, with method resolution through traits and `comptime` expressions; produces the typed tree (THIR) for every body, broken or not |
-| `sisu-sir` | 3093 | SIR: the data model, the text writer and reader, the validator, the types of places, and the jump threading of the SIR that runs |
-| `sisu-lower` | 5427 | THIR to SIR: control flow, scopes and their drops, unwind edges, closure conversion, trait calls and their static resolution, drop glue, `comptime` functions, the borrow facts of signatures |
-| `sisu-borrowck` | 5476 | The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, the task rules, escapes, must-consume, purity, `explain-borrow`, and the `Shared` escape analysis |
-| `sisu-interp` | 13342 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the task scheduler (random, PCT, bounded exhaustive) and the `sim` profile's faults, capabilities and the host's objects, the capability log, hot replacement in epochs, the parallel test runner, the dynamic ownership monitor, and the compile-time evaluator |
-| `sisu-rt` | 10668 | Stage 2's runtime, linked into every native executable: the shared ABI (the value layout, the type table's encoding, the entry points), panics and stack traces, allocation, the structural operations on values, iterators, dicts and sets, the intrinsics, the scheduler of tasks on pooled stacks, the library types, capabilities, and the host's files, network and processes |
-| `sisu-codegen` | 3965 | Stage 2's debug backend: SIR to Cranelift IR, one instance per function and list of type arguments, with trait calls resolved at compile time; the object file and the link |
-| `sisu-driver` | 10635 | The query layer and the `sisu` command line; manifests (a TOML reader of its own), the package layout and the lockfile; the counterexample mode, `audit --ownership` and `--caps`, `check --explain`, replay tokens, snapshot files and transcripts, the `sim` build check; `fmt`, the REPL and worksheets, `run --watch`'s rebuilds, and the language server with its JSON; `build --native` and `run --native`; the soundness tests (fault injection, mutation fuzzing), the language server's protocol tests and the native conformance test |
-| `sisu-conformance` | 1337 | The language-agnostic conformance runner, and its native mode |
+| `sisu-resolve` | 12423 | Loads the Sisu-written std (`compiler/std/`), declares every item, resolves signatures to types, registers methods; traits, impls, coherence and the trait solver; derives (unfolding each trait's `comptime def derive`), delegation and the instances of templates; the generators and generated tests of property testing, the interceptors and fakes of the program's traits; the borrow rules about declarations |
+| `sisu-typeck` | 11888 | The bidirectional checker, with method resolution through traits and `comptime` expressions; produces the typed tree (THIR) for every body, broken or not |
+| `sisu-sir` | 3215 | SIR: the data model, the text writer and reader, the validator, the types of places, and the jump threading of the SIR that runs |
+| `sisu-lower` | 5975 | THIR to SIR: control flow, scopes and their drops, unwind edges, closure conversion, trait calls and their static resolution, drop glue, `comptime` functions, the borrow facts of signatures |
+| `sisu-borrowck` | 5686 | The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, the task rules, escapes, must-consume, purity, `explain-borrow`, and the `Shared` escape analysis |
+| `sisu-interp` | 14186 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the task scheduler (random, PCT, bounded exhaustive) and the `sim` profile's faults, capabilities and the host's objects, the capability log, hot replacement in epochs, the parallel test runner, the dynamic ownership monitor, and the compile-time evaluator |
+| `sisu-rt` | 12340 | Stage 2's runtime, linked into every native executable: the shared ABI (the value layout, the type table's encoding, the entry points), panics and stack traces, allocation, the structural operations on values, iterators, dicts and sets, the intrinsics, the scheduler of tasks on pooled stacks, the library types, capabilities, and the host's files, network and processes |
+| `sisu-codegen` | 6540 | Stage 2's debug backend: SIR to Cranelift IR, one instance per function and list of type arguments, with trait calls resolved at compile time; the object file and the link |
+| `sisu-driver` | 12898 | The query layer and the `sisu` command line; manifests (a TOML reader of its own), the package layout and the lockfile; the counterexample mode, `audit --ownership` and `--caps`, `sisu doc`, replay tokens, snapshot files and transcripts, the `sim` build check; `fmt`, the REPL and worksheets, `run --watch`'s rebuilds, and the language server with its JSON; `build --native` and `run --native`; the soundness tests (fault injection, mutation fuzzing), the language server's protocol tests and the native conformance test |
+| `sisu-conformance` | 1520 | The language-agnostic conformance runner, and its native mode |
 
 Line counts are of each crate's `src`, unit tests included. Besides the crates:
 `catalog/messages.catalog` (every message); the standard library, in
@@ -1565,6 +1565,15 @@ counterexample mode finds should be checked against this list first.
 14. **What a `Shared`, `Cell`, `Mutex` or channel holds is decided by its
     type.** A view or a must-consume value cannot be put in one (`E0421`,
     `E0422`) even when it would be released before what it borrows.
+15. **A `mut` parameter read in its own method call is a `mut` reborrow.**
+    `def add(mut xs: list[int]): xs.push(len(xs))` is rejected (`E0405`),
+    where the same call on a local list is accepted as a two-phase borrow:
+    lowering passes the parameter, a `ref mut`, to `len` as a copy, which
+    is a `mut` reborrow (decision 40) that ends the receiver's loan, where
+    a local is passed as a shared borrow. The monitor agrees with the
+    checker on that SIR; lowering a read of a `mut` parameter as a shared
+    reborrow (`ref xs.*`) would accept it. The wrong-ownership corpus found
+    it (decision 263).
 
 ## The interpreter
 
@@ -2294,12 +2303,11 @@ list) is `E0812`: change a copy and check it again. The predicate is a
 `pure` function the compiler writes (`X#where`, `E0814` unless it is a
 `bool`); a run-time refinement check that fails is `R0103`.
 
-**`sisu check --explain FILE`** (`sisu-driver/src/doc.rs`) prints the
-file's declarations as `sisu doc` renders them: each signature joined
-onto one line, with its contracts under it, a type's invariants, a
+**Documented automatically** (07): `sisu doc` (section "Documentation")
+shows each signature with its contracts under it, a type's invariants, a
 refinement's predicate and the `try_from` that checks it, and the error
 set the compiler inferred for a `T !` function (`... ! {A, B}  #
-inferred`). The conformance suite compares it (`NAME.doc`).
+inferred`); `contracts/explain` pins it.
 
 ## Property tests
 
@@ -2651,6 +2659,43 @@ point (`fmt(fmt(x)) == fmt(x)`), and every case without a
 `NAME.unformatted` must already be canonical. CI runs `sisu fmt --check`
 over `compiler/std/` and those cases.
 
+## Documentation
+
+`sisu doc [PATH] [--output DIR]` (09, "Documentation"; 10;
+`sisu-driver/src/doc.rs`) writes a program's documentation as Markdown,
+a page per module of the root package, and `sisu doc --std [MODULE...]`
+the standard library's. It is a pure function of the modules' syntax
+trees and what the front end resolved (decision 258), so that the front
+end in Sisu can transcribe it (18's stage table puts it among stage 1's
+`pure` functions over the syntax tree): nothing is evaluated, so a doc
+example is shown as written and `sisu test` runs it.
+
+**A page** is the module's path, its `##!` lines, the modules under it,
+the names it re-exports (linked to their sections), a list of its items
+with the first paragraph of each one's doc comment, and a section per
+item: the declaration as written, with a header over several lines
+joined into one, the contracts under it (07: "documented
+automatically"), a struct's fields and an enum's variants with their own
+`##` lines, and the headers of the module's impls of the type; the
+item's `##` lines, which are Markdown, an example's fence labelled
+`sisu`; and what the compiler knows that the declaration does not say:
+the error set it inferred for a `T !` function (05), the typed holes left
+in a function (10: "`sisu doc` marks the functions that contain one"),
+and the parameters that hold capabilities, through the fields of the
+types they are of (09). A type's methods and a trait's follow it, each a
+section of its own; the impls of types the module does not declare close
+the page. A package's pages show what another package may name, its
+`pub` items and their `pub` members; a single file's and the standard
+library's show everything.
+
+**Where it goes.** Without `--output`, `sisu doc` prints the pages, each
+after a line `<!-- NAME.md -->`, which a Markdown viewer shows as
+nothing, so the whole output is one document; with `--output DIR`, each
+page is the file `DIR/NAME.md`. A program with an error is reported as
+`sisu check` reports it and nothing is written (`D0114`). The
+conformance suite's `doc/` cases pin the output byte for byte
+(`NAME.doc`), and check that `--output` writes the pages it prints.
+
 ## Hot replacement
 
 `sisu run --watch` (10, "Debugging and profiling"; D-053, D-068, N-35;
@@ -2912,8 +2957,10 @@ sisu run [FILE] [ARGS...]    check, lower and run; `--watch` swaps in each save 
                              `--native [--release]` builds it natively and runs that
 sisu replay LOG              run a recorded program again against its log (`--monitor`)
 sisu check [FILE]            diagnostics; `--format=ids` for the conformance form,
-                             `--explain` the signatures with their contracts,
                              `--diary LOG` appends them to the friction log
+sisu doc [PATH]              the documentation, a Markdown page per module, printed;
+                             `--output DIR` writes the pages there, `--std [MODULE...]`
+                             documents the standard library (decision 258)
 sisu build [FILE]            check and lower a package (or a file), and write its lockfile;
                              `--native [--release] [--output PATH]` the executable, a
                              package's in `build/debug/` or `build/release/`
@@ -2927,7 +2974,7 @@ sisu test [FILE]             run the tests (and `tests/*.transcript`) under the 
 sisu bench [FILE]            run the benchmarks; `--iterations N`
                              (`run` and `test` also take `--schedule-seed N`, `--explore N`,
                              `--scheduler random|pct|exhaustive` and `--depth N`; `run`,
-                             `check`, `build`, `test` and `bench` take `--locked`)
+                             `check`, `build`, `doc`, `test` and `bench` take `--locked`)
 sisu fmt [PATH...]           format in place; `--check` reports what would change
 sisu repl [FILE|DIR]         a session; a package's directory loads the package
 sisu ws FILE                 run a worksheet; `--run` with the real `System`
@@ -3545,15 +3592,15 @@ serialised is checked against both of stage 0's ways of running it.
 ### Coverage
 
 `conformance/native.list` names the cases the backend builds and runs:
-165 of them, every case of the suite that runs a program (the others are
+196 of them, every case of the suite that runs a program (the others are
 diagnostics, `sisu test` files, and the tools' cases: `--watch`, the
 REPL, worksheets, tokens, SIR and documentation). Among them are every
 case of `concurrency/` that runs (tasks, scopes, cancellation, channels,
 `select`, races, generators and their closing, `log`, mutexes across
-tasks, the deadlock report, a task's stack overflow), all 43 of `run/`
-that have a `main` (`run/testing` is a test file without one), the 35 of
+tasks, the deadlock report, a task's stack overflow), all 47 of `run/`
+that have a `main` (`run/testing` is a test file without one), the 37 of
 `ownership/` that run (with `Mutex`, `Shared`, `Weak`, `Cell` and
-`Arena`), and the 10 of `capabilities/` (fakes, attenuations, caretakers,
+`Arena`), and the 11 of `capabilities/` (fakes, attenuations, caretakers,
 interceptors, `cap.lend`, the test clock, the host's processes, an
 in-process network and the drops of objects with their handles' last
 copies), with `replay/network` on the host's real network.
@@ -5598,3 +5645,256 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      which 04's `Escapable` auto trait already requires of the arguments
      (a type is `Escapable` when nothing in it is a view). A parameter
      without the bound may hold a loan, as before.
+
+**Round 10: `sisu doc`, and what round 9 left** (sections
+"Documentation", "Contracts and refinements", "Stage 2")
+
+258. `sisu doc [PATH] [--output DIR]` and `sisu doc --std [MODULE...]`
+     write the documentation (09, "Documentation"; 10, which leaves the
+     form open) as Markdown, a page per module, made from the modules'
+     syntax trees and what the front end resolved, with nothing evaluated,
+     so that the front end in Sisu transcribes it (18's stage 1: "`sisu
+     doc` as `pure` functions over the syntax tree"). The inputs are each
+     module's tree as the build has it, the program's resolved names, and
+     the error sets the checker inferred. The program is the one `sisu
+     check PATH` takes (a file, a package, each member of a workspace, with
+     `--locked`, `--features` and `--no-default-features` as there), built
+     without its tests (decision 243); one with an error is reported as
+     `sisu check` reports it, then `D0114`, and nothing is written (status
+     1). The pages are the root package's modules' (a dependency documents
+     itself); with `--std`, the standard library's, `std.core` (the
+     prelude) and the modules of 11 (not `target`, whose facts are the
+     host's), or those an import path names (`D0113` for another path).
+     A page is `PATH.md`, PATH being the module's import path (`geo.shapes`,
+     `std.x.http`) or a single file's stem, and a program's pages come in
+     the order of their paths. Without `--output`, `sisu doc` prints each
+     page after a line `<!-- PATH.md -->`; with it, it writes each into DIR
+     (made when missing) and prints nothing. A package's pages show what
+     another package may name, its `pub` items and in them the `pub`
+     fields and methods (hidden fields leave a line `# private fields` after
+     the others); a single file's and the standard library's show every
+     item. A page is these blocks, each only when it has something, one
+     blank line between two, a line break at the end:
+     - ``# `PATH` ``;
+     - the module's `##!` lines as doc text (below);
+     - `## Modules` and a line per module with a page here whose path is
+       the page's and one more name, in the order of paths: ``- [`CHILD`](CHILD.md)``,
+       then `: ` and its SUMMARY when it has one;
+     - `## Re-exports` and a line per name the module re-exports: each name
+       a package module's `pub` imports bind, in order, or the prelude's
+       names a std module names (decision 245's table): ``- `NAME`: [`TARGET`](LINK)``,
+       TARGET being a module's path or `MODULE.ITEM`, and LINK its page, or
+       its page and `#ITEM` for an item that is not a method, when that page
+       is here (else ``- `NAME`: `TARGET` ``);
+     - `## Contents` and a line per item section, ``- [`NAME`](#NAME)``,
+       with `: ` and the SUMMARY of its doc comment;
+     - a section per function, struct, enum, error set, trait, constant and
+       type alias, in source order (imports, tests, suites, benchmarks,
+       `extern` blocks and statements have none);
+     - `## Implementations`: in a block fenced by "```sisu" and "```", the
+       header of each impl of a type the module does not declare, after its
+       doc comment, an inherent one's constants under it; then a section
+       per method of the inherent ones, as a type's.
+     A section is `<a id="NAME"></a>` and ``## `NAME` `` on the next line
+     (`###` and `TYPE.NAME` for a type's or a trait's method), then the
+     declaration in a block fenced by "```sisu" and "```", the doc text,
+     and for a function `Unfinished: ` and its typed holes (each call of
+     `todo` in its body where `todo` is the prelude's, as written, once,
+     as inline code, joined by `, `, then `.`) and `Capabilities: ` and its
+     parameters that hold a capability (``fs` (`Fs`)``, `self` first, its
+     capability types in the order met, joined by `, `, then `.`): decision
+     240's rule read from the resolved signature, a handle, `System`,
+     `TestClock` or `Lent` reached through references, tuples, type
+     arguments and the fields of structs and enums, or a type parameter
+     bounded by an operations trait. Then a type's methods (those it
+     declares, then its inherent impls', each kept or left as the page
+     shows members) and a trait's, each a section. These parts are joined
+     by blank lines. A declaration is its attributes, one a line; its
+     header, the tokens up to the first line break outside brackets joined
+     with one space where the source had a gap and none where a line break
+     follows an opening bracket or comes before a closing one, a trailing
+     comma before such a closing bracket and a final `:` left out, and for
+     a `T !` function ` SET  # inferred` after it (`{}`, a member, or
+     `{A, B}` in the checker's order, a member of another module written
+     after its module's path); then, four spaces in: a function's
+     `requires` and `ensures` as written, later lines keeping their
+     indentation relative to the first, and for a `mut self` method of a
+     struct with an invariant ``# re-checks the invariant of `T` on
+     return``; a struct's fields as written, defaults too, then its
+     invariants and constants (`const NAME: TYPE`); an enum's variants and
+     `..` for an open one; a trait's associated types; a refinement's `def
+     try_from(value: BASE) -> NAME[PARAMS] ! RefinementError`; then a
+     type's inherent impls' constants; a field, a variant, an associated
+     type and a constant each after its `##` lines, written `## TEXT` (`##`
+     for an empty one); then, for a type with impls in the module, a blank
+     line and the header of each, inherent or trait, in order, after its
+     `##` lines. An impl is of a
+     type by its name: a path's names joined by dots, `Option` for `T?`,
+     `Result` for `T ! E`, a reference's type's name. Doc text is the `##`
+     (`##!`) lines without the marker and the one space after it, the blank
+     lines at either end left out, and a line "```" that opens a fenced
+     block (an example, which `sisu test` runs) written "```sisu"; a
+     SUMMARY is its first paragraph, the lines up to a blank one or a
+     fence, each trimmed, joined by spaces. 10's rendering of an example
+     with its values needs evaluation and is not here, nor `--open` nor
+     `--digest` (port-debt.md). `sisu check --explain`, a stand-in that
+     printed a file's signatures "as `sisu doc` renders them", is retired,
+     and `NAME.doc` in the conformance suite is now `sisu doc`'s output
+     (`# doc ARGS` gives other arguments). This changes no rule of the
+     front end; stage 1 transcribes `sisu doc` with the driver's commands.
+     `doc/items`, `doc/package`, `doc/std_pages`, `contracts/explain` and
+     `contracts/proposal_contracts` pin it.
+259. A test's instance stays a test once it is resolved. The resolver
+     records an instance before it resolves it, and resolving it made the
+     function's `FnInfo` again, as a free function's, keeping only the
+     template it was made from, so the instance of a test whose body
+     reflects (decision 251) was checked as a function: a `requires` in it
+     was taken for a precondition rather than reported (`E0807`), a value
+     it returned was `E0316`, naming `__instance_N`, rather than `E0381`,
+     and its SIR function was not marked `test`. An instance whose template
+     is a test now takes the test's kind when it is resolved. This changes
+     a rule of the resolver, which stage 1 transcribes (its
+     DISCREPANCIES.md noted the difference). `reflect/test_instances` pins
+     it.
+260. Two more of what stage 1 calls most run without the runtime's
+     dispatch in native code, with the interpreter's results and schedule.
+     `Shared.get` is the address its handle holds, after the report to
+     `sisu_rt_shared_touch` that a dereference of a `Shared` makes
+     (`--stats`); it was decoded and dispatched like any intrinsic. A read
+     of a constant whose function only returns a literal (`const LIMIT: int
+     = 5`, the shape lowering gives every constant of a number, a `bool`, a
+     `char` or a `str`) is the literal, where it was a call: the read keeps
+     what the call did that a run shows, its entry's yield point (decision
+     204) and its count of nested calls, so a seed's schedule is the same
+     and a recursion that reads a constant at the limit overflows there, in
+     the constant's name (decision 234). Stage 1 built in release and run
+     natively prints the SIR of `examples/wordcount` in 3.431 G
+     instructions against 3.465 G (valgrind's count), and of its own
+     package, with decision 262, in 128.0 G against 130.8 G, its output
+     the same byte for byte. This changes no front-end rule.
+     `run/constant_reads` pins both behaviours in the three native modes.
+261. A statement's operands are used in order (decision 222), so what one
+     of them moves is gone for the operands after it: `pair(s, s)` with two
+     `own` parameters, `take(p.a, p)`, and the tuple `(t, t)` moved the
+     same value twice, which the ownership checker accepted, since it
+     checked every operand of a statement against the state before the
+     statement; the interpreter stopped at the second use (`R0033`), the
+     monitor called it a violation, and natively the value would have been
+     freed twice. Now an operand that uses a value an earlier operand of
+     its statement moved, or a part of it, is `E0400` (a value or what it is
+     part of) or `E0401` (the whole after a part), the move labelled at the
+     statement. Moving two different fields of one value in one statement
+     (`both(q.a, q.b)`) stays accepted. The wrong-ownership corpus found it
+     (`wrong/moved_twice_in_call`). This changes a rule of the ownership
+     checker (`init.rs`), which stage 1 transcribes.
+262. The native runtime copies a value that owns something (`.copy()`, and
+     the copies the generated code asks for) by a plan made once per type
+     when the type table is decoded: a struct or a tuple is its bytes, then
+     each part that owns something copied again over them, the structs and
+     tuples it holds in place opened into their own parts; an enum other
+     than an error set the same, by the parts of the variant it holds; and a
+     list of such values copies the elements' bytes at once and then each
+     element's parts, where it looked at the element's type for every
+     element. A list of texts or of options does the same by its element's
+     kind. A struct or tuple holding a lock in place keeps the rule of its
+     kind, since a copied lock starts unlocked. What a copy makes is the
+     same, part for part, and nothing a program sees depends on the order in
+     which the parts are copied (a copy runs no Sisu code; it counts handles
+     and return traces, which nothing observes in order). It gains little:
+     stage 1's copies are mostly of its bitsets' words (a `list[int]`,
+     copied as its bytes either way) and of texts, whose cost is the
+     allocation and the bytes; of `examples/wordcount`, 3.053 G
+     instructions against 3.065 G, @@COPY_SELF@@. Copying the parts a word
+     at a time rather than by `memmove` counted more instructions and is
+     not kept. This changes no front-end rule.
+263. The corpora of 18's Phase 3 that need no people. The wrong-ownership
+     corpus is the programs of `wrong/` whose one error is a rule of the
+     ownership model: the ownership checker's codes (`E04xx`) and the type
+     checker's about ownership (`E0338`, `E0339`, `E0340`, `E0341`,
+     `E0352`, `E0366`, `E0367`, `E0396`, `E0397`); fifty-two programs join
+     the ten that were there, and `tests/wrong.rs` counts them (sixty-two,
+     at least sixty) and holds each to one error that names its fix and to
+     a program without errors once a fix with edits is applied. Naming a
+     fix took a note on every diagnostic the corpus reached without one,
+     each a catalog entry: `E0401` (`borrow.copy-before-move`), `E0366`
+     (`type.assign-every-path`), `E0367` (the fix `type.declare-var`, as
+     `E0312` has it), `E0341` through a borrow that only reads
+     (`type.borrow-with-mut`), `E0352` (`type.call-instead`), `E0396`
+     (`type.dyn-owned`), `E0397` (`borrow.consume-before-call`), `E0410`
+     (`borrow.store-owned`), `E0412` (`borrow.owned-field`), `E0414`
+     (`borrow.from-only-parameters`), `E0416` (`borrow.copy-part`), `E0420`
+     (`borrow.consume-each`), `E0421` (`borrow.own-instead`), `E0422`
+     (`borrow.consume-first`), `E0423` (`type.capture-copy`), `E0424`
+     (`type.plain-closure`), `E0425` (`task.write-closure`), `E0426` and
+     `E0437` (`task.make-inside`, when no other note applies), `E0430`
+     (`task.join-inside`) and `E0433` (`task.return-send`). The translated
+     slice of rustc's borrow-checker UI tests is `ownership/rustc/`: twelve
+     of their shapes, rewritten in Sisu from memory of them, each pinning
+     its code and its counterexample run, and the two-phase borrow they
+     accept. Writing them found a hole and an over-rejection: two operands
+     of one statement moving one value (decision 261), and a `mut`
+     parameter read in its own method call (known over-rejection 15). The
+     notes change what the front end reports in the human form (the
+     identifiers' form does not show notes), which stage 1 transcribes.
+264. `max` and `min` of two `int`s run inline, as decision 253 meant them
+     to: its code took two `int`s, but lowering passes every argument of
+     `min` and `max` by reference (std declares them generic, and a
+     borrowed parameter whose type is a type parameter is passed by
+     reference, decision 59), so no call matched and each went through the
+     runtime's dispatch. The inline code now reads its two arguments
+     through any references when both are `int`s and so is the result. A
+     loop taking the `max` and the `min` of 20 million values runs in
+     @@MINMAX@@; stage 1 makes 3.3 million such calls checking its own
+     package. This changes no front-end rule. `run/inline_operations` pins
+     both at their edges in the three native modes.
+265. More of what stage 1 calls most runs without the intrinsic's
+     descriptor (port-debt.md, "Stage 2"), whose decoding, finding the
+     arguments through their references by the type table, and dispatch
+     cost a few hundred instructions a call: the generated code calls an
+     entry of the runtime that takes the values' words. Appending text to
+     a `String` (`fmt.text`, `fmt.display` of a text, `String.push`) is
+     `sisu_rt_text_push` with the text's address and length, `fmt.display`
+     of an `int` is `sisu_rt_text_push_int`, which writes the digits
+     without the allocation `to_string` made, a new `String` from a text
+     (`str.to_string`, `String.new`) is `sisu_rt_text_from`, and `fmt.new`
+     writes an empty `String` inline; `dict.get`, `dict.contains` and
+     `set.contains` are `sisu_rt_table_find`, which gives the address of
+     the key's value or whether the key is there; and a push compiled
+     inline that finds no room calls `sisu_rt_list_reserve`, which grows
+     the buffer as the runtime's push does, and then stores the element as
+     with room. Each does what the runtime's arm did, with the same
+     allocations, so `SISU_RT_ALLOCS` counts the same; an argument moved
+     into the call, whose drop after it decision 218 gives the call, still
+     goes through the descriptor. In the runtime, `==` and the order of two
+     values look at each type once where they looked three times, and the
+     `Display` text of an `int` inside any structural text is written
+     without an allocation. This changes no front-end rule; the cases of
+     `conformance/native.list` that build texts (`run/interpolation`,
+     `run/format_specs`), look keys up (`ownership/dict_entries`) and push
+     pin it in the three native modes.
+266. The native runtime drops a struct without drop glue, a tuple, and an
+     enum without glue that is not an error set by a list of the parts
+     that need a drop, made once per type when the type table is decoded,
+     where it looked at every field's type on every drop: a struct's
+     fields and a tuple's elements last to first, the structs without glue
+     and the tuples it holds in place opened into their own parts at their
+     offsets, an enum's those of the variant it holds. A struct without
+     glue drops its fields last to first (lowering gives glue to every
+     declared type whose drop runs code or changes a count, so such a
+     struct's drop only frees memory), as a tuple does, so the order of
+     every drop is the one its kind's rule gives, and a part that panics
+     leaves the others to be dropped as cleanup, a second panic aborting,
+     as before. A list looks at its element's way of dropping once, and
+     frees a list of texts' texts without a call for each. This changes no
+     front-end rule. `run/drop_parts` pins the order through tuples within
+     tuples and a panic among their parts, and drops of values that only
+     free memory, in the three native modes.
+
+     Decisions 264 to 266 and 260 to 262, measured on stage 1 built in
+     release by a release `sisu` from a copy of its package and run
+     natively, each output byte for byte the same: printing the SIR of
+     its own package takes @@SELF_INSNS@@ instructions (valgrind's count)
+     against 130.8 G with round 9's compiler, @@SELF_WALL@@; of
+     `examples/wordcount`, 2.91 G against 3.46 G. The arithmetic loops of
+     decision 246 compile to the same code as before and run in the same
+     time, but for `max` and `min`: @@ARITH@@.

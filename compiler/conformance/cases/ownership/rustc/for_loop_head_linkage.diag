@@ -1,0 +1,3 @@
+8:9-8:23 E0405 borrow.mut-while-borrowed name="vector" line="6" end="8"
+  label 6:14-6:20 borrow.borrowed-here
+  label 6:5-6:20 borrow.later-used

@@ -1,0 +1,2 @@
+4:16-4:19 E0412 borrow.view-in-enum ty="Token" fty="str"
+  label 3:6-3:11 borrow.type-declared-here ty="Token"

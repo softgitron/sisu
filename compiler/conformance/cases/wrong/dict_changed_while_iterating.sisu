@@ -1,0 +1,8 @@
+# A wrong program: a dict is changed inside the loop over its keys.
+
+def main():
+    var stock = {"apples": 3, "pears": 0}
+    for k in stock.keys():
+        if stock[k] == 0:
+            _ = stock.remove(k)
+    print(stock)

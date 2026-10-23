@@ -1,0 +1,15 @@
+# A wrong program: a field is moved out of a value, and then the whole
+# value is used.
+
+struct User:
+    name: String
+    email: String
+
+def archive(own u: User):
+    print("archived {u.email}")
+
+def main():
+    let u = User(name="Roni".to_string(), email="roni@example.com".to_string())
+    let name = u.name
+    print(name)
+    archive(u)

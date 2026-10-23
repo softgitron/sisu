@@ -78,6 +78,22 @@ pub mod sym {
     /// at `b` are the same, for `==` on two texts of one length, compiled
     /// inline otherwise (decision 253); it runs on the caller's stack.
     pub const BYTES_EQ: &str = "sisu_rt_bytes_eq";
+    /// `sisu_rt_text_push(text, bytes, n)`: appends `n` bytes to the
+    /// `String` at `text` (decision 265).
+    pub const TEXT_PUSH: &str = "sisu_rt_text_push";
+    /// `sisu_rt_text_push_int(text, n)`: appends the decimal digits of the
+    /// `int` `n` to the `String` at `text` (decision 265).
+    pub const TEXT_PUSH_INT: &str = "sisu_rt_text_push_int";
+    /// `sisu_rt_text_from(dst, bytes, n)`: writes at `dst` a new `String`
+    /// holding `n` bytes (decision 265).
+    pub const TEXT_FROM: &str = "sisu_rt_text_from";
+    /// `sisu_rt_table_find(table, key, key_ty, value) -> u64`: looks a key
+    /// up in the `dict` or `set` at `table`: the address of its value (with
+    /// `value` 1) or 1, when it is there, else 0 (decision 265).
+    pub const TABLE_FIND: &str = "sisu_rt_table_find";
+    /// `sisu_rt_list_reserve(list, size)`: room for one more element of
+    /// `size` bytes in the list at `list` (decision 265).
+    pub const LIST_RESERVE: &str = "sisu_rt_list_reserve";
     /// `sisu_rt_intrinsic(desc, ret, args) -> u8`: a call of an intrinsic;
     /// `desc` is a [`super::CallDesc`] and `args` the arguments' addresses.
     pub const INTRINSIC: &str = "sisu_rt_intrinsic";

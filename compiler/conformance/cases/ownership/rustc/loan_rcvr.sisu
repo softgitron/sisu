@@ -1,0 +1,18 @@
+# After rustc's `borrowck-loan-rcvr`: a method that takes `mut self` is
+# called while a borrow of the value is still used (Rust's E0502).
+
+struct Point:
+    x: int
+    y: int
+
+    def bump(mut self):
+        self.x += 1
+
+    def sum(self) -> int:
+        return self.x + self.y
+
+def main():
+    var p = Point(x=1, y=2)
+    let r = ref p
+    p.bump()
+    print(r.sum())

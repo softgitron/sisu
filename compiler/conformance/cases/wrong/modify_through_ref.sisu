@@ -1,0 +1,7 @@
+# A wrong program: a list is changed through a borrow that only reads.
+
+def main():
+    var xs = [1, 2]
+    let r = ref xs
+    r.push(3)
+    print(xs)

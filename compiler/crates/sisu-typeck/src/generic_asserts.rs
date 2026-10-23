@@ -7,8 +7,8 @@
 //! false condition is the call's compile-time error. Stage 0 folds what
 //! such checks are made of, integer and boolean arithmetic, comparisons
 //! and interpolated text; a condition that calls a function is checked
-//! nowhere (the run never sees it either), which `sisu check --explain`
-//! does not show yet.
+//! nowhere (the run never sees it either), which `sisu doc` does not show
+//! yet.
 
 use crate::purity::visit_block;
 use crate::thir::{Body, BodyKind, Callee, Expr, ExprKind, GenericAssert, InterpPart, Typed};

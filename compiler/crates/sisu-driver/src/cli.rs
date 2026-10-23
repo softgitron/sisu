@@ -519,6 +519,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
         "new" => new_package(rest, host),
         "fmt" => fmt(rest, host),
         "explain-borrow" => explain_borrow(rest, host),
+        "doc" => doc(rest, host),
         "replay" => replay(rest, host),
         "audit" => audit(rest, host),
         "run" | "check" | "sir" | "test" | "bench" | "build" | "tokens" | "parse" => {
@@ -545,9 +546,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                     "--no-cache",
                     "--no-default-features",
                 ],
-                "check" => {
-                    &["--format=ids", "--format=human", "--explain", "--locked", "--no-default-features"]
-                }
+                "check" => &["--format=ids", "--format=human", "--locked", "--no-default-features"],
                 "build" => &["--locked", "--native", "--release", "--no-default-features"],
                 "bench" => &["--locked", "--no-default-features"],
                 "tokens" => &["--trivia"],
@@ -1479,12 +1478,6 @@ fn command(
                 stage.set("the ownership checker");
                 let all = db.diagnostics(file);
                 let errors = all.iter().filter(|d| d.is_error()).count();
-                if has("--explain") {
-                    // The signatures, as `sisu doc` renders them (09).
-                    let Some(p) = db.parsed(file) else { return exit::ERROR };
-                    let lexed = sisu_lexer::lex(p.file, source);
-                    host.stdout(&crate::doc::explain(source, &lexed.tokens, &p.module, &c.program, &c.typed));
-                }
                 // `--diary PATH` (18, Phase 3): every diagnostic, and what
                 // resolved the last check's, appended to the log.
                 if let Some(path) = &opts.diary {
@@ -2611,6 +2604,226 @@ fn run_tests(
     host.stdout(&out);
     let reports = results.into_iter().map(|(_, _, r)| r).collect();
     (if failed > 0 { exit::ERROR } else { exit::OK }, reports)
+}
+
+/// The root module of the program `sisu doc --std` documents: an import of
+/// every module of the standard library, so that each is loaded.
+fn std_root() -> String {
+    let mut text = String::new();
+    for (name, _) in sisu_resolve::std_sources::DOCUMENTED {
+        let path = sisu_resolve::std_sources::display_path(name);
+        text.push_str(&format!("import {path} as std_{name}\n"));
+    }
+    text
+}
+
+/// `sisu doc [PATH] [--output DIR]` and `sisu doc --std [MODULE...]` (09,
+/// "Documentation"; decision 258): every module of a program (a file, a
+/// package, each member of a workspace), or of the standard library (the
+/// modules named by their import paths, or all), as a Markdown page,
+/// printed each after a line naming its file, or written into `DIR`.
+/// The program is built as `sisu build` builds it, without its tests
+/// (decision 243); one with an error is reported as `sisu check` reports
+/// it, and nothing is written.
+fn doc(args: &[String], host: &mut dyn Host) -> i32 {
+    let mut targets: Vec<&str> = Vec::new();
+    let mut output: Option<String> = None;
+    let (mut std_lib, mut locked) = (false, false);
+    let mut features = crate::package::FeatureRequest::default();
+    let mut i = 0;
+    while let Some(a) = args.get(i) {
+        let value = |i: &mut usize, flag: &str| -> Option<String> {
+            match a.strip_prefix(flag).and_then(|v| v.strip_prefix('=')) {
+                Some(v) => Some(v.to_string()),
+                None => {
+                    *i += 1;
+                    args.get(*i).cloned()
+                }
+            }
+        };
+        match a.as_str() {
+            "--std" => std_lib = true,
+            "--locked" => locked = true,
+            "--no-default-features" => features.no_default = true,
+            _ if a == "--output" || a.starts_with("--output=") => output = value(&mut i, "--output"),
+            _ if a == "--features" || a.starts_with("--features=") => {
+                let names = value(&mut i, "--features").unwrap_or_default();
+                features.names.extend(
+                    names
+                        .split(|c: char| c == ',' || c.is_whitespace())
+                        .filter(|f| !f.is_empty())
+                        .map(str::to_string),
+                );
+            }
+            _ if a.starts_with('-') => {
+                host.stderr(&plain_error(
+                    msg::CLI_UNKNOWN_OPTION,
+                    &[("option", a.clone()), ("command", "doc".into())],
+                ));
+                return EXIT_USAGE;
+            }
+            _ => targets.push(a.as_str()),
+        }
+        i += 1;
+    }
+    // With `--std`, the modules by their import paths; else one path.
+    if std_lib {
+        let known = |p: &str| {
+            p == "std.core"
+                || sisu_resolve::std_sources::DOCUMENTED
+                    .iter()
+                    .any(|(n, _)| sisu_resolve::std_sources::display_path(n) == p)
+        };
+        if let Some(bad) = targets.iter().find(|t| !known(t)) {
+            host.stderr(&plain_error(msg::DOC_STD_PATH, &[("path", bad.to_string())]));
+            return EXIT_USAGE;
+        }
+    } else if let Some(extra) = targets.get(1) {
+        host.stderr(&plain_error(
+            msg::CLI_UNKNOWN_OPTION,
+            &[("option", extra.to_string()), ("command", "doc".into())],
+        ));
+        return EXIT_USAGE;
+    }
+    let inputs = if std_lib {
+        vec![Input::single("std.sisu", std_root())]
+    } else {
+        match inputs_for("doc", targets.first().copied(), locked, false, false, &features, host) {
+            Ok(i) => i,
+            Err(code) => return code,
+        }
+    };
+    let only: Option<&[&str]> = (std_lib && !targets.is_empty()).then_some(targets.as_slice());
+    let mut pages = Vec::new();
+    for input in &inputs {
+        let r =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| doc_pages(input, only, std_lib, host)));
+        match r {
+            Ok(Ok(p)) => pages.extend(p),
+            Ok(Err(code)) => return code,
+            Err(payload) => {
+                let detail = payload
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "unknown".into());
+                let dump = std::env::temp_dir().join("sisu-ice.sisu");
+                let _ = std::fs::write(&dump, &input.source);
+                host.stderr(&plain_error(
+                    msg::CLI_ICE,
+                    &[("stage", "sisu doc".into()), ("detail", detail), ("dump", dump.display().to_string())],
+                ));
+                return EXIT_ICE;
+            }
+        }
+    }
+    let Some(dir) = output else {
+        host.stdout(&crate::doc::printed(&pages));
+        return exit::OK;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    for page in &pages {
+        let path = dir.join(&page.file);
+        if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, &page.text)) {
+            host.stderr(&plain_error(
+                msg::CLI_CANNOT_WRITE,
+                &[("path", path.display().to_string()), ("reason", e.to_string())],
+            ));
+            return exit::ERROR;
+        }
+    }
+    exit::OK
+}
+
+/// The pages of one program: the root package's modules, or with `std_lib`
+/// the standard library's, those `only` names if it names some (decision
+/// 258).
+fn doc_pages(
+    input: &Input,
+    only: Option<&[&str]>,
+    std_lib: bool,
+    host: &mut dyn Host,
+) -> Result<Vec<crate::doc::Page>, i32> {
+    use sisu_resolve::std_sources;
+    let mut db = Db::new();
+    db.no_tests = true;
+    input.load(&mut db);
+    let Some(c) = db.checked(&input.file) else { return Err(exit::ERROR) };
+    let errors = c.diagnostics.iter().filter(|d| d.is_error()).count();
+    if errors > 0 {
+        let mut out = sisu_diag::render::render_human(&c.map, &c.diagnostics);
+        out.push_str(&plain_error(msg::DOC_ERRORS_FOUND, &[("count", errors.to_string())]));
+        host.stderr(&out);
+        return Err(exit::ERROR);
+    }
+    let prog = &c.program;
+    // Each module with a page: its id, path, text and syntax as the build
+    // has it.
+    let mut found: Vec<(sisu_resolve::ModuleId, String, String, sisu_syntax::ast::Module)> = Vec::new();
+    if std_lib {
+        let mut modules: Vec<(&str, &str)> = vec![("prelude", std_sources::PRELUDE)];
+        modules.extend(std_sources::DOCUMENTED.iter().copied());
+        for (name, text) in modules {
+            let id = if name == "prelude" {
+                Some(prog.prelude)
+            } else {
+                prog.modules
+                    .iter()
+                    .position(|m| m.is_std && m.name == name)
+                    .map(|k| sisu_resolve::ModuleId(k as u32))
+            };
+            let Some(id) = id else { continue };
+            let path = std_sources::display_path(name);
+            if only.is_some_and(|o| !o.contains(&path.as_str())) {
+                continue;
+            }
+            let parse = sisu_parser::parse(sisu_diag::FileId(0), text);
+            let module = sisu_syntax::ast::build::module(&parse.tree);
+            found.push((id, path, text.to_string(), module));
+        }
+    } else {
+        let program = db.program(&input.file);
+        for (k, (path, file, package)) in program.modules.iter().enumerate() {
+            if *package != 0 {
+                continue;
+            }
+            let (Some(&id), Some(text), Some(parsed)) =
+                (prog.user_modules.get(k), db.text(file), db.parsed(file))
+            else {
+                continue;
+            };
+            let module = match crate::cfg::filter(&parsed.module, false, program.features.get(*package)).0 {
+                Some(m) => m,
+                None => parsed.module.clone(),
+            };
+            let shown = if path.is_empty() {
+                std::path::Path::new(file)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            } else {
+                path.join(".")
+            };
+            found.push((id, shown, text.to_string(), module));
+        }
+    }
+    found.sort_by(|a, b| a.1.cmp(&b.1));
+    let tokens: Vec<Vec<sisu_syntax::tree::Token>> =
+        found.iter().map(|(_, _, text, _)| sisu_lexer::lex(sisu_diag::FileId(0), text).tokens).collect();
+    let sources: Vec<crate::doc::Source<'_>> = found
+        .iter()
+        .zip(&tokens)
+        .map(|((id, path, text, module), tokens)| crate::doc::Source {
+            id: *id,
+            path: path.clone(),
+            text,
+            tokens,
+            module,
+        })
+        .collect();
+    let public_only = !std_lib && prog.packages.first().is_some_and(|p| !p.name.is_empty());
+    let docs = crate::doc::Docs { sources: &sources, prog, inferred: &c.typed.inferred, public_only };
+    Ok(crate::doc::pages(&docs))
 }
 
 /// `sisu explain-borrow FILE:LINE`: every borrow live on the line, with

@@ -1,0 +1,8 @@
+# A wrong program: a variable is assigned while a borrow of it is still
+# used.
+
+def main():
+    var total = 10
+    let seen = ref total
+    total = 20
+    print(seen)

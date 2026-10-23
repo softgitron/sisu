@@ -1,0 +1,16 @@
+# A wrong program: a must-consume value is given to a generic function,
+# whose body may drop it.
+
+@must_consume
+struct Receipt:
+    total: int
+
+    def file(own self):
+        print("filed {self.total}")
+
+def keep[T](own x: T) -> int:
+    return 1
+
+def main():
+    let r = Receipt(total=5)
+    print(keep(r))

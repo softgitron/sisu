@@ -1,0 +1,2 @@
+6:15-6:19 E0338 type.move-out-of-borrow what="v[0]"
+  fix type.add-copy 6:19-6:19 ".copy()"

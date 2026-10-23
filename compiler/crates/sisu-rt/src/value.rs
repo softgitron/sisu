@@ -41,7 +41,19 @@ pub(crate) unsafe fn text<'a>(p: *mut u8, t: u32) -> Option<&'a [u8]> {
     // SAFETY: as the caller guarantees.
     unsafe {
         let (p, t) = target(p, t);
-        match ty(t).kind {
+        text_at(p, ty(t))
+    }
+}
+
+/// The text of the `str`, `String` or `Path` at `p` itself, of the type
+/// `entry` describes; `None` for any other value.
+///
+/// # Safety
+/// `p` must hold a value of that type, which must outlive the slice.
+unsafe fn text_at<'a>(p: *mut u8, entry: &TypeEntry) -> Option<&'a [u8]> {
+    // SAFETY: as the caller guarantees.
+    unsafe {
+        match entry.kind {
             Kind::Str => Some(mem::str_at(p).bytes()),
             Kind::String | Kind::Path => Some(mem::at::<Text>(p).bytes()),
             _ => None,
@@ -120,6 +132,18 @@ pub(crate) unsafe fn drop_value(p: *mut u8, t: u32) -> u8 {
     let entry = ty(t);
     // SAFETY: the parts are where the type says, each dropped once.
     unsafe {
+        // By the parts that need a drop, when the type has them listed
+        // (decision 266).
+        match rt::drop_parts(t) {
+            rt::DropParts::Parts(parts) => return drop_parts(p, parts),
+            rt::DropParts::Variants(variants) => {
+                return match variants.get(tag(p, entry) as usize) {
+                    Some(parts) => drop_parts(p, parts),
+                    None => abi::OK,
+                };
+            }
+            rt::DropParts::ByKind => {}
+        }
         match &entry.kind {
             Kind::String | Kind::Path | Kind::Bytes => {
                 mem::at::<Text>(p).release();
@@ -130,8 +154,23 @@ pub(crate) unsafe fn drop_value(p: *mut u8, t: u32) -> u8 {
                 let size = ty(*e).size;
                 let mut status = abi::OK;
                 if rt::needs_drop(*e) {
-                    for i in 0..list.len {
-                        status = after_part(status, drop_value(list.at(i, size), *e));
+                    // The element's way of dropping looked at once.
+                    match (rt::drop_parts(*e), &ty(*e).kind) {
+                        (rt::DropParts::Parts(parts), _) => {
+                            for i in 0..list.len {
+                                status = after_part(status, drop_parts(list.at(i, size), parts));
+                            }
+                        }
+                        (_, Kind::String | Kind::Path | Kind::Bytes) => {
+                            for i in 0..list.len {
+                                mem::at::<Text>(list.at(i, size)).release();
+                            }
+                        }
+                        _ => {
+                            for i in 0..list.len {
+                                status = after_part(status, drop_value(list.at(i, size), *e));
+                            }
+                        }
                     }
                 }
                 mem::release(list.ptr);
@@ -325,6 +364,20 @@ unsafe fn run_glue(glue: Option<u32>, p: *mut u8) -> u8 {
     }
 }
 
+/// Drops the parts of the value at `p` that need a drop, in order
+/// ([`rt::DropParts`]).
+///
+/// # Safety
+/// `p` must hold a value whose parts these are, dead afterwards.
+unsafe fn drop_parts(p: *mut u8, parts: &[(u32, u32)]) -> u8 {
+    let mut status = abi::OK;
+    for &(off, t) in parts {
+        // SAFETY: each part is at its offset.
+        status = after_part(status, unsafe { drop_value(p.add(off as usize), t) });
+    }
+    status
+}
+
 /// Drops the fields at `p` that the type's glue leaves out, last to first
 /// as the glue drops its own; none of them runs Sisu code.
 ///
@@ -379,6 +432,18 @@ unsafe fn copy_part(dst: *mut u8, src: *mut u8, t: u32) {
     }
 }
 
+/// Copies again, over the bytes already copied, the parts of a value that
+/// own something ([`rt::CopyParts`]).
+///
+/// # Safety
+/// `src` must hold a value whose parts these are, and `dst` its bytes.
+unsafe fn copy_parts(dst: *mut u8, src: *mut u8, parts: &[(u32, u32)]) {
+    for &(off, t) in parts {
+        // SAFETY: each part is at its offset in both.
+        unsafe { copy_value(dst.add(off as usize), src.add(off as usize), t) };
+    }
+}
+
 /// `.copy()`: writes at `dst` a deep copy of the value at `src`.
 ///
 /// # Safety
@@ -391,6 +456,21 @@ pub(crate) unsafe fn copy_value(dst: *mut u8, src: *mut u8, t: u32) {
             mem::copy(dst, src, entry.size as usize);
             return;
         }
+        match rt::copy_parts(t) {
+            rt::CopyParts::Parts(parts) => {
+                mem::copy(dst, src, entry.size as usize);
+                copy_parts(dst, src, parts);
+                return;
+            }
+            rt::CopyParts::Variants(variants) if matches!(entry.kind, Kind::Enum { error: false, .. }) => {
+                mem::copy(dst, src, entry.size as usize);
+                if let Some(parts) = variants.get(tag(src, entry) as usize) {
+                    copy_parts(dst, src, parts);
+                }
+                return;
+            }
+            _ => {}
+        }
         match &entry.kind {
             Kind::String | Kind::Path | Kind::Bytes => {
                 let b = mem::at::<Text>(src).bytes();
@@ -401,12 +481,40 @@ pub(crate) unsafe fn copy_value(dst: *mut u8, src: *mut u8, t: u32) {
                 let size = ty(*e).size;
                 let mut to = List::empty();
                 to.reserve(from.len, size);
-                if rt::plain(*e) {
-                    mem::copy(to.ptr, from.ptr, (from.len * u64::from(size)) as usize);
-                } else {
-                    for i in 0..from.len {
-                        copy_value(to.at(i, size), from.at(i, size), *e);
+                // The elements' bytes at once; then, for elements that own
+                // something, those parts again, the element's kind looked at
+                // once rather than for each (decision 262).
+                match rt::copy_parts(*e) {
+                    _ if rt::plain(*e) => mem::copy(to.ptr, from.ptr, (from.len * u64::from(size)) as usize),
+                    rt::CopyParts::Parts(parts) => {
+                        mem::copy(to.ptr, from.ptr, (from.len * u64::from(size)) as usize);
+                        for i in 0..from.len {
+                            copy_parts(to.at(i, size), from.at(i, size), parts);
+                        }
                     }
+                    _ => match ty(*e).kind {
+                        Kind::String | Kind::Path | Kind::Bytes => {
+                            for i in 0..from.len {
+                                let b = mem::at::<Text>(from.at(i, size)).bytes();
+                                (to.at(i, size) as *mut Text).write(Text::from_bytes(b));
+                            }
+                        }
+                        Kind::Option(payload) => {
+                            for i in 0..from.len {
+                                let (d, s) = (to.at(i, size), from.at(i, size));
+                                let tg = mem::word(s, 0);
+                                mem::set_word(d, 0, tg);
+                                if tg == 0 {
+                                    copy_part(d.add(8), s.add(8), payload);
+                                }
+                            }
+                        }
+                        _ => {
+                            for i in 0..from.len {
+                                copy_value(to.at(i, size), from.at(i, size), *e);
+                            }
+                        }
+                    },
                 }
                 to.len = from.len;
                 (dst as *mut List).write(to);
@@ -527,10 +635,10 @@ pub(crate) unsafe fn equal(a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> bool {
     unsafe {
         let (a, ta) = target(a, ta);
         let (b, tb) = target(b, tb);
-        if let (Some(x), Some(y)) = (text(a, ta), text(b, tb)) {
+        let (ea, eb) = (ty(ta), ty(tb));
+        if let (Some(x), Some(y)) = (text_at(a, ea), text_at(b, eb)) {
             return x == y;
         }
-        let (ea, eb) = (ty(ta), ty(tb));
         match (&ea.kind, &eb.kind) {
             (Kind::Int | Kind::Sized(_), Kind::Int | Kind::Sized(_))
             | (Kind::U64, Kind::U64)
@@ -635,10 +743,10 @@ pub(crate) unsafe fn compare(a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> Option
     unsafe {
         let (a, ta) = target(a, ta);
         let (b, tb) = target(b, tb);
-        if let (Some(x), Some(y)) = (text(a, ta), text(b, tb)) {
+        let (ea, eb) = (ty(ta), ty(tb));
+        if let (Some(x), Some(y)) = (text_at(a, ea), text_at(b, eb)) {
             return Some(x.cmp(y));
         }
-        let (ea, eb) = (ty(ta), ty(tb));
         match (&ea.kind, &eb.kind) {
             (Kind::Int | Kind::Sized(_), Kind::Int | Kind::Sized(_)) => {
                 Some((mem::word(a, 0) as i64).cmp(&(mem::word(b, 0) as i64)))
@@ -740,11 +848,12 @@ pub(crate) unsafe fn display(out: &mut Vec<u8>, p: *mut u8, t: u32) {
     // SAFETY: as the caller guarantees.
     unsafe {
         let (p, t) = target(p, t);
-        if let Some(b) = text(p, t) {
+        let entry = ty(t);
+        if let Some(b) = text_at(p, entry) {
             out.extend_from_slice(b);
             return;
         }
-        match ty(t).kind {
+        match entry.kind {
             Kind::Char => push_char(out, mem::word(p, 0) as u32),
             // std's `Contextual` (prelude): `message: cause`.
             Kind::Enum { .. } | Kind::ErrSet(_) => {
@@ -767,6 +876,26 @@ pub(crate) unsafe fn display(out: &mut Vec<u8>, p: *mut u8, t: u32) {
     }
 }
 
+/// The decimal digits of `n`, after a `-` when it is negative, as
+/// `Display` writes an `int`, written at the end of `buf`.
+pub(crate) fn int_digits(n: i64, buf: &mut [u8; 20]) -> &[u8] {
+    let mut m = n.unsigned_abs();
+    let mut i = buf.len();
+    loop {
+        i -= 1;
+        buf[i] = b'0' + (m % 10) as u8;
+        m /= 10;
+        if m == 0 {
+            break;
+        }
+    }
+    if n < 0 {
+        i -= 1;
+        buf[i] = b'-';
+    }
+    &buf[i..]
+}
+
 fn push_char(out: &mut Vec<u8>, code: u32) {
     let c = char::from_u32(code).unwrap_or('\u{fffd}');
     let mut buf = [0u8; 4];
@@ -784,7 +913,7 @@ pub(crate) unsafe fn debug(out: &mut Vec<u8>, p: *mut u8, t: u32) {
         match &entry.kind {
             Kind::Unit => out.extend_from_slice(b"()"),
             Kind::Int | Kind::Sized(_) => {
-                out.extend_from_slice((mem::word(p, 0) as i64).to_string().as_bytes())
+                out.extend_from_slice(int_digits(mem::word(p, 0) as i64, &mut [0u8; 20]))
             }
             Kind::U64 => out.extend_from_slice(mem::word(p, 0).to_string().as_bytes()),
             Kind::I128 => out.extend_from_slice((crate::wide::bits(p) as i128).to_string().as_bytes()),

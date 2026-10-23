@@ -89,6 +89,7 @@ fn dropping_intrinsics(f: &Function, types: &Types, out: &mut Vec<Finding>) {
                     .with("callee", name.clone())
                     .with_arg("name", shown_name.clone())
                     .with("ty", sisu_sir::write::ty(&ty))
+                    .note(msg::BORROW_CONSUME_EACH, Vec::new())
                     .at(b, si);
                 let decl = f.locals.get(shown.local.0 as usize).and_then(|l| l.loc);
                 if decl.is_some() && names::is_named(f, shown.local) {
@@ -179,6 +180,7 @@ fn generic_calls(f: &Function, types: &Types, out: &mut Vec<Finding>, depth: u32
                     Finding::new(msg::TYPE_MUST_CONSUME_ARGUMENT, f, s.loc)
                         .with("ty", sisu_sir::write::ty(ty))
                         .with("param", param)
+                        .note(msg::BORROW_CONSUME_BEFORE_CALL, Vec::new())
                         .at(b, si),
                 );
             }

@@ -1,0 +1,10 @@
+# After rustc's two-phase borrow tests (`two-phase-allow-access-during-
+# reservation` and the `vec.push(vec.len())` shape): a `mut` borrow made
+# for a call's receiver does not start until the call, so the arguments
+# may read what it borrows. Accepted, as in Rust, and run.
+
+def main():
+    var v = [1, 2]
+    v.push(len(v))
+    v.insert(0, v[1])
+    print(v)

@@ -374,6 +374,10 @@ fn obstacle_diag(
         d = d.note(msg::TASK_WRAP_MUTEX, vec![("ty", inner)]);
     } else if m == msg::TASK_NOT_SYNC {
         d = d.note(msg::TASK_USE_OWN, Vec::new());
+    } else if m == msg::TASK_RESULT_NOT_SEND {
+        d = d.note(msg::TASK_RETURN_SEND, Vec::new());
+    } else {
+        d = d.note(msg::TASK_MAKE_INSIDE, Vec::new());
     }
     d
 }
@@ -391,13 +395,16 @@ fn check_bounds(c: &mut Checker) {
             continue;
         }
         if prog.can_borrow_in(&t, &c.env) {
-            let d =
-                Diagnostic::new(msg::BORROW_VIEW_IN_OWNER, span).with("ty", c.show(&t)).with("owner", owner);
+            let d = Diagnostic::new(msg::BORROW_VIEW_IN_OWNER, span)
+                .with("ty", c.show(&t))
+                .with("owner", owner)
+                .note(msg::BORROW_OWN_INSTEAD, Vec::new());
             c.report(d);
         } else if must_consume_ty(prog, &t, 0) {
             let d = Diagnostic::new(msg::BORROW_MUST_CONSUME_IN_OWNER, span)
                 .with("ty", c.show(&t))
-                .with("owner", owner);
+                .with("owner", owner)
+                .note(msg::BORROW_CONSUME_FIRST, Vec::new());
             c.report(d);
         }
     }

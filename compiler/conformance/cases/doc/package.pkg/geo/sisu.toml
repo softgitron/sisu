@@ -1,0 +1,8 @@
+# `sisu doc` on a package (decision 258): a page per module of the package,
+# none for its dependencies, each showing what another package may name.
+[package]
+name = "geo"
+version = "0.3.0"
+
+[dependencies]
+units = { path = "../units" }

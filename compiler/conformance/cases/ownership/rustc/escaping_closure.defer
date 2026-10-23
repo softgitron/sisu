@@ -1,0 +1,23 @@
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+ownership violation: a reference was used after its loan had ended
+  the loan: a shared borrow of `start` in `counter`, created at escaping_closure.sisu:6:12 by `_2 = ref _1`
+  ended by: the return from the frame of `start` at escaping_closure.sisu:9:11 (`_3 = call fn counter()`)
+  used at: escaping_closure.sisu:9:11 (`_2 = call move _3()`)
+  loans of `start` not ended yet: 0 shared, 0 with `mut`
+  at main (escaping_closure.sisu:9:11)
+SIR of `main`:
+fn main(0) source 0 @8:5-8:9 {
+    let _0: ()
+    let _1: ()
+    let _2: int
+    let _3: fn() -> int
+  bb0:
+    _3 = call fn counter() @9:11-9:20
+    _2 = call move _3() @9:11-9:22
+    _1 = call intrinsic print(copy _2) @9:5-9:23
+    _0 = const ()
+    return
+}
+outcome: conflict reached; the run stopped at a concrete ownership conflict
+--- status 134

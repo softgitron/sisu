@@ -1,0 +1,2 @@
+13:16-13:22 E0416 borrow.move-out-of-drop part="s.user" name="s" ty="Session"
+  label 8:9-8:13 borrow.drop-impl-here ty="Session"

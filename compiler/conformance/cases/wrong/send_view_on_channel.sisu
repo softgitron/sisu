@@ -1,0 +1,9 @@
+# A wrong program: a channel is made to carry views, which its receiver
+# could keep after what they borrow is gone.
+
+def main():
+    let tx, rx = channel[str](capacity=1)
+    tx.send("a").expect("room")
+    tx.close()
+    for x in rx:
+        print(x)

@@ -1,0 +1,39 @@
+1
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+ownership violation: a reference was used after its loan had ended
+  the loan: a shared borrow of `v` in `main`, created at loan_blocks_move.sisu:9:13 by `_2 = ref _1`
+  ended by: a move of `v` at loan_blocks_move.sisu:10:5 (`_3 = call fn take(move _1)`)
+  used at: loan_blocks_move.sisu:11:5 (`_4 = call intrinsic print(copy _2)`)
+  value: `v` = <no value>
+  loans of `v` not ended yet: 0 shared, 0 with `mut`
+  at main (loan_blocks_move.sisu:11:5)
+SIR of `main`:
+fn main(0) source 0 @7:5-7:9 {
+    let _0: ()
+    let _1: list[int] "v" @8:9-8:10
+    let _2: ref list[int] "w" @9:9-9:10
+    let _3: ()
+    let _4: ()
+    let _5: bool "flag"
+  bb0:
+    _5 = const false
+    _1 = list(const 3) @8:13-8:16
+    _5 = const true
+    goto bb1
+  bb1 (unwind bb2):
+    _2 = ref _1 @9:13-9:18
+    _5 = const false
+    _3 = call fn take(move _1) @10:5-10:12
+    _4 = call intrinsic print(copy _2) @11:5-11:13
+    _0 = const ()
+    goto bb3
+  bb2 (cleanup):
+    drop _1 if _5
+    resume
+  bb3:
+    _5 = const false
+    return
+}
+outcome: conflict reached; the run stopped at a concrete ownership conflict
+--- status 134

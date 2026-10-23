@@ -1,0 +1,18 @@
+# A wrong program: a function returns early and leaves a must-consume
+# value behind.
+
+@must_consume
+struct Payment:
+    amount: int
+
+    def settle(own self):
+        print("settled {self.amount}")
+
+def pay(amount: int, check: bool):
+    let p = Payment(amount=amount)
+    if check:
+        return
+    p.settle()
+
+def main():
+    pay(10, False)

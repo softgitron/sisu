@@ -1,0 +1,15 @@
+# After rustc's `borrowck-use-mut-borrow`: a value is read whole while a
+# `mut` borrow of one of its fields is still used (Rust's E0503).
+
+struct A:
+    a: int
+    b: int
+
+def show(x: A):
+    print(x.a + x.b)
+
+def main():
+    var x = A(a=1, b=2)
+    let p = ref mut x.a
+    show(x)
+    p += 1

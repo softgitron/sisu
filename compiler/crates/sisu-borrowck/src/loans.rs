@@ -1462,6 +1462,7 @@ impl Analysis {
                                 .with("param", names::local_name(f, LocalId(i + 1)))
                                 .with("function", display_fn(&f.name))
                                 .label(self.loans[x].loc, self.loan_label(f, x).0, self.loan_label(f, x).1)
+                                .note(msg::BORROW_STORE_OWNED, Vec::new())
                                 .at(b, si),
                         );
                         return;
@@ -1574,6 +1575,7 @@ impl Analysis {
                         self.loan_label(f, foreign).0,
                         self.loan_label(f, foreign).1,
                     )
+                    .note(msg::BORROW_STORE_OWNED, Vec::new())
                     .at(b, si),
             );
             return true;

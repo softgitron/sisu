@@ -1,0 +1,15 @@
+# A wrong program: a task changes a function value it borrows, but a
+# function value is not `Send`.
+
+def double(x: int) -> int:
+    return x * 2
+
+def triple(x: int) -> int:
+    return x * 3
+
+def main():
+    var f = double
+    task.scope do s:
+        s.spawn do:
+            f = triple
+    print(f(2))

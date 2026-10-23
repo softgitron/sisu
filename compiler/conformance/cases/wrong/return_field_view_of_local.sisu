@@ -1,0 +1,9 @@
+# A wrong program: a function returns a view of a field of a value it
+# made, which is gone when it returns.
+
+struct Config:
+    name: String
+
+def default_name() -> str:
+    let c = Config(name="default".to_string())
+    return c.name

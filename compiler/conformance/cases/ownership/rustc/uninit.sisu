@@ -1,0 +1,9 @@
+# After rustc's `borrowck-uninit`: a variable is used before anything
+# assigned it (Rust's E0381).
+
+def show(x: int):
+    print(x)
+
+def main():
+    let x: int
+    show(x)

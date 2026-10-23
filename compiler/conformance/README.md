@@ -36,7 +36,7 @@ is compared byte for byte.
 | `NAME.files/` | not compared: copied into the run's working directory (fixtures, `NAME.snap` snapshots, `tests/*.transcript` transcripts) |
 | `NAME.sir` | `sisu sir NAME.sisu`, the serialised SIR |
 | `NAME.test` | standard output of `sisu test NAME.sisu` |
-| `NAME.doc` | standard output of `sisu check --explain NAME.sisu`: the signatures with their contracts, as `sisu doc` renders them |
+| `NAME.doc` | standard output of `sisu doc NAME.sisu`, the documentation's pages, or of `sisu doc ARGS` when a line `# doc ARGS` gives the arguments (`# doc --std std.time`) |
 | `NAME.tokens` | `sisu tokens NAME.sisu` |
 | `NAME.tree` | `sisu parse --tree NAME.sisu` |
 | `NAME.defer` | `sisu run --defer-borrow NAME.sisu ARGS...`: standard output, then `--- stderr`, standard error, and `--- status N` |
@@ -54,6 +54,10 @@ A line `# explore N` also runs a case that runs again as `sisu run
 --explore N NAME.sisu ARGS...`: the program under the schedule seeds 0 to
 N-1, each of which must give the expected output and status.
 
+A case with `NAME.doc` also runs `sisu doc` again with `--output DIR`,
+which must write exactly the pages the first run printed, each into the
+file its line `<!-- FILE -->` names, and exit as it did.
+
 A case is run when any of `.out`, `.err` or `.status` exists.
 
 Every command runs in a fresh temporary directory holding only
@@ -68,9 +72,10 @@ A directory `NAME.pkg/` is a package case (09): a package with its
 other. Every command runs in it, or in the directory `NAME.cwd` names
 (relative to `NAME.pkg/`), without naming a file, as a programmer runs
 them. The files beside it are a file case's (`NAME.diag` for `sisu check
---format=ids`, `NAME.test`, `NAME.out`, `NAME.err`, `NAME.status`,
-`NAME.args`, `NAME.stdin`, `NAME.unformatted`, `NAME.watch` for `sisu run
---watch`, `NAME.repl` for `sisu repl` with the package loaded), and these:
+--format=ids`, `NAME.doc` for `sisu doc`, `NAME.test`, `NAME.out`,
+`NAME.err`, `NAME.status`, `NAME.args`, `NAME.stdin`, `NAME.unformatted`,
+`NAME.watch` for `sisu run --watch`, `NAME.repl` for `sisu repl` with the
+package loaded), and these:
 
 | File | Compared with |
 |---|---|
@@ -224,9 +229,13 @@ and the time spent building and running them.
   `Drop` that panics; `drop_chain`: a long chain dropped at constant
   depth; `drop_moved_parts`: what is left of a value once a part moves
   out, error values a pattern takes fields out of, and the operands a `?`
-  or a panic abandons), panics and their exit statuses, a recursion that
+  or a panic abandons; `drop_parts`: tuples within tuples, last to first,
+  a panic among their parts, and values whose drop only frees memory,
+  natively by their parts), panics and their exit statuses, a recursion that
   overflows the stack (`stack_overflow`: a panic naming the function, its
-  drops and `defer`s run, the trace's ends), what a call leaves of an
+  drops and `defer`s run, the trace's ends), constants read where they are
+  used, natively too, with the schedule and the overflow a call of them
+  gives (`constant_reads`), what a call leaves of an
   iterator given to an `Iterable[T]` parameter (`iterable_rest`: dropped
   when it returns and when it unwinds), an iterator written in Sisu given
   to one (`iterable_iterator`: lazy, through a generator), capabilities,
@@ -260,7 +269,8 @@ and the time spent building and running them.
   `implements`, `reflect.construct` and `default_of`, promotion of generic
   callers, reflection in methods (`methods`), in a trait's own methods and
   the methods of trait impls, generic ones too (`trait_methods`), in
-  tests, parametrised ones too (`tests`, with its `.test`), in closures
+  tests, parametrised ones too (`tests`, with its `.test`; a test that
+  reflects is still a test to the checker, `test_instances`), in closures
   (`closures`), over methods (`methods_of`), the places it cannot unfold
   (`methods_rejected`), `comptime panic` and the bound on instances,
   `embed`, `target`, `std.x.cli`'s parser and `json.encode` written over
@@ -269,9 +279,17 @@ and the time spent building and running them.
   kept identical by a test.
 - `contracts/` is 07: `requires`, `ensures` with `result` and `old`,
   invariants, refinement types and their chains, the check levels, the
-  failure messages with every part's value, `sisu check --explain`
-  (`.doc`), contracts as properties, and `proposal_contracts`, which
-  starts with `proposal/examples/contracts.sisu`.
+  failure messages with every part's value, contracts as `sisu doc`
+  shows them (`.doc`), contracts as properties, and `proposal_contracts`,
+  which starts with `proposal/examples/contracts.sisu`.
+- `doc/` is `sisu doc` (10; decision 258), each case's pages pinned by
+  its `.doc`: `items`, a single file with every kind of item (contracts,
+  an inferred error set, a typed hole, capability parameters, a type's
+  impls and methods, an impl of a type it does not declare), `package`, a
+  package whose pages show only what another package may name, with
+  modules under modules, re-exports and a dependency it does not
+  document, and `std_pages`, the pages of four modules of the standard
+  library (`# doc --std ...`).
 - `replay/` is the capability log and replay tokens: programs reading
   standard input, files and the network, recorded and replayed, and
   failing tests run again from their tokens.
@@ -354,12 +372,26 @@ and the time spent building and running them.
   monitor's concrete conflict, or "no conflict" with the account of why
   the checker still rejects them (`candidate_false_positive` and
   `untested_path` show the two other outcomes). `explain_borrow` pins
-  `sisu explain-borrow`.
-- `wrong/` is the wrong-program corpus (18, Phase 2): about forty short
-  programs a newcomer might write, each with one intended mistake that its
-  first comment names (a misspelling, a missing `mut`, a use after a move,
-  a view kept in a plain struct, ...). Each `.diag` pins the one error by
-  identifier and span with its fix; a test of the driver
-  (`tests/wrong.rs`) holds every case to one error that names a fix, a
-  fix with edits or a note, and applies each fix with edits to see that
-  the program then checks.
+  `sisu explain-borrow`. `rustc/` is a translated slice of rustc's
+  borrow-checker UI tests (18, Phase 3): a dozen of their shapes rewritten
+  in Sisu by hand (a move while borrowed, two closures that change one
+  variable, a closure that escapes with a borrow, a borrow of a local
+  returned, a use before assignment, a use after a move and a new value,
+  a list changed in the loop over it, moves out of a list's element, a
+  field assigned while borrowed with `mut`, a `mut self` method called
+  while borrowed, a value read whole while a field is borrowed with
+  `mut`), each pinning its code and its counterexample run (`.defer`), and
+  the two-phase borrow they accept (`two_phase_allowed`), which runs.
+- `wrong/` is the wrong-program corpus (18, Phases 2 and 3): ninety-three
+  short programs a newcomer might write, each with one intended mistake
+  that its first comment names (a misspelling, a missing `mut`, a use
+  after a move, a view kept in a plain struct, ...). Sixty-two of them
+  are the wrong-ownership corpus of Phase 3, a mistake against the
+  ownership model each: moves, partial moves and moves in loops, borrows
+  that conflict or outlive what they borrow, views in owners, `from`
+  clauses, must-consume values, closures, tasks and what they may share,
+  and `mut` at calls. Each `.diag` pins the one error by identifier and
+  span; a test of the driver (`tests/wrong.rs`) holds every case to one
+  error that names its fix, a fix with edits or a note, applies each fix
+  with edits to see that the program then checks, and counts the
+  ownership corpus, which must hold sixty.

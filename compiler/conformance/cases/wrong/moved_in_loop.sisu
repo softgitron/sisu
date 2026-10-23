@@ -1,0 +1,13 @@
+# A wrong program: a value is moved inside a loop, so the second
+# iteration has nothing to move.
+
+struct Order:
+    item: String
+
+def ship(own o: Order):
+    print("shipped {o.item}")
+
+def main():
+    let o = Order(item="lamp".to_string())
+    for _ in range(2):
+        ship(o)

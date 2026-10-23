@@ -1,0 +1,3 @@
+7:15-7:17 E0403 borrow.use-while-mut-borrowed name="xs" line="6" end="8"
+  label 6:13-6:23 borrow.borrowed-by borrower="m"
+  label 8:5-8:6 borrow.later-used

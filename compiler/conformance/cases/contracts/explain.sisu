@@ -1,8 +1,8 @@
-# `sisu check --explain`: each declaration's signature with its contracts,
-# the way `sisu doc` renders them (09): a header over several lines is
-# joined, an inferred error set is filled in, a refinement shows the
-# conversion that checks it, and a `mut self` method of a type with an
-# invariant says that it keeps it.
+# `sisu doc`: each declaration's signature with its contracts (07: they
+# are "documented automatically"): a header over several lines is joined,
+# an inferred error set is filled in, a refinement shows the conversion
+# that checks it, and a `mut self` method of a type with an invariant says
+# that it keeps it.
 
 ## A percentage.
 type Percent = int where 0 <= self <= 100

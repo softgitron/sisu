@@ -1,0 +1,10 @@
+# After rustc's `borrowck-closures-two-mut`: two closures that both
+# change one variable are alive at once (Rust's E0499).
+
+def main():
+    var xs = [3]
+    let c1 = () -> xs.push(4)
+    let c2 = () -> xs.push(5)
+    c1()
+    c2()
+    print(xs)

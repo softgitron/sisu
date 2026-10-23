@@ -440,7 +440,8 @@ impl Checker<'_> {
             let d = self
                 .error(msg::TYPE_VIEW_TO_DYN, self.range_of(&x))
                 .with("ty", self.show(&concrete))
-                .with("dyn", self.show(&Ty::Dyn(tr.clone())));
+                .with("dyn", self.show(&Ty::Dyn(tr.clone())))
+                .note(msg::TYPE_DYN_OWNED, Vec::new());
             self.report(d);
             return self.wrap(x, Coercion::Mismatch, exp.clone());
         }
@@ -1240,7 +1241,8 @@ impl Checker<'_> {
                     let diag = self
                         .error(msg::TYPE_VALUE_RETURNS_BORROW, range)
                         .with("name", n)
-                        .with("param", p.name.clone());
+                        .with("param", p.name.clone())
+                        .note(msg::TYPE_CALL_INSTEAD, Vec::new());
                     self.report(diag);
                     return Expr::error(span);
                 }
@@ -2477,13 +2479,17 @@ impl Checker<'_> {
                 let local = &self.locals[cap.local.0 as usize];
                 let (name, ty) = (local.name.clone(), local.ty.clone());
                 if cap.mutable {
-                    let d = self.error(msg::TYPE_OWN_CLOSURE_CHANGES, range).with("name", name);
+                    let d = self
+                        .error(msg::TYPE_OWN_CLOSURE_CHANGES, range)
+                        .with("name", name)
+                        .note(msg::TYPE_PLAIN_CLOSURE, Vec::new());
                     self.report(d);
                 } else if !self.is_copy(&ty) && self.infer.zonk(&ty) != Ty::Error {
                     let d = self
                         .error(msg::TYPE_OWN_CLOSURE_CAPTURE, range)
                         .with("name", name)
-                        .with("ty", self.show(&ty));
+                        .with("ty", self.show(&ty))
+                        .note(msg::TYPE_CAPTURE_COPY, Vec::new());
                     self.report(d);
                 }
             }

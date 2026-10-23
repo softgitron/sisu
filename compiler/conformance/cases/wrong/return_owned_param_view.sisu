@@ -1,0 +1,8 @@
+# A wrong program: a function returns a view of a text it was given to
+# own, which is gone when it returns.
+
+def trimmed(own s: String) -> str:
+    return s.trim()
+
+def main():
+    print(trimmed("  hi  ".to_string()))

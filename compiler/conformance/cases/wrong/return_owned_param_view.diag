@@ -1,0 +1,2 @@
+5:5-5:20 E0407 borrow.return-local name="s" function="trimmed"
+  label 5:12-5:13 borrow.borrowed-here

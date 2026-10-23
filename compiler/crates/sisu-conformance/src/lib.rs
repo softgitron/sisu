@@ -456,6 +456,34 @@ impl Runner<'_> {
         }
     }
 
+    /// `NAME.doc` (decision 258): what `sisu doc` prints, each page after a
+    /// line naming its file; then the pages `--output DIR` writes, which
+    /// must be the pages it printed.
+    fn doc_checks(&mut self, case: &Case, cwd: &Path, expected: &str, args: &[String]) {
+        let out = invoke(self.sisu, cwd, args);
+        self.compare(case, &args.join(" "), Some("doc"), expected, &out.stdout);
+        let dir = cwd.join("sisu-doc-output");
+        let mut written = args.to_vec();
+        written.push("--output".into());
+        written.push(dir.display().to_string());
+        let wrote = invoke(self.sisu, cwd, &written);
+        let mut pages = String::new();
+        for line in out.stdout.lines() {
+            if let Some(file) = line.strip_prefix("<!-- ").and_then(|l| l.strip_suffix(" -->")) {
+                let text = std::fs::read_to_string(dir.join(file)).unwrap_or_default();
+                pages.push_str(&format!("{line}\n{text}"));
+            }
+        }
+        self.compare(
+            case,
+            "sisu doc --output writes the pages it prints",
+            None,
+            &format!("{}--- status {}\n", out.stdout, out.status),
+            &format!("{pages}--- status {}\n", wrote.status),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// `NAME.watch` (10, "Debugging and profiling"): the program under
     /// `sisu run --watch ARGS...`, which saves new versions of its own
     /// files (from its `NAME.files/`) to drive the swaps, so it runs in a
@@ -522,7 +550,6 @@ impl Runner<'_> {
             ("tree", vec!["parse", "--tree"]),
             ("sir", vec!["sir"]),
             ("test", vec!["test"]),
-            ("doc", vec!["check", "--explain"]),
         ] {
             let Some(expected) = case.expected(ext) else { continue };
             let mut a = s(&args);
@@ -547,6 +574,16 @@ impl Runner<'_> {
             }
         }
 
+        // `NAME.doc`: the pages of `sisu doc NAME.sisu`, or of `sisu doc
+        // ARGS` when a line `# doc ARGS` gives them (`# doc --std`).
+        if let Some(expected) = case.expected("doc") {
+            let mut a = s(&["doc"]);
+            match source.lines().find_map(|l| l.trim().strip_prefix("# doc ")) {
+                Some(given) => a.extend(given.split_whitespace().map(str::to_string)),
+                None => a.push(file.clone()),
+            }
+            self.doc_checks(case, &sandbox.dir, &expected, &a);
+        }
         let args: Vec<String> =
             case.expected("args").map(|a| a.lines().map(str::to_string).collect()).unwrap_or_default();
         // `NAME.stdin`: what every run of the program reads.
@@ -799,6 +836,9 @@ impl Runner<'_> {
             let out = invoke(self.sisu, &cwd, &s(&["build"]));
             let shown = format!("{}--- stderr\n{}--- status {}\n", out.stdout, out.stderr, out.status);
             self.compare(case, "sisu build", Some("build"), &expected, &shown);
+        }
+        if let Some(expected) = case.expected("doc") {
+            self.doc_checks(case, &cwd, &expected, &s(&["doc"]));
         }
         if let Some(expected) = case.expected("test") {
             let out = invoke(self.sisu, &cwd, &s(&["test"]));

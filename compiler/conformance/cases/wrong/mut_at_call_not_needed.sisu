@@ -1,0 +1,11 @@
+# A wrong program: a call says `mut` for a parameter that only reads.
+
+def total(xs: list[int]) -> int:
+    var t = 0
+    for x in xs:
+        t += x
+    return t
+
+def main():
+    var xs = [1, 2]
+    print(total(mut xs))

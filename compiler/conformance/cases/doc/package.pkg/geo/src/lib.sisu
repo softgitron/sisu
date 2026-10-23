@@ -1,0 +1,18 @@
+##! Geometry for the plane: shapes, and storing them.
+##!
+##! The root module's page lists the modules under it.
+
+pub from geo.shapes import Shape as Figure
+pub from units import Meters
+pub import geo.store
+
+## How far apart two coordinates may be and still be the same.
+pub const EPSILON: f64 = 0.000001
+
+## Private: the page leaves it out.
+def helper() -> int:
+    return 1
+
+## Seen by every module of `geo`, and by no other package: left out too.
+pub(package) def counted() -> int:
+    return helper() + 1

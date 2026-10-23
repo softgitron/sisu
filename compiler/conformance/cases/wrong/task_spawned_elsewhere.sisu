@@ -1,0 +1,9 @@
+# A wrong program: a function given a scope spawns a task that borrows
+# the function's parameter, which the scope may outlive.
+
+def start(s: Scope, names: list[String]):
+    s.spawn(() -> print(len(names)))
+
+def main():
+    task.scope do s:
+        start(s, ["a".to_string()])

@@ -1,0 +1,7 @@
+# A wrong program: a `let` declared without a value is assigned twice.
+
+def main():
+    let size: int
+    size = 1
+    size = 2
+    print(size)

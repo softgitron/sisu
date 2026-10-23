@@ -610,6 +610,36 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.b.switch_to_block(cont);
     }
 
+    /// A call of a constant's function that only returns a literal, read
+    /// without the call (decision 260): what its entry does that anything
+    /// can see, the count of nested calls past the limit (the overflow,
+    /// named after the constant) and the yield point, then the literal.
+    fn constant_read(&mut self, dest: &Place, name: &str, c: &Const) -> Result<(), Error> {
+        let a = self.depth_addr();
+        let d = self.load(a, 0);
+        let d1 = self.b.ins().iadd_imm(d, 1);
+        let over = self.b.ins().icmp_imm(IntCC::SignedGreaterThan, d1, abi::MAX_DEPTH);
+        let (overflow, counted) = (self.b.create_block(), self.b.create_block());
+        self.b.ins().brif(over, overflow, &[], counted, &[]);
+        self.b.set_cold_block(overflow);
+        self.b.switch_to_block(overflow);
+        // As the function's entry does: the count is one more while the
+        // runtime decides, and back as it was after.
+        self.store_word(d1, a, 0);
+        let shown = display_fn_name(name, self.cg.prog);
+        let text = self.cg.text(shown.as_bytes())?;
+        let text = self.data_addr(text);
+        let len = self.iconst(shown.len() as i64);
+        let st = self.rt_status(sym::PANIC_STACK, &[text, len])?;
+        let a = self.depth_addr();
+        self.store_word(d, a, 0);
+        self.check(st);
+        self.b.ins().jump(counted, &[]);
+        self.b.switch_to_block(counted);
+        self.yield_check()?;
+        self.statement(&StatementKind::Assign(dest.clone(), Rvalue::Use(Operand::Const(c.clone()))))
+    }
+
     /// A yield point (decision 85): one less of the budget, and the
     /// scheduler when it is spent.
     fn yield_check(&mut self) -> Result<(), Error> {
@@ -831,6 +861,13 @@ impl<'a, 'p> Cx<'a, 'p> {
                     self.count_at(addr, &dest)?;
                 }
                 Ok(())
+            }
+            StatementKind::Call { dest, callee: Callee::Fn(name, tys), args }
+                if tys.is_empty()
+                    && args.is_empty()
+                    && let Some(c) = self.cg.function(name).and_then(returned_constant) =>
+            {
+                self.constant_read(dest, name, c)
             }
             StatementKind::Call { dest, callee, args } => {
                 // A call's result goes to its destination's memory: a
@@ -2426,8 +2463,10 @@ impl<'a, 'p> Cx<'a, 'p> {
     /// option's tag, and the next item of a range or of a borrowed list's
     /// elements. Each reads only what is borrowed or `Copy`, so nothing is
     /// left to drop. Where the runtime raises a panic (an index out of
-    /// bounds), grows a list, or keeps an iterator's state itself, the
-    /// code calls it after all.
+    /// bounds) or keeps an iterator's state itself, the code calls it
+    /// after all; where it grows a list, builds a text or looks a key up,
+    /// the code calls an entry of its own, without the descriptor
+    /// (decision 265).
     fn inline_intrinsic(
         &mut self,
         i: Intrinsic,
@@ -2437,6 +2476,16 @@ impl<'a, 'p> Cx<'a, 'p> {
         use Intrinsic as I;
         let named = |t: &Type, names: &[&str]| matches!(t, Type::Named(n, _) if names.contains(&n.as_str()));
         let text = |t: &Type| matches!(t, Type::Str) || named(t, &["String", "Path"]);
+        // A formatter is the `String` it builds, empty at first (decision
+        // 265).
+        if i == I::FmtNew && named(&self.place_type(dest)?, &["String"]) {
+            let (d, _) = self.place(dest, None)?;
+            let zero = self.iconst(0);
+            for k in 0..3 {
+                self.store_word(zero, d, 8 * k);
+            }
+            return Ok(Fast::Done);
+        }
         let Some((a0, t0)) = argv.first().cloned() else { return Ok(Fast::No) };
         // Only arguments read in place, or holding nothing to drop: a value
         // moved into the call may be the runtime's to drop afterwards
@@ -2451,6 +2500,70 @@ impl<'a, 'p> Cx<'a, 'p> {
                 let len = self.load(b, 8);
                 let (d, _) = self.place(dest, None)?;
                 self.store_word(len, d, 0);
+                Ok(Fast::Done)
+            }
+            // A reference to a `Shared`'s value is the address the handle
+            // holds; reaching the cell counts for `--stats`, as a
+            // dereference does (decision 260).
+            I::SharedGet if named(&bt, &["Shared"]) => {
+                let v = self.load(b, 0);
+                self.rt(sym::SHARED_TOUCH, &[v])?;
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(v, d, 0);
+                Ok(Fast::Done)
+            }
+            // Text appended to a `String` (a formatter's too), and a new
+            // `String` from a text, by the runtime's own entries rather
+            // than the descriptor (decision 265): the text's address and
+            // length, or an `int`'s value for its digits. Only what is read
+            // in place: a value moved in is the runtime's to drop afterwards
+            // (decision 218).
+            I::FmtText | I::FmtDisplay | I::StringPush if named(&bt, &["String"]) => {
+                let Some((a1, t1)) = argv.get(1).cloned() else { return Ok(Fast::No) };
+                if !matches!(t1, Type::Ref(..) | Type::Str) && self.cg.types.needs_drop(&t1)? {
+                    return Ok(Fast::No);
+                }
+                let (v, vt) = self.base_of(a1, &t1);
+                if text(&vt) {
+                    let (ptr, len) = (self.load(v, 0), self.load(v, 8));
+                    self.rt(sym::TEXT_PUSH, &[b, ptr, len])?;
+                    return Ok(Fast::Done);
+                }
+                if vt == Type::Int && i == I::FmtDisplay {
+                    let n = self.load(v, 0);
+                    self.rt(sym::TEXT_PUSH_INT, &[b, n])?;
+                    return Ok(Fast::Done);
+                }
+                Ok(Fast::No)
+            }
+            I::StrToString | I::StringNew if text(&bt) && named(&self.place_type(dest)?, &["String"]) => {
+                let (ptr, len) = (self.load(b, 0), self.load(b, 8));
+                let (d, _) = self.place(dest, None)?;
+                self.rt(sym::TEXT_FROM, &[d, ptr, len])?;
+                Ok(Fast::Done)
+            }
+            // A key looked up in a dict or a set by the runtime's own entry
+            // rather than the descriptor (decision 265): the address of its
+            // value, or whether it is there. The key is read in place.
+            I::DictGet | I::DictContains | I::SetContains if named(&bt, &["dict", "set"]) => {
+                let Some((a1, t1)) = argv.get(1).cloned() else { return Ok(Fast::No) };
+                if !matches!(t1, Type::Ref(..) | Type::Str) && self.cg.types.needs_drop(&t1)? {
+                    return Ok(Fast::No);
+                }
+                let kt = self.type_id(&t1)?;
+                let kt = self.i32const(kt);
+                let value = self.i32const(u32::from(i == I::DictGet));
+                let found = self.rt_status(sym::TABLE_FIND, &[b, a1, kt, value])?;
+                let (d, _) = self.place(dest, None)?;
+                if i == I::DictGet {
+                    // `Some` (tag 0) of the value's address, or `None` (1).
+                    let none = self.b.ins().icmp_imm(IntCC::Equal, found, 0);
+                    let tag = self.b.ins().uextend(types::I64, none);
+                    self.store_word(tag, d, 0);
+                    self.store_word(found, d, 8);
+                } else {
+                    self.store_word(found, d, 0);
+                }
                 Ok(Fast::Done)
             }
             I::ListIsEmpty if named(&bt, &["list"]) => {
@@ -2638,9 +2751,17 @@ impl<'a, 'p> Cx<'a, 'p> {
                 self.b.switch_to_block(slow);
                 Ok(Fast::Slow(done))
             }
-            I::Max | I::Min if t0 == Type::Int && argv.get(1).is_some_and(|(_, t)| *t == Type::Int) => {
-                let Some((a1, _)) = argv.get(1).cloned() else { return Ok(Fast::No) };
-                let (x, y) = (self.load(b, 0), self.load(a1, 0));
+            // Two `int`s, or references to them, which a generic function
+            // that takes its `T` by reference passes (decision 59): the
+            // result is the value either way (decision 264).
+            I::Max | I::Min
+                if bt == Type::Int
+                    && argv.get(1).is_some_and(|(_, t)| target_type(t) == Type::Int)
+                    && self.place_type(dest)? == Type::Int =>
+            {
+                let Some((a1, t1)) = argv.get(1).cloned() else { return Ok(Fast::No) };
+                let (b1, _) = self.base_of(a1, &t1);
+                let (x, y) = (self.load(b, 0), self.load(b1, 0));
                 // The first unless the second is the greater (`max`) or
                 // the less (`min`).
                 let cc = if i == I::Max { IntCC::SignedLessThan } else { IntCC::SignedGreaterThan };
@@ -2657,9 +2778,14 @@ impl<'a, 'p> Cx<'a, 'p> {
                 let len = self.load(b, 8);
                 let cap = self.load(b, 16);
                 let room = self.b.ins().icmp(IntCC::UnsignedLessThan, len, cap);
-                let (fast, slow, done) =
-                    (self.b.create_block(), self.b.create_block(), self.b.create_block());
-                self.b.ins().brif(room, fast, &[], slow, &[]);
+                let (fast, grow) = (self.b.create_block(), self.b.create_block());
+                self.b.ins().brif(room, fast, &[], grow, &[]);
+                // Without room, the runtime grows the buffer as its push
+                // would, and the element goes in as with room (decision 265).
+                self.b.switch_to_block(grow);
+                let bytes = self.iconst(i64::from(size));
+                self.rt(sym::LIST_RESERVE, &[b, bytes])?;
+                self.b.ins().jump(fast, &[]);
                 self.b.switch_to_block(fast);
                 let data = self.load(b, 0);
                 let off = self.b.ins().imul_imm(len, i64::from(size));
@@ -2667,9 +2793,7 @@ impl<'a, 'p> Cx<'a, 'p> {
                 self.copy_bytes(at, a1, size);
                 let more = self.b.ins().iadd_imm(len, 1);
                 self.store_word(more, b, 8);
-                self.b.ins().jump(done, &[]);
-                self.b.switch_to_block(slow);
-                Ok(Fast::Slow(done))
+                Ok(Fast::Done)
             }
             I::IterNext if named(&bt, &["Iter"]) => {
                 let obj = self.load(b, 0);
@@ -3193,6 +3317,25 @@ pub(crate) fn match_type(pat: &Type, ty: &Type, binds: &mut [Option<Type>]) -> b
             matches!(ty, Type::Dyn(m, b) if m == n && a.len() == b.len() && a.iter().zip(b).all(|(x, y)| match_type(x, y, binds)))
         }
         other => other == ty,
+    }
+}
+
+/// The literal a constant's function returns, when that is all it does:
+/// one block that assigns it to the result and returns (`const LIMIT: int
+/// = 5`).
+fn returned_constant(f: &sir::Function) -> Option<&Const> {
+    if f.kind != sir::FnKind::Value || f.param_count != 0 || !f.type_params.is_empty() {
+        return None;
+    }
+    let [block] = f.blocks.as_slice() else { return None };
+    let [stmt] = block.stmts.as_slice() else { return None };
+    match (&stmt.kind, &block.term) {
+        (StatementKind::Assign(p, Rvalue::Use(Operand::Const(c))), Terminator::Return)
+            if p.local.0 == 0 && p.proj.is_empty() && !matches!(c, sir::Const::Fn(_)) =>
+        {
+            Some(c)
+        }
+        _ => None,
     }
 }
 

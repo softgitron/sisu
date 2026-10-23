@@ -1,8 +1,7 @@
 //! The driver: the query layer ([`db`]) that `sisu check`, `sisu run` and
 //! later the language server share, the command line ([`cli`]), the
-//! counts of `sisu audit --ownership` ([`audit`]), the signatures of
-//! `sisu check --explain` ([`doc`]) and the replay tokens of failing tests
-//! ([`replay`]).
+//! counts of `sisu audit --ownership` ([`audit`]), the pages of `sisu
+//! doc` ([`doc`]) and the replay tokens of failing tests ([`replay`]).
 
 pub mod assist;
 pub mod audit;

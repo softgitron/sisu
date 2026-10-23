@@ -1,0 +1,10 @@
+# A wrong program: a function that changes its argument is called without
+# `mut` at the call.
+
+def add_total(mut xs: list[int]):
+    xs.push(0)
+
+def main():
+    var xs = [1, 2]
+    add_total(xs)
+    print(xs)

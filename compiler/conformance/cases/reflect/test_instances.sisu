@@ -1,0 +1,24 @@
+# A test whose body reflects is a template made once, and its instance is
+# a test (decisions 251 and 259): a contract in it is `E0807` and a value
+# it returns `E0381`, as in a test written out. Its instance used to be
+# checked as a function, which took the contract for a precondition and
+# named itself in `E0316`. The positions are in each instance's text
+# (`<NAME>/main.sisu`), which `--format=ids` does not name for one file.
+
+struct Point:
+    x: int
+    y: int
+
+test "a contract":
+    requires True
+    var n = 0
+    comptime for f in reflect.fields_of(Point):
+        n += 1
+    assert n == 2
+
+test "a returned value":
+    var n = 0
+    comptime for f in reflect.fields_of(Point):
+        n += 1
+    if n == 2:
+        return 1

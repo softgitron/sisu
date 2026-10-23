@@ -1,49 +1,141 @@
+<!-- proposal_contracts.md -->
+# `proposal_contracts`
+
+## Contents
+
+- [`binary_search`](#binary_search)
+- [`Account`](#Account)
+- [`Overdrawn`](#Overdrawn)
+- [`Port`](#Port)
+- [`Percent`](#Percent)
+- [`NonEmpty`](#NonEmpty)
+- [`listen`](#listen)
+- [`demo`](#demo)
+- [`Money`](#Money)
+- [`TcpListener`](#TcpListener)
+- [`main`](#main)
+
+<a id="binary_search"></a>
+## `binary_search`
+
+```sisu
 def binary_search[T: Ord](items: Slice[T], target: T) -> int?
     requires items.is_sorted()
     ensures match result:
         case Some(i): items[i] == target
         case None: not items.contains(target)
+```
 
+<a id="Account"></a>
+## `Account`
+
+```sisu
 struct Account
     balance: Money
     limit: Money
     invariant self.balance >= -self.limit
+```
 
-    def withdraw(mut self, amount: Money)
-        requires amount > Money.ZERO
-        ensures self.balance == old(self.balance) - amount
-        # re-checks the invariant of `Account` on return
+<a id="Account.withdraw"></a>
+### `Account.withdraw`
 
-    def try_withdraw(mut self, amount: Money) -> ! Overdrawn
-        # re-checks the invariant of `Account` on return
+```sisu
+def withdraw(mut self, amount: Money)
+    requires amount > Money.ZERO
+    ensures self.balance == old(self.balance) - amount
+    # re-checks the invariant of `Account` on return
+```
 
+<a id="Account.try_withdraw"></a>
+### `Account.try_withdraw`
+
+```sisu
+def try_withdraw(mut self, amount: Money) -> ! Overdrawn
+    # re-checks the invariant of `Account` on return
+```
+
+<a id="Overdrawn"></a>
+## `Overdrawn`
+
+```sisu
 error Overdrawn
     Overdrawn
+```
 
+<a id="Port"></a>
+## `Port`
+
+```sisu
 type Port = int where 1 <= self <= 65535
     def try_from(value: int) -> Port ! RefinementError
+```
 
+<a id="Percent"></a>
+## `Percent`
+
+```sisu
 type Percent = int where 0 <= self <= 100
     def try_from(value: int) -> Percent ! RefinementError
+```
 
+<a id="NonEmpty"></a>
+## `NonEmpty`
+
+```sisu
 type NonEmpty[T] = list[T] where not self.is_empty()
     def try_from(value: list[T]) -> NonEmpty[T] ! RefinementError
 
+impl[T: Copy] NonEmpty[T]
+```
+
+<a id="NonEmpty.first"></a>
+### `NonEmpty.first`
+
+```sisu
+def first(self) -> T
+```
+
+<a id="listen"></a>
+## `listen`
+
+```sisu
 def listen(net: Net, port: Port) -> TcpListener ! NetError
+```
 
+Capabilities: `net` (`Net`).
+
+<a id="demo"></a>
+## `demo`
+
+```sisu
 def demo(net: Net, user_input: int)
+```
 
+Capabilities: `net` (`Net`).
+
+<a id="Money"></a>
+## `Money`
+
+```sisu
 @derive(Copy, Eq, Ord)
 @delegate(Add, Sub, Neg, Display, to="cents")
 struct Money
     cents: int
-
-impl Money
     const ZERO: Money
 
+impl Money
+```
+
+<a id="TcpListener"></a>
+## `TcpListener`
+
+```sisu
 type TcpListener = Listener
+```
 
-impl[T: Copy] NonEmpty[T]
-    def first(self) -> T
+<a id="main"></a>
+## `main`
 
+```sisu
 def main()
+```

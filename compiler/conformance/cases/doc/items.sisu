@@ -1,0 +1,170 @@
+##! `sisu doc` on a single file (decision 258): a page with every kind of
+##! item. A single file shows everything, `pub` or not; its tests and its
+##! `@cfg(test)` helpers are left out, as `sisu build` leaves them out.
+##!
+##! The `##!` lines are the page's introduction, as Markdown.
+
+from std.time import Duration
+
+## A point in the plane.
+##
+## Two points are equal when their coordinates are.
+@derive(Eq)
+struct Point:
+    ## Across.
+    x: int
+    ## Up, zero unless given.
+    y: int = 0
+
+    ## The origin.
+    const ORIGIN: Point = Point(x=0, y=0)
+
+    ## The distance to `other`, in steps along the axes.
+    ##
+    ## ```
+    ## assert Point(x=1, y=2).steps(Point(x=4, y=6)) == 7
+    ## ```
+    def steps(self, other: Point) -> int:
+        return abs(self.x - other.x) + abs(self.y - other.y)
+
+impl Display for Point:
+    def fmt(self, mut f: Formatter):
+        f.write("({self.x}, {self.y})")
+
+impl Point:
+    ## The point moved by `dx` across.
+    def moved(self, dx: int) -> Point:
+        return Point(x=self.x + dx, y=self.y)
+
+## A counter that never goes above its limit.
+struct Counter:
+    count: int
+    limit: int
+    invariant 0 <= self.count <= self.limit
+
+    ## Counts one more, up to the limit.
+    def bump(mut self) -> bool:
+        ensures self.count <= self.limit
+        if self.count == self.limit:
+            return False
+        self.count += 1
+        return True
+
+## The shapes there are.
+@derive(Eq)
+enum Shape:
+    ## A circle around the origin.
+    Circle(radius: int)
+    Square(side: int)
+
+## What reading a shape can go wrong with.
+@derive(Eq)
+error ShapeError:
+    Empty
+    Unknown(name: String)
+    ..
+
+## Something with an area.
+trait Area:
+    ## The unit the area is in.
+    type Unit
+
+    ## The area.
+    def area(self) -> int
+
+    ## Whether there is no area at all.
+    def is_empty(self) -> bool:
+        return self.area() == 0
+
+impl Area for Shape:
+    type Unit = int
+
+    def area(self) -> int:
+        match self:
+            case Circle(r):
+                return 3 * r * r
+            case Square(s):
+                return s * s
+
+## Lists have areas too: the sum of their parts'.
+impl Area for list[Shape]:
+    type Unit = int
+
+    def area(self) -> int:
+        var total = 0
+        for s in self:
+            total += s.area()
+        return total
+
+## The most shapes a drawing holds.
+const MAX_SHAPES: int = 64
+
+## A drawing's shapes.
+type Drawing = list[Shape]
+
+## A size that is never negative.
+type Size = int where self >= 0
+
+## Reads a shape from its name.
+##
+## The names are those `Shape` has, in lower case:
+##
+## ```text
+## circle 3
+## square 2
+## ```
+##
+## ```
+## assert parse("circle 2") == Ok(Circle(2))
+## ```
+def parse(text: str) -> Shape !:
+    requires len(text) < 100
+    let parts = text.split(" ").collect()
+    if len(parts) != 2:
+        return Err(Empty)
+    let n = parts[1].parse_int() else:
+        return Err(Unknown(name=text.to_string()))
+    match parts[0]:
+        case "circle":
+            return Ok(Circle(n))
+        case "square":
+            return Ok(Square(n))
+        case _:
+            return Err(Unknown(name=parts[0].to_string()))
+
+## Draws a drawing to a file.
+def save(
+    fs: Fs,
+    drawing: Drawing,
+    path: Path,
+) -> ! IoError:
+    fs.write_text(path, "{len(drawing)} shapes")?
+    return Ok(())
+
+## What a drawing needs from the world.
+struct Studio:
+    fs: Fs
+    clock: Clock
+
+## Opens a studio.
+def open(studio: Studio, name: str, wait: Duration):
+    print(name)
+    print(wait)
+
+## Reads a drawing back through any file system.
+def load[F: FsOps](fs: F, path: Path) -> Drawing !:
+    let text = fs.read_to_string(path)?
+    return Ok([parse(text)?])
+
+## Not finished yet.
+def scale(own d: Drawing, by: int) -> Drawing:
+    if by == 1:
+        return d
+    return todo("scale")
+
+@cfg(test)
+def helper() -> int:
+    return 1
+
+test "parses a circle":
+    assert parse("circle 1") == Ok(Circle(1))

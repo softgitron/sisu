@@ -3,7 +3,7 @@
 //! guarantees, as its documentation in `abi` describes.
 
 use crate::abi::{self, IntOp, Kind, ValueOp};
-use crate::mem::{self, Text};
+use crate::mem::{self, List, Text};
 use crate::rt::{self, ty};
 use crate::sched::{system, system_status};
 use crate::value;
@@ -572,6 +572,101 @@ unsafe extern "C" fn sisu_rt_bytes_eq(a: *const u8, b: *const u8, n: u64) -> u8 
     let (x, y) =
         unsafe { (std::slice::from_raw_parts(a, n as usize), std::slice::from_raw_parts(b, n as usize)) };
     u8::from(x == y)
+}
+
+/// The `n` bytes at `b`, or none.
+///
+/// # Safety
+/// Unless `n` is 0, `b` must hold `n` bytes, which must outlive the slice.
+unsafe fn bytes_at<'a>(b: *const u8, n: u64) -> &'a [u8] {
+    if n == 0 {
+        return &[];
+    }
+    // SAFETY: as the caller guarantees.
+    unsafe { std::slice::from_raw_parts(b, n as usize) }
+}
+
+/// Appends `n` bytes at `b` to the `String` at `t`, without the
+/// intrinsic's descriptor (decision 265): `fmt.text`, `fmt.display` of a
+/// text and `String.push`. Bytes of the text itself, which a program the
+/// ownership checker accepts never pushes, are copied out first.
+///
+/// # Safety
+/// `t` must hold a `String`, and `b` `n` bytes.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_text_push(t: *mut u8, b: *const u8, n: u64) {
+    let (t, b) = (t as usize, b as usize);
+    // SAFETY: as the caller guarantees.
+    system(|| unsafe {
+        let text = mem::at::<Text>(t as *mut u8);
+        let bytes = bytes_at(b as *const u8, n);
+        let start = text.ptr as usize;
+        if !text.ptr.is_null() && b >= start && b < start + text.cap as usize {
+            let own = bytes.to_vec();
+            text.push(&own);
+        } else {
+            text.push(bytes);
+        }
+    })
+}
+
+/// Appends the decimal digits of `n` to the `String` at `t`, as `Display`
+/// writes an `int` (decision 265).
+///
+/// # Safety
+/// `t` must hold a `String`.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_text_push_int(t: *mut u8, n: i64) {
+    let t = t as usize;
+    let mut buf = [0u8; 20];
+    let digits = value::int_digits(n, &mut buf);
+    let (d, len) = (digits.as_ptr() as usize, digits.len());
+    // SAFETY: as the caller guarantees; the digits are in `buf`.
+    system(|| unsafe { mem::at::<Text>(t as *mut u8).push(bytes_at(d as *const u8, len as u64)) })
+}
+
+/// Writes at `dst` a new `String` holding the `n` bytes at `b`
+/// (decision 265): `str.to_string` and `String.new`.
+///
+/// # Safety
+/// `dst` must have room for a `String`, and `b` hold `n` bytes.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_text_from(dst: *mut u8, b: *const u8, n: u64) {
+    let (dst, b) = (dst as usize, b as usize);
+    // SAFETY: as the caller guarantees.
+    system(|| unsafe { value::write_string(dst as *mut u8, bytes_at(b as *const u8, n)) })
+}
+
+/// Looks a key up in the `dict` or `set` at `t`, without the intrinsic's
+/// descriptor (decision 265): for `dict.get` (`value` 1) the address of
+/// the key's value, for `contains` 1, when the key is there; else 0.
+///
+/// # Safety
+/// `t` must hold a dict or a set, and `key` a value of type `kt`.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_table_find(t: *mut u8, key: *mut u8, kt: u32, value: u32) -> u64 {
+    let (t, key) = (t as usize, key as usize);
+    // SAFETY: as the caller guarantees.
+    system(|| unsafe {
+        let table = crate::dict::table(t as *mut u8);
+        match table.position(key as *mut u8, kt) {
+            Some(i) if value != 0 => table.val_at(i) as u64,
+            Some(_) => 1,
+            None => 0,
+        }
+    })
+}
+
+/// Room for one more element of `size` bytes in the list at `l`: a push
+/// compiled inline that finds no room (decision 265).
+///
+/// # Safety
+/// `l` must hold a list of elements of `size` bytes.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_list_reserve(l: *mut u8, size: u64) {
+    let l = l as usize;
+    // SAFETY: as the caller guarantees.
+    system(|| unsafe { mem::at::<List>(l as *mut u8).reserve(1, size as u32) })
 }
 
 /// A call of an intrinsic: `desc` says which and the types of its

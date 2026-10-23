@@ -13,9 +13,42 @@ static TYPES: OnceLock<Vec<TypeEntry>> = OnceLock::new();
 static NEEDS_DROP: OnceLock<Vec<bool>> = OnceLock::new();
 /// Whether a copy of a value of each type is a copy of its bytes.
 static PLAIN: OnceLock<Vec<bool>> = OnceLock::new();
+/// The parts of each struct, tuple and enum variant that a copy copies
+/// again over the value's bytes (decision 262).
+static COPY_PARTS: OnceLock<Vec<CopyParts>> = OnceLock::new();
+/// The parts of each struct, tuple and enum variant that a drop drops
+/// (decision 266).
+static DROP_PARTS: OnceLock<Vec<DropParts>> = OnceLock::new();
 /// The addresses of the program's functions the type table names (drop
 /// glue), as integers.
 static FNS: OnceLock<Vec<usize>> = OnceLock::new();
+
+/// How a value of a type that is not plain is copied, when it is not by
+/// its kind's own rule: its bytes, then each part that owns something
+/// (its offset and type) copied over them, a struct's or a tuple's
+/// fields, through the structs and tuples it holds in place; for an enum,
+/// such parts of each variant.
+#[derive(Clone, Debug, Default)]
+pub(crate) enum CopyParts {
+    #[default]
+    ByKind,
+    Parts(Vec<(u32, u32)>),
+    Variants(Vec<Vec<(u32, u32)>>),
+}
+
+/// How a value of a type that needs a drop is dropped, when it is not by
+/// its kind's own rule: each part that needs one (its offset and type), in
+/// the order that rule drops them, a struct's fields and a tuple's
+/// elements last to first, through the structs without drop glue and the
+/// tuples it holds in place; for an enum without glue that is not an
+/// error set, such parts of each variant.
+#[derive(Clone, Debug, Default)]
+pub(crate) enum DropParts {
+    #[default]
+    ByKind,
+    Parts(Vec<(u32, u32)>),
+    Variants(Vec<Vec<(u32, u32)>>),
+}
 
 /// A compiled function that takes one value: `fn(ret, value) -> status`.
 pub(crate) type ValueFn = unsafe extern "C" fn(*mut u8, *mut u8) -> u8;
@@ -23,9 +56,13 @@ pub(crate) type ValueFn = unsafe extern "C" fn(*mut u8, *mut u8) -> u8;
 pub(crate) fn init(types: Vec<TypeEntry>, fns: Vec<usize>) {
     let needs = needs_drop_table(&types);
     let plain = plain_table(&types, &needs);
+    let parts = copy_parts_table(&types, &plain);
+    let drops = drop_parts_table(&types, &needs);
     let _ = TYPES.set(types);
     let _ = NEEDS_DROP.set(needs);
     let _ = PLAIN.set(plain);
+    let _ = COPY_PARTS.set(parts);
+    let _ = DROP_PARTS.set(drops);
     let _ = FNS.set(fns);
 }
 
@@ -50,6 +87,148 @@ pub(crate) fn needs_drop(id: u32) -> bool {
 /// nothing and holds no lock, whose copy starts unlocked.
 pub(crate) fn plain(id: u32) -> bool {
     PLAIN.get().and_then(|t| t.get(id as usize)).copied().unwrap_or(false)
+}
+
+/// How a value of type `id` that is not plain is copied ([`CopyParts`]).
+pub(crate) fn copy_parts(id: u32) -> &'static CopyParts {
+    static BY_KIND: CopyParts = CopyParts::ByKind;
+    COPY_PARTS.get().and_then(|t| t.get(id as usize)).unwrap_or(&BY_KIND)
+}
+
+/// How a value of type `id` that needs a drop is dropped ([`DropParts`]).
+pub(crate) fn drop_parts(id: u32) -> &'static DropParts {
+    static BY_KIND: DropParts = DropParts::ByKind;
+    DROP_PARTS.get().and_then(|t| t.get(id as usize)).unwrap_or(&BY_KIND)
+}
+
+/// [`DropParts`] for every type that needs a drop: a struct without drop
+/// glue whose fields no glue drops, a tuple, and an enum whose variants
+/// are such, that is not an error set (whose drop lets go of its return
+/// trace). What a drop by the parts does is what the kinds' rules do: a
+/// struct without glue drops its fields that need it last to first, as a
+/// tuple its elements, so opening one in place keeps the order, and the
+/// status after each part is combined as before.
+fn drop_parts_table(types: &[TypeEntry], needs: &[bool]) -> Vec<DropParts> {
+    fn opened(entry: &TypeEntry) -> bool {
+        match &entry.kind {
+            Kind::Struct { fields, glue: None, .. } => fields.iter().all(|f| !f.glue),
+            Kind::Tuple(_) => true,
+            _ => false,
+        }
+    }
+    fn open(types: &[TypeEntry], needs: &[bool], t: u32, at: u32, out: &mut Vec<(u32, u32)>, depth: u32) {
+        if !needs.get(t as usize).copied().unwrap_or(false) {
+            return;
+        }
+        let inner: Vec<(u32, u32)> = match types.get(t as usize) {
+            Some(entry) if depth < 16 && opened(entry) => match &entry.kind {
+                Kind::Struct { fields, .. } => fields.iter().rev().map(|f| (f.offset, f.ty)).collect(),
+                Kind::Tuple(slots) => slots.iter().rev().map(|s| (s.offset, s.ty)).collect(),
+                _ => Vec::new(),
+            },
+            _ => {
+                out.push((at, t));
+                return;
+            }
+        };
+        for (off, ty) in inner {
+            open(types, needs, ty, at + off, out, depth + 1);
+        }
+    }
+    types
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| {
+            if !needs.get(i).copied().unwrap_or(false) {
+                return DropParts::ByKind;
+            }
+            match &entry.kind {
+                Kind::Struct { .. } | Kind::Tuple(_) if opened(entry) => {
+                    let mut parts = Vec::new();
+                    open(types, needs, i as u32, 0, &mut parts, 0);
+                    DropParts::Parts(parts)
+                }
+                Kind::Enum { variants, glue: None, error: false, .. }
+                    if variants.iter().all(|v| v.fields.iter().all(|f| !f.glue)) =>
+                {
+                    let all = variants
+                        .iter()
+                        .map(|v| {
+                            let mut parts = Vec::new();
+                            for f in v.fields.iter().rev() {
+                                open(types, needs, f.ty, f.offset, &mut parts, 1);
+                            }
+                            parts
+                        })
+                        .collect();
+                    DropParts::Variants(all)
+                }
+                _ => DropParts::ByKind,
+            }
+        })
+        .collect()
+}
+
+/// [`CopyParts`] for every type: the parts of a struct's fields, a tuple's
+/// elements and each variant's fields that are not plain, each in place,
+/// a struct or tuple among them opened into its own parts at its offset,
+/// in order. A struct or tuple that holds a lock in place keeps its kind's
+/// rule, which a copy of a lock needs.
+fn copy_parts_table(types: &[TypeEntry], plain: &[bool]) -> Vec<CopyParts> {
+    fn open(
+        types: &[TypeEntry],
+        plain: &[bool],
+        t: u32,
+        at: u32,
+        out: &mut Vec<(u32, u32)>,
+        depth: u32,
+    ) -> bool {
+        if plain.get(t as usize).copied().unwrap_or(false) {
+            return true;
+        }
+        let Some(entry) = types.get(t as usize) else { return false };
+        let inner: Vec<(u32, u32)> = match &entry.kind {
+            Kind::Struct { fields, .. } if depth < 16 => fields.iter().map(|f| (f.offset, f.ty)).collect(),
+            Kind::Tuple(slots) if depth < 16 => slots.iter().map(|s| (s.offset, s.ty)).collect(),
+            Kind::Mutex(_) | Kind::RwLock(_) => return false,
+            _ => {
+                out.push((at, t));
+                return true;
+            }
+        };
+        inner.into_iter().all(|(off, ty)| open(types, plain, ty, at + off, out, depth + 1))
+    }
+    types
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| {
+            if plain.get(i).copied().unwrap_or(false) {
+                return CopyParts::ByKind;
+            }
+            let mut parts = Vec::new();
+            match &entry.kind {
+                Kind::Struct { .. } | Kind::Tuple(_) => {
+                    if open(types, plain, i as u32, 0, &mut parts, 0) {
+                        CopyParts::Parts(parts)
+                    } else {
+                        CopyParts::ByKind
+                    }
+                }
+                Kind::Enum { variants, .. } => {
+                    let mut all = Vec::new();
+                    for v in variants {
+                        let mut parts = Vec::new();
+                        if !v.fields.iter().all(|f| open(types, plain, f.ty, f.offset, &mut parts, 1)) {
+                            return CopyParts::ByKind;
+                        }
+                        all.push(parts);
+                    }
+                    CopyParts::Variants(all)
+                }
+                _ => CopyParts::ByKind,
+            }
+        })
+        .collect()
 }
 
 /// The function at `index` of the function table.

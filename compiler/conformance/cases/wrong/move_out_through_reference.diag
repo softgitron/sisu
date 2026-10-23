@@ -1,0 +1,2 @@
+8:12-8:18 E0338 type.move-out-of-borrow what="u.name"
+  fix type.add-copy 8:18-8:18 ".copy()"
