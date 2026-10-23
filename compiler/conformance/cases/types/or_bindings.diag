@@ -1,0 +1,4 @@
+10:35-10:53 E0385 type.bindings-in-or-pattern name="r"
+10:48-10:52 E0385 type.bindings-in-or-pattern name="side"
+17:44-17:45 E0300 type.mismatch expected="int" found="ref String"
+23:5-23:12 E0314 type.non-exhaustive missing="`Named(_)`"

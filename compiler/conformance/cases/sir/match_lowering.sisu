@@ -1,0 +1,15 @@
+enum Op:
+    Add(int, int)
+    Neg(int)
+    Zero
+
+def eval(op: Op) -> int:
+    return match op:
+        case Add(a, b): a + b
+        case Neg(x): -x
+        case Zero: 0
+
+def main():
+    print(eval(Add(2, 3)))
+    print(eval(Neg(4)))
+    print(eval(Zero))

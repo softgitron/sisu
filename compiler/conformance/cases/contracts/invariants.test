@@ -1,0 +1,27 @@
+test "construction checks the invariant" ... FAILED
+test "a ledger built right" ... ok
+test "contract of Range.widen" ... ok
+test "contract of Range.shift" ... ok
+test "contract of Range.set_lo" ... ok
+test "contract of Range.collapse_wrongly" ... FAILED
+test "contract of Ledger.add" ... ok
+
+test "construction checks the invariant" ... FAILED
+panic: invariant of `Range` failed: self.lo <= self.hi
+    self.lo <= self.hi
+    │          │
+    5          1
+  at the invariant of Range (invariants.sisu:8:15)
+  at test "construction checks the invariant" (invariants.sisu:69:9)
+replay: sisu test --replay 1-efd678754d35b529-0.0.1-t0-s0-r0 invariants.sisu
+
+test "contract of Range.collapse_wrongly" ... FAILED
+panic: the property failed for (Range(lo=0, hi=0),) (case 3, shrunk once)
+  it panicked: invariant of `Range` failed: self.lo <= self.hi
+    self.lo <= self.hi
+    │          │
+    1          0
+  at test "contract of Range.collapse_wrongly" (<arbitrary>/main.sisu:72:5)
+replay: sisu test --replay 1-efd678754d35b529-0.0.1-t5-s0-r0-c0.0.0.0 invariants.sisu
+
+5 passed, 2 failed, 0 blocked

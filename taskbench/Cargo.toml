@@ -1,6 +1,6 @@
 [package]
 name = "taskbench"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.97"
 description = "Bet-3 stack harness: stackful colourless tasks on stacks that cannot move, measured against Go and Java virtual threads"

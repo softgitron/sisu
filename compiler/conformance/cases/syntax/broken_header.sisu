@@ -1,0 +1,8 @@
+# The parameter list is broken, so `f`'s signature is unknown: its body's
+# use of `x` and the call below report nothing more.
+def f(x int) -> int:
+    let y = x + 1
+    return y
+
+def main():
+    print(f(1))

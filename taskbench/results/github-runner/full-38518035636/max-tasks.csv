@@ -1,0 +1,486 @@
+schema,run_id,timestamp_utc,machine_id,implementation,benchmark,strategy,reservation_bytes,stack_bytes,threads,tasks,params,metric,value,unit,status,note
+1,20261014T054628Z-34831,2026-10-14T05:46:29Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,32738,count,ok,"limit=vma_count VMA limit reached (65532 mappings, vm.max_map_count=65530): mprotect(guard): Cannot allocate memory (os error 12)"
+1,20261014T054628Z-34831,2026-10-14T05:46:29Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,failed,vma_count
+1,20261014T054628Z-34831,2026-10-14T05:46:29Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,65531,count,ok,
+1,20261014T054628Z-34831,2026-10-14T05:46:29Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T054628Z-34831,2026-10-14T05:46:29Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,152272896,bytes,ok,
+1,20261014T054628Z-34831,2026-10-14T05:46:29Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,67551232,bytes,ok,
+1,20261014T054628Z-34831,2026-10-14T05:46:29Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T054628Z-34831,2026-10-14T05:46:29Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,133070.654,1/s,ok,
+1,20261014T054629Z-34847,2026-10-14T05:47:34Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T054629Z-34847,2026-10-14T05:47:34Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T054629Z-34847,2026-10-14T05:47:34Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,57,count,ok,
+1,20261014T054629Z-34847,2026-10-14T05:47:34Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T054629Z-34847,2026-10-14T05:47:34Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,4524802048,bytes,ok,
+1,20261014T054629Z-34847,2026-10-14T05:47:34Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,2069094400,bytes,ok,
+1,20261014T054629Z-34847,2026-10-14T05:47:34Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T054629Z-34847,2026-10-14T05:47:34Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,383557.571,1/s,ok,
+1,20261014T054629Z-34847,2026-10-14T05:47:34Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T054629Z-34847,2026-10-14T05:47:34Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T054629Z-34847,2026-10-14T05:47:34Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,6590,bytes,ok,
+1,20261014T054734Z-34902,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T054734Z-34902,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T054734Z-34902,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,57,count,ok,
+1,20261014T054734Z-34902,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T054734Z-34902,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,5548785664,bytes,ok,
+1,20261014T054734Z-34902,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,26980352,bytes,ok,
+1,20261014T054734Z-34902,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,5572,bytes,ok,
+1,20261014T054734Z-34902,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,443847.878,1/s,ok,
+1,20261014T054734Z-34902,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T054734Z-34902,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T054734Z-34902,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,5572,bytes,ok,
+1,20261014T054837Z-34925,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,32738,count,ok,"limit=vma_count VMA limit reached (65532 mappings, vm.max_map_count=65530): mprotect(guard): Cannot allocate memory (os error 12)"
+1,20261014T054837Z-34925,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,failed,vma_count
+1,20261014T054837Z-34925,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,65531,count,ok,
+1,20261014T054837Z-34925,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T054837Z-34925,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,152211456,bytes,ok,
+1,20261014T054837Z-34925,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,67547136,bytes,ok,
+1,20261014T054837Z-34925,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6588,bytes,ok,
+1,20261014T054837Z-34925,2026-10-14T05:48:37Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,129351.956,1/s,ok,
+1,20261014T054837Z-34943,2026-10-14T05:49:43Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T054837Z-34943,2026-10-14T05:49:43Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T054837Z-34943,2026-10-14T05:49:43Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,57,count,ok,
+1,20261014T054837Z-34943,2026-10-14T05:49:43Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T054837Z-34943,2026-10-14T05:49:43Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,4524830720,bytes,ok,
+1,20261014T054837Z-34943,2026-10-14T05:49:43Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,2069094400,bytes,ok,
+1,20261014T054837Z-34943,2026-10-14T05:49:43Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T054837Z-34943,2026-10-14T05:49:43Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,331678.086,1/s,ok,
+1,20261014T054837Z-34943,2026-10-14T05:49:43Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T054837Z-34943,2026-10-14T05:49:43Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T054837Z-34943,2026-10-14T05:49:43Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,6590,bytes,ok,
+1,20261014T054943Z-34966,2026-10-14T05:50:44Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T054943Z-34966,2026-10-14T05:50:44Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T054943Z-34966,2026-10-14T05:50:44Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,54,count,ok,
+1,20261014T054943Z-34966,2026-10-14T05:50:44Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T054943Z-34966,2026-10-14T05:50:44Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,604147712,bytes,ok,
+1,20261014T054943Z-34966,2026-10-14T05:50:44Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,1249280,bytes,ok,
+1,20261014T054943Z-34966,2026-10-14T05:50:44Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,601,bytes,ok,
+1,20261014T054943Z-34966,2026-10-14T05:50:44Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,1383271.083,1/s,ok,
+1,20261014T054943Z-34966,2026-10-14T05:50:44Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T054943Z-34966,2026-10-14T05:50:44Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T054943Z-34966,2026-10-14T05:50:44Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,601,bytes,ok,
+1,20261014T055044Z-34993,2026-10-14T05:51:45Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T055044Z-34993,2026-10-14T05:51:45Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T055044Z-34993,2026-10-14T05:51:45Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,51,count,ok,
+1,20261014T055044Z-34993,2026-10-14T05:51:45Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T055044Z-34993,2026-10-14T05:51:45Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,404238336,bytes,ok,
+1,20261014T055044Z-34993,2026-10-14T05:51:45Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,868352,bytes,ok,
+1,20261014T055044Z-34993,2026-10-14T05:51:45Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,401,bytes,ok,
+1,20261014T055044Z-34993,2026-10-14T05:51:45Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,1710516.993,1/s,ok,
+1,20261014T055044Z-34993,2026-10-14T05:51:45Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60.002,s,ok,
+1,20261014T055044Z-34993,2026-10-14T05:51:45Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T055044Z-34993,2026-10-14T05:51:45Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,401,bytes,ok,
+1,20261014T055145Z-35019,2026-10-14T05:51:46Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,max_tasks,9489,count,ok,limit=threads Resource temporarily unavailable (os error 11) (vmas=38023)
+1,20261014T055145Z-35019,2026-10-14T05:51:46Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,limit,,,failed,threads
+1,20261014T055145Z-35019,2026-10-14T05:51:46Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,vmas_at_stop,38023,count,ok,
+1,20261014T055145Z-35019,2026-10-14T05:51:46Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T055145Z-35019,2026-10-14T05:51:46Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,rss_at_stop,98861056,bytes,ok,
+1,20261014T055145Z-35019,2026-10-14T05:51:46Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,pte_at_stop,1650688,bytes,ok,
+1,20261014T055145Z-35019,2026-10-14T05:51:46Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,10242,bytes,ok,
+1,20261014T055145Z-35019,2026-10-14T05:51:46Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,spawn_rate,24766.466,1/s,ok,
+1,20261014T055146Z-44537,2026-10-14T05:52:48Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,max_tasks,1000000,count,ok,limit=cap
+1,20261014T055146Z-44537,2026-10-14T05:52:48Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,limit,,,ok,cap
+1,20261014T055146Z-44537,2026-10-14T05:52:48Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,rss_at_stop,2695974912,bytes,ok,
+1,20261014T055146Z-44537,2026-10-14T05:52:48Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,pte_at_stop,5402624,bytes,ok,
+1,20261014T055146Z-44537,2026-10-14T05:52:48Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,total_per_task_at_stop,2697,bytes,ok,
+1,20261014T055146Z-44537,2026-10-14T05:52:48Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,spawn_rate,471510.039,1/s,ok,
+1,20261014T055146Z-44537,2026-10-14T05:52:48Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,hold_secs,60,s,ok,
+1,20261014T055146Z-44537,2026-10-14T05:52:48Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T055146Z-44537,2026-10-14T05:52:48Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,total_per_task_after_hold,2699,bytes,ok,
+1,20261014T055249Z-44564,2026-10-14T05:54:14Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,max_tasks,1000000,count,ok,limit=cap
+1,20261014T055249Z-44564,2026-10-14T05:54:14Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,limit,,,ok,cap
+1,20261014T055249Z-44564,2026-10-14T05:54:14Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,rss_at_stop,1112489984,bytes,ok,
+1,20261014T055249Z-44564,2026-10-14T05:54:14Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,pte_at_stop,2441216,bytes,ok,
+1,20261014T055249Z-44564,2026-10-14T05:54:14Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,total_per_task_at_stop,1067,bytes,ok,
+1,20261014T055249Z-44564,2026-10-14T05:54:14Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,spawn_rate,461613.112,1/s,ok,
+1,20261014T055249Z-44564,2026-10-14T05:54:14Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,hold_secs,60,s,ok,
+1,20261014T055249Z-44564,2026-10-14T05:54:14Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T055249Z-44564,2026-10-14T05:54:14Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,total_per_task_after_hold,1069,bytes,ok,
+1,20261014T063524Z-86268,2026-10-14T06:35:24Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,32738,count,ok,"limit=vma_count VMA limit reached (65532 mappings, vm.max_map_count=65530): mprotect(guard): Cannot allocate memory (os error 12)"
+1,20261014T063524Z-86268,2026-10-14T06:35:24Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,failed,vma_count
+1,20261014T063524Z-86268,2026-10-14T06:35:24Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,65531,count,ok,
+1,20261014T063524Z-86268,2026-10-14T06:35:24Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T063524Z-86268,2026-10-14T06:35:24Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,152154112,bytes,ok,
+1,20261014T063524Z-86268,2026-10-14T06:35:24Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,67547136,bytes,ok,
+1,20261014T063524Z-86268,2026-10-14T06:35:24Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T063524Z-86268,2026-10-14T06:35:24Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,134408.555,1/s,ok,
+1,20261014T063524Z-86284,2026-10-14T06:36:29Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T063524Z-86284,2026-10-14T06:36:29Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T063524Z-86284,2026-10-14T06:36:29Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,57,count,ok,
+1,20261014T063524Z-86284,2026-10-14T06:36:29Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T063524Z-86284,2026-10-14T06:36:29Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,4524793856,bytes,ok,
+1,20261014T063524Z-86284,2026-10-14T06:36:29Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,2069106688,bytes,ok,
+1,20261014T063524Z-86284,2026-10-14T06:36:29Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T063524Z-86284,2026-10-14T06:36:29Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,384601.347,1/s,ok,
+1,20261014T063524Z-86284,2026-10-14T06:36:29Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T063524Z-86284,2026-10-14T06:36:29Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T063524Z-86284,2026-10-14T06:36:29Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,6590,bytes,ok,
+1,20261014T063629Z-86301,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T063629Z-86301,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T063629Z-86301,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,57,count,ok,
+1,20261014T063629Z-86301,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T063629Z-86301,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,5548810240,bytes,ok,
+1,20261014T063629Z-86301,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,26992640,bytes,ok,
+1,20261014T063629Z-86301,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,5572,bytes,ok,
+1,20261014T063629Z-86301,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,438712.764,1/s,ok,
+1,20261014T063629Z-86301,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T063629Z-86301,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T063629Z-86301,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,5572,bytes,ok,
+1,20261014T063732Z-86326,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,32738,count,ok,"limit=vma_count VMA limit reached (65532 mappings, vm.max_map_count=65530): mprotect(guard): Cannot allocate memory (os error 12)"
+1,20261014T063732Z-86326,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,failed,vma_count
+1,20261014T063732Z-86326,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,65531,count,ok,
+1,20261014T063732Z-86326,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T063732Z-86326,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,152276992,bytes,ok,
+1,20261014T063732Z-86326,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,67543040,bytes,ok,
+1,20261014T063732Z-86326,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T063732Z-86326,2026-10-14T06:37:32Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,127569.122,1/s,ok,
+1,20261014T063733Z-86342,2026-10-14T06:38:38Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T063733Z-86342,2026-10-14T06:38:38Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T063733Z-86342,2026-10-14T06:38:38Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,55,count,ok,
+1,20261014T063733Z-86342,2026-10-14T06:38:38Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T063733Z-86342,2026-10-14T06:38:38Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,4524826624,bytes,ok,
+1,20261014T063733Z-86342,2026-10-14T06:38:38Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,2069098496,bytes,ok,
+1,20261014T063733Z-86342,2026-10-14T06:38:38Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T063733Z-86342,2026-10-14T06:38:38Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,330770.057,1/s,ok,
+1,20261014T063733Z-86342,2026-10-14T06:38:38Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T063733Z-86342,2026-10-14T06:38:38Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T063733Z-86342,2026-10-14T06:38:38Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,6590,bytes,ok,
+1,20261014T063838Z-86361,2026-10-14T06:39:39Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T063838Z-86361,2026-10-14T06:39:39Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T063838Z-86361,2026-10-14T06:39:39Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,55,count,ok,
+1,20261014T063838Z-86361,2026-10-14T06:39:39Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T063838Z-86361,2026-10-14T06:39:39Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,604127232,bytes,ok,
+1,20261014T063838Z-86361,2026-10-14T06:39:39Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,1253376,bytes,ok,
+1,20261014T063838Z-86361,2026-10-14T06:39:39Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,601,bytes,ok,
+1,20261014T063838Z-86361,2026-10-14T06:39:39Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,1426100.018,1/s,ok,
+1,20261014T063838Z-86361,2026-10-14T06:39:39Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T063838Z-86361,2026-10-14T06:39:39Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T063838Z-86361,2026-10-14T06:39:39Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,601,bytes,ok,
+1,20261014T063939Z-86440,2026-10-14T06:40:40Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T063939Z-86440,2026-10-14T06:40:40Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T063939Z-86440,2026-10-14T06:40:40Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,52,count,ok,
+1,20261014T063939Z-86440,2026-10-14T06:40:40Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T063939Z-86440,2026-10-14T06:40:40Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,404148224,bytes,ok,
+1,20261014T063939Z-86440,2026-10-14T06:40:40Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,864256,bytes,ok,
+1,20261014T063939Z-86440,2026-10-14T06:40:40Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,401,bytes,ok,
+1,20261014T063939Z-86440,2026-10-14T06:40:40Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,1706356.167,1/s,ok,
+1,20261014T063939Z-86440,2026-10-14T06:40:40Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60.002,s,ok,
+1,20261014T063939Z-86440,2026-10-14T06:40:40Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T063939Z-86440,2026-10-14T06:40:40Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,401,bytes,ok,
+1,20261014T064040Z-86461,2026-10-14T06:40:41Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,max_tasks,9489,count,ok,limit=threads Resource temporarily unavailable (os error 11) (vmas=38023)
+1,20261014T064040Z-86461,2026-10-14T06:40:41Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,limit,,,failed,threads
+1,20261014T064040Z-86461,2026-10-14T06:40:41Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,vmas_at_stop,38023,count,ok,
+1,20261014T064040Z-86461,2026-10-14T06:40:41Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T064040Z-86461,2026-10-14T06:40:41Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,rss_at_stop,98959360,bytes,ok,
+1,20261014T064040Z-86461,2026-10-14T06:40:41Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,pte_at_stop,1646592,bytes,ok,
+1,20261014T064040Z-86461,2026-10-14T06:40:41Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,10235,bytes,ok,
+1,20261014T064040Z-86461,2026-10-14T06:40:41Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,spawn_rate,24428.293,1/s,ok,
+1,20261014T064041Z-95979,2026-10-14T06:41:43Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,max_tasks,1000000,count,ok,limit=cap
+1,20261014T064041Z-95979,2026-10-14T06:41:43Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,limit,,,ok,cap
+1,20261014T064041Z-95979,2026-10-14T06:41:43Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,rss_at_stop,2695999488,bytes,ok,
+1,20261014T064041Z-95979,2026-10-14T06:41:43Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,pte_at_stop,5398528,bytes,ok,
+1,20261014T064041Z-95979,2026-10-14T06:41:43Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,total_per_task_at_stop,2697,bytes,ok,
+1,20261014T064041Z-95979,2026-10-14T06:41:43Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,spawn_rate,463532.274,1/s,ok,
+1,20261014T064041Z-95979,2026-10-14T06:41:43Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,hold_secs,60,s,ok,
+1,20261014T064041Z-95979,2026-10-14T06:41:43Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T064041Z-95979,2026-10-14T06:41:43Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,total_per_task_after_hold,2699,bytes,ok,
+1,20261014T064143Z-96001,2026-10-14T06:43:09Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,max_tasks,1000000,count,ok,limit=cap
+1,20261014T064143Z-96001,2026-10-14T06:43:09Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,limit,,,ok,cap
+1,20261014T064143Z-96001,2026-10-14T06:43:09Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,rss_at_stop,1095036928,bytes,ok,
+1,20261014T064143Z-96001,2026-10-14T06:43:09Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,pte_at_stop,2424832,bytes,ok,
+1,20261014T064143Z-96001,2026-10-14T06:43:09Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,total_per_task_at_stop,1049,bytes,ok,
+1,20261014T064143Z-96001,2026-10-14T06:43:09Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,spawn_rate,447710.926,1/s,ok,
+1,20261014T064143Z-96001,2026-10-14T06:43:09Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,hold_secs,60,s,ok,
+1,20261014T064143Z-96001,2026-10-14T06:43:09Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T064143Z-96001,2026-10-14T06:43:09Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,total_per_task_after_hold,1052,bytes,ok,
+1,20261014T072421Z-136580,2026-10-14T07:24:22Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,32738,count,ok,"limit=vma_count VMA limit reached (65532 mappings, vm.max_map_count=65530): mprotect(guard): Cannot allocate memory (os error 12)"
+1,20261014T072421Z-136580,2026-10-14T07:24:22Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,failed,vma_count
+1,20261014T072421Z-136580,2026-10-14T07:24:22Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,65531,count,ok,
+1,20261014T072421Z-136580,2026-10-14T07:24:22Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T072421Z-136580,2026-10-14T07:24:22Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,152154112,bytes,ok,
+1,20261014T072421Z-136580,2026-10-14T07:24:22Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,67547136,bytes,ok,
+1,20261014T072421Z-136580,2026-10-14T07:24:22Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T072421Z-136580,2026-10-14T07:24:22Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,135370.096,1/s,ok,
+1,20261014T072422Z-136596,2026-10-14T07:25:27Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T072422Z-136596,2026-10-14T07:25:27Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T072422Z-136596,2026-10-14T07:25:27Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,57,count,ok,
+1,20261014T072422Z-136596,2026-10-14T07:25:27Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T072422Z-136596,2026-10-14T07:25:27Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,4524781568,bytes,ok,
+1,20261014T072422Z-136596,2026-10-14T07:25:27Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,2069094400,bytes,ok,
+1,20261014T072422Z-136596,2026-10-14T07:25:27Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T072422Z-136596,2026-10-14T07:25:27Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,391193.583,1/s,ok,
+1,20261014T072422Z-136596,2026-10-14T07:25:27Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T072422Z-136596,2026-10-14T07:25:27Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T072422Z-136596,2026-10-14T07:25:27Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,6590,bytes,ok,
+1,20261014T072527Z-136617,2026-10-14T07:26:29Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T072527Z-136617,2026-10-14T07:26:29Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T072527Z-136617,2026-10-14T07:26:29Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,56,count,ok,
+1,20261014T072527Z-136617,2026-10-14T07:26:29Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T072527Z-136617,2026-10-14T07:26:29Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,5548802048,bytes,ok,
+1,20261014T072527Z-136617,2026-10-14T07:26:29Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,26984448,bytes,ok,
+1,20261014T072527Z-136617,2026-10-14T07:26:29Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,5572,bytes,ok,
+1,20261014T072527Z-136617,2026-10-14T07:26:29Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,444716.264,1/s,ok,
+1,20261014T072527Z-136617,2026-10-14T07:26:29Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T072527Z-136617,2026-10-14T07:26:29Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T072527Z-136617,2026-10-14T07:26:29Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,5572,bytes,ok,
+1,20261014T072629Z-136633,2026-10-14T07:26:30Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,32738,count,ok,"limit=vma_count VMA limit reached (65532 mappings, vm.max_map_count=65530): mprotect(guard): Cannot allocate memory (os error 12)"
+1,20261014T072629Z-136633,2026-10-14T07:26:30Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,failed,vma_count
+1,20261014T072629Z-136633,2026-10-14T07:26:30Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,65531,count,ok,
+1,20261014T072629Z-136633,2026-10-14T07:26:30Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T072629Z-136633,2026-10-14T07:26:30Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,152281088,bytes,ok,
+1,20261014T072629Z-136633,2026-10-14T07:26:30Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,67551232,bytes,ok,
+1,20261014T072629Z-136633,2026-10-14T07:26:30Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6591,bytes,ok,
+1,20261014T072629Z-136633,2026-10-14T07:26:30Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,131319.889,1/s,ok,
+1,20261014T072630Z-136649,2026-10-14T07:27:35Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T072630Z-136649,2026-10-14T07:27:35Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T072630Z-136649,2026-10-14T07:27:35Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,58,count,ok,
+1,20261014T072630Z-136649,2026-10-14T07:27:35Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T072630Z-136649,2026-10-14T07:27:35Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,4524843008,bytes,ok,
+1,20261014T072630Z-136649,2026-10-14T07:27:35Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,2069110784,bytes,ok,
+1,20261014T072630Z-136649,2026-10-14T07:27:35Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T072630Z-136649,2026-10-14T07:27:35Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,380947.307,1/s,ok,
+1,20261014T072630Z-136649,2026-10-14T07:27:35Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T072630Z-136649,2026-10-14T07:27:35Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T072630Z-136649,2026-10-14T07:27:35Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,6590,bytes,ok,
+1,20261014T072735Z-136669,2026-10-14T07:28:36Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T072735Z-136669,2026-10-14T07:28:36Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T072735Z-136669,2026-10-14T07:28:36Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,55,count,ok,
+1,20261014T072735Z-136669,2026-10-14T07:28:36Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T072735Z-136669,2026-10-14T07:28:36Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,604131328,bytes,ok,
+1,20261014T072735Z-136669,2026-10-14T07:28:36Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,1257472,bytes,ok,
+1,20261014T072735Z-136669,2026-10-14T07:28:36Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,601,bytes,ok,
+1,20261014T072735Z-136669,2026-10-14T07:28:36Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,1434874.364,1/s,ok,
+1,20261014T072735Z-136669,2026-10-14T07:28:36Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T072735Z-136669,2026-10-14T07:28:36Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T072735Z-136669,2026-10-14T07:28:36Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,601,bytes,ok,
+1,20261014T072836Z-136686,2026-10-14T07:29:37Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T072836Z-136686,2026-10-14T07:29:37Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T072836Z-136686,2026-10-14T07:29:37Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,50,count,ok,
+1,20261014T072836Z-136686,2026-10-14T07:29:37Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T072836Z-136686,2026-10-14T07:29:37Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,404189184,bytes,ok,
+1,20261014T072836Z-136686,2026-10-14T07:29:37Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,864256,bytes,ok,
+1,20261014T072836Z-136686,2026-10-14T07:29:37Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,401,bytes,ok,
+1,20261014T072836Z-136686,2026-10-14T07:29:37Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,1796975.676,1/s,ok,
+1,20261014T072836Z-136686,2026-10-14T07:29:37Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60.001,s,ok,
+1,20261014T072836Z-136686,2026-10-14T07:29:37Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T072836Z-136686,2026-10-14T07:29:37Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,401,bytes,ok,
+1,20261014T072937Z-136709,2026-10-14T07:29:38Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,max_tasks,9489,count,ok,limit=threads Resource temporarily unavailable (os error 11) (vmas=38023)
+1,20261014T072937Z-136709,2026-10-14T07:29:38Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,limit,,,failed,threads
+1,20261014T072937Z-136709,2026-10-14T07:29:38Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,vmas_at_stop,38023,count,ok,
+1,20261014T072937Z-136709,2026-10-14T07:29:38Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T072937Z-136709,2026-10-14T07:29:38Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,rss_at_stop,98881536,bytes,ok,
+1,20261014T072937Z-136709,2026-10-14T07:29:38Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,pte_at_stop,1658880,bytes,ok,
+1,20261014T072937Z-136709,2026-10-14T07:29:38Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,10242,bytes,ok,
+1,20261014T072937Z-136709,2026-10-14T07:29:38Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,spawn_rate,25541.620,1/s,ok,
+1,20261014T072938Z-146227,2026-10-14T07:30:40Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,max_tasks,1000000,count,ok,limit=cap
+1,20261014T072938Z-146227,2026-10-14T07:30:40Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,limit,,,ok,cap
+1,20261014T072938Z-146227,2026-10-14T07:30:40Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,rss_at_stop,2695712768,bytes,ok,
+1,20261014T072938Z-146227,2026-10-14T07:30:40Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,pte_at_stop,5398528,bytes,ok,
+1,20261014T072938Z-146227,2026-10-14T07:30:40Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,total_per_task_at_stop,2697,bytes,ok,
+1,20261014T072938Z-146227,2026-10-14T07:30:40Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,spawn_rate,474247.781,1/s,ok,
+1,20261014T072938Z-146227,2026-10-14T07:30:40Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,hold_secs,60,s,ok,
+1,20261014T072938Z-146227,2026-10-14T07:30:40Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T072938Z-146227,2026-10-14T07:30:40Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,total_per_task_after_hold,2699,bytes,ok,
+1,20261014T073041Z-146249,2026-10-14T07:32:07Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,max_tasks,1000000,count,ok,limit=cap
+1,20261014T073041Z-146249,2026-10-14T07:32:07Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,limit,,,ok,cap
+1,20261014T073041Z-146249,2026-10-14T07:32:07Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,rss_at_stop,1071448064,bytes,ok,
+1,20261014T073041Z-146249,2026-10-14T07:32:07Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,pte_at_stop,2379776,bytes,ok,
+1,20261014T073041Z-146249,2026-10-14T07:32:07Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,total_per_task_at_stop,1026,bytes,ok,
+1,20261014T073041Z-146249,2026-10-14T07:32:07Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,spawn_rate,440957.949,1/s,ok,
+1,20261014T073041Z-146249,2026-10-14T07:32:07Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,hold_secs,60,s,ok,
+1,20261014T073041Z-146249,2026-10-14T07:32:07Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T073041Z-146249,2026-10-14T07:32:07Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,total_per_task_after_hold,1025,bytes,ok,
+1,20261014T081303Z-185766,2026-10-14T08:13:04Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,32738,count,ok,"limit=vma_count VMA limit reached (65532 mappings, vm.max_map_count=65530): mprotect(guard): Cannot allocate memory (os error 12)"
+1,20261014T081303Z-185766,2026-10-14T08:13:04Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,failed,vma_count
+1,20261014T081303Z-185766,2026-10-14T08:13:04Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,65531,count,ok,
+1,20261014T081303Z-185766,2026-10-14T08:13:04Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T081303Z-185766,2026-10-14T08:13:04Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,152199168,bytes,ok,
+1,20261014T081303Z-185766,2026-10-14T08:13:04Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,67551232,bytes,ok,
+1,20261014T081303Z-185766,2026-10-14T08:13:04Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6588,bytes,ok,
+1,20261014T081303Z-185766,2026-10-14T08:13:04Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,135157.577,1/s,ok,
+1,20261014T081304Z-185782,2026-10-14T08:14:09Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T081304Z-185782,2026-10-14T08:14:09Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T081304Z-185782,2026-10-14T08:14:09Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,56,count,ok,
+1,20261014T081304Z-185782,2026-10-14T08:14:09Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T081304Z-185782,2026-10-14T08:14:09Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,4524814336,bytes,ok,
+1,20261014T081304Z-185782,2026-10-14T08:14:09Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,2069098496,bytes,ok,
+1,20261014T081304Z-185782,2026-10-14T08:14:09Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T081304Z-185782,2026-10-14T08:14:09Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,391465.034,1/s,ok,
+1,20261014T081304Z-185782,2026-10-14T08:14:09Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T081304Z-185782,2026-10-14T08:14:09Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T081304Z-185782,2026-10-14T08:14:09Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,6590,bytes,ok,
+1,20261014T081409Z-185800,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T081409Z-185800,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T081409Z-185800,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,55,count,ok,
+1,20261014T081409Z-185800,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T081409Z-185800,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,5548789760,bytes,ok,
+1,20261014T081409Z-185800,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,26980352,bytes,ok,
+1,20261014T081409Z-185800,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,5572,bytes,ok,
+1,20261014T081409Z-185800,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,441374.862,1/s,ok,
+1,20261014T081409Z-185800,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T081409Z-185800,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T081409Z-185800,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,5572,bytes,ok,
+1,20261014T081512Z-185820,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,32738,count,ok,"limit=vma_count VMA limit reached (65532 mappings, vm.max_map_count=65530): mprotect(guard): Cannot allocate memory (os error 12)"
+1,20261014T081512Z-185820,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,failed,vma_count
+1,20261014T081512Z-185820,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,65531,count,ok,
+1,20261014T081512Z-185820,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T081512Z-185820,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,152338432,bytes,ok,
+1,20261014T081512Z-185820,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,67543040,bytes,ok,
+1,20261014T081512Z-185820,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T081512Z-185820,2026-10-14T08:15:12Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,131936.398,1/s,ok,
+1,20261014T081512Z-185836,2026-10-14T08:16:17Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T081512Z-185836,2026-10-14T08:16:17Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T081512Z-185836,2026-10-14T08:16:17Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,56,count,ok,
+1,20261014T081512Z-185836,2026-10-14T08:16:17Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T081512Z-185836,2026-10-14T08:16:17Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,4524822528,bytes,ok,
+1,20261014T081512Z-185836,2026-10-14T08:16:17Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,2069110784,bytes,ok,
+1,20261014T081512Z-185836,2026-10-14T08:16:17Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T081512Z-185836,2026-10-14T08:16:17Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,352003.724,1/s,ok,
+1,20261014T081512Z-185836,2026-10-14T08:16:17Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T081512Z-185836,2026-10-14T08:16:17Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T081512Z-185836,2026-10-14T08:16:17Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,6590,bytes,ok,
+1,20261014T081617Z-185854,2026-10-14T08:17:18Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T081617Z-185854,2026-10-14T08:17:18Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T081617Z-185854,2026-10-14T08:17:18Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,54,count,ok,
+1,20261014T081617Z-185854,2026-10-14T08:17:18Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T081617Z-185854,2026-10-14T08:17:18Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,604135424,bytes,ok,
+1,20261014T081617Z-185854,2026-10-14T08:17:18Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,1253376,bytes,ok,
+1,20261014T081617Z-185854,2026-10-14T08:17:18Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,601,bytes,ok,
+1,20261014T081617Z-185854,2026-10-14T08:17:18Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,1375429.488,1/s,ok,
+1,20261014T081617Z-185854,2026-10-14T08:17:18Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T081617Z-185854,2026-10-14T08:17:18Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T081617Z-185854,2026-10-14T08:17:18Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,601,bytes,ok,
+1,20261014T081718Z-185878,2026-10-14T08:18:19Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T081718Z-185878,2026-10-14T08:18:19Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T081718Z-185878,2026-10-14T08:18:19Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,51,count,ok,
+1,20261014T081718Z-185878,2026-10-14T08:18:19Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T081718Z-185878,2026-10-14T08:18:19Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,404230144,bytes,ok,
+1,20261014T081718Z-185878,2026-10-14T08:18:19Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,856064,bytes,ok,
+1,20261014T081718Z-185878,2026-10-14T08:18:19Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,401,bytes,ok,
+1,20261014T081718Z-185878,2026-10-14T08:18:19Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,1811245.039,1/s,ok,
+1,20261014T081718Z-185878,2026-10-14T08:18:19Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60.001,s,ok,
+1,20261014T081718Z-185878,2026-10-14T08:18:19Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T081718Z-185878,2026-10-14T08:18:19Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,401,bytes,ok,
+1,20261014T081819Z-185895,2026-10-14T08:18:20Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,max_tasks,9489,count,ok,limit=threads Resource temporarily unavailable (os error 11) (vmas=38023)
+1,20261014T081819Z-185895,2026-10-14T08:18:20Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,limit,,,failed,threads
+1,20261014T081819Z-185895,2026-10-14T08:18:20Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,vmas_at_stop,38023,count,ok,
+1,20261014T081819Z-185895,2026-10-14T08:18:20Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T081819Z-185895,2026-10-14T08:18:20Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,rss_at_stop,98865152,bytes,ok,
+1,20261014T081819Z-185895,2026-10-14T08:18:20Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,pte_at_stop,1654784,bytes,ok,
+1,20261014T081819Z-185895,2026-10-14T08:18:20Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,10242,bytes,ok,
+1,20261014T081819Z-185895,2026-10-14T08:18:20Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,spawn_rate,25636.257,1/s,ok,
+1,20261014T081820Z-195413,2026-10-14T08:19:23Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,max_tasks,1000000,count,ok,limit=cap
+1,20261014T081820Z-195413,2026-10-14T08:19:23Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,limit,,,ok,cap
+1,20261014T081820Z-195413,2026-10-14T08:19:23Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,rss_at_stop,2668085248,bytes,ok,
+1,20261014T081820Z-195413,2026-10-14T08:19:23Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,pte_at_stop,5345280,bytes,ok,
+1,20261014T081820Z-195413,2026-10-14T08:19:23Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,total_per_task_at_stop,2669,bytes,ok,
+1,20261014T081820Z-195413,2026-10-14T08:19:23Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,spawn_rate,476433.680,1/s,ok,
+1,20261014T081820Z-195413,2026-10-14T08:19:23Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,hold_secs,60.059,s,ok,
+1,20261014T081820Z-195413,2026-10-14T08:19:23Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T081820Z-195413,2026-10-14T08:19:23Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,total_per_task_after_hold,2671,bytes,ok,
+1,20261014T081923Z-195433,2026-10-14T08:20:49Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,max_tasks,1000000,count,ok,limit=cap
+1,20261014T081923Z-195433,2026-10-14T08:20:49Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,limit,,,ok,cap
+1,20261014T081923Z-195433,2026-10-14T08:20:49Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,rss_at_stop,1067753472,bytes,ok,
+1,20261014T081923Z-195433,2026-10-14T08:20:49Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,pte_at_stop,2371584,bytes,ok,
+1,20261014T081923Z-195433,2026-10-14T08:20:49Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,total_per_task_at_stop,1022,bytes,ok,
+1,20261014T081923Z-195433,2026-10-14T08:20:49Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,spawn_rate,450192.968,1/s,ok,
+1,20261014T081923Z-195433,2026-10-14T08:20:49Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,hold_secs,60,s,ok,
+1,20261014T081923Z-195433,2026-10-14T08:20:49Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T081923Z-195433,2026-10-14T08:20:49Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,total_per_task_after_hold,1020,bytes,ok,
+1,20261014T090137Z-235221,2026-10-14T09:01:38Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,32738,count,ok,"limit=vma_count VMA limit reached (65532 mappings, vm.max_map_count=65530): mprotect(guard): Cannot allocate memory (os error 12)"
+1,20261014T090137Z-235221,2026-10-14T09:01:38Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,failed,vma_count
+1,20261014T090137Z-235221,2026-10-14T09:01:38Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,65531,count,ok,
+1,20261014T090137Z-235221,2026-10-14T09:01:38Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T090137Z-235221,2026-10-14T09:01:38Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,152276992,bytes,ok,
+1,20261014T090137Z-235221,2026-10-14T09:01:38Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,67538944,bytes,ok,
+1,20261014T090137Z-235221,2026-10-14T09:01:38Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6588,bytes,ok,
+1,20261014T090137Z-235221,2026-10-14T09:01:38Z,github-runner,taskbench,max-tasks,A,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,134520.984,1/s,ok,
+1,20261014T090138Z-235237,2026-10-14T09:02:42Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T090138Z-235237,2026-10-14T09:02:42Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T090138Z-235237,2026-10-14T09:02:42Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,57,count,ok,
+1,20261014T090138Z-235237,2026-10-14T09:02:42Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T090138Z-235237,2026-10-14T09:02:42Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,4524797952,bytes,ok,
+1,20261014T090138Z-235237,2026-10-14T09:02:42Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,2069102592,bytes,ok,
+1,20261014T090138Z-235237,2026-10-14T09:02:42Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T090138Z-235237,2026-10-14T09:02:42Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,390847.172,1/s,ok,
+1,20261014T090138Z-235237,2026-10-14T09:02:42Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T090138Z-235237,2026-10-14T09:02:42Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T090138Z-235237,2026-10-14T09:02:42Z,github-runner,taskbench,max-tasks,B,1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,6590,bytes,ok,
+1,20261014T090243Z-235258,2026-10-14T09:03:45Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T090243Z-235258,2026-10-14T09:03:45Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T090243Z-235258,2026-10-14T09:03:45Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,57,count,ok,
+1,20261014T090243Z-235258,2026-10-14T09:03:45Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T090243Z-235258,2026-10-14T09:03:45Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,5548777472,bytes,ok,
+1,20261014T090243Z-235258,2026-10-14T09:03:45Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,26988544,bytes,ok,
+1,20261014T090243Z-235258,2026-10-14T09:03:45Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,5572,bytes,ok,
+1,20261014T090243Z-235258,2026-10-14T09:03:45Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,444777.457,1/s,ok,
+1,20261014T090243Z-235258,2026-10-14T09:03:45Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T090243Z-235258,2026-10-14T09:03:45Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T090243Z-235258,2026-10-14T09:03:45Z,github-runner,taskbench,max-tasks,C,,8192,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,5572,bytes,ok,
+1,20261014T090345Z-235277,2026-10-14T09:03:46Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,32738,count,ok,"limit=vma_count VMA limit reached (65532 mappings, vm.max_map_count=65530): mprotect(guard): Cannot allocate memory (os error 12)"
+1,20261014T090345Z-235277,2026-10-14T09:03:46Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,failed,vma_count
+1,20261014T090345Z-235277,2026-10-14T09:03:46Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,65531,count,ok,
+1,20261014T090345Z-235277,2026-10-14T09:03:46Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T090345Z-235277,2026-10-14T09:03:46Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,152264704,bytes,ok,
+1,20261014T090345Z-235277,2026-10-14T09:03:46Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,67543040,bytes,ok,
+1,20261014T090345Z-235277,2026-10-14T09:03:46Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T090345Z-235277,2026-10-14T09:03:46Z,github-runner,taskbench,max-tasks,D(A),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,134035.189,1/s,ok,
+1,20261014T090346Z-235293,2026-10-14T09:04:51Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T090346Z-235293,2026-10-14T09:04:51Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T090346Z-235293,2026-10-14T09:04:51Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,58,count,ok,
+1,20261014T090346Z-235293,2026-10-14T09:04:51Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T090346Z-235293,2026-10-14T09:04:51Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,4524822528,bytes,ok,
+1,20261014T090346Z-235293,2026-10-14T09:04:51Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,2069098496,bytes,ok,
+1,20261014T090346Z-235293,2026-10-14T09:04:51Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,6590,bytes,ok,
+1,20261014T090346Z-235293,2026-10-14T09:04:51Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,332507.858,1/s,ok,
+1,20261014T090346Z-235293,2026-10-14T09:04:51Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T090346Z-235293,2026-10-14T09:04:51Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T090346Z-235293,2026-10-14T09:04:51Z,github-runner,taskbench,max-tasks,D(B),1048576,1048576,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,6590,bytes,ok,
+1,20261014T090451Z-235313,2026-10-14T09:05:52Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T090451Z-235313,2026-10-14T09:05:52Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T090451Z-235313,2026-10-14T09:05:52Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,54,count,ok,
+1,20261014T090451Z-235313,2026-10-14T09:05:52Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T090451Z-235313,2026-10-14T09:05:52Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,604188672,bytes,ok,
+1,20261014T090451Z-235313,2026-10-14T09:05:52Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,1245184,bytes,ok,
+1,20261014T090451Z-235313,2026-10-14T09:05:52Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,601,bytes,ok,
+1,20261014T090451Z-235313,2026-10-14T09:05:52Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,1429362.687,1/s,ok,
+1,20261014T090451Z-235313,2026-10-14T09:05:52Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60,s,ok,
+1,20261014T090451Z-235313,2026-10-14T09:05:52Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T090451Z-235313,2026-10-14T09:05:52Z,github-runner,taskbench,max-tasks,E,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,601,bytes,ok,
+1,20261014T090552Z-235334,2026-10-14T09:06:53Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_tasks,1000000,count,ok,limit=cap 
+1,20261014T090552Z-235334,2026-10-14T09:06:53Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,limit,,,ok,cap
+1,20261014T090552Z-235334,2026-10-14T09:06:53Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,vmas_at_stop,50,count,ok,
+1,20261014T090552Z-235334,2026-10-14T09:06:53Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T090552Z-235334,2026-10-14T09:06:53Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,rss_at_stop,404156416,bytes,ok,
+1,20261014T090552Z-235334,2026-10-14T09:06:53Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,pte_at_stop,860160,bytes,ok,
+1,20261014T090552Z-235334,2026-10-14T09:06:53Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,401,bytes,ok,
+1,20261014T090552Z-235334,2026-10-14T09:06:53Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,spawn_rate,1828673.640,1/s,ok,
+1,20261014T090552Z-235334,2026-10-14T09:06:53Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,hold_secs,60.002,s,ok,
+1,20261014T090552Z-235334,2026-10-14T09:06:53Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T090552Z-235334,2026-10-14T09:06:53Z,github-runner,tokio,max-tasks,tokio,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60,total_per_task_after_hold,401,bytes,ok,
+1,20261014T090653Z-235355,2026-10-14T09:06:54Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,max_tasks,9489,count,ok,limit=threads Resource temporarily unavailable (os error 11) (vmas=38023)
+1,20261014T090653Z-235355,2026-10-14T09:06:54Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,limit,,,failed,threads
+1,20261014T090653Z-235355,2026-10-14T09:06:54Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,vmas_at_stop,38023,count,ok,
+1,20261014T090653Z-235355,2026-10-14T09:06:54Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,max_map_count,65530,count,ok,
+1,20261014T090653Z-235355,2026-10-14T09:06:54Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,rss_at_stop,98910208,bytes,ok,
+1,20261014T090653Z-235355,2026-10-14T09:06:54Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,pte_at_stop,1654784,bytes,ok,
+1,20261014T090653Z-235355,2026-10-14T09:06:54Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,total_per_task_at_stop,10241,bytes,ok,
+1,20261014T090653Z-235355,2026-10-14T09:06:54Z,github-runner,os-threads,max-tasks,os-threads,,,2,30000,cap=30000;mem_guard=536870912;hold_s=60,spawn_rate,25948.361,1/s,ok,
+1,20261014T090654Z-244873,2026-10-14T09:07:56Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,max_tasks,1000000,count,ok,limit=cap
+1,20261014T090654Z-244873,2026-10-14T09:07:56Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,limit,,,ok,cap
+1,20261014T090654Z-244873,2026-10-14T09:07:56Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,rss_at_stop,2666352640,bytes,ok,
+1,20261014T090654Z-244873,2026-10-14T09:07:56Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,pte_at_stop,5349376,bytes,ok,
+1,20261014T090654Z-244873,2026-10-14T09:07:56Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,total_per_task_at_stop,2667,bytes,ok,
+1,20261014T090654Z-244873,2026-10-14T09:07:56Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,spawn_rate,501176.598,1/s,ok,
+1,20261014T090654Z-244873,2026-10-14T09:07:56Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,hold_secs,60,s,ok,
+1,20261014T090654Z-244873,2026-10-14T09:07:56Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T090654Z-244873,2026-10-14T09:07:56Z,github-runner,go,max-tasks,go,,,2,1000000,cap=1000000;mem_guard=536870912;go=go1.24.13;hold_s=60,total_per_task_after_hold,2669,bytes,ok,
+1,20261014T090757Z-244893,2026-10-14T09:09:23Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,max_tasks,1000000,count,ok,limit=cap
+1,20261014T090757Z-244893,2026-10-14T09:09:23Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,limit,,,ok,cap
+1,20261014T090757Z-244893,2026-10-14T09:09:23Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,rss_at_stop,1066729472,bytes,ok,
+1,20261014T090757Z-244893,2026-10-14T09:09:23Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,pte_at_stop,2367488,bytes,ok,
+1,20261014T090757Z-244893,2026-10-14T09:09:23Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,total_per_task_at_stop,1021,bytes,ok,
+1,20261014T090757Z-244893,2026-10-14T09:09:23Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,spawn_rate,438414.478,1/s,ok,
+1,20261014T090757Z-244893,2026-10-14T09:09:23Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,hold_secs,60,s,ok,
+1,20261014T090757Z-244893,2026-10-14T09:09:23Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,parked_after_hold,1000000,count,ok,1000000 of 1000000 tasks still parked after the hold
+1,20261014T090757Z-244893,2026-10-14T09:09:23Z,github-runner,java,max-tasks,java,,,2,1000000,cap=1000000;mem_guard=536870912;hold_s=60;jvm=21.0.12.1+1-LTS -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC,total_per_task_after_hold,1021,bytes,ok,

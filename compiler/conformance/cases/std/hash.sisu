@@ -1,0 +1,25 @@
+# `std.hash` (11): SHA-256, SHA-512 and BLAKE3 across their block
+# boundaries (BLAKE3 over several chunks, which its tree merges), CRC-32,
+# FNV-1a and SipHash-2-4, each checked against its reference.
+import std.hash
+from std.encoding import hex_encode
+
+def data(n: int) -> bytes:
+    var out: list[u8] = []
+    for i in range(n):
+        out.push((i % 251).truncate_to[u8]())
+    return bytes.from_list(out)
+
+def main():
+    var key: list[u8] = []
+    for i in range(16):
+        key.push(i.truncate_to[u8]())
+    let k = bytes.from_list(key)
+    for n in [0, 3, 55, 56, 64, 128, 1025, 3073]:
+        let d = data(n)
+        print("{n}: sha256 {hex_encode(hash.sha256(d))}")
+        print("{n}: sha512 {hex_encode(hash.sha512(d)).byte_slice(0, 64)}")
+        print("{n}: blake3 {hex_encode(hash.blake3(d))}")
+        print(
+            "{n}: crc32 {hash.crc32(d)} fnv {hash.fnv1a_32(d)} {hash.fnv1a_64(d)} sip {hash.siphash24(k, d)}"
+        )

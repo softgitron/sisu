@@ -1,0 +1,607 @@
+##! Contracts (07; stage 0's `sisu-typeck/src/contracts.rs`): `requires`
+##! and `ensures` clauses at the start of a function's body, `old(e)` and
+##! `result` in `ensures`, a struct's `invariant` lines (checked by the
+##! method the compiler writes for them), and refinement types (`type Port
+##! = int where 1 <= self <= 65535`).
+##!
+##! A clause is a `bool` expression that only reads: it calls `pure`
+##! functions and changes nothing (E0801, E0802). Those messages are not
+##! the type checker's own: stage 1 notes that stage 0 reports an error
+##! there (`other`).
+
+from stage1.diag import Msg, TextRange
+from stage1.syntax.ast import (
+    Arg,
+    Ast,
+    Block,
+    Closure,
+    ContractKind,
+    ExprId,
+    ExprKind,
+    IndexArg,
+    Mode,
+    StmtKind,
+    StrPart,
+    UnOp,
+)
+from stage1.syntax.ast import build
+from stage1.typeck.check import Checker, Cx, EnsuresCtx
+from stage1.typeck.program import DefKind, Embedded, FnKind
+from stage1.typeck.thir import (
+    ArgMode,
+    Callee,
+    ClosureId,
+    ClosureRole,
+    Coercion,
+    ContractCheck,
+    TArg,
+    TClosure,
+    TContractKind,
+    TContracts,
+    TExprId,
+    TExprKind,
+    TStmt,
+)
+from stage1.typeck.ty import DefId, Ty, TyData
+
+## A clause of a function's contract as written: its keyword, its
+## condition and the whole clause.
+@derive(Copy)
+pub struct Clause:
+    pub kind: ContractKind
+    pub expr: ExprId
+    pub range: TextRange
+
+## The `requires` and `ensures` clauses a body starts with.
+pub pure def leading_contracts(ast: Ast, b: Block) -> list[Clause]:
+    var out: list[Clause] = []
+    for s in b.stmts:
+        match ast.stmt(s).kind:
+            case StmtKind.Contract(c):
+                match c.kind:
+                    case ContractKind.Requires | ContractKind.Ensures:
+                        out.push(Clause(kind=c.kind, expr=c.expr, range=c.range))
+                    case _:
+                        return out
+            case _:
+                return out
+    return out
+
+impl Checker:
+    ## The contract of the function being checked, from the clauses its
+    ## body starts with, once its parameters are declared; `ret` is the
+    ## type `result` is in `ensures`.
+    pub pure def check_contracts(mut self, cx: Cx, is_test: bool, clauses: list[Clause], ret: Ty):
+        var out = TContracts(
+            requires=[], ensures=[], olds=[], result=None, labels=[], invariant=None
+        )
+        # A `mut self` method of a type with an invariant checks it again
+        # when it returns (07).
+        if let Some(f) = cx.prog.fn_info(self.def_):
+            var plain = True
+            match f.kind:
+                case FnKind.Invariant(_) | FnKind.Drop:
+                    plain = False
+                case _:
+                    pass
+            if f.self_mode == Some(Mode.Mut) and plain:
+                if let Some(o) = f.owner:
+                    if let TyData.Adt(d, args) = self.data(o):
+                        if let Some(check) = cx.prog.invariant_check(d):
+                            out.invariant = Some((check, args.copy()))
+        if is_test:
+            for c in clauses:
+                self.report_other(self.error(cx, Msg.ContractNotInTest, c.range))
+            return
+        for c in clauses:
+            if c.kind == ContractKind.Requires:
+                out.requires.push(self.contract_clause(cx, TContractKind.Requires, c.expr))
+        var ensures: list[Clause] = []
+        for c in clauses:
+            if c.kind == ContractKind.Ensures:
+                ensures.push(c)
+        if ensures.is_empty() or self.generator.is_some():
+            if not ensures.is_empty():
+                self.report_other(self.error(cx, Msg.ContractGeneratorEnsures, ensures[0].range))
+            self.keep_contracts(out)
+            return
+        # `result` (and a labelled result's labels) name the value
+        # returned, as a borrowed parameter would: by reference unless it
+        # is `Copy`.
+        self.push_scope()
+        let scope = len(self.scopes) - 1
+        let span = ensures[0].range
+        let rty = self.param_local_ty(cx, ret, Mode.Borrow)
+        let r = self.new_local("result", rty, False, span)
+        self.declare(cx, "result", r, False, span)
+        out.result = Some(r)
+        if let TyData.Tuple(elems, labels) = self.data(ret):
+            for i in range(len(elems)):
+                if i < len(labels):
+                    let lt = self.param_local_ty(cx, elems[i], Mode.Borrow)
+                    let x = self.new_local(labels[i], lt, False, span)
+                    self.declare(cx, labels[i], x, False, span)
+                    out.labels.push((x, i))
+        self.ensures = Some(EnsuresCtx(scope=scope, olds=[]))
+        for c in ensures:
+            out.ensures.push(self.contract_clause(cx, TContractKind.Ensures, c.expr))
+        if let Some(e) = self.ensures:
+            out.olds = e.olds.copy()
+        self.ensures = None
+        self.pop_scope()
+        self.keep_contracts(out)
+
+    ## Keeps a contract that checks something, for lowering.
+    pure def keep_contracts(mut self, own c: TContracts):
+        if c.requires.is_empty() and c.ensures.is_empty() and c.invariant.is_none():
+            return
+        self.contracts = Some(c)
+
+    ## One clause: a condition that only reads.
+    pub pure def contract_clause(
+        mut self, cx: Cx, kind: TContractKind, expr: ExprId
+    ) -> ContractCheck:
+        let cond = self.check_condition_expr(cx, expr)
+        let text = self.source_text(cx, cx.ast.expr(expr).range).trim_end().to_string()
+        let replay = self.only_reads(cx, cond, True)
+        return ContractCheck(
+            kind=kind, cond=cond, text=text, span=cx.ast.expr(expr).range, replay=replay
+        )
+
+    ## A contract statement inside a body: an `invariant` line of the check
+    ## the compiler writes for a struct, or a clause out of place.
+    pub pure def contract_stmt(
+        mut self, cx: Cx, kind: ContractKind, expr: ExprId, range: TextRange, mut out: list[TStmt]
+    ):
+        var in_check = False
+        if let Some(f) = cx.prog.fn_info(self.def_):
+            if let FnKind.Invariant(_) = f.kind:
+                in_check = True
+        match kind:
+            case ContractKind.Invariant:
+                if in_check:
+                    let check = self.contract_clause(cx, TContractKind.Invariant, expr)
+                    out.push(TStmt.Contract(check))
+                else:
+                    # A loop invariant is reserved (07, "What is deferred").
+                    let what = "a loop invariant (`invariant` in a body)"
+                    self.unsupported(cx, range, what, "the contract verifier (after version 1)")
+                    out.push(TStmt.Error(range))
+            case ContractKind.Requires | ContractKind.Ensures:
+                var is_test = False
+                if let Some(f) = cx.prog.fn_info(self.def_):
+                    if let FnKind.Test(_) = f.kind:
+                        is_test = True
+                if is_test:
+                    self.report_other(self.error(cx, Msg.ContractNotInTest, range))
+                else:
+                    let d = self.error(cx, Msg.ContractMisplaced, range)
+                    self.report_other(d.with("keyword", kind.keyword()))
+                out.push(TStmt.Error(range))
+            case ContractKind.Decreases:
+                let what = "a termination measure (`decreases`)"
+                self.unsupported(cx, range, what, "the contract verifier (after version 1)")
+                out.push(TStmt.Error(range))
+
+    ## `old(e)` in `ensures`: `e` as it was on entry, saved in a local then
+    ## (a copy of a place that is not `Copy`).
+    pub pure def old_expr(
+        mut self, cx: Cx, args: list[Arg], trailing: Closure?, at: TextRange
+    ) -> TExprId:
+        var scope = 0
+        match self.ensures:
+            case Some(ctx):
+                scope = ctx.scope
+            case None:
+                self.report_other(self.error(cx, Msg.ContractOldOutside, at))
+                self.check_args_loosely(cx, args)
+                return self.error_expr(at)
+        if len(args) != 1:
+            self.report_other(self.error(cx, Msg.ContractOldArguments, at))
+            self.check_args_loosely(cx, args)
+            return self.error_expr(at)
+        let arg = ref args[0]
+        if arg.name.is_some() or trailing.is_some():
+            self.report_other(self.error(cx, Msg.ContractOldArguments, at))
+            return self.error_expr(at)
+        # `result` does not exist on entry.
+        let hidden = self.scopes[scope].copy()
+        self.scopes[scope] = []
+        let x0 = self.infer_expr(cx, arg.value, None)
+        if scope < len(self.scopes):
+            self.scopes[scope] = hidden
+        let x1 = self.decay(cx, x0)
+        let x = self.auto_deref(x1)
+        let ty = self.resolved(self.ty_of(x))
+        var value = x
+        if not self.is_copy(cx, ty) and self.is_place(x):
+            let s = self.span_of(x)
+            value = self.add(TExprKind.CopyOf(x), ty, s)
+        let text = "old({self.source_text(cx, cx.ast.expr(arg.value).range)})"
+        let l = self.new_local(text, ty, False, at)
+        if let Some(e) = ref mut self.ensures:
+            e.olds.push((l, value))
+        return self.add(TExprKind.Local(l), ty, at)
+
+    ## A value of a refinement type as its base, the same value (07: a
+    ## refinement "can be used wherever `T` can"), for operators, fields,
+    ## indexing, iteration and the base's methods; a reference to one as a
+    ## reference to its base. Anything else is returned as it is.
+    pub pure def unrefined(mut self, cx: Cx, x: TExprId) -> TExprId:
+        var ty = self.resolved(self.ty_of(x))
+        var by_ref: bool? = None
+        if let TyData.Ref(inner, m) = self.types.data(ty).copy():
+            ty = self.resolved(inner)
+            by_ref = Some(m)
+        if self.refinement_of(cx, ty).is_none():
+            return x
+        # Through a refinement of a refinement to the type under both.
+        let base = cx.prog.unrefine(mut self.types, ty)
+        var to = base
+        if let Some(m) = by_ref:
+            to = self.types.ref_(base, m)
+        return self.wrap(x, Coercion.Unrefine, to)
+
+    ## A value of a refinement type as its own base, one step: a value of
+    ## `Small = Port where ...` as a `Port` (whose methods it has).
+    pub pure def unrefined_once(mut self, cx: Cx, x: TExprId) -> TExprId:
+        var ty = self.resolved(self.ty_of(x))
+        var by_ref: bool? = None
+        if let TyData.Ref(inner, m) = self.types.data(ty).copy():
+            ty = self.resolved(inner)
+            by_ref = Some(m)
+        let refined = self.refinement_of(cx, ty) else:
+            return x
+        let (_, _, base) = refined
+        var to = base
+        if let Some(m) = by_ref:
+            to = self.types.ref_(base, m)
+        return self.wrap(x, Coercion.Unrefine, to)
+
+    ## The refinements a value of `ty` satisfies, the outermost base's
+    ## first: `[Port, Small]` for `Small`, each with its arguments.
+    pub pure def refinement_chain(mut self, cx: Cx, ty: Ty) -> list[(DefId, list[Ty])]:
+        var chain: list[(DefId, list[Ty])] = []
+        var at = self.resolved(ty)
+        while let TyData.Adt(d, args) = self.types.data(at).copy():
+            let base = cx.prog.refinement_base(mut self.types, d, args) else:
+                break
+            chain.push((d, args))
+            if len(chain) > 64:
+                break
+            at = base
+        chain.reverse()
+        return chain
+
+    ## Whether `ty` is a refinement type: its definition, arguments and
+    ## base.
+    pub pure def refinement_of(mut self, cx: Cx, ty: Ty) -> (DefId, list[Ty], Ty)?:
+        if let TyData.Adt(d, args) = self.data(ty):
+            let base = cx.prog.refinement_base(mut self.types, d, args) else:
+                return None
+            return Some((d, args, base))
+        return None
+
+    ## A constant written where a refinement is expected (07: "constructing
+    ## one checks `pred` (statically when the value is a constant)"): a
+    ## `comptime` expression that checks the predicate on the value and
+    ## gives it, so the check runs, and fails, at compile time.
+    pub pure def refine_constant(
+        mut self, cx: Cx, value: TExprId, d: DefId, args: list[Ty], ty: Ty
+    ) -> TExprId:
+        let span = self.span_of(value)
+        let r = cx.prog.refinement(d) else:
+            return value
+        if r.predicate.is_none():
+            return value
+        if self.ty_of(value) == Ty.error():
+            self.exprs[value.index].ty = ty
+            return value
+        # Each predicate of the chain, the outermost base's first.
+        var stmts: list[TStmt] = []
+        let whole = self.types.adt(d, args.copy())
+        for (rd, rargs) in self.refinement_chain(cx, whole):
+            let ri = cx.prog.refinement(rd) else:
+                continue
+            let pred = ri.predicate else:
+                continue
+            let base = self.types.subst(ri.base, rargs)
+            let mode = if self.is_copy(cx, base): ArgMode.Value else: ArgMode.Borrow
+            let arg = self.add(self.exprs[value.index].kind.copy(), base, span)
+            let callee = Callee.Fn(def_=pred, type_args=rargs.copy())
+            let call = self.add(
+                TExprKind.Call(callee=callee, args=[TArg(expr=arg, mode=mode)]), Ty.bool(), span
+            )
+            stmts.push(
+                TStmt.Contract(
+                    ContractCheck(
+                        kind=TContractKind.Refinement,
+                        cond=call,
+                        text=ri.text.copy(),
+                        span=span,
+                        replay=False,
+                    )
+                )
+            )
+        let refined = self.add(self.exprs[value.index].kind.copy(), ty, span)
+        stmts.push(TStmt.Return(value=Some(refined), span=span))
+        let body = self.new_block(stmts, span)
+        let id = ClosureId(index=len(self.closures))
+        let fn_ty = self.types.fn_([], ty, True)
+        self.closures.push(
+            Some(
+                TClosure(
+                    params=[],
+                    captures=[],
+                    own_=False,
+                    ret=ty,
+                    body=body,
+                    span=span,
+                    fn_ty=fn_ty,
+                    comptime_=True,
+                    role=ClosureRole.Plain,
+                )
+            )
+        )
+        self.comptime_sites.push((id, span))
+        return self.add(TExprKind.Comptime(id), ty, span)
+
+    ## `X.try_from(v)` for a refinement `X`: `X ! RefinementError`.
+    pub pure def refine_try(
+        mut self, cx: Cx, ty: Ty, args: list[Arg], trailing: Closure?, at: TextRange
+    ) -> TExprId:
+        let refined = self.refinement_of(cx, ty) else:
+            return self.error_expr(at)
+        let (d, targs, _) = refined
+        if len(args) != 1:
+            let name = cx.prog.defs[d.index].name.copy()
+            var found = len(args)
+            if trailing.is_some():
+                found += 1
+            let diag = self.error(cx, Msg.TypeArgumentCount, at).with("name", "{name}.try_from")
+            self.report(diag.with("expected", "1").with("found", "{found}"))
+            self.check_args_loosely(cx, args)
+            return self.error_expr(at)
+        # The value is of the type under every refinement of the chain:
+        # `Small.try_from` takes an `int` and checks `Port`'s predicate too.
+        let root = cx.prog.unrefine(mut self.types, ty)
+        let x0 = self.check_expr(cx, args[0].value, root)
+        let x = self.check_movable(cx, x0)
+        var err = Ty.error()
+        if let Some(e) = cx.prog.lookup_in(cx.prog.prelude, "RefinementError"):
+            err = self.types.err_set([e])
+        var rty = Ty.error()
+        if let Some(r) = cx.prog.wk.result:
+            rty = self.types.adt(r, [ty, err])
+        return self.add(TExprKind.RefineTry(value=x, refinement=d, type_args=targs), rty, at)
+
+    ## An assignment to, or a `mut` borrow of, a place inside a value of a
+    ## type with an invariant, outside that type's own methods (07: "the
+    ## compiler enforces this"); and a change through a refinement's base.
+    ## Both are `contract.` and `refine.` messages.
+    pub pure def check_protected_place(mut self, cx: Cx, e: TExprId, range: TextRange):
+        var cur = e
+        while True:
+            match self.exprs[cur.index].kind:
+                case TExprKind.Field(base, _):
+                    let owner = self.resolved(self.types.strip_ref(self.ty_of(base)))
+                    if let TyData.Adt(d, _) = self.types.data(owner):
+                        var own_method = False
+                        if let Some(s) = self.self_ty:
+                            if let TyData.Adt(o, _) = self.types.data(s):
+                                own_method = o == d
+                        if cx.prog.invariant_check(d).is_some() and not own_method:
+                            self.invariant_field(cx, owner, range)
+                            return
+                    cur = base
+                case TExprKind.Index(base, _, _):
+                    let owner = self.resolved(self.types.strip_ref(self.ty_of(base)))
+                    if let TyData.Adt(d, _) = self.types.data(owner):
+                        var own_method = False
+                        if let Some(s) = self.self_ty:
+                            if let TyData.Adt(o, _) = self.types.data(s):
+                                own_method = o == d
+                        if cx.prog.invariant_check(d).is_some() and not own_method:
+                            self.invariant_field(cx, owner, range)
+                            return
+                    cur = base
+                case TExprKind.Coerce(inner, Coercion.Unrefine):
+                    let inner_ty = self.ty_of(inner)
+                    if let Some((d, _, _)) = self.refinement_of(cx, inner_ty):
+                        var pred = String.new()
+                        if let Some(r) = cx.prog.refinement(d):
+                            pred = r.text.copy()
+                        let what = self.source_text(cx, range)
+                        let shown = self.show(cx, inner_ty)
+                        var diag = self.error(cx, Msg.RefineChangeThroughBase, range).with(
+                            "what", what
+                        )
+                        self.report_other(diag.with("ty", shown).with("predicate", pred))
+                    return
+                case TExprKind.Deref(inner):
+                    cur = inner
+                case _:
+                    return
+
+    ## `contract.invariant-field`: a change of a part of `owner`, a type
+    ## with an invariant, outside its own methods.
+    pure def invariant_field(mut self, cx: Cx, owner: Ty, range: TextRange):
+        let what = self.source_text(cx, range)
+        let shown = self.show(cx, owner)
+        let d = self.error(cx, Msg.ContractInvariantField, range).with("what", what)
+        self.report_other(d.with("ty", shown))
+
+    ## Whether `base` names std's `arbitrary` or `exhaustive` (17): which.
+    pub pure def generator_kind(self, cx: Cx, base: ExprId) -> String?:
+        var name = String.new()
+        match cx.ast.expr(base).kind:
+            case ExprKind.Name(n):
+                name = n.copy()
+            case _:
+                return None
+        if self.lookup_local(name).is_some():
+            return None
+        let d = cx.prog.lookup(self.module, name) else:
+            return None
+        let f = cx.prog.fn_info(d) else:
+            return None
+        match f.intrinsic:
+            case Some(i):
+                if i == "test.arbitrary":
+                    return Some("arbitrary".to_string())
+                if i == "test.exhaustive":
+                    return Some("exhaustive".to_string())
+                return None
+            case None:
+                return None
+
+    ## `arbitrary[T]` and `exhaustive[T](max_len=n)`: the `Gen` of the
+    ## generator the compiler wrote for `T`, as `Gen.of(g)` or `Gen.every(g,
+    ## max_len=n)` (the call `typeck.collect` wrote for the site, by the
+    ## site's expression `site`).
+    pub pure def generator_site(
+        mut self,
+        cx: Cx,
+        site: ExprId,
+        base: ExprId,
+        targs: list[IndexArg],
+        call: list[Arg]?,
+        range: TextRange,
+        expected: Ty?,
+    ) -> TExprId:
+        let kind = self.generator_kind(cx, base) ?? String.new()
+        var t = ExprId(index=0)
+        var one = len(targs) == 1
+        if one:
+            match targs[0]:
+                case IndexArg.Expr(x):
+                    t = x
+                case _:
+                    one = False
+        if not one:
+            let whole = cx.ast.expr(site).range
+            let found = "`{self.source_text(cx, whole)}`"
+            self.report_other(self.error(cx, Msg.ParseExpectedType, whole).with("found", found))
+            return self.error_expr(range)
+        var key = String.new()
+        for c in self.source_text(cx, cx.ast.expr(t).range).chars():
+            if c != ' ' and c != '\n' and c != '\t' and c != '\r':
+                key.push_char(c)
+        var found = False
+        if let Some(entry) = cx.prog.generator_sites.get(key.copy()):
+            found = entry.is_some()
+        let replacement = cx.prog.generator_calls.get((self.module.index, site.index))
+        if not found or replacement.is_none():
+            # `test.no-generator`: a `Gen` of nothing known, so what uses its
+            # cases is not reported again.
+            if found:
+                # A site the compiler wrote a generator for but no call:
+                # outside what stage 1 renders.
+                self.other("test.no-generator")
+            else:
+                var why = "the compiler writes generators only for the program's own module".to_string()
+                if let Some(w) = cx.prog.generator_failures.get(key):
+                    why = w.copy()
+                let written = cx.ast.expr(t).range
+                let shown = self.source_text(cx, written)
+                let d = self.error(cx, Msg.TestNoGenerator, written).with("ty", shown)
+                self.report_other(d.with("why", why))
+            if let Some(args) = call:
+                self.check_args_loosely(cx, args)
+            var ty = Ty.error()
+            if let Some(g) = cx.prog.lookup_in(cx.prog.prelude, "Gen"):
+                ty = self.types.adt(g, [Ty.error()])
+            return self.add(TExprKind.Error, ty, range)
+        if kind == "arbitrary":
+            if let Some(extra) = call:
+                if not extra.is_empty():
+                    let d = self.error(cx, Msg.TypeArgumentCount, range).with("name", "arbitrary")
+                    self.report(d.with("expected", "0").with("found", "{len(extra)}"))
+        var call_expr = ExprId(index=0)
+        if let Some(r) = replacement:
+            call_expr = r
+        return self.infer_expr(cx, call_expr, expected)
+
+    ## `embed("path")` (08): the text of the file, read by the driver at
+    ## compile time, as a literal; a path that is not one plain string, or
+    ## a file that could not be read, is a `comptime.` error.
+    pub pure def embed_call(
+        mut self, cx: Cx, args: list[Arg], trailing: Closure?, range: TextRange
+    ) -> TExprId:
+        var path: String? = None
+        if len(args) == 1 and trailing.is_none() and args[0].name.is_none():
+            if let ExprKind.Str(parts) = cx.ast.expr(args[0].value).kind:
+                var plain = True
+                for p in parts:
+                    if let StrPart.Interp(_, _, _, _) = p:
+                        plain = False
+                if plain:
+                    path = Some(build.plain_text(parts))
+        let p = path else:
+            self.report_other(self.error(cx, Msg.ComptimeEmbedPath, range))
+            return self.error_expr(range)
+        var why = "only the program's own file may embed, in stage 0".to_string()
+        match cx.prog.embedded.get(p.copy()):
+            case Some(Embedded.Read(text)):
+                return self.add(TExprKind.Str(text.copy()), Ty.str(), range)
+            case Some(Embedded.Failed(w)):
+                why = w.copy()
+            case None:
+                pass
+        let d = self.error(cx, Msg.ComptimeEmbedFailed, range).with("path", p).with("reason", why)
+        self.report_other(d)
+        return self.error_expr(range)
+
+    ## Whether an expression is a constant: a literal (a number, possibly
+    ## negated, text, a character, a boolean), a `const`, or a list, tuple,
+    ## set or dict of constants. A constant where a refinement is expected
+    ## is checked at compile time.
+    pub pure def is_constant(self, cx: Cx, e: ExprId) -> bool:
+        match cx.ast.expr(e).kind:
+            case ExprKind.Int(_, _, _) | ExprKind.Float(_, _, _) | ExprKind.Char(_):
+                return True
+            case ExprKind.RawStr(_) | ExprKind.ByteStr(_):
+                return True
+            case ExprKind.Str(parts):
+                for p in parts:
+                    if let StrPart.Interp(_, _, _, _) = p:
+                        return False
+                return True
+            case ExprKind.Name(n):
+                if n == "True" or n == "False":
+                    return True
+                if self.lookup_local(n).is_some():
+                    return False
+                let d = cx.prog.lookup(self.module, n) else:
+                    return False
+                if let DefKind.Const(_) = cx.prog.defs[d.index].kind():
+                    return True
+                return False
+            case ExprKind.Unary(UnOp.Neg, inner):
+                return match cx.ast.expr(inner).kind:
+                    case ExprKind.Int(_, _, _) | ExprKind.Float(_, _, _): True
+                    case _: False
+            case ExprKind.Paren(inner):
+                return self.is_constant(cx, inner)
+            case ExprKind.List(xs):
+                for x in xs:
+                    if not self.is_constant(cx, x):
+                        return False
+                return True
+            case ExprKind.Tuple(xs):
+                for x in xs:
+                    if not self.is_constant(cx, x):
+                        return False
+                return True
+            case ExprKind.Set(xs):
+                for x in xs:
+                    if not self.is_constant(cx, x):
+                        return False
+                return True
+            case ExprKind.Dict(kv):
+                for (k, v) in kv:
+                    if not self.is_constant(cx, k) or not self.is_constant(cx, v):
+                        return False
+                return True
+            case _:
+                return False

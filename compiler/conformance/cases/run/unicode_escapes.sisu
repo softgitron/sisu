@@ -1,0 +1,8 @@
+# `\u{...}` names a Unicode scalar value by one to six hex digits, in
+# characters and strings alike.
+def main():
+    let c = '\u{41}'
+    let s = "\u{1F600}\u{0000e9}\u{10FFFF}-\u{0}"
+    print(c)
+    print([ch.code() for ch in s.chars()])
+    print(s.byte_len())

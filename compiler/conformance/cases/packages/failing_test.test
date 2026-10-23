@@ -1,0 +1,9 @@
+test "stats/a failing test in a module replays from its token" ... FAILED
+
+test "stats/a failing test in a module replays from its token" ... FAILED
+panic: the property failed for [1, 0, 0] (case 3, shrunk 9 times)
+  the property returned False
+  at test "stats/a failing test in a module replays from its token" (src/stats.sisu:4:5)
+replay: sisu test --replay 1-82bf70ce3aaebef6-0.0.1-t0-s0-r0-c1.0.1.1.0.0.1.0.0.0 .
+
+0 passed, 1 failed, 0 blocked

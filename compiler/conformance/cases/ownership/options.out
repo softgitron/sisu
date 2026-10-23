@@ -1,0 +1,14 @@
+match on a temporary:
+  keep made
+  drop made
+if let on a local:
+  borrowed made
+coalesce:
+  default
+try:
+  got tried
+  drop tried
+  ok 1
+  err Bad(reason="no")
+end of main
+  drop made

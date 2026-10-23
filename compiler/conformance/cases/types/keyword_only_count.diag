@@ -1,0 +1,2 @@
+13:11-13:22 E0305 type.argument-count name="scale" expected="1" found="2"
+14:11-14:34 E0305 type.argument-count name="clamp" expected="2" found="3"

@@ -1,0 +1,9 @@
+# After rustc's `borrowck-local-borrow-outlives-fn`: a function returns a
+# borrow of its own parameter's value (Rust's E0515).
+
+def keep(x: int) -> ref int:
+    let y = x
+    return ref y
+
+def main():
+    print(keep(3))

@@ -1,0 +1,143 @@
+##! `pure` on SIR (stage 0's `sisu-borrowck/src/purity.rs`; D-074; 18,
+##! pipeline step 6): a pure function calls only pure functions, pure
+##! intrinsics and function values of a pure type, and drops only values
+##! whose `Drop` (if any) is pure, since dropping runs it. The bodies of the
+##! closures a pure function creates are held to the same rule, since the
+##! closure runs on the pure function's behalf. Taking a capability as a
+##! parameter, and passing an impure function where a pure one is
+##! expected, are type rules checked before SIR (E0334, E0335). A
+##! `comptime` expression is a value to the code around it: the compiler
+##! runs it, with no access to the world (08).
+
+from stage1.borrowck.finding import Finding, FindingParam, text
+from stage1.borrowck.loans import display_fn
+from stage1.borrowck.names import is_named, place_name
+from stage1.borrowck.types import Types
+from stage1.diag import Msg
+from stage1.sir import Callee, FnKind, Operand, Place, Program, Rvalue, StatementKind, Type
+
+pub pure def check(p: Program, types: Types) -> list[Finding]:
+    var out: list[Finding] = []
+    for f in p.functions:
+        if not f.pure:
+            continue
+        match f.kind:
+            case FnKind.Closure(_) | FnKind.Value | FnKind.Comptime(_):
+                continue
+            case _:
+                pass
+        let name = display_fn(f.name)
+        var todo: list[String] = [f.name.copy()]
+        var seen: list[String] = [f.name.copy()]
+        while let Some(gn) = todo.pop():
+            # By name in the table of functions (`Types.function`), the
+            # first of a name, as `Program.function` finds it.
+            let gi = types.function(gn) else:
+                continue
+            let g = ref p.functions[gi]
+            for b in range(len(g.blocks)):
+                let block = ref g.blocks[b]
+                for si in range(len(block.stmts)):
+                    let s = ref block.stmts[si]
+                    match s.kind:
+                        case StatementKind.Call(_, callee, _):
+                            var impure: String? = None
+                            match callee:
+                                # A `comptime` expression is a value by the
+                                # time the program runs; the compiler ran it.
+                                case Callee.Fn(n, _):
+                                    if let Some(ci) = types.function(n):
+                                        let c = ref p.functions[ci]
+                                        var comptime_ = False
+                                        if let FnKind.Comptime(_) = c.kind:
+                                            comptime_ = True
+                                        if not c.pure and not comptime_:
+                                            impure = Some(display_fn(n))
+                                case Callee.Trait(n, _):
+                                    if let Some(d) = types.trait_method(p, n):
+                                        if not d.pure:
+                                            impure = Some(n.copy())
+                                case Callee.Intrinsic(n, _):
+                                    if let Some(d) = types.intrinsic(p, n):
+                                        if not d.pure:
+                                            impure = Some(last_part(n))
+                                case Callee.Value(o):
+                                    var place: Place? = None
+                                    if let Operand.Copy(pl) = o:
+                                        place = Some(pl.copy())
+                                    if let Operand.Move(pl) = o:
+                                        place = Some(pl.copy())
+                                    if let Some(pl) = place:
+                                        if let Some(Type.Fn(_, _, False)) = types.place_ty(g, pl):
+                                            out.push(
+                                                Finding.new(Msg.TypeImpureValueCall, g, s.loc).with(
+                                                    "name", name
+                                                ).label(
+                                                    f.loc, Msg.TypeDeclaredPureHere, pure_here(name)
+                                                ).at(b, si)
+                                            )
+                            if let Some(c) = impure:
+                                out.push(
+                                    Finding.new(Msg.TypeImpureCall, g, s.loc).with(
+                                        "callee", c
+                                    ).with("name", name).label(
+                                        f.loc, Msg.TypeDeclaredPureHere, pure_here(name)
+                                    ).at(b, si)
+                                )
+                        # Dropping a value runs its `Drop`, which must be pure
+                        # too.
+                        case StatementKind.Drop(place, _):
+                            if block.cleanup:
+                                continue
+                            let t = types.place_ty(g, place) else:
+                                continue
+                            for d in types.drop_fns(t):
+                                let ci = types.function(d) else:
+                                    continue
+                                let c = ref p.functions[ci]
+                                if c.pure:
+                                    continue
+                                # `Type.Drop.drop`, the method of `impl Drop
+                                # for Type`.
+                                var owner = d.copy()
+                                if d.ends_with(".Drop.drop"):
+                                    owner = d.byte_slice(0, d.byte_len() - 10).to_string()
+                                elif let Some(cut) = last_dot(d):
+                                    owner = d.byte_slice(0, cut).to_string()
+                                let value = place_name(types, g, place)
+                                var fd = Finding.new(Msg.TypeImpureDrop, g, s.loc).with_arg(
+                                    "value", value.copy()
+                                ).with("ty", owner).with("name", name).at(b, si)
+                                let decl = g.locals[place.local.index].loc
+                                if decl.is_some() and is_named(g, place.local):
+                                    fd = fd.label(
+                                        decl,
+                                        Msg.BorrowDeclaredHere,
+                                        [FindingParam(name="name".to_string(), value=value)],
+                                    )
+                                fd = fd.label(f.loc, Msg.TypeDeclaredPureHere, pure_here(name))
+                                out.push(fd)
+                        case StatementKind.Assign(_, Rvalue.Closure(c, _, _)):
+                            if not seen.contains(c) and types.function(c).is_some():
+                                seen.push(c.copy())
+                                todo.push(c.copy())
+                        case _:
+                            pass
+    return out
+
+pure def pure_here(name: str) -> list[FindingParam]:
+    return [text("name", name)]
+
+## What follows the last `.` of a name, or the name.
+pure def last_part(n: str) -> String:
+    if let Some(cut) = last_dot(n):
+        return n.byte_slice(cut + 1, n.byte_len()).to_string()
+    return n.to_string()
+
+pure def last_dot(s: str) -> int?:
+    var i = s.byte_len() - 1
+    while i >= 0:
+        if s.byte_at(i) == 46:
+            return Some(i)
+        i -= 1
+    return None

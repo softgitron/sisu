@@ -1,0 +1,9 @@
+# A wrong program: a borrow of an element of a temporary list is kept
+# after the statement that made the list.
+
+def scores() -> list[int]:
+    return [7, 9]
+
+def main():
+    let best = scores().last()
+    print(best ?? 0)

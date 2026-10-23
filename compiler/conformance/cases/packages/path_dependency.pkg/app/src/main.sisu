@@ -1,0 +1,8 @@
+import textkit
+from textkit.fmt.boxes import boxed
+
+def main(sys: System):
+    let args = sys.env.args()
+    let words = if len(args) > 0: args else: ["no", "arguments"]
+    print(boxed(textkit.title(words)))
+    print(textkit.VERSION)

@@ -1,0 +1,34 @@
+# Generic functions (03, "Generic syntax"): type arguments inferred or
+# written, bounds and `where` clauses, checked once at the definition.
+
+def largest[T: Ord](xs: list[T]) -> ref T?:
+    var best: ref T? = None
+    for x in xs:
+        match best:
+            case Some(b) if b >= x:
+                pass
+            case _:
+                best = Some(x)
+    return best
+
+def pair_up[A, B](own a: A, own b: B) -> (A, B):
+    return (a, b)
+
+def show_all[T](xs: list[T]) -> String where T: Display:
+    return xs.join(", ")
+
+# A `Copy` type parameter's values copy, and one may be a reference, so
+# the result names what it may borrow from.
+def first_or[T: Copy](xs: list[T], default: T) -> T from xs, default:
+    return if len(xs) > 0: xs[0] else: default
+
+def main():
+    print(largest([3, 9, 2]) ?? 0)
+    print(largest(["pear", "apple"]) ?? "")
+    let empty: list[int] = []
+    print(largest(empty).is_none())
+    print(pair_up(1, 'c'))
+    print(pair_up[int, bool](2, True))
+    print(show_all([1.5, 2.0]))
+    print(first_or(empty, 7))
+    print(first_or[str](["x"], "y"))

@@ -1,0 +1,878 @@
+##! Initialisation and moves: a forward dataflow over move paths (stage 0's
+##! `sisu-borrowck/src/init.rs`).
+##!
+##! Each path has two bits: *may be initialised* (`mi`) and *may be
+##! uninitialised* (`mu`), joined by union. Initialising a path sets `mi`
+##! and clears `mu` for it and every path below it; moving, dropping or
+##! ending the storage of a path does the opposite. A path is definitely
+##! initialised where `mu` is clear for it and everything below it, and
+##! definitely uninitialised where `mi` is clear likewise.
+##!
+##! A switch on a discriminant teaches the dataflow which variant is active
+##! on each edge: the payload paths of the other variants hold nothing
+##! there, so both bits are cleared ("vacuous"), which lets the drop
+##! elaboration remove the drop of a payload that cannot exist.
+##!
+##! Unwind edges carry the state at every statement of the block, after the
+##! statement's moves and before its result is stored.
+##!
+##! Its findings: a use of a path that may be moved is a use after a move
+##! (or of a partly moved value); one that was never assigned is a use
+##! before assignment; a second assignment to a `let` declared without a
+##! value is reported too, and so is a move out of a value whose type
+##! implements `Drop`, or through a reference, an index or a key.
+
+from stage1.borrowck.bitset import BitSet
+from stage1.borrowck.finding import Finding, param, text
+from stage1.borrowck.names import is_named, local_name, place_name, temp_source
+from stage1.borrowck.paths import Cover, MovePaths
+from stage1.borrowck.types import Types
+from stage1.diag import Msg
+from stage1.sir import (
+    BasicBlock,
+    Callee,
+    Function,
+    Loc,
+    LocalId,
+    Operand,
+    Place,
+    Program,
+    Proj,
+    Rvalue,
+    Statement,
+    StatementKind,
+    Terminator,
+)
+from stage1.sir.write import ty as type_text
+
+## What may be initialised (`mi`) and what may be uninitialised (`mu`)
+## at a point, by move path.
+pub struct State:
+    pub mi: BitSet
+    pub mu: BitSet
+
+impl State:
+    pub pure def bottom(n: int) -> State:
+        return State(mi=BitSet.new(n), mu=BitSet.new(n))
+
+    ## Adds every bit of `o`; returns whether anything changed.
+    pub pure def join(mut self, o: State) -> bool:
+        let a = self.mi.union(o.mi)
+        let b = self.mu.union(o.mu)
+        return a or b
+
+    ## `join` for a state that holds `o`'s bits but for those in the words
+    ## `words` names: only those words are joined.
+    pub pure def join_words(mut self, o: State, words: list[int]) -> bool:
+        let a = join_words_of(mut self.mi, o.mi, words)
+        let b = join_words_of(mut self.mu, o.mu, words)
+        return a or b
+
+## Adds the bits of the words `words` names of `o` to `set`; returns whether
+## anything changed.
+pure def join_words_of(mut set: BitSet, o: BitSet, words: list[int]) -> bool:
+    var changed = False
+    for w in words:
+        if w >= len(o.words):
+            continue
+        while len(set.words) <= w:
+            set.words.push(0)
+        let m = set.words[w] | o.words[w]
+        if m != set.words[w]:
+            set.words[w] = m
+            changed = True
+    return changed
+
+## What a switch on a discriminant teaches its edges (`switch_facts`): how
+## many variants the value has, each case's variant and target block, the
+## default block, the variants the cases list, and each payload path with
+## its variant.
+pub struct SwitchFacts:
+    count: int
+    cases: list[(int, int)]
+    default: int
+    listed: set[int]
+    children: list[(int, int)]
+
+pub struct Analysis:
+    pub paths: MovePaths
+    ## The predecessors of each block, through its terminator or its
+    ## unwind edge (stage 0's `Cfg`).
+    pub pred: list[list[int]]
+    pub entry: list[State]
+    pub reachable: list[bool]
+
+## Where a search for a statement goes: to the move that left a path
+## empty, or to the assignment that gave it its value.
+@derive(Eq, Copy)
+pub enum Site:
+    Move
+    Init
+
+## The operands a statement reads or moves, in evaluation order.
+pub pure def operands(s: Statement) -> list[Operand]:
+    match s.kind:
+        case StatementKind.Assign(_, rv):
+            return rvalue_operands(rv)
+        case StatementKind.Call(_, callee, args):
+            var v = args.copy()
+            if let Callee.Value(o) = callee:
+                v.push(o.copy())
+            return v
+        case _:
+            return []
+
+pub pure def rvalue_operands(rv: Rvalue) -> list[Operand]:
+    return match rv:
+        case Rvalue.Use(o): [o.copy()]
+        case Rvalue.Unary(_, o): [o.copy()]
+        case Rvalue.Binary(_, a, b): [a.copy(), b.copy()]
+        case Rvalue.Aggregate(_, ops): ops.copy()
+        case Rvalue.Closure(_, _, ops): ops.copy()
+        case _: []
+
+## The destination a statement stores into, if any.
+pub pure def dest(s: Statement) -> Place?:
+    return match s.kind:
+        case StatementKind.Assign(p, _): Some(p.copy())
+        case StatementKind.Call(p, _, _): Some(p.copy())
+        case _: None
+
+## The locals named by index and key projections of a place.
+pub pure def index_locals(p: Place) -> list[LocalId]:
+    var out: list[LocalId] = []
+    for x in p.proj:
+        match x:
+            case Proj.Index(l):
+                out.push(l)
+            case Proj.IndexFromEnd(l):
+                out.push(l)
+            case Proj.Key(l):
+                out.push(l)
+            case _:
+                pass
+    return out
+
+## The predecessors of each block: the blocks whose terminator or unwind
+## edge leads to it, each once, in order.
+pub pure def predecessors(f: Function) -> list[list[int]]:
+    let n = len(f.blocks)
+    var pred: list[list[int]] = []
+    for _ in range(n):
+        pred.push([])
+    for i in range(n):
+        var s = targets(f.blocks[i])
+        if let Some(u) = f.blocks[i].unwind:
+            s.push(u.index)
+        var kept: list[int] = []
+        for t in s:
+            if t < n:
+                kept.push(t)
+        kept.sort()
+        var last = -1
+        for t in kept:
+            if t != last:
+                pred[t].push(i)
+            last = t
+    return pred
+
+## The targets of a block's terminator.
+pub pure def targets(b: BasicBlock) -> list[int]:
+    match b.term:
+        case Terminator.Goto(t):
+            return [t.index]
+        case Terminator.Switch(_, cases, default):
+            var v: list[int] = []
+            for (_, t) in cases:
+                v.push(t.index)
+            v.push(default.index)
+            return v
+        case _:
+            return []
+
+impl Analysis:
+    pub pure def run(f: Function, types: Types) -> Analysis:
+        let paths = MovePaths.build_with(f, types)
+        let n = paths.count()
+        let nb = len(f.blocks)
+        var entry: list[State] = []
+        var reachable: list[bool] = []
+        for _ in range(nb):
+            entry.push(State.bottom(n))
+            reachable.push(False)
+        var a = Analysis(paths=paths, pred=predecessors(f), entry=[], reachable=[])
+        if nb == 0:
+            a.entry = entry
+            a.reachable = reachable
+            return a
+        # At entry the parameters hold values; every other local is empty.
+        var init = State.bottom(n)
+        for l in range(len(f.locals)):
+            let root = a.paths.roots[l]
+            if l >= 1 and l <= f.param_count:
+                a.set_init(mut init, root)
+            else:
+                a.set_uninit(mut init, root)
+        entry[0] = init
+        reachable[0] = True
+        var queued: list[bool] = []
+        for _ in range(nb):
+            queued.push(False)
+        var work = [0]
+        queued[0] = True
+        while let Some(b) = work.pop():
+            queued[b] = False
+            let block = ref f.blocks[b]
+            var st = entry[b].copy()
+            # A `while` over the statements, with the unwinding edge asked
+            # once: natively, a `for` loop's `next` and `is_some` are calls of
+            # intrinsics, which cost more than the rest of a step. The state
+            # after each statement's moves is joined into the unwinding
+            # block's entry as it is reached, rather than copied and joined
+            # after the statements: nothing else is joined in between, so
+            # the joins and the blocks they queue are stage 0's.
+            # After the first join there, which is whole, only the words of
+            # the sets the statements changed since the last one are joined
+            # (`words`): the rest are in that entry already.
+            var u = -1
+            if let Some(x) = block.unwind:
+                u = x.index
+            var words: list[int] = []
+            var whole = True
+            let count = len(block.stmts)
+            var si = 0
+            while si < count:
+                let s = ref block.stmts[si]
+                a.moves_noting(s, mut st, mut words)
+                if u >= 0:
+                    if whole:
+                        push_state(u, st, mut entry, mut reachable, mut queued, mut work)
+                        whole = False
+                    else:
+                        push_words(u, st, words, mut entry, mut reachable, mut queued, mut work)
+                    words.clear()
+                a.inits_noting(s, mut st, mut words)
+                si += 1
+            if u >= 0:
+                if whole:
+                    push_state(u, st, mut entry, mut reachable, mut queued, mut work)
+                else:
+                    push_words(u, st, words, mut entry, mut reachable, mut queued, mut work)
+            # Only a switch on a discriminant teaches its edges something
+            # (`switch_facts`, found once a visit, and `edge_effect`); the
+            # edges of another terminator take the state as it is.
+            let facts = a.switch_facts(f, types, block)
+            for t in targets(block):
+                if t >= nb:
+                    continue
+                if let Some(fx) = facts:
+                    var s = st.copy()
+                    a.edge_effect(fx, t, mut s)
+                    push_state(t, s, mut entry, mut reachable, mut queued, mut work)
+                else:
+                    push_state(t, st, mut entry, mut reachable, mut queued, mut work)
+        a.entry = entry
+        a.reachable = reachable
+        return a
+
+    pub pure def set_init(self, mut st: State, id: int):
+        for d in self.paths.descendants(id):
+            _ = st.mi.insert(d)
+            st.mu.remove(d)
+
+    pub pure def set_uninit(self, mut st: State, id: int):
+        for d in self.paths.descendants(id):
+            st.mi.remove(d)
+            _ = st.mu.insert(d)
+
+    pure def set_vacuous(self, mut st: State, id: int):
+        for d in self.paths.descendants(id):
+            st.mi.remove(d)
+            st.mu.remove(d)
+
+    ## The paths a statement moves out, drops or ends.
+    pub pure def removed_paths(self, s: Statement) -> list[int]:
+        var out: list[int] = []
+        for o in operands(s):
+            if let Operand.Move(p) = o:
+                let (id, cover) = self.paths.lookup(p)
+                if cover == Cover.Exact:
+                    out.push(id)
+        match s.kind:
+            case StatementKind.Drop(place, _):
+                let (id, cover) = self.paths.lookup(place)
+                if cover == Cover.Exact:
+                    out.push(id)
+            case StatementKind.StorageDead(l):
+                out.push(self.paths.roots[l.index])
+            case _:
+                pass
+        return out
+
+    ## The path a statement initialises, if its destination is one.
+    pub pure def init_path(self, s: Statement) -> int?:
+        let d = dest(s) else:
+            return None
+        let (id, cover) = self.paths.lookup(d)
+        if cover == Cover.Exact:
+            return Some(id)
+        return None
+
+    ## `apply_moves`, noting in `words` each word of the sets it writes
+    ## (a path's word is `d // 62`, as `BitSet` writes `WORD` out).
+    pure def moves_noting(self, s: Statement, mut st: State, mut words: list[int]):
+        for id in self.removed_paths(s):
+            for d in self.paths.descendants(id):
+                st.mi.remove(d)
+                _ = st.mu.insert(d)
+                words.push(d // 62)
+
+    ## `apply_inits`, noting in `words` each word of the sets it writes.
+    pure def inits_noting(self, s: Statement, mut st: State, mut words: list[int]):
+        if let Some(id) = self.init_path(s):
+            for d in self.paths.descendants(id):
+                _ = st.mi.insert(d)
+                st.mu.remove(d)
+                words.push(d // 62)
+
+    pub pure def apply_moves(self, s: Statement, mut st: State):
+        for id in self.removed_paths(s):
+            self.set_uninit(mut st, id)
+
+    pub pure def apply_inits(self, s: Statement, mut st: State):
+        if let Some(id) = self.init_path(s):
+            self.set_init(mut st, id)
+
+    pub pure def apply(self, s: Statement, mut st: State):
+        self.apply_moves(s, mut st)
+        self.apply_inits(s, mut st)
+
+    ## What a switch on a discriminant teaches its edges, when the block
+    ## ends in one: the path of the value switched on, its variants, and
+    ## the paths of their payloads.
+    pure def switch_facts(self, f: Function, types: Types, block: BasicBlock) -> SwitchFacts?:
+        let Terminator.Switch(value, cases, default) = block.term.copy() else:
+            return None
+        let Operand.Copy(v) = value else:
+            return None
+        if not v.proj.is_empty():
+            return None
+        # The last statement that writes the switched local decides.
+        var scrutinee: Place? = None
+        var k = len(block.stmts) - 1
+        while k >= 0:
+            let s = ref block.stmts[k]
+            var done = False
+            match s.kind:
+                case StatementKind.Assign(p, rv):
+                    if p == v:
+                        if let Rvalue.Discriminant(q) = rv:
+                            scrutinee = Some(q.copy())
+                        done = True
+                case StatementKind.Call(p, _, _):
+                    if p == v:
+                        done = True
+                case _:
+                    pass
+            if done:
+                break
+            k -= 1
+        let q = scrutinee else:
+            return None
+        let (id, cover) = self.paths.lookup(q)
+        if cover != Cover.Exact:
+            return None
+        let ty = types.place_ty(f, q) else:
+            return None
+        let count = types.variant_count(ty) else:
+            return None
+        # Sets rather than lists: an enum of hundreds of variants has as
+        # many cases and children.
+        var listed: set[int] = set()
+        var targets: list[(int, int)] = []
+        for (c, t) in cases:
+            _ = listed.add(c)
+            targets.push((c, t.index))
+        var children: list[(int, int)] = []
+        for c in self.paths.paths[id].children:
+            if let Some(Proj.Downcast(var_)) = self.paths.paths[c].place.proj.last():
+                children.push((c, var_))
+        return Some(
+            SwitchFacts(
+                count=count, cases=targets, default=default.index, listed=listed, children=children
+            )
+        )
+
+    ## What the switch `fx` teaches the edge to `target`: the payload paths
+    ## of the variants that edge does not take hold nothing there.
+    pub pure def edge_effect(self, fx: SwitchFacts, target: int, mut st: State):
+        var active: set[int] = set()
+        for (c, t) in fx.cases:
+            if t == target:
+                _ = active.add(c)
+        if fx.default == target:
+            for c in range(fx.count):
+                if not fx.listed.contains(c):
+                    _ = active.add(c)
+        for (c, var_) in fx.children:
+            if not active.contains(var_):
+                self.set_vacuous(mut st, c)
+
+    ## The state before each statement of a block, and at its terminator.
+    pub pure def states(self, f: Function, b: int) -> list[State]:
+        var out: list[State] = []
+        var st = self.entry[b].copy()
+        for s in f.blocks[b].stmts:
+            out.push(st.copy())
+            self.apply(s, mut st)
+        out.push(st)
+        return out
+
+    ## Whether the path and everything below it are initialised.
+    pub pure def fully_init(self, st: State, id: int) -> bool:
+        for d in self.paths.descendants(id):
+            if st.mu.contains(d):
+                return False
+        return True
+
+    ## Whether the path and everything below it are uninitialised.
+    pub pure def fully_uninit(self, st: State, id: int) -> bool:
+        for d in self.paths.descendants(id):
+            if st.mi.contains(d):
+                return False
+        return True
+
+    # ---------------------------------------------------------------- diagnostics
+
+    pub pure def findings(self, f: Function, types: Types, p: Program) -> list[Finding]:
+        var out: list[Finding] = []
+        var reported: list[(int, (int, int)?)] = []
+        for b in range(len(f.blocks)):
+            if not self.reachable[b] or f.blocks[b].cleanup:
+                continue
+            let states = self.states(f, b)
+            for si in range(len(f.blocks[b].stmts)):
+                let s = ref f.blocks[b].stmts[si]
+                # Each use, and whether it needs the whole value (`True`) or
+                # only the path itself and what contains it (`False`).
+                var uses: list[(Place, bool)] = []
+                for o in operands(s):
+                    match o:
+                        case Operand.Copy(q):
+                            uses.push((q.copy(), True))
+                        case Operand.Move(q):
+                            uses.push((q.copy(), True))
+                        case _:
+                            pass
+                if let StatementKind.Assign(_, rv) = s.kind:
+                    match rv:
+                        case Rvalue.Ref(q, _):
+                            uses.push((q.copy(), True))
+                        case Rvalue.Discriminant(q):
+                            uses.push((q.copy(), True))
+                        case Rvalue.CopyOf(q):
+                            uses.push((q.copy(), True))
+                        case Rvalue.StrView(q):
+                            uses.push((q.copy(), True))
+                        case _:
+                            pass
+                var all = uses.copy()
+                for (q, _) in uses:
+                    for l in index_locals(q):
+                        all.push((Place.local(l), True))
+                if let Some(d) = dest(s):
+                    for l in index_locals(d):
+                        all.push((Place.local(l), True))
+                    let (_, cover) = self.paths.lookup(d)
+                    if cover == Cover.Exact:
+                        # Assigning a field needs the value around it.
+                        if not d.proj.is_empty():
+                            var proj = d.proj.copy()
+                            _ = proj.pop()
+                            all.push((strip_downcast(Place(local=d.local, proj=proj)), False))
+                    else:
+                        all.push((base_before_through(d), False))
+                # The operands are evaluated in order (decision 222): what one
+                # of them moves is gone for those after it (decision 261).
+                var moved_now: list[int] = []
+                var moves: list[int?] = []
+                for o in operands(s):
+                    match o:
+                        case Operand.Move(q):
+                            moves.push(Some(self.paths.lookup(q).0))
+                        case Operand.Copy(_):
+                            moves.push(None)
+                        case _:
+                            pass
+                var k = 0
+                for (q, whole) in all:
+                    match self.moved_by_statement(
+                        f, types, b, si, q, whole, moved_now, mut reported
+                    ):
+                        case Some(fd):
+                            out.push(fd)
+                        case None:
+                            if let Some(fd) = self.check_use(
+                                f, types, b, si, states[si], q, whole, mut reported
+                            ):
+                                out.push(fd)
+                    if k < len(uses) and k < len(moves):
+                        if let Some(id) = moves[k]:
+                            moved_now.push(id)
+                    k += 1
+                # A `let` declared without a value is assigned once per path.
+                if let Some(d) = dest(s):
+                    if d.proj.is_empty()
+                            and d.local.index < len(f.locals)
+                            and f.locals[d.local.index].once:
+                        let root = self.paths.roots[d.local.index]
+                        if states[si].mi.contains(root) and not reported.contains((root, None)):
+                            reported.push((root, None))
+                            let name = local_name(f, d.local)
+                            let first = self.find_site(f, b, si, [root], Site.Init)
+                            var fd = Finding.new(Msg.TypeReassignLet, f, s.loc).with(
+                                "name", name
+                            ).fix(Msg.TypeDeclareVar, [text("name", name)], None).at(b, si)
+                            if let Some((fb, fs)) = first:
+                                # The same statement, run again by a loop.
+                                let again = fb == b and fs == si
+                                let label = if again: Msg.BorrowAssignedInLoop else: Msg.BorrowAssignedHere
+                                fd = fd.label(
+                                    f.blocks[fb].stmts[fs].loc, label, [text("name", name)]
+                                )
+                            out.push(fd)
+                # Moving out of a value that implements `Drop`, or through a
+                # reference or an index.
+                for o in operands(s):
+                    if let Operand.Move(q) = o:
+                        if let Some(fd) = self.check_move_out(f, types, p, b, si, s, q):
+                            out.push(fd)
+            # The terminator's operand.
+            if let Terminator.Switch(value, _, _) = f.blocks[b].term:
+                var switched: Place? = None
+                match value:
+                    case Operand.Copy(q):
+                        switched = Some(q.copy())
+                    case Operand.Move(q):
+                        switched = Some(q.copy())
+                    case _:
+                        pass
+                if let Some(q) = switched:
+                    let si = len(f.blocks[b].stmts)
+                    if let Some(fd) = self.check_use(
+                        f, types, b, si, states[si], q, True, mut reported
+                    ):
+                        out.push(fd)
+        return out
+
+    pure def check_move_out(
+        self, f: Function, types: Types, p: Program, b: int, si: int, s: Statement, q: Place
+    ) -> Finding?:
+        var through = False
+        for x in q.proj:
+            match x:
+                case Proj.Field(_) | Proj.Downcast(_):
+                    pass
+                case _:
+                    through = True
+        if through:
+            let name = place_name(types, f, q)
+            var fd = Finding.new(Msg.BorrowMoveOutOfPlace, f, s.loc).with_arg("name", name).at(
+                b, si
+            )
+            # The value it would come out of.
+            if is_named(f, q.local):
+                let root = local_name(f, q.local)
+                let decl = f.locals[q.local.index].loc
+                fd = fd.label(decl, Msg.BorrowDeclaredHere, [text("name", root)])
+            else:
+                if let Some(made) = temp_source(f, q.local):
+                    fd = fd.label(Some(made), Msg.BorrowMadeHere, [])
+            return Some(fd)
+        # Each prefix ending before a field: does its type implement Drop?
+        for i in range(len(q.proj)):
+            let Proj.Field(_) = q.proj[i] else:
+                continue
+            var proj: list[Proj] = []
+            for k in range(i):
+                proj.push(q.proj[k])
+            let base = strip_downcast(Place(local=q.local, proj=proj))
+            let t = types.place_ty(f, base) else:
+                continue
+            if types.implements_drop(t):
+                let ty = type_text(t)
+                return Some(
+                    Finding.new(Msg.BorrowMoveOutOfDrop, f, s.loc).note(
+                        Msg.BorrowCopyPart, []
+                    ).with_arg("part", place_name(types, f, q)).with_arg(
+                        "name", place_name(types, f, base)
+                    ).with("ty", ty).label(
+                        types.drop_impl_loc(p, t), Msg.BorrowDropImplHere, [text("ty", ty)]
+                    ).at(b, si)
+                )
+        return None
+
+    pure def check_use(
+        self,
+        f: Function,
+        types: Types,
+        b: int,
+        si: int,
+        st: State,
+        q: Place,
+        whole: bool,
+        mut reported: list[(int, (int, int)?)],
+    ) -> Finding?:
+        let (id, cover) = self.paths.lookup(q)
+        var loc: Loc? = None
+        if si < len(f.blocks[b].stmts):
+            loc = f.blocks[b].stmts[si].loc
+        if loc.is_none():
+            loc = f.blocks[b].loc
+        if st.mu.contains(id):
+            let site = self.find_site(f, b, si, self.related(id), Site.Move)
+            let key = (self.paths.roots[self.paths.local_of(id).index], site)
+            if reported.contains(key):
+                return None
+            reported.push(key)
+            let used = place_name(types, f, self.paths.paths[id].place)
+            match site:
+                case Some((mb, ms)):
+                    let mloc = f.blocks[mb].stmts[ms].loc
+                    var line = 0
+                    if let Some(l) = mloc:
+                        line = l.line
+                    # A move at or after the use was reached around a loop.
+                    var later = mb == b and ms == si
+                    if let Some(m) = mloc:
+                        if let Some(u) = loc:
+                            if m.line > u.line or (m.line == u.line and m.col >= u.col):
+                                later = True
+                    let label = if later: Msg.BorrowMovedInLoop else: Msg.BorrowMovedHere
+                    return Some(
+                        Finding.new(Msg.BorrowUseAfterMove, f, loc).with_arg(
+                            "name", used.copy()
+                        ).with("line", "{line}").label(mloc, label, [param("name", used)]).note(
+                            Msg.BorrowCopyBeforeMove, []
+                        ).at(b, si)
+                    )
+                case None:
+                    var decl: Loc? = None
+                    if q.local.index < len(f.locals):
+                        decl = f.locals[q.local.index].loc
+                    var fd = Finding.new(Msg.TypeUninitialized, f, loc).with_arg(
+                        "name", used.copy()
+                    ).note(Msg.TypeAssignEveryPath, []).at(b, si)
+                    if decl.is_some():
+                        fd = fd.label(decl, Msg.BorrowDeclaredHere, [param("name", used)])
+                    return Some(fd)
+        if whole and (cover == Cover.Exact or cover == Cover.Through):
+            let below = self.paths.descendants(id)
+            for k in range(1, len(below)):
+                let d = below[k]
+                if not st.mu.contains(d):
+                    continue
+                let site = self.find_site(f, b, si, self.paths.descendants(d), Site.Move)
+                let key = (d, site)
+                if reported.contains(key):
+                    return None
+                reported.push(key)
+                let whole_name = place_name(types, f, self.paths.paths[id].place)
+                let part = place_name(types, f, self.paths.paths[d].place)
+                var mloc: Loc? = None
+                if let Some((mb, ms)) = site:
+                    mloc = f.blocks[mb].stmts[ms].loc
+                var line = 0
+                if let Some(l) = mloc:
+                    line = l.line
+                return Some(
+                    Finding.new(Msg.BorrowUseAfterPartialMove, f, loc).with_arg(
+                        "name", whole_name
+                    ).with_arg("part", part.copy()).with("line", "{line}").label(
+                        mloc, Msg.BorrowMovedHere, [param("name", part)]
+                    ).note(Msg.BorrowCopyBeforeMove, []).at(b, si)
+                )
+        return None
+
+    ## A use of `q` after an earlier operand of the same statement moved it,
+    ## or the value it is part of (`E0400`), or, for a use of the whole, a
+    ## part of it (`E0401`); the move is labelled at the statement.
+    pure def moved_by_statement(
+        self,
+        f: Function,
+        types: Types,
+        b: int,
+        si: int,
+        q: Place,
+        whole: bool,
+        moved_now: list[int],
+        mut reported: list[(int, (int, int)?)],
+    ) -> Finding?:
+        if moved_now.is_empty():
+            return None
+        let (id, cover) = self.paths.lookup(q)
+        let above = self.paths.ancestors(id)
+        var part: int? = None
+        var moved = False
+        for m in moved_now:
+            if m == id or above.contains(m):
+                moved = True
+                break
+        if not moved:
+            if not whole or not (cover == Cover.Exact or cover == Cover.Through):
+                return None
+            let below = self.paths.descendants(id)
+            for m in moved_now:
+                if below.contains(m):
+                    part = Some(m)
+                    break
+            if part.is_none():
+                return None
+        let key = (self.paths.roots[self.paths.local_of(id).index], Some((b, si)))
+        if reported.contains(key):
+            return None
+        reported.push(key)
+        var loc: Loc? = None
+        if si < len(f.blocks[b].stmts):
+            loc = f.blocks[b].stmts[si].loc
+        var line = 0
+        if let Some(l) = loc:
+            line = l.line
+        let used = place_name(types, f, self.paths.paths[id].place)
+        let d = part else:
+            return Some(
+                Finding.new(Msg.BorrowUseAfterMove, f, loc).with_arg("name", used.copy()).with(
+                    "line", "{line}"
+                ).label(loc, Msg.BorrowMovedHere, [param("name", used)]).note(
+                    Msg.BorrowCopyBeforeMove, []
+                ).at(b, si)
+            )
+        let moved_part = place_name(types, f, self.paths.paths[d].place)
+        return Some(
+            Finding.new(Msg.BorrowUseAfterPartialMove, f, loc).with_arg("name", used).with_arg(
+                "part", moved_part.copy()
+            ).with("line", "{line}").label(
+                loc, Msg.BorrowMovedHere, [param("name", moved_part)]
+            ).note(Msg.BorrowCopyBeforeMove, []).at(b, si)
+        )
+
+    ## The paths whose move makes `id` uninitialised: itself, its ancestors
+    ## and its descendants.
+    pure def related(self, id: int) -> list[int]:
+        var v = self.paths.descendants(id)
+        for a in self.paths.ancestors(id):
+            v.push(a)
+        return v
+
+    ## The nearest statement before (block, stmt) that moves (or, for
+    ## `Site.Init`, initialises) one of `targets`, searching backwards and
+    ## stopping at statements that initialise the path again.
+    pub pure def find_site(
+        self, f: Function, b: int, si: int, targets: list[int], what: Site
+    ) -> (int, int)?:
+        var visited: list[bool] = []
+        for _ in range(len(f.blocks)):
+            visited.push(False)
+        var queue: list[(int, int)] = [(b, si)]
+        var head = 0
+        var first = True
+        while head < len(queue):
+            let (blk, end) = queue[head]
+            head += 1
+            if not first:
+                if visited[blk]:
+                    continue
+                visited[blk] = True
+            first = False
+            var stopped = False
+            var i = min(end, len(f.blocks[blk].stmts)) - 1
+            while i >= 0:
+                let s = ref f.blocks[blk].stmts[i]
+                match what:
+                    case Site.Move:
+                        var hit = False
+                        for p in self.removed_paths(s):
+                            if targets.contains(p):
+                                hit = True
+                        if hit:
+                            if let StatementKind.StorageDead(_) = s.kind:
+                                pass
+                            else:
+                                return Some((blk, i))
+                        if let Some(p) = self.init_path(s):
+                            if targets.contains(p):
+                                stopped = True
+                    case Site.Init:
+                        if let Some(p) = self.init_path(s):
+                            if targets.contains(p):
+                                return Some((blk, i))
+                if stopped:
+                    break
+                i -= 1
+            if stopped:
+                continue
+            for p in self.pred[blk]:
+                if not f.blocks[p].cleanup and not visited[p]:
+                    queue.push((p, len(f.blocks[p].stmts)))
+        return None
+
+## A place without the variant projections at its end.
+pub pure def strip_downcast(own p: Place) -> Place:
+    var q = p
+    while not q.proj.is_empty():
+        let Proj.Downcast(_) = q.proj[len(q.proj) - 1] else:
+            break
+        _ = q.proj.pop()
+    return q
+
+## The part of a place before its first deref, index or key.
+pub pure def base_before_through(p: Place) -> Place:
+    var n = len(p.proj)
+    for i in range(len(p.proj)):
+        match p.proj[i]:
+            case Proj.Field(_) | Proj.Downcast(_):
+                pass
+            case _:
+                n = i
+                break
+    if n == len(p.proj):
+        n = max(n - 1, 0)
+    var proj: list[Proj] = []
+    for k in range(n):
+        proj.push(p.proj[k])
+    return strip_downcast(Place(local=p.local, proj=proj))
+
+## Joins a state into a block's entry, queueing the block when its entry
+## changed or it was not reached before.
+pure def push_state(
+    t: int,
+    s: State,
+    mut entry: list[State],
+    mut reachable: list[bool],
+    mut queued: list[bool],
+    mut work: list[int],
+):
+    let changed = entry[t].join(s)
+    if (changed or not reachable[t]) and not queued[t]:
+        reachable[t] = True
+        queued[t] = True
+        work.push(t)
+    reachable[t] = True
+
+## `push_state` for a state whose bits but those of the words `words` names
+## block `t`'s entry holds already (`State.join_words`).
+pure def push_words(
+    t: int,
+    s: State,
+    words: list[int],
+    mut entry: list[State],
+    mut reachable: list[bool],
+    mut queued: list[bool],
+    mut work: list[int],
+):
+    let changed = entry[t].join_words(s, words)
+    if (changed or not reachable[t]) and not queued[t]:
+        reachable[t] = True
+        queued[t] = True
+        work.push(t)
+    reachable[t] = True

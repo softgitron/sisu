@@ -1,0 +1,13 @@
+# The version `layout.sisu` saves: `Point` has a `z`.
+
+struct Point:
+    x: int
+    y: int
+    z: int
+
+def show(p: Point) -> String:
+    return "({p.x}, {p.y}, {p.z})"
+
+def main():
+    live.boundary()
+    print("v2: {show(Point(x=1, y=2, z=3))}")

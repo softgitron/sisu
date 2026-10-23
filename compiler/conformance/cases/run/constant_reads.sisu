@@ -1,0 +1,33 @@
+# Constants read where they are used (decision 260): a native build reads
+# a constant whose function only returns a literal without calling it,
+# and keeps what the call did that a run shows: the yield point at its
+# entry, so tasks that read constants interleave as the interpreter's do,
+# and the count of nested calls, so a recursion that reads one at the
+# limit overflows there, in the constant's name.
+
+const STEP: int = 1
+const HALF: f64 = 0.5
+const LOUD: bool = True
+const MARK: char = '*'
+const NAME: str = "reader"
+
+## Each task appends its number as it reads constants, so the list shows
+## where the scheduler switched.
+def interleaved() -> list[String]:
+    let seen = Mutex(list())
+    task.scope do s:
+        for k in range(3):
+            s.spawn do:
+                for i in range(12):
+                    if LOUD and HALF < 1.0:
+                        seen.lock().push("{k}{i * STEP}{MARK}")
+    return seen.into_inner()
+
+def down(n: int) -> int:
+    let s = STEP
+    return down(n + s) + 1
+
+def main():
+    print(NAME)
+    print(interleaved())
+    print(down(0))

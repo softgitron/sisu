@@ -1,0 +1,15 @@
+# An impl binds each associated type its trait declares.
+
+trait Source:
+    type Item
+    def take(mut self) -> Item?
+
+struct Empty:
+    done: bool
+
+impl Source for Empty:
+    def take(mut self) -> int?:
+        return None
+
+def main():
+    pass

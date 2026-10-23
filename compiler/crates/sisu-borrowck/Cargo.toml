@@ -1,0 +1,22 @@
+[package]
+name = "sisu-borrowck"
+description = "The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, escapes, must-consume, purity"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sisu-sir.workspace = true
+sisu-diag.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+sisu-syntax.workspace = true
+sisu-parser.workspace = true
+sisu-resolve.workspace = true
+sisu-typeck.workspace = true
+sisu-lower.workspace = true

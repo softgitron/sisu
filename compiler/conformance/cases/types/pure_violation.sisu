@@ -1,0 +1,6 @@
+pure def square(x: int) -> int:
+    print("side effect")
+    return x * x
+
+def main():
+    print(square(3))

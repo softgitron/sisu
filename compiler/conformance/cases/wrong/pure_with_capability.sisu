@@ -1,0 +1,7 @@
+# A wrong program: a `pure` function takes a capability.
+
+pure def size(fs: Fs, name: Path) -> int:
+    return 0
+
+def main(sys: System):
+    print(size(sys.fs, "a.txt"))

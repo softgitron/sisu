@@ -1,0 +1,11 @@
+# A value cannot be passed with `mut` and borrowed by another argument of
+# the same call.
+
+def append_all(mut to: list[int], from_list: list[int]):
+    for x in from_list:
+        to.push(x)
+
+def main():
+    var xs = [1, 2]
+    append_all(mut xs, xs)
+    print(xs)

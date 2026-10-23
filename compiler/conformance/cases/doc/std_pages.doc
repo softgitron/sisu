@@ -1,0 +1,802 @@
+<!-- std.collections.md -->
+# `std.collections`
+
+`std.collections` (11): the collections beyond the prelude's `list`,
+`dict`, `set` and `Arena`, written in Sisu over `list`. The prelude's
+collections are reached from here too (`from std.collections import
+Arena`).
+
+Each type's doc examples are tests: `sisu test --std` runs them.
+
+## Re-exports
+
+- `list`: `std.core.list`
+- `dict`: `std.core.dict`
+- `set`: `std.core.set`
+- `Arena`: `std.core.Arena`
+- `Key`: `std.core.Key`
+- `Slice`: `std.core.Slice`
+- `Iter`: `std.core.Iter`
+- `Entry`: `std.core.Entry`
+
+## Contents
+
+- [`Deque`](#Deque): A double-ended queue: values go in and come out at either end.
+- [`Heap`](#Heap): A priority queue: `pop` takes the smallest value first (a binary heap over a list, so `push` and `pop` take time logarithmic in its size).
+- [`SortedDict`](#SortedDict): A map whose keys are kept in order (11 names a B-tree; stage 0's is a sorted list, searched by halves): `keys` and `items` go from the smallest key up, whatever order they were inserted in.
+- [`SortedSet`](#SortedSet): A set whose values are kept in order (11's B-tree set; stage 0's is a sorted list, searched by halves): `values` goes from the smallest up.
+- [`BitSet`](#BitSet): A set of small non-negative integers, one bit each, in 64-bit words.
+
+<a id="Deque"></a>
+## `Deque`
+
+```sisu
+pub struct Deque[T]
+    front: list[T]
+    back: list[T]
+
+impl[T] Len for Deque[T]
+impl[T: Eq] Contains[T] for Deque[T]
+```
+
+A double-ended queue: values go in and come out at either end.
+
+Two lists hold it, the front one reversed, so each end is a list's end;
+taking from an empty end moves the other list across, so a value is
+moved a constant number of times on average.
+
+```sisu
+var q: Deque[int] = Deque.new()
+q.push_back(2)
+q.push_back(3)
+q.push_front(1)
+assert len(q) == 3
+assert q.pop_front() == Some(1)
+assert q.pop_back() == Some(3)
+assert q.pop_front() == Some(2)
+assert q.pop_front() == None
+```
+
+<a id="Deque.new"></a>
+### `Deque.new`
+
+```sisu
+pub pure def new() -> Deque[T]
+```
+
+An empty queue.
+
+<a id="Deque.push_back"></a>
+### `Deque.push_back`
+
+```sisu
+pub pure def push_back(mut self, own x: T)
+```
+
+Adds `x` after the last value.
+
+<a id="Deque.push_front"></a>
+### `Deque.push_front`
+
+```sisu
+pub pure def push_front(mut self, own x: T)
+```
+
+Adds `x` before the first value.
+
+<a id="Deque.pop_front"></a>
+### `Deque.pop_front`
+
+```sisu
+pub pure def pop_front(mut self) -> T?
+```
+
+Takes the first value, or `None` when the queue is empty.
+
+<a id="Deque.pop_back"></a>
+### `Deque.pop_back`
+
+```sisu
+pub pure def pop_back(mut self) -> T?
+```
+
+Takes the last value, or `None` when the queue is empty.
+
+```sisu
+var q: Deque[str] = Deque.new()
+q.push_front("b")
+q.push_front("a")
+assert q.pop_back() == Some("b")
+```
+
+<a id="Deque.first"></a>
+### `Deque.first`
+
+```sisu
+pub pure def first(self) -> ref T?
+```
+
+The first value, or `None`.
+
+<a id="Deque.last"></a>
+### `Deque.last`
+
+```sisu
+pub pure def last(self) -> ref T?
+```
+
+The last value, or `None`.
+
+<a id="Deque.get"></a>
+### `Deque.get`
+
+```sisu
+pub pure def get(self, i: int) -> ref T?
+```
+
+The value at position `i` from the front, or `None`.
+
+```sisu
+var q: Deque[int] = Deque.new()
+for x in [10, 20, 30]:
+    q.push_back(x)
+q.push_front(0)
+assert q.get(0).copied() == Some(0)
+assert q.get(3).copied() == Some(30)
+assert q.get(4).copied() == None
+```
+
+<a id="Deque.is_empty"></a>
+### `Deque.is_empty`
+
+```sisu
+pub pure def is_empty(self) -> bool
+```
+
+<a id="Heap"></a>
+## `Heap`
+
+```sisu
+pub struct Heap[T: Ord]
+    items: list[T]
+
+impl[T: Ord] Len for Heap[T]
+```
+
+A priority queue: `pop` takes the smallest value first (a binary heap
+over a list, so `push` and `pop` take time logarithmic in its size).
+
+```sisu
+var h: Heap[int] = Heap.new()
+for x in [5, 1, 4, 2, 3]:
+    h.push(x)
+var out: list[int] = []
+while let Some(x) = h.pop():
+    out.push(x)
+assert out == [1, 2, 3, 4, 5]
+```
+
+<a id="Heap.new"></a>
+### `Heap.new`
+
+```sisu
+pub pure def new() -> Heap[T]
+```
+
+<a id="Heap.push"></a>
+### `Heap.push`
+
+```sisu
+pub pure def push(mut self, own x: T)
+```
+
+Adds `x`.
+
+<a id="Heap.pop"></a>
+### `Heap.pop`
+
+```sisu
+pub pure def pop(mut self) -> T?
+```
+
+Takes the smallest value, or `None` when the heap is empty.
+
+<a id="Heap.peek"></a>
+### `Heap.peek`
+
+```sisu
+pub pure def peek(self) -> ref T?
+```
+
+The smallest value, or `None`.
+
+```sisu
+var h: Heap[str] = Heap.new()
+h.push("pear")
+h.push("apple")
+assert h.peek().copied() == Some("apple")
+```
+
+<a id="Heap.is_empty"></a>
+### `Heap.is_empty`
+
+```sisu
+pub pure def is_empty(self) -> bool
+```
+
+<a id="SortedDict"></a>
+## `SortedDict`
+
+```sisu
+pub struct SortedDict[K: Ord, V]
+    ks: list[K]
+    vs: list[V]
+
+impl[K: Ord, V] Len for SortedDict[K, V]
+impl[K: Ord, V] Contains[K] for SortedDict[K, V]
+```
+
+A map whose keys are kept in order (11 names a B-tree; stage 0's is a
+sorted list, searched by halves): `keys` and `items` go from the
+smallest key up, whatever order they were inserted in.
+
+```sisu
+var d: SortedDict[str, int] = SortedDict.new()
+_ = d.insert("pear", 3)
+_ = d.insert("apple", 5)
+_ = d.insert("fig", 1)
+assert d.keys() == ["apple", "fig", "pear"]
+assert d.get("fig").copied() == Some(1)
+assert d.insert("fig", 2) == Some(1)
+assert d.remove("apple") == Some(5)
+assert len(d) == 2
+```
+
+<a id="SortedDict.new"></a>
+### `SortedDict.new`
+
+```sisu
+pub pure def new() -> SortedDict[K, V]
+```
+
+<a id="SortedDict.position"></a>
+### `SortedDict.position`
+
+```sisu
+pure def position(self, key: K) -> int
+```
+
+Where `key` is, or where it would go: the index of the first key not
+smaller than it.
+
+<a id="SortedDict.holds"></a>
+### `SortedDict.holds`
+
+```sisu
+pure def holds(self, i: int, key: K) -> bool
+```
+
+Whether the key at `i` is `key`.
+
+<a id="SortedDict.insert"></a>
+### `SortedDict.insert`
+
+```sisu
+pub pure def insert(mut self, own key: K, own value: V) -> V?
+```
+
+Inserts or replaces; gives the value `key` had.
+
+<a id="SortedDict.get"></a>
+### `SortedDict.get`
+
+```sisu
+pub pure def get(self, key: K) -> ref V?
+```
+
+The value of `key`, or `None`.
+
+<a id="SortedDict.remove"></a>
+### `SortedDict.remove`
+
+```sisu
+pub pure def remove(mut self, key: K) -> V?
+```
+
+Removes `key`; gives its value.
+
+<a id="SortedDict.contains"></a>
+### `SortedDict.contains`
+
+```sisu
+pub pure def contains(self, key: K) -> bool
+```
+
+<a id="SortedDict.keys"></a>
+### `SortedDict.keys`
+
+```sisu
+pub pure def keys(self) -> list[K] where K: Copy
+```
+
+The keys, smallest first.
+
+<a id="SortedDict.first_key"></a>
+### `SortedDict.first_key`
+
+```sisu
+pub pure def first_key(self) -> K? where K: Copy
+```
+
+The smallest key and its value, or `None`.
+
+```sisu
+var d: SortedDict[int, str] = SortedDict.new()
+_ = d.insert(7, "seven")
+_ = d.insert(2, "two")
+assert d.first_key() == Some(2)
+```
+
+<a id="SortedDict.is_empty"></a>
+### `SortedDict.is_empty`
+
+```sisu
+pub pure def is_empty(self) -> bool
+```
+
+<a id="SortedSet"></a>
+## `SortedSet`
+
+```sisu
+pub struct SortedSet[T: Ord]
+    items: list[T]
+
+impl[T: Ord] Len for SortedSet[T]
+impl[T: Ord] Contains[T] for SortedSet[T]
+```
+
+A set whose values are kept in order (11's B-tree set; stage 0's is a
+sorted list, searched by halves): `values` goes from the smallest up.
+
+```sisu
+var s: SortedSet[str] = SortedSet.new()
+assert s.insert("pear")
+assert s.insert("apple")
+assert not s.insert("pear")
+assert s.values() == ["apple", "pear"]
+assert s.contains("apple") and not s.contains("fig")
+assert s.remove("apple")
+assert len(s) == 1
+```
+
+<a id="SortedSet.new"></a>
+### `SortedSet.new`
+
+```sisu
+pub pure def new() -> SortedSet[T]
+```
+
+<a id="SortedSet.position"></a>
+### `SortedSet.position`
+
+```sisu
+pure def position(self, x: T) -> int
+```
+
+The index of the first value not smaller than `x`.
+
+<a id="SortedSet.holds"></a>
+### `SortedSet.holds`
+
+```sisu
+pure def holds(self, i: int, x: T) -> bool
+```
+
+<a id="SortedSet.insert"></a>
+### `SortedSet.insert`
+
+```sisu
+pub pure def insert(mut self, own x: T) -> bool
+```
+
+Adds `x`; whether it was not there yet.
+
+<a id="SortedSet.remove"></a>
+### `SortedSet.remove`
+
+```sisu
+pub pure def remove(mut self, x: T) -> bool
+```
+
+Removes `x`; whether it was there.
+
+<a id="SortedSet.contains"></a>
+### `SortedSet.contains`
+
+```sisu
+pub pure def contains(self, x: T) -> bool
+```
+
+<a id="SortedSet.values"></a>
+### `SortedSet.values`
+
+```sisu
+pub pure def values(self) -> list[T] where T: Copy
+```
+
+The values, smallest first.
+
+<a id="SortedSet.first"></a>
+### `SortedSet.first`
+
+```sisu
+pub pure def first(self) -> ref T?
+```
+
+The smallest value, or `None`.
+
+<a id="SortedSet.last"></a>
+### `SortedSet.last`
+
+```sisu
+pub pure def last(self) -> ref T?
+```
+
+The largest value, or `None`.
+
+```sisu
+var s: SortedSet[int] = SortedSet.new()
+for x in [5, 1, 9]:
+    _ = s.insert(x)
+assert s.last().copied() == Some(9)
+assert s.first().copied() == Some(1)
+```
+
+<a id="SortedSet.range"></a>
+### `SortedSet.range`
+
+```sisu
+pub pure def range(self, low: T, high: T) -> list[T] where T: Copy
+```
+
+The values from `low` (included) up to `high` (left out), smallest
+first.
+
+```sisu
+var s: SortedSet[int] = SortedSet.new()
+for x in [1, 3, 5, 7, 9]:
+    _ = s.insert(x)
+assert s.range(3, 8) == [3, 5, 7]
+```
+
+<a id="SortedSet.is_empty"></a>
+### `SortedSet.is_empty`
+
+```sisu
+pub pure def is_empty(self) -> bool
+```
+
+<a id="BitSet"></a>
+## `BitSet`
+
+```sisu
+pub struct BitSet
+    words: list[u64]
+
+impl Len for BitSet
+impl Contains[int] for BitSet
+```
+
+A set of small non-negative integers, one bit each, in 64-bit words.
+
+```sisu
+var b = BitSet.new()
+b.insert(3)
+b.insert(64)
+b.insert(3)
+assert b.contains(64) and not b.contains(4)
+assert len(b) == 2
+b.remove(3)
+assert b.members() == [64]
+```
+
+<a id="BitSet.new"></a>
+### `BitSet.new`
+
+```sisu
+pub pure def new() -> BitSet
+```
+
+<a id="BitSet.insert"></a>
+### `BitSet.insert`
+
+```sisu
+pub pure def insert(mut self, n: int)
+```
+
+Adds `n`; panics for a negative one.
+
+<a id="BitSet.remove"></a>
+### `BitSet.remove`
+
+```sisu
+pub pure def remove(mut self, n: int)
+```
+
+<a id="BitSet.contains"></a>
+### `BitSet.contains`
+
+```sisu
+pub pure def contains(self, n: int) -> bool
+```
+
+<a id="BitSet.members"></a>
+### `BitSet.members`
+
+```sisu
+pub pure def members(self) -> list[int]
+```
+
+The members, smallest first.
+<!-- std.fmt.md -->
+# `std.fmt`
+
+`std.fmt` (11): formatting. The traits `Display` (what `{x}` writes)
+and `Debug` (what `{x:?}` writes), the `Formatter` they write into and
+the `Spec` of a placeholder (width, fill, alignment, precision) are the
+prelude's, which interpolation uses, and are reached from here too
+(`from std.fmt import Display`).
+
+## Re-exports
+
+- `Display`: `std.core.Display`
+- `Debug`: `std.core.Debug`
+- `Formatter`: `std.core.Formatter`
+- `Spec`: `std.core.Spec`
+<!-- std.string.md -->
+# `std.string`
+
+`std.string` (11): text. A `String` is its UTF-8 bytes, `str` is the
+type of a text literal, and `char` is a Unicode scalar value; their
+methods (`len`, `chars`, `split`, `trim`, `find`, `replace`,
+`to_lowercase` and `to_uppercase`, which map case over all of Unicode,
+...) are the prelude's, and `String` is reached from here too (`from
+std.string import String`; `str` and `char` are built-in names).
+`Builder` makes a text from many pieces. Grapheme iteration and the
+normalisation forms need Unicode's tables, which are not here yet.
+
+## Re-exports
+
+- `String`: `std.core.String`
+
+## Contents
+
+- [`Builder`](#Builder): A text made from many pieces: each `push` keeps its piece, and `build` copies them all into one `String` once, so making a long text from short pieces copies each byte once.
+
+<a id="Builder"></a>
+## `Builder`
+
+```sisu
+pub struct Builder
+    pieces: list[String]
+    bytes: int
+```
+
+A text made from many pieces: each `push` keeps its piece, and `build`
+copies them all into one `String` once, so making a long text from
+short pieces copies each byte once.
+
+```sisu
+var b = Builder.new()
+b.push("one")
+b.push_char(',')
+b.push(" two")
+b.push_line("")
+b.push_line("three")
+assert b.build() == "one, two\nthree\n"
+assert b.byte_len() == 15
+```
+
+<a id="Builder.new"></a>
+### `Builder.new`
+
+```sisu
+pub pure def new() -> Builder
+```
+
+An empty builder.
+
+<a id="Builder.push"></a>
+### `Builder.push`
+
+```sisu
+pub pure def push(mut self, text: str)
+```
+
+Adds `text`.
+
+<a id="Builder.push_char"></a>
+### `Builder.push_char`
+
+```sisu
+pub pure def push_char(mut self, c: char)
+```
+
+Adds the character `c`.
+
+<a id="Builder.push_line"></a>
+### `Builder.push_line`
+
+```sisu
+pub pure def push_line(mut self, text: str)
+```
+
+Adds `text` and then a line break.
+
+<a id="Builder.push_joined"></a>
+### `Builder.push_joined`
+
+```sisu
+pub pure def push_joined(mut self, parts: list[str], sep: str)
+```
+
+Adds the pieces of `parts` with `sep` between each two.
+
+```sisu
+var b = Builder.new()
+b.push("[")
+b.push_joined(["a", "b", "c"], "; ")
+b.push("]")
+assert b.build() == "[a; b; c]"
+```
+
+<a id="Builder.byte_len"></a>
+### `Builder.byte_len`
+
+```sisu
+pub pure def byte_len(self) -> int
+```
+
+The number of bytes of the text so far.
+
+<a id="Builder.is_empty"></a>
+### `Builder.is_empty`
+
+```sisu
+pub pure def is_empty(self) -> bool
+```
+
+<a id="Builder.build"></a>
+### `Builder.build`
+
+```sisu
+pub pure def build(self) -> String
+```
+
+The text so far, as one `String`; the builder keeps its pieces.
+<!-- std.time.md -->
+# `std.time`
+
+`std.time` (11): `DateTime`, `Duration`, `Timer`, `TimeError` and the
+test clock `TestClock` are the prelude's, which this module also names;
+`Ticker` and `Timeline` (N-35, D-075) are written here, over a `Clock`,
+so the same code keeps real time in production and is deterministic
+under the test clock.
+
+## Re-exports
+
+- `DateTime`: `std.core.DateTime`
+- `Duration`: `std.core.Duration`
+- `Timer`: `std.core.Timer`
+- `TimeError`: `std.core.TimeError`
+- `TestClock`: `std.core.TestClock`
+- `Clock`: `std.core.Clock`
+
+## Contents
+
+- [`Ticker`](#Ticker): A periodic ticker that does not drift (N-35): its `n`-th tick is at `start + n * period` whatever each iteration took, so a slow iteration does not push the ticks after it back. A tick that passes while the loop is busy is skipped, not fired late, and counted in `missed`.
+- [`Timeline`](#Timeline): Virtual time (Sonic Pi's model, N-35): `sleep(d)` moves the timeline's own time on by exactly `d` and then waits for the clock to reach it, so the time spent between sleeps does not accumulate as drift.
+
+<a id="Ticker"></a>
+## `Ticker`
+
+```sisu
+pub struct Ticker
+    clock: Clock
+    period: Duration
+    next: DateTime
+    ## The ticks skipped because they passed while the loop was busy.
+    pub missed: int
+```
+
+A periodic ticker that does not drift (N-35): its `n`-th tick is at
+`start + n * period` whatever each iteration took, so a slow iteration
+does not push the ticks after it back. A tick that passes while the
+loop is busy is skipped, not fired late, and counted in `missed`.
+
+Each `wait` is a boundary where a running program adopts the newest
+epoch of hot replacement (10, "Debugging and profiling": `Ticker.wait`
+calls `live.boundary()`).
+
+```sisu
+let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("a time"))
+let start = clock.now()
+var t = Ticker.every(clock, Duration.seconds(1))
+t.wait().expect("not cancelled")
+t.wait().expect("not cancelled")
+assert clock.now() - start == Duration.seconds(2)
+clock.advance(Duration.millis(3500))
+t.wait().expect("not cancelled")
+assert clock.now() - start == Duration.seconds(6)
+assert t.missed == 3
+```
+
+<a id="Ticker.every"></a>
+### `Ticker.every`
+
+```sisu
+pub def every(clock: Clock, period: Duration) -> Ticker
+    requires period > Duration.seconds(0)
+```
+
+Ticks every `period`, the first a period from now.
+
+Capabilities: `clock` (`Clock`).
+
+<a id="Ticker.wait"></a>
+### `Ticker.wait`
+
+```sisu
+pub def wait(mut self) -> ! TaskError
+```
+
+Waits for the next tick still ahead, skipping those that passed.
+
+Capabilities: `self` (`Clock`).
+
+<a id="Timeline"></a>
+## `Timeline`
+
+```sisu
+pub struct Timeline
+    clock: Clock
+    ## The timeline's time: where it is in its score.
+    pub now: DateTime
+```
+
+Virtual time (Sonic Pi's model, N-35): `sleep(d)` moves the timeline's
+own time on by exactly `d` and then waits for the clock to reach it, so
+the time spent between sleeps does not accumulate as drift.
+
+```sisu
+let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("a time"))
+var tl = Timeline.start(clock)
+let t0 = tl.now
+tl.sleep(Duration.millis(250)).expect("not cancelled")
+clock.advance(Duration.millis(100))
+tl.sleep(Duration.millis(250)).expect("not cancelled")
+assert tl.now - t0 == Duration.millis(500)
+assert clock.now() - t0 == Duration.millis(500)
+```
+
+<a id="Timeline.start"></a>
+### `Timeline.start`
+
+```sisu
+pub def start(clock: Clock) -> Timeline
+```
+
+A timeline whose time starts at the clock's.
+
+Capabilities: `clock` (`Clock`).
+
+<a id="Timeline.sleep"></a>
+### `Timeline.sleep`
+
+```sisu
+pub def sleep(mut self, d: Duration) -> ! TaskError
+```
+
+Moves the timeline on by `d`, and waits until the clock is there.
+
+Capabilities: `self` (`Clock`).

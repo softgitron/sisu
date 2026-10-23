@@ -1,0 +1,2149 @@
+##! Builds the AST from the lossless tree (stage 0's
+##! `sisu-syntax/src/ast/build.rs`). Total: every node kind has a case,
+##! and `ERROR` nodes or missing children become `Error` or `None`. The
+##! nodes go into the `Ast`'s arena as they are made, children first.
+
+from stage1.diag import TextRange
+from stage1.syntax.ast import (
+    Arg,
+    Arm,
+    ArmBody,
+    ArmGen,
+    AssocTypeDef,
+    Ast,
+    Attr,
+    BinOp,
+    Block,
+    Closure,
+    ClosureBody,
+    ClosureParam,
+    CmpOp,
+    CompClause,
+    CompKind,
+    Cond,
+    CondPart,
+    ConstDef,
+    Contract,
+    ContractKind,
+    ElseBody,
+    EnumDef,
+    Expr,
+    ExprId,
+    ExprKind,
+    FieldDef,
+    FnDef,
+    FromImport,
+    GenericParam,
+    ImplDef,
+    Import,
+    IndexArg,
+    Item,
+    ItemId,
+    ItemKind,
+    LetElse,
+    Mode,
+    Module,
+    Name,
+    Param,
+    ParamKind,
+    PatArg,
+    PatKind,
+    Pattern,
+    PatternId,
+    SelectArm,
+    Stmt,
+    StmtId,
+    StmtKind,
+    StrPart,
+    StructDef,
+    SuiteDef,
+    TestDef,
+    TraitDef,
+    TypeAlias,
+    TypeExpr,
+    TypeExprId,
+    TypeKind,
+    UnOp,
+    VariantDef,
+    VariantField,
+    Vis,
+    WherePred,
+)
+from stage1.syntax.kinds import SyntaxKind
+from stage1.syntax.tree import Element, Tree, is_item
+from stage1.text import char_at
+
+## Builds the AST of a whole file.
+pub pure def module(tree: Tree) -> Module:
+    let text: str = tree.text
+    var b = B(t=tree, source=text, ast=Ast.new())
+    let root = tree.root
+    var items: list[ItemId] = []
+    var docs: list[String] = []
+    var broken_names: list[String] = []
+    # A script's top-level statements are its `main` (10), not code that
+    # failed to parse as a declaration.
+    let script = text.starts_with("#!")
+    for e in tree.nodes[root].children:
+        match e:
+            case Node(n):
+                let kind = tree.nodes[n].kind
+                if not script and not is_item(kind) and kind != SyntaxKind.Eof:
+                    for m in tree.preorder(n):
+                        for t in b.tokens(m):
+                            if tree.tokens[t].kind == SyntaxKind.Ident:
+                                broken_names.push(b.text(t).to_string())
+                b.push_item(n, mut items)
+            case Leaf(t):
+                if tree.tokens[t].kind == SyntaxKind.ModuleDocComment:
+                    docs.push(doc_text(b.text(t), "##!"))
+    broken_names.sort()
+    return Module(ast=b.ast, items=items, docs=docs, broken_names=dedup(broken_names))
+
+## The list without the repeats of each element (it is sorted).
+pure def dedup(own xs: list[String]) -> list[String]:
+    var out: list[String] = []
+    for x in own xs:
+        if let Some(last) = out.last():
+            if last == x:
+                continue
+        out.push(x)
+    return out
+
+pure def doc_text(text: str, prefix: str) -> String:
+    let s = text.strip_prefix(prefix)
+    return s.strip_prefix(" ").to_string()
+
+pub pure def is_type_node(k: SyntaxKind) -> bool:
+    return match k:
+        case PathType | OptionType | ResultType | ErrorSetType | TupleType | ParenType: True
+        case FnType | RefType | DynType | ImplType | PtrType | ConstArg: True
+        case _: False
+
+pub pure def is_expr_node(k: SyntaxKind) -> bool:
+    return match k:
+        case Literal | StringExpr | NameRef | ParenExpr | TupleExpr | ListExpr | DictExpr: True
+        case SetExpr | Comprehension | BinExpr | CompareExpr | PrefixExpr | CallExpr: True
+        case FieldExpr | OptFieldExpr | IndexExpr | TryExpr | ClosureExpr | IfExpr | MatchExpr: True
+        case _: False
+
+pub pure def is_pattern_node(k: SyntaxKind) -> bool:
+    return match k:
+        case IdentPat | WildcardPat | LiteralPat | CtorPat | TuplePat | ParenPat: True
+        case ListPat | StarPat | RestPat | OrPat: True
+        case _: False
+
+pub pure def is_item_node(k: SyntaxKind) -> bool:
+    return is_item(k)
+
+## Whether a node is a type or an `ERROR` node where one belongs.
+pure def is_type_or_error(k: SyntaxKind) -> bool:
+    return is_type_node(k) or k == SyntaxKind.Error
+
+## Whether a node is an expression or an `ERROR` node where one belongs.
+pure def is_expr_or_error(k: SyntaxKind) -> bool:
+    return is_expr_node(k) or k == SyntaxKind.Error
+
+## The builder: the tree, a view of its text, and the AST it fills.
+view struct B:
+    t: ref Tree
+    source: str
+    ast: Ast
+
+impl B:
+    pure def kind(self, n: int) -> SyntaxKind:
+        return self.t.nodes[n].kind
+
+    pure def range(self, n: int) -> TextRange:
+        let node = ref self.t.nodes[n]
+        return TextRange(start=node.start, end=node.end)
+
+    ## The child nodes of `n`.
+    pure def nodes(self, n: int) -> list[int]:
+        var out: list[int] = []
+        for e in self.t.nodes[n].children:
+            if let Node(c) = e:
+                out.push(c)
+        return out
+
+    ## The child tokens of `n` that are not trivia.
+    pure def tokens(self, n: int) -> list[int]:
+        var out: list[int] = []
+        for e in self.t.nodes[n].children:
+            if let Leaf(t) = e:
+                if not self.t.tokens[t].kind.is_trivia():
+                    out.push(t)
+        return out
+
+    pure def token_kind(self, t: int) -> SyntaxKind:
+        return self.t.tokens[t].kind
+
+    pure def token_range(self, t: int) -> TextRange:
+        let token = self.t.tokens[t]
+        return TextRange(start=token.start, end=token.end)
+
+    pure def text(self, t: int) -> str from self:
+        let token = self.t.tokens[t]
+        return self.source.byte_slice(token.start, token.end)
+
+    ## The source text of a node.
+    pure def node_text(self, n: int) -> str from self:
+        let node = ref self.t.nodes[n]
+        return self.source.byte_slice(node.start, node.end)
+
+    pure def name(self, t: int) -> Name:
+        return Name(text=self.text(t).to_string(), range=self.token_range(t))
+
+    pure def has(self, n: int, k: SyntaxKind) -> bool:
+        for t in self.tokens(n):
+            if self.token_kind(t) == k:
+                return True
+        return False
+
+    pure def child(self, n: int, k: SyntaxKind) -> int?:
+        for c in self.nodes(n):
+            if self.kind(c) == k:
+                return Some(c)
+        return None
+
+    ## The first child node of `n` whose kind passes `pick`.
+    pure def find_node(self, n: int, pick: pure (SyntaxKind) -> bool) -> int?:
+        for c in self.nodes(n):
+            if pick(self.kind(c)):
+                return Some(c)
+        return None
+
+    ## The last child node of `n` whose kind passes `pick`.
+    pure def rfind_node(self, n: int, pick: pure (SyntaxKind) -> bool) -> int?:
+        var found: int? = None
+        for c in self.nodes(n):
+            if pick(self.kind(c)):
+                found = Some(c)
+        return found
+
+    ## The first child token of `n` of kind `k`.
+    pure def token_of(self, n: int, k: SyntaxKind) -> int?:
+        for t in self.tokens(n):
+            if self.token_kind(t) == k:
+                return Some(t)
+        return None
+
+    ## The first IDENT token after the first token of kind `after`.
+    pure def ident_after(self, n: int, after: SyntaxKind) -> Name?:
+        var seen = False
+        for t in self.tokens(n):
+            let k = self.token_kind(t)
+            if seen and (k == SyntaxKind.Ident or k.is_keyword()):
+                return Some(self.name(t))
+            if k == after:
+                seen = True
+        return None
+
+    pure def missing_name(self, n: int) -> Name:
+        return Name(text=String.new(), range=TextRange.empty(self.range(n).end))
+
+    ## The name of the first IDENT child token of `n`.
+    pure def first_ident(self, n: int) -> Name?:
+        match self.token_of(n, SyntaxKind.Ident):
+            case Some(t):
+                return Some(self.name(t))
+            case None:
+                return None
+
+    # ---------------------------------------------------------------- items
+
+    pure def push_item(mut self, n: int, mut out: list[ItemId]):
+        let k = self.kind(n)
+        if is_item_node(k):
+            out.push(self.item(n))
+        elif k == SyntaxKind.Block:
+            # An unexpectedly indented block: keep what is in it.
+            for c in self.nodes(n):
+                self.push_item(c, mut out)
+        elif k == SyntaxKind.Error:
+            let range = self.range(n)
+            let item = Item(
+                node=n, range=range, attrs=[], vis=Vis.Private, docs=[], kind=ItemKind.Error
+            )
+            out.push(self.ast.add_item(item))
+        else:
+            let range = self.range(n)
+            for s in self.stmts_of(n):
+                let item = Item(
+                    node=n, range=range, attrs=[], vis=Vis.Private, docs=[], kind=ItemKind.Stmt(s)
+                )
+                out.push(self.ast.add_item(item))
+
+    pure def docs_before(self, n: int) -> list[String]:
+        let parent = self.t.nodes[n].parent else:
+            return []
+        let kids = ref self.t.nodes[parent].children
+        var pos = -1
+        for i in range(len(kids)):
+            if kids[i] == Element.Node(n):
+                pos = i
+                break
+        if pos < 0:
+            return []
+        var docs: list[String] = []
+        var i = pos - 1
+        while i >= 0:
+            match kids[i]:
+                case Leaf(t):
+                    let k = self.token_kind(t)
+                    if k == SyntaxKind.DocComment:
+                        docs.push(doc_text(self.text(t), "##"))
+                    elif not is_layout_or_space(k):
+                        break
+                case Node(_):
+                    break
+            i -= 1
+        docs.reverse()
+        return docs
+
+    pure def attrs(mut self, n: int) -> list[Attr]:
+        var out: list[Attr] = []
+        for a in self.nodes(n):
+            if self.kind(a) != SyntaxKind.Attribute:
+                continue
+            var name = String.new()
+            for t in self.tokens(a):
+                let k = self.token_kind(t)
+                if k == SyntaxKind.At or k == SyntaxKind.Newline:
+                    continue
+                if k == SyntaxKind.LParen:
+                    break
+                name.push(self.text(t))
+            var args: list[Arg] = []
+            if let Some(l) = self.child(a, SyntaxKind.ArgList):
+                args = self.args(l)
+            out.push(Attr(name=name, args=args, range=self.range(a)))
+        return out
+
+    pure def vis(self, n: int) -> Vis:
+        let v = self.child(n, SyntaxKind.Visibility) else:
+            return Vis.Private
+        for t in self.tokens(v):
+            if self.text(t) == "package":
+                return Vis.PubPackage
+        return Vis.Pub
+
+    pure def item(mut self, n: int) -> ItemId:
+        let kind = match self.kind(n):
+            case FnDef: ItemKind.Fn(self.fn_def(n))
+            case StructDef: ItemKind.Struct(self.struct_def(n))
+            case EnumDef: ItemKind.Enum(self.enum_def(n))
+            case ErrorDef: ItemKind.ErrorSet(self.enum_def(n))
+            case ImplDef: ItemKind.Impl(self.impl_def(n))
+            case TraitDef: ItemKind.Trait(self.trait_def(n))
+            case ImportItem: ItemKind.Import(self.import_(n))
+            case FromImport: ItemKind.FromImport(self.import_from(n))
+            case TestDef: ItemKind.Test(self.test_def(n))
+            case BenchDef: ItemKind.Bench(self.test_def(n))
+            case SuiteDef: ItemKind.Suite(self.suite_def(n))
+            case ConstDef: ItemKind.Const(self.const_def(n))
+            case TypeAlias: ItemKind.TypeAlias(self.type_alias(n))
+            case ExternBlock: ItemKind.Extern(self.extern_items(n))
+            case _: ItemKind.Error
+        let attrs = self.attrs(n)
+        let item = Item(
+            node=n,
+            range=self.range(n),
+            attrs=attrs,
+            vis=self.vis(n),
+            docs=self.docs_before(n),
+            kind=kind,
+        )
+        return self.ast.add_item(item)
+
+    pure def type_alias(mut self, n: int) -> TypeAlias:
+        var ty: TypeExprId? = None
+        if let Some(c) = self.find_node(n, is_type_node):
+            ty = Some(self.type_expr(c))
+        let generics = self.generics(n)
+        var predicate: ExprId? = None
+        if let Some(c) = self.find_node(n, is_expr_or_error):
+            predicate = Some(self.expr(c))
+        return TypeAlias(
+            name=self.ident_after(n, SyntaxKind.TypeKw) ?? self.missing_name(n),
+            generics=generics,
+            ty=ty,
+            refinement=self.has(n, SyntaxKind.WhereKw),
+            predicate=predicate,
+        )
+
+    pure def extern_items(mut self, n: int) -> list[ItemId]:
+        var items: list[ItemId] = []
+        if let Some(b) = self.child(n, SyntaxKind.Block):
+            for c in self.nodes(b):
+                if is_item_node(self.kind(c)):
+                    items.push(self.item(c))
+        return items
+
+    pure def generics(mut self, n: int) -> list[GenericParam]:
+        let g = self.child(n, SyntaxKind.GenericParams) else:
+            return []
+        var out: list[GenericParam] = []
+        for p in self.nodes(g):
+            if self.kind(p) != SyntaxKind.GenericParam:
+                continue
+            # The types after `:` are bounds; the one after `=` is the default.
+            var bounds: list[TypeExprId] = []
+            var default: TypeExprId? = None
+            var after_eq = False
+            for e in self.elements(p):
+                match e:
+                    case Leaf(t) if self.token_kind(t) == SyntaxKind.Eq:
+                        after_eq = True
+                    case Node(c) if is_type_or_error(self.kind(c)):
+                        if after_eq:
+                            default = Some(self.type_expr(c))
+                        else:
+                            bounds.push(self.type_expr(c))
+                    case _:
+                        pass
+            out.push(
+                GenericParam(
+                    name=self.first_ident(p) ?? self.missing_name(p),
+                    bounds=bounds,
+                    default=default,
+                    is_const=self.has(p, SyntaxKind.ConstKw),
+                )
+            )
+        return out
+
+    ## The children of `n`, copied, for loops that add to the AST.
+    pure def elements(self, n: int) -> list[Element]:
+        var out: list[Element] = []
+        for e in self.t.nodes[n].children:
+            out.push(e)
+        return out
+
+    ## The predicates of a `where` clause: `T: A + B, C.Item: D`.
+    pure def where_preds(mut self, n: int) -> list[WherePred]:
+        let w = self.child(n, SyntaxKind.WhereClause) else:
+            return []
+        var out: list[WherePred] = []
+        var subject: TypeExprId? = None
+        var bounds: list[TypeExprId] = []
+        var after_colon = False
+        var start = self.range(w).start
+        for e in self.elements(w):
+            match e:
+                case Leaf(t):
+                    match self.token_kind(t):
+                        case Colon:
+                            after_colon = True
+                        case Comma:
+                            if let Some(ty) = subject:
+                                out.push(self.where_pred(ty, bounds, start))
+                                subject = None
+                                bounds = []
+                            after_colon = False
+                        case _:
+                            pass
+                case Node(c) if is_type_or_error(self.kind(c)):
+                    let ty = self.type_expr(c)
+                    if after_colon:
+                        bounds.push(ty)
+                    else:
+                        start = self.ast.type_expr(ty).range.start
+                        subject = Some(ty)
+                case _:
+                    pass
+        if let Some(ty) = subject:
+            out.push(self.where_pred(ty, bounds, start))
+        return out
+
+    ## A predicate of a `where` clause, from its subject's `start` to the
+    ## end of its last bound.
+    pure def where_pred(self, ty: TypeExprId, bounds: list[TypeExprId], start: int) -> WherePred:
+        var end = self.ast.type_expr(ty).range.end
+        if let Some(b) = bounds.last():
+            end = self.ast.type_expr(b).range.end
+        return WherePred(ty=ty, bounds=bounds.copy(), range=TextRange.new(start, end))
+
+    ## `type Item` or `type Item = T` inside a trait or an impl.
+    pure def assoc_type(mut self, n: int) -> AssocTypeDef:
+        var ty: TypeExprId? = None
+        if let Some(c) = self.find_node(n, is_type_node):
+            ty = Some(self.type_expr(c))
+        return AssocTypeDef(
+            name=self.ident_after(n, SyntaxKind.TypeKw) ?? self.missing_name(n),
+            ty=ty,
+            range=self.range(n),
+        )
+
+    pure def trait_def(mut self, n: int) -> TraitDef:
+        var supertraits: list[TypeExprId] = []
+        for c in self.nodes(n):
+            if is_type_node(self.kind(c)):
+                supertraits.push(self.type_expr(c))
+        var methods: list[FnDef] = []
+        var assoc_types: list[AssocTypeDef] = []
+        if let Some(b) = self.child(n, SyntaxKind.Block):
+            for c in self.nodes(b):
+                match self.kind(c):
+                    case FnDef:
+                        methods.push(self.fn_def(c))
+                    case TypeAlias:
+                        assoc_types.push(self.assoc_type(c))
+                    case _:
+                        pass
+        let generics = self.generics(n)
+        return TraitDef(
+            name=self.ident_after(n, SyntaxKind.TraitKw) ?? self.missing_name(n),
+            generics=generics,
+            supertraits=supertraits,
+            methods=methods,
+            assoc_types=assoc_types,
+        )
+
+    pure def fn_def(mut self, n: int) -> FnDef:
+        let tokens = self.tokens(n)
+        # `pure` before `def`.
+        var is_pure = False
+        for t in tokens:
+            let k = self.token_kind(t)
+            if k == SyntaxKind.DefKw:
+                break
+            if self.text(t) == "pure":
+                is_pure = k == SyntaxKind.Ident
+                break
+        let name = self.ident_after(n, SyntaxKind.DefKw) ?? self.missing_name(n)
+        var params: list[Param] = []
+        if let Some(p) = self.child(n, SyntaxKind.ParamList):
+            params = self.params(p)
+        var ret: TypeExprId? = None
+        var from_: list[Name] = []
+        if let Some(r) = self.child(n, SyntaxKind.RetType):
+            if let Some(c) = self.find_node(r, is_type_or_error):
+                ret = Some(self.type_expr(c))
+            var seen = False
+            for t in self.tokens(r):
+                let k = self.token_kind(t)
+                if k == SyntaxKind.FromKw:
+                    seen = True
+                elif seen and (k == SyntaxKind.Ident or k == SyntaxKind.SelfKw):
+                    from_.push(self.name(t))
+        let generics = self.generics(n)
+        let where_ = self.where_preds(n)
+        var body: Block? = None
+        var body_broken = False
+        if let Some(b) = self.child(n, SyntaxKind.Block):
+            body = Some(self.block(b))
+            body_broken = self.has_error(b)
+        let attrs = self.attrs(n)
+        return FnDef(
+            node=n,
+            range=self.range(n),
+            name=name,
+            is_pure=is_pure,
+            is_comptime=self.has(n, SyntaxKind.ComptimeKw),
+            generics=generics,
+            params=params,
+            ret=ret,
+            from_=from_,
+            where_=where_,
+            body=body,
+            attrs=attrs,
+            header_broken=self.error_outside_block(n),
+            body_broken=body_broken,
+            vis=self.vis(n),
+        )
+
+    ## Whether a node has an `ERROR` node anywhere inside it.
+    pure def has_error(self, n: int) -> bool:
+        for c in self.nodes(n):
+            if self.kind(c) == SyntaxKind.Error or self.has_error(c):
+                return True
+        return False
+
+    ## Whether a node has an `ERROR` node anywhere except inside its block.
+    pure def error_outside_block(self, n: int) -> bool:
+        for c in self.nodes(n):
+            match self.kind(c):
+                case Error:
+                    return True
+                case Block:
+                    pass
+                case _:
+                    if self.error_outside_block(c):
+                        return True
+        return False
+
+    pure def params(mut self, list: int) -> list[Param]:
+        var out: list[Param] = []
+        for p in self.nodes(list):
+            if self.kind(p) != SyntaxKind.Param:
+                continue
+            let toks = self.tokens(p)
+            var mode = Mode.Borrow
+            if self.has(p, SyntaxKind.MutKw):
+                mode = Mode.Mut
+            elif self.has(p, SyntaxKind.OwnKw):
+                mode = Mode.Own
+            let ty_node = self.find_node(p, is_type_or_error)
+            let default_node = self.find_node(p, is_expr_node)
+            var kind = ParamKind.Error
+            if self.has(p, SyntaxKind.SelfKw):
+                kind = ParamKind.SelfParam
+            elif self.has(p, SyntaxKind.Star):
+                match self.token_of(p, SyntaxKind.Ident):
+                    case Some(t):
+                        var ty: TypeExprId? = None
+                        if let Some(c) = ty_node:
+                            ty = Some(self.type_expr(c))
+                        kind = ParamKind.Variadic(name=self.name(t), ty=ty)
+                    case None:
+                        kind = ParamKind.KeywordOnly
+            elif self.has(p, SyntaxKind.Slash):
+                kind = ParamKind.PositionalOnly
+            else:
+                var named: int? = None
+                for t in toks:
+                    let k = self.token_kind(t)
+                    let keyword = k.is_keyword() and k != SyntaxKind.MutKw and k != SyntaxKind.OwnKw
+                    if k == SyntaxKind.Ident or keyword:
+                        named = Some(t)
+                        break
+                if let Some(t) = named:
+                    var ty: TypeExprId? = None
+                    if let Some(c) = ty_node:
+                        ty = Some(self.type_expr(c))
+                    let ty_id = ty
+                        ?? self.add_type(TypeExpr(node=p, range=self.range(p), kind=TypeKind.Error))
+                    var default: ExprId? = None
+                    if let Some(c) = default_node:
+                        default = Some(self.expr(c))
+                    kind = ParamKind.Named(name=self.name(t), ty=ty_id, default=default)
+            out.push(Param(node=p, range=self.range(p), mode=mode, kind=kind))
+        return out
+
+    pure def add_type(mut self, own t: TypeExpr) -> TypeExprId:
+        return self.ast.add_type(t)
+
+    pure def add_pattern(mut self, own p: Pattern) -> PatternId:
+        return self.ast.add_pattern(p)
+
+    pure def struct_def(mut self, n: int) -> StructDef:
+        var fields: list[FieldDef] = []
+        var methods: list[FnDef] = []
+        var invariants: list[Contract] = []
+        var unsupported: list[(TextRange, String)] = []
+        var consts: list[ConstDef] = []
+        if let Some(b) = self.child(n, SyntaxKind.Block):
+            for c in self.nodes(b):
+                match self.kind(c):
+                    case FieldDef:
+                        var ty: TypeExprId? = None
+                        if let Some(x) = self.find_node(c, is_type_or_error):
+                            ty = Some(self.type_expr(x))
+                        let ty_id = ty
+                            ?? self.add_type(
+                                TypeExpr(node=c, range=self.range(c), kind=TypeKind.Error)
+                            )
+                        var default: ExprId? = None
+                        if let Some(x) = self.find_node(c, is_expr_node):
+                            default = Some(self.expr(x))
+                        fields.push(
+                            FieldDef(
+                                node=c,
+                                range=self.range(c),
+                                name=self.first_ident(c) ?? self.missing_name(c),
+                                ty=ty_id,
+                                default=default,
+                                vis=self.vis(c),
+                            )
+                        )
+                    case FnDef:
+                        methods.push(self.fn_def(c))
+                    case ConstDef:
+                        consts.push(self.const_def(c))
+                    case PassStmt | Attribute:
+                        pass
+                    case ContractStmt:
+                        let contract = self.contract(c)
+                        if contract.kind == ContractKind.Invariant:
+                            invariants.push(contract)
+                        else:
+                            unsupported.push((self.range(c), "a contract".to_string()))
+                    case _:
+                        # The parser reported any other line already.
+                        pass
+        let generics = self.generics(n)
+        return StructDef(
+            name=self.ident_after(n, SyntaxKind.StructKw) ?? self.missing_name(n),
+            generics=generics,
+            is_view=self.has(n, SyntaxKind.ViewKw),
+            fields=fields,
+            methods=methods,
+            invariants=invariants,
+            consts=consts,
+            unsupported=unsupported,
+        )
+
+    pure def enum_def(mut self, n: int) -> EnumDef:
+        let is_error = self.kind(n) == SyntaxKind.ErrorDef
+        let keyword = if is_error: SyntaxKind.ErrorKw else: SyntaxKind.EnumKw
+        var variants: list[VariantDef] = []
+        var methods: list[FnDef] = []
+        var open = False
+        if let Some(b) = self.child(n, SyntaxKind.Block):
+            for c in self.nodes(b):
+                match self.kind(c):
+                    case VariantDef:
+                        var fields: list[VariantField] = []
+                        for f in self.nodes(c):
+                            if self.kind(f) != SyntaxKind.VariantField:
+                                continue
+                            var fname: Name? = None
+                            if self.has(f, SyntaxKind.Colon):
+                                fname = self.first_ident(f)
+                            var ty: TypeExprId? = None
+                            if let Some(x) = self.find_node(f, is_type_or_error):
+                                ty = Some(self.type_expr(x))
+                            let ty_id = ty
+                                ?? self.add_type(
+                                    TypeExpr(node=f, range=self.range(f), kind=TypeKind.Error)
+                                )
+                            fields.push(VariantField(name=fname, ty=ty_id, range=self.range(f)))
+                        variants.push(
+                            VariantDef(
+                                node=c,
+                                range=self.range(c),
+                                name=self.first_ident(c) ?? self.missing_name(c),
+                                fields=fields,
+                            )
+                        )
+                    case OpenMarker:
+                        open = True
+                    case FnDef:
+                        methods.push(self.fn_def(c))
+                    case _:
+                        pass
+        let generics = self.generics(n)
+        return EnumDef(
+            name=self.ident_after(n, keyword) ?? self.missing_name(n),
+            generics=generics,
+            variants=variants,
+            methods=methods,
+            open=open,
+        )
+
+    pure def impl_def(mut self, n: int) -> ImplDef:
+        var types: list[int] = []
+        for c in self.nodes(n):
+            if is_type_node(self.kind(c)):
+                types.push(c)
+        let has_for = self.has(n, SyntaxKind.ForKw)
+        var trait_ty: TypeExprId? = None
+        var self_ty: TypeExprId? = None
+        if has_for and len(types) >= 2:
+            trait_ty = Some(self.type_expr(types[0]))
+            self_ty = Some(self.type_expr(types[1]))
+        elif not types.is_empty():
+            self_ty = Some(self.type_expr(types[0]))
+        let self_id = self_ty
+            ?? self.add_type(TypeExpr(node=n, range=self.range(n), kind=TypeKind.Error))
+        var methods: list[FnDef] = []
+        var assoc_types: list[AssocTypeDef] = []
+        var consts: list[ConstDef] = []
+        if let Some(b) = self.child(n, SyntaxKind.Block):
+            for c in self.nodes(b):
+                match self.kind(c):
+                    case FnDef:
+                        methods.push(self.fn_def(c))
+                    case TypeAlias:
+                        assoc_types.push(self.assoc_type(c))
+                    case ConstDef:
+                        consts.push(self.const_def(c))
+                    case _:
+                        pass
+        let generics = self.generics(n)
+        return ImplDef(
+            generics=generics,
+            trait_ty=trait_ty,
+            self_ty=self_id,
+            methods=methods,
+            assoc_types=assoc_types,
+            consts=consts,
+        )
+
+    pure def path_names(self, n: int) -> list[Name]:
+        var out: list[Name] = []
+        if let Some(p) = self.child(n, SyntaxKind.ModulePath):
+            for t in self.tokens(p):
+                if self.token_kind(t) != SyntaxKind.Dot:
+                    out.push(self.name(t))
+        return out
+
+    ## `import a.b` (Rust's `import`; `import` is a keyword in Sisu).
+    pure def import_(mut self, n: int) -> Import:
+        var c_header: String? = None
+        if let Some(s) = self.child(n, SyntaxKind.StringExpr):
+            c_header = Some(self.plain_text_of(s))
+        return Import(
+            path=self.path_names(n), alias=self.ident_after(n, SyntaxKind.AsKw), c_header=c_header
+        )
+
+    ## The text of the string literal `s` without its interpolations.
+    pure def plain_text_of(mut self, s: int) -> String:
+        return plain_text(self.string_parts(s))
+
+    pure def import_from(self, n: int) -> FromImport:
+        var names: list[(Name, Name?)] = []
+        for c in self.nodes(n):
+            if self.kind(c) != SyntaxKind.ImportName:
+                continue
+            var toks: list[int] = []
+            for t in self.tokens(c):
+                if self.token_kind(t) == SyntaxKind.Ident:
+                    toks.push(t)
+            if toks.is_empty():
+                continue
+            var alias: Name? = None
+            if len(toks) >= 2:
+                alias = Some(self.name(toks[1]))
+            names.push((self.name(toks[0]), alias))
+        return FromImport(path=self.path_names(n), names=names)
+
+    pure def test_def(mut self, n: int) -> TestDef:
+        var name = String.new()
+        var name_range = TextRange.empty(self.range(n).start)
+        if let Some(s) = self.child(n, SyntaxKind.StringExpr):
+            name = self.plain_text_of(s)
+            name_range = self.range(s)
+        var cases: (PatternId, ExprId)? = None
+        if self.has(n, SyntaxKind.ForKw):
+            let pat = self.find_node(n, is_pattern_node)
+            var iter: int? = None
+            for c in self.nodes(n):
+                if is_expr_node(self.kind(c)) and self.kind(c) != SyntaxKind.StringExpr:
+                    iter = Some(c)
+            if let Some(p) = pat:
+                if let Some(e) = iter:
+                    let pid = self.pattern(p)
+                    cases = Some((pid, self.expr(e)))
+        var params: list[Param] = []
+        if let Some(p) = self.child(n, SyntaxKind.ParamList):
+            params = self.params(p)
+        var body: Block? = None
+        if let Some(b) = self.child(n, SyntaxKind.Block):
+            body = Some(self.block(b))
+        return TestDef(name=name, name_range=name_range, cases=cases, params=params, body=body)
+
+    pure def suite_def(mut self, n: int) -> SuiteDef:
+        var name = String.new()
+        if let Some(s) = self.child(n, SyntaxKind.StringExpr):
+            name = self.plain_text_of(s)
+        var items: list[ItemId] = []
+        if let Some(b) = self.child(n, SyntaxKind.Block):
+            for c in self.nodes(b):
+                self.push_item(c, mut items)
+        return SuiteDef(name=name, items=items)
+
+    pure def const_def(mut self, n: int) -> ConstDef:
+        var ty: TypeExprId? = None
+        if let Some(c) = self.find_node(n, is_type_node):
+            ty = Some(self.type_expr(c))
+        var value: ExprId? = None
+        if let Some(c) = self.find_node(n, is_expr_node):
+            value = Some(self.expr(c))
+        return ConstDef(
+            name=self.ident_after(n, SyntaxKind.ConstKw) ?? self.missing_name(n), ty=ty, value=value
+        )
+
+    # ---------------------------------------------------------------- statements
+
+    pure def block(mut self, n: int) -> Block:
+        var stmts: list[StmtId] = []
+        for c in self.nodes(n):
+            stmts.extend(self.stmts_of(c))
+        return Block(node=n, range=self.range(n), stmts=stmts)
+
+    ## The statements a child node of a block stands for: usually one, all
+    ## of them for an unexpectedly indented block.
+    pure def stmts_of(mut self, n: int) -> list[StmtId]:
+        if self.kind(n) == SyntaxKind.Block:
+            return self.block(n).stmts
+        return [self.stmt(n)]
+
+    ## The child block of `n`, or an empty one with `n`'s range.
+    pure def block_or_empty(mut self, n: int) -> Block:
+        match self.child(n, SyntaxKind.Block):
+            case Some(b):
+                return self.block(b)
+            case None:
+                return Block(node=n, range=self.range(n), stmts=[])
+
+    pure def stmt(mut self, n: int) -> StmtId:
+        let range = self.range(n)
+        let kind = match self.kind(n):
+            case LetStmt: self.let_stmt(n)
+            case AssignStmt: self.assign_stmt(n)
+            case ExprStmt: StmtKind.Expr(self.first_expr(n))
+            case ReturnStmt: self.return_stmt(n)
+            case BreakStmt: StmtKind.Break
+            case ContinueStmt: StmtKind.Continue
+            case PassStmt: StmtKind.Pass
+            case IfStmt: self.if_stmt(n, range)
+            case WhileStmt: self.while_stmt(n, range)
+            case ForStmt: self.for_stmt(n, range)
+            case AssertStmt: self.assert_stmt(n)
+            case ExpectStmt: StmtKind.Expect(self.first_expr(n))
+            case DeferStmt: self.defer_stmt(n, range)
+            case WithStmt: self.with_stmt(n)
+            case UnsafeBlock: StmtKind.Unsupported("an `unsafe` block".to_string())
+            case SelectStmt: StmtKind.Select(self.select_arms(n))
+            case YieldStmt: self.yield_stmt(n)
+            case ContractStmt: StmtKind.Contract(self.contract(n))
+            case ComptimeStmt: self.comptime_stmt(n)
+            case k if is_item_node(k): StmtKind.Item(self.item(n))
+            case _: StmtKind.Error
+        return self.ast.add_stmt(Stmt(node=n, range=range, kind=kind))
+
+    pure def assign_stmt(mut self, n: int) -> StmtKind:
+        let exprs = self.expr_nodes(n)
+        # The operator: the first augmented one, or `=`.
+        var op: BinOp? = None
+        for t in self.tokens(n):
+            let k = self.token_kind(t)
+            if let Some(o) = aug_op(k):
+                op = Some(o)
+                break
+            if k == SyntaxKind.Eq:
+                break
+        var target: ExprId? = None
+        if len(exprs) >= 1:
+            target = Some(self.expr(exprs[0]))
+        var value: ExprId? = None
+        if len(exprs) >= 2:
+            value = Some(self.expr(exprs[1]))
+        let t = target ?? self.error_expr(n)
+        let v = value ?? self.error_expr(n)
+        return StmtKind.Assign(target=t, op=op, value=v)
+
+    pure def return_stmt(mut self, n: int) -> StmtKind:
+        if let Some(i) = self.child(n, SyntaxKind.ImplDef):
+            return StmtKind.ReturnImpl(self.impl_def(i))
+        match self.find_node(n, is_expr_or_error):
+            case Some(c):
+                return StmtKind.Return(Some(self.expr(c)))
+            case None:
+                return StmtKind.Return(None)
+
+    pure def if_stmt(mut self, n: int, range: TextRange) -> StmtKind:
+        var branches: list[(Cond, Block)] = []
+        let cond = self.child(n, SyntaxKind.Cond)
+        let block = self.child(n, SyntaxKind.Block)
+        if let Some(c) = cond:
+            let first = self.cond(c)
+            match block:
+                case Some(b):
+                    branches.push((first, self.block(b)))
+                case None:
+                    branches.push(
+                        (first, Block(node=n, range=TextRange.empty(range.end), stmts=[]))
+                    )
+        var else_block: Block? = None
+        for c in self.nodes(n):
+            match self.kind(c):
+                case ElifClause:
+                    var elif_cond = Cond(range=self.range(c), parts=[])
+                    if let Some(x) = self.child(c, SyntaxKind.Cond):
+                        elif_cond = self.cond(x)
+                    branches.push((elif_cond, self.block_or_empty(c)))
+                case ElseClause:
+                    else_block = None
+                    if let Some(b) = self.child(c, SyntaxKind.Block):
+                        else_block = Some(self.block(b))
+                case _:
+                    pass
+        return StmtKind.If(branches=branches, else_block=else_block)
+
+    pure def while_stmt(mut self, n: int, range: TextRange) -> StmtKind:
+        var cond = Cond(range=range, parts=[])
+        if let Some(c) = self.child(n, SyntaxKind.Cond):
+            cond = self.cond(c)
+        return StmtKind.While(cond=cond, body=self.block_or_empty(n))
+
+    pure def for_stmt(mut self, n: int, range: TextRange) -> StmtKind:
+        var mode = Mode.Borrow
+        var after_in = False
+        for t in self.tokens(n):
+            match self.token_kind(t):
+                case InKw:
+                    after_in = True
+                case MutKw if after_in:
+                    mode = Mode.Mut
+                case OwnKw if after_in:
+                    mode = Mode.Own
+                case _:
+                    pass
+        var pat: PatternId? = None
+        if let Some(c) = self.find_node(n, is_pattern_node):
+            pat = Some(self.pattern(c))
+        let pat_id = pat ?? self.add_pattern(Pattern(node=n, range=range, kind=PatKind.Error))
+        let iter = self.first_expr(n)
+        return StmtKind.For(pat=pat_id, mode=mode, iter=iter, body=self.block_or_empty(n))
+
+    pure def assert_stmt(mut self, n: int) -> StmtKind:
+        let exprs = self.expr_nodes(n)
+        var cond: ExprId? = None
+        if len(exprs) >= 1:
+            cond = Some(self.expr(exprs[0]))
+        var message: ExprId? = None
+        if len(exprs) >= 2:
+            message = Some(self.expr(exprs[1]))
+        let c = cond ?? self.error_expr(n)
+        return StmtKind.Assert(cond=c, message=message)
+
+    pure def defer_stmt(mut self, n: int, range: TextRange) -> StmtKind:
+        if let Some(b) = self.child(n, SyntaxKind.Block):
+            return StmtKind.Defer(self.block(b))
+        var stmts: list[StmtId] = []
+        for c in self.nodes(n):
+            stmts.push(self.stmt(c))
+        return StmtKind.Defer(Block(node=n, range=range, stmts=stmts))
+
+    pure def with_stmt(mut self, n: int) -> StmtKind:
+        let value = self.first_expr(n)
+        let name = self.ident_after(n, SyntaxKind.AsKw) ?? self.missing_name(n)
+        return StmtKind.With(value=value, name=name, body=self.block_or_empty(n))
+
+    pure def select_arms(mut self, n: int) -> list[SelectArm]:
+        var arms: list[SelectArm] = []
+        if let Some(l) = self.child(n, SyntaxKind.MatchArmList):
+            for c in self.nodes(l):
+                if self.kind(c) == SyntaxKind.MatchArm:
+                    arms.push(self.select_arm(c))
+        return arms
+
+    pure def yield_stmt(mut self, n: int) -> StmtKind:
+        match self.find_node(n, is_expr_node):
+            case Some(e):
+                return StmtKind.Yield(Some(self.expr(e)))
+            case None:
+                return StmtKind.Yield(None)
+
+    pure def comptime_stmt(mut self, n: int) -> StmtKind:
+        let kids = self.nodes(n)
+        if kids.is_empty():
+            return StmtKind.Error
+        return StmtKind.Comptime(self.stmt(kids[0]))
+
+    pure def let_stmt(mut self, n: int) -> StmtKind:
+        # Children in order: pattern, then type after `:`, then value after `=`.
+        var role = 0
+        var pat: PatternId? = None
+        var ty: TypeExprId? = None
+        var init: ExprId? = None
+        var else_: LetElse? = None
+        for e in self.elements(n):
+            match e:
+                case Leaf(t):
+                    match self.token_kind(t):
+                        case Colon:
+                            role = 1
+                        case Eq | Walrus:
+                            role = 2
+                        case _:
+                            pass
+                case Node(c):
+                    let k = self.kind(c)
+                    if k == SyntaxKind.LetElse:
+                        else_ = Some(self.let_else(c))
+                    elif role == 0 and pat == None:
+                        pat = Some(self.pattern(c))
+                    elif role == 1 and ty == None:
+                        ty = Some(self.type_expr(c))
+                    elif role == 2 and init == None:
+                        init = Some(self.expr(c))
+        let pat_id = pat
+            ?? self.add_pattern(Pattern(node=n, range=self.range(n), kind=PatKind.Error))
+        return StmtKind.Let(
+            mutable=self.has(n, SyntaxKind.VarKw), pat=pat_id, ty=ty, init=init, else_=else_
+        )
+
+    pure def let_else(mut self, n: int) -> LetElse:
+        var body: ElseBody? = None
+        if let Some(b) = self.child(n, SyntaxKind.Block):
+            body = Some(ElseBody.Block(self.block(b)))
+        elif let Some(s) = self.find_node(n, is_diverging_stmt):
+            body = Some(ElseBody.Diverge(self.stmt(s)))
+        else:
+            body = Some(ElseBody.Expr(self.first_expr(n)))
+        let binding = self.ident_after(n, SyntaxKind.AsKw)
+        return LetElse(range=self.range(n), binding=binding, body=body.unwrap())
+
+    pure def cond(mut self, n: int) -> Cond:
+        var parts: list[CondPart] = []
+        for c in self.nodes(n):
+            let k = self.kind(c)
+            if k == SyntaxKind.LetCond:
+                var pat: PatternId? = None
+                if let Some(x) = self.find_node(c, is_pattern_node):
+                    pat = Some(self.pattern(x))
+                let pat_id = pat
+                    ?? self.add_pattern(Pattern(node=c, range=self.range(c), kind=PatKind.Error))
+                parts.push(CondPart.Let(pat=pat_id, value=self.first_expr(c)))
+            elif is_expr_or_error(k):
+                parts.push(CondPart.Expr(self.expr(c)))
+        return Cond(range=self.range(n), parts=parts)
+
+    # ---------------------------------------------------------------- expressions
+
+    ## An `Error` expression, empty, at the end of `n`.
+    pure def error_expr(mut self, n: int) -> ExprId:
+        let e = Expr(node=n, range=TextRange.empty(self.range(n).end), kind=ExprKind.Error)
+        return self.ast.add_expr(e)
+
+    ## A contract clause: its keyword and expression.
+    pure def contract(mut self, n: int) -> Contract:
+        let toks = self.tokens(n)
+        var kind = ContractKind.Decreases
+        if not toks.is_empty():
+            kind = match self.text(toks[0]):
+                case "requires": ContractKind.Requires
+                case "ensures": ContractKind.Ensures
+                case "invariant": ContractKind.Invariant
+                case _: ContractKind.Decreases
+        let range = self.range(n)
+        # The clause without the line break that ends it.
+        var end = range.end
+        var i = len(toks) - 1
+        while i >= 0:
+            match self.token_kind(toks[i]):
+                case Newline | Dedent | Indent | Whitespace | LineBreak:
+                    i -= 1
+                case _:
+                    end = self.token_range(toks[i]).end
+                    break
+        let expr = self.first_expr(n)
+        let whole = TextRange.new(range.start, max(end, self.ast.expr(expr).range.end))
+        return Contract(kind=kind, expr=expr, range=whole)
+
+    pure def first_expr(mut self, n: int) -> ExprId:
+        match self.find_node(n, is_expr_or_error):
+            case Some(c):
+                return self.expr(c)
+            case None:
+                return self.error_expr(n)
+
+    ## The child nodes of `n` that are expressions or `ERROR` nodes.
+    pure def expr_nodes(self, n: int) -> list[int]:
+        var out: list[int] = []
+        for c in self.nodes(n):
+            if is_expr_or_error(self.kind(c)):
+                out.push(c)
+        return out
+
+    pure def exprs(mut self, n: int) -> list[ExprId]:
+        var out: list[ExprId] = []
+        for c in self.expr_nodes(n):
+            out.push(self.expr(c))
+        return out
+
+    pure def args(mut self, list: int) -> list[Arg]:
+        var out: list[Arg] = []
+        for a in self.nodes(list):
+            if self.kind(a) != SyntaxKind.Arg:
+                continue
+            let toks = self.tokens(a)
+            var name: Name? = None
+            if len(toks) >= 2 and self.token_kind(toks[1]) == SyntaxKind.Eq:
+                name = Some(self.name(toks[0]))
+            let value = self.first_expr(a)
+            out.push(
+                Arg(
+                    node=a,
+                    range=self.range(a),
+                    name=name,
+                    mutable=self.has(a, SyntaxKind.MutKw),
+                    value=value,
+                )
+            )
+        return out
+
+    pure def expr(mut self, n: int) -> ExprId:
+        let range = self.range(n)
+        let kind = match self.kind(n):
+            case Literal: self.literal_node(n)
+            case StringExpr: ExprKind.Str(self.string_parts(n))
+            case NameRef: self.name_ref(n)
+            case ParenExpr: ExprKind.Paren(self.first_expr(n))
+            case TupleExpr: ExprKind.Tuple(self.exprs(n))
+            case ListExpr: ExprKind.List(self.exprs(n))
+            case SetExpr: ExprKind.Set(self.exprs(n))
+            case DictExpr: ExprKind.Dict(self.dict_entries(n))
+            case Comprehension: self.comprehension(n)
+            case BinExpr: self.bin_expr(n)
+            case CompareExpr: self.compare(n)
+            case PrefixExpr: self.prefix_expr(n)
+            case CallExpr: self.call_expr(n)
+            case FieldExpr: self.field_expr(n)
+            case OptFieldExpr: self.opt_field_expr(n)
+            case IndexExpr: self.index_expr(n)
+            case TryExpr: ExprKind.Try(self.first_expr(n))
+            case ClosureExpr: self.closure_expr(n, range)
+            case IfExpr: self.if_expr(n)
+            case MatchExpr: self.match_expr(n)
+            case _: ExprKind.Error
+        return self.ast.add_expr(Expr(node=n, range=range, kind=kind))
+
+    pure def literal_node(self, n: int) -> ExprKind:
+        let toks = self.tokens(n)
+        if toks.is_empty():
+            return ExprKind.Error
+        return self.literal(toks[0])
+
+    pure def name_ref(self, n: int) -> ExprKind:
+        let toks = self.tokens(n)
+        if toks.is_empty():
+            return ExprKind.Error
+        return match self.token_kind(toks[0]):
+            case SelfKw: ExprKind.SelfValue
+            case SelfTypeKw: ExprKind.SelfType
+            case _: ExprKind.Name(self.text(toks[0]).to_string())
+
+    pure def dict_entries(mut self, n: int) -> list[(ExprId, ExprId)]:
+        var out: list[(ExprId, ExprId)] = []
+        for c in self.nodes(n):
+            if self.kind(c) != SyntaxKind.DictEntry:
+                continue
+            let kv = self.expr_nodes(c)
+            var k: ExprId? = None
+            if len(kv) >= 1:
+                k = Some(self.expr(kv[0]))
+            var v: ExprId? = None
+            if len(kv) >= 2:
+                v = Some(self.expr(kv[1]))
+            let key = k ?? self.error_expr(c)
+            let value = v ?? self.error_expr(c)
+            out.push((key, value))
+        return out
+
+    pure def bin_expr(mut self, n: int) -> ExprKind:
+        let operands = self.expr_nodes(n)
+        var op = BinOp.Add
+        for t in self.tokens(n):
+            if let Some(o) = bin_op(self.token_kind(t)):
+                op = o
+                break
+        var lhs: ExprId? = None
+        if len(operands) >= 1:
+            lhs = Some(self.expr(operands[0]))
+        var rhs: ExprId? = None
+        if len(operands) >= 2:
+            rhs = Some(self.expr(operands[1]))
+        let l = lhs ?? self.error_expr(n)
+        let r = rhs ?? self.error_expr(n)
+        return ExprKind.Binary(op=op, lhs=l, rhs=r)
+
+    pure def prefix_expr(mut self, n: int) -> ExprKind:
+        let inner = self.first_expr(n)
+        let toks = self.tokens(n)
+        if toks.is_empty():
+            return ExprKind.Error
+        return match self.token_kind(toks[0]):
+            case Minus: ExprKind.Unary(op=UnOp.Neg, expr=inner)
+            case Tilde: ExprKind.Unary(op=UnOp.BitNot, expr=inner)
+            case NotKw: ExprKind.Unary(op=UnOp.Not, expr=inner)
+            case RefKw: ExprKind.Ref(mutable=self.has(n, SyntaxKind.MutKw), expr=inner)
+            case Caret: ExprKind.FromEnd(inner)
+            case ComptimeKw: ExprKind.Comptime(inner)
+            case UnsafeKw: ExprKind.Unsupported("`unsafe`".to_string())
+            case _: ExprKind.Error
+
+    pure def call_expr(mut self, n: int) -> ExprKind:
+        let callee = self.first_expr(n)
+        var args: list[Arg] = []
+        if let Some(l) = self.child(n, SyntaxKind.ArgList):
+            args = self.args(l)
+        var trailing: Closure? = None
+        if let Some(d) = self.child(n, SyntaxKind.DoBlock):
+            trailing = Some(self.do_block(d))
+        return ExprKind.Call(callee=callee, args=args, trailing=trailing)
+
+    pure def field_expr(mut self, n: int) -> ExprKind:
+        if self.has(n, SyntaxKind.LBracket):
+            let es = self.expr_nodes(n)
+            var base: ExprId? = None
+            if len(es) >= 1:
+                base = Some(self.expr(es[0]))
+            var field: ExprId? = None
+            if len(es) >= 2:
+                field = Some(self.expr(es[1]))
+            let b = base ?? self.error_expr(n)
+            let f = field ?? self.error_expr(n)
+            return ExprKind.FieldOf(base=b, field=f)
+        let base = self.first_expr(n)
+        var name = self.missing_name(n)
+        for t in self.tokens(n):
+            if self.token_kind(t) != SyntaxKind.Dot:
+                name = self.name(t)
+        return ExprKind.Field(base=base, name=name)
+
+    pure def opt_field_expr(mut self, n: int) -> ExprKind:
+        let base = self.first_expr(n)
+        let name = self.ident_after(n, SyntaxKind.QuestionDot) ?? self.missing_name(n)
+        return ExprKind.OptField(base=base, name=name)
+
+    pure def index_expr(mut self, n: int) -> ExprKind:
+        let kids = self.nodes(n)
+        var base: ExprId? = None
+        if not kids.is_empty():
+            base = Some(self.expr(kids[0]))
+        let base_id = base ?? self.error_expr(n)
+        var args: list[IndexArg] = []
+        for i in range(1, len(kids)):
+            let c = kids[i]
+            if self.kind(c) == SyntaxKind.Slice:
+                var lo: ExprId? = None
+                var hi: ExprId? = None
+                var after = False
+                for e in self.elements(c):
+                    match e:
+                        case Leaf(t) if self.token_kind(t) == SyntaxKind.Colon:
+                            after = True
+                        case Node(x):
+                            if after:
+                                hi = Some(self.expr(x))
+                            else:
+                                lo = Some(self.expr(x))
+                        case _:
+                            pass
+                args.push(IndexArg.Slice(lo=lo, hi=hi))
+            else:
+                args.push(IndexArg.Expr(self.expr(c)))
+        return ExprKind.Index(base=base_id, args=args)
+
+    pure def closure_expr(mut self, n: int, range: TextRange) -> ExprKind:
+        var params: list[ClosureParam] = []
+        if let Some(p) = self.child(n, SyntaxKind.ClosureParams):
+            params = self.closure_params(p)
+        var body: ExprId? = None
+        if let Some(b) = self.rfind_node(n, is_expr_or_error):
+            body = Some(self.expr(b))
+        let body_id = body ?? self.error_expr(n)
+        let c = Closure(
+            node=n,
+            range=range,
+            own_=self.has(n, SyntaxKind.OwnKw),
+            params=params,
+            implicit_param=False,
+            body=ClosureBody.Expr(body_id),
+        )
+        return ExprKind.Closure(c)
+
+    pure def if_expr(mut self, n: int) -> ExprKind:
+        let parts = self.exprs(n)
+        var branches: list[(ExprId, ExprId)] = []
+        var i = 0
+        while i + 1 < len(parts):
+            branches.push((parts[i], parts[i + 1]))
+            i += 2
+        var else_: ExprId? = None
+        if len(parts) % 2 == 1 and self.has(n, SyntaxKind.ElseKw):
+            else_ = Some(parts[len(parts) - 1])
+        return ExprKind.If(branches=branches, else_=else_)
+
+    pure def match_expr(mut self, n: int) -> ExprKind:
+        let scrutinee = self.first_expr(n)
+        var arms: list[Arm] = []
+        if let Some(l) = self.child(n, SyntaxKind.MatchArmList):
+            arms = self.arms(l)
+        return ExprKind.Match(scrutinee=scrutinee, arms=arms)
+
+    pure def compare(mut self, n: int) -> ExprKind:
+        var operands: list[ExprId] = []
+        var ops: list[CmpOp] = []
+        var pending_not = False
+        for e in self.elements(n):
+            match e:
+                case Node(c):
+                    operands.push(self.expr(c))
+                case Leaf(t):
+                    var op: CmpOp? = None
+                    match self.token_kind(t):
+                        case EqEq:
+                            op = Some(CmpOp.Eq)
+                        case BangEq:
+                            op = Some(CmpOp.Ne)
+                        case Lt:
+                            op = Some(CmpOp.Lt)
+                        case LtEq:
+                            op = Some(CmpOp.Le)
+                        case Gt:
+                            op = Some(CmpOp.Gt)
+                        case GtEq:
+                            op = Some(CmpOp.Ge)
+                        case InKw:
+                            op = Some(if pending_not: CmpOp.NotIn else: CmpOp.In)
+                        case NotKw:
+                            pending_not = True
+                        case _:
+                            pass
+                    if let Some(o) = op:
+                        pending_not = False
+                        ops.push(o)
+        var first: ExprId? = None
+        if not operands.is_empty():
+            first = Some(operands[0])
+        let first_id = first ?? self.error_expr(n)
+        var rest: list[(CmpOp, ExprId)] = []
+        for k in range(len(ops)):
+            var operand: ExprId? = None
+            if k + 1 < len(operands):
+                operand = Some(operands[k + 1])
+            let x = operand ?? self.error_expr(n)
+            rest.push((ops[k], x))
+        return ExprKind.Compare(first=first_id, rest=rest)
+
+    pure def comprehension(mut self, n: int) -> ExprKind:
+        let toks = self.tokens(n)
+        var open: SyntaxKind? = None
+        if not toks.is_empty():
+            open = Some(self.token_kind(toks[0]))
+        var elem: ExprId? = None
+        var value: ExprId? = None
+        var clauses: list[CompClause] = []
+        var dict = False
+        for c in self.nodes(n):
+            let k = self.kind(c)
+            match k:
+                case DictEntry:
+                    dict = True
+                    let kv = self.expr_nodes(c)
+                    elem = None
+                    value = None
+                    if len(kv) >= 1:
+                        elem = Some(self.expr(kv[0]))
+                    if len(kv) >= 2:
+                        value = Some(self.expr(kv[1]))
+                case CompFor:
+                    var pat: PatternId? = None
+                    if let Some(x) = self.find_node(c, is_pattern_node):
+                        pat = Some(self.pattern(x))
+                    let pat_id = pat
+                        ?? self.add_pattern(
+                            Pattern(node=c, range=self.range(c), kind=PatKind.Error)
+                        )
+                    clauses.push(CompClause.For(pat=pat_id, iter=self.first_expr(c)))
+                case CompIf:
+                    clauses.push(CompClause.If(self.first_expr(c)))
+                case _ if elem == None and is_expr_or_error(k):
+                    elem = Some(self.expr(c))
+                case _:
+                    pass
+        let kind = match open:
+            case Some(LBracket): CompKind.List
+            case Some(LBrace) if dict: CompKind.Dict
+            case Some(LBrace): CompKind.Set
+            case _: CompKind.Gen
+        let elem_id = elem ?? self.error_expr(n)
+        return ExprKind.Comprehension(kind=kind, elem=elem_id, value=value, clauses=clauses)
+
+    pure def closure_params(mut self, n: int) -> list[ClosureParam]:
+        var out: list[ClosureParam] = []
+        for c in self.nodes(n):
+            if self.kind(c) != SyntaxKind.ClosureParam:
+                continue
+            var ty: TypeExprId? = None
+            if let Some(x) = self.find_node(c, is_type_node):
+                ty = Some(self.type_expr(x))
+            out.push(ClosureParam(name=self.first_ident(c) ?? self.missing_name(c), ty=ty))
+        return out
+
+    pure def do_block(mut self, n: int) -> Closure:
+        var params: list[ClosureParam]? = None
+        if let Some(p) = self.child(n, SyntaxKind.ClosureParams):
+            params = Some(self.closure_params(p))
+        let implicit_param = params.is_none()
+        let body = self.block_or_empty(n)
+        return Closure(
+            node=n,
+            range=self.range(n),
+            own_=self.has(n, SyntaxKind.OwnKw),
+            params=params ?? [],
+            implicit_param=implicit_param,
+            body=ClosureBody.Block(body),
+        )
+
+    ## The arms of a `MATCH_ARM_LIST`, with those made at compile time.
+    pure def arms(mut self, l: int) -> list[Arm]:
+        var out: list[Arm] = []
+        for a in self.nodes(l):
+            match self.kind(a):
+                case MatchArm:
+                    out.push(self.arm(a))
+                case ComptimeStmt:
+                    if let Some(arm) = self.arm_gen(a):
+                        out.push(arm)
+                case _:
+                    pass
+        return out
+
+    ## The arms of the `MATCH_ARM_LIST` child of `c`.
+    pure def arms_in(mut self, c: int) -> list[Arm]:
+        match self.child(c, SyntaxKind.MatchArmList):
+            case Some(l):
+                return self.arms(l)
+            case None:
+                return []
+
+    ## `comptime for p in e:` or `comptime if e:` with arms (08).
+    pure def arm_gen(mut self, n: int) -> Arm?:
+        let kids = self.nodes(n)
+        if kids.is_empty():
+            return None
+        let inner = kids[0]
+        var made: ArmGen? = None
+        match self.kind(inner):
+            case ForStmt:
+                var pat: PatternId? = None
+                if let Some(c) = self.find_node(inner, is_pattern_node):
+                    pat = Some(self.pattern(c))
+                let pat_id = pat
+                    ?? self.add_pattern(
+                        Pattern(node=inner, range=self.range(inner), kind=PatKind.Error)
+                    )
+                let iter = self.first_expr(inner)
+                made = Some(ArmGen.For(pat=pat_id, iter=iter, arms=self.arms_in(inner)))
+            case IfStmt:
+                var cond: ExprId? = None
+                if let Some(c) = self.child(inner, SyntaxKind.Cond):
+                    cond = Some(self.first_expr(c))
+                let cond_id = cond ?? self.error_expr(inner)
+                let then = self.arms_in(inner)
+                var else_: list[Arm] = []
+                if let Some(e) = self.child(inner, SyntaxKind.ElseClause):
+                    else_ = self.arms_in(e)
+                made = Some(ArmGen.If(cond=cond_id, then=then, else_=else_))
+            case _:
+                return None
+        let gen = made else:
+            return None
+        let range = self.range(n)
+        let generated = self.ast.add_arm_gen(gen)
+        let pat = self.add_pattern(Pattern(node=n, range=range, kind=PatKind.Wildcard))
+        return Some(
+            Arm(
+                node=n,
+                range=range,
+                pat=pat,
+                guard=None,
+                body=ArmBody.Block(Block(node=n, range=range, stmts=[])),
+                generated=Some(generated),
+            )
+        )
+
+    pure def select_arm(mut self, n: int) -> SelectArm:
+        let range = self.range(n)
+        var pat: PatternId? = None
+        if let Some(c) = self.find_node(n, is_pattern_or_error):
+            pat = Some(self.pattern(c))
+        let pat_id = pat ?? self.add_pattern(Pattern(node=n, range=range, kind=PatKind.Error))
+        # The operation is the expression after `=`.
+        var after_eq = False
+        var op: ExprId? = None
+        for e in self.elements(n):
+            match e:
+                case Leaf(t) if self.token_kind(t) == SyntaxKind.Eq:
+                    after_eq = True
+                case Node(c) if after_eq and op == None and is_expr_node(self.kind(c)):
+                    op = Some(self.expr(c))
+                case _:
+                    pass
+        let op_id = op ?? self.error_expr(n)
+        var body = Block(node=n, range=range, stmts=[])
+        if let Some(b) = self.child(n, SyntaxKind.Block):
+            body = self.block(b)
+        return SelectArm(node=n, range=range, pat=pat_id, op=op_id, body=body)
+
+    pure def arm(mut self, n: int) -> Arm:
+        var pat: PatternId? = None
+        if let Some(c) = self.find_node(n, is_pattern_or_error):
+            pat = Some(self.pattern(c))
+        var guard: ExprId? = None
+        if let Some(g) = self.child(n, SyntaxKind.MatchGuard):
+            guard = Some(self.first_expr(g))
+        var body: ArmBody? = None
+        if let Some(b) = self.child(n, SyntaxKind.Block):
+            body = Some(ArmBody.Block(self.block(b)))
+        else:
+            var e: ExprId? = None
+            if let Some(x) = self.rfind_node(n, is_expr_node):
+                e = Some(self.expr(x))
+            body = Some(ArmBody.Expr(e ?? self.error_expr(n)))
+        let pat_id = pat
+            ?? self.add_pattern(Pattern(node=n, range=self.range(n), kind=PatKind.Error))
+        return Arm(
+            node=n, range=self.range(n), pat=pat_id, guard=guard, body=body.unwrap(), generated=None
+        )
+
+    pure def literal(self, t: int) -> ExprKind:
+        let text = self.text(t)
+        match self.token_kind(t):
+            case IntNumber:
+                let (digits, suffix) = split_suffix(text, False)
+                return ExprKind.Int(text=text.to_string(), value=parse_int(digits), suffix=suffix)
+            case FloatNumber:
+                let (digits, suffix) = split_suffix(text, True)
+                let value = digits.replace("_", "").parse_float() ?? 0.0
+                return ExprKind.Float(text=text.to_string(), value=value, suffix=suffix)
+            case CharLit:
+                let inner = text.strip_prefix("'").strip_suffix("'")
+                var c = '\0'
+                for d in decode_escapes(inner).chars():
+                    c = d
+                    break
+                return ExprKind.Char(c)
+            case RawString:
+                let s = text.strip_prefix("r")
+                if s.starts_with("\"\"\""):
+                    return ExprKind.RawStr(trim_quotes(s, "\"\"\"").to_string())
+                return ExprKind.RawStr(trim_quotes(s, "\"").to_string())
+            case ByteString:
+                let s = trim_quotes(text.strip_prefix("b"), "\"")
+                return ExprKind.ByteStr(decode_byte_escapes(s))
+            case _:
+                return ExprKind.Error
+
+    pure def string_parts(mut self, n: int) -> list[StrPart]:
+        var parts: list[StrPart] = []
+        for e in self.elements(n):
+            match e:
+                case Leaf(t) if self.token_kind(t) == SyntaxKind.StringText:
+                    let raw = self.text(t).replace("{{{{", "{{").replace("}}}}", "}}")
+                    let text = decode_escapes(raw)
+                    # Text after text joins it.
+                    var joined: String? = None
+                    if let Some(Text(s)) = parts.last():
+                        joined = Some("{s}{text}")
+                    match joined:
+                        case Some(both):
+                            _ = parts.pop()
+                            parts.push(StrPart.Text(both.copy()))
+                        case None:
+                            parts.push(StrPart.Text(text))
+                case Node(i) if self.kind(i) == SyntaxKind.Interpolation:
+                    let expr_node = self.find_node(i, is_expr_or_error)
+                    var expr: ExprId? = None
+                    if let Some(c) = expr_node:
+                        expr = Some(self.expr(c))
+                    let expr_id = expr ?? self.error_expr(i)
+                    var debug: String? = None
+                    if self.has(i, SyntaxKind.Eq):
+                        if let Some(c) = expr_node:
+                            debug = Some(self.node_text(c).to_string())
+                    var spec: String? = None
+                    if let Some(f) = self.token_of(i, SyntaxKind.FormatSpec):
+                        spec = Some(self.text(f).to_string())
+                    parts.push(
+                        StrPart.Interp(expr=expr_id, debug=debug, spec=spec, range=self.range(i))
+                    )
+                case _:
+                    pass
+        return parts
+
+    # ---------------------------------------------------------------- types
+
+    pure def type_expr(mut self, n: int) -> TypeExprId:
+        let range = self.range(n)
+        var types: list[int] = []
+        for c in self.nodes(n):
+            if is_type_or_error(self.kind(c)):
+                types.push(c)
+        if self.kind(n) == SyntaxKind.ParenType:
+            return self.first_type(n, types)
+        let kind = match self.kind(n):
+            case PathType: self.path_type(n)
+            case OptionType: TypeKind.Option(self.first_type(n, types))
+            case ResultType: self.result_type(n)
+            case ErrorSetType: TypeKind.Union(self.types_of(types))
+            case TupleType: TypeKind.Tuple(self.tuple_fields(n))
+            case FnType: self.fn_type(n)
+            case RefType: self.ref_type(n, types)
+            case ConstArg: self.const_arg(n)
+            case DynType: self.dyn_type(types)
+            case ImplType: TypeKind.Unsupported("`impl Trait for T` types".to_string())
+            case PtrType: TypeKind.Unsupported("raw pointers".to_string())
+            case _: TypeKind.Error
+        return self.add_type(TypeExpr(node=n, range=range, kind=kind))
+
+    pure def ref_type(mut self, n: int, types: list[int]) -> TypeKind:
+        let inner = self.first_type(n, types)
+        return TypeKind.Ref(mutable=self.has(n, SyntaxKind.MutKw), inner=inner)
+
+    pure def dyn_type(mut self, types: list[int]) -> TypeKind:
+        if types.is_empty():
+            return TypeKind.Error
+        return TypeKind.Dyn(self.type_expr(types[0]))
+
+    ## The first of the type nodes `types` of `n`, or the error type.
+    pure def first_type(mut self, n: int, types: list[int]) -> TypeExprId:
+        if types.is_empty():
+            return self.error_type(n)
+        return self.type_expr(types[0])
+
+    pure def types_of(mut self, types: list[int]) -> list[TypeExprId]:
+        var out: list[TypeExprId] = []
+        for c in types:
+            out.push(self.type_expr(c))
+        return out
+
+    pure def path_type(mut self, n: int) -> TypeKind:
+        var segments: list[Name] = []
+        for t in self.tokens(n):
+            match self.token_kind(t):
+                case Ident | SelfTypeKw | TypeKw:
+                    segments.push(self.name(t))
+                case _:
+                    pass
+        var args: list[TypeExprId] = []
+        if let Some(g) = self.child(n, SyntaxKind.GenericArgs):
+            for c in self.nodes(g):
+                if is_type_or_error(self.kind(c)):
+                    args.push(self.type_expr(c))
+        return TypeKind.Path(segments=segments, args=args)
+
+    pure def result_type(mut self, n: int) -> TypeKind:
+        var ok: TypeExprId? = None
+        var err: TypeExprId? = None
+        var after_bang = False
+        for e in self.elements(n):
+            match e:
+                case Leaf(t) if self.token_kind(t) == SyntaxKind.Bang:
+                    after_bang = True
+                case Node(c) if is_type_or_error(self.kind(c)):
+                    if after_bang:
+                        err = Some(self.type_expr(c))
+                    else:
+                        ok = Some(self.type_expr(c))
+                case _:
+                    pass
+        return TypeKind.Result(ok=ok, err=err)
+
+    pure def tuple_fields(mut self, n: int) -> list[(Name?, TypeExprId)]:
+        var out: list[(Name?, TypeExprId)] = []
+        for c in self.nodes(n):
+            let k = self.kind(c)
+            if k == SyntaxKind.TupleTypeField:
+                var ty: TypeExprId? = None
+                if let Some(x) = self.find_node(c, is_type_node):
+                    ty = Some(self.type_expr(x))
+                let ty_id = ty ?? self.error_type(c)
+                out.push((self.first_ident(c), ty_id))
+            elif is_type_or_error(k):
+                out.push((None, self.type_expr(c)))
+        return out
+
+    pure def fn_type(mut self, n: int) -> TypeKind:
+        var params: list[TypeExprId] = []
+        var ret: TypeExprId? = None
+        var after_arrow = False
+        for e in self.elements(n):
+            match e:
+                case Leaf(t) if self.token_kind(t) == SyntaxKind.Arrow:
+                    after_arrow = True
+                case Node(c):
+                    let k = self.kind(c)
+                    if not is_type_or_error(k) and k != SyntaxKind.TupleTypeField:
+                        continue
+                    var ty: TypeExprId? = None
+                    if k == SyntaxKind.TupleTypeField:
+                        if let Some(x) = self.find_node(c, is_type_node):
+                            ty = Some(self.type_expr(x))
+                    else:
+                        ty = Some(self.type_expr(c))
+                    let ty_id = ty ?? self.error_type(c)
+                    if after_arrow:
+                        ret = Some(ty_id)
+                    else:
+                        params.push(ty_id)
+                case _:
+                    pass
+        var pure = False
+        for t in self.tokens(n):
+            if self.text(t) == "pure":
+                pure = True
+        let ret_id = ret ?? self.error_type(n)
+        return TypeKind.Fn(pure=pure, params=params, ret=ret_id)
+
+    pure def const_arg(mut self, n: int) -> TypeKind:
+        for c in self.nodes(n):
+            if is_expr_node(self.kind(c)):
+                return TypeKind.ConstExpr(self.expr(c))
+        let toks = self.tokens(n)
+        if toks.is_empty():
+            return TypeKind.ConstArg(0)
+        let (digits, _) = split_suffix(self.text(toks[0]), False)
+        let value = parse_int(digits) else:
+            return TypeKind.ConstArg(0)
+        # Rust's `v as i128`; a value past `int` is kept to `int`'s range.
+        return TypeKind.ConstArg(value.to_int() ?? 0)
+
+    pure def error_type(mut self, n: int) -> TypeExprId:
+        return self.add_type(
+            TypeExpr(node=n, range=TextRange.empty(self.range(n).end), kind=TypeKind.Error)
+        )
+
+    # ---------------------------------------------------------------- patterns
+
+    ## The child patterns (and `ERROR` nodes) of `n`.
+    pure def pats(mut self, n: int) -> list[PatternId]:
+        var out: list[PatternId] = []
+        for c in self.nodes(n):
+            if is_pattern_or_error(self.kind(c)):
+                out.push(self.pattern(c))
+        return out
+
+    pure def pattern(mut self, n: int) -> PatternId:
+        let range = self.range(n)
+        if self.kind(n) == SyntaxKind.ParenPat:
+            let inner = self.pats(n)
+            if not inner.is_empty():
+                return inner[0]
+            return self.add_pattern(Pattern(node=n, range=range, kind=PatKind.Error))
+        let kind = match self.kind(n):
+            case WildcardPat: PatKind.Wildcard
+            case IdentPat: self.ident_pat(n)
+            case LiteralPat: self.literal_pat(n, range)
+            case CtorPat: self.ctor_pat(n)
+            case TuplePat: PatKind.Tuple(self.pats(n))
+            case ListPat: PatKind.List(self.pats(n))
+            case StarPat: PatKind.Star(self.first_ident(n))
+            case RestPat: PatKind.Rest
+            case OrPat: PatKind.Or(self.pats(n))
+            case _: PatKind.Error
+        return self.add_pattern(Pattern(node=n, range=range, kind=kind))
+
+    pure def ident_pat(self, n: int) -> PatKind:
+        let toks = self.tokens(n)
+        if toks.is_empty():
+            return PatKind.Error
+        return PatKind.Bind(self.name(toks[0]))
+
+    pure def literal_pat(mut self, n: int, range: TextRange) -> PatKind:
+        let toks = self.tokens(n)
+        let negative = not toks.is_empty() and self.token_kind(toks[0]) == SyntaxKind.Minus
+        var lit: ExprId? = None
+        if let Some(s) = self.child(n, SyntaxKind.StringExpr):
+            lit = Some(self.expr(s))
+        else:
+            for t in toks:
+                if self.token_kind(t) != SyntaxKind.Minus:
+                    let e = Expr(node=n, range=self.token_range(t), kind=self.literal(t))
+                    lit = Some(self.ast.add_expr(e))
+                    break
+        let found = lit else:
+            return PatKind.Error
+        if negative:
+            let neg = Expr(node=n, range=range, kind=ExprKind.Unary(op=UnOp.Neg, expr=found))
+            return PatKind.Literal(self.ast.add_expr(neg))
+        return PatKind.Literal(found)
+
+    pure def ctor_pat(mut self, n: int) -> PatKind:
+        var path: list[Name] = []
+        for t in self.tokens(n):
+            let k = self.token_kind(t)
+            if k == SyntaxKind.Ident or k == SyntaxKind.SelfTypeKw:
+                path.push(self.name(t))
+        var args: list[PatArg]? = None
+        if let Some(a) = self.child(n, SyntaxKind.PatArgs):
+            var out: list[PatArg] = []
+            for x in self.nodes(a):
+                if self.kind(x) != SyntaxKind.PatArg:
+                    continue
+                let inner = self.find_node(x, is_pattern_or_error)
+                let toks = self.tokens(x)
+                let keyword = len(toks) >= 2 and self.token_kind(toks[1]) == SyntaxKind.Eq
+                match inner:
+                    case Some(p) if self.kind(p) == SyntaxKind.RestPat and not keyword:
+                        out.push(PatArg.Rest)
+                    case Some(p) if keyword:
+                        out.push(PatArg.Keyword(self.name(toks[0]), self.pattern(p)))
+                    case Some(p):
+                        out.push(PatArg.Positional(self.pattern(p)))
+                    case None:
+                        let broken = Pattern(node=x, range=self.range(x), kind=PatKind.Error)
+                        out.push(PatArg.Positional(self.add_pattern(broken)))
+            args = Some(out)
+        return PatKind.Ctor(path=path, args=args)
+
+## Whether a token is a line break, layout or a space, which may stand
+## between a doc comment and its item.
+pure def is_layout_or_space(k: SyntaxKind) -> bool:
+    return match k:
+        case Whitespace | LineBreak | Newline | Dedent | Indent: True
+        case _: False
+
+pure def is_pattern_or_error(k: SyntaxKind) -> bool:
+    return is_pattern_node(k) or k == SyntaxKind.Error
+
+## The statements a `let ... else:` may end with on its line.
+pure def is_diverging_stmt(k: SyntaxKind) -> bool:
+    return match k:
+        case ReturnStmt | BreakStmt | ContinueStmt: True
+        case _: False
+
+## The text between the quotes `quote` that start and end it, as Rust's
+## `trim_start_matches` and `trim_end_matches` take them: every repeat.
+pure def trim_quotes(s: str, quote: str) -> str from s:
+    var start = 0
+    let n = s.byte_len()
+    let q = quote.byte_len()
+    while start + q <= n and s.byte_slice(start, start + q) == quote:
+        start += q
+    var end = n
+    while end - q >= start and s.byte_slice(end - q, end) == quote:
+        end -= q
+    return s.byte_slice(start, end)
+
+pub pure def aug_op(k: SyntaxKind) -> BinOp?:
+    return match k:
+        case PlusEq: Some(BinOp.Add)
+        case MinusEq: Some(BinOp.Sub)
+        case StarEq: Some(BinOp.Mul)
+        case SlashEq: Some(BinOp.Div)
+        case SlashSlashEq: Some(BinOp.FloorDiv)
+        case PercentEq: Some(BinOp.Mod)
+        case StarStarEq: Some(BinOp.Pow)
+        case AmpEq: Some(BinOp.BitAnd)
+        case PipeEq: Some(BinOp.BitOr)
+        case CaretEq: Some(BinOp.BitXor)
+        case ShlEq: Some(BinOp.Shl)
+        case ShrEq: Some(BinOp.Shr)
+        case PlusPercentEq: Some(BinOp.WrapAdd)
+        case MinusPercentEq: Some(BinOp.WrapSub)
+        case StarPercentEq: Some(BinOp.WrapMul)
+        case PlusPipeEq: Some(BinOp.SatAdd)
+        case MinusPipeEq: Some(BinOp.SatSub)
+        case StarPipeEq: Some(BinOp.SatMul)
+        case _: None
+
+pub pure def bin_op(k: SyntaxKind) -> BinOp?:
+    return match k:
+        case Plus: Some(BinOp.Add)
+        case Minus: Some(BinOp.Sub)
+        case Star: Some(BinOp.Mul)
+        case Slash: Some(BinOp.Div)
+        case SlashSlash: Some(BinOp.FloorDiv)
+        case Percent: Some(BinOp.Mod)
+        case StarStar: Some(BinOp.Pow)
+        case PlusPercent: Some(BinOp.WrapAdd)
+        case MinusPercent: Some(BinOp.WrapSub)
+        case StarPercent: Some(BinOp.WrapMul)
+        case PlusPipe: Some(BinOp.SatAdd)
+        case MinusPipe: Some(BinOp.SatSub)
+        case StarPipe: Some(BinOp.SatMul)
+        case Shl: Some(BinOp.Shl)
+        case Shr: Some(BinOp.Shr)
+        case Amp: Some(BinOp.BitAnd)
+        case Pipe: Some(BinOp.BitOr)
+        case Caret: Some(BinOp.BitXor)
+        case AndKw: Some(BinOp.And)
+        case OrKw: Some(BinOp.Or)
+        case QuestionQuestion: Some(BinOp.Coalesce)
+        case _: None
+
+const INT_SUFFIXES: list[str] = [
+    "i128", "u128", "i16", "i32", "i64", "u16", "u32", "u64", "uint", "int", "i8", "u8"
+]
+
+## Splits a number literal into digits and a type suffix.
+pub pure def split_suffix(text: str, float: bool) -> (String, String?):
+    let hex = text.byte_len() > 2 and (text.starts_with("0x") or text.starts_with("0X"))
+    var candidates: list[str] = INT_SUFFIXES
+    if float or not hex:
+        candidates.push("f32")
+        candidates.push("f64")
+    for s in candidates:
+        if text.ends_with(s) and text.byte_len() > s.byte_len():
+            let d = text.byte_slice(0, text.byte_len() - s.byte_len())
+            if hex or not (d.ends_with("e") or d.ends_with("E")):
+                return (d.to_string(), Some(s.to_string()))
+    return (text.to_string(), None)
+
+## The value of an integer literal without its suffix; `None` if it does
+## not fit in 128 bits.
+pub pure def parse_int(text: str) -> u128?:
+    let lower = text.replace("_", "").to_lowercase()
+    if lower.starts_with("0x"):
+        return parse_radix(lower.byte_slice(2, lower.byte_len()), 16)
+    if lower.starts_with("0b"):
+        return parse_radix(lower.byte_slice(2, lower.byte_len()), 2)
+    if lower.starts_with("0o"):
+        return parse_radix(lower.byte_slice(2, lower.byte_len()), 8)
+    # Rust's `parse` takes a leading `+`.
+    return parse_radix(lower.strip_prefix("+"), 10)
+
+## The digits of `text` in base `radix` as a `u128`, as Rust's
+## `u128::from_str_radix` reads them: at least one digit, each below the
+## radix, and the value within 128 bits; `None` otherwise.
+pub pure def parse_radix(text: str, radix: int) -> u128?:
+    if text.is_empty():
+        return None
+    let max: u128 = 340282366920938463463374607431768211455
+    let base = radix.to_u128() ?? 10u128
+    var v: u128 = 0
+    for c in text.chars():
+        let d = digit_value(c) else:
+            return None
+        if d >= radix:
+            return None
+        let digit = d.to_u128() ?? 0u128
+        if v > (max - digit) // base:
+            return None
+        v = v * base + digit
+    return Some(v)
+
+## The value of an ASCII digit or letter as a digit of a base up to 36.
+pure def digit_value(c: char) -> int?:
+    let code = c.code()
+    if code >= 48 and code <= 57:
+        return Some(code - 48)
+    if code >= 97 and code <= 122:
+        return Some(code - 87)
+    if code >= 65 and code <= 90:
+        return Some(code - 55)
+    return None
+
+## The bytes of a byte string's text: its escapes, with `\xNN` for any
+## byte, and every other character as its UTF-8 bytes.
+pub pure def decode_byte_escapes(s: str) -> list[int]:
+    var out: list[int] = []
+    var rest = s
+    while let Some(i) = rest.byte_find("\\x"):
+        var byte: int? = None
+        if i + 4 <= rest.byte_len():
+            let hex = rest.byte_slice(i + 2, i + 4)
+            if is_hex_pair(hex):
+                byte = Some(((parse_radix(hex, 16) ?? 0u128).to_int()) ?? 0)
+        # `\\x` is a backslash and an `x`, not an escape: only an odd run
+        # of backslashes escapes.
+        var run = 0
+        var j = i
+        while j > 0 and rest.byte_at(j - 1) == 92:
+            run += 1
+            j -= 1
+        match byte:
+            case Some(b) if run % 2 == 0:
+                for x in decode_escapes(rest.byte_slice(0, i)).bytes():
+                    out.push(x.to_int())
+                out.push(b)
+                rest = rest.byte_slice(i + 4, rest.byte_len())
+            case _:
+                for x in decode_escapes(rest.byte_slice(0, i + 2)).bytes():
+                    out.push(x.to_int())
+                rest = rest.byte_slice(i + 2, rest.byte_len())
+    for x in decode_escapes(rest).bytes():
+        out.push(x.to_int())
+    return out
+
+## Whether `s` is two ASCII hex digits.
+pure def is_hex_pair(s: str) -> bool:
+    if s.byte_len() != 2:
+        return False
+    for c in s.chars():
+        let d = digit_value(c) else:
+            return False
+        if d >= 16:
+            return False
+    return True
+
+## Decodes `\n`, `\t`, `\r`, `\0`, `\\`, `\"`, `\'` and `\u{...}`; an
+## unknown or invalid escape (already reported by the lexer) is kept as
+## written.
+pub pure def decode_escapes(s: str) -> String:
+    if not s.contains("\\"):
+        return s.to_string()
+    var out = String.new()
+    var rest = s
+    while let Some(i) = rest.byte_find("\\"):
+        out.push(rest.byte_slice(0, i))
+        let after = rest.byte_slice(i + 1, rest.byte_len())
+        if after.is_empty():
+            out.push_char('\\')
+            return out
+        let c = char_at(after, 0)
+        var used = c.len_utf8()
+        match c:
+            case 'n':
+                out.push_char('\n')
+            case 't':
+                out.push_char('\t')
+            case 'r':
+                out.push_char('\r')
+            case '0':
+                out.push_char('\0')
+            case '\\':
+                out.push_char('\\')
+            case '"':
+                out.push_char('"')
+            case '\'':
+                out.push_char('\'')
+            case 'u':
+                match unicode_escape(after.byte_slice(used, after.byte_len())):
+                    case Some((ch, len)):
+                        out.push_char(ch)
+                        used += len
+                    # Reported by the lexer, which leaves the braces in the
+                    # text: the escape is kept as written.
+                    case None:
+                        out.push("\\u")
+            case other:
+                out.push_char('\\')
+                out.push_char(other)
+        rest = after.byte_slice(used, after.byte_len())
+    out.push(rest)
+    return out
+
+## The text after `\u` of a Unicode escape: `{`, one to six ASCII hex
+## digits naming a Unicode scalar value, and `}`. Gives the character and
+## the length of that text, or `None` when it is not one (no sign, no
+## space, no surrogate, nothing past `10FFFF`).
+pub pure def unicode_escape(s: str) -> (char, int)?:
+    if s.byte_len() == 0 or s.byte_at(0) != 123:
+        return None
+    let inner = s.byte_slice(1, s.byte_len())
+    let close = inner.byte_find("}}") else:
+        return None
+    if close == 0 or close > 6:
+        return None
+    var value = 0
+    for i in range(close):
+        let b = inner.byte_at(i).to_int()
+        var digit = -1
+        if b >= 48 and b <= 57:
+            digit = b - 48
+        elif b >= 97 and b <= 102:
+            digit = b - 87
+        elif b >= 65 and b <= 70:
+            digit = b - 55
+        if digit < 0:
+            return None
+        value = value * 16 + digit
+    let ch = char.from_code(value) else:
+        return None
+    return Some((ch, close + 2))
+
+## The text of a string literal with no interpolation.
+pub pure def plain_text(parts: list[StrPart]) -> String:
+    var s = String.new()
+    for p in parts:
+        if let Text(t) = p:
+            s.push(t)
+    return s
+
+test "number suffixes":
+    assert split_suffix("42u8", False) == ("42".to_string(), Some("u8".to_string()))
+    assert split_suffix("0xFF", False) == ("0xFF".to_string(), None)
+    assert split_suffix("1.0f32", True) == ("1.0".to_string(), Some("f32".to_string()))
+    assert parse_int("0b1010") == Some(10u128)
+    assert parse_int("1_000") == Some(1000u128)
+
+test "escapes":
+    assert decode_escapes("a\\nb\\u{{41}}\\\\") == "a\nbA\\"

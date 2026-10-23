@@ -1,0 +1,2 @@
+4:23-4:26 E0412 borrow.view-in-enum ty="ParseError" fty="str"
+  label 3:7-3:17 borrow.type-declared-here ty="ParseError"

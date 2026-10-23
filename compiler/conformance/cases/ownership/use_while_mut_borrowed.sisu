@@ -1,0 +1,8 @@
+# A value borrowed with `mut` cannot be read through another path while
+# the `mut` borrow is still used.
+
+def main():
+    var total = 10
+    let r = ref mut total
+    print(total)
+    r += 1

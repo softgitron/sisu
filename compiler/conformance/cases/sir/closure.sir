@@ -1,0 +1,106 @@
+sir 0
+source 0 "closure.sisu"
+entry main
+
+intrinsic Iter.next pure inner 0 keeps 0
+intrinsic iter.ref pure from 0
+intrinsic print
+
+fn count_if(2) source 0 @1:5-1:13 {
+    let _0: int
+    let _1: ref list[int] "xs" @1:14-1:27
+    let _2: fn(int) -> bool "keep" @1:29-1:48
+    let _3: int "n" @2:9-2:10
+    let _4: Iter[ref int]
+    let _5: ref list[int]
+    let _6: ref mut Iter[ref int]
+    let _7: Option[ref int]
+    let _8: int
+    let _9: ref int "x" @3:9-3:10
+    let _10: bool
+    let _11: int
+    let _12: int
+  bb0 (unwind bb1):
+    _3 = const 0 @2:13-2:14
+    _5 = ref _1.* @3:14-3:16
+    _4 = call intrinsic iter.ref(copy _5) @3:5-3:16
+    goto bb3
+  bb1 (cleanup):
+    drop _2
+    resume
+  bb2 (cleanup):
+    drop _4
+    goto bb1
+  bb3 (unwind bb2):
+    _6 = ref mut _4 @3:5-3:16
+    _7 = call intrinsic Iter.next(copy _6) @3:5-3:16
+    _8 = discriminant _7 @3:5-3:16
+    switch copy _8 [0: bb4, else: bb6] @3:5-3:16
+  bb4 (unwind bb2):
+    _9 = copy _7.as(0).0 @3:9-3:10
+    _11 = copy _9.* @4:17-4:18
+    _10 = call copy _2(copy _11) @4:12-4:19
+    switch copy _10 [0: bb3, else: bb5] @4:12-4:19
+  bb5 (unwind bb2):
+    _12 = add copy _3, const 1 @5:13-5:19
+    _3 = move _12 @5:13-5:19
+    goto bb3
+  bb6 (unwind bb1):
+    drop _4 @5:19-5:19
+    goto bb7
+  bb7 (unwind bb1):
+    dead _4 @5:19-5:19
+    _0 = copy _3 @6:12-6:13
+    goto bb8
+  bb8:
+    drop _2 @6:5-6:13
+    return @6:5-6:13
+}
+
+fn main(0) source 0 @8:5-8:9 {
+    let _0: ()
+    let _1: list[int] "xs" @9:9-9:11
+    let _2: int "limit" @10:9-10:14
+    let _3: int "big" @11:9-11:12
+    let _4: ref list[int]
+    let _5: pure fn(int) -> bool
+    let _6: ref int
+    let _7: ()
+  bb0:
+    _1 = list(const 1, const 2, const 3) @9:14-9:23
+    goto bb1
+  bb1 (unwind bb2):
+    _2 = const 1 @10:17-10:18
+    _4 = ref _1 @11:24-11:26
+    _6 = ref _2 @11:28-11:42
+    _5 = closure main#closure0(copy _6) @11:28-11:42
+    goto bb3
+  bb2 (cleanup):
+    drop _1
+    resume
+  bb3 (unwind bb4):
+    _3 = call fn count_if(copy _4, copy _5) @11:15-11:43
+    goto bb5
+  bb4 (cleanup):
+    drop _5
+    goto bb2
+  bb5 (unwind bb2):
+    drop _5 @11:43-11:43
+    goto bb6
+  bb6 (unwind bb2):
+    _7 = call intrinsic print(copy _3) @12:5-12:15
+    _0 = const ()
+    goto bb7
+  bb7:
+    drop _1 @12:15-12:15
+    return
+}
+
+fn main#closure0(2) closure pure source 0 from 0 1 @11:28-11:42 {
+    let _0: bool
+    let _1: (ref int,) "env(limit)"
+    let _2: int "x" @11:28-11:29
+  bb0:
+    _0 = gt copy _2, copy _1.0.* @11:33-11:42
+    return @11:33-11:42
+}

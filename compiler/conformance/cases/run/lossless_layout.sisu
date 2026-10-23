@@ -1,0 +1,14 @@
+##! Odd but valid layout survives `sisu parse --print` byte for byte.
+
+
+
+def   spaced  (  a :int ,b: int)->int :   # comment after the colon
+    return a+b      # trailing spaces and comments
+
+
+
+def main( ):
+    # a comment line
+    let  xs=[ 1,2 ,
+        3 ]
+    print( spaced( xs[0],xs[ ^1 ] ) )

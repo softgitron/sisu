@@ -1,0 +1,6 @@
+def main():
+    let x = 1
+    if True:
+        let x = 2
+        print(x)
+    print(x)

@@ -1,0 +1,12 @@
+Ok("started")
+Ok(["out/logs"])
+Ok(True)
+Ok(7)
+Ok(())
+False
+Ok("from the fixture\n")
+Err(NotFound(path="absent.txt"))
+True
+None
+NotFound(program="sisu-no-such-program")
+True

@@ -1,0 +1,4 @@
+# A workspace (09): its members build together, with one lockfile beside
+# this manifest.
+[workspace]
+members = ["greeter", "core"]

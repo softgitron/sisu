@@ -1,0 +1,55 @@
+# What the checker rejects in contracts (07): a clause after the first
+# statement, one that calls what is not `pure` or changes what it reads,
+# `old` outside `ensures` or with other than one expression, an `ensures`
+# on a generator, a field of a type with an invariant assigned from
+# outside, a contract in a test, and a generator for a type with none.
+
+def late(x: int) -> int:
+    let y = x + 1
+    requires x > 0  # E0800: after a statement
+    return y
+
+def noisy(x: int) -> bool:
+    print(x)
+    return True
+
+def impure(x: int) -> int:
+    requires noisy(x)  # E0801
+    return x
+
+def changing(mut xs: list[int]) -> int:
+    requires xs.pop() != None  # E0802
+    return len(xs)
+
+def early(x: int) -> int:
+    requires old(x) > 0  # E0803
+    return x
+
+def two(x: int, y: int) -> int:
+    ensures result == old(x, y)  # E0804
+    return x
+
+def counter(n: int) -> Iter[int]:
+    ensures n >= 0  # E0805
+    var i = 0
+    while i < n:
+        yield i
+        i += 1
+
+struct Meter:
+    reading: int
+    invariant self.reading >= 0
+
+    def reset(mut self):
+        self.reading = 0
+
+def tamper(mut m: Meter):
+    m.reading = -1  # E0806
+
+test "a test states no contract":
+    requires True  # E0807
+    assert True
+
+test "a function has no generator":
+    check(arbitrary[(int) -> int]) do f:  # E0820
+        return f(1) == f(1)

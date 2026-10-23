@@ -1,0 +1,24 @@
+pub from lib.inner import helper
+from lib.inner import again
+
+pub struct Counter:
+    pub count: int
+    step: int
+
+    pub def bump(mut self):
+        self.count += self.step
+
+    def reset(mut self):
+        self.count = 0
+
+def secret() -> int:
+    return 42
+
+pub(package) def internal() -> int:
+    return 7
+
+def hidden() -> int:
+    return internal() + again()
+
+struct Hidden:
+    x: int

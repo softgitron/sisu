@@ -1,0 +1,517 @@
+##! The Sisu parser: hand-written recursive descent that never fails
+##! (proposal/02-syntax.md, "Grammar notes"; docs/architecture.md,
+##! "Parsing and the syntax tree"). Every production can yield an `ERROR`
+##! node, recovery synchronises at NEWLINE and DEDENT, and the result is
+##! always a lossless tree whose text is the input byte for byte. One rule
+##! of the grammar is one function, in the modules below: `items`,
+##! `stmts`, `exprs`, `patterns` and `types`, over the state in `state`.
+##!
+##! Diagnostics are kept to one per token while parsing and to one per line
+##! afterwards, the most likely cause (docs/architecture.md, "Error
+##! tolerance").
+
+from stage1.diag import Catalog, Diagnostic, Lines, Msg, render_ids, sort
+from stage1.lexer import Lexed, lex
+from stage1.mutants import Rng
+from stage1.parser.state import Parser
+from stage1.syntax.kinds import SyntaxKind
+from stage1.syntax.tree import StableId, Tree
+
+## The result of parsing one file: the tree, and the lexer's and the
+## parser's diagnostics in source order.
+pub struct Parse:
+    pub tree: Tree
+    pub diagnostics: list[Diagnostic]
+
+## Parses a whole file. The catalog gives the diagnostics' codes, which
+## order them and rank them.
+pub pure def parse(text: str, catalog: Catalog) -> Parse:
+    return parse_lexed(text, lex(text), catalog)
+
+## Parses a file already lexed.
+pub pure def parse_lexed(text: str, own lexed: Lexed, catalog: Catalog) -> Parse:
+    var diagnostics = lexed.diagnostics
+    var lex_errors: list[int] = []
+    for d in diagnostics:
+        if catalog.is_error(d.msg):
+            lex_errors.push(d.start)
+    var p = Parser.new(text, lexed.tokens, lex_errors)
+    p.source_file()
+    let (tree, parse_diags) = p.finish()
+    # A script (`#!` on its first line, 10) may have statements at the top
+    # level: they run as its `main`.
+    let script = text.starts_with("#!")
+    for d in own parse_diags:
+        if not (script and d.msg == Msg.ParseTopLevelStatement):
+            diagnostics.push(d)
+    sort(mut diagnostics, catalog)
+    let kept = without_structure_echoes(without_bracket_echoes(text, diagnostics), catalog)
+    return Parse(tree=tree, diagnostics=one_per_line(text, kept, catalog))
+
+## When the lexer gives up on a bracket that is never closed, it does so at
+## the start of a line (a statement keyword at the bracket's indentation)
+## or at the end of the file, and the parser then reports "expected `)`"
+## at exactly that token. That second report says the same thing again and
+## is dropped; a missing closer in the middle of a line is a separate
+## mistake and stays.
+pure def without_bracket_echoes(text: str, own diagnostics: list[Diagnostic]) -> list[Diagnostic]:
+    var first = -1
+    for d in diagnostics:
+        if d.msg == Msg.LexUnclosedBracket and (first < 0 or d.start < first):
+            first = d.start
+    if first < 0:
+        return diagnostics
+    var out: list[Diagnostic] = []
+    for d in own diagnostics:
+        let closer = match d.param("expected"):
+            case Some(e): e == "`)`" or e == "`]`" or e == "`}}`"
+            case None: False
+        let echo = d.msg == Msg.ParseExpected
+            and closer
+            and d.start > first
+            and starts_line(text, d.start)
+        if not echo:
+            out.push(d)
+    return out
+
+## Whether only spaces stand between the start of its line and byte `at`,
+## or `at` is at the end of the text.
+pure def starts_line(text: str, at: int) -> bool:
+    if at >= text.byte_len():
+        return True
+    var i = at - 1
+    while i >= 0 and text.byte_at(i) != 10:
+        if text.byte_at(i) != 32:
+            return False
+        i -= 1
+    return True
+
+## A statement at the top level (`E0107`) or an unexpected indented block
+## (`E0125`) after an earlier syntax error is almost always that error's
+## consequence: the block structure the parser sees has already diverged
+## from the one intended. They are reported only when nothing precedes
+## them.
+pure def without_structure_echoes(
+    own diagnostics: list[Diagnostic], catalog: Catalog
+) -> list[Diagnostic]:
+    var seen_error = False
+    var out: list[Diagnostic] = []
+    for d in own diagnostics:
+        let structural = d.msg == Msg.ParseTopLevelStatement or d.msg == Msg.ParseUnexpectedIndent
+        if structural and seen_error:
+            continue
+        if catalog.is_error(d.msg):
+            seen_error = True
+        out.push(d)
+    return out
+
+## How likely a diagnostic is to be the cause rather than a consequence of
+## the others on its line, most likely first: a lexical error about the
+## characters themselves, then bracket errors, then grammar errors.
+pure def rank(d: Diagnostic, catalog: Catalog) -> int:
+    let code = catalog.code(d.msg)
+    if code == "E0008" or code == "E0009" or code == "E0010":
+        return 1
+    if code.starts_with("E00"):
+        return 0
+    return 2
+
+## Keeps one syntax diagnostic per line: the most likely cause, the first
+## of equals. A second error on the same line almost always follows from
+## the first (an unterminated string, then an unclosed bracket, then a
+## missing operand), so this is the guard against diagnostic storms;
+## errors on different lines are all reported.
+pure def one_per_line(
+    text: str, own diagnostics: list[Diagnostic], catalog: Catalog
+) -> list[Diagnostic]:
+    let lines = Lines.of(text)
+    var out: list[Diagnostic] = []
+    var last_line = -1
+    for d in own diagnostics:
+        let line = lines.index(d.start)
+        if line == last_line and not out.is_empty():
+            if rank(d, catalog) < rank(out[len(out) - 1], catalog):
+                _ = out.pop()
+                out.push(d)
+        else:
+            out.push(d)
+            last_line = line
+    return out
+
+# ------------------------------------------------------------------ tests
+# The unit tests of stage 0's parser (`sisu-parser/src/tests.rs`). They
+# read the message catalog for the codes, so they run from this package's
+# directory, as `sisu test` does.
+
+## The kinds, under a short name for the tests' expected lists.
+type K = SyntaxKind
+
+def test_catalog(sys: System) -> Catalog:
+    let text = sys.fs.read_to_string(Path.new("../catalog/messages.catalog")) else:
+        panic("the tests read the catalog at ../catalog/messages.catalog")
+    return Catalog.parse(text)
+
+## `src` parsed, after checking that the tree reprints it.
+pure def checked(src: str, catalog: Catalog) -> Parse:
+    let p = parse(src, catalog)
+    assert p.tree.to_source() == src
+    return p
+
+pure def codes(src: str, catalog: Catalog) -> list[String]:
+    var out: list[String] = []
+    for d in checked(src, catalog).diagnostics:
+        out.push(catalog.code(d.msg))
+    return out
+
+pure def kinds_in(src: str, catalog: Catalog) -> list[SyntaxKind]:
+    let p = checked(src, catalog)
+    var out: list[SyntaxKind] = []
+    for n in p.tree.preorder(p.tree.root):
+        out.push(p.tree.nodes[n].kind)
+    return out
+
+pure def count(kinds: list[SyntaxKind], kind: SyntaxKind) -> int:
+    var n = 0
+    for k in kinds:
+        if k == kind:
+            n += 1
+    return n
+
+test "the proposal's examples parse without syntax errors"(sys: System):
+    let catalog = test_catalog(sys)
+    let names = [
+        "hello",
+        "wordcount",
+        "errors",
+        "ownership",
+        "traits",
+        "concurrency",
+        "capabilities",
+        "contracts",
+        "comptime",
+        "testing",
+        "ffi",
+    ]
+    for name in names:
+        let path = "../../proposal/examples/{name}.sisu"
+        let src = sys.fs.read_to_string(Path.new(path)) else:
+            panic("cannot read {path}")
+        assert checked(src, catalog).diagnostics.is_empty()
+
+test "leading comments belong to the root"(sys: System):
+    let p = checked("## doc\n# c\ndef f():\n    pass\n", test_catalog(sys))
+    var kids: list[SyntaxKind] = []
+    for e in p.tree.nodes[p.tree.root].children:
+        if let Node(n) = e:
+            kids.push(p.tree.nodes[n].kind)
+    assert kids == [K.FnDef]
+
+test "the shape of hello"(sys: System):
+    let k = kinds_in("def main():\n    print(\"Hei, maailma!\")\n", test_catalog(sys))
+    let expected = [
+        K.SourceFile,
+        K.FnDef,
+        K.ParamList,
+        K.Block,
+        K.ExprStmt,
+        K.CallExpr,
+        K.NameRef,
+        K.ArgList,
+        K.Arg,
+        K.StringExpr,
+    ]
+    assert k == expected
+
+test "three syntax errors, three reports"(sys: System):
+    # The Phase 0 exit criterion: a file with three syntax errors reports
+    # all three, each on its own line.
+    let src = "def main():\n    let x = (1 +\n    let y = 2\n    if y > 1\n        print(y)\n    print(x y)\n"
+    let p = checked(src, test_catalog(sys))
+    let lines = Lines.of(src)
+    var at: list[int] = []
+    for d in p.diagnostics:
+        at.push(lines.index(d.start) + 1)
+    assert at == [2, 4, 6]
+
+test "a missing colon and a missing block"(sys: System):
+    let catalog = test_catalog(sys)
+    assert codes("def main()\n    pass\n", catalog) == ["E0100"]
+    let p = checked("def main():\npass\n", catalog)
+    assert catalog.code(p.diagnostics[0].msg) == "E0101"
+    assert p.diagnostics[0].param("keyword") == Some("def".to_string())
+    assert p.diagnostics[0].param("line") == Some("1".to_string())
+    assert codes("def f():\n    if x: return 1\n", catalog) == ["E0102"]
+
+test "the operator mixing rules"(sys: System):
+    let c = test_catalog(sys)
+    assert codes("def f():\n    x = a and b or c\n", c) == ["E0108"]
+    assert codes("def f():\n    x = a or b and c\n", c) == ["E0108"]
+    assert codes("def f():\n    x = (a and b) or c\n", c).is_empty()
+    assert codes("def f():\n    x = a & b | c\n", c) == ["E0109"]
+    assert codes("def f():\n    x = a & b + c\n", c) == ["E0110"]
+    assert codes("def f():\n    x = c & 1 == 1\n", c).is_empty()
+    assert codes("def f():\n    x = a << b + c\n", c) == ["E0111"]
+    assert codes("def f():\n    x = -2 ** 2\n", c) == ["E0112"]
+    assert codes("def f():\n    x = (-2) ** 2\n", c).is_empty()
+    assert codes("def f():\n    x = a < b > c\n", c) == ["E0113"]
+    assert codes("def f():\n    x = a < b <= c\n", c).is_empty()
+    assert codes("def f():\n    x = a != b != c\n", c) == ["E0119"]
+
+test "an assignment in a condition"(sys: System):
+    assert codes("def f():\n    if x = 1:\n        pass\n", test_catalog(sys)) == ["E0114"]
+
+test "closures and trailing blocks"(sys: System):
+    let c = test_catalog(sys)
+    let k = kinds_in("def f():\n    xs.sort_by((a, b) -> b.1.cmp(a.1))\n", c)
+    assert k.contains(K.ClosureExpr)
+    let src = "def f():\n    let t = xs.fold(0) do acc, x:\n        return acc + x\n    print(t)\n"
+    let k2 = kinds_in(src, c)
+    assert k2.contains(K.DoBlock)
+    assert count(k2, K.LetStmt) == 1
+    assert codes(src, c).is_empty()
+
+test "match forms"(sys: System):
+    let c = test_catalog(sys)
+    let src = "def f(s: Shape) -> f64:\n    let a = match s:\n        case Circle(r): r * r\n        case Empty: 0.0\n    match s:\n        case Rect(w, h) if w == h:\n            return w\n        case _:\n            pass\n    return a\n"
+    assert codes(src, c).is_empty()
+    let k = kinds_in(src, c)
+    assert count(k, K.MatchExpr) == 2
+    assert k.contains(K.MatchGuard)
+
+test "let-else forms"(sys: System):
+    let c = test_catalog(sys)
+    let src = "def f():\n    let x = g() else: 0\n    let y = g() else as e: h(e)\n    let Some(z) = o else:\n        return\n    let w = g() else: return None\n"
+    assert codes(src, c).is_empty()
+    assert count(kinds_in(src, c), K.LetElse) == 4
+
+test "conditions chain with commas"(sys: System):
+    let c = test_catalog(sys)
+    let src = "def f():\n    if let Some(u) = users.get(id), let Some(t) = u.team, t.active:\n        notify(t)\n"
+    assert codes(src, c).is_empty()
+    assert count(kinds_in(src, c), K.LetCond) == 2
+
+test "literals and comprehensions"(sys: System):
+    let c = test_catalog(sys)
+    let src = "def f():\n    let a = [x * x for x in xs if x > 0]\n    let b = {{k: v for k, v in pairs}}\n    let c = {{1, 2}}\n    let d = {{}}\n    let e = (1, \"a\")\n    let f = ()\n"
+    assert codes(src, c).is_empty()
+    let k = kinds_in(src, c)
+    assert count(k, K.Comprehension) == 2
+    assert k.contains(K.SetExpr) and k.contains(K.DictExpr) and k.contains(K.TupleExpr)
+
+test "types"(sys: System):
+    let c = test_catalog(sys)
+    let src = "def f(a: ref str?, b: list[int], c: (int, str) -> bool) -> int ! {{IoError, ParseError}}:\n    pass\ndef g() -> !:\n    pass\ndef h() -> ! IoError:\n    pass\n"
+    assert codes(src, c).is_empty()
+    let k = kinds_in(src, c)
+    assert k.contains(K.OptionType) and k.contains(K.RefType)
+    assert k.contains(K.FnType) and k.contains(K.ErrorSetType)
+    assert count(k, K.ResultType) == 3
+
+test "a top-level statement is reported but kept"(sys: System):
+    let c = test_catalog(sys)
+    let p = checked("print(1)\ndef main():\n    pass\n", c)
+    assert len(p.diagnostics) == 1
+    assert c.code(p.diagnostics[0].msg) == "E0107"
+    var nodes = 0
+    for e in p.tree.nodes[p.tree.root].children:
+        if let Node(_) = e:
+            nodes += 1
+    assert nodes == 2
+
+test "an unexpected indent keeps the structure"(sys: System):
+    assert codes("def f():\n    x = 1\n        y = 2\n    z = 3\n", test_catalog(sys)) == ["E0125"]
+
+test "stable identities survive edits of other bodies"(sys: System):
+    let c = test_catalog(sys)
+    let a = checked("def f():\n    x = 1\n\ndef g():\n    y = 2\n", c)
+    let b = checked("def f():\n    x = 1\n    x = 2\n    x = 3\n\ndef g():\n    y = 2\n", c)
+    let ia = statement_ids(a)
+    let ib = statement_ids(b)
+    # `g` and its body keep their identities although `f` grew.
+    assert ia[len(ia) - 1] == ib[len(ib) - 1]
+    assert ib.contains(ia[0])
+    assert ia[len(ia) - 2].item[0].starts_with("FN_DEF:g#0")
+
+## The identities of the functions and statements of a tree, in pre-order.
+pure def statement_ids(p: Parse) -> list[StableId]:
+    var ids: list[StableId] = []
+    for n in p.tree.preorder(p.tree.root):
+        match p.tree.nodes[n].kind:
+            case FnDef | ExprStmt | AssignStmt:
+                ids.push(p.tree.stable_id(n))
+            case _:
+                pass
+    return ids
+
+test "random inputs never break the parser"(sys: System):
+    # Never fails, always lossless, never a storm of diagnostics.
+    let c = test_catalog(sys)
+    let vocabulary = [
+        "def",
+        "f",
+        "(",
+        ")",
+        ":",
+        "\n",
+        "    ",
+        "if",
+        "x",
+        "else",
+        "elif",
+        "return",
+        "let",
+        "=",
+        "1",
+        "\"s{{x}}\"",
+        "[",
+        "]",
+        "{{",
+        "}}",
+        ",",
+        "+",
+        "and",
+        "or",
+        "match",
+        "case",
+        "->",
+        "do",
+        "?",
+        ".",
+        "struct",
+        "enum",
+        "..",
+        "@a",
+        "#c\n",
+        "\t",
+        "'c'",
+        "not",
+        "in",
+        "for",
+        "while",
+        "**",
+        "-",
+        "|",
+        "_",
+        "Some",
+        "(a, b)",
+        "\"",
+        "{{",
+        "pass\n",
+    ]
+    var rng = Rng.new(0x9E3779B9)
+    for _ in range(200):
+        var s = String.new()
+        for _ in range(rng.below(60)):
+            s.push(vocabulary[rng.below(len(vocabulary))])
+            if rng.below(3) == 0:
+                s.push(" ")
+        let p = checked(s, c)
+        var lines = 1
+        for l in s.lines():
+            lines += 1
+        assert len(p.diagnostics) <= 2 * lines + 2
+
+test "an unterminated string is the only report"(sys: System):
+    # Its line also has an unclosed `(`; the string is the cause.
+    assert codes("def main():\n    print(\"no end)\n    print(1)\n", test_catalog(sys)) == ["E0003"]
+
+test "an unclosed bracket is reported once"(sys: System):
+    let c = test_catalog(sys)
+    assert codes("def main():\n    let xs = [1, 2\n    print(xs)\n", c) == ["E0009"]
+    # A closer missing in the middle of a later line is a second mistake.
+    assert codes("def main():\n    let xs = [1, 2\n    let y = (xs b)\n", c) == ["E0009", "E0100"]
+
+test "a block header closes its open bracket"(sys: System):
+    let c = test_catalog(sys)
+    # The `(` is closed at the `:` because an indented block follows.
+    assert codes("def f(x: int -> int:\n    let y = x\n    return y\n", c) == ["E0009"]
+    # A colon inside brackets that is not a block header is left alone.
+    assert codes("def f():\n    let d = {{\n        \"a\":\n            1,\n    }}\n", c).is_empty()
+
+test "recovery always makes progress"(sys: System):
+    # Found by fuzzing stage 0: a dedent inside `select` left the parser at
+    # an INDENT that the `case` loop never consumed.
+    let src = "def f():\n    return task.scope do s:\n        select:\n            case _ = clock.after(5):\n           **     s.cancel()\n                return Err(Timeout)\n"
+    _ = checked(src, test_catalog(sys))
+
+test "a struct body's bad line is reported once per body"(sys: System):
+    let src = "struct A:\n    print(1)\n    struct B:\n        x: int\n    print(2)\n"
+    assert codes(src, test_catalog(sys)) == ["E0126"]
+
+## The diagnostics of `def f():` with `line` as its body, in the
+## conformance form.
+pure def body_diagnostics(line: str, catalog: Catalog) -> String:
+    let src = "def f():\n    {line}\n"
+    return render_ids(src, checked(src, catalog).diagnostics, catalog)
+
+## A diagnostic's line in the conformance form, then its fix that puts
+## parentheses at `open` and `close`.
+pure def with_parens(diagnostic: str, open: str, close: str) -> String:
+    return "{diagnostic}\n  fix parse.parenthesize {open}-{open} \"(\" {close}-{close} \")\"\n"
+
+test "a mix of operators is fixed with Python's grouping"(sys: System):
+    let c = test_catalog(sys)
+    let mixed = "E0109 parse.mixed-bitwise"
+    # `&` binds tighter than `|` on either side of it; on the right, the fix
+    # waits for the end of the operand.
+    let left = with_parens("2:15-2:16 {mixed} first=\"&\" second=\"|\"", "2:9", "2:14")
+    assert body_diagnostics("x = a & b | c", c) == left
+    let right = with_parens("2:15-2:16 {mixed} first=\"|\" second=\"&\"", "2:13", "2:18")
+    assert body_diagnostics("x = a | b & c", c) == right
+    # Arithmetic beside a bitwise operator or a shift is grouped on its side.
+    let arithmetic = "E0110 parse.bitwise-arithmetic op=\"&\""
+    let before = with_parens("2:15-2:16 {arithmetic}", "2:9", "2:14")
+    assert body_diagnostics("x = a + 1 & b", c) == before
+    let after = with_parens("2:18-2:18 {arithmetic}", "2:13", "2:18")
+    assert body_diagnostics("x = a & b + 1", c) == after
+    let shift = "E0111 parse.shift-arithmetic"
+    let shifted = with_parens("2:19-2:19 {shift}", "2:14", "2:19")
+    assert body_diagnostics("x = a << b + c", c) == shifted
+    let shifting = with_parens("2:15-2:17 {shift}", "2:9", "2:14")
+    assert body_diagnostics("x = a - 1 >> b", c) == shifting
+    # `-x ** y` is `-(x ** y)`, as Python reads it.
+    let power = with_parens("2:16-2:16 E0112 parse.negative-power", "2:10", "2:16")
+    assert body_diagnostics("x = -a ** 2", c) == power
+    # A mix reported at a token that already has a report is dropped, and
+    # so is its fix.
+    let first = with_parens("2:19-2:20 E0110 parse.bitwise-arithmetic op=\"|\"", "2:13", "2:18")
+    assert body_diagnostics("x = a | b + 1 & c", c) == first
+
+test "a Python conditional is rewritten as an if expression"(sys: System):
+    let c = test_catalog(sys)
+    let conditional = "E0115 parse.python-conditional"
+    let simple = "2:13-2:26 {conditional}\n  fix parse.use-if-expression 2:13-2:26 \"if c: x else: y\"\n"
+    assert body_diagnostics("let a = x if c else y", c) == simple
+    # The `else` is the first outside brackets.
+    let nested = "2:13-2:36 {conditional}\n  fix parse.use-if-expression 2:13-2:36 \"if f(c else d): x else: y\"\n"
+    assert body_diagnostics("let a = x if f(c else d) else y", c) == nested
+    # Without an `else`, the tokens trail the statement.
+    let trailing = "2:15-2:17 E0117 parse.trailing-tokens found=\"`if`\"\n"
+    assert body_diagnostics("let a = x if c", c) == trailing
+    # The look ends at the end of the file inside an open bracket, where
+    # the bracket's report is the line's.
+    assert codes("def f():\n    let m = x if c else f(y\n", c) == ["E0009"]
+
+test "an expected block is labelled at its keyword"(sys: System):
+    let c = test_catalog(sys)
+    let src = "def f():\n    let matches = match x:\n    pass\n"
+    let expected = "3:5-3:9 E0101 parse.expected-block keyword=\"match\" line=\"2\"\n  label 2:19-2:24 parse.opened-here keyword=\"match\"\n"
+    assert render_ids(src, checked(src, c).diagnostics, c) == expected
+    # The first whole word on the line, wherever it is written.
+    let text = "for for_each in xs: \"for\"\n"
+    let p = Parser.new(text, lex(text).tokens, [])
+    assert p.word_on_line("for", 1) == Some((0, 3))
+    assert p.word_on_line("each", 1) == None
+    assert p.word_on_line("in", 1) == Some((13, 15))
+    assert p.word_on_line("for", 2) == None
+    assert p.word_on_line("for", 3) == None
+
+test "a punctuation token missing at the end of a line is written by the fix"(sys: System):
+    let c = test_catalog(sys)
+    let colon = "1:8-1:8 E0100 parse.expected expected=\"`:`\" found=\"the end of the line\"\n"
+    let src = "def f()\n    pass\n"
+    let fixed = "{colon}  fix parse.insert-token 1:8-1:8 \":\"\n"
+    assert render_ids(src, checked(src, c).diagnostics, c) == fixed
+    # One missing inside a line has no fix.
+    let inside = "2:13-2:14 E0100 parse.expected expected=\"`)`\" found=\"`y`\"\n"
+    assert body_diagnostics("print(x y)", c) == inside

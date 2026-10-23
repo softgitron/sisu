@@ -1,0 +1,9 @@
+# A generic type takes as many arguments as it declares, less its defaults.
+
+struct Pair[A, B = int]:
+    a: A
+    b: B
+
+def main():
+    let p: Pair[int, int, int] = Pair(a=1, b=2)
+    let q: Pair = Pair(a=1, b=2)

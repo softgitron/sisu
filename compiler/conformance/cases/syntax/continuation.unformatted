@@ -1,0 +1,2 @@
+Its layout is what it tests: a definition and expressions continued over
+several lines, which `sisu fmt` joins.

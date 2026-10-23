@@ -1,0 +1,9 @@
+# A dict keeps the keys it is given: a `str` key borrows the `String` it
+# views for as long as the dict is used.
+
+def main():
+    var name = String.new("aino")
+    var ages: dict[str, int] = {}
+    ages[name] = 27
+    name.push(" virtanen")
+    print(ages)

@@ -1,0 +1,18 @@
+# A logical line continues inside brackets, after a trailing comma and
+# when the next line starts with a binary operator or `.`.
+def add(a: int,
+        b: int) -> int:
+    return a + b
+
+def main():
+    let total = 1
+        + 2
+        + 3
+    let xs = [
+        1,
+        2,
+    ]
+    let text = "a b c"
+        .to_uppercase()
+    print(add(total, len(xs)))
+    print(text)

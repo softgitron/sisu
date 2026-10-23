@@ -1,0 +1,3 @@
+9:1-9:29 E0254 resolve.drop-generic ty="Pair[int, int]" name="Pair" expected="impl[A, B] Drop for Pair[A, B]"
+17:1-17:35 E0254 resolve.drop-generic ty="Plain[T]" name="Plain" expected="impl[T] Drop for Plain[T]"
+26:1-26:34 E0254 resolve.drop-generic ty="Swapped[B, A]" name="Swapped" expected="impl[A, B] Drop for Swapped[A, B]"

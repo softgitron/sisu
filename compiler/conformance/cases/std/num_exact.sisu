@@ -1,0 +1,47 @@
+# `std.num`'s exact types (11; D-076): `BigInt`, an integer of any size,
+# and `Decimal`, a base-10 number held exactly, with literals written
+# where one is expected and rounding only where it is asked for; and the
+# checked arithmetic that reports instead of trapping. Two decimals of
+# equal value are equal, each shown with its own places.
+from std.num import BigInt, Decimal, Rounding, checked_pow, checked_sub
+
+def factorial(n: int) -> BigInt:
+    var out = BigInt.of(1)
+    for i in range(2, n + 1):
+        out = out * BigInt.of(i)
+    return out
+
+def fibonacci(n: int) -> BigInt:
+    var a: BigInt = 0
+    var b: BigInt = 1
+    for _ in range(n):
+        let next = a + b
+        a = b
+        b = next
+    return a
+
+def main():
+    let f = factorial(30)
+    print(f)
+    print(fibonacci(100))
+    let (q, r) = f.divmod(fibonacci(50))
+    print("{q} {r}")
+    print(BigInt.of(-7) % BigInt.of(3))
+    print(BigInt.of(2).pow(64) - BigInt.of(1))
+    print((BigInt.of(2).pow(64) - BigInt.of(1)).to_int())
+    print(BigInt.parse("-0") == Some(BigInt.of(0)))
+    var keys: set[BigInt] = set()
+    _ = keys.add(factorial(20))
+    print(keys.contains(BigInt.parse("2432902008176640000").expect("digits")))
+    var total: Decimal = 0
+    for price in ["19.99", "5.01", "0.10"]:
+        total = total + Decimal.parse(price).expect("a price")
+    print(total)
+    let rate: Decimal = 0.075
+    let tax = (total * rate).round(2, Rounding.HalfEven)
+    print("{tax} {total + tax}")
+    let third = Decimal.of(1).div(Decimal.of(3), 6, Rounding.Down)
+    print("{third} {third * Decimal.of(3)}")
+    print(Decimal.parse("1.10").expect("digits") == Decimal.parse("1.1").expect("digits"))
+    print(Decimal.parse("2.50").expect("digits") > Decimal.parse("2.499").expect("digits"))
+    print("{checked_sub(-9223372036854775807, 2)} {checked_pow(10, 18)} {checked_pow(10, 19)}")

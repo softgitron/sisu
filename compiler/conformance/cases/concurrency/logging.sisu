@@ -1,0 +1,13 @@
+# The `log` facade (06, Q-5): ambient like `print_err`, it writes to the
+# standard error, and inside a task it names the task's trace context, the
+# path of spawn indices from the root task.
+
+def main():
+    log.info("starting")
+    task.scope do s:
+        s.spawn do:
+            log.warn("in the first task")
+            task.scope do inner:
+                inner.spawn(() -> log.error("in its child"))
+        s.spawn(() -> log.debug("in the second task"))
+    log.info("done")

@@ -1,0 +1,34 @@
+# PCT (Burckhardt et al. 2010): random priorities and `depth - 1` points
+# where the running task drops below every other. The bug here needs two
+# orderings at once (depth 2): the writer must publish before the reader
+# looks, and the reader must look before the writer finishes. PCT with
+# depth 2 finds it among a few seeds; each seed is one schedule.
+# schedule --scheduler pct --depth 2 --explore 40
+
+@derive(Copy)
+struct Shared2:
+    state: Cap[Mutex[(bool, int)]]
+
+def set(s: Shared2, ready: bool, value: int):
+    var g = s.state.get().lock()
+    g.value = (ready, value)
+
+def writer(s: Shared2):
+    set(s, True, 0)  # the bug: ready before the value
+    task.yield_now()
+    set(s, True, 42)
+
+def reader(s: Shared2) -> int:
+    task.yield_now()
+    let (ready, value) = s.state.get().lock().value
+    if ready:
+        return value
+    return 42
+
+test "a reader never sees a half-published value":
+    let s = Shared2(state=Cap(Mutex((False, 0))))
+    let seen = task.scope do sc:
+        sc.spawn(() -> writer(s))
+        let r = sc.spawn(() -> reader(s))
+        return Ok(r.join()?)
+    assert seen == Ok(42)

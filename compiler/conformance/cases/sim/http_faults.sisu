@@ -1,0 +1,65 @@
+# std.x.http between two nodes of a `Sim` under injected faults (17): the
+# network of the simulation's nodes fails `connect` and `listen` at the
+# `--faults` rate with an error of `NetError`, as a real network may. A
+# client that retries gets its answer; one that does not is caught, with
+# a token that replays the faults and the schedule.
+# sim --faults 0.3 --explore 12
+
+import http
+from std.net import Url
+from std.sim import Sim
+
+struct Echo:
+    pass
+
+impl http.Handler for Echo:
+    def handle(self, request: http.Request) -> http.Response:
+        return http.Response.text(200, "OK", "{request.target}\n")
+
+def url(text: str) -> Url:
+    return Url.parse(text).expect("valid")
+
+## A listener at port 80 of the node, retrying what the faults refuse.
+def listen(net: Net) -> Listener:
+    while True:
+        match net.listen(80):
+            case Ok(l):
+                return l
+            case Err(_):
+                pass
+
+def get_retrying(net: Net, target: str) -> bytes ! HttpError:
+    var tries = 0
+    while True:
+        tries += 1
+        match http.get(net, url("http://server{target}")):
+            case Ok(body):
+                return Ok(body)
+            case Err(Network(_)) if tries < 10:
+                pass
+            case Err(e):
+                return Err(e)
+
+test "a client that retries gets its answer":
+    let sim = Sim.new(seed=7)
+    let server = sim.node("server")
+    let client = sim.node("client")
+    let listener = listen(sim.system(server).net)
+    let body = task.scope do s:
+        s.spawn(() -> http.serve(listener, Echo()))
+        let b = get_retrying(sim.system(client).net, "/a")
+        s.cancel()
+        return b
+    assert body == Ok(b"/a\n")
+
+test "a client that does not retry":
+    let sim = Sim.new(seed=7)
+    let server = sim.node("server")
+    let client = sim.node("client")
+    let listener = listen(sim.system(server).net)
+    let body = task.scope do s:
+        s.spawn(() -> http.serve(listener, Echo()))
+        let b = http.get(sim.system(client).net, url("http://server/one"))
+        s.cancel()
+        return b
+    assert body == Ok(b"/one\n")

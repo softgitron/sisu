@@ -1,1 +1,6 @@
 /target
+__pycache__/
+# run_all.sh's scratch files inside a results directory (removed when a run ends)
+/results/**/.controls-build/
+/results/**/.attempt-*.csv
+/results/**/.times-*

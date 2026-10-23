@@ -1,0 +1,28 @@
+@cfg(feature="color")
+pub def show(s: String) -> String:
+    return "[color] {s}"
+
+@cfg(not any(feature="color"))
+pub def show(s: String) -> String:
+    return s
+
+@cfg(feature="ascii")
+const ASCII: bool = True
+
+@cfg(not any(feature="ascii"))
+const ASCII: bool = False
+
+@cfg(feature="unicode")
+const UNICODE: bool = True
+
+@cfg(not any(feature="unicode"))
+const UNICODE: bool = False
+
+@cfg(feature="borders")
+const BORDERS: bool = True
+
+@cfg(not any(feature="borders"))
+const BORDERS: bool = False
+
+pub def features() -> String:
+    return "ascii={ASCII} unicode={UNICODE} borders={BORDERS}"

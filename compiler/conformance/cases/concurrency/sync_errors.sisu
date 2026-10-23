@@ -1,0 +1,17 @@
+# What the sync types refuse (decision 239): an `Atomic` cannot hold a
+# view (E0421), as no owner a task may share can; a read guard only reads
+# its value (E0341, with the note naming `write`); and an `RwLock` is
+# `Sync` only when its value is, since its readers share the value: a
+# `Cell` in one cannot reach another task (E0427).
+
+struct Config:
+    version: int
+
+def main():
+    let text = Atomic("text")
+    let lock = task.RwLock(Config(version=1))
+    var g = lock.read()
+    g.value.version = 3
+    let shared = task.RwLock(Cell.new(1))
+    task.scope do s:
+        s.spawn(() -> print(shared.read().value.get()))

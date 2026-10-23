@@ -1,0 +1,4 @@
+2:12-2:12 E0100 parse.expected expected="`:`" found="the end of the line"
+  fix parse.insert-token 2:12-2:12 ":"
+6:15-6:15 E0103 parse.expected-expression found="the end of the line"
+9:9-9:10 E0105 parse.expected-pattern found="`=`"

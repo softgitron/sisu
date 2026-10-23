@@ -1,0 +1,2 @@
+13:5-13:17 E0420 borrow.must-consume-intrinsic callee="list.clear" name="jobs" ty="list[Job]"
+  label 12:9-12:13 borrow.declared-here name="jobs"

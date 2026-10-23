@@ -1,0 +1,12 @@
+# The program saves a new version of the module `scene.shapes` (from
+# `versions/shapes.sisu`) after its second frame; the third frame draws
+# with the new `shape`.
+from scene.shapes import shape
+
+def main(sys: System):
+    for frame in range(4):
+        live.boundary()
+        print("frame {frame}: {shape(frame)}, epoch {live.epoch()}")
+        if frame == 1:
+            let text = sys.fs.read_to_string("versions/shapes.sisu").expect("the next version")
+            sys.fs.write_text("src/shapes.sisu", text).expect("saved")

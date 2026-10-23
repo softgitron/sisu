@@ -1,0 +1,30 @@
+# A result that can only view text, returned from an argument that owns
+# no text (a `str` taken from a `list[str]`), holds what the argument's
+# elements view, not the argument: the list may change while the result
+# is used, but the text it views may not.
+
+view struct Token:
+    text: str
+
+def longest(words: list[str]) -> str:
+    var best = ""
+    for w in words:
+        if len(w) > len(best):
+            best = w
+    return best
+
+def first_text(tokens: list[Token]) -> str:
+    return tokens[0].text
+
+def main():
+    var text = String.new("a bb ccc")
+    var words = [w for w in text.split_whitespace()]
+    let best = longest(words)
+    words.clear()
+    print(best)
+    var tokens = [Token(text=w) for w in text.split_whitespace()]
+    let first = first_text(tokens)
+    tokens.clear()
+    print(first)
+    text.push(" dddd")
+    print(text)

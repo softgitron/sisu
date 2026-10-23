@@ -1,0 +1,1124 @@
+##! What the compiler writes from templates (stage 0's `derive.rs`, where it
+##! runs a trait's derive, and `instances.rs`; 08, "Derive" and
+##! "Reflection"): the impls `@derive` makes for the root module's types,
+##! each from its trait's `comptime def derive`, the prelude's or the
+##! module's own; and the instances of templates, the generic functions that
+##! reflect on their type parameters, one for each list of type arguments
+##! the program calls them with. Both are unfolded as source text
+##! (`typeck.template`), parsed, and declared in a module of their own whose
+##! scope is the template's (`<derive>/main.sisu`, `<NAME[ARGS]>/main.sisu`),
+##! then checked like any other code, and a diagnostic there is at its line
+##! and column in that text, as stage 0 reports it.
+##!
+##! Which instances a program needs is known only once its calls are typed,
+##! so the driver checks the program, collects the requests its bodies make
+##! (`Request`) and declares them, until no new one comes; a generic
+##! function that calls a template with its own type parameters becomes a
+##! template too (promoted), and the program is resolved again. An instance
+##! is declared in a module of its own with each type argument bound to
+##! `__T0`, `__T1`, ... there, so the unfolded code names the argument
+##! whatever module it comes from.
+##!
+##! The std modules' derived impls are unfolded from the prelude's templates
+##! too, into `<derive>/NAME.sisu` modules of the standard library, whose
+##! bodies lowering checks when it reaches them. The base makes the text of
+##! every std module's, the modules a program may import included
+##! (`Resolver.std_derived`): a program that imports one declares that
+##! text, as the templates are the base's and not copied for each file. The
+##! attributes of a std type, which the base does not keep the text of, are
+##! none to `reflect.attributes_of`.
+
+from stage1.diag import Diagnostic, Msg, TextRange
+from stage1.parser import parse
+from stage1.syntax.ast import (
+    Ast,
+    Attr,
+    Block,
+    ExprId,
+    ExprKind,
+    FnDef,
+    GenericParam,
+    ItemId,
+    ItemKind,
+    TypeExprId,
+    Vis,
+)
+from stage1.syntax.ast import Mode
+from stage1.syntax.ast import build
+from stage1.syntax.ast import visit
+from stage1.typeck.collect import Resolver
+from stage1.typeck.program import Answer, DefKind, FnKind, ModuleId, Request, VariantInfo, derivable
+from stage1.typeck.template import (
+    Body,
+    FieldShape,
+    Kind,
+    MethodShape,
+    Src,
+    Target,
+    Templates,
+    TypeShape,
+    Unfolding,
+    VariantShape,
+    unfold,
+    unfold_expr,
+    unfold_fn,
+)
+from stage1.typeck.ty import DefId, TraitRef, Ty, TyData
+
+## The most instances one resolution declares, so that a template whose
+## instances need ever larger types stops (`to_json[T]` calling
+## `to_json[list[T]]`).
+pub const MAX_INSTANCES: int = 256
+
+## A derived impl to check once every impl is known: the type, the trait,
+## where it was asked for and, for a delegated impl, the field it forwards
+## to.
+pub struct DeriveCheck:
+    pub ty: DefId
+    pub trait_name: String
+    pub span: TextRange
+    pub field: String?
+
+## Where the template of a derive is written.
+enum DeriveSource:
+    ## In the module itself.
+    Own
+    ## In the prelude.
+    Prelude
+
+impl Resolver:
+    ## The `comptime def derive` of the trait `name` as `module` sees it: its
+    ## own trait of that name, or the prelude's.
+    pure def derive_template(
+        self, module: ModuleId, name: str, templates: Templates
+    ) -> DeriveSource?:
+        if not self.is_std(module)
+                and self.derive_templates.contains((module.index, name.to_string())):
+            return Some(DeriveSource.Own)
+        if templates.derives.contains(name.to_string()):
+            return Some(DeriveSource.Prelude)
+        return None
+
+    ## The derived impls of the structs and enums among `items` (stage 0's
+    ## `declare_derived`): each `@derive`d trait's, `PartialOrd` with `Ord`,
+    ## and `Debug` for every type without its own, unfolded from the trait's
+    ## template into one text, declared as `<derive>/NAME.sisu`; and before
+    ## them each `@delegate`d trait's, which forwards to a field, declared as
+    ## `<delegate>/NAME.sisu`. A std module whose text the base made
+    ## (`std_derived`) declares that text.
+    pub pure def declare_derived(
+        mut self, module: ModuleId, items: list[ItemId], templates: Templates
+    ):
+        let std = self.is_std(module)
+        let module_name = self.prog.modules[module.index].name.copy()
+        var made: String? = None
+        if std:
+            if let Some(t) = self.std_derived.get(module_name.copy()):
+                made = Some(t.copy())
+        var text = String.new()
+        var delegate = String.new()
+        for id in items:
+            let item = self.sources[module.index].ast.item(id).copy()
+            var name = String.new()
+            var gps: list[GenericParam] = []
+            var field_tys: list[TypeExprId] = []
+            var field_names: list[String] = []
+            var body = Body.Struct([])
+            var is_struct = False
+            match item.kind:
+                case ItemKind.Struct(s):
+                    name = s.name.text.copy()
+                    gps = s.generics.copy()
+                    var fields: list[(String, bool)] = []
+                    for f in s.fields:
+                        field_tys.push(f.ty)
+                        field_names.push(f.name.text.copy())
+                        fields.push((f.name.text.copy(), f.default.is_some()))
+                    body = Body.Struct(fields)
+                    is_struct = True
+                case ItemKind.Enum(e):
+                    name = e.name.text.copy()
+                    gps = e.generics.copy()
+                    var variants: list[(String, list[String?])] = []
+                    for v in e.variants:
+                        var fields: list[String?] = []
+                        for f in v.fields:
+                            field_tys.push(f.ty)
+                            match f.name:
+                                case Some(n):
+                                    fields.push(Some(n.text.copy()))
+                                case None:
+                                    fields.push(None)
+                        variants.push((v.name.text.copy(), fields))
+                    body = Body.Enum(variants)
+                case _:
+                    continue
+            let builtin = is_struct and has_builtin(item.attrs)
+            # A type with a `const` parameter (E0900) gets no impls.
+            var has_const = False
+            for g in gps:
+                if g.is_const:
+                    has_const = True
+            if name.is_empty() or has_const:
+                continue
+            let ty = self.prog.lookup_in(module, name) else:
+                continue
+            let used = self.used_params(module, gps, field_tys)
+            # The parameters with the text of their bounds, which the base
+            # has the std modules' texts for.
+            var generics: list[(String, list[String])] = []
+            for g in gps:
+                var bounds: list[String] = []
+                for b in g.bounds:
+                    if made.is_some():
+                        break
+                    let r = self.ast(module).type_expr(b).range
+                    let written = self.text_in(module, r)
+                    if not written.is_empty():
+                        bounds.push(written)
+                generics.push((g.name.text.copy(), bounds))
+            var wanted: list[(String, TextRange)] = []
+            for a in item.attrs:
+                if a.name != "derive":
+                    continue
+                for arg in a.args:
+                    var written = String.new()
+                    if let ExprKind.Name(n) = self.ast(module).expr(arg.value).kind:
+                        written = n.copy()
+                    if written == "Copy":
+                        # A flag on the type, checked against its fields.
+                        self.copy_checks.push((ty, arg.range))
+                    elif not written.is_empty()
+                            and (
+                                derivable(written)
+                                        or self.derive_template(
+                                            module, written, templates
+                                        ).is_some()
+                            ):
+                        var seen = False
+                        for (w, _) in wanted:
+                            if w == written:
+                                seen = True
+                        if not seen:
+                            wanted.push((written, arg.range))
+                    else:
+                        let shown = self.text_in(module, arg.range)
+                        var d = Diagnostic.new(
+                            Msg.ResolveNotDerivable, arg.range.start, arg.range.end
+                        )
+                        self.report_other(module, d.with("name", shown))
+            # `@delegate(Trait, ..., to="field")`: impls that forward to a
+            # field.
+            let delegated = self.delegations(module, item.attrs, name, is_struct, field_names)
+            for (t, field, at) in delegated:
+                delegate.push(delegate_text(name, generics, used, t, field))
+                self.derive_checks.push(
+                    DeriveCheck(ty=ty, trait_name=t.copy(), span=at, field=Some(field.copy()))
+                )
+            # `Ord` brings `PartialOrd`, which it determines.
+            var ord_at: TextRange? = None
+            var has_partial = False
+            for (w, at) in wanted:
+                if w == "Ord" and ord_at.is_none():
+                    ord_at = Some(at)
+                if w == "PartialOrd":
+                    has_partial = True
+            if let Some(at) = ord_at:
+                if not has_partial and not self.has_impl(module, items, "PartialOrd", name):
+                    wanted.push(("PartialOrd".to_string(), at))
+            # Every type has `Debug` (11): the derived one unless it has its
+            # own.
+            var debug = False
+            for (w, _) in wanted:
+                if w == "Debug":
+                    debug = True
+            for (w, _, _) in delegated:
+                if w == "Debug":
+                    debug = True
+            if not builtin and not debug and not self.has_impl(module, items, "Debug", name):
+                wanted.push(("Debug".to_string(), TextRange.empty(item.range.start)))
+            for (t, asked) in wanted:
+                if made.is_some():
+                    self.derive_checks.push(
+                        DeriveCheck(ty=ty, trait_name=t.copy(), span=asked, field=None)
+                    )
+                    continue
+                let source = self.derive_template(module, t, templates) else:
+                    continue
+                let (head, written) = header(name, generics, used, t)
+                let target = Target(name=name.copy(), written=written, body=body.copy())
+                var unfolded: String? = None
+                # Where the template stopped, in its module, and why.
+                var failed: (ModuleId, TextRange, String)? = None
+                match source:
+                    case DeriveSource.Own:
+                        if let Some(f) = self.derive_templates.get((module.index, t.copy())):
+                            let module_text = self.text_of_module(module)
+                            let src = Src(
+                                ast=ref self.sources[module.index].ast, source=module_text
+                            )
+                            match unfold(src, f, head, target):
+                                case Ok(x):
+                                    unfolded = Some(x)
+                                case Err(Unfolding.Failed(at, why)):
+                                    failed = Some((module, at, why.copy()))
+                    case DeriveSource.Prelude:
+                        if let Some(f) = templates.derives.get(t.copy()):
+                            let src = Src(ast=ref templates.syntax, source=templates.text)
+                            match unfold(src, f, head, target):
+                                case Ok(x):
+                                    unfolded = Some(x)
+                                case Err(Unfolding.Failed(at, why)):
+                                    failed = Some((self.prog.prelude, at, why.copy()))
+                match unfolded:
+                    case Some(x):
+                        text.push(x)
+                    case None:
+                        if let Some((tm, at, why)) = failed:
+                            var d = Diagnostic.new(Msg.ComptimeDeriveFailed, asked.start, asked.end)
+                            d = d.with("trait", t).with("ty", name).with("reason", why)
+                            if tm == module:
+                                d = d.label(Msg.ComptimeDeriveHere, at.start, at.end)
+                            else:
+                                # The template stopped in another file than
+                                # the type's.
+                                d = d.label_in(Msg.ComptimeDeriveHere, at.start, at.end, tm.index)
+                            self.report_other(module, d)
+                        continue
+                self.derive_checks.push(
+                    DeriveCheck(ty=ty, trait_name=t.copy(), span=asked, field=None)
+                )
+        # Delegated impls are ordinary impls, written by the compiler.
+        if not delegate.is_empty():
+            _ = self.declare_generated_in(module, "<delegate>", delegate)
+        if let Some(x) = made:
+            text = x.copy()
+        elif std:
+            _ = self.std_derived.insert(module_name, text.copy())
+        if not text.is_empty():
+            _ = self.declare_generated_in(module, "<derive>", text)
+
+    ## Declares generated code in a module of its own, with the generated
+    ## text as its source file and `module` as its scope; its bodies are
+    ## checked with that text, but those of the impls the standard library
+    ## derives, which lowering checks when it reaches them, as it does the
+    ## standard library's other bodies.
+    pub pure def declare_generated_in(mut self, module: ModuleId, dir: str, text: str) -> ModuleId:
+        let name = "{dir}/{self.prog.modules[module.index].name}.sisu"
+        let is_std = self.prog.modules[module.index].is_std
+        let parsed = parse(text, Shared.get(self.catalog))
+        let generated = build.module(parsed.tree)
+        let items = generated.items.copy()
+        let id = self.add_module(name, is_std, generated)
+        # A syntax error in what the compiler wrote is in the file it wrote,
+        # as stage 0 reports it.
+        for d in parsed.diagnostics:
+            self.report_other(id, d.copy())
+        self.prog.modules[id.index].parent = Some(module)
+        self.prog.modules[id.index].package = self.prog.modules[module.index].package
+        if not is_std:
+            _ = self.module_texts.insert(id, text.to_string())
+        if not is_std or dir != "<derive>":
+            self.generated.push((id, text.to_string()))
+        self.declare_items(id, items, "")
+        # Each site of a generator in it stands for the generator's call,
+        # once every module's generators are known (`declare_written_sites`).
+        if self.sites_known and self.writes_sites(id):
+            self.write_sites_in(id)
+        return id
+
+    ## The checks of the derived and delegated impls of the root module, once
+    ## every impl is known (stage 0's `check_derives`): the type implements
+    ## the trait's supertraits itself, and a derive of the language's traits
+    ## (or a delegation) needs the trait of every field (of the field), or the
+    ## generated bodies, which would only repeat the error, go. The
+    ## definitions from `first` on are the program's, those before it the
+    ## base's (`first` is 0 for the base's own checks).
+    pub pure def check_derives(mut self, first: int):
+        let checks = self.derive_checks.copy()
+        self.derive_checks = []
+        for c in checks:
+            let home = self.prog.defs[c.ty.index].module
+            var trait_def = self.prog.lookup(home, c.trait_name)
+            if trait_def.is_none():
+                trait_def = self.prog.lookup(self.prog.prelude, c.trait_name)
+            let td = trait_def else:
+                continue
+            # A derive of the language's traits needs the trait of every
+            # field, the prelude's `Default` of every field without a default
+            # of its own; another trait's derive needs what its code uses,
+            # which checking the derived impl finds.
+            let default = self.prog.lookup(self.prog.prelude, "Default") == Some(td)
+            let structural = derivable(c.trait_name) or c.field.is_some() or default
+            var found: DefId? = None
+            for i in self.prog.impls:
+                if found.is_some():
+                    break
+                # An impl made before the type cannot be of it: the base's
+                # impls are none of a program's types'.
+                if i.index < first and c.ty.index >= first:
+                    continue
+                let info = self.prog.impl_info(i) else:
+                    continue
+                let module_name = ref self.prog.modules[self.prog.defs[i.index].module.index].name
+                let generated = module_name.starts_with("<derive>/")
+                    or module_name.starts_with("<delegate>/")
+                if not generated or info.trait_ref.def_ != td:
+                    continue
+                if let TyData.Adt(d, _) = self.types.data(info.self_ty):
+                    if d == c.ty:
+                        found = Some(i)
+            let imp = found else:
+                continue
+            let found_info = self.prog.impl_info(imp) else:
+                continue
+            let info = found_info.copy()
+            let env = self.prog.elaborate_env(mut self.types, info.predicates)
+            var fields: list[(String, Ty)] = []
+            match self.prog.defs[c.ty.index].kind():
+                case DefKind.Struct(s):
+                    for f in s.fields:
+                        if not default or f.default.is_none():
+                            fields.push((f.name.copy(), f.ty))
+                case DefKind.Enum(e):
+                    for v in e.variants:
+                        var k = 0
+                        for (n, t) in v.fields:
+                            let shown = n.copy() ?? "{k}"
+                            fields.push(("{v.name}.{shown}", t))
+                            k += 1
+                case _:
+                    pass
+            if let Some(f) = c.field:
+                var only: list[(String, Ty)] = []
+                for (n, t) in fields:
+                    if n == f:
+                        only.push((n.copy(), t))
+                fields = only
+            let tr = TraitRef(def_=td, args=[])
+            # The trait's supertraits, which the type implements itself.
+            var supers: list[TraitRef] = []
+            if let Some(ti) = self.prog.trait_info(td):
+                supers = ti.supertraits.copy()
+            var names: list[String] = []
+            for g in info.generics:
+                names.push(g.name.copy())
+            for st in supers:
+                if self.prog.implements(mut self.types, info.self_ty, st, env) == Answer.No:
+                    var d = Diagnostic.new(Msg.ResolveSupertraitMissing, c.span.start, c.span.end)
+                    d = d.with("ty", self.prog.display_in(self.types, info.self_ty, names))
+                    d = d.with("trait", c.trait_name).with(
+                        "super", self.prog.display_trait_in(self.types, st, [])
+                    )
+                    self.report_other(home, d)
+            for (fname, fty) in fields:
+                if self.types.contains_error(fty) or not structural:
+                    continue
+                if self.prog.implements(mut self.types, fty, tr, env) == Answer.No:
+                    var m = Msg.ResolveDeriveField
+                    if c.field.is_some():
+                        m = Msg.ResolveDelegateField
+                    var d = Diagnostic.new(m, c.span.start, c.span.end)
+                    d = d.with("ty", self.prog.defs[c.ty.index].name).with("trait", c.trait_name)
+                    d = d.with("field", fname).with(
+                        "fty", self.prog.display_in(self.types, fty, names)
+                    )
+                    self.report_other(home, d)
+                    # The generated body would only repeat the error.
+                    for (_, m) in info.methods:
+                        var kind_now = self.prog.defs[m.index].kind().copy()
+                        if let DefKind.Fn(f) = ref mut kind_now:
+                            f.body = None
+                            f.body_broken = True
+                        self.prog.defs[m.index].set_kind(kind_now)
+                    break
+
+    # ---------------------------------------------------------------- instances
+
+    ## Declares the instances `requests` asks for, after the program's own
+    ## declarations are resolved, and resolves them (stage 0's
+    ## `declare_instances`).
+    pub pure def declare_instances(mut self, requests: list[Request]):
+        var made = 0
+        for q in requests:
+            let Request.Instance(def_, args, site) = q.copy() else:
+                continue
+            if self.instance_of(def_, args).is_some():
+                continue
+            var template = False
+            var fits = False
+            if let Some(f) = self.prog.fn_info(def_):
+                template = f.template
+                # A template made once is made for no arguments (decision
+                # 251).
+                if f.made_once():
+                    fits = args.is_empty()
+                else:
+                    fits = len(f.generics) == len(args)
+            if not template or not fits:
+                continue
+            # Counted over the whole resolution, however many times it is
+            # given more; reported once.
+            if self.instances_asked >= MAX_INSTANCES:
+                if self.instances_bounded:
+                    break
+                self.instances_bounded = True
+                let at = self.prog.defs[def_.index].span
+                var d = Diagnostic.new(Msg.ComptimeInstancesUnbounded, at.start, at.end)
+                d = d.with("name", self.prog.defs[def_.index].name)
+                self.report_other(
+                    self.prog.defs[def_.index].module, d.with("count", "{MAX_INSTANCES}")
+                )
+                break
+            self.instances_asked += 1
+            made += 1
+            self.declare_instance(def_, args, site)
+        if made > 0:
+            self.resolve_pending()
+            self.record_method_instances()
+
+    ## The instance declared for a template and type arguments.
+    pub pure def instance_of(self, def_: DefId, args: list[Ty]) -> DefId?:
+        for (d, a, inst) in self.prog.instances:
+            if d == def_ and a == args:
+                return Some(inst)
+        return None
+
+    pure def declare_instance(mut self, def_: DefId, args: list[Ty], site: (ModuleId, TextRange)):
+        let module = self.prog.defs[def_.index].module
+        let name = self.prog.defs[def_.index].name.copy()
+        var shown: list[String] = []
+        for a in args:
+            shown.push(self.prog.display(self.types, a))
+        var what = name.copy()
+        if not args.is_empty():
+            what = "{name}[{shown.join(", ")}]"
+        var template: FnDef? = None
+        if let Some(x) = self.template_fns.get(def_):
+            template = Some(x.copy())
+        let f = template else:
+            return
+        var generics: list[String] = []
+        var owner: Ty? = None
+        var impl_generics = 0
+        if let Some(info) = self.prog.fn_info(def_):
+            for g in info.generics:
+                generics.push(g.name.copy())
+            owner = info.owner
+            impl_generics = info.impl_generics
+        # A method of a trait impl is made once, as generic as it is: its
+        # type parameters (the impl's, its own) stay parameters, which
+        # reflection shows by their names and cannot look into (decision
+        # 251).
+        let generic = args.is_empty() and not generics.is_empty()
+        if generic:
+            self.shape_names = generics.copy()
+        # Each type the unfolded code may name (an argument, a field's
+        # type, an element type) is an alias in the instance's module.
+        var aliases: list[(String, Ty)] = []
+        var params: list[(String, TypeShape)] = []
+        for i in range(min(len(generics), len(args))):
+            let shape = self.shape(args[i], "__T{i}", 0, mut aliases)
+            params.push((generics[i].copy(), shape))
+        # A method's instance is a method of its type, which its compile-time
+        # code names `Self` (decision 244), in an impl with the generic
+        # impl's parameters: named as the impl names them, or apart when the
+        # method is the trait's, whose code never names them (decision 251).
+        var within: String? = None
+        if let Some(t) = owner:
+            var self_ty = self.types.subst(t, args)
+            if generic:
+                self_ty = t
+            params.push(("Self".to_string(), self.shape(self_ty, "__S", 0, mut aliases)))
+            var head = "impl __S".to_string()
+            if generic and impl_generics > 0:
+                var names: list[String] = []
+                for i in range(impl_generics):
+                    if self.provided_copies.contains(def_):
+                        names.push("__G{i}")
+                    else:
+                        names.push(generics[i].copy())
+                head = "impl[{names.join(", ")}] __S"
+            within = Some(head)
+        # An impl for every type (`impl[T: B] Trait for T`) has no type
+        # whose method the instance could be.
+        if generic:
+            if let Some(t) = owner:
+                if self.types.key(t).is_none():
+                    let self_shown = self.prog.display_in(self.types, t, self.shape_names)
+                    self.shape_names = []
+                    let (site_module, at) = site
+                    var d = Diagnostic.new(Msg.ComptimeInstanceFailed, at.start, at.end)
+                    d = d.with("name", what).with(
+                        "reason",
+                        "`Self` is `{self_shown}`, a type parameter, which is not known at compile time",
+                    )
+                    self.report_other(site_module, d)
+                    return
+        # The type parameters its code names, which it may ask the names
+        # of: the impl's, unless the trait wrote the method, and its own.
+        if generic:
+            var from_ = 0
+            if self.provided_copies.contains(def_):
+                from_ = impl_generics
+            for i in range(from_, len(generics)):
+                params.push(
+                    (generics[i].copy(), TypeShape.named(generics[i], generics[i], Kind.Param))
+                )
+        # The program's types its compile-time code names
+        # (`reflect.fields_of(Point)`), and the traits
+        # (`reflect.methods_of(Store)`, decision 251).
+        var types: list[(String, TypeShape)] = []
+        var named_at = 0
+        for n in named_types(self.ast(module), f):
+            var taken = False
+            for (p, _) in params:
+                if p == n:
+                    taken = True
+            if taken:
+                continue
+            let i = named_at
+            named_at += 1
+            if let Some(t) = self.named_type(module, n):
+                let shape = self.shape(t, "__C{i}", 0, mut aliases)
+                types.push((n.copy(), shape))
+            elif let Some(shape) = self.named_trait(module, n):
+                types.push((n.copy(), shape))
+        self.shape_names = []
+        let inst = "__instance_{self.instances_declared}"
+        var source = self.text_of_module(module)
+        if self.is_std(module):
+            source = String.new()
+            if let Some(t) = self.std_texts.get(self.prog.modules[module.index].name):
+                source = t.copy()
+        var unfolded: String? = None
+        var failed: (TextRange, String)? = None
+        if module.index < len(self.sources):
+            let src = Src(ast=ref self.sources[module.index].ast, source=source)
+            let head: str? = match within:
+                case Some(h): Some(h)
+                case None: None
+            match unfold_fn(src, f, params, types, inst, head, generic):
+                case Ok(x):
+                    unfolded = Some(x)
+                case Err(Unfolding.Failed(at, why)):
+                    failed = Some((at, why.copy()))
+        let text = unfolded else:
+            # `comptime.instance-failed`, at the call that needed it.
+            let (site_module, at) = site
+            if let Some((range, reason)) = failed:
+                var d = Diagnostic.new(Msg.ComptimeInstanceFailed, at.start, at.end)
+                d = d.with("name", what).with("reason", reason)
+                # Where the program's own template stopped; a standard
+                # library template's reason is the whole story.
+                if not self.is_std(module):
+                    if module != site_module:
+                        # A label in another file than the message's.
+                        let (s, e) = (range.start, range.end)
+                        d = d.label_in(Msg.ComptimeInstanceHere, s, e, module.index)
+                    else:
+                        d = d.label(Msg.ComptimeInstanceHere, range.start, range.end)
+                self.report_other(site_module, d)
+            return
+        let m = self.declare_generated_in(module, "<{what}>", text)
+        self.instances_declared += 1
+        _ = self.instance_modules.add(m)
+        # The types, by the names the unfolded code uses.
+        for (alias, t) in aliases:
+            let d = self.new_def(m, alias, TextRange.empty(0), Vis.Private, DefKind.TypeAlias(t))
+            _ = self.prog.modules[m.index].items.insert(alias.copy(), d)
+        # A function is an item of the module; a method exists once its impl
+        # is resolved.
+        match self.prog.modules[m.index].items.get(inst):
+            case Some(d):
+                self.record_instance(d, def_, args, site)
+            case None:
+                self.method_instances.push((m, inst.copy(), def_, args.copy(), site))
+
+    pure def record_instance(
+        mut self, d: DefId, template: DefId, args: list[Ty], site: (ModuleId, TextRange)
+    ):
+        self.prog.instances.push((template, args.copy(), d))
+        _ = self.prog.instance_sites.insert(d, site)
+        let t = self.prog.fn_info(template).copy() else:
+            return
+        var kind_now = self.prog.defs[d.index].kind().copy()
+        if let DefKind.Fn(f) = ref mut kind_now:
+            # A test's instance is the test (decision 251).
+            if let FnKind.Test(_) = t.kind:
+                f.kind = t.kind.copy()
+            # A generic impl's method made once keeps the impl's bounds and
+            # its own `where` clause, which its text does not write
+            # (decision 251).
+            if args.is_empty() and not t.generics.is_empty() and len(f.generics) == len(t.generics):
+                f.predicates = t.predicates.copy()
+        self.prog.defs[d.index].set_kind(kind_now)
+        _ = self.instance_of.insert(d, (template, args.copy()))
+
+    ## A constant's or a field default's value whose code runs at compile
+    ## time by unfolding (decision 251), unfolded: the value with its
+    ## compile-time parts written as literals, parsed from a text of its own
+    ## (`<NAME>/MODULE.sisu`, a module whose scope is `module`'s), which its
+    ## diagnostics name: the value and that module. The types it names are
+    ## written as `module` names them. A value that cannot be unfolded is
+    ## `E0609`, at `site`.
+    pub pure def unfold_value(
+        mut self, module: ModuleId, name: str, e: ExprId, site: TextRange
+    ) -> (ExprId, ModuleId)?:
+        var source = self.text_of_module(module)
+        if self.is_std(module):
+            source = String.new()
+            if let Some(t) = self.std_texts.get(self.prog.modules[module.index].name):
+                source = t.copy()
+        var aliases: list[(String, Ty)] = []
+        var types: list[(String, TypeShape)] = []
+        for n in value_types(self.ast(module), e):
+            if let Some(t) = self.named_type(module, n):
+                let shape = self.shape(t, n, 0, mut aliases)
+                types.push((n.copy(), written_plainly(shape, n)))
+            elif let Some(shape) = self.named_trait(module, n):
+                types.push((n.copy(), shape))
+        var unfolded: String? = None
+        var failed: (TextRange, String)? = None
+        if module.index < len(self.sources):
+            let src = Src(ast=ref self.sources[module.index].ast, source=source)
+            match unfold_expr(src, e, types):
+                case Ok(x):
+                    unfolded = Some(x)
+                case Err(Unfolding.Failed(at, why)):
+                    failed = Some((at, why.copy()))
+        let text = unfolded else:
+            if let Some((range, reason)) = failed:
+                var d = Diagnostic.new(Msg.ComptimeInstanceFailed, site.start, site.end)
+                d = d.with("name", name).with("reason", reason)
+                if not self.is_std(module):
+                    d = d.label(Msg.ComptimeInstanceHere, range.start, range.end)
+                self.report_other(module, d)
+            return None
+        let m = self.declare_value_in(module, "<{name}>", "const __value = {text}\n")
+        for it in self.sources[m.index].items:
+            if let ItemKind.Const(c) = self.sources[m.index].ast.item(it).kind:
+                if let Some(v) = c.value:
+                    return Some((v, m))
+        return None
+
+    ## A module of the text an unfolded value is written in (`unfold_value`):
+    ## `module`'s scope, its own syntax and file, and none of its items
+    ## declared, since the value is the one item and is the declaration's.
+    pure def declare_value_in(mut self, module: ModuleId, dir: str, text: str) -> ModuleId:
+        let name = "{dir}/{self.prog.modules[module.index].name}.sisu"
+        let is_std = self.prog.modules[module.index].is_std
+        let parsed = parse(text, Shared.get(self.catalog))
+        let generated = build.module(parsed.tree)
+        let id = self.add_module(name, is_std, generated)
+        for d in parsed.diagnostics:
+            self.report_other(id, d.copy())
+        self.prog.modules[id.index].parent = Some(module)
+        self.prog.modules[id.index].package = self.prog.modules[module.index].package
+        if not is_std:
+            _ = self.module_texts.insert(id, text.to_string())
+        self.generated.push((id, text.to_string()))
+        # Each site of a generator in it stands for the generator's call, as
+        # in any text the compiler writes (`declare_generated_in`).
+        if self.sites_known and self.writes_sites(id):
+            self.write_sites_in(id)
+        return id
+
+    ## The methods `declare_instance` declared, now that their impls are
+    ## resolved.
+    pure def record_method_instances(mut self):
+        let pending = self.method_instances.copy()
+        self.method_instances = []
+        for (m, inst, template, args, site) in pending:
+            var i = len(self.prog.defs) - 1
+            var found: DefId? = None
+            while i >= 0 and found.is_none():
+                let x = ref self.prog.defs[i]
+                if x.module == m and x.name == inst:
+                    if let DefKind.Fn(_) = x.kind():
+                        found = Some(DefId(index=i))
+                i -= 1
+            if let Some(d) = found:
+                self.record_instance(d, template, args, site)
+
+    ## The type `name` names in `module`, when it is a type without type
+    ## parameters: a struct, an enum, an error set or an alias.
+    pure def named_type(mut self, module: ModuleId, name: str) -> Ty?:
+        let d = self.prog.lookup(module, name) else:
+            return None
+        match self.prog.defs[d.index].kind():
+            case DefKind.Struct(_) | DefKind.Enum(_) | DefKind.ErrorSet(_):
+                if self.prog.type_generics(d).is_empty():
+                    return Some(self.types.adt(d, []))
+                return None
+            case DefKind.TypeAlias(t):
+                return Some(t)
+            case _:
+                return None
+
+    ## The trait `name` names in `module`, as reflection sees it: its methods
+    ## (decision 251).
+    pure def named_trait(mut self, module: ModuleId, name: str) -> TypeShape?:
+        let d = self.prog.lookup(module, name) else:
+            return None
+        let found = self.prog.trait_info(d) else:
+            return None
+        let info = found.copy()
+        var names = ["Self".to_string()]
+        for g in info.generics:
+            names.push(g.name.copy())
+        var s = TypeShape.named(name, name, Kind.Trait)
+        for m in info.methods:
+            if let Some(shape) = self.method_shape(m, names):
+                s.methods.push(shape)
+        return Some(s)
+
+    ## What reflection sees of the method `m`, its types shown with `names`
+    ## for the generic parameters in scope.
+    pure def method_shape(mut self, m: DefId, names: list[String]) -> MethodShape?:
+        let found = self.prog.fn_info(m) else:
+            return None
+        let f = found.copy()
+        var params: list[(String, String, list[TypeShape])] = []
+        for p in f.params:
+            params.push(
+                (p.name.copy(), mode_text(p.mode).to_string(), [self.signature_shape(p.ty, names)])
+            )
+        var receiver = String.new()
+        if let Some(mode) = f.self_mode:
+            if mode == Mode.Borrow:
+                receiver = "self".to_string()
+            else:
+                receiver = "{mode_text(mode)} self"
+        return Some(
+            MethodShape(
+                name=self.prog.defs[m.index].name.copy(),
+                receiver=receiver,
+                params=params,
+                ret=[self.signature_shape(f.ret, names)],
+                provided=f.body.is_some(),
+            )
+        )
+
+    ## A type of a signature as reflection sees it: known by its name.
+    pure def signature_shape(mut self, t: Ty, names: list[String]) -> TypeShape:
+        let shown = self.prog.display_in(self.types, t, names)
+        let base = self.prog.unrefine(mut self.types, t)
+        let kind = match self.types.data(base):
+            case TyData.Param(_) | TyData.Assoc(_, _, _): Kind.Param
+            case TyData.Int: Kind.Int
+            case TyData.Float: Kind.Float
+            case TyData.Bool: Kind.Bool
+            case TyData.Char: Kind.Char
+            case TyData.Str: Kind.Str
+            case TyData.Tuple(_, _): Kind.Tuple
+            case _: Kind.Other
+        return TypeShape.named(shown, shown, kind)
+
+    ## A type's own methods, declared in it or in its inherent impls, in
+    ## the order they are declared (decision 251).
+    pure def own_methods(mut self, t: Ty) -> list[MethodShape]:
+        let key = self.types.key(t) else:
+            return []
+        var ms: list[int] = []
+        for (k, d) in self.prog.methods.items():
+            if k.0 != key:
+                continue
+            if let Some(f) = self.prog.fn_info(d):
+                if f.impl_.is_none():
+                    ms.push(d.index)
+        ms.sort()
+        var names: list[String] = []
+        if let TyData.Adt(d, _) = self.types.data(t):
+            for g in self.prog.type_generics(d):
+                names.push(g.name.copy())
+        var out: list[MethodShape] = []
+        for i in ms:
+            if self.prog.defs[i].name.starts_with("__"):
+                continue
+            if let Some(shape) = self.method_shape(DefId(index=i), names):
+                out.push(shape)
+        return out
+
+    ## What reflection sees of `t`, written `written` in the unfolded code
+    ## (an alias, added to `aliases`, whose nested types are aliases named
+    ## after it); a field's type is looked into one level deep. A type
+    ## parameter that stays one (`shape_names`) is known by its name only.
+    pub pure def shape(
+        mut self, t: Ty, written: str, depth: int, mut aliases: list[(String, Ty)]
+    ) -> TypeShape:
+        aliases.push((written.to_string(), t))
+        let name = self.prog.display_in(self.types, t, self.shape_names)
+        let base = self.prog.unrefine(mut self.types, t)
+        var s = TypeShape.named(name, written, Kind.Other)
+        match self.types.data(base).copy():
+            case TyData.Param(_) | TyData.Assoc(_, _, _):
+                s.kind = Kind.Param
+            case TyData.Int:
+                s.kind = Kind.Int
+            case TyData.Float:
+                s.kind = Kind.Float
+            case TyData.Bool:
+                s.kind = Kind.Bool
+            case TyData.Char:
+                s.kind = Kind.Char
+            case TyData.Str:
+                s.kind = Kind.Str
+            case TyData.Tuple(_, _):
+                s.kind = Kind.Tuple
+            case TyData.Adt(d, a):
+                let builtin = self.prog.builtin(d)
+                if builtin == Some("String".to_string()):
+                    s.kind = Kind.Str
+                elif builtin == Some("list".to_string()):
+                    if let Some(e) = a.first():
+                        s.elem = [self.shape(e, "{written}_e", depth + 1, mut aliases)]
+                    s.kind = Kind.List
+                elif Some(d) == self.prog.wk.option:
+                    if let Some(e) = a.first():
+                        s.elem = [self.shape(e, "{written}_e", depth + 1, mut aliases)]
+                    s.kind = Kind.Option
+                elif builtin.is_some():
+                    s.kind = Kind.Other
+                else:
+                    s.kind = self.shape_of_def(d, a, written, depth, mut aliases, mut s)
+            case _:
+                pass
+        if let TyData.Adt(d, _) = self.types.data(t):
+            if let Some(attrs) = self.attrs_of.get(d):
+                s.attrs = attrs.copy()
+        s.impls = self.impl_names(t)
+        if depth == 0:
+            s.methods = self.own_methods(t)
+        return s
+
+    ## The kind of a declared type, with its fields or variants when it is
+    ## the argument itself (`depth` 0).
+    pure def shape_of_def(
+        mut self,
+        d: DefId,
+        a: list[Ty],
+        written: str,
+        depth: int,
+        mut aliases: list[(String, Ty)],
+        mut s: TypeShape,
+    ) -> Kind:
+        match self.prog.defs[d.index].kind().copy():
+            case DefKind.Struct(si):
+                if depth == 0:
+                    var k = 0
+                    for f in si.fields:
+                        let ft = self.types.subst(f.ty, a)
+                        let shape = self.shape(ft, "{written}_f{k}", depth + 1, mut aliases)
+                        s.fields.push(
+                            FieldShape(name=f.name.copy(), ty=[shape], default=f.default.is_some())
+                        )
+                        k += 1
+                return Kind.Struct
+            case DefKind.Enum(ei):
+                if depth == 0:
+                    s.variants = self.variant_shapes(ei.variants, a, written, depth, mut aliases)
+                return Kind.Enum
+            case DefKind.ErrorSet(ei):
+                if depth == 0:
+                    s.variants = self.variant_shapes(ei.variants, a, written, depth, mut aliases)
+                return Kind.Enum
+            case _:
+                return Kind.Other
+
+    pure def variant_shapes(
+        mut self,
+        variants: list[VariantInfo],
+        a: list[Ty],
+        written: str,
+        depth: int,
+        mut aliases: list[(String, Ty)],
+    ) -> list[VariantShape]:
+        var out: list[VariantShape] = []
+        var vi = 0
+        for v in variants:
+            var fields: list[(String?, list[TypeShape])] = []
+            var k = 0
+            for (n, ft) in v.fields:
+                let t = self.types.subst(ft, a)
+                let shape = self.shape(t, "{written}_v{vi}_{k}", depth + 1, mut aliases)
+                fields.push((n.copy(), [shape]))
+                k += 1
+            out.push(VariantShape(name=v.name.copy(), fields=fields))
+            vi += 1
+        return out
+
+    ## The names of the traits `t` has an impl of.
+    pure def impl_names(self, t: Ty) -> list[String]:
+        var out: list[String] = []
+        for i in self.prog.impls:
+            let info = self.prog.impl_info(i) else:
+                continue
+            var matches = info.self_ty == t
+            if let TyData.Adt(a, _) = self.types.data(info.self_ty):
+                if let TyData.Adt(b, _) = self.types.data(t):
+                    matches = a == b
+            if matches:
+                let n = self.prog.defs[info.trait_ref.def_.index].name.copy()
+                if not out.contains(n):
+                    out.push(n)
+        out.sort()
+        return out
+
+## `impl[A: Eq] Eq for P[A]:` and the self type `P[A]` (stage 0's `header`).
+pure def header(
+    name: str, generics: list[(String, list[String])], used: list[bool], trait_name: str
+) -> (String, String):
+    var ty = name.to_string()
+    var params = String.new()
+    if not generics.is_empty():
+        var names: list[String] = []
+        var ps: list[String] = []
+        for i in range(len(generics)):
+            let (n, bounds) = (generics[i].0.copy(), generics[i].1.copy())
+            names.push(n.copy())
+            var all = bounds
+            if i >= len(used) or used[i]:
+                all.push(trait_name.to_string())
+            if all.is_empty():
+                ps.push(n)
+            else:
+                ps.push("{n}: {all.join(" + ")}")
+        ty = "{name}[{names.join(", ")}]"
+        params = "[{ps.join(", ")}]"
+    return ("impl{params} {trait_name} for {ty}:\n", ty)
+
+## The source of one delegated impl (stage 0's `delegate_text`): the
+## trait's method on the field, the result wrapped back into the type when
+## the trait returns `Self`.
+pure def delegate_text(
+    name: str,
+    generics: list[(String, list[String])],
+    used: list[bool],
+    trait_name: str,
+    field: str,
+) -> String:
+    let (head, ty) = header(name, generics, used, trait_name)
+    let v = field
+    var body = "    pure def len(self) -> int:\n        return len(self.{v})\n"
+    match trait_name:
+        case "Add":
+            body = delegate_op(name, ty, v, "+", "add")
+        case "Sub":
+            body = delegate_op(name, ty, v, "-", "sub")
+        case "Mul":
+            body = delegate_op(name, ty, v, "*", "mul")
+        case "Div":
+            body = delegate_op(name, ty, v, "/", "div")
+        case "Rem":
+            body = delegate_op(name, ty, v, "%", "rem")
+        case "Neg":
+            body = "    pure def neg(self) -> {ty}:\n        return {name}({v}=-self.{v})\n"
+        case "Eq":
+            body = "    pure def eq(self, other: {ty}) -> bool:\n        return self.{v} == other.{v}\n"
+        case "PartialOrd":
+            body = "    pure def partial_cmp(self, other: {ty}) -> Ordering?:\n"
+            body.push("        return self.{v}.partial_cmp(other.{v})\n")
+        case "Ord":
+            body = "    pure def cmp(self, other: {ty}) -> Ordering:\n"
+            body.push("        return self.{v}.cmp(other.{v})\n")
+        case "Hash":
+            body = "    pure def hash(self, mut h: Hasher):\n        self.{v}.hash(mut h)\n"
+        case "Display":
+            body = "    pure def fmt(self, mut f: Formatter):\n        self.{v}.fmt(mut f)\n"
+        case "Debug":
+            body = "    pure def fmt_debug(self, mut f: Formatter):\n"
+            body.push("        self.{v}.fmt_debug(mut f)\n")
+        case _:
+            pass
+    return "\n{head}{body}"
+
+## A delegated operator: the field's operation, wrapped back into the type.
+pure def delegate_op(name: str, ty: str, v: str, sym: str, method: str) -> String:
+    return "    pure def {method}(self, other: {ty}) -> {ty}:\n        return {name}({v}=self.{v} {sym} other.{v})\n"
+
+## A parameter's mode as reflection shows it: empty, `mut` or `own`.
+pure def mode_text(m: Mode) -> str:
+    return match m:
+        case Mode.Borrow: ""
+        case Mode.Mut: "mut"
+        case Mode.Own: "own"
+
+## The names a value passes to `reflect`'s queries: the types it may name.
+pure def value_types(ast: Ast, e: ExprId) -> list[String]:
+    var out: list[String] = []
+    for x in visit.exprs_of(ast, e):
+        if let ExprKind.Call(callee, args, _) = ast.expr(x).kind:
+            if let ExprKind.Field(base, _) = ast.expr(callee).kind:
+                if let ExprKind.Name(n) = ast.expr(base).kind:
+                    if n == "reflect":
+                        for a in args:
+                            for y in visit.exprs_of(ast, a.value):
+                                if let ExprKind.Name(m) = ast.expr(y).kind:
+                                    if not out.contains(m):
+                                        out.push(m.copy())
+    return out
+
+## A shape written as the module it is unfolded in names its types: the
+## name the code wrote for the type itself, the shown name for the types
+## in it.
+pure def written_plainly(own s: TypeShape, written: str) -> TypeShape:
+    var t = plainly(s)
+    t.written = written.to_string()
+    return t
+
+pure def plainly(own s: TypeShape) -> TypeShape:
+    var t = s
+    t.written = t.name.copy()
+    for i in range(len(t.fields)):
+        var tys: list[TypeShape] = []
+        for x in t.fields[i].ty:
+            tys.push(plainly(x.copy()))
+        t.fields[i].ty = tys
+    for i in range(len(t.variants)):
+        for k in range(len(t.variants[i].fields)):
+            var tys: list[TypeShape] = []
+            for x in t.variants[i].fields[k].1:
+                tys.push(plainly(x.copy()))
+            t.variants[i].fields[k].1 = tys
+    var elems: list[TypeShape] = []
+    for x in t.elem:
+        elems.push(plainly(x.copy()))
+    t.elem = elems
+    return t
+
+## Whether an attribute list has `@builtin`.
+pure def has_builtin(attrs: list[Attr]) -> bool:
+    for a in attrs:
+        if a.name == "builtin":
+            return True
+    return False
+
+## The names the compile-time code of `f` passes to `reflect`'s queries or
+## computes with (`comptime ...`), in order: the types it may name.
+pure def named_types(ast: Ast, f: FnDef) -> list[String]:
+    var out: list[String] = []
+    var stmts: Block? = None
+    if let Some(b) = f.body:
+        stmts = Some(b.copy())
+    let body = stmts else:
+        return out
+    for e in visit.exprs_in_block(ast, body):
+        var roots: list[ExprId] = []
+        match ast.expr(e).kind:
+            case ExprKind.Call(callee, args, _):
+                if let ExprKind.Field(base, _) = ast.expr(callee).kind:
+                    if let ExprKind.Name(n) = ast.expr(base).kind:
+                        if n == "reflect":
+                            for a in args:
+                                roots.push(a.value)
+            case ExprKind.Comptime(inner):
+                roots.push(inner)
+            case _:
+                pass
+        for r in roots:
+            for x in visit.exprs_of(ast, r):
+                if let ExprKind.Name(n) = ast.expr(x).kind:
+                    if not out.contains(n):
+                        out.push(n.copy())
+    return out

@@ -1,0 +1,9 @@
+# A mutex guard borrows its mutex: it cannot outlive the frame that owns
+# the mutex.
+
+def locked() -> MutexGuard[int]:
+    let m = Mutex(1)
+    return m.lock()
+
+def main():
+    print(locked().value)

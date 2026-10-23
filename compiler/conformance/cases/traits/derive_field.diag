@@ -1,0 +1,2 @@
+7:9-7:11 E0244 resolve.derive-field ty="Wrapper" trait="Eq" field="inner" fty="Plain"
+11:9-11:13 E0244 resolve.derive-field ty="Named" trait="Copy" field="name" fty="String"

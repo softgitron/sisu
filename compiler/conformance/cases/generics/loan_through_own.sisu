@@ -1,0 +1,17 @@
+# A generic container keeps what `own` hands it: the caller knows that the
+# `mut` argument now holds the loan the `own` argument held, so `s` stays
+# borrowed while `b` is used.
+
+struct Bag[T]:
+    items: list[T]
+
+impl[T] Bag[T]:
+    def put(mut self, own x: T):
+        self.items.push(x)
+
+def main():
+    var s = "x".to_string()
+    var b: Bag[ref String] = Bag(items=[])
+    b.put(ref s)
+    s.push("y")
+    print(len(b.items))

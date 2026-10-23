@@ -1,0 +1,42 @@
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+ownership violation: `label` was used while it holds no value: it was moved out, or never assigned
+  used at: uninitialized.sisu:8:11 (`_6 = ref _1`)
+  at main (uninitialized.sisu:8:11)
+SIR of `main`:
+fn main(0) source 0 @4:5-4:9 {
+    let _0: ()
+    let _1: String "label" once @5:9-5:14
+    let _2: bool
+    let _3: int
+    let _4: String
+    let _5: ()
+    let _6: ref String
+    let _7: bool "flag"
+  bb0:
+    _7 = const false
+    goto bb1
+  bb1 (unwind bb2):
+    _3 = call intrinsic len(const "abc") @6:8-6:18
+    _2 = gt copy _3, const 5 @6:8-6:22
+    switch copy _2 [0: bb3, else: bb4] @6:8-6:22
+  bb2 (cleanup):
+    drop _1 if _7
+    resume
+  bb3 (unwind bb2):
+    _6 = ref _1 @8:11-8:16
+    _5 = call intrinsic print(copy _6) @8:5-8:17
+    _0 = const ()
+    goto bb5
+  bb4 (unwind bb2):
+    _4 = call intrinsic str.to_string(const "long") @7:17-7:35
+    _7 = const false
+    _1 = move _4 @7:9-7:35
+    _7 = const true
+    goto bb3
+  bb5:
+    drop _1 if _7 @8:17-8:17
+    return
+}
+outcome: conflict reached; the run stopped at a concrete ownership conflict
+--- status 134

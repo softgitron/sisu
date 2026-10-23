@@ -1,0 +1,37 @@
+##! Comments where the formatter must keep them: at the end of a line, on
+##! lines of their own inside and between blocks, inside brackets, and
+##! after the last line of a block, at the level of the block they were
+##! written in.
+# A comment before the first item.
+
+
+# A second one, after blank lines.
+def first(x: int) -> int:   # at the end of the header
+    # at the start of the body
+
+    let y = x + 1    # after a statement
+    if y > 2:
+        return y
+        # after the last line of the `if`, at its level
+    # at the body's level
+    return [
+        1,  # one
+        # alone, inside the brackets
+        2,
+    ][0]
+            # deeper than any block: the next line's level
+# at the top, after the body
+
+## A doc comment.
+def second(xs: list[int]) -> int:
+    var total = 0
+    for x in xs:
+        total += x
+            # written deeper than the loop's body
+    # after the loop
+    return total
+# the end of the file
+
+
+
+# after blank lines at the end

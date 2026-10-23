@@ -1,0 +1,28 @@
+# Caretakers (06; Q-51): `fs.revocable()` gives a capability and its
+# revoker; once revoked, every copy of the caretaker, retained or not,
+# fails with `Revoked`.
+
+struct Plugin:
+    fs: Fs
+
+impl Plugin:
+    def run(self) -> String ! IoError:
+        return self.fs.read_to_string("config.txt")
+
+def main():
+    let fs = Fs.in_memory({"config.txt": "port = 8080"})
+    let plugin_fs, revoker = fs.revocable()
+    let plugin = Plugin(fs=plugin_fs)
+    print(plugin.run())
+    print(revoker.is_revoked())
+    revoker.revoke()
+    print(revoker.is_revoked())
+    print(plugin.run())
+    print(plugin_fs.exists("config.txt"))
+    match plugin_fs.write_text("config.txt", "port = 1"):
+        case Err(Revoked):
+            print("revoked")
+        case _:
+            print("unexpected")
+    # The original handle is untouched.
+    print(fs.read_to_string("config.txt"))

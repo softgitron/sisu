@@ -1,0 +1,11 @@
+leaving nested
+drop after quiet
+drop t.2
+drop t.1.2
+drop t.1.0
+drop t.0
+10
+end of main
+drop last.2
+bomb last.1 goes off
+drop last.0

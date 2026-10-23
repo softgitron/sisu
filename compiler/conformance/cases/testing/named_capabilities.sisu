@@ -1,0 +1,39 @@
+# A test that names capabilities receives a fresh fake of each (decision
+# 241; 17, "Isolation and parallelism"): an empty in-memory `Fs`, a
+# network of its own, the run's test clock as a `Clock` or as the
+# `TestClock` that moves it, `Rand.seeded`, and `Env`, `Proc` and `Stdin`
+# fakes. Such a test touches nothing outside itself, so it runs in
+# parallel with the others, and what one writes no other sees.
+
+def save(fs: Fs, name: Path, text: str) -> ! IoError:
+    fs.write_text(name, text)?
+    return Ok(())
+
+test "a fresh in-memory Fs"(fs: Fs):
+    save(fs, "note", "kept").expect("in memory")
+    assert fs.read_to_string("note") == Ok("kept".to_string())
+
+test "the next test's Fs is empty"(fs: Fs):
+    assert not fs.exists("note")
+
+test "a clock that stands still, a seeded Rand and empty fakes"(
+    clock: Clock, rand: Rand, env: Env, stdin: Stdin
+):
+    let start = clock.now()
+    assert clock.now() == start
+    assert env.args() == []
+    assert stdin.read_line() == None
+    let r = rand.between(0, 10)
+    assert r >= 0 and r < 10
+
+test "the test clock moves when told"(clock: TestClock):
+    let start = clock.now()
+    clock.advance(Duration.seconds(5))
+    assert clock.now() - start == Duration.seconds(5)
+
+test "a network of its own"(net: Net):
+    let listener = net.listen(80).expect("bound")
+    _ = listener
+
+test "a failing one shows its fakes are its own"(fs: Fs):
+    assert fs.exists("note"), "nothing another test wrote is here"

@@ -1,0 +1,15 @@
+##! Amounts of money: a dependency, whose pages `shop`'s do not write.
+
+## An amount in cents.
+pub struct Cents:
+    pub value: int
+
+## What an amount cannot be.
+pub error MoneyError:
+    Negative
+
+## The amount `value` cents, when it is one.
+pub def cents(value: int) -> Cents ! MoneyError:
+    if value < 0:
+        return Err(Negative)
+    return Ok(Cents(value=value))

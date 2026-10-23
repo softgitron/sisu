@@ -1,0 +1,28 @@
+##! Keeping shapes in files.
+
+from geo.shapes import Shape, area
+
+## Why a stored shape could not be read back.
+pub error StoreError:
+    Empty
+
+## Where the shapes are kept: the file system stays private.
+pub struct Store:
+    fs: Fs
+    pub root: Path
+
+    ## A store under `root`.
+    pub def new(fs: Fs, own root: Path) -> Store:
+        return Store(fs=fs, root=root)
+
+    ## Writes a shape's area to `name`.
+    pub def save(self, name: Path, s: Shape) -> ! IoError:
+        self.fs.write_text(name, "{area(s)}")?
+        return Ok(())
+
+## Reads the text of a stored shape through any file system.
+pub def load[F: FsOps](fs: F, path: Path) -> String !:
+    let text = fs.read_to_string(path)?
+    if text.is_empty():
+        return Err(Empty)
+    return Ok(text)

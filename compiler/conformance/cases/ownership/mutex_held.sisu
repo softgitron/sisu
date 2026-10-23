@@ -1,0 +1,8 @@
+# Stage 0 has one task: locking a mutex the task holds would wait forever,
+# so it panics.
+
+def main():
+    let m = Mutex(0)
+    let g = m.lock()
+    let h = m.lock()
+    print(g.value + h.value)

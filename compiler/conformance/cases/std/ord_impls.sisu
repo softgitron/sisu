@@ -1,0 +1,20 @@
+# `min`, `max` and `sorted` order by the type's own `Ord` (03); the host's
+# structural order is only a shortcut for types whose `Ord` is structural.
+@derive(Copy, Eq)
+struct Rev:
+    n: int
+
+impl PartialOrd for Rev:
+    def partial_cmp(self, other: Rev) -> Ordering?:
+        return Some(self.cmp(other))
+
+impl Ord for Rev:
+    def cmp(self, other: Rev) -> Ordering:
+        return other.n.cmp(self.n)
+
+def main():
+    print("{max(Rev(n=1), Rev(n=2)):?} {min(Rev(n=1), Rev(n=2)):?}")
+    print("{sorted([Rev(n=1), Rev(n=3), Rev(n=2)]):?}")
+    print("{max(1, 2)} {min("b", "a")} {sorted([3, 1, 2])} {sorted({"b", "a"})}")
+    let xs = [10, 20]
+    print("{xs.first().copied()} {xs.get(7).copied()}")

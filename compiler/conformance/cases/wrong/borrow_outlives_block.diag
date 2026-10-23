@@ -1,0 +1,3 @@
+9:26-9:26 E0406 borrow.does-not-live-long-enough name="count" line="9" end="12"
+  label 9:17-9:26 borrow.borrowed-by borrower="shown"
+  label 12:5-12:17 borrow.later-used

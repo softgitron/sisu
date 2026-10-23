@@ -1,0 +1,225 @@
+##! `std.rand` (11): the generators behind `Rand`. The prelude's `Rand` is
+##! the capability (`bits`, `between`, `unit`, `coin`, `shuffle`) and
+##! `Rand.seeded` its SplitMix64 for tests; this module adds a fast
+##! generator, xoshiro256**, and a cryptographically secure one, ChaCha20
+##! (RFC 8439), each a `Rand` that every copy of the handle shares, and
+##! choosing and sampling over any `Rand`. A seeded generator gives the
+##! same values in every run and on every target.
+
+## The bits of `x` as an `int` (two's complement).
+pure def signed(x: u64) -> int:
+    match x.to_int():
+        case Some(n):
+            return n
+        case None:
+            return (x - 9223372036854775808u64).to_int().expect("below 2**63")
+                + (-9223372036854775807 - 1)
+
+pure def rotl(x: u64, k: u64) -> u64:
+    return (x << k) | (x >> (64u64 - k))
+
+## The state of xoshiro256** after `n` steps of SplitMix64 from `seed`,
+## the seeding its authors recommend.
+pure def expand(seed: int) -> list[u64]:
+    var st = seed.truncate_to[u64]()
+    var out: list[u64] = []
+    for _ in range(4):
+        st = st +% 0x9e3779b97f4a7c15u64
+        var z = st
+        z = (z ^ (z >> 30u64)) *% 0xbf58476d1ce4e5b9u64
+        z = (z ^ (z >> 27u64)) *% 0x94d049bb133111ebu64
+        out.push(z ^ (z >> 31u64))
+    return out
+
+## One step of xoshiro256** (Blackman and Vigna, 2018) over its four
+## words: the next 64 bits.
+##
+## ```
+## var s: list[u64] = [1u64, 2u64, 3u64, 4u64]
+## assert [step(mut s), step(mut s), step(mut s)] == [11520, 0, 1509978240]
+## ```
+pub pure def step(mut s: list[u64]) -> int:
+    let result = rotl(s[1] *% 5u64, 7u64) *% 9u64
+    let t = s[1] << 17u64
+    s[2] = s[2] ^ s[0]
+    s[3] = s[3] ^ s[1]
+    s[1] = s[1] ^ s[2]
+    s[0] = s[0] ^ s[3]
+    s[2] = s[2] ^ t
+    s[3] = rotl(s[3], 45u64)
+    return signed(result)
+
+## `rand.fast`: xoshiro256**'s four words, which every copy shares.
+struct Xoshiro:
+    state: Mutex[list[u64]]
+
+impl RandOps for Xoshiro:
+    def bits(self) -> int:
+        var g = self.state.lock()
+        return step(mut g.value)
+
+## A fast generator seeded with `seed`: xoshiro256**, whose four words of
+## state SplitMix64 makes from the seed. Not for secrets.
+##
+## ```
+## let r = fast(42)
+## assert r.bits() == 1546998764402558742
+## assert r.bits() == 6990951692964543102
+## let same = fast(42)
+## assert same.bits() == 1546998764402558742
+## ```
+pub def fast(seed: int) -> Rand:
+    return Xoshiro(state=Mutex(expand(seed)))
+
+# ------------------------------------------------------------------ ChaCha20
+
+pure def rotl32(x: u32, k: u32) -> u32:
+    return (x << k) | (x >> (32u32 - k))
+
+pure def quarter(mut s: list[u32], a: int, b: int, c: int, d: int):
+    s[a] = s[a] +% s[b]
+    s[d] = rotl32(s[d] ^ s[a], 16u32)
+    s[c] = s[c] +% s[d]
+    s[b] = rotl32(s[b] ^ s[c], 12u32)
+    s[a] = s[a] +% s[b]
+    s[d] = rotl32(s[d] ^ s[a], 8u32)
+    s[c] = s[c] +% s[d]
+    s[b] = rotl32(s[b] ^ s[c], 7u32)
+
+## ChaCha20's block function (RFC 8439, 2.3): sixteen words of key stream
+## from eight words of key, a block counter and three words of nonce.
+##
+## ```
+## let key: list[u32] = [0x03020100u32, 0x07060504u32, 0x0b0a0908u32, 0x0f0e0d0cu32, 0x13121110u32, 0x17161514u32, 0x1b1a1918u32, 0x1f1e1d1cu32]
+## let out = chacha20_block(key, 1u32, [0x09000000u32, 0x4a000000u32, 0u32])
+## assert out[0] == 0xe4e7f110u32 and out[1] == 0x15593bd1u32 and out[15] == 0x4e3c50a2u32
+## ```
+pub pure def chacha20_block(key: list[u32], counter: u32, nonce: list[u32]) -> list[u32]:
+    requires len(key) == 8 and len(nonce) == 3
+    var init: list[u32] = [0x61707865u32, 0x3320646eu32, 0x79622d32u32, 0x6b206574u32]
+    init.extend(key.copy())
+    init.push(counter)
+    init.extend(nonce.copy())
+    var s = init.copy()
+    for _ in range(10):
+        quarter(mut s, 0, 4, 8, 12)
+        quarter(mut s, 1, 5, 9, 13)
+        quarter(mut s, 2, 6, 10, 14)
+        quarter(mut s, 3, 7, 11, 15)
+        quarter(mut s, 0, 5, 10, 15)
+        quarter(mut s, 1, 6, 11, 12)
+        quarter(mut s, 2, 7, 8, 13)
+        quarter(mut s, 3, 4, 9, 14)
+    for i in range(16):
+        s[i] = s[i] +% init[i]
+    return s
+
+## `rand.secure` and `rand.chacha20`: the key, the nonce, the next block's
+## counter and what is left of the current block.
+struct ChaChaState:
+    key: list[u32]
+    nonce: list[u32]
+    counter: u32
+    words: list[u32]
+    at: int
+
+struct ChaCha:
+    state: Mutex[ChaChaState]
+
+impl RandOps for ChaCha:
+    def bits(self) -> int:
+        var g = self.state.lock()
+        if g.value.at >= 16:
+            g.value.words = chacha20_block(g.value.key, g.value.counter, g.value.nonce)
+            g.value.counter = g.value.counter +% 1u32
+            g.value.at = 0
+        let at = g.value.at
+        let low = g.value.words[at].to_int()
+        let high = g.value.words[at + 1].to_int()
+        g.value.at = at + 2
+        return (high << 32) | low
+
+## A secure generator whose key stream is ChaCha20's (RFC 8439) for `key`,
+## eight words, and `nonce`, three, from block 0: the same key and nonce
+## give the same values. Each 64 bits are two words of the stream, the
+## first the low half.
+##
+## ```
+## let zero: list[u32] = [0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32]
+## let r = chacha20(zero, [0u32, 0u32, 0u32])
+## assert r.bits() == -8053014886254331786
+## ```
+pub def chacha20(key: list[u32], nonce: list[u32]) -> Rand:
+    requires len(key) == 8 and len(nonce) == 3
+    let st = ChaChaState(key=key.copy(), nonce=nonce.copy(), counter=0u32, words=[], at=16)
+    return ChaCha(state=Mutex(st))
+
+## A secure generator keyed with 256 bits from `source` (the host's
+## randomness, say): ChaCha20, whose output cannot be told from random
+## without the key.
+pub def secure(source: Rand) -> Rand:
+    var key: list[u32] = []
+    for _ in range(4):
+        let b = source.bits()
+        key.push((b & 0xffffffff).truncate_to[u32]())
+        key.push(((b >> 32) & 0xffffffff).truncate_to[u32]())
+    return chacha20(key, [0u32, 0u32, 0u32])
+
+# ------------------------------------------------------------------ choosing
+
+## One of `xs`, each equally likely, or `None` when there is none.
+##
+## ```
+## let r = fast(7)
+## let x = choose(r, [10, 20, 30]).expect("not empty")
+## assert x == 10 or x == 20 or x == 30
+## let none: list[int] = []
+## assert choose(r, none) == None
+## ```
+pub def choose[T: Copy](rand: Rand, xs: list[T]) -> T?:
+    if xs.is_empty():
+        return None
+    return Some(xs[rand.between(0, len(xs))])
+
+## `k` different indices below `n`, in random order, each set of them
+## equally likely (`k` at most `n`).
+##
+## ```
+## let picked = sample(fast(1), 10, 4)
+## assert len(picked) == 4
+## assert all([0 <= i < 10 for i in picked])
+## var seen: set[int] = set()
+## for i in picked:
+##     _ = seen.add(i)
+## assert len(seen) == 4
+## ```
+pub def sample(rand: Rand, n: int, k: int) -> list[int]:
+    requires 0 <= k <= n
+    # A partial Fisher-Yates shuffle over the indices that moved, kept in
+    # a dict, so it takes time and space proportional to `k`.
+    var moved: dict[int, int] = {}
+    var out: list[int] = []
+    for i in range(k):
+        let j = rand.between(i, n)
+        let at_j = moved.get(j).copied() ?? j
+        let at_i = moved.get(i).copied() ?? i
+        _ = moved.insert(j, at_i)
+        out.push(at_j)
+    return out
+
+## `n` random bytes.
+##
+## ```
+## let b = random_bytes(fast(3), 10)
+## assert len(b) == 10
+## ```
+pub def random_bytes(rand: Rand, n: int) -> bytes:
+    requires n >= 0
+    var out: list[u8] = []
+    while len(out) < n:
+        var x = rand.bits()
+        for _ in range(8):
+            if len(out) < n:
+                out.push((x & 255).truncate_to[u8]())
+            x = x >> 8
+    return bytes.from_list(out)

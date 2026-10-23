@@ -1,0 +1,72 @@
+# The alternatives of `|` bind the same names, of the same types (PEP 634;
+# D-055): the arm sees each name once, bound from whichever alternative
+# matched.
+
+enum Stmt:
+    Assign(place: String, value: int)
+    AugAssign(place: String, op: String, value: int)
+    Pass
+
+struct Res:
+    name: String
+
+impl Drop for Res:
+    def drop(mut self):
+        print("drop {self.name}")
+
+enum Holder:
+    A(r: Res, n: int)
+    B(n: int, r: Res)
+    Empty
+
+def describe(s: Stmt) -> String:
+    match s:
+        case Stmt.Assign(place, value) | Stmt.AugAssign(place, _, value):
+            return "{place} gets {value}"
+        case Stmt.Pass:
+            return "pass"
+
+def take(own h: Holder) -> int:
+    match h:
+        case Holder.A(r, n) | Holder.B(n, r):
+            print("took {r.name}")
+            return n
+        case Holder.Empty:
+            return 0
+
+def classify(p: (int, int)) -> String:
+    match p:
+        case (0, y) | (y, 0):
+            return "on an axis at {y}"
+        case (x, y) if x == y:
+            return "diagonal"
+        case _:
+            return "elsewhere"
+
+def head(words: list[str]) -> String:
+    match words:
+        case [w] | [w, _]:
+            return w.to_string()
+        case [w, *rest] | [*rest, w]:
+            return "{w} and {len(rest)} more"
+        case []:
+            return "nothing".to_string()
+
+def main():
+    print(describe(Stmt.Assign(place="x".to_string(), value=1)))
+    print(describe(Stmt.AugAssign(place="y".to_string(), op="+".to_string(), value=2)))
+    print(describe(Stmt.Pass))
+    print(take(Holder.A(r=Res(name="a".to_string()), n=1)))
+    print(take(Holder.B(n=2, r=Res(name="b".to_string()))))
+    print(take(Holder.Empty))
+    print(classify((0, 5)))
+    print(classify((7, 0)))
+    print(classify((3, 3)))
+    print(classify((1, 2)))
+    print(head(["a"]))
+    print(head(["b", "c"]))
+    print(head(["d", "e", "f"]))
+    print(head([]))
+    for x in [Some(1), None, Some(2), Some(3)]:
+        if let Some(n) | Some(n) = x:
+            print("some {n}")

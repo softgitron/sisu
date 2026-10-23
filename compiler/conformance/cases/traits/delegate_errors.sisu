@@ -1,0 +1,23 @@
+# `@delegate` needs `to="field"` naming a field, traits it can forward, a
+# field whose type implements them, and, for a trait that returns `Self`,
+# a newtype with that one field.
+
+@delegate(Add, to="value")
+struct Two:
+    value: int
+    other: int
+
+@delegate(Display, to="nope")
+struct Missing:
+    value: int
+
+@delegate(Frobnicate, to="value")
+struct Unknown:
+    value: int
+
+@delegate(Hash, to="value")
+struct FloatKey:
+    value: f64
+
+def main():
+    pass

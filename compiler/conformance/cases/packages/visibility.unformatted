@@ -1,0 +1,2 @@
+Its imports of private items are what it tests; they are unused, and
+`sisu fmt` removes unused imports.

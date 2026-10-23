@@ -1,0 +1,17 @@
+# A lent capability is a view: it cannot become a handle, which could be
+# stored (E0421), nor be kept in a struct that is not a view (E0412-style
+# escapes are the ownership checker's).
+
+struct Keeper:
+    fs: Fs
+
+def keep(l: Lent[Fs]) -> Keeper:
+    return Keeper(fs=l)
+
+def as_handle(l: Lent[Fs]) -> Fs:
+    return l
+
+def main():
+    let fs = Fs.in_memory()
+    print(keep(fs.lend()).fs.exists("x"))
+    print(as_handle(fs.lend()).exists("x"))

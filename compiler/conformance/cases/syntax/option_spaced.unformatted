@@ -1,0 +1,3 @@
+Its spelling is what it tests: options written `Option[...]` with spaces
+and over lines, which `sisu fmt` rewrites as `syntax/option_sugar` writes
+them (it once refused them, decision 267).

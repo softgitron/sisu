@@ -1,0 +1,19 @@
+test "a point" ... ok
+test "several snapshots in one test" ... ok
+test "a changed rendering" ... FAILED
+test "no snapshot yet" ... FAILED
+
+test "a changed rendering" ... FAILED
+panic: the snapshot `a changed rendering` changed (`sisu test --update` accepts the new one):
+- Point(x=3, y=5)
++ Point(x=3, y=4)
+  at test "a changed rendering" (snapshots.sisu:21:5)
+replay: sisu test --replay 1-40bbe5439e2a30e4-0.0.1-t2-s0-r0 snapshots.sisu
+
+test "no snapshot yet" ... FAILED
+panic: there is no snapshot `no snapshot yet` yet (`sisu test --update` stores this one):
+(True, 'c')
+  at test "no snapshot yet" (snapshots.sisu:24:5)
+replay: sisu test --replay 1-40bbe5439e2a30e4-0.0.1-t3-s0-r0 snapshots.sisu
+
+2 passed, 2 failed, 0 blocked

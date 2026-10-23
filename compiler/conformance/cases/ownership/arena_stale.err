@@ -1,0 +1,2 @@
+panic: stale arena key: slot 0, generation 0, no longer holds its value
+  at main (arena_stale.sisu:8:11)

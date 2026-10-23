@@ -1,0 +1,10 @@
+# A move inside a loop moves the value on the first iteration, so the
+# second one uses a moved value.
+
+def consume(own s: String):
+    print(s)
+
+def main():
+    let s = "once".to_string()
+    for i in range(2):
+        consume(s)

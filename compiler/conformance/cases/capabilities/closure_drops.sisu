@@ -1,0 +1,57 @@
+# A function value goes with what its environment holds (decision 248):
+# an `own` closure copies what it captures, so the copy of a handle it
+# holds is counted, every copy of the function value counts it once more,
+# and dropping the last copy drops the object, running its `Drop`. A
+# closure of references holds no copy, and counts nothing.
+
+struct Noisy:
+    name: String
+
+impl Drop for Noisy:
+    def drop(mut self):
+        print("dropped {self.name}")
+
+struct Dice:
+    noise: Noisy
+    seed: int
+
+impl RandOps for Dice:
+    def bits(self) -> int:
+        return self.seed
+
+def dice(name: str, seed: int) -> Rand:
+    return Dice(noise=Noisy(name=name.to_string()), seed=seed)
+
+def roller(name: str, seed: int) -> () -> int:
+    let r = dice(name, seed)
+    return own () -> r.bits()
+
+struct Game:
+    roll: () -> int
+    name: String
+
+def twice(f: () -> int) -> int:
+    return f() + f()
+
+def copies() -> int:
+    let g = roller("copied", 4)
+    let h = g
+    return h() + g()
+
+def main():
+    let f = roller("kept to the end", 3)
+    print("one roll: {f()}")
+    # Both copies go when `copies` returns.
+    print("two copies: {copies()}")
+    # A callee drops the copy it was given; the caller's goes after.
+    print("twice: {twice(roller("passed", 5))}")
+    # A struct's field, and a list of function values.
+    let game = Game(roll=roller("in a struct", 6), name="dice".to_string())
+    print("{game.name}: {(game.roll)()}")
+    let rolls = [roller("in a list", 7), roller("also in a list", 8)]
+    print("listed: {rolls[0]() + rolls[1]()}")
+    # A closure of references counts nothing.
+    let r = dice("borrowed", 9)
+    let peek = () -> r.bits()
+    print("borrowed: {peek()}")
+    print("end of main")

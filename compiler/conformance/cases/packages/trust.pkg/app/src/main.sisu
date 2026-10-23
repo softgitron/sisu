@@ -1,0 +1,5 @@
+import fastmath
+import rawio
+
+def main():
+    print(rawio.peek() + fastmath.fast())

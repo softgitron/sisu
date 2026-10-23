@@ -1,0 +1,572 @@
+##! Exhaustiveness and reachability of `match` (stage 0's
+##! `sisu-typeck/src/exhaustive.rs`; 03, "`match` is exhaustive"), by the
+##! usefulness algorithm over constructor spaces (Maranget, "Warnings for
+##! pattern matching", 2007). A witness of the first missing case names it
+##! in the diagnostic.
+##!
+##! Types with infinitely many values (integers, strings) need a `case _` or
+##! a binding; an open error set needs a wildcard (05). Lists are split by
+##! length: with `L` one more than the longest fixed part of any list
+##! pattern in the column, the constructors are "exactly 0", ..., "exactly
+##! L - 1" and "L or more".
+##!
+##! A space is a node of an arena (`Spaces`), referred to by index, rather
+##! than the recursive value of the Rust (`syntax.ast` says why).
+
+from stage1.diag import Msg, TextRange
+from stage1.typeck.check import Checker, Cx
+from stage1.typeck.program import DefKind
+from stage1.typeck.thir import Lit, PatId, TArm, TPatKind
+from stage1.typeck.ty import DefId, Ty, TyData
+
+@derive(Eq)
+enum Ctor:
+    Variant(def_: DefId, index: int)
+    Struct(DefId)
+    Tuple(int)
+    Bool(bool)
+    ## A list of exactly `n` elements, or of `n` or more when `more`.
+    List(n: int, more: bool)
+    ## A literal: never part of a complete signature.
+    Other(String)
+
+enum Sp:
+    Wild
+    C(ctor: Ctor, args: list[int])
+    ## A list pattern: its leading elements, and its trailing ones when it
+    ## has a `*rest` (so it matches any longer list too).
+    Slice(prefix: list[int], suffix: list[int]?)
+
+## The spaces of one `match`, by index.
+struct Spaces:
+    nodes: list[Sp]
+
+impl Spaces:
+    pure def add(mut self, own s: Sp) -> int:
+        self.nodes.push(s)
+        return len(self.nodes) - 1
+
+    pure def wild(mut self) -> int:
+        return self.add(Sp.Wild)
+
+    pure def is_wild(self, s: int) -> bool:
+        if let Sp.Wild = self.nodes[s]:
+            return True
+        return False
+
+    ## The fewest elements a list pattern matches, and whether it matches
+    ## more.
+    pure def slice_len(self, s: int) -> (int, bool)?:
+        match self.nodes[s]:
+            case Sp.Slice(p, None):
+                return Some((len(p), False))
+            case Sp.Slice(p, Some(x)):
+                return Some((len(p) + len(x), True))
+            case _:
+                return None
+
+    ## Whether a column head matches every value of a constructor.
+    pure def covers(self, head: int, c: Ctor) -> bool:
+        match self.nodes[head]:
+            case Sp.C(k, _):
+                return k == c
+            case Sp.Slice(_, _):
+                if let Ctor.List(m, more) = c:
+                    match self.slice_len(head):
+                        case Some((n, False)):
+                            return not more and n == m
+                        case Some((n, True)):
+                            return n <= m
+                        case None:
+                            return False
+                return False
+            case _:
+                return False
+
+    ## The sub-patterns of a list pattern seen as a list of `m` elements.
+    pure def slice_fields(mut self, head: int, m: int) -> list[int]?:
+        match self.nodes[head].copy():
+            case Sp.Slice(p, None):
+                if len(p) == m:
+                    return Some(p.copy())
+                return None
+            case Sp.Slice(p, Some(s)):
+                if len(p) + len(s) <= m:
+                    var v = p.copy()
+                    for _ in range(m - len(p) - len(s)):
+                        v.push(self.wild())
+                    for x in s:
+                        v.push(x)
+                    return Some(v)
+                return None
+            case _:
+                return None
+
+    pure def specialize(mut self, rows: list[list[int]], c: Ctor, arity: int) -> list[list[int]]:
+        var out: list[list[int]] = []
+        for r in rows:
+            if r.is_empty():
+                continue
+            let first = r[0]
+            match self.nodes[first].copy():
+                case Sp.C(k, args):
+                    if k == c:
+                        var n = args.copy()
+                        for i in range(1, len(r)):
+                            n.push(r[i])
+                        out.push(n)
+                case Sp.Slice(_, _):
+                    if self.covers(first, c):
+                        var n = self.slice_fields(first, arity) ?? []
+                        for i in range(1, len(r)):
+                            n.push(r[i])
+                        out.push(n)
+                case Sp.Wild:
+                    var n: list[int] = []
+                    for _ in range(arity):
+                        n.push(self.wild())
+                    for i in range(1, len(r)):
+                        n.push(r[i])
+                    out.push(n)
+        return out
+
+    pure def default_rows(self, rows: list[list[int]]) -> list[list[int]]:
+        var out: list[list[int]] = []
+        for r in rows:
+            if let Some(first) = r.first():
+                if self.is_wild(first):
+                    out.push(rest_of(r, 1))
+        return out
+
+    ## The alternatives of a pattern, or-patterns expanded at every depth.
+    pure def expand(mut self, c: Checker, p: PatId) -> list[int]:
+        match c.pats[p.index].kind:
+            case TPatKind.Wild | TPatKind.Bind(_, _) | TPatKind.Error:
+                return [self.wild()]
+            case TPatKind.Deref(inner):
+                return self.expand(c, inner)
+            case TPatKind.Lit(Lit.Bool(b)):
+                return [self.add(Sp.C(ctor=Ctor.Bool(b), args=[]))]
+            case TPatKind.Lit(l):
+                return [self.add(Sp.C(ctor=Ctor.Other(l.key()), args=[]))]
+            case TPatKind.List(prefix, has_rest, _, suffix):
+                var all = prefix.copy()
+                for x in suffix:
+                    all.push(x)
+                let fixed = len(prefix)
+                let rest = has_rest
+                var out: list[int] = []
+                for args in self.product(c, all):
+                    var pre: list[int] = []
+                    var suf: list[int] = []
+                    for i in range(len(args)):
+                        if i < fixed:
+                            pre.push(args[i])
+                        else:
+                            suf.push(args[i])
+                    if rest:
+                        out.push(self.add(Sp.Slice(prefix=pre, suffix=Some(suf))))
+                    else:
+                        out.push(self.add(Sp.Slice(prefix=pre, suffix=None)))
+                return out
+            case TPatKind.Or(ps):
+                let alternatives = ps.copy()
+                var out: list[int] = []
+                for x in alternatives:
+                    for s in self.expand(c, x):
+                        out.push(s)
+                return out
+            case TPatKind.Variant(def_, variant, fields):
+                let fs = fields.copy()
+                var out: list[int] = []
+                for args in self.product(c, fs):
+                    out.push(
+                        self.add(
+                            Sp.C(ctor=Ctor.Variant(def_=def_, index=variant), args=args.copy())
+                        )
+                    )
+                return out
+            case TPatKind.Struct(def_, fields):
+                let fs = fields.copy()
+                var out: list[int] = []
+                for args in self.product(c, fs):
+                    out.push(self.add(Sp.C(ctor=Ctor.Struct(def_), args=args.copy())))
+                return out
+            case TPatKind.Tuple(ps):
+                let fs = ps.copy()
+                var out: list[int] = []
+                for args in self.product(c, fs):
+                    out.push(self.add(Sp.C(ctor=Ctor.Tuple(len(ps)), args=args.copy())))
+                return out
+
+    pure def product(mut self, c: Checker, fields: list[PatId]) -> list[list[int]]:
+        var acc: list[list[int]] = [[]]
+        for f in fields:
+            let alts = self.expand(c, f)
+            var next: list[list[int]] = []
+            for a in acc:
+                for alt in alts:
+                    var v = a.copy()
+                    v.push(alt)
+                    next.push(v)
+            acc = next
+            if len(acc) > 4096:
+                # Pathological or-patterns: give up precision, never
+                # correctness of the report.
+                while len(acc) > 4096:
+                    _ = acc.pop()
+        return acc
+
+impl Checker:
+    ## The constructors of a type with their field types, or `None` for a
+    ## type with infinitely many.
+    pure def ctors(mut self, cx: Cx, ty: Ty) -> list[(Ctor, list[Ty])]?:
+        let z = self.infer.zonk(mut self.types, ty)
+        match self.types.data(z).copy():
+            case TyData.Bool:
+                return Some([(Ctor.Bool(True), []), (Ctor.Bool(False), [])])
+            case TyData.Tuple(es, _):
+                return Some([(Ctor.Tuple(len(es)), es.copy())])
+            case TyData.Ref(t, _):
+                return self.ctors(cx, t)
+            case TyData.Never | TyData.Error:
+                return Some([])
+            case TyData.ErrSet(members):
+                var out: list[(Ctor, list[Ty])] = []
+                for d in members:
+                    let e = cx.prog.enum_info(d) else:
+                        return None
+                    if e.open:
+                        return None
+                    for i in range(len(e.variants)):
+                        var fs: list[Ty] = []
+                        for (_, t) in e.variants[i].fields:
+                            fs.push(t)
+                        out.push((Ctor.Variant(def_=d, index=i), fs))
+                return Some(out)
+            case TyData.Adt(d, args):
+                match cx.prog.defs[d.index].kind():
+                    case DefKind.Enum(e):
+                        var out: list[(Ctor, list[Ty])] = []
+                        for i in range(len(e.variants)):
+                            var fs: list[Ty] = []
+                            for (_, t) in e.variants[i].fields:
+                                fs.push(self.types.subst(t, args))
+                            out.push((Ctor.Variant(def_=d, index=i), fs))
+                        return Some(out)
+                    case DefKind.Struct(s):
+                        if s.builtin.is_some():
+                            return None
+                        var fs: list[Ty] = []
+                        for f in s.fields:
+                            fs.push(self.types.subst(f.ty, args))
+                        return Some([(Ctor.Struct(d), fs)])
+                    case _:
+                        return None
+            case _:
+                return None
+
+    ## The constructors of a column's type, given the patterns at its head
+    ## (lists are split by the lengths those patterns mention).
+    pure def ctors_in(
+        mut self, cx: Cx, sp: Spaces, ty: Ty, heads: list[int]
+    ) -> list[(Ctor, list[Ty])]?:
+        var t = self.infer.zonk(mut self.types, ty)
+        if let TyData.Ref(inner, _) = self.types.data(t):
+            t = inner
+        if let TyData.Adt(d, args) = self.types.data(t).copy():
+            if Some(d) == cx.prog.wk.list:
+                let elem = if args.is_empty(): Ty.error() else: args[0]
+                var lens: list[int] = []
+                for h in heads:
+                    if let Some((n, _)) = sp.slice_len(h):
+                        lens.push(n)
+                if lens.is_empty():
+                    return None
+                var bound = 0
+                for n in lens:
+                    bound = max(bound, n)
+                bound += 1
+                var out: list[(Ctor, list[Ty])] = []
+                for m in range(bound):
+                    var fs: list[Ty] = []
+                    for _ in range(m):
+                        fs.push(elem)
+                    out.push((Ctor.List(n=m, more=False), fs))
+                var fs: list[Ty] = []
+                for _ in range(bound):
+                    fs.push(elem)
+                out.push((Ctor.List(n=bound, more=True), fs))
+                return Some(out)
+        return self.ctors(cx, ty)
+
+    pure def render(self, cx: Cx, c: Ctor, args: list[String]) -> String:
+        match c:
+            case Ctor.Variant(d, i):
+                var name = String.new()
+                if let Some(e) = cx.prog.enum_info(d):
+                    if i < len(e.variants):
+                        name = e.variants[i].name.copy()
+                return with_args(name, args)
+            case Ctor.Struct(d):
+                return with_args(cx.prog.defs[d.index].name.copy(), args)
+            case Ctor.Tuple(_):
+                return "({args.join(", ")})"
+            case Ctor.Bool(b):
+                return if b: "True".to_string() else: "False".to_string()
+            case Ctor.List(_, False):
+                return "[{args.join(", ")}]"
+            case Ctor.List(_, True):
+                var parts = args.copy()
+                parts.push("*_".to_string())
+                return "[{parts.join(", ")}]"
+            case Ctor.Other(s):
+                return s.copy()
+
+    ## A witness of a value no row matches, one rendered pattern per column.
+    pure def witness(
+        mut self, cx: Cx, mut sp: Spaces, rows: list[list[int]], tys: list[Ty]
+    ) -> list[String]?:
+        if tys.is_empty():
+            if rows.is_empty():
+                return Some([])
+            return None
+        let head = tys[0]
+        var heads: list[int] = []
+        for r in rows:
+            if let Some(h) = r.first():
+                heads.push(h)
+        let rest_tys = rest_tys_of(tys, 1)
+        match self.ctors_in(cx, sp, head, heads):
+            case Some(cs):
+                var all_used = not cs.is_empty()
+                for (c, _) in cs:
+                    if not used(sp, rows, c):
+                        all_used = False
+                if all_used:
+                    for (c, ftys) in cs:
+                        let spec = sp.specialize(rows, c, len(ftys))
+                        var sub_tys = ftys.copy()
+                        for t in rest_tys:
+                            sub_tys.push(t)
+                        if let Some(w) = self.witness(cx, mut sp, spec, sub_tys):
+                            var fw: list[String] = []
+                            var rest: list[String] = []
+                            for i in range(len(w)):
+                                if i < len(ftys):
+                                    fw.push(w[i].copy())
+                                else:
+                                    rest.push(w[i].copy())
+                            var out = [self.render(cx, c, fw)]
+                            for x in rest:
+                                out.push(x.copy())
+                            return Some(out)
+                    return None
+                let defaults = sp.default_rows(rows)
+                let rest = self.witness(cx, mut sp, defaults, rest_tys) else:
+                    return None
+                var missing: String? = None
+                for (c, ftys) in cs:
+                    if missing.is_none() and not used(sp, rows, c):
+                        var wilds: list[String] = []
+                        for _ in ftys:
+                            wilds.push("_".to_string())
+                        missing = Some(self.render(cx, c, wilds))
+                var out = [missing ?? "_".to_string()]
+                for x in rest:
+                    out.push(x.copy())
+                return Some(out)
+            case None:
+                let defaults = sp.default_rows(rows)
+                let rest = self.witness(cx, mut sp, defaults, rest_tys) else:
+                    return None
+                var out = ["_".to_string()]
+                for x in rest:
+                    out.push(x.copy())
+                return Some(out)
+
+    ## Reports a non-exhaustive `match` and unreachable arms.
+    pub pure def check_exhaustive(mut self, cx: Cx, ty: Ty, arms: list[TArm], range: TextRange):
+        let z = self.infer.zonk(mut self.types, ty)
+        if self.types.contains_error(z):
+            return
+        for a in arms:
+            if self.pat_has_error(a.pat):
+                return
+        var sp = Spaces(nodes=[])
+        var rows: list[list[int]] = []
+        for a in arms:
+            let alts = sp.expand(self, a.pat)
+            if a.guard.is_none():
+                var reachable = False
+                for s in alts:
+                    if not reachable and self.useful(cx, mut sp, rows, [s], [ty]):
+                        reachable = True
+                if not reachable and not rows.is_empty():
+                    let at = self.pats[a.pat.index].span
+                    let d = self.error(cx, Msg.TypeUnreachableArm, at)
+                    self.report(d)
+                for s in alts:
+                    rows.push([s])
+        if let Some(w) = self.witness(cx, mut sp, rows, [ty]):
+            let missing = "`{w.join(", ")}`"
+            var open = False
+            let zz = self.infer.zonk(mut self.types, ty)
+            if let TyData.ErrSet(m) = self.types.data(zz):
+                for d in m:
+                    if let Some(e) = cx.prog.enum_info(d):
+                        if e.open:
+                            open = True
+            if open:
+                let shown = self.show(cx, ty)
+                let d = self.error(cx, Msg.TypeOpenSetNeedsWildcard, range).with("ty", shown)
+                self.report(d)
+            else:
+                let d = self.error(cx, Msg.TypeNonExhaustive, range).with("missing", missing)
+                self.report(d.note_with(Msg.TypeMissingPatterns, "missing", missing))
+
+    pure def useful(
+        mut self, cx: Cx, mut sp: Spaces, rows: list[list[int]], v: list[int], tys: list[Ty]
+    ) -> bool:
+        if v.is_empty():
+            return rows.is_empty()
+        let head = v[0]
+        let rest_v = rest_of(v, 1)
+        let rest_tys = rest_tys_of(tys, 1)
+        match sp.nodes[head].copy():
+            case Sp.C(ctor, args):
+                let spec = sp.specialize(rows, ctor, len(args))
+                var field_tys: list[Ty]? = None
+                if let Some(cs) = self.ctors(cx, tys[0]):
+                    for (k, f) in cs:
+                        if field_tys.is_none() and k == ctor:
+                            field_tys = Some(f.copy())
+                var nt: list[Ty] = []
+                match field_tys:
+                    case Some(f):
+                        nt = f.copy()
+                    case None:
+                        for _ in args:
+                            nt.push(Ty.error())
+                var nv = args.copy()
+                for x in rest_v:
+                    nv.push(x)
+                for t in rest_tys:
+                    nt.push(t)
+                return self.useful(cx, mut sp, spec, nv, nt)
+            case Sp.Slice(_, _):
+                # Useful if it adds a value for any list length it covers.
+                var heads: list[int] = []
+                for r in rows:
+                    if let Some(h) = r.first():
+                        heads.push(h)
+                heads.push(head)
+                let cs = self.ctors_in(cx, sp, tys[0], heads) else:
+                    return False
+                for (k, ftys) in cs:
+                    if not sp.covers(head, k):
+                        continue
+                    let Ctor.List(m, _) = k else:
+                        continue
+                    let spec = sp.specialize(rows, k, m)
+                    var nv = sp.slice_fields(head, m) ?? []
+                    for x in rest_v:
+                        nv.push(x)
+                    var nt = ftys.copy()
+                    for t in rest_tys:
+                        nt.push(t)
+                    if self.useful(cx, mut sp, spec, nv, nt):
+                        return True
+                return False
+            case Sp.Wild:
+                var heads: list[int] = []
+                for r in rows:
+                    if let Some(h) = r.first():
+                        heads.push(h)
+                match self.ctors_in(cx, sp, tys[0], heads):
+                    case Some(cs):
+                        var all_used = not cs.is_empty()
+                        for (k, _) in cs:
+                            if not used(sp, rows, k):
+                                all_used = False
+                        if all_used:
+                            for (k, ftys) in cs:
+                                let spec = sp.specialize(rows, k, len(ftys))
+                                var nv: list[int] = []
+                                for _ in ftys:
+                                    nv.push(sp.wild())
+                                for x in rest_v:
+                                    nv.push(x)
+                                var nt = ftys.copy()
+                                for t in rest_tys:
+                                    nt.push(t)
+                                if self.useful(cx, mut sp, spec, nv, nt):
+                                    return True
+                            return False
+                        let defaults = sp.default_rows(rows)
+                        return self.useful(cx, mut sp, defaults, rest_v, rest_tys)
+                    case None:
+                        let defaults = sp.default_rows(rows)
+                        return self.useful(cx, mut sp, defaults, rest_v, rest_tys)
+
+    pure def pat_has_error(self, p: PatId) -> bool:
+        match self.pats[p.index].kind:
+            case TPatKind.Error:
+                return True
+            case TPatKind.Variant(_, _, fields):
+                for f in fields:
+                    if self.pat_has_error(f):
+                        return True
+                return False
+            case TPatKind.Struct(_, fields):
+                for f in fields:
+                    if self.pat_has_error(f):
+                        return True
+                return False
+            case TPatKind.Tuple(ps):
+                for f in ps:
+                    if self.pat_has_error(f):
+                        return True
+                return False
+            case TPatKind.Or(ps):
+                for f in ps:
+                    if self.pat_has_error(f):
+                        return True
+                return False
+            case TPatKind.Deref(inner):
+                return self.pat_has_error(inner)
+            case TPatKind.List(prefix, _, _, suffix):
+                for f in prefix:
+                    if self.pat_has_error(f):
+                        return True
+                for f in suffix:
+                    if self.pat_has_error(f):
+                        return True
+                return False
+            case _:
+                return False
+
+## Whether some row's head covers the constructor.
+pure def used(sp: Spaces, rows: list[list[int]], c: Ctor) -> bool:
+    for r in rows:
+        if let Some(h) = r.first():
+            if sp.covers(h, c):
+                return True
+    return False
+
+pure def with_args(name: String, args: list[String]) -> String:
+    if args.is_empty():
+        return name.copy()
+    return "{name}({args.join(", ")})"
+
+pure def rest_of(xs: list[int], from_: int) -> list[int]:
+    var out: list[int] = []
+    for i in range(from_, len(xs)):
+        out.push(xs[i])
+    return out
+
+pure def rest_tys_of(xs: list[Ty], from_: int) -> list[Ty]:
+    var out: list[Ty] = []
+    for i in range(from_, len(xs)):
+        out.push(xs[i])
+    return out

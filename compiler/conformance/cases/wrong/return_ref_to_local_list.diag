@@ -1,0 +1,2 @@
+6:5-6:21 E0407 borrow.return-local name="xs[...]" function="biggest"
+  label 6:12-6:21 borrow.borrowed-here

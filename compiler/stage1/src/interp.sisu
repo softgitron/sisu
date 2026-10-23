@@ -1,0 +1,1961 @@
+##! Compile-time evaluation (stage 0's `sisu-interp/src/comptime.rs`; 08,
+##! "Compile-time evaluation"; 18, Phase 4: "the comptime evaluator as the
+##! same interpreter with fuel, a memory limit and no `System`").
+##!
+##! A `comptime` expression is lowered to a function of nothing, of kind
+##! `comptime N`. The compiler runs each one, in program order, with a
+##! budget of `N` steps and nothing reaching the world, then replaces its
+##! body by statements that build the value it returned, which makes it a
+##! `value` function: at run time the program does only what it would do
+##! for a literal. A panic, a spent budget, a use of the world (printing,
+##! files, the environment, the clock) or a value with no literal form (a
+##! function, a reference) is an error of the program at the `comptime`
+##! expression, and the function keeps its body. A `comptime` expression
+##! that uses another one's value runs after it; one that uses a failed one
+##! fails too, its error being that one's. A panic's message is the
+##! catalog's, as stage 0's interpreter renders it.
+##!
+##! Stage 0 runs them in its interpreter (`sisu-interp`); stage 1 has the
+##! part of it that compile-time code needs (`Interp`): integers, the sized
+##! ones, floats, text, lists, tuples, structs and enums, references,
+##! ranges, closures, and the intrinsics on them. Values are trees, each
+##! aggregate owning its parts, and a reference is a path from a frame's
+##! local (stage 0's `value.rs` and `place.rs`). A function that needs more
+##! makes the program beyond the slice of stage 1's lowering, with what it
+##! needed. Each statement is a step of the budget, as in stage 0.
+
+from stage1.diag import Catalog, Param
+from stage1.sir import (
+    Aggregate,
+    BasicBlock,
+    BinOp,
+    Callee,
+    Const,
+    FnKind,
+    ImplTarget,
+    IntrinsicDecl,
+    LocalDecl,
+    LocalId,
+    Operand,
+    Place,
+    Program,
+    Proj,
+    Rvalue,
+    Statement,
+    StatementKind,
+    Terminator,
+    Type,
+    TypeDecl,
+    UnOp,
+)
+from stage1.sir.types import Decls, field_ty
+from stage1.text import hex
+
+const INT_MAX: int = 9223372036854775807
+const INT_MIN: int = -9223372036854775807 - 1
+
+## What a run of the `comptime` functions did: those that failed, which
+## keep their bodies, with why, and why the program is beyond stage 1's
+## evaluator.
+pub struct Evaluated:
+    pub errors: list[Error]
+    pub beyond: list[String]
+
+## Why a `comptime` function has no value.
+pub enum Failure:
+    ## It panicked, with this message.
+    Panicked(String)
+    ## A refinement's predicate was false for a constant (07): the type,
+    ## the value and the predicate.
+    Refinement(ty: String, value: String, predicate: String)
+    ## It ran out of its budget of steps.
+    Budget(int)
+    ## It used the world: what it used.
+    World(String)
+    ## Its value has no form that can be kept for run time: what it is.
+    NotKept(String)
+
+## A `comptime` function that failed, by name.
+pub struct Error:
+    pub function: String
+    pub failure: Failure
+
+## Why a run stopped without a value.
+pub error Stop:
+    ## A panic, with its message.
+    Panicked(message: String)
+    ## A refinement's predicate was false for a constant: the type, the
+    ## value and the predicate.
+    Refinement(ty: String, value: String, predicate: String)
+    ## The budget of steps was spent.
+    Budget
+    ## The world was used: what.
+    World(what: String)
+    ## The value has no form that can be kept for run time: what it is.
+    NotKept(what: String)
+    ## What stage 1's evaluator does not run.
+    Beyond(why: String)
+
+## A value: a tree, each aggregate owning its parts.
+pub enum Value:
+    Unit
+    Int(int)
+    Float(f64)
+    F32(f32)
+    Bool(bool)
+    Char(char)
+    ## A `str`: text that is not owned.
+    Str(String)
+    String(String)
+    List(list[Value])
+    Tuple(list[Value])
+    ## A struct or an enum value, by its type's name; a struct's variant
+    ## is 0.
+    Adt(ty: String, variant: int, fields: list[Value])
+    Ref(Pointer)
+    ## A range's iterator: the next number, the end and the step.
+    Range(cur: int, stop: int, step: int)
+    Fn(String)
+    Closure(name: String, types: list[Type], env: list[Value])
+    Moved
+
+## A place reached from a frame's local.
+pub struct Pointer:
+    frame: int
+    local: int
+    path: list[Step]
+
+enum Step:
+    ## A struct field or tuple element.
+    Field(int)
+    ## The payload of an enum value of the given variant.
+    Payload(int)
+    ## A list element.
+    Index(int)
+
+struct Frame:
+    func: int
+    locals: list[Value]
+    block: int
+    next: int
+    ## The caller's place for the result, resolved when it returns.
+    dest: Place?
+    ## The function's type arguments.
+    types: list[Type]
+
+## What a call through a trait runs, with its arguments and type
+## arguments.
+enum Target:
+    Fn(int, list[Value], list[Type])
+    Intrinsic(String, list[Value], list[Type])
+
+## The state of the evaluation of one `comptime` function, with the
+## catalog its panics' messages come from.
+struct Interp:
+    frames: list[Frame]
+    fuel: int
+    funcs: dict[String, int]
+    catalog: Catalog
+
+@derive(Eq, Copy)
+enum State:
+    Running
+    Done
+    Failed
+
+# ---------------------------------------------------------------- the run
+
+## Runs every `comptime` function of the program and bakes its value into
+## it (stage 0's `evaluate`). A `comptime` expression that uses a failed
+## one is not run, its error being that one's.
+pub pure def evaluate(mut prog: Program, catalog: Catalog) -> Evaluated:
+    var out = Evaluated(errors=[], beyond=[])
+    var names: list[String] = []
+    for f in prog.functions:
+        if let FnKind.Comptime(_) = f.kind:
+            names.push(f.name.copy())
+    if names.is_empty():
+        return out
+    # One interpreter runs them all, finding functions by name in a table
+    # made once: baking a value changes a function's body, not its place.
+    var funcs: dict[String, int] = {}
+    for i in range(len(prog.functions)):
+        if not funcs.contains(prog.functions[i].name.copy()):
+            _ = funcs.insert(prog.functions[i].name.copy(), i)
+    var it = Interp(frames=[], fuel=0, funcs=funcs, catalog=catalog.copy())
+    var state: dict[String, State] = {}
+    for n in names:
+        visit(mut prog, n, mut state, mut out, mut it)
+    return out
+
+pure def visit(
+    mut prog: Program,
+    name: str,
+    mut state: dict[String, State],
+    mut out: Evaluated,
+    mut it: Interp,
+):
+    if state.contains(name.to_string()):
+        return
+    _ = state.insert(name.to_string(), State.Running)
+    let deps = comptime_deps(prog, name)
+    for d in deps:
+        visit(mut prog, d, mut state, mut out, mut it)
+    for d in deps:
+        var failed = False
+        if let Some(st) = state.get(d.copy()):
+            failed = st == State.Failed
+        if failed:
+            _ = state.insert(name.to_string(), State.Failed)
+            return
+    var at = -1
+    for i in range(len(prog.functions)):
+        if prog.functions[i].name == name:
+            at = i
+    if at < 0:
+        return
+    let FnKind.Comptime(budget) = prog.functions[at].kind else:
+        return
+    match run(prog, at, budget, mut it):
+        case Ok(baked):
+            let (locals, stmts, intrinsics) = baked
+            let f = ref mut prog.functions[at]
+            f.locals = locals
+            f.blocks = [
+                BasicBlock(
+                    stmts=stmts, term=Terminator.Return, unwind=None, cleanup=False, loc=f.loc
+                )
+            ]
+            f.kind = FnKind.Value
+            for n in intrinsics:
+                declare_intrinsic(mut prog, n)
+            _ = state.insert(name.to_string(), State.Done)
+        case Err(stop):
+            _ = state.insert(name.to_string(), State.Failed)
+            var failure = Failure.Budget(budget)
+            match stop:
+                case Beyond(why):
+                    let reason = "a `comptime` expression that needs {why}, which stage 1's evaluator does not run"
+                    if not out.beyond.contains(reason):
+                        out.beyond.push(reason)
+                    return
+                case Panicked(m):
+                    failure = Failure.Panicked(m.copy())
+                case Refinement(ty, value, predicate):
+                    failure = Failure.Refinement(
+                        ty=ty.copy(), value=value.copy(), predicate=predicate.copy()
+                    )
+                case Budget:
+                    pass
+                case World(what):
+                    failure = Failure.World(what.copy())
+                case NotKept(what):
+                    failure = Failure.NotKept(what.copy())
+            out.errors.push(Error(function=name.to_string(), failure=failure))
+
+## The `comptime` functions that the function `name` calls, directly or
+## through functions that are not themselves `comptime`.
+pure def comptime_deps(prog: Program, name: str) -> list[String]:
+    var seen: set[String] = set()
+    _ = seen.add(name.to_string())
+    var work = [name.to_string()]
+    var deps: list[String] = []
+    while let Some(n) = work.pop():
+        let found = prog.function(n) else:
+            continue
+        var callees: list[String] = []
+        for b in found.blocks:
+            for s in b.stmts:
+                match s.kind:
+                    case StatementKind.Call(_, callee, args):
+                        if let Callee.Fn(c, _) = callee:
+                            callees.push(c.copy())
+                        fn_consts(args, mut callees)
+                    case StatementKind.Assign(_, Rvalue.Closure(c, _, ops)):
+                        callees.push(c.copy())
+                        fn_consts(ops, mut callees)
+                    case StatementKind.Assign(_, Rvalue.Use(o)):
+                        fn_consts([o.copy()], mut callees)
+                    case StatementKind.Assign(_, Rvalue.Aggregate(_, ops)):
+                        fn_consts(ops, mut callees)
+                    case _:
+                        pass
+        for c in callees:
+            if not seen.add(c.copy()):
+                continue
+            if let Some(g) = prog.function(c):
+                if let FnKind.Comptime(_) = g.kind:
+                    deps.push(c.copy())
+                else:
+                    work.push(c.copy())
+    return deps
+
+pure def fn_consts(ops: list[Operand], mut out: list[String]):
+    for o in ops:
+        if let Operand.Const(Const.Fn(n)) = o:
+            out.push(n.copy())
+
+## Runs the `comptime` function at `at` with its budget, and builds its
+## value: the baked body's locals and statements, and the intrinsics they
+## call.
+pure def run(
+    prog: Program, at: int, budget: int, mut it: Interp
+) -> (list[LocalDecl], list[Statement], list[String]) ! Stop:
+    it.frames = []
+    it.fuel = budget
+    let v = it.call(prog, at, [])?
+    let ret = prog.functions[at].locals[0].ty.copy()
+    let decls = Decls.new(prog.types)
+    var b = Baker(
+        locals=[LocalDecl(ty=ret.copy(), name=None, loc=None, once=False)], stmts=[], intrinsics=[]
+    )
+    b.build(decls, v, ret, Place.local(LocalId(index=0)))?
+    return Ok((b.locals, b.stmts, b.intrinsics))
+
+## Declares an intrinsic the baked statements call, unless the program
+## does: pure, borrowing and keeping nothing.
+pure def declare_intrinsic(mut prog: Program, name: str):
+    if prog.intrinsic(name).is_some():
+        return
+    var at = 0
+    while at < len(prog.intrinsics) and prog.intrinsics[at].name < name:
+        at += 1
+    let d = IntrinsicDecl(name=name.to_string(), pure=True, from_=[], inner=[], owns=[], keeps=[])
+    prog.intrinsics.insert(at, d)
+
+# ---------------------------------------------------------------- the interpreter
+
+impl Interp:
+    ## Calls the function at `fi` with `args` and runs until it returns.
+    pure def call(mut self, prog: Program, fi: int, args: list[Value]) -> Value ! Stop:
+        let base = len(self.frames)
+        self.push_frame(prog, fi, args, None, [])
+        while True:
+            let top = len(self.frames) - 1
+            let f = ref prog.functions[self.frames[top].func]
+            let bi = self.frames[top].block
+            if bi >= len(f.blocks):
+                return Err(Stop.Beyond("a jump out of its function"))
+            let block = ref f.blocks[bi]
+            let next = self.frames[top].next
+            if next < len(block.stmts):
+                self.frames[top].next = next + 1
+                if self.fuel <= 0:
+                    return Err(Stop.Budget)
+                self.fuel -= 1
+                self.stmt(prog, block.stmts[next])?
+                continue
+            match block.term:
+                case Terminator.Goto(t):
+                    self.jump(t.index)
+                case Terminator.Switch(value, cases, default):
+                    let n = self.switch_value(value)?
+                    var to = default.index
+                    for (c, t) in cases:
+                        if c == n:
+                            to = t.index
+                            break
+                    self.jump(to)
+                case Terminator.Return:
+                    let fr = self.frames.pop() else:
+                        return Err(Stop.Beyond("a return without a frame"))
+                    var v = Value.Unit
+                    if let Some(x) = fr.locals.first():
+                        if let Value.Moved = x:
+                            pass
+                        else:
+                            v = x.copy()
+                    if len(self.frames) <= base:
+                        return Ok(v)
+                    if let Some(d) = fr.dest:
+                        let p = self.resolve(d)?
+                        self.write(p, v)?
+                case Terminator.Unreachable:
+                    return Err(self.panicked("panic.unreachable-plain", []))
+                case Terminator.Resume:
+                    return Err(Stop.Beyond("unwinding"))
+
+    pure def push_frame(
+        mut self, prog: Program, fi: int, args: list[Value], dest: Place?, types: list[Type]
+    ):
+        let f = ref prog.functions[fi]
+        var locals = [Value.Moved]
+        for a in args:
+            locals.push(a.copy())
+        while len(locals) < len(f.locals):
+            locals.push(Value.Moved)
+        self.frames.push(
+            Frame(func=fi, locals=locals, block=0, next=0, dest=dest.copy(), types=types.copy())
+        )
+
+    ## The index of the function `name`.
+    pure def func_index(self, name: str) -> int ! Stop:
+        if let Some(i) = self.funcs.get(name.to_string()):
+            return Ok(i)
+        return Err(Stop.Beyond("a function the program does not have"))
+
+    pure def jump(mut self, b: int):
+        let top = len(self.frames) - 1
+        self.frames[top].block = b
+        self.frames[top].next = 0
+
+    pure def switch_value(mut self, value: Operand) -> int ! Stop:
+        let v = self.operand(value)?
+        return match self.target(v)?:
+            case Value.Int(n): Ok(n)
+            case Value.Bool(b): Ok(if b: 1 else: 0)
+            case _: Err(Stop.Beyond("a switch on a value that is not a number"))
+
+    ## A type of the running function with its type arguments filled in.
+    pure def concrete(self, t: Type) -> Type:
+        let top = len(self.frames) - 1
+        if top < 0 or self.frames[top].types.is_empty():
+            return t.copy()
+        return t.subst(self.frames[top].types)
+
+    pure def concrete_all(self, ts: list[Type]) -> list[Type]:
+        var out: list[Type] = []
+        for t in ts:
+            out.push(self.concrete(t))
+        return out
+
+    pure def stmt(mut self, prog: Program, s: Statement) -> () ! Stop:
+        match s.kind:
+            case StatementKind.Assign(p, rv):
+                let v = self.rvalue(prog, rv)?
+                let at = self.resolve(p)?
+                self.write(at, v)?
+            case StatementKind.Call(dest, callee, args):
+                match callee:
+                    case Callee.Fn(name, tys):
+                        let fi = self.func_index(name)?
+                        var vals: list[Value] = []
+                        for o in args:
+                            vals.push(self.operand(o)?)
+                        let ts = self.concrete_all(tys)
+                        self.push_frame(prog, fi, vals, Some(dest.copy()), ts)
+                    case Callee.Intrinsic(name, tys):
+                        var vals: list[Value] = []
+                        for o in args:
+                            vals.push(self.operand(o)?)
+                        let ts = self.concrete_all(tys)
+                        let v = self.intrinsic(prog, name, ts, vals)?
+                        let at = self.resolve(dest)?
+                        self.write(at, v)?
+                    case Callee.Value(op):
+                        let f = self.operand(op)?
+                        var vals: list[Value] = []
+                        for o in args:
+                            vals.push(self.operand(o)?)
+                        match self.target(f)?:
+                            case Value.Fn(name):
+                                let fi = self.func_index(name)?
+                                self.push_frame(prog, fi, vals, Some(dest.copy()), [])
+                            case Value.Closure(name, types, env):
+                                let fi = self.func_index(name)?
+                                var all = [Value.Tuple(env.copy())]
+                                for v in vals:
+                                    all.push(v.copy())
+                                self.push_frame(prog, fi, all, Some(dest.copy()), types)
+                            case _:
+                                return Err(Stop.Beyond("a call of a value that is not a function"))
+                    case Callee.Trait(name, tys):
+                        var vals: list[Value] = []
+                        for o in args:
+                            vals.push(self.operand(o)?)
+                        let ts = self.concrete_all(tys)
+                        match self.dispatch(prog, name, ts, vals)?:
+                            case Target.Fn(fi, all, targs):
+                                self.push_frame(prog, fi, all, Some(dest.copy()), targs)
+                            case Target.Intrinsic(n, all, targs):
+                                let v = self.intrinsic(prog, n, targs, all)?
+                                let at = self.resolve(dest)?
+                                self.write(at, v)?
+            case StatementKind.Drop(place, flag):
+                # A flagged drop runs when its flag is set, and clears it.
+                if let Some(fl) = flag:
+                    let top = len(self.frames) - 1
+                    match self.frames[top].locals[fl.index]:
+                        case Value.Bool(b):
+                            if not b:
+                                return Ok(())
+                        case _:
+                            return Ok(())
+                    self.frames[top].locals[fl.index] = Value.Bool(False)
+                let at = self.resolve_for_drop(place)? else:
+                    return Ok(())
+                let v = self.take(at)?
+                if own_drop(prog, v):
+                    return Err(Stop.Beyond("a drop of a value whose type has its own `drop`"))
+            case StatementKind.StorageDead(l):
+                let top = len(self.frames) - 1
+                self.frames[top].locals[l.index] = Value.Moved
+        return Ok(())
+
+    pure def rvalue(mut self, prog: Program, rv: Rvalue) -> Value ! Stop:
+        match rv:
+            case Rvalue.Use(o):
+                return self.operand(o)
+            case Rvalue.Ref(p, _):
+                return Ok(Value.Ref(self.resolve(p)?))
+            case Rvalue.Binary(op, a, b):
+                let x = self.operand(a)?
+                let y = self.operand(b)?
+                return self.binary(op, x, y)
+            case Rvalue.Unary(op, a):
+                let x = self.operand(a)?
+                return self.unary(op, x)
+            case Rvalue.Aggregate(kind, ops):
+                var vals: list[Value] = []
+                for o in ops:
+                    vals.push(self.operand(o)?)
+                match kind:
+                    case Aggregate.Tuple:
+                        return Ok(Value.Tuple(vals))
+                    case Aggregate.List:
+                        return Ok(Value.List(vals))
+                    case Aggregate.Struct(name):
+                        return Ok(Value.Adt(ty=name.copy(), variant=0, fields=vals))
+                    case Aggregate.Variant(ty, name):
+                        let v = variant_index(prog, ty, name) else:
+                            return Err(
+                                Stop.Beyond("a variant of a type the program does not declare")
+                            )
+                        return Ok(Value.Adt(ty=ty.copy(), variant=v, fields=vals))
+                    case _:
+                        return Err(Stop.Beyond("a set, a dict or a `dyn` value"))
+            case Rvalue.Discriminant(p):
+                let at = self.resolve(p)?
+                return match self.target(self.read(at)?)?:
+                    case Value.Adt(_, v, _): Ok(Value.Int(v))
+                    case _: Err(Stop.Beyond("the variant of a value that is not an enum"))
+            case Rvalue.Closure(name, tys, ops):
+                var env: list[Value] = []
+                for o in ops:
+                    env.push(self.operand(o)?)
+                return Ok(Value.Closure(name=name.copy(), types=self.concrete_all(tys), env=env))
+            case Rvalue.CopyOf(p):
+                let at = self.resolve(p)?
+                return self.target(self.read(at)?)
+            case Rvalue.StrView(p):
+                let at = self.resolve(p)?
+                return match self.target(self.read(at)?)?:
+                    case Value.Str(s) | Value.String(s): Ok(Value.Str(s.copy()))
+                    case _: Err(Stop.Beyond("a view of a value that is not text"))
+
+    pure def operand(mut self, o: Operand) -> Value ! Stop:
+        match o:
+            case Operand.Copy(p):
+                let at = self.resolve(p)?
+                return self.read(at)
+            case Operand.Move(p):
+                let at = self.resolve(p)?
+                return self.take(at)
+            case Operand.Const(c):
+                return Ok(const_value(c))
+
+    # ---------------------------------------------------------------- dispatch
+
+    ## What a call through a trait runs (stage 0's `dispatch`): the impl
+    ## whose patterns match the concrete type arguments; a `Self` that is a
+    ## reference dispatches on what it points to.
+    pure def dispatch(
+        mut self, prog: Program, name: str, tys_in: list[Type], args_in: list[Value]
+    ) -> Target ! Stop:
+        var tys = tys_in.copy()
+        var args = args_in.copy()
+        let Some(dot) = last_dot(name) else:
+            return Err(Stop.Beyond("a trait method without its trait"))
+        let trait_name = name.byte_slice(0, dot)
+        let method = name.byte_slice(dot + 1, name.byte_len())
+        if tys.is_empty():
+            return Err(Stop.Beyond("a trait call without `Self`"))
+        var self_ty = tys[0].copy()
+        for _ in range(16):
+            let Type.Ref(inner, _) = self_ty.copy() else:
+                break
+            var first = Value.Unit
+            if let Some(a) = args.first():
+                first = a.copy()
+            let Value.Ref(p) = first else:
+                return Err(Stop.Beyond("a trait call on a reference without one"))
+            args[0] = self.read(p)?
+            self_ty = inner[0].copy()
+        match self_ty:
+            case Type.Dyn(_, _):
+                return Err(Stop.Beyond("a call through a `dyn` value"))
+            case _:
+                pass
+        tys[0] = self_ty.copy()
+        for imp in prog.impls:
+            if imp.trait_name != trait_name:
+                continue
+            let n = len(imp.trait_args)
+            var binds: list[Type?] = []
+            for _ in range(imp.params):
+                binds.push(None)
+            if not match_type(imp.self_ty, self_ty, mut binds):
+                continue
+            var fits = True
+            for i in range(n):
+                if i + 1 < len(tys) and not match_type(imp.trait_args[i], tys[i + 1], mut binds):
+                    fits = False
+            if not fits:
+                continue
+            var targs: list[Type] = []
+            for b in binds:
+                match b:
+                    case Some(t):
+                        targs.push(t.copy())
+                    case None:
+                        targs.push(Type.Unit)
+            for i in range(1 + n, len(tys)):
+                targs.push(tys[i].copy())
+            for (m, target) in imp.methods:
+                if m != method:
+                    continue
+                match target:
+                    case ImplTarget.Fn(f):
+                        let fi = self.func_index(f)?
+                        self.adapt(prog, fi, targs, mut args)?
+                        return Ok(Target.Fn(fi, args, targs))
+                    case ImplTarget.Intrinsic(i):
+                        return Ok(Target.Intrinsic(i.copy(), args, targs))
+            # The trait's provided method.
+            let fi = self.func_index(name)?
+            self.adapt(prog, fi, tys, mut args)?
+            return Ok(Target.Fn(fi, args, tys))
+        return Err(Stop.Beyond("a trait the language implements for the type itself"))
+
+    ## A trait passes a parameter whose declared type is a generic
+    ## parameter by reference; the impl of a `Copy` type takes it by value.
+    ## Each such argument becomes the value it points to.
+    pure def adapt(
+        self, prog: Program, fi: int, tys: list[Type], mut args: list[Value]
+    ) -> () ! Stop:
+        let f = ref prog.functions[fi]
+        for i in range(len(args)):
+            if i + 1 >= len(f.locals):
+                continue
+            var by_value = True
+            if let Type.Ref(_, _) = f.locals[i + 1].ty.subst(tys):
+                by_value = False
+            if by_value:
+                if let Value.Ref(p) = args[i].copy():
+                    args[i] = self.read(p)?
+        return Ok(())
+
+    # ---------------------------------------------------------------- places
+
+    ## The pointer a place of the running function leads to.
+    pure def resolve(mut self, p: Place) -> Pointer ! Stop:
+        let found = self.resolve_mode(p, False)? else:
+            return Err(Stop.Beyond("a place that does not resolve"))
+        return Ok(found)
+
+    ## As `resolve`, but the payload of a variant the value does not hold
+    ## is no place: dropping it drops nothing.
+    pure def resolve_for_drop(mut self, p: Place) -> Pointer? ! Stop:
+        return self.resolve_mode(p, True)
+
+    pure def resolve_mode(mut self, p: Place, drop: bool) -> Pointer? ! Stop:
+        let top = len(self.frames) - 1
+        var ptr = Pointer(frame=top, local=p.local.index, path=[])
+        for proj in p.proj:
+            match proj:
+                case Proj.Deref:
+                    match self.read(ptr)?:
+                        case Value.Ref(q):
+                            ptr = q.copy()
+                        case _:
+                            return Err(
+                                Stop.Beyond("a dereference of a value that is not a reference")
+                            )
+                case Proj.Field(i):
+                    ptr.path.push(Step.Field(i))
+                case Proj.Downcast(v):
+                    if drop:
+                        var holds = False
+                        if let Value.Adt(_, w, _) = self.target(self.read(ptr)?)?:
+                            holds = w == v
+                        if not holds:
+                            return Ok(None)
+                    ptr.path.push(Step.Payload(v))
+                case Proj.Index(l) | Proj.IndexFromEnd(l):
+                    var from_end = False
+                    if let Proj.IndexFromEnd(_) = proj:
+                        from_end = True
+                    let Value.Int(i) = self.target(self.frames[top].locals[l.index].copy())? else:
+                        return Err(Stop.Beyond("an index that is not a number"))
+                    let Value.List(xs) = self.read(ptr)? else:
+                        return Err(Stop.Beyond("an index into a value that is not a list"))
+                    let at = list_index(i, len(xs), from_end, self.catalog)?
+                    ptr.path.push(Step.Index(at))
+                case Proj.Key(_):
+                    return Err(Stop.Beyond("a dict"))
+        return Ok(Some(ptr))
+
+    ## A copy of the value a pointer leads to.
+    pure def read(self, p: Pointer) -> Value ! Stop:
+        if p.frame >= len(self.frames) or p.local >= len(self.frames[p.frame].locals):
+            return Err(Stop.Beyond("a reference to a frame that has returned"))
+        let found = value_at(self.frames[p.frame].locals[p.local], p.path, 0) else:
+            return Err(Stop.Beyond("a place that does not hold its value"))
+        return Ok(found.copy())
+
+    ## The value a pointer leads to, moved out.
+    pure def take(mut self, p: Pointer) -> Value ! Stop:
+        let v = self.read(p)?
+        self.write(p, Value.Moved)?
+        return Ok(v)
+
+    pure def write(mut self, p: Pointer, own v: Value) -> () ! Stop:
+        if p.frame >= len(self.frames) or p.local >= len(self.frames[p.frame].locals):
+            return Err(Stop.Beyond("a reference to a frame that has returned"))
+        if not set_at(mut self.frames[p.frame].locals[p.local], p.path, 0, v):
+            return Err(Stop.Beyond("a place that does not hold its value"))
+        return Ok(())
+
+    ## The value behind references: what an intrinsic or an operator reads.
+    pure def target(self, v: Value) -> Value ! Stop:
+        var x = v.copy()
+        for _ in range(64):
+            let Value.Ref(p) = x else:
+                return Ok(x)
+            x = self.read(p)?
+        return Err(Stop.Beyond("a chain of references"))
+
+    # ---------------------------------------------------------------- operators
+
+    pure def binary(mut self, op: BinOp, a_in: Value, b_in: Value) -> Value ! Stop:
+        let a = self.target(a_in)?
+        let b = self.target(b_in)?
+        match op:
+            case BinOp.Eq:
+                return Ok(Value.Bool(equal(a, b)?))
+            case BinOp.Ne:
+                return Ok(Value.Bool(not equal(a, b)?))
+            case BinOp.Lt | BinOp.Le | BinOp.Gt | BinOp.Ge:
+                let c = compare(a, b)? else:
+                    return Ok(Value.Bool(False))
+                var holds = c >= 0
+                if op == BinOp.Lt:
+                    holds = c < 0
+                elif op == BinOp.Le:
+                    holds = c <= 0
+                elif op == BinOp.Gt:
+                    holds = c > 0
+                return Ok(Value.Bool(holds))
+            case BinOp.Concat:
+                let x = text_of(a) else:
+                    return Err(Stop.Beyond("a concatenation of values that are not text"))
+                let y = text_of(b) else:
+                    return Err(Stop.Beyond("a concatenation of values that are not text"))
+                return Ok(Value.String("{x}{y}"))
+            case BinOp.In:
+                return Err(Stop.Beyond("`in`"))
+            case _:
+                pass
+        match (a, b):
+            case (Value.Int(x), Value.Int(y)):
+                return Ok(Value.Int(int_op(op, x, y, self.catalog)?))
+            case (Value.Float(x), Value.Float(y)):
+                return Ok(Value.Float(float_op(op, x, y)?))
+            case (Value.F32(x), Value.F32(y)):
+                # In `f64`, which rounds `+`, `-`, `*` and `/` the same once
+                # the result is rounded to `f32`.
+                let r = float_op(op, x.to_f64(), y.to_f64())?
+                return Ok(Value.F32(r.to_f32()))
+            case _:
+                return Err(Stop.Beyond("an operator on values it does not take"))
+
+    pure def unary(mut self, op: UnOp, a_in: Value) -> Value ! Stop:
+        let a = self.target(a_in)?
+        match (op, a):
+            case (UnOp.Neg, Value.Int(x)):
+                if x == INT_MIN:
+                    return Err(self.panicked("panic.overflow", [param("expr", "-({x})")]))
+                return Ok(Value.Int(-x))
+            case (UnOp.Neg, Value.Float(x)):
+                return Ok(Value.Float(-x))
+            case (UnOp.Neg, Value.F32(x)):
+                return Ok(Value.F32(-x))
+            case (UnOp.Not, Value.Bool(b)):
+                return Ok(Value.Bool(not b))
+            case (UnOp.BitNot, Value.Int(x)):
+                return Ok(Value.Int(-x - 1))
+            case _:
+                return Err(Stop.Beyond("an operator on values it does not take"))
+
+    # ---------------------------------------------------------------- intrinsics
+
+    pure def intrinsic(
+        mut self, prog: Program, name: str, tys: list[Type], args: list[Value]
+    ) -> Value ! Stop:
+        match name:
+            case "assert.fail" | "assert.fail_parts" | "assert.fail_compare":
+                return self.assert_fail(prog, name, args)
+            case "contract.fail":
+                return self.contract_fail(args)
+            case "panic":
+                let m = self.text(args, 0)?
+                return Err(self.panicked("panic.explicit", [param("message", m)]))
+            case "unreachable":
+                let m = self.text(args, 0)?
+                if m.is_empty():
+                    return Err(self.panicked("panic.unreachable-plain", []))
+                return Err(self.panicked("panic.unreachable", [param("message", m)]))
+            # Nothing reaches the world at compile time: the first use of it
+            # is the error.
+            case "print":
+                return Err(Stop.World("the standard output"))
+            case "print_err" | "eprint":
+                return Err(Stop.World("the standard error"))
+            case "len":
+                return match self.target(arg(args, 0)?)?:
+                    case Value.Str(s) | Value.String(s): Ok(Value.Int(len(s)))
+                    case Value.List(xs): Ok(Value.Int(len(xs)))
+                    case _: Err(Stop.Beyond("`len` of a value that is not text or a list"))
+            case "range":
+                let start = int_arg(self, args, 0)?
+                let stop = int_arg(self, args, 1)?
+                let step = int_arg(self, args, 2)?
+                if step == 0:
+                    return Err(self.panicked("panic.range-step", []))
+                return Ok(Value.Range(cur=start, stop=stop, step=step))
+            case "Iter.next":
+                let Value.Ref(p) = arg(args, 0)? else:
+                    return Err(Stop.Beyond("an iterator that is not a range"))
+                let Value.Range(cur, stop, step) = self.read(p)? else:
+                    return Err(Stop.Beyond("an iterator that is not a range"))
+                let more = if step > 0: cur < stop else: cur > stop
+                if not more:
+                    return Ok(none())
+                # Past the greatest `int` the range is done.
+                var next = Value.Range(cur=stop, stop=stop, step=step)
+                if (step > 0 and cur <= INT_MAX - step) or (step < 0 and cur >= INT_MIN - step):
+                    next = Value.Range(cur=cur + step, stop=stop, step=step)
+                self.write(p, next)?
+                return Ok(some(Value.Int(cur)))
+            case "list.push":
+                let Value.Ref(p) = arg(args, 0)? else:
+                    return Err(Stop.Beyond("a push onto a value that is not a list"))
+                let Value.List(xs) = self.read(p)? else:
+                    return Err(Stop.Beyond("a push onto a value that is not a list"))
+                var ys = xs
+                ys.push(arg(args, 1)?)
+                self.write(p, Value.List(ys))?
+                return Ok(Value.Unit)
+            case "list.pop":
+                let Value.Ref(p) = arg(args, 0)? else:
+                    return Err(Stop.Beyond("a pop from a value that is not a list"))
+                let Value.List(xs) = self.read(p)? else:
+                    return Err(Stop.Beyond("a pop from a value that is not a list"))
+                var ys = xs
+                let last = ys.pop()
+                self.write(p, Value.List(ys))?
+                if let Some(x) = last:
+                    return Ok(some(x.copy()))
+                return Ok(none())
+            case "list.is_empty":
+                let Value.List(xs) = self.target(arg(args, 0)?)? else:
+                    return Err(Stop.Beyond("a list method on a value that is not a list"))
+                return Ok(Value.Bool(xs.is_empty()))
+            case "Array.filled":
+                var n = -1
+                if len(tys) > 1:
+                    if let Type.Const(k) = tys[1]:
+                        n = k
+                if n < 0:
+                    return Err(Stop.Beyond("an array whose length is not a constant"))
+                let v = arg(args, 0)?
+                var items: list[Value] = []
+                for _ in range(n):
+                    items.push(v.copy())
+                return Ok(Value.List(items))
+            case "generic.value":
+                if let Some(Type.Const(k)) = tys.first():
+                    return Ok(Value.Int(k))
+                return Err(Stop.Beyond("a `const` parameter without a constant"))
+            case "str.to_string":
+                let t = text_of(self.target(arg(args, 0)?)?) else:
+                    return Err(Stop.Beyond("`to_string` of a value that is not text"))
+                return Ok(Value.String(t))
+            case "str.to_uppercase":
+                let t = text_of(self.target(arg(args, 0)?)?) else:
+                    return Err(Stop.Beyond("`to_uppercase` of a value that is not text"))
+                return Ok(Value.String(t.to_uppercase()))
+            case "str.to_lowercase":
+                let t = text_of(self.target(arg(args, 0)?)?) else:
+                    return Err(Stop.Beyond("`to_lowercase` of a value that is not text"))
+                return Ok(Value.String(t.to_lowercase()))
+            case "str.byte_len":
+                let t = text_of(self.target(arg(args, 0)?)?) else:
+                    return Err(Stop.Beyond("`byte_len` of a value that is not text"))
+                return Ok(Value.Int(t.byte_len()))
+            case "String.new":
+                if args.is_empty():
+                    return Ok(Value.String(String.new()))
+                let t = text_of(self.target(arg(args, 0)?)?) else:
+                    return Err(Stop.Beyond("a `String` of a value that is not text"))
+                return Ok(Value.String(t))
+            case "char.code":
+                let Value.Char(c) = self.target(arg(args, 0)?)? else:
+                    return Err(Stop.Beyond("`code` of a value that is not a character"))
+                return Ok(Value.Int(c.code()))
+            case "f32.from_literal":
+                return match self.target(arg(args, 0)?)?:
+                    case Value.Float(x): Ok(Value.F32(x.to_f32()))
+                    case Value.Int(n): Ok(Value.F32(n.to_f64().to_f32()))
+                    case _: Err(Stop.Beyond("an `f32` of a value that is not a number"))
+            case "fmt.new":
+                return Ok(Value.String(String.new()))
+            case "fmt.text" | "fmt.display" | "fmt.debug":
+                let Value.Ref(p) = arg(args, 0)? else:
+                    return Err(Stop.Beyond("formatting into a value that is not a `String`"))
+                let v = self.target(arg(args, 1)?)?
+                var more = String.new()
+                if name == "fmt.text":
+                    more = self.text(args, 1)?
+                elif name == "fmt.debug":
+                    self.debug_into(prog, v, mut more)?
+                else:
+                    self.display_into(prog, v, mut more)?
+                let Value.String(s) = self.read(p)? else:
+                    return Err(Stop.Beyond("formatting into a value that is not a `String`"))
+                self.write(p, Value.String("{s}{more}"))?
+                return Ok(Value.Unit)
+            case _:
+                pass
+        if let Some(dot) = name.find("."):
+            let owner = name.byte_slice(0, dot)
+            let method = name.byte_slice(dot + 1, name.byte_len())
+            if is_sized(owner):
+                return self.sized_op(owner, method, args)
+            match owner:
+                case "Fs" | "Env" | "Clock" | "Proc" | "Stdin" | "Net" | "Rand" | "System":
+                    return Err(Stop.World("the world"))
+                case _:
+                    pass
+        return Err(Stop.Beyond("the intrinsic `{name}`"))
+
+    ## The operations of the sized integers `u8` to `u32` and `i8` to
+    ## `i32`, whose values are `int`s in their range (stage 0's
+    ## `sized.rs`).
+    pure def sized_op(mut self, kind: str, method: str, args: list[Value]) -> Value ! Stop:
+        let (lo, hi, bits, signed) = bounds(kind)
+        let x = int_arg(self, args, 0)?
+        match method:
+            case "add":
+                let y = int_arg(self, args, 1)?
+                return self.checked(kind, checked_add(x, y), x, "+", y)
+            case "sub":
+                let y = int_arg(self, args, 1)?
+                return self.checked(kind, checked_sub(x, y), x, "-", y)
+            case "mul":
+                let y = int_arg(self, args, 1)?
+                return self.checked(kind, checked_mul(x, y), x, "*", y)
+            case "floordiv" | "rem":
+                let y = int_arg(self, args, 1)?
+                if y == 0:
+                    return Err(self.panicked("panic.divide-by-zero", []))
+                # `//` floors and `%` has the sign of the divisor, as for
+                # `int`.
+                if method == "rem":
+                    return Ok(Value.Int(int_op(BinOp.Mod, x, y, self.catalog)?))
+                return self.checked(kind, Some(x // y), x, "//", y)
+            case "pow":
+                let y = int_arg(self, args, 1)?
+                if y < 0:
+                    return Err(
+                        self.panicked("panic.negative-exponent", [param("expr", "{x} ** {y}")])
+                    )
+                return self.checked(kind, checked_pow(x, y), x, "**", y)
+            case "sat_add" | "sat_sub" | "sat_mul":
+                let y = int_arg(self, args, 1)?
+                let v = match method:
+                    case "sat_add": x +| y
+                    case "sat_sub": x -| y
+                    case _: x *| y
+                return Ok(Value.Int(min(max(v, lo), hi)))
+            case "wrap_add" | "wrap_sub" | "wrap_mul":
+                let y = int_arg(self, args, 1)?
+                let v = match method:
+                    case "wrap_add": x +% y
+                    case "wrap_sub": x -% y
+                    case _: x *% y
+                return Ok(Value.Int(wrap(v, bits, signed)))
+            case "shl" | "shr":
+                let y = int_arg(self, args, 1)?
+                if y < 0 or y >= bits:
+                    let ps = [param("ty", kind), param("amount", "{y}"), param("max", "{bits - 1}")]
+                    return Err(self.panicked("panic.shift-out-of-range-sized", ps))
+                if method == "shl":
+                    return Ok(Value.Int(wrap(x << y, bits, signed)))
+                return Ok(Value.Int(x >> y))
+            case "and":
+                return Ok(Value.Int(x & int_arg(self, args, 1)?))
+            case "or":
+                return Ok(Value.Int(x | int_arg(self, args, 1)?))
+            case "xor":
+                return Ok(Value.Int(x ^ int_arg(self, args, 1)?))
+            case "not":
+                if signed:
+                    return Ok(Value.Int(-x - 1))
+                return Ok(Value.Int(hi ^ x))
+            case "neg":
+                return self.checked(kind, checked_sub(0, x), x, "-", 0)
+            case "to_int" | "widen":
+                return Ok(Value.Int(x))
+            case "from_literal":
+                return self.checked(kind, Some(x), x, "as", 0)
+            case "wrapping_from":
+                return Ok(Value.Int(wrap(x, bits, signed)))
+            case _:
+                return Err(Stop.Beyond("the `{kind}` operation `{method}`"))
+
+    ## A sized integer's result in its type's range, or the overflow of
+    ## `x sym y` (stage 0's `checked`).
+    pure def checked(self, kind: str, r: int?, x: int, sym: str, y: int) -> Value ! Stop:
+        let (lo, hi, _, _) = bounds(kind)
+        if let Some(v) = r:
+            if lo <= v and v <= hi:
+                return Ok(Value.Int(v))
+        return Err(self.panicked("panic.overflow", [param("expr", "{x} {sym} {y} as {kind}")]))
+
+    # ---------------------------------------------------------------- panics
+
+    ## A panic with the catalog's message `id` (stage 0's `panic`).
+    pure def panicked(self, id: str, params: list[Param]) -> Stop:
+        return panic_with(self.catalog, id, params)
+
+    ## The text of argument `i`, a `str` or a `String`.
+    pure def text(self, args: list[Value], i: int) -> String ! Stop:
+        let t = text_of(self.target(arg(args, i)?)?) else:
+            return Err(Stop.Beyond("text of a value that is not text"))
+        return Ok(t)
+
+    ## How `{x:?}` shows a value, for a failed comparison.
+    pure def debug(self, prog: Program, v: Value) -> String ! Stop:
+        var out = String.new()
+        self.debug_into(prog, self.target(v)?, mut out)?
+        return Ok(out)
+
+    ## The parts a failed check shows: (column, `Debug` text) pairs.
+    pure def shown_parts(self, v: Value) -> list[(int, String)] ! Stop:
+        var out: list[(int, String)] = []
+        let Value.List(xs) = self.target(v)? else:
+            return Ok(out)
+        for x in xs:
+            let Value.Tuple(t) = x else:
+                continue
+            if len(t) != 2:
+                continue
+            let Value.Int(c) = self.target(t[0])? else:
+                return Err(Stop.Beyond("a part's column that is not a number"))
+            let shown = text_of(self.target(t[1])?) else:
+                return Err(Stop.Beyond("a part's value that is not text"))
+            out.push((max(c, 0), shown))
+        return Ok(out)
+
+    ## `contract.fail(kind, owner, clause, parts)`: a contract's clause did
+    ## not hold (07: "A contract violation is a panic"). A refinement's
+    ## (kind 3) is a panic of its own, which compile-time evaluation
+    ## reports as a diagnostic of its own.
+    pure def contract_fail(self, args: list[Value]) -> Value ! Stop:
+        let kind = int_arg(self, args, 0)?
+        let owner = self.text(args, 1)?
+        let clause = self.text(args, 2)?
+        let parts = self.shown_parts(arg(args, 3)?)?
+        if kind == 3:
+            var value = String.new()
+            if let Some((_, v)) = parts.first():
+                value = v.copy()
+            return Err(Stop.Refinement(ty=owner, value=value, predicate=clause))
+        var id = "contract.invariant-failed"
+        var key = "ty"
+        if kind == 0:
+            id = "contract.requires-failed"
+            key = "function"
+        elif kind == 1:
+            id = "contract.ensures-failed"
+            key = "function"
+        var m = render(self.catalog, id, [param(key, owner), param("clause", clause)])
+        m.push(parts_diagram(clause, parts))
+        return Err(self.panicked("panic.explicit", [param("message", m)]))
+
+    ## A failed `assert` (stage 0's `assert_fail`): its text and message,
+    ## then the values of its parts or of the two sides it compared.
+    pure def assert_fail(self, prog: Program, name: str, args: list[Value]) -> Value ! Stop:
+        let expr = self.text(args, 0)?
+        let message = self.text(args, 1)?
+        var m = String.new()
+        if message.is_empty():
+            m = render(self.catalog, "panic.assert", [param("expr", expr)])
+        else:
+            let ps = [param("expr", expr), param("message", message)]
+            m = render(self.catalog, "panic.assert-message", ps)
+        if name == "assert.fail_parts":
+            m.push(parts_diagram(expr, self.shown_parts(arg(args, 2)?)?))
+        if name == "assert.fail_compare":
+            let left = self.debug(prog, arg(args, 2)?)?
+            let right = self.debug(prog, arg(args, 3)?)?
+            m.push("\n  ")
+            m.push(render(self.catalog, "run.assert-left", [param("value", left)]))
+            m.push("\n  ")
+            m.push(render(self.catalog, "run.assert-right", [param("value", right)]))
+        return Err(self.panicked("panic.explicit", [param("message", m)]))
+
+# ---------------------------------------------------------------- helpers
+
+## A catalog parameter.
+pure def param(name: str, value: str) -> Param:
+    return Param(name=name.to_string(), value=value.to_string())
+
+## The catalog's message `id` with its parameters (stage 0's `render`).
+pure def render(catalog: Catalog, id: str, params: list[Param]) -> String:
+    return catalog.render(id, params)
+
+## A panic with the catalog's message `id` (stage 0's `panic`).
+pure def panic_with(catalog: Catalog, id: str, params: list[Param]) -> Stop:
+    return Stop.Panicked(render(catalog, id, params))
+
+## The overflow of `x op y` on `int`s.
+pure def overflow(catalog: Catalog, x: int, op: BinOp, y: int) -> Stop:
+    return panic_with(catalog, "panic.overflow", [param("expr", "{x} {symbol(op)} {y}")])
+
+## How an operator is written in an overflow's message (stage 0's
+## `symbol`).
+pure def symbol(op: BinOp) -> str:
+    return match op:
+        case BinOp.Add: "+"
+        case BinOp.Sub: "-"
+        case BinOp.Mul: "*"
+        case BinOp.Div: "/"
+        case BinOp.FloorDiv: "//"
+        case BinOp.Mod: "%"
+        case BinOp.Pow: "**"
+        case BinOp.Shl: "<<"
+        case BinOp.Shr: ">>"
+        case _: op.name()
+
+## `x + y`, or `None` when it does not fit an `int`.
+pure def checked_add(x: int, y: int) -> int?:
+    if (y > 0 and x > INT_MAX - y) or (y < 0 and x < INT_MIN - y):
+        return None
+    return Some(x + y)
+
+## `x - y`, or `None` when it does not fit an `int`.
+pure def checked_sub(x: int, y: int) -> int?:
+    if (y < 0 and x > INT_MAX + y) or (y > 0 and x < INT_MIN + y):
+        return None
+    return Some(x - y)
+
+## `x * y`, or `None` when it does not fit an `int`: the wrapped product
+## divides back to `x` exactly when it did not wrap.
+pure def checked_mul(x: int, y: int) -> int?:
+    if x == 0 or y == 0:
+        return Some(0)
+    if y == -1:
+        if x == INT_MIN:
+            return None
+        return Some(-x)
+    let p = x *% y
+    if p // y != x:
+        return None
+    return Some(p)
+
+## `x ** y` for `y >= 0`, or `None` when it does not fit an `int`.
+pure def checked_pow(x: int, y: int) -> int?:
+    if x == 0:
+        return Some(if y == 0: 1 else: 0)
+    if x == 1:
+        return Some(1)
+    if x == -1:
+        return Some(if y % 2 == 0: 1 else: -1)
+    var r = 1
+    for _ in range(y):
+        let next = checked_mul(r, x) else:
+            return None
+        r = next
+    return Some(r)
+
+pure def arg(args: list[Value], i: int) -> Value ! Stop:
+    if i >= len(args):
+        return Err(Stop.Beyond("an intrinsic called with too few arguments"))
+    return Ok(args[i].copy())
+
+pure def int_arg(it: Interp, args: list[Value], i: int) -> int ! Stop:
+    let Value.Int(n) = it.target(arg(args, i)?)? else:
+        return Err(Stop.Beyond("an integer operation on a value that is not an integer"))
+    return Ok(n)
+
+pure def some(own v: Value) -> Value:
+    return Value.Adt(ty="Option".to_string(), variant=0, fields=[v])
+
+pure def none() -> Value:
+    return Value.Adt(ty="Option".to_string(), variant=1, fields=[])
+
+## The variant index of `name` in the enum `ty`.
+pure def variant_index(prog: Program, ty: str, name: str) -> int?:
+    if ty == "Option":
+        return Some(if name == "Some": 0 else: 1)
+    if ty == "Result":
+        return Some(if name == "Ok": 0 else: 1)
+    for d in prog.types:
+        if let TypeDecl.Enum(n, _, variants, _, _, _, _) = d:
+            if n == ty:
+                for i in range(len(variants)):
+                    if variants[i].name == name:
+                        return Some(i)
+    return None
+
+## Whether dropping a value runs code of the program's (a type with its
+## own `drop`), which stage 1's evaluator does not run.
+pure def own_drop(prog: Program, v: Value) -> bool:
+    match v:
+        case Value.Adt(ty, _, fields):
+            for d in prog.types:
+                match d:
+                    case TypeDecl.Struct(n, _, _, drop, _, _):
+                        if n == ty and drop.is_some():
+                            return True
+                    case TypeDecl.Enum(n, _, _, drop, _, _, _):
+                        if n == ty and drop.is_some():
+                            return True
+            for f in fields:
+                if own_drop(prog, f):
+                    return True
+            return False
+        case Value.List(xs) | Value.Tuple(xs):
+            for x in xs:
+                if own_drop(prog, x):
+                    return True
+            return False
+        case Value.Closure(_, _, env):
+            for x in env:
+                if own_drop(prog, x):
+                    return True
+            return False
+        case _:
+            return False
+
+## The value at a path from `v`.
+pure def value_at(v: Value, path: list[Step], i: int) -> ref Value? from v:
+    if i == len(path):
+        return Some(ref v)
+    match path[i]:
+        case Step.Field(k):
+            match v:
+                case Value.Tuple(xs):
+                    if k < len(xs):
+                        return value_at(xs[k], path, i + 1)
+                case Value.Adt(_, _, xs):
+                    if k < len(xs):
+                        return value_at(xs[k], path, i + 1)
+                case _:
+                    pass
+        case Step.Payload(w):
+            if let Value.Adt(_, variant, _) = v:
+                if variant == w:
+                    return value_at(v, path, i + 1)
+        case Step.Index(k):
+            if let Value.List(xs) = v:
+                if k < len(xs):
+                    return value_at(xs[k], path, i + 1)
+    return None
+
+## Writes `x` at a path from `v`; whether the path leads somewhere.
+pure def set_at(mut v: Value, path: list[Step], i: int, own x: Value) -> bool:
+    if i == len(path):
+        v = x
+        return True
+    match path[i]:
+        case Step.Field(k):
+            if let Value.Tuple(xs) = ref mut v:
+                if k < len(xs):
+                    return set_at(mut xs[k], path, i + 1, x)
+            if let Value.Adt(_, _, xs) = ref mut v:
+                if k < len(xs):
+                    return set_at(mut xs[k], path, i + 1, x)
+        case Step.Payload(w):
+            var holds = False
+            if let Value.Adt(_, variant, _) = v:
+                holds = variant == w
+            if holds:
+                return set_at(mut v, path, i + 1, x)
+        case Step.Index(k):
+            if let Value.List(xs) = ref mut v:
+                if k < len(xs):
+                    return set_at(mut xs[k], path, i + 1, x)
+    return False
+
+## Where the last `.` of a name is.
+pure def last_dot(name: str) -> int?:
+    var at: int? = None
+    var i = 0
+    for c in name.chars():
+        if c == '.':
+            at = Some(i)
+        i += c.len_utf8()
+    return at
+
+## Matches an impl's pattern (its parameters are `$0` and on, bound in
+## `binds`) against a concrete type.
+pure def match_type(pat: Type, ty: Type, mut binds: list[Type?]) -> bool:
+    match pat:
+        case Type.Param(i):
+            if i >= len(binds):
+                return False
+            match binds[i]:
+                case None:
+                    binds[i] = Some(ty.copy())
+                    return True
+                case Some(b):
+                    return b == ty
+        case Type.Named(n, a):
+            let Type.Named(m, b) = ty else:
+                return False
+            if m != n or len(a) != len(b):
+                return False
+            for k in range(len(a)):
+                if not match_type(a[k], b[k], mut binds):
+                    return False
+            return True
+        case Type.Tuple(a):
+            let Type.Tuple(b) = ty else:
+                return False
+            if len(a) != len(b):
+                return False
+            for k in range(len(a)):
+                if not match_type(a[k], b[k], mut binds):
+                    return False
+            return True
+        case Type.Ref(a, mutable):
+            let Type.Ref(b, k) = ty else:
+                return False
+            return mutable == k and match_type(a[0], b[0], mut binds)
+        case _:
+            return pat == ty
+
+## The position `xs[i]` (or `xs[^i]`, `from_end`) names in a list of `n`
+## elements, or the panic of a negative or out-of-bounds index (stage 0's
+## `list_index`).
+pure def list_index(i: int, n: int, from_end: bool, catalog: Catalog) -> int ! Stop:
+    if i < 0 and not from_end:
+        return Err(panic_with(catalog, "panic.negative-index", [param("index", "{i}")]))
+    var at = i
+    if from_end and i >= 0:
+        at = n - i
+    if i < 0 or at < 0 or at >= n:
+        let shown = if from_end: "^{i}" else: "{i}"
+        let ps = [param("len", "{n}"), param("index", shown)]
+        return Err(panic_with(catalog, "panic.index-out-of-bounds", ps))
+    return Ok(at)
+
+## The text of a `str` or `String`.
+pure def text_of(v: Value) -> String?:
+    return match v:
+        case Value.Str(s) | Value.String(s): Some(s.copy())
+        case _: None
+
+## Structural equality; `str` and `String` with the same text are equal.
+pure def equal(a: Value, b: Value) -> bool ! Stop:
+    match (a, b):
+        case (Value.Int(x), Value.Int(y)):
+            return Ok(x == y)
+        case (Value.Float(x), Value.Float(y)):
+            return Ok(x == y)
+        case (Value.F32(x), Value.F32(y)):
+            return Ok(x == y)
+        case (Value.Bool(x), Value.Bool(y)):
+            return Ok(x == y)
+        case (Value.Char(x), Value.Char(y)):
+            return Ok(x == y)
+        case (Value.Unit, Value.Unit):
+            return Ok(True)
+        case (Value.Str(x) | Value.String(x), Value.Str(y) | Value.String(y)):
+            return Ok(x == y)
+        case (Value.Tuple(xs) | Value.List(xs), Value.Tuple(ys) | Value.List(ys)):
+            if len(xs) != len(ys):
+                return Ok(False)
+            for i in range(len(xs)):
+                if not equal(xs[i], ys[i])?:
+                    return Ok(False)
+            return Ok(True)
+        case (Value.Adt(t, v, xs), Value.Adt(u, w, ys)):
+            if t != u or v != w or len(xs) != len(ys):
+                return Ok(False)
+            for i in range(len(xs)):
+                if not equal(xs[i], ys[i])?:
+                    return Ok(False)
+            return Ok(True)
+        case (Value.Fn(x), Value.Fn(y)):
+            return Ok(x == y)
+        case (Value.Ref(_), _) | (_, Value.Ref(_)):
+            return Err(Stop.Beyond("a comparison through a reference"))
+        case _:
+            return Ok(False)
+
+## The order of two values: below 0, 0 or above 0; `None` for NaN and for
+## values without an order.
+pure def compare(a: Value, b: Value) -> int? ! Stop:
+    match (a, b):
+        case (Value.Int(x), Value.Int(y)):
+            return Ok(Some(order(x < y, x > y)))
+        case (Value.Float(x), Value.Float(y)):
+            if x.is_nan() or y.is_nan():
+                return Ok(None)
+            return Ok(Some(order(x < y, x > y)))
+        case (Value.F32(x), Value.F32(y)):
+            if x.is_nan() or y.is_nan():
+                return Ok(None)
+            return Ok(Some(order(x < y, x > y)))
+        case (Value.Bool(x), Value.Bool(y)):
+            let (p, q) = (if x: 1 else: 0, if y: 1 else: 0)
+            return Ok(Some(order(p < q, p > q)))
+        case (Value.Char(x), Value.Char(y)):
+            return Ok(Some(order(x < y, x > y)))
+        case (Value.Unit, Value.Unit):
+            return Ok(Some(0))
+        case (Value.Str(x) | Value.String(x), Value.Str(y) | Value.String(y)):
+            return Ok(Some(order(x < y, x > y)))
+        case (Value.Tuple(xs) | Value.List(xs), Value.Tuple(ys) | Value.List(ys)):
+            for i in range(min(len(xs), len(ys))):
+                let c = compare(xs[i], ys[i])? else:
+                    return Ok(None)
+                if c != 0:
+                    return Ok(Some(c))
+            return Ok(Some(order(len(xs) < len(ys), len(xs) > len(ys))))
+        case _:
+            return Err(Stop.Beyond("an ordering of values it does not order"))
+
+pure def order(less: bool, greater: bool) -> int:
+    if less:
+        return -1
+    if greater:
+        return 1
+    return 0
+
+## An integer operation as stage 0's interpreter computes it (`int_op`):
+## overflow, a zero divisor or a shift out of range panics; `//` floors and
+## `%` has the sign of the divisor (02, "Operators").
+pure def int_op(op: BinOp, x: int, y: int, catalog: Catalog) -> int ! Stop:
+    match op:
+        case BinOp.Add:
+            let r = checked_add(x, y) else:
+                return Err(overflow(catalog, x, op, y))
+            return Ok(r)
+        case BinOp.Sub:
+            let r = checked_sub(x, y) else:
+                return Err(overflow(catalog, x, op, y))
+            return Ok(r)
+        case BinOp.Mul:
+            let r = checked_mul(x, y) else:
+                return Err(overflow(catalog, x, op, y))
+            return Ok(r)
+        case BinOp.Div | BinOp.FloorDiv:
+            if y == 0:
+                return Err(panic_with(catalog, "panic.divide-by-zero", []))
+            if x == INT_MIN and y == -1:
+                return Err(overflow(catalog, x, op, y))
+            return Ok(x // y)
+        case BinOp.Mod:
+            if y == 0:
+                return Err(panic_with(catalog, "panic.divide-by-zero", []))
+            if y == -1:
+                return Ok(0)
+            return Ok(x % y)
+        case BinOp.Pow:
+            if y < 0:
+                let ps = [param("expr", "{x} ** {y}")]
+                return Err(panic_with(catalog, "panic.negative-exponent", ps))
+            let r = checked_pow(x, y) else:
+                return Err(overflow(catalog, x, op, y))
+            return Ok(r)
+        case BinOp.WrapAdd:
+            return Ok(x +% y)
+        case BinOp.WrapSub:
+            return Ok(x -% y)
+        case BinOp.WrapMul:
+            return Ok(x *% y)
+        case BinOp.SatAdd:
+            return Ok(x +| y)
+        case BinOp.SatSub:
+            return Ok(x -| y)
+        case BinOp.SatMul:
+            return Ok(x *| y)
+        case BinOp.Shl | BinOp.Shr:
+            if y < 0 or y >= 64:
+                let ps = [param("amount", "{y}")]
+                return Err(panic_with(catalog, "panic.shift-out-of-range", ps))
+            if op == BinOp.Shl:
+                return Ok(x << y)
+            return Ok(x >> y)
+        case BinOp.BitAnd:
+            return Ok(x & y)
+        case BinOp.BitOr:
+            return Ok(x | y)
+        case BinOp.BitXor:
+            return Ok(x ^ y)
+        case _:
+            return Err(Stop.Beyond("an integer operation it does not compute"))
+
+## Float arithmetic is IEEE 754's: no trap, a division by zero gives an
+## infinity or NaN; `%` has the divisor's sign (decision 18).
+pure def float_op(op: BinOp, x: f64, y: f64) -> f64 ! Stop:
+    match op:
+        case BinOp.Add:
+            return Ok(x + y)
+        case BinOp.Sub:
+            return Ok(x - y)
+        case BinOp.Mul:
+            return Ok(x * y)
+        case BinOp.Div:
+            return Ok(x / y)
+        case BinOp.FloorDiv:
+            return Ok((x / y).floor())
+        case _:
+            return Err(Stop.Beyond("a float operation it does not compute"))
+
+## Whether `owner` is a sized integer type of `int`'s values.
+pure def is_sized(owner: str) -> bool:
+    return match owner:
+        case "u8" | "u16" | "u32" | "i8" | "i16" | "i32": True
+        case _: False
+
+## The least and greatest values of a sized integer type, its bits and
+## whether it is signed.
+pure def bounds(kind: str) -> (int, int, int, bool):
+    return match kind:
+        case "u8": (0, 255, 8, False)
+        case "u16": (0, 65535, 16, False)
+        case "u32": (0, 4294967295, 32, False)
+        case "i8": (-128, 127, 8, True)
+        case "i16": (-32768, 32767, 16, True)
+        case _: (-2147483648, 2147483647, 32, True)
+
+## `v` reduced to a width of `bits`, as two's complement wrapping does.
+pure def wrap(v: int, bits: int, signed: bool) -> int:
+    let m = v & ((1 << bits) - 1)
+    if signed and m >= (1 << (bits - 1)):
+        return m - (1 << bits)
+    return m
+
+# ---------------------------------------------------------------- formatting
+
+impl Interp:
+    ## How `{x}` shows a value (stage 0's `display_into`): the plain text of
+    ## text and characters, `Debug`'s form of anything else.
+    pure def display_into(self, prog: Program, v: Value, mut out: String) -> () ! Stop:
+        match v:
+            case Value.Str(s) | Value.String(s):
+                out.push(s)
+            case Value.Char(c):
+                out.push_char(c)
+            case Value.Ref(p):
+                match self.read(p):
+                    case Ok(t):
+                        self.display_into(prog, t, mut out)?
+                    case Err(_):
+                        out.push("<dangling>")
+            # std's `Contextual` (prelude): `message: cause`.
+            case Value.Adt(ty, _, fields):
+                if ty == "Contextual" and len(fields) == 2:
+                    self.display_into(prog, fields[0], mut out)?
+                    out.push(": ")
+                    self.display_into(prog, fields[1], mut out)?
+                else:
+                    self.debug_into(prog, v, mut out)?
+            case _:
+                self.debug_into(prog, v, mut out)?
+        return Ok(())
+
+    ## How `{x:?}` shows a value (stage 0's `debug_into`): the way it is
+    ## written, `"text"`, `'c'`, `[1, 2]`, `Point(x=1.0, y=2.0)`.
+    pure def debug_into(self, prog: Program, v: Value, mut out: String) -> () ! Stop:
+        match v:
+            case Value.Moved:
+                out.push("<moved>")
+            case Value.Unit:
+                out.push("()")
+            case Value.Int(n):
+                out.push("{n}")
+            case Value.Float(x):
+                out.push("{x}")
+            case Value.F32(x):
+                out.push("{x}")
+            case Value.Bool(b):
+                out.push(if b: "True" else: "False")
+            case Value.Char(c):
+                out.push(quote_char(c))
+            case Value.Str(s) | Value.String(s):
+                out.push(quote_str(s))
+            case Value.Tuple(xs):
+                out.push("(")
+                self.debug_list(prog, xs, mut out)?
+                if len(xs) == 1:
+                    out.push(",")
+                out.push(")")
+            case Value.List(xs):
+                out.push("[")
+                self.debug_list(prog, xs, mut out)?
+                out.push("]")
+            case Value.Adt(ty, variant, fields):
+                var is_struct = True
+                if ty == "Option" or ty == "Result":
+                    is_struct = False
+                if let Some(TypeDecl.Enum(_, _, _, _, _, _, _)) = prog.type_decl(ty):
+                    is_struct = False
+                if is_struct:
+                    if ty == "System":
+                        out.push("System")
+                        return Ok(())
+                    var names: list[String?] = []
+                    if let Some(TypeDecl.Struct(_, _, fs, _, _, _)) = prog.type_decl(ty):
+                        for f in fs:
+                            names.push(Some(f.name.copy()))
+                    var short = ty.copy()
+                    if let Some(dot) = last_dot(ty):
+                        short = ty.byte_slice(dot + 1, ty.byte_len()).to_string()
+                    out.push(short)
+                    out.push("(")
+                    self.debug_fields(prog, fields, names, mut out)?
+                    out.push(")")
+                else:
+                    let (vname, names) = variant_info(prog, ty, variant)
+                    out.push(vname)
+                    if not fields.is_empty():
+                        out.push("(")
+                        self.debug_fields(prog, fields, names, mut out)?
+                        out.push(")")
+            case Value.Ref(p):
+                match self.read(p):
+                    case Ok(t):
+                        self.debug_into(prog, t, mut out)?
+                    case Err(_):
+                        out.push("<dangling>")
+            case Value.Fn(n):
+                out.push("<fn {n}>")
+            case Value.Closure(_, _, _):
+                out.push("<closure>")
+            case Value.Range(_, _, _):
+                out.push("<iter>")
+        return Ok(())
+
+    pure def debug_list(self, prog: Program, xs: list[Value], mut out: String) -> () ! Stop:
+        for i in range(len(xs)):
+            if i > 0:
+                out.push(", ")
+            self.debug_into(prog, xs[i], mut out)?
+        return Ok(())
+
+    pure def debug_fields(
+        self, prog: Program, xs: list[Value], names: list[String?], mut out: String
+    ) -> () ! Stop:
+        for i in range(len(xs)):
+            if i > 0:
+                out.push(", ")
+            if i < len(names):
+                if let Some(n) = names[i]:
+                    out.push(n)
+                    out.push("=")
+            self.debug_into(prog, xs[i], mut out)?
+        return Ok(())
+
+## A variant's name and field names (stage 0's `variant_info`).
+pure def variant_info(prog: Program, ty: str, variant: int) -> (String, list[String?]):
+    if ty == "Option":
+        return ((if variant == 0: "Some" else: "None").to_string(), [])
+    if ty == "Result":
+        return ((if variant == 0: "Ok" else: "Err").to_string(), [])
+    if let Some(TypeDecl.Enum(_, _, variants, _, _, _, _)) = prog.type_decl(ty):
+        if 0 <= variant and variant < len(variants):
+            var names: list[String?] = []
+            for (n, _) in variants[variant].fields:
+                names.push(n.copy())
+            return (variants[variant].name.copy(), names)
+    return ("{ty}#{variant}", [])
+
+## Text in double quotes, as `Debug` writes it (stage 0's `quote_str`).
+pure def quote_str(s: str) -> String:
+    var q = String.new("\"")
+    for c in s.chars():
+        match c:
+            case '"':
+                q.push("\\\"")
+            case '\\':
+                q.push("\\\\")
+            case '\n':
+                q.push("\\n")
+            case '\t':
+                q.push("\\t")
+            case '\r':
+                q.push("\\r")
+            case _:
+                if is_control(c):
+                    q.push("\\u{{{hex(c.code())}}}")
+                else:
+                    q.push_char(c)
+    q.push_char('"')
+    return q
+
+## A character in single quotes, as `Debug` writes it (stage 0's
+## `quote_char`).
+pure def quote_char(c: char) -> String:
+    return match c:
+        case '\'': "'\\''".to_string()
+        case '\\': "'\\\\'".to_string()
+        case '\n': "'\\n'".to_string()
+        case '\t': "'\\t'".to_string()
+        case '\r': "'\\r'".to_string()
+        case _: if is_control(c): "'\\u{{{hex(c.code())}}}'" else: "'{c}'"
+
+## Whether a character is a control character (Unicode's `Cc`).
+pure def is_control(c: char) -> bool:
+    let n = c.code()
+    return n < 0x20 or (0x7F <= n and n <= 0x9F)
+
+# ---------------------------------------------------------------- baking
+
+## Builds the statements that make a value (stage 0's `Baker`).
+struct Baker:
+    locals: list[LocalDecl]
+    stmts: list[Statement]
+    intrinsics: list[String]
+
+impl Baker:
+    ## Builds `v` of type `ty` as an operand: a constant, or a new local
+    ## that holds it.
+    pure def part(mut self, decls: Decls, v: Value, ty: Type) -> Operand ! Stop:
+        if let Some(k) = scalar(v):
+            return Ok(Operand.Const(k))
+        let l = LocalId(index=len(self.locals))
+        self.locals.push(LocalDecl(ty=ty.copy(), name=None, loc=None, once=False))
+        self.build(decls, v, ty, Place.local(l))?
+        return Ok(Operand.Move(Place.local(l)))
+
+    pure def call(mut self, own dest: Place, name: str, own arg: Const):
+        if not self.intrinsics.contains(name.to_string()):
+            self.intrinsics.push(name.to_string())
+        let callee = Callee.Intrinsic(name=name.to_string(), args=[])
+        let kind = StatementKind.Call(dest=dest, callee=callee, args=[Operand.Const(arg)])
+        self.stmts.push(Statement(kind=kind, loc=None))
+
+    pure def build(mut self, decls: Decls, v: Value, ty: Type, dest: Place) -> () ! Stop:
+        if let Some(k) = scalar(v):
+            self.assign(dest.copy(), Rvalue.Use(Operand.Const(k)))
+            return Ok(())
+        match v:
+            case Value.String(s):
+                self.call(dest.copy(), "String.new", Const.Str(s.copy()))
+            # An `f32` from the `f64` that holds it.
+            case Value.F32(x):
+                self.call(dest.copy(), "f32.from_literal", Const.Float(x.to_f64()))
+            case Value.Tuple(xs):
+                var ts: list[Type] = []
+                if let Type.Tuple(es) = ty:
+                    ts = es.copy()
+                var ops: list[Operand] = []
+                for i in range(len(xs)):
+                    var t = Type.Unit
+                    if i < len(ts):
+                        t = ts[i].copy()
+                    ops.push(self.part(decls, xs[i], t)?)
+                self.assign(dest.copy(), Rvalue.Aggregate(kind=Aggregate.Tuple, operands=ops))
+            case Value.List(xs):
+                var ops: list[Operand] = []
+                for x in xs:
+                    ops.push(self.part(decls, x, type_arg(ty, 0))?)
+                self.assign(dest.copy(), Rvalue.Aggregate(kind=Aggregate.List, operands=ops))
+            case Value.Adt(name, variant, fields):
+                var is_struct = False
+                if let Some(TypeDecl.Struct(_, _, _, _, _, _)) = decls.get(name):
+                    is_struct = True
+                if is_struct:
+                    var ops: list[Operand] = []
+                    for i in range(len(fields)):
+                        let t = field(decls, ty, name, None, i)?
+                        ops.push(self.part(decls, fields[i], t)?)
+                    let k = Aggregate.Struct(name.copy())
+                    self.assign(dest.copy(), Rvalue.Aggregate(kind=k, operands=ops))
+                    return Ok(())
+                var vname = String.new()
+                if name == "Option":
+                    vname = (if variant == 0: "Some" else: "None").to_string()
+                elif name == "Result":
+                    vname = (if variant == 0: "Ok" else: "Err").to_string()
+                else:
+                    if let Some(TypeDecl.Enum(_, _, variants, _, _, _, _)) = decls.get(name):
+                        if variant < len(variants):
+                            vname = variants[variant].name.copy()
+                    if vname.is_empty():
+                        return Err(Stop.NotKept("a value of type `{name}`"))
+                var ops: list[Operand] = []
+                for i in range(len(fields)):
+                    let t = field(decls, ty, name, Some(variant), i)?
+                    ops.push(self.part(decls, fields[i], t)?)
+                let k = Aggregate.Variant(name.copy(), vname)
+                self.assign(dest.copy(), Rvalue.Aggregate(kind=k, operands=ops))
+            case _:
+                return Err(Stop.NotKept(kind_of(v)))
+        return Ok(())
+
+    pure def assign(mut self, own dest: Place, own rv: Rvalue):
+        self.stmts.push(Statement(kind=StatementKind.Assign(place=dest, value=rv), loc=None))
+
+## The value of a constant operand.
+pure def const_value(c: Const) -> Value:
+    return match c:
+        case Const.Int(n): Value.Int(n)
+        case Const.Float(x): Value.Float(x)
+        case Const.Bool(b): Value.Bool(b)
+        case Const.Char(ch): Value.Char(ch)
+        case Const.Str(s): Value.Str(s.copy())
+        case Const.Unit: Value.Unit
+        case Const.Fn(n): Value.Fn(n.copy())
+
+## A value written as a constant.
+pure def scalar(v: Value) -> Const?:
+    return match v:
+        case Value.Unit: Some(Const.Unit)
+        case Value.Int(n): Some(Const.Int(n))
+        case Value.Float(x): Some(Const.Float(x))
+        case Value.Bool(b): Some(Const.Bool(b))
+        case Value.Char(c): Some(Const.Char(c))
+        case Value.Str(s): Some(Const.Str(s.copy()))
+        case _: None
+
+## Type argument `i` of a named type.
+pure def type_arg(t: Type, i: int) -> Type:
+    if let Type.Named(_, args) = t:
+        if i < len(args):
+            return args[i].copy()
+    return Type.Unit
+
+## The type of field `i` of a value of type `ty` (declared `name`), of
+## variant `v` for an enum.
+pure def field(decls: Decls, ty: Type, name: str, v: int?, i: int) -> Type ! Stop:
+    # An error's payload is typed by its own error set.
+    var t = ty.copy()
+    if let Type.ErrSet(_) = ty:
+        t = Type.Named(name=name.to_string(), args=[])
+    let found = field_ty(decls, t, v, i) else:
+        return Err(Stop.NotKept("a value of type `{name}`"))
+    return Ok(found)
+
+## What a value with no literal form is, for its error (stage 0's
+## `kind_of`).
+pure def kind_of(v: Value) -> String:
+    let what = match v:
+        case Value.Ref(_): "a reference"
+        case Value.Fn(_) | Value.Closure(_, _, _): "a function"
+        case Value.Range(_, _, _): "an iterator"
+        case _: "a value"
+    return what.to_string()
+
+# ---------------------------------------------------------------- the parts of a failed check
+
+## The diagram under a failed check's text that shows the values of its
+## parts (stage 0's `format::parts_diagram`): a bar from each part's
+## column down to its value, on the first row where the value fits.
+pub pure def parts_diagram(text: str, shown: list[(int, String)]) -> String:
+    if shown.is_empty() or text.contains("\n"):
+        return String.new()
+    # One part a column, the first shown, the rightmost first.
+    var parts: list[(int, String)] = []
+    for (c, v) in shown:
+        var seen = False
+        for (k, _) in parts:
+            if k == c:
+                seen = True
+        if not seen:
+            parts.push((c, v.copy()))
+    parts.sort_by((a, b) -> b.0.cmp(a.0))
+    # rows[r] holds the values on row r + 1 (row 0 is the bars), as
+    # (column, text); depth[i] the row of part i.
+    var rows: list[list[(int, String)]] = []
+    var depth: list[int] = []
+    var width = 0
+    for (c, v) in parts:
+        let n = chars_in(v)
+        var r = -1
+        for i in range(len(rows)):
+            if r < 0 and fits(rows[i], c, n):
+                r = i
+        if r < 0:
+            rows.push([])
+            r = len(rows) - 1
+        rows[r].push((c, v.copy()))
+        depth.push(r)
+        width = max(width, c + n)
+    width += 1
+    var out = "\n    {text}"
+    # The bar row, then each row of values with the bars that pass it.
+    for r in range(len(rows) + 1):
+        var line: list[char] = []
+        for _ in range(width):
+            line.push(' ')
+        for i in range(len(parts)):
+            # A part's bar runs down through the rows above its value.
+            let c = parts[i].0
+            if (r == 0 or depth[i] >= r) and c < width:
+                line[c] = '│'
+        if r > 0:
+            for (c, v) in rows[r - 1]:
+                var k = c
+                for ch in v.chars():
+                    if k < width:
+                        line[k] = ch
+                    k += 1
+        var s = String.new()
+        for ch in line:
+            s.push_char(ch)
+        out.push("\n    ")
+        out.push(s.trim_end())
+    return out
+
+## Whether a value of `n` characters at column `c` keeps clear of a row's.
+pure def fits(row: list[(int, String)], c: int, n: int) -> bool:
+    for (k, w) in row:
+        if not (c + n < k or k + chars_in(w) < c):
+            return False
+    return True
+
+## The number of characters of a text.
+pure def chars_in(s: str) -> int:
+    var n = 0
+    for _ in s.chars():
+        n += 1
+    return n
+
+# ---------------------------------------------------------------- tests
+
+test "a failed check shows its parts' values under their columns":
+    assert parts_diagram("len(xs) == 2", []) == ""
+    let two = [(0, "1".to_string()), (4, "[1]".to_string())]
+    assert parts_diagram("len(xs) == 2", two) == "\n    len(xs) == 2\n    │   │\n    1   [1]"
+    # A value that does not fit beside another goes on a row of its own.
+    let wide = [(0, "100".to_string()), (2, "7".to_string())]
+    assert parts_diagram("a + b", wide) == "\n    a + b\n    │ │\n    │ 7\n    100"
+
+test "an index at compile time panics with the catalog's messages":
+    var text = String.new()
+    text.push("R0002 runtime panic.index-out-of-bounds ")
+    text.push("index out of bounds: the length is {{len}} but the index is {{index}}\n")
+    text.push("R0015 runtime panic.negative-index the index {{index}} is negative\n")
+    let catalog = Catalog.parse(text)
+    var message = String.new()
+    if let Err(Panicked(m)) = list_index(3, 2, False, catalog):
+        message = m.copy()
+    assert message == "index out of bounds: the length is 2 but the index is 3"
+    if let Err(Panicked(m)) = list_index(-1, 2, False, catalog):
+        message = m.copy()
+    assert message == "the index -1 is negative"
+    if let Err(Panicked(m)) = list_index(3, 2, True, catalog):
+        message = m.copy()
+    assert message == "index out of bounds: the length is 2 but the index is ^3"
+    var last = -1
+    if let Ok(at) = list_index(1, 2, True, catalog):
+        last = at
+    assert last == 1

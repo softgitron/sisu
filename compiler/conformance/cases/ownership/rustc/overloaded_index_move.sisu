@@ -1,0 +1,7 @@
+# After rustc's `borrowck-overloaded-index-move-from-vec`: a value is
+# moved out of a list by indexing it (Rust's E0507).
+
+def main():
+    let v = ["a".to_string(), "b".to_string()]
+    let bad = v[0]
+    print(bad)

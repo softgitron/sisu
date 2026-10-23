@@ -1,0 +1,3 @@
+7:9-7:18 E0367 type.reassign-let name="total"
+  label 7:9-7:18 borrow.assigned-in-loop name="total"
+  fix type.declare-var

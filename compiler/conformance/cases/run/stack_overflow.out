@@ -1,0 +1,3 @@
+recursing
+the outermost guard is dropped
+main's defer runs

@@ -1,0 +1,7 @@
+# A returned borrow must come from a parameter in the `from` clause.
+
+def pick(a: list[int], b: list[int]) -> ref int from a:
+    return ref b[0]
+
+def main():
+    print(pick([1], [2]))

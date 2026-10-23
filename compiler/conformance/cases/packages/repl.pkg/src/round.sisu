@@ -1,0 +1,3 @@
+## The area of a circle of radius `r`, in whole units.
+pub def area(r: int) -> int:
+    return 3 * r * r

@@ -1,0 +1,15 @@
+# The pages of a package (decision 258) beyond the conformance suite's:
+# re-exports of each kind of item, of a module, under another name, of a
+# dependency's and of the standard library's, a set inferred from errors of
+# other modules and of a dependency, an item a feature that is off leaves
+# out, and what another package may not name.
+[package]
+name = "shop"
+version = "0.2.0"
+
+[dependencies]
+money = { path = "../money" }
+
+[features]
+default = []
+fancy = []

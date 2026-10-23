@@ -1,0 +1,7 @@
+panic: invariant of `Opts` failed: self.count >= 0
+    self.count >= 0
+    │
+    -1
+  at the invariant of Opts (cli.sisu:16:15)
+  at show (cli.sisu:19:11)
+  at main (cli.sisu:47:5)

@@ -1,0 +1,15 @@
+# A struct body line that is neither a field, a method nor `pass` is
+# reported once per body (E0126), also when a struct declared inside the
+# body comes between two such lines.
+struct A:
+    print(1)
+    struct B:
+        x: int
+    print(2)
+    let y = 3
+
+struct C:
+    struct D:
+        print(4)
+    print(5)
+    print(6)

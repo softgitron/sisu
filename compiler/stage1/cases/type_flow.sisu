@@ -1,0 +1,43 @@
+# Branches, loops, `?` and the rules of what a body leaves.
+error Missing:
+    Gone
+
+error Other:
+    Bad
+
+def find(xs: list[int], x: int) -> int ! Missing:
+    for i in range(len(xs)):
+        if xs[i] == x:
+            return Ok(i)
+    return Err(Gone)
+
+def first(xs: list[int]) -> int?:
+    let n = xs.first()?
+    return Some(n)
+
+def lookup(xs: list[int]) -> int ! Other:
+    let i = find(xs, 3)?
+    return Ok(i)
+
+def pick(flag: bool) -> str:
+    let n = if flag: 1 elif not flag: 2 else: "none"
+    while True:
+        if flag:
+            break
+    return "done"
+
+def loop_forever() -> int:
+    while True:
+        pass
+
+def main():
+    print(pick(True))
+    print(first([1]))
+    find([1], 1)
+    continue
+
+def ends(xs: list[int], s: str) -> int:
+    let last = xs[-1]
+    let c = s[0]
+    let n = 3
+    return n[0] + last

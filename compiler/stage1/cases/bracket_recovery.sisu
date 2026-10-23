@@ -1,0 +1,17 @@
+# A bracket left open is closed where a statement keyword starts a line
+# at or left of the bracket's line, and where a block header ends in `:`
+# before an indented line; a closer of another kind closes up to its
+# opener.
+def f(x: int, y: (int, str) -> int:
+    let a = g(1, [2, 3)
+    let b = (4 +
+    return a
+
+def g(xs: list[int]) -> int:
+    let c = {1: [2, (3]}
+    let d = xs[0]]
+    return c
+
+class Wrong:
+    def h(self:
+        pass

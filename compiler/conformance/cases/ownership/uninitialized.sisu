@@ -1,0 +1,8 @@
+# A `let` declared without a value must be assigned on every path before
+# it is used.
+
+def main():
+    let label: String
+    if len("abc") > 5:
+        label = "long".to_string()
+    print(label)

@@ -1,0 +1,3 @@
+6:11-6:31 E0612 comptime.embed-failed path="missing.txt" reason="there is no such file"
+7:11-7:34 E0612 comptime.embed-failed path="../outside.txt" reason="the path must stay inside the program's directory"
+8:11-8:22 E0613 comptime.embed-path

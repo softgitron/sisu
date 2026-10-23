@@ -1,0 +1,37 @@
+# Reflection in tests (17; decision 251): a test whose body reflects is a
+# template made once, before anything runs, like a function without type
+# parameters; so is each case of a parametrised test, whose body begins
+# by binding the case. A test that takes a capability gets its fake as
+# any other test does.
+
+struct Point:
+    x: int
+    y: int
+
+const POINTS: list[Point] = [Point(x=1, y=2), Point(x=3, y=4)]
+
+test "fields are counted":
+    var n = 0
+    comptime for f in reflect.fields_of(Point):
+        n += 1
+    assert n == 2
+
+test "names with a clock"(clock: TestClock):
+    var names: list[String] = []
+    comptime for f in reflect.fields_of(Point):
+        names.push(f.name)
+    assert names == ["x", "y"]
+    assert clock.now() == clock.now()
+
+test "sums" for p, total in [(Point(x=1, y=2), 3), (Point(x=0, y=0), 0)]:
+    var sum = 0
+    comptime for f in reflect.fields_of(Point):
+        sum += p.[f]
+    assert sum == total
+
+test "every point" for p in POINTS:
+    comptime for f in reflect.fields_of(Point):
+        assert p.[f] > 0
+
+def main():
+    print(reflect.name_of(Point))

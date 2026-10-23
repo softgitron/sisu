@@ -1,0 +1,8 @@
+# A wrong program: a scope's body returns the handle of one of its tasks,
+# which ends with the scope.
+
+def main():
+    let h = task.scope do s:
+        return s.spawn do:
+            return 1
+    print(h.join().expect("joined"))

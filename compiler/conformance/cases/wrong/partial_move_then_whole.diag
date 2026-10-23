@@ -1,0 +1,2 @@
+15:5-15:15 E0401 borrow.use-after-partial-move name="u" part="u.name" line="13"
+  label 13:16-13:22 borrow.moved-here name="u.name"

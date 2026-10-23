@@ -1,0 +1,12 @@
+moved into a call:
+  keep a
+  drop a
+assigned again after a move:
+  keep b1
+  drop b1
+  b is b2
+moved into another binding:
+  d is c
+end of main
+  drop c
+  drop b2

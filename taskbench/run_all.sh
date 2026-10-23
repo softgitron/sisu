@@ -1,67 +1,108 @@
 #!/usr/bin/env bash
 # Runs every benchmark of the bet-3 harness for every strategy configuration and
 # the Go and Java controls, writing results/<machine>/<date>/<benchmark>.csv,
-# machine-spec.csv and versions.txt.
+# machine-spec.csv, versions.txt, controls-versions.txt, timing.csv and load.csv.
 #
-# Usage: ./run_all.sh [--scale smoke|full] [--threads N] [--machine-id ID] [--out DIR] [--no-controls]
-#                     [--only BENCH[,BENCH...]]
+# Usage: ./run_all.sh [--scale smoke|full] [--reps N] [--threads N] [--machine-id ID] [--out DIR]
+#                     [--no-controls] [--only BENCH[,BENCH...]] [--quiet-below CPUS]
 #
-# smoke (default) sizes every run for a development machine (minutes in total).
-# full is for the dedicated machines of the Phase 1 report: 100k and 1M idle
-# tasks, 10k echo connections, 100k idle connections, 1M cancelled reads. It
-# needs RLIMIT_NOFILE >= 200064 (raise the hard limit; sysctls stay at their
-# defaults, which is what the bet-3 scale row is about) and about 16 GiB of RAM.
+# smoke (default) sizes every run for a development machine (minutes in total,
+# one repetition). full is the Phase 1 report's scale (scale.sh): 100k and 1M
+# idle tasks, 1M tasks held for 60 s, 10k and 1000 echo connections, the most
+# idle connections the RLIMIT_NOFILE hard limit allows (up to 100k), 1M cancelled
+# reads, and five repetitions of every cell in fresh processes (proposal/20,
+# section 6.5). It needs about 16 GiB of RAM; sysctls stay at their defaults,
+# which is what the bet-3 scale row is about.
+#
+# Repetitions run in rep-major order: every benchmark (with its controls) once,
+# then again, so a run that is cut short still has every benchmark.
 #
 # --only runs a subset of the benchmarks at the chosen scale, for example
-# "--scale full --only idle-memory,max-tasks" on a 16 GiB machine whose
-# RLIMIT_NOFILE is too low for the full echo runs.
+# "--scale full --only idle-memory,max-tasks".
+#
+# --quiet-below CPUS is for a machine shared with other work: every process waits
+# until the rest of the machine uses fewer than CPUS CPUs, and is measured again
+# when the rest used more while it ran (load.sh). load.csv records the load
+# during every process either way.
 #
 # A configuration that fails (for example strategy A at 100k tasks, which hits
 # vm.max_map_count) is a result and is recorded with status "failed". A process
 # that dies (a crash would be a harness bug) is recorded as a "process_exit" row.
 set -uo pipefail
 cd "$(dirname "$0")"
+. ./scale.sh
 
 SCALE=smoke
+REPS=""
 THREADS=$(nproc)
 MACHINE=${MACHINE_ID:-$(cat /proc/sys/kernel/hostname 2>/dev/null || hostname)}
 OUT=""
 CONTROLS=1
 ONLY=""
+LOAD_QUIET=off
+usage() {
+  echo "usage: $0 [--scale smoke|full] [--reps N] [--threads N] [--machine-id ID] [--out DIR] [--no-controls] [--only BENCH,...] [--quiet-below CPUS]" >&2
+  exit 2
+}
 while [ $# -gt 0 ]; do
   case "$1" in
     --scale) SCALE=$2; shift 2 ;;
+    --reps) REPS=$2; shift 2 ;;
     --threads) THREADS=$2; shift 2 ;;
     --machine-id) MACHINE=$2; shift 2 ;;
     --out) OUT=$2; shift 2 ;;
     --no-controls) CONTROLS=0; shift ;;
     --only) ONLY=$2; shift 2 ;;
-    *) echo "usage: $0 [--scale smoke|full] [--threads N] [--machine-id ID] [--out DIR] [--no-controls] [--only BENCH,...]" >&2; exit 2 ;;
+    --quiet-below) LOAD_QUIET=$2; shift 2 ;;
+    *) usage ;;
   esac
 done
+case "$SCALE" in smoke|full) ;; *) usage ;; esac
+[ "$LOAD_QUIET" = off ] || awk -v q="$LOAD_QUIET" 'BEGIN {exit !(q + 0 > 0)}' || usage
+scale_params "$SCALE" "$THREADS"
+REPS=${REPS:-$REPS_DEFAULT}
 DATE=$(date -u +%Y-%m-%d)
 OUT=${OUT:-results/$MACHINE/$DATE}
 mkdir -p "$OUT"
+. ./load.sh
 
 cargo build --release --quiet || exit 1
 BIN=target/release/taskbench
 
+# A digest of the sources the binary and the controls were built from, so a
+# results directory names its harness even when it was produced from a working
+# tree (the commit is GITHUB_SHA on CI, or whatever commit the results land in).
+source_digest() {
+  find src tests controls Cargo.toml Cargo.lock run_all.sh scale.sh load.sh -type f \
+    \( -name '*.rs' -o -name '*.go' -o -name '*.java' -o -name '*.sh' -o -name '*.py' -o -name '*.toml' \
+       -o -name '*.lock' -o -name 'go.mod' \) -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1
+}
+# One record per invocation (a results directory may be filled by several, one
+# per --only group).
 {
+  echo "=== run_all.sh --scale $SCALE --reps $REPS${ONLY:+ --only $ONLY}"
   echo "date_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo "scale: $SCALE threads: $THREADS machine_id: $MACHINE"
+  echo "scale: $SCALE reps: $REPS threads: $THREADS machine_id: $MACHINE"
   echo "rustc: $(rustc --version)"
   echo "cargo: $(cargo --version)"
   echo "uname: $(uname -a)"
-  echo "taskbench: $($BIN help | head -1)"
-} > "$OUT/versions.txt"
+  echo "taskbench: $($BIN help | head -1) version $(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+  echo "source_sha256: $(source_digest)"
+  echo "binary_sha256: $(sha256sum "$BIN" | cut -d' ' -f1)"
+  echo "commit: ${GITHUB_SHA:-not recorded (working tree; see source_sha256)}"
+  echo "rlimit_nofile_hard: $(nofile_hard); idle connections: $IC_CONNS; echo connections: $ECHO_CONNS"
+  echo "quiet_below: $LOAD_QUIET (CPUs used by other processes; load.sh)"
+} >> "$OUT/versions.txt"
 "$BIN" machine-spec --machine-id "$MACHINE" --csv "$OUT/machine-spec.csv" --quiet
+TIMING="$OUT/timing.csv"
+[ -s "$TIMING" ] || echo "rep,benchmark,start_utc,seconds" > "$TIMING"
 
-# run BENCH ARGS...: one benchmark process; a non-zero exit becomes a CSV row.
+# run BENCH ARGS...: one benchmark process (load.sh's load_run measures it again
+# if the machine was busy); a non-zero exit becomes a CSV row.
 run() {
   local bench=$1; shift
-  if [ -n "$ONLY" ] && [[ ",$ONLY," != *",$bench,"* ]]; then return 0; fi
   echo "== $bench $*"
-  "$BIN" "$bench" "$@" --threads "$THREADS" --machine-id "$MACHINE" --csv "$OUT/$bench.csv" --quiet
+  load_run taskbench "$bench" "$*" "$BIN" "$bench" "$@" --threads "$THREADS" --machine-id "$MACHINE" --csv "$LOAD_TMP" --quiet
   local rc=$?
   if [ $rc -ne 0 ]; then
     local strat=B base=A prev=""
@@ -79,77 +120,144 @@ run() {
   fi
 }
 
-if [ "$SCALE" = full ]; then
-  ROUNDS=200000; IM_SIZES="100000 1000000"; MT=1000000; GUARD=512M
-  ECHO_ARGS="--connections 10000 --duration 30 --warmup-secs 5"; IC=100000
-  ST_ARGS="--duration 10"; PO_REPS=31; CU_TASKS=1000000; CU_CONC=8192; OS_MT=30000; OS_IM=10000
-else
-  ROUNDS=20000; IM_SIZES="10000"; MT=100000; GUARD=1G
-  ECHO_ARGS="--connections 1000 --duration 3 --warmup-secs 1"; IC=5000
-  ST_ARGS="--duration 2"; PO_REPS=11; CU_TASKS=4096; CU_CONC=512; OS_MT=5000; OS_IM=2000
-fi
-
-# Stackful configurations: the five strategies and the reservation sizes of Phase 1.
+# The reservation sizes of Phase 1. "D --base B" is split into words on purpose
+# wherever it is used unquoted.
 RESERVATIONS="128K 1M 8M"
 
-# spawn-join
-# shellcheck disable=SC2086
-for s in A B C D "D --base B" E tokio os-threads; do run spawn-join --strategy $s --rounds $ROUNDS; done
-run spawn-join --strategy A --stack-cache 1024 --rounds $ROUNDS
-run spawn-join --strategy D --stack-cache 1024 --rounds $ROUNDS
-run spawn-join --strategy B --rounds $((ROUNDS / 10)) --batch 100
-run spawn-join --strategy B --rounds $ROUNDS --scope-per-round
+bench_spawn_join() {
+  local sj="--rounds $SJ_ROUNDS --warmup $SJ_WARMUP"
+  # shellcheck disable=SC2086
+  for s in A B C D "D --base B" E tokio os-threads; do run spawn-join --strategy $s $sj; done
+  # shellcheck disable=SC2086
+  run spawn-join --strategy A --stack-cache 1024 $sj
+  # shellcheck disable=SC2086
+  run spawn-join --strategy D --stack-cache 1024 $sj
+  run spawn-join --strategy B --rounds $((SJ_ROUNDS / 10)) --warmup $((SJ_WARMUP / 10)) --batch 100
+  # shellcheck disable=SC2086
+  run spawn-join --strategy B $sj --scope-per-round
+}
 
-# idle-memory, after shallow use and after a 32 KiB excursion
-for n in $IM_SIZES; do
-  for r in $RESERVATIONS; do
-    for s in A B D; do run idle-memory --strategy "$s" --reservation "$r" --tasks "$n"; done
-    run idle-memory --strategy D --base B --reservation "$r" --tasks "$n"
+# idle-memory, after shallow use and after a 32 KiB excursion. Strategies that
+# keep their pages (A, B, C) measure only the shallow phase at IM_SKIP_AT tasks
+# and above (policy 7); D(A), D(B), E and tokio run both phases everywhere.
+bench_idle_memory() {
+  local im="--settle-ms $IM_SETTLE_MS"
+  for n in $IM_SIZES; do
+    local skip
+    skip=$(skip_excursion_at "$n")
+    for r in $RESERVATIONS; do
+      # shellcheck disable=SC2086
+      for s in A B; do run idle-memory --strategy "$s" --reservation "$r" --tasks "$n" $im $skip; done
+      # shellcheck disable=SC2086
+      run idle-memory --strategy D --reservation "$r" --tasks "$n" $im
+      # shellcheck disable=SC2086
+      run idle-memory --strategy D --base B --reservation "$r" --tasks "$n" $im
+    done
+    # shellcheck disable=SC2086
+    for c in 4K 8K 16K; do run idle-memory --strategy C --stack-size "$c" --tasks "$n" $im $skip; done
+    # shellcheck disable=SC2086
+    run idle-memory --strategy E --tasks "$n" $im
+    # shellcheck disable=SC2086
+    run idle-memory --strategy tokio --tasks "$n" $im
   done
-  for c in 4K 8K 16K; do run idle-memory --strategy C --stack-size "$c" --tasks "$n"; done
-  run idle-memory --strategy E --tasks "$n"
-  run idle-memory --strategy tokio --tasks "$n"
-done
-run idle-memory --strategy os-threads --tasks $OS_IM
+  # shellcheck disable=SC2086
+  run idle-memory --strategy os-threads --tasks "$OS_IM" $im
+}
 
-# max-tasks under the current sysctls
-for s in A B C D "D --base B" E tokio; do run max-tasks --strategy $s --tasks $MT --mem-guard $GUARD; done
-run max-tasks --strategy os-threads --tasks $OS_MT --mem-guard $GUARD
+# max-tasks under the current sysctls; a run that reaches the cap holds 60 s at full scale.
+bench_max_tasks() {
+  local hold=""
+  [ "$MT_HOLD" != 0 ] && hold="--hold-secs $MT_HOLD"
+  # shellcheck disable=SC2086
+  for s in A B C D "D --base B" E tokio; do run max-tasks --strategy $s --tasks "$MT_CAP" --mem-guard "$MT_GUARD" $hold; done
+  # shellcheck disable=SC2086
+  run max-tasks --strategy os-threads --tasks "$OS_MT" --mem-guard "$MT_GUARD" $hold
+}
 
-# echo and idle connections ("D --base B" is split into words on purpose)
-# shellcheck disable=SC2086
-for s in A B C D "D --base B" E tokio; do run echo --strategy $s $ECHO_ARGS; done
-# shellcheck disable=SC2086
-for s in A B C D "D --base B" E tokio; do run idle-connections --strategy $s --connections $IC; done
+bench_echo() {
+  for c in $ECHO_CONNS; do
+    # shellcheck disable=SC2086
+    for s in A B C D "D --base B" E tokio; do
+      run echo --strategy $s --connections "$c" --duration "$ECHO_DURATION" --warmup-secs "$ECHO_WARMUP"
+    done
+  done
+}
 
-# deep recursion: clean "stack exhausted" everywhere
-for r in $RESERVATIONS; do
-  for s in A B D; do run deep-recursion --strategy "$s" --reservation "$r"; done
-  run deep-recursion --strategy D --base B --reservation "$r"
-done
-for c in 2K 8K 16K; do run deep-recursion --strategy C --stack-size "$c"; done
-run deep-recursion --strategy E
-run deep-recursion --strategy tokio
+bench_idle_connections() {
+  # shellcheck disable=SC2086
+  for s in A B C D "D --base B" E tokio; do
+    run idle-connections --strategy $s --connections "$IC_CONNS" --settle-ms "$IC_SETTLE_MS"
+  done
+}
 
-# starvation: yield points every 10000 iterations (about 20 us), none, and dense
-# shellcheck disable=SC2086
-for s in A B C D "D --base B" E tokio os-threads; do run starvation --strategy $s $ST_ARGS; done
-# shellcheck disable=SC2086
-run starvation --strategy B $ST_ARGS --yield-every 0
-# shellcheck disable=SC2086
-run starvation --strategy B $ST_ARGS --yield-every 1000
+# deep recursion: clean "stack exhausted" everywhere, at the default (policy) probe
+# reserve; --framed adds the worst frame shape for the reserve (stackful only)
+bench_deep_recursion() {
+  for r in $RESERVATIONS; do
+    for s in A B D; do run deep-recursion --strategy "$s" --reservation "$r" --framed; done
+    run deep-recursion --strategy D --base B --reservation "$r" --framed
+  done
+  for c in 2K 8K 16K; do run deep-recursion --strategy C --stack-size "$c" --framed; done
+  run deep-recursion --strategy E
+  run deep-recursion --strategy tokio
+}
 
-# probe overhead
-for s in B C A E; do run probe-overhead --strategy "$s" --reps $PO_REPS; done
+# starvation: four compute tasks per worker with yield points every K iterations
+# (ST_KS), plus a dense budget (1000) and none at all (0: reported, not counted)
+bench_starvation() {
+  local st="--tasks $ST_TASKS --duration $ST_DURATION"
+  for k in $ST_KS; do
+    # shellcheck disable=SC2086
+    for s in A B C D "D --base B" E tokio; do run starvation --strategy $s $st --yield-every "$k"; done
+  done
+  # shellcheck disable=SC2086
+  run starvation --strategy os-threads $st
+  # shellcheck disable=SC2086
+  run starvation --strategy B $st --yield-every 1000
+  # shellcheck disable=SC2086
+  run starvation --strategy B $st --yield-every 0
+}
 
-# io_uring cancellation (amendment A1)
-for s in A B C D "D --base B"; do run cancel-uring --strategy $s --tasks $CU_TASKS --concurrency $CU_CONC; done
-run cancel-uring --strategy B --tasks $CU_TASKS --concurrency $CU_CONC --source file
-run cancel-uring --strategy B --tasks $CU_TASKS --concurrency $CU_CONC --source file-buffered --async-percent 100
-run cancel-uring --strategy B --tasks $((CU_TASKS / 4)) --concurrency $CU_CONC --break-contract
+bench_probe_overhead() {
+  # shellcheck disable=SC2086
+  for s in B C "D --base B" A E; do run probe-overhead --strategy $s --reps "$PO_REPS"; done
+}
 
+# io_uring cancellation (amendment A1): the registered procedure (every read
+# cancelled in flight, 4 KiB stack buffers) and the harness's races, on each
+# stackful strategy; then file-backed reads and the negative control on B.
+bench_cancel_uring() {
+  local cu="--tasks $CU_TASKS --concurrency $CU_CONC"
+  # shellcheck disable=SC2086
+  for s in A B C D "D --base B"; do run cancel-uring --strategy $s $cu --pipe-mix cancel --buf-bytes 4096; done
+  # shellcheck disable=SC2086
+  for s in A B C D "D --base B"; do run cancel-uring --strategy $s $cu; done
+  run cancel-uring --strategy B --tasks "$CU_FILE_TASKS" --concurrency "$CU_CONC" --source file
+  run cancel-uring --strategy B --tasks "$CU_FILE_TASKS" --concurrency "$CU_CONC" --source file-buffered --async-percent 100
+  run cancel-uring --strategy B --tasks $((CU_TASKS / 4)) --concurrency "$CU_CONC" --break-contract
+}
+
+BENCHES="spawn-join idle-memory max-tasks echo idle-connections deep-recursion starvation probe-overhead cancel-uring"
+CONTROLLED=",spawn-join,idle-memory,max-tasks,echo,idle-connections,starvation,"
+selected() { [ -z "$ONLY" ] || [[ ",$ONLY," == *",$1,"* ]]; }
+
+ctl=(controls/run_controls.sh "$OUT" --threads "$THREADS" --machine-id "$MACHINE" --scale "$SCALE" --quiet-below "$LOAD_QUIET")
 if [ $CONTROLS = 1 ]; then
-  controls/run_controls.sh "$OUT" --threads "$THREADS" --machine-id "$MACHINE" --scale "$SCALE" ${ONLY:+--only "$ONLY"}
+  "${ctl[@]}" --build-only || CONTROLS=0
 fi
+for rep in $(seq 1 "$REPS"); do
+  for b in $BENCHES; do
+    selected "$b" || continue
+    echo "==== repetition $rep of $REPS: $b"
+    t0=$(date +%s)
+    start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    "bench_${b//-/_}"
+    if [ $CONTROLS = 1 ] && [[ "$CONTROLLED" == *",$b,"* ]]; then
+      "${ctl[@]}" --no-build --only "$b"
+    fi
+    echo "$rep,$b,$start,$(($(date +%s) - t0))" >> "$TIMING"
+  done
+done
 rm -rf "$OUT/.controls-build"
+rm -f "$OUT"/.attempt-*.csv "$OUT"/.times-*
 echo "results in $OUT"

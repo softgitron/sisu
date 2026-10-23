@@ -1,0 +1,5 @@
+from textkit import cap
+
+pub def boxed(text: String) -> String:
+    let line = "+{"-".repeat(len(text) + 2)}+"
+    return "{line}\n| {cap(text)} |\n{line}"

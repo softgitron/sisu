@@ -1,0 +1,42 @@
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+ownership violation: a reference was used after its loan had ended
+  the loan: a shared borrow of `x` in `main`, created at dangling_block.sisu:9:13 by `_6 = ref _5`
+  ended by: the end of the scope of `x` at dangling_block.sisu:9:18 (`dead _5`)
+  used at: dangling_block.sisu:12:5 (`_8 = call intrinsic print(copy _2)`)
+  value: `x` = <no value>
+  loans of `x` not ended yet: 0 shared, 0 with `mut`
+  at main (dangling_block.sisu:12:5)
+SIR of `main`:
+fn main(0) source 0 @4:5-4:9 {
+    let _0: ()
+    let _1: int "y" @5:9-5:10
+    let _2: ref int "r" once @6:9-6:10
+    let _3: bool
+    let _4: int
+    let _5: int "x" @8:13-8:14
+    let _6: ref int
+    let _7: ref int
+    let _8: ()
+  bb0:
+    _1 = const 1 @5:13-5:14
+    _4 = call intrinsic len(const "x") @7:8-7:16
+    _3 = gt copy _4, const 0 @7:8-7:20
+    switch copy _3 [0: bb2, else: bb3] @7:8-7:20
+  bb1:
+    _8 = call intrinsic print(copy _2) @12:5-12:13
+    _0 = const ()
+    return
+  bb2:
+    _7 = ref _1 @11:13-11:18
+    _2 = copy _7 @11:9-11:18
+    goto bb1
+  bb3:
+    _5 = const 5 @8:17-8:18
+    _6 = ref _5 @9:13-9:18
+    _2 = copy _6 @9:9-9:18
+    dead _5 @9:18-9:18
+    goto bb1
+}
+outcome: conflict reached; the run stopped at a concrete ownership conflict
+--- status 134

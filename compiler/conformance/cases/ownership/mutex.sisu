@@ -1,0 +1,25 @@
+# `Mutex` in one task (06): `lock` gives a guard, `guard.value` is the
+# value, and the guard unlocks when it is dropped (a temporary at the end
+# of its statement).
+
+struct Stats:
+    hits: int
+    misses: int
+
+def record(m: Shared[Mutex[Stats]], hit: bool):
+    var g = m.lock()
+    if hit:
+        g.value.hits += 1
+    else:
+        g.value.misses += 1
+
+def main():
+    let m = Mutex(5)
+    m.lock().value += 1
+    print(m.lock().value)
+    let stats = Shared(Mutex(Stats(hits=0, misses=0)))
+    for i in range(5):
+        record(stats, i % 2 == 0)
+    let g = stats.lock()
+    print("{g.value.hits} hits, {g.value.misses} misses")
+    print(stats.is_poisoned())

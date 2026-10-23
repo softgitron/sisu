@@ -1,0 +1,10 @@
+# A wrong program: a closure that borrows a local is stored in a plain
+# struct, which cannot hold a borrow.
+
+struct Rule:
+    check: (int) -> bool
+
+def main():
+    let limit = 10
+    let r = Rule(check=x -> x < limit)
+    print(r.check(3))

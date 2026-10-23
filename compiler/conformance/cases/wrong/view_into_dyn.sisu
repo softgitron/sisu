@@ -1,0 +1,17 @@
+# A wrong program: a view struct is made into a `dyn` of a trait, which
+# owns its value.
+
+trait Named:
+    def name(self) -> str
+
+view struct Label:
+    text: str
+
+impl Named for Label:
+    def name(self) -> str:
+        return self.text
+
+def main():
+    let l = Label(text="x")
+    let n: Box[dyn Named] = Box(l)
+    print(n.name())

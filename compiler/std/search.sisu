@@ -1,0 +1,198 @@
+##! `std.search` (11; D-075): finding values. Binary search over a sorted
+##! list (`bisect_left`, `bisect_right`, `binary_search`,
+##! `partition_point`), selection of the `k`-th smallest value in place,
+##! and search combinators over the candidates an iterator gives (an
+##! `Iter`, a generator's, or an adapter's, each search of one type), as
+##! LogicT has them: `interleave` takes from two searches in turn, so an endless
+##! one cannot starve the other (fair disjunction); `deepening` searches
+##! again with a growing bound (iterative deepening); `within` stops
+##! after a bounded number of candidates.
+
+## The first index at which `x` could be inserted keeping `xs` sorted:
+## before any values equal to it.
+##
+## ```
+## assert bisect_left([1, 2, 2, 3], 2) == 1
+## assert bisect_left([1, 2, 2, 3], 4) == 4
+## ```
+pub pure def bisect_left[T: Ord](xs: list[T], x: T) -> int:
+    return partition_point(xs, (v) -> v.cmp(x) == Ordering.Less)
+
+## The last index at which `x` could be inserted keeping `xs` sorted:
+## after any values equal to it.
+##
+## ```
+## assert bisect_right([1, 2, 2, 3], 2) == 3
+## assert bisect_right([1, 2, 2, 3], 0) == 0
+## ```
+pub pure def bisect_right[T: Ord](xs: list[T], x: T) -> int:
+    return partition_point(xs, (v) -> v.cmp(x) != Ordering.Greater)
+
+## The index of a value equal to `x` in the sorted `xs`, or `None`.
+##
+## ```
+## assert binary_search([2, 3, 5, 7, 11], 7) == Some(3)
+## assert binary_search([2, 3, 5, 7, 11], 4) == None
+## ```
+pub pure def binary_search[T: Ord](xs: list[T], x: T) -> int?:
+    let i = bisect_left(xs, x)
+    if i < len(xs) and xs[i].cmp(x) == Ordering.Equal:
+        return Some(i)
+    return None
+
+## The number of values at the start of `xs` for which `pred` holds,
+## when it holds for a prefix and for nothing after it: the index of the
+## first value it does not hold for, found by halves.
+##
+## ```
+## assert partition_point([1, 3, 5, 6, 8], (x) -> x % 2 == 1) == 3
+## ```
+pub pure def partition_point[T](xs: list[T], pred: pure (ref T) -> bool) -> int:
+    var lo = 0
+    var hi = len(xs)
+    while lo < hi:
+        let mid = lo + (hi - lo) // 2
+        if pred(ref xs[mid]):
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+## Reorders `xs` so that the value at `k` is the one sorting would put
+## there, with none greater before it and none smaller after it
+## (quickselect, in time linear on average).
+##
+## ```
+## var xs = [9, 1, 8, 2, 7, 3]
+## select_nth(mut xs, 2)
+## assert xs[2] == 3
+## assert all([x <= 3 for x in xs[0:2]]) and all([x >= 3 for x in xs[3:6]])
+## ```
+pub pure def select_nth[T: Ord](mut xs: list[T], k: int):
+    requires 0 <= k < len(xs)
+    var lo = 0
+    var hi = len(xs)
+    while hi - lo > 1:
+        let p = pivot(mut xs, lo, hi)
+        if p == k:
+            return
+        if k < p:
+            hi = p
+        else:
+            lo = p + 1
+
+## Partitions `xs[lo:hi]` around the median of its first, middle and
+## last values; gives where that value ends.
+pure def pivot[T: Ord](mut xs: list[T], lo: int, hi: int) -> int:
+    let mid = lo + (hi - lo) // 2
+    let last = hi - 1
+    if xs[mid] < xs[lo]:
+        xs.swap(mid, lo)
+    if xs[last] < xs[lo]:
+        xs.swap(last, lo)
+    if xs[mid] < xs[last]:
+        xs.swap(mid, last)
+    var store = lo
+    for i in range(lo, last):
+        if xs[i] < xs[last]:
+            xs.swap(i, store)
+            store += 1
+    xs.swap(store, last)
+    return store
+
+## The candidates of `a` and `b` in turn, one from each, until both end:
+## a fair choice between two searches, each of which may be endless.
+##
+## ```
+## let odd = interleave(iter_of([1, 3, 5]), iter_of([2, 4]))
+## assert odd.collect() == [1, 2, 3, 4, 5]
+## let naturals = interleave(range(0, 1000000000), iter_of([-1, -2]))
+## assert naturals.take(6).collect() == [0, -1, 1, -2, 2, 3]
+## ```
+pub def interleave[I: Iterator](own a: I, own b: I) -> Iter[I.Item]:
+    var first = a
+    var second = b
+    var first_done = False
+    var second_done = False
+    while not (first_done and second_done):
+        if not first_done:
+            match first.next():
+                case Some(x):
+                    yield x
+                case None:
+                    first_done = True
+        if not second_done:
+            match second.next():
+                case Some(x):
+                    yield x
+                case None:
+                    second_done = True
+
+## The candidates of `searches` in turn, one from each that has any left.
+##
+## ```
+## let all = interleave_all([iter_of([1, 4]), iter_of([2]), iter_of([3, 5, 6])])
+## assert all.collect() == [1, 2, 3, 4, 5, 6]
+## ```
+pub def interleave_all[I: Iterator](own searches: list[I]) -> Iter[I.Item]:
+    var live = searches
+    while not live.is_empty():
+        var next_round: list[I] = []
+        for s in own live:
+            var it = s
+            match it.next():
+                case Some(x):
+                    yield x
+                    next_round.push(it)
+                case None:
+                    pass
+        live = next_round
+
+## Iterative deepening: the candidates `search(d)` gives for each bound
+## `d` from 0 to `limit`, in turn, where `search(d)` gives the ones it
+## finds within `d` but not within `d - 1`; so the shallowest come first,
+## as a breadth-first search would give them, in a depth-first search's
+## space.
+##
+## ```
+## # The numbers below 8 by how many bits they have set.
+## let by_bits = deepening((d) -> iter_of([x for x in range(8) if popcount(x) == d]), 3)
+## assert by_bits.collect() == [0, 1, 2, 4, 3, 5, 6, 7]
+## ```
+pub def deepening[I: Iterator](search: (int) -> I, limit: int) -> Iter[I.Item]:
+    requires limit >= 0
+    for d in range(limit + 1):
+        for x in own search(d):
+            yield x
+
+## The number of bits set in `n`, not negative.
+pub pure def popcount(n: int) -> int:
+    requires n >= 0
+    var count = 0
+    var m = n
+    while m > 0:
+        count += m & 1
+        m = m >> 1
+    return count
+
+## The first candidate of `search` that `accept` takes, looking at no more
+## than `budget` candidates (a bounded search): `None` when none of those
+## is taken.
+##
+## ```
+## assert within(range(1, 1000000000), 100, (x) -> x * x > 50) == Some(8)
+## assert within(range(1, 1000000000), 5, (x) -> x * x > 50) == None
+## ```
+pub def within[I: Iterator](own search: I, budget: int, accept: (ref I.Item) -> bool) -> I.Item?:
+    requires budget >= 0
+    var it = search
+    var left = budget
+    while left > 0:
+        match it.next():
+            case Some(x):
+                if accept(ref x):
+                    return Some(x)
+            case None:
+                return None
+        left -= 1
+    return None

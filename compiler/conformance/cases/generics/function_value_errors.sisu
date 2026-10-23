@@ -1,0 +1,23 @@
+# What cannot be a function value (decision 225): a function returning a
+# borrow of a parameter it borrows, since a value takes its arguments by
+# value; a generic intrinsic, which has no body to make an instance of;
+# and a generic function whose bounds the inferred types do not meet.
+
+struct Point:
+    x: int
+    y: int
+
+def first_of(xs: list[String]) -> ref String:
+    return ref xs[0]
+
+def smallest[T](xs: list[T]) -> T where T: Copy + Ord:
+    var best = xs[0]
+    for x in xs.iter():
+        if x < best:
+            best = x
+    return best
+
+def main():
+    let f = first_of
+    let g = print
+    let h: (list[Point]) -> Point = smallest

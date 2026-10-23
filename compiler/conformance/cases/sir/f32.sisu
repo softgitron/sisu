@@ -1,0 +1,8 @@
+# An `f32` literal is made from the `f64` that holds it exactly
+# (`f32.from_literal`), its arithmetic is SIR's own operators on `f32`
+# values, and an `f32` where an `f64` is expected widens (`f32.to_f64`).
+def scale(x: f32) -> f64:
+    return x * 2.5
+
+def main():
+    print(scale(0.1))

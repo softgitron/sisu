@@ -1,0 +1,41 @@
+# Functions as values (decision 225): a generic one takes its type
+# arguments from where the value goes, and its bounds are required of
+# them; one that borrows a parameter takes it by value, as every function
+# value does, and lends it to the function. Each is a closure of the
+# function's value wrapper, and runs natively as it runs here.
+
+def twice[T](x: T) -> (T, T) where T: Copy:
+    return (x, x)
+
+def largest[T](xs: list[T]) -> T where T: Copy + Ord:
+    var best = xs[0]
+    for x in xs.iter():
+        if x > best:
+            best = x
+    return best
+
+def shout(text: String) -> String:
+    return "{text}!"
+
+def apply(f: (int) -> (int, int), x: int) -> (int, int):
+    return f(x)
+
+def on_numbers(f: (list[int]) -> int, xs: list[int]) -> int:
+    return f(xs.copy())
+
+def map_text(f: (String) -> String, xs: list[String]) -> list[String]:
+    var out: list[String] = []
+    for x in xs.iter():
+        out.push(f(x.copy()))
+    return out
+
+def main():
+    print(apply(twice, 3))
+    let pair: (str) -> (str, str) = twice
+    print(pair("a"))
+    print(on_numbers(largest, [3, 9, 4]))
+    let pick: (list[str]) -> str = largest
+    print(pick(["pear", "apple", "plum"]))
+    let doubles: list[(int) -> (int, int)] = [twice, twice]
+    print(doubles[1](7))
+    print(map_text(shout, ["hi".to_string(), "there".to_string()]))

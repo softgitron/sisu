@@ -1,0 +1,20 @@
+test "money is never made or lost" ... FAILED
+test "not even with the lock" ... ok
+test "every choice is a schedule of its own" ... FAILED
+
+test "money is never made or lost" ... FAILED
+with schedule 0.0.0.0.0.1.0.0.0.1 of a bounded exhaustive search (preemption bound 1)
+`sim.always` does not hold: the total is 100
+replay: sisu test --replay 1-e62dd7809ef2940e-0.0.1-t0-s0-r0-x0.0.0.0.0.1.0.0.0.1 choose_always.sisu
+
+test "every choice is a schedule of its own" ... FAILED
+with schedule 2 of a bounded exhaustive search (preemption bound 1)
+panic: assertion failed: k < 2
+    k < 2
+    │
+    2
+  at test "every choice is a schedule of its own" (choose_always.sisu:54:5)
+replay: sisu test --replay 1-e62dd7809ef2940e-0.0.1-t2-s0-r0-x2 choose_always.sisu
+
+1 passed, 2 failed, 0 blocked
+searched 16 schedules (preemption bound 1)

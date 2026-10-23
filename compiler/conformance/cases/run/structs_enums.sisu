@@ -1,0 +1,87 @@
+@derive(Eq)
+struct Point:
+    x: f64
+    y: f64
+
+    def length(self) -> f64:
+        return (self.x * self.x + self.y * self.y).sqrt()
+
+    def scale(mut self, k: f64):
+        self.x = self.x * k
+        self.y = self.y * k
+
+    def origin() -> Point:
+        return Point(x=0.0, y=0.0)
+
+struct Config:
+    name: String
+    retries: int = 3
+    verbose: bool = False
+
+enum Shape:
+    Circle(r: f64)
+    Rect(w: f64, h: f64)
+    Tri(f64, f64, f64)
+    Dot
+
+def describe(s: Shape) -> String:
+    return match s:
+        case Circle(r) if r == 0.0: "a point-sized circle"
+        case Circle(r): "a circle of radius {r}"
+        case Rect(w, h) if w == h: "a square of side {w}"
+        case Rect(w, h): "a {w} by {h} rectangle"
+        case Tri(a, b, c): "a triangle with perimeter {a + b + c}"
+        case Dot: "a dot"
+
+def classify(n: int) -> str:
+    match n:
+        case 0:
+            return "zero"
+        case 1 | 2 | 3:
+            return "small"
+        case _ if n < 0:
+            return "negative"
+        case _:
+            return "large"
+
+def first_two(xs: list[int]) -> String:
+    match xs:
+        case []:
+            return "empty"
+        case [one]:
+            return "just {one}"
+        case [a, b, *rest]:
+            return "{a} then {b} and {len(rest)} more"
+
+def main():
+    var p = Point(x=3.0, y=4.0)
+    print(p.length())
+    p.scale(2.0)
+    print("{p:?}")
+    print("{Point.origin():?}")
+    let c = Config(name="svc".to_string())
+    print("{c:?}")
+    let c2 = Config(name="db".to_string(), verbose=True)
+    print("{c2.name} {c2.retries} {c2.verbose}")
+    let q = p.copy()
+    print(q == p)
+    for s in [
+        Circle(r=0.0),
+        Circle(r=1.5),
+        Rect(w=2.0, h=2.0),
+        Rect(w=1.0, h=3.0),
+        Tri(3.0, 4.0, 5.0),
+        Dot,
+    ]:
+        print(describe(s))
+    for n in [0, 2, -5, 99]:
+        print(classify(n))
+    print(first_two([]))
+    print(first_two([7]))
+    print(first_two([1, 2, 3, 4]))
+    let pair = (1, "x")
+    match pair:
+        case (1, label):
+            print("one with {label}")
+        case (_, _):
+            print("other")

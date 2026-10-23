@@ -1,0 +1,64 @@
+committed 1
+forgot 2
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+ownership violation: `u` was dropped holding a `Transaction`, which must be passed to an `own` parameter
+  used at: must_consume_dropped.sisu:15:27 (`drop _2`)
+  at main (must_consume_dropped.sisu:15:27)
+SIR of `main`:
+fn main(0) source 0 @11:5-11:9 {
+    let _0: ()
+    let _1: Transaction "t" @12:9-12:10
+    let _2: Transaction "u" @13:9-13:10
+    let _3: ()
+    let _4: ()
+    let _5: String
+    let _6: ref mut String
+    let _7: ()
+    let _8: ref String
+    let _9: bool "flag"
+  bb0:
+    _9 = const false
+    _1 = struct Transaction(const 1) @12:13-12:30
+    _9 = const true
+    goto bb1
+  bb1 (unwind bb2):
+    _2 = struct Transaction(const 2) @13:13-13:30
+    goto bb3
+  bb2 (cleanup):
+    drop _1 if _9
+    resume
+  bb3 (unwind bb4):
+    _9 = const false
+    _3 = call fn Transaction.commit(move _1) @14:5-14:15
+    _5 = call intrinsic fmt.new() @15:11-15:26
+    _6 = ref mut _5 @15:11-15:26
+    _7 = call intrinsic fmt.text(copy _6, const "forgot ") @15:11-15:26
+    _7 = call intrinsic fmt.display(copy _6, copy _2.0, const "") @15:20-15:24
+    goto bb5
+  bb4 (cleanup):
+    drop _2
+    goto bb2
+  bb5 (unwind bb6):
+    _8 = ref _5 @15:11-15:26
+    _4 = call intrinsic print(copy _8) @15:5-15:27
+    goto bb7
+  bb6 (cleanup):
+    drop _5
+    goto bb4
+  bb7 (unwind bb4):
+    drop _5 @15:27-15:27
+    goto bb8
+  bb8 (unwind bb4):
+    dead _5 @15:27-15:27
+    _0 = const ()
+    goto bb9
+  bb9 (unwind bb2):
+    drop _2 @15:27-15:27
+    goto bb10
+  bb10:
+    _9 = const false
+    return
+}
+outcome: conflict reached; the run stopped at a concrete ownership conflict
+--- status 134

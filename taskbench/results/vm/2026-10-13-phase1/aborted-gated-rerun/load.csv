@@ -1,0 +1,43 @@
+start_utc,benchmark,implementation,args,attempt,kept,wall_s,own_cpu_s,others_cpu_s,others_cpus,steal_s,quiet_below,gate,gate_wait_s
+2026-10-13T23:08:51Z,spawn-join,taskbench,"--strategy A --rounds 100000 --warmup 10000",1,yes,0.97,0.97,0.03,0.029,0.02,0.3,quiet,2
+2026-10-13T23:08:54Z,spawn-join,taskbench,"--strategy B --rounds 100000 --warmup 10000",1,yes,0.09,0.10,0.01,0.126,0.00,0.3,quiet,2
+2026-10-13T23:08:57Z,spawn-join,taskbench,"--strategy C --rounds 100000 --warmup 10000",1,yes,0.09,0.10,-0.00,-0.011,0.00,0.3,quiet,2
+2026-10-13T23:08:59Z,spawn-join,taskbench,"--strategy D --rounds 100000 --warmup 10000",1,yes,1.01,1.02,0.04,0.037,0.00,0.3,quiet,2
+2026-10-13T23:09:02Z,spawn-join,taskbench,"--strategy D --base B --rounds 100000 --warmup 10000",1,yes,0.09,0.10,-0.00,-0.023,0.00,0.3,quiet,2
+2026-10-13T23:09:04Z,spawn-join,taskbench,"--strategy E --rounds 100000 --warmup 10000",1,yes,0.07,0.09,0.01,0.193,0.01,0.3,quiet,2
+2026-10-13T23:09:06Z,spawn-join,taskbench,"--strategy tokio --rounds 100000 --warmup 10000",1,yes,0.17,0.22,0.01,0.063,0.00,0.3,quiet,2
+2026-10-13T23:09:08Z,spawn-join,taskbench,"--strategy os-threads --rounds 100000 --warmup 10000",1,yes,1.42,1.50,-0.23,-0.163,0.07,0.3,quiet,2
+2026-10-13T23:09:12Z,spawn-join,taskbench,"--strategy A --stack-cache 1024 --rounds 100000 --warmup 10000",1,yes,0.09,0.10,-0.00,-0.034,0.00,0.3,quiet,2
+2026-10-13T23:09:14Z,spawn-join,taskbench,"--strategy D --stack-cache 1024 --rounds 100000 --warmup 10000",1,yes,0.14,0.15,0.04,0.276,0.01,0.3,quiet,2
+2026-10-13T23:09:16Z,spawn-join,taskbench,"--strategy B --rounds 10000 --warmup 1000 --batch 100",1,yes,1.52,5.51,0.23,0.151,0.07,0.3,quiet,2
+2026-10-13T23:09:19Z,spawn-join,taskbench,"--strategy B --rounds 100000 --warmup 10000 --scope-per-round",1,yes,0.12,0.13,-0.00,-0.025,0.00,0.3,quiet,2
+2026-10-13T23:09:22Z,spawn-join,go,"--rounds 100000 --warmup 10000",1,yes,0.11,0.14,-0.00,-0.009,0.00,0.3,quiet,2
+2026-10-13T23:09:24Z,spawn-join,java,"--rounds 100000",1,yes,1.35,2.53,-0.13,-0.099,0.08,0.3,quiet,2
+2026-10-13T23:09:27Z,spawn-join,taskbench,"--strategy A --rounds 100000 --warmup 10000",1,yes,0.92,0.92,0.02,0.023,0.02,0.3,quiet,2
+2026-10-13T23:09:30Z,spawn-join,taskbench,"--strategy B --rounds 100000 --warmup 10000",1,yes,0.10,0.12,-0.01,-0.058,0.00,0.3,quiet,2
+2026-10-13T23:09:32Z,spawn-join,taskbench,"--strategy C --rounds 100000 --warmup 10000",1,yes,0.09,0.10,-0.02,-0.223,0.00,0.3,quiet,2
+2026-10-13T23:09:34Z,spawn-join,taskbench,"--strategy D --rounds 100000 --warmup 10000",1,yes,1.08,1.08,0.05,0.042,0.01,0.3,quiet,2
+2026-10-13T23:09:38Z,spawn-join,taskbench,"--strategy D --base B --rounds 100000 --warmup 10000",1,yes,0.09,0.10,0.00,0.023,0.00,0.3,quiet,3
+2026-10-13T23:09:40Z,spawn-join,taskbench,"--strategy E --rounds 100000 --warmup 10000",1,yes,0.07,0.08,-0.00,-0.057,0.00,0.3,quiet,2
+2026-10-13T23:09:42Z,spawn-join,taskbench,"--strategy tokio --rounds 100000 --warmup 10000",1,yes,0.17,0.22,-0.02,-0.109,0.00,0.3,quiet,2
+2026-10-13T23:09:48Z,spawn-join,taskbench,"--strategy os-threads --rounds 100000 --warmup 10000",1,yes,1.17,1.29,-0.19,-0.159,0.03,0.3,quiet,6
+2026-10-13T23:09:51Z,spawn-join,taskbench,"--strategy A --stack-cache 1024 --rounds 100000 --warmup 10000",1,yes,0.09,0.10,-0.00,-0.011,0.00,0.3,quiet,2
+2026-10-13T23:09:53Z,spawn-join,taskbench,"--strategy D --stack-cache 1024 --rounds 100000 --warmup 10000",1,yes,0.13,0.15,0.00,0.007,0.00,0.3,quiet,2
+2026-10-13T23:09:55Z,spawn-join,taskbench,"--strategy B --rounds 10000 --warmup 1000 --batch 100",1,no,1.57,5.25,0.51,0.324,0.08,0.3,quiet,2
+2026-10-13T23:09:59Z,spawn-join,taskbench,"--strategy B --rounds 10000 --warmup 1000 --batch 100",2,yes,1.51,5.50,0.14,0.092,0.06,0.3,quiet,2
+2026-10-13T23:10:03Z,spawn-join,taskbench,"--strategy B --rounds 100000 --warmup 10000 --scope-per-round",1,yes,0.11,0.12,-0.01,-0.115,0.00,0.3,quiet,2
+2026-10-13T23:10:05Z,spawn-join,go,"--rounds 100000 --warmup 10000",1,yes,0.10,0.13,-0.03,-0.325,0.00,0.3,quiet,2
+2026-10-13T23:10:07Z,spawn-join,java,"--rounds 100000",1,yes,1.29,2.40,-0.10,-0.079,0.04,0.3,quiet,2
+2026-10-13T23:10:10Z,spawn-join,taskbench,"--strategy A --rounds 100000 --warmup 10000",1,yes,0.94,0.94,0.03,0.036,0.01,0.3,quiet,2
+2026-10-13T23:10:13Z,spawn-join,taskbench,"--strategy B --rounds 100000 --warmup 10000",1,yes,0.09,0.10,-0.01,-0.104,0.00,0.3,quiet,2
+2026-10-13T23:10:15Z,spawn-join,taskbench,"--strategy C --rounds 100000 --warmup 10000",1,yes,0.09,0.10,0.00,0.011,0.00,0.3,quiet,2
+2026-10-13T23:10:17Z,spawn-join,taskbench,"--strategy D --rounds 100000 --warmup 10000",1,yes,1.03,1.02,0.04,0.035,0.01,0.3,quiet,2
+2026-10-13T23:10:20Z,spawn-join,taskbench,"--strategy D --base B --rounds 100000 --warmup 10000",1,yes,0.09,0.10,0.01,0.089,0.00,0.3,quiet,2
+2026-10-13T23:10:23Z,spawn-join,taskbench,"--strategy E --rounds 100000 --warmup 10000",1,yes,0.09,0.11,0.01,0.117,0.00,0.3,quiet,2
+2026-10-13T23:10:25Z,spawn-join,taskbench,"--strategy tokio --rounds 100000 --warmup 10000",1,yes,0.16,0.20,-0.02,-0.128,0.02,0.3,quiet,2
+2026-10-13T23:10:27Z,spawn-join,taskbench,"--strategy os-threads --rounds 100000 --warmup 10000",1,yes,1.20,1.29,-0.21,-0.179,0.05,0.3,quiet,2
+2026-10-13T23:10:30Z,spawn-join,taskbench,"--strategy A --stack-cache 1024 --rounds 100000 --warmup 10000",1,yes,0.09,0.10,-0.00,-0.054,0.00,0.3,quiet,2
+2026-10-13T23:10:32Z,spawn-join,taskbench,"--strategy D --stack-cache 1024 --rounds 100000 --warmup 10000",1,yes,0.14,0.15,0.00,0.000,0.00,0.3,quiet,2
+2026-10-13T23:10:34Z,spawn-join,taskbench,"--strategy B --rounds 10000 --warmup 1000 --batch 100",1,yes,1.49,5.64,0.05,0.036,0.09,0.3,quiet,2
+2026-10-13T23:10:38Z,spawn-join,taskbench,"--strategy B --rounds 100000 --warmup 10000 --scope-per-round",1,yes,0.12,0.13,0.00,0.025,0.01,0.3,quiet,2
+2026-10-13T23:10:40Z,spawn-join,go,"--rounds 100000 --warmup 10000",1,yes,0.10,0.15,-0.03,-0.248,0.00,0.3,quiet,2

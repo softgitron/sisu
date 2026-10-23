@@ -1,0 +1,17 @@
+# A generator that code which cannot wait takes items from runs to its
+# next `yield` there and then; an operation in it that would wait (a
+# sleep here) aborts the program, since nothing could run the code that
+# asked meanwhile. Iterated with `for`, the same generator may wait.
+
+def ticks(clock: Clock) -> Iter[int]:
+    for i in range(3):
+        _ = clock.sleep(Duration.millis(1))
+        yield i
+
+def main(sys: System):
+    var n = 0
+    for i in ticks(sys.clock):
+        n += i
+    print(n)
+    print(sum(ticks(sys.clock)))
+    print("not reached")

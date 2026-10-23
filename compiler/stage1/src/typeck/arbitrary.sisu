@@ -1,0 +1,1386 @@
+##! Generators for property tests (stage 0's `sisu-resolve/src/arbitrary.rs`;
+##! 17, "Property-based testing"; D-070), written by the compiler as Sisu
+##! source and declared beside the module they serve
+##! (`<arbitrary>/main.sisu`), so they are checked and lowered like any
+##! code:
+##!
+##! - `__arbitrary_T` for each struct, enum and refinement type of the
+##!   module whose parts all have a generator: a struct's fields in order,
+##!   then its invariant (a case that breaks it is refused); an enum's
+##!   variant, then its fields; a refinement's base, then its predicate (an
+##!   integer refinement whose predicate bounds `self` draws in that range,
+##!   which is what lets `exhaustive[T]` list a finite domain).
+##! - `__arbitrary_site_N` for each type written in `arbitrary[T]` or
+##!   `exhaustive[T](...)`, which the checker puts there (the call that
+##!   stands for the site, `Gen.of(...)` or `Gen.every(..., max_len=n)`, is
+##!   written here too, as syntax of the module).
+##! - for each function with a contract whose parameters all have a
+##!   generator, its cases (refused unless `requires` holds) and a test,
+##!   `contract of NAME`, that calls it on them: `ensures` and the
+##!   invariants are checked by the call (07: contracts as properties).
+##! - for each `@refines(reference)`, its cases and a test that the
+##!   function gives what its reference gives on each, within the
+##!   tolerance.
+##!
+##! A type parameter of a generic type is given by a generator parameter;
+##! one of a function is `int`, when every bound is one `int` meets. The
+##! generators are built from `Draws`'s (`std/prelude.sisu`).
+
+from stage1.diag import Diagnostic, Msg, TextRange
+from stage1.syntax.ast import (
+    Arg,
+    Ast,
+    BinOp,
+    ClosureBody,
+    CmpOp,
+    ContractKind,
+    Expr,
+    ExprId,
+    ExprKind,
+    FnDef,
+    GenericParam,
+    IndexArg,
+    ItemId,
+    ItemKind,
+    Mode,
+    Name,
+    ParamKind,
+    TypeExpr,
+    TypeExprId,
+    TypeKind,
+    UnOp,
+)
+from stage1.syntax.ast import visit
+from stage1.text import is_alphanumeric
+from stage1.typeck.collect import Resolver, has_attr
+from stage1.typeck.program import ModuleId
+from stage1.typeck.ty import DefId
+
+## The largest `int`, past which a bound cannot be widened by one.
+const INT_MAX: int = 9223372036854775807
+
+## What the generator writer knows of a type of the module.
+enum Shape:
+    Struct(generics: list[String], fields: list[(String, TypeExprId)], invariant: bool)
+    ## Each variant's name and its fields, named or not.
+    Enum(generics: list[String], variants: list[(String, list[(String?, TypeExprId)])])
+    Refinement(generics: list[String], base: TypeExprId, domain: (int, int)?)
+
+impl Shape:
+    pure def generics(self) -> list[String]:
+        return match self:
+            case Shape.Struct(g, _, _) | Shape.Enum(g, _) | Shape.Refinement(g, _, _): g.copy()
+
+## The bounds `int` meets, which a generic function's parameter may have
+## for its contract to be tested with `int` for it.
+pure def int_meets(name: str) -> bool:
+    return match name:
+        case "Ord" | "PartialOrd" | "Eq" | "Hash" | "Display" | "Debug" | "Copy" | "Num": True
+        case "Send" | "Sync": True
+        case _: False
+
+## The types whose values the prelude's `Draws` draws itself.
+pure def leaf_generator(n: str) -> bool:
+    return match n:
+        case "int" | "i64" | "bool" | "f64" | "f32" | "char" | "String" | "u8" | "u16": True
+        case "u32": True
+        case "i8" | "i16" | "i32" | "Duration": True
+        case _: False
+
+## Why the type `t` has no generator, for messages.
+pure def no_generator(ast: Ast, t: TypeExprId) -> String:
+    return "`{type_text(ast, t)}` has no generator"
+
+struct Writer:
+    shapes: dict[String, Shape]
+    ## Which shapes have a generator (decided once for all).
+    ok: dict[String, bool]
+    out: String
+
+impl Writer:
+    ## Whether a shape has a generator.
+    pure def has(self, n: str) -> bool:
+        if let Some(v) = self.ok.get(n.to_string()):
+            if v:
+                return True
+        return False
+
+    ## Whether every part of a type has a generator; `params` are the type
+    ## parameters in scope (each given by a generator parameter).
+    pure def type_ok(self, ast: Ast, t: TypeExprId, params: list[String]) -> bool:
+        return self.type_why(ast, t, params).is_none()
+
+    ## Why a part of a type has no generator, the first such part's, or
+    ## `None` when every part has one (stage 0's `type_ok`).
+    pure def type_why(self, ast: Ast, t: TypeExprId, params: list[String]) -> String?:
+        match ast.type_expr(t).kind:
+            case TypeKind.Path(segments, args):
+                if len(segments) != 1:
+                    return Some(no_generator(ast, t))
+                let n = segments[0].text.copy()
+                if params.contains(n) and args.is_empty():
+                    return None
+                if args.is_empty() and leaf_generator(n):
+                    return None
+                if len(args) == 1
+                        and (
+                            n == "list" or n == "set" or n == "Option" or n == "Box" or n == "Slice"
+                        ):
+                    return self.args_why(ast, args, params)
+                if len(args) == 2 and n == "dict":
+                    return self.args_why(ast, args, params)
+                if let Some(s) = self.shapes.get(n.copy()):
+                    if len(s.generics()) == len(args) and self.has(n):
+                        return self.args_why(ast, args, params)
+                return Some(no_generator(ast, t))
+            case TypeKind.Option(inner):
+                return self.type_why(ast, inner, params)
+            case TypeKind.Tuple(es):
+                if es.is_empty():
+                    return Some(no_generator(ast, t))
+                for (_, e) in es:
+                    if let Some(why) = self.type_why(ast, e, params):
+                        return Some(why)
+                return None
+            case _:
+                return Some(no_generator(ast, t))
+
+    ## Why the first of `args` without a generator has none.
+    pure def args_why(self, ast: Ast, args: list[TypeExprId], params: list[String]) -> String?:
+        for a in args:
+            if let Some(why) = self.type_why(ast, a, params):
+                return Some(why)
+        return None
+
+    ## An expression of type `t` drawn from the `Draws` named `d`.
+    pure def call(self, ast: Ast, t: TypeExprId, d: str, depth: int) -> String:
+        match ast.type_expr(t).kind:
+            case TypeKind.Path(segments, args):
+                var n = String.new()
+                if let Some(s) = segments.first():
+                    n = s.text.copy()
+                if args.is_empty():
+                    let ns: str = n
+                    match ns:
+                        case "int" | "i64":
+                            return "Draws.gen_int({d})"
+                        case "bool" | "f64" | "f32" | "char":
+                            return "Draws.gen_{n}({d})"
+                        case "String":
+                            return "Draws.gen_string({d})"
+                        case "Duration":
+                            return "Draws.gen_duration({d})"
+                        case "u8" | "u16" | "u32" | "i8" | "i16" | "i32":
+                            return "Draws.gen_{n}({d})"
+                        case _:
+                            pass
+                if len(args) == 1:
+                    let x = self.func(ast, args[0], depth)
+                    if n == "list" or n == "Slice":
+                        return "Draws.gen_list({d}, {x})"
+                    if n == "set":
+                        return "Draws.gen_set({d}, {x})"
+                    if n == "Option":
+                        return "Draws.gen_option({d}, {x})"
+                    if n == "Box":
+                        return "Draws.gen_box({d}, {x})"
+                if len(args) == 2 and n == "dict":
+                    let k = self.func(ast, args[0], depth)
+                    let v = self.func(ast, args[1], depth)
+                    return "Draws.gen_dict({d}, {k}, {v})"
+                if args.is_empty() and not self.shapes.contains(n.copy()):
+                    return "gen_{n}({d})"
+                var s = "__arbitrary_{n}({d}"
+                for a in args:
+                    s.push(", ")
+                    s.push(self.func(ast, a, depth))
+                s.push(")")
+                return s
+            case TypeKind.Option(inner):
+                return "Draws.gen_option({d}, {self.func(ast, inner, depth)})"
+            case TypeKind.Tuple(es):
+                var parts: list[String] = []
+                for (_, e) in es:
+                    parts.push(self.call(ast, e, d, depth))
+                if len(parts) == 1:
+                    return "({parts[0]},)"
+                return "({parts.join(", ")})"
+            case _:
+                return "{d}.reject()"
+
+    ## A function value `(Draws) -> T` for the type `t`.
+    pure def func(self, ast: Ast, t: TypeExprId, depth: int) -> String:
+        if let TypeKind.Path(segments, args) = ast.type_expr(t).kind:
+            if args.is_empty():
+                var n = String.new()
+                if let Some(s) = segments.first():
+                    n = s.text.copy()
+                let ns: str = n
+                let shape = self.shapes.contains(n.copy())
+                return match ns:
+                    case "int" | "i64": "Draws.gen_int"
+                    case "bool" | "f64" | "f32" | "char" | "u8" | "u16" | "u32" | "i8": "Draws.gen_{n}"
+                    case "i16" | "i32": "Draws.gen_{n}"
+                    case "String": "Draws.gen_string"
+                    case "Duration": "Draws.gen_duration"
+                    case _: if shape: "__arbitrary_{n}" else: "gen_{n}"
+        let e = "e{depth}"
+        return "(({e}: Draws) -> {self.call(ast, t, e, depth + 1)})"
+
+    ## `def __arbitrary_T[...](d: Draws, gen_A: (Draws) -> A, ...) -> T[...]:`.
+    pure def header(mut self, name: str, generics: list[(String, String)]):
+        var params: list[String] = []
+        var bounded: list[String] = []
+        for (g, b) in generics:
+            params.push(g.copy())
+            if b.is_empty():
+                bounded.push(g.copy())
+            else:
+                bounded.push("{g}: {b}")
+        var gp = String.new()
+        var ta = String.new()
+        if not params.is_empty():
+            gp = "[{bounded.join(", ")}]"
+            ta = "[{params.join(", ")}]"
+        var sig = "\ndef __arbitrary_{name}{gp}(d: Draws"
+        # Owned, so the result borrows from none of them.
+        for p in params:
+            sig.push(", own gen_{p}: (Draws) -> {p}")
+        sig.push(") -> {name}{ta}:\n")
+        self.out.push(sig)
+
+impl Resolver:
+    ## Writes and declares the generators the module's property tests need
+    ## (see the module comment), with the call that stands for each site.
+    pub pure def declare_generators(mut self, module: ModuleId, items: list[ItemId]):
+        var shapes: dict[String, Shape] = {}
+        var order: list[(String, list[(String, String)])] = []
+        for it in items:
+            let item = self.ast(module).item(it).copy()
+            let builtin = has_attr(item.attrs, "builtin")
+            match item.kind:
+                case ItemKind.Struct(s):
+                    if s.is_view or builtin or s.name.text.is_empty():
+                        continue
+                    var has_const = False
+                    for g in s.generics:
+                        if g.is_const:
+                            has_const = True
+                    if has_const:
+                        continue
+                    var fields: list[(String, TypeExprId)] = []
+                    for f in s.fields:
+                        fields.push((f.name.text.copy(), f.ty))
+                    let shape = Shape.Struct(
+                        generics=generic_names(s.generics),
+                        fields=fields,
+                        invariant=not s.invariants.is_empty(),
+                    )
+                    _ = shapes.insert(s.name.text.copy(), shape)
+                    order.push((s.name.text.copy(), self.bounds_of(module, s.generics)))
+                case ItemKind.Enum(e):
+                    if e.name.text.is_empty():
+                        continue
+                    var variants: list[(String, list[(String?, TypeExprId)])] = []
+                    for v in e.variants:
+                        var fs: list[(String?, TypeExprId)] = []
+                        for f in v.fields:
+                            var n: String? = None
+                            if let Some(x) = f.name:
+                                n = Some(x.text.copy())
+                            fs.push((n, f.ty))
+                        variants.push((v.name.text.copy(), fs))
+                    let shape = Shape.Enum(generics=generic_names(e.generics), variants=variants)
+                    _ = shapes.insert(e.name.text.copy(), shape)
+                    order.push((e.name.text.copy(), self.bounds_of(module, e.generics)))
+                case ItemKind.TypeAlias(a):
+                    if not a.refinement or a.name.text.is_empty():
+                        continue
+                    let base = a.ty else:
+                        continue
+                    # Narrowed by the base's below, for a refinement of one.
+                    var domain: (int, int)? = None
+                    if let Some(p) = a.predicate:
+                        domain = int_domain(self.ast(module), p)
+                    let shape = Shape.Refinement(
+                        generics=generic_names(a.generics), base=base, domain=domain
+                    )
+                    _ = shapes.insert(a.name.text.copy(), shape)
+                    order.push((a.name.text.copy(), self.bounds_of(module, a.generics)))
+                case _:
+                    pass
+        # An integer refinement draws in the range its predicate and its
+        # bases' bound it to; one not over `int` draws its base.
+        var domains: list[(String, (int, int)?)] = []
+        for n in shapes.keys():
+            var d: (int, int)? = None
+            if let Some(found) = root_domain(self.ast(module), shapes, n, 0):
+                d = found
+            domains.push((n.copy(), d))
+        for (n, d) in domains:
+            var narrowed: Shape? = None
+            if let Some(Shape.Refinement(g, b, _)) = shapes.get(n.copy()):
+                narrowed = Some(Shape.Refinement(generics=g.copy(), base=b, domain=d))
+            if let Some(s) = narrowed:
+                _ = shapes.insert(n.copy(), s.copy())
+        var w = Writer(shapes=shapes, ok={}, out=String.new())
+        # Which types have a generator: assume all do, then drop those with
+        # a part that has none, until nothing changes.
+        for (n, _) in order:
+            _ = w.ok.insert(n.copy(), True)
+        while True:
+            var changed = False
+            for (n, _) in order:
+                if not w.has(n):
+                    continue
+                let found = w.shapes.get(n.copy()) else:
+                    continue
+                let s = found.copy()
+                let params = s.generics()
+                var fine = True
+                match s:
+                    case Shape.Struct(_, fields, _):
+                        for (_, t) in fields:
+                            if not w.type_ok(self.ast(module), t, params):
+                                fine = False
+                    case Shape.Enum(_, variants):
+                        for (_, fs) in variants:
+                            for (_, t) in fs:
+                                if not w.type_ok(self.ast(module), t, params):
+                                    fine = False
+                    case Shape.Refinement(_, base, _):
+                        fine = w.type_ok(self.ast(module), base, params)
+                if not fine:
+                    _ = w.ok.insert(n.copy(), False)
+                    changed = True
+            if not changed:
+                break
+        # Each type's generator, written out only if a property needs it.
+        var gens: dict[String, String] = {}
+        for (n, bounds) in order:
+            if not w.has(n):
+                continue
+            let found = w.shapes.get(n.copy()) else:
+                continue
+            let s = found.copy()
+            let start = w.out.byte_len()
+            _ = gens.insert(n.copy(), String.new())
+            w.header(n, bounds)
+            match s:
+                case Shape.Struct(_, fields, invariant):
+                    var parts: list[String] = []
+                    for (f, t) in fields:
+                        parts.push("{f}={w.call(self.ast(module), t, "d", 0)}")
+                    w.out.push("    let v = {n}({parts.join(", ")})\n")
+                    if invariant:
+                        w.out.push("    if not v.__invariant():\n        d.reject()\n")
+                    w.out.push("    return v\n")
+                case Shape.Enum(_, variants):
+                    w.out.push("    let k = d.draw({max(len(variants), 1)})\n")
+                    for i in range(len(variants)):
+                        let (vn, fs) = (variants[i].0.copy(), variants[i].1.copy())
+                        var value = vn.copy()
+                        if not fs.is_empty():
+                            var parts: list[String] = []
+                            for (f, t) in fs:
+                                let drawn_value = w.call(self.ast(module), t, "d", 0)
+                                match f:
+                                    case Some(name):
+                                        parts.push("{name}={drawn_value}")
+                                    case None:
+                                        parts.push(drawn_value)
+                            value = "{vn}({parts.join(", ")})"
+                        if i + 1 < len(variants):
+                            w.out.push("    if k == {i}:\n        return {value}\n")
+                        else:
+                            w.out.push("    return {value}\n")
+                    if variants.is_empty():
+                        w.out.push("    d.reject()\n")
+                case Shape.Refinement(_, base, domain):
+                    var draw = String.new()
+                    match domain:
+                        case Some((lo, hi)):
+                            draw = "Draws.gen_in(d, {lo}, {hi})"
+                        case None:
+                            draw = w.call(self.ast(module), base, "d", 0)
+                    w.out.push("    match {n}.try_from({draw}):\n        case Ok(v):\n")
+                    w.out.push(
+                        "            return v\n        case Err(_):\n            d.reject()\n"
+                    )
+            let text = w.out.byte_slice(start, w.out.byte_len()).to_string()
+            w.out = w.out.byte_slice(0, start).to_string()
+            _ = gens.insert(n.copy(), text)
+        self.declare_sites(module, items, mut w)
+        # The contracts as properties.
+        var tests = String.new()
+        var k = 0
+        var contract_fns: list[(String?, FnDef)] = []
+        for it in items:
+            match self.ast(module).item(it).kind:
+                case ItemKind.Fn(f):
+                    contract_fns.push((None, f.copy()))
+                case ItemKind.Struct(s):
+                    for m in s.methods:
+                        contract_fns.push((Some(s.name.text.copy()), m.copy()))
+                case ItemKind.Enum(e):
+                    for m in e.methods:
+                        contract_fns.push((Some(e.name.text.copy()), m.copy()))
+                case ItemKind.Impl(i):
+                    if i.trait_ty.is_none():
+                        if let TypeKind.Path(segments, args) = self.ast(module).type_expr(
+                            i.self_ty
+                        ).kind:
+                            if args.is_empty() and len(segments) == 1:
+                                for m in i.methods:
+                                    contract_fns.push((Some(segments[0].text.copy()), m.copy()))
+                case _:
+                    pass
+        # A `mut self` method of a type with an `invariant` has a contract
+        # even without clauses: the invariant holds when it returns.
+        var kept: set[String] = set()
+        for it in items:
+            if let ItemKind.Struct(s) = self.ast(module).item(it).kind:
+                if not s.invariants.is_empty():
+                    _ = kept.add(s.name.text.copy())
+        for (owner, f) in contract_fns:
+            let clauses = f.contracts(self.ast(module))
+            var keeps_invariant = False
+            if let Some(o) = owner:
+                if kept.contains(o) and not f.params.is_empty():
+                    if let ParamKind.SelfParam = f.params[0].kind:
+                        keeps_invariant = f.params[0].mode == Mode.Mut
+            if (clauses.is_empty() and not keeps_invariant)
+                    or f.is_comptime
+                    or f.name.text.is_empty():
+                continue
+            # Each type parameter is `int`, when `int` meets its bounds.
+            var subst: dict[String, String] = {}
+            var fine = True
+            for g in f.generics:
+                var bounds_ok = True
+                for b in g.bounds:
+                    var meets = False
+                    if let TypeKind.Path(segments, args) = self.ast(module).type_expr(b).kind:
+                        meets = args.is_empty()
+                            and len(segments) == 1
+                            and int_meets(segments[0].text)
+                    if not meets:
+                        bounds_ok = False
+                fine = fine and bounds_ok and not g.is_const
+                _ = subst.insert(g.name.text.copy(), "int".to_string())
+            if not f.where_.is_empty():
+                fine = False
+            # The receiver, then the parameters: (name, type to draw, mode).
+            var params: list[(String, TypeExprId, Mode)] = []
+            for p in f.params:
+                match p.kind:
+                    case ParamKind.SelfParam:
+                        var plain = False
+                        var o = String.new()
+                        if let Some(x) = owner:
+                            o = x.copy()
+                            if let Some(s) = w.shapes.get(x.copy()):
+                                plain = s.generics().is_empty()
+                        if plain:
+                            let te = TypeExpr(
+                                node=f.node,
+                                range=f.name.range,
+                                kind=TypeKind.Path(
+                                    segments=[Name(text=o, range=f.name.range)], args=[]
+                                ),
+                            )
+                            let id = self.sources[module.index].ast.add_type(te)
+                            params.push(("self".to_string(), id, p.mode))
+                        else:
+                            fine = False
+                    case ParamKind.Named(name, ty, _):
+                        let t = self.substitute(module, ty, subst)
+                        params.push((name.text.copy(), t, p.mode))
+                    case _:
+                        fine = False
+            var drawn_tys: list[TypeExprId] = []
+            for (_, t, _) in params:
+                drawn_tys.push(self.drawn(module, t))
+            var all_ok = True
+            for t in drawn_tys:
+                if not w.type_ok(self.ast(module), t, []):
+                    all_ok = False
+            if not fine or not all_ok or params.is_empty():
+                continue
+            var shown = f.name.text.copy()
+            if let Some(o) = owner:
+                shown = "{o}.{f.name.text}"
+            # A type's function without `self` is called through the type.
+            var has_self = False
+            if let Some(p) = f.params.first():
+                if let ParamKind.SelfParam = p.kind:
+                    has_self = True
+            var assoc: String? = None
+            if not has_self:
+                assoc = owner.copy()
+            let n = k
+            k += 1
+            # `requires` as a predicate of the same parameters: a method of
+            # the type for a method.
+            var requires: list[String] = []
+            for c in clauses:
+                if c.kind == ContractKind.Requires:
+                    let r = self.ast(module).expr(c.expr).range
+                    requires.push("({self.text_in(module, r).trim()})")
+            var decl = String.new()
+            if not requires.is_empty():
+                var named: list[String] = []
+                for p in f.params:
+                    if let ParamKind.Named(name, ty, _) = p.kind:
+                        named.push("{name.text}: {type_text(self.ast(module), ty)}")
+                var gs: list[String] = []
+                for g in f.generics:
+                    var b: list[String] = []
+                    for x in g.bounds:
+                        b.push(self.text_in(module, self.ast(module).type_expr(x).range))
+                    if b.is_empty():
+                        gs.push(g.name.text.copy())
+                    else:
+                        gs.push("{g.name.text}: {b.join(" + ")}")
+                var gp = String.new()
+                if not gs.is_empty():
+                    gp = "[{gs.join(", ")}]"
+                let condition = requires.join(" and ")
+                match owner:
+                    case Some(o):
+                        var ps: list[String] = []
+                        if has_self:
+                            ps.push("self".to_string())
+                        for x in named:
+                            ps.push(x.copy())
+                        decl = "\nimpl {o}:\n    def __requires_{n}{gp}({ps.join(", ")}) -> bool:\n"
+                        decl.push("        return {condition}\n")
+                    case None:
+                        decl = "\ndef __requires_{n}{gp}({named.join(", ")}) -> bool:\n"
+                        decl.push("    return {condition}\n")
+            w.out.push(decl)
+            var tys: list[String] = []
+            for t in drawn_tys:
+                tys.push(type_text(self.ast(module), t))
+            var tuple = "({tys.join(", ")})"
+            if len(tys) == 1:
+                tuple = "({tys[0]},)"
+            var cases = "\ndef __contract_cases_{n}(d: Draws) -> {tuple}:\n"
+            for i in range(len(params)):
+                cases.push(
+                    "    let a{i}: {tys[i]} = {w.call(self.ast(module), drawn_tys[i], "d", 0)}\n"
+                )
+            var names: list[String] = []
+            for i in range(len(params)):
+                names.push("a{i}")
+            if not requires.is_empty():
+                var call = String.new()
+                match assoc:
+                    case Some(o):
+                        call = "{o}.__requires_{n}({names.join(", ")})"
+                    case None:
+                        if owner.is_some():
+                            var rest: list[String] = []
+                            for i in range(1, len(names)):
+                                rest.push(names[i].copy())
+                            call = "a0.__requires_{n}({rest.join(", ")})"
+                        else:
+                            call = "__requires_{n}({names.join(", ")})"
+                cases.push("    if not {call}:\n        d.reject()\n")
+            var ret = "({names.join(", ")})"
+            if len(names) == 1:
+                ret = "({names[0]},)"
+            cases.push("    return {ret}\n")
+            w.out.push(cases)
+            # The test: the call, on each case; its contract is checked
+            # inside it.
+            var body = String.new()
+            var args: list[String] = []
+            for i in range(len(params)):
+                let (_, _, mode) = params[i].copy()
+                if mode == Mode.Mut:
+                    body.push("        var b{i} = args.{i}\n")
+                    args.push("mut b{i}")
+                else:
+                    body.push("        let b{i} = args.{i}\n")
+                    args.push("b{i}")
+            var call = String.new()
+            match assoc:
+                case Some(o):
+                    call = "{o}.{f.name.text}({args.join(", ")})"
+                case None:
+                    if owner.is_some():
+                        var rest: list[String] = []
+                        for i in range(1, len(args)):
+                            rest.push(args[i].copy())
+                        call = "b0.{f.name.text}({rest.join(", ")})"
+                    else:
+                        call = "{f.name.text}({args.join(", ")})"
+            body.push("        _ = {call}\n        return True\n")
+            tests.push("\ntest \"contract of {shown}\":\n")
+            tests.push(
+                "    check(Gen.of(__contract_cases_{n}, quiet=True, steps=100000)) do args:\n{body}"
+            )
+        k = self.declare_refinements(module, items, mut w, mut tests, k)
+        w.out.push(tests)
+        # The generators the sites and the contract tests call, and the
+        # ones those call, in declaration order.
+        var needed: set[String] = set()
+        var queue = referenced(w.out)
+        while let Some(n) = queue.pop():
+            if let Some(g) = gens.get(n.copy()):
+                if needed.add(n.copy()):
+                    for x in referenced(g):
+                        queue.push(x.copy())
+        var text = String.new()
+        for (n, _) in order:
+            if needed.contains(n):
+                if let Some(g) = gens.get(n.copy()):
+                    text.push(g)
+        text.push(w.out)
+        if text.is_empty():
+            return
+        let generated = self.declare_generated_in(module, "<arbitrary>", text)
+        # The generators are named from the module they serve.
+        var names: list[(String, DefId)] = []
+        for (name, d) in self.prog.modules[generated.index].items.items():
+            names.push((name.copy(), d))
+        for (name, d) in names:
+            if not self.prog.modules[module.index].items.contains(name.copy()):
+                _ = self.prog.modules[module.index].items.insert(name.copy(), d)
+
+    ## The names and the text of the bounds of generic parameters.
+    pure def bounds_of(self, module: ModuleId, gs: list[GenericParam]) -> list[(String, String)]:
+        var out: list[(String, String)] = []
+        for g in gs:
+            var b: list[String] = []
+            for x in g.bounds:
+                b.push(self.text_in(module, self.ast(module).type_expr(x).range))
+            out.push((g.name.text.copy(), b.join(" + ")))
+        return out
+
+    ## The types written in `arbitrary[T]` and `exhaustive[T](...)`: each
+    ## once, with the function `__arbitrary_site_N` that draws it when it
+    ## has a generator, and the call that stands for each site.
+    pure def declare_sites(mut self, module: ModuleId, items: list[ItemId], mut w: Writer):
+        # The calls whose callee is a site, with their arguments.
+        var calls: dict[int, (ExprId, list[Arg])] = {}
+        let exprs = visit.exprs_in_items(self.ast(module), items)
+        for e in exprs:
+            if let ExprKind.Call(callee, args, _) = self.ast(module).expr(e).kind:
+                if let ExprKind.Index(_, _) = self.ast(module).expr(callee).kind:
+                    _ = calls.insert(callee.index, (e, args.copy()))
+        var keys: list[String] = []
+        for e in exprs:
+            let ExprKind.Index(base, targs) = self.ast(module).expr(e).kind.copy() else:
+                continue
+            var kind = String.new()
+            if let ExprKind.Name(n) = self.ast(module).expr(base).kind:
+                kind = n.copy()
+            if kind != "arbitrary" and kind != "exhaustive":
+                continue
+            if len(targs) != 1:
+                continue
+            var t = ExprId(index=0)
+            match targs[0]:
+                case IndexArg.Expr(x):
+                    t = x
+                case _:
+                    continue
+            let key = without_spaces(self.text_in(module, self.ast(module).expr(t).range))
+            if not keys.contains(key.copy()):
+                keys.push(key.copy())
+                let i = len(keys) - 1
+                var site: String? = None
+                match self.expr_as_type(module, t):
+                    case Some(te):
+                        match w.type_why(self.ast(module), te, []):
+                            case None:
+                                let name = "__arbitrary_site_{i}"
+                                let ty = type_text(self.ast(module), te)
+                                let drawn_value = w.call(self.ast(module), te, "d", 0)
+                                w.out.push(
+                                    "\ndef {name}(d: Draws) -> {ty}:\n    return {drawn_value}\n"
+                                )
+                                site = Some(name)
+                            case Some(why):
+                                _ = self.prog.generator_failures.insert(key.copy(), why)
+                    case None:
+                        let why = "`{key}` is not a type"
+                        _ = self.prog.generator_failures.insert(key.copy(), why)
+                _ = self.prog.generator_sites.insert(key.copy(), site)
+            # The call that stands for this site.
+            var site = String.new()
+            if let Some(entry) = self.prog.generator_sites.get(key.copy()):
+                if let Some(n) = entry:
+                    site = n.copy()
+            if site.is_empty():
+                continue
+            var call_args: list[Arg]? = None
+            if let Some(c) = calls.get(e.index):
+                call_args = Some(c.1.copy())
+            self.write_site_call(module, e, kind, call_args, site)
+
+    ## The calls that stand for the sites in the modules the compiler wrote
+    ## so far (the doc examples, the interceptors and fakes, the derived and
+    ## delegated impls), now that every module's generators are known, as
+    ## stage 0's checker makes a site's call wherever the site is checked; a
+    ## module the compiler writes from now on (an instance of a template)
+    ## has its sites' calls written as it is declared.
+    pub pure def declare_written_sites(mut self):
+        for i in range(len(self.prog.modules)):
+            let g = ModuleId(index=i)
+            if self.writes_sites(g):
+                self.write_sites_in(g)
+        self.sites_known = True
+
+    ## Whether module `g` is one the compiler wrote for the program, but for
+    ## its generators, with a site in its text whose type has a generator.
+    pub pure def writes_sites(self, g: ModuleId) -> bool:
+        if self.prog.generator_sites.is_empty() or g.index >= len(self.sources):
+            return False
+        let data = ref self.prog.modules[g.index]
+        if data.is_std
+                or data.name.starts_with("<arbitrary>/")
+                or self.prog.user_modules.contains(g):
+            return False
+        let text = self.module_texts.get(g) else:
+            return False
+        return text.contains("arbitrary") or text.contains("exhaustive")
+
+    ## The calls that stand for the sites in module `g` whose types have
+    ## generators, which the module's scope sees.
+    pub pure def write_sites_in(mut self, g: ModuleId):
+        let items = self.sources[g.index].items.copy()
+        var calls: dict[int, list[Arg]] = {}
+        let exprs = visit.exprs_in_items(self.ast(g), items)
+        for e in exprs:
+            if let ExprKind.Call(callee, args, _) = self.ast(g).expr(e).kind:
+                if let ExprKind.Index(_, _) = self.ast(g).expr(callee).kind:
+                    _ = calls.insert(callee.index, args.copy())
+        for e in exprs:
+            let ExprKind.Index(base, targs) = self.ast(g).expr(e).kind.copy() else:
+                continue
+            var kind = String.new()
+            if let ExprKind.Name(n) = self.ast(g).expr(base).kind:
+                kind = n.copy()
+            if kind != "arbitrary" and kind != "exhaustive":
+                continue
+            if len(targs) != 1:
+                continue
+            let IndexArg.Expr(t) = targs[0] else:
+                continue
+            let key = without_spaces(self.text_in(g, self.ast(g).expr(t).range))
+            var site = String.new()
+            if let Some(entry) = self.prog.generator_sites.get(key):
+                if let Some(n) = entry:
+                    site = n.copy()
+            if site.is_empty():
+                continue
+            var call_args: list[Arg]? = None
+            if let Some(c) = calls.get(e.index):
+                call_args = Some(c.copy())
+            self.write_site_call(g, e, kind, call_args, site)
+
+    ## The call `Gen.of(site)` or `Gen.every(site, max_len=n)` that stands
+    ## for the site `e` of `module` (with the arguments `call_args` of the
+    ## call the site is the callee of), written into the module's syntax.
+    pure def write_site_call(
+        mut self, module: ModuleId, e: ExprId, kind: str, call_args: list[Arg]?, site: str
+    ):
+        # The site's own range, whether it is called or not.
+        let at = self.ast(module).expr(e).range
+        let node = self.ast(module).expr(e).node
+        var method = "of"
+        let callee_name = self.add_name_expr(module, node, at, site)
+        var args = [Arg(node=node, range=at, name=None, mutable=False, value=callee_name)]
+        if kind == "exhaustive":
+            method = "every"
+            var max_len: ExprId? = None
+            if let Some(given) = call_args:
+                for a in given:
+                    if max_len.is_none():
+                        match a.name:
+                            case None:
+                                max_len = Some(a.value)
+                            case Some(n):
+                                if n.text == "max_len":
+                                    max_len = Some(a.value)
+            let three = Expr(
+                node=node,
+                range=at,
+                kind=ExprKind.Int(text="3".to_string(), value=Some(three_u128()), suffix=None),
+            )
+            var value = ExprId(index=0)
+            match max_len:
+                case Some(v):
+                    value = v
+                case None:
+                    value = self.sources[module.index].ast.add_expr(three)
+            args.push(
+                Arg(
+                    node=node,
+                    range=at,
+                    name=Some(Name(text="max_len".to_string(), range=at)),
+                    mutable=False,
+                    value=value,
+                )
+            )
+        let gen = self.add_name_expr(module, node, at, "Gen")
+        let field = Expr(
+            node=node,
+            range=at,
+            kind=ExprKind.Field(base=gen, name=Name(text=method.to_string(), range=at)),
+        )
+        let f = self.sources[module.index].ast.add_expr(field)
+        let call = Expr(node=node, range=at, kind=ExprKind.Call(callee=f, args=args, trailing=None))
+        let made = self.sources[module.index].ast.add_expr(call)
+        _ = self.prog.generator_calls.insert((module.index, e.index), made)
+
+    ## `@refines(reference)` (17, D-070): the function must give what its
+    ## reference gives on every case, within the tolerance; its cases go to
+    ## `w`, its test to `tests`, numbered from `k`. Gives the next number.
+    pure def declare_refinements(
+        mut self,
+        module: ModuleId,
+        items: list[ItemId],
+        mut w: Writer,
+        mut tests: String,
+        first: int,
+    ) -> int:
+        var k = first
+        var fns: dict[String, FnDef] = {}
+        for it in items:
+            if let ItemKind.Fn(f) = self.ast(module).item(it).kind:
+                _ = fns.insert(f.name.text.copy(), f.copy())
+        for it in items:
+            let item = self.ast(module).item(it).copy()
+            let ItemKind.Fn(f) = item.kind else:
+                continue
+            for a in item.attrs:
+                if a.name != "refines":
+                    continue
+                var reference: String? = None
+                if let Some(x) = a.args.first():
+                    if x.name.is_none():
+                        if let ExprKind.Name(n) = self.ast(module).expr(x.value).kind:
+                            reference = Some(n.copy())
+                # `tolerance=Ulps(n)`: absent, a whole number, or written
+                # otherwise.
+                var tolerance = False
+                var ulps: int? = None
+                for x in a.args:
+                    if tolerance:
+                        break
+                    if let Some(n) = x.name:
+                        if n.text == "tolerance":
+                            tolerance = True
+                            ulps = self.ulps_of(module, x.value)
+                # `test.refines-mismatch`, each reason a report of its own.
+                let at = f.name.range
+                var shown_ref = "?".to_string()
+                if let Some(r) = reference:
+                    shown_ref = r.copy()
+                let rname = reference else:
+                    let why = "the reference is a function of this module, named first"
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
+                    continue
+                let found = fns.get(rname.copy()) else:
+                    let why = "there is no function `{rname}` in this module"
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
+                    continue
+                let g = found.copy()
+                if tolerance and ulps.is_none():
+                    let why = "the tolerance is written `tolerance=Ulps(n)`, with a whole number"
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
+                    continue
+                let mine = self.signature_of(module, f)
+                let theirs = self.signature_of(module, g)
+                if mine.is_none() or theirs.is_none():
+                    let why = "both must be free functions with named parameters"
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
+                    continue
+                let (ps, ret) = mine ?? ([], String.new())
+                let (qs, gret) = theirs ?? ([], String.new())
+                if not f.generics.is_empty() or not g.generics.is_empty() or ps.is_empty():
+                    let why = "both must take parameters, and no type parameters"
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
+                    continue
+                if ps != qs or ret != gret:
+                    var mine_texts: list[String] = []
+                    for (t, _) in ps:
+                        mine_texts.push(t.copy())
+                    var their_texts: list[String] = []
+                    for (t, _) in qs:
+                        their_texts.push(t.copy())
+                    let takes = mine_texts.join(", ")
+                    let they_take = their_texts.join(", ")
+                    var why = "`{f.name.text}` takes ({takes}) and gives `{ret}`, "
+                    why.push("`{rname}` takes ({they_take}) and gives `{gret}`")
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
+                    continue
+                if tolerance and ret != "f64":
+                    let why = "a tolerance in ULPs compares `f64` results, not `{ret}`"
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
+                    continue
+                var tys: list[TypeExprId] = []
+                for p in f.params:
+                    if let ParamKind.Named(_, ty, _) = p.kind:
+                        tys.push(self.drawn(module, ty))
+                var no_gen: String? = None
+                for t in tys:
+                    if no_gen.is_none():
+                        no_gen = w.type_why(self.ast(module), t, [])
+                if let Some(why) = no_gen:
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
+                    continue
+                let n = k
+                k += 1
+                var texts: list[String] = []
+                for t in tys:
+                    texts.push(type_text(self.ast(module), t))
+                var tuple = "({texts.join(", ")})"
+                if len(texts) == 1:
+                    tuple = "({texts[0]},)"
+                var cases = "\ndef __refines_cases_{n}(d: Draws) -> {tuple}:\n"
+                for i in range(len(tys)):
+                    cases.push(
+                        "    let a{i}: {texts[i]} = {w.call(self.ast(module), tys[i], "d", 0)}\n"
+                    )
+                var names: list[String] = []
+                for i in range(len(tys)):
+                    names.push("a{i}")
+                var ret_tuple = "({names.join(", ")})"
+                if len(names) == 1:
+                    ret_tuple = "({names[0]},)"
+                cases.push("    return {ret_tuple}\n")
+                w.out.push(cases)
+                # Each call gets its own copy of an argument it takes.
+                var args: list[String] = []
+                for i in range(len(ps)):
+                    match ps[i].1:
+                        case Mode.Own:
+                            args.push("args.{i}.copy()")
+                        case Mode.Mut:
+                            args.push("mut args.{i}.copy()")
+                        case Mode.Borrow:
+                            args.push("args.{i}")
+                let lhs = "{f.name.text}({args.join(", ")})"
+                let rhs = "{rname}({args.join(", ")})"
+                var holds = "{lhs} == {rhs}"
+                if let Some(u) = ulps:
+                    holds = "within_ulps({lhs}, {rhs}, {u})"
+                tests.push("\ntest \"{f.name.text} refines {rname}\":\n")
+                tests.push(
+                    "    check(Gen.of(__refines_cases_{n}, quiet=True, steps=100000)) do args:\n"
+                )
+                tests.push("        return {holds}\n")
+        return k
+
+    ## The `n` of `Ulps(n)`, a whole number that fits an `int`.
+    pure def ulps_of(self, module: ModuleId, e: ExprId) -> int?:
+        let ExprKind.Call(callee, args, _) = self.ast(module).expr(e).kind.copy() else:
+            return None
+        let ExprKind.Name(n) = self.ast(module).expr(callee).kind.copy() else:
+            return None
+        if n != "Ulps" or len(args) != 1:
+            return None
+        if let ExprKind.Int(_, value, _) = self.ast(module).expr(args[0].value).kind:
+            if let Some(v) = value:
+                return v.to_int()
+        return None
+
+    ## A free function's parameters (each type as written, with its mode)
+    ## and result, as `@refines` compares them; `None` for one with a
+    ## parameter that is not named.
+    ## `test.refines-mismatch` on the function named at `at`.
+    pure def refines_mismatch(
+        mut self, module: ModuleId, at: TextRange, reference: str, name: str, why: str
+    ):
+        var d = Diagnostic.new(Msg.TestRefinesMismatch, at.start, at.end)
+        d = d.with("reference", reference).with("name", name).with("why", why)
+        self.report_other(module, d)
+
+    pure def signature_of(self, module: ModuleId, h: FnDef) -> (list[(String, Mode)], String)?:
+        var ps: list[(String, Mode)] = []
+        for p in h.params:
+            match p.kind:
+                case ParamKind.Named(_, ty, _):
+                    ps.push((type_text(self.ast(module), ty), p.mode))
+                case _:
+                    return None
+        var ret = "()".to_string()
+        if let Some(r) = h.ret:
+            ret = type_text(self.ast(module), r)
+        return Some((ps, ret))
+
+    ## The type a parameter's cases are drawn as: a `Slice[T]` as a
+    ## `list[T]`, a `str` as a `String` (each becomes the parameter's type
+    ## where it is passed).
+    pure def drawn(mut self, module: ModuleId, t: TypeExprId) -> TypeExprId:
+        let te = self.ast(module).type_expr(t).copy()
+        if let TypeKind.Path(segments, args) = te.kind:
+            if len(segments) == 1:
+                var to = String.new()
+                if segments[0].text == "Slice":
+                    to = "list".to_string()
+                elif segments[0].text == "str" and args.is_empty():
+                    to = "String".to_string()
+                if not to.is_empty():
+                    let named = Name(text=to, range=segments[0].range)
+                    let kind = TypeKind.Path(segments=[named], args=args.copy())
+                    return self.sources[module.index].ast.add_type(
+                        TypeExpr(node=te.node, range=te.range, kind=kind)
+                    )
+        return t
+
+    ## The type with the type parameters replaced by the names in `subst`.
+    pure def substitute(
+        mut self, module: ModuleId, t: TypeExprId, subst: dict[String, String]
+    ) -> TypeExprId:
+        if subst.is_empty():
+            return t
+        let te = self.ast(module).type_expr(t).copy()
+        var kind = te.kind.copy()
+        match te.kind:
+            case TypeKind.Path(segments, args):
+                var segs = segments.copy()
+                if len(segs) == 1 and args.is_empty():
+                    if let Some(to) = subst.get(segs[0].text.copy()):
+                        segs[0] = Name(text=to.copy(), range=segs[0].range)
+                var xs: list[TypeExprId] = []
+                for a in args:
+                    xs.push(self.substitute(module, a, subst))
+                kind = TypeKind.Path(segments=segs, args=xs)
+            case TypeKind.Option(i):
+                kind = TypeKind.Option(self.substitute(module, i, subst))
+            case TypeKind.Dyn(i):
+                kind = TypeKind.Dyn(self.substitute(module, i, subst))
+            case TypeKind.Ref(mutable, inner):
+                kind = TypeKind.Ref(mutable=mutable, inner=self.substitute(module, inner, subst))
+            case TypeKind.Tuple(es):
+                var xs: list[(Name?, TypeExprId)] = []
+                for (n, e) in es:
+                    xs.push((n.copy(), self.substitute(module, e, subst)))
+                kind = TypeKind.Tuple(xs)
+            case TypeKind.Result(ok, err):
+                var o: TypeExprId? = None
+                if let Some(x) = ok:
+                    o = Some(self.substitute(module, x, subst))
+                var r: TypeExprId? = None
+                if let Some(x) = err:
+                    r = Some(self.substitute(module, x, subst))
+                kind = TypeKind.Result(ok=o, err=r)
+            case TypeKind.Fn(pure, params, ret):
+                var ps: list[TypeExprId] = []
+                for p in params:
+                    ps.push(self.substitute(module, p, subst))
+                kind = TypeKind.Fn(pure=pure, params=ps, ret=self.substitute(module, ret, subst))
+            case TypeKind.Union(us):
+                var xs: list[TypeExprId] = []
+                for u in us:
+                    xs.push(self.substitute(module, u, subst))
+                kind = TypeKind.Union(xs)
+            case _:
+                pass
+        return self.sources[module.index].ast.add_type(
+            TypeExpr(node=te.node, range=te.range, kind=kind)
+        )
+
+    pure def add_name_expr(
+        mut self, module: ModuleId, node: int, at: TextRange, name: str
+    ) -> ExprId:
+        return self.sources[module.index].ast.add_expr(
+            Expr(node=node, range=at, kind=ExprKind.Name(name.to_string()))
+        )
+
+    ## An index argument read as a type: `list[int]` in `arbitrary[list[int]]`.
+    pure def expr_as_type(mut self, module: ModuleId, e: ExprId) -> TypeExprId?:
+        let x = self.ast(module).expr(e).copy()
+        var kind = TypeKind.Error
+        match x.kind:
+            case ExprKind.Name(n):
+                kind = TypeKind.Path(segments=[Name(text=n.copy(), range=x.range)], args=[])
+            case ExprKind.Index(base, args):
+                let ExprKind.Name(n) = self.ast(module).expr(base).kind.copy() else:
+                    return None
+                let base_range = self.ast(module).expr(base).range
+                var targs: list[TypeExprId] = []
+                for a in args:
+                    var y = ExprId(index=0)
+                    match a:
+                        case IndexArg.Expr(x):
+                            y = x
+                        case _:
+                            return None
+                    let t = self.expr_as_type(module, y) else:
+                        return None
+                    targs.push(t)
+                kind = TypeKind.Path(segments=[Name(text=n, range=base_range)], args=targs)
+            case ExprKind.Tuple(xs):
+                if xs.is_empty():
+                    return None
+                var es: list[(Name?, TypeExprId)] = []
+                for y in xs:
+                    let t = self.expr_as_type(module, y) else:
+                        return None
+                    es.push((None, t))
+                kind = TypeKind.Tuple(es)
+            case ExprKind.Paren(inner):
+                return self.expr_as_type(module, inner)
+            # `(int) -> bool` reads as a closure.
+            case ExprKind.Closure(c):
+                if c.implicit_param:
+                    return None
+                var params: list[TypeExprId] = []
+                for p in c.params:
+                    if p.ty.is_some():
+                        return None
+                    let pt = TypeExpr(
+                        node=x.node,
+                        range=p.name.range,
+                        kind=TypeKind.Path(segments=[p.name.copy()], args=[]),
+                    )
+                    params.push(self.sources[module.index].ast.add_type(pt))
+                var body = ExprId(index=0)
+                match c.body:
+                    case ClosureBody.Expr(x):
+                        body = x
+                    case _:
+                        return None
+                let ret = self.expr_as_type(module, body) else:
+                    return None
+                kind = TypeKind.Fn(pure=False, params=params, ret=ret)
+            case _:
+                return None
+        return Some(
+            self.sources[module.index].ast.add_type(TypeExpr(node=x.node, range=x.range, kind=kind))
+        )
+
+## The names of generic parameters.
+pure def generic_names(gs: list[GenericParam]) -> list[String]:
+    var out: list[String] = []
+    for g in gs:
+        out.push(g.name.text.copy())
+    return out
+
+## A text without its whitespace: a site's key.
+pure def without_spaces(text: str) -> String:
+    var out = String.new()
+    for c in text.chars():
+        if not c.is_whitespace():
+            out.push_char(c)
+    return out
+
+## `3`, as the value of an integer literal.
+pure def three_u128() -> u128:
+    var x: u128 = 0
+    for _ in range(3):
+        x = x + 1
+    return x
+
+## The range `[lo, hi)` of an integer refinement over `int`, as far as its
+## base's bound it, or as its predicate alone bounds it; `None` when the
+## shape is not a refinement whose bases come down to `int` (stage 0's
+## `Err`), `Some(None)` when they do but nothing bounds both ends.
+pure def root_domain(ast: Ast, shapes: dict[String, Shape], n: str, depth: int) -> ((int, int)?)?:
+    let found = shapes.get(n.to_string()) else:
+        return None
+    let Shape.Refinement(_, base, domain) = found.copy() else:
+        return None
+    if depth > 64:
+        return None
+    let TypeKind.Path(segments, args) = ast.type_expr(base).kind.copy() else:
+        return None
+    if len(segments) != 1 or not args.is_empty():
+        return None
+    if segments[0].text == "int":
+        return Some(domain)
+    let inherited = root_domain(ast, shapes, segments[0].text, depth + 1) else:
+        return None
+    if let Some((a, c)) = domain:
+        if let Some((e, f)) = inherited:
+            return Some(Some((max(a, e), min(c, f))))
+        return Some(domain)
+    return Some(inherited)
+
+## The range `[lo, hi)` an integer refinement's predicate bounds `self` to
+## (stage 0's `int_domain`): comparisons of `self` with integer literals,
+## joined by `and`; `None` when the predicate is anything else or leaves
+## an end open.
+pub pure def int_domain(ast: Ast, p: ExprId) -> (int, int)?:
+    var lo = -INT_MAX - 1
+    var hi = INT_MAX
+    if not domain_walk(ast, p, mut lo, mut hi):
+        return None
+    if lo > -INT_MAX - 1 and hi < INT_MAX and lo < hi:
+        return Some((lo, hi))
+    return None
+
+pure def domain_literal(ast: Ast, e: ExprId) -> int?:
+    match ast.expr(e).kind:
+        case ExprKind.Int(_, value, suffix):
+            if suffix.is_some():
+                return None
+            let v = value else:
+                return None
+            return v.to_int()
+        case ExprKind.Unary(op, inner):
+            if op != UnOp.Neg:
+                return None
+            let v = domain_literal(ast, inner) else:
+                return None
+            return Some(-v)
+        case ExprKind.Paren(inner):
+            return domain_literal(ast, inner)
+        case _:
+            return None
+
+pure def domain_is_self(ast: Ast, e: ExprId) -> bool:
+    return match ast.expr(e).kind:
+        case ExprKind.SelfValue: True
+        case ExprKind.Paren(inner): domain_is_self(ast, inner)
+        case _: False
+
+## Narrows `[lo, hi)` by `a op b` where one side is `self`.
+pure def domain_narrow(
+    ast: Ast, mut lo: int, mut hi: int, a: ExprId, op_in: CmpOp, b: ExprId
+) -> bool:
+    var op = op_in
+    var k = 0
+    if domain_is_self(ast, a):
+        let x = domain_literal(ast, b) else:
+            return False
+        k = x
+    elif domain_is_self(ast, b):
+        # `k op self` is `self op' k`.
+        match op_in:
+            case CmpOp.Lt:
+                op = CmpOp.Gt
+            case CmpOp.Le:
+                op = CmpOp.Ge
+            case CmpOp.Gt:
+                op = CmpOp.Lt
+            case CmpOp.Ge:
+                op = CmpOp.Le
+            case CmpOp.Eq:
+                op = CmpOp.Eq
+            case _:
+                return False
+        let x = domain_literal(ast, a) else:
+            return False
+        k = x
+    else:
+        return False
+    match op:
+        case CmpOp.Lt:
+            hi = min(hi, k)
+        case CmpOp.Le:
+            if k == INT_MAX:
+                return False
+            hi = min(hi, k + 1)
+        case CmpOp.Gt:
+            if k == INT_MAX:
+                return False
+            lo = max(lo, k + 1)
+        case CmpOp.Ge:
+            lo = max(lo, k)
+        case CmpOp.Eq:
+            if k == INT_MAX:
+                return False
+            lo = max(lo, k)
+            hi = min(hi, k + 1)
+        case _:
+            return False
+    return True
+
+pure def domain_walk(ast: Ast, e: ExprId, mut lo: int, mut hi: int) -> bool:
+    match ast.expr(e).kind:
+        case ExprKind.Paren(inner):
+            return domain_walk(ast, inner, mut lo, mut hi)
+        case ExprKind.Binary(op, lhs, rhs):
+            if op != BinOp.And:
+                return False
+            return domain_walk(ast, lhs, mut lo, mut hi) and domain_walk(ast, rhs, mut lo, mut hi)
+        case ExprKind.Compare(first, rest):
+            var left = first
+            for (op, right) in rest:
+                if not domain_narrow(ast, mut lo, mut hi, left, op, right):
+                    return False
+                left = right
+            return True
+        case _:
+            return False
+
+## The types whose generators `text` calls: each `__arbitrary_T`.
+pure def referenced(text: str) -> list[String]:
+    var out: list[String] = []
+    var rest = text.to_string()
+    let marker = "__arbitrary_"
+    while let Some(i) = rest.find(marker):
+        rest = rest.byte_slice(i + marker.byte_len(), rest.byte_len()).to_string()
+        var n = String.new()
+        for c in rest.chars():
+            if not (is_alphanumeric(c) or c == '_'):
+                break
+            n.push_char(c)
+        if not n.is_empty():
+            out.push(n)
+    return out
+
+## The spelling of a type (stage 0's `type_text`, whose substitutions the
+## generators never use).
+pub pure def type_text(ast: Ast, t: TypeExprId) -> String:
+    match ast.type_expr(t).kind:
+        case TypeKind.Path(segments, args):
+            var parts: list[String] = []
+            for s in segments:
+                parts.push(s.text.copy())
+            let name = parts.join(".")
+            if args.is_empty():
+                return name
+            var a: list[String] = []
+            for x in args:
+                a.push(type_text(ast, x))
+            return "{name}[{a.join(", ")}]"
+        case TypeKind.Option(i):
+            return "{type_text(ast, i)}?"
+        case TypeKind.Tuple(es):
+            var a: list[String] = []
+            for (n, e) in es:
+                match n:
+                    case Some(x):
+                        a.push("{x.text}: {type_text(ast, e)}")
+                    case None:
+                        a.push(type_text(ast, e))
+            if len(a) == 1:
+                return "({a[0]},)"
+            return "({a.join(", ")})"
+        case TypeKind.Ref(mutable, inner):
+            let m = if mutable: "mut " else: ""
+            return "ref {m}{type_text(ast, inner)}"
+        case TypeKind.Result(ok, err):
+            var o = String.new()
+            if let Some(x) = ok:
+                o = type_text(ast, x)
+            var r = String.new()
+            if let Some(x) = err:
+                r = type_text(ast, x)
+            if o.is_empty():
+                return "! {r}"
+            return "{o} ! {r}"
+        case TypeKind.Fn(pure, params, ret):
+            var p: list[String] = []
+            for x in params:
+                p.push(type_text(ast, x))
+            let shown = if pure: "pure " else: ""
+            return "{shown}({p.join(", ")}) -> {type_text(ast, ret)}"
+        case TypeKind.Union(us):
+            var p: list[String] = []
+            for x in us:
+                p.push(type_text(ast, x))
+            return "{{{p.join(", ")}}}"
+        case TypeKind.Dyn(i):
+            return "dyn {type_text(ast, i)}"
+        case _:
+            return "()"

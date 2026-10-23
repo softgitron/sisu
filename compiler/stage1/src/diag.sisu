@@ -1,0 +1,1606 @@
+##! Diagnostics (docs/architecture.md, "Diagnostics and the message
+##! catalog"): a message named by its catalog identifier, named parameters,
+##! a primary span and labelled secondary spans, rendered in the
+##! conformance form that `--format=ids` prints. Spans are byte ranges of
+##! one file; positions are 1-based lines and columns counted in characters.
+##!
+##! The codes, kinds and texts of messages are not written here: they are
+##! read from `catalog/messages.catalog`, the catalog stage 0 uses (D-065).
+
+from stage1.text import is_plain
+
+## A message stage 1 reports, by its catalog identifier.
+@derive(Eq, Debug, Copy)
+pub enum Msg:
+    LexTabInIndentation
+    LexInconsistentDedent
+    LexUnterminatedString
+    LexUnterminatedBlockString
+    LexUnknownCharacter
+    LexUnterminatedChar
+    LexInvalidEscape
+    LexUnmatchedClose
+    LexUnclosedBracket
+    LexMismatchedBracket
+    LexSemicolon
+    LexInvalidNumber
+    LexLoneCloseBrace
+    LexBadIndentChar
+    LexBackslashContinuation
+    LexBadCharLiteral
+    LexNewlineInInterpolation
+    LexOpenedHere
+    LexUseSpaces
+    LexCloseString
+    LexCloseBracket
+    ParseExpected
+    ParseExpectedBlock
+    ParseBlockOnSameLine
+    ParseExpectedExpression
+    ParseExpectedType
+    ParseExpectedPattern
+    ParseExpectedDeclaration
+    ParseTopLevelStatement
+    ParseMixedAndOr
+    ParseMixedBitwise
+    ParseBitwiseArithmetic
+    ParseShiftArithmetic
+    ParseNegativePower
+    ParseMixedChain
+    ParseAssignmentInExpression
+    ParseIfExpressionElse
+    ParseTrailingTokens
+    ParseArmStatement
+    ParseChainOperator
+    ParseEmptyInterpolation
+    ParseClosureParameter
+    ParseWalrus
+    ParseKeywordAsName
+    ParseUnexpectedIndent
+    ParseExpectedMember
+    ParsePythonConditional
+    ParseInsertToken
+    ParseOpenedHere
+    ParseUseIfExpression
+    ParseParenthesize
+    ResolveUndefinedName
+    ResolveUndefinedType
+    ResolveConstExpression
+    ResolveConstNotInt
+    ComptimePanicked
+    ResolveDuplicateDefinition
+    ResolveFirstDefined
+    ResolveSimilarName
+    ResolveSimilarType
+    ResolveSimilarModule
+    ResolveShadowOuter
+    ResolveImportUnknown
+    ResolveMethodSignature
+    TypeNoSelf
+    TypeMismatch
+    TypeExpectedBecause
+    TypeIfBranches
+    TypeFoundHere
+    TypeUnquote
+    TypeCallConversion
+    TypeIntegerDivision
+    TypeUseFloorDivision
+    TypeFloatFloorDivision
+    TypeFloatSuffix
+    TypeMixedNumbers
+    TypeConvertToFloat
+    TypeBinaryOperator
+    TypeInterpolate
+    TypeUnaryOperator
+    TypeNotBool
+    TypeUnknownField
+    TypeUnknownMethod
+    TypeSimilarMember
+    TypeArgumentCount
+    TypeUnknownKeyword
+    TypeDuplicateArgument
+    TypeMissingArgument
+    TypeAddHole
+    TypeNotCallable
+    TypeAssignImmutable
+    TypeNotMutable
+    TypeDeclareVar
+    TypeTakeMut
+    ResolveDefinedHere
+    TypeNotAPlace
+    TypeMissingReturn
+    TypeReturnValueInUnit
+    TypeDropReturnValue
+    TypeReturnInTest
+    TypeReturnNeedsValue
+    TypeUnusedResult
+    TypeDiscard
+    TypeTryNeedsFallible
+    TypeTryContext
+    TypeErrorNotInSet
+    TypeAddErrorSet
+    TypeBreakOutsideLoop
+    TypeContinueOutsideLoop
+    TypeCannotInfer
+    TypeHole
+    TypeUnreachableCode
+    TypeMoveOutOfBorrow
+    TypeAddCopy
+    TypeMutArgumentMissing
+    TypeAddMut
+    TypeMutArgumentUnexpected
+    TypeRemoveMut
+    TypeNotGeneric
+    TypeTypeArgumentsNeeded
+    TypeNotAValue
+    TypeValueReturnsBorrow
+    TypeMethodNeedsReceiver
+    TypeAssocNotMethod
+    TypeTupleIndex
+    TypeComparisonTypes
+    TypeNotOrdered
+    TypeLiteralOutOfRange
+    TypePositionalAfterKeyword
+    TypeNameArgument
+    TypeMainSignature
+    TypeTestSignature
+    TypeAssertMessage
+    TypeUnsizedDyn
+    TypeBoundNotSatisfied
+    TypeShowDebug
+    TypeAddBound
+    TypeLetNeedsType
+    TypeRefutableLet
+    TypeVariantNeedsFields
+    TypeElseNotFallible
+    TypeElseMustDiverge
+    TypeBadFormatSpec
+    TypeNoDisplay
+    TypeImpureArgument
+    TypeFromEndOutsideIndex
+    TypeAddImpl
+    TypeImpureCapability
+    TypeConstantNegativeIndex
+    TypeFromEndIndex
+    TypeStrNotIndexable
+    TypeNotIndexable
+    TypeMissingField
+    TypeNoConstructor
+    TypeUnknownAssociated
+    TypeAmbiguousMethod
+    TypeArmNeedsExpression
+    TypeBindingsInOrPattern
+    TypeClosureParameterCount
+    TypeCoalesce
+    TypeConstPattern
+    TypeItOutsideClosure
+    TypeNonExhaustive
+    TypeNotAStructPattern
+    TypeNotIterable
+    TypeOpenSetNeedsWildcard
+    TypeOptionalChain
+    TypeOwnClosureCapture
+    TypeOwnClosureChanges
+    TypePatternFieldCount
+    TypePatternMismatch
+    TypeRestOutsideArguments
+    TypeSelfTypeOutside
+    TypeStarOutsideList
+    TypeUnknownVariant
+    TypeUnpackCount
+    TypeUnreachableArm
+    TypeViewToDyn
+    TypeYieldOutsideGenerator
+    TypeRemovePure
+    TypeGeneratorResult
+    TypeStructuralOnly
+    # The ownership checker's (`sisu-borrowck`), on SIR.
+    TypeImpureCall
+    TypeImpureValueCall
+    TypeImpureDrop
+    TypeDeclaredPureHere
+    TypeUninitialized
+    TypeReassignLet
+    TypeMustConsumeArgument
+    BorrowUseAfterMove
+    BorrowUseAfterPartialMove
+    BorrowMoveOutOfDrop
+    BorrowMoveOutOfPlace
+    BorrowMustConsume
+    BorrowMustConsumeExit
+    BorrowMustConsumeIntrinsic
+    BorrowMovedHere
+    BorrowMovedInLoop
+    BorrowDeclaredHere
+    BorrowAssignedHere
+    BorrowAssignedInLoop
+    BorrowDropImplHere
+    BorrowMadeHere
+    BorrowCopyBeforeMove
+    BorrowUnvisitedRest
+    BorrowModifyWhileBorrowed
+    BorrowUseWhileMutBorrowed
+    BorrowMoveWhileBorrowed
+    BorrowMutWhileBorrowed
+    BorrowDoesNotLiveLongEnough
+    BorrowReturnLocal
+    BorrowReturnNotFrom
+    BorrowStoreInPlainType
+    BorrowStoreIntoCaller
+    TaskBorrowsBodyLocal
+    TaskBorrowsElsewhere
+    BorrowBorrowedBy
+    BorrowBorrowedHere
+    BorrowLaterUsed
+    BorrowMoveAfter
+    BorrowDeclareOutside
+    BorrowBindTemporary
+    BorrowReturnOwned
+    BorrowUseOwnClosure
+    TaskUseOwn
+    BorrowAddFrom
+    # The manifests and the module trees of a program of several modules
+    # (`sisu-driver`'s `manifest.rs` and `package.rs`).
+    PackageTomlSyntax
+    PackageTomlDuplicate
+    PackageMissingKey
+    PackageBadValue
+    PackageBadName
+    PackageNoManifest
+    PackageRenamedDependency
+    PackageCycle
+    PackageNoRootModule
+    PackageTwoRootModules
+    PackageNotAPath
+    PackageBadWhen
+    PackageModuleName
+    PackageNoMember
+    PackageScriptMetadata
+    PackageTrustUnknown
+    PackageNoPackage
+    PackageReservedName
+    PackageDependsHere
+    PackageUnknownKey
+    PackageUnknownFeature
+    ResolveBadCfg
+    ResolveUnknownFeature
+    TypeReadGuardValue
+    CapUntrusted
+    BorrowDeclareView
+    BorrowConsumeWith
+    TaskNotSend
+    TaskNotSendMut
+    TaskNotSync
+    TaskResultNotSend
+    CapNotShareable
+    BorrowViewInOwner
+    BorrowMustConsumeInOwner
+    BorrowViewFieldInPlainStruct
+    BorrowViewInEnum
+    BorrowTypeDeclaredHere
+    ResolveSealedTrait
+    ResolveOrphanImpl
+    ResolveNotATraitMethod
+    ResolveMissingAssocType
+    ResolveSupertraitMissing
+    ResolveMissingTraitMethod
+    BorrowFromRequired
+    BorrowBorrowedParam
+    CapInternal
+    Stage0Unsupported
+    ResolveFieldDefaultOrder
+    ContractNotPure
+    ContractChanges
+    ComptimeNoFake
+    ResolveNotInModule
+    TypeMissingReturnEnd
+    TypeMainForms
+    TypeBreakUseReturn
+    TypeTruthiness
+    TypeIntRange
+    TypeFloatRange
+    TypeMissingPatterns
+    TypeOptionNotValue
+    TypeSpecLetters
+    TypeMethodOfTraits
+    RefineUseTryFrom
+    ResolveDefaultInFunction
+    ResolveRenameDuplicate
+    ResolveWriteTraitMethod
+    TaskFieldPath
+    TaskWrapMutex
+    # The front end's other messages, which `check` renders.
+    BorrowFromNotAParameter
+    BorrowFromWithoutBorrow
+    ComptimeBudget
+    ComptimeBudgetAttribute
+    ComptimeDeriveFailed
+    ComptimeDeriveTemplate
+    ComptimeEmbedFailed
+    ComptimeEmbedPath
+    ComptimeInstanceFailed
+    ComptimeInstancesUnbounded
+    ComptimeIo
+    ComptimeNotConstant
+    ComptimeNotKept
+    ComptimeOnly
+    ComptimeTemplateValue
+    ContractGeneratorEnsures
+    ContractInvariantField
+    ContractMisplaced
+    ContractNotInTest
+    ContractOldArguments
+    ContractOldOutside
+    RefineChangeThroughBase
+    RefineNeedsTryFrom
+    RefineNotSatisfied
+    RefineOwnImpl
+    RefinePredicateType
+    ResolveAliasCycle
+    ResolveAmbiguousVariant
+    ResolveAssocNeedsType
+    ResolveAssocOutsideTraitImpl
+    ResolveConstArgument
+    ResolveConstTypeRequired
+    ResolveDelegateField
+    ResolveDelegateSelf
+    ResolveDelegateTo
+    ResolveDeriveField
+    ResolveDropGeneric
+    ResolveDropSignature
+    ResolveDropTarget
+    ResolveDuplicateField
+    ResolveDuplicateMethod
+    ResolveDuplicateParameter
+    ResolveDuplicateVariant
+    ResolveGenericDefaultOrder
+    ResolveImplDefault
+    ResolveInferredSetPosition
+    ResolveMissingBody
+    ResolveNoAssocType
+    ResolveNotADependency
+    ResolveNotAModule
+    ResolveNotATrait
+    ResolveNotAType
+    ResolveNotAnErrorSet
+    ResolveNotDelegable
+    ResolveNotDerivable
+    ResolveNotObjectSafe
+    ResolveNotReexported
+    ResolveOverlappingImpl
+    ResolvePackageItem
+    ResolveParameterDefaultOrder
+    ResolvePrivateField
+    ResolvePrivateItem
+    ResolvePrivateMethod
+    ResolveScriptMain
+    ResolveSelfNotFirst
+    ResolveSelfOutsideMethod
+    ResolveSelfTypeOutside
+    ResolveStdOnlyAttribute
+    ResolveTraitAsType
+    ResolveTraitCycle
+    ResolveTypeArgument
+    ResolveTypeArgumentCount
+    ResolveUnionOutsideResult
+    ResolveUnknownAssocType
+    ResolveUnknownModule
+    Stage0Internal
+    TaskClosureLiteral
+    TaskRaceTypes
+    TaskResultUnknown
+    TaskScopeEscapes
+    TaskSelectArm
+    TestNoGenerator
+    TestRefinesMismatch
+    BorrowNoSuchParam
+    BorrowNotBorrowedParam
+    BorrowRemoveFrom
+    BorrowResultCannotBorrow
+    ComptimeDeriveHere
+    ComptimeInstanceHere
+    ResolveAddDyn
+    ResolveFirstImpl
+    # The notes that name a fix where the wrong-ownership corpus had none
+    # (decision 263).
+    TaskMakeInside
+    TaskReturnSend
+    TaskJoinInside
+    TaskWriteClosure
+    BorrowFromOnlyParameters
+    BorrowCopyPart
+    BorrowConsumeFirst
+    BorrowConsumeEach
+    BorrowConsumeBeforeCall
+    BorrowOwnInstead
+    BorrowStoreOwned
+    BorrowOwnedField
+    TypeCallInstead
+    TypeCaptureCopy
+    TypePlainClosure
+    TypeBorrowWithMut
+    TypeAssignEveryPath
+    TypeDynOwned
+
+impl Msg:
+    ## The catalog identifier.
+    pub pure def id(self) -> str:
+        return match self:
+            case LexTabInIndentation: "lex.tab-in-indentation"
+            case LexInconsistentDedent: "lex.inconsistent-dedent"
+            case LexUnterminatedString: "lex.unterminated-string"
+            case LexUnterminatedBlockString: "lex.unterminated-block-string"
+            case LexUnknownCharacter: "lex.unknown-character"
+            case LexUnterminatedChar: "lex.unterminated-char"
+            case LexInvalidEscape: "lex.invalid-escape"
+            case LexUnmatchedClose: "lex.unmatched-close"
+            case LexUnclosedBracket: "lex.unclosed-bracket"
+            case LexMismatchedBracket: "lex.mismatched-bracket"
+            case LexSemicolon: "lex.semicolon"
+            case LexInvalidNumber: "lex.invalid-number"
+            case LexLoneCloseBrace: "lex.lone-close-brace"
+            case LexBadIndentChar: "lex.bad-indent-char"
+            case LexBackslashContinuation: "lex.backslash-continuation"
+            case LexBadCharLiteral: "lex.bad-char-literal"
+            case LexNewlineInInterpolation: "lex.newline-in-interpolation"
+            case LexOpenedHere: "lex.opened-here"
+            case LexUseSpaces: "lex.use-spaces"
+            case LexCloseString: "lex.close-string"
+            case LexCloseBracket: "lex.close-bracket"
+            case ParseExpected: "parse.expected"
+            case ParseExpectedBlock: "parse.expected-block"
+            case ParseBlockOnSameLine: "parse.block-on-same-line"
+            case ParseExpectedExpression: "parse.expected-expression"
+            case ParseExpectedType: "parse.expected-type"
+            case ParseExpectedPattern: "parse.expected-pattern"
+            case ParseExpectedDeclaration: "parse.expected-declaration"
+            case ParseTopLevelStatement: "parse.top-level-statement"
+            case ParseMixedAndOr: "parse.mixed-and-or"
+            case ParseMixedBitwise: "parse.mixed-bitwise"
+            case ParseBitwiseArithmetic: "parse.bitwise-arithmetic"
+            case ParseShiftArithmetic: "parse.shift-arithmetic"
+            case ParseNegativePower: "parse.negative-power"
+            case ParseMixedChain: "parse.mixed-chain"
+            case ParseAssignmentInExpression: "parse.assignment-in-expression"
+            case ParseIfExpressionElse: "parse.if-expression-else"
+            case ParseTrailingTokens: "parse.trailing-tokens"
+            case ParseArmStatement: "parse.arm-statement"
+            case ParseChainOperator: "parse.chain-operator"
+            case ParseEmptyInterpolation: "parse.empty-interpolation"
+            case ParseClosureParameter: "parse.closure-parameter"
+            case ParseWalrus: "parse.walrus"
+            case ParseKeywordAsName: "parse.keyword-as-name"
+            case ParseUnexpectedIndent: "parse.unexpected-indent"
+            case ParseExpectedMember: "parse.expected-member"
+            case ParsePythonConditional: "parse.python-conditional"
+            case ParseInsertToken: "parse.insert-token"
+            case ParseOpenedHere: "parse.opened-here"
+            case ParseUseIfExpression: "parse.use-if-expression"
+            case ParseParenthesize: "parse.parenthesize"
+            case ResolveUndefinedName: "resolve.undefined-name"
+            case ResolveConstExpression: "resolve.const-expression"
+            case ResolveConstNotInt: "resolve.const-not-int"
+            case ComptimePanicked: "comptime.panicked"
+            case ResolveUndefinedType: "resolve.undefined-type"
+            case ResolveDuplicateDefinition: "resolve.duplicate-definition"
+            case ResolveFirstDefined: "resolve.first-defined"
+            case ResolveSimilarName: "resolve.similar-name"
+            case ResolveSimilarType: "resolve.similar-type"
+            case ResolveSimilarModule: "resolve.similar-module"
+            case ResolveShadowOuter: "resolve.shadow-outer"
+            case ResolveImportUnknown: "resolve.import-unknown"
+            case ResolveMethodSignature: "resolve.method-signature"
+            case TypeNoSelf: "type.no-self"
+            case TypeMismatch: "type.mismatch"
+            case TypeExpectedBecause: "type.expected-because"
+            case TypeIfBranches: "type.if-branches"
+            case TypeFoundHere: "type.found-here"
+            case TypeUnquote: "type.unquote"
+            case TypeCallConversion: "type.call-conversion"
+            case TypeIntegerDivision: "type.integer-division"
+            case TypeUseFloorDivision: "type.use-floor-division"
+            case TypeFloatFloorDivision: "type.float-floor-division"
+            case TypeFloatSuffix: "type.float-suffix"
+            case TypeMixedNumbers: "type.mixed-numbers"
+            case TypeConvertToFloat: "type.convert-to-float"
+            case TypeBinaryOperator: "type.binary-operator"
+            case TypeInterpolate: "type.interpolate"
+            case TypeUnaryOperator: "type.unary-operator"
+            case TypeNotBool: "type.not-bool"
+            case TypeUnknownField: "type.unknown-field"
+            case TypeUnknownMethod: "type.unknown-method"
+            case TypeSimilarMember: "type.similar-member"
+            case TypeArgumentCount: "type.argument-count"
+            case TypeUnknownKeyword: "type.unknown-keyword"
+            case TypeDuplicateArgument: "type.duplicate-argument"
+            case TypeMissingArgument: "type.missing-argument"
+            case TypeAddHole: "type.add-hole"
+            case TypeNotCallable: "type.not-callable"
+            case TypeAssignImmutable: "type.assign-immutable"
+            case TypeNotMutable: "type.not-mutable"
+            case TypeDeclareVar: "type.declare-var"
+            case TypeTakeMut: "type.take-mut"
+            case ResolveDefinedHere: "resolve.defined-here"
+            case TypeNotAPlace: "type.not-a-place"
+            case TypeMissingReturn: "type.missing-return"
+            case TypeReturnValueInUnit: "type.return-value-in-unit"
+            case TypeDropReturnValue: "type.drop-return-value"
+            case TypeReturnInTest: "type.return-in-test"
+            case TypeReturnNeedsValue: "type.return-needs-value"
+            case TypeUnusedResult: "type.unused-result"
+            case TypeDiscard: "type.discard"
+            case TypeTryNeedsFallible: "type.try-needs-fallible"
+            case TypeTryContext: "type.try-context"
+            case TypeErrorNotInSet: "type.error-not-in-set"
+            case TypeAddErrorSet: "type.add-error-set"
+            case TypeBreakOutsideLoop: "type.break-outside-loop"
+            case TypeContinueOutsideLoop: "type.continue-outside-loop"
+            case TypeCannotInfer: "type.cannot-infer"
+            case TypeHole: "type.hole"
+            case TypeUnreachableCode: "type.unreachable-code"
+            case TypeMoveOutOfBorrow: "type.move-out-of-borrow"
+            case TypeAddCopy: "type.add-copy"
+            case TypeMutArgumentMissing: "type.mut-argument-missing"
+            case TypeAddMut: "type.add-mut"
+            case TypeMutArgumentUnexpected: "type.mut-argument-unexpected"
+            case TypeRemoveMut: "type.remove-mut"
+            case TypeNotGeneric: "type.not-generic"
+            case TypeTypeArgumentsNeeded: "type.type-arguments-needed"
+            case TypeNotAValue: "type.not-a-value"
+            case TypeValueReturnsBorrow: "type.value-returns-borrow"
+            case TypeMethodNeedsReceiver: "type.method-needs-receiver"
+            case TypeAssocNotMethod: "type.assoc-not-method"
+            case TypeTupleIndex: "type.tuple-index"
+            case TypeComparisonTypes: "type.comparison-types"
+            case TypeNotOrdered: "type.not-ordered"
+            case TypeLiteralOutOfRange: "type.literal-out-of-range"
+            case TypePositionalAfterKeyword: "type.positional-after-keyword"
+            case TypeNameArgument: "type.name-argument"
+            case TypeMainSignature: "type.main-signature"
+            case TypeTestSignature: "type.test-signature"
+            case TypeAssertMessage: "type.assert-message"
+            case TypeUnsizedDyn: "type.unsized-dyn"
+            case TypeBoundNotSatisfied: "type.bound-not-satisfied"
+            case TypeShowDebug: "type.show-debug"
+            case TypeAddBound: "type.add-bound"
+            case TypeLetNeedsType: "type.let-needs-type"
+            case TypeRefutableLet: "type.refutable-let"
+            case TypeVariantNeedsFields: "type.variant-needs-fields"
+            case TypeElseNotFallible: "type.else-not-fallible"
+            case TypeElseMustDiverge: "type.else-must-diverge"
+            case TypeBadFormatSpec: "type.bad-format-spec"
+            case TypeNoDisplay: "type.no-display"
+            case TypeImpureArgument: "type.impure-argument"
+            case TypeFromEndOutsideIndex: "type.from-end-outside-index"
+            case TypeAddImpl: "type.add-impl"
+            case TypeImpureCapability: "type.impure-capability"
+            case TypeConstantNegativeIndex: "type.constant-negative-index"
+            case TypeFromEndIndex: "type.from-end-index"
+            case TypeStrNotIndexable: "type.str-not-indexable"
+            case TypeNotIndexable: "type.not-indexable"
+            case TypeMissingField: "type.missing-field"
+            case TypeNoConstructor: "type.no-constructor"
+            case TypeUnknownAssociated: "type.unknown-associated"
+            case TypeAmbiguousMethod: "type.ambiguous-method"
+            case TypeArmNeedsExpression: "type.arm-needs-expression"
+            case TypeBindingsInOrPattern: "type.bindings-in-or-pattern"
+            case TypeClosureParameterCount: "type.closure-parameter-count"
+            case TypeCoalesce: "type.coalesce"
+            case TypeConstPattern: "type.const-pattern"
+            case TypeItOutsideClosure: "type.it-outside-closure"
+            case TypeNonExhaustive: "type.non-exhaustive"
+            case TypeNotAStructPattern: "type.not-a-struct-pattern"
+            case TypeNotIterable: "type.not-iterable"
+            case TypeOpenSetNeedsWildcard: "type.open-set-needs-wildcard"
+            case TypeOptionalChain: "type.optional-chain"
+            case TypeOwnClosureCapture: "type.own-closure-capture"
+            case TypeOwnClosureChanges: "type.own-closure-changes"
+            case TypePatternFieldCount: "type.pattern-field-count"
+            case TypePatternMismatch: "type.pattern-mismatch"
+            case TypeRestOutsideArguments: "type.rest-outside-arguments"
+            case TypeSelfTypeOutside: "type.self-type-outside"
+            case TypeStarOutsideList: "type.star-outside-list"
+            case TypeUnknownVariant: "type.unknown-variant"
+            case TypeUnpackCount: "type.unpack-count"
+            case TypeUnreachableArm: "type.unreachable-arm"
+            case TypeViewToDyn: "type.view-to-dyn"
+            case TypeYieldOutsideGenerator: "type.yield-outside-generator"
+            case TypeRemovePure: "type.remove-pure"
+            case TypeGeneratorResult: "type.generator-result"
+            case TypeStructuralOnly: "type.structural-only"
+            case TypeImpureCall: "type.impure-call"
+            case TypeImpureValueCall: "type.impure-value-call"
+            case TypeImpureDrop: "type.impure-drop"
+            case TypeDeclaredPureHere: "type.declared-pure-here"
+            case TypeUninitialized: "type.uninitialized"
+            case TypeReassignLet: "type.reassign-let"
+            case TypeMustConsumeArgument: "type.must-consume-argument"
+            case BorrowUseAfterMove: "borrow.use-after-move"
+            case BorrowUseAfterPartialMove: "borrow.use-after-partial-move"
+            case BorrowMoveOutOfDrop: "borrow.move-out-of-drop"
+            case BorrowMoveOutOfPlace: "borrow.move-out-of-place"
+            case BorrowMustConsume: "borrow.must-consume"
+            case BorrowMustConsumeExit: "borrow.must-consume-exit"
+            case BorrowMustConsumeIntrinsic: "borrow.must-consume-intrinsic"
+            case BorrowMovedHere: "borrow.moved-here"
+            case BorrowMovedInLoop: "borrow.moved-in-loop"
+            case BorrowDeclaredHere: "borrow.declared-here"
+            case BorrowAssignedHere: "borrow.assigned-here"
+            case BorrowAssignedInLoop: "borrow.assigned-in-loop"
+            case BorrowDropImplHere: "borrow.drop-impl-here"
+            case BorrowMadeHere: "borrow.made-here"
+            case BorrowCopyBeforeMove: "borrow.copy-before-move"
+            case BorrowUnvisitedRest: "borrow.unvisited-rest"
+            case BorrowModifyWhileBorrowed: "borrow.modify-while-borrowed"
+            case BorrowUseWhileMutBorrowed: "borrow.use-while-mut-borrowed"
+            case BorrowMoveWhileBorrowed: "borrow.move-while-borrowed"
+            case BorrowMutWhileBorrowed: "borrow.mut-while-borrowed"
+            case BorrowDoesNotLiveLongEnough: "borrow.does-not-live-long-enough"
+            case BorrowReturnLocal: "borrow.return-local"
+            case BorrowReturnNotFrom: "borrow.return-not-from"
+            case BorrowStoreInPlainType: "borrow.store-in-plain-type"
+            case BorrowStoreIntoCaller: "borrow.store-into-caller"
+            case TaskBorrowsBodyLocal: "task.borrows-body-local"
+            case TaskBorrowsElsewhere: "task.borrows-elsewhere"
+            case BorrowBorrowedBy: "borrow.borrowed-by"
+            case BorrowBorrowedHere: "borrow.borrowed-here"
+            case BorrowLaterUsed: "borrow.later-used"
+            case BorrowMoveAfter: "borrow.move-after"
+            case BorrowDeclareOutside: "borrow.declare-outside"
+            case BorrowBindTemporary: "borrow.bind-temporary"
+            case BorrowReturnOwned: "borrow.return-owned"
+            case BorrowUseOwnClosure: "borrow.use-own-closure"
+            case TaskUseOwn: "task.use-own"
+            case BorrowAddFrom: "borrow.add-from"
+            case PackageTomlSyntax: "package.toml-syntax"
+            case PackageTomlDuplicate: "package.toml-duplicate"
+            case PackageMissingKey: "package.missing-key"
+            case PackageBadValue: "package.bad-value"
+            case PackageBadName: "package.bad-name"
+            case PackageNoManifest: "package.no-manifest"
+            case PackageRenamedDependency: "package.renamed-dependency"
+            case PackageCycle: "package.cycle"
+            case PackageNoRootModule: "package.no-root-module"
+            case PackageTwoRootModules: "package.two-root-modules"
+            case PackageNotAPath: "package.not-a-path"
+            case PackageBadWhen: "package.bad-when"
+            case PackageModuleName: "package.module-name"
+            case PackageNoMember: "package.no-member"
+            case PackageScriptMetadata: "package.script-metadata"
+            case PackageTrustUnknown: "package.trust-unknown"
+            case PackageNoPackage: "package.no-package"
+            case PackageReservedName: "package.reserved-name"
+            case PackageDependsHere: "package.depends-here"
+            case PackageUnknownKey: "package.unknown-key"
+            case PackageUnknownFeature: "package.unknown-feature"
+            case ResolveBadCfg: "resolve.bad-cfg"
+            case ResolveUnknownFeature: "resolve.unknown-feature"
+            case TypeReadGuardValue: "type.read-guard-value"
+            case CapUntrusted: "cap.untrusted"
+            case BorrowDeclareView: "borrow.declare-view"
+            case BorrowConsumeWith: "borrow.consume-with"
+            case TaskNotSend: "task.not-send"
+            case TaskNotSendMut: "task.not-send-mut"
+            case TaskNotSync: "task.not-sync"
+            case TaskResultNotSend: "task.result-not-send"
+            case CapNotShareable: "cap.not-shareable"
+            case BorrowViewInOwner: "borrow.view-in-owner"
+            case BorrowMustConsumeInOwner: "borrow.must-consume-in-owner"
+            case BorrowViewFieldInPlainStruct: "borrow.view-field-in-plain-struct"
+            case BorrowViewInEnum: "borrow.view-in-enum"
+            case BorrowTypeDeclaredHere: "borrow.type-declared-here"
+            case ResolveSealedTrait: "resolve.sealed-trait"
+            case ResolveOrphanImpl: "resolve.orphan-impl"
+            case ResolveNotATraitMethod: "resolve.not-a-trait-method"
+            case ResolveMissingAssocType: "resolve.missing-assoc-type"
+            case ResolveSupertraitMissing: "resolve.supertrait-missing"
+            case ResolveMissingTraitMethod: "resolve.missing-trait-method"
+            case BorrowFromRequired: "borrow.from-required"
+            case BorrowBorrowedParam: "borrow.borrowed-param"
+            case CapInternal: "cap.internal"
+            case Stage0Unsupported: "stage0.unsupported"
+            case ResolveFieldDefaultOrder: "resolve.field-default-order"
+            case ContractNotPure: "contract.not-pure"
+            case ContractChanges: "contract.changes"
+            case ComptimeNoFake: "comptime.no-fake"
+            case ResolveNotInModule: "resolve.not-in-module"
+            case TypeMissingReturnEnd: "type.missing-return-end"
+            case TypeMainForms: "type.main-forms"
+            case TypeBreakUseReturn: "type.break-use-return"
+            case TypeTruthiness: "type.truthiness"
+            case TypeIntRange: "type.int-range"
+            case TypeFloatRange: "type.float-range"
+            case TypeMissingPatterns: "type.missing-patterns"
+            case TypeOptionNotValue: "type.option-not-value"
+            case TypeSpecLetters: "type.spec-letters"
+            case TypeMethodOfTraits: "type.method-of-traits"
+            case RefineUseTryFrom: "refine.use-try-from"
+            case ResolveDefaultInFunction: "resolve.default-in-function"
+            case ResolveRenameDuplicate: "resolve.rename-duplicate"
+            case ResolveWriteTraitMethod: "resolve.write-trait-method"
+            case TaskFieldPath: "task.field-path"
+            case TaskWrapMutex: "task.wrap-mutex"
+            case BorrowFromNotAParameter: "borrow.from-not-a-parameter"
+            case BorrowFromWithoutBorrow: "borrow.from-without-borrow"
+            case ComptimeBudget: "comptime.budget"
+            case ComptimeBudgetAttribute: "comptime.budget-attribute"
+            case ComptimeDeriveFailed: "comptime.derive-failed"
+            case ComptimeDeriveTemplate: "comptime.derive-template"
+            case ComptimeEmbedFailed: "comptime.embed-failed"
+            case ComptimeEmbedPath: "comptime.embed-path"
+            case ComptimeInstanceFailed: "comptime.instance-failed"
+            case ComptimeInstancesUnbounded: "comptime.instances-unbounded"
+            case ComptimeIo: "comptime.io"
+            case ComptimeNotConstant: "comptime.not-constant"
+            case ComptimeNotKept: "comptime.not-kept"
+            case ComptimeOnly: "comptime.only"
+            case ComptimeTemplateValue: "comptime.template-value"
+            case ContractGeneratorEnsures: "contract.generator-ensures"
+            case ContractInvariantField: "contract.invariant-field"
+            case ContractMisplaced: "contract.misplaced"
+            case ContractNotInTest: "contract.not-in-test"
+            case ContractOldArguments: "contract.old-arguments"
+            case ContractOldOutside: "contract.old-outside"
+            case RefineChangeThroughBase: "refine.change-through-base"
+            case RefineNeedsTryFrom: "refine.needs-try-from"
+            case RefineNotSatisfied: "refine.not-satisfied"
+            case RefineOwnImpl: "refine.own-impl"
+            case RefinePredicateType: "refine.predicate-type"
+            case ResolveAliasCycle: "resolve.alias-cycle"
+            case ResolveAmbiguousVariant: "resolve.ambiguous-variant"
+            case ResolveAssocNeedsType: "resolve.assoc-needs-type"
+            case ResolveAssocOutsideTraitImpl: "resolve.assoc-outside-trait-impl"
+            case ResolveConstArgument: "resolve.const-argument"
+            case ResolveConstTypeRequired: "resolve.const-type-required"
+            case ResolveDelegateField: "resolve.delegate-field"
+            case ResolveDelegateSelf: "resolve.delegate-self"
+            case ResolveDelegateTo: "resolve.delegate-to"
+            case ResolveDeriveField: "resolve.derive-field"
+            case ResolveDropGeneric: "resolve.drop-generic"
+            case ResolveDropSignature: "resolve.drop-signature"
+            case ResolveDropTarget: "resolve.drop-target"
+            case ResolveDuplicateField: "resolve.duplicate-field"
+            case ResolveDuplicateMethod: "resolve.duplicate-method"
+            case ResolveDuplicateParameter: "resolve.duplicate-parameter"
+            case ResolveDuplicateVariant: "resolve.duplicate-variant"
+            case ResolveGenericDefaultOrder: "resolve.generic-default-order"
+            case ResolveImplDefault: "resolve.impl-default"
+            case ResolveInferredSetPosition: "resolve.inferred-set-position"
+            case ResolveMissingBody: "resolve.missing-body"
+            case ResolveNoAssocType: "resolve.no-assoc-type"
+            case ResolveNotADependency: "resolve.not-a-dependency"
+            case ResolveNotAModule: "resolve.not-a-module"
+            case ResolveNotATrait: "resolve.not-a-trait"
+            case ResolveNotAType: "resolve.not-a-type"
+            case ResolveNotAnErrorSet: "resolve.not-an-error-set"
+            case ResolveNotDelegable: "resolve.not-delegable"
+            case ResolveNotDerivable: "resolve.not-derivable"
+            case ResolveNotObjectSafe: "resolve.not-object-safe"
+            case ResolveNotReexported: "resolve.not-reexported"
+            case ResolveOverlappingImpl: "resolve.overlapping-impl"
+            case ResolvePackageItem: "resolve.package-item"
+            case ResolveParameterDefaultOrder: "resolve.parameter-default-order"
+            case ResolvePrivateField: "resolve.private-field"
+            case ResolvePrivateItem: "resolve.private-item"
+            case ResolvePrivateMethod: "resolve.private-method"
+            case ResolveScriptMain: "resolve.script-main"
+            case ResolveSelfNotFirst: "resolve.self-not-first"
+            case ResolveSelfOutsideMethod: "resolve.self-outside-method"
+            case ResolveSelfTypeOutside: "resolve.self-type-outside"
+            case ResolveStdOnlyAttribute: "resolve.std-only-attribute"
+            case ResolveTraitAsType: "resolve.trait-as-type"
+            case ResolveTraitCycle: "resolve.trait-cycle"
+            case ResolveTypeArgument: "resolve.type-argument"
+            case ResolveTypeArgumentCount: "resolve.type-argument-count"
+            case ResolveUnionOutsideResult: "resolve.union-outside-result"
+            case ResolveUnknownAssocType: "resolve.unknown-assoc-type"
+            case ResolveUnknownModule: "resolve.unknown-module"
+            case Stage0Internal: "stage0.internal"
+            case TaskClosureLiteral: "task.closure-literal"
+            case TaskRaceTypes: "task.race-types"
+            case TaskResultUnknown: "task.result-unknown"
+            case TaskScopeEscapes: "task.scope-escapes"
+            case TaskSelectArm: "task.select-arm"
+            case TestNoGenerator: "test.no-generator"
+            case TestRefinesMismatch: "test.refines-mismatch"
+            case BorrowNoSuchParam: "borrow.no-such-param"
+            case BorrowNotBorrowedParam: "borrow.not-borrowed-param"
+            case BorrowRemoveFrom: "borrow.remove-from"
+            case BorrowResultCannotBorrow: "borrow.result-cannot-borrow"
+            case ComptimeDeriveHere: "comptime.derive-here"
+            case ComptimeInstanceHere: "comptime.instance-here"
+            case ResolveAddDyn: "resolve.add-dyn"
+            case ResolveFirstImpl: "resolve.first-impl"
+            case TaskMakeInside: "task.make-inside"
+            case TaskReturnSend: "task.return-send"
+            case TaskJoinInside: "task.join-inside"
+            case TaskWriteClosure: "task.write-closure"
+            case BorrowFromOnlyParameters: "borrow.from-only-parameters"
+            case BorrowCopyPart: "borrow.copy-part"
+            case BorrowConsumeFirst: "borrow.consume-first"
+            case BorrowConsumeEach: "borrow.consume-each"
+            case BorrowConsumeBeforeCall: "borrow.consume-before-call"
+            case BorrowOwnInstead: "borrow.own-instead"
+            case BorrowStoreOwned: "borrow.store-owned"
+            case BorrowOwnedField: "borrow.owned-field"
+            case TypeCallInstead: "type.call-instead"
+            case TypeCaptureCopy: "type.capture-copy"
+            case TypePlainClosure: "type.plain-closure"
+            case TypeBorrowWithMut: "type.borrow-with-mut"
+            case TypeAssignEveryPath: "type.assign-every-path"
+            case TypeDynOwned: "type.dyn-owned"
+
+## A byte range of a text: from `start` up to, not including, `end`.
+@derive(Eq, Hash, Debug, Copy)
+pub struct TextRange:
+    pub start: int
+    pub end: int
+
+impl TextRange:
+    ## The range between two offsets, in either order.
+    pub pure def new(start: int, end: int) -> TextRange:
+        if end < start:
+            return TextRange(start=end, end=start)
+        return TextRange(start=start, end=end)
+
+    ## The smallest range holding both.
+    pub pure def cover(self, other: TextRange) -> TextRange:
+        return TextRange(start=min(self.start, other.start), end=max(self.end, other.end))
+
+    ## The empty range at `at`.
+    pub pure def empty(at: int) -> TextRange:
+        return TextRange(start=at, end=at)
+
+    pub pure def is_empty(self) -> bool:
+        return self.start == self.end
+
+## A named parameter of a message: `name="value"` in the rendered form.
+@derive(Eq)
+pub struct Param:
+    pub name: String
+    pub value: String
+
+## A secondary span with a message of its own ("opened here").
+@derive(Eq)
+pub struct Label:
+    pub msg: Msg
+    pub start: int
+    pub end: int
+    pub params: list[Param]
+    ## The file the span is in when it is not the diagnostic's (-1): while
+    ## the type checker reports, the index of the module it is in; in what
+    ## `typeck.Checked` gives, the index of the checked file (0 the root
+    ## module's, `k + 1` the `k`th of `Checked.files`).
+    pub file: int
+
+## A replacement of the text from byte `start` up to `end`.
+@derive(Eq)
+pub struct Edit:
+    pub start: int
+    pub end: int
+    pub text: String
+
+## A note or help line under a diagnostic ("copy it with `.copy()`
+## before it is moved"), with its parameters.
+@derive(Eq)
+pub struct Note:
+    pub msg: Msg
+    pub params: list[Param]
+
+## A suggested change: a message and the edits that make it.
+@derive(Eq)
+pub struct Fix:
+    pub msg: Msg
+    pub params: list[Param]
+    pub edits: list[Edit]
+
+## One diagnostic: a message, its parameters, the byte range it is about,
+## labels, fixes, and notes (which the conformance form does not print).
+@derive(Eq)
+pub struct Diagnostic:
+    pub msg: Msg
+    pub start: int
+    pub end: int
+    pub params: list[Param]
+    pub labels: list[Label]
+    pub fixes: list[Fix]
+    pub notes: list[Note]
+
+impl Diagnostic:
+    pub pure def new(msg: Msg, start: int, end: int) -> Diagnostic:
+        return Diagnostic(msg=msg, start=start, end=end, params=[], labels=[], fixes=[], notes=[])
+
+    ## The diagnostic with one more parameter.
+    pub pure def with(own self, name: str, value: str) -> Diagnostic:
+        var d = self
+        d.params.push(Param(name=name.to_string(), value=value.to_string()))
+        return d
+
+    ## The diagnostic with a label at `start..end`.
+    pub pure def label(own self, msg: Msg, start: int, end: int) -> Diagnostic:
+        var d = self
+        d.labels.push(Label(msg=msg, start=start, end=end, params=[], file=-1))
+        return d
+
+    ## The diagnostic with a label at `start..end` of another file than its
+    ## own, `file` (`Label.file`).
+    pub pure def label_in(own self, msg: Msg, start: int, end: int, file: int) -> Diagnostic:
+        var d = self
+        d.labels.push(Label(msg=msg, start=start, end=end, params=[], file=file))
+        return d
+
+    ## The diagnostic with a label at `start..end` that has one parameter.
+    pub pure def label_with(
+        own self, msg: Msg, start: int, end: int, name: str, value: str
+    ) -> Diagnostic:
+        var d = self
+        let param = Param(name=name.to_string(), value=value.to_string())
+        d.labels.push(Label(msg=msg, start=start, end=end, params=[param], file=-1))
+        return d
+
+    ## The diagnostic with a fix that replaces `start..end` by `text`.
+    pub pure def fix(
+        own self, msg: Msg, name: str, value: str, start: int, end: int, text: str
+    ) -> Diagnostic:
+        var d = self
+        let param = Param(name=name.to_string(), value=value.to_string())
+        let replacement = Edit(start=start, end=end, text=text.to_string())
+        d.fixes.push(Fix(msg=msg, params=[param], edits=[replacement]))
+        return d
+
+    ## The diagnostic with a fix, without parameters of its own, that
+    ## replaces `start..end` by `text`.
+    pub pure def fix_at(own self, msg: Msg, start: int, end: int, text: str) -> Diagnostic:
+        var d = self
+        let replacement = Edit(start=start, end=end, text=text.to_string())
+        d.fixes.push(Fix(msg=msg, params=[], edits=[replacement]))
+        return d
+
+    ## The diagnostic with a fix, without parameters of its own, made of
+    ## several edits.
+    pub pure def fix_edits(own self, msg: Msg, own edits: list[Edit]) -> Diagnostic:
+        var d = self
+        d.fixes.push(Fix(msg=msg, params=[], edits=edits))
+        return d
+
+    ## The diagnostic with a fix, its parameters and its edits.
+    pub pure def fix_params(
+        own self, msg: Msg, own params: list[Param], own edits: list[Edit]
+    ) -> Diagnostic:
+        var d = self
+        d.fixes.push(Fix(msg=msg, params=params, edits=edits))
+        return d
+
+    ## The diagnostic with a note.
+    pub pure def note(own self, msg: Msg) -> Diagnostic:
+        var d = self
+        d.notes.push(Note(msg=msg, params=[]))
+        return d
+
+    ## The diagnostic with a note that has one parameter.
+    pub pure def note_with(own self, msg: Msg, name: str, value: str) -> Diagnostic:
+        var d = self
+        let param = Param(name=name.to_string(), value=value.to_string())
+        d.notes.push(Note(msg=msg, params=[param]))
+        return d
+
+    ## The diagnostic with a note and its parameters.
+    pub pure def note_params(own self, msg: Msg, own params: list[Param]) -> Diagnostic:
+        var d = self
+        d.notes.push(Note(msg=msg, params=params))
+        return d
+
+    ## The value of the parameter `name`, or `None`.
+    pub pure def param(self, name: str) -> String?:
+        for p in self.params:
+            if p.name == name:
+                return Some(p.value.copy())
+        return None
+
+## The message catalog: for each identifier, its code (`E0100`, or `-` for
+## a label, a note or a fix) and its kind (`error`, `label`, ...).
+pub struct Catalog:
+    codes: dict[String, String]
+    kinds: dict[String, String]
+    templates: dict[String, String]
+
+impl Catalog:
+    ## Reads the catalog's line format: `CODE KIND IDENTIFIER TEMPLATE...`,
+    ## with blank lines and `#` comments. A line with fewer fields is
+    ## skipped, as is a second entry for an identifier.
+    pub pure def parse(text: str) -> Catalog:
+        var catalog = Catalog(codes={}, kinds={}, templates={})
+        for raw in text.lines():
+            let line = raw.trim()
+            if line.is_empty() or line.starts_with("#"):
+                continue
+            var fields: list[String] = []
+            for word in line.split_whitespace():
+                fields.push(word.to_string())
+            if len(fields) < 4 or catalog.codes.contains(fields[2].copy()):
+                continue
+            _ = catalog.codes.insert(fields[2].copy(), fields[0].copy())
+            _ = catalog.kinds.insert(fields[2].copy(), fields[1].copy())
+            _ = catalog.templates.insert(fields[2].copy(), template_of(line))
+        return catalog
+
+    ## A message's text with its parameters filled in (stage 0's
+    ## `Catalog::render`); an identifier the catalog lacks renders as
+    ## itself with its parameters.
+    pub pure def render(self, id: str, params: list[Param]) -> String:
+        match self.templates.get(id.to_string()):
+            case Some(t):
+                return fill_template(t, params)
+            case None:
+                var s = id.to_string()
+                for p in params:
+                    s.push(" {p.name}={p.value}")
+                return s
+
+    ## Whether the catalog has an entry for `msg`.
+    pub pure def has(self, msg: Msg) -> bool:
+        return self.codes.contains(msg.id().to_string())
+
+    ## The code of a message; `E????` for one without a code of its own or
+    ## missing from the catalog, as stage 0 prints them.
+    pub pure def code(self, msg: Msg) -> String:
+        if let Some(code) = self.codes.get(msg.id().to_string()):
+            if code != "-":
+                return code.copy()
+        return "E????".to_string()
+
+    ## Whether a message is an error (its kind in the catalog is `error`).
+    pub pure def is_error(self, msg: Msg) -> bool:
+        if let Some(kind) = self.kinds.get(msg.id().to_string()):
+            return kind == "error"
+        return False
+
+    ## An error of the command line as stage 0's driver prints one
+    ## (`plain_error`): `error[CODE]: ` and the message, on a line.
+    pub pure def plain_error(self, id: str, params: list[Param]) -> String:
+        var code = String.new()
+        if let Some(c) = self.codes.get(id.to_string()):
+            code = c.copy()
+        return "error[{code}]: {self.render(id, params)}\n"
+
+    ## The word a diagnostic's severity is shown with (stage 0's
+    ## `Diagnostic::severity`): `warning` for a warning, `note` for a note
+    ## or help, `error` for anything else.
+    pub pure def severity(self, msg: Msg) -> str:
+        if let Some(kind) = self.kinds.get(msg.id().to_string()):
+            if kind == "warning":
+                return "warning"
+            if kind == "note" or kind == "help":
+                return "note"
+        return "error"
+
+## The template of a catalog line: what follows its first three fields.
+pure def template_of(line: str) -> String:
+    var rest = line
+    for _ in range(3):
+        let trimmed = rest.trim_start()
+        var end = 0
+        let n = trimmed.byte_len()
+        while end < n and trimmed.byte_at(end) != 32 and trimmed.byte_at(end) != 9:
+            end += 1
+        rest = trimmed.byte_slice(end, n)
+    return rest.trim().to_string()
+
+## Substitutes `{name}` parameters into a template (stage 0's
+## `fill_template`): `{{` and `}}` are braces, `\n` a line break, and a
+## parameter not given stays as written.
+pub pure def fill_template(template: str, params: list[Param]) -> String:
+    var out = String.new()
+    var chars: list[char] = []
+    for c in template.chars():
+        chars.push(c)
+    let n = len(chars)
+    var i = 0
+    while i < n:
+        let c = chars[i]
+        if c == '{' and i + 1 < n and chars[i + 1] == '{':
+            out.push_char('{')
+            i += 2
+        elif c == '}' and i + 1 < n and chars[i + 1] == '}':
+            out.push_char('}')
+            i += 2
+        elif c == '\\' and i + 1 < n and chars[i + 1] == 'n':
+            out.push_char('\n')
+            i += 2
+        elif c == '{':
+            var j = i + 1
+            var name = String.new()
+            while j < n and chars[j] != '}':
+                name.push_char(chars[j])
+                j += 1
+            var found = False
+            for p in params:
+                if p.name == name and not found:
+                    out.push(p.value)
+                    found = True
+            if not found:
+                out.push("{{{name}}}")
+            i = j + 1
+        else:
+            out.push_char(c)
+            i += 1
+    return out
+
+## Sorts diagnostics by position, then code, keeping the order of equals
+## (stage 0 sorts stably by start, end and code).
+pub pure def sort(mut diags: list[Diagnostic], catalog: Catalog):
+    diags.sort_by((a, b) -> compare(a, b, catalog))
+
+## Sorts diagnostics as `sort` does and drops each one identical to an
+## earlier one (stage 0's `sort_unique`): one mistake is one message, also
+## where the compiler checks one piece of source more than once.
+pub pure def sort_unique(mut diags: list[Diagnostic], catalog: Catalog):
+    sort(mut diags, catalog)
+    var kept: list[Diagnostic] = []
+    for d in diags:
+        # Sorted, so an identical one is among the last kept at its span.
+        var repeat = False
+        var k = len(kept) - 1
+        while k >= 0 and kept[k].start == d.start and kept[k].end == d.end:
+            if kept[k] == d:
+                repeat = True
+                break
+            k -= 1
+        if not repeat:
+            kept.push(d.copy())
+    diags = kept
+
+pure def compare(a: Diagnostic, b: Diagnostic, catalog: Catalog) -> Ordering:
+    if a.start != b.start:
+        return a.start.cmp(b.start)
+    if a.end != b.end:
+        return a.end.cmp(b.end)
+    return catalog.code(a.msg).cmp(catalog.code(b.msg))
+
+## Where the lines of a text start, for positions in messages, and which
+## lines are ASCII, whose columns are their bytes.
+pub struct Lines:
+    starts: list[int]
+    ascii: list[bool]
+
+impl Lines:
+    ## The lines of `text`: one starts at 0 and after each `\n`.
+    pub pure def of(text: str) -> Lines:
+        var starts = [0]
+        var ascii: list[bool] = []
+        var plain = True
+        let n = text.byte_len()
+        var i = 0
+        while i < n:
+            let b = text.byte_at(i)
+            if b == 10:
+                starts.push(i + 1)
+                ascii.push(plain)
+                plain = True
+            elif b >= 128:
+                plain = False
+            i += 1
+        ascii.push(plain)
+        return Lines(starts=starts, ascii=ascii)
+
+    ## Where the line of 0-based index `index` starts, or `None` past the
+    ## last line.
+    pub pure def start_of(self, index: int) -> int?:
+        if index < 0 or index >= len(self.starts):
+            return None
+        return Some(self.starts[index])
+
+    ## The 0-based index of the line holding byte `offset`.
+    pub pure def index(self, offset: int) -> int:
+        var lo = 0
+        var hi = len(self.starts) - 1
+        while lo < hi:
+            let mid = (lo + hi + 1) // 2
+            if self.starts[mid] <= offset:
+                lo = mid
+            else:
+                hi = mid - 1
+        return lo
+
+    ## The byte offset of 1-based `line` and `col` of `text`, the column
+    ## counting characters (stage 0's `SourceFile::offset`); past the last
+    ## line, the end of the text.
+    pub pure def offset(self, text: str, line: int, col: int) -> int:
+        let index = max(line - 1, 0)
+        if index >= len(self.starts):
+            return text.byte_len()
+        let start = self.starts[index]
+        var end = text.byte_len()
+        if index + 1 < len(self.starts):
+            end = self.starts[index + 1]
+        var off = start
+        var i = 0
+        for c in text.byte_slice(start, end).chars():
+            if i + 1 >= col:
+                break
+            off += c.len_utf8()
+            i += 1
+        return off
+
+    ## The 1-based line and column of byte `offset` of `text`, the column
+    ## counting characters from the start of the line.
+    pub pure def line_col(self, text: str, offset: int) -> (int, int):
+        let at = min(offset, text.byte_len())
+        let line = self.index(at)
+        let start = self.starts[line]
+        if self.ascii[line]:
+            return (line + 1, at - start + 1)
+        var col = 1
+        var i = start
+        while i < at:
+            if not is_continuation(text.byte_at(i)):
+                col += 1
+            i += 1
+        return (line + 1, col)
+
+    ## The text of 1-based `line`, without its line break (stage 0's
+    ## `SourceFile::line_text`); empty past the last line.
+    pub pure def text_of(self, text: str, line: int) -> String:
+        let index = max(line - 1, 0)
+        if index >= len(self.starts):
+            return String.new()
+        let start = self.starts[index]
+        var end = text.byte_len()
+        if index + 1 < len(self.starts):
+            end = self.starts[index + 1]
+        while end > start and (text.byte_at(end - 1) == 10 or text.byte_at(end - 1) == 13):
+            end -= 1
+        return text.byte_slice(start, end).to_string()
+
+    ## `line:col-line:col`, the form of a span in rendered diagnostics.
+    pub pure def span(self, text: str, start: int, end: int) -> String:
+        let (l1, c1) = self.line_col(text, start)
+        let (l2, c2) = self.line_col(text, end)
+        return "{l1}:{c1}-{l2}:{c2}"
+
+## Whether `b` continues the encoding of a character rather than starting one.
+pub pure def is_continuation(b: u8) -> bool:
+    return b & 0xC0 == 0x80
+
+## A text in double quotes with `"`, `\`, and the line break and tab
+## characters escaped: how parameters and token texts are printed.
+pub pure def quote(value: str) -> String:
+    if is_plain(value):
+        return "\"{value}\""
+    var s = String.new("\"")
+    for c in value.chars():
+        match c:
+            case '"':
+                s.push("\\\"")
+            case '\\':
+                s.push("\\\\")
+            case '\n':
+                s.push("\\n")
+            case '\t':
+                s.push("\\t")
+            case '\r':
+                s.push("\\r")
+            case _:
+                s.push_char(c)
+    s.push_char('"')
+    return s
+
+## One line per diagnostic, then one indented line per label and fix,
+## naming messages by code and identifier, never by text (the conformance
+## form):
+##
+## ```text
+## 3:5-3:8 E0100 parse.expected expected="`:`" found="the end of the line"
+##   label 1:5-1:8 lex.opened-here
+## ```
+pub pure def render_ids(text: str, diags: list[Diagnostic], catalog: Catalog) -> String:
+    return render_ids_in("", text, diags, catalog)
+
+## `render_ids` for a file of a program of several files, named `name`
+## (stage 0's `render_ids_with_files`): every position has the file's name
+## first. An empty name leaves positions as `render_ids` writes them.
+pub pure def render_ids_in(
+    name: str, text: str, diags: list[Diagnostic], catalog: Catalog
+) -> String:
+    let lines = Lines.of(text)
+    var file = String.new()
+    if not name.is_empty():
+        file = "{name}:"
+    var out = String.new()
+    for d in diags:
+        out.push("{file}{lines.span(text, d.start, d.end)} {catalog.code(d.msg)} {d.msg.id()}")
+        for p in d.params:
+            out.push(" {p.name}={quote(p.value)}")
+        out.push("\n")
+        for l in d.labels:
+            out.push("  label {file}{lines.span(text, l.start, l.end)} {l.msg.id()}")
+            for p in l.params:
+                out.push(" {p.name}={quote(p.value)}")
+            out.push("\n")
+        for f in d.fixes:
+            out.push("  fix {f.msg.id()}")
+            for e in f.edits:
+                out.push(" {file}{lines.span(text, e.start, e.end)} {quote(e.text)}")
+            out.push("\n")
+    return out
+
+## A diagnostic of a program of several files, with the file it is in and
+## the file each of its labels is in (stage 0's spans carry their file), as
+## the program's list of files numbers them; a label without a file of its
+## own is in the diagnostic's.
+@derive(Eq)
+pub struct Filed:
+    pub file: int
+    pub diag: Diagnostic
+    pub label_files: list[int]
+
+impl Filed:
+    ## The file of the `k`th label.
+    pub pure def label_file(self, k: int) -> int:
+        if k < len(self.label_files):
+            return self.label_files[k]
+        return self.file
+
+## Sorts diagnostics of a program's files by file, start, end and code,
+## keeping the order of equals (stage 0's `sort`); with `unique`, drops each
+## one identical to an earlier one too (its `sort_unique`).
+pub pure def sort_filed(mut diags: list[Filed], catalog: Catalog, unique: bool):
+    diags.sort_by((a, b) -> compare_filed(a, b, catalog))
+    if not unique:
+        return
+    var kept: list[Filed] = []
+    for d in diags:
+        # Sorted, so an identical one is among the last kept at its span.
+        var repeat = False
+        var k = len(kept) - 1
+        while k >= 0 and same_span(kept[k], d):
+            if kept[k] == d:
+                repeat = True
+                break
+            k -= 1
+        if not repeat:
+            kept.push(d.copy())
+    diags = kept
+
+pure def same_span(a: Filed, b: Filed) -> bool:
+    return a.file == b.file and a.diag.start == b.diag.start and a.diag.end == b.diag.end
+
+pure def compare_filed(a: Filed, b: Filed, catalog: Catalog) -> Ordering:
+    if a.file != b.file:
+        return a.file.cmp(b.file)
+    return compare(a.diag, b.diag, catalog)
+
+## The human form of the diagnostics of one file named `name`.
+pub pure def render_human(
+    name: str, text: str, diags: list[Diagnostic], catalog: Catalog
+) -> String:
+    var filed: list[Filed] = []
+    for d in diags:
+        filed.push(Filed(file=0, diag=d.copy(), label_files=[]))
+    return render_human_files([(name.to_string(), text.to_string())], filed, catalog)
+
+## The human form of diagnostics (stage 0's `render_human`, modelled on
+## rustc's multi-span layout): for each, its severity, code and message,
+## where it is, the source line with its span marked under it, each
+## label's line with the label's span marked and its message beside (a
+## label in another file says which first), the notes and the fixes, and a
+## blank line. `files` holds each file's name and text.
+pub pure def render_human_files(
+    files: list[(String, String)], diags: list[Filed], catalog: Catalog
+) -> String:
+    var lines: list[Lines] = []
+    for (_, t) in files:
+        lines.push(Lines.of(t))
+    var out = String.new()
+    for x in diags:
+        let d = ref x.diag
+        let word = catalog.severity(d.msg)
+        out.push("{word}[{catalog.code(d.msg)}]: {catalog.render(d.msg.id(), d.params)}\n")
+        let (line, col) = place(files, lines, x.file, d.start)
+        out.push("  --> {file_name(files, x.file)}:{line}:{col}\n")
+        # The width of the line numbers, the same for every excerpt.
+        var gutter = digits(line)
+        for k in range(len(d.labels)):
+            gutter = max(gutter, digits(place(files, lines, x.label_file(k), d.labels[k].start).0))
+        excerpt(mut out, files, lines, x.file, d.start, d.end, "^", "", gutter, False)
+        var file = x.file
+        var at = line
+        for k in range(len(d.labels)):
+            let l = ref d.labels[k]
+            # A label in another file says which, as rustc does.
+            let moved = x.label_file(k) != file
+            if moved:
+                file = x.label_file(k)
+                let (ll, lc) = place(files, lines, file, l.start)
+                out.push("  ::: {file_name(files, file)}:{ll}:{lc}\n")
+            let here = place(files, lines, file, l.start).0
+            let said = catalog.render(l.msg.id(), l.params)
+            let shown = not moved and here == at
+            excerpt(mut out, files, lines, file, l.start, l.end, "-", said, gutter, shown)
+            at = here
+        for n in d.notes:
+            out.push("  = note: {catalog.render(n.msg.id(), n.params)}\n")
+        for f in d.fixes:
+            out.push("  = fix: {fix_text(f, catalog)}\n")
+        out.push("\n")
+    return out
+
+## The conformance form of diagnostics of a program's files (stage 0's
+## `render_ids`, or with `named` its `render_ids_with_files`, where every
+## position has its file's name first).
+pub pure def render_ids_files(
+    files: list[(String, String)], diags: list[Filed], named: bool, catalog: Catalog
+) -> String:
+    var lines: list[Lines] = []
+    for (_, t) in files:
+        lines.push(Lines.of(t))
+    var out = String.new()
+    for x in diags:
+        let d = ref x.diag
+        out.push(
+            "{span_in(files, lines, x.file, d.start, d.end, named)} {catalog.code(d.msg)} {d.msg.id()}"
+        )
+        for p in d.params:
+            out.push(" {p.name}={quote(p.value)}")
+        out.push("\n")
+        for k in range(len(d.labels)):
+            let l = ref d.labels[k]
+            out.push(
+                "  label {span_in(files, lines, x.label_file(k), l.start, l.end, named)} {l.msg.id()}"
+            )
+            for p in l.params:
+                out.push(" {p.name}={quote(p.value)}")
+            out.push("\n")
+        for f in d.fixes:
+            out.push("  fix {f.msg.id()}")
+            for e in f.edits:
+                out.push(" {span_in(files, lines, x.file, e.start, e.end, named)} {quote(e.text)}")
+            out.push("\n")
+    return out
+
+## A span of file `file` as `line:col-line:col`, with `named` its file's
+## name first; `0:0-0:0` in a file the list does not have.
+pure def span_in(
+    files: list[(String, String)], lines: list[Lines], file: int, start: int, end: int, named: bool
+) -> String:
+    var prefix = String.new()
+    if named:
+        prefix = "{file_name(files, file)}:"
+    if file < 0 or file >= len(files):
+        return "{prefix}0:0-0:0"
+    return "{prefix}{lines[file].span(files[file].1, start, end)}"
+
+## The 1-based line and column of byte `offset` of file `file`; `(0, 0)`
+## in a file the list does not have, as stage 0's source map gives them.
+pure def place(
+    files: list[(String, String)], lines: list[Lines], file: int, offset: int
+) -> (int, int):
+    if file < 0 or file >= len(files):
+        return (0, 0)
+    return lines[file].line_col(files[file].1, offset)
+
+## The name of file `file`, `<unknown>` for one the list does not have.
+pure def file_name(files: list[(String, String)], file: int) -> String:
+    if file < 0 or file >= len(files):
+        return "<unknown>".to_string()
+    return files[file].0.copy()
+
+## One line of source with `start..end` of file `file` marked under it by
+## `marker`, and `said` after the marks; with `shown`, the line was just
+## shown (a label on the line of the span before it), so only the marks are
+## added. A span over several lines is marked to the end of its first line.
+pure def excerpt(
+    mut out: String,
+    files: list[(String, String)],
+    lines: list[Lines],
+    file: int,
+    start: int,
+    end: int,
+    marker: str,
+    said: str,
+    gutter: int,
+    shown: bool,
+):
+    if file < 0 or file >= len(files):
+        return
+    let text: str = files[file].1
+    let (l1, c1) = lines[file].line_col(text, start)
+    let (l2, c2) = lines[file].line_col(text, end)
+    let line = lines[file].text_of(text, l1)
+    let pad = " ".repeat(gutter)
+    if not shown:
+        out.push("{pad} |\n{" ".repeat(gutter - digits(l1))}{l1} | {line}\n")
+    let before = max(c1 - 1, 0)
+    var width = max(c2 - c1, 1)
+    if l2 != l1:
+        width = max(char_count(line.trim_end()) - before, 1)
+    out.push("{pad} | {" ".repeat(before)}{marker.repeat(width)}")
+    if not said.is_empty():
+        out.push(" ")
+        out.push(said)
+    out.push("\n")
+
+## A fix as a person reads it (stage 0's `fix_text`): its message, then
+## the text it writes, each edit's in backquotes (a deletion has none to
+## show; its message says what goes).
+pub pure def fix_text(f: Fix, catalog: Catalog) -> String:
+    var out = catalog.render(f.msg.id(), f.params)
+    var first = True
+    for e in f.edits:
+        if e.text.is_empty():
+            continue
+        if first:
+            out.push(": ")
+            first = False
+        else:
+            out.push(", ")
+        out.push("`{e.text}`")
+    return out
+
+## The number of decimal digits of a line number.
+pure def digits(n: int) -> int:
+    var count = 1
+    var rest = n
+    while rest >= 10:
+        rest = rest // 10
+        count += 1
+    return count
+
+## The number of characters of a text.
+pure def char_count(s: str) -> int:
+    var n = 0
+    for _ in s.chars():
+        n += 1
+    return n
+
+test "positions count characters":
+    let text = "ab\nä x\n"
+    let lines = Lines.of(text)
+    assert lines.line_col(text, 0) == (1, 1)
+    assert lines.line_col(text, 3) == (2, 1)
+    # 'ä' is two bytes; the space after it is column 2.
+    assert lines.line_col(text, 5) == (2, 2)
+    assert lines.line_col(text, 100) == (3, 1)
+
+test "quoting escapes five characters":
+    assert quote("a\"b\\c\nd\te\rf") == "\"a\\\"b\\\\c\\nd\\te\\rf\""
+    assert quote("ï€") == "\"ï€\""
+
+test "the catalog renders a message's template":
+    let catalog = Catalog.parse("R0003 runtime panic.overflow   integer overflow: {{expr}}\n")
+    let p = Param(name="expr".to_string(), value="2 ** 70".to_string())
+    let rendered = catalog.render("panic.overflow", [p])
+    assert rendered == "integer overflow: 2 ** 70"
+    assert catalog.render("panic.none", []) == "panic.none"
+
+test "identical diagnostics are reported once":
+    let catalog = Catalog.parse("E0200 error resolve.undefined-name x\n")
+    let a = Diagnostic.new(Msg.ResolveUndefinedName, 5, 11).with("name", "double")
+    let b = Diagnostic.new(Msg.ResolveUndefinedName, 5, 11).with("name", "triple")
+    let c = Diagnostic.new(Msg.ResolveUndefinedName, 1, 2).with("name", "double")
+    var diags = [a.copy(), b.copy(), c.copy(), a.copy(), b.copy()]
+    sort_unique(mut diags, catalog)
+    assert len(diags) == 3
+    assert diags[0] == c
+    assert diags[1] == a
+    assert diags[2] == b
+
+test "the catalog gives codes and kinds":
+    let catalog = Catalog.parse(
+        "# a comment\nE0011 error   lex.semicolon   no semicolons\n-     label   lex.opened-here   opened here\n"
+    )
+    assert catalog.code(Msg.LexSemicolon) == "E0011"
+    assert catalog.code(Msg.LexOpenedHere) == "E????"
+    assert catalog.code(Msg.ParseExpected) == "E????"
+    assert catalog.is_error(Msg.LexSemicolon)
+    assert not catalog.is_error(Msg.LexOpenedHere)
+
+test "a diagnostic renders with its parameters and labels":
+    let catalog = Catalog.parse(
+        "E0010 error lex.mismatched-bracket x\n- label lex.opened-here opened here\n"
+    )
+    let d = Diagnostic.new(Msg.LexMismatchedBracket, 8, 9).with("close", "]").with("open", "(")
+    let text = "def ((( ]] :: -> ->\n"
+    let rendered = render_ids(text, [d.label(Msg.LexOpenedHere, 6, 7)], catalog)
+    let first = "1:9-1:10 E0010 lex.mismatched-bracket close=\"]\" open=\"(\"\n"
+    assert rendered == "{first}  label 1:7-1:8 lex.opened-here\n"

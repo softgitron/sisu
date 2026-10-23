@@ -1,0 +1,3 @@
+panic while unwinding: explosion in drop
+  the first panic: first failure
+  a panic during unwinding aborts the program

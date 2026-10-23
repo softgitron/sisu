@@ -1,0 +1,6 @@
+5:11-5:17 E0308 type.missing-argument arg="b" name="add"
+  fix type.add-hole 5:16-5:16 ", todo(\"b\")"
+6:11-6:23 E0305 type.argument-count name="add" expected="2" found="3"
+7:11-7:22 E0308 type.missing-argument arg="b" name="add"
+  fix type.add-hole 7:21-7:21 ", b=todo(\"b\")"
+7:18-7:19 E0306 type.unknown-keyword name="add" arg="c"

@@ -1,0 +1,28 @@
+10
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+ownership violation: a reference was used after its loan had ended
+  the loan: a `mut` borrow of `total` in `main`, created at use_while_mut_borrowed.sisu:6:13 by `_2 = ref mut _1`
+  ended by: a use of `total` at use_while_mut_borrowed.sisu:7:5 (`_3 = call intrinsic print(copy _1)`)
+  used at: use_while_mut_borrowed.sisu:8:5 (`_4 = add copy _2.*, const 1`)
+  value: `total` = 10
+  loans of `total` not ended yet: 0 shared, 0 with `mut`
+  at main (use_while_mut_borrowed.sisu:8:5)
+SIR of `main`:
+fn main(0) source 0 @4:5-4:9 {
+    let _0: ()
+    let _1: int "total" @5:9-5:14
+    let _2: ref mut int "r" @6:9-6:10
+    let _3: ()
+    let _4: int
+  bb0:
+    _1 = const 10 @5:17-5:19
+    _2 = ref mut _1 @6:13-6:26
+    _3 = call intrinsic print(copy _1) @7:5-7:17
+    _4 = add copy _2.*, const 1 @8:5-8:11
+    _2.* = move _4 @8:5-8:11
+    _0 = const ()
+    return
+}
+outcome: conflict reached; the run stopped at a concrete ownership conflict
+--- status 134

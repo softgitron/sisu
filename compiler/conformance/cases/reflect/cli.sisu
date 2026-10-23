@@ -1,0 +1,48 @@
+# `cli.parse[T]` and `cli.help_text[T]` (11, `std.x.cli`) are templates in
+# the standard library over reflection: made for `Opts` from its fields.
+# The struct is built once with every field, so its invariant holds of
+# what was parsed.
+
+import cli
+
+struct Opts:
+    name: String
+    verbose: bool
+    quiet: bool = True
+    ratio: f64 = 0.5
+    out: Path = Path.new("out.txt")
+    count: int = 3
+    files: list[String]
+    invariant self.count >= 0
+
+def show(args: list[str]):
+    match cli.parse[Opts](args):
+        case Ok(o): print(
+            "name={o.name} verbose={o.verbose} quiet={o.quiet} ratio={o.ratio} out={o.out} count={o.count} files={o.files:?}"
+        )
+        case Err(e): print("error: {e:?}")
+
+def main():
+    show(["--name", "x"])
+    show(
+        [
+            "--name=y",
+            "--verbose",
+            "--quiet=false",
+            "--ratio",
+            "1.25",
+            "--out",
+            "o.txt",
+            "a",
+            "b",
+            "--",
+            "--c",
+        ]
+    )
+    show(["--verbose"])
+    show(["--name", "x", "--ratio", "inf"])
+    show(["--name", "x", "--verbose=maybe"])
+    show(["--name", "x", "--colour", "red"])
+    show(["--name"])
+    show(["--name", "x", "--count", "-1"])
+    print(cli.help_text[Opts]())

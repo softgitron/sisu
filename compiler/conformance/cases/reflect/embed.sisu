@@ -1,0 +1,9 @@
+# `embed("path")` is the text of a file beside the program, read at
+# compile time (08); the program's own files only.
+
+const NOTES: str = embed("notes.txt")
+
+def main():
+    print(len(NOTES.lines().collect()))
+    for line in NOTES.lines():
+        print("> {line}")

@@ -1,0 +1,11 @@
+# A wrong program: an impl leaves out a method its trait requires.
+
+struct Point:
+    x: int
+    y: int
+
+impl Display for Point:
+    pass
+
+def main():
+    print(Point(x=1, y=2))

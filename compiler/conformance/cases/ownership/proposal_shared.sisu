@@ -1,0 +1,36 @@
+# The `Shared` section of proposal/examples/ownership.sisu, kept identical
+# by a test: `shared_demo` shares immutable data with two tasks, and
+# `counter_demo` counts through a `Mutex` behind a `Shared` from four. The
+# escape analysis tags both `Shared` sites may-cross (Q-2), and the
+# monitor rerun checks the tag.
+# explore 20
+
+# Shared ownership is a type you choose. Immutable by default.
+struct Config:
+    verbose: bool
+    retries: int
+
+def shared_demo(own cfg: Config):
+    let shared = Shared(cfg)
+    let a = shared.copy()                    # bumps the count; `shared` still usable
+    let b = shared.copy()
+    task.scope do s:
+        s.spawn(() -> use_config(a))         # Shared[Config] is Send because Config is Sync (plain data)
+        s.spawn(() -> use_config(b))
+
+def use_config(cfg: Shared[Config]):
+    print(cfg.retries)
+
+# Shared and mutable requires a lock; the type system will not let you forget.
+def counter_demo():
+    let hits = Shared(Mutex(0))
+    task.scope do s:
+        for _ in range(4):
+            s.spawn do:
+                hits.lock().value += 1
+    assert hits.lock().value == 4
+
+def main():
+    shared_demo(Config(verbose=False, retries=3))
+    counter_demo()
+    print("counted")

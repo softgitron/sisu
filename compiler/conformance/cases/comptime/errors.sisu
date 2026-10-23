@@ -1,0 +1,25 @@
+# What `comptime` cannot use: a run-time value of the function, or one of
+# its type parameters, whose argument is known only at a call (E0600). A
+# `comptime def` runs only at compile time (E0605), and
+# `@comptime_budget` takes a positive number of steps (E0606).
+
+comptime def twice(n: int) -> int:
+    return n * 2
+
+def uses_a_local(x: int) -> int:
+    return comptime x + 1
+
+def uses_a_type_parameter[T](value: T) -> list[T]:
+    return comptime []
+
+def calls_at_run_time() -> int:
+    return twice(2)
+
+@comptime_budget(steps=-1)
+const NEGATIVE: int = comptime 1
+
+@comptime_budget(budget=5)
+const MISNAMED: int = comptime 2
+
+def main():
+    pass

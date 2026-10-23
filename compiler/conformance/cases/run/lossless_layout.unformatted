@@ -1,0 +1,2 @@
+Its layout is what it tests: odd spacing and blank lines, kept byte for
+byte by the lossless tree, which `sisu fmt` would normalise.

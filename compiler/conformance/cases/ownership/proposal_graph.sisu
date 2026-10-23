@@ -1,0 +1,22 @@
+# The graph section of proposal/examples/ownership.sisu, which stage 0
+# runs (the `Shared` and `Mutex` sections spawn tasks, Phase 6); kept
+# identical to the original by a test.
+
+# Graphs: an arena with generational handles, not pointers.
+struct Node:
+    label: String
+    edges: list[Key[Node]]                  # generational keys into the arena, not pointers
+
+def graph_demo():
+    var nodes = Arena[Node]()
+    let a = nodes.insert(Node(label="a", edges=[]))
+    let b = nodes.insert(Node(label="b", edges=[]))
+    nodes[a].edges.push(b)
+    nodes[b].edges.push(a)                   # a cycle, with no ownership problem
+    nodes.remove(a)
+    assert nodes.get(a).is_none()            # stale handles are detected, not dangling
+
+# Stage 0 runs the demo from a `main` the proposal's text does not have.
+def main():
+    graph_demo()
+    print("graph_demo ran")

@@ -1,0 +1,33 @@
+# References as arguments (04, rule 3): a parameter whose type is a
+# reference takes the reference the call passes, a `ref mut T` too, and
+# reaches the value through it as a `mut` parameter does.
+
+struct Tally:
+    counts: list[int]
+    total: int
+
+def bump(t: ref mut Tally, n: int):
+    t.total += n
+    t.counts.push(n)
+
+def reset_first(t: ref mut Tally):
+    t.counts[0] = 0
+
+def bump_twice(t: ref mut Tally):
+    bump(t, 1)
+    bump(t, 2)
+
+def sum(t: ref Tally) -> int:
+    var s = 0
+    for c in t.counts:
+        s += c
+    return s
+
+def main():
+    var t = Tally(counts=[5], total=5)
+    bump(ref mut t, 3)
+    bump_twice(ref mut t)
+    print((t.counts.copy(), t.total, sum(ref t)))
+    let r = ref mut t
+    reset_first(r)
+    print(t.counts)

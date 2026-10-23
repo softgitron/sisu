@@ -1,0 +1,60 @@
+# The sized integers (03, "Numbers"), `u8` to `u128` and `i8` to `i128`:
+# arithmetic that traps, wraps (`+%`) or saturates (`+|`) at the type's
+# bounds, lossless widening, checked narrowing, and the 128-bit types,
+# whose values reach past `int`.
+
+def main():
+    # Bounds: a literal takes the expected type and is checked to fit.
+    let byte: u8 = 255
+    let small: i8 = -128
+    let big: u64 = 18446744073709551615
+    let max_i128: i128 = 170141183460469231731687303715884105727
+    let min_i128: i128 = -170141183460469231731687303715884105728
+    let max_u128: u128 = 340282366920938463463374607431768211455
+    print((byte, small, big))
+    print(max_i128)
+    print(min_i128)
+    print(max_u128)
+    # Wrapping and saturating at each type's bounds.
+    print((byte +% 1, byte +| 1, small -% 1, small -| 1))
+    print((max_i128 +% 1 == min_i128, max_u128 +% 1, 0u128 -| 1))
+    print(max_u128 *| 2 == max_u128)
+    # Floor division and a remainder with the divisor's sign, as for `int`.
+    print((-7i32 // 2, -7i32 % 3, min_i128 // -3, min_i128 % 7))
+    print((max_u128 // 3, max_u128 % 7))
+    # Shifts and bits.
+    print((1u128 << 127, max_i128 >> 120, ~0u8, 0xF0u8 ^ 0xFFu8))
+    print(2i128 ** 100)
+    # Widening: `int` and `u64` to `i128`, `u64` to `u128`, loses nothing.
+    let n = 9223372036854775807
+    let wide: i128 = n
+    let from_u64: u128 = big
+    print((wide * 2, from_u64 + 1))
+    # Narrowing is a method, `None` when the value does not fit.
+    print((max_i128.to_int(), 42i128.to_int(), max_u128.to_int()))
+    print((300.to_u8(), 200.to_u8(), n.to_i128(), (-5).to_u128()))
+    print((300.truncate_to[u8](), (-1).truncate_to[u128](), (-1).truncate_to[i128]()))
+    # Comparisons, hashing and formatting.
+    print([min_i128 < 0i128, max_u128 > 0u128, 5u128 == 5u128])
+    print(sorted([3u128, max_u128, 0u128]))
+    var counts: dict[i128, str] = {}
+    counts[max_i128] = "max"
+    counts[min_i128] = "min"
+    print(counts)
+    print("[{42i128:>6}] [{255u128:x}] [{max_u128:?}]")
+    # A value beyond `int` takes the same specs.
+    print("{max_u128:#x} {big:,} {min_i128:_} {min_i128:x} {max_u128:e}")
+    # Literal patterns of the wide kinds.
+    for x in [max_u128, 7u128]:
+        match x:
+            case 340282366920938463463374607431768211455:
+                print("the greatest u128")
+            case 7:
+                print("seven")
+            case _:
+                print("another")
+    match big:
+        case 18446744073709551615:
+            print("the greatest u64")
+        case _:
+            print("another")

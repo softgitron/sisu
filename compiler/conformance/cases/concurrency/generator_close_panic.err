@@ -1,0 +1,2 @@
+panic while a generator dropped before its end cleans up: a bad drop
+  a panic there aborts the program

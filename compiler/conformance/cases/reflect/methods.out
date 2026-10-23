@@ -1,0 +1,14 @@
+7
+["x", "y"]
+Point(x: 3, y: 4)
+a Point of 2 fields
+a Point of 2 fields
+a struct of 2 fields, tagged a
+the type int, tagged b
+2
+0
+["Circle", "Square"]
+60
+60
+main sees x
+main sees y

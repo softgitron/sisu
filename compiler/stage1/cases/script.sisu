@@ -1,0 +1,4 @@
+#!/usr/bin/env sisu
+# A script may hold statements at the top level.
+print("hello")
+let x = 1

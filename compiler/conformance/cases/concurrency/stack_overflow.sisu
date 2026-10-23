@@ -1,0 +1,41 @@
+# A task whose recursion has no end overflows its stack (decision 234): the
+# task panics with a message that names the function, its frames unwind
+# with their drops, and its joiner gets `TaskPanicked`, in the interpreter
+# (100 000 frames) as natively (a task's stack, 1 MiB unless
+# `SISU_TASK_STACK` says otherwise). A second task's overflow that nobody
+# joins ends the scope, and `main`, with the panic.
+
+struct Guard:
+    depth: int
+
+impl Drop for Guard:
+    def drop(mut self):
+        if self.depth == 0:
+            print("the task's outermost guard is dropped")
+
+def down(depth: int) -> int:
+    let guard = Guard(depth=depth)
+    return down(depth + 1) + 1
+
+def fits(depth: int) -> int:
+    if depth == 0:
+        return 0
+    return fits(depth - 1) + 1
+
+def main():
+    let (deep, shallow) = task.scope do s:
+        let deep = s.spawn(() -> down(0))
+        let shallow = s.spawn(() -> fits(100))
+        return (deep.join(), shallow.join())
+    match deep:
+        case Err(TaskPanicked(message, trace)):
+            print(message)
+            let lines: list[str] = trace.lines().collect()
+            print("a trace of {lines.len()} lines, from {lines[0]} to {lines[^1]}")
+            print(lines[50])
+        case other:
+            print("unexpected: {other}")
+    print("the shallow task returned {shallow}")
+    task.scope do s:
+        s.spawn(() -> down(0))
+    print("not reached")

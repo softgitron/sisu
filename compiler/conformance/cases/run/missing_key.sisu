@@ -1,0 +1,4 @@
+def main():
+    let ages = {"ada": 36}
+    print(ages["ada"])
+    print(ages["bob"])

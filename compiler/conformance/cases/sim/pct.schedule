@@ -1,0 +1,13 @@
+test "a reader never sees a half-published value" ... FAILED
+
+test "a reader never sees a half-published value" ... FAILED
+with schedule seed 3 of a PCT scheduler of depth 2; `--scheduler pct --depth 2 --schedule-seed 3` runs it again
+panic: assertion failed: seen == Ok(42)
+    seen == Ok(42)
+    │       │
+    Ok(0)   Ok(42)
+  at test "a reader never sees a half-published value" (pct.sisu:34:5)
+replay: sisu test --replay 1-2f227e3c9d9a874e-0.0.1-t0-s3-r0-p2 pct.sisu
+
+0 passed, 1 failed, 0 blocked
+explored 40 schedules of a PCT scheduler of depth 2 per test (seeds 0 to 39)

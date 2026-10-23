@@ -101,11 +101,30 @@ pub struct ReadOutcome {
     pub cancel: Option<i32>,
 }
 
+/// The kernel's ring size limits: `IORING_MAX_ENTRIES` submission entries and
+/// `IORING_MAX_CQ_ENTRIES` completion entries. A larger request fails with
+/// `EINVAL`, which is how `--concurrency 8192` used to fail at full scale.
+pub const MAX_SQ_ENTRIES: u32 = 32_768;
+pub const MAX_CQ_ENTRIES: u32 = 2 * MAX_SQ_ENTRIES;
+
+/// Submission and completion queue sizes for a request of `entries`: the
+/// completion queue gets four times the submission queue (every read can have a
+/// cancel, plus slack), both clamped to the kernel's limits. Completions beyond
+/// the completion queue are not lost: kernels since 5.5 keep an overflow list
+/// (`IORING_FEAT_NODROP`), and the ring thread reaps continuously.
+pub fn ring_sizes(entries: u32) -> (u32, u32) {
+    let sq = entries.clamp(1, MAX_SQ_ENTRIES);
+    let cq = entries.saturating_mul(4).clamp(sq, MAX_CQ_ENTRIES);
+    (sq, cq)
+}
+
 impl UringDriver {
-    /// Sets up a ring with `entries` submission entries. Fails (for the caller to
-    /// report "skipped") when io_uring is unavailable or forbidden.
+    /// Sets up a ring with `entries` submission entries (clamped to the kernel's
+    /// limits, see [`ring_sizes`]). Fails (for the caller to report "skipped")
+    /// when io_uring is unavailable or forbidden.
     pub fn new(entries: u32) -> io::Result<UringDriver> {
-        let ring: IoUring = IoUring::builder().setup_cqsize(entries.saturating_mul(4)).build(entries)?;
+        let (sq, cq) = ring_sizes(entries);
+        let ring: IoUring = IoUring::builder().setup_cqsize(cq).build(sq)?;
         // SAFETY: eventfd creates a new descriptor we take ownership of.
         let efd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC) };
         if efd < 0 {
@@ -411,5 +430,30 @@ fn push_sqe(ring: &mut IoUring, e: &squeue::Entry) {
             return;
         }
         let _ = ring.submit();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ring_sizes_stay_within_the_kernel_limits() {
+        assert_eq!(ring_sizes(1024), (1024, 4096));
+        // --concurrency 8192 asks for (2 * 8192 + 64).next_power_of_two() entries.
+        assert_eq!(ring_sizes(32_768), (32_768, MAX_CQ_ENTRIES));
+        assert_eq!(ring_sizes(1 << 20), (MAX_SQ_ENTRIES, MAX_CQ_ENTRIES));
+        assert_eq!(ring_sizes(0), (1, 1));
+    }
+
+    #[test]
+    fn full_scale_ring_can_be_created() {
+        // Where io_uring works at all, the full-scale ring must work too.
+        if UringDriver::new(64).is_err() {
+            eprintln!("io_uring unavailable here; nothing to check");
+            return;
+        }
+        let entries = (2 * 8192u32 + 64).next_power_of_two();
+        assert!(UringDriver::new(entries).is_ok(), "a ring for --concurrency 8192 failed");
     }
 }

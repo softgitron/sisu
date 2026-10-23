@@ -1,0 +1,9 @@
+["x", "y"]
+2
+the struct Point has 2 fields
+the enum Shape has 2 variants
+Point(x=0, y=7)
+["Point", "Shape"]
+["x", "y"]
+3
+1 2

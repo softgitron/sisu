@@ -1,0 +1,2 @@
+2:16-2:17 E0010 lex.mismatched-bracket close="]" open="("
+  label 2:11-2:12 lex.opened-here

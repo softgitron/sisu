@@ -1,0 +1,10 @@
+# `struct` is misspelt, so `Log` is never declared; its uses are not
+# reported again.
+stuct Log:
+    name: str
+
+def make() -> Log:
+    return Log(name="x")
+
+def main():
+    let l = make()

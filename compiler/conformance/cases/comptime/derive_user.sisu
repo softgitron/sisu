@@ -1,0 +1,59 @@
+# Any trait can derive (08, "Derive"): its `comptime def derive` returns
+# the impl for the type it is given, built with reflection. The compiler
+# runs it for each `@derive`, unrolling `comptime for` and deciding
+# `if comptime` at compile time; what is left is ordinary code, checked
+# like any other impl. Among a `match`'s arms, `comptime for V in
+# reflect.variants_of(T)` makes an arm `case V(..)` per variant, in which
+# `self.[field]` is that variant's field.
+
+trait Fields:
+    def field_names(self) -> list[String]
+    def total(self) -> int
+    def describe(self) -> String
+
+    comptime def derive(T: type) -> impl Fields for T:
+        return impl Fields for T:
+            def field_names(self) -> list[String]:
+                var names: list[String] = []
+                comptime for f in reflect.fields_of(T):
+                    names.push(f.name.to_string())
+                return names
+
+            def total(self) -> int:
+                var sum = 0
+                comptime for f in reflect.fields_of(T):
+                    sum += self.[f]
+                return sum
+
+            def describe(self) -> String:
+                if comptime reflect.is_enum(T):
+                    match self:
+                        comptime for V in reflect.variants_of(T):
+                            case V(..):
+                                var parts: list[String] = []
+                                comptime for field in V.fields:
+                                    parts.push("{field.name}={self.[field]}")
+                                return "{reflect.name_of(T)}.{V.name}({parts.join(", ")}), variant {V.index + 1} of {len(reflect.variants_of(T))}"
+                else:
+                    return "a {reflect.name_of(T)} with {len(reflect.fields_of(T))} fields"
+
+@derive(Fields)
+struct Point:
+    x: int
+    y: int
+
+@derive(Fields, Eq)
+enum Shape:
+    Dot
+    Circle(r: f64)
+    Rect(f64, f64)
+
+def main():
+    let p = Point(x=3, y=4)
+    print(p.field_names())
+    print(p.total())
+    print(p.describe())
+    for s in [Shape.Dot, Shape.Circle(r=1.5), Shape.Rect(2.0, 3.0)]:
+        print(s.describe())
+    print(Shape.Circle(r=1.5) == Shape.Circle(r=1.5))
+    print(Shape.Circle(r=1.5) == Shape.Dot)

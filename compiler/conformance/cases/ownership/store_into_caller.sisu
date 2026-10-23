@@ -1,0 +1,11 @@
+# A view of one argument cannot be stored in another `mut` argument: the
+# caller could not tell that its list now borrows the text.
+
+def split_into(mut out: list[str], text: str):
+    for w in text.split_whitespace():
+        out.push(w)
+
+def main():
+    var words: list[str] = []
+    split_into(mut words, "a b")
+    print(words)

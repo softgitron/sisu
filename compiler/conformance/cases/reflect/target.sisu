@@ -1,0 +1,12 @@
+# `target` describes what the program is built for; `if comptime` on it
+# picks a branch at compile time, and both branches are checked.
+
+def runtime() -> str:
+    return target.runtime
+
+def page_size() -> int:
+    return if comptime target.os == "windows": 65536 else: 4096
+
+def main():
+    print(runtime())
+    print(page_size())

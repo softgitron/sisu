@@ -1,0 +1,16 @@
+# A derived impl compares each field, so each field's type implements the
+# trait; `@derive(Copy)` needs every field `Copy`.
+
+struct Plain:
+    x: int
+
+@derive(Eq)
+struct Wrapper:
+    inner: Plain
+
+@derive(Copy)
+struct Named:
+    name: String
+
+def main():
+    pass

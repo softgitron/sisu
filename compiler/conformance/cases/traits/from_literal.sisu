@@ -1,0 +1,47 @@
+# `FromLiteral` (02, "Literals"): an integer, float or string literal
+# whose expected type implements `FromLiteral[L]` becomes that type, in
+# generic code too; a negative literal is a literal.
+
+@derive(Copy, Eq)
+struct Meters:
+    value: f64
+
+impl FromLiteral[f64] for Meters:
+    def from_literal(literal: f64) -> Meters:
+        return Meters(value=literal)
+
+impl FromLiteral[int] for Meters:
+    def from_literal(literal: int) -> Meters:
+        return Meters(value=literal.to_f64())
+
+struct Name:
+    text: String
+
+impl FromLiteral[str] for Name:
+    def from_literal(literal: str) -> Name:
+        return Name(text=literal.to_uppercase())
+
+def double[T: FromLiteral[int] + Add](x: T) -> T:
+    let two: T = 2
+    return x + two
+
+impl Add for Meters:
+    def add(self, other: Meters) -> Meters:
+        return Meters(value=self.value + other.value)
+
+def show(m: Meters):
+    print("{m.value}m")
+
+def main():
+    let a: Meters = 2.5
+    let b: Meters = 3
+    show(a)
+    show(b)
+    show(7)
+    let n: Name = "aino"
+    print(n.text)
+    let ms: list[Meters] = [1, 2.5]
+    print(len(ms))
+    show(double(a))
+    let c: Meters = -4
+    show(c)

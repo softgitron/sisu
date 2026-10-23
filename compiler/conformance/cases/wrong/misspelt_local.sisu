@@ -1,0 +1,7 @@
+# A wrong program: a local's name is misspelt where it is used.
+
+def main():
+    var total = 0
+    for x in [1, 2, 3]:
+        total += x
+    print(totl)

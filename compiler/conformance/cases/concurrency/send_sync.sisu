@@ -1,0 +1,52 @@
+# `Send` and `Sync`, inferred from the types' parts and checked where a
+# value crosses a `spawn` (06): what a task shares by reference must be
+# `Sync`, what it moves in or changes `Send`, and what it returns `Send`.
+# The message names the part in the way and the wrapper that fixes it.
+
+struct Stats:
+    hits: Cell[int]
+    name: String
+
+def shares_a_cell():
+    let cell = Cell(0)
+    task.scope do s:
+        s.spawn(() -> cell.set(1))
+
+def shares_a_struct():
+    let stats = Stats(hits=Cell(0), name=String.new("x"))
+    task.scope do s:
+        s.spawn(() -> print(stats.name))
+
+def moves_a_function(f: (int) -> int):
+    task.scope do s:
+        s.spawn(() -> print(f(1)))
+
+def changes_a_cell_list():
+    # A `Cell` may move to another task (it is `Send`): one task changing
+    # a list of them through a `ref mut` is fine.
+    var cells = [Cell(1)]
+    task.scope do s:
+        s.spawn do:
+            cells.push(Cell(2))
+
+def returns_a_closure(n: int):
+    task.scope do s:
+        let h = s.spawn(own () -> own x -> x + n)
+        _ = h
+
+def generic_needs_a_bound[T](x: T):
+    task.scope do s:
+        s.spawn(() -> print_it(x))
+
+def print_it[T](x: T):
+    pass
+
+def fine[T: Sync](x: T, m: Mutex[int], shared: Shared[Mutex[int]]):
+    task.scope do s:
+        s.spawn do:
+            m.lock().value += 1
+            shared.lock().value += 1
+            print_it(x)
+
+def main():
+    pass

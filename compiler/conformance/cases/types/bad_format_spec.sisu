@@ -1,0 +1,10 @@
+# A format spec is checked where it is written (E0399); a `DateTime` takes
+# a `strftime` pattern instead.
+
+def main(sys: System):
+    let n = 5
+    print("{n:zz}")
+    print("{n:>8.2q}")
+    print("{n:<<<}")
+    print("{n:>8.2f}")
+    print("{sys.clock.now():%H:%M}")

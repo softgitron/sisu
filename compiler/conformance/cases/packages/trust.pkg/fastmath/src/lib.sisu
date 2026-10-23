@@ -1,0 +1,4 @@
+pub def fast() -> int:
+    unsafe:
+        return 2
+    return 3

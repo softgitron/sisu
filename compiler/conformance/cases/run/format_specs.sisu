@@ -1,0 +1,40 @@
+# Format specs (03, "Strings"), applied by the values' impls in Sisu
+# (`Spec` in std/prelude.sisu): sign and zero padding after it, the `#`
+# prefixes, grouping (by four outside base ten), precision, exponents and
+# percentages, alignment and fill, `?` for the `Debug` text, and a type's
+# own `Display` passing the spec to a part it writes at depth 0 (the leaf
+# applies the whole spec; what is left pads the whole text).
+
+struct Tagged:
+    tag: String
+    value: int
+
+impl Display for Tagged:
+    def fmt(self, mut f: Formatter):
+        f.write(self.tag)
+        self.value.fmt(mut f)
+
+struct Name:
+    text: String
+
+impl Display for Name:
+    def fmt(self, mut f: Formatter):
+        f.write("<")
+        f.write(self.text)
+        f.write(">")
+
+def main():
+    let n = -5
+    let big = 1234567
+    let h = 255
+    let x = -1234.5
+    let pi = 3.14159
+    let s = "hi"
+    let inf = 1.0 / 0.0
+    print("[{n:05}] [{h:#x}] [{h:#010x}] [{h:#o}] [{h:b}] [{big:,}] [{big:_x}]")
+    print("[{x:,.2f}] [{pi:8.3}] [{pi:e}] [{pi:.2E}] [{0.5:%}] [{0.125:.1%}] [{inf:>6}] [{-inf}]")
+    print("[{s:>5}] [{"hello":.2}] [{s:>8?}] [{True:^7}] [{'c':*>3}] [{n:+}] [{h:+}] [{h: }]")
+    print(
+        "[{Tagged(tag="v".to_string(), value=7):>6}] [{Name(text="ann".to_string()):>8}] [{Name(text="ann".to_string()):.3}]"
+    )
+    print("[{[1, 2]:>10}] [{(1, "a"):?}] [{Some(3):?}]")

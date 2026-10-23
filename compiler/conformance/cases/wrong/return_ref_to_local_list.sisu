@@ -1,0 +1,9 @@
+# A wrong program: a function returns a borrow of an element of a list it
+# made itself.
+
+def biggest() -> ref int:
+    let xs = [3, 9, 4]
+    return ref xs[1]
+
+def main():
+    print(biggest())

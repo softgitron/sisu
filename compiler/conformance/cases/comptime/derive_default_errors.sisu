@@ -1,0 +1,15 @@
+# `@derive(Default)` needs `Default` of every field that has no default of
+# its own (E0244, at the attribute). An enum's is refused where the
+# prelude's template stops (E0608), which a test of the resolver holds.
+
+struct Opaque:
+    n: int
+
+@derive(Default)
+struct Holder:
+    thing: Opaque
+    other: Opaque = Opaque(n=1)
+    count: int
+
+def main():
+    pass

@@ -1,0 +1,175 @@
+##! std.x.cli for stage 0: command-line parsing derived from a struct's
+##! fields (11, `std.x`), written over compile-time reflection (08):
+##! `parse[T]` and `help_text[T]` are made once for each struct they are
+##! called with, by unfolding their bodies for its fields.
+
+## What can go wrong while parsing arguments.
+error Error:
+    UnknownOption(name: String)
+    MissingValue(name: String)
+    InvalidValue(name: String, value: String)
+    MissingArgument(name: String)
+    UnexpectedArgument(value: String)
+
+## Parses `args` into a `T`, which must be a struct. Each field `f` of type
+## `int`, `float`, `String`, `Path` or `bool` is the option `--f` (an
+## underscore may be written `-`), given as `--f value` or `--f=value`; a
+## `bool` field is a flag, given as `--f` (or `--f=true`). One field of
+## type `list[...]` collects the positional arguments in order, and `--`
+## ends the options. A field with a default may be omitted; any other
+## field is required (a flag is `False` when not given). Errors name the
+## option as written: unknown options and missing values first, as the
+## arguments are read, then invalid values and missing options in the
+## order of the fields. The struct is built once, with every field, so
+## its invariant is checked on what was parsed.
+def parse[T](args: list[str]) -> T ! Error:
+    comptime if not reflect.is_struct(T):
+        comptime panic("`cli.parse` parses into a struct, not `{reflect.name_of(T)}`")
+    var spec = Spec(takes_value=dict(), positional=None)
+    comptime for f in reflect.fields_of(T):
+        comptime if reflect.is_list(f.ty):
+            spec.positional = Some(f.name.to_string())
+        else:
+            _ = spec.takes_value.insert(f.name.to_string(), not reflect.is_bool(f.ty))
+    let given = scan(args, spec)?
+    return Ok(
+        reflect.construct(
+            T,
+            {
+                f.name: if comptime f.default and not reflect.is_list(f.ty): (
+                    if given.has(f.name): value[f.ty](given, f.name)? else: reflect.default_of(f)
+                ) else: value[f.ty](given, f.name)?
+                for f in reflect.fields_of(T)
+            },
+        )
+    )
+
+## The options `parse[T]` reads, one line each: the option, the kind of
+## value it takes and its default, then the positional arguments.
+def help_text[T]() -> String:
+    comptime if not reflect.is_struct(T):
+        comptime panic("`cli.help_text` describes a struct, not `{reflect.name_of(T)}`")
+    var lines: list[String] = []
+    comptime for f in reflect.fields_of(T):
+        comptime if reflect.is_list(f.ty):
+            pass
+        elif comptime reflect.is_bool(f.ty):
+            lines.push("  {option(f.name)}")
+        elif comptime f.default:
+            lines.push(
+                "  {option(f.name)} <{reflect.name_of(f.ty)}>  (default: {reflect.default_of(f)})"
+            )
+        else:
+            lines.push("  {option(f.name)} <{reflect.name_of(f.ty)}>")
+    comptime for f in reflect.fields_of(T):
+        comptime if reflect.is_list(f.ty):
+            lines.push("  {f.name}...  ({reflect.name_of(reflect.elem_of(f.ty))})")
+    return lines.join("\n")
+
+## `--min-length` for the field `min_length`.
+pure def option(field: str) -> String:
+    return "--{field.replace("_", "-")}"
+
+## How `scan` reads the arguments for a struct: whether each option (by
+## field name) takes a value, and the field, if any, that collects the
+## positional arguments.
+struct Spec:
+    takes_value: dict[String, bool]
+    positional: String?
+
+## What `scan` found, by field name: each option's value and how it was
+## written, each flag given, and the positional arguments in order.
+struct Given:
+    values: dict[String, String]
+    written: dict[String, String]
+    flags: set[String]
+    positional: list[String]
+
+impl Given:
+    ## Whether the option or flag for `field` was given.
+    def has(self, field: str) -> bool:
+        return self.values.contains(field.to_string()) or self.flags.contains(field.to_string())
+
+## Reads `args` against `spec`; the last of a repeated option counts.
+def scan(args: list[str], spec: Spec) -> Given ! Error:
+    var given = Given(values=dict(), written=dict(), flags=set(), positional=[])
+    var i = 0
+    var options_done = False
+    while i < len(args):
+        let a = args[i]
+        i += 1
+        if not options_done and a == "--":
+            options_done = True
+            continue
+        if options_done or not a.starts_with("--"):
+            if spec.positional.is_none():
+                return Err(UnexpectedArgument(value=a.to_string()))
+            given.positional.push(a.to_string())
+            continue
+        let body = a.strip_prefix("--")
+        var written = body.to_string()
+        var inline: String? = None
+        if let Some((n, v)) = body.split_once("="):
+            written = n.to_string()
+            inline = Some(v.to_string())
+        let field = written.replace("-", "_")
+        if not spec.takes_value.contains(field.copy()):
+            return Err(UnknownOption(name="--{written}"))
+        if not spec.takes_value[field.copy()] and inline.is_none():
+            _ = given.flags.add(field)
+            continue
+        var text = String.new()
+        if let Some(v) = inline:
+            text = v.copy()
+        elif i < len(args):
+            text = args[i].to_string()
+            i += 1
+        else:
+            return Err(MissingValue(name="--{written}"))
+        _ = given.written.insert(field.copy(), "--{written}")
+        _ = given.values.insert(field, text)
+    return Ok(given)
+
+## The value for `field` from what was given: the positional arguments
+## for a `list`, whether the flag was given for a `bool` (or its written
+## value), the option's value otherwise.
+def value[F](given: Given, field: str) -> F ! Error:
+    if comptime reflect.is_list(F):
+        var out: F = []
+        for item in given.positional.iter():
+            out.push(convert[reflect.elem_of(F)](field, item)?)
+        return Ok(out)
+    elif comptime reflect.is_bool(F):
+        return match given.values.get(field.to_string()):
+            case Some(text): convert[F](given.written[field.to_string()], text)
+            case None: Ok(given.flags.contains(field.to_string()))
+    else:
+        return match given.values.get(field.to_string()):
+            case Some(text): convert[F](given.written[field.to_string()], text)
+            case None: Err(MissingArgument(name=option(field)))
+
+## `text` as a value of `F`, for the option written `name`.
+def convert[F](name: str, text: str) -> F ! Error:
+    if comptime reflect.is_int(F):
+        return match text.parse_int():
+            case Some(n): Ok(n)
+            case None: Err(invalid(name, text))
+    elif comptime reflect.is_float(F):
+        return match text.parse_float():
+            case Some(x): Ok(x)
+            case None: Err(invalid(name, text))
+    elif comptime reflect.is_bool(F):
+        if text == "true" or text == "True":
+            return Ok(True)
+        if text == "false" or text == "False":
+            return Ok(False)
+        return Err(invalid(name, text))
+    elif comptime reflect.name_of(F) == "String":
+        return Ok(text.to_string())
+    elif comptime reflect.name_of(F) == "Path":
+        return Ok(Path.new(text))
+    else:
+        comptime panic("`cli.parse` cannot read an option of type `{reflect.name_of(F)}`")
+
+pure def invalid(name: str, text: str) -> Error:
+    return InvalidValue(name=name.to_string(), value=text.to_string())

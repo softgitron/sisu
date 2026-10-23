@@ -1,0 +1,27 @@
+# `std.process` and `std.env` (11): a command built and run through the
+# process capability, a command line split as a shell splits it, a run
+# that fails as an error; and the environment's variables read as
+# numbers, flags and lists, required, and expanded into text.
+import std.env
+import std.process
+from std.process import Command
+
+def main():
+    let proc = Proc.fake({"uname": "Sisu", "date": "2026-10-23"})
+    print(Command.new("uname").arg("-s").output(proc))
+    print(Command.parse("date --iso").expect("a command").output(proc))
+    print(Command.new("missing").output(proc))
+    print(
+        process.checked(
+            "tool", ProcOutput(status=3, stdout=String.new(""), stderr=String.new("boom"))
+        )
+    )
+    print(process.split("cp 'my file' \"other \\\"file\\\"\" dir\\ name"))
+    print(process.split("unclosed 'quote"))
+    let e = Env.fake(
+        args=["--fast"],
+        vars={"PORT": "8080", "VERBOSE": "on", "PATH": "/bin:/usr/bin", "HOME": "/home/ada"},
+    )
+    print("{env.get_int(e, "PORT")} {env.is_set(e, "VERBOSE")} {env.get_list(e, "PATH")}")
+    print(env.require(e, "EDITOR"))
+    print(env.expand(e, "cd $HOME && echo ${{PORT}}"))

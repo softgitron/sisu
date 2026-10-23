@@ -1,0 +1,52 @@
+# Reflection over methods (08: reflection exposes "methods"; decision 251):
+# `reflect.methods_of` of a trait gives its methods, and of a type its own
+# (declared in it or in an inherent impl), each with its name, how it
+# takes `self`, its parameters (name, mode, type), its result type and
+# whether it has a body; `reflect.is_trait` tells a trait from a type.
+# A constant and a `comptime def` reflect too.
+
+trait Store:
+    def get(self, key: str) -> String?
+    def put(mut self, key: str, own value: String)
+    def size(self) -> int:
+        return 0
+
+struct Point:
+    x: int
+    y: int
+
+    def norm(self) -> int:
+        return self.x * self.x + self.y * self.y
+
+impl Point:
+    def scaled(self, by: int) -> Point:
+        return Point(x=self.x * by, y=self.y * by)
+
+    def origin() -> Point:
+        return Point(x=0, y=0)
+
+def describe_store() -> list[String]:
+    var out: list[String] = []
+    comptime for m in reflect.methods_of(Store):
+        out.push(
+            "{m.name}: {m.receiver}, {len(m.params)} parameters, gives {m.ret}, provided {m.provided}"
+        )
+        comptime for p in m.params:
+            out.push("  {p.index} {p.name}: {p.mode} {p.ty}")
+    return out
+
+const STORE_METHODS: list[str] = [m.name for m in reflect.methods_of(Store)]
+
+comptime def point_methods() -> list[str]:
+    return [m.name for m in reflect.methods_of(Point)]
+
+def kinds() -> (bool, bool):
+    return (reflect.is_trait(Store), reflect.is_trait(Point))
+
+def main():
+    for line in describe_store():
+        print(line)
+    print(STORE_METHODS)
+    print(comptime point_methods())
+    print(kinds())
+    print(comptime len(reflect.methods_of(Store)))

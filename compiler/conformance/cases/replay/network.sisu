@@ -1,0 +1,24 @@
+# The real network through the log (N-04): a listener on a port the host
+# picks, a connection to it and an echo. How often each socket was not
+# ready is the host's timing; the log holds every poll, so the replay
+# makes the same calls in the same order.
+
+def echo_once(listener: Listener) -> ! {NetError, TaskError}:
+    var conn = listener.accept()?
+    let got = conn.read_to_end()?
+    conn.write(got)?
+    conn.close()
+    return Ok(())
+
+def main(sys: System) -> ! {NetError, TaskError}:
+    let listener = sys.net.listen(0, host="127.0.0.1")?
+    let port = listener.port
+    let back = task.scope do s:
+        s.spawn(() -> echo_once(listener))
+        var c = sys.net.connect("127.0.0.1", port)?
+        c.write(b"ping")?
+        c.close()
+        return c.read_to_end()
+    print(back)
+    print("a port the host chose: {port > 0}")
+    return Ok(())

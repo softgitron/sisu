@@ -1,0 +1,8 @@
+# A wrong program: a value bound with `let` is changed; `var` declares
+# one that may change.
+
+def main():
+    let count = 0
+    for x in [1, 2, 3]:
+        count = count + x
+    print(count)

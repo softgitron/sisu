@@ -1,0 +1,105 @@
+# Reflection beyond generic functions (08, "Reflection"; decision 244): a
+# function or a method whose body runs code at compile time (`reflect`,
+# `comptime for`, `x.[f]`) is a template. One without type parameters is
+# made once, before anything calls it, from the types it names; a method
+# names its own type `Self`; a method of a generic type is made for each
+# type argument it is called with, and a generic method that calls a
+# template with its type parameters becomes one too.
+
+struct Point:
+    x: int
+    y: int
+
+    # A method in the type's declaration.
+    def total(self) -> int:
+        var sum = 0
+        comptime for f in reflect.fields_of(Self):
+            sum += self.[f]
+        return sum
+
+enum Shape:
+    Circle(radius: int)
+    Square(side: int)
+
+impl Point:
+    # A method without `self`.
+    def field_names() -> list[String]:
+        var out: list[String] = []
+        comptime for f in reflect.fields_of(Self):
+            out.push(f.name)
+        return out
+
+    def describe(self) -> String:
+        var parts: list[String] = []
+        comptime for f in reflect.fields_of(Point):
+            parts.push("{f.name}: {self.[f]}")
+        return "{reflect.name_of(Self)}({parts.join(", ")})"
+
+trait Describe:
+    def describe_it(self) -> String
+
+# A method of a trait's impl, called directly and through `dyn`.
+impl Describe for Point:
+    def describe_it(self) -> String:
+        return "a {reflect.name_of(Self)} of {len(reflect.fields_of(Self))} fields"
+
+struct Wrapper[T]:
+    inner: T
+    tag: String
+
+impl[T] Wrapper[T]:
+    # Made for each `T` it is called with.
+    def shape(self) -> String:
+        if comptime reflect.is_struct(T):
+            return "a struct of {len(reflect.fields_of(T))} fields, tagged {self.tag}"
+        else:
+            return "the type {reflect.name_of(T)}, tagged {self.tag}"
+
+def count_fields[T]() -> int:
+    return len(reflect.fields_of(T))
+
+struct Holder[T]:
+    item: T
+
+impl[T] Holder[T]:
+    # Calls a template with its own type parameter: a template too.
+    def fields(self) -> int:
+        return count_fields[T]()
+
+# A function without type parameters, over a type of the program.
+def variants() -> list[String]:
+    var out: list[String] = []
+    comptime for v in reflect.variants_of(Shape):
+        out.push(v.name)
+    return out
+
+# A loop unrolled at compile time.
+def unrolled() -> int:
+    var n = 0
+    comptime for i in [1, 2, 3]:
+        n += i * 10
+    return n
+
+def apply(f: () -> int) -> int:
+    return f()
+
+def through_dyn(d: ref dyn Describe) -> String:
+    return d.describe_it()
+
+def main():
+    let p = Point(x=3, y=4)
+    print(p.total())
+    print(Point.field_names())
+    print(p.describe())
+    print(p.describe_it())
+    print(through_dyn(ref p))
+    print(Wrapper(inner=Point(x=1, y=2), tag="a").shape())
+    print(Wrapper(inner=5, tag="b").shape())
+    print(Holder(item=Point(x=5, y=6)).fields())
+    print(Holder(item="text").fields())
+    print(variants())
+    print(unrolled())
+    print(apply(unrolled))
+    # `main` is a function like any other.
+    comptime for f in reflect.fields_of(Point):
+        print("main sees {f.name}")

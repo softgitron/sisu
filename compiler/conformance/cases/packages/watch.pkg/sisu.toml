@@ -1,0 +1,7 @@
+# Hot replacement in a package (10, "Debugging and profiling"; 09):
+# `sisu run --watch` watches every module's file, and a save of one swaps
+# the bodies that changed in it.
+[package]
+name = "scene"
+version = "0.1.0"
+edition = "2027"

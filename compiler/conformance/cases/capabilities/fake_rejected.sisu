@@ -1,0 +1,17 @@
+# `cap.Fake[...]` takes one of the program's traits whose methods can all
+# be forwarded.
+
+trait Store:
+    def get[T](self, key: str) -> T?
+
+trait Named:
+    def name(self) -> ref str
+
+struct Plain:
+    pass
+
+def main():
+    let a = cap.Fake[Store].new()
+    let b: cap.Fake[Named] = cap.Fake[Named].new()
+    let c = cap.Fake[Plain].new()
+    let d = cap.Fake[Display].new()

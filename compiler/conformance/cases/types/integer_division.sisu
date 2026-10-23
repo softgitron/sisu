@@ -1,0 +1,5 @@
+def mean(total: int, count: int) -> int:
+    return total / count
+
+def main():
+    print(mean(7, 2))

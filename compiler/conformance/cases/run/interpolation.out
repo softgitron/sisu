@@ -1,0 +1,10 @@
+3 x tea = 7.50
+Item(name="tea", price=2.5)
+item=Item(name="tea", price=2.5)
+item.name="tea"
+[1, 2, 3] (1, 'a') {} nested 3
+   4|-3  |
+[] 0
+a
+multi-line 3
+string

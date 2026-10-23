@@ -1,0 +1,4 @@
+Ok(42)
+from rx: Ok("hello")
+the watcher saw the cancellation
+the channel stayed full

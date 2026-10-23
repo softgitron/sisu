@@ -1,0 +1,9 @@
+import counting.fields
+
+struct Pair:
+    a: int
+    b: int
+
+def main():
+    print(fields.count[Pair]())
+    print(fields.count[int]())

@@ -1,0 +1,683 @@
+##! What the checker needs to know about SIR types (stage 0's
+##! `sisu-borrowck/src/types.rs`): the type of a place, the variants and
+##! fields of a type, which types implement `Drop`, which drop nothing,
+##! which must be consumed, and the functions a drop or a call through a
+##! trait runs. Stage 0's `Types` holds the program; here a function that
+##! needs more of it than the declared types takes it.
+
+from stage1.sir import Function, ImplTarget, IntrinsicDecl, Loc, Place, Program, Type, TypeDecl
+from stage1.sir.types import Decls, field_ty, place_ty
+
+## The builtin types whose values can hold no loan and own nothing that
+## can.
+pub pure def plain_builtin(n: str) -> bool:
+    return match n:
+        case "String" | "Path" | "DateTime" | "bytes" | "f32" | "u8" | "u16" | "u32" | "u64" | "u128": True
+        case "i8" | "i16" | "i32" | "i128" | "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc": True
+        case "Stdin" | "System" | "HostFs" | "HostNet" | "HostClock" | "HostRand" | "HostEnv": True
+        # What a `Cap` holds is neither a view nor must-consume (checked
+        # where one is made).
+        case "HostProc" | "HostStdin" | "TestClock" | "Cap": True
+        case _: False
+
+## The builtin types whose values may borrow whatever their arguments are:
+## an iterator walks a collection it may borrow, an entry borrows its dict.
+pub pure def borrowing_builtin(n: str) -> bool:
+    return match n:
+        case "Iter" | "Entry" | "Iterable" | "MutexGuard" | "ReadGuard" | "Lent" | "Slice": True
+        case _: False
+
+pub struct Types:
+    pub decls: Decls
+    ## The program's functions by name, each the index of the first of its
+    ## name in the program's list, as `Program::function` finds it (stage
+    ## 0's `Types::function`, decision 219). Placing the drops changes no
+    ## function's name or place, so the index serves the program with its
+    ## drops too.
+    pub fns: dict[String, int]
+    ## The program's intrinsics and trait methods by name, each the index
+    ## of the first of its name, as `Program::intrinsic` and
+    ## `Program::trait_method` find them.
+    intrinsics: dict[String, int]
+    trait_methods: dict[String, int]
+
+impl Types:
+    pub pure def new(types: list[TypeDecl]) -> Types:
+        return Types(decls=Decls.new(types), fns={}, intrinsics={}, trait_methods={})
+
+    ## The types of a program, with its functions, intrinsics and trait
+    ## methods by name.
+    pub pure def of(p: Program) -> Types:
+        var fns: dict[String, int] = {}
+        for i in range(len(p.functions)):
+            if not fns.contains(p.functions[i].name.copy()):
+                _ = fns.insert(p.functions[i].name.copy(), i)
+        var intrinsics: dict[String, int] = {}
+        for i in range(len(p.intrinsics)):
+            if not intrinsics.contains(p.intrinsics[i].name.copy()):
+                _ = intrinsics.insert(p.intrinsics[i].name.copy(), i)
+        var trait_methods: dict[String, int] = {}
+        for i in range(len(p.trait_methods)):
+            if not trait_methods.contains(p.trait_methods[i].name.copy()):
+                _ = trait_methods.insert(p.trait_methods[i].name.copy(), i)
+        return Types(
+            decls=Decls.new(p.types), fns=fns, intrinsics=intrinsics, trait_methods=trait_methods
+        )
+
+    ## The program's intrinsic of that name (`Program::intrinsic`).
+    pub pure def intrinsic(self, p: Program, name: str) -> ref IntrinsicDecl? from p:
+        if let Some(i) = self.intrinsics.get(name.to_string()):
+            return Some(ref p.intrinsics[i])
+        return None
+
+    ## The program's trait method of that name (`Program::trait_method`).
+    pub pure def trait_method(self, p: Program, name: str) -> ref IntrinsicDecl? from p:
+        if let Some(i) = self.trait_methods.get(name.to_string()):
+            return Some(ref p.trait_methods[i])
+        return None
+
+    ## The declared types the places of `f` can reach, each once, in the
+    ## order met: those its locals' types name, and those their fields and
+    ## variants name. What initialisation and drop placement ask of the
+    ## program's types is about these.
+    pub pure def reached_decls(self, f: Function) -> list[TypeDecl]:
+        var seen: set[String] = set()
+        var out: list[TypeDecl] = []
+        var work: list[Type] = []
+        for l in f.locals:
+            work.push(l.ty.copy())
+        while let Some(t) = work.pop():
+            match t:
+                case Type.Named(n, args):
+                    for a in args:
+                        work.push(a.copy())
+                    self.reach_named(n, mut seen, mut out, mut work)
+                case Type.ErrSet(ms):
+                    for m in ms:
+                        self.reach_named(m, mut seen, mut out, mut work)
+                case Type.Tuple(es):
+                    for e in es:
+                        work.push(e.copy())
+                case Type.Ref(inner, _):
+                    for x in inner:
+                        work.push(x.copy())
+                case Type.Fn(params, ret, _):
+                    for x in params:
+                        work.push(x.copy())
+                    for x in ret:
+                        work.push(x.copy())
+                case Type.Dyn(_, args) | Type.ConstOp(_, args):
+                    for x in args:
+                        work.push(x.copy())
+                case Type.Assoc(self_ty, _, args, _):
+                    for x in self_ty:
+                        work.push(x.copy())
+                    for x in args:
+                        work.push(x.copy())
+                case _:
+                    pass
+        return out
+
+    pure def reach_named(
+        self, n: str, mut seen: set[String], mut out: list[TypeDecl], mut work: list[Type]
+    ):
+        if not seen.add(n.to_string()):
+            return
+        let d = self.decls.get(n) else:
+            return
+        match d:
+            case TypeDecl.Struct(_, _, fields, _, _, _):
+                for f in fields:
+                    work.push(f.ty.copy())
+            case TypeDecl.Enum(_, _, variants, _, _, _, _):
+                for v in variants:
+                    for (_, ft) in v.fields:
+                        work.push(ft.copy())
+        out.push(d.copy())
+
+    ## Where the program's function of that name is in its list.
+    pub pure def function(self, name: str) -> int?:
+        if let Some(i) = self.fns.get(name.to_string()):
+            return Some(i)
+        return None
+
+    ## The type of a place, or `None` when SIR does not say (a payload of a
+    ## union of error sets).
+    pub pure def place_ty(self, f: Function, p: Place) -> Type?:
+        return place_ty(self.decls, f, p)
+
+    ## Field `i` of a struct or tuple, or of variant `v` of an enum.
+    pub pure def field_ty(self, t: Type, variant: int?, i: int) -> Type?:
+        return field_ty(self.decls, t, variant, i)
+
+    ## The number of fields of a struct or tuple, or of variant `v`.
+    pub pure def field_count(self, t: Type, variant: int?) -> int:
+        var n = 0
+        while self.field_ty(t, variant, n).is_some():
+            n += 1
+        return n
+
+    ## The number of variants of an enum type, if it is one.
+    pub pure def variant_count(self, t: Type) -> int?:
+        match t:
+            case Type.Named(n, _):
+                if n == "Option" or n == "Result":
+                    return Some(2)
+                let d = self.decls.get(n) else:
+                    return None
+                if let TypeDecl.Enum(_, _, variants, _, _, _, _) = d:
+                    return Some(len(variants))
+                return None
+            case Type.ErrSet(ms):
+                if len(ms) != 1:
+                    return None
+                let d = self.decls.get(ms[0]) else:
+                    return None
+                if let TypeDecl.Enum(_, _, variants, _, _, _, _) = d:
+                    return Some(len(variants))
+                return None
+            case _:
+                return None
+
+    ## Whether dropping a value of the type does nothing: scalars, views,
+    ## references, functions and capability handles, and tuples, options
+    ## and results of them.
+    pub pure def trivial_drop(self, t: Type) -> bool:
+        match t:
+            case Type.Int | Type.Float | Type.Bool | Type.Char | Type.Str | Type.Unit | Type.Never:
+                return True
+            case Type.Ref(_, _) | Type.Fn(_, _, _) | Type.Const(_) | Type.ConstOp(_, _):
+                return True
+            case Type.Tuple(es):
+                for e in es:
+                    if not self.trivial_drop(e):
+                        return False
+                return True
+            case Type.Named(n, args):
+                if n == "Fs" or n == "Env" or n == "Clock" or n == "DateTime":
+                    return True
+                if n == "Option" or n == "Result":
+                    for a in args:
+                        if not self.trivial_drop(a):
+                            return False
+                    return True
+                return False
+            case _:
+                return False
+
+    ## Whether the type itself implements `Drop`.
+    pub pure def implements_drop(self, t: Type) -> bool:
+        let Type.Named(n, _) = t else:
+            return False
+        let d = self.decls.get(n) else:
+            return False
+        return match d:
+            case TypeDecl.Struct(_, _, _, drop, _, _): drop.is_some()
+            case TypeDecl.Enum(_, _, _, drop, _, _, _): drop.is_some()
+
+    ## Whether an intrinsic keeps or returns every value its argument `i`
+    ## holds (the `keeps` of its declaration, from its contract).
+    pub pure def intrinsic_keeps(self, p: Program, name: str, i: int) -> bool:
+        if let Some(d) = self.intrinsic(p, name):
+            return d.keeps.contains(i)
+        return False
+
+    ## The function a call through a trait runs for concrete type
+    ## arguments, with its own type arguments: the impl whose patterns
+    ## match, or the trait's provided method.
+    pub pure def trait_target(
+        self, p: Program, name: str, tys: list[Type]
+    ) -> (String, list[Type])?:
+        let cut = last_dot(name) else:
+            return None
+        if tys.is_empty():
+            return None
+        let trait_name = name.byte_slice(0, cut)
+        let method = name.byte_slice(cut + 1, name.byte_len())
+        for imp in p.impls:
+            if imp.trait_name != trait_name:
+                continue
+            var binds: list[Type?] = []
+            for _ in range(imp.params):
+                binds.push(None)
+            if not match_pattern(imp.self_ty, tys[0], mut binds):
+                continue
+            var all = True
+            for k in range(len(imp.trait_args)):
+                if k + 1 >= len(tys):
+                    break
+                if not match_pattern(imp.trait_args[k], tys[k + 1], mut binds):
+                    all = False
+                    break
+            if not all:
+                continue
+            let n = len(imp.trait_args)
+            for (m, target) in imp.methods:
+                if m != method:
+                    continue
+                match target:
+                    case ImplTarget.Fn(f):
+                        var targs: list[Type] = []
+                        for b in binds:
+                            targs.push(b.copy() ?? Type.Unit)
+                        for k in range(1 + n, len(tys)):
+                            targs.push(tys[k].copy())
+                        return Some((f.copy(), targs))
+                    case ImplTarget.Intrinsic(_):
+                        return None
+            return Some((name.to_string(), tys.copy()))
+        return None
+
+    ## Where the type's own `Drop` is written: the `self` of its `drop`.
+    pub pure def drop_impl_loc(self, p: Program, t: Type) -> Loc?:
+        let Type.Named(n, _) = t else:
+            return None
+        let d = self.decls.get(n) else:
+            return None
+        let drop = match d:
+            case TypeDecl.Struct(_, _, _, x, _, _): x.copy()
+            case TypeDecl.Enum(_, _, _, x, _, _, _): x.copy()
+        let name = drop else:
+            return None
+        let f = p.function(name) else:
+            return None
+        if len(f.locals) < 2:
+            return None
+        return f.locals[1].loc
+
+    ## The `Drop` functions dropping a value of the type may run.
+    pub pure def drop_fns(self, t: Type) -> list[String]:
+        var out: list[String] = []
+        var seen: list[Type] = []
+        self.drop_fns_into(t, mut out, 0, mut seen)
+        return out
+
+    ## `seen`: the types looked at already, each once.
+    pure def drop_fns_into(self, t: Type, mut out: list[String], depth: int, mut seen: list[Type]):
+        if depth > 32:
+            return
+        match t:
+            case Type.Tuple(es):
+                for e in es:
+                    self.drop_fns_into(e, mut out, depth + 1, mut seen)
+            case Type.Named(n, args):
+                if seen.contains(t):
+                    return
+                seen.push(t.copy())
+                for a in args:
+                    self.drop_fns_into(a, mut out, depth + 1, mut seen)
+                let d = self.decls.get(n) else:
+                    return
+                match d:
+                    case TypeDecl.Struct(_, _, fields, drop, _, _):
+                        if let Some(x) = drop:
+                            if not out.contains(x):
+                                out.push(x.copy())
+                        for f in fields:
+                            self.drop_fns_into(f.ty, mut out, depth + 1, mut seen)
+                    case TypeDecl.Enum(_, _, variants, drop, _, _, _):
+                        if let Some(x) = drop:
+                            if not out.contains(x):
+                                out.push(x.copy())
+                        for v in variants:
+                            for (_, ft) in v.fields:
+                                self.drop_fns_into(ft, mut out, depth + 1, mut seen)
+            case Type.ErrSet(ms):
+                for m in ms:
+                    self.drop_fns_into(
+                        Type.Named(name=m.copy(), args=[]), mut out, depth + 1, mut seen
+                    )
+            case _:
+                pass
+
+    ## `@must_consume` (D-054), propagated through containers (D-064): a
+    ## value of a marked type, or a collection, option, tuple, iterator or
+    ## aggregate holding one. A reference never is: it owns nothing.
+    pub pure def must_consume(self, t: Type) -> bool:
+        var seen: list[Type] = []
+        return self.must_consume_in(t, 0, mut seen)
+
+    ## `seen`: the types looked at already. One met again adds nothing: it
+    ## is being looked at (a recursive type), or it was and is not (else
+    ## the answer is already known).
+    pure def must_consume_in(self, t: Type, depth: int, mut seen: list[Type]) -> bool:
+        if depth > 32:
+            return False
+        match t:
+            case Type.Ref(_, _):
+                return False
+            case Type.Tuple(es):
+                for e in es:
+                    if self.must_consume_in(e, depth + 1, mut seen):
+                        return True
+                return False
+            case Type.Named(n, args):
+                if plain_builtin(n) or seen.contains(t):
+                    return False
+                seen.push(t.copy())
+                for a in args:
+                    if self.must_consume_in(a, depth + 1, mut seen):
+                        return True
+                let d = self.decls.get(n) else:
+                    return False
+                match d:
+                    case TypeDecl.Struct(_, _, fields, _, _, marked):
+                        if marked:
+                            return True
+                        for f in fields:
+                            if self.must_consume_in(f.ty, depth + 1, mut seen):
+                                return True
+                        return False
+                    case TypeDecl.Enum(_, _, variants, _, _, _, marked):
+                        if marked:
+                            return True
+                        for v in variants:
+                            for (_, ft) in v.fields:
+                                if self.must_consume_in(ft, depth + 1, mut seen):
+                                    return True
+                        return False
+            case Type.ErrSet(ms):
+                for m in ms:
+                    if self.must_consume_in(
+                        Type.Named(name=m.copy(), args=[]), depth + 1, mut seen
+                    ):
+                        return True
+                return False
+            case _:
+                return False
+
+    ## The name of field `i` of a struct type (or of variant `v`), for
+    ## diagnostics.
+    pub pure def field_name(self, t: Type, variant: int?, i: int) -> String?:
+        let Type.Named(n, _) = t else:
+            return None
+        let d = self.decls.get(n) else:
+            return None
+        match variant:
+            case None:
+                if let TypeDecl.Struct(_, _, fields, _, _, _) = d:
+                    if i < len(fields):
+                        return Some(fields[i].name.copy())
+                return None
+            case Some(v):
+                if let TypeDecl.Enum(_, _, variants, _, _, _, _) = d:
+                    if v < len(variants) and i < len(variants[v].fields):
+                        return variants[v].fields[i].0.copy()
+                return None
+
+    ## Whether a value of the type can hold a loan: a reference, a `str`
+    ## view, a function value (a closure holds its captures), an iterator
+    ## or entry, a `view struct`, or a builtin container or tuple of such.
+    ## A plain struct or enum cannot: the resolver rejects view fields in
+    ## one, and the checker rejects storing a borrowing value in one.
+    pub pure def may_hold(self, t: Type) -> bool:
+        return self.may_hold_depth(t, 0)
+
+    pure def may_hold_depth(self, t: Type, depth: int) -> bool:
+        if depth > 32:
+            return True
+        match t:
+            # A type parameter may stand for a view.
+            case Type.Ref(_, _) | Type.Str | Type.Fn(_, _, _) | Type.Param(_) | Type.Assoc(
+                _, _, _, _
+            ):
+                return True
+            case Type.Tuple(es):
+                for e in es:
+                    if self.may_hold_depth(e, depth + 1):
+                        return True
+                return False
+            case Type.Named(n, args):
+                if borrowing_builtin(n):
+                    return True
+                if plain_builtin(n):
+                    return False
+                var any = False
+                for a in args:
+                    if self.may_hold_depth(a, depth + 1):
+                        any = True
+                match n:
+                    case "list" | "Array" | "dict" | "set" | "Option" | "Result":
+                        return any
+                    case _:
+                        pass
+                # A generic type holds what its arguments hold.
+                if let Some(TypeDecl.Struct(_, _, _, _, view_, _)) = self.decls.get(n):
+                    if view_:
+                        return True
+                return any
+            # Only a value that owns what it holds becomes `dyn`.
+            case _:
+                return False
+
+    ## Whether a value of the type holds a capability handle or a `Cap`,
+    ## whose object goes with the handle's last copy (decision 237): a
+    ## result that points into the object borrows the place the call
+    ## copied the handle from. A `Lent` holds loans of its own instead.
+    pub pure def holds_handle(self, t: Type) -> bool:
+        return self.holds_handle_depth(t, 0)
+
+    pure def holds_handle_depth(self, t: Type, depth: int) -> bool:
+        if depth > 16:
+            return False
+        match t:
+            case Type.Tuple(es):
+                for e in es:
+                    if self.holds_handle_depth(e, depth + 1):
+                        return True
+                return False
+            case Type.Named(n, args):
+                match n:
+                    case "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "System" | "Cap":
+                        return True
+                    case "Lent" | "Shared" | "Weak" | "list" | "Array" | "dict" | "set" | "Iter":
+                        return False
+                    case "Entry" | "Iterable" | "Cell" | "Atomic" | "Mutex" | "RwLock" | "MutexGuard":
+                        return False
+                    case "ReadGuard" | "Arena" | "Slice":
+                        return False
+                    case "Option" | "Result":
+                        for a in args:
+                            if self.holds_handle_depth(a, depth + 1):
+                                return True
+                        return False
+                    case _:
+                        pass
+                let d = self.decls.get(n) else:
+                    return False
+                match d:
+                    case TypeDecl.Struct(_, _, fields, _, _, _):
+                        for fd in fields:
+                            if self.holds_handle_depth(fd.ty.subst(args), depth + 1):
+                                return True
+                    case TypeDecl.Enum(_, _, variants, _, _, _, _):
+                        for v in variants:
+                            for (_, ft) in v.fields:
+                                if self.holds_handle_depth(ft.subst(args), depth + 1):
+                                    return True
+                return False
+            case _:
+                return False
+
+    ## The index of a variant of an enum, by name.
+    pub pure def variant_index(self, name: str, variant: str) -> int?:
+        let d = self.decls.get(name) else:
+            return None
+        if let TypeDecl.Enum(_, _, variants, _, _, _, _) = d:
+            for i in range(len(variants)):
+                if variants[i].name == variant:
+                    return Some(i)
+        return None
+
+    ## The type a struct's field (or a variant's) is declared with, its
+    ## type parameters unsubstituted.
+    pub pure def declared_field_ty(self, name: str, variant: int?, i: int) -> Type?:
+        let d = self.decls.get(name) else:
+            return None
+        match d:
+            case TypeDecl.Struct(_, _, fields, _, _, _):
+                if variant.is_none() and i < len(fields):
+                    return Some(fields[i].ty.copy())
+                return None
+            case TypeDecl.Enum(_, _, variants, _, _, _, _):
+                let v = variant else:
+                    return None
+                if v < len(variants) and i < len(variants[v].fields):
+                    return Some(variants[v].fields[i].1.copy())
+                return None
+
+    ## Whether every loan a value of a declared field type can hold is one
+    ## of its type parameters' (`T`, `list[T]`, `I.Item`), so a generic
+    ## type's arguments say what it holds; a function type's captures and a
+    ## reference are not.
+    pub pure def carried_by_params(self, t: Type) -> bool:
+        match t:
+            case Type.Param(_) | Type.Assoc(_, _, _, _):
+                return True
+            case Type.Tuple(es):
+                for e in es:
+                    if not self.carried_by_params(e) and self.may_hold(e):
+                        return False
+                return True
+            case Type.Named(n, args):
+                if borrowing_builtin(n):
+                    return False
+                if let Some(TypeDecl.Struct(_, _, _, _, view_, _)) = self.decls.get(n):
+                    if view_:
+                        return False
+                for a in args:
+                    if not self.carried_by_params(a) and self.may_hold(a):
+                        return False
+                return True
+            case _:
+                return not self.may_hold(t)
+
+    ## Whether the name is a plain struct or an enum, which cannot hold a
+    ## loan.
+    pub pure def is_plain_aggregate(self, name: str) -> bool:
+        return match self.decls.get(name):
+            case Some(TypeDecl.Struct(_, _, _, _, view_, _)): not view_
+            case Some(TypeDecl.Enum(_, _, _, _, _, _, _)): True
+            case _: False
+
+    ## Whether dropping a value of the type runs a user `Drop` (its own or
+    ## a part's), which may read the references the value holds.
+    pub pure def has_drop_glue(self, t: Type) -> bool:
+        var open: list[Type] = []
+        var done: list[(Type, bool)] = []
+        return self.drop_glue_in(t, 0, mut open, mut done)
+
+    ## A type met again while it is being looked at is a recursive type,
+    ## which counts as having glue (the depth bound's answer); one already
+    ## looked at gives what it gave.
+    pure def drop_glue_in(
+        self, t: Type, depth: int, mut open: list[Type], mut done: list[(Type, bool)]
+    ) -> bool:
+        if depth > 32:
+            return True
+        match t:
+            # Its type argument, or the value behind a `dyn`, may have one.
+            case Type.Param(_) | Type.Assoc(_, _, _, _) | Type.Dyn(_, _):
+                return True
+            case Type.Tuple(es):
+                for e in es:
+                    if self.drop_glue_in(e, depth + 1, mut open, mut done):
+                        return True
+                return False
+            case Type.Named(n, args):
+                # Dropping a guard unlocks its mutex, through its loan.
+                if n == "MutexGuard" or n == "ReadGuard":
+                    return True
+                for (k, r) in done:
+                    if k == t:
+                        return r
+                if open.contains(t):
+                    return True
+                open.push(t.copy())
+                # The fields with the type's arguments in them.
+                var r = False
+                for a in args:
+                    if not r and self.drop_glue_in(a, depth + 1, mut open, mut done):
+                        r = True
+                if not r:
+                    if let Some(d) = self.decls.get(n):
+                        match d:
+                            case TypeDecl.Struct(_, _, fields, drop, _, _):
+                                r = drop.is_some()
+                                for fd in fields:
+                                    if not r
+                                            and self.drop_glue_in(
+                                                fd.ty.subst(args), depth + 1, mut open, mut done
+                                            ):
+                                        r = True
+                            case TypeDecl.Enum(_, _, variants, drop, _, _, _):
+                                r = drop.is_some()
+                                for v in variants:
+                                    for (_, ft) in v.fields:
+                                        if not r
+                                                and self.drop_glue_in(
+                                                    ft.subst(args), depth + 1, mut open, mut done
+                                                ):
+                                            r = True
+                _ = open.pop()
+                done.push((t.copy(), r))
+                return r
+            case Type.ErrSet(ms):
+                for m in ms:
+                    if self.drop_glue_in(
+                        Type.Named(name=m.copy(), args=[]), depth, mut open, mut done
+                    ):
+                        return True
+                return False
+            case _:
+                return False
+
+    ## The declaration of a type, by name.
+    pub pure def decl(self, name: str) -> TypeDecl?:
+        if let Some(d) = self.decls.get(name):
+            return Some(d.copy())
+        return None
+
+## Where the last `.` of a name is.
+pure def last_dot(s: str) -> int?:
+    var i = s.byte_len() - 1
+    while i >= 0:
+        if s.byte_at(i) == 46:
+            return Some(i)
+        i -= 1
+    return None
+
+## Matches an impl's pattern (parameters `$0` and on) against a type.
+pub pure def match_pattern(pat: Type, ty: Type, mut binds: list[Type?]) -> bool:
+    match pat:
+        case Type.Param(i):
+            if i >= len(binds):
+                return False
+            if binds[i].is_none():
+                binds[i] = Some(ty.copy())
+                return True
+            return binds[i] == Some(ty.copy())
+        case Type.Named(n, a):
+            let Type.Named(m, b) = ty else:
+                return False
+            if m != n or len(a) != len(b):
+                return False
+            for k in range(len(a)):
+                if not match_pattern(a[k], b[k], mut binds):
+                    return False
+            return True
+        case Type.Tuple(a):
+            let Type.Tuple(b) = ty else:
+                return False
+            if len(a) != len(b):
+                return False
+            for k in range(len(a)):
+                if not match_pattern(a[k], b[k], mut binds):
+                    return False
+            return True
+        case Type.Ref(a, mutable):
+            let Type.Ref(b, k) = ty else:
+                return False
+            return mutable == k and match_pattern(a[0], b[0], mut binds)
+        case _:
+            return pat == ty

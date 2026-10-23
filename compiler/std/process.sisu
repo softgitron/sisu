@@ -1,0 +1,132 @@
+##! `std.process` (11): running other programs through the process
+##! capability. `Proc.run` (the prelude's) runs a program with arguments
+##! to its end and gives its status and output; `Command` builds such a
+##! run, `split` reads a command line written as a shell would split it,
+##! and `checked` turns a failed run into an error. Pipes between programs
+##! and signals wait for the host contract, whose runs take no input.
+
+## A run that finished with a status other than 0.
+pub error ProcessError:
+    Failed(program: String, status: int, stderr: String)
+
+## A program and its arguments, to run through a `Proc`.
+##
+## ```
+## let proc = Proc.fake({"greet": "hello"})
+## let out = Command.new("greet").arg("--loud").run(proc).expect("a fake")
+## assert out.status == 0 and out.stdout == "hello"
+## ```
+pub struct Command:
+    pub program: String
+    pub args: list[String]
+
+    ## The program, without arguments yet.
+    pub pure def new(program: str) -> Command:
+        return Command(program=String.new(program), args=[])
+
+    ## The command a command line writes (`split`'s words); `None` for an
+    ## empty line or an unclosed quote.
+    ##
+    ## ```
+    ## let c = Command.parse("git commit -m 'a message'").expect("a command")
+    ## assert c.program == "git" and c.args == ["commit", "-m", "a message"]
+    ## ```
+    pub pure def parse(line: str) -> Command?:
+        var words = split(line)?
+        if words.is_empty():
+            return None
+        let program = words.remove(0)
+        return Some(Command(program=program, args=words))
+
+    ## The command with `a` after its arguments.
+    pub pure def arg(own self, a: str) -> Command:
+        var c = self
+        c.args.push(String.new(a))
+        return c
+
+    ## The command with each of `more` after its arguments.
+    pub pure def with_args(own self, more: list[str]) -> Command:
+        var c = self
+        for a in more:
+            c.args.push(String.new(a))
+        return c
+
+    ## Runs the program to its end. A blocking point.
+    pub def run(self, proc: Proc) -> ProcOutput ! ProcError:
+        var args: list[str] = []
+        for i in range(len(self.args)):
+            args.push(self.args[i])
+        return proc.run(self.program, args)
+
+    ## Runs the program to its end and gives its standard output, or
+    ## `Failed` when its status is not 0.
+    ##
+    ## ```
+    ## let proc = Proc.fake({"date": "today"})
+    ## assert Command.new("date").output(proc) == Ok(String.new("today"))
+    ## ```
+    pub def output(self, proc: Proc) -> String ! {ProcError, ProcessError}:
+        let out = self.run(proc)?
+        return checked(self.program, out)
+
+## The output's standard output when its status is 0, else `Failed`.
+pub pure def checked(program: str, own out: ProcOutput) -> String ! ProcessError:
+    if out.status != 0:
+        return Err(Failed(program=String.new(program), status=out.status, stderr=out.stderr))
+    return Ok(out.stdout)
+
+## The words of a command line, split at unquoted spaces and tabs as a
+## POSIX shell splits them: `'...'` keeps everything in it, `"..."`
+## everything but `\"` and `\\`, and `\` outside quotes keeps the
+## character after it. `None` for an unclosed quote.
+##
+## ```
+## assert split("a  b\tc") == Some(["a", "b", "c"])
+## assert split("say 'hi there' \"x \\\"y\\\"\" z\\ w") == Some(["say", "hi there", "x \"y\"", "z w"])
+## assert split("'open") == None
+## assert split("") == Some([])
+## ```
+pub pure def split(line: str) -> list[String]?:
+    var words: list[String] = []
+    var word = String.new()
+    var in_word = False
+    var quote: char? = None
+    var escaped = False
+    for c in line.chars():
+        if escaped:
+            word.push_char(c)
+            escaped = False
+            continue
+        match quote:
+            case Some('\''):
+                if c == '\'':
+                    quote = None
+                else:
+                    word.push_char(c)
+            case Some(_):
+                if c == '"':
+                    quote = None
+                elif c == '\\':
+                    escaped = True
+                else:
+                    word.push_char(c)
+            case None:
+                if c == ' ' or c == '\t':
+                    if in_word:
+                        words.push(word)
+                        word = String.new()
+                        in_word = False
+                elif c == '\'' or c == '"':
+                    quote = Some(c)
+                    in_word = True
+                elif c == '\\':
+                    escaped = True
+                    in_word = True
+                else:
+                    word.push_char(c)
+                    in_word = True
+    if quote != None or escaped:
+        return None
+    if in_word:
+        words.push(word)
+    return Some(words)

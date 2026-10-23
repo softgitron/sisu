@@ -1,0 +1,7 @@
+## A rectangle.
+pub struct Rect:
+    pub w: int
+    pub h: int
+
+    pub def area(self) -> int:
+        return self.w * self.h

@@ -1,0 +1,7 @@
+# Line breaks written as CR LF, and a file without a final line break.
+def main():
+    let x = (1,
+        2)
+    print(x)
+
+    return

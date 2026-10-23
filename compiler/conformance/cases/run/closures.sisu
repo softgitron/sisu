@@ -1,0 +1,33 @@
+def apply_twice(f: (int) -> int, x: int) -> int:
+    return f(f(x))
+
+def repeat(n: int, body: () -> ()):
+    for _ in range(n):
+        body()
+
+def make_list(n: int, f: (int) -> int) -> list[int]:
+    return [f(i) for i in range(n)]
+
+def main():
+    let k = 10
+    print(apply_twice(x -> x + k, 1))
+    print(apply_twice(it * 3, 2))
+    var total = 0
+    repeat(4) do:
+        total += 5
+    print(total)
+    let squares = make_list(5) do i:
+        return i * i
+    print(squares)
+    var log: list[String] = []
+    repeat(2) do:
+        log.push("tick".to_string())
+    print(log)
+    let words = ["kiwi", "fig", "banana", "apple"]
+    var sorted_words = [w for w in words]
+    sorted_words.sort_by((a, b) -> len(a).cmp(len(b)))
+    print(sorted_words)
+    let longest = words.iter().max_by(w -> len(w)) ?? ""
+    print(longest)
+    let add = (a: int, b: int) -> a + b
+    print(add(2, 3))

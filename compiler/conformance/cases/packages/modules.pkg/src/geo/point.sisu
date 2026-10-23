@@ -1,0 +1,32 @@
+##! `atlas.geo.point`: a directory's file is a child of the directory's
+##! module, `atlas.geo`.
+
+@derive(Copy)
+pub struct Point:
+    pub x: int
+    pub y: int
+
+    ## The distance, rounded down.
+    pub def distance(self, other: Point) -> int:
+        let dx = self.x - other.x
+        let dy = self.y - other.y
+        return isqrt(dx * dx + dy * dy)
+
+pub def origin() -> Point:
+    return Point(x=0, y=0)
+
+pub def manhattan(a: Point, b: Point) -> int:
+    return abs(a.x - b.x) + abs(a.y - b.y)
+
+## Private to this module.
+def isqrt(n: int) -> int:
+    var r = 0
+    while (r + 1) * (r + 1) <= n:
+        r += 1
+    return r
+
+test "a 3-4-5 triangle":
+    assert Point(x=3, y=4).distance(origin()) == 5
+
+test "the private helper is visible to its own tests":
+    assert isqrt(17) == 4

@@ -1,0 +1,47 @@
+# `std.io` (11): readers and writers. `BufReader` reads lines (`\n` and
+# `\r\n`) and runs of bytes over any reader however small its reads,
+# `BufWriter` gathers writes, `copy` moves a stream into another, and a
+# network connection is a reader and a writer like the in-memory ones.
+from std.io import BufReader, BufWriter, BytesReader, BytesWriter, Reader, SeekFrom, StdinReader
+from std.io import copy, read_to_end
+
+# A reader that gives at most two bytes at a time.
+struct Trickle:
+    inner: BytesReader
+
+impl Reader for Trickle:
+    def read(mut self, max: int) -> bytes ! {IoError, NetError, TaskError}:
+        return self.inner.read(if max < 2: max else: 2)
+
+def main(sys: System):
+    var lines = BufReader.new(Trickle(inner=BytesReader.new(b"one\r\ntwo\n\nthree")), capacity=3)
+    print(lines.read_lines())
+    var r = BytesReader.new(b"0123456789")
+    print("{r.read(3)} {r.seek(SeekFrom.End(-2))} {r.read(5)} {r.seek(SeekFrom.Start(-1))}")
+    var w = BufWriter.new(BytesWriter.new(), capacity=5)
+    for word in ["ab", "cd", "ef", "g"]:
+        w.write(word.encode()).expect("in memory")
+        print("held {w.held()}")
+    w.flush().expect("in memory")
+    print(w.into_inner().to_text())
+    var source = BytesReader.new(b"copied through")
+    var sink = BytesWriter.new()
+    print(copy(mut source, mut sink))
+    print(sink.to_text())
+    var stdin = BufReader.new(StdinReader.new(Stdin.fake(["first line", "second"])))
+    print(stdin.read_until(32u8))
+    print(stdin.read_line())
+    print(read_to_end(mut stdin))
+    let net = Net.fake()
+    let listener = net.listen(7000).expect("a port")
+    task.scope() do s:
+        s.spawn() do:
+            var conn = listener.accept().expect("a connection")
+            var reader = BufReader.new(conn)
+            let line = reader.read_line().expect("a line") ?? String.new()
+            var back = reader.into_inner()
+            back.write("echo: {line}\n".encode()).expect("sent")
+        var conn = net.connect("localhost", 7000).expect("connected")
+        conn.write(b"hello\n").expect("sent")
+        var replies = BufReader.new(conn)
+        print(replies.read_line())

@@ -1,0 +1,6 @@
+def main():
+    let xs = [1, 2, 3]
+    assert len(xs) == 3
+    assert xs[0] < xs[1], "ordered"
+    let total = 1 + 2
+    assert total == 4, "total is {total}"

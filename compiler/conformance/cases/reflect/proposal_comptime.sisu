@@ -1,0 +1,62 @@
+# The parts of proposal/examples/comptime.sisu that stage 0 runs, each
+# section verbatim (a test keeps them so): reflection's JSON encoder, the
+# user-defined derive, and conditional compilation with a test. The CRC
+# table and the ring buffer are `comptime/proposal_arrays`; the checked
+# string DSL needs the `sql` package, which stage 0 does not have.
+
+import std.json
+
+# Reflection: a generic JSON encoder with no macro.
+def to_json[T](value: T) -> String:
+    if comptime reflect.is_int(T) or reflect.is_float(T):
+        return "{value}"
+    elif comptime reflect.is_str(T):
+        return json.quote(value)
+    elif comptime reflect.is_list(T):
+        return "[{value.iter().map(to_json(it)).join(",")}]"
+    elif comptime reflect.is_struct(T):
+        var out = String("{{")               # doubled: a lone brace opens an interpolation
+        comptime for i, f in enumerate(reflect.fields_of(T)):
+            if i > 0:
+                out.push(",")
+            out.push("{json.quote(f.name)}:{to_json(value.[f])}")
+        out.push("}}")
+        return out
+    else:
+        comptime panic("to_json: unsupported type {reflect.name_of(T)}")   # a compile error
+
+# A user-defined derive: any trait can provide one.
+trait Describe:
+    def describe(self) -> String
+
+    comptime def derive(T: type) -> impl Describe for T:
+        return impl Describe for T:
+            def describe(self) -> String:
+                var parts = list()
+                comptime for f in reflect.fields_of(T):
+                    parts.push("{f.name}={self.[f]:?}")
+                return "{reflect.name_of(T)}({parts.join(", ")})"
+
+@derive(Describe, Debug)
+struct Point:
+    x: int
+    y: int
+
+# Conditional compilation: both branches must type-check.
+def page_size() -> int:
+    return if comptime target.os == "windows": 65536 else: 4096
+
+@cfg(test)
+def test_helper() -> Point:
+    return Point(x=1, y=2)
+
+test "derive describes fields":
+    assert test_helper().describe() == "Point(x=1, y=2)"
+
+def main():
+    print(to_json(Point(x=3, y=4)))
+    print(to_json([Point(x=1, y=2), Point(x=-3, y=40)]))
+    print(to_json("a \"quoted\" word"))
+    print(to_json([[1, 2], [3]]))
+    print(Point(x=5, y=6).describe())
+    print(page_size())

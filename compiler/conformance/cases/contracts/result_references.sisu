@@ -1,0 +1,27 @@
+# `ensures` on a function that returns a reference: `result` is that
+# reference, as a parameter of a reference type is.
+
+struct Item:
+    count: int
+
+struct Shelf:
+    items: list[Item]
+
+impl Shelf:
+    def get(self, i: int) -> ref Item:
+        ensures result.count >= 0
+        return ref self.items[i]
+
+    def get_mut(mut self, i: int) -> ref mut Item:
+        ensures result.count >= 0
+        return ref mut self.items[i]
+
+def main():
+    var shelf = Shelf(items=[Item(count=2)])
+    print(shelf.get(0).count)
+    let m = shelf.get_mut(0)
+    m.count += 1
+    print(shelf.items[0].count)
+    let bad = shelf.get_mut(0)
+    bad.count = -1
+    print(shelf.get(0).count)

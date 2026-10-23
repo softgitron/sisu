@@ -1,0 +1,3 @@
+4:5-4:16 E0411 borrow.view-field-in-plain-struct ty="Cursor" field="at" fty="ref int"
+  label 3:8-3:14 borrow.type-declared-here ty="Cursor"
+  fix borrow.declare-view 3:1-3:1 "view "

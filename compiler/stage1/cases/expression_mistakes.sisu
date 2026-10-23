@@ -1,0 +1,20 @@
+# Mistakes inside expressions: empty and broken interpolations, closure
+# parameters that are not names, keywords as names, missing operands,
+# and a set literal with a dict entry.
+def main():
+    print("{}")
+    print("{:>3}")
+    print("{x y}")
+    let f = (1, 2) -> 3
+    let g = (a, (b)) -> a
+    let h = x.match
+    let i = obj.def(1)
+    let j = 1 +
+    let k = {1, 2: 3}
+    let l = {1: 2, 3}
+    let m = [1, 2
+    let n = f(a=1, 2)
+    let o = xs[1:2, :3, 4:]
+    let p = x?.y?.z ?? 0
+    let q = t.0.1
+    let r = x.[field]

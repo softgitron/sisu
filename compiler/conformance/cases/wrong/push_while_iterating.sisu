@@ -1,0 +1,8 @@
+# A wrong program: a list grows inside the loop that reads it.
+
+def main():
+    var xs = [1, 2, 3]
+    for x in xs:
+        if x > 1:
+            xs.push(x)
+    print(xs)

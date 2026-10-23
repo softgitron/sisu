@@ -1,0 +1,2 @@
+13:5-13:20 E0417 borrow.must-consume name="t" ty="Token"
+  label 12:9-12:10 borrow.declared-here name="t"

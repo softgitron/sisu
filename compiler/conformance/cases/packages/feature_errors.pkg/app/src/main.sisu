@@ -1,0 +1,14 @@
+import render
+
+# `fast` is declared, but nothing turns it on.
+@cfg(feature="fast")
+def mode() -> String:
+    return "fast"
+
+# No `[features]` of this package declares `slow` (`W0006`).
+@cfg(feature="slow")
+def mode() -> String:
+    return "slow"
+
+def main():
+    print(render.show("hello"))

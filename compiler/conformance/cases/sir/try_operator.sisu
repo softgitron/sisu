@@ -1,0 +1,18 @@
+error E:
+    Bad
+
+def inner(ok: bool) -> int ! E:
+    if ok:
+        return Ok(1)
+    return Err(Bad)
+
+def outer() -> int ! E:
+    let v = inner(False)?
+    return Ok(v + 1)
+
+def main():
+    match outer():
+        case Ok(v):
+            print(v)
+        case Err(e):
+            print(e)

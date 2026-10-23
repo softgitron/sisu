@@ -1,0 +1,39 @@
+# Const generic parameters (03, "Const generics"): a parameter `const N:
+# int` takes a constant, is part of the type (`Grid[int, 3]` and
+# `Grid[int, 4]` are different types), and is an `int` in the bodies of
+# its type's methods and of its function, where it has the value of the
+# call's argument. `Array[T, N]` holds `N` values; `Array.filled` makes
+# one, its `N` from the type expected.
+
+struct Grid[T, const W: int]:
+    cells: Array[T, W]
+
+    def width(self) -> int:
+        return W
+
+    def describe(self) -> String:
+        return "a grid {W} wide of {self.cells.len()} cells"
+
+def cells_of[const N: int](fill: int) -> Array[int, N]:
+    return Array.filled(fill)
+
+def twice[const N: int]() -> int:
+    return size[N]() * 2
+
+def size[const M: int]() -> int:
+    return M
+
+def main():
+    let g: Grid[int, 3] = Grid(cells=Array.filled(0))
+    print(g.width())
+    print(g.describe())
+    var a = cells_of[4](7)
+    a[^1] = 1
+    print(a)
+    print(len(a))
+    print(twice[5]())
+    var total = 0
+    for x in a:
+        total += x
+    print(total)
+    print(a == cells_of[4](7))

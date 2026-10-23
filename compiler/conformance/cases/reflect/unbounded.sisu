@@ -1,0 +1,10 @@
+# A template whose instances need ever larger types stops at a bound.
+
+def depth[T](value: T) -> int:
+    if comptime reflect.name_of(T) == "never":
+        return 0
+    else:
+        return 1 + depth([value])
+
+def main():
+    print(depth(1))

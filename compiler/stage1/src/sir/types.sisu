@@ -1,0 +1,130 @@
+##! Types of places, for the passes that read SIR (stage 0's
+##! `sisu-sir/src/types.rs`), and the name of a type's drop glue.
+
+from stage1.sir import Function, Place, Proj, Type, TypeDecl
+
+## The drop glue of the declared type `ty`: the function `ty#drop`, of kind
+## `glue`, taking the value with `own`.
+pub pure def glue_name(ty: str) -> String:
+    return "{ty}#drop"
+
+## The declared types of a program, found by name.
+pub struct Decls:
+    pub types: list[TypeDecl]
+    index: dict[String, int]
+
+impl Decls:
+    pub pure def new(types: list[TypeDecl]) -> Decls:
+        var index: dict[String, int] = {}
+        for i in range(len(types)):
+            let n = types[i].name().to_string()
+            if not index.contains(n):
+                _ = index.insert(n, i)
+        return Decls(types=types.copy(), index=index)
+
+    pub pure def get(self, name: str) -> ref TypeDecl?:
+        if let Some(i) = self.index.get(name.to_string()):
+            return Some(ref self.types[i])
+        return None
+
+## The type of a place in `f`, or `None` when SIR does not say (a payload
+## of a union of error sets).
+pub pure def place_ty(decls: Decls, f: Function, p: Place) -> Type?:
+    if p.local.index >= len(f.locals):
+        return None
+    var t = f.locals[p.local.index].ty.copy()
+    var variant: int? = None
+    for proj in p.proj:
+        match proj:
+            case Proj.Deref:
+                match t.copy():
+                    case Type.Ref(inner, _):
+                        t = inner[0].copy()
+                    case Type.Named(n, args):
+                        # A `Shared` and a mutex or read guard lead to the
+                        # value.
+                        let pointer = n == "Shared" or n == "MutexGuard" or n == "ReadGuard"
+                        if pointer and not args.is_empty():
+                            t = args[0].copy()
+                        else:
+                            return None
+                    case _:
+                        return None
+            case Proj.Downcast(v):
+                variant = Some(v)
+                continue
+            case Proj.Field(i):
+                let ft = field_ty(decls, t, variant, i) else:
+                    return None
+                variant = None
+                t = ft
+            case Proj.Index(_) | Proj.IndexFromEnd(_):
+                match t.copy():
+                    case Type.Named(n, args):
+                        if (n == "list" or n == "Array") and not args.is_empty():
+                            t = args[0].copy()
+                        else:
+                            return None
+                    case _:
+                        return None
+            case Proj.Key(_):
+                match t.copy():
+                    case Type.Named(n, args):
+                        if n == "dict" and len(args) > 1:
+                            t = args[1].copy()
+                        elif n == "Arena" and not args.is_empty():
+                            t = args[0].copy()
+                        else:
+                            return None
+                    case _:
+                        return None
+    return Some(t)
+
+## Field `i` of a struct or tuple, or of variant `v` of an enum.
+pub pure def field_ty(decls: Decls, t: Type, variant: int?, i: int) -> Type?:
+    match t:
+        case Type.Tuple(es):
+            if variant.is_none() and i < len(es):
+                return Some(es[i].copy())
+            return None
+        case Type.Named(n, args):
+            if n == "Option":
+                let v = variant else:
+                    return None
+                if v == 0 and i == 0 and not args.is_empty():
+                    return Some(args[0].copy())
+                return None
+            if n == "Result":
+                let v = variant else:
+                    return None
+                if v == 0 and i == 0 and not args.is_empty():
+                    return Some(args[0].copy())
+                if v == 1 and i == 0 and len(args) > 1:
+                    return Some(args[1].copy())
+                return None
+            let d = decls.get(n) else:
+                return None
+            match d:
+                case TypeDecl.Struct(_, _, fields, _, _, _):
+                    if variant.is_some() or i >= len(fields):
+                        return None
+                    return Some(fields[i].ty.subst(args))
+                case TypeDecl.Enum(_, _, variants, _, _, _, _):
+                    let v = variant else:
+                        return None
+                    if v >= len(variants) or i >= len(variants[v].fields):
+                        return None
+                    return Some(variants[v].fields[i].1.subst(args))
+        case Type.ErrSet(ms):
+            let v = variant else:
+                return None
+            if len(ms) != 1:
+                return None
+            let d = decls.get(ms[0]) else:
+                return None
+            if let TypeDecl.Enum(_, _, variants, _, _, _, _) = d:
+                if v < len(variants) and i < len(variants[v].fields):
+                    return Some(variants[v].fields[i].1.copy())
+            return None
+        case _:
+            return None

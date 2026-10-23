@@ -1,0 +1,2 @@
+panic: the byte index 3 is inside a character of the text
+  at main (char_boundary.sisu:7:11)

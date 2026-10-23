@@ -1,0 +1,18 @@
+struct Item:
+    name: String
+    price: f64
+
+def main():
+    let item = Item(name="tea".to_string(), price=2.5)
+    let qty = 3
+    print("{qty} x {item.name} = {qty.to_f64() * item.price:.2}")
+    print("{item:?}")
+    print("{item=}")
+    print("{item.name=}")
+    print("{[1, 2, 3]} {(1, 'a')} {{}} {"nested {qty}"}")
+    print("{qty + 1:>4}|{-qty:<4}|")
+    let empty: list[int] = []
+    print("{empty} {len(empty)}")
+    print("""a
+multi-line {qty}
+string""")

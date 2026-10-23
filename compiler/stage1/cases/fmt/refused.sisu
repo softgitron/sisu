@@ -1,0 +1,5 @@
+# A file with a syntax error is not formatted: `sisu fmt` reports the error
+# and leaves the file as it is, however it is laid out.
+def   broken(x:int,   y:int)->int:
+    let z = (x +
+    return  z

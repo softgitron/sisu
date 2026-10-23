@@ -1,0 +1,11 @@
+# A wrong program: a task is spawned from a function value, whose captures
+# cannot be checked.
+
+def work() -> int:
+    return 1
+
+def main():
+    let total = task.scope do s:
+        let h = s.spawn(work)
+        return h.join().expect("joined")
+    print(total)

@@ -1,0 +1,10 @@
+--- stderr
+error[E0338]: cannot move `v[0]` out of a borrowed value; copy it with `.copy()`
+  --> overloaded_index_move.sisu:6:15
+  |
+6 |     let bad = v[0]
+  |               ^^^^
+  = fix: copy it with `.copy()`: `.copy()`
+
+error[D0006]: the program was not run: errors found (1)
+--- status 1

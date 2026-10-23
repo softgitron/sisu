@@ -1,0 +1,7 @@
+extern "C":
+    def getpid() -> int
+
+pub def peek() -> int:
+    unsafe:
+        return 0
+    return 1

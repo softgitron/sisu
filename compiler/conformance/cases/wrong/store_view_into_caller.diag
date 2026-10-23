@@ -1,0 +1,2 @@
+6:5-6:20 E0410 borrow.store-into-caller name="line" param="seen" function="remember"
+  label 6:15-6:19 borrow.borrowed-here

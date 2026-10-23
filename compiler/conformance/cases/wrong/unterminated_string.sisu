@@ -1,0 +1,4 @@
+# A wrong program: a string is not closed on its line.
+
+def main():
+    print("hello)

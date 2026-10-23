@@ -1,0 +1,12 @@
+test "assuming every write works" ... FAILED
+test "retrying each write" ... ok
+test "a test without a System is untouched" ... ok
+
+test "assuming every write works" ... FAILED
+panic: assertion failed: store_all(sys.fs, 20) == Ok(20)
+  left:  Err(InvalidData(path="f0.txt"))
+  right: Ok(20)
+  at test "assuming every write works" (faults.sisu:32:5)
+replay: sisu test --replay 1-81b520ece953678a-0.0.1-t0-s0-r0-m200000 faults.sisu
+
+2 passed, 1 failed, 0 blocked

@@ -1,0 +1,12 @@
+# A function cannot return a borrow of its own local: the local is gone
+# when the function returns.
+
+def biggest(xs: list[int]) -> ref int:
+    var best = xs[0]
+    for x in xs:
+        if x > best:
+            best = x
+    return ref best
+
+def main():
+    print(biggest([3, 9, 4]))

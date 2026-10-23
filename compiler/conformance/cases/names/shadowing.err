@@ -1,0 +1,6 @@
+warning[W0002]: `x` shadows a binding of an enclosing scope
+  --> shadowing.sisu:4:13
+  |
+4 |         let x = 2
+  |             ^
+

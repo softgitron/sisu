@@ -1,0 +1,403 @@
+##! The parser's state and its token-level helpers: looking at the
+##! significant tokens, attaching tokens (with the trivia before them) to
+##! the tree, and reporting at most one diagnostic per token.
+
+from stage1.diag import Diagnostic, Edit, Fix, Lines, Msg
+from stage1.syntax.kinds import SyntaxKind
+from stage1.syntax.tree import Token, Tree, TreeBuilder
+
+pub view struct Parser:
+    pub(package) text: str
+    ## The significant (non-trivia) tokens, and their indices among all.
+    pub(package) sig: list[Token]
+    pub(package) sig_index: list[int]
+    ## The number of all the tokens, trivia included.
+    pub(package) token_count: int
+    ## The position in `sig`.
+    pub(package) pos: int
+    pub(package) builder: TreeBuilder
+    pub(package) diags: list[Diagnostic]
+    ## The position at which the last diagnostic was reported.
+    pub(package) last_error_at: int?
+    ## Set when the last construct consumed a block, so the statement
+    ## needs no NEWLINE of its own.
+    pub(package) ended_with_block: bool
+    ## Inside `@attr(...)`, keywords are plain names (`@cfg(test)`).
+    pub(package) in_attribute: bool
+    ## A struct body already has a line that is not a member, so the
+    ## following ones are not reported again.
+    pub(package) bad_member_reported: bool
+    ## Byte offsets of the lexer's errors.
+    pub(package) lex_errors: list[int]
+    ## While positive, diagnostics are not reported (inside code that is
+    ## already known to be misplaced).
+    pub(package) quiet: int
+    ## Every diagnostic the parser tried to report, kept or not.
+    pub(package) attempts: int
+    ## The byte range of the last expression parsed, for E0115's fix.
+    pub(package) last_expr: (int, int)?
+    pub(package) lines: Lines
+
+impl Parser:
+    pub pure def new(text: str, own tokens: list[Token], own lex_errors: list[int]) -> Parser:
+        var sig: list[Token] = []
+        var sig_index: list[int] = []
+        for i in range(len(tokens)):
+            if not tokens[i].kind.is_trivia():
+                sig.push(tokens[i])
+                sig_index.push(i)
+        let count = len(tokens)
+        return Parser(
+            text=text,
+            sig=sig,
+            sig_index=sig_index,
+            token_count=count,
+            pos=0,
+            builder=TreeBuilder.new(text, tokens),
+            diags=[],
+            last_error_at=None,
+            ended_with_block=False,
+            in_attribute=False,
+            bad_member_reported=False,
+            lex_errors=lex_errors,
+            quiet=0,
+            attempts=0,
+            last_expr=None,
+            lines=Lines.of(text),
+        )
+
+    ## The tree and the parser's diagnostics.
+    pub pure def finish(own self) -> (Tree, list[Diagnostic]):
+        var p = self
+        return (p.builder.finish(), p.diags)
+
+    # ------------------------------------------------------------ looking
+
+    ## The kind of the `n`th significant token from here, `EOF` past the end.
+    pub(package) pure def nth(self, n: int) -> SyntaxKind:
+        let i = self.pos + n
+        if i < len(self.sig):
+            return self.sig[i].kind
+        return SyntaxKind.Eof
+
+    pub(package) pure def current(self) -> SyntaxKind:
+        return self.nth(0)
+
+    pub(package) pure def at(self, kind: SyntaxKind) -> bool:
+        return self.nth(0) == kind
+
+    ## Whether the current token is `close`, a line end or the end of the
+    ## file: where a bracketed list stops.
+    pub(package) pure def at_list_end(self, close: SyntaxKind) -> bool:
+        let k = self.nth(0)
+        return k == close or k == SyntaxKind.Newline or k == SyntaxKind.Eof
+
+    ## Whether the current token is DEDENT or EOF: where a block stops.
+    pub(package) pure def at_block_end(self) -> bool:
+        let k = self.nth(0)
+        return k == SyntaxKind.Dedent or k == SyntaxKind.Eof
+
+    ## The text of the `n`th significant token from here, empty past the end.
+    pub(package) pure def nth_text(self, n: int) -> str:
+        let i = self.pos + n
+        if i < len(self.sig):
+            return self.text.byte_slice(self.sig[i].start, self.sig[i].end)
+        return ""
+
+    pub(package) pure def current_text(self) -> str:
+        return self.nth_text(0)
+
+    ## A name with the given text (a contextual keyword).
+    pub(package) pure def at_contextual(self, word: str) -> bool:
+        return self.at(SyntaxKind.Ident) and self.current_text() == word
+
+    ## Where the last significant token consumed ends.
+    pub(package) pure def previous_end(self) -> int?:
+        if self.pos >= 1 and self.pos - 1 < len(self.sig):
+            return Some(self.sig[self.pos - 1].end)
+        return None
+
+    ## The byte range of the `n`th significant token from here, `None` past
+    ## the end.
+    pub(package) pure def nth_range(self, n: int) -> (int, int)?:
+        let i = self.pos + n
+        if i < len(self.sig):
+            return Some((self.sig[i].start, self.sig[i].end))
+        return None
+
+    ## The byte range of the current token, empty at the end of the text
+    ## past the last.
+    pub(package) pure def current_range(self) -> (int, int):
+        if self.pos < len(self.sig):
+            return (self.sig[self.pos].start, self.sig[self.pos].end)
+        let n = self.text.byte_len()
+        return (n, n)
+
+    ## The 1-based line of the current token.
+    pub(package) pure def current_line(self) -> int:
+        let (start, _) = self.current_range()
+        return self.line_of(start)
+
+    ## Where `word` is first written as a whole word on the 1-based `line`.
+    pub(package) pure def word_on_line(self, word: str, line: int) -> (int, int)?:
+        let start = self.lines.start_of(line - 1) else:
+            return None
+        let end = self.text.byte_find("\n", start) ?? self.text.byte_len()
+        # A word is never empty; an empty one would match everywhere.
+        if word.is_empty():
+            return None
+        var at = start
+        while let Some(i) = self.text.byte_find(word, at):
+            let after = i + word.byte_len()
+            if after > end:
+                return None
+            let before_word = i > start and is_word_byte(self.text.byte_at(i - 1))
+            let after_word = after < end and is_word_byte(self.text.byte_at(after))
+            if not before_word and not after_word:
+                return Some((i, after))
+            at = after
+        return None
+
+    pub(package) pure def line_of(self, offset: int) -> int:
+        return self.lines.index(offset) + 1
+
+    ## Whether the current token ends the logical line.
+    pub(package) pure def at_line_end(self) -> bool:
+        return match self.current():
+            case Newline | Dedent | Indent | Eof: True
+            case _: False
+
+    ## Where the parser is, to tell whether a rule consumed anything: the
+    ## current token's start and kind.
+    pub(package) pure def pos_marker(self) -> (int, SyntaxKind):
+        if self.pos < len(self.sig):
+            return (self.sig[self.pos].start, self.sig[self.pos].kind)
+        return (-1, SyntaxKind.Eof)
+
+    # ------------------------------------------------------------ building
+
+    pure def flush_trivia(mut self):
+        var target = self.token_count
+        if self.pos < len(self.sig_index):
+            target = self.sig_index[self.pos]
+        while self.builder.tokens_attached() < target:
+            self.builder.token()
+
+    pub(package) pure def start(mut self, kind: SyntaxKind):
+        self.flush_trivia()
+        self.builder.start_node(kind)
+
+    ## Opens the root node without attaching trivia, so that a file's
+    ## leading comments belong to it.
+    pub(package) pure def start_root(mut self, kind: SyntaxKind):
+        self.builder.start_node(kind)
+
+    pub(package) pure def checkpoint(mut self) -> int:
+        self.flush_trivia()
+        return self.builder.checkpoint()
+
+    pub(package) pure def start_at(mut self, checkpoint: int, kind: SyntaxKind):
+        self.builder.start_node_at(checkpoint, kind)
+
+    pub(package) pure def finish_node(mut self):
+        self.builder.finish_node()
+
+    ## Attaches the current token, with the trivia before it, and advances.
+    pub(package) pure def bump(mut self):
+        if self.pos >= len(self.sig):
+            return
+        if self.current() == SyntaxKind.Eof:
+            # EOF is attached once, by `source_file`.
+            return
+        self.flush_trivia()
+        self.builder.token()
+        self.pos += 1
+        self.ended_with_block = False
+
+    ## Attaches the EOF token and everything before it.
+    pub(package) pure def bump_eof(mut self):
+        while self.builder.tokens_attached() < self.token_count:
+            self.builder.token()
+        self.pos = len(self.sig)
+
+    pub(package) pure def eat(mut self, kind: SyntaxKind) -> bool:
+        if self.at(kind):
+            self.bump()
+            return True
+        return False
+
+    # ------------------------------------------------------------ errors
+
+    ## The span of an error at the current token: the token itself, or for
+    ## a layout token the end of the significant token before it.
+    pub(package) pure def error_span(self) -> (int, int):
+        if self.at_line_end() and self.pos > 0 and self.pos - 1 < len(self.sig):
+            let end = self.sig[self.pos - 1].end
+            return (end, end)
+        return self.current_range()
+
+    ## Keeps `diag` unless a diagnostic was already reported at this token,
+    ## or reports are quiet.
+    pub(package) pure def report(mut self, own diag: Diagnostic):
+        self.attempts += 1
+        if self.last_error_at == Some(self.pos) or self.quiet > 0:
+            return
+        self.last_error_at = Some(self.pos)
+        self.diags.push(diag)
+
+    ## How many diagnostics were kept, so a fix can be added to one later.
+    pub(package) pure def diags_len(self) -> int:
+        return len(self.diags)
+
+    ## Adds a fix to the diagnostic kept at `index`.
+    pub(package) pure def add_fix(mut self, index: int, msg: Msg, own edits: list[Edit]):
+        if index >= 0 and index < len(self.diags):
+            self.diags[index].fixes.push(Fix(msg=msg, params=[], edits=edits))
+
+    ## Whether a syntax error was found before the current token.
+    pub(package) pure def error_before(self) -> bool:
+        if not self.diags.is_empty():
+            return True
+        let (here, _) = self.current_range()
+        for e in self.lex_errors:
+            if e < here:
+                return True
+        return False
+
+    pub(package) pure def error(mut self, msg: Msg):
+        let (start, end) = self.error_span()
+        self.report(Diagnostic.new(msg, start, end))
+
+    pub(package) pure def error_found(mut self, msg: Msg):
+        let (start, end) = self.error_span()
+        let found = self.found()
+        self.report(Diagnostic.new(msg, start, end).with("found", found))
+
+    ## How the current token is named in "found ...".
+    pub(package) pure def found(self) -> String:
+        return match self.current():
+            case Ident | IntNumber | FloatNumber | CharLit: "`{self.current_text()}`"
+            case kind: kind.describe()
+
+    ## Consumes `kind`, or reports "expected `kind`, found ...".
+    pub(package) pure def expect(mut self, kind: SyntaxKind) -> bool:
+        if self.eat(kind):
+            return True
+        let (start, end) = self.error_span()
+        let found = self.found()
+        var d = Diagnostic.new(Msg.ParseExpected, start, end).with("expected", kind.describe())
+        d = d.with("found", found)
+        # A punctuation token missing at the end of a line: the fix writes it.
+        if start == end:
+            if let Some(text) = kind.punctuation_text():
+                d = d.fix_at(Msg.ParseInsertToken, start, end, text)
+        self.report(d)
+        return False
+
+    ## Consumes a name, accepting a keyword with an error so that the tree
+    ## keeps its shape.
+    pub(package) pure def expect_name(mut self) -> bool:
+        if self.eat(SyntaxKind.Ident):
+            return True
+        if let Some(keyword) = self.current().keyword_text():
+            let (start, end) = self.error_span()
+            self.report(Diagnostic.new(Msg.ParseKeywordAsName, start, end).with("keyword", keyword))
+            self.bump()
+            return True
+        let (start, end) = self.error_span()
+        let found = self.found()
+        let d = Diagnostic.new(Msg.ParseExpected, start, end).with("expected", "a name")
+        self.report(d.with("found", found))
+        return False
+
+    ## Wraps the current token in an ERROR node.
+    pub(package) pure def bump_error(mut self):
+        self.start(SyntaxKind.Error)
+        self.bump()
+        self.finish_node()
+
+    ## Skips to the end of the logical line: the tokens go into an ERROR
+    ## node and the NEWLINE is consumed. An indented block that follows is
+    ## left for the caller, so its structure is not lost.
+    pub(package) pure def recover_line(mut self):
+        match self.current():
+            case Newline | Dedent | Eof:
+                _ = self.eat(SyntaxKind.Newline)
+                return
+            case _:
+                pass
+        self.start(SyntaxKind.Error)
+        while not self.at_line_end():
+            self.bump()
+        self.finish_node()
+        _ = self.eat(SyntaxKind.Newline)
+
+    ## Ends a simple statement: its NEWLINE, unless a block already ended it.
+    pub(package) pure def end_stmt(mut self):
+        if self.ended_with_block:
+            return
+        if self.eat(SyntaxKind.Newline) or self.at_block_end():
+            return
+        if let Some(d) = self.python_conditional():
+            self.report(d)
+        else:
+            let (start, end) = self.error_span()
+            let found = self.found()
+            self.report(Diagnostic.new(Msg.ParseTrailingTokens, start, end).with("found", found))
+        self.recover_line()
+
+    ## `a if c else b` after a statement's expression `a` (E0115), with
+    ## the fix that writes it as `if c: a else: b`. Only looks: the tokens
+    ## are recovered as any trailing tokens are.
+    pure def python_conditional(self) -> Diagnostic?:
+        if not self.at(SyntaxKind.IfKw):
+            return None
+        let (value_start, value_end) = self.last_expr else:
+            return None
+        if self.previous_end() != Some(value_end):
+            return None
+        # `else` at the depth of the `if`, then the line's end.
+        var depth = 0
+        var else_at: int? = None
+        var i = 1
+        while True:
+            match self.nth(i):
+                case LParen | LBracket | LBrace:
+                    depth += 1
+                case RParen | RBracket | RBrace:
+                    depth -= 1
+                case ElseKw if depth == 0 and else_at == None:
+                    else_at = Some(i)
+                # The end of the file ends the look at any depth: an open
+                # bracket is closed only by the layout's recovery.
+                case Eof:
+                    break
+                case Newline | Dedent | Indent | Colon if depth == 0:
+                    break
+                case _:
+                    pass
+            i += 1
+        let e = else_at else:
+            return None
+        if e <= 1 or i <= e + 1:
+            return None
+        let (cond_start, _) = self.nth_range(1) else:
+            return None
+        let (_, cond_end) = self.nth_range(e - 1) else:
+            return None
+        let (other_start, _) = self.nth_range(e + 1) else:
+            return None
+        let (_, end) = self.nth_range(i - 1) else:
+            return None
+        if cond_start > cond_end or other_start > end or value_start > end:
+            return None
+        let cond = self.text.byte_slice(cond_start, cond_end)
+        let other = self.text.byte_slice(other_start, end)
+        let first = self.text.byte_slice(value_start, value_end)
+        let text = "if {cond}: {first} else: {other}"
+        let d = Diagnostic.new(Msg.ParsePythonConditional, value_start, end)
+        return Some(d.fix_at(Msg.ParseUseIfExpression, value_start, end, text))
+
+## Whether a byte belongs to a word: an ASCII letter or digit, or `_`.
+pure def is_word_byte(b: u8) -> bool:
+    return (b >= 48 and b <= 57) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or b == 95

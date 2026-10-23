@@ -1,0 +1,10 @@
+get: self, 1 parameters, gives String?, provided False
+  0 key:  str
+put: mut self, 2 parameters, gives (), provided False
+  0 key:  str
+  1 value: own String
+size: self, 0 parameters, gives int, provided True
+["get", "put", "size"]
+["norm", "scaled", "origin"]
+(True, False)
+3

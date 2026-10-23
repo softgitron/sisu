@@ -1,0 +1,7 @@
+# A use after a move in the body of a parametrised test is reported once
+# (E0400), though each case is lowered and checked as a function of its own.
+test "keeps a moved list" for n in [1, 2, 3]:
+    let xs = [n]
+    let ys = xs
+    print(xs)
+    print(ys)

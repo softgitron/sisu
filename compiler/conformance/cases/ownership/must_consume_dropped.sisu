@@ -1,0 +1,15 @@
+# A `@must_consume` value cannot just go out of scope (D-054): it must be
+# passed to an `own` parameter first, here its own `commit` method.
+
+@must_consume
+struct Transaction:
+    id: int
+
+    def commit(own self):
+        print("committed {self.id}")
+
+def main():
+    let t = Transaction(id=1)
+    let u = Transaction(id=2)
+    t.commit()
+    print("forgot {u.id}")

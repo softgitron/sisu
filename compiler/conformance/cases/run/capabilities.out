@@ -1,0 +1,9 @@
+3 lines
+failed: NotFound(path="missing.txt")
+refused: PermissionDenied(path="out.txt")
+saved
+True
+data
+False
+["first", "second arg"]
+unset

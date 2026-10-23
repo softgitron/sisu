@@ -1,0 +1,10 @@
+# `Num` is sealed: only the standard library implements it.
+
+struct Money:
+    cents: int
+
+impl Num for Money:
+    pass
+
+def main():
+    pass

@@ -1,0 +1,16 @@
+# A type implements a trait at most once (D-013): the generic impl covers
+# the specific one.
+
+trait Describe:
+    def describe(self) -> String
+
+impl[T] Describe for list[T]:
+    def describe(self) -> String:
+        return "a list"
+
+impl Describe for list[int]:
+    def describe(self) -> String:
+        return "a list of ints"
+
+def main():
+    pass

@@ -1,0 +1,5 @@
+pub def mean(xs: list[int]) -> int:
+    var total = 0
+    for x in xs:
+        total += x
+    return total // max(len(xs), 1)

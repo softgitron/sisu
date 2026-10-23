@@ -1,0 +1,25 @@
+import render
+
+@cfg(feature="fast")
+def mode() -> String:
+    return "fast"
+
+# A feature that is off: `not(feature="NAME")` (decision 250), or `not`
+# before any condition, as `report` below has it.
+@cfg(not(feature="fast"))
+def mode() -> String:
+    return "careful"
+
+@cfg(feature="verbose")
+def report():
+    print("verbose")
+
+@cfg(not any(feature="verbose"))
+def report():
+    print("quiet")
+
+def main():
+    print(mode())
+    report()
+    print(render.show("hello"))
+    print(render.features())

@@ -1,0 +1,8 @@
+# A package of several modules (09, "Modules"): the module tree mirrors
+# the file tree under `src/`, with no `mod` declarations.
+[package]
+name = "atlas"
+version = "0.2.0"
+edition = "2027"
+description = "Distances between places"
+license = "Apache-2.0 OR Unlicense"

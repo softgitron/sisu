@@ -1,0 +1,54 @@
+error Late:
+    Slow
+
+def spin(name: str, n: int) -> int ! Late:
+    var t = 0
+    for i in range(n):
+        t += i
+    print("{name} finished")
+    if n > 12:
+        return Err(Slow)
+    return Ok(t)
+
+def main(sys: System):
+    for round in range(3):
+        let r = task.race do r:
+            r.spawn(() -> spin("x{round}", 5 + round * 4))
+            r.spawn(() -> spin("y{round}", 9))
+            r.spawn(() -> spin("z{round}", 3 + round))
+        print("round {round}: {r}")
+    let tx, rx = channel[String](capacity=2)
+    let tx2, rx2 = channel[String](capacity=1)
+    task.scope do s:
+        s.spawn do:
+            for i in range(4):
+                _ = tx.send("a{i}")
+            tx.close()
+        s.spawn do:
+            for i in range(3):
+                _ = tx2.send("b{i}")
+            tx2.close()
+        var open = 2
+        var seen = 0
+        while open > 0 and seen < 20:
+            seen += 1
+            select:
+                case m = rx.recv():
+                    match m:
+                        case Ok(v):
+                            print("rx {v}")
+                        case Err(_):
+                            open -= 1
+                case m = rx2.recv():
+                    match m:
+                        case Ok(v):
+                            print("rx2 {v}")
+                        case Err(_):
+                            open -= 1
+    let out = task.scope do s:
+        let hs = [s.spawn(() -> spin("h{i}", i * 3)) for i in range(6)]
+        var acc = list()
+        for h in hs:
+            acc.push(h.join())
+        return acc
+    print(out)

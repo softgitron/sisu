@@ -1,0 +1,11 @@
+# A wrong program: a type's name is misspelt in a signature.
+
+struct Point:
+    x: int
+    y: int
+
+def norm(p: Piont) -> int:
+    return p.x * p.x + p.y * p.y
+
+def main():
+    print(norm(Point(x=3, y=4)))

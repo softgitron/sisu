@@ -1,0 +1,4 @@
+from shapes import Rect
+from shapes.round import area
+Rect(w=2, h=3).area()
+area(2)

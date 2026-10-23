@@ -1,0 +1,724 @@
+# Sisu message catalog (English).
+#
+# Every diagnostic, label, fix, note, runtime message and command-line
+# message is an entry here; code only names identifiers (D-065). The format
+# is described in crates/sisu-diag/src/catalog.rs and docs/architecture.md:
+#
+#   CODE  KIND  IDENTIFIER  TEMPLATE
+#
+# Codes are stable and never reused. Ranges: E00xx lexer, E01xx parser,
+# E02xx names and declarations, E03xx types, E04xx ownership, E05xx
+# lowering, E06xx compile-time evaluation, E07xx capabilities, E09xx
+# stage-0 limits and internal errors, E10xx packages and manifests
+# (`sisu.toml`, `sisu.lock`, the module tree), W0xxx warnings, R0xxx run
+# time, D0xxx driver.
+
+# ---------------------------------------------------------------- lexer
+E0001 error   lex.tab-in-indentation      a tab in indentation; Sisu indents with spaces only
+E0002 error   lex.inconsistent-dedent     this line's indentation matches no enclosing block; the enclosing blocks start at column {columns}
+E0003 error   lex.unterminated-string     this string literal is not closed before the end of the line
+-     fix     lex.close-string            close it on its line
+-     fix     lex.close-bracket           close it on the line that opens it
+E0004 error   lex.unterminated-block-string  this multi-line string literal is never closed
+E0005 error   lex.unknown-character       `{char}` cannot appear in Sisu source outside a string or comment
+E0006 error   lex.unterminated-char       this character literal is not closed
+E0007 error   lex.invalid-escape          `\{escape}` is not an escape sequence; write `\\` for a backslash
+E0008 error   lex.unmatched-close         `{close}` closes nothing
+E0009 error   lex.unclosed-bracket        `{open}` is never closed
+E0010 error   lex.mismatched-bracket      `{close}` does not close the `{open}` before it
+E0011 error   lex.semicolon               Sisu has no semicolons; put each statement on its own line
+E0012 error   lex.invalid-number          `{text}` is not a valid number literal
+E0013 error   lex.lone-close-brace        a single `}}` in a string closes nothing; write `}}}}` for a literal brace
+E0014 error   lex.bad-indent-char         `{char}` in indentation; Sisu indents with ASCII spaces only
+E0015 error   lex.backslash-continuation  Sisu has no backslash continuation; break the line inside brackets, after a comma or before an operator
+E0016 error   lex.bad-char-literal        a character literal holds exactly one character
+E0018 error   lex.newline-in-interpolation  an interpolation in a one-line string must end on the same line
+-     label   lex.opened-here             opened here
+-     help    lex.use-spaces              replace each tab with spaces
+
+# ---------------------------------------------------------------- parser
+E0100 error   parse.expected              expected {expected}, found {found}
+-     fix     parse.insert-token          write the missing token
+E0101 error   parse.expected-block        expected an indented block after `{keyword}` on line {line}
+E0102 error   parse.block-on-same-line    a block starts on the next line, indented; nothing may follow `:` on the line that opens it
+E0103 error   parse.expected-expression   expected an expression, found {found}
+E0104 error   parse.expected-type         expected a type, found {found}
+E0105 error   parse.expected-pattern      expected a pattern, found {found}
+E0106 error   parse.expected-declaration  expected a declaration, found {found}
+E0107 error   parse.top-level-statement   statements cannot appear at the top level of a module; put them in a function such as `main`
+E0108 error   parse.mixed-and-or          `and` and `or` cannot be mixed without parentheses
+E0109 error   parse.mixed-bitwise         `{first}` and `{second}` cannot be mixed without parentheses
+E0110 error   parse.bitwise-arithmetic    `{op}` cannot be mixed with arithmetic or shifts without parentheses
+E0111 error   parse.shift-arithmetic      a shift cannot be mixed with arithmetic without parentheses
+E0112 error   parse.negative-power        `-x ** y` is ambiguous; write `-(x ** y)` or `(-x) ** y`
+E0113 error   parse.mixed-chain           a chained comparison must point one way; `{first}` and `{second}` do not
+E0114 error   parse.assignment-in-expression  assignment is a statement and has no value; to compare, write `==`
+E0115 error   parse.python-conditional    `a if c else b` is not Sisu; write `if c: a else: b`
+E0116 error   parse.if-expression-else    an `if` expression needs an `else` branch, because it must have a value
+E0117 error   parse.trailing-tokens       unexpected {found} after the end of the statement
+E0118 error   parse.arm-statement         a `case` arm on one line holds a single expression; put statements in an indented block
+E0119 error   parse.chain-operator        `{op}` cannot be chained; use parentheses or `and`
+# E0120 is retired: the parser takes arguments in any order, so the tree
+# stays whole, and the checker reports a positional argument after a
+# keyword one as E0376, with the fix that names it.
+E0121 error   parse.empty-interpolation   an interpolation needs an expression between `{{` and `}}`
+E0122 error   parse.closure-parameter     a closure parameter must be a name
+E0123 error   parse.walrus                Sisu has no `:=`; bind with `let` or use `if let`
+E0124 error   parse.keyword-as-name       `{keyword}` is a keyword and cannot be used as a name here
+E0125 error   parse.unexpected-indent     this line is indented more than the line before it, which does not open a block
+E0126 error   parse.expected-member       a struct body holds fields, methods and `pass`; this line is none of them
+-     label   parse.opened-here           this `{keyword}` opens the block
+-     fix     parse.use-if-expression     write it as `if c: a else: b`
+-     fix     parse.parenthesize          add parentheses
+
+# ---------------------------------------------------------------- names and declarations
+E0200 error   resolve.undefined-name      cannot find `{name}` in this scope
+E0201 error   resolve.undefined-type      cannot find a type named `{name}`
+E0202 error   resolve.duplicate-definition  `{name}` is defined more than once in this module
+E0203 error   resolve.unknown-module      there is no module `{name}`
+E0204 error   resolve.not-in-module       module `{module}` has no item `{name}`
+E0205 error   resolve.duplicate-field     `{name}` is declared more than once in `{owner}`
+E0206 error   resolve.duplicate-variant   `{owner}` has more than one variant named `{name}`
+E0207 error   resolve.duplicate-parameter  the parameter `{name}` appears more than once
+E0208 error   resolve.type-argument-count  wrong number of type arguments for `{name}`: expected {expected}, found {found}
+E0209 error   resolve.not-a-type          `{name}` is not a type
+E0211 error   resolve.ambiguous-variant   `{name}` is a variant of more than one type ({candidates}); qualify it, as in `{example}`
+E0212 error   resolve.not-an-error-set    `{name}` is not an error set, so it cannot follow `!`
+E0213 error   resolve.drop-target         `Drop` can be implemented only for a struct or enum declared in this module
+E0215 error   resolve.self-outside-method  `self` exists only inside a method
+E0216 error   resolve.drop-signature      `Drop` has one method, `def drop(mut self)`
+E0217 error   resolve.duplicate-method    `{owner}` has more than one method named `{name}`
+E0218 error   resolve.self-not-first      `self` must be the first parameter
+E0219 error   resolve.const-type-required  a `const` needs a type: `const {name}: T = ...`
+E0220 error   resolve.import-unknown      cannot import `{name}`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
+E0221 error   resolve.field-default-order  a field with a default must not use the value of another field
+-     note    resolve.default-in-function  a default is computed before the other fields have values; build the value in a function that takes `{name}` instead
+E0222 error   resolve.parameter-default-order  a parameter without a default cannot follow one with a default
+E0223 error   resolve.not-a-module        `{name}` is not a module
+E0224 error   resolve.missing-body        `{name}` has no body; only standard-library intrinsics are declared without one
+E0225 error   resolve.std-only-attribute  `@{name}` is reserved for the standard library
+E0226 error   resolve.inferred-set-position  an inferred error set (`T !`) can only be the result type of a function
+E0227 error   resolve.union-outside-result  `{{A, B}}` is a union of error sets and can only follow `!`
+E0228 error   resolve.alias-cycle         the type alias `{name}` refers to itself
+E0229 error   resolve.self-type-outside   `Self` exists only inside a type's declaration or `impl`
+# E0210 and E0214 (generics and trait impls before Phase 4) are retired.
+E0230 error   resolve.not-a-trait         `{name}` is not a trait
+E0231 error   resolve.trait-as-type       `{name}` is a trait, not a type; a value of a type that implements it is `dyn {name}`
+E0232 error   resolve.missing-trait-method  the impl of `{trait}` for `{ty}` is missing {methods}
+E0233 error   resolve.not-a-trait-method  `{name}` is not a method of `{trait}`
+E0234 error   resolve.method-signature    `{name}` does not have the signature `{trait}` gives it: expected `{expected}`, found `{found}`
+E0235 error   resolve.overlapping-impl    `{trait}` is implemented for `{ty}` more than once; a type implements a trait at most once
+E0236 error   resolve.orphan-impl         `{trait}` for `{ty}` can be implemented only in the package of the trait or of the type, or in the root package
+E0237 error   resolve.missing-assoc-type  the impl of `{trait}` for `{ty}` does not say what `{name}` is; add `type {name} = ...`
+E0238 error   resolve.unknown-assoc-type  `{trait}` has no associated type `{name}`
+E0239 error   resolve.no-assoc-type       `{ty}` has no associated type `{name}` among its bounds
+E0240 error   resolve.sealed-trait        `{trait}` is implemented only by the standard library, so `{ty}` cannot implement it
+E0241 error   resolve.not-object-safe     `{trait}` cannot be used as `dyn {trait}`: its method `{method}` cannot be called through it, because {reason}
+E0242 error   resolve.supertrait-missing  `{ty}` implements `{trait}`, which requires `{super}`, but `{ty}` does not implement `{super}`
+E0243 error   resolve.not-derivable       `{name}` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one
+E0244 error   resolve.derive-field        `{ty}` cannot derive `{trait}`: its field `{field}` has type `{fty}`, which does not implement `{trait}`
+E0245 error   resolve.generic-default-order  a type parameter without a default cannot follow one with a default
+E0246 error   resolve.impl-default        the type parameters of an `impl` or a function take no defaults; a default belongs to a type's or a trait's parameter
+E0247 error   resolve.trait-cycle         `{name}` cannot be its own supertrait
+E0248 error   resolve.assoc-outside-trait-impl  an associated type belongs in an impl of a trait
+E0249 error   resolve.assoc-needs-type    `type {name}` in an impl needs a type: `type {name} = ...`
+E0250 error   resolve.not-delegable       `{name}` cannot be delegated; `@delegate` takes `Add`, `Sub`, `Mul`, `Div`, `Rem`, `Neg`, `Eq`, `PartialOrd`, `Ord`, `Hash`, `Display`, `Debug` and `Len`
+E0251 error   resolve.delegate-to         `@delegate` needs `to="field"`, naming a field of `{ty}`
+E0252 error   resolve.delegate-self       `{trait}` returns a `{ty}`, so `{ty}` can delegate it only when `{field}` is its one field
+E0253 error   resolve.delegate-field      `{ty}` cannot delegate `{trait}` to `{field}`: its type `{fty}` does not implement `{trait}`
+E0254 error   resolve.drop-generic        a `Drop` for `{ty}` must apply to every `{name}`: write `{expected}`, with the type's parameters in order and only the bounds the type declares
+E0255 error   resolve.private-item        `{name}` is private to the module `{module}`; declare it `pub` to use it from another module
+E0256 error   resolve.package-item        `{name}` is `pub(package)` in `{module}`, so only the modules of the package `{package}` can use it
+E0257 error   resolve.not-reexported      `{name}` is imported into `{module}`, not declared there; import it from `{origin}`, or re-export it with `pub from {origin} import {name}`
+E0258 error   resolve.private-field       the field `{field}` of `{ty}` is private to the module `{module}`; declare it `pub` to use it from another module
+E0259 error   resolve.private-method      the method `{name}` of `{ty}` is private to the module `{module}`; declare it `pub` to call it from another module
+E0260 error   resolve.not-a-dependency    cannot import `{name}`: `{package}` is not a dependency of `{this}`; add it to `[dependencies]` in that package's `sisu.toml`
+E0261 error   resolve.script-main         a script's statements at the top level are its `main`, so it cannot also declare `main`
+E0262 error   resolve.const-argument      `{param}` is a `const` parameter of `{name}`, so it takes a constant, such as `{name}[..., 8]`, not a type
+E0263 error   resolve.type-argument       `{param}` is a type parameter of `{name}`, so it takes a type, not a constant
+E0264 error   resolve.const-expression    a type's constant argument is computed where the type is written, from integers, `const` parameters, constants written that way and the operators `+ - * // % ** << >> & | ^`; this is none of them
+E0265 error   resolve.const-not-int       a type's constant argument is an `int`, and this is a `{ty}`
+-     label   resolve.first-impl          the other impl is here
+-     fix     resolve.add-dyn             write `dyn {name}`
+-     label   resolve.first-defined       first defined here
+-     label   resolve.defined-here        `{name}` is defined here
+-     fix     resolve.similar-name        a similar name is in scope
+-     fix     resolve.similar-type        a type with a similar name is in scope
+-     fix     resolve.similar-module      a module with a similar name exists
+-     note    resolve.rename-duplicate    rename one of them, or remove the one not wanted
+-     note    resolve.write-trait-method  write `{signature}` in the impl
+-     note    borrow.consume-with         consume it with one of its methods that take `own self`: {methods}
+E0266 error   resolve.bad-cfg             `@cfg` takes a condition: `test`, `feature="NAME"`, `not` and a condition, or `all(...)` or `any(...)` of conditions; this is none of them
+
+# ---------------------------------------------------------------- types
+E0300 error   type.mismatch               expected `{expected}`, found `{found}`
+E0301 error   type.integer-division       `/` divides floats; for integers use `//`, or convert to `f64` first
+E0302 error   type.not-bool               a condition must be a `bool`, not `{found}`; Sisu has no truthiness
+E0303 error   type.unknown-field          `{ty}` has no field `{name}`
+E0304 error   type.unknown-method         `{ty}` has no method `{name}`
+E0305 error   type.argument-count         wrong number of arguments to `{name}`: expected {expected}, found {found}
+E0306 error   type.unknown-keyword        `{name}` has no parameter named `{arg}`
+E0307 error   type.duplicate-argument     the argument `{arg}` is given more than once
+E0308 error   type.missing-argument       missing the argument `{arg}` of `{name}`
+E0309 error   type.not-callable           a value of type `{ty}` cannot be called
+E0310 error   type.binary-operator        `{op}` cannot be applied to `{lhs}` and `{rhs}`
+E0311 error   type.unary-operator         `{op}` cannot be applied to `{ty}`
+E0312 error   type.assign-immutable       `{name}` is immutable; declare it with `var` to assign to it
+E0313 error   type.not-a-place            this expression cannot be assigned to
+E0314 error   type.non-exhaustive         this `match` does not cover {missing}
+E0315 error   type.missing-return         `{name}` returns `{ty}`, but control can reach the end of its body without a `return`
+E0316 error   type.return-value-in-unit   `{name}` returns nothing, so its `return` takes no value
+E0317 error   type.return-needs-value     this `return` needs a value of type `{ty}`
+E0318 error   type.unused-result          this `{ty}` is not used; handle it, or discard it with `_ = ...`
+E0319 error   type.try-needs-fallible     `?` needs a `T ! E` or a `T?`, found `{ty}`
+E0320 error   type.try-context            `?` on `{ty}` needs a function that returns `{needed}`, but this one returns `{found}`
+E0321 error   type.error-not-in-set       `{from}` errors cannot leave this function, whose error set is `{to}`
+E0322 error   type.break-outside-loop     `break` is only valid inside a loop
+E0323 error   type.continue-outside-loop  `continue` is only valid inside a loop
+E0324 error   type.cannot-infer           the type of `{name}` cannot be inferred here; add a type annotation
+E0325 error   type.not-iterable           a `for` loop cannot iterate over `{ty}`
+E0326 error   type.pattern-mismatch       this pattern cannot match a value of type `{ty}`
+E0327 error   type.unknown-variant        `{ty}` has no variant `{name}`
+E0328 error   type.pattern-field-count    wrong number of fields in the pattern for `{name}`: expected {expected}, found {found}
+E0329 error   type.refutable-let          this pattern might not match; add `else:` with a block that leaves the scope
+E0330 error   type.else-not-fallible      `else` after `let` needs a `T?`, a `T ! E` or a pattern that can fail; this value is `{ty}`
+E0331 error   type.else-must-diverge      the block after `else:` must leave the scope with `return`, `break`, `continue` or a panic
+E0333 error   type.impure-call            `{callee}` is not pure, so the pure function `{name}` cannot call it
+E0334 error   type.impure-capability      the pure function `{name}` cannot use the capability `{ty}`
+E0335 error   type.impure-argument        this function is passed where a pure function is required, but it calls `{callee}`, which is not pure
+E0337 error   type.missing-field          missing the field `{field}` of `{ty}`
+E0338 error   type.move-out-of-borrow     cannot move `{what}` out of a borrowed value; copy it with `.copy()`
+E0339 error   type.mut-argument-missing   `{param}` is a `mut` parameter, so the call must say `mut` before the argument
+E0340 error   type.mut-argument-unexpected  `{param}` is not a `mut` parameter, so the argument takes no `mut`
+E0341 error   type.not-mutable            cannot modify `{what}`; it is not declared with `var`
+E0342 error   type.it-outside-closure     `it` is the parameter of an implicit closure and exists only where a one-parameter function is expected
+E0344 error   type.constant-negative-index  a constant negative index does not compile; count from the end with `^`: `{fix}`
+E0345 error   type.str-not-indexable      `{ty}` cannot be indexed by position; use `.chars()`, `.bytes()` or `.byte_slice(a, b)`
+E0347 error   type.bound-not-satisfied    `{ty}` does not implement `{bound}`
+E0349 error   type.not-generic            `{name}` does not take type arguments
+E0350 error   type.not-a-value            `{name}` is a {kind}, not a value
+E0351 error   type.unknown-associated     `{ty}` has no associated function `{name}`
+E0352 error   type.value-returns-borrow   `{name}` cannot be a value: it returns a borrow of its parameter `{param}`, which a function value takes by value
+E0353 error   type.closure-parameter-count  wrong number of closure parameters: expected {expected}, found {found}
+E0356 error   type.open-set-needs-wildcard  `{ty}` is an open error set; matching it needs a `case _` arm
+E0358 error   type.let-needs-type         `let {name}` without a value needs a type annotation
+E0359 error   type.no-constructor         `{ty}` cannot be constructed in code
+E0360 error   type.not-indexable          a value of type `{ty}` cannot be indexed
+E0361 error   type.method-needs-receiver  `{name}` is a method; call it on a value, as in `x.{name}()`
+E0362 error   type.assoc-not-method       `{name}` has no `self`; call it on the type, as in `{ty}.{name}()`
+E0363 error   type.tuple-index            the tuple `{ty}` has no element {index}
+E0364 error   type.unpack-count           wrong number of names to unpack into: the value has size {found}, the pattern has size {expected}
+E0365 error   type.if-branches            the branches of this `{keyword}` have different types: `{first}` and `{second}`
+E0366 error   type.uninitialized          `{name}` is used before it is assigned
+E0367 error   type.reassign-let           `{name}` is a `let` binding and is already assigned
+E0368 error   type.not-ordered            `{ty}` has no order, so it cannot be compared with `{op}` or sorted
+E0369 error   type.comparison-types       `{lhs}` and `{rhs}` cannot be compared
+E0370 error   type.optional-chain         `?.` needs an optional value, found `{ty}`
+E0371 error   type.coalesce               `??` needs an optional value on its left, found `{ty}`
+E0372 error   type.float-floor-division   `//` divides integers; for floats use `/`
+E0373 error   type.mixed-numbers          `{op}` cannot mix `{lhs}` and `{rhs}`; convert one of them explicitly
+E0374 error   type.literal-out-of-range   `{text}` does not fit in `{ty}`
+E0332 error   type.float-suffix           a float literal takes the suffix `f32` or `f64`, not `{suffix}`
+E0375 error   type.type-arguments-needed  `{name}` needs a type argument, as in `{name}[T]`
+E0376 error   type.positional-after-keyword  a positional argument cannot follow a keyword argument
+# E0377 is retired: a call that leaves out a parameter without a default
+# is E0308, with the fix that passes a hole.
+E0378 error   type.main-signature         `main` must take nothing or one `System` parameter, and return nothing or `! E`
+E0702 error   type.test-signature         a test takes nothing, the real `System` as its one parameter (`test "name"(sys: System):`), or fresh fakes of the capabilities it names, one of each (`test "name"(fs: Fs, clock: Clock):`)
+E0379 error   type.assert-message         the message of `assert` must be a string
+E0380 error   type.no-display             `{ty}` has no text rendering for `{spec}`
+E0381 error   type.return-in-test         a test returns nothing
+E0382 error   type.self-type-outside      `Self` exists only inside a type's declaration
+E0383 error   type.from-end-outside-index  `^` counts from the end and appears only inside an index, as in `xs[^1]`
+E0384 error   type.arm-needs-expression   an arm of a `match` that has a value holds one expression, not a block
+E0385 error   type.bindings-in-or-pattern  `{name}` is bound in some alternatives of `|` but not in all; every alternative must bind the same names
+E0386 error   type.variant-needs-fields   `{name}` has fields; write `{name}(...)`
+E0387 error   type.star-outside-list      `*name` collects the rest of a list and appears only in a list pattern
+E0388 error   type.rest-outside-arguments  `..` skips the remaining fields and appears only inside `Name(...)`
+E0389 error   type.no-self                `self` exists only inside a method
+E0390 error   type.not-a-struct-pattern   `{name}` cannot be matched with fields
+E0391 error   type.const-pattern          a constant cannot be used as a pattern yet; compare with `==` in a guard
+E0392 error   type.impure-value-call      `{name}` is pure, so it cannot call a function value whose type is not `pure`
+E0393 error   type.impure-drop            dropping `{value}` here runs the `Drop` of `{ty}`, which is not pure, so the pure function `{name}` cannot do it
+E0394 error   type.ambiguous-method       `{name}` is a method of more than one trait `{ty}` implements ({traits}); call it on the trait, as in `Trait.{name}(x)`
+E0395 error   type.unsized-dyn            `{ty}` has no size of its own; hold it behind `ref` or in a `Box`
+E0396 error   type.view-to-dyn            `{ty}` borrows, so it cannot become `{dyn}`, which owns its value
+E0397 error   type.must-consume-argument  `{ty}` is must-consume, so it cannot be the argument of the generic parameter `{param}`, whose values the body may drop
+E0398 error   type.structural-only        {callee} is hashed and compared structurally in stage 0, and `{ty}` has an impl of `{trait}` of its own; derive `Hash` and `Eq` for it, or key by a field
+E0399 error   type.bad-format-spec        `{spec}` is not a format spec; it is `[[fill]align][sign][#][0][width][,|_][.precision][type]`, as in `>8.2f`, with the type one of `d x X o b e E f F % s ?`
+-     note    type.method-of-traits       `{name}` is a method of {traits}
+-     label   type.expected-because       expected because of this
+-     label   type.found-here             this is `{ty}`
+-     note    type.missing-patterns       add an arm for {missing}, or a `case _` arm
+-     fix     type.use-floor-division     use `//` for integer division
+-     fix     type.discard                discard it explicitly
+-     fix     type.declare-var            declare `{name}` with `var`
+-     fix     type.from-end-index         count from the end with `^`
+-     fix     type.add-error-set          add `{set}` to the function's error set
+-     fix     type.add-copy               copy it with `.copy()`
+-     fix     type.convert-to-float       make the `int` an `{ty}`
+-     fix     type.interpolate            write the value into the text
+-     note    type.option-not-value       the value may be missing: give a default with `??`, or take it apart with `if let` or `match`
+-     note    type.read-guard-value       a read guard only reads the value; `write()` gives the guard that changes it
+-     fix     type.similar-member         the type has a member with a similar name
+-     fix     type.take-mut               take `{name}` with `mut`
+-     fix     type.remove-pure            remove `pure`
+-     fix     type.show-debug             show its `Debug` form
+-     fix     type.add-bound              bound `{param}` by `{bound}`
+-     fix     type.add-hole               pass `{name}` as a hole to fill
+-     fix     type.unquote                write the number without quotes
+-     fix     type.call-conversion        call `{method}`, which gives the type expected
+-     fix     type.name-argument          name it `{name}`
+-     fix     type.drop-return-value      return without the value
+-     note    type.spec-letters           `d`, `x`, `X`, `o` and `b` format integers, `e`, `E`, `f`, `F` and `%` format numbers, and text takes none of them
+-     note    type.break-use-return       `return` leaves the function; `break` leaves only a loop
+-     note    type.int-range              `{ty}` holds {min} to {max}
+-     note    type.float-range            `{ty}` holds magnitudes up to {max}
+-     note    type.missing-return-end     return a value on that path too, or end the body with a `return`
+-     note    type.main-forms             write `def main():` or `def main(sys: System):`, returning nothing or `!`
+-     fix     type.add-mut                write `mut` before the argument
+-     fix     type.remove-mut             remove `mut`
+-     fix     type.add-impl               `{ty}` has every method of `{trait}`; add `impl {trait} for {ty}`
+-     help    type.truthiness             write the test explicitly, as in `not xs.is_empty()` or `x != 0`
+
+# ---------------------------------------------------------------- ownership
+# The signature rules (E0411-E0415) are the resolver's; the rest are the
+# ownership checker's (sisu-borrowck), which runs on SIR.
+E0400 error   borrow.use-after-move       `{name}` was moved on line {line} and cannot be used afterwards
+E0401 error   borrow.use-after-partial-move  `{name}` cannot be used as a whole, because `{part}` was moved out of it on line {line}
+E0402 error   borrow.modify-while-borrowed  `{name}` is borrowed on line {line} and cannot be modified until that borrow ends on line {end}
+E0403 error   borrow.use-while-mut-borrowed  `{name}` is borrowed with `mut` on line {line} and cannot be used until that borrow ends on line {end}
+E0404 error   borrow.move-while-borrowed  `{name}` is borrowed on line {line} and cannot be moved until that borrow ends on line {end}
+E0405 error   borrow.mut-while-borrowed   `{name}` is already borrowed on line {line}, so it cannot be borrowed with `mut` until that borrow ends on line {end}
+E0406 error   borrow.does-not-live-long-enough  `{name}` does not live long enough: it is borrowed on line {line}, and the borrow is still used on line {end}, after `{name}` is gone
+E0407 error   borrow.return-local         this returns a borrow of `{name}`, which belongs to `{function}` and is gone when it returns
+E0408 error   borrow.return-not-from      this returns a borrow of the parameter `{param}`, which is not in the `from` clause of `{function}`
+E0409 error   borrow.store-in-plain-type  `{ty}` cannot hold this value, because it borrows `{name}`; only a `view struct` holds borrows
+E0410 error   borrow.store-into-caller    this value borrows `{name}`, so it cannot be stored in `{param}`, which belongs to the caller of `{function}`
+E0411 error   borrow.view-field-in-plain-struct  `{ty}` holds `{field}: {fty}`, which borrows; only a `view struct` may hold a borrow
+E0412 error   borrow.view-in-enum         `{ty}` cannot hold `{fty}`, which borrows; an enum has no view form, so store an owned value such as `String`
+E0413 error   borrow.from-required        `{name}` returns `{ret}`, which borrows, and has more than one borrowed parameter ({params}); name the ones it borrows from with `from`
+E0414 error   borrow.from-not-a-parameter  `{name}` in the `from` clause is not a borrowed parameter of `{function}`
+E0415 error   borrow.from-without-borrow  `{function}` returns `{ty}`, which does not borrow, so it takes no `from` clause
+E0416 error   borrow.move-out-of-drop     cannot move `{part}` out of `{name}`, because `{ty}` implements `Drop`, which needs the whole value
+E0417 error   borrow.must-consume         `{name}` is never consumed: a `{ty}` must be passed to an `own` parameter before it goes out of scope
+E0418 error   borrow.must-consume-exit    this leaves the scope with `{name}` unconsumed: a `{ty}` must be passed to an `own` parameter first
+E0419 error   borrow.move-out-of-place    cannot move out of `{name}` through a reference or an index; copy it with `.copy()`
+E0420 error   borrow.must-consume-intrinsic  `{callee}` may drop values that `{name}` holds, and a `{ty}` is must-consume: its values must be passed to an `own` parameter
+E0421 error   borrow.view-in-owner        `{ty}` borrows, so it cannot be put in `{owner}`, which can outlive what it borrows (04, rule 3)
+E0422 error   borrow.must-consume-in-owner  `{ty}` is must-consume, so it cannot be put in `{owner}`, which can drop it where the checker does not see
+E0423 error   type.own-closure-capture    an `own` closure keeps a copy of `{name}`, and `{ty}` is not `Copy`; stage 0 copies captures (a capture by move arrives with tasks)
+E0424 error   type.own-closure-changes    an `own` closure keeps a copy of `{name}` and cannot change it; borrow it with a plain closure instead
+E0425 error   task.closure-literal        `{function}` takes a closure written at the call (or a `do` block), so that what it captures can be checked; a function value is not one
+E0426 error   task.not-send               `{name}` moves into the task, but `{ty}` is not `Send`
+E0427 error   task.not-sync               `{name}` is shared with the task by reference, but `{ty}` is not `Sync`
+E0428 error   task.borrows-body-local     the task borrows `{name}`, which belongs to the scope's body: the body ends before the scope joins its tasks
+E0429 error   task.borrows-elsewhere      the task borrows `{name}`, but only a task spawned on a scope in that scope's body may borrow, and only what the body's environment borrows
+E0430 error   task.scope-escapes          a scope's body cannot return `{ty}`: a scope and the handles of its tasks end with the scope
+E0431 error   task.race-types             the tasks of a race return one type: this one returns `{found}`, an earlier one `{expected}`
+E0432 error   task.result-unknown         the type of the task's result must be known where it is joined
+E0433 error   task.result-not-send        the task returns `{ty}`, which is not `Send`, so it cannot cross back to the task that joins it
+E0434 error   task.select-arm             a `select` arm waits for a `recv`, `send` or `join` call, a `Timer` or a `Cancellation`, not `{ty}`
+E0437 error   task.not-send-mut           `{name}` is changed by the task through a reference, but `{ty}` is not `Send`
+E0435 error   type.yield-outside-generator  `yield` belongs in the body of a generator, a function that returns `Iter[T]` (not in a closure)
+E0436 error   type.generator-result       `{name}` yields, so it must return `Iter[T]`, not `{ty}`
+-     help    task.wrap-mutex             wrap it: `Mutex[{ty}]` shares mutation between tasks; or move the value with an `own` task
+-     help    task.use-own                move it into the task instead: write `own () -> ...` (or `do own:`), or copy what the task needs into a local before the `spawn`
+-     note    task.field-path             because of `{path}`, a `{ty}`
+-     note    task.make-inside            make the value inside the task, or give the task a value that is `Send` to make it from
+-     note    task.return-send            return a value that is `Send` from the task, and make the rest from it after the join
+-     note    task.join-inside            join the task inside the scope and return what it returned
+-     note    task.write-closure          write the closure at the call, one that calls the function: `() -> work()`
+-     label   borrow.moved-here           `{name}` is moved here
+-     label   borrow.moved-in-loop        `{name}` is moved here, in an earlier iteration of the loop
+-     label   borrow.borrowed-by          borrowed here by `{borrower}`
+-     label   borrow.borrowed-here        borrowed here
+-     label   borrow.later-used           the borrow is still used here
+-     label   borrow.declared-here        `{name}` is declared here
+-     label   borrow.assigned-here        `{name}` is assigned here first
+-     note    borrow.move-after           move this after line {end}, where the borrow ends, or work on a copy made with `.copy()`
+-     note    borrow.copy-before-move     copy it with `.copy()` before it is moved, or move it later
+-     note    borrow.use-own-closure      a closure that is stored or returned must own what it captures: write it as an `own` closure
+-     note    borrow.return-owned         return an owned value instead, such as a copy made with `.copy()`
+-     note    borrow.unvisited-rest       the loop that consumes `{name}` has not visited every element yet; finish the loop first, or return what is left
+-     note    borrow.declare-outside      declare `{name}` where it lives as long as the borrow is used, outside the block or loop it is in now
+-     note    borrow.bind-temporary       a temporary lives until the end of its statement; bind it with `let` first so it lives as long as the borrow
+-     note    borrow.from-only-parameters  a `from` clause names only borrowed parameters the result comes from: remove this name, or add the parameter
+-     note    borrow.copy-part            copy the part with `.copy()`, which leaves the value whole for its `Drop`
+-     note    borrow.consume-first        consume the value before it would go in, or keep it in a variable until it is consumed
+-     note    borrow.consume-each         take the values out first and consume each of them: `for x in own xs`
+-     note    borrow.consume-before-call  consume the value before the call, or call a function written for its type
+-     note    borrow.own-instead          put an owned value in it instead, such as a `String` made with `.to_string()`
+-     note    borrow.store-owned          store an owned value instead, such as a copy made with `.copy()` or `.to_string()`
+-     note    borrow.owned-field          declare the field with an owned type, such as `String` for `str`
+-     note    type.call-instead           call it where its result is needed, or pass a closure that returns an owned copy of the result
+-     note    type.capture-copy           copy it into a local first (`let c = name.copy()`) and capture that, or use a plain closure, which borrows it
+-     note    type.plain-closure          use a plain closure, which borrows the variable and may change it
+-     note    type.borrow-with-mut        borrow it with `ref mut` to change what the borrow refers to
+-     note    type.assign-every-path      give it a value on every path before this use, or where it is declared
+-     note    type.dyn-owned              make the `dyn` from a value that owns what it holds, or keep the view as its own type
+-     label   borrow.borrowed-param       `{name}` is a borrowed parameter
+-     label   borrow.not-borrowed-param   `{name}` lends nothing: it is passed with `own`, or its value is `Copy` and cannot borrow
+-     label   borrow.no-such-param        `{function}` has no parameter `{name}`
+-     label   borrow.result-cannot-borrow  `{ty}` cannot hold a borrow
+-     label   borrow.type-declared-here   `{ty}` is declared here
+-     label   borrow.drop-impl-here       `{ty}` implements `Drop` here
+-     label   borrow.assigned-in-loop     `{name}` is assigned here, in an earlier iteration of the loop
+-     label   borrow.made-here            the value is made here
+-     label   type.declared-pure-here     `{name}` is declared `pure` here
+-     fix     borrow.declare-view         declare it `view struct {ty}`
+-     fix     borrow.remove-from          remove the `from` clause
+-     fix     borrow.add-from             name `{param}` in the `from` clause
+
+# ---------------------------------------------------------------- lowering and SIR
+E0500 error   sir.parse                   SIR: {detail}
+E0501 error   sir.invalid                 invalid SIR in `{function}`: {detail}
+
+# ---------------------------------------------------------------- compile-time evaluation
+E0600 error   comptime.not-constant       `comptime` evaluates what is known at compile time, and `{name}` is known only at run time
+E0601 error   comptime.io                 the compile-time evaluation of this expression used {what}; nothing reaches the world at compile time
+E0602 error   comptime.panicked           the compile-time evaluation of this expression panicked: {message}
+E0603 error   comptime.budget             the compile-time evaluation in `{item}` used up its budget of {steps} steps; raise it with `@comptime_budget(steps=N)` on `{item}`
+E0604 error   comptime.not-kept           {what} made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can
+E0605 error   comptime.only               `{name}` is a `comptime def`: it can be called only at compile time, inside `comptime`
+E0606 error   comptime.budget-attribute   `@comptime_budget` takes `steps=N`, a positive number of steps
+E0607 error   comptime.derive-template    a trait's derive is `comptime def derive(T: type) -> impl {trait} for T`, whose body is `return impl {trait} for T:` with the impl's methods
+E0608 error   comptime.derive-failed      deriving `{trait}` for `{ty}` stopped at compile time: {reason}
+-     label   comptime.derive-here        the derive's template, where it stopped
+E0609 error   comptime.instance-failed    making `{name}` stopped at compile time: {reason}
+-     label   comptime.instance-here      the template, where it stopped
+E0610 error   comptime.instances-unbounded  `{name}` needs more than {count} instances: its instances call it with ever more types
+E0611 error   comptime.template-value     `{name}` reflects on its type parameters, so it is made for each call's types and cannot be used as a value
+E0612 error   comptime.embed-failed       cannot embed `{path}`: {reason}
+E0613 error   comptime.embed-path         `embed` takes the path of a file as a string literal
+E0614 error   comptime.no-fake            `cap.Fake[{name}]` needs a trait of the program whose methods can all be forwarded: a `self` or `mut self` receiver, no type parameters, and no borrow or `Self` in a signature
+
+# ---------------------------------------------------------------- capabilities
+E0700 error   cap.not-shareable          `{ty}` cannot become `{cap}`: a capability may reach every task, and `{ty}` is not `{auto}`
+E0701 error   cap.internal               `{name}` is internal to the standard library; a program reaches the world only through the capabilities it is given
+E0703 error   cap.untrusted              the package `{package}` is not trusted with {what}; a dependency may contain `unsafe` and `extern` only when `[trust] unsafe` in the root package's `sisu.toml` lists it
+
+# ---------------------------------------------------------------- contracts and refinement types (07)
+E0800 error   contract.misplaced          `{keyword}` is a function's contract and belongs at the start of its body, before its first statement
+E0801 error   contract.not-pure           a contract only reads what it is given, and `{callee}` is not `pure`
+E0802 error   contract.changes            a contract only reads what it is given, and this changes it
+E0803 error   contract.old-outside        `old(...)` is a value as it was on entry, which only an `ensures` clause can ask for
+E0804 error   contract.old-arguments      `old` takes one expression, as in `old(self.balance)`
+E0805 error   contract.generator-ensures  a generator has no `ensures`: what it returns is its iterator
+E0806 error   contract.invariant-field    `{what}` is part of a `{ty}`, whose invariant only its own methods may change and check again; change it through one of them
+E0807 error   contract.not-in-test        a test has no contract; check what it needs with `assert`
+E0810 error   refine.not-satisfied        `{value}` is not a `{ty}`: `{predicate}` is false for it
+E0811 error   refine.needs-try-from       expected `{expected}`, found `{found}`; a value becomes a `{expected}` where its predicate is checked, with `{name}.try_from(...)`
+E0812 error   refine.change-through-base  `{what}` is a `{ty}`, which a change through its base could take outside `{predicate}`; change a copy of the base and check it again with `try_from`
+E0813 error   refine.own-impl             `{ty}` refines `{base}` and has its reading impls; it cannot have an impl of `{trait}` of its own
+E0814 error   refine.predicate-type       the predicate of `{ty}` must be a `bool`, found `{found}`
+-     help    refine.use-try-from         check it where it runs: `{name}.try_from(...)`
+E0820 error   test.no-generator           `{ty}` has no generator for property tests: {why}
+E0821 error   test.refines-mismatch       `@refines({reference})` on `{name}` cannot be checked: {why}
+
+# ---------------------------------------------------------------- stage-0 limits and internal errors
+E0900 error   stage0.unsupported          {construct} is not implemented in stage 0 yet; it arrives with {phase}
+E0901 error   stage0.internal             internal compiler error in {stage}: {detail}
+E0971 error   sim.unmodelled-extern       this `sim` build reaches `{callee}`, an `extern` call with no simulation model, in `{function}` at {at}
+
+# ---------------------------------------------------------------- packages and manifests
+E1000 error   package.toml-syntax         this is not TOML that `sisu.toml` reads: expected {expected}, found {found}
+E1001 error   package.toml-duplicate      `{key}` is given more than once in `{table}`
+E1002 error   package.missing-key         `{table}` needs `{key}`
+E1003 error   package.bad-value           `{key}` takes {expected}, found {found}
+E1004 error   package.bad-name            `{name}` cannot name a package: {why}
+E1005 error   package.no-manifest         the dependency `{name}` has no `sisu.toml` at `{path}`
+E1006 error   package.renamed-dependency  the dependency `{name}` is the package `{found}`; a path dependency is named by its own `[package] name`
+E1007 error   package.cycle               the packages depend on each other in a cycle: {cycle}; packages build in dependency order, so their graph has no cycle
+E1008 error   package.no-root-module      the package `{name}` has no root module; add `src/main.sisu` (an application) or `src/lib.sisu` (a library)
+E1009 error   package.two-root-modules    the package `{name}` has both `src/main.sisu` and `src/lib.sisu`; a package has one root module
+E1010 error   package.not-a-path          the dependency `{name}` is not a `path` dependency; stage 0 has no registry, so a dependency is `{name} = {{ path = "../{name}" }}`
+E1011 error   package.bad-when            `when` takes the build target's facts `os`, `arch` and `runtime`, each a string or a list of strings, as in `when = {{ os = "windows" }}`
+E1012 error   package.module-name         `{file}` is not a module: `{name}` is not a module name; a module is named in lowercase letters, digits and `_`
+E1013 error   package.no-member           the workspace member `{path}` has no `sisu.toml`
+E1014 error   package.script-metadata     a script's metadata starts with `# /// script` and ends with a line `# ///`; this block has no end
+E1015 error   package.trust-unknown       `[trust] unsafe` names `{name}`, which is not a dependency of this package
+E1016 error   package.no-package          `{path}` has `[workspace]` but no `[package]`, so it cannot be a dependency
+E1017 error   package.reserved-name       `{name}` is the name of a standard-library module, which `import {name}` names; a package of the program needs another name
+-     label   package.depends-here        `{name}` depends on `{dep}` here
+E1018 error   package.unknown-feature     `{name}` is not a feature of `{package}`; a package's features are the keys of its `[features]`
+
+# ---------------------------------------------------------------- warnings
+W0001 warning type.hole                   typed hole `{name}` of type `{ty}`
+W0002 warning resolve.shadow-outer        `{name}` shadows a binding of an enclosing scope
+W0003 warning type.unreachable-arm        this `case` arm is unreachable; the arms above it cover every value it matches
+W0004 warning type.unreachable-code       this code is unreachable
+W0005 warning package.unknown-key         `{key}` is not a key of `{table}` that stage 0 knows; it is ignored
+W0006 warning resolve.unknown-feature     no `[features]` of this package declares `{name}`, so `feature="{name}"` never holds
+
+# ---------------------------------------------------------------- run time
+R0001 runtime panic.explicit              {message}
+R0002 runtime panic.index-out-of-bounds   index out of bounds: the length is {len} but the index is {index}
+R0003 runtime panic.overflow              integer overflow: {expr}
+R0004 runtime panic.divide-by-zero        division by zero
+R0005 runtime panic.shift-out-of-range    a shift by {amount} is out of range; shifts take 0 to 63
+R0094 runtime panic.bad-port              {port} is not a port; ports are 0 to 65535
+R0093 runtime panic.shift-out-of-range-sized  a shift of a `{ty}` by {amount} is out of range; shifts take 0 to {max}
+R0006 runtime panic.assert                assertion failed: {expr}
+R0007 runtime panic.assert-message        assertion failed: {expr}\n  message: {message}
+R0008 runtime panic.expect                {message}: {value}
+R0009 runtime panic.unreachable           entered unreachable code: {message}
+R0010 runtime panic.missing-key           the key {key} is not in the dict
+R0011 runtime panic.negative-exponent     a negative exponent on an integer: {expr}
+R0012 runtime panic.zip-lengths           zip: the arguments have different lengths
+R0013 runtime panic.hole                  reached the typed hole {hole}
+R0014 runtime panic.during-unwind         panic while unwinding: {message}\n  the first panic: {first}\n  a panic during unwinding aborts the program
+R0015 runtime panic.negative-index        the index {index} is negative; count from the end with `^`
+R0016 runtime panic.slice-bounds          the slice bounds {start}:{end} are negative
+R0017 runtime panic.unordered             NaN has no order
+R0018 runtime run.error-returned          error: {error}
+R0019 runtime run.panic-header            panic: {message}
+R0020 runtime run.frame                   at {function} ({location})
+R0021 runtime panic.range-step            the step of a range must not be zero
+R0023 runtime panic.conversion            cannot convert {value} to `{ty}`
+R0024 runtime run.internal                internal error in the interpreter: {detail}
+R0025 runtime run.assert-left             left:  {value}
+R0026 runtime run.assert-right            right: {value}
+R0029 runtime panic.unreachable-plain     entered unreachable code
+R0030 runtime panic.expect-none           called `expect` on `None`
+R0031 runtime panic.expect-error          called `expect` on an error: {value}
+R0032 runtime panic.stack-overflow        stack overflow in `{function}`: the calls nest deeper than the stack holds
+R0033 runtime panic.moved-value           use of a value after it was moved
+R0034 runtime panic.dangling              use of a reference to a value that no longer exists
+R0037 runtime panic.insert-out-of-bounds  insert index {index} is out of bounds for a list of length {len}
+R0038 runtime run.step-limit              the program ran past its limit of {steps} statements
+R0039 runtime run.trace-line              at {location}
+R0040 runtime run.no-entry                the program has no `main` function
+R0041 runtime run.trace-header            error return trace:
+
+# The dynamic ownership monitor (`sisu run --monitor`, on by default in
+# `sisu test`) and its counterexample mode (`--defer-borrow`, A2).
+R0042 runtime monitor.header              ownership violation: {what}
+R0043 runtime monitor.use-ended-loan      a reference was used after its loan had ended
+R0044 runtime monitor.use-dangling        a reference was used after `{name}` was gone
+R0045 runtime monitor.use-moved           `{name}` was used while it holds no value: it was moved out, or never assigned
+R0046 runtime monitor.loan                the loan: {kind} borrow of `{place}` in `{function}`, created at {location} by `{stmt}`
+R0047 runtime monitor.ended-by            ended by: {operation} of `{place}` at {location} (`{stmt}`)
+R0048 runtime monitor.used-at             used at: {location} (`{stmt}`)
+R0049 runtime monitor.value               value: `{place}` = {value}
+R0050 runtime monitor.counts              loans of `{place}` not ended yet: {shared} shared, {exclusive} with `mut`
+R0051 runtime monitor.sir-header          SIR of `{function}`:
+R0052 runtime monitor.op-write            a modification
+R0053 runtime monitor.op-read             a use
+R0054 runtime monitor.op-move             a move
+R0055 runtime monitor.op-drop             a drop
+R0056 runtime monitor.op-dead             the end of the scope
+R0057 runtime monitor.op-borrow-mut       a `mut` borrow
+R0058 runtime monitor.kind-shared         a shared
+R0059 runtime monitor.kind-mut            a `mut`
+R0060 runtime defer.header                counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+R0061 runtime defer.conflict              outcome: conflict reached; the run stopped at a concrete ownership conflict
+R0062 runtime defer.no-conflict           outcome: no conflict; this run ended without an ownership conflict
+R0063 runtime defer.reached               the checker still rejects line {line} ({code} {id}), which this run reached without a conflict (count: {count})
+R0064 runtime defer.not-reached           the checker still rejects line {line} ({code} {id}), which this run never reached
+R0065 runtime defer.false-positive        every rejected statement was reached without a conflict: a candidate false positive
+R0066 runtime defer.inconclusive          a rejected statement was never reached: inconclusive, an untested path
+R0067 runtime defer.signature             the checker still rejects line {line} ({code} {id}), a rule about declarations that no run can test
+R0068 runtime monitor.no-value            <no value>
+R0069 runtime monitor.unconsumed          `{name}` was dropped holding a `{ty}`, which must be passed to an `own` parameter
+R0070 runtime defer.declarations-only     only rules about declarations reject the program, and the run reached no conflict: a candidate false positive
+R0071 runtime monitor.op-return           the return from the frame
+R0072 runtime panic.stale-key             stale arena key: slot {index}, generation {generation}, no longer holds its value
+R0073 runtime panic.mutex-held            the lock is already held by this task, which would wait for itself forever
+R0074 runtime panic.mutex-poisoned        the lock is poisoned: a task panicked holding it and left its value's invariant broken
+# R0075 is retired: `Cell.set` and `Cell.replace` swap the value before the
+# old one's `Drop` runs, so no `Drop` finds a cell half replaced.
+R0076 runtime panic.scope-ended           a task was spawned on a scope that has ended
+R0077 runtime panic.joined-twice          the task was joined already: its result was taken by an earlier `join`
+R0078 runtime panic.empty-race            a race whose body spawned no task has no winner
+R0079 runtime panic.unobserved-error      a task failed with {error} and nobody joined it, and the scope's result cannot carry it
+R0080 runtime run.deadlock                deadlock: every task is waiting, and no timer can wake any of them
+R0081 runtime run.deadlock-task           {task} waits for {wait} at {location}
+R0082 runtime run.task-root               the root task
+R0092 runtime run.task-named              task {task}
+R0083 runtime panic.channel-capacity      a channel's capacity must be at least 1, not {capacity}
+R0084 runtime run.log-record              {level}: {message}
+R0085 runtime run.log-record-task         {level} [task {task}]: {message}
+R0086 runtime run.stats-tasks             stats: {tasks} tasks, at most {max} at once, {switches} switches
+R0087 runtime run.stats-latency           stats: scheduling latency p50 {p50} p99 {p99} max {max} statements; p50 {p50us} p99 {p99us} microseconds
+R0088 runtime run.stats-shared            stats shared: {local} cells from task-local sites, {crossing} from may-cross sites, {crossed} reached by another task
+R0089 runtime monitor.shared-crossed      a `Shared` whose construction site the escape analysis tagged task-local was reached by another task
+R0091 runtime panic.nested-recv           a receiver inside another iterator would have to wait; iterate the receiver itself
+R0090 runtime panic.into-inner-poisoned   `into_inner` of a poisoned lock: a task panicked holding it and left its value's invariant broken
+R0100 runtime contract.requires-failed    precondition of `{function}` failed: {clause}
+R0101 runtime contract.ensures-failed     postcondition of `{function}` failed: {clause}
+R0102 runtime contract.invariant-failed   invariant of `{ty}` failed: {clause}
+R0103 runtime contract.refinement-failed  `{value}` is not a `{ty}`: `{clause}` is false for it
+R0104 runtime run.case-too-long           the case ran past its budget of {steps} statements
+R0105 runtime sim.always-failed           `sim.always` does not hold: {what}
+R0106 runtime sim.choose-none             `sim.choose` needs at least one option
+R0107 runtime test.snapshot-changed       the snapshot `{name}` changed (`sisu test --update` accepts the new one):\n{diff}
+R0108 runtime test.snapshot-missing       there is no snapshot `{name}` yet (`sisu test --update` stores this one):\n{value}
+
+# Hot replacement (`sisu run --watch`; 10, "Debugging and profiling";
+# D-053, D-068): what a save did to the running program.
+R0109 runtime run.live-epoch              watch: epoch {epoch} replaces {functions}
+R0110 runtime run.live-rejected           watch: the save of {files} does not check, so the program keeps running epoch {epoch}:\n{diagnostics}
+R0111 runtime run.live-restart-signature  watch: the signature of `{function}` changed, so the program starts again
+R0112 runtime run.live-restart-layout     watch: the layout of `{ty}` changed, so the program starts again
+R0114 runtime run.live-restart-impls      watch: the impls of `{trait}` changed, so the program starts again
+R0115 runtime panic.char-boundary         the byte index {index} is inside a character of the text
+R0116 runtime run.stats-depth             stats stack-depth: {calls} calls, the deepest stack {max} frames, about {bytes} bytes of native stack there (16 per SIR local and 64 per frame)
+R0117 runtime run.stats-depth-bucket      stats stack-depth: {calls} calls at a depth of {from} to {to} frames
+R0118 runtime run.stats-shared-sites      stats shared: {local} of {total} `Shared` construction sites tagged task-local, {crossing} may-cross
+R0119 runtime run.stats-shared-site       stats shared: {at} in `{function}`, {tag}: {cells} cells made, {crossed} reached by another task
+R0120 runtime run.stats-tag-local         task-local
+R0121 runtime run.stats-tag-crossing      may-cross
+# A natively compiled program broke a rule its runtime relies on (stage 2;
+# docs/architecture.md, "Stage 2").
+R0122 runtime run.native-internal         internal error in the native runtime: {detail}
+# `--stats` of a native run: the latency in microseconds (native code counts
+# no statements).
+R0124 runtime run.stats-latency-native    stats: scheduling latency p50 {p50us} p99 {p99us} microseconds (native code counts no statements)
+# A native run under `SISU_RT_ALLOCS` (stage 2, decision 217): the runtime's
+# allocations of values still live when the program ends.
+R0125 runtime run.live-allocations        allocations: {count} of the runtime's live at exit
+# A native run under `SISU_RT_ALLOCS=peak` (decision 229): the most of the
+# runtime's allocations of values that were live at once, before R0125.
+R0126 runtime run.peak-allocations        allocations: at most {count} of the runtime's live at once
+# A panic's stack trace deeper than its innermost and outermost frames
+# shows (decision 234): the line that stands for the frames between.
+R0127 runtime run.trace-elided            ... (frames left out)
+# A generator dropped before its end is closed: its frames unwind, running
+# their drops and `defer`s (decision 236). A panic there aborts, as one
+# during unwinding does, and so does a wait.
+R0128 runtime panic.during-abandon        panic while a generator dropped before its end cleans up: {message}\n  a panic there aborts the program
+R0129 runtime panic.abandoned-wait        a generator dropped before its end cannot wait while it cleans up
+# A generator that code which cannot wait takes items from (another
+# iterator's adapter, an intrinsic's `Iterable[T]` argument) runs to its
+# next `yield` there and then; a wait there aborts the program (decision
+# 247).
+R0130 runtime panic.driven-wait           a generator inside another iterator, or given to `sum`, `zip` and the other functions of an `Iterable[T]`, cannot wait; iterate it with `for`
+
+# ---------------------------------------------------------------- driver
+
+D0001 cli     cli.cannot-read             cannot read `{path}`: {reason}
+D0002 cli     cli.usage                   usage: sisu <command> [options] [<file>]\n\nWithout a file, a command works on the package of the current directory (`sisu.toml`).\n\ncommands:\n  run [<file>] [args...]  check and run a program (`--watch` swaps in each save, `--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor, `--contracts=off|preconditions|all` sets what it checks, `--record LOG` writes its capability log, `--stats` reports the scheduler's numbers, `--stats stack-depth` a histogram of the frame depths, `--stats shared` each `Shared` construction site, `--native` compiles it to an executable and runs that, `--release` with the release profile, `--from-sir FILE` runs a file of serialised SIR, natively with `--native`)\n  check [<file>]         report diagnostics (`--format=ids` for the conformance form, `--diary LOG` appends them and what resolved the last check's to a JSONL log)\n  doc [<path>]           the documentation, a Markdown page per module, printed each after a line naming its file (`--output DIR` writes the pages into DIR instead, `--std [MODULE...]` documents the standard library, or the modules named, as `std.time`)\n  build [<file>]         check and lower a package, writing its lockfile (`--native` also compiles a program to an executable: a package's to `build/debug/NAME` beside its lockfile, `build/release/NAME` with `--release`, a file's beside it, named by its stem, or at `--output PATH`; `--native --from-sir` compiles a file of serialised SIR)\n  test [<file>]          run the tests and transcripts under the ownership monitor (`--no-monitor` without it, `--no-cache` runs the tests that passed before too, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`, `--update` for snapshots and transcripts, `--replay TOKEN`, `--sim` with `--faults P`, `--std` for the standard library's doc examples)\n  bench [<file>]         run the benchmarks (`--iterations N`)\n  replay <log>           run a recorded program again against its capability log\n  fmt [<path>...]        format files in place (`--check` reports what would change)\n  repl [<file>|<dir>]    an interactive session, with a package loaded from its directory\n  ws <file>              run a worksheet, showing each statement's value (`--run` with the real `System`)\n  lsp                    the language server, over standard input and output\n  new <name>             create a package (`--lib` for a library)\n  sir [<file>]           print the serialised SIR\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--ast` the AST built from it, `--print` reprints the source, `--shape` prints what formatting keeps\n  explain <code>         describe a diagnostic code\n  explain-borrow <file>:<line>  show every borrow live on a line\n  audit --ownership <file>...  count the uses of `Shared`, `Weak`, `Cell`, `Arena`, `Key`, `.copy()` and `unsafe` in each file\n  audit --caps <file>...  the capability parameters of each function that does I/O, the depth from `main` of each use of a capability, and the structs bundling three or more\n\n`run`, `check`, `build`, `doc`, `test` and `bench` take `--locked`, which keeps `sisu.lock` as it is, and `--features NAMES` (the package's features to turn on, separated by commas, `DEP/FEATURE` for a dependency's) and `--no-default-features`. `run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
+D0003 cli     cli.unknown-command         unknown command `{command}`; run `sisu help`
+D0004 cli     cli.missing-file            `sisu {command}` needs a file
+D0005 cli     cli.no-main                 `{file}` has no `main` function
+D0006 cli     cli.errors-found            the program was not run: errors found ({count})
+D0007 cli     cli.test-result             test {name} ... {outcome}
+D0008 cli     cli.test-summary            {passed} passed, {failed} failed, {blocked} blocked
+D0009 cli     cli.unknown-option          unknown option `{option}` for `sisu {command}`
+D0010 cli     cli.explain-unknown         there is no diagnostic `{code}`
+D0011 cli     cli.explain                 {code} ({kind}) {id}: {template}
+D0012 cli     cli.ice                     internal compiler error in {stage}: {detail}\nthe intermediate form was written to {dump}
+D0013 cli     cli.cannot-write            cannot write `{path}`: {reason}
+D0014 cli     cli.explain-borrow-header   borrows live on line {line} of {file}, in `{function}`:
+D0015 cli     cli.explain-borrow-loan     {kind} borrow of `{place}` from {start}, held by {holders}, used until {end}
+D0016 cli     cli.explain-borrow-temporary  {kind} borrow of `{place}` from {start}, held by a temporary, used until {end}
+D0017 cli     cli.explain-borrow-none     no borrow is live on line {line} of {file}
+D0018 cli     cli.explain-borrow-usage    `sisu explain-borrow` takes FILE:LINE, as in `sisu explain-borrow main.sisu:12`
+D0019 cli     cli.explain-borrow-shared   a shared
+D0020 cli     cli.explain-borrow-mut      a `mut`
+D0021 cli     cli.ownership-errors        the program was not run: the ownership checker found errors ({count}); `--defer-borrow` runs it under the monitor
+D0022 cli     cli.audit-usage             `sisu audit` needs one of its audits: `sisu audit --ownership FILE...` or `sisu audit --caps FILE...`
+D0023 cli     cli.bad-option-value        `{option}` needs a number, not `{value}`
+D0024 cli     cli.explore-ok              explored {count} schedules (seeds {first} to {last}): every run exited with status 0
+D0025 cli     cli.explore-failed          schedule seed {seed} of {count} failed with exit status {status}; `--schedule-seed {seed}` runs it again
+D0026 cli     cli.explore-test-failed     with schedule seed {seed}; `--schedule-seed {seed}` runs it again
+D0027 cli     cli.explore-summary         explored {count} schedules per test (seeds {first} to {last})
+D0028 cli     cli.bad-contract-level      `--contracts` takes `off`, `preconditions` or `all`, not `{value}`
+D0029 cli     cli.test-checks-contracts   `sisu test` checks every contract; `--contracts` sets what `sisu run` and `sisu sir` check
+D0030 cli     cli.replay-token            replay: sisu test --replay {token} {file}
+D0031 cli     cli.replay-no-token         no replay token: the test takes the real `System`, which a replay cannot stand in for
+D0032 cli     cli.bad-replay-token        `{token}` is not a replay token
+D0033 cli     cli.token-other-code        the token is for other code (content hash {expected}); `{file}` has content hash {found}
+D0034 cli     cli.other-toolchain         {what} was made by toolchain {expected}, and this is {found}
+D0035 cli     cli.token-no-test           the token names test {index}, and `{file}` has {count}
+D0036 cli     cli.bad-log                 `{path}` is not a capability log: {reason}
+D0037 cli     cli.replay-diverged         the replay diverged from the log: {detail}
+D0038 cli     cli.record-once             `--record` records one run; it does not combine with `{option}`
+D0039 cli     cli.bad-redact              `--redact` takes capability names (fs, net, clock, rand, env, proc, stdin), not `{value}`
+D0040 cli     cli.replay-status           the replay exited with status {found}, and the recorded run with {expected}
+D0041 cli     cli.bad-scheduler           `--scheduler` takes `random`, `pct` or `exhaustive`, not `{value}`
+D0042 cli     cli.pct-failed              schedule seed {seed} of {count} failed with exit status {status} under a PCT scheduler of depth {depth}; `--scheduler pct --depth {depth} --schedule-seed {seed}` runs it again
+D0043 cli     cli.pct-test-failed         with schedule seed {seed} of a PCT scheduler of depth {depth}; `--scheduler pct --depth {depth} --schedule-seed {seed}` runs it again
+D0044 cli     cli.pct-summary             explored {count} schedules of a PCT scheduler of depth {depth} per test (seeds {first} to {last})
+D0045 cli     cli.pct-ok                  explored {count} schedules of a PCT scheduler of depth {depth} (seeds {first} to {last}): every run exited with status 0
+D0046 cli     cli.exhaustive-failed       schedule {schedule} failed with exit status {status}: run {count} of a bounded exhaustive search (preemption bound {bound})
+D0047 cli     cli.exhaustive-ok           searched {count} schedules (preemption bound {bound}): every run exited with status 0{stopped}
+D0048 cli     cli.exhaustive-test-failed  with schedule {schedule} of a bounded exhaustive search (preemption bound {bound})
+D0049 cli     cli.exhaustive-summary      searched {count} schedules (preemption bound {bound}){stopped}
+D0050 cli     cli.exhaustive-stopped      , stopping at {cap} schedules
+D0051 cli     cli.bad-fault-rate          `--faults` takes a probability from 0 to 1, as in `--faults 0.02`, not `{value}`
+D0052 cli     cli.faults-without-sim      `--faults` sets the fault rate of the `sim` profile; add `--sim`
+D0053 cli     cli.tests-unselected        {count} not selected
+D0054 cli     cli.snapshot-updated        updated the snapshot `{name}`:\n{diff}
+D0055 cli     cli.snapshot-new            stored the new snapshot `{name}`:\n{text}
+D0056 cli     cli.snapshot-unwritable     cannot write the snapshots to `{path}`: {reason}
+D0057 cli     cli.bench-result            bench {name} ... {iterations} iterations, {each} each
+D0058 cli     cli.bench-failed            bench {name} ... FAILED\n{message}
+D0059 cli     cli.bench-summary           {count} benchmarks, {failed} failed (stage 0 times the interpreter: compare benchmarks with each other, not with compiled code)
+D0060 cli     cli.transcript-result       transcript {name} ... {outcome}
+D0061 cli     cli.transcript-differs      what the program printed differs from the transcript (`sisu test --update` accepts it):\n{diff}
+D0062 cli     cli.transcript-no-main      a transcript runs the program's `main`, and `{file}` has none
+D0063 cli     cli.transcript-updated      updated the transcript {name}:\n{diff}
+D0064 cli     cli.no-package              there is no `sisu.toml` in `{dir}` or a directory above it; `sisu {command}` without a file works on a package
+D0065 cli     cli.locked                  `sisu.lock` is not up to date, and `--locked` keeps it as it is: {what}
+D0066 cli     cli.built                   built the package `{name}` {version} (modules: {modules})
+D0067 cli     cli.workspace-run           `sisu {command}` in a workspace needs one member's application; name the member: {members}
+D0070 cli     cli.built-file              built `{file}`
+D0071 cli     cli.created                 created the package `{name}`, with its manifest `sisu.toml` and its root module `{root}`
+D0072 cli     cli.bad-package-name        `{name}` cannot name a package: a package is named in lowercase letters, digits and `_`, starting with a letter, and not as a standard-library module
+D0073 cli     cli.exists                  `{path}` exists already
+D0074 cli     cli.fmt-would-change        `{file}` is not formatted; `sisu fmt` would change it:\n{diff}
+D0075 cli     cli.fmt-syntax              `{file}` has syntax errors, so it was not formatted
+D0076 cli     cli.fmt-unstable            internal error: the formatted `{file}` would not parse to the same program (from byte {at}); it was left as it is
+D0077 cli     cli.fmt-nothing             there is no `.sisu` file to format in `{path}`
+D0078 cli     cli.watch-alone             `--watch` runs the program once, swapping in each save; it does not combine with `{option}`
+D0079 cli     cli.repl-banner             sisu repl: each input runs as the next line of a script; `:back N` forgets the last N inputs, `:why NAME` shows where a value came from, `:quit` ends
+D0080 cli     cli.repl-loaded             the package `{name}` is loaded: import its modules by their paths (`from {name} import ...`)
+D0081 cli     cli.repl-prompt             sisu>
+D0082 cli     cli.repl-more               ...
+D0083 cli     cli.repl-not-kept           the input did not run to its end, so the session is as it was before it
+D0084 cli     cli.repl-back               forgot the last inputs ({forgotten}); the session keeps {count}
+D0085 cli     cli.repl-back-too-far       there are not that many inputs to forget; the session has {count}
+D0086 cli     cli.repl-bad-command        `:{command}` is not a command of the REPL; the commands are `:back N`, `:why NAME` and `:quit`
+D0087 cli     cli.repl-why-value          {name} = {value}  <- {expr}  (input {input})
+D0088 cli     cli.repl-why-call           {call}  (log #{record})
+D0089 cli     cli.repl-why-change         then {text}  (input {input})
+D0090 cli     cli.repl-why-unbound        no input of the session binds `{name}`
+D0091 cli     cli.repl-diverged           the session's earlier inputs did not replay as they ran ({detail}); its values may differ from what they were
+D0092 cli     cli.ws-value                # => {value}
+D0093 cli     cli.ws-output               # | {text}
+D0094 cli     cli.bad-stats               `--stats` takes `stack-depth` or `shared` (or nothing, for the scheduler's numbers), not `{value}`
+D0095 cli     lsp.not-open                the document is not open
+D0096 cli     lsp.not-served              `{method}` is not served
+D0097 cli     lsp.not-a-command           `{command}` is not a command of this server
+D0098 cli     lsp.not-a-name              `{name}` is not a name
+D0099 cli     lsp.cannot-rename           nothing here can be renamed: a local, or a definition of the program's own
+D0100 cli     lsp.not-analysed            the document is not analysed
+D0101 cli     lsp.has-errors              the program has errors: fix them to see its borrows
+D0102 cli     lsp.keyword                 keyword
+D0069 cli     cli.no-application          the package `{name}` is a library (`src/lib.sisu`); `sisu run` runs an application, whose root module is `src/main.sisu`
+
+# The native backend (stage 2; docs/architecture.md, "Stage 2"): `sisu
+# build --native` and `sisu run --native`.
+D0103 cli     native.unsupported          the native backend does not compile {what} yet (in `{function}`); `sisu run` without `--native` runs the program
+D0104 cli     native.no-runtime           the native runtime `libsisu_rt.a` is not beside `sisu` (in `{dir}`); `cargo build` in `compiler/` builds it
+D0105 cli     native.link-failed          linking `{output}` failed: {detail}
+D0106 cli     native.built                built `{output}`
+D0107 cli     native.internal             internal error in the native backend: {detail}
+D0108 cli     native.cannot-run           cannot run `{path}`: {reason}
+D0109 cli     native.alone                `--native` builds a native executable and runs it; it does not combine with `{option}`
+# `sisu build --from-sir FILE` without `--native` (decisions 212 and 254):
+# `sisu run --from-sir FILE` interprets the program.
+D0110 cli     native.from-sir             `sisu build --from-sir FILE` compiles a serialised SIR program with the native backend; it goes with `--native`, and `sisu run --from-sir FILE` interprets it
+# `--release` without `--native` (decision 232): the profiles are the native
+# backend's.
+D0111 cli     native.release              `--release` builds with the native backend's release profile (09); it goes with `--native`
+# `--features NAMES` on the command line (09, decision 250): a name that is
+# not a feature of the package it names.
+D0112 cli     cli.unknown-feature         `--features` names `{name}`, which is not a feature of `{package}`; a package's features are the keys of its `[features]`
+# `sisu doc --std MODULE...` (decision 258) with a path that names no
+# module of the standard library.
+D0113 cli     doc.std-path                `{path}` is not a module of the standard library; `sisu doc --std` takes the paths an import names them by, as `std.time`
+# `sisu doc` on a program with errors (decision 258): nothing is written.
+D0114 cli     doc.errors-found            the documentation was not written: errors found ({count})

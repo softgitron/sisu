@@ -1,0 +1,7 @@
+# A wrong program: an `own` closure captures a text, which it would have
+# to copy.
+
+def main():
+    let name = "Roni".to_string()
+    let greet = own () -> "hello, {name}"
+    print(greet())

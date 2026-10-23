@@ -1,0 +1,20 @@
+# What `@refines` cannot check is a compile error at the function.
+
+pure def a_ref(x: int) -> int:
+    return x
+
+@refines(missing)
+pure def a(x: int) -> int:
+    return x
+
+@refines(a_ref)
+pure def b(x: str) -> int:
+    return 1
+
+@refines(a_ref, tolerance=Ulps(1))
+pure def c(x: int) -> int:
+    return x
+
+@refines(a_ref, tolerance=Ulps(x))
+pure def d(x: int) -> int:
+    return x

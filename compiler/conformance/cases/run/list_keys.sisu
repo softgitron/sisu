@@ -1,0 +1,35 @@
+# A list is `Hash` when its elements are (the prelude's `impl[T: Hash]
+# Hash for list[T]`), so it may be a dict key or a set element, alone or
+# inside a tuple, an option or a struct; equal lists are the same key.
+
+@derive(Eq, Hash, Debug)
+struct Route:
+    steps: list[int]
+
+def main():
+    var counts: dict[list[int], int] = {}
+    counts[[1, 2]] = 1
+    counts[[]] = 0
+    counts[[1, 2]] = counts[[1, 2]] + 1
+    print(counts[[1, 2]])
+    print(len(counts))
+    print([] in counts)
+    print([2, 1] in counts)
+    var seen: set[list[str]] = set()
+    _ = seen.add(["a", "b"])
+    _ = seen.add(["a", "b"])
+    _ = seen.add(["b"])
+    print(len(seen))
+    var pairs: dict[(int, list[int]), str] = {}
+    pairs[(1, [2, 3])] = "one"
+    print(pairs.get((1, [2, 3])))
+    print(pairs.get((1, [3, 2])))
+    var maybe: dict[list[int]?, int] = {}
+    maybe[Some([7])] = 7
+    maybe[None] = 0
+    print(maybe[Some([7])])
+    var routes: dict[Route, int] = {}
+    routes[Route(steps=[1, 2])] = 2
+    print(routes.get(Route(steps=[1, 2])))
+    for (k, v) in counts:
+        print("{k} -> {v}")

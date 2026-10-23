@@ -1,0 +1,18 @@
+test "an ordinary test beside them" ... ok
+test "squares refines squares_ref" ... FAILED
+test "mean refines mean_ref" ... ok
+test "count refines count_ref" ... FAILED
+
+test "squares refines squares_ref" ... FAILED
+panic: the property failed for (1664511,) (case 11, shrunk 52 times)
+  it panicked: integer overflow: 2770598533632 * 3329023
+  at test "squares refines squares_ref" (<arbitrary>/main.sisu:16:5)
+replay: sisu test --replay 1-1a13367376fe4919-0.0.1-t1-s0-r0-c7.3329021 refines.sisu
+
+test "count refines count_ref" ... FAILED
+panic: the property failed for ([0, 0, 0, 0],) (case 3, shrunk 12 times)
+  the property returned False
+  at test "count refines count_ref" (<arbitrary>/main.sisu:24:5)
+replay: sisu test --replay 1-1a13367376fe4919-0.0.1-t3-s0-r0-c1.0.0.1.0.0.1.0.0.1.0.0.0 refines.sisu
+
+2 passed, 2 failed, 0 blocked

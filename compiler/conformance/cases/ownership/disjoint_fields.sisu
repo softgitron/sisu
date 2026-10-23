@@ -1,0 +1,20 @@
+# Borrows of different fields do not conflict.
+
+struct Point:
+    x: int
+    y: int
+
+struct Account:
+    owner: String
+    balance: int
+
+def main():
+    var p = Point(x=1, y=2)
+    let rx = ref p.x
+    p.y += 10
+    print(rx)
+    print("{p:?}")
+    var a = Account(owner="aino".to_string(), balance=5)
+    let who = ref a.owner
+    a.balance += 1
+    print("{who} has {a.balance}")

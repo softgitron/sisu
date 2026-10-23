@@ -1,0 +1,2 @@
+5:12-5:35 E0300 type.mismatch expected="int" found="Iter[str]"
+  fix type.call-conversion 5:35-5:35 ".count()"

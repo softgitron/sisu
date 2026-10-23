@@ -1,0 +1,257 @@
+##! Conditional compilation of items (stage 0's `sisu-driver/src/cfg.rs`;
+##! 08, "Conditional compilation": "`@cfg` on items and `if comptime` in
+##! bodies"; decision 243). An item (a declaration, an import, a test, an
+##! item of a suite or of an `extern` block, or a method of an impl or a
+##! trait) whose `@cfg(...)` does not hold is left out before the program is
+##! resolved, as if it were not written; one whose `@cfg` holds is kept as
+##! written. A condition is `test` (the program is built with its tests),
+##! `feature="NAME"` (its package turns the feature on), `not` and a
+##! condition, `not(...)` of one condition (so `not(feature="tls")` is a
+##! feature that is off, decision 250), or `all(...)` and `any(...)` of
+##! conditions; several in one `@cfg` must all hold. A program built
+##! without its tests leaves out its `test`, `suite` and `bench` items too.
+##!
+##! Stage 0 filters the AST; so does stage 1's type checker, and its name
+##! pass, which reads the syntax tree, leaves out the nodes of the items
+##! and methods the filter left out (`Filtered.left_out`).
+
+from stage1.diag import Catalog, TextRange
+from stage1.parser import parse
+from stage1.syntax.ast import Ast, Attr, ExprId, ExprKind, FnDef, ItemId, ItemKind, Module, Name
+from stage1.syntax.ast import UnOp
+from stage1.syntax.ast import build
+
+## A package's features: those its `[features]` declares, and those that
+## are on in this build (09).
+@derive(Eq, Debug)
+pub struct Features:
+    pub declared: list[String]
+    pub on: list[String]
+
+impl Features:
+    pub pure def none() -> Features:
+        return Features(declared=[], on=[])
+
+## A `@cfg` that is not a condition (`E0266`), or a `feature="NAME"` whose
+## package declares no such feature (`W0006`).
+@derive(Eq, Debug)
+pub enum Problem:
+    NotACondition(TextRange)
+    UnknownFeature(TextRange, String)
+
+## A module as a build compiles it: the module, when the filter changed it
+## (`None` when it is the module as written), the problems its `@cfg`s
+## have, and the syntax nodes of the items and methods left out.
+pub struct Filtered:
+    pub module: Module?
+    pub problems: list[Problem]
+    pub left_out: list[int]
+
+struct Filter:
+    ## Whether the program is built with its tests (Rust's `test`, a
+    ## keyword here).
+    tests: bool
+    features: Features?
+    problems: list[Problem]
+    left_out: list[int]
+
+impl Filter:
+    pure def holds(mut self, ast: Ast, e: ExprId, name: Name?) -> bool:
+        let range = ast.expr(e).range
+        let named = match name:
+            case Some(n): Some(n.text.copy())
+            case None: None
+        match named:
+            case Some(n):
+                if n == "feature":
+                    if let ExprKind.Str(parts) = ast.expr(e).kind:
+                        let f = build.plain_text(parts)
+                        var declared = False
+                        var on = False
+                        if let Some(fs) = self.features:
+                            declared = fs.declared.contains(f)
+                            on = fs.on.contains(f)
+                        if not declared:
+                            self.problems.push(Problem.UnknownFeature(range, f.copy()))
+                        return on
+            case None:
+                match ast.expr(e).kind:
+                    case ExprKind.Name(n):
+                        if n == "test":
+                            return self.tests
+                    case ExprKind.Unary(op, inner):
+                        if op == UnOp.Not:
+                            return not self.holds(ast, inner, None)
+                    case ExprKind.Paren(inner):
+                        return self.holds(ast, inner, None)
+                    case ExprKind.Call(callee, args, trailing):
+                        if trailing.is_none():
+                            # `not(...)` of one condition, keyword or not.
+                            if let ExprKind.Name(n) = ast.expr(callee).kind:
+                                if n == "not":
+                                    if len(args) == 1:
+                                        return not self.holds(ast, args[0].value, args[0].name)
+                                    self.problems.push(Problem.NotACondition(range))
+                                    return True
+                            var all = False
+                            var known = False
+                            if let ExprKind.Name(n) = ast.expr(callee).kind:
+                                if n == "all":
+                                    all = True
+                                    known = True
+                                elif n == "any":
+                                    known = True
+                            if not known:
+                                self.problems.push(Problem.NotACondition(range))
+                                return True
+                            var each: list[bool] = []
+                            for a in args:
+                                each.push(self.holds(ast, a.value, a.name))
+                            if all:
+                                return not each.contains(False)
+                            return each.contains(True)
+                    case _:
+                        pass
+        self.problems.push(Problem.NotACondition(range))
+        return True
+
+    ## Whether every `@cfg` among `attrs` holds. Each condition is looked
+    ## at, so every problem is reported.
+    pure def kept(mut self, ast: Ast, attrs: list[Attr]) -> bool:
+        var keep = True
+        for a in attrs:
+            if a.name != "cfg":
+                continue
+            if a.args.is_empty():
+                # `@cfg` itself: the attribute's range runs to the next line.
+                let at = TextRange.new(a.range.start, a.range.start + 1 + a.name.byte_len())
+                self.problems.push(Problem.NotACondition(at))
+            for arg in a.args:
+                let holds = self.holds(ast, arg.value, arg.name)
+                keep = keep and holds
+        return keep
+
+    pure def methods(mut self, ast: Ast, methods: list[FnDef]) -> list[FnDef]:
+        var out: list[FnDef] = []
+        for m in methods:
+            if self.kept(ast, m.attrs):
+                out.push(m.copy())
+            else:
+                self.left_out.push(m.node)
+        return out
+
+    ## The items kept of `items`, with what is in them filtered, into
+    ## `ast`, whose items they are.
+    pure def items(mut self, mut ast: Ast, items: list[ItemId]) -> list[ItemId]:
+        var out: list[ItemId] = []
+        for id in items:
+            let attrs = ast.item(id).attrs.copy()
+            if not self.kept(ast, attrs):
+                self.left_out.push(ast.item(id).node)
+                continue
+            var tested = False
+            match ast.item(id).kind:
+                case ItemKind.Test(_) | ItemKind.Suite(_) | ItemKind.Bench(_):
+                    tested = True
+                case _:
+                    pass
+            if not self.tests and tested:
+                self.left_out.push(ast.item(id).node)
+                continue
+            var kind = ast.item(id).kind.copy()
+            match ref mut kind:
+                case ItemKind.Suite(s):
+                    s.items = self.items(mut ast, s.items)
+                case ItemKind.Extern(xs):
+                    let kept = self.items(mut ast, xs)
+                    xs.clear()
+                    xs.extend(kept)
+                case ItemKind.Impl(imp):
+                    imp.methods = self.methods(ast, imp.methods)
+                case ItemKind.Trait(t):
+                    t.methods = self.methods(ast, t.methods)
+                case _:
+                    pass
+            ast.items[id.index].kind = kind
+            out.push(id)
+        return out
+
+pure def has_cfg(attrs: list[Attr]) -> bool:
+    for a in attrs:
+        if a.name == "cfg":
+            return True
+    return False
+
+pure def methods_have_cfg(methods: list[FnDef]) -> bool:
+    for m in methods:
+        if has_cfg(m.attrs):
+            return True
+    return False
+
+## Whether `items` have anything to leave out or look at: a `@cfg`, or a
+## test when the program is built without its tests.
+pure def affected(ast: Ast, items: list[ItemId], tests: bool) -> bool:
+    for id in items:
+        let item = ast.item(id)
+        if has_cfg(item.attrs):
+            return True
+        match item.kind:
+            case ItemKind.Test(_) | ItemKind.Bench(_):
+                if not tests:
+                    return True
+            case ItemKind.Suite(s):
+                if not tests or affected(ast, s.items, tests):
+                    return True
+            case ItemKind.Extern(xs):
+                if affected(ast, xs, tests):
+                    return True
+            case ItemKind.Impl(imp):
+                if methods_have_cfg(imp.methods):
+                    return True
+            case ItemKind.Trait(t):
+                if methods_have_cfg(t.methods):
+                    return True
+            case _:
+                pass
+    return False
+
+## The module as this build compiles it, with the problems its `@cfg`s
+## have and the nodes it left out. `tests` is whether the program is built
+## with its tests, `features` its package's features.
+pub pure def filter(m: Module, tests: bool, features: Features?) -> Filtered:
+    if not affected(m.ast, m.items, tests):
+        return Filtered(module=None, problems=[], left_out=[])
+    var f = Filter(tests=tests, features=features.copy(), problems=[], left_out=[])
+    var ast = m.ast.copy()
+    let items = f.items(mut ast, m.items)
+    let module = Module(
+        ast=ast, items=items, docs=m.docs.copy(), broken_names=m.broken_names.copy()
+    )
+    return Filtered(module=Some(module), problems=f.problems, left_out=f.left_out)
+
+# ------------------------------------------------------------------ tests
+
+## The names of the functions a build of `source` keeps, with the feature
+## `tls` declared and, with `on`, turned on.
+pure def kept_fns(source: str, on: bool) -> (list[String], int):
+    let parsed = parse(source, Catalog.parse(""))
+    let m = build.module(parsed.tree)
+    var turned: list[String] = []
+    if on:
+        turned.push("tls".to_string())
+    let features = Features(declared=["tls".to_string()], on=turned)
+    let filtered = filter(m, True, Some(features))
+    let kept = filtered.module ?? m
+    var out: list[String] = []
+    for it in kept.items:
+        if let ItemKind.Fn(f) = kept.ast.item(it).kind:
+            out.push(f.name.text.copy())
+    return (out, len(filtered.problems))
+
+test "`not(...)` turns its one condition around":
+    let source = "@cfg(not(feature=\"tls\"))\ndef plain():\n    pass\n\n@cfg(feature=\"tls\")\ndef secure():\n    pass\n"
+    assert kept_fns(source, False) == (["plain".to_string()], 0)
+    assert kept_fns(source, True) == (["secure".to_string()], 0)
+    # Two conditions are not a condition, and the item is kept.
+    let two = "@cfg(not(feature=\"tls\", test))\ndef both():\n    pass\n"
+    assert kept_fns(two, False) == (["both".to_string()], 1)

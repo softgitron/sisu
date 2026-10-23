@@ -100,6 +100,23 @@ pub fn tree_sum<P: StackProbe>(p: P, t: &Tree) -> u64 {
     s
 }
 
+/// The kernel of [`spin_iterations`] with `p.check()` on every loop back-edge: the
+/// cost model of a compiler-inserted yield check in a loop that makes no call.
+/// (In a loop that calls, the callee's entry check can serve as the yield point,
+/// as Go's `stackguard0` prologue check did before asynchronous preemption: the
+/// scheduler requests a yield by moving the limit the check compares against.)
+#[inline(never)]
+pub fn checked_loop<P: StackProbe>(p: P, n: u64) -> u64 {
+    p.check();
+    let mut x = 1u64;
+    for _ in 0..n {
+        x = x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        x ^= x >> 29;
+        p.check();
+    }
+    x
+}
+
 /// The compute-bound kernel of `starvation`: `n` rounds of an LCG and a mix.
 #[inline(never)]
 pub fn spin_iterations(x: u64, n: u64) -> u64 {
@@ -125,6 +142,8 @@ mod tests {
         let t = build_tree(6, 1);
         assert_eq!(tree_sum(NoProbe, &t), tree_sum(lp, &t));
         assert_eq!(shallow_work(NoProbe, 3), shallow_work(lp, 3));
+        assert_eq!(checked_loop(NoProbe, 1000), checked_loop(lp, 1000));
+        assert_eq!(checked_loop(NoProbe, 1000), spin_iterations(1, 1000));
     }
 
     #[test]

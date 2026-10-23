@@ -1,0 +1,6 @@
+# A wrong program: an optional value is used as if it were there.
+
+def main():
+    let xs = [3, 1, 2]
+    let first = xs.first()
+    print(first + 1)

@@ -1,0 +1,30 @@
+loaded 12 bytes
+sisu> sisu> 8081
+sisu> 16162
+sisu> sisu> sisu> sisu> sisu> [8081, 6]
+sisu> port = 8081  <- config.strip_prefix("port = ").trim().parse_int().expect("a port") + 1  (input 2)
+  config = "port = 8080\n"  <- sys.fs.read_to_string("app.toml")?  (input 1)
+    read_file "app.toml" -> ok "port = 8080\n"  (log #2)
+sisu> seen = [8081, 6]  <- [port]  (input 5)
+  port = 8081  <- config.strip_prefix("port = ").trim().parse_int().expect("a port") + 1  (input 2)
+    config = "port = 8080\n"  <- sys.fs.read_to_string("app.toml")?  (input 1)
+      read_file "app.toml" -> ok "port = 8080\n"  (log #2)
+  then seen.push(area(2, 3))  (input 6)
+sisu> forgot the last inputs (2); the session keeps 5
+sisu> [8081]
+sisu> sisu> sisu> 
+--- stderr
+sisu repl: each input runs as the next line of a script; `:back N` forgets the last N inputs, `:why NAME` shows where a value came from, `:quit` ends
+error[E0300]: expected `int`, found `str`
+  --> <input>:1:18
+  |
+1 | let wrong: int = "text"
+  |                  ^^^^^^
+  |            --- expected because of this
+
+panic: index out of bounds: the length is 2 but the index is 5
+  at main (<repl>:19:1)
+the input did not run to its end, so the session is as it was before it
+there are not that many inputs to forget; the session has 6
+`:frob` is not a command of the REPL; the commands are `:back N`, `:why NAME` and `:quit`
+--- status 0

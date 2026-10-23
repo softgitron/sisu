@@ -1,0 +1,26 @@
+# A `str` view borrows the `String` it views (04, "Views"): the string
+# cannot change while a view of it is used, and may change afterwards.
+
+def shout(s: str) -> String:
+    return s.to_uppercase()
+
+def first_line(text: str) -> str:
+    for line in text.lines():
+        return line.trim()
+    return ""
+
+def main():
+    var s = String.new("  hello\nworld")
+    let line = first_line(s)
+    print(line)
+    print(shout(line))
+    s.push("!")
+    print(s.trim())
+    let parts = s.split_once("\n")
+    match parts:
+        case Some((a, b)):
+            print("{a.trim()} | {b}")
+        case None:
+            pass
+    s.clear()
+    print(len(s))

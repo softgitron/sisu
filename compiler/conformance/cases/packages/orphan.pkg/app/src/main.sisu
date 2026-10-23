@@ -1,0 +1,17 @@
+# The orphan rule (03, "Coherence"; D-013): an impl lives in the package of
+# the trait or of the type, except in the root package, which nothing
+# depends on. `app` is the root, so it may implement std's `Display` for a
+# type of `shapes`; `shapes` may not implement it for std's `int`.
+from shapes import Area, Square
+
+impl Display for Square:
+    def fmt(self, mut f: Formatter):
+        f.write("square of side {self.side}")
+
+impl Area for int:
+    def area(self) -> int:
+        return self * self
+
+def main():
+    let s = Square(side=3)
+    print("{s}: {s.area()}, {4.area()}")

@@ -1,0 +1,11 @@
+# After rustc's borrow-checker UI test `borrowck-loan-blocks-move`: a
+# value is moved while a borrow of it is still used (Rust's E0505).
+
+def take(own v: list[int]):
+    print(len(v))
+
+def main():
+    let v = [3]
+    let w = ref v
+    take(v)
+    print(w)

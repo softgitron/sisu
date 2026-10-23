@@ -1,0 +1,452 @@
+##! The ownership checker (stage 0's `sisu-borrowck`; pipeline step 6,
+##! "Checkers on SIR"), as far as stage 1 has it. It runs on SIR after
+##! lowering, function by function:
+##!
+##! 1. **Initialisation and moves** (`borrowck.init`): a forward dataflow
+##!    over move paths decides, before every statement, which paths may be
+##!    initialised and which may be moved out. A use of a path that may be
+##!    moved is a use after a move (or of a partly moved value); one that
+##!    was never assigned is a use before assignment; a second assignment to
+##!    a `let` declared without a value is reported too.
+##! 2. **Drop placement** (`borrowck.elaborate`): lowering emits every
+##!    `drop` unconditionally; the dataflow removes the drops of values that
+##!    are moved on every path, guards those of values moved on some path
+##!    with a drop flag, and splits the drop of a partly moved value into
+##!    drops of the parts that remain.
+##! 3. **Loans** (`borrowck.loans`): every `ref`, `ref mut`, `strview` and
+##!    copy of a `ref mut` creates a loan; a forward dataflow tracks which
+##!    locals may hold each loan, a backward one which locals are live, and
+##!    a loan is live where a local holding it is live (non-lexical). An
+##!    access that conflicts with a live loan is an error naming both
+##!    places; so is the end of a local's storage while a loan of it is
+##!    live, a return of a loan the signature does not allow, and storing a
+##!    loan where it may not go.
+##! 4. **Must-consume** (`borrowck.consume`): a drop of a `@must_consume`
+##!    value on a normal path is an error.
+##! 5. **Purity** (`borrowck.purity`): a `pure` function calls only pure
+##!    functions.
+##! 6. **`Shared` escape analysis** (`borrowck.shared`): each site that
+##!    makes a `Shared` is tagged task-local or may-cross, which the SIR
+##!    writes as `Shared.new` or `Shared.new_atomic`.
+
+import stage1.borrowck.consume
+import stage1.borrowck.elaborate
+import stage1.borrowck.loans
+import stage1.borrowck.purity
+import stage1.borrowck.shared
+import stage1.lower
+import stage1.sir.simplify
+import stage1.sir.write
+import stage1.typeck
+from stage1.borrowck.finding import Finding, dedup, to_diagnostic
+from stage1.borrowck.init import Analysis
+from stage1.borrowck.types import Types
+from stage1.diag import Catalog, Diagnostic, Lines, render_ids, sort_unique
+from stage1.lower.names import CONTRACTS_ALL
+from stage1.sir import Function, Program, TypeDecl
+
+## The checked program: SIR with its drops placed, and the findings.
+pub struct Checked:
+    pub program: Program
+    pub findings: list[Finding]
+
+## The functions of the standard library as initialisation and drop
+## placement left them, kept from one program to the next of a run (stage
+## 0 keeps them from one check of a program to the next, its `FnCache`): a
+## function lowered as before, whose places reach declared types declared
+## as before, gets the drops it got before, and no finding.
+pub struct Placed:
+    entries: dict[String, PlacedFn]
+
+struct PlacedFn:
+    ## The function as lowering gave it, without its source's number.
+    input: Function
+    decls: list[TypeDecl]
+    ## The function with its drops.
+    output: Function
+    ## Whether the moves were checked too (none was found).
+    checked: bool
+
+impl Placed:
+    pub pure def new() -> Placed:
+        return Placed(entries={})
+
+    ## What was made of `f` before, if it may be taken again.
+    pure def reuse(self, f: Function, types: Types, findings_too: bool) -> Function?:
+        let e = self.entries.get(f.name.copy()) else:
+            return None
+        if findings_too and not e.checked:
+            return None
+        if not same_function(e.input, f):
+            return None
+        if e.decls != types.reached_decls(f):
+            return None
+        var g = e.output.copy()
+        g.source = f.source
+        return Some(g)
+
+    pure def keep(mut self, f: Function, types: Types, g: Function, checked: bool):
+        let entry = PlacedFn(
+            input=f.copy(), decls=types.reached_decls(f), output=g.copy(), checked=checked
+        )
+        _ = self.entries.insert(f.name.copy(), entry)
+
+## Whether two functions are the same but for the number of their source,
+## which depends on the program's other files.
+pure def same_function(a: Function, b: Function) -> bool:
+    return a.name == b.name
+        and a.type_params == b.type_params
+        and a.kind == b.kind
+        and a.param_count == b.param_count
+        and a.pure == b.pure
+        and a.from_ == b.from_
+        and a.inner == b.inner
+        and a.owns == b.owns
+        and a.loc == b.loc
+        and a.locals == b.locals
+        and a.blocks == b.blocks
+
+## Checks a lowered program and places its drops (stage 0's `check_with`,
+## without its memo and without the loans). The standard library's
+## functions are taken as checked, as `sisu check` takes them
+## (`trust_std`): their drops are placed and their moves checked, but
+## must-consume is not checked again for every program.
+pub pure def check(p: Program) -> Checked:
+    var placed = Placed.new()
+    return check_with(p, True, mut placed)
+
+## `check`, or with `findings` false only its drop placement (what the SIR
+## shows: the initialisation dataflow and the drops it places), without
+## the loans, must-consume and purity, whose findings change no statement.
+## The standard library's functions whose drops `placed` placed before for
+## another program are taken from it.
+pub pure def check_with(p: Program, findings_too: bool, mut placed: Placed) -> Checked:
+    let types = Types.of(p)
+    var findings: list[Finding] = []
+    var functions: list[Function] = []
+    for f in p.functions:
+        let std_fn = f.source < len(p.sources) and p.sources[f.source].starts_with("<std>/")
+        if std_fn:
+            if let Some(g) = placed.reuse(f, types, findings_too):
+                functions.push(g)
+                continue
+        var g = f.copy()
+        let init = Analysis.run(g, types)
+        var found = 0
+        if findings_too:
+            for x in init.findings(g, types, p):
+                findings.push(x.copy())
+                found += 1
+        elaborate.elaborate(mut g, init, types)
+        if std_fn and found == 0:
+            placed.keep(f, types, g, findings_too)
+        functions.push(g)
+    var program = Program(
+        sources=p.sources.copy(),
+        entry=p.entry.copy(),
+        types=p.types.copy(),
+        intrinsics=p.intrinsics.copy(),
+        functions=functions,
+        tests=p.tests.copy(),
+        trait_methods=p.trait_methods.copy(),
+        impls=p.impls.copy(),
+    )
+    if not findings_too:
+        _ = shared.tag_sites(mut program)
+        return Checked(program=program, findings=[])
+    for f in program.functions:
+        let trusted = f.source < len(program.sources)
+            and program.sources[f.source].starts_with("<std>/")
+        if not trusted:
+            let a = loans.Analysis.run(program, f, types, True)
+            for x in a.findings(program, f, types):
+                findings.push(x.copy())
+            let (found, _) = consume.check(f, types, p)
+            for x in found:
+                findings.push(x.copy())
+    for x in purity.check(program, types):
+        findings.push(x.copy())
+    dedup(mut findings)
+    _ = shared.tag_sites(mut program)
+    return Checked(program=program, findings=findings)
+
+## The findings as diagnostics of a program of several files: `files`
+## gives, for each of the program's SIR sources, the position of its file
+## among the `count` files of the program and its text, or none for a file
+## of the standard library or one the compiler wrote (a finding there is
+## not one stage 1 renders: `None`). Each file's diagnostics, sorted.
+pub pure def diagnostics_by_file(
+    findings: list[Finding], files: list[(int, String)?], count: int, catalog: Catalog
+) -> list[list[Diagnostic]]?:
+    var out: list[list[Diagnostic]] = []
+    for _ in range(count):
+        out.push([])
+    for f in findings:
+        if f.source >= len(files):
+            return None
+        let (at, text) = files[f.source].copy() else:
+            return None
+        out[at].push(to_diagnostic(f, text, Lines.of(text)))
+    for k in range(count):
+        sort_unique(mut out[k], catalog)
+    return Some(out)
+
+## The findings as diagnostics of the program's file (SIR source 0), in
+## the order `sisu check` prints them; `None` when one is in another file.
+pub pure def diagnostics(findings: list[Finding], text: str, catalog: Catalog) -> list[Diagnostic]?:
+    let lines = Lines.of(text)
+    var out: list[Diagnostic] = []
+    for f in findings:
+        if f.source != 0:
+            return None
+        out.push(to_diagnostic(f, text, lines))
+    sort_unique(mut out, catalog)
+    return Some(out)
+
+# ------------------------------------------------------------------ tests
+
+## A prelude with what the tests below use.
+pure def test_prelude() -> String:
+    var p = String.new()
+    p.push("@builtin(\"String\")\nstruct String:\n    pass\n\n")
+    p.push(
+        "impl String:\n    @intrinsic(\"String.new\")\n    pure def new(text: str = \"\") -> String\n\n"
+    )
+    p.push("trait Drop:\n    def drop(mut self)\n")
+    return p
+
+## The SIR function `name` of a program, after drop placement and jump
+## threading, as `sisu sir` writes it; or why there is none.
+pure def function_text(program: str, name: str) -> String:
+    let catalog = Catalog.parse("")
+    let base = typeck.base_from(test_prelude(), catalog)
+    let checked = typeck.check_file(base, program, catalog, False, {}, True)
+    if checked.has_error or not checked.beyond.is_empty():
+        return "not lowered"
+    let typed = checked.typed else:
+        return "not lowered"
+    var kept = typeck.StdBodies.new()
+    var kept_lowered = lower.StdLowered.new()
+    var kept_slots = lower.StdSlots.new()
+    let all = CONTRACTS_ALL
+    let lowered = lower.lower(
+        typed, base, "main.sisu", all, catalog, mut kept, mut kept_lowered, mut kept_slots
+    )
+    if not lowered.beyond.is_empty():
+        return lowered.beyond.join("\n")
+    var p = check(lowered.program).program
+    simplify.program(mut p)
+    var out = String.new()
+    var inside = False
+    for line in write.write(p).split("\n"):
+        if line.starts_with("fn {name}(") or line.starts_with("fn {name}["):
+            inside = True
+        if inside:
+            out.push(line)
+            out.push("\n")
+            if line == "}}":
+                break
+    return out
+
+## The ownership checker's diagnostics of a program, as `sisu check
+## --format=ids` prints them; or why there are none.
+pure def ownership_of(program: str) -> String:
+    var codes = String.new()
+    codes.push("E0333 error type.impure-call x\nE0366 error type.uninitialized x\n")
+    codes.push("E0400 error borrow.use-after-move x\nE0405 error borrow.mut-while-borrowed x\n")
+    codes.push("E0407 error borrow.return-local x\nE0417 error borrow.must-consume x\n")
+    let catalog = Catalog.parse(codes)
+    let base = typeck.base_from(test_prelude(), catalog)
+    let checked = typeck.check_file(base, program, catalog, False, {}, True)
+    if checked.has_error:
+        return "not lowered"
+    for b in checked.beyond:
+        if not checked.owner_beyond.contains(b):
+            return "not lowered"
+    let typed = checked.typed else:
+        return "not lowered"
+    var kept = typeck.StdBodies.new()
+    var kept_lowered = lower.StdLowered.new()
+    var kept_slots = lower.StdSlots.new()
+    let all = CONTRACTS_ALL
+    let lowered = lower.lower(
+        typed, base, "main.sisu", all, catalog, mut kept, mut kept_lowered, mut kept_slots
+    )
+    if not lowered.beyond.is_empty():
+        return lowered.beyond.join("\n")
+    let done = check(lowered.program)
+    let diags = diagnostics(done.findings, program, catalog) else:
+        return "elsewhere"
+    return render_ids(program, diags, catalog)
+
+## The lines of a function as `sisu sir` writes it.
+pure def lines(parts: list[str]) -> String:
+    var out = String.new()
+    for p in parts:
+        out.push(p)
+        out.push("\n")
+    return out
+
+## The functions below, and what stage 0 writes for each.
+pure def moves_program() -> String:
+    var p = String.new()
+    p.push("struct Pair:\n    a: String\n    b: String\n\n")
+    p.push("def take(own s: String):\n    pass\n\n")
+    p.push("def f(c: bool):\n    let s = String.new()\n    if c:\n        take(s)\n\n")
+    p.push("def h():\n    let s = String.new()\n    take(s)\n\n")
+    p.push("def part():\n    let p = Pair(a=String.new(), b=String.new())\n    take(p.a)\n\n")
+    p.push("def main():\n    f(True)\n    h()\n    part()\n")
+    return p
+
+test "a value moved on some paths is dropped behind a flag":
+    let expected = lines(
+        [
+            "fn f(1) source 0 @8:5-8:6 {{",
+            "    let _0: ()",
+            "    let _1: bool \"c\" @8:7-8:14",
+            "    let _2: String \"s\" @9:9-9:10",
+            "    let _3: str",
+            "    let _4: ()",
+            "    let _5: bool \"flag\"",
+            "  bb0:",
+            "    _5 = const false",
+            "    _3 = call fn String.new#text() @9:13-9:25",
+            "    _2 = call intrinsic String.new(copy _3) @9:13-9:25",
+            "    _5 = const true",
+            "    goto bb1",
+            "  bb1 (unwind bb2):",
+            "    switch copy _1 [0: bb3, else: bb4] @10:8-10:9",
+            "  bb2 (cleanup):",
+            "    drop _2 if _5",
+            "    resume",
+            "  bb3 (unwind bb2):",
+            "    _0 = const ()",
+            "    goto bb5",
+            "  bb4 (unwind bb2):",
+            "    _5 = const false",
+            "    _4 = call fn take(move _2) @11:9-11:16",
+            "    goto bb3",
+            "  bb5:",
+            "    drop _2 if _5 @11:16-11:16",
+            "    return",
+            "}}",
+        ]
+    )
+    assert function_text(moves_program(), "f") == expected
+
+test "a value moved on every path is not dropped, and a part that stays is":
+    let moved = lines(
+        [
+            "fn h(0) source 0 @13:5-13:6 {{",
+            "    let _0: ()",
+            "    let _1: String \"s\" @14:9-14:10",
+            "    let _2: str",
+            "    let _3: ()",
+            "  bb0:",
+            "    _2 = call fn String.new#text() @14:13-14:25",
+            "    _1 = call intrinsic String.new(copy _2) @14:13-14:25",
+            "    goto bb1",
+            "  bb1 (unwind bb2):",
+            "    _3 = call fn take(move _1) @15:5-15:12",
+            "    _0 = const ()",
+            "    goto bb3",
+            "  bb2 (cleanup):",
+            "    resume",
+            "  bb3:",
+            "    return",
+            "}}",
+        ]
+    )
+    assert function_text(moves_program(), "h") == moved
+    let part = function_text(moves_program(), "part")
+    assert part.contains("    _6 = call fn take(move _1.0) @19:5-19:14\n")
+    assert part.contains("  bb5 (cleanup):\n    drop _1.1\n    resume\n")
+    assert part.contains("  bb6:\n    drop _1.1 @19:14-19:14\n    return\n")
+    # The first field's value is dropped if making the second panics
+    # (decision 222).
+    assert part.contains("  bb2 (cleanup):\n    drop _2\n    resume\n")
+
+test "drop glue runs a type's drop, then its fields' in reverse order":
+    var program: String = "struct Noisy:\n    n: int\n\n"
+    program.push("impl Drop for Noisy:\n    def drop(mut self):\n        pass\n\n")
+    program.push("struct Two:\n    x: Noisy\n    y: Noisy\n\n")
+    program.push("def main():\n    let t = Two(x=Noisy(n=1), y=Noisy(n=2))\n")
+    let noisy = lines(
+        [
+            "fn Noisy#drop(1) glue source 0 own 0 {{",
+            "    let _0: ()",
+            "    let _1: Noisy \"self\"",
+            "    let _2: ref mut Noisy",
+            "  bb0:",
+            "    _2 = ref mut _1",
+            "    _0 = call fn Noisy.Drop.drop(move _2)",
+            "    goto bb1",
+            "  bb1:",
+            "    return",
+            "}}",
+        ]
+    )
+    assert function_text(program, "Noisy#drop") == noisy
+    let two = lines(
+        [
+            "fn Two#drop(1) glue source 0 own 0 {{",
+            "    let _0: ()",
+            "    let _1: Two \"self\"",
+            "  bb0:",
+            "    goto bb5",
+            "  bb1:",
+            "    return",
+            "  bb2 (cleanup):",
+            "    resume",
+            "  bb3 (cleanup):",
+            "    drop _1.0",
+            "    goto bb2",
+            "  bb4:",
+            "    drop _1.0",
+            "    return",
+            "  bb5 (unwind bb3):",
+            "    drop _1.1",
+            "    goto bb4",
+            "}}",
+        ]
+    )
+    assert function_text(program, "Two#drop") == two
+
+test "a use after a move names the move, and a borrow its later use":
+    var moved: String = "def take(own s: String):\n    pass\n\n"
+    moved.push("def main():\n    let s = String.new()\n    take(s)\n    take(s)\n")
+    var expected = String.new()
+    expected.push("7:5-7:12 E0400 borrow.use-after-move name=\"s\" line=\"6\"\n")
+    expected.push("  label 6:5-6:12 borrow.moved-here name=\"s\"\n")
+    assert ownership_of(moved) == expected
+    var conflict: String = "def keep(mut a: String, b: String):\n    pass\n\n"
+    conflict.push("def main():\n    var s = String.new()\n    let r = ref s\n    keep(mut s, r)\n")
+    expected = String.new()
+    expected.push("7:5-7:19 E0405 borrow.mut-while-borrowed name=\"s\" line=\"6\" end=\"7\"\n")
+    expected.push("  label 6:13-6:18 borrow.borrowed-by borrower=\"r\"\n")
+    expected.push("  label 7:5-7:19 borrow.later-used\n")
+    assert ownership_of(conflict) == expected
+    let local = "def made() -> ref String:\n    let s = String.new()\n    return ref s\n"
+    expected = String.new()
+    expected.push("3:5-3:17 E0407 borrow.return-local name=\"s\" function=\"made\"\n")
+    expected.push("  label 3:12-3:17 borrow.borrowed-here\n")
+    assert ownership_of(local) == expected
+
+test "must-consume, definite assignment and purity are the ownership checker's":
+    var receipt: String = "@must_consume\nstruct Receipt:\n    id: int\n\n"
+    receipt.push("def main():\n    let r = Receipt(id=1)\n")
+    var expected = String.new()
+    expected.push("6:26-6:26 E0417 borrow.must-consume name=\"r\" ty=\"Receipt\"\n")
+    expected.push("  label 6:9-6:10 borrow.declared-here name=\"r\"\n")
+    assert ownership_of(receipt) == expected
+    var unset: String = "def take(own s: String):\n    pass\n\n"
+    unset.push("def main():\n    let r: String\n    take(r)\n")
+    expected = String.new()
+    expected.push("6:5-6:12 E0366 type.uninitialized name=\"r\"\n")
+    expected.push("  label 5:9-5:10 borrow.declared-here name=\"r\"\n")
+    assert ownership_of(unset) == expected
+    let impure = "def shout():\n    pass\n\npure def quiet():\n    shout()\n"
+    expected = String.new()
+    expected.push("5:5-5:12 E0333 type.impure-call callee=\"shout\" name=\"quiet\"\n")
+    expected.push("  label 4:10-4:15 type.declared-pure-here name=\"quiet\"\n")
+    assert ownership_of(impure) == expected

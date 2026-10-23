@@ -1,0 +1,11 @@
+2
+2
+True
+False
+2
+Some("one")
+None
+7
+Some(2)
+[1, 2] -> 2
+[] -> 0

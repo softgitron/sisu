@@ -1,0 +1,12 @@
+# A wrong program: a task reads a function value it shares with the scope,
+# but a function value is not `Sync`.
+
+def double(x: int) -> int:
+    return x * 2
+
+def main():
+    let f = double
+    task.scope do s:
+        s.spawn do:
+            print(f(2))
+        print(f(3))

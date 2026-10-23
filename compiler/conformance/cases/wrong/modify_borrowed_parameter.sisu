@@ -1,0 +1,10 @@
+# A wrong program: a function changes a parameter it borrows; `mut`
+# lets it.
+
+def add_one(xs: list[int]):
+    xs.push(1)
+
+def main():
+    var xs = [1, 2]
+    add_one(xs)
+    print(xs)

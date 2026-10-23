@@ -1,0 +1,97 @@
+sir 0
+source 0 "match_lowering.sisu"
+entry main
+
+enum Op { Add(int, int), Neg(int), Zero }
+
+intrinsic print
+
+fn eval(1) source 0 @6:5-6:9 {
+    let _0: int
+    let _1: ref Op "op" @6:10-6:16
+    let _2: int
+    let _3: int "a" @8:18-8:19
+    let _4: int "b" @8:21-8:22
+    let _5: int "x" @9:18-9:19
+  bb0:
+    _2 = discriminant _1.* @7:12-10:21
+    switch copy _2 [0: bb1, 1: bb2, 2: bb3, else: bb4] @7:12-10:21
+  bb1:
+    _3 = copy _1.*.as(0).0 @8:18-8:19
+    _4 = copy _1.*.as(0).1 @8:21-8:22
+    _0 = add copy _3, copy _4 @8:25-8:30
+    return @7:5-10:21
+  bb2:
+    _5 = copy _1.*.as(1).0 @9:18-9:19
+    _0 = neg copy _5 @9:22-9:24
+    return @7:5-10:21
+  bb3:
+    _0 = const 0 @10:20-10:21
+    return @7:5-10:21
+  bb4:
+    unreachable @7:12-10:21
+}
+
+fn main(0) source 0 @12:5-12:9 {
+    let _0: ()
+    let _1: ()
+    let _2: int
+    let _3: Op
+    let _4: ref Op
+    let _5: ()
+    let _6: int
+    let _7: Op
+    let _8: ref Op
+    let _9: ()
+    let _10: int
+    let _11: Op
+    let _12: ref Op
+  bb0:
+    _3 = variant Op::Add(const 2, const 3) @13:16-13:25
+    goto bb1
+  bb1 (unwind bb2):
+    _4 = ref _3 @13:16-13:25
+    _2 = call fn eval(copy _4) @13:11-13:26
+    _1 = call intrinsic print(copy _2) @13:5-13:27
+    goto bb3
+  bb2 (cleanup):
+    drop _3
+    resume
+  bb3:
+    drop _3 @13:27-13:27
+    goto bb4
+  bb4:
+    dead _3 @13:27-13:27
+    _7 = variant Op::Neg(const 4) @14:16-14:22
+    goto bb5
+  bb5 (unwind bb6):
+    _8 = ref _7 @14:16-14:22
+    _6 = call fn eval(copy _8) @14:11-14:23
+    _5 = call intrinsic print(copy _6) @14:5-14:24
+    goto bb7
+  bb6 (cleanup):
+    drop _7
+    resume
+  bb7:
+    drop _7 @14:24-14:24
+    goto bb8
+  bb8:
+    dead _7 @14:24-14:24
+    _11 = variant Op::Zero() @15:16-15:20
+    goto bb9
+  bb9 (unwind bb10):
+    _12 = ref _11 @15:16-15:20
+    _10 = call fn eval(copy _12) @15:11-15:21
+    _9 = call intrinsic print(copy _10) @15:5-15:22
+    goto bb11
+  bb10 (cleanup):
+    drop _11
+    resume
+  bb11:
+    drop _11 @15:22-15:22
+    goto bb12
+  bb12:
+    dead _11 @15:22-15:22
+    _0 = const ()
+    return
+}

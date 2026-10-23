@@ -1,0 +1,3 @@
+3:38-3:40 E0415 borrow.from-without-borrow function="total" ty="int"
+  label 3:29-3:32 borrow.result-cannot-borrow ty="int"
+  fix borrow.remove-from 3:32-3:40 ""

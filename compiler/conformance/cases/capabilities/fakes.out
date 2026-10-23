@@ -1,0 +1,18 @@
+Ok(["dir/a.txt", "dir/empty"])
+Ok(Metadata(len=3, modified=1970-01-01T00:00:00Z, is_dir=False))
+Ok(True)
+Ok(())
+Err(NotFound(path="dir/a.txt"))
+Err(AlreadyExists(path="dir"))
+Ok(2026-10-11T12:00:00Z)
+2026-10-11T13:30:00Z
+5400s
+[657, 711, 782]
+[657, 711, 782]
+True
+[3, 5, 6, 2, 1, 4]
+["--verbose", "in.txt"]
+Some("fi_FI")
+None
+Ok("Sun Oct 11")
+Err(NotFound(program="rm"))

@@ -1,0 +1,7 @@
+6:6-6:14 E0266 resolve.bad-cfg
+10:6-10:18 E0266 resolve.bad-cfg
+14:1-14:5 E0266 resolve.bad-cfg
+19:24-19:27 E0266 resolve.bad-cfg
+23:14-23:19 W0006 resolve.unknown-feature name="tls"
+28:6-28:30 E0266 resolve.bad-cfg
+36:10-36:21 E0266 resolve.bad-cfg

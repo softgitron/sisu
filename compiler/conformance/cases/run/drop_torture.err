@@ -1,0 +1,3 @@
+panic: index out of bounds: the length is 0 but the index is 1
+  at loop_panic (drop_torture.sisu:78:13)
+  at main (drop_torture.sisu:94:5)

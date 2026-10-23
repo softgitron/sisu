@@ -1,0 +1,42 @@
+def main():
+    let s = "Hello, World"
+    print(len(s))
+    print(len("häh"))
+    print(s.to_lowercase())
+    print(s.to_uppercase())
+    print(s.starts_with("Hell"))
+    print(s.ends_with("x"))
+    print(s.contains("lo, W"))
+    print(s.find("World") ?? -1)
+    print(s.replace("World", "Sisu"))
+    print("  padded  ".trim() + "|")
+    print("a-b-c".split("-").collect())
+    print("one two  three".split_whitespace().count())
+    print("line1\nline2\r\nline3".lines().collect())
+    print("key=value".split_once("=") ?? ("", ""))
+    print("ab".repeat(3))
+    print("prefix_name".strip_prefix("prefix_"))
+    print("42".parse_int() ?? 0)
+    print("-17".parse_int() ?? 0)
+    print("4x".parse_int() ?? 0)
+    print([c for c in "abc".chars()])
+    var built = String.new()
+    built += "con"
+    built += "cat"
+    built.push_char('!')
+    print(built)
+    let joined = ["x", "y", "z"].join(", ")
+    print(joined)
+    let name = "Ada"
+    let n = 42
+    let f = 3.14159
+    print("{name} has {n} items")
+    print("{n=} {f=}")
+    print("[{n:>6}] [{n:<6}] [{n:^6}] [{n:06}] [{n:+}]")
+    print("[{f:.2}] [{f:8.3}] [{f:e}] [{0.25:.1%}]")
+    print("[{255:x}] [{255:X}] [{255:#o}] [{5:b}] [{1234567:,}]")
+    print("[{name:>5}] [{name:*<6}] [{name:.2}]")
+    print("{name:?} {'c':?} {[1, 2]:?}")
+    print("braces: {{literal}}")
+    print("tab:\tend, quote: \", backslash: \\")
+    print("é".to_uppercase())

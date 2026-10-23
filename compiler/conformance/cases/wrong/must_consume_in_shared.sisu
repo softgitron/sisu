@@ -1,0 +1,13 @@
+# A wrong program: a must-consume value is put in a `Shared`, which could
+# drop it where the checker does not see.
+
+@must_consume
+struct Lock:
+    id: int
+
+    def release(own self):
+        print("released {self.id}")
+
+def main():
+    let s = Shared(Lock(id=1))
+    print(Shared.count(s))

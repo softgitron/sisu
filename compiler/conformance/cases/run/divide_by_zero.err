@@ -1,0 +1,3 @@
+panic: division by zero
+  at ratio (divide_by_zero.sisu:2:12)
+  at main (divide_by_zero.sisu:7:11)

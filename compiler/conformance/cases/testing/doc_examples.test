@@ -1,0 +1,13 @@
+test "mean (doc example)" ... ok
+test "Stack.push (doc example)" ... ok
+test "Stack.push (doc example 2)" ... FAILED
+
+test "Stack.push (doc example 2)" ... FAILED
+panic: assertion failed: s.items == [8, 7]
+    s.items == [8, 7]
+    │
+    [7, 8]
+  at test "Stack.push (doc example 2)" (doc_examples.sisu:31:8)
+replay: sisu test --replay 1-912c9bcd1c9ea2ff-0.0.1-t2-s0-r0 doc_examples.sisu
+
+2 passed, 1 failed, 0 blocked

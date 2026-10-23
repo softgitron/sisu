@@ -1,0 +1,3 @@
+4:34-4:35 E0415 borrow.from-without-borrow function="shout" ty="String"
+  label 4:22-4:28 borrow.result-cannot-borrow ty="String"
+  fix borrow.remove-from 4:28-4:35 ""

@@ -1,0 +1,8 @@
+a point: ["x", "y"] Point(x=3, y=4) 1
+first: A, second: A: ["first", "second"] Pair[A](first=1, second=2) 1
+Pair[A](first=a, second=b) 1
+Point(x=3, y=4) 1
+Pair[A](first=1, second=2) 1
+["first", "second"]
+["q.first=1", "q.second=2"]
+["7.first=a", "7.second=b"]

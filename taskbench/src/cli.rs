@@ -29,21 +29,29 @@ const COMMON: &[&str] = &[
     "quiet",
 ];
 
-const FLAGS: &[&str] = &["machine-spec", "canary", "quiet", "break-contract", "scope-per-round", "help"];
+const FLAGS: &[&str] =
+    &["machine-spec", "canary", "quiet", "break-contract", "scope-per-round", "skip-excursion", "framed", "help"];
 
 fn command_options(cmd: &str) -> Option<&'static [&'static str]> {
     Some(match cmd {
         "spawn-join" => &["rounds", "warmup", "batch", "scope-per-round"],
-        "idle-memory" => &["excursion", "settle-ms", "mem-guard"],
-        "max-tasks" => &["mem-guard", "os-stack"],
+        "idle-memory" => &["excursion", "settle-ms", "mem-guard", "skip-excursion"],
+        "max-tasks" => &["mem-guard", "os-stack", "hold-secs"],
         "echo" => &["connections", "msg-bytes", "duration", "warmup-secs"],
         "idle-connections" => &["connections", "settle-ms"],
-        "deep-recursion" => &["parse-depth", "naive-depth"],
+        "deep-recursion" => &["parse-depth", "naive-depth", "framed"],
         "starvation" => &["yield-every", "duration", "probe-interval-us", "baseline-secs"],
-        "probe-overhead" => &["reps", "workload", "fib-n", "calls", "tree-depth"],
-        "cancel-uring" => {
-            &["concurrency", "async-percent", "break-contract", "buf-bytes", "source", "file-bytes", "file-dir"]
-        }
+        "probe-overhead" => &["reps", "workload", "fib-n", "calls", "tree-depth", "loop-iters"],
+        "cancel-uring" => &[
+            "concurrency",
+            "async-percent",
+            "break-contract",
+            "buf-bytes",
+            "source",
+            "pipe-mix",
+            "file-bytes",
+            "file-dir",
+        ],
         "machine-spec" => &[],
         _ => return None,
     })
@@ -57,17 +65,21 @@ USAGE: taskbench <command> [options]
 Commands:
   spawn-join        median and p99 of spawn-plus-join        (--rounds 20000 --warmup 2000 --batch 1)
   idle-memory       resident memory per parked task          (--tasks 10000 --excursion 32K --settle-ms 200
-                    --mem-guard 1G)
-  max-tasks         tasks creatable before a limit stops it  (--tasks CAP=100000 --mem-guard 1G)
+                    --mem-guard 1G [--skip-excursion: size for the excursion, measure shallow only])
+  max-tasks         tasks creatable before a limit stops it  (--tasks CAP=100000 --mem-guard 1G
+                    --hold-secs 0: keep a run that reached the cap parked this long, then recheck)
   echo              TCP echo, N connections, in-process client (--connections 1000 --msg-bytes 64
                     --duration 3 --warmup-secs 1)
   idle-connections  resident memory per idle connection      (--connections 5000)
-  deep-recursion    10k-deep parse and 1M-deep recursion in a task (--parse-depth 10000 --naive-depth 1000000)
+  deep-recursion    10k-deep parse and 1M-deep recursion in a task (--parse-depth 10000 --naive-depth 1000000
+                    [--framed: also 256-byte frames with drop code; measure with --probe-reserve 16K])
   starvation        latency probe under N compute-bound tasks (--tasks 2*threads --yield-every 10000
                     --duration 2 --probe-interval-us 1000 --baseline-secs 1)
-  probe-overhead    compute loops with and without stack probes (--reps 11 --workload all|fib|calls|tree)
+  probe-overhead    compute loops with and without stack probes (--reps 11 --workload all|fib|calls|tree|loop;
+                    loop: a back-edge yield check in a call-free loop, --loop-iters 20000000)
   cancel-uring      io_uring reads into stack buffers, cancelled in flight (--tasks 4096 --concurrency 512
-                    --async-percent 25 [--break-contract])
+                    --async-percent 25 --buf-bytes 512 --source pipe|file|file-buffered
+                    --pipe-mix race|cancel [--break-contract])
   machine-spec      print (and with --csv record) the machine specification
   strategies        list the stack strategies
   csv-header        print the CSV header line
@@ -89,7 +101,7 @@ Common options:
   --machine-id ID        machine column (default: host name)
   --reservation SIZE     A/B/D stack reservation per task (default 1M; also 128K, 8M)
   --stack-size SIZE      C exact stack size (default 8K)
-  --probe-reserve SIZE   B/C bytes below the probe limit (default B 16K, C 8K)
+  --probe-reserve SIZE   B/C bytes below the probe limit (default 5K, the owner's policy)
   --guard SIZE           A guard size (default 4K)
   --chunk SIZE           B/C reservation chunk (default 1G)
   --base A|B             D's base strategy (default A)

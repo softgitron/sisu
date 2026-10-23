@@ -1,0 +1,1164 @@
+##! `sisu doc` (09, "Documentation"; 10, "One binary"; stage 0's
+##! `sisu-driver/src/doc.rs`): every module of a program as a Markdown page,
+##! a `pure` function of the modules' syntax and the program's resolved
+##! names and inferred error sets (decision 258), which is why the front end
+##! in Sisu has it (18, "Bootstrapping": `sisu doc` among stage 1's `pure`
+##! functions over the syntax tree). Nothing is evaluated: a doc example is
+##! shown as it is written, and `sisu test` runs it.
+##!
+##! A page is the module's path as its title, its `##!` lines, the modules
+##! under it, the names it re-exports, a list of its items, and a section
+##! for each item: its declaration as written (a header over several lines
+##! joined into one, comments and bodies left out, a contract keeping its
+##! own lines), its `##` lines, which are Markdown, and what the compiler
+##! knows of it that the declaration does not say: the error set it
+##! inferred for a `T !` function (05), the typed holes left in a function
+##! (10), the parameters that hold capabilities (09). Decision 258 states
+##! the form byte for byte; this module follows it, function for function.
+
+import stage1.typeck
+from stage1.diag import Catalog
+from stage1.lexer import lex
+from stage1.parser import parse
+from stage1.syntax.ast import (
+    Ast,
+    Attr,
+    ConstDef,
+    Contract,
+    EnumDef,
+    ExprKind,
+    FnDef,
+    ImplDef,
+    ItemId,
+    ItemKind,
+    Mode,
+    Module,
+    Name,
+    ParamKind,
+    StructDef,
+    TraitDef,
+    TypeAlias,
+    TypeExprId,
+    TypeKind,
+    Vis,
+)
+from stage1.syntax.ast import build, visit
+from stage1.syntax.kinds import SyntaxKind
+from stage1.syntax.tree import Token
+from stage1.typeck.program import DefKind, ModuleId, Predicate, Program
+from stage1.typeck.std_sources import display_path, reexports
+from stage1.typeck.ty import DefId, Ty, TyData, Types
+
+## A module to document.
+pub struct Source:
+    pub id: ModuleId
+    ## The module's path as an import names it (`shapes.geometry`,
+    ## `std.time`), or a single file's stem: its page is `PATH.md`.
+    pub path: String
+    pub text: String
+    ## The tokens the lexer makes of `text`, trivia and layout among them.
+    pub tokens: list[Token]
+    ## The module as the build has it, its `@cfg`s applied (decision 243).
+    pub module: Module
+
+## What the pages are made from.
+pub view struct Docs:
+    ## The modules with pages, in the order the pages are printed.
+    pub sources: ref list[Source]
+    pub prog: ref Program
+    pub types: ref Types
+    ## The error set the checker inferred for each `T !` function (05:
+    ## "`sisu doc` shows it").
+    pub inferred: ref dict[DefId, list[DefId]]
+    ## A package's pages show what another package may name: its `pub`
+    ## items and their `pub` members. A single file's and the standard
+    ## library's show everything (decision 147: std's items are public).
+    pub public_only: bool
+
+## One page: a module's documentation.
+@derive(Eq, Debug)
+pub struct Page:
+    ## The file's name: the module's path, then `.md`.
+    pub file: String
+    pub text: String
+
+## Every module's page.
+pub pure def pages(docs: Docs) -> list[Page]:
+    var out: list[Page] = []
+    for k in range(len(docs.sources)):
+        let w = Writer.new(docs, k)
+        out.push(Page(file="{docs.sources[k].path}.md", text=w.page()))
+    return out
+
+## What `sisu doc` prints without `--output`: each page after a line that
+## names its file, `<!-- NAME.md -->`, which Markdown shows as nothing.
+pub pure def printed(pages: list[Page]) -> String:
+    var out = String.new()
+    for p in pages:
+        out.push("<!-- ")
+        out.push(p.file)
+        out.push(" -->\n")
+        out.push(p.text)
+    return out
+
+const STEP: str = "    "
+
+## The capability types, as `sisu audit --caps` has them (decision 240):
+## the handles of a `System`, the `System`, a test clock, and a `Lent` of a
+## handle.
+pure def is_capability(name: str) -> bool:
+    return match name:
+        case "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin": True
+        case "System" | "TestClock" | "Lent": True
+        case _: False
+
+## Each operations trait's handle: a type parameter bounded by one (`[F:
+## FsOps]`, the form that takes a `Lent`) holds that capability.
+pure def ops_handle(name: str) -> str?:
+    return match name:
+        case "FsOps": Some("Fs")
+        case "NetOps": Some("Net")
+        case "ClockOps": Some("Clock")
+        case "RandOps": Some("Rand")
+        case "EnvOps": Some("Env")
+        case "ProcOps": Some("Proc")
+        case "StdinOps": Some("Stdin")
+        case _: None
+
+pure def is_code(k: SyntaxKind) -> bool:
+    if k.is_trivia():
+        return False
+    return match k:
+        case Newline | Indent | Dedent | Eof: False
+        case _: True
+
+pure def is_opening(k: SyntaxKind) -> bool:
+    return match k:
+        case LParen | LBracket | LBrace: True
+        case _: False
+
+pure def is_closing(k: SyntaxKind) -> bool:
+    return match k:
+        case RParen | RBracket | RBrace: True
+        case _: False
+
+## `<a id="NAME"></a>`: where a link to an item lands, the same in every
+## renderer of Markdown.
+pure def anchor(name: str) -> String:
+    return "<a id=\"{name}\"></a>"
+
+## `text` as inline code: between backticks one more than the longest run
+## inside it, with a space inside each end when it starts or ends with one.
+pure def code_span(text: str) -> String:
+    var longest = 0
+    var run = 0
+    for c in text.chars():
+        if c == '`':
+            run += 1
+        else:
+            run = 0
+        longest = max(longest, run)
+    let fence = "`".repeat(longest + 1)
+    if text.starts_with("`") or text.ends_with("`"):
+        return "{fence} {text} {fence}"
+    return "{fence}{text}{fence}"
+
+## The lines of a doc comment as Markdown: the blank lines at either end
+## dropped, and the opening fence of an example (a line "```" outside a
+## fenced block, which `sisu test` runs as Sisu) labelled "```sisu".
+pure def markdown(lines: list[String]) -> String?:
+    var first = -1
+    var last = -1
+    for k in range(len(lines)):
+        if not lines[k].trim().is_empty():
+            if first < 0:
+                first = k
+            last = k
+    if first < 0:
+        return None
+    var out: list[String] = []
+    var fenced = False
+    for k in range(first, last + 1):
+        let line = lines[k].copy()
+        let t = line.trim()
+        if not fenced and t.starts_with("```"):
+            fenced = True
+            if t == "```":
+                out.push("{line.trim_end()}sisu")
+                continue
+        elif fenced and t == "```":
+            fenced = False
+        out.push(line)
+    return Some(out.join("\n"))
+
+## The first paragraph of a doc comment, on one line: its lines up to the
+## first blank one or fence, each trimmed, joined by spaces.
+pure def summary(lines: list[String]) -> String?:
+    var words: list[String] = []
+    var started = False
+    for l in lines:
+        let t = l.trim()
+        if not started and t.is_empty():
+            continue
+        started = True
+        if t.is_empty() or t.starts_with("```"):
+            break
+        words.push(t.to_string())
+    if words.is_empty():
+        return None
+    return Some(words.join(" "))
+
+## A list entry for a link, with the summary after a colon.
+pure def entry(text: str, link: str, lines: list[String]) -> String:
+    return match summary(lines):
+        case Some(s): "- [`{text}`]({link}): {s}"
+        case None: "- [`{text}`]({link})"
+
+## The name of the type an impl is for: a path's names joined by dots
+## (`Point` for `Deque[T]`'s `Deque`, `other.Point`), `Option` for `T?`,
+## `Result` for `T ! E`, and a reference's type for the reference.
+pure def type_name(ast: Ast, t: TypeExprId) -> String?:
+    match ast.type_expr(t).kind:
+        case TypeKind.Path(segments, _):
+            if segments.is_empty():
+                return None
+            var names: list[String] = []
+            for s in segments:
+                names.push(s.text.copy())
+            return Some(names.join("."))
+        case TypeKind.Option(_):
+            return Some("Option".to_string())
+        case TypeKind.Result(_, _):
+            return Some("Result".to_string())
+        case TypeKind.Ref(_, inner):
+            return type_name(ast, inner)
+        case _:
+            return None
+
+pure def self_name(ast: Ast, i: ImplDef) -> String?:
+    return type_name(ast, i.self_ty)
+
+## The doc comments of a function or a member, and where its section is
+## made: the module's syntax, a type's name for a method, and the level of
+## its heading.
+view struct Writer:
+    docs: Docs
+    ## The module this page documents, by its index among the sources.
+    at: int
+    ## One view of the module's text for the whole page: a view of a
+    ## `String` is a copy of it in stage 0's interpreter.
+    text: str
+    ## The module's functions, by where their names start.
+    fns: dict[int, DefId]
+    ## Whether `todo` names the prelude's typed hole in this module.
+    todo_is_hole: bool
+
+impl Writer:
+    pure def new(docs: Docs, at: int) -> Writer:
+        let prog = docs.prog
+        let src = ref docs.sources[at]
+        var fns: dict[int, DefId] = {}
+        for i in range(len(prog.defs)):
+            let d = ref prog.defs[i]
+            if d.module == src.id:
+                if let DefKind.Fn(_) = d.kind():
+                    _ = fns.insert(d.span.start, DefId(index=i))
+        var todo: DefId? = None
+        if src.id.index < len(prog.modules):
+            if let Some(d) = prog.modules[src.id.index].items.get("todo"):
+                todo = Some(d)
+        if todo.is_none() and prog.prelude.index < len(prog.modules):
+            if let Some(d) = prog.modules[prog.prelude.index].items.get("todo"):
+                todo = Some(d)
+        var todo_is_hole = False
+        if let Some(d) = todo:
+            if let Some(f) = prog.fn_info(d):
+                if let Some(i) = f.intrinsic:
+                    todo_is_hole = i == "todo"
+        let copied = Docs(
+            sources=docs.sources,
+            prog=docs.prog,
+            types=docs.types,
+            inferred=docs.inferred,
+            public_only=docs.public_only,
+        )
+        return Writer(docs=copied, at=at, text=src.text, fns=fns, todo_is_hole=todo_is_hole)
+
+    pure def src(self) -> ref Source:
+        return ref self.docs.sources[self.at]
+
+    pure def ast(self) -> ref Ast:
+        return ref self.docs.sources[self.at].module.ast
+
+    pure def shown(self, vis: Vis) -> bool:
+        return not self.docs.public_only or vis == Vis.Pub
+
+    pure def token_text(self, t: Token) -> str:
+        if t.start < 0 or t.end > self.text.byte_len() or t.start > t.end:
+            return ""
+        return self.text.byte_slice(t.start, t.end)
+
+    ## The index of the first token at or after `at`.
+    pure def token_at(self, at: int) -> int:
+        let tokens = ref self.docs.sources[self.at].tokens
+        var lo = 0
+        var hi = len(tokens)
+        while lo < hi:
+            let mid = (lo + hi) // 2
+            if tokens[mid].start < at:
+                lo = mid + 1
+            else:
+                hi = mid
+        return lo
+
+    ## The code tokens from `start` up to the end of the header line: the
+    ## first line break outside brackets, or `end`; a `:` that ends it is
+    ## left out, and so are the tokens of the attributes `skip`.
+    pure def header(self, start: int, end: int, skip: list[Attr]) -> String:
+        let tokens = ref self.docs.sources[self.at].tokens
+        var depth = 0
+        var picked: list[Token] = []
+        var i = self.token_at(start)
+        while i < len(tokens):
+            let t = tokens[i]
+            i += 1
+            if t.start >= end:
+                break
+            var skipped = False
+            for a in skip:
+                if a.range.start <= t.start and t.end <= a.range.end:
+                    skipped = True
+                    break
+            if skipped:
+                continue
+            if is_opening(t.kind):
+                depth += 1
+            elif is_closing(t.kind):
+                depth -= 1
+            elif (t.kind == SyntaxKind.Newline or t.kind == SyntaxKind.Indent)
+                    and depth <= 0
+                    and not picked.is_empty():
+                break
+            if is_code(t.kind):
+                picked.push(t)
+        if let Some(t) = picked.last():
+            if t.kind == SyntaxKind.Colon:
+                _ = picked.pop()
+        return self.join(picked)
+
+    ## The code tokens in `start..end`, joined into one line.
+    pure def compact(self, start: int, end: int) -> String:
+        let tokens = ref self.docs.sources[self.at].tokens
+        var picked: list[Token] = []
+        var i = self.token_at(start)
+        while i < len(tokens) and tokens[i].end <= end:
+            if is_code(tokens[i].kind):
+                picked.push(tokens[i])
+            i += 1
+        return self.join(picked)
+
+    ## Tokens as written, a gap between two of them kept as one space; a
+    ## gap that was a line break inside brackets goes, and so does the
+    ## trailing comma of a list written one element per line.
+    pure def join(self, picked: list[Token]) -> String:
+        # The pieces, so that a trailing comma and the space before it can
+        # be taken back (a `String` has no `pop`).
+        var pieces: list[str] = []
+        for k in range(len(picked)):
+            let t = picked[k]
+            if k > 0:
+                let prev = picked[k - 1]
+                var gap = ""
+                if prev.end <= t.start and t.start <= self.text.byte_len():
+                    gap = self.text.byte_slice(prev.end, t.start)
+                let broken = gap.contains("\n")
+                let closing = is_closing(t.kind)
+                if broken and closing and prev.kind == SyntaxKind.Comma:
+                    _ = pieces.pop()
+                    if let Some(" ") = pieces.last():
+                        _ = pieces.pop()
+                let opening = is_opening(prev.kind)
+                if not gap.is_empty() and not (broken and (opening or closing)):
+                    pieces.push(" ")
+            pieces.push(self.token_text(t))
+        var out = String.new()
+        for p in pieces:
+            out.push(p)
+        return out
+
+    ## The `##` lines just before the token at `start`, each without its
+    ## `##` and the one space after it.
+    pure def docs_before(self, start: int) -> list[String]:
+        let tokens = ref self.docs.sources[self.at].tokens
+        var docs: list[String] = []
+        var i = self.token_at(start)
+        while i > 0:
+            i -= 1
+            let t = tokens[i]
+            match t.kind:
+                case DocComment:
+                    let s = self.token_text(t).strip_prefix("##")
+                    docs.push(s.strip_prefix(" ").to_string())
+                case Whitespace | LineBreak | Newline | Indent | Dedent:
+                    pass
+                case _:
+                    break
+        docs.reverse()
+        return docs
+
+    ## The `##` lines before the code token that comes before `at` (the
+    ## `const` of a constant whose name starts at `at`).
+    pure def docs_before_keyword(self, at: int) -> list[String]:
+        let tokens = ref self.docs.sources[self.at].tokens
+        var i = self.token_at(at)
+        while i > 0:
+            i -= 1
+            if is_code(tokens[i].kind):
+                return self.docs_before(tokens[i].start)
+        return []
+
+    ## A doc comment inside a declaration, as written, at `indent`.
+    pure def doc_comment(self, docs: list[String], indent: str, mut out: String):
+        for d in docs:
+            out.push(indent)
+            if d.is_empty():
+                out.push("##\n")
+            else:
+                out.push("## ")
+                out.push(d)
+                out.push("\n")
+
+    pure def attrs(self, attrs: list[Attr], indent: str, mut out: String):
+        for a in attrs:
+            out.push(indent)
+            out.push(self.compact(a.range.start, a.range.end))
+            out.push("\n")
+
+    ## A contract clause as written; the lines after its first keep their
+    ## indentation relative to it.
+    pure def contract(self, c: Contract, indent: str, mut out: String):
+        let start = c.range.start
+        var text = ""
+        if start <= c.range.end and c.range.end <= self.text.byte_len():
+            text = self.text.byte_slice(start, c.range.end)
+        # The column the clause starts at: after the line break before it.
+        var line_start = start
+        while line_start > 0 and self.text.byte_at(line_start - 1) != 10:
+            line_start -= 1
+        let column = start - line_start
+        var k = 0
+        for raw in text.lines():
+            let line = raw.trim_end()
+            if k == 0:
+                out.push(indent)
+                out.push(line)
+                out.push("\n")
+            elif not line.trim().is_empty():
+                let lead = line.byte_len() - line.trim_start().byte_len()
+                let rest = line.byte_slice(min(lead, column), line.byte_len())
+                out.push(indent)
+                out.push(rest)
+                out.push("\n")
+            k += 1
+
+    pure def constant(self, c: ConstDef, indent: str, mut out: String):
+        out.push(indent)
+        out.push("const ")
+        out.push(c.name.text)
+        if let Some(t) = c.ty:
+            let range = self.ast().type_expr(t).range
+            out.push(": ")
+            out.push(self.compact(range.start, range.end))
+        out.push("\n")
+
+    ## The path of a module as its page names it.
+    pure def module_path(self, m: ModuleId) -> String:
+        for s in self.docs.sources:
+            if s.id == m:
+                return s.path.copy()
+        if m.index >= len(self.docs.prog.modules):
+            return String.new()
+        let data = ref self.docs.prog.modules[m.index]
+        if not data.path.is_empty():
+            return data.path.join(".")
+        if data.is_std:
+            return display_path(data.name)
+        return data.name.copy()
+
+    ## The page of a module that has one in this documentation.
+    pure def page_of(self, m: ModuleId) -> String?:
+        for s in self.docs.sources:
+            if s.id == m:
+                return Some("{s.path}.md")
+        return None
+
+    ## A definition's name as this module's page writes it: bare when it
+    ## is this module's or the prelude's, else after its module's path.
+    pure def name_here(self, d: DefId) -> String:
+        let def_ = self.docs.prog.def(d)
+        if def_.module == self.src().id or def_.module == self.docs.prog.prelude:
+            return def_.name.copy()
+        return "{self.module_path(def_.module)}.{def_.name}"
+
+    pure def page(self) -> String:
+        let ast = self.ast()
+        let m = ref self.src().module
+        var blocks = ["# `{self.src().path}`".to_string()]
+        if let Some(intro) = markdown(m.docs):
+            blocks.push(intro)
+        if let Some(kids) = self.children():
+            blocks.push(kids)
+        if let Some(names) = self.reexports():
+            blocks.push(names)
+        # The types the module declares take its impls of them.
+        var types: set[String] = set()
+        for it in m.items:
+            match ast.item(it).kind:
+                case ItemKind.Struct(s):
+                    _ = types.add(s.name.text.copy())
+                case ItemKind.Enum(e) | ItemKind.ErrorSet(e):
+                    _ = types.add(e.name.text.copy())
+                case ItemKind.TypeAlias(a):
+                    _ = types.add(a.name.text.copy())
+                case _:
+                    pass
+        var impls_of: dict[String, list[ItemId]] = {}
+        var others: list[ItemId] = []
+        for it in m.items:
+            if let ItemKind.Impl(i) = ast.item(it).kind:
+                match self_name(ast, i):
+                    case Some(n) if types.contains(n):
+                        var found: list[ItemId] = []
+                        if let Some(known) = impls_of.get(n):
+                            found = known.copy()
+                        found.push(it)
+                        _ = impls_of.insert(n.copy(), found)
+                    case _:
+                        others.push(it)
+        var contents: list[String] = []
+        var sections: list[String] = []
+        for it in m.items:
+            let item = ast.item(it)
+            if not self.shown(item.vis):
+                continue
+            var name = String.new()
+            var section = String.new()
+            match item.kind:
+                case ItemKind.Fn(f):
+                    name = f.name.text.copy()
+                    section = self.function(f, item.docs, None, None, 2)
+                case ItemKind.Struct(s):
+                    name = s.name.text.copy()
+                    section = self.struct_section(it, s, impls_in(impls_of, name))
+                case ItemKind.Enum(e) | ItemKind.ErrorSet(e):
+                    name = e.name.text.copy()
+                    section = self.enum_section(it, e, impls_in(impls_of, name))
+                case ItemKind.Trait(t):
+                    name = t.name.text.copy()
+                    section = self.trait_section(it, t)
+                case ItemKind.Const(c):
+                    name = c.name.text.copy()
+                    section = self.const_section(it, c)
+                case ItemKind.TypeAlias(a):
+                    name = a.name.text.copy()
+                    section = self.alias_section(it, a, impls_in(impls_of, name))
+                case _:
+                    continue
+            contents.push(entry(name, "#{name}", item.docs))
+            sections.push(section)
+        if not contents.is_empty():
+            blocks.push("## Contents\n\n{contents.join("\n")}")
+        for s in sections:
+            blocks.push(s.copy())
+        if let Some(rest) = self.implementations(others):
+            blocks.push(rest)
+        var out = blocks.join("\n\n")
+        out.push("\n")
+        return out
+
+    ## The modules one step under this one (a package's), with the first
+    ## paragraph of each one's `##!` lines.
+    pure def children(self) -> String?:
+        let prog = self.docs.prog
+        let id = self.src().id
+        if id.index >= len(prog.modules):
+            return None
+        let me = ref prog.modules[id.index].path
+        if me.is_empty():
+            return None
+        var kids: list[int] = []
+        for k in range(len(self.docs.sources)):
+            let s = ref self.docs.sources[k]
+            if s.id.index < len(prog.modules):
+                let d = ref prog.modules[s.id.index].path
+                if len(d) == len(me) + 1 and starts_with(d, me):
+                    kids.push(k)
+        kids.sort_by((a, b) -> self.docs.sources[a].path.cmp(self.docs.sources[b].path))
+        if kids.is_empty():
+            return None
+        var lines: list[String] = []
+        for k in kids:
+            let kid = ref self.docs.sources[k]
+            lines.push(entry(kid.path, "{kid.path}.md", kid.module.docs))
+        return Some("## Modules\n\n{lines.join("\n")}")
+
+    ## The names another module sees through this one that it does not
+    ## declare: a package module's `pub` imports, and the prelude's names a
+    ## std module names too (`std.time`'s `DateTime`).
+    pure def reexports(self) -> String?:
+        let prog = self.docs.prog
+        let id = self.src().id
+        if id.index >= len(prog.modules):
+            return None
+        let data = ref prog.modules[id.index]
+        var lines: list[String] = []
+        if data.is_std:
+            if prog.prelude.index >= len(prog.modules):
+                return None
+            let prelude = ref prog.modules[prog.prelude.index]
+            for name in reexports(data.name):
+                if let Some(d) = prelude.items.get(name.to_string()):
+                    lines.push(self.reexport(name, d))
+        else:
+            let ast = self.ast()
+            for it in self.src().module.items:
+                let item = ast.item(it)
+                if item.vis != Vis.Pub:
+                    continue
+                var bound: list[String] = []
+                match item.kind:
+                    case ItemKind.FromImport(imp):
+                        for (n, alias) in imp.names:
+                            match alias:
+                                case Some(a):
+                                    bound.push(a.text.copy())
+                                case None:
+                                    bound.push(n.text.copy())
+                    case ItemKind.Import(imp):
+                        match imp.alias:
+                            case Some(a):
+                                bound.push(a.text.copy())
+                            case None:
+                                if let Some(last) = imp.path.last():
+                                    bound.push(last.text.copy())
+                    case _:
+                        continue
+                for b in bound:
+                    if let Some(d) = data.items.get(b):
+                        lines.push(self.reexport(b, d))
+        if lines.is_empty():
+            return None
+        return Some("## Re-exports\n\n{lines.join("\n")}")
+
+    ## One re-exported name: what it names, linked to its section when
+    ## that has a page here.
+    pure def reexport(self, bound: str, d: DefId) -> String:
+        let def_ = self.docs.prog.def(d)
+        var shown = String.new()
+        var link: String? = None
+        match def_.kind():
+            case DefKind.Module(m):
+                shown = self.module_path(m)
+                link = self.page_of(m)
+            case kind:
+                var item = False
+                match kind:
+                    case DefKind.Fn(f):
+                        item = f.owner.is_none()
+                    case DefKind.Struct(_) | DefKind.Enum(_) | DefKind.ErrorSet(_):
+                        item = True
+                    case DefKind.Const(_) | DefKind.TypeAlias(_) | DefKind.Trait(_):
+                        item = True
+                    case DefKind.Refinement(_):
+                        item = True
+                    case _:
+                        item = False
+                if item:
+                    if let Some(p) = self.page_of(def_.module):
+                        link = Some("{p}#{def_.name}")
+                shown = "{self.module_path(def_.module)}.{def_.name}"
+        return match link:
+            case Some(l): "- `{bound}`: [`{shown}`]({l})"
+            case None: "- `{bound}`: `{shown}`"
+
+    ## A section's heading, after the anchor its links land on.
+    pure def heading(self, name: str, level: int) -> String:
+        return "{anchor(name)}\n{"#".repeat(level)} `{name}`"
+
+    ## A function's section: its declaration (attributes, header and
+    ## contracts), its doc comment, and what the compiler adds.
+    pure def function(
+        self, f: FnDef, docs: list[String], owner: str?, invariant_of: str?, level: int
+    ) -> String:
+        var name = f.name.text.copy()
+        if let Some(o) = owner:
+            name = "{o}.{f.name.text}"
+        var code = String.new()
+        self.attrs(f.attrs, "", mut code)
+        var header = self.header(f.range.start, f.range.end, f.attrs)
+        # `T !`: the set the compiler inferred from the body (05).
+        if header.ends_with("!"):
+            if let Some(set) = self.inferred(f):
+                header.push(" {set}  # inferred")
+        code.push(header)
+        code.push("\n")
+        for c in f.contracts(self.ast()):
+            self.contract(c, STEP, mut code)
+        if let Some(o) = invariant_of:
+            if let Some(p) = f.params.first():
+                if let ParamKind.SelfParam = p.kind:
+                    if p.mode == Mode.Mut:
+                        code.push("{STEP}# re-checks the invariant of `{o}` on return\n")
+        var parts = ["{self.heading(name, level)}\n\n```sisu\n{code}```".to_string()]
+        if let Some(text) = markdown(docs):
+            parts.push(text)
+        let holes = self.holes(f)
+        if not holes.is_empty():
+            var shown: list[String] = []
+            for h in holes:
+                shown.push(code_span(h))
+            parts.push("Unfinished: {shown.join(", ")}.")
+        let caps = self.capabilities(f)
+        if not caps.is_empty():
+            parts.push("Capabilities: {caps.join(", ")}.")
+        return parts.join("\n\n")
+
+    ## The inferred error set of a `T !` function, as a type is written.
+    pure def inferred(self, f: FnDef) -> String?:
+        let d = self.fns.get(f.name.range.start) else:
+            return None
+        let set = self.docs.inferred.get(d) else:
+            return None
+        var names: list[String] = []
+        for x in set:
+            names.push(self.name_here(x))
+        if names.is_empty():
+            return Some("{{}}".to_string())
+        if len(names) == 1:
+            return Some(names[0].copy())
+        return Some("{{{names.join(", ")}}}")
+
+    ## The typed holes in a function's body (10: `sisu doc` marks the
+    ## functions that contain one): each call of the prelude's `todo`, as
+    ## written, once.
+    pure def holes(self, f: FnDef) -> list[String]:
+        var out: list[String] = []
+        if not self.todo_is_hole:
+            return out
+        let ast = self.ast()
+        let Some(body) = ref f.body else:
+            return out
+        for e in visit.exprs_in_block(ast, body):
+            if let ExprKind.Call(callee, _, _) = ast.expr(e).kind:
+                var base = callee
+                if let ExprKind.Index(b, _) = ast.expr(callee).kind:
+                    base = b
+                if let ExprKind.Name(n) = ast.expr(base).kind:
+                    if n == "todo":
+                        let range = ast.expr(e).range
+                        let text = self.compact(range.start, range.end)
+                        if not out.contains(text):
+                            out.push(text)
+        return out
+
+    ## The parameters of a function that hold capabilities, `self` first,
+    ## each with the capability types it holds: ``fs` (`Fs`)`.
+    pure def capabilities(self, f: FnDef) -> list[String]:
+        var out: list[String] = []
+        let d = self.fns.get(f.name.range.start) else:
+            return out
+        let info = self.docs.prog.fn_info(d) else:
+            return out
+        if info.self_mode.is_some():
+            if let Some(owner) = info.owner:
+                self.add_held("self", owner, info.predicates, mut out)
+        for p in info.params:
+            self.add_held(p.name, p.ty, info.predicates, mut out)
+        return out
+
+    ## A parameter's entry among the capabilities, when it holds any.
+    pure def add_held(self, name: str, ty: Ty, preds: list[Predicate], mut out: list[String]):
+        var held: list[String] = []
+        var seen: list[DefId] = []
+        self.held(ty, preds, mut held, mut seen)
+        if not held.is_empty():
+            var types: list[String] = []
+            for h in held:
+                types.push("`{h}`")
+            out.push("`{name}` ({types.join(", ")})")
+
+    ## The handle an operations trait stands for, when `d` is one of the
+    ## prelude's.
+    pure def ops(self, d: DefId) -> str?:
+        let def_ = self.docs.prog.def(d)
+        if def_.module != self.docs.prog.prelude:
+            return None
+        return ops_handle(def_.name)
+
+    ## The capability types a type holds: itself, through references, the
+    ## elements of tuples, its type arguments (options and collections),
+    ## the fields of a struct or enum, and a type parameter bounded by an
+    ## operations trait (decision 240's rule, read from the signature).
+    pure def held(
+        self, ty: Ty, preds: list[Predicate], mut out: list[String], mut seen: list[DefId]
+    ):
+        let prog = self.docs.prog
+        match self.docs.types.data(ty):
+            case TyData.Ref(inner, _):
+                self.held(inner, preds, mut out, mut seen)
+            case TyData.Tuple(elems, _):
+                for e in elems:
+                    self.held(e, preds, mut out, mut seen)
+            case TyData.Param(_):
+                for p in preds:
+                    if p.ty == ty:
+                        if let Some(h) = self.ops(p.bound.def_):
+                            add_once(mut out, h)
+            case TyData.Dyn(tr):
+                if let Some(h) = self.ops(tr.def_):
+                    add_once(mut out, h)
+            case TyData.Adt(d, args):
+                let def_ = prog.def(d)
+                if def_.module == prog.prelude and is_capability(def_.name):
+                    # A `Lent` is its handle's capability.
+                    var name = def_.name.copy()
+                    if def_.name == "Lent":
+                        if let Some(a) = args.first():
+                            if let TyData.Adt(h, _) = self.docs.types.data(a):
+                                name = prog.def(h).name.copy()
+                    add_once(mut out, name)
+                    return
+                for a in args:
+                    self.held(a, preds, mut out, mut seen)
+                if seen.contains(d):
+                    return
+                seen.push(d)
+                # A field's type parameters are the type's, whose arguments
+                # were looked at above: the function's bounds say nothing
+                # of them.
+                match def_.kind():
+                    case DefKind.Struct(s):
+                        for field in s.fields:
+                            self.held(field.ty, [], mut out, mut seen)
+                    case DefKind.Enum(e) | DefKind.ErrorSet(e):
+                        for v in e.variants:
+                            for (_, t) in v.fields:
+                                self.held(t, [], mut out, mut seen)
+                    case _:
+                        pass
+            case _:
+                pass
+
+    ## The headers of a type's impls, after a blank line, each after its
+    ## doc comment.
+    pure def impl_headers(self, impls: list[ItemId], mut out: String):
+        if impls.is_empty():
+            return
+        out.push("\n")
+        let ast = self.ast()
+        for it in impls:
+            let item = ast.item(it)
+            self.doc_comment(item.docs, "", mut out)
+            out.push(self.header(item.range.start, item.range.end, item.attrs))
+            out.push("\n")
+
+    ## The constants of a type's inherent impls.
+    pure def impl_constants(self, impls: list[ItemId], mut out: String):
+        let ast = self.ast()
+        for it in impls:
+            if let ItemKind.Impl(i) = ast.item(it).kind:
+                if i.trait_ty.is_none():
+                    for c in i.consts:
+                        self.doc_comment(
+                            self.docs_before_keyword(c.name.range.start), STEP, mut out
+                        )
+                        self.constant(c, STEP, mut out)
+
+    ## The sections of a type's methods: those declared in it, then those
+    ## of its inherent impls, in order.
+    pure def methods(
+        self, name: str, owns: list[FnDef], impls: list[ItemId], invariant_of: str?
+    ) -> list[String]:
+        var out: list[String] = []
+        for m in owns:
+            if self.shown(m.vis):
+                out.push(
+                    self.function(m, self.docs_before(m.range.start), Some(name), invariant_of, 3)
+                )
+        let ast = self.ast()
+        for it in impls:
+            if let ItemKind.Impl(i) = ast.item(it).kind:
+                if i.trait_ty.is_none():
+                    for m in i.methods:
+                        if self.shown(m.vis):
+                            let docs = self.docs_before(m.range.start)
+                            out.push(self.function(m, docs, Some(name), invariant_of, 3))
+        return out
+
+    ## The start of a type's section: its declaration and doc comment.
+    pure def type_start(self, name: str, code: str, docs: list[String]) -> list[String]:
+        var parts = ["{self.heading(name, 2)}\n\n```sisu\n{code}```".to_string()]
+        if let Some(text) = markdown(docs):
+            parts.push(text)
+        return parts
+
+    pure def struct_section(self, it: ItemId, s: StructDef, impls: list[ItemId]) -> String:
+        let item = self.ast().item(it)
+        let name = s.name.text.copy()
+        var code = String.new()
+        self.attrs(item.attrs, "", mut code)
+        code.push(self.header(item.range.start, item.range.end, item.attrs))
+        code.push("\n")
+        var hidden = False
+        for field in s.fields:
+            if not self.shown(field.vis):
+                hidden = True
+                continue
+            self.doc_comment(self.docs_before(field.range.start), STEP, mut code)
+            code.push(STEP)
+            code.push(self.compact(field.range.start, field.range.end))
+            code.push("\n")
+        if hidden:
+            code.push("{STEP}# private fields\n")
+        for inv in s.invariants:
+            self.contract(inv, STEP, mut code)
+        for c in s.consts:
+            self.doc_comment(self.docs_before_keyword(c.name.range.start), STEP, mut code)
+            self.constant(c, STEP, mut code)
+        self.impl_constants(impls, mut code)
+        self.impl_headers(impls, mut code)
+        var parts = self.type_start(name, code, item.docs)
+        var invariant_of: str? = None
+        if not s.invariants.is_empty():
+            invariant_of = Some(name)
+        for m in self.methods(name, s.methods, impls, invariant_of):
+            parts.push(m.copy())
+        return parts.join("\n\n")
+
+    pure def enum_section(self, it: ItemId, e: EnumDef, impls: list[ItemId]) -> String:
+        let item = self.ast().item(it)
+        let name = e.name.text.copy()
+        var code = String.new()
+        self.attrs(item.attrs, "", mut code)
+        code.push(self.header(item.range.start, item.range.end, item.attrs))
+        code.push("\n")
+        for v in e.variants:
+            self.doc_comment(self.docs_before(v.range.start), STEP, mut code)
+            code.push(STEP)
+            code.push(self.compact(v.range.start, v.range.end))
+            code.push("\n")
+        if e.open:
+            code.push("{STEP}..\n")
+        self.impl_constants(impls, mut code)
+        self.impl_headers(impls, mut code)
+        var parts = self.type_start(name, code, item.docs)
+        for m in self.methods(name, e.methods, impls, None):
+            parts.push(m.copy())
+        return parts.join("\n\n")
+
+    pure def trait_section(self, it: ItemId, t: TraitDef) -> String:
+        let item = self.ast().item(it)
+        let name = t.name.text.copy()
+        var code = String.new()
+        self.attrs(item.attrs, "", mut code)
+        code.push(self.header(item.range.start, item.range.end, item.attrs))
+        code.push("\n")
+        for a in t.assoc_types:
+            self.doc_comment(self.docs_before(a.range.start), STEP, mut code)
+            code.push(STEP)
+            code.push(self.compact(a.range.start, a.range.end))
+            code.push("\n")
+        var parts = self.type_start(name, code, item.docs)
+        for m in t.methods:
+            parts.push(self.function(m, self.docs_before(m.range.start), Some(name), None, 3))
+        return parts.join("\n\n")
+
+    pure def const_section(self, it: ItemId, c: ConstDef) -> String:
+        let item = self.ast().item(it)
+        var code = String.new()
+        self.attrs(item.attrs, "", mut code)
+        self.constant(c, "", mut code)
+        return self.type_start(c.name.text, code, item.docs).join("\n\n")
+
+    pure def alias_section(self, it: ItemId, a: TypeAlias, impls: list[ItemId]) -> String:
+        let item = self.ast().item(it)
+        let name = a.name.text.copy()
+        var code = String.new()
+        self.attrs(item.attrs, "", mut code)
+        code.push(self.header(item.range.start, item.range.end, item.attrs))
+        code.push("\n")
+        # A refinement's one way in from its base (07).
+        if a.refinement:
+            if let Some(base) = a.ty:
+                var args = String.new()
+                if not a.generics.is_empty():
+                    var names: list[String] = []
+                    for g in a.generics:
+                        names.push(g.name.text.copy())
+                    args = "[{names.join(", ")}]"
+                let range = self.ast().type_expr(base).range
+                let written = self.compact(range.start, range.end)
+                code.push(
+                    "{STEP}def try_from(value: {written}) -> {name}{args} ! RefinementError\n"
+                )
+        self.impl_constants(impls, mut code)
+        self.impl_headers(impls, mut code)
+        var parts = self.type_start(name, code, item.docs)
+        for m in self.methods(name, [], impls, None):
+            parts.push(m.copy())
+        return parts.join("\n\n")
+
+    ## The impls of types the module does not declare: their headers, and
+    ## the methods of the inherent ones.
+    pure def implementations(self, impls: list[ItemId]) -> String?:
+        if impls.is_empty():
+            return None
+        let ast = self.ast()
+        var code = String.new()
+        var methods: list[String] = []
+        for it in impls:
+            let item = ast.item(it)
+            let ItemKind.Impl(i) = ref item.kind else:
+                continue
+            self.doc_comment(item.docs, "", mut code)
+            code.push(self.header(item.range.start, item.range.end, item.attrs))
+            code.push("\n")
+            if i.trait_ty.is_some():
+                continue
+            for c in i.consts:
+                self.doc_comment(self.docs_before_keyword(c.name.range.start), STEP, mut code)
+                self.constant(c, STEP, mut code)
+            var owner = String.new()
+            match self_name(ast, i):
+                case Some(n):
+                    owner = n
+                case None:
+                    let range = ast.type_expr(i.self_ty).range
+                    owner = self.compact(range.start, range.end)
+            for m in i.methods:
+                if self.shown(m.vis):
+                    let docs = self.docs_before(m.range.start)
+                    methods.push(self.function(m, docs, Some(owner), None, 3))
+        var parts = ["## Implementations\n\n```sisu\n{code}```".to_string()]
+        for m in methods:
+            parts.push(m.copy())
+        return Some(parts.join("\n\n"))
+
+## The impls a module wrote of the type `name`.
+pure def impls_in(impls_of: dict[String, list[ItemId]], name: str) -> list[ItemId]:
+    if let Some(found) = impls_of.get(name.to_string()):
+        return found.copy()
+    return []
+
+## Whether the path `d` begins with the path `me`.
+pure def starts_with(d: list[String], me: list[String]) -> bool:
+    if len(d) < len(me):
+        return False
+    for k in range(len(me)):
+        if d[k] != me[k]:
+            return False
+    return True
+
+## `name` added to `out` unless it is there.
+pure def add_once(mut out: list[String], name: str):
+    for x in out:
+        if x == name:
+            return
+    out.push(name.to_string())
+
+# ------------------------------------------------------------------ tests
+
+## The texts `xs` as `String`s.
+pure def strings(xs: list[str]) -> list[String]:
+    var out: list[String] = []
+    for x in xs:
+        out.push(x.to_string())
+    return out
+
+## A prelude with what the tests below use: the results, a list, the
+## typed hole, and a capability with its operations trait.
+pure def test_prelude() -> String:
+    var p = String.new()
+    p.push("@builtin(\"String\")\nstruct String:\n    pass\n\n")
+    p.push("@builtin(\"list\")\nstruct list[T]:\n    pass\n\n")
+    p.push("enum Option[T]:\n    Some(T)\n    None\n\n")
+    p.push("enum Result[T, E]:\n    Ok(T)\n    Err(E)\n\n")
+    p.push("struct Fs:\n    pass\n\n")
+    p.push("trait FsOps:\n    def read(self) -> int\n\n")
+    p.push("@intrinsic(\"todo\")\npure def todo[T](name: str = \"\") -> T\n")
+    return p
+
+## What `sisu doc` prints of `text`, a program of one file whose stem is
+## `name`, checked against the test prelude.
+pure def printed_of(text: str, name: str) -> String:
+    let catalog = Catalog.parse("")
+    let base = typeck.base_from(test_prelude(), catalog)
+    let checked = typeck.check_file(base, text, catalog, False, {}, True)
+    let typed = checked.typed else:
+        return String.new()
+    let module = build.module(parse(text, catalog).tree)
+    let sources = [
+        Source(
+            id=typed.prog.user_modules[0],
+            path=name.to_string(),
+            text=text.to_string(),
+            tokens=lex(text).tokens,
+            module=module,
+        ),
+    ]
+    let docs = Docs(
+        sources=ref sources,
+        prog=ref typed.prog,
+        types=ref typed.types,
+        inferred=ref typed.inferred,
+        public_only=False,
+    )
+    return printed(pages(docs))
+
+test "inline code is fenced by one backtick more than it holds":
+    assert code_span("a") == "`a`"
+    assert code_span("a`b") == "``a`b``"
+    assert code_span("`a") == "`` `a ``"
+    assert code_span("a``b`") == "``` a``b` ```"
+
+test "doc text loses its blank ends, and an example's fence says `sisu`":
+    let example = ["", "First.", "", "```", "x = 1", "```"]
+    var lines = strings(example)
+    for l in strings(["    ```", "y", "    ```", "```text", "z", "```", ""]):
+        lines.push(l.copy())
+    var expected = "First.\n\n```sisu\nx = 1\n```\n    ```sisu\ny\n    ```\n".to_string()
+    expected.push("```text\nz\n```")
+    let wanted = Some(expected)
+    assert markdown(lines) == wanted
+    assert markdown(strings(["", "  "])) == None
+
+test "a summary is the first paragraph on one line":
+    let lines = strings(["", "  First line,", "second line.", "", "More."])
+    assert summary(lines) == Some("First line, second line.".to_string())
+    assert summary(strings(["Only", "```", "code"])) == Some("Only".to_string())
+    assert summary(strings(["", ""])) == None
+    let entry_line = entry("f", "#f", strings(["Does it."]))
+    assert entry_line == "- [`f`](#f): Does it."
+
+test "a page: declarations as written, doc text, and what the compiler knows":
+    var text = "##! A module.\n\n## Why `find` fails.\nerror Missing:\n    Gone\n\n".to_string()
+    text.push("## Finds it.\n##\n## ```\n## assert find(1) == Ok(1)\n## ```\n")
+    text.push("def find(\n    n: int,\n) -> int !:\n    if n < 0:\n        return Err(Gone)\n")
+    text.push("    return Ok(n)\n\n## Not yet.\n")
+    text.push(
+        "def later[F: FsOps](fs: F, own seen: list[Fs]) -> int:\n    return todo(\"later\")\n"
+    )
+    var expected = "<!-- m.md -->\n# `m`\n\nA module.\n\n## Contents\n\n".to_string()
+    expected.push("- [`Missing`](#Missing): Why `find` fails.\n- [`find`](#find): Finds it.\n")
+    expected.push("- [`later`](#later): Not yet.\n\n")
+    expected.push(
+        "<a id=\"Missing\"></a>\n## `Missing`\n\n```sisu\nerror Missing\n    Gone\n```\n\n"
+    )
+    expected.push("Why `find` fails.\n\n")
+    expected.push("<a id=\"find\"></a>\n## `find`\n\n```sisu\n")
+    expected.push("def find(n: int) -> int ! Missing  # inferred\n```\n\n")
+    expected.push("Finds it.\n\n```sisu\nassert find(1) == Ok(1)\n```\n\n")
+    expected.push("<a id=\"later\"></a>\n## `later`\n\n```sisu\n")
+    expected.push("def later[F: FsOps](fs: F, own seen: list[Fs]) -> int\n```\n\nNot yet.\n\n")
+    expected.push("Unfinished: `todo(\"later\")`.\n\nCapabilities: `fs` (`Fs`), `seen` (`Fs`).\n")
+    assert printed_of(text, "m") == expected

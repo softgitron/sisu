@@ -1,0 +1,8 @@
+hits: 8
+Ok(False)
+Err(True)
+Atomic(True) True False
+set up once
+callers: 4
+sum: 15
+readers saw 32; now second 2

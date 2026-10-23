@@ -1,0 +1,22 @@
+# `own` closures (04, "Closures") keep copies of what they capture, so they
+# can be returned and stored in a plain struct.
+
+def make_adder(n: int) -> (int) -> int:
+    let k = n * 2
+    return own x -> x + k
+
+struct Handler:
+    name: String
+    run: (int) -> int
+
+def main():
+    let f = make_adder(1)
+    print(f(1))
+    print(f(10))
+    let base = 10
+    let h = Handler(name="add base".to_string(), run=own x -> x + base)
+    print("{h.name}: {h.run(1)}")
+    var handlers: list[(int) -> int] = []
+    for i in range(3):
+        handlers.push(own x -> x * i)
+    print([g(5) for g in handlers])

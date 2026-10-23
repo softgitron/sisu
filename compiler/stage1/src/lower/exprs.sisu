@@ -1,0 +1,1670 @@
+##! Expressions (stage 0's `sisu-lower/src/exprs.rs`): places, operands,
+##! and evaluation into a destination.
+##!
+##! Lowering makes a few expressions of its own (a generator's closure, a
+##! literal a pattern compares with, the parts a failed assertion shows);
+##! they go in the function's own arena after the body's (`FnLower.extra`),
+##! so every expression is read through `ex`.
+
+from stage1.diag import TextRange
+from stage1.lower.func import (
+    CompRest,
+    Cx,
+    DropEntry,
+    FnLower,
+    ForBody,
+    closure_name,
+    comptime_name,
+    value_wrapped,
+)
+from stage1.sir import (
+    Aggregate,
+    BinOp as SirBinOp,
+    Callee,
+    Const,
+    Loc,
+    LocalId,
+    Operand,
+    Place,
+    Proj,
+    Rvalue,
+    StatementKind,
+    Terminator,
+    Type,
+    UnOp as SirUnOp,
+    VALUE_WRAPPER,
+)
+from stage1.syntax.ast import BinOp, CmpOp, Mode, UnOp
+from stage1.typeck.program import param_local_ty
+from stage1.typeck.std_sources import own_kind, sized
+from stage1.typeck.thir import (
+    ArgMode,
+    Coercion,
+    FieldInit,
+    IndexKind,
+    InterpPart,
+    TArg,
+    TCompClause,
+    TCompKind,
+    TExpr,
+    TExprId,
+    TExprKind,
+    TryKind,
+)
+from stage1.typeck.thir import Callee as TCallee
+from stage1.typeck.ty import DefId, Ty, TyData, TyKey, Types
+
+pub pure def bin_op(cx: Cx, types: Types, op: BinOp, ty: Ty) -> SirBinOp:
+    var is_string = False
+    if let TyData.Adt(d, _) = types.data(ty):
+        is_string = cx.prog.builtin(d) == Some("String".to_string())
+    return match op:
+        case BinOp.Add: if is_string: SirBinOp.Concat else: SirBinOp.Add
+        case BinOp.Sub: SirBinOp.Sub
+        case BinOp.Mul: SirBinOp.Mul
+        case BinOp.Div: SirBinOp.Div
+        case BinOp.FloorDiv: SirBinOp.FloorDiv
+        case BinOp.Mod: SirBinOp.Mod
+        case BinOp.Pow: SirBinOp.Pow
+        case BinOp.WrapAdd: SirBinOp.WrapAdd
+        case BinOp.WrapSub: SirBinOp.WrapSub
+        case BinOp.WrapMul: SirBinOp.WrapMul
+        case BinOp.SatAdd: SirBinOp.SatAdd
+        case BinOp.SatSub: SirBinOp.SatSub
+        case BinOp.SatMul: SirBinOp.SatMul
+        case BinOp.Shl: SirBinOp.Shl
+        case BinOp.Shr: SirBinOp.Shr
+        case BinOp.BitAnd: SirBinOp.BitAnd
+        case BinOp.BitOr: SirBinOp.BitOr
+        case BinOp.BitXor: SirBinOp.BitXor
+        case BinOp.And | BinOp.Or | BinOp.Coalesce: SirBinOp.Eq
+
+pub pure def cmp_op(op: CmpOp) -> SirBinOp:
+    return match op:
+        case CmpOp.Eq: SirBinOp.Eq
+        case CmpOp.Ne: SirBinOp.Ne
+        case CmpOp.Lt: SirBinOp.Lt
+        case CmpOp.Le: SirBinOp.Le
+        case CmpOp.Gt: SirBinOp.Gt
+        case CmpOp.Ge: SirBinOp.Ge
+        case CmpOp.In | CmpOp.NotIn: SirBinOp.In
+
+## The two hex digits of a byte.
+pure def hex_byte(b: int) -> String:
+    let digits = "0123456789abcdef"
+    var out = String.new()
+    out.push(digits.byte_slice((b >> 4) & 15, ((b >> 4) & 15) + 1))
+    out.push(digits.byte_slice(b & 15, (b & 15) + 1))
+    return out
+
+impl FnLower:
+    # ---------------------------------------------------------------- expressions
+
+    ## An expression of the body, or one lowering made.
+    pub pure def ex(self, cx: Cx, e: TExprId) -> TExpr:
+        let n = len(cx.body.exprs)
+        if e.index < n:
+            return cx.body.exprs[e.index].copy()
+        return self.extra[e.index - n].copy()
+
+    pub pure def ty_of(self, cx: Cx, e: TExprId) -> Ty:
+        let n = len(cx.body.exprs)
+        if e.index < n:
+            return cx.body.exprs[e.index].ty
+        return self.extra[e.index - n].ty
+
+    pub pure def span_of(self, cx: Cx, e: TExprId) -> TextRange:
+        let n = len(cx.body.exprs)
+        if e.index < n:
+            return cx.body.exprs[e.index].span
+        return self.extra[e.index - n].span
+
+    ## Adds an expression of lowering's own.
+    pub pure def add_expr(
+        mut self, cx: Cx, own kind: TExprKind, ty: Ty, span: TextRange
+    ) -> TExprId:
+        let id = TExprId(index=len(cx.body.exprs) + len(self.extra))
+        self.extra.push(TExpr(kind=kind, ty=ty, span=span))
+        return id
+
+    ## Whether the expression denotes a place rather than a temporary.
+    pub pure def is_place(self, cx: Cx, e: TExprId) -> bool:
+        return match self.ex(cx, e).kind:
+            case TExprKind.Local(_) | TExprKind.Deref(_) | TExprKind.Index(_, _, _): True
+            case TExprKind.Field(base, _): self.is_place(cx, base)
+            case TExprKind.Coerce(x, Coercion.Unrefine): self.is_place(cx, x)
+            case _: False
+
+    # ---------------------------------------------------------------- places and operands
+
+    pub pure def local_place(mut self, cx: Cx, l: int) -> Place:
+        if let Some(p) = self.alias.get(l):
+            return p.copy()
+        if let Some(k) = self.env.get(l):
+            # What a closure keeps by value its environment holds itself.
+            var by_value = False
+            if let Some(c) = self.closure:
+                let caps = ref cx.body.closures[c.index].captures
+                if k < len(caps):
+                    by_value = caps[k].by_value
+            if by_value:
+                return Place(local=LocalId(index=1), proj=[Proj.Field(k)])
+            return Place(local=LocalId(index=1), proj=[Proj.Field(k), Proj.Deref])
+        return Place.local(self.local_for(cx, l))
+
+    ## The place of an expression; a temporary (dropped at the end of the
+    ## statement) for one that is not a place.
+    pub pure def place_of(mut self, cx: Cx, e: TExprId) -> Place:
+        let x = self.ex(cx, e)
+        match x.kind:
+            case TExprKind.Local(l):
+                return self.local_place(cx, l)
+            case TExprKind.Field(base, index):
+                return self.place_of(cx, base).project(Proj.Field(index))
+            case TExprKind.Index(base, index, kind):
+                let b = self.place_of(cx, base)
+                let ity = self.ty_of(cx, index)
+                let i = self.temp(cx, ity)
+                self.into(cx, Place.local(i), index)
+                if kind == IndexKind.Dict and self.needs_drop(cx, ity):
+                    self.register(DropEntry.Local(i))
+                    self.split(cx)
+                let proj = match kind:
+                    case IndexKind.List: Proj.Index(i)
+                    case IndexKind.ListFromEnd: Proj.IndexFromEnd(i)
+                    case IndexKind.Dict: Proj.Key(i)
+                return b.project(proj)
+            # A refinement's value is its base's: the same place.
+            case TExprKind.Coerce(inner, Coercion.Unrefine):
+                return self.place_of(cx, inner)
+            case TExprKind.Deref(inner):
+                if self.is_place(cx, inner):
+                    return self.place_of(cx, inner).project(Proj.Deref)
+                let ity = self.ty_of(cx, inner)
+                let t = self.temp(cx, ity)
+                self.into(cx, Place.local(t), inner)
+                # A `Shared` or a mutex guard made for the expression is
+                # dropped with the statement's temporaries.
+                if self.needs_drop(cx, ity) and ity != Ty.never():
+                    self.register(DropEntry.Local(t))
+                    self.split(cx)
+                return Place.local(t).project(Proj.Deref)
+            case _:
+                let t = self.temp(cx, x.ty)
+                self.into(cx, Place.local(t), e)
+                if self.needs_drop(cx, x.ty) and x.ty != Ty.never():
+                    self.register(DropEntry.Local(t))
+                    self.split(cx)
+                return Place.local(t)
+
+    ## Whether a value of the type is copied: `Copy`, or a reference.
+    pub pure def copies(mut self, cx: Cx, ty: Ty) -> bool:
+        if let TyData.Ref(_, _) = self.types.data(ty):
+            return True
+        return cx.prog.is_copy_in(mut self.types, ty, self.bounds)
+
+    ## Reads a place by value: a copy, or a move of a non-`Copy` value.
+    pub pure def copy_or_move(mut self, cx: Cx, own p: Place, ty: Ty) -> Operand:
+        if self.copies(cx, ty):
+            return Operand.Copy(p)
+        return Operand.Move(p)
+
+    pure def literal(mut self, cx: Cx, x: TExpr) -> Const?:
+        match x.kind:
+            # A `u64`, `u128` or `i128` is a value of its own kind, which an
+            # intrinsic makes.
+            case TExprKind.Int(n):
+                if let Some(k) = self.sized_int(cx, x.ty):
+                    if own_kind(k):
+                        return None
+                return Some(Const.Int(n))
+            # So is an `f32`, made from the `f64` that holds it.
+            case TExprKind.Float(f):
+                if self.is_f32(cx, x.ty):
+                    return None
+                return Some(Const.Float(f))
+            case TExprKind.Bool(b):
+                return Some(Const.Bool(b))
+            case TExprKind.Char(c):
+                return Some(Const.Char(c))
+            case TExprKind.Unit:
+                return Some(Const.Unit)
+            case TExprKind.Str(s):
+                if x.ty == Ty.str():
+                    return Some(Const.Str(s.copy()))
+                return None
+            case TExprKind.FnRef(d, _):
+                var wrapped = False
+                if let Some(f) = cx.prog.fn_info(d):
+                    wrapped = value_wrapped(cx.prog, mut self.types, f)
+                if wrapped:
+                    return None
+                return Some(Const.Fn(cx.ctx.fn_name(cx.prog, self.types, d)))
+            case _:
+                return None
+
+    ## Whether `t` is `f32`.
+    pub pure def is_f32(self, cx: Cx, t: Ty) -> bool:
+        if let TyData.Adt(d, a) = self.types.data(t):
+            return a.is_empty() and cx.prog.builtin(d) == Some("f32".to_string())
+        return False
+
+    ## The name of a sized integer type (`u8`), `None` for any other.
+    pub pure def sized_int(self, cx: Cx, t: Ty) -> String?:
+        let TyData.Adt(d, a) = self.types.data(t) else:
+            return None
+        if not a.is_empty():
+            return None
+        let b = cx.prog.builtin(d) else:
+            return None
+        for s in sized():
+            if s == b:
+                return Some(b.copy())
+        return None
+
+    ## Whether evaluating an expression may leave the statement it is part
+    ## of before the statement runs: by a `?`, a `return`, a `break`, or a
+    ## panic (a call, an index, arithmetic, a contract). Only literals,
+    ## locals, functions, closures, and the parts, borrows and aggregates of
+    ## such cannot; a struct with an invariant or a field's default can.
+    pub pure def may_leave(self, cx: Cx, e: TExprId) -> bool:
+        let n = len(cx.body.exprs)
+        if e.index < n:
+            return self.kind_may_leave(cx, cx.body.exprs[e.index].kind)
+        return self.kind_may_leave(cx, self.extra[e.index - n].kind)
+
+    pure def kind_may_leave(self, cx: Cx, kind: TExprKind) -> bool:
+        match kind:
+            case TExprKind.Int(_) | TExprKind.WideInt(_) | TExprKind.Float(_) | TExprKind.Bool(_):
+                return False
+            case TExprKind.Char(_) | TExprKind.Str(_) | TExprKind.Bytes(_) | TExprKind.Unit:
+                return False
+            case TExprKind.Local(_) | TExprKind.FnRef(_, _) | TExprKind.Closure(_):
+                return False
+            case TExprKind.Field(base, _):
+                return self.may_leave(cx, base)
+            case TExprKind.Deref(inner):
+                return self.may_leave(cx, inner)
+            case TExprKind.Borrow(place, _):
+                return self.may_leave(cx, place)
+            case TExprKind.Tuple(xs):
+                return self.any_may_leave(cx, xs)
+            case TExprKind.List(xs):
+                return self.any_may_leave(cx, xs)
+            case TExprKind.Variant(_, _, args):
+                return self.any_may_leave(cx, args)
+            case TExprKind.Struct(def_, fields):
+                if cx.prog.invariant_check(def_).is_some():
+                    return True
+                for f in fields:
+                    match f:
+                        case FieldInit.Value(x):
+                            if self.may_leave(cx, x):
+                                return True
+                        case FieldInit.Default(_):
+                            return True
+                return False
+            case _:
+                return True
+
+    pure def any_may_leave(self, cx: Cx, xs: list[TExprId]) -> bool:
+        for x in xs:
+            if self.may_leave(cx, x):
+                return True
+        return False
+
+    ## The values of expressions as the operands of one statement, in
+    ## order: each held while the ones after it are evaluated, when one of
+    ## them may leave (`hold`), so that leaving drops it.
+    pub pure def operands(mut self, cx: Cx, es: list[TExprId]) -> list[Operand]:
+        var may: list[bool] = []
+        for e in es:
+            may.push(self.may_leave(cx, e))
+        let later = self.leaving_after(may)
+        var held: list[LocalId] = []
+        var ops: list[Operand] = []
+        for i in range(len(es)):
+            let mark = len(self.locals)
+            let o = self.operand(cx, es[i])
+            if later[i]:
+                self.hold(cx, o, mark, self.ty_of(cx, es[i]), mut held)
+            ops.push(o)
+        self.release(cx, held)
+        return ops
+
+    ## For each of a statement's operands, whether one after it may leave
+    ## the statement, from whether each may.
+    pub pure def leaving_after(self, may: list[bool]) -> list[bool]:
+        var out: list[bool] = []
+        for _ in may:
+            out.push(False)
+        var i = len(may) - 2
+        while i >= 0:
+            out[i] = out[i + 1] or may[i + 1]
+            i -= 1
+        return out
+
+    ## The value of an expression as an operand.
+    pub pure def operand(mut self, cx: Cx, e: TExprId) -> Operand:
+        let x = self.ex(cx, e)
+        if let Some(c) = self.literal(cx, x):
+            return Operand.Const(c)
+        if self.is_place(cx, e):
+            let p = self.place_of(cx, e)
+            return self.copy_or_move(cx, p, x.ty)
+        let t = self.temp(cx, x.ty)
+        self.into(cx, Place.local(t), e)
+        # A temporary that holds a capability handle moves into what takes
+        # it, count and all (decision 237).
+        if self.needs_drop(cx, x.ty):
+            return Operand.Move(Place.local(t))
+        return Operand.Copy(Place.local(t))
+
+    ## A reference to the expression's place (or to a temporary).
+    pub pure def borrow_operand(mut self, cx: Cx, e: TExprId, mutable: bool) -> Operand:
+        let p = self.place_of(cx, e)
+        let et = self.ty(cx, self.ty_of(cx, e))
+        let t = self.temp_sir(Type.Ref(inner=[et], mutable=mutable))
+        let loc = cx.loc(self.span_of(cx, e))
+        self.assign(cx, Place.local(t), Rvalue.Ref(place=p, mutable=mutable), loc)
+        return Operand.Copy(Place.local(t))
+
+    ## An operand for reading without consuming: a copy of a `Copy` value
+    ## that holds no capability handle, a reference otherwise.
+    pub pure def compare_operand(mut self, cx: Cx, e: TExprId) -> Operand:
+        if not self.needs_drop(cx, self.ty_of(cx, e)):
+            return self.operand(cx, e)
+        return self.borrow_operand(cx, e, False)
+
+    ## The expression as a `str` value.
+    pub pure def str_operand(mut self, cx: Cx, e: TExprId) -> Operand:
+        let ety = self.ty_of(cx, e)
+        if ety == Ty.str():
+            return self.operand(cx, e)
+        let loc = cx.loc(self.span_of(cx, e))
+        if let TyData.Ref(inner, _) = self.types.data(ety).copy():
+            let p = self.place_of(cx, e).project(Proj.Deref)
+            if inner == Ty.str():
+                return Operand.Copy(p)
+            let t = self.temp_sir(Type.Str)
+            self.assign(cx, Place.local(t), Rvalue.StrView(p), loc)
+            return Operand.Copy(Place.local(t))
+        let p = self.place_of(cx, e)
+        let t = self.temp_sir(Type.Str)
+        self.assign(cx, Place.local(t), Rvalue.StrView(p), loc)
+        return Operand.Copy(Place.local(t))
+
+    ## An argument as the callee takes it; `by_value` when the callee takes
+    ## by value what the call passes by reference (a trait method resolved
+    ## to the impl of a `Copy` type). `owned`: the parameter is taken with
+    ## `own`.
+    pub pure def arg_operand_for(mut self, cx: Cx, a: TArg, by_value: bool, owned: bool) -> Operand:
+        if by_value and (a.mode == ArgMode.Ref or a.mode == ArgMode.Value):
+            if let TyData.Ref(_, _) = self.types.data(self.ty_of(cx, a.expr)):
+                let p = self.place_of(cx, a.expr).project(Proj.Deref)
+                return Operand.Copy(p)
+            if owned:
+                return self.operand(cx, a.expr)
+            return self.lent_copy(cx, a.expr)
+        if a.mode == ArgMode.Value and not owned:
+            if cx.prog.is_copy_in(mut self.types, self.ty_of(cx, a.expr), self.bounds):
+                return self.lent_copy(cx, a.expr)
+        return self.arg_operand(cx, a)
+
+    ## Whether each parameter of a function (`self` first) is taken with
+    ## `own`.
+    pub pure def owned_params(self, cx: Cx, def_: DefId) -> list[bool]:
+        var out: list[bool] = []
+        let f = cx.prog.fn_info(def_) else:
+            return out
+        if let Some(m) = f.self_mode:
+            out.push(m == Mode.Own)
+        for p in f.params:
+            out.push(p.mode == Mode.Own)
+        return out
+
+    ## A `Copy` value a callee borrows: a copy of it, or, for one that holds
+    ## a capability handle, a copy of its place, a temporary being dropped
+    ## with the statement's others, so that the handle outlives the call
+    ## whichever callee takes the copy (decision 237).
+    pure def lent_copy(mut self, cx: Cx, e: TExprId) -> Operand:
+        if self.needs_drop(cx, self.ty_of(cx, e)):
+            return Operand.Copy(self.place_of(cx, e))
+        return self.operand(cx, e)
+
+    ## A reference to the value of an expression: the expression itself
+    ## when it is one, a borrow of its place otherwise.
+    pub pure def ref_operand(mut self, cx: Cx, e: TExprId) -> Operand:
+        if let TyData.Ref(_, _) = self.types.data(self.ty_of(cx, e)):
+            return self.operand(cx, e)
+        return self.borrow_operand(cx, e, False)
+
+    pure def arg_operand(mut self, cx: Cx, a: TArg) -> Operand:
+        let ety = self.ty_of(cx, a.expr)
+        match a.mode:
+            case ArgMode.Ref:
+                return self.ref_operand(cx, a.expr)
+            case ArgMode.Value:
+                return self.operand(cx, a.expr)
+            case ArgMode.Borrow:
+                if self.copies(cx, ety):
+                    return self.lent_copy(cx, a.expr)
+                return self.borrow_operand(cx, a.expr, False)
+            case ArgMode.BorrowMut:
+                if let TyData.Ref(_, True) = self.types.data(ety):
+                    return self.operand(cx, a.expr)
+                return self.borrow_operand(cx, a.expr, True)
+
+    pure def variant_names(self, cx: Cx, def_: DefId, v: int) -> (String, String):
+        var tname = cx.ctx.type_name(cx.prog, def_)
+        if Some(def_) == cx.prog.wk.option:
+            tname = "Option".to_string()
+        elif Some(def_) == cx.prog.wk.result:
+            tname = "Result".to_string()
+        var vname = String.new()
+        if let Some(e) = cx.prog.enum_info(def_):
+            if v < len(e.variants):
+                vname = e.variants[v].name.copy()
+        return (tname, vname)
+
+    pub pure def intrinsic_call(
+        mut self,
+        cx: Cx,
+        own dest: Place,
+        name: str,
+        own tys: list[Type],
+        own args: list[Operand],
+        loc: Loc?,
+    ):
+        let callee = Callee.Intrinsic(name=name.to_string(), args=tys)
+        self.emit(cx, StatementKind.Call(dest=dest, callee=callee, args=args), loc)
+
+    ## The first type argument of an `Adt`, or `Error`.
+    pure def first_arg(self, t: Ty) -> Ty:
+        if let TyData.Adt(_, a) = self.types.data(t):
+            if not a.is_empty():
+                return a[0]
+        return Ty.error()
+
+    ## The second type argument of an `Adt`, or `Error`.
+    pure def second_arg(self, t: Ty) -> Ty:
+        if let TyData.Adt(_, a) = self.types.data(t):
+            if len(a) > 1:
+                return a[1]
+        return Ty.error()
+
+    # ---------------------------------------------------------------- evaluation into a place
+
+    pub pure def into(mut self, cx: Cx, own dest: Place, e: TExprId):
+        let x = self.ex(cx, e)
+        let loc = cx.loc(x.span)
+        if let Some(c) = self.literal(cx, x):
+            self.assign(cx, dest, Rvalue.Use(Operand.Const(c)), loc)
+            return
+        match x.kind:
+            case TExprKind.Str(s):
+                # A literal that took the type `String` or `Path`
+                # (FromLiteral).
+                var name = "String.new"
+                if let TyData.Adt(d, _) = self.types.data(x.ty):
+                    if cx.prog.builtin(d) == Some("Path".to_string()):
+                        name = "Path.new"
+                self.intrinsic_call(cx, dest, name, [], [Operand.Const(Const.Str(s.copy()))], loc)
+            case TExprKind.Local(_) | TExprKind.Field(_, _) | TExprKind.Index(
+                _, _, _
+            ) | TExprKind.Deref(_):
+                let p = self.place_of(cx, e)
+                let v = self.copy_or_move(cx, p, x.ty)
+                self.assign(cx, dest, Rvalue.Use(v), loc)
+            case TExprKind.Const(d):
+                let name = cx.ctx.const_name(cx.prog, d)
+                self.emit(
+                    cx,
+                    StatementKind.Call(dest=dest, callee=Callee.Fn(name=name, args=[]), args=[]),
+                    loc,
+                )
+            # A `const` generic parameter: the constant its type argument is,
+            # which the frame has at run time.
+            case TExprKind.ConstParam(i):
+                self.intrinsic_call(cx, dest, "generic.value", [Type.Param(i)], [], loc)
+            case TExprKind.Call(callee, args):
+                if let TCallee.Fn(def_, type_args) = callee:
+                    if self.special_call(cx, dest.copy(), def_, type_args, args, loc):
+                        return
+                var c = Callee.Value(Operand.Const(Const.Unit))
+                var by_value: list[bool] = []
+                # A function value takes its arguments as its own.
+                var owned: list[bool] = []
+                match callee:
+                    case TCallee.Fn(def_, type_args):
+                        let (cc, bv) = self.callee_for(cx, def_, type_args)
+                        c = cc
+                        by_value = bv
+                        owned = self.owned_params(cx, def_)
+                    case TCallee.Value(f):
+                        c = Callee.Value(self.operand(cx, f))
+                        for _ in args:
+                            owned.push(True)
+                var may: list[bool] = []
+                for a in args:
+                    may.push(self.may_leave(cx, a.expr))
+                let later = self.leaving_after(may)
+                var held: list[LocalId] = []
+                var ops: list[Operand] = []
+                for i in range(len(args)):
+                    let bv = if i < len(by_value): by_value[i] else: False
+                    let own_ = if i < len(owned): owned[i] else: True
+                    let mark = len(self.locals)
+                    let o = self.arg_operand_for(cx, args[i], bv, own_)
+                    if later[i]:
+                        self.hold(cx, o, mark, self.ty_of(cx, args[i].expr), mut held)
+                    ops.push(o)
+                self.release(cx, held)
+                self.emit(cx, StatementKind.Call(dest=dest, callee=c, args=ops), loc)
+                if x.ty == Ty.never():
+                    self.terminate(Terminator.Unreachable, loc)
+            case TExprKind.Variant(def_, variant, args):
+                let ops = self.operands(cx, args)
+                let (t, v) = self.variant_names(cx, def_, variant)
+                self.assign(
+                    cx, dest, Rvalue.Aggregate(kind=Aggregate.Variant(t, v), operands=ops), loc
+                )
+            case TExprKind.Struct(def_, fields):
+                var ops: list[Operand] = []
+                var held: list[LocalId] = []
+                var may: list[bool] = []
+                for f in fields:
+                    match f:
+                        case FieldInit.Value(v):
+                            may.push(self.may_leave(cx, v))
+                        case FieldInit.Default(_):
+                            may.push(True)
+                let later = self.leaving_after(may)
+                for i in range(len(fields)):
+                    let mark = len(self.locals)
+                    match fields[i]:
+                        case FieldInit.Value(v):
+                            let o = self.operand(cx, v)
+                            if later[i]:
+                                self.hold(cx, o, mark, self.ty_of(cx, v), mut held)
+                            ops.push(o)
+                        case FieldInit.Default(fi):
+                            var fty = Ty.error()
+                            if let Some(s) = cx.prog.struct_info(def_):
+                                if i < len(s.fields):
+                                    fty = s.fields[i].ty
+                            let t = self.temp(cx, fty)
+                            let name = cx.ctx.field_default_name(cx.prog, def_, fi)
+                            self.emit(
+                                cx,
+                                StatementKind.Call(
+                                    dest=Place.local(t),
+                                    callee=Callee.Fn(name=name, args=[]),
+                                    args=[],
+                                ),
+                                loc,
+                            )
+                            var o = Operand.Move(Place.local(t))
+                            if cx.prog.is_copy(mut self.types, fty):
+                                o = Operand.Copy(Place.local(t))
+                            if later[i]:
+                                self.hold(cx, o, mark, fty, mut held)
+                            ops.push(o)
+                self.release(cx, held)
+                let sname = cx.ctx.type_name(cx.prog, def_)
+                self.assign(
+                    cx,
+                    dest.copy(),
+                    Rvalue.Aggregate(kind=Aggregate.Struct(sname), operands=ops),
+                    loc,
+                )
+                # A struct with an invariant checks it once built (07); a
+                # panic of the check drops it.
+                var targs: list[Ty] = []
+                if let TyData.Adt(_, a) = self.types.data(x.ty):
+                    targs = a.copy()
+                var unheld: LocalId? = None
+                if dest.proj.is_empty() and not self.is_registered(dest.local):
+                    if self.needs_drop(cx, x.ty) and cx.prog.invariant_check(def_).is_some():
+                        unheld = Some(dest.local)
+                if let Some(l) = unheld:
+                    self.register(DropEntry.Local(l))
+                    self.split(cx)
+                self.invariant_after_construction(cx, dest, def_, targs, loc)
+                if let Some(l) = unheld:
+                    self.release(cx, [l])
+            case TExprKind.Tuple(xs):
+                let ops = self.operands(cx, xs)
+                self.assign(cx, dest, Rvalue.Aggregate(kind=Aggregate.Tuple, operands=ops), loc)
+            case TExprKind.List(xs):
+                let ops = self.operands(cx, xs)
+                self.assign(cx, dest, Rvalue.Aggregate(kind=Aggregate.List, operands=ops), loc)
+            case TExprKind.Set(xs):
+                let ops = self.operands(cx, xs)
+                self.assign(cx, dest, Rvalue.Aggregate(kind=Aggregate.Set, operands=ops), loc)
+            case TExprKind.Dict(kv):
+                var es: list[TExprId] = []
+                for (k, v) in kv:
+                    es.push(k)
+                    es.push(v)
+                let ops = self.operands(cx, es)
+                self.assign(cx, dest, Rvalue.Aggregate(kind=Aggregate.Dict, operands=ops), loc)
+            case TExprKind.Slice(base, lo, hi):
+                let b = self.borrow_operand(cx, base, False)
+                var l = Operand.Const(Const.Int(0))
+                if let Some(v) = lo:
+                    l = self.operand(cx, v)
+                var h = Operand.Const(Const.Int(9223372036854775807))
+                if let Some(v) = hi:
+                    h = self.operand(cx, v)
+                self.intrinsic_call(cx, dest, "list.slice", [], [b, l, h], loc)
+            case TExprKind.Borrow(place, mutable):
+                let p = self.place_of(cx, place)
+                self.assign(cx, dest, Rvalue.Ref(place=p, mutable=mutable), loc)
+            case TExprKind.Float(f):
+                # An `f32` literal (the others are constants) travels as the
+                # `f64` that holds it exactly.
+                self.intrinsic_call(
+                    cx, dest, "f32.from_literal", [], [Operand.Const(Const.Float(f))], loc
+                )
+            case TExprKind.Bytes(b):
+                # The bytes travel as hex text, which any byte survives.
+                var hex = String.new()
+                for v in b:
+                    hex.push(hex_byte(v))
+                self.intrinsic_call(
+                    cx, dest, "bytes.from_hex", [], [Operand.Const(Const.Str(hex))], loc
+                )
+            case TExprKind.Int(n):
+                # A literal of a kind of its own (the others are constants): a
+                # `u64` from its bits, a 128-bit integer from the `int` it
+                # equals.
+                let k = self.sized_int(cx, x.ty) ?? "u64".to_string()
+                let name = if k == "u64": "u64.from_bits".to_string() else: "{k}.widen"
+                self.intrinsic_call(cx, dest, name, [], [Operand.Const(Const.Int(n))], loc)
+            case TExprKind.WideInt(bits):
+                # A 128-bit literal beyond `int` travels as its decimal text.
+                let k = self.sized_int(cx, x.ty) ?? "i128".to_string()
+                var text = "{bits}"
+                if k == "i128":
+                    text = signed_text(bits)
+                self.intrinsic_call(
+                    cx, dest, "{k}.from_text", [], [Operand.Const(Const.Str(text))], loc
+                )
+            case TExprKind.Unary(op, operand):
+                let oty = self.ty_of(cx, operand)
+                if op == UnOp.BitNot:
+                    if let Some(k) = self.sized_int(cx, oty):
+                        let v = self.operand(cx, operand)
+                        self.intrinsic_call(cx, dest, "{k}.not", [], [v], loc)
+                        return
+                let v = self.operand(cx, operand)
+                let u = match op:
+                    case UnOp.Neg: SirUnOp.Neg
+                    case UnOp.Not: SirUnOp.Not
+                    case UnOp.BitNot: SirUnOp.BitNot
+                self.assign(cx, dest, Rvalue.Unary(op=u, operand=v), loc)
+            case TExprKind.Binary(op, lhs, rhs):
+                let lty = self.ty_of(cx, lhs)
+                if let Some(k) = self.sized_int(cx, lty):
+                    # The sized integers' arithmetic is the host's, by type.
+                    let name = match op:
+                        case BinOp.Add: "add"
+                        case BinOp.Sub: "sub"
+                        case BinOp.Mul: "mul"
+                        case BinOp.FloorDiv | BinOp.Div: "floordiv"
+                        case BinOp.Mod: "rem"
+                        case BinOp.Pow: "pow"
+                        case BinOp.WrapAdd: "wrap_add"
+                        case BinOp.WrapSub: "wrap_sub"
+                        case BinOp.WrapMul: "wrap_mul"
+                        case BinOp.SatAdd: "sat_add"
+                        case BinOp.SatSub: "sat_sub"
+                        case BinOp.SatMul: "sat_mul"
+                        case BinOp.Shl: "shl"
+                        case BinOp.Shr: "shr"
+                        case BinOp.BitAnd: "and"
+                        case BinOp.BitOr: "or"
+                        case BinOp.BitXor: "xor"
+                        case BinOp.And | BinOp.Or | BinOp.Coalesce: "invalid"
+                    let a = self.operand(cx, lhs)
+                    let b = self.operand(cx, rhs)
+                    self.intrinsic_call(cx, dest, "{k}.{name}", [], [a, b], loc)
+                    return
+                let bop = bin_op(cx, self.types, op, x.ty)
+                var a = Operand.Const(Const.Unit)
+                var b = Operand.Const(Const.Unit)
+                if bop == SirBinOp.Concat:
+                    a = self.str_operand(cx, lhs)
+                    b = self.str_operand(cx, rhs)
+                else:
+                    a = self.operand(cx, lhs)
+                    b = self.operand(cx, rhs)
+                self.assign(cx, dest, Rvalue.Binary(op=bop, lhs=a, rhs=b), loc)
+            case TExprKind.Logic(and_, lhs, rhs):
+                self.into(cx, dest.copy(), lhs)
+                let rhs_bb = self.new_block()
+                let join = self.new_block()
+                var zero = rhs_bb
+                var other = join
+                if and_:
+                    zero = join
+                    other = rhs_bb
+                self.terminate(
+                    Terminator.Switch(
+                        value=Operand.Copy(dest.copy()), cases=[(0, zero)], default=other
+                    ),
+                    loc,
+                )
+                self.switch_to(cx, rhs_bb)
+                self.push_scope()
+                self.into(cx, dest, rhs)
+                self.pop_scope(cx)
+                self.goto(join)
+                self.switch_to(cx, join)
+            case TExprKind.Compare(first, rest):
+                self.compare(cx, dest, first, rest, loc)
+            case TExprKind.Coalesce(opt, default, deref):
+                let p = self.place_of(cx, opt)
+                let inner = self.first_arg(self.ty_of(cx, opt))
+                let d = self.temp_sir(Type.Int)
+                self.assign(cx, Place.local(d), Rvalue.Discriminant(p.copy()), loc)
+                let some = self.new_block()
+                let none = self.new_block()
+                let join = self.new_block()
+                self.terminate(
+                    Terminator.Switch(
+                        value=Operand.Copy(Place.local(d)), cases=[(0, some)], default=none
+                    ),
+                    loc,
+                )
+                self.switch_to(cx, some)
+                let payload = p.project(Proj.Downcast(0)).project(Proj.Field(0))
+                var v = Operand.Const(Const.Unit)
+                if deref:
+                    v = Operand.Copy(payload.project(Proj.Deref))
+                else:
+                    v = self.copy_or_move(cx, payload, inner)
+                self.assign(cx, dest.copy(), Rvalue.Use(v), loc)
+                self.goto(join)
+                self.switch_to(cx, none)
+                self.push_scope()
+                self.into(cx, dest, default)
+                self.pop_scope(cx)
+                self.goto(join)
+                self.switch_to(cx, join)
+            case TExprKind.If(cond, then, else_):
+                let c = self.operand(cx, cond)
+                let t_bb = self.new_block()
+                let e_bb = self.new_block()
+                let join = self.new_block()
+                self.terminate(Terminator.Switch(value=c, cases=[(0, e_bb)], default=t_bb), loc)
+                self.switch_to(cx, t_bb)
+                self.push_scope()
+                self.into(cx, dest.copy(), then)
+                self.pop_scope(cx)
+                self.goto(join)
+                self.switch_to(cx, e_bb)
+                self.push_scope()
+                self.into(cx, dest, else_)
+                self.pop_scope(cx)
+                self.goto(join)
+                self.switch_to(cx, join)
+            case TExprKind.Match(scrutinee, arms):
+                self.match_into(cx, Some(dest), scrutinee, arms, x.span)
+            case TExprKind.Closure(id):
+                let cl = ref cx.body.closures[id.index]
+                var ops: list[Operand] = []
+                for cap in cl.captures:
+                    let p = self.local_place(cx, cap.local)
+                    let lty = cx.body.locals[cap.local].ty
+                    # What the closure keeps by value is copied, or moved into
+                    # a task.
+                    if cap.by_value:
+                        ops.push(self.copy_or_move(cx, p, lty))
+                        continue
+                    let st = self.ty(cx, lty)
+                    let t = self.temp_sir(Type.Ref(inner=[st], mutable=cap.mutable))
+                    self.assign(cx, Place.local(t), Rvalue.Ref(place=p, mutable=cap.mutable), loc)
+                    ops.push(Operand.Copy(Place.local(t)))
+                let name = closure_name(cx.ctx.body_name(cx.prog, self.types, cx.body), id)
+                var tys: list[Type] = []
+                for i in range(len(self.type_params)):
+                    tys.push(Type.Param(i))
+                self.assign(cx, dest, Rvalue.Closure(name=name, args=tys, operands=ops), loc)
+            # A generator: the closure that runs its body, in an `Iter`.
+            case TExprKind.Generator(id):
+                let fty = cx.body.closures[id.index].fn_ty
+                let c = self.temp(cx, fty)
+                let closure = self.add_expr(cx, TExprKind.Closure(id), fty, x.span)
+                self.into(cx, Place.local(c), closure)
+                self.intrinsic_call(cx, dest, "gen.new", [], [Operand.Move(Place.local(c))], loc)
+            # The compiler runs the function and replaces its body by the
+            # value; what runs here is a call that builds it.
+            case TExprKind.Comptime(id):
+                let name = comptime_name(cx.ctx.body_name(cx.prog, self.types, cx.body), id)
+                self.emit(
+                    cx,
+                    StatementKind.Call(dest=dest, callee=Callee.Fn(name=name, args=[]), args=[]),
+                    loc,
+                )
+            case TExprKind.Try(inner, kind):
+                self.try_(cx, dest, x, inner, kind, loc)
+            case TExprKind.OptChain(base, binder, then, flatten):
+                let p = self.place_of(cx, base)
+                let d = self.temp_sir(Type.Int)
+                self.assign(cx, Place.local(d), Rvalue.Discriminant(p.copy()), loc)
+                let some = self.new_block()
+                let none = self.new_block()
+                let join = self.new_block()
+                self.terminate(
+                    Terminator.Switch(
+                        value=Operand.Copy(Place.local(d)), cases=[(0, some)], default=none
+                    ),
+                    loc,
+                )
+                self.switch_to(cx, some)
+                self.push_scope()
+                _ = self.alias.insert(binder, p.project(Proj.Downcast(0)).project(Proj.Field(0)))
+                let tty = self.ty_of(cx, then)
+                let t = self.temp(cx, tty)
+                self.into(cx, Place.local(t), then)
+                let v = self.copy_or_move(cx, Place.local(t), tty)
+                if flatten:
+                    self.assign(cx, dest.copy(), Rvalue.Use(v), loc)
+                else:
+                    let some_v = Aggregate.Variant("Option".to_string(), "Some".to_string())
+                    self.assign(cx, dest.copy(), Rvalue.Aggregate(kind=some_v, operands=[v]), loc)
+                self.pop_scope(cx)
+                self.goto(join)
+                self.switch_to(cx, none)
+                let none_v = Aggregate.Variant("Option".to_string(), "None".to_string())
+                self.assign(cx, dest, Rvalue.Aggregate(kind=none_v, operands=[]), loc)
+                self.goto(join)
+                self.switch_to(cx, join)
+            case TExprKind.Interp(parts):
+                self.interp(cx, dest, x.ty, parts, loc)
+            case TExprKind.Comprehension(kind, clauses, elem, value):
+                var new = "list.new"
+                if kind == TCompKind.Set:
+                    new = "set.new"
+                elif kind == TCompKind.Dict:
+                    new = "dict.new"
+                var tys: list[Type] = []
+                if let TyData.Adt(_, a) = self.types.data(x.ty).copy():
+                    for t in a:
+                        tys.push(self.ty(cx, t))
+                else:
+                    new = "list.new"
+                self.intrinsic_call(cx, dest.copy(), new, tys, [], loc)
+                var vty: Ty? = None
+                if let Some(v) = value:
+                    vty = Some(self.ty_of(cx, v))
+                let item_tys = (self.ty_of(cx, elem), vty)
+                let dest_ty = self.ty(cx, x.ty)
+                self.comprehension_rest(
+                    cx,
+                    CompRest(
+                        clauses=clauses.copy(),
+                        elem=elem,
+                        value=value,
+                        dest=dest,
+                        dest_ty=dest_ty,
+                        kind=kind,
+                        item_tys=item_tys,
+                    ),
+                )
+            case TExprKind.Coerce(inner, kind):
+                self.coerce(cx, dest, x, inner, kind, loc)
+            case TExprKind.FieldDefault(def_, field):
+                let name = cx.ctx.field_default_name(cx.prog, def_, field)
+                self.emit(
+                    cx,
+                    StatementKind.Call(dest=dest, callee=Callee.Fn(name=name, args=[]), args=[]),
+                    loc,
+                )
+            case TExprKind.DefaultArg(def_, param):
+                let name = cx.ctx.param_default_name(cx.prog, self.types, def_, param)
+                self.emit(
+                    cx,
+                    StatementKind.Call(dest=dest, callee=Callee.Fn(name=name, args=[]), args=[]),
+                    loc,
+                )
+            case TExprKind.CopyOf(inner):
+                let p = self.place_of(cx, inner)
+                self.assign(cx, dest, Rvalue.CopyOf(p), loc)
+            case TExprKind.Trace(inner):
+                let r = self.borrow_operand(cx, inner, False)
+                self.intrinsic_call(cx, dest, "error.trace", [], [r], loc)
+            case TExprKind.RefineTry(value, refinement, type_args):
+                self.refine_try(cx, dest, value, refinement, type_args, loc)
+            case TExprKind.Error:
+                self.terminate(Terminator.Unreachable, loc)
+            # A function that is its value wrapper as a value (`f#value`): a
+            # closure of it with nothing in its environment, for the type
+            # arguments (decision 225).
+            case TExprKind.FnRef(d, type_args):
+                let name = "{cx.ctx.fn_name(cx.prog, self.types, d)}{VALUE_WRAPPER}"
+                var tys: list[Type] = []
+                for t in type_args:
+                    tys.push(self.ty(cx, t))
+                self.assign(cx, dest, Rvalue.Closure(name=name, args=tys, operands=[]), loc)
+            case _:
+                pass
+
+    ## `first op x op y ...`: each comparison in turn, the chain stopping at
+    ## the first that is false.
+    pure def compare(
+        mut self, cx: Cx, own dest: Place, first: TExprId, rest: list[(CmpOp, TExprId)], loc: Loc?
+    ):
+        # Equality and order through the traits when the type's impls are
+        # not the structural ones the operators compute.
+        let fty = self.ty_of(cx, first)
+        let stripped = self.types.strip_ref(fty)
+        let base = cx.prog.normalize(mut self.types, stripped, self.bounds)
+        var eq_trait: DefId? = None
+        if let Some(t) = cx.prog.wk.eq:
+            if not cx.prog.is_structural(mut self.types, base, t):
+                eq_trait = Some(t)
+        var ord_trait: DefId? = None
+        if let Some(t) = cx.prog.wk.partial_ord:
+            if not cx.prog.is_structural(mut self.types, base, t):
+                ord_trait = Some(t)
+        var any_trait = False
+        for (op, x) in rest:
+            let via = match op:
+                case CmpOp.Eq | CmpOp.Ne: eq_trait.is_some()
+                case CmpOp.In | CmpOp.NotIn: self.contains_method(cx, x).is_some()
+                case _: ord_trait.is_some()
+            if via:
+                any_trait = True
+        var a = Operand.Const(Const.Unit)
+        if any_trait:
+            a = self.ref_operand(cx, first)
+        else:
+            a = self.compare_operand(cx, first)
+        let join = self.new_block()
+        for i in range(len(rest)):
+            let (op, x) = rest[i]
+            var b = Operand.Const(Const.Unit)
+            if any_trait:
+                b = self.ref_operand(cx, x)
+            else:
+                b = self.compare_operand(cx, x)
+            var via_contains: DefId? = None
+            if op == CmpOp.In or op == CmpOp.NotIn:
+                via_contains = self.contains_method(cx, x)
+            if let Some(m) = via_contains:
+                var elem = Ty.error()
+                let xty = self.types.strip_ref(self.ty_of(cx, x))
+                let container = cx.prog.normalize(mut self.types, xty, self.bounds)
+                if let TyData.Adt(_, args) = self.types.data(container):
+                    if not args.is_empty():
+                        elem = args[0]
+                let (callee, _) = self.callee_for(cx, m, [elem])
+                let t = self.temp_sir(Type.Bool)
+                self.emit(
+                    cx,
+                    StatementKind.Call(
+                        dest=Place.local(t), callee=callee, args=[b.copy(), a.copy()]
+                    ),
+                    loc,
+                )
+                if op == CmpOp.NotIn:
+                    self.assign(
+                        cx,
+                        dest.copy(),
+                        Rvalue.Unary(op=SirUnOp.Not, operand=Operand.Copy(Place.local(t))),
+                        loc,
+                    )
+                else:
+                    self.assign(cx, dest.copy(), Rvalue.Use(Operand.Copy(Place.local(t))), loc)
+            elif op == CmpOp.NotIn:
+                let t = self.temp_sir(Type.Bool)
+                self.assign(
+                    cx,
+                    Place.local(t),
+                    Rvalue.Binary(op=SirBinOp.In, lhs=a.copy(), rhs=b.copy()),
+                    loc,
+                )
+                self.assign(
+                    cx,
+                    dest.copy(),
+                    Rvalue.Unary(op=SirUnOp.Not, operand=Operand.Copy(Place.local(t))),
+                    loc,
+                )
+            elif (op == CmpOp.Eq or op == CmpOp.Ne) and eq_trait.is_some():
+                self.eq_via_trait(cx, dest.copy(), a.copy(), b.copy(), op == CmpOp.Ne, base, loc)
+            elif (op == CmpOp.Lt or op == CmpOp.Le or op == CmpOp.Gt or op == CmpOp.Ge)
+                    and ord_trait.is_some():
+                self.order_via_trait(cx, dest.copy(), a.copy(), b.copy(), op, base, loc)
+            else:
+                self.assign(
+                    cx, dest.copy(), Rvalue.Binary(op=cmp_op(op), lhs=a.copy(), rhs=b.copy()), loc
+                )
+            if i + 1 < len(rest):
+                let next = self.new_block()
+                self.terminate(
+                    Terminator.Switch(
+                        value=Operand.Copy(dest.copy()), cases=[(0, join)], default=next
+                    ),
+                    loc,
+                )
+                self.switch_to(cx, next)
+            a = b
+        self.goto(join)
+        self.switch_to(cx, join)
+
+    ## `x in xs` for a list whose elements have an `Eq` of their own:
+    ## `list.contains`, written in Sisu.
+    pure def contains_method(mut self, cx: Cx, x: TExprId) -> DefId?:
+        let xty = self.types.strip_ref(self.ty_of(cx, x))
+        let container = cx.prog.normalize(mut self.types, xty, self.bounds)
+        let TyData.Adt(d, args) = self.types.data(container).copy() else:
+            return None
+        if Some(d) != cx.prog.wk.list:
+            return None
+        if args.is_empty():
+            return None
+        let elem = args[0]
+        let eq = cx.prog.wk.eq else:
+            return None
+        if cx.prog.is_structural(mut self.types, elem, eq):
+            return None
+        let key = self.types.key(container) else:
+            return None
+        return cx.prog.method(key, "contains")
+
+    pure def try_(
+        mut self, cx: Cx, own dest: Place, x: TExpr, inner: TExprId, kind: TryKind, loc: Loc?
+    ):
+        let p = self.place_of(cx, inner)
+        let d = self.temp_sir(Type.Int)
+        self.assign(cx, Place.local(d), Rvalue.Discriminant(p.copy()), loc)
+        let ok = self.new_block()
+        let err = self.new_block()
+        self.terminate(
+            Terminator.Switch(value=Operand.Copy(Place.local(d)), cases=[(0, ok)], default=err), loc
+        )
+        self.switch_to(cx, err)
+        match kind:
+            case TryKind.Result(_, _):
+                let err_ty = self.second_arg(self.ty_of(cx, inner))
+                let t = self.temp(cx, err_ty)
+                let payload = p.project(Proj.Downcast(1)).project(Proj.Field(0))
+                self.assign(cx, Place.local(t), Rvalue.Use(Operand.Move(payload)), loc)
+                let et = self.ty(cx, err_ty)
+                let r = self.temp_sir(Type.Ref(inner=[et], mutable=True))
+                self.assign(cx, Place.local(r), Rvalue.Ref(place=Place.local(t), mutable=True), loc)
+                # An error's trace names the program's `?`s: the standard
+                # library's (and its templates') are left out, as a panic's
+                # trace leaves out its frames.
+                let module = cx.prog.defs[cx.body.def_.index].module
+                if not cx.prog.modules[module.index].is_std:
+                    let at = self.location_text(cx, x.span)
+                    let u = self.unit()
+                    let args = [Operand.Copy(Place.local(r)), Operand.Const(Const.Str(at))]
+                    self.intrinsic_call(cx, u, "error.trace_push", [], args, loc)
+                let errv = Aggregate.Variant("Result".to_string(), "Err".to_string())
+                let made = Rvalue.Aggregate(kind=errv, operands=[Operand.Move(Place.local(t))])
+                self.assign(cx, Place.local(LocalId(index=0)), made, loc)
+            case TryKind.Option:
+                let nonev = Aggregate.Variant("Option".to_string(), "None".to_string())
+                self.assign(
+                    cx,
+                    Place.local(LocalId(index=0)),
+                    Rvalue.Aggregate(kind=nonev, operands=[]),
+                    loc,
+                )
+        self.contract_exit(cx, loc)
+        self.emit_exit(cx, 0, loc)
+        self.terminate(Terminator.Return, loc)
+        self.switch_to(cx, ok)
+        let v = self.copy_or_move(cx, p.project(Proj.Downcast(0)).project(Proj.Field(0)), x.ty)
+        self.assign(cx, dest, Rvalue.Use(v), loc)
+
+    pure def interp(mut self, cx: Cx, own dest: Place, ty: Ty, parts: list[InterpPart], loc: Loc?):
+        self.intrinsic_call(cx, dest.copy(), "fmt.new", [], [], loc)
+        let st = self.ty(cx, ty)
+        let r = self.temp_sir(Type.Ref(inner=[st], mutable=True))
+        self.assign(cx, Place.local(r), Rvalue.Ref(place=dest, mutable=True), loc)
+        for part in parts:
+            match part:
+                case InterpPart.Text(s):
+                    let u = self.unit()
+                    let args = [Operand.Copy(Place.local(r)), Operand.Const(Const.Str(s.copy()))]
+                    self.intrinsic_call(cx, u, "fmt.text", [], args, loc)
+                case InterpPart.Value(expr, debug, spec_in):
+                    if let Some(src) = debug:
+                        let u = self.unit()
+                        let args = [
+                            Operand.Copy(Place.local(r)), Operand.Const(Const.Str("{src}="))
+                        ]
+                        self.intrinsic_call(cx, u, "fmt.text", [], args, loc)
+                    # A spec ending in `?` asks for `Debug` (`{x:>8?}`).
+                    var is_debug = debug.is_some()
+                    var spec = spec_in.copy()
+                    if spec_in.ends_with("?"):
+                        is_debug = True
+                        spec = spec_in.byte_slice(0, spec_in.byte_len() - 1).to_string()
+                    let name = if is_debug: "fmt.debug" else: "fmt.display"
+                    let stripped = self.types.strip_ref(self.ty_of(cx, expr))
+                    let base = cx.prog.erase_refinements(mut self.types, stripped)
+                    let tr = if is_debug: cx.prog.wk.debug else: cx.prog.wk.display
+                    # A spec is applied by the value's impl, in Sisu; the host
+                    # writes the plain text of a structural value.
+                    var via_trait = not spec.is_empty()
+                    if let Some(t) = tr:
+                        if not cx.prog.is_structural(mut self.types, base, t):
+                            via_trait = True
+                    if via_trait:
+                        self.format_via_trait(
+                            cx, Operand.Copy(Place.local(r)), expr, is_debug, spec
+                        )
+                        continue
+                    let v = self.compare_operand(cx, expr)
+                    let u = self.unit()
+                    let at = cx.loc(self.span_of(cx, expr))
+                    let args = [Operand.Copy(Place.local(r)), v, Operand.Const(Const.Str(spec))]
+                    self.intrinsic_call(cx, u, name, [], args, at)
+
+    pure def coerce(
+        mut self, cx: Cx, own dest: Place, x: TExpr, inner: TExprId, kind: Coercion, loc: Loc?
+    ):
+        match kind:
+            case Coercion.StrView:
+                let p = self.place_of(cx, inner)
+                self.assign(cx, dest, Rvalue.StrView(p), loc)
+            case Coercion.RefStrView:
+                let p = self.place_of(cx, inner).project(Proj.Deref)
+                self.assign(cx, dest, Rvalue.StrView(p), loc)
+            case Coercion.DerefCopy:
+                let p = self.place_of(cx, inner).project(Proj.Deref)
+                self.assign(cx, dest, Rvalue.Use(Operand.Copy(p)), loc)
+            case Coercion.MutToShared:
+                let p = self.place_of(cx, inner)
+                self.assign(cx, dest, Rvalue.Use(Operand.Copy(p)), loc)
+            case Coercion.NeverToAny | Coercion.Widen | Coercion.Mismatch | Coercion.Unrefine:
+                self.into(cx, dest, inner)
+            case Coercion.FloatWiden:
+                let v = self.operand(cx, inner)
+                self.intrinsic_call(cx, dest, "f32.to_f64", [], [v], loc)
+            case Coercion.IntWiden:
+                # The same value; a `u64`, `u128` or `i128` is a kind of its
+                # own.
+                let v = self.operand(cx, inner)
+                if let Some(k) = self.sized_int(cx, x.ty):
+                    if own_kind(k):
+                        self.intrinsic_call(cx, dest, "{k}.widen", [], [v], loc)
+                        return
+                self.assign(cx, dest, Rvalue.Use(v), loc)
+            case Coercion.ToCap:
+                # The handle takes the value over, with its type for the
+                # calls through the operations trait.
+                let v = self.operand(cx, inner)
+                let t = self.ty(cx, self.ty_of(cx, inner))
+                let handle = self.ty(cx, x.ty)
+                self.intrinsic_call(cx, dest, "cap.new", [t, handle], [v], loc)
+            case Coercion.ToDyn | Coercion.RefToDyn:
+                let v = self.operand(cx, inner)
+                let t = self.ty(cx, self.ty_of(cx, inner))
+                self.assign(cx, dest, Rvalue.Aggregate(kind=Aggregate.Dyn(t), operands=[v]), loc)
+            case Coercion.BoxToDyn:
+                # `Box(dyn C(b.value))`.
+                let p = self.place_of(cx, inner)
+                let content = self.first_arg(self.ty_of(cx, inner))
+                let dyn_ty = self.first_arg(x.ty)
+                let t = self.temp(cx, dyn_ty)
+                let v = self.copy_or_move(cx, p.project(Proj.Field(0)), content)
+                let ct = self.ty(cx, content)
+                self.assign(
+                    cx, Place.local(t), Rvalue.Aggregate(kind=Aggregate.Dyn(ct), operands=[v]), loc
+                )
+                let name = cx.ctx.type_name(cx.prog, cx.prog.wk.boxed ?? DefId(index=0))
+                let made = Rvalue.Aggregate(
+                    kind=Aggregate.Struct(name), operands=[Operand.Move(Place.local(t))]
+                )
+                self.assign(cx, dest, made, loc)
+
+    ## A call of `def_` with the typed tree's type arguments: the SIR callee,
+    ## and for each argument whether the callee takes by value what the call
+    ## passes by reference. A trait method whose `Self` is known here is
+    ## resolved to its impl's method (or the trait's provided body); a `Self`
+    ## that is a generic parameter, an associated type of one, a reference or
+    ## a `dyn` is resolved at run time (`call trait`).
+    pub pure def callee_for(
+        mut self, cx: Cx, def_: DefId, type_args_in: list[Ty]
+    ) -> (Callee, list[bool]):
+        let f = cx.prog.fn_info(def_) else:
+            return (Callee.Fn(name=cx.ctx.fn_name(cx.prog, self.types, def_), args=[]), [])
+        # A template's call is a call of its instance for these arguments
+        # (08, "Reflection"), which takes by value what is `Copy`.
+        if f.template:
+            for (t, args, inst) in cx.prog.instances:
+                if t == def_ and args == type_args_in:
+                    return self.direct_callee(cx, inst, [])
+        # A refinement is its base here: it has its base's impls (07).
+        var type_args: list[Ty] = []
+        for t in type_args_in:
+            let erased = cx.prog.erase_refinements(mut self.types, t)
+            type_args.push(cx.prog.normalize(mut self.types, erased, self.bounds))
+        if let Some(t) = f.trait_:
+            var n = 0
+            if let Some(i) = cx.prog.trait_info(t):
+                n = len(i.generics)
+            let self_ty = type_args.first() ?? Ty.error()
+            let opaque = match self.types.data(self_ty):
+                case TyData.Param(_) | TyData.Assoc(_, _, _) | TyData.Dyn(_) | TyData.Ref(
+                    _, _
+                ) | TyData.ErrSet(_): True
+                case _: False
+            if not opaque:
+                var trait_args: list[Ty] = []
+                var own_args: list[Ty] = []
+                for i in range(1, len(type_args)):
+                    if i < 1 + n:
+                        trait_args.push(type_args[i])
+                    else:
+                        own_args.push(type_args[i])
+                if let Some(found) = cx.prog.resolve_method(
+                    mut self.types, def_, trait_args, self_ty, self.bounds
+                ):
+                    let (target, targs_in) = found
+                    # A capability handle (or a `Lent` of one) forwards to its
+                    # object, whose type only the run knows.
+                    var forward = False
+                    if let Some(tf) = cx.prog.fn_info(target):
+                        forward = tf.intrinsic == Some("cap.forward".to_string())
+                    if forward:
+                        let tys = self.tys(cx, type_args)
+                        return (
+                            Callee.Trait(name=cx.ctx.fn_name(cx.prog, self.types, def_), args=tys),
+                            [],
+                        )
+                    var targs = targs_in.copy()
+                    for a in own_args:
+                        targs.push(a)
+                    return self.direct_callee(cx, target, targs)
+            let tys = self.tys(cx, type_args)
+            return (Callee.Trait(name=cx.ctx.fn_name(cx.prog, self.types, def_), args=tys), [])
+        return self.direct_callee(cx, def_, type_args)
+
+    pure def tys(mut self, cx: Cx, ts: list[Ty]) -> list[Type]:
+        var out: list[Type] = []
+        for t in ts:
+            out.push(self.ty(cx, t))
+        return out
+
+    pure def direct_callee(
+        mut self, cx: Cx, def_: DefId, type_args: list[Ty]
+    ) -> (Callee, list[bool]):
+        let f = cx.prog.fn_info(def_) else:
+            return (Callee.Fn(name=cx.ctx.fn_name(cx.prog, self.types, def_), args=[]), [])
+        # Every bound met by a structural impl: the host computes it.
+        var fast: String? = None
+        if let Some(s) = f.structural:
+            var all = True
+            for p in f.predicates:
+                let subst = self.types.subst(p.ty, type_args)
+                let subject = cx.prog.normalize(mut self.types, subst, self.bounds)
+                if not cx.prog.is_structural(mut self.types, subject, p.bound.def_):
+                    all = False
+            if all:
+                fast = Some(s.copy())
+        var intr = f.intrinsic.copy()
+        if intr.is_none():
+            intr = fast
+        if let Some(n) = intr:
+            var tys: list[Type] = []
+            if self.needs_type_args(cx, def_):
+                tys = self.tys(cx, type_args)
+            return (Callee.Intrinsic(name=n.copy(), args=tys), [])
+        # Which borrowed parameters the callee takes by value: `Copy` ones
+        # whose declared type is not a generic parameter.
+        var slots: list[(Ty, Mode)] = []
+        if let Some(m) = f.self_mode:
+            if let Some(o) = f.owner:
+                slots.push((o, m))
+        for p in f.params:
+            slots.push((p.ty, p.mode))
+        let env = cx.prog.elaborate_env(mut self.types, f.predicates)
+        var by_value: list[bool] = []
+        for (ty, mode) in slots:
+            let local = param_local_ty(cx.prog, mut self.types, ty, mode, env)
+            let subst = self.types.subst(local, type_args)
+            let concrete = cx.prog.normalize(mut self.types, subst, self.bounds)
+            var is_ref = False
+            if let TyData.Ref(_, _) = self.types.data(concrete):
+                is_ref = True
+            by_value.push(mode == Mode.Borrow and not is_ref)
+        let tys = self.tys(cx, type_args)
+        return (Callee.Fn(name=cx.ctx.fn_name(cx.prog, self.types, def_), args=tys), by_value)
+
+    ## The referent of an operand that holds a reference, copied.
+    pure def deref_operand(self, own o: Operand) -> Operand:
+        return match o:
+            case Operand.Copy(p): Operand.Copy(p.project(Proj.Deref))
+            case Operand.Move(p): Operand.Copy(p.project(Proj.Deref))
+            case _: o
+
+    ## Calls `method` of the trait `tr` for `ty` with references `args`.
+    pure def trait_method_call(
+        mut self,
+        cx: Cx,
+        own dest: Place,
+        tr: DefId?,
+        method: str,
+        ty: Ty,
+        own args: list[Operand],
+        loc: Loc?,
+    ):
+        var m: DefId? = None
+        if let Some(t) = tr:
+            m = cx.prog.trait_method(t, method)
+        let found = m else:
+            self.terminate(Terminator.Unreachable, loc)
+            return
+        let (callee, by_value) = self.callee_for(cx, found, [ty])
+        var out: list[Operand] = []
+        for i in range(len(args)):
+            if i < len(by_value) and by_value[i]:
+                out.push(self.deref_operand(args[i].copy()))
+            else:
+                out.push(args[i].copy())
+        self.emit(cx, StatementKind.Call(dest=dest, callee=callee, args=out), loc)
+
+    ## `a == b` (or `!=`) through `Eq` for references `a` and `b`.
+    pure def eq_via_trait(
+        mut self, cx: Cx, own dest: Place, a: Operand, b: Operand, negate: bool, ty: Ty, loc: Loc?
+    ):
+        let eq = cx.prog.wk.eq
+        if negate:
+            let t = self.temp_sir(Type.Bool)
+            self.trait_method_call(cx, Place.local(t), eq, "eq", ty, [a.copy(), b.copy()], loc)
+            self.assign(
+                cx, dest, Rvalue.Unary(op=SirUnOp.Not, operand=Operand.Copy(Place.local(t))), loc
+            )
+        else:
+            self.trait_method_call(cx, dest, eq, "eq", ty, [a.copy(), b.copy()], loc)
+
+    ## `a < b` and the other orderings through `PartialOrd`: the order is
+    ## `Some(o)` and `o` is what the operator asks for; `None` (unordered)
+    ## makes every ordering false.
+    pure def order_via_trait(
+        mut self, cx: Cx, own dest: Place, a: Operand, b: Operand, op: CmpOp, ty: Ty, loc: Loc?
+    ):
+        let ord_ty = Type.Named(name="Ordering", args=[])
+        let o = self.temp_sir(Type.Named(name="Option", args=[ord_ty]))
+        self.trait_method_call(
+            cx, Place.local(o), cx.prog.wk.partial_ord, "partial_cmp", ty, [a.copy(), b.copy()], loc
+        )
+        let d = self.temp_sir(Type.Int)
+        self.assign(cx, Place.local(d), Rvalue.Discriminant(Place.local(o)), loc)
+        let some = self.new_block()
+        let none = self.new_block()
+        let join = self.new_block()
+        self.terminate(
+            Terminator.Switch(value=Operand.Copy(Place.local(d)), cases=[(0, some)], default=none),
+            loc,
+        )
+        self.switch_to(cx, some)
+        let v = self.temp_sir(Type.Int)
+        let payload = Place.local(o).project(Proj.Downcast(0)).project(Proj.Field(0))
+        self.assign(cx, Place.local(v), Rvalue.Discriminant(payload), loc)
+        # Less is 0, Equal 1, Greater 2.
+        var bop = SirBinOp.Ne
+        var k = 0
+        if op == CmpOp.Lt:
+            bop = SirBinOp.Eq
+        elif op == CmpOp.Le:
+            k = 2
+        elif op == CmpOp.Gt:
+            bop = SirBinOp.Eq
+            k = 2
+        let cmp = Rvalue.Binary(
+            op=bop, lhs=Operand.Copy(Place.local(v)), rhs=Operand.Const(Const.Int(k))
+        )
+        self.assign(cx, dest.copy(), cmp, loc)
+        self.goto(join)
+        self.switch_to(cx, none)
+        self.assign(cx, dest, Rvalue.Use(Operand.Const(Const.Bool(False))), loc)
+        self.goto(join)
+        self.switch_to(cx, join)
+
+    ## Writes `expr` to the `String` that `buf` refers to through its
+    ## `Display` (or `Debug`) impl: a `Formatter` with the spec, the trait's
+    ## method, and `Formatter.finish`, which pads by what is left of the
+    ## spec.
+    pure def format_via_trait(
+        mut self, cx: Cx, own buf: Operand, expr: TExprId, debug: bool, spec: str
+    ):
+        let loc = cx.loc(self.span_of(cx, expr))
+        let fdef = cx.prog.wk.formatter else:
+            return
+        let fty = self.types.adt(fdef, [])
+        let f = self.temp(cx, fty)
+        self.intrinsic_call(
+            cx,
+            Place.local(f),
+            "fmt.formatter",
+            [],
+            [Operand.Const(Const.Str(spec.to_string()))],
+            loc,
+        )
+        self.register(DropEntry.Local(f))
+        self.split(cx)
+        let fst = self.ty(cx, fty)
+        let fr = self.temp_sir(Type.Ref(inner=[fst], mutable=True))
+        self.assign(cx, Place.local(fr), Rvalue.Ref(place=Place.local(f), mutable=True), loc)
+        let stripped = self.types.strip_ref(self.ty_of(cx, expr))
+        let erased = cx.prog.erase_refinements(mut self.types, stripped)
+        let base = cx.prog.normalize(mut self.types, erased, self.bounds)
+        let v = self.ref_operand(cx, expr)
+        let tr = if debug: cx.prog.wk.debug else: cx.prog.wk.display
+        let method = if debug: "fmt_debug" else: "fmt"
+        let u = self.unit()
+        self.trait_method_call(cx, u, tr, method, base, [v, Operand.Copy(Place.local(fr))], loc)
+        let finish = cx.prog.method(TyKey.Adt(fdef), "finish") else:
+            return
+        let u2 = self.unit()
+        let callee = Callee.Fn(name=cx.ctx.fn_name(cx.prog, self.types, finish), args=[])
+        self.emit(
+            cx,
+            StatementKind.Call(dest=u2, callee=callee, args=[Operand.Move(Place.local(f)), buf]),
+            loc,
+        )
+
+    ## `print` and `print_err` of a value whose `Display` is its own impl,
+    ## and `len` of a value of a type that implements `Len` itself: through
+    ## the traits. Returns whether it lowered the call.
+    pure def special_call(
+        mut self,
+        cx: Cx,
+        own dest: Place,
+        def_: DefId,
+        type_args: list[Ty],
+        args: list[TArg],
+        loc: Loc?,
+    ) -> bool:
+        let f = cx.prog.fn_info(def_) else:
+            return False
+        let intr = f.intrinsic.copy() else:
+            return False
+        if args.is_empty():
+            return False
+        let arg_expr = args[0].expr
+        var first_ty = Ty.error()
+        if not type_args.is_empty():
+            first_ty = type_args[0]
+        let first = cx.prog.erase_refinements(mut self.types, first_ty)
+        let stripped = self.types.strip_ref(first)
+        let base = cx.prog.normalize(mut self.types, stripped, self.bounds)
+        if intr == "print" or intr == "print_err":
+            if let Some(d) = cx.prog.wk.display:
+                if cx.prog.is_structural(mut self.types, base, d):
+                    return False
+            else:
+                return False
+            let sty = self.types.adt(cx.prog.wk.string ?? def_, [])
+            let s = self.temp(cx, sty)
+            self.intrinsic_call(cx, Place.local(s), "fmt.new", [], [], loc)
+            self.register(DropEntry.Local(s))
+            self.split(cx)
+            let sst = self.ty(cx, sty)
+            let r = self.temp_sir(Type.Ref(inner=[sst], mutable=True))
+            self.assign(cx, Place.local(r), Rvalue.Ref(place=Place.local(s), mutable=True), loc)
+            self.format_via_trait(cx, Operand.Copy(Place.local(r)), arg_expr, False, "")
+            self.intrinsic_call(cx, dest, intr, [], [Operand.Move(Place.local(s))], loc)
+            return True
+        if intr == "len":
+            var builtin = False
+            match self.types.data(base):
+                case TyData.Str:
+                    builtin = True
+                case TyData.Adt(d, _):
+                    if let Some(b) = cx.prog.builtin(d):
+                        builtin = b == "String"
+                            or b == "list"
+                            or b == "Array"
+                            or b == "dict"
+                            or b == "set"
+                case _:
+                    pass
+            if builtin:
+                return False
+            let v = self.ref_operand(cx, arg_expr)
+            self.trait_method_call(cx, dest, cx.prog.wk.len, "len", base, [v], loc)
+            return True
+        return False
+
+    ## Whether an intrinsic needs its type arguments at run time: one of its
+    ## generic parameters appears in its result but in no parameter, or a
+    ## parameter is an `Iterable[T]`.
+    pure def needs_type_args(self, cx: Cx, def_: DefId) -> bool:
+        let f = cx.prog.fn_info(def_) else:
+            return False
+        let iterable = cx.prog.wk.iterable
+        for p in f.params:
+            if let TyData.Adt(d, _) = self.types.data(p.ty):
+                if Some(d) == iterable:
+                    return True
+        var in_params: list[int] = []
+        for p in f.params:
+            params_of(self.types, p.ty, mut in_params)
+        if f.self_mode.is_some():
+            if let Some(o) = f.owner:
+                params_of(self.types, o, mut in_params)
+        var in_ret: list[int] = []
+        params_of(self.types, f.ret, mut in_ret)
+        for i in in_ret:
+            if not in_params.contains(i):
+                return True
+        return False
+
+    pure def location_text(self, cx: Cx, span: TextRange) -> String:
+        let name = cx.ctx.file_name(cx.prog, cx.module)
+        if let Some(l) = cx.loc(span):
+            return "{name}:{l.line}:{l.col}"
+        return name
+
+    pub pure def comprehension_rest(mut self, cx: Cx, own c: CompRest):
+        if c.clauses.is_empty():
+            let r = self.temp_sir(Type.Ref(inner=[c.dest_ty.copy()], mutable=True))
+            self.assign(cx, Place.local(r), Rvalue.Ref(place=c.dest.copy(), mutable=True), None)
+            let loc = cx.loc(self.span_of(cx, c.elem))
+            match c.kind:
+                case TCompKind.List:
+                    let v = self.operand(cx, c.elem)
+                    let u = self.unit()
+                    self.intrinsic_call(
+                        cx, u, "list.push", [], [Operand.Copy(Place.local(r)), v], loc
+                    )
+                case TCompKind.Set:
+                    let v = self.operand(cx, c.elem)
+                    let t = self.temp_sir(Type.Bool)
+                    self.intrinsic_call(
+                        cx, Place.local(t), "set.add", [], [Operand.Copy(Place.local(r)), v], loc
+                    )
+                case TCompKind.Dict:
+                    let mark = len(self.locals)
+                    let k = self.operand(cx, c.elem)
+                    var held: list[LocalId] = []
+                    if let Some(x) = c.value:
+                        if self.may_leave(cx, x):
+                            self.hold(cx, k, mark, self.ty_of(cx, c.elem), mut held)
+                    var v = Operand.Const(Const.Unit)
+                    if let Some(x) = c.value:
+                        v = self.operand(cx, x)
+                    self.release(cx, held)
+                    let vty = c.item_tys.1 ?? Ty.unit()
+                    var opt = Ty.unit()
+                    if let Some(o) = cx.prog.wk.option:
+                        opt = self.types.adt(o, [vty])
+                    let t = self.temp(cx, opt)
+                    let args = [Operand.Copy(Place.local(r)), k, v]
+                    self.intrinsic_call(cx, Place.local(t), "dict.insert", [], args, loc)
+                    if self.needs_drop(cx, vty):
+                        self.split(cx)
+                        self.emit(cx, StatementKind.Drop(place=Place.local(t), flag=None), loc)
+                        self.split(cx)
+            return
+        var rest: list[TCompClause] = []
+        for i in range(1, len(c.clauses)):
+            rest.push(c.clauses[i].copy())
+        let next = CompRest(
+            clauses=rest,
+            elem=c.elem,
+            value=c.value,
+            dest=c.dest.copy(),
+            dest_ty=c.dest_ty.copy(),
+            kind=c.kind,
+            item_tys=c.item_tys,
+        )
+        match c.clauses[0].copy():
+            case TCompClause.For(pat, iter, mode, item):
+                let span = self.span_of(cx, iter)
+                self.for_loop(cx, pat, iter, mode, item, ForBody.Comprehension(next), span)
+            case TCompClause.If(cond):
+                let after = self.new_block()
+                let depth = len(self.scopes)
+                self.push_scope()
+                let v = self.operand(cx, cond)
+                let ok = self.new_block()
+                let f = self.edge_to(cx, after, depth)
+                let at = cx.loc(self.span_of(cx, cond))
+                self.terminate(Terminator.Switch(value=v, cases=[(0, f)], default=ok), at)
+                self.switch_to(cx, ok)
+                self.comprehension_rest(cx, next)
+                self.pop_scope(cx)
+                self.goto(after)
+                self.switch_to(cx, after)
+
+## The generic parameters a type mentions.
+pure def params_of(types: Types, t: Ty, mut out: list[int]):
+    match types.data(t):
+        case TyData.Param(i):
+            out.push(i)
+        case TyData.Adt(_, a):
+            for x in a:
+                params_of(types, x, mut out)
+        case TyData.Tuple(e, _):
+            for x in e:
+                params_of(types, x, mut out)
+        case TyData.Fn(ps, r, _):
+            for x in ps:
+                params_of(types, x, mut out)
+            params_of(types, r, mut out)
+        case TyData.Ref(x, _):
+            params_of(types, x, mut out)
+        case _:
+            pass
+
+## The decimal text of a 128-bit pattern read as a signed `i128`.
+pure def signed_text(bits: u128) -> String:
+    let half: u128 = 170141183460469231731687303715884105728
+    if bits < half:
+        return "{bits}"
+    # The two's complement: the value is `bits - 2^128`.
+    let most: u128 = 340282366920938463463374607431768211455
+    let magnitude = (most - bits) + 1
+    return "-{magnitude}"

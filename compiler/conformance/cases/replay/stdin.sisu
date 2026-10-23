@@ -1,0 +1,24 @@
+# Standard input is a capability (06: `System.stdin`), and what a run
+# read is in its log (N-04): the conformance runner records every run and
+# replays the log with no input at all.
+
+def numbers(input: Stdin) -> list[int]:
+    var out: list[int] = []
+    while True:
+        let line = input.read_line() else:
+            return out
+        match line.trim().parse_int():
+            case Some(n):
+                out.push(n)
+            case None:
+                print("skipped {line:?}")
+
+def main(sys: System):
+    let xs = numbers(sys.stdin)
+    var total = 0
+    for x in xs:
+        total += x
+    print("{len(xs)} numbers, total {total}")
+
+test "a fake input":
+    assert numbers(Stdin.fake(["4", " 5 ", "five", "-2"])) == [4, 5, -2]

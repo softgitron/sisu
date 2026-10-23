@@ -1,0 +1,558 @@
+##! The raw scanner (docs/architecture.md, "Lexing"): text to tokens that
+##! cover every byte, trivia included. Line breaks are `LINE_BREAK` here;
+##! the layout pass decides which of them end logical lines. A string with
+##! interpolation is a sequence of tokens: `STRING_START`, `STRING_TEXT`,
+##! `INTERP_START`, the expression's tokens, an optional `COLON
+##! FORMAT_SPEC` or `EQ`, `INTERP_END`, and `STRING_END` (PEP 701).
+
+from stage1.diag import Diagnostic, Msg
+from stage1.syntax.kinds import KEYWORDS, PUNCTUATION, SyntaxKind
+from stage1.syntax.tree import Token
+from stage1.text import char_at, is_alphanumeric
+
+## Where the scanner is.
+@derive(Eq, Debug, Copy)
+enum Mode:
+    Code
+    ## Inside `{...}` of a string; `depth` counts the brackets opened inside.
+    Interp(depth: int, triple: bool)
+    ## Inside the text of a string that opened at `start`.
+    Str(triple: bool, start: int)
+
+## The suffixes a number literal may carry (`42u8`, `1.0f32`).
+const SUFFIXES: list[str] = [
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "i128",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "u128",
+    "f32",
+    "f64",
+    "int",
+    "uint",
+]
+
+view struct Scanner:
+    text: str
+    ## The length of `text` in bytes.
+    n: int
+    pos: int
+    tokens: list[Token]
+    modes: list[Mode]
+    diags: list[Diagnostic]
+    last_significant: SyntaxKind
+    ## `KEYWORDS` and `PUNCTUATION` as lookups.
+    keywords: dict[String, SyntaxKind]
+    punctuation: dict[String, SyntaxKind]
+
+## Scans `text` into raw tokens, appending its diagnostics to `diags`.
+pub pure def scan(text: str, mut diags: list[Diagnostic]) -> list[Token]:
+    var s = Scanner.new(text)
+    while s.pos < s.n:
+        let before = s.pos
+        match s.mode():
+            case Str(triple, start):
+                s.string_text(triple, start)
+            case _:
+                s.code()
+        if s.pos == before:
+            # Never stall: consume one character as an error token.
+            s.pos += char_at(s.text, s.pos).len_utf8()
+            s.push(SyntaxKind.ErrorToken, before)
+    # Close any string left open at the end of the file.
+    var open = True
+    while open:
+        match s.mode():
+            case Code:
+                open = False
+            case Str(triple, start):
+                let at = s.pos
+                let m = if triple: Msg.LexUnterminatedBlockString else: Msg.LexUnterminatedString
+                s.error(m, start, at)
+                s.push(SyntaxKind.StringEnd, at)
+                _ = s.modes.pop()
+            case Interp(_, _):
+                let at = s.pos
+                s.push(SyntaxKind.InterpEnd, at)
+                _ = s.modes.pop()
+    diags.extend(s.diags)
+    return s.tokens
+
+impl Scanner:
+    pure def new(text: str) -> Scanner:
+        var keywords: dict[String, SyntaxKind] = {}
+        for (word, kind) in KEYWORDS:
+            _ = keywords.insert(word.to_string(), kind)
+        var punctuation: dict[String, SyntaxKind] = {}
+        for (spelling, kind) in PUNCTUATION:
+            _ = punctuation.insert(spelling.to_string(), kind)
+        return Scanner(
+            text=text,
+            n=text.byte_len(),
+            pos=0,
+            tokens=[],
+            modes=[Mode.Code],
+            diags=[],
+            last_significant=SyntaxKind.Newline,
+            keywords=keywords,
+            punctuation=punctuation,
+        )
+
+    pure def mode(self) -> Mode:
+        return match self.modes.last():
+            case Some(m): m
+            case None: Mode.Code
+
+    ## The byte at `i`, or -1 past the end.
+    pure def byte(self, i: int) -> int:
+        if i < self.n:
+            return self.text.byte_at(i).to_int()
+        return -1
+
+    ## Whether the text at the current position starts with `prefix`.
+    pure def at_text(self, prefix: str) -> bool:
+        let m = prefix.byte_len()
+        if self.pos + m > self.n:
+            return False
+        for j in range(m):
+            if self.text.byte_at(self.pos + j) != prefix.byte_at(j):
+                return False
+        return True
+
+    pure def push(mut self, kind: SyntaxKind, start: int):
+        self.tokens.push(Token(kind=kind, start=start, end=self.pos))
+        if not kind.is_trivia():
+            self.last_significant = kind
+
+    pure def error(mut self, msg: Msg, start: int, end: int):
+        self.diags.push(Diagnostic.new(msg, start, end))
+
+    pure def error_with(mut self, msg: Msg, start: int, end: int, name: str, value: str):
+        self.diags.push(Diagnostic.new(msg, start, end).with(name, value))
+
+    ## Inside the interpolation of a one-line string.
+    pure def in_one_line_interpolation(self) -> bool:
+        return match self.mode():
+            case Interp(_, triple): not triple
+            case _: False
+
+    ## Inside an interpolation or the text of a string.
+    pure def in_string(self) -> bool:
+        return match self.mode():
+            case Code: False
+            case _: True
+
+    pure def code(mut self):
+        let start = self.pos
+        let b = self.byte(start)
+        if b < 0:
+            return
+        if (b == 10 or b == 13) and self.in_one_line_interpolation():
+            # A line break ends a one-line string inside its interpolation:
+            # report it, close the interpolation and the string, and scan
+            # the line break as code.
+            self.error(Msg.LexNewlineInInterpolation, start, start)
+            while self.in_string():
+                let kind = match self.mode():
+                    case Interp(_, _): SyntaxKind.InterpEnd
+                    case _: SyntaxKind.StringEnd
+                _ = self.modes.pop()
+                self.push(kind, start)
+        if b == 32 or b == 9 or b == 12:
+            while self.byte(self.pos) == 32
+                    or self.byte(self.pos) == 9
+                    or self.byte(self.pos) == 12:
+                self.pos += 1
+            self.push(SyntaxKind.Whitespace, start)
+        elif b == 10:
+            self.pos += 1
+            self.push(SyntaxKind.LineBreak, start)
+        elif b == 13:
+            self.pos += 1
+            if self.byte(self.pos) == 10:
+                self.pos += 1
+            self.push(SyntaxKind.LineBreak, start)
+        elif b == 35:
+            self.comment(start)
+        elif b == 34:
+            self.string_start(start)
+        elif b == 39:
+            self.char_literal(start)
+        elif is_ascii_digit(b):
+            self.number(start)
+        elif is_ascii_letter(b)
+                or b == 95
+                or (b >= 128 and char_at(self.text, start).is_alphabetic()):
+            self.ident(start)
+        else:
+            self.punctuation(start)
+
+    ## `#` to the end of the line: `##!` documents the module, `##` the
+    ## item or field that follows.
+    pure def comment(mut self, start: int):
+        var kind = SyntaxKind.Comment
+        if self.at_text("##!"):
+            kind = SyntaxKind.ModuleDocComment
+        elif self.at_text("##"):
+            kind = SyntaxKind.DocComment
+        while self.pos < self.n and self.byte(self.pos) != 10 and self.byte(self.pos) != 13:
+            self.pos += 1
+        self.push(kind, start)
+
+    pure def ident(mut self, start: int):
+        while self.pos < self.n:
+            let b = self.byte(self.pos)
+            if is_ascii_letter(b) or is_ascii_digit(b) or b == 95:
+                self.pos += 1
+            elif b >= 128 and is_alphanumeric(char_at(self.text, self.pos)):
+                self.pos += char_at(self.text, self.pos).len_utf8()
+            else:
+                break
+        let length = self.pos - start
+        if length == 1 and self.byte(self.pos) == 34:
+            let b = self.byte(start)
+            if b == 114 or b == 98:
+                self.prefixed_string(start, b == 114)
+                return
+        # After `.` or `?.` a keyword is an ordinary name (02, "Lexical
+        # structure"), and so after `def`, which declares such a method
+        # (`def or(own self, default: T)`, called as `x.or(d)`).
+        var kind = SyntaxKind.Ident
+        match self.last_significant:
+            case Dot | QuestionDot | DefKw:
+                pass
+            case _:
+                let word = self.text.byte_slice(start, self.pos).to_string()
+                if let Some(k) = self.keywords.get(word):
+                    kind = k
+        self.push(kind, start)
+
+    pure def number(mut self, start: int):
+        let after_dot = self.last_significant == SyntaxKind.Dot
+        var is_float = False
+        var valid = True
+        var radix = 10
+        if self.byte(start) == 48:
+            let second = self.byte(start + 1)
+            if second == 120 or second == 88:
+                radix = 16
+            elif second == 98 or second == 66:
+                radix = 2
+            elif second == 111 or second == 79:
+                radix = 8
+        if radix != 10:
+            self.pos += 2
+            var digits = 0
+            while self.byte(self.pos) == 95 or is_digit_in(self.byte(self.pos), radix):
+                if self.byte(self.pos) != 95:
+                    digits += 1
+                self.pos += 1
+            if digits == 0:
+                valid = False
+        else:
+            self.digits()
+            if not after_dot
+                    and self.byte(self.pos) == 46
+                    and is_ascii_digit(self.byte(self.pos + 1)):
+                is_float = True
+                self.pos += 1
+                self.digits()
+            let e = self.byte(self.pos)
+            if not after_dot and (e == 101 or e == 69):
+                let sign = self.byte(self.pos + 1) == 43 or self.byte(self.pos + 1) == 45
+                let digit_at = if sign: 2 else: 1
+                if is_ascii_digit(self.byte(self.pos + digit_at)):
+                    is_float = True
+                    self.pos += digit_at
+                    self.digits()
+        # A suffix such as `u8` or `f32` is part of the literal.
+        let suffix_start = self.pos
+        while self.pos < self.n:
+            let b = self.byte(self.pos)
+            if is_ascii_letter(b) or is_ascii_digit(b) or b == 95:
+                self.pos += 1
+            elif b >= 128 and is_alphanumeric(char_at(self.text, self.pos)):
+                self.pos += char_at(self.text, self.pos).len_utf8()
+            else:
+                break
+        if self.pos > suffix_start:
+            let suffix = self.text.byte_slice(suffix_start, self.pos)
+            let floating = suffix.starts_with("f")
+            if not is_suffix(suffix) or (radix != 10 and floating):
+                valid = False
+            elif floating:
+                is_float = True
+        if not valid:
+            let text = self.text.byte_slice(start, self.pos)
+            self.error_with(Msg.LexInvalidNumber, start, self.pos, "text", text)
+        self.push(if is_float: SyntaxKind.FloatNumber else: SyntaxKind.IntNumber, start)
+
+    pure def digits(mut self):
+        while is_ascii_digit(self.byte(self.pos)) or self.byte(self.pos) == 95:
+            self.pos += 1
+
+    ## Consumes an escape sequence starting at `\`, reporting unknown ones.
+    pure def escape(mut self):
+        let start = self.pos
+        self.pos += 1
+        if self.pos >= self.n:
+            return
+        let b = self.byte(self.pos)
+        if b == 10 or b == 13:
+            return
+        let c = char_at(self.text, self.pos)
+        self.pos += c.len_utf8()
+        if not is_escape_letter(c):
+            self.error_with(Msg.LexInvalidEscape, start, self.pos, "escape", "{c}")
+            return
+        if c == 'u' and not self.unicode_escape():
+            self.error_with(Msg.LexInvalidEscape, start, self.pos, "escape", "u")
+
+    ## After `\u`: `{`, one to six hex digits naming a Unicode scalar
+    ## value, and `}`, consumed if valid.
+    pure def unicode_escape(mut self) -> bool:
+        if self.byte(self.pos) != 123:
+            return False
+        var i = self.pos + 1
+        var value = 0
+        while i < self.n and is_digit_in(self.byte(i), 16):
+            # Seven digits are already too many: the value stops growing.
+            if i - self.pos <= 6:
+                value = value * 16 + hex_value(self.byte(i))
+            i += 1
+        let count = i - self.pos - 1
+        if self.byte(i) != 125 or count == 0 or count > 6:
+            return False
+        if value > 0x10FFFF or (0xD800 <= value <= 0xDFFF):
+            return False
+        self.pos = i + 1
+        return True
+
+    pure def char_literal(mut self, start: int):
+        self.pos += 1
+        var count = 0
+        var closed = False
+        while self.pos < self.n:
+            let b = self.byte(self.pos)
+            if b == 39:
+                self.pos += 1
+                closed = True
+                break
+            if b == 10 or b == 13:
+                break
+            if b == 92:
+                self.escape()
+            else:
+                self.pos += char_at(self.text, self.pos).len_utf8()
+            count += 1
+        if not closed:
+            self.error(Msg.LexUnterminatedChar, start, self.pos)
+        elif count != 1:
+            self.error(Msg.LexBadCharLiteral, start, self.pos)
+        self.push(SyntaxKind.CharLit, start)
+
+    pure def string_start(mut self, start: int):
+        let triple = self.at_text("\"\"\"")
+        self.pos += if triple: 3 else: 1
+        self.push(SyntaxKind.StringStart, start)
+        self.modes.push(Mode.Str(triple=triple, start=start))
+
+    ## Raw `r"..."` and byte `b"..."` strings are single tokens.
+    pure def prefixed_string(mut self, start: int, raw: bool):
+        let triple = self.at_text("\"\"\"")
+        let delim = if triple: "\"\"\"" else: "\""
+        self.pos += delim.byte_len()
+        var closed = False
+        while self.pos < self.n:
+            if self.at_text(delim):
+                self.pos += delim.byte_len()
+                closed = True
+                break
+            let b = self.byte(self.pos)
+            if not triple and (b == 10 or b == 13):
+                break
+            if b == 92 and not raw:
+                # A byte string also takes `\xNN`, any byte.
+                if self.byte(self.pos + 1) == 120
+                        and is_digit_in(self.byte(self.pos + 2), 16)
+                        and is_digit_in(self.byte(self.pos + 3), 16):
+                    self.pos += 4
+                else:
+                    self.escape()
+            else:
+                self.pos += char_at(self.text, self.pos).len_utf8()
+        if not closed:
+            let m = if triple: Msg.LexUnterminatedBlockString else: Msg.LexUnterminatedString
+            self.error(m, start, self.pos)
+        self.push(if raw: SyntaxKind.RawString else: SyntaxKind.ByteString, start)
+
+    pure def string_text(mut self, triple: bool, opened: int):
+        let start = self.pos
+        while self.pos < self.n:
+            let b = self.byte(self.pos)
+            if (triple and self.at_text("\"\"\"")) or (not triple and b == 34):
+                break
+            if not triple and (b == 10 or b == 13):
+                break
+            if b == 123:
+                if self.byte(self.pos + 1) == 123:
+                    self.pos += 2
+                    continue
+                break
+            if b == 125:
+                if self.byte(self.pos + 1) == 125:
+                    self.pos += 2
+                    continue
+                let at = self.pos
+                self.pos += 1
+                self.error(Msg.LexLoneCloseBrace, at, at + 1)
+                continue
+            if b == 92:
+                self.escape()
+                continue
+            self.pos += char_at(self.text, self.pos).len_utf8()
+        if self.pos > start:
+            self.push(SyntaxKind.StringText, start)
+        let here = self.pos
+        let b = self.byte(here)
+        if b < 0:
+            return
+        if b == 123:
+            self.pos += 1
+            self.push(SyntaxKind.InterpStart, here)
+            self.modes.push(Mode.Interp(depth=0, triple=triple))
+        elif b == 10 or b == 13:
+            # An unterminated one-line string: close it before the line
+            # break, and report it from its opening quote. Brackets left
+            # open before the quote and closed at the end of the text were
+            # meant to follow it: `print("no end)` closes as
+            # `print("no end")`.
+            var line = opened
+            while line > 0 and self.byte(line - 1) != 10:
+                line -= 1
+            var open = 0
+            for i in range(line, opened):
+                let c = self.byte(i)
+                if c == 40 or c == 91:
+                    open += 1
+                elif c == 41 or c == 93:
+                    open -= 1
+            var end = here
+            while open > 0
+                    and end > start
+                    and (self.byte(end - 1) == 41 or self.byte(end - 1) == 93):
+                end -= 1
+                open -= 1
+            let d = Diagnostic.new(Msg.LexUnterminatedString, opened, here)
+            self.diags.push(d.fix_at(Msg.LexCloseString, end, end, "\""))
+            self.push(SyntaxKind.StringEnd, here)
+            _ = self.modes.pop()
+        else:
+            self.pos += if triple: 3 else: 1
+            self.push(SyntaxKind.StringEnd, here)
+            _ = self.modes.pop()
+
+    pure def punctuation(mut self, start: int):
+        match self.mode():
+            case Interp(depth, triple):
+                let b = self.byte(start)
+                if depth == 0 and b == 125:
+                    self.pos += 1
+                    self.push(SyntaxKind.InterpEnd, start)
+                    _ = self.modes.pop()
+                    return
+                if depth == 0 and b == 58:
+                    self.pos += 1
+                    self.push(SyntaxKind.Colon, start)
+                    # The format spec runs to the closing brace.
+                    let spec_start = self.pos
+                    while self.pos < self.n:
+                        let c = self.byte(self.pos)
+                        if c == 125 or c == 34 or c == 10 or c == 13:
+                            break
+                        self.pos += char_at(self.text, self.pos).len_utf8()
+                    self.push(SyntaxKind.FormatSpec, spec_start)
+                    return
+                var delta = 0
+                if b == 40 or b == 91 or b == 123:
+                    delta = 1
+                elif b == 41 or b == 93 or b == 125:
+                    delta = -1
+                if delta != 0:
+                    _ = self.modes.pop()
+                    self.modes.push(Mode.Interp(depth=max(depth + delta, 0), triple=triple))
+            case _:
+                pass
+        # The longest operator or punctuation the text starts with.
+        var length = 3
+        while length > 0:
+            if let Some(kind) = self.punctuation_of(length):
+                self.pos += length
+                match kind:
+                    case Semicolon:
+                        self.error(Msg.LexSemicolon, start, self.pos)
+                    case Backslash:
+                        let b = self.byte(self.pos)
+                        if b == 10 or b == 13:
+                            self.error(Msg.LexBackslashContinuation, start, self.pos)
+                        else:
+                            self.error_with(Msg.LexUnknownCharacter, start, self.pos, "char", "\\")
+                    case _:
+                        pass
+                self.push(kind, start)
+                return
+            length -= 1
+        let c = char_at(self.text, start)
+        self.pos += c.len_utf8()
+        self.error_with(Msg.LexUnknownCharacter, start, self.pos, "char", "{c}")
+        self.push(SyntaxKind.ErrorToken, start)
+
+    ## The operator or punctuation spelled by the `length` bytes at the
+    ## current position, if they are ASCII and one of `PUNCTUATION`.
+    pure def punctuation_of(self, length: int) -> SyntaxKind?:
+        if self.pos + length > self.n:
+            return None
+        for j in range(length):
+            if self.byte(self.pos + j) >= 128:
+                return None
+        let spelling = self.text.byte_slice(self.pos, self.pos + length).to_string()
+        return match self.punctuation.get(spelling):
+            case Some(kind): Some(kind)
+            case None: None
+
+pure def is_ascii_digit(b: int) -> bool:
+    return 48 <= b <= 57
+
+pure def is_ascii_letter(b: int) -> bool:
+    return (97 <= b <= 122) or (65 <= b <= 90)
+
+## Whether byte `b` is a digit in base `radix` (2, 8, 10 or 16).
+pure def is_digit_in(b: int, radix: int) -> bool:
+    if radix == 16:
+        return is_ascii_digit(b) or (97 <= b <= 102) or (65 <= b <= 70)
+    return 48 <= b < 48 + radix
+
+## The value of a hex digit.
+pure def hex_value(b: int) -> int:
+    if b <= 57:
+        return b - 48
+    if b >= 97:
+        return b - 87
+    return b - 55
+
+## The known escape letters after `\` in strings and characters.
+pure def is_escape_letter(c: char) -> bool:
+    return match c:
+        case 'n' | 't' | 'r' | '0' | '\\' | '"' | '\'' | 'u': True
+        case _: False
+
+pure def is_suffix(text: str) -> bool:
+    for s in SUFFIXES:
+        if s == text:
+            return True
+    return False

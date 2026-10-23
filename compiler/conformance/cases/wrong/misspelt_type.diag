@@ -1,0 +1,2 @@
+7:13-7:18 E0201 resolve.undefined-type name="Piont"
+  fix resolve.similar-type 7:13-7:18 "Point"

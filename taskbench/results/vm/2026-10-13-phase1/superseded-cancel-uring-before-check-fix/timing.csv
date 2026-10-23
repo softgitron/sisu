@@ -1,0 +1,6 @@
+rep,benchmark,start_utc,seconds
+1,cancel-uring,2026-10-13T20:18:50Z,386
+2,cancel-uring,2026-10-13T20:25:16Z,335
+3,cancel-uring,2026-10-13T20:30:51Z,381
+4,cancel-uring,2026-10-13T20:37:12Z,356
+5,cancel-uring,2026-10-13T20:43:08Z,388

@@ -1,0 +1,12 @@
+# Only a `view struct` may have a reference field.
+
+struct Cursor:
+    at: ref int
+
+view struct Pointer:
+    at: ref int
+
+def main():
+    let x = 1
+    let p = Pointer(at=ref x)
+    print(p.at)

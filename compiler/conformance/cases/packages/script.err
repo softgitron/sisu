@@ -1,0 +1,2 @@
+error: NotFound(path="missing.txt")
+  at script.sisu:19:12

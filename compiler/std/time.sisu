@@ -1,0 +1,81 @@
+##! `std.time` (11): `DateTime`, `Duration`, `Timer`, `TimeError` and the
+##! test clock `TestClock` are the prelude's, which this module also names;
+##! `Ticker` and `Timeline` (N-35, D-075) are written here, over a `Clock`,
+##! so the same code keeps real time in production and is deterministic
+##! under the test clock.
+
+## A periodic ticker that does not drift (N-35): its `n`-th tick is at
+## `start + n * period` whatever each iteration took, so a slow iteration
+## does not push the ticks after it back. A tick that passes while the
+## loop is busy is skipped, not fired late, and counted in `missed`.
+##
+## Each `wait` is a boundary where a running program adopts the newest
+## epoch of hot replacement (10, "Debugging and profiling": `Ticker.wait`
+## calls `live.boundary()`).
+##
+## ```
+## let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("a time"))
+## let start = clock.now()
+## var t = Ticker.every(clock, Duration.seconds(1))
+## t.wait().expect("not cancelled")
+## t.wait().expect("not cancelled")
+## assert clock.now() - start == Duration.seconds(2)
+## clock.advance(Duration.millis(3500))
+## t.wait().expect("not cancelled")
+## assert clock.now() - start == Duration.seconds(6)
+## assert t.missed == 3
+## ```
+pub struct Ticker:
+    clock: Clock
+    period: Duration
+    next: DateTime
+    ## The ticks skipped because they passed while the loop was busy.
+    pub missed: int
+
+    ## Ticks every `period`, the first a period from now.
+    pub def every(clock: Clock, period: Duration) -> Ticker:
+        requires period > Duration.seconds(0)
+        return Ticker(clock=clock, period=period, next=clock.now() + period, missed=0)
+
+    ## Waits for the next tick still ahead, skipping those that passed.
+    pub def wait(mut self) -> ! TaskError:
+        live.boundary()
+        let now = self.clock.now()
+        while self.next <= now:
+            self.next = self.next + self.period
+            self.missed += 1
+        if now < self.next:
+            self.clock.after(self.next - now).wait()?
+        self.next = self.next + self.period
+        return Ok(())
+
+## Virtual time (Sonic Pi's model, N-35): `sleep(d)` moves the timeline's
+## own time on by exactly `d` and then waits for the clock to reach it, so
+## the time spent between sleeps does not accumulate as drift.
+##
+## ```
+## let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("a time"))
+## var tl = Timeline.start(clock)
+## let t0 = tl.now
+## tl.sleep(Duration.millis(250)).expect("not cancelled")
+## clock.advance(Duration.millis(100))
+## tl.sleep(Duration.millis(250)).expect("not cancelled")
+## assert tl.now - t0 == Duration.millis(500)
+## assert clock.now() - t0 == Duration.millis(500)
+## ```
+pub struct Timeline:
+    clock: Clock
+    ## The timeline's time: where it is in its score.
+    pub now: DateTime
+
+    ## A timeline whose time starts at the clock's.
+    pub def start(clock: Clock) -> Timeline:
+        return Timeline(clock=clock, now=clock.now())
+
+    ## Moves the timeline on by `d`, and waits until the clock is there.
+    pub def sleep(mut self, d: Duration) -> ! TaskError:
+        self.now = self.now + d
+        let real = self.clock.now()
+        if real < self.now:
+            self.clock.after(self.now - real).wait()?
+        return Ok(())

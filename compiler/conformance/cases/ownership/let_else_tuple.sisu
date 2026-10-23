@@ -1,0 +1,37 @@
+# `let (a, b) = e else:` binds the parts of an option's payload for the
+# rest of the block, as `let x = e else:` binds the whole: the bindings
+# are made on the matching path and dropped at the end of the block.
+
+struct Res:
+    name: String
+
+impl Drop for Res:
+    def drop(mut self):
+        print("drop {self.name}")
+
+def find(names: list[String], k: int) -> (String, int)?:
+    if k < len(names):
+        return Some((names[k].copy(), k))
+    return None
+
+def describe(names: list[String], k: int) -> int:
+    let (name, i) = find(names, k) else:
+        return -1
+    print("{name} at {i}")
+    return i
+
+def pair(n: int) -> (Res, int)?:
+    if n > 0:
+        return Some((Res(name="r{n}".to_string()), n))
+    return None
+
+def main():
+    let names = ["a".to_string(), "b".to_string()]
+    print(describe(names, 1))
+    print(describe(names, 5))
+    let (r, n) = pair(2) else:
+        return
+    print("got {r.name} and {n}")
+    let (s, m) = pair(0) else: (Res(name="fallback".to_string()), 0)
+    print("got {s.name} and {m}")
+    print("end of main")

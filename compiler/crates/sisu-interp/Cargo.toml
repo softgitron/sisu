@@ -1,0 +1,15 @@
+[package]
+name = "sisu-interp"
+description = "The SIR interpreter: a trampolined frame stack, value semantics, deterministic Drop, unwinding panics and the host intrinsics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sisu-sir.workspace = true
+sisu-diag.workspace = true
+
+[lints]
+workspace = true

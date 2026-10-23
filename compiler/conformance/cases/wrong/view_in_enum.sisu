@@ -1,0 +1,15 @@
+# A wrong program: an enum's variant holds a view, which an enum cannot.
+
+enum Token:
+    Word(text: str)
+    Number(value: int)
+
+def describe(t: Token) -> int:
+    match t:
+        case Word(_):
+            return 1
+        case Number(n):
+            return n
+
+def main():
+    print(describe(Number(value=3)))

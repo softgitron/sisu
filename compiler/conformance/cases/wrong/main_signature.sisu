@@ -1,0 +1,4 @@
+# A wrong program: `main` takes a parameter that is not a `System`.
+
+def main(n: int):
+    print(n)

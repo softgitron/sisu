@@ -1,0 +1,5 @@
+5:11-5:14 E0252 resolve.delegate-self trait="Add" ty="Two" field="value"
+10:20-10:29 E0251 resolve.delegate-to ty="Missing"
+14:11-14:21 E0250 resolve.not-delegable name="Frobnicate"
+18:11-18:15 E0242 resolve.supertrait-missing ty="FloatKey" trait="Hash" super="Eq"
+18:11-18:15 E0253 resolve.delegate-field ty="FloatKey" trait="Hash" field="value" fty="f64"

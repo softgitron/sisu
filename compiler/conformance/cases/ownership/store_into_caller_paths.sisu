@@ -1,0 +1,19 @@
+# The ways a view can reach the memory of a caller through a `mut`
+# parameter: as a key it inserts, through a dict entry, and through a
+# borrow of the parameter.
+
+def add_key(mut counts: dict[str, int], word: str):
+    counts[word] = 1
+
+def add_entry(mut counts: dict[str, str], word: str):
+    let slot = counts.entry("k").or_insert(word)
+    print(slot)
+
+def push_through(mut out: list[str], word: str):
+    let r = ref mut out
+    r.push(word)
+
+def main():
+    var counts: dict[str, int] = {}
+    add_key(mut counts, "a")
+    print(counts)

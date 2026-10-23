@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# Stage 1 as the front end of a `sisu`-like command: the program is read,
+# checked, lowered and ownership-checked by stage 1, the front end written
+# in Sisu, and its SIR is built by stage 0's native backend (`sisu build
+# --native --from-sir`, decision 212).
+#
+#   sisu1 check [--format=ids] [PATH]            every diagnostic, as `sisu check` prints them
+#   sisu1 sir [PATH]                             the whole program's SIR, as `sisu sir` prints it
+#   sisu1 build [--release] [--contracts=LEVEL] [PATH] [--output OUT]
+#                                                an executable, where `sisu build --native` puts
+#                                                it (`--native` is implied), in the release
+#                                                profile with `--release` (decision 232)
+#   sisu1 run [PATH] [-- ARGS...]                the program built into a temporary directory and
+#                                                run with ARGS, with its exit status
+#   sisu1 fmt [--check] [PATH...]                each file formatted in place, as `sisu fmt`
+#                                                formats it, or with `--check` what would change,
+#                                                with `sisu fmt`'s exit status
+#   sisu1 doc [PATH] [--output DIR]              the documentation, a Markdown page per module,
+#   sisu1 doc --std [MODULE...]                  as `sisu doc` writes it, with its exit status
+#
+# `check`, `build`, `run` and `doc` take `--features NAMES` (the root
+# package's features to turn on, separated by commas or spaces,
+# `DEP/FEATURE` for a dependency's, any number of times) and
+# `--no-default-features`, as `sisu` does (decision 250).
+#
+# PATH is a file or the directory of a package or workspace (whose members
+# `build` builds in turn); without one, the package of the working
+# directory, whose lockfile `check`, `sir` and `build` write as `sisu`
+# does. Stage 1's other commands (`tokens`, `parse`, `names`,
+# `types`, ...) pass through as well. The first use builds stage 1 with
+# stage 0 (`sisu build --native`) into compiler/target/stage1/, and so
+# does a use after a source of stage 1 changed.
+set -uo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+compiler=$(dirname "$here")
+sisu="$compiler/target/release/sisu"
+exe="$compiler/target/stage1/sisu1"
+if [ ! -x "$sisu" ]; then
+    echo "sisu1: stage 0 is not built (cargo build --release in $compiler)" >&2
+    exit 1
+fi
+if [ ! -x "$exe" ] || [ -n "$(find "$here/src" -name '*.sisu' -newer "$exe" -print -quit)" ]; then
+    mkdir -p "$(dirname "$exe")"
+    if ! (cd "$here" && "$sisu" build --native --output "$exe" > /dev/null); then
+        echo "sisu1: stage 1 does not build" >&2
+        exit 1
+    fi
+fi
+# `build` is the native build: `sisu1 build --release` is `sisu build
+# --native --release`, stage 1's own `build` taking stage 0's options.
+if [ "${1:-}" = build ]; then
+    shift
+    native=0
+    for a in "$@"; do
+        [ "$a" = --native ] && native=1
+    done
+    [ "$native" = 1 ] || set -- --native "$@"
+    exec "$exe" --home "$compiler" build "$@"
+fi
+# `fmt` and `doc` exit with stage 0's status (2 for a usage error, 70 for
+# a file the formatter refused as changed), which stage 1 returns as the
+# error `Exit(status=N)`: the run time prints it as the last line of
+# standard error, which goes, and N is the exit status.
+if [ "${1:-}" = fmt ] || [ "${1:-}" = doc ]; then
+    err=$(mktemp)
+    trap 'rm -f "$err"' EXIT
+    "$exe" --home "$compiler" "$@" 2> "$err"
+    status=$?
+    last=$(tail -n 1 "$err")
+    case "$last" in
+        "error: Exit(status="*")")
+            status=${last#error: Exit(status=}
+            status=${status%)}
+            sed '$d' "$err" >&2
+            ;;
+        *) cat "$err" >&2 ;;
+    esac
+    exit "$status"
+fi
+if [ "${1:-}" != run ]; then
+    exec "$exe" --home "$compiler" "$@"
+fi
+shift
+# The features the build turns on (decision 250), before the path, as
+# `sisu run` takes its options.
+features=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --features)
+            features+=("$1" "${2:-}")
+            shift
+            [ $# -gt 0 ] && shift
+            ;;
+        --features=*|--no-default-features)
+            features+=("$1")
+            shift
+            ;;
+        *) break ;;
+    esac
+done
+# Without a path, the package of the working directory or the nearest
+# one above it, as `sisu run` finds it.
+path=()
+if [ $# -gt 0 ] && [ "$1" != "--" ]; then
+    path=("$1")
+    shift
+fi
+[ "${1:-}" = "--" ] && shift
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+"$exe" --home "$compiler" build --native ${features[@]+"${features[@]}"} ${path[@]+"${path[@]}"} \
+    --output "$tmp/program" > /dev/null || exit $?
+"$tmp/program" "$@"
+exit $?

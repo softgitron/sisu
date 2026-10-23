@@ -1,0 +1,44 @@
+# What the capability rules reject: an object a handle cannot share
+# between tasks (E0700, naming the field in the way), the standard
+# library's internal functions (E0701), a capability in a `pure` function
+# (E0334), and a must-consume object, which a handle never drops (E0422).
+
+struct Counting:
+    seen: Cell[int]
+
+impl EnvOps for Counting:
+    def args(self) -> list[str]:
+        self.seen.set(self.seen.get() + 1)
+        return []
+    def get(self, name: str) -> String?:
+        return None
+
+pure def pure_reader(env: Env) -> int:
+    return 0
+
+def main(sys: System):
+    let env: Env = Counting(seen=Cell(0))
+    let copy = System.assemble(
+        fs=sys.fs,
+        net=sys.net,
+        clock=sys.clock,
+        rand=sys.rand,
+        env=env,
+        proc=sys.proc,
+        stdin=sys.stdin,
+    )
+    print(pure_reader(env))
+
+@must_consume
+struct Ticket:
+    id: int
+
+struct Holding:
+    ticket: Ticket
+
+impl RandOps for Holding:
+    def bits(self) -> int:
+        return 4
+
+def ticketed() -> Rand:
+    return Holding(ticket=Ticket(id=1))

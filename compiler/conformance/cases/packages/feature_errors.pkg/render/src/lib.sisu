@@ -1,0 +1,2 @@
+pub def show(s: String) -> String:
+    return "{s}"

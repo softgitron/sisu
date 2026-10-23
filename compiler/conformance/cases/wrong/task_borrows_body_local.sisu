@@ -1,0 +1,8 @@
+# A wrong program: a task borrows a value made in the scope's body, which
+# ends before the scope waits for its tasks.
+
+def main():
+    task.scope do s:
+        let names = ["a", "b"]
+        s.spawn do:
+            print(len(names))

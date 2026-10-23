@@ -1,0 +1,2 @@
+10:11-10:15 E0400 borrow.use-after-move name="lead" line="9"
+  label 9:16-9:31 borrow.moved-here name="lead"

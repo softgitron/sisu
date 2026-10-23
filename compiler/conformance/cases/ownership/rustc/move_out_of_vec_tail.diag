@@ -1,0 +1,2 @@
+11:25-11:37 E0338 type.move-out-of-borrow what="first.string"
+  fix type.add-copy 11:37-11:37 ".copy()"

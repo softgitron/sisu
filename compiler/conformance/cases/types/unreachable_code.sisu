@@ -1,0 +1,6 @@
+def f() -> int:
+    return 1
+    print("never")
+
+def main():
+    print(f())

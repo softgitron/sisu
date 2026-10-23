@@ -1,0 +1,29 @@
+# Generators (concurrency.sisu's `primes`): a function that yields returns
+# an `Iter` whose items its body computes only as they are asked for.
+
+def primes() -> Iter[int]:
+    var found = list()
+    var n = 2
+    while True:
+        if found.iter().all(n % it != 0):
+            found.push(n)
+            yield n
+        n += 1
+
+def countdown(start: int) -> Iter[String]:
+    var i = start
+    while i > 0:
+        yield "{i}"
+        i -= 1
+    yield "liftoff"
+
+def evens(xs: list[int]) -> Iter[int]:
+    for x in xs:
+        if x % 2 == 0:
+            yield x
+
+def main():
+    for p in primes().take(10):
+        print(p)
+    print(countdown(3).collect())
+    print(evens([1, 2, 3, 4, 6]).collect())

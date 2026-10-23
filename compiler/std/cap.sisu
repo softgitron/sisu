@@ -1,0 +1,961 @@
+##! std.cap (06, "Capabilities"; 11): the attenuations, the caretakers,
+##! the fakes and the interceptor of the capabilities, written in Sisu over
+##! the operations traits of the prelude (`FsOps`, `ClockOps`, ...). Every
+##! module sees it as `cap`; the prelude's `Fs.read_only`, `Fs.in_memory`,
+##! `Rand.seeded` and the rest return these, made into handles.
+
+# ------------------------------------------------------------------ the file system
+
+## A path with its empty and `.` parts dropped (`./a//b/` is `a/b`); `.`
+## for none. A `..` part is kept.
+pure def normal(text: str) -> String:
+    var out = String.new()
+    for part in text.split("/"):
+        if part == "" or part == ".":
+            continue
+        if not out.is_empty():
+            out.push("/")
+        out.push(part)
+    if out.is_empty():
+        return ".".to_string()
+    return out
+
+## A path's error, reported for `path` (an attenuation reports the path it
+## was given, not the one it passed on).
+pure def relabel(own e: IoError, path: Path) -> IoError:
+    match e:
+        case NotFound(_):
+            return NotFound(path=path.copy())
+        case PermissionDenied(_):
+            return PermissionDenied(path=path.copy())
+        case AlreadyExists(_):
+            return AlreadyExists(path=path.copy())
+        case InvalidData(_):
+            return InvalidData(path=path.copy())
+        case _:
+            return e
+
+## `Fs.read_only`: forwards what reads, refuses every change.
+struct ReadOnly[T]:
+    inner: T
+
+impl[T: FsOps] FsOps for ReadOnly[T]:
+    def read(self, path: Path) -> bytes ! IoError:
+        return self.inner.read(path)
+    def write(self, path: Path, data: bytes) -> ! IoError:
+        return Err(PermissionDenied(path=path.copy()))
+    def read_to_string(self, path: Path) -> String ! IoError:
+        return self.inner.read_to_string(path)
+    def write_text(self, path: Path, text: str) -> ! IoError:
+        return Err(PermissionDenied(path=path.copy()))
+    def exists(self, path: Path) -> bool:
+        return self.inner.exists(path)
+    def metadata(self, path: Path) -> Metadata ! IoError:
+        return self.inner.metadata(path)
+    def remove(self, path: Path) -> ! IoError:
+        return Err(PermissionDenied(path=path.copy()))
+    def list_dir(self, path: Path) -> list[Path] ! IoError:
+        return self.inner.list_dir(path)
+    def create_dir(self, path: Path) -> ! IoError:
+        return Err(PermissionDenied(path=path.copy()))
+    def sync(self, path: Path) -> ! IoError:
+        return self.inner.sync(path)
+
+## `Fs.restrict_to`: paths relative to `root`; an absolute path, or one
+## with a `..` part, is refused. The paths it lists are relative to `root`.
+struct Restricted[T]:
+    inner: T
+    root: String
+
+impl[T] Restricted[T]:
+    ## The path below the root, or `None` for one that would leave it.
+    pure def below(self, path: Path) -> Path?:
+        let text = path.as_str()
+        if text.starts_with("/"):
+            return None
+        for part in text.split("/"):
+            if part == "..":
+                return None
+        let rest = normal(text)
+        if rest == ".":
+            return Some(Path.new(self.root))
+        return Some(Path.new("{self.root}/{rest}"))
+
+    ## A path the inner file system listed, relative to the root again.
+    pure def outside(self, path: Path) -> Path:
+        let prefix = "{self.root}/"
+        return Path.new(path.as_str().strip_prefix(prefix))
+
+impl[T: FsOps] FsOps for Restricted[T]:
+    def read(self, path: Path) -> bytes ! IoError:
+        let full = self.below(path) else:
+            return Err(PermissionDenied(path=path.copy()))
+        return self.inner.read(full).map_err((e) -> relabel(e, path))
+    def write(self, path: Path, data: bytes) -> ! IoError:
+        let full = self.below(path) else:
+            return Err(PermissionDenied(path=path.copy()))
+        return self.inner.write(full, data).map_err((e) -> relabel(e, path))
+    def read_to_string(self, path: Path) -> String ! IoError:
+        let full = self.below(path) else:
+            return Err(PermissionDenied(path=path.copy()))
+        return self.inner.read_to_string(full).map_err((e) -> relabel(e, path))
+    def write_text(self, path: Path, text: str) -> ! IoError:
+        let full = self.below(path) else:
+            return Err(PermissionDenied(path=path.copy()))
+        return self.inner.write_text(full, text).map_err((e) -> relabel(e, path))
+    def exists(self, path: Path) -> bool:
+        let full = self.below(path) else:
+            return False
+        return self.inner.exists(full)
+    def metadata(self, path: Path) -> Metadata ! IoError:
+        let full = self.below(path) else:
+            return Err(PermissionDenied(path=path.copy()))
+        return self.inner.metadata(full).map_err((e) -> relabel(e, path))
+    def remove(self, path: Path) -> ! IoError:
+        let full = self.below(path) else:
+            return Err(PermissionDenied(path=path.copy()))
+        return self.inner.remove(full).map_err((e) -> relabel(e, path))
+    def list_dir(self, path: Path) -> list[Path] ! IoError:
+        let full = self.below(path) else:
+            return Err(PermissionDenied(path=path.copy()))
+        let found = self.inner.list_dir(full).map_err((e) -> relabel(e, path))?
+        var out: list[Path] = []
+        for p in found:
+            out.push(self.outside(p))
+        return Ok(out)
+    def create_dir(self, path: Path) -> ! IoError:
+        let full = self.below(path) else:
+            return Err(PermissionDenied(path=path.copy()))
+        return self.inner.create_dir(full).map_err((e) -> relabel(e, path))
+    def sync(self, path: Path) -> ! IoError:
+        let full = self.below(path) else:
+            return Err(PermissionDenied(path=path.copy()))
+        return self.inner.sync(full).map_err((e) -> relabel(e, path))
+
+## `Fs.revocable`: forwards until its revoker revokes it, then fails with
+## `Revoked` (and nothing exists).
+struct Caretaker[T]:
+    inner: T
+    revoker: Revoker
+
+impl[T: FsOps] FsOps for Caretaker[T]:
+    def read(self, path: Path) -> bytes ! IoError:
+        if self.revoker.is_revoked():
+            return Err(Revoked)
+        return self.inner.read(path)
+    def write(self, path: Path, data: bytes) -> ! IoError:
+        if self.revoker.is_revoked():
+            return Err(Revoked)
+        return self.inner.write(path, data)
+    def read_to_string(self, path: Path) -> String ! IoError:
+        if self.revoker.is_revoked():
+            return Err(Revoked)
+        return self.inner.read_to_string(path)
+    def write_text(self, path: Path, text: str) -> ! IoError:
+        if self.revoker.is_revoked():
+            return Err(Revoked)
+        return self.inner.write_text(path, text)
+    def exists(self, path: Path) -> bool:
+        if self.revoker.is_revoked():
+            return False
+        return self.inner.exists(path)
+    def metadata(self, path: Path) -> Metadata ! IoError:
+        if self.revoker.is_revoked():
+            return Err(Revoked)
+        return self.inner.metadata(path)
+    def remove(self, path: Path) -> ! IoError:
+        if self.revoker.is_revoked():
+            return Err(Revoked)
+        return self.inner.remove(path)
+    def list_dir(self, path: Path) -> list[Path] ! IoError:
+        if self.revoker.is_revoked():
+            return Err(Revoked)
+        return self.inner.list_dir(path)
+    def create_dir(self, path: Path) -> ! IoError:
+        if self.revoker.is_revoked():
+            return Err(Revoked)
+        return self.inner.create_dir(path)
+    def sync(self, path: Path) -> ! IoError:
+        if self.revoker.is_revoked():
+            return Err(Revoked)
+        return self.inner.sync(path)
+
+## A file of an in-memory file system.
+struct MemFile:
+    data: bytes
+    modified: DateTime
+
+## `Fs.in_memory` (17, "Fixtures"): files by path and the directories made,
+## behind the mutexes every copy of the handle shares. A file's parent
+## directories exist while it does. Each write is stamped with the run's
+## test clock.
+struct MemFs:
+    files: Mutex[dict[String, MemFile]]
+    dirs: Mutex[set[String]]
+
+impl MemFs:
+    def new(files: dict[str, str]) -> Fs:
+        var held: dict[String, MemFile] = {}
+        let now = Clock.fake().now()
+        for name, text in files.items():
+            _ = held.insert(normal(name), MemFile(data=text.encode(), modified=now))
+        return MemFs(files=Mutex(held), dirs=Mutex(set()))
+
+    ## Whether `dir` (a normal path) is a directory: one made, or the
+    ## parent of a file.
+    def is_dir(self, dir: str) -> bool:
+        if dir == ".":
+            return True
+        if self.dirs.lock().value.contains(dir.to_string()):
+            return True
+        let prefix = "{dir}/"
+        let files = self.files.lock()
+        for name in files.value.keys():
+            if name.starts_with(prefix):
+                return True
+        return False
+
+    ## The metadata of the file `name` (a normal path), if there is one.
+    def file_metadata(self, name: str) -> Metadata?:
+        let files = self.files.lock()
+        return match files.value.get(name.to_string()):
+            case Some(f): Some(Metadata(len=len(f.data), modified=f.modified, is_dir=False))
+            case None: None
+
+impl FsOps for MemFs:
+    def read(self, path: Path) -> bytes ! IoError:
+        let name = normal(path.as_str())
+        let files = self.files.lock()
+        match files.value.get(name):
+            case Some(f):
+                return Ok(f.data.copy())
+            case None:
+                return Err(NotFound(path=path.copy()))
+    def write(self, path: Path, data: bytes) -> ! IoError:
+        let name = normal(path.as_str())
+        if self.is_dir(name):
+            return Err(AlreadyExists(path=path.copy()))
+        let now = Clock.fake().now()
+        var files = self.files.lock()
+        _ = files.value.insert(name, MemFile(data=data.copy(), modified=now))
+        return Ok(())
+    def exists(self, path: Path) -> bool:
+        let name = normal(path.as_str())
+        if self.files.lock().value.contains(name.copy()):
+            return True
+        return self.is_dir(name)
+    def metadata(self, path: Path) -> Metadata ! IoError:
+        let name = normal(path.as_str())
+        if let Some(m) = self.file_metadata(name):
+            return Ok(m)
+        if self.is_dir(name):
+            return Ok(Metadata(len=0, modified=DateTime.epoch(), is_dir=True))
+        return Err(NotFound(path=path.copy()))
+    def remove(self, path: Path) -> ! IoError:
+        let name = normal(path.as_str())
+        var files = self.files.lock()
+        match files.value.remove(name):
+            case Some(_):
+                return Ok(())
+            case None:
+                return Err(NotFound(path=path.copy()))
+    def list_dir(self, path: Path) -> list[Path] ! IoError:
+        let dir = normal(path.as_str())
+        if not self.is_dir(dir):
+            return Err(NotFound(path=path.copy()))
+        let prefix: String = if dir == ".": String.new() else: "{dir}/"
+        var names: set[String] = set()
+        let files = self.files.lock()
+        for name in files.value.keys():
+            if name.starts_with(prefix):
+                let rest = name.strip_prefix(prefix)
+                let first = match rest.split_once("/"):
+                    case Some((head, _)): head
+                    case None: rest
+                names.add("{prefix}{first}")
+        let dirs = self.dirs.lock()
+        for d in dirs.value.iter():
+            if d.starts_with(prefix) and not d.strip_prefix(prefix).contains("/"):
+                names.add(d.copy())
+        var out: list[String] = []
+        for n in names.iter():
+            out.push(n.copy())
+        out.sort()
+        var paths: list[Path] = []
+        for n in out:
+            paths.push(Path.new(n))
+        return Ok(paths)
+    def create_dir(self, path: Path) -> ! IoError:
+        let name = normal(path.as_str())
+        if self.files.lock().value.contains(name.copy()):
+            return Err(AlreadyExists(path=path.copy()))
+        var dir = String.new()
+        var dirs = self.dirs.lock()
+        for part in name.split("/"):
+            if not dir.is_empty():
+                dir.push("/")
+            dir.push(part)
+            dirs.value.add(dir.copy())
+        return Ok(())
+    ## Every write is durable at once: nothing to do.
+    def sync(self, path: Path) -> ! IoError:
+        if not self.exists(path):
+            return Err(NotFound(path=path.copy()))
+        return Ok(())
+
+## The `sim` profile's file system (17, "Simulation and replay"): in
+## memory, with a pessimistic durability model. A write changes the file
+## at once for every reader, but only `sync` of the file makes its
+## contents durable, and only `sync` of its directory (`"."` at the top)
+## makes its name durable, as POSIX asks of `fsync`; `crash` puts back what
+## was durable, so a file whose name was never synced vanishes whole. A
+## `Copy` handle on the state every copy shares.
+@derive(Copy)
+struct SimFs:
+    state: Cap[Mutex[SimFsState]]
+
+struct SimFsState:
+    files: dict[String, MemFile]
+    dirs: set[String]
+    ## Each file's synced contents.
+    durable: dict[String, bytes]
+    ## The names, of files and directories, whose directory entry was
+    ## synced.
+    entries: set[String]
+    crashes: int
+
+impl SimFs:
+    def new() -> SimFs:
+        let st = SimFsState(files={}, dirs=set(), durable={}, entries=set(), crashes=0)
+        return SimFs(state=Cap.new(Mutex(st)))
+
+    ## A crash: every file and directory goes back to what was durable.
+    def crash(self):
+        var g = self.state.get().lock()
+        g.value.crashes += 1
+        var files: dict[String, MemFile] = {}
+        for name, data in g.value.durable.items():
+            if kept(g.value.entries, name):
+                _ = files.insert(name.copy(), MemFile(data=data.copy(), modified=DateTime.epoch()))
+        var dirs: set[String] = set()
+        for d in g.value.entries.iter():
+            if not g.value.durable.contains(d.copy()) and kept(g.value.entries, d):
+                dirs.add(d.copy())
+        g.value.files = files
+        g.value.dirs = dirs
+
+    ## How many crashes it went through.
+    def crashes(self) -> int:
+        return self.state.get().lock().value.crashes
+
+    ## Whether `dir` (a normal path) is a directory: one made, or the
+    ## parent of a file.
+    def is_dir(self, dir: str) -> bool:
+        if dir == ".":
+            return True
+        let g = self.state.get().lock()
+        if g.value.dirs.contains(dir.to_string()):
+            return True
+        let prefix = "{dir}/"
+        for name in g.value.files.keys():
+            if name.starts_with(prefix):
+                return True
+        return False
+
+## Whether every name on the way to `name` has a durable entry.
+pure def kept(entries: set[String], name: str) -> bool:
+    var at = String.new()
+    for part in name.split("/"):
+        if not at.is_empty():
+            at.push("/")
+        at.push(part)
+        if not entries.contains(at.copy()):
+            return False
+    return True
+
+## The names directly inside the directory `dir` (a normal path).
+pure def children(files: dict[String, MemFile], dirs: set[String], dir: str) -> set[String]:
+    let prefix: String = if dir == ".": String.new() else: "{dir}/"
+    var out: set[String] = set()
+    for name in files.keys():
+        if name.starts_with(prefix):
+            let rest = name.strip_prefix(prefix)
+            let first = match rest.split_once("/"):
+                case Some((head, _)): head
+                case None: rest
+            out.add("{prefix}{first}")
+    for d in dirs.iter():
+        if d.starts_with(prefix) and not d.strip_prefix(prefix).contains("/") and d != dir:
+            out.add(d.copy())
+    return out
+
+impl FsOps for SimFs:
+    def read(self, path: Path) -> bytes ! IoError:
+        let name = normal(path.as_str())
+        let g = self.state.get().lock()
+        match g.value.files.get(name):
+            case Some(f):
+                return Ok(f.data.copy())
+            case None:
+                return Err(NotFound(path=path.copy()))
+    def write(self, path: Path, data: bytes) -> ! IoError:
+        let name = normal(path.as_str())
+        if self.is_dir(name):
+            return Err(AlreadyExists(path=path.copy()))
+        let now = Clock.fake().now()
+        var g = self.state.get().lock()
+        _ = g.value.files.insert(name, MemFile(data=data.copy(), modified=now))
+        return Ok(())
+    def exists(self, path: Path) -> bool:
+        let name = normal(path.as_str())
+        if self.state.get().lock().value.files.contains(name.copy()):
+            return True
+        return self.is_dir(name)
+    def metadata(self, path: Path) -> Metadata ! IoError:
+        let name = normal(path.as_str())
+        let found = match self.state.get().lock().value.files.get(name.copy()):
+            case Some(f): Some(Metadata(len=len(f.data), modified=f.modified, is_dir=False))
+            case None: None
+        if let Some(m) = found:
+            return Ok(m)
+        if self.is_dir(name):
+            return Ok(Metadata(len=0, modified=DateTime.epoch(), is_dir=True))
+        return Err(NotFound(path=path.copy()))
+    def remove(self, path: Path) -> ! IoError:
+        let name = normal(path.as_str())
+        var g = self.state.get().lock()
+        match g.value.files.remove(name):
+            case Some(_):
+                return Ok(())
+            case None:
+                return Err(NotFound(path=path.copy()))
+    def list_dir(self, path: Path) -> list[Path] ! IoError:
+        let dir = normal(path.as_str())
+        if not self.is_dir(dir.copy()):
+            return Err(NotFound(path=path.copy()))
+        let g = self.state.get().lock()
+        let names = children(g.value.files, g.value.dirs, dir)
+        var out: list[String] = []
+        for n in names.iter():
+            out.push(n.copy())
+        out.sort()
+        var paths: list[Path] = []
+        for n in out:
+            paths.push(Path.new(n))
+        return Ok(paths)
+    def create_dir(self, path: Path) -> ! IoError:
+        let name = normal(path.as_str())
+        var g = self.state.get().lock()
+        if g.value.files.contains(name.copy()):
+            return Err(AlreadyExists(path=path.copy()))
+        var dir = String.new()
+        for part in name.split("/"):
+            if not dir.is_empty():
+                dir.push("/")
+            dir.push(part)
+            g.value.dirs.add(dir.copy())
+        return Ok(())
+    ## A file: its contents become durable. A directory: the names in it
+    ## now, and only those, become its durable entries.
+    def sync(self, path: Path) -> ! IoError:
+        let name = normal(path.as_str())
+        let is_dir = self.is_dir(name.copy())
+        var g = self.state.get().lock()
+        let data = match g.value.files.get(name.copy()):
+            case Some(f): Some(f.data.copy())
+            case None: None
+        if let Some(d) = data:
+            _ = g.value.durable.insert(name, d.copy())
+            return Ok(())
+        if not is_dir:
+            return Err(NotFound(path=path.copy()))
+        let now_in = children(g.value.files, g.value.dirs, name.copy())
+        let prefix: String = if name == ".": String.new() else: "{name}/"
+        var entries: set[String] = set()
+        for e in g.value.entries.iter():
+            let direct = e.starts_with(prefix) and not e.strip_prefix(prefix).contains("/")
+            if not direct:
+                entries.add(e.copy())
+        for c in now_in.iter():
+            entries.add(c.copy())
+        g.value.entries = entries
+        return Ok(())
+
+# ------------------------------------------------------------------ the network
+
+## The network of `System.fake`: it reaches nothing.
+@derive(Copy)
+struct NoNet:
+    pass
+
+impl NetOps for NoNet:
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}:
+        return Err(NotAllowed(address="{host}:{port}"))
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
+        return Err(NotAllowed(address="{host}:{port}"))
+
+## `Net.only_hosts`: the named hosts only.
+struct OnlyHosts[T]:
+    inner: T
+    hosts: list[String]
+
+impl[T: NetOps] OnlyHosts[T]:
+    pure def allows(self, host: str) -> bool:
+        for h in self.hosts:
+            if h == host:
+                return True
+        return False
+
+impl[T: NetOps] NetOps for OnlyHosts[T]:
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}:
+        if not self.allows(host):
+            return Err(NotAllowed(address="{host}:{port}"))
+        return self.inner.connect(host, port)
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
+        if not self.allows(host):
+            return Err(NotAllowed(address="{host}:{port}"))
+        return self.inner.listen(port, host)
+
+## `Net.https_only`: the listed ports only.
+struct OnlyPorts[T]:
+    inner: T
+    ports: list[int]
+
+impl[T: NetOps] NetOps for OnlyPorts[T]:
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}:
+        if not self.ports.contains(port):
+            return Err(NotAllowed(address="{host}:{port}"))
+        return self.inner.connect(host, port)
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
+        if not self.ports.contains(port):
+            return Err(NotAllowed(address="{host}:{port}"))
+        return self.inner.listen(port, host)
+
+## `Net.revocable`: forwards until revoked, then fails with `Revoked`.
+struct NetCaretaker[T]:
+    inner: T
+    revoker: Revoker
+
+impl[T: NetOps] NetOps for NetCaretaker[T]:
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}:
+        if self.revoker.is_revoked():
+            return Err(Revoked)
+        return self.inner.connect(host, port)
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
+        if self.revoker.is_revoked():
+            return Err(Revoked)
+        return self.inner.listen(port, host)
+
+## One end of an in-process pipe of `Net.fake`: what it writes the other
+## end reads, through bounded channels of chunks, so a writer waits for a
+## slow reader. `pending` holds the rest of a chunk read in part.
+struct PipeStream:
+    out: Sender[bytes]?
+    into: Receiver[bytes]
+    pending: bytes
+
+impl Stream for PipeStream:
+    def read(mut self, max: int) -> bytes ! {NetError, TaskError}:
+        if self.pending.is_empty():
+            match self.into.recv():
+                case Ok(chunk):
+                    self.pending = chunk
+                case Err(Closed):
+                    return Ok(bytes.new())
+                case Err(Cancelled):
+                    return Err(Cancelled)
+                case Err(TaskPanicked(message, trace)):
+                    return Err(TaskPanicked(message=message, trace=trace))
+        let n = if max < len(self.pending): max else: len(self.pending)
+        let head = self.pending.slice(0, n)
+        self.pending = self.pending.slice(n, len(self.pending))
+        return Ok(head)
+    def write(mut self, data: bytes) -> ! {NetError, TaskError}:
+        match self.out:
+            case Some(out):
+                match out.send(data.copy()):
+                    case Ok(()):
+                        return Ok(())
+                    case Err(Closed):
+                        return Err(Closed)
+                    case Err(Cancelled):
+                        return Err(Cancelled)
+                    case Err(TaskPanicked(message, trace)):
+                        return Err(TaskPanicked(message=message, trace=trace))
+            case None:
+                return Err(Closed)
+    def close(mut self):
+        self.out = None
+
+## A pair of pipe ends joined to each other.
+def pipe_pair() -> (PipeStream, PipeStream):
+    let a_out, b_in = channel[bytes](capacity=4)
+    let b_out, a_in = channel[bytes](capacity=4)
+    let a = PipeStream(out=Some(a_out), into=a_in, pending=bytes.new())
+    let b = PipeStream(out=Some(b_out), into=b_in, pending=bytes.new())
+    return (a, b)
+
+## What a listener of `Net.fake` accepts from.
+struct FakeAccept:
+    queue: Receiver[Conn]
+
+impl Accept for FakeAccept:
+    def accept(self) -> Conn ! {NetError, TaskError}:
+        match self.queue.recv():
+            case Ok(c):
+                return Ok(c)
+            case Err(Closed):
+                return Err(Closed)
+            case Err(Cancelled):
+                return Err(Cancelled)
+            case Err(TaskPanicked(message, trace)):
+                return Err(TaskPanicked(message=message, trace=trace))
+
+## The state of `Net.fake`: the listeners by address, the connections made
+## to each, and the next free port.
+struct FakeNetState:
+    listeners: dict[String, Sender[Conn]]
+    connections: dict[String, int]
+    next_port: int
+
+## The network of `System.sim`: `Net.fake` under another name, so the
+## `sim` profile knows its calls are its own to fail (17).
+@derive(Copy)
+struct SimNetwork:
+    inner: Net
+
+impl SimNetwork:
+    def new() -> SimNetwork:
+        return SimNetwork(inner=Net.fake())
+
+impl NetOps for SimNetwork:
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}:
+        return self.inner.connect(host, port)
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
+        return self.inner.listen(port, host)
+
+## `Net.fake`: an in-process network (17). Addresses are `host:port` as
+## written; nothing outside the process is reached.
+@derive(Copy)
+struct FakeNet:
+    state: Cap[Mutex[FakeNetState]]
+
+impl FakeNet:
+    def new() -> Net:
+        return FakeNet(
+            state=Cap(Mutex(FakeNetState(listeners={}, connections={}, next_port=40000)))
+        )
+
+    ## How many connections were made to `host` at `port`.
+    def connections(self, host: str, port: int) -> int:
+        let g = self.state.get().lock()
+        return g.value.connections.get("{host}:{port}") ?? 0
+
+    ## The accept queue of the listener at `address`, counting the
+    ## connection made to it.
+    def queue_for(self, address: str) -> Sender[Conn]?:
+        var g = self.state.get().lock()
+        let n = g.value.connections.get(address.to_string()) ?? 0
+        _ = g.value.connections.insert(address.to_string(), n + 1)
+        return match g.value.listeners.get(address.to_string()):
+            case Some(q): Some(q.copy())
+            case None: None
+
+impl NetOps for FakeNet:
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}:
+        let address = "{host}:{port}"
+        let queue = self.queue_for(address) else:
+            return Err(Refused(address=address))
+        let mine, theirs = pipe_pair()
+        let accepted = Conn(stream=Box(theirs), peer="client".to_string())
+        match queue.send(accepted):
+            case Ok(()):
+                return Ok(Conn(stream=Box(mine), peer=address))
+            case Err(Closed):
+                return Err(Refused(address=address))
+            case Err(Cancelled):
+                return Err(Cancelled)
+            case Err(TaskPanicked(message, trace)):
+                return Err(TaskPanicked(message=message, trace=trace))
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
+        var g = self.state.get().lock()
+        var at = port
+        if at == 0:
+            at = g.value.next_port
+            g.value.next_port += 1
+        let address = "{host}:{at}"
+        if g.value.listeners.contains(address.copy()):
+            return Err(Other(message="{address} is in use"))
+        let tx, rx = channel[Conn](capacity=16)
+        _ = g.value.listeners.insert(address, tx)
+        return Ok(Listener(inner=Box(FakeAccept(queue=rx)), port=at))
+
+# ------------------------------------------------------------------ randomness
+
+## `Rand.seeded`: SplitMix64 (Steele, Lea and Flood, 2014) over a state
+## every copy of the handle shares.
+struct SeededRand:
+    state: Mutex[int]
+
+impl SeededRand:
+    pure def new(seed: int) -> Rand:
+        return SeededRand(state=Mutex(seed))
+
+impl RandOps for SeededRand:
+    def bits(self) -> int:
+        var s = self.state.lock()
+        # The constants are 0x9E3779B97F4A7C15, 0xBF58476D1CE4E5B9 and
+        # 0x94D049BB133111EB as 64-bit patterns; `>>` shifts the sign in,
+        # so each logical shift masks it off.
+        s.value = s.value +% -7046029254386353131
+        var z = s.value
+        z = (z ^ ((z >> 30) & 17179869183)) *% -4658895280553007687
+        z = (z ^ ((z >> 27) & 137438953471)) *% -7723592293110705685
+        return z ^ ((z >> 31) & 8589934591)
+
+# ------------------------------------------------------------------ the environment and processes
+
+## `Env.fake`: the arguments and variables it was made with.
+struct FakeEnv:
+    args: list[String]
+    vars: dict[String, String]
+
+impl FakeEnv:
+    pure def new(args: list[str], vars: dict[str, str]) -> Env:
+        var a: list[String] = []
+        for x in args:
+            a.push(x.to_string())
+        var v: dict[String, String] = {}
+        for k, x in vars.items():
+            _ = v.insert(k.to_string(), x.to_string())
+        return FakeEnv(args=a, vars=v)
+
+impl EnvOps for FakeEnv:
+    def args(self) -> list[str]:
+        var out: list[str] = []
+        for i in range(len(self.args)):
+            out.push(self.args[i])
+        return out
+    def get(self, name: str) -> String?:
+        return match self.vars.get(name.to_string()):
+            case Some(v): Some(v.copy())
+            case None: None
+
+## `Stdin.fake`: its lines, in order, then the end of the input.
+struct FakeStdin:
+    state: Cap[Mutex[FakeLines]]
+
+struct FakeLines:
+    lines: list[String]
+    next: int
+
+impl FakeStdin:
+    def new(lines: list[str]) -> Stdin:
+        var ls: list[String] = []
+        for x in lines:
+            ls.push(x.to_string())
+        return FakeStdin(state=Cap.new(Mutex(FakeLines(lines=ls, next=0))))
+
+impl StdinOps for FakeStdin:
+    def read_line(self) -> String?:
+        var g = self.state.get().lock()
+        if g.value.next >= len(g.value.lines):
+            return None
+        let line = g.value.lines[g.value.next].copy()
+        g.value.next += 1
+        return Some(line)
+
+## `Proc.fake`: each program named prints its text and exits with 0.
+struct FakeProc:
+    outputs: dict[String, String]
+
+impl FakeProc:
+    pure def new(outputs: dict[str, str]) -> Proc:
+        var o: dict[String, String] = {}
+        for k, x in outputs.items():
+            _ = o.insert(k.to_string(), x.to_string())
+        return FakeProc(outputs=o)
+
+impl ProcOps for FakeProc:
+    def run(self, program: str, args: list[str]) -> ProcOutput ! ProcError:
+        return match self.outputs.get(program.to_string()):
+            case Some(text): Ok(ProcOutput(status=0, stdout=text.copy(), stderr=String.new()))
+            case None: Err(NotFound(program=program.to_string()))
+
+# ------------------------------------------------------------------ interceptors (D-075)
+
+## One call through a capability, as an interceptor sees it: the
+## capability, the method, and the arguments rendered with `Debug` and
+## separated by `, `.
+struct Call:
+    capability: String
+    method: String
+    args: String
+
+## What a `Wrap` tells about each call through its capability.
+trait Interceptor:
+    ## Before the call runs.
+    def before(self, call: Call)
+    ## After it returns, with the `Debug` rendering of its result.
+    def after(self, call: Call, outcome: str):
+        pass
+
+## An interceptor around the capability `inner` (D-075): every call
+## through its operations trait is shown to `hook` before it runs and
+## after it returns, and then forwarded. Where a capability is expected, a
+## `Wrap` of it becomes one (when the interceptor is `Send` and `Sync`).
+## The impls for the standard capabilities are below; a `Wrap` of a value
+## of one of the program's traits implements that trait too, by an impl
+## the compiler writes from the trait's methods (stage 0's stand-in for
+## reflection over methods, `shims.rs`).
+struct Wrap[T, I]:
+    inner: T
+    hook: I
+
+## `Fake[Trait]`, for one of the program's traits, is a recording fake of
+## it (17): `Fake[Mailer].new()` logs each call, `calls()` gives the log
+## (each call written `method(arguments)`), and `on_METHOD(result)`
+## queues what a method returns, the last result queued returned again
+## once the others are used; a method called with nothing queued panics.
+## Copies of a fake share what it recorded. The compiler writes the fake
+## from the trait's methods; this declaration only gives it its name.
+struct Fake[T]:
+    pass
+
+impl[T: FsOps, I: Interceptor] FsOps for Wrap[T, I]:
+    def read(self, path: Path) -> bytes ! IoError:
+        let c = Call(capability="Fs".to_string(), method="read".to_string(), args="{path:?}")
+        self.hook.before(c.copy())
+        let r = self.inner.read(path)
+        self.hook.after(c, "{r:?}")
+        return r
+    def write(self, path: Path, data: bytes) -> ! IoError:
+        let c = Call(
+            capability="Fs".to_string(), method="write".to_string(), args="{path:?}, {data:?}"
+        )
+        self.hook.before(c.copy())
+        let r = self.inner.write(path, data)
+        self.hook.after(c, "{r:?}")
+        return r
+    def read_to_string(self, path: Path) -> String ! IoError:
+        let c = Call(
+            capability="Fs".to_string(), method="read_to_string".to_string(), args="{path:?}"
+        )
+        self.hook.before(c.copy())
+        let r = self.inner.read_to_string(path)
+        self.hook.after(c, "{r:?}")
+        return r
+    def write_text(self, path: Path, text: str) -> ! IoError:
+        let c = Call(
+            capability="Fs".to_string(), method="write_text".to_string(), args="{path:?}, {text:?}"
+        )
+        self.hook.before(c.copy())
+        let r = self.inner.write_text(path, text)
+        self.hook.after(c, "{r:?}")
+        return r
+    def exists(self, path: Path) -> bool:
+        let c = Call(capability="Fs".to_string(), method="exists".to_string(), args="{path:?}")
+        self.hook.before(c.copy())
+        let r = self.inner.exists(path)
+        self.hook.after(c, "{r:?}")
+        return r
+    def metadata(self, path: Path) -> Metadata ! IoError:
+        let c = Call(capability="Fs".to_string(), method="metadata".to_string(), args="{path:?}")
+        self.hook.before(c.copy())
+        let r = self.inner.metadata(path)
+        self.hook.after(c, "{r:?}")
+        return r
+    def remove(self, path: Path) -> ! IoError:
+        let c = Call(capability="Fs".to_string(), method="remove".to_string(), args="{path:?}")
+        self.hook.before(c.copy())
+        let r = self.inner.remove(path)
+        self.hook.after(c, "{r:?}")
+        return r
+    def list_dir(self, path: Path) -> list[Path] ! IoError:
+        let c = Call(capability="Fs".to_string(), method="list_dir".to_string(), args="{path:?}")
+        self.hook.before(c.copy())
+        let r = self.inner.list_dir(path)
+        self.hook.after(c, "{r:?}")
+        return r
+    def create_dir(self, path: Path) -> ! IoError:
+        let c = Call(capability="Fs".to_string(), method="create_dir".to_string(), args="{path:?}")
+        self.hook.before(c.copy())
+        let r = self.inner.create_dir(path)
+        self.hook.after(c, "{r:?}")
+        return r
+    def sync(self, path: Path) -> ! IoError:
+        let c = Call(capability="Fs".to_string(), method="sync".to_string(), args="{path:?}")
+        self.hook.before(c.copy())
+        let r = self.inner.sync(path)
+        self.hook.after(c, "{r:?}")
+        return r
+
+impl[T: ClockOps, I: Interceptor] ClockOps for Wrap[T, I]:
+    def now(self) -> DateTime:
+        let c = Call(capability="Clock".to_string(), method="now".to_string(), args=String.new())
+        self.hook.before(c.copy())
+        let r = self.inner.now()
+        self.hook.after(c, "{r:?}")
+        return r
+    def after(self, d: Duration) -> Timer:
+        let c = Call(capability="Clock".to_string(), method="after".to_string(), args="{d:?}")
+        self.hook.before(c.copy())
+        let r = self.inner.after(d)
+        self.hook.after(c, "{r:?}")
+        return r
+
+impl[T: RandOps, I: Interceptor] RandOps for Wrap[T, I]:
+    def bits(self) -> int:
+        let c = Call(capability="Rand".to_string(), method="bits".to_string(), args=String.new())
+        self.hook.before(c.copy())
+        let r = self.inner.bits()
+        self.hook.after(c, "{r:?}")
+        return r
+
+impl[T: EnvOps, I: Interceptor] EnvOps for Wrap[T, I]:
+    def args(self) -> list[str]:
+        let c = Call(capability="Env".to_string(), method="args".to_string(), args=String.new())
+        self.hook.before(c.copy())
+        let r = self.inner.args()
+        self.hook.after(c, "{r:?}")
+        return r
+    def get(self, name: str) -> String?:
+        let c = Call(capability="Env".to_string(), method="get".to_string(), args="{name:?}")
+        self.hook.before(c.copy())
+        let r = self.inner.get(name)
+        self.hook.after(c, "{r:?}")
+        return r
+
+impl[T: ProcOps, I: Interceptor] ProcOps for Wrap[T, I]:
+    def run(self, program: str, args: list[str]) -> ProcOutput ! ProcError:
+        let c = Call(
+            capability="Proc".to_string(), method="run".to_string(), args="{program:?}, {args:?}"
+        )
+        self.hook.before(c.copy())
+        let r = self.inner.run(program, args)
+        self.hook.after(c, "{r:?}")
+        return r
+
+impl[T: NetOps, I: Interceptor] NetOps for Wrap[T, I]:
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}:
+        let c = Call(
+            capability="Net".to_string(), method="connect".to_string(), args="{host:?}, {port:?}"
+        )
+        self.hook.before(c.copy())
+        let r = self.inner.connect(host, port)
+        let outcome = match r:
+            case Ok(conn): "Ok(<connection to {conn.peer}>)"
+            case Err(e): "Err({e:?})"
+        self.hook.after(c, outcome)
+        return r
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
+        let c = Call(
+            capability="Net".to_string(), method="listen".to_string(), args="{port:?}, {host:?}"
+        )
+        self.hook.before(c.copy())
+        let r = self.inner.listen(port, host)
+        let outcome = match r:
+            case Ok(l): "Ok(<listener at {l.port}>)"
+            case Err(e): "Err({e:?})"
+        self.hook.after(c, outcome)
+        return r

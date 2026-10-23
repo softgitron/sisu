@@ -1,0 +1,36 @@
+# Constants and defaults that reflect (08, "Reflection"; decision 251): a
+# constant's value, a field's default and a parameter's default may ask
+# `reflect` about the program's types; the value is unfolded once
+# everything it names is declared, and then checked and evaluated like any
+# other.
+
+struct Point:
+    x: int
+    y: int
+
+enum Shape:
+    Circle(radius: int)
+    Square(side: int)
+    Dot
+
+const FIELDS: int = len(reflect.fields_of(Point))
+const NAMES: list[str] = [f.name for f in reflect.fields_of(Point)]
+const VARIANTS: list[str] = [v.name for v in reflect.variants_of(Shape)]
+const TITLE: str = reflect.name_of(Point)
+
+struct Layout:
+    columns: int = len(reflect.fields_of(Point))
+    title: String = String(reflect.name_of(Shape))
+
+def header(width: int = len(reflect.variants_of(Shape))) -> String:
+    return "-".repeat(width)
+
+def main():
+    print(FIELDS)
+    print(NAMES)
+    print(VARIANTS)
+    print(TITLE)
+    let l = Layout()
+    print("{l.columns} {l.title}")
+    print(header())
+    print(header(width=5))

@@ -1,0 +1,36 @@
+# `json.encode[T]` (11, std.json) is a template over reflection in the
+# standard library, made for each type the program encodes.
+
+import std.json
+
+struct Point:
+    x: int
+    y: int
+
+enum Shape:
+    Circle(center: Point, radius: f64)
+    Polygon(points: list[Point])
+    Empty
+
+struct Drawing:
+    title: String
+    shapes: list[Shape]
+    note: String?
+    visible: bool
+
+def main():
+    print(json.encode(42))
+    print(json.encode([1.5, 2.0]))
+    print(json.encode("say \"hi\""))
+    print(json.encode(Point(x=1, y=-2)))
+    let d = Drawing(
+        title="plan".to_string(),
+        shapes=[
+            Circle(center=Point(x=0, y=0), radius=1.5), Polygon(points=[Point(x=1, y=1)]), Empty
+        ],
+        note=None,
+        visible=True,
+    )
+    print(json.encode(d))
+    let maybe: int? = Some(3)
+    print(json.encode(maybe))

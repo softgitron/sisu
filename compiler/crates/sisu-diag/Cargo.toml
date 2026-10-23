@@ -1,0 +1,11 @@
+[package]
+name = "sisu-diag"
+description = "Spans, the source map and the message catalog: every diagnostic is an identifier with parameters"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

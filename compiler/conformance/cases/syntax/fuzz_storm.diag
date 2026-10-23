@@ -1,0 +1,5 @@
+1:9-1:10 E0010 lex.mismatched-bracket close="]" open="("
+  label 1:7-1:8 lex.opened-here
+2:7-2:8 E0008 lex.unmatched-close close=")"
+3:6-3:7 E0009 lex.unclosed-bracket open="("
+  fix lex.close-bracket 3:7-3:7 ")"

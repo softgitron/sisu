@@ -1,0 +1,27 @@
+# The user-defined derive of proposal/examples/comptime.sisu, kept
+# identical to the proposal's text by a test (the rest of that example
+# needs `Array`, sized integers, const generics, reflection in generic
+# code, `target`, `@cfg` and the `sql` package).
+
+# A user-defined derive: any trait can provide one.
+trait Describe:
+    def describe(self) -> String
+
+    comptime def derive(T: type) -> impl Describe for T:
+        return impl Describe for T:
+            def describe(self) -> String:
+                var parts = list()
+                comptime for f in reflect.fields_of(T):
+                    parts.push("{f.name}={self.[f]:?}")
+                return "{reflect.name_of(T)}({parts.join(", ")})"
+
+@derive(Describe, Debug)
+struct Point:
+    x: int
+    y: int
+
+def main():
+    let p = Point(x=1, y=2)
+    print(p.describe())
+    assert p.describe() == "Point(x=1, y=2)"
+    print("{p:?}")

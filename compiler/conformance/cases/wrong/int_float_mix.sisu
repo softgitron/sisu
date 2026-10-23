@@ -1,0 +1,6 @@
+# A wrong program: an `int` and an `f64` are mixed in arithmetic.
+
+def main():
+    let total = 7
+    let average = total / 2.0
+    print(average)

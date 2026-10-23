@@ -1,0 +1,29 @@
+# The rules the checker applies to tasks before ownership (06): a task and
+# a scope's body are written at the call, so their captures can be checked;
+# a scope's body cannot return its scope or a handle of its tasks; a
+# `select` arm waits for a receive, a send, a join, a timer or a
+# cancellation; `yield` belongs in a generator, which returns `Iter[T]`.
+
+def not_written_here(f: () -> int):
+    task.scope do s:
+        let h = s.spawn(f)
+        _ = h
+
+def returns_its_scope():
+    let leaked = task.scope do s:
+        return s
+    _ = leaked
+
+def bad_arm(n: int):
+    select:
+        case x = n + 1:
+            print(x)
+
+def not_a_generator():
+    yield 1
+
+def wrong_result() -> list[int]:
+    yield 1
+
+def main():
+    pass

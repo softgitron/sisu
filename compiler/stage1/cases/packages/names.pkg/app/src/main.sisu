@@ -1,0 +1,13 @@
+import uitl
+import app.helpers
+from app.helpers import twice, missing
+from util.text import shout
+import util
+
+def main():
+    print(twice(2))
+    print(shout("x"))
+    print(helpers.twice(3))
+    print(geo.point.origin())
+    print(undefined_thing)
+    print(util.VERSION)

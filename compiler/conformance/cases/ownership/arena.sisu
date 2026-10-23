@@ -1,0 +1,27 @@
+# `Arena[T]` with generational `Key[T]` handles (04): keys are `Copy`, a
+# graph's cycles are keys, a removed slot is reused under a new
+# generation, and a stale key finds nothing.
+
+struct Node:
+    label: String
+    edges: list[Key[Node]]
+
+def main():
+    var nodes = Arena[Node]()
+    let a = nodes.insert(Node(label="a", edges=[]))
+    let b = nodes.insert(Node(label="b", edges=[a]))
+    nodes[a].edges.push(b)
+    print(len(nodes))
+    print(nodes[b].label)
+    print(nodes[nodes[a].edges[0]].label)
+    print(nodes.get(a)?.label ?? "none")
+    nodes.remove(a)
+    print(nodes.contains(a))
+    print(nodes.get(a).is_none())
+    let c = nodes.insert(Node(label="c", edges=[]))
+    print(c.index == a.index)
+    print(c.generation - a.generation)
+    print([nodes[k].label.copy() for k in nodes.keys()])
+    let taken = nodes.take(b)
+    print(taken?.label ?? "none")
+    print(len(nodes))

@@ -1,0 +1,9 @@
+# A wrong program: a text is pushed onto a list, which takes it, and then
+# printed.
+
+def main():
+    var names: list[String] = []
+    let name = "Roni".to_string()
+    names.push(name)
+    print(name)
+    print(names)

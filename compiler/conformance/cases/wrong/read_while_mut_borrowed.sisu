@@ -1,0 +1,8 @@
+# A wrong program: a list is read while a `mut` borrow of it is still
+# used.
+
+def main():
+    var xs = [1, 2, 3]
+    let m = ref mut xs
+    print(len(xs))
+    m.push(4)

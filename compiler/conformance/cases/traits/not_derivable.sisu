@@ -1,0 +1,8 @@
+# `@derive` knows `Copy`, `Debug`, `Eq`, `PartialOrd`, `Ord` and `Hash`.
+
+@derive(Eq, Display)
+struct Point:
+    x: int
+
+def main():
+    pass

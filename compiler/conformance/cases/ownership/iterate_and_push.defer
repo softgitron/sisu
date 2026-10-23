@@ -1,0 +1,65 @@
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+ownership violation: a reference was used after its loan had ended
+  the loan: a shared borrow of `xs` in `main`, created at iterate_and_push.sisu:6:14 by `_3 = ref _1`
+  ended by: a `mut` borrow of `xs` at iterate_and_push.sisu:8:13 (`_9 = call intrinsic list.push(copy _10, const 4)`)
+  used at: iterate_and_push.sisu:6:5 (`_5 = call intrinsic Iter.next(copy _4)`)
+  value: `xs` = [1, 2, 3, 4]
+  loans of `xs` not ended yet: 0 shared, 2 with `mut`
+  at main (iterate_and_push.sisu:6:5)
+SIR of `main`:
+fn main(0) source 0 @4:5-4:9 {
+    let _0: ()
+    let _1: list[int] "xs" @5:9-5:11
+    let _2: Iter[ref int]
+    let _3: ref list[int]
+    let _4: ref mut Iter[ref int]
+    let _5: Option[ref int]
+    let _6: int
+    let _7: ref int "x" @6:9-6:10
+    let _8: bool
+    let _9: ()
+    let _10: ref mut list[int]
+    let _11: ()
+    let _12: ref list[int]
+  bb0:
+    _1 = list(const 1, const 2, const 3) @5:14-5:23
+    goto bb1
+  bb1 (unwind bb2):
+    _3 = ref _1 @6:14-6:16
+    _2 = call intrinsic iter.ref(copy _3) @6:5-6:16
+    goto bb4
+  bb2 (cleanup):
+    drop _1
+    resume
+  bb3 (cleanup):
+    drop _2
+    goto bb2
+  bb4 (unwind bb3):
+    _4 = ref mut _2 @6:5-6:16
+    _5 = call intrinsic Iter.next(copy _4) @6:5-6:16
+    _6 = discriminant _5 @6:5-6:16
+    switch copy _6 [0: bb5, else: bb7] @6:5-6:16
+  bb5 (unwind bb3):
+    _7 = copy _5.as(0).0 @6:9-6:10
+    _8 = eq copy _7, const 2 @7:12-7:18
+    switch copy _8 [0: bb4, else: bb6] @7:12-7:18
+  bb6 (unwind bb3):
+    _10 = ref mut _1 @8:13-8:15
+    _9 = call intrinsic list.push(copy _10, const 4) @8:13-8:23
+    goto bb4
+  bb7 (unwind bb2):
+    drop _2 @8:23-8:23
+    goto bb8
+  bb8 (unwind bb2):
+    dead _2 @8:23-8:23
+    _12 = ref _1 @9:11-9:13
+    _11 = call intrinsic print(copy _12) @9:5-9:14
+    _0 = const ()
+    goto bb9
+  bb9:
+    drop _1 @9:14-9:14
+    return
+}
+outcome: conflict reached; the run stopped at a concrete ownership conflict
+--- status 134

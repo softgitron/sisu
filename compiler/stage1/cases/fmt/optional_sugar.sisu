@@ -1,0 +1,14 @@
+# `Option[T]` written `T?` where that reads unambiguously: not when `T` is
+# optional, a result or a function, nor behind `ref` or `?`.
+trait Shape:
+    def area(self) -> int
+
+def plain(x: Option[int], pair: Option[(int, str)], shape: Option[ref dyn Shape]) -> Option[int]:
+    return None
+
+def kept(x: ref Option[int], f: Option[(int) -> int], nested: Option[int?], again: Option[int]?) -> int:
+    return 0
+
+def deeper(y: Option[list[Option[int]]], z: Option[(int)], w: Option[Option[int]  # why
+]) -> int:
+    return 0

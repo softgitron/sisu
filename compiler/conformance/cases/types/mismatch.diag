@@ -1,0 +1,2 @@
+5:18-5:25 E0300 type.mismatch expected="int" found="str"
+  label 5:12-5:15 type.expected-because

@@ -1,6 +1,11 @@
 //! `max-tasks`: how many parked tasks can exist before something runs out, and
 //! which limit it was.
 //!
+//! With `--hold-secs S`, a run that reached the cap keeps every task parked for
+//! another S seconds and then checks that all are still parked and reads memory
+//! again: the scale row of the pre-registration (proposal/20, section 6.5) passes
+//! when all 1M tasks park and the process survives 60 seconds.
+//!
 //! Tasks are spawned one at a time (each does shallow work and parks on a gate)
 //! until a spawn fails, `--tasks` (the cap) is reached, or the memory headroom
 //! (`MemAvailable`, or the memory cgroup's limit minus its usage when that is
@@ -32,20 +37,35 @@ pub struct MaxResult {
     pub base: MemSnapshot,
     pub at_stop: MemSnapshot,
     pub spawn_secs: f64,
+    /// With `--hold-secs`, after the hold: seconds held, tasks still parked, memory.
+    pub held: Option<Held>,
+}
+
+/// What a hold after reaching the cap found.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Held {
+    pub secs: f64,
+    pub parked: u64,
+    pub mem: MemSnapshot,
 }
 
 pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
     let default_cap = if ctx.args.imp == Impl::OsThreads { 10_000 } else { 100_000 };
     let cap = ctx.args.tasks.unwrap_or(default_cap);
     let guard = ctx.args.size("mem-guard", 1 << 30)? as u64;
-    let p = params(&[("cap", cap.to_string()), ("mem_guard", guard.to_string())]);
+    let hold = ctx.args.secs("hold-secs", 0.0)?;
+    let mut pairs = vec![("cap", cap.to_string()), ("mem_guard", guard.to_string())];
+    if !hold.is_zero() {
+        pairs.push(("hold_s", format!("{}", hold.as_secs_f64())));
+    }
+    let p = params(&pairs);
     ctx.banner(&p);
     let res = match ctx.args.imp.clone() {
-        Impl::Tokio => crate::tokio_ref::max_tasks(ctx.args.threads, cap, guard)?,
-        Impl::OsThreads => os_threads(cap, guard, ctx.args.size("os-stack", 64 * 1024)?),
+        Impl::Tokio => crate::tokio_ref::max_tasks(ctx.args.threads, cap, guard, hold)?,
+        Impl::OsThreads => os_threads(cap, guard, ctx.args.size("os-stack", 64 * 1024)?, hold),
         Impl::Taskbench(cfg) => {
             let rt = Runtime::with_worker_stack(ctx.args.threads, &cfg, ctx.args.worker_stack)?;
-            if ctx.args.imp.is_stackless() { stackless(&rt, cap, guard) } else { stackful(&rt, cap, guard) }
+            if ctx.args.imp.is_stackless() { stackless(&rt, cap, guard, hold) } else { stackful(&rt, cap, guard, hold) }
         }
     };
     emit(ctx, &p, &res);
@@ -75,13 +95,30 @@ pub fn emit(ctx: &mut BenchCtx, p: &str, res: &MaxResult) {
         ctx.metric(p, tasks, "total_per_task_at_stop", per.round(), "bytes");
         ctx.metric(p, tasks, "spawn_rate", res.created as f64 / res.spawn_secs.max(1e-9), "1/s");
     }
+    if let Some(h) = res.held {
+        ctx.metric(p, tasks, "hold_secs", (h.secs * 1e3).round() / 1e3, "s");
+        let mut r = ctx.row("parked_after_hold", Some(h.parked as f64), "count");
+        r.params = p.to_string();
+        r.tasks = tasks;
+        r.status = if h.parked == res.created { Status::Ok } else { Status::Failed };
+        r.note = format!("{} of {} tasks still parked after the hold", h.parked, res.created);
+        ctx.emit(r);
+        let per = (h.mem.rss_plus_pte() as f64 - res.base.rss_plus_pte() as f64) / res.created.max(1) as f64;
+        ctx.metric(p, tasks, "total_per_task_after_hold", per.round(), "bytes");
+    }
+}
+
+/// Whether a run that stopped with `created` tasks holds them (only a run that
+/// reached the cap is a candidate for the scale row's survival check).
+fn holds(hold: Duration, created: u64, cap: u64) -> bool {
+    !hold.is_zero() && created == cap
 }
 
 fn below_guard(guard: u64) -> bool {
     mem::mem_headroom().map(|a| a < guard).unwrap_or(false)
 }
 
-fn stackful(rt: &Runtime, cap: u64, guard: u64) -> MaxResult {
+fn stackful(rt: &Runtime, cap: u64, guard: u64, hold: Duration) -> MaxResult {
     let gate = Gate::new();
     rt.block_on(|| {
         let mut res = MaxResult { cap, base: mem::snapshot(false), limit: "cap".into(), ..Default::default() };
@@ -123,13 +160,22 @@ fn stackful(rt: &Runtime, cap: u64, guard: u64) -> MaxResult {
                 let _ = rt::sleep(Duration::from_millis(5));
             }
             res.at_stop = mem::snapshot(true);
+            if holds(hold, res.created, cap) {
+                let t = Instant::now();
+                let _ = rt::sleep(hold);
+                res.held = Some(Held {
+                    secs: t.elapsed().as_secs_f64(),
+                    parked: gate.waiting() as u64,
+                    mem: mem::snapshot(false),
+                });
+            }
             gate.open();
         });
         res
     })
 }
 
-fn stackless(rt: &Runtime, cap: u64, guard: u64) -> MaxResult {
+fn stackless(rt: &Runtime, cap: u64, guard: u64, hold: Duration) -> MaxResult {
     let gate = Arc::new(Gate::new());
     rt.block_on_async(async move {
         let mut res = MaxResult { cap, base: mem::snapshot(false), limit: "cap".into(), ..Default::default() };
@@ -157,6 +203,15 @@ fn stackless(rt: &Runtime, cap: u64, guard: u64) -> MaxResult {
             let _ = rt::sleep_async(Duration::from_millis(5)).await;
         }
         res.at_stop = mem::snapshot(true);
+        if holds(hold, res.created, cap) {
+            let t = Instant::now();
+            let _ = rt::sleep_async(hold).await;
+            res.held = Some(Held {
+                secs: t.elapsed().as_secs_f64(),
+                parked: gate.waiting() as u64,
+                mem: mem::snapshot(false),
+            });
+        }
         gate.open();
         let _ = s.join_all().await;
         res
@@ -170,9 +225,11 @@ const VMAS_PER_THREAD: u64 = 4;
 /// Threads between two checks of the VMA count.
 const THREAD_BATCH: u64 = 256;
 
-fn os_threads(cap: u64, guard: u64, stack: usize) -> MaxResult {
+fn os_threads(cap: u64, guard: u64, stack: usize, hold: Duration) -> MaxResult {
+    use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
     use std::sync::{Condvar, Mutex};
     let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let parked = Arc::new(AtomicU64::new(0));
     let mut res = MaxResult { cap, base: mem::snapshot(false), limit: "cap".into(), ..Default::default() };
     let max_vmas = mem::read_sysctl("vm/max_map_count").unwrap_or(65530);
     let t0 = Instant::now();
@@ -192,10 +249,11 @@ fn os_threads(cap: u64, guard: u64, stack: usize) -> MaxResult {
                 break;
             }
         }
-        let g = gate.clone();
+        let (g, k) = (gate.clone(), parked.clone());
         match std::thread::Builder::new().stack_size(stack).spawn(move || {
             let (m, cv) = &*g;
             let mut open = m.lock().unwrap();
+            k.fetch_add(1, SeqCst);
             while !*open {
                 open = cv.wait(open).unwrap();
             }
@@ -222,6 +280,12 @@ fn os_threads(cap: u64, guard: u64, stack: usize) -> MaxResult {
     res.spawn_secs = t0.elapsed().as_secs_f64();
     std::thread::sleep(Duration::from_millis(100));
     res.at_stop = mem::snapshot(true);
+    if holds(hold, res.created, cap) {
+        let t = Instant::now();
+        std::thread::sleep(hold);
+        res.held =
+            Some(Held { secs: t.elapsed().as_secs_f64(), parked: parked.load(SeqCst), mem: mem::snapshot(false) });
+    }
     {
         let (m, cv) = &*gate;
         *m.lock().unwrap() = true;

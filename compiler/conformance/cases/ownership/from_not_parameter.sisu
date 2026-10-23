@@ -1,0 +1,10 @@
+# The `from` clause names borrowed parameters.
+
+def head(xs: list[int], n: int) -> ref int from n:
+    return ref xs[0]
+
+def first(xs: list[int]) -> ref int from ys:
+    return ref xs[0]
+
+def main():
+    print(head([1], 0))

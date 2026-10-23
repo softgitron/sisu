@@ -1,0 +1,11 @@
+error A:
+    Oops
+
+error B:
+    Other
+
+def f() -> int ! A:
+    return Err(Other)
+
+def main():
+    pass

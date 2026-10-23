@@ -1,0 +1,42 @@
+# `Shared` (04, rule 5): `.copy()` makes another owner, not a copy of the
+# value; fields and methods of the value are reached through it; the value
+# is dropped with its last owner; a `Weak` handle does not keep it alive.
+
+struct Config:
+    verbose: bool
+    retries: int
+
+    def describe(self) -> String:
+        return "retries={self.retries}"
+
+struct Loud:
+    name: String
+
+impl Drop for Loud:
+    def drop(mut self):
+        print("drop {self.name}")
+
+def use_config(cfg: Shared[Config]):
+    print(cfg.retries)
+
+def main():
+    let shared = Shared(Config(verbose=False, retries=3))
+    let a = shared.copy()
+    let b = shared.copy()
+    use_config(a)
+    print(b.describe())
+    print(Shared.count(shared))
+    print("{shared:?}")
+    let w = Shared.downgrade(shared)
+    print(w.upgrade().is_some())
+    var weak: Weak[Loud]? = None
+    if True:
+        let one = Shared(Loud(name="one".to_string()))
+        let two = one.copy()
+        weak = Some(Shared.downgrade(two))
+        print(Shared.count(one))
+        print("leaving the block")
+    match weak:
+        case Some(w): print(w.upgrade().is_some())
+        case None: print("no handle")
+    print("end")

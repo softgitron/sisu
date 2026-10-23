@@ -1,0 +1,2 @@
+10:26-10:27 E0347 type.bound-not-satisfied ty="Point" bound="Display"
+  fix type.show-debug 10:27-10:27 ":?"

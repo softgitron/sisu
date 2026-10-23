@@ -1,0 +1,37 @@
+# Views (04, "Views"): a `view struct` holds borrows; a list of views is
+# itself view-like; both are tied to the frame that owns what they borrow.
+# The tokenizer of proposal/examples/ownership.sisu.
+
+view struct Token:
+    kind: TokenKind
+    text: str
+
+@derive(Eq)
+enum TokenKind:
+    Word
+    Number
+
+def tokenize(source: str) -> list[Token]:
+    var out: list[Token] = []
+    for piece in source.split_whitespace():
+        let kind: TokenKind = if piece.chars().all(it.is_digit()): Number else: Word
+        out.push(Token(kind=kind, text=piece))
+    return out
+
+def count_numbers(tokens: list[Token]) -> int:
+    var n = 0
+    for t in tokens:
+        if t.kind == Number:
+            n += 1
+    return n
+
+def main():
+    var src = String.new("let x = 42")
+    let tokens = tokenize(src)
+    for t in tokens:
+        print("{t.kind:?}: {t.text}")
+    print(count_numbers(tokens))
+    src.push(" + 1")
+    print(src)
+    let words = [w for w in src.split_whitespace()]
+    print(len(words))

@@ -1,0 +1,5 @@
+item 0;item 1;item 2;x+y 24
+True 2.0 4.0 -1.0
+1.0 5.0 True
+-2.0 -0.75 -1.0
+["apple", "fig", "kiwi", "pear"] 4 ["fig", "kiwi"] Some("apple") Some("pear")

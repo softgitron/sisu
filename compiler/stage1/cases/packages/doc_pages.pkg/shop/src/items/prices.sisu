@@ -1,0 +1,5 @@
+##! Prices.
+
+## A price in cents.
+pub struct Price:
+    pub cents: int

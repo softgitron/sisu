@@ -1,0 +1,7 @@
+2
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+outcome: no conflict; this run ended without an ownership conflict
+  the checker still rejects line 4 (E0408 borrow.return-not-from), which this run reached without a conflict (count: 1)
+every rejected statement was reached without a conflict: a candidate false positive
+--- status 0

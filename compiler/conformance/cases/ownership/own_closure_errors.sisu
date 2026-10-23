@@ -1,0 +1,14 @@
+# An `own` closure keeps copies of what it captures: in stage 0 each
+# capture must be `Copy` (E0423), and the closure cannot change one (E0424).
+
+def each(n: int, f: (int) -> ()):
+    for i in range(n):
+        f(i)
+
+def main():
+    let name = "x".to_string()
+    let size = own () -> len(name)
+    var total = 0
+    each(3) do own i:
+        total += i
+    print(size())

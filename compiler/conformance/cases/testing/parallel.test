@@ -1,0 +1,20 @@
+first starts
+first ends
+second
+third
+fourth sees 0 arguments
+fifth
+test "first, slow" ... ok
+test "second, quick" ... ok
+test "third fails" ... FAILED
+test "fourth takes the real System" ... ok
+test "fifth, quick" ... ok
+
+test "third fails" ... FAILED
+panic: assertion failed: busy(10) == 0
+  left:  24
+  right: 0
+  at test "third fails" (parallel.sisu:23:5)
+replay: sisu test --replay 1-553316b4dba0f1d0-0.0.1-t2-s0-r0 parallel.sisu
+
+4 passed, 1 failed, 0 blocked

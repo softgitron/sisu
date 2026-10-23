@@ -1,0 +1,228 @@
+##! `std.sort` (11): stable and unstable sorting of a list in place. A
+##! stable sort keeps equal values in the order they were in (a merge sort
+##! of their positions, then one pass of swaps that moves each value once);
+##! an unstable one may not, and needs no extra room (introsort:
+##! quicksort, a heap sort where it would go quadratic, insertion sort for
+##! short runs). The prelude's `list.sort` and `sorted` are stable too.
+
+## Sorts `xs` from the smallest up, keeping equal values in order.
+##
+## ```
+## var xs = [5, 2, 9, 1, 5, 6]
+## sort(mut xs)
+## assert xs == [1, 2, 5, 5, 6, 9]
+## ```
+pub pure def sort[T: Ord](mut xs: list[T]):
+    sort_by(mut xs, (a, b) -> a.cmp(b))
+
+## Sorts `xs` by `cmp`, keeping in order the values it finds equal.
+##
+## ```
+## var words = ["pear", "fig", "apple", "kiwi"]
+## sort_by(mut words, (a, b) -> len(a).cmp(len(b)))
+## assert words == ["fig", "pear", "kiwi", "apple"]
+## ```
+pub pure def sort_by[T](mut xs: list[T], cmp: pure (ref T, ref T) -> Ordering):
+    let n = len(xs)
+    var order: list[int] = [i for i in range(n)]
+    var scratch: list[int] = [i for i in range(n)]
+    merge_sort(xs, mut order, mut scratch, 0, n, cmp)
+    apply(mut xs, order)
+
+## Sorts `xs` by the key `key` gives each value, computed once each,
+## keeping in order the values with equal keys.
+##
+## ```
+## var people = [("ada", 36), ("bob", 25), ("cy", 36), ("di", 25)]
+## sort_by_key(mut people, (p) -> p.1)
+## assert people == [("bob", 25), ("di", 25), ("ada", 36), ("cy", 36)]
+## ```
+pub pure def sort_by_key[T, K: Ord](mut xs: list[T], key: pure (ref T) -> K):
+    let order = key_order(xs, key)
+    apply(mut xs, order)
+
+## The positions of `xs` in the stable order of their keys.
+pure def key_order[T, K: Ord](xs: list[T], key: pure (ref T) -> K) -> list[int]:
+    let keys: list[K] = [key(x) for x in xs]
+    let n = len(keys)
+    var order: list[int] = [i for i in range(n)]
+    var scratch: list[int] = [i for i in range(n)]
+    merge_sort(keys, mut order, mut scratch, 0, n, (a, b) -> a.cmp(b))
+    return order
+
+## Sorts the positions `order[lo:hi]` by the values of `xs` they name,
+## stably: halves sorted, then merged, the earlier half first on a tie.
+pure def merge_sort[T](
+    xs: list[T],
+    mut order: list[int],
+    mut scratch: list[int],
+    lo: int,
+    hi: int,
+    cmp: pure (ref T, ref T) -> Ordering,
+):
+    if hi - lo < 2:
+        return
+    let mid = lo + (hi - lo) // 2
+    merge_sort(xs, mut order, mut scratch, lo, mid, cmp)
+    merge_sort(xs, mut order, mut scratch, mid, hi, cmp)
+    if cmp(ref xs[order[mid - 1]], ref xs[order[mid]]) != Ordering.Greater:
+        return
+    var i = lo
+    var j = mid
+    var k = lo
+    while i < mid and j < hi:
+        if cmp(ref xs[order[j]], ref xs[order[i]]) == Ordering.Less:
+            scratch[k] = order[j]
+            j += 1
+        else:
+            scratch[k] = order[i]
+            i += 1
+        k += 1
+    while i < mid:
+        scratch[k] = order[i]
+        i += 1
+        k += 1
+    while j < hi:
+        scratch[k] = order[j]
+        j += 1
+        k += 1
+    for t in range(lo, hi):
+        order[t] = scratch[t]
+
+## Moves the value at `order[k]` to `k`, for each `k`, by swaps along the
+## permutation's cycles: each value moves once.
+pure def apply[T](mut xs: list[T], order: list[int]):
+    let n = len(order)
+    var done: list[bool] = [False for _ in range(n)]
+    for start in range(n):
+        if done[start]:
+            continue
+        var k = start
+        while True:
+            done[k] = True
+            let j = order[k]
+            if j == start:
+                break
+            xs.swap(k, j)
+            k = j
+
+## Sorts `xs` from the smallest up; equal values may change places.
+##
+## ```
+## var xs = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]
+## sort_unstable(mut xs)
+## assert xs == [1, 1, 2, 3, 3, 4, 5, 5, 5, 6, 9]
+## ```
+pub pure def sort_unstable[T: Ord](mut xs: list[T]):
+    sort_unstable_by(mut xs, (a, b) -> a.cmp(b))
+
+## Sorts `xs` by `cmp`; values it finds equal may change places.
+##
+## ```
+## var xs = [3, 1, 2]
+## sort_unstable_by(mut xs, (a, b) -> b.cmp(a))
+## assert xs == [3, 2, 1]
+## ```
+pub pure def sort_unstable_by[T](mut xs: list[T], cmp: pure (ref T, ref T) -> Ordering):
+    let n = len(xs)
+    var depth = 0
+    var m = n
+    while m > 1:
+        depth += 2
+        m = m // 2
+    intro(mut xs, 0, n, depth, cmp)
+
+## Introsort of `xs[lo:hi]`, with `depth` partitions left before a heap
+## sort takes over.
+pure def intro[T](
+    mut xs: list[T], lo: int, hi: int, depth: int, cmp: pure (ref T, ref T) -> Ordering
+):
+    var start = lo
+    var end = hi
+    var budget = depth
+    while end - start > 16:
+        if budget == 0:
+            heap_sort(mut xs, start, end, cmp)
+            return
+        budget -= 1
+        let p = partition(mut xs, start, end, cmp)
+        # The smaller side by recursion, the larger by the loop.
+        if p - start < end - p - 1:
+            intro(mut xs, start, p, budget, cmp)
+            start = p + 1
+        else:
+            intro(mut xs, p + 1, end, budget, cmp)
+            end = p
+    insertion(mut xs, start, end, cmp)
+
+## Partitions `xs[lo:hi]` around the median of its first, middle and last
+## values; gives the pivot's final index.
+pure def partition[T](
+    mut xs: list[T], lo: int, hi: int, cmp: pure (ref T, ref T) -> Ordering
+) -> int:
+    let mid = lo + (hi - lo) // 2
+    let last = hi - 1
+    if cmp(ref xs[mid], ref xs[lo]) == Ordering.Less:
+        xs.swap(mid, lo)
+    if cmp(ref xs[last], ref xs[lo]) == Ordering.Less:
+        xs.swap(last, lo)
+    if cmp(ref xs[mid], ref xs[last]) == Ordering.Less:
+        xs.swap(mid, last)
+    # The median is now at `last`, the pivot.
+    var store = lo
+    for i in range(lo, last):
+        if cmp(ref xs[i], ref xs[last]) == Ordering.Less:
+            xs.swap(i, store)
+            store += 1
+    xs.swap(store, last)
+    return store
+
+pure def insertion[T](mut xs: list[T], lo: int, hi: int, cmp: pure (ref T, ref T) -> Ordering):
+    for i in range(lo + 1, hi):
+        var j = i
+        while j > lo and cmp(ref xs[j], ref xs[j - 1]) == Ordering.Less:
+            xs.swap(j, j - 1)
+            j -= 1
+
+pure def heap_sort[T](mut xs: list[T], lo: int, hi: int, cmp: pure (ref T, ref T) -> Ordering):
+    let n = hi - lo
+    var i = n // 2 - 1
+    while i >= 0:
+        sift_down(mut xs, lo, i, n, cmp)
+        i -= 1
+    var end = n - 1
+    while end > 0:
+        xs.swap(lo, lo + end)
+        sift_down(mut xs, lo, 0, end, cmp)
+        end -= 1
+
+pure def sift_down[T](
+    mut xs: list[T], base: int, start: int, n: int, cmp: pure (ref T, ref T) -> Ordering
+):
+    var root = start
+    while True:
+        let child = 2 * root + 1
+        if child >= n:
+            return
+        var top = child
+        if child + 1 < n and cmp(ref xs[base + child], ref xs[base + child + 1]) == Ordering.Less:
+            top = child + 1
+        if cmp(ref xs[base + root], ref xs[base + top]) != Ordering.Less:
+            return
+        xs.swap(base + root, base + top)
+        root = top
+
+## Whether each value is at most the next.
+##
+## ```
+## assert is_sorted([1, 2, 2, 3]) and not is_sorted([2, 1])
+## ```
+pub pure def is_sorted[T: Ord](xs: list[T]) -> bool:
+    return is_sorted_by(xs, (a, b) -> a.cmp(b))
+
+## Whether `cmp` finds no value greater than the next.
+pub pure def is_sorted_by[T](xs: list[T], cmp: pure (ref T, ref T) -> Ordering) -> bool:
+    for i in range(1, len(xs)):
+        if cmp(ref xs[i - 1], ref xs[i]) == Ordering.Greater:
+            return False
+    return True

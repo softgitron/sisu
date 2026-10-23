@@ -1,0 +1,2 @@
+7:11-7:15 E0200 resolve.undefined-name name="totl"
+  fix resolve.similar-name 7:11-7:15 "total"

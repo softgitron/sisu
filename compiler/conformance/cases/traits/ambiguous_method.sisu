@@ -1,0 +1,21 @@
+# Two traits a type implements both have `name`: the call names the trait.
+
+trait Named:
+    def name(self) -> String
+
+trait Titled:
+    def name(self) -> String
+
+struct P:
+    x: int
+
+impl Named for P:
+    def name(self) -> String:
+        return "named"
+
+impl Titled for P:
+    def name(self) -> String:
+        return "titled"
+
+def main():
+    print(P(x=1).name())

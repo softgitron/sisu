@@ -1,0 +1,3 @@
+../c/sisu.toml:7:1-7:2 E1007 package.cycle cycle="`a` -> `b` -> `c` -> `a`"
+  label sisu.toml:6:1-6:2 package.depends-here name="a" dep="b"
+  label ../b/sisu.toml:6:1-6:2 package.depends-here name="b" dep="c"

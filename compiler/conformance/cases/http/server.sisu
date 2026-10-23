@@ -1,0 +1,85 @@
+# std.x.http over the in-process network of `Net.fake` (17; 18, Phase 6):
+# a server task answers clients on other tasks, under many schedules.
+# explore 50
+
+import http
+from std.net import Url
+
+struct Greeter:
+    greeting: String
+
+impl http.Handler for Greeter:
+    def handle(self, request: http.Request) -> http.Response:
+        if request.target == "/missing":
+            return http.Response.text(404, "Not Found", "no such page\n")
+        let who = if request.body.is_empty(): "?".to_string() else: request.body.decode().ok()
+            ?? "?".to_string()
+        return http.Response.text(200, "OK", "{self.greeting}, {who} at {request.target}\n")
+
+def url(text: str) -> Url:
+    return Url.parse(text).expect("valid")
+
+test "a server answers a client":
+    let net = Net.fake()
+    let listener = net.listen(8080).expect("free")
+    let r = task.scope do s:
+        s.spawn(() -> http.serve(listener, Greeter(greeting="hello".to_string())))
+        let r = http.request(net, "POST", url("http://localhost:8080/a"), b"aino")
+        s.cancel()
+        return r
+    let resp = r.expect("answered")
+    assert resp.status == 200
+    assert resp.body == b"hello, aino at /a\n"
+    assert resp.header("content-type") == Some("text/plain; charset=utf-8".to_string())
+
+# A task that fails cancels its siblings (06), so the client that meets
+# a 404 asks with `request`, for which a status is not a failure.
+test "clients on many tasks each get their own answer":
+    let net = Net.fake()
+    let listener = net.listen(80).expect("free")
+    let answers = task.scope do s:
+        s.spawn(() -> http.serve(listener, Greeter(greeting="hi".to_string())))
+        let a = s.spawn(() -> http.get(net, url("http://localhost/one")))
+        let b = s.spawn(() -> http.get(net, url("http://localhost/two")))
+        let c = s.spawn(() -> http.request(net, "GET", url("http://localhost/missing")))
+        let got = (a.join(), b.join(), c.join().map((r) -> r.status))
+        s.cancel()
+        return got
+    assert answers.0 == Ok(b"hi, ? at /one\n")
+    assert answers.1 == Ok(b"hi, ? at /two\n")
+    assert answers.2 == Ok(404)
+
+test "nothing listens: the client is refused":
+    let net = Net.fake()
+    match http.get(net, url("http://localhost:9/")):
+        case Err(Network(message)):
+            assert message == "Refused(address=\"localhost:9\")"
+        case other:
+            assert False, "expected a refusal, got {other}"
+
+test "the scripted network counts requests":
+    let net = http.FakeNet().respond_to("https://api.example.com/v1/data", b"from net")
+    assert http.get(net, url("https://api.example.com/v1/data")) == Ok(b"from net")
+    assert http.get(net, url("https://api.example.com/v2")) == Err(Status(code=404))
+    assert net.request_count() == 2
+
+test "an echo server returns what it reads":
+    let net = Net.fake()
+    let listener = net.listen(7).expect("free")
+    let back = task.scope do s:
+        s.spawn do:
+            let conn = listener.accept()?
+            var c = conn
+            while True:
+                let chunk = c.read(4)?
+                if chunk.is_empty():
+                    break
+                c.write(chunk)?
+            c.close()
+            return Ok(())
+        var client = net.connect("localhost", 7)?
+        client.write(b"echo ")?
+        client.write(b"this")?
+        client.close()
+        return client.read_to_end()
+    assert back == Ok(b"echo this")

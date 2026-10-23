@@ -1,0 +1,738 @@
+##! `std.regex` (11): regular expressions matched in time linear in the
+##! text, whatever the pattern: no backtracking, so no pattern can make a
+##! match take exponential time (ReDoS), as RE2's and Go's engines
+##! guarantee. A pattern is compiled to a program (Thompson's
+##! construction) that a Pike VM runs over the text, every alternative at
+##! once; a match is the leftmost one, and among those the one Perl's
+##! order of alternatives and greedy repetitions prefers, with the
+##! submatch of each group.
+##!
+##! The syntax is RE2's core: literals and `\` escapes of the
+##! punctuation; `.` (any character but a line break); classes `[a-z_]`,
+##! `[^...]`, `\d`, `\w`, `\s` (`[\t\n\f\r ]`, as RE2's) and `\D`, `\W`,
+##! `\S`; `^` and `$` (the
+##! start and the end of the text); `\b` and `\B` (a word boundary or
+##! not); groups `(...)` and `(?:...)`; `|`; and `*`, `+`, `?`, `{n}`,
+##! `{n,}`, `{n,m}`, each lazy with a `?` after it. Positions are byte
+##! indices into the text.
+
+## What a pattern cannot be compiled for: the problem, and the character
+## index in the pattern where it was found.
+pub error RegexError:
+    Syntax(at: int, message: String)
+
+## One step of a compiled pattern.
+@derive(Eq)
+enum Inst:
+    ## The character `c`.
+    Char(c: char)
+    ## A character in one of `ranges` (inclusive code points), or in none
+    ## of them when `negated`.
+    Class(ranges: list[(int, int)], negated: bool)
+    ## Any character but `\n`.
+    Any
+    ## Go on at `x` and at `y`, `x` preferred.
+    Split(x: int, y: int)
+    Jump(to: int)
+    ## Record the position in capture slot `slot`.
+    Save(slot: int)
+    ## The start, or the end, of the text.
+    Start
+    End
+    ## A word boundary, or with `negated` a place that is not one.
+    Boundary(negated: bool)
+    Match
+
+## A pattern read into a tree, before it is compiled.
+enum Node:
+    Empty
+    Lit(c: char)
+    Set(ranges: list[(int, int)], negated: bool)
+    Dot
+    Begin
+    Finish
+    Word(negated: bool)
+    Group(index: int?, inner: list[Node])
+    Concat(parts: list[Node])
+    Alt(choices: list[Node])
+    Repeat(inner: list[Node], min: int, max: int?, greedy: bool)
+
+## The most a counted repetition may repeat, which bounds the program.
+const MAX_REPEAT: int = 1000
+
+## The reader of a pattern.
+struct Parser:
+    cs: list[char]
+    at: int
+    groups: int
+
+impl Parser:
+    pure def peek(self) -> char?:
+        return self.cs.get(self.at).copied()
+
+    pure def error(self, message: str) -> RegexError:
+        return Syntax(at=self.at, message=String.new(message))
+
+    ## The next character, or `message` at `at` at the end of the
+    ## pattern.
+    pure def next_or(mut self, at: int, message: str) -> char ! RegexError:
+        match self.peek():
+            case Some(c):
+                self.at += 1
+                return Ok(c)
+            case None:
+                return Err(Syntax(at=at, message=String.new(message)))
+
+    pure def alternation(mut self) -> Node ! RegexError:
+        var choices: list[Node] = [self.concat()?]
+        while self.peek() == Some('|'):
+            self.at += 1
+            choices.push(self.concat()?)
+        if len(choices) == 1:
+            return Ok(choices.pop().expect("a choice"))
+        return Ok(Alt(choices=choices))
+
+    pure def concat(mut self) -> Node ! RegexError:
+        var parts: list[Node] = []
+        while let Some(c) = self.peek():
+            if c == '|' or c == ')':
+                break
+            parts.push(self.repeat()?)
+        if parts.is_empty():
+            return Ok(Empty)
+        if len(parts) == 1:
+            return Ok(parts.pop().expect("a part"))
+        return Ok(Concat(parts=parts))
+
+    ## A number of a counted repetition, if one is here.
+    pure def number(mut self) -> int?:
+        var n: int? = None
+        while let Some(c) = self.peek():
+            match c.to_digit():
+                case Some(d):
+                    n = Some((n ?? 0) * 10 + d)
+                    if (n ?? 0) > MAX_REPEAT:
+                        n = Some(MAX_REPEAT + 1)
+                    self.at += 1
+                case None:
+                    break
+        return n
+
+    pure def repeat(mut self) -> Node ! RegexError:
+        let atom = self.atom()?
+        var node = atom
+        var repeated = False
+        while let Some(c) = self.peek():
+            let here = self.at
+            var min = 0
+            var max: int? = None
+            if c == '*':
+                self.at += 1
+            elif c == '+':
+                self.at += 1
+                min = 1
+            elif c == '?':
+                self.at += 1
+                max = Some(1)
+            elif c == '{':
+                let back = self.at
+                self.at += 1
+                match self.number():
+                    case Some(n):
+                        min = n
+                        if self.peek() == Some(','):
+                            self.at += 1
+                            max = self.number()
+                        else:
+                            max = Some(n)
+                        if self.peek() != Some('}'):
+                            self.at = back
+                            break
+                        self.at += 1
+                    case None:
+                        # Not a repetition: `{` is itself.
+                        self.at = back
+                        break
+                if min > MAX_REPEAT or (max ?? 0) > MAX_REPEAT:
+                    return Err(
+                        Syntax(
+                            at=back, message=String.new("a repetition of more than {MAX_REPEAT}")
+                        )
+                    )
+                if let Some(m) = max:
+                    if m < min:
+                        return Err(
+                            Syntax(
+                                at=back,
+                                message=String.new("a repetition whose bounds are reversed"),
+                            )
+                        )
+            else:
+                break
+            if repeated:
+                return Err(Syntax(at=here, message=String.new("a repetition of a repetition")))
+            var greedy = True
+            if self.peek() == Some('?'):
+                self.at += 1
+                greedy = False
+            node = Repeat(inner=[node], min=min, max=max, greedy=greedy)
+            repeated = True
+        return Ok(node)
+
+    pure def atom(mut self) -> Node ! RegexError:
+        let c = self.peek().expect("a character")
+        let start = self.at
+        self.at += 1
+        if c == '(':
+            var index: int? = None
+            if self.peek() == Some('?'):
+                self.at += 1
+                if self.peek() != Some(':'):
+                    return Err(self.error("`(?:`, the only group flag"))
+                self.at += 1
+            else:
+                self.groups += 1
+                index = Some(self.groups)
+            let inner = self.alternation()?
+            if self.peek() != Some(')'):
+                return Err(Syntax(at=start, message=String.new("an unclosed group")))
+            self.at += 1
+            return Ok(Group(index=index, inner=[inner]))
+        if c == '[':
+            return self.class()
+        if c == '.':
+            return Ok(Dot)
+        if c == '^':
+            return Ok(Begin)
+        if c == '$':
+            return Ok(Finish)
+        if c == '*' or c == '+' or c == '?':
+            return Err(Syntax(at=start, message=String.new("a repetition of nothing")))
+        if c == '\\':
+            return self.escape(False)
+        return Ok(Lit(c=c))
+
+    ## What follows a `\`, inside a class (`in_class`) or not.
+    pure def escape(mut self, in_class: bool) -> Node ! RegexError:
+        let c = self.next_or(self.at - 1, "a `\\` at the end")?
+        let digit: list[(int, int)] = [(48, 57)]
+        let word: list[(int, int)] = [(48, 57), (65, 90), (95, 95), (97, 122)]
+        let space: list[(int, int)] = [(9, 10), (12, 13), (32, 32)]
+        match c:
+            case 'd':
+                return Ok(Set(ranges=digit, negated=False))
+            case 'D':
+                return Ok(Set(ranges=digit, negated=True))
+            case 'w':
+                return Ok(Set(ranges=word, negated=False))
+            case 'W':
+                return Ok(Set(ranges=word, negated=True))
+            case 's':
+                return Ok(Set(ranges=space, negated=False))
+            case 'S':
+                return Ok(Set(ranges=space, negated=True))
+            case 'n':
+                return Ok(Lit(c='\n'))
+            case 't':
+                return Ok(Lit(c='\t'))
+            case 'r':
+                return Ok(Lit(c='\r'))
+            case 'f':
+                return Ok(Lit(c=char.from_code(12).expect("a character")))
+            case 'v':
+                return Ok(Lit(c=char.from_code(11).expect("a character")))
+            case 'b':
+                if in_class:
+                    return Err(Syntax(at=self.at - 2, message=String.new("`\\b` in a class")))
+                return Ok(Word(negated=False))
+            case 'B':
+                if in_class:
+                    return Err(Syntax(at=self.at - 2, message=String.new("`\\B` in a class")))
+                return Ok(Word(negated=True))
+            case _:
+                if c.is_alphabetic() or c.is_digit():
+                    return Err(Syntax(at=self.at - 2, message=String.new("the escape `\\{c}`")))
+                return Ok(Lit(c=c))
+
+    ## A class: `[` read already, up to its `]`.
+    pure def class(mut self) -> Node ! RegexError:
+        let start = self.at - 1
+        var negated = False
+        if self.peek() == Some('^'):
+            self.at += 1
+            negated = True
+        var ranges: list[(int, int)] = []
+        var first = True
+        while True:
+            let c = self.next_or(start, "an unclosed class")?
+            if c == ']' and not first:
+                break
+            first = False
+            var low = c.code()
+            if c == '\\':
+                match self.escape(True)?:
+                    case Lit(e):
+                        low = e.code()
+                    case Set(extra, neg):
+                        if neg:
+                            ranges_add(mut ranges, complement(extra))
+                        else:
+                            ranges_add(mut ranges, extra)
+                        continue
+                    case _:
+                        return Err(self.error("an escape in a class"))
+            if self.peek() == Some('-')
+                    and self.cs.get(self.at + 1).copied() != Some(']')
+                    and self.cs.get(self.at + 1) != None:
+                self.at += 1
+                let h = self.peek().expect("a character")
+                self.at += 1
+                var high = h.code()
+                if h == '\\':
+                    match self.escape(True)?:
+                        case Lit(e):
+                            high = e.code()
+                        case _:
+                            return Err(self.error("a class as the end of a range"))
+                if high < low:
+                    return Err(
+                        Syntax(
+                            at=self.at - 1, message=String.new("a range whose ends are reversed")
+                        )
+                    )
+                ranges.push((low, high))
+            else:
+                ranges.push((low, low))
+        return Ok(Set(ranges=ranges, negated=negated))
+
+## Adds `more` to `ranges`.
+pure def ranges_add(mut ranges: list[(int, int)], more: list[(int, int)]):
+    for r in more:
+        ranges.push(r)
+
+## The code points in none of `ranges`, which do not overlap.
+pure def complement(ranges: list[(int, int)]) -> list[(int, int)]:
+    var sorted_ranges = ranges.copy()
+    sorted_ranges.sort()
+    var out: list[(int, int)] = []
+    var next = 0
+    for (low, high) in sorted_ranges:
+        if low > next:
+            out.push((next, low - 1))
+        if high + 1 > next:
+            next = high + 1
+    if next <= 0x10ffff:
+        out.push((next, 0x10ffff))
+    return out
+
+# ------------------------------------------------------------------ compiling
+
+## Appends the instructions of `node` to `prog`.
+pure def emit(mut prog: list[Inst], node: Node):
+    match node:
+        case Empty:
+            pass
+        case Lit(c):
+            prog.push(Char(c=c))
+        case Set(ranges, negated):
+            prog.push(Class(ranges=ranges.copy(), negated=negated))
+        case Dot:
+            prog.push(Any)
+        case Begin:
+            prog.push(Start)
+        case Finish:
+            prog.push(End)
+        case Word(negated):
+            prog.push(Boundary(negated=negated))
+        case Group(index, inner):
+            match index:
+                case Some(i):
+                    prog.push(Save(slot=2 * i))
+                    emit(mut prog, inner[0])
+                    prog.push(Save(slot=2 * i + 1))
+                case None:
+                    emit(mut prog, inner[0])
+        case Concat(parts):
+            for p in parts:
+                emit(mut prog, p)
+        case Alt(choices):
+            # Split to each choice but the last, each choice jumping past
+            # the others when it matches.
+            var jumps: list[int] = []
+            for (k, choice) in enumerate(choices):
+                if k + 1 < len(choices):
+                    let split = len(prog)
+                    prog.push(Split(x=split + 1, y=0))
+                    emit(mut prog, choice)
+                    jumps.push(len(prog))
+                    prog.push(Jump(to=0))
+                    prog[split] = Split(x=split + 1, y=len(prog))
+                else:
+                    emit(mut prog, choice)
+            let end = len(prog)
+            for j in jumps:
+                prog[j] = Jump(to=end)
+        case Repeat(inner, min, max, greedy):
+            match max:
+                case None:
+                    if min > 0:
+                        # x{n,}: x n - 1 times, then x+: x; split(back to x, out).
+                        for _ in range(min - 1):
+                            emit(mut prog, inner[0])
+                        plus(mut prog, inner[0], greedy)
+                    elif nullable(inner[0]):
+                        # x* of an x that can match nothing is (x+)?, as Go
+                        # compiles it, so that an empty turn of the loop
+                        # leaves it in the order of preference.
+                        let quest = len(prog)
+                        prog.push(Split(x=0, y=0))
+                        plus(mut prog, inner[0], greedy)
+                        let out = len(prog)
+                        prog[quest] = if greedy: Split(x=quest + 1, y=out) else: Split(
+                            x=out, y=quest + 1
+                        )
+                    else:
+                        # x*: L: split(x, out); x; jump L.
+                        let loop = len(prog)
+                        prog.push(Split(x=0, y=0))
+                        emit(mut prog, inner[0])
+                        prog.push(Jump(to=loop))
+                        let out = len(prog)
+                        prog[loop] = if greedy: Split(x=loop + 1, y=out) else: Split(
+                            x=out, y=loop + 1
+                        )
+                case Some(m):
+                    for _ in range(min):
+                        emit(mut prog, inner[0])
+                    # x? repeated: each optional copy may end the run.
+                    var splits: list[int] = []
+                    for _ in range(m - min):
+                        splits.push(len(prog))
+                        prog.push(Split(x=0, y=0))
+                        emit(mut prog, inner[0])
+                    let out = len(prog)
+                    for at in splits:
+                        prog[at] = if greedy: Split(x=at + 1, y=out) else: Split(x=out, y=at + 1)
+
+## x+: `x`, then a split back to its start or on.
+pure def plus(mut prog: list[Inst], node: Node, greedy: bool):
+    let start = len(prog)
+    emit(mut prog, node)
+    let at = len(prog)
+    prog.push(if greedy: Split(x=start, y=at + 1) else: Split(x=at + 1, y=start))
+
+## Whether `node` can match no characters.
+pure def nullable(node: Node) -> bool:
+    match node:
+        case Lit(_):
+            return False
+        case Set(_, _):
+            return False
+        case Dot:
+            return False
+        case Group(_, inner):
+            return nullable(inner[0])
+        case Concat(parts):
+            return all([nullable(p) for p in parts])
+        case Alt(choices):
+            return any([nullable(c) for c in choices])
+        case Repeat(inner, min, _, _):
+            return min == 0 or nullable(inner[0])
+        case _:
+            return True
+
+# ------------------------------------------------------------------ matching
+
+## A compiled pattern.
+##
+## ```
+## let re = Regex.new("(\\w+)@(\\w+)\\.com").expect("a pattern")
+## assert re.is_match("write to ada@example.com today")
+## let m = re.find("write to ada@example.com today").expect("a match")
+## assert m.text == "ada@example.com" and m.start == 9 and m.end == 24
+## assert m.group(1) == Some(String.new("ada")) and m.group(2) == Some(String.new("example"))
+## assert Regex.new("a(b") == Err(Syntax(at=1, message=String.new("an unclosed group")))
+## ```
+@derive(Eq)
+pub struct Regex:
+    pattern: String
+    prog: list[Inst]
+    groups: int
+
+    ## The pattern compiled; `Syntax` where it is not one.
+    pub pure def new(pattern: str) -> Regex ! RegexError:
+        var cs: list[char] = []
+        for c in pattern.chars():
+            cs.push(c)
+        var p = Parser(cs=cs, at=0, groups=0)
+        let tree = p.alternation()?
+        if p.at < len(p.cs):
+            return Err(p.error("a `)` without its `(`"))
+        var prog: list[Inst] = [Save(slot=0)]
+        emit(mut prog, tree)
+        prog.push(Save(slot=1))
+        prog.push(Match)
+        return Ok(Regex(pattern=String.new(pattern), prog=prog, groups=p.groups))
+
+    ## The pattern's text.
+    pub pure def pattern(self) -> str:
+        return self.pattern
+
+    ## The number of capturing groups.
+    pub pure def groups(self) -> int:
+        return self.groups
+
+    ## Whether the pattern matches somewhere in `text`.
+    pub pure def is_match(self, text: str) -> bool:
+        return self.find(text) != None
+
+    ## The leftmost match in `text`, or `None`.
+    pub pure def find(self, text: str) -> Match?:
+        let cs = chars_of(text)
+        let offsets = byte_offsets(cs)
+        return self.find_at(text, cs, offsets, 0)
+
+    ## Every match in `text`, left to right, none overlapping, as RE2 and
+    ## Go find them: after an empty match the search goes on a character
+    ## later, and an empty match right where a match ended is left out.
+    ##
+    ## ```
+    ## let re = Regex.new("\\d+").expect("a pattern")
+    ## let found = [m.text.copy() for m in re.find_all("a1 b22 c333")]
+    ## assert found == ["1", "22", "333"]
+    ## assert len(Regex.new("x*").expect("a pattern").find_all("ab")) == 3
+    ## ```
+    pub pure def find_all(self, text: str) -> list[Match]:
+        let cs = chars_of(text)
+        let offsets = byte_offsets(cs)
+        var out: list[Match] = []
+        var at = 0
+        var last_end = -1
+        while at <= len(cs):
+            match self.find_at(text, cs, offsets, at):
+                case Some(m):
+                    let (first, last) = (m.start_char, m.end_char)
+                    if first == last:
+                        at = last + 1
+                        if first == last_end:
+                            continue
+                    else:
+                        at = last
+                    last_end = last
+                    out.push(m)
+                case None:
+                    break
+        return out
+
+    ## `text` with every match replaced by `replacement`, in which `$0` is the
+    ## match, `$1` to `$9` its groups and `$$` a `$`.
+    ##
+    ## ```
+    ## let re = Regex.new("(\\w+)=(\\w+)").expect("a pattern")
+    ## assert re.replace_all("a=1, b=2", "$2:$1") == "1:a, 2:b"
+    ## assert Regex.new("o").expect("a pattern").replace_all("foo", "0") == "f00"
+    ## ```
+    pub pure def replace_all(self, text: str, replacement: str) -> String:
+        var out = String.new()
+        var last = 0
+        for m in self.find_all(text):
+            out.push(text.byte_slice(last, m.start))
+            out.push(expand(replacement, m))
+            last = m.end
+        out.push(text.byte_slice(last, text.byte_len()))
+        return out
+
+    ## The parts of `text` between the matches.
+    ##
+    ## ```
+    ## let re = Regex.new(",\\s*").expect("a pattern")
+    ## assert re.split("a, b,c,  d") == ["a", "b", "c", "d"]
+    ## ```
+    pub pure def split(self, text: str) -> list[String]:
+        var out: list[String] = []
+        var last = 0
+        for m in self.find_all(text):
+            if m.end == m.start and m.start == 0:
+                continue
+            out.push(text.byte_slice(last, m.start).to_string())
+            last = m.end
+        out.push(text.byte_slice(last, text.byte_len()).to_string())
+        return out
+
+    ## The leftmost match starting at character `start` or later.
+    pure def find_at(self, text: str, cs: list[char], offsets: list[int], start: int) -> Match?:
+        let slots = 2 * (self.groups + 1)
+        let n = len(self.prog)
+        var current: list[Thread] = []
+        var matched: list[int]? = None
+        var i = start
+        while i <= len(cs):
+            if matched == None:
+                var seen: list[bool] = [False for _ in range(n)]
+                for t in current:
+                    seen[t.pc] = True
+                let blank: list[int] = [-1 for _ in range(slots)]
+                self.add(mut current, mut seen, 0, blank, cs, i)
+            if current.is_empty() and matched != None:
+                break
+            var next: list[Thread] = []
+            var next_seen: list[bool] = [False for _ in range(n)]
+            for t in current:
+                match self.prog[t.pc]:
+                    case Match:
+                        matched = Some(t.caps.copy())
+                        # Lower-priority threads are cut off.
+                        break
+                    case Char(c):
+                        if i < len(cs) and cs[i] == c:
+                            self.add(mut next, mut next_seen, t.pc + 1, t.caps, cs, i + 1)
+                    case Class(ranges, negated):
+                        if i < len(cs) and in_ranges(ranges, cs[i].code()) != negated:
+                            self.add(mut next, mut next_seen, t.pc + 1, t.caps, cs, i + 1)
+                    case Any:
+                        if i < len(cs) and cs[i] != '\n':
+                            self.add(mut next, mut next_seen, t.pc + 1, t.caps, cs, i + 1)
+                    case _:
+                        pass
+            current = next
+            i += 1
+        match matched:
+            case Some(caps):
+                return Some(Match.of(text, caps, offsets))
+            case None:
+                return None
+
+    ## Adds the thread at `pc` to `list`, following the jumps, splits,
+    ## saves and assertions there at character `i` (in the order of
+    ## preference), each instruction once per step.
+    pure def add(
+        self,
+        mut list: list[Thread],
+        mut seen: list[bool],
+        pc: int,
+        caps: list[int],
+        cs: list[char],
+        i: int,
+    ):
+        if seen[pc]:
+            return
+        seen[pc] = True
+        match self.prog[pc]:
+            case Jump(to):
+                self.add(mut list, mut seen, to, caps, cs, i)
+            case Split(x, y):
+                self.add(mut list, mut seen, x, caps, cs, i)
+                self.add(mut list, mut seen, y, caps, cs, i)
+            case Save(slot):
+                var c = caps.copy()
+                c[slot] = i
+                self.add(mut list, mut seen, pc + 1, c, cs, i)
+            case Start:
+                if i == 0:
+                    self.add(mut list, mut seen, pc + 1, caps, cs, i)
+            case End:
+                if i == len(cs):
+                    self.add(mut list, mut seen, pc + 1, caps, cs, i)
+            case Boundary(negated):
+                let before = i > 0 and is_word(cs[i - 1])
+                let after = i < len(cs) and is_word(cs[i])
+                if (before != after) != negated:
+                    self.add(mut list, mut seen, pc + 1, caps, cs, i)
+            case _:
+                list.push(Thread(pc=pc, caps=caps.copy()))
+
+## A thread of the Pike VM: where it is in the program and the positions
+## its saves recorded.
+struct Thread:
+    pc: int
+    caps: list[int]
+
+pure def is_word(c: char) -> bool:
+    let n = c.code()
+    return (48 <= n <= 57) or (65 <= n <= 90) or (97 <= n <= 122) or n == 95
+
+pure def in_ranges(ranges: list[(int, int)], n: int) -> bool:
+    for (low, high) in ranges:
+        if low <= n <= high:
+            return True
+    return False
+
+pure def chars_of(text: str) -> list[char]:
+    var cs: list[char] = []
+    for c in text.chars():
+        cs.push(c)
+    return cs
+
+## The byte index of each character of `cs` and of their end.
+pure def byte_offsets(cs: list[char]) -> list[int]:
+    var out: list[int] = []
+    var at = 0
+    for c in cs:
+        out.push(at)
+        at += c.len_utf8()
+    out.push(at)
+    return out
+
+## `replacement` with its `$` references written out for `m`.
+pure def expand(replacement: str, m: Match) -> String:
+    var out = String.new()
+    var dollar = False
+    for c in replacement.chars():
+        if dollar:
+            dollar = False
+            if c == '$':
+                out.push_char('$')
+                continue
+            match c.to_digit():
+                case Some(d):
+                    out.push(m.group(d) ?? String.new())
+                    continue
+                case None:
+                    out.push_char('$')
+        if c == '$':
+            dollar = True
+        else:
+            out.push_char(c)
+    if dollar:
+        out.push_char('$')
+    return out
+
+## A match: its text and byte positions in the text searched, and its
+## groups' (`None` for a group that took no part).
+@derive(Eq)
+pub struct Match:
+    pub start: int
+    pub end: int
+    pub text: String
+    groups: list[String?]
+    start_char: int
+    end_char: int
+
+    pure def of(text: str, caps: list[int], offsets: list[int]) -> Match:
+        var groups: list[String?] = []
+        for g in range(len(caps) // 2):
+            let a = caps[2 * g]
+            let b = caps[2 * g + 1]
+            if a < 0 or b < 0:
+                groups.push(None)
+            else:
+                groups.push(Some(text.byte_slice(offsets[a], offsets[b]).to_string()))
+        let start = offsets[caps[0]]
+        let end = offsets[caps[1]]
+        return Match(
+            start=start,
+            end=end,
+            text=text.byte_slice(start, end).to_string(),
+            groups=groups,
+            start_char=caps[0],
+            end_char=caps[1],
+        )
+
+    ## Group `i`'s text (0 is the whole match), or `None` when the group
+    ## took no part or there is no such group.
+    pub pure def group(self, i: int) -> String?:
+        match self.groups.get(i):
+            case Some(g):
+                return g.copy()
+            case None:
+                return None

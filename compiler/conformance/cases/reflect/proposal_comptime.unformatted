@@ -1,0 +1,2 @@
+Holds sections of `proposal/examples/comptime.sisu` unchanged, which are
+not in the form `sisu fmt` writes.

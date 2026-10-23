@@ -1,0 +1,2 @@
+3:11-3:16 E0200 resolve.undefined-name name="cuont"
+  fix resolve.similar-name 3:11-3:16 "count"

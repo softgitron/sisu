@@ -1,0 +1,32 @@
+test "an assertion" ... FAILED
+test "a property shrinks, and its token holds the shrunk case" ... FAILED
+test "tasks under the seeded scheduler" ... FAILED
+test "the real system" ... FAILED
+
+test "an assertion" ... FAILED
+panic: assertion failed: mean([1, 2, 3]) == 3
+  left:  2
+  right: 3
+  at test "an assertion" (tokens.sisu:14:5)
+replay: sisu test --replay 1-082ede2fcd94e7d4-0.0.1-t0-s0-r0 tokens.sisu
+
+test "a property shrinks, and its token holds the shrunk case" ... FAILED
+panic: the property failed for [0, 3, 0] (case 5, shrunk 8 times)
+  the property returned False
+  at test "a property shrinks, and its token holds the shrunk case" (tokens.sisu:17:5)
+replay: sisu test --replay 1-082ede2fcd94e7d4-0.0.1-t1-s0-r0-c1.0.0.1.0.5.1.0.0.0 tokens.sisu
+
+test "tasks under the seeded scheduler" ... FAILED
+panic: assertion failed: results.is_ok()
+    results.is_ok()
+    │
+    Err(TaskPanicked(message="division by zero", trace="at mean (tokens.sisu:11:12)\nat closure in test \"tasks under the seeded scheduler\" (tokens.sisu:23:31)"))
+  at test "tasks under the seeded scheduler" (tokens.sisu:25:5)
+replay: sisu test --replay 1-082ede2fcd94e7d4-0.0.1-t2-s0-r0 tokens.sisu
+
+test "the real system" ... FAILED
+panic: assertion failed: sys.env.get("SISU_SURELY_UNSET").is_some()
+  at test "the real system" (tokens.sisu:28:5)
+no replay token: the test takes the real `System`, which a replay cannot stand in for
+
+0 passed, 4 failed, 0 blocked

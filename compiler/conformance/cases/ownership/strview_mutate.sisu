@@ -1,0 +1,8 @@
+# A `str` view borrows the `String` it views (04, "Views"), so the string
+# cannot change while the view is still used.
+
+def main():
+    var name = String.new("Aino")
+    let short: str = name
+    name.push(" Virtanen")
+    print(short)

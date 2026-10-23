@@ -1,0 +1,15 @@
+# `f32` mixes with no other number implicitly but widening to `f64`
+# where one is expected (03, "Numbers"); its literals must fit.
+def main():
+    let a: f32 = 1.5
+    let n = 3
+    let x: f64 = 2.0
+    let b: f32 = x
+    let c = a + n
+    let d = a // a
+    let e = 1e39f32
+    let f = 1.5u8
+    let g = a < x
+    let h: int = a
+    let i = 1e400
+    print("{a:x}")

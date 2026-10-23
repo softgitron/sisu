@@ -1,0 +1,48 @@
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+ownership violation: a reference was used after its loan had ended
+  the loan: a shared borrow of `_2` in `main`, created at temporary_borrow.sisu:8:17 by `_3 = ref _2`
+  ended by: a drop of `_2` at temporary_borrow.sisu:8:31 (`drop _2`)
+  used at: temporary_borrow.sisu:9:11 (`_5 = copy _1.as(0).0.*`)
+  value: `_2` = <no value>
+  loans of `_2` not ended yet: 0 shared, 0 with `mut`
+  at main (temporary_borrow.sisu:9:11)
+SIR of `main`:
+fn main(0) source 0 @7:5-7:9 {
+    let _0: ()
+    let _1: Option[ref int] "first" @8:9-8:14
+    let _2: list[int]
+    let _3: ref list[int]
+    let _4: ()
+    let _5: int
+    let _6: int
+  bb0:
+    _2 = call fn make() @8:17-8:23
+    goto bb1
+  bb1 (unwind bb2):
+    _3 = ref _2 @8:17-8:23
+    _1 = call intrinsic list.first(copy _3) @8:17-8:31
+    goto bb3
+  bb2 (cleanup):
+    drop _2
+    resume
+  bb3:
+    drop _2 @8:31-8:31
+    goto bb4
+  bb4:
+    dead _2 @8:31-8:31
+    _6 = discriminant _1 @9:11-9:21
+    switch copy _6 [0: bb5, else: bb6] @9:11-9:21
+  bb5:
+    _5 = copy _1.as(0).0.* @9:11-9:21
+    goto bb7
+  bb6:
+    _5 = const 0 @9:20-9:21
+    goto bb7
+  bb7:
+    _4 = call intrinsic print(copy _5) @9:5-9:22
+    _0 = const ()
+    return
+}
+outcome: conflict reached; the run stopped at a concrete ownership conflict
+--- status 134

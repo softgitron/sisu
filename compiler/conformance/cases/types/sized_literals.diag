@@ -1,0 +1,7 @@
+5:19-5:58 E0374 type.literal-out-of-range text="170141183460469231731687303715884105728" ty="i128"
+6:19-6:58 E0374 type.literal-out-of-range text="340282366920938463463374607431768211456" ty="u128"
+7:19-7:21 E0374 type.literal-out-of-range text="-1" ty="u128"
+8:19-8:59 E0374 type.literal-out-of-range text="-170141183460469231731687303715884105729" ty="i128"
+10:13-10:26 E0310 type.binary-operator op="+" lhs="i128" rhs="u128"
+13:19-13:25 E0300 type.mismatch expected="u128" found="i128"
+  label 13:12-13:16 type.expected-because

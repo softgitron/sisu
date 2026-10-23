@@ -1,0 +1,8 @@
+# After rustc's `borrowck-for-loop-head-linkage`: the loop's list is
+# changed while the loop borrows it (Rust's E0502).
+
+def main():
+    var vector = [1, 2]
+    for x in vector:
+        print(x)
+        vector.push(0)

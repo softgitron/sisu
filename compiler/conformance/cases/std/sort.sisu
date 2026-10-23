@@ -1,0 +1,52 @@
+# `std.sort` (11): the stable sort keeps equal values in order, by
+# value, by a comparison and by a key computed once; the unstable one
+# (introsort) sorts runs long enough to partition and to fall back to its
+# heap sort, checked against the stable one on lists made by a seeded
+# generator.
+import std.sort
+
+def made(seed: int, n: int, spread: int) -> list[int]:
+    var out: list[int] = []
+    var x = seed
+    for _ in range(n):
+        x = (x * 1103515245 + 12345) % 2147483648
+        out.push(x % spread)
+    return out
+
+def main():
+    var words = ["delta", "alpha", "echo", "bravo", "charlie", "ab", "de"]
+    sort.sort_by(mut words, (a, b) -> len(a).cmp(len(b)))
+    print(words)
+    var pairs = [(3, "c"), (1, "a"), (3, "a"), (2, "b"), (1, "b")]
+    sort.sort_by_key(mut pairs, (p) -> p.0)
+    print(pairs)
+    var keyed = [5, 3, 8, 1]
+    sort.sort_by_key(mut keyed, (x) -> -x)
+    print(keyed)
+    for (seed, n, spread) in [
+        (1, 0, 5), (2, 1, 5), (3, 17, 3), (4, 200, 10), (5, 1000, 1000), (6, 600, 2)
+    ]:
+        let xs = made(seed, n, spread)
+        var a = xs.copy()
+        sort.sort(mut a)
+        var b = xs.copy()
+        sort.sort_unstable(mut b)
+        var c = xs.copy()
+        c.sort()
+        print("{n}: {sort.is_sorted(a)} {a == b} {a == c}")
+    # Stability over many equal keys: the positions stay increasing.
+    let xs = made(7, 500, 4)
+    var tagged: list[(int, int)] = []
+    for (i, x) in enumerate(xs):
+        tagged.push((x, i))
+    sort.sort_by(mut tagged, (p, q) -> p.0.cmp(q.0))
+    var stable = True
+    for i in range(1, len(tagged)):
+        if tagged[i - 1].0 == tagged[i].0 and tagged[i - 1].1 > tagged[i].1:
+            stable = False
+    print("stable: {stable}")
+    # An adversarial order for a naive quicksort: sorted, then reversed.
+    var down = [i for i in range(2000)]
+    down.reverse()
+    sort.sort_unstable(mut down)
+    print("{down[0]} {down[1999]} {sort.is_sorted(down)}")

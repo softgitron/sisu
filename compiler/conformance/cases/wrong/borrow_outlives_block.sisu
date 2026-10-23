@@ -1,0 +1,12 @@
+# A wrong program: a borrow of a value declared inside a block is used
+# after the block, where the value is gone.
+
+def main():
+    let fallback = 0
+    let shown: ref int
+    if len("x") > 0:
+        let count = 5
+        shown = ref count
+    else:
+        shown = ref fallback
+    print(shown)

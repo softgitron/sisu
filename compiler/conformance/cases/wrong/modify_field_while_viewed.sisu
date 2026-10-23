@@ -1,0 +1,10 @@
+# A wrong program: a field is assigned while a view of it is still used.
+
+struct Doc:
+    title: String
+
+def main():
+    var d = Doc(title="draft".to_string())
+    let t: str = d.title
+    d.title = "final".to_string()
+    print(t)

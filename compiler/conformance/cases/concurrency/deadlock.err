@@ -1,0 +1,3 @@
+deadlock: every task is waiting, and no timer can wake any of them
+  the root task waits for recv at deadlock.sisu:10:13
+  task 1 waits for recv at deadlock.sisu:9:17

@@ -1,0 +1,3 @@
+14:17-14:41 E0421 borrow.view-in-owner ty="str" owner="channel"
+15:17-15:42 E0421 borrow.view-in-owner ty="Word" owner="channel"
+16:20-16:48 E0422 borrow.must-consume-in-owner ty="Receipt" owner="channel"

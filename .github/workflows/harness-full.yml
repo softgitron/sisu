@@ -1,0 +1,118 @@
+# Full-scale run of the bet-3 stack harness (taskbench) on a GitHub-hosted
+# runner: machine 2 of the Phase 1 report (taskbench/docs/report-phase1.md).
+#
+# Triggered only by a push: a tag that matches harness-run-* (for example
+# `git tag harness-run-1 && git push origin harness-run-1`), or a push to
+# the working branch whose head commit message contains the marker
+# [harness-full] (the working session cannot push tags). There is no
+# schedule and no manual dispatch (the owner's decision, October 2026).
+#
+# The run is `./run_all.sh --scale full` with five repetitions of every cell
+# (proposal/20, section 6.5), the Go and Java controls included. Every
+# benchmark that fits the runner runs; a cell that cannot fit becomes a failed
+# row through the scripts' memory guards, never an out-of-memory kill: 1M tasks
+# need a 16 GB runner, connection counts follow the runner's RLIMIT_NOFILE hard
+# limit, and the scripts record what they skipped and why. ubuntu-latest has
+# 4 vCPUs and 16 GB for public repositories but 2 vCPUs and 8 GB for private
+# ones (this repository's smoke run of 2026-10-13 got 2 and 8): on the smaller
+# runner the 1M-task cells stop at the memory guard and machine 2 cannot
+# reproduce them. machine-spec.csv records which runner ran.
+name: harness-full
+
+on:
+  push:
+    tags:
+      - 'harness-run-*'
+    branches:
+      - 'claude/beyond-the-box'
+
+permissions:
+  contents: read
+
+jobs:
+  full:
+    if: startsWith(github.ref, 'refs/tags/harness-run-') || contains(github.event.head_commit.message, '[harness-full]')
+    name: taskbench full scale (machine 2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        working-directory: taskbench
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image's default java is 17, which has no virtual threads.
+      - name: JDK 21 (virtual threads)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # The same Go minor release as machine 1.
+      - name: Go 1.24
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+
+      - name: Kernel defaults, no swap, huge pages on request as on machine 1
+        run: |
+          # The runner image raises vm.max_map_count to 262144; the scale row is
+          # measured under the kernel default, 65530 (proposal/20, section 4.4).
+          sudo sysctl -w vm.max_map_count=65530
+          # Resident memory per idle task must not be paged out.
+          sudo swapoff -a
+          # The image sets transparent huge pages to "always", under which Go's
+          # goroutines hold 66 KiB each after the 32 KiB excursion (before its
+          # GC), so Go's 100k cell would meet the memory guard on an 8 GB runner.
+          # Machine 1 runs with "madvise", the setting used here.
+          echo madvise | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+          sysctl vm.max_map_count vm.overcommit_memory kernel.threads-max kernel.pid_max
+          cat /sys/kernel/mm/transparent_hugepage/enabled /sys/kernel/mm/transparent_hugepage/defrag
+          free -b
+
+      - name: Toolchain versions and limits
+        run: |
+          rustc --version
+          cargo --version
+          go version
+          java -version 2>&1
+          nproc
+          ulimit -a
+          echo "RLIMIT_NOFILE hard: $(ulimit -Hn)"
+
+      - name: Build (release)
+        run: cargo build --release
+
+      # Leaves time for the summary and the upload when the run is cut short;
+      # repetitions run in rep-major order, so every benchmark has some.
+      - name: Full-scale run (harness and controls, five repetitions)
+        timeout-minutes: 280
+        # The harness's memory guards read the limit of the cgroup they run in;
+        # a hosted runner has none, so the 1M-task cells can starve the runner
+        # agent itself (run 38513665561 was lost that way). A transient scope
+        # with a cap below the machine's memory leaves the agent its memory
+        # and lets the guards turn an over-large cell into a failed row. The
+        # runner this repository gets has 2 vCPUs and 7.75 GiB (run
+        # 38518035636), so the cap is 6 GiB; raise it with the runner.
+        run: |
+          sudo systemd-run --scope --quiet --same-dir \
+            --uid="$(id -u)" --gid="$(id -g)" \
+            -p MemoryMax=6G -p MemorySwapMax=0 \
+            --setenv=PATH="$PATH" --setenv=HOME="$HOME" --setenv=GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            --setenv=GITHUB_SHA="$GITHUB_SHA" --setenv=GITHUB_REF_NAME="$GITHUB_REF_NAME" \
+            --setenv=JAVA_HOME="${JAVA_HOME:-}" --setenv=GOROOT="${GOROOT:-}" \
+            ./run_all.sh --scale full --machine-id github-runner \
+            --out "results/github-runner/full-${GITHUB_RUN_ID}"
+
+      - name: Summarise
+        if: always()
+        run: python3 summarize.py --markdown "results/github-runner/full-${GITHUB_RUN_ID}" || true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taskbench-full-${{ github.run_id }}
+          path: taskbench/results/github-runner/
+          if-no-files-found: warn

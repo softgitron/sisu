@@ -1,0 +1,11 @@
+14:19-14:25 E0264 resolve.const-expression
+15:19-15:22 E0265 resolve.const-not-int ty="f64"
+16:19-16:23 E0265 resolve.const-not-int ty="f64"
+17:19-17:26 E0602 comptime.panicked message="integer overflow: 2 ** 70"
+18:19-18:26 E0602 comptime.panicked message="integer overflow: 4611686018427387904 * 4"
+19:19-19:25 E0602 comptime.panicked message="division by zero"
+20:19-20:26 E0602 comptime.panicked message="a shift by 64 is out of range; shifts take 0 to 63"
+21:19-21:24 E0264 resolve.const-expression
+22:19-22:26 E0200 resolve.undefined-name name="nothing"
+28:16-28:26 E0300 type.mismatch expected="Array[int, H * W]" found="Array[int, W * H]"
+32:23-32:24 E0264 resolve.const-expression

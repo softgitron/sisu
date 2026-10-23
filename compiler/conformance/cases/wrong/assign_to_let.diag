@@ -1,0 +1,3 @@
+7:9-7:14 E0312 type.assign-immutable name="count" what="count"
+  label 5:9-5:14 resolve.defined-here name="count"
+  fix type.declare-var

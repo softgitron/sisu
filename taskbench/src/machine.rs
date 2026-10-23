@@ -63,6 +63,31 @@ pub fn collect() -> Vec<(String, String)> {
         .find_map(|l| l.strip_prefix("model name").map(|r| r.trim_start_matches([' ', '\t', ':']).to_string()))
         .unwrap_or_else(|| "?".into());
     out.push(("cpu_model".into(), model));
+    // The SMT state and the virtualisation host (proposal/20, section 4.4).
+    let first = |key: &str| {
+        cpuinfo.lines().find_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            (k.trim() == key).then(|| v.trim().to_string())
+        })
+    };
+    let per_core = match (first("siblings").and_then(|v| v.parse::<u32>().ok()), first("cpu cores")) {
+        (Some(sib), Some(cores)) => match cores.parse::<u32>() {
+            Ok(c) if c > 0 => (sib / c).to_string(),
+            _ => "?".into(),
+        },
+        _ => "?".into(),
+    };
+    out.push(("threads_per_core".into(), per_core));
+    out.push((
+        "smt".into(),
+        format!(
+            "active={} control={}",
+            read_trim("/sys/devices/system/cpu/smt/active"),
+            read_trim("/sys/devices/system/cpu/smt/control")
+        ),
+    ));
+    let flagged = first("flags").is_some_and(|f| f.split_whitespace().any(|x| x == "hypervisor"));
+    out.push(("hypervisor".into(), if flagged { hypervisor_vendor() } else { "none (bare metal)".into() }));
     let online = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0);
     out.push(("cpus_available".into(), online.to_string()));
     out.push(("cpus_online".into(), read_trim("/sys/devices/system/cpu/online")));
@@ -112,6 +137,24 @@ pub fn collect() -> Vec<(String, String)> {
     out
 }
 
+/// The hypervisor's CPUID vendor signature (leaf 0x40000000), e.g. `KVMKVMKVM` or
+/// `Microsoft Hv`; only meaningful when the CPU reports the `hypervisor` flag.
+fn hypervisor_vendor() -> String {
+    #[cfg(target_arch = "x86_64")]
+    {
+        // CPUID exists on every x86-64 CPU; leaf 0x40000000 is reserved for
+        // hypervisors and returns zeros (or the highest basic leaf) elsewhere.
+        let r = std::arch::x86_64::__cpuid(0x4000_0000);
+        let bytes: Vec<u8> = [r.ebx, r.ecx, r.edx].iter().flat_map(|w| w.to_le_bytes()).collect();
+        let name: String = bytes.iter().filter(|b| b.is_ascii_graphic() || **b == b' ').map(|&b| b as char).collect();
+        if name.trim().is_empty() { "hypervisor (vendor unknown)".into() } else { name.trim().to_string() }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        "hypervisor (vendor unknown)".into()
+    }
+}
+
 /// Raises the soft `RLIMIT_NOFILE` to the hard limit, as the Go runtime (1.19+)
 /// and the JVM (`-XX:+MaxFDLimit`) do by default. Returns the new soft limit.
 pub fn raise_nofile_limit() -> u64 {
@@ -135,7 +178,9 @@ mod tests {
     #[test]
     fn collects_core_keys() {
         let spec = super::collect();
-        for key in ["uname", "cpu_model", "mem_total_bytes", "sysctl.vm.max_map_count", "rlimit_nofile"] {
+        for key in
+            ["uname", "cpu_model", "mem_total_bytes", "sysctl.vm.max_map_count", "rlimit_nofile", "smt", "hypervisor"]
+        {
             assert!(spec.iter().any(|(k, _)| k == key), "missing {key}");
         }
     }

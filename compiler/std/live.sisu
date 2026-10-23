@@ -1,0 +1,19 @@
+##! `live` (10, "Debugging and profiling"; N-35, D-068): where a running
+##! program adopts the newest epoch of hot replacement under `sisu run
+##! --watch`. Ambient, as `task` and `log` are.
+
+## A boundary: under `sisu run --watch` the running task adopts the newest
+## epoch here, and resolves every call after it in that epoch until its
+## next boundary, so one iteration of a loop never mixes an old body with
+## a new one. Without `--watch` it does nothing. `Ticker.wait` calls it.
+##
+## ```
+## for _ in range(3):
+##     live.boundary()
+## ```
+@intrinsic("live.boundary")
+def boundary()
+
+## The epoch the running task has adopted: 0 until the first swap.
+@intrinsic("live.epoch")
+def epoch() -> int

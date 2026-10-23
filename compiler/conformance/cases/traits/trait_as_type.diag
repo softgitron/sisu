@@ -1,0 +1,2 @@
+6:18-6:23 E0231 resolve.trait-as-type name="Shape"
+  fix resolve.add-dyn 6:18-6:18 "dyn "

@@ -1,0 +1,54 @@
+# `sim.choose(n)` is a choice point the bounded exhaustive search runs
+# each way, and `sim.always(what, holds) do: ...` an invariant checked at
+# every switch between tasks while the block runs (17): with both, the
+# search is a model checker whose model is the program.
+# schedule --scheduler exhaustive --depth 1
+
+import std.sim
+
+@derive(Copy)
+struct Bank:
+    accounts: Cap[Mutex[list[int]]]
+
+impl Bank:
+    def total(self) -> int:
+        var t = 0
+        for x in self.accounts.get().lock().value.iter():
+            t += x
+        return t
+    def add(self, i: int, n: int):
+        var g = self.accounts.get().lock()
+        g.value[i] += n
+
+## Moves `n` from account `a` to `b` in two steps another task can see
+## between: the bug the invariant catches.
+def transfer(bank: Bank, a: int, b: int, n: int):
+    bank.add(a, -n)
+    task.yield_now()
+    bank.add(b, n)
+
+## The same move under one lock.
+def transfer_locked(bank: Bank, a: int, b: int, n: int):
+    var g = bank.accounts.get().lock()
+    g.value[a] -= n
+    g.value[b] += n
+
+test "money is never made or lost":
+    let bank = Bank(accounts=Cap(Mutex([50, 50])))
+    sim.always("the total is 100", () -> bank.total() == 100) do:
+        _ = task.scope do s:
+            s.spawn(() -> transfer(bank, 0, 1, 10))
+            s.spawn(() -> transfer(bank, 1, 0, 5))
+            return Ok(())
+
+test "not even with the lock":
+    let bank = Bank(accounts=Cap(Mutex([50, 50])))
+    sim.always("the total is 100", () -> bank.total() == 100) do:
+        _ = task.scope do s:
+            s.spawn(() -> transfer_locked(bank, 0, 1, 10))
+            s.spawn(() -> transfer_locked(bank, 1, 0, 5))
+            return Ok(())
+
+test "every choice is a schedule of its own":
+    let k = sim.choose(3)
+    assert k < 2

@@ -1,0 +1,45 @@
+# Failures (06): a task that fails cancels its running siblings; a failure
+# nobody joined is the scope's result, the first in time, after every task
+# has finished; an error the body returns cancels the tasks still running
+# and is the result; a task that is cancelled and returns `Cancelled` is
+# not a failure.
+# explore 20
+
+error Late:
+    TimedOut
+
+def fail() -> int ! Late:
+    return Err(TimedOut)
+
+def waits(rx: Receiver[int]) -> int ! {ChannelError, TaskError}:
+    return rx.recv()
+
+def unobserved() -> int ! {Late, TaskError}:
+    return task.scope do s:
+        s.spawn(() -> fail())
+        return Ok(1)
+
+def body_error() -> int ! {Late, ChannelError, TaskError}:
+    let tx, rx = channel[int](capacity=1)
+    return task.scope do s:
+        let h = s.spawn(() -> waits(rx))
+        if len(rx_name()) > 0:
+            return Err(TimedOut)
+        return h.join()
+
+def rx_name() -> str:
+    return "rx"
+
+def sibling_cancelled() -> String:
+    let tx, rx = channel[int](capacity=1)
+    let r = task.scope do s:
+        let slow = s.spawn(() -> waits(rx))
+        let quick = s.spawn(() -> fail())
+        return Ok((quick.join(), slow.join()))
+    _ = tx
+    return "{r}"
+
+def main():
+    print(unobserved())
+    print(body_error())
+    print(sibling_cancelled())

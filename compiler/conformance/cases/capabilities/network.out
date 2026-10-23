@@ -1,0 +1,12 @@
+7
+Ok(b"ping")
+True
+40000
+True
+True
+refused: Refused(address="localhost:443")
+revoked: Revoked
+Net.connect("localhost", 7)
+Net.listen(10, "localhost")
+accept: Err(Cancelled)
+read: Err(Cancelled)

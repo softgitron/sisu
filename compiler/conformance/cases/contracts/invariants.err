@@ -1,0 +1,7 @@
+panic: invariant of `Range` failed: self.lo <= self.hi
+    self.lo <= self.hi
+    │          │
+    -3         -4
+  at the invariant of Range (invariants.sisu:8:15)
+  at Range.collapse_wrongly (invariants.sisu:28:30)
+  at main (invariants.sisu:65:5)

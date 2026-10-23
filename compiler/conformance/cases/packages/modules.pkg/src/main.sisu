@@ -1,0 +1,12 @@
+##! The root module of `atlas`: `src/main.sisu`, an application.
+
+import atlas.geo.units as units
+from atlas.geo.point import Point, origin
+from atlas.places import named
+
+def main():
+    let home = named("home", Point(x=3, y=4))
+    print("{home.name} is {units.show(home.at.distance(origin()))} from the origin")
+    for p in places.all():
+        print("{p.name}: {p.at:?}")
+    print(geo.point.manhattan(home.at, Point(x=0, y=0)))

@@ -1,0 +1,143 @@
+# Structured, colourless concurrency.
+
+import http
+from std.net import Url
+
+error Timeout:
+    Timeout
+
+# Fan out, join all, first error cancels the rest.
+def fetch_all(net: Net, urls: list[Url]) -> list[bytes] ! {HttpError, TaskError}:
+    return task.scope do s:
+        let handles = [s.spawn(() -> http.get(net, url)) for url in urls]
+        var out = list.with_capacity(len(handles))
+        for h in handles:
+            out.push(h.join()?)              # ? on a task failure cancels siblings
+        return Ok(out)
+
+# A worker pool over a bounded channel. No goroutine leaks: the scope joins.
+def process_jobs(jobs: list[Job], workers: int) -> list[Outcome]:
+    let tx, rx = channel[Job](capacity=32)
+    let results = Mutex(list())
+    task.scope do s:
+        for _ in range(workers):
+            s.spawn do:
+                for job in rx:               # ends when tx is closed and drained
+                    let outcome = handle(job)
+                    results.lock().push(outcome)
+        for j in jobs:
+            tx.send(j).expect("workers outlive the sender")
+        tx.close()
+    return results.into_inner()
+
+# Timeouts and cancellation are structural.
+def fetch_with_timeout(net: Net, clock: Clock, url: Url) -> bytes ! {HttpError, TaskError, Timeout}:
+    return task.scope do s:
+        let h = s.spawn(() -> http.get(net, url))
+        select:
+            case r = h.join():
+                return r
+            case _ = clock.after(Duration.seconds(5)):
+                s.cancel()
+                return Err(Timeout)
+
+# Supervision: restart a worker that panics, stop on cancellation.
+def supervise(net: Net, port: int):
+    task.scope do s:
+        while True:
+            let worker = s.spawn(() -> serve(net, port))
+            match worker.join():
+                case Err(TaskPanicked(message, trace)):
+                    log.error("server crashed: {message}\n{trace}; restarting")
+                case Err(Cancelled):
+                    break
+                case Ok(()):
+                    break
+
+# What the type system refuses.
+def refused():
+    var counter = 0
+    task.scope do s:
+        # s.spawn do:
+        #     counter += 1
+        # error[E0412]: `counter` is modified by a task while borrowed by another
+        #   help: wrap it: `let counter = Mutex(0)` or `Atomic(0)`
+        s.spawn(() -> print(counter))        # reading a shared borrow is fine
+
+    let cell = Cell(0)
+    task.scope do s:
+        pass
+        # s.spawn(() -> cell.set(1))
+        # error[E0413]: `Cell[int]` is not Sync and cannot be shared between tasks
+        #   help: use `Mutex[int]` for shared mutation, or move the value with `own`
+
+# Generators are lazy iterators compiled to state machines; no runtime needed.
+def primes() -> Iter[int]:
+    var found = list()
+    var n = 2
+    while True:
+        if found.iter().all(n % it != 0):
+            found.push(n)
+            yield n
+        n += 1
+
+def gen_demo():
+    for p in primes().take(10):
+        print(p)
+
+# ---------------------------------------------------------------- appended for the conformance suite
+# The proposal's text above names `Job`, `Outcome`, `handle` and `serve`
+# without declaring them; they are declared here, and `main` runs each
+# part against the in-process network of `Net.fake` and the test clock.
+
+@derive(Copy)
+struct Job:
+    id: int
+
+struct Outcome:
+    job: int
+    square: int
+
+def handle(job: Job) -> Outcome:
+    return Outcome(job=job.id, square=job.id * job.id)
+
+# The first run of the server fails at once; the second finds its port
+# taken by the first's listener, and stops.
+def serve(net: Net, port: int):
+    match net.listen(port):
+        case Ok(_):
+            panic("the listener at port {port} failed")
+        case Err(_):
+            return
+
+struct Pages:
+    clock: Clock
+
+impl http.Handler for Pages:
+    def handle(self, request: http.Request) -> http.Response:
+        if request.target == "/slow":
+            _ = self.clock.sleep(Duration.seconds(10))
+        return http.Response.text(200, "OK", "page {request.target}")
+
+def url(text: str) -> Url:
+    return Url.parse(text).expect("valid")
+
+def main():
+    let net = Net.fake()
+    let clock = Clock.fake()
+    let listener = net.listen(80).expect("free")
+    task.scope do s:
+        s.spawn(() -> http.serve(listener, Pages(clock=clock)))
+        let pages = fetch_all(net, [url("http://localhost/a"), url("http://localhost/b")])
+        print(pages)
+        print(fetch_with_timeout(net, clock, url("http://localhost/fast")))
+        print(fetch_with_timeout(net, clock, url("http://localhost/slow")))
+        s.cancel()
+    var outcomes = process_jobs([Job(id=1), Job(id=2), Job(id=3), Job(id=4)], 2)
+    outcomes.sort_by((a, b) -> a.job.cmp(b.job))
+    for o in outcomes:
+        print("job {o.job}: {o.square}")
+    supervise(net, 9000)
+    refused()
+    gen_demo()
+# explore 20

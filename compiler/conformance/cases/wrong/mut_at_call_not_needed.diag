@@ -1,0 +1,2 @@
+11:17-11:23 E0340 type.mut-argument-unexpected param="xs"
+  fix type.remove-mut

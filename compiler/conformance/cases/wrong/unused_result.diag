@@ -1,0 +1,2 @@
+13:5-13:13 E0318 type.unused-result ty="int ! Invalid"
+  fix type.discard 13:5-13:5 "_ = "

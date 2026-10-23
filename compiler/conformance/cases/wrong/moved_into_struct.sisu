@@ -1,0 +1,11 @@
+# A wrong program: a value goes into a struct and is used again by its old
+# name.
+
+struct Team:
+    lead: String
+
+def main():
+    let lead = "Aino".to_string()
+    let team = Team(lead=lead)
+    print(lead)
+    print(team.lead)

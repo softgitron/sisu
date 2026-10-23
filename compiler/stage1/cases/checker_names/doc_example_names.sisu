@@ -1,0 +1,21 @@
+# The names of a doc example (10, "Testing"), a test of the module written
+# into a module of its own whose lines are the file's: stage 0's type
+# checker reports what it cannot find there, a name with the closest one in
+# the examples' scope as its fix, a type in an annotation without one, and
+# a `let` that shadows warns.
+
+## Doubles a number.
+##
+## ```
+## assert dobule(2) == 4
+## let s: Strng = "x"
+## let a = 1
+## if True:
+##     let a = 2
+## assert a == 1
+## ```
+def double(x: int) -> int:
+    return x * 2
+
+def main():
+    print(double(2))

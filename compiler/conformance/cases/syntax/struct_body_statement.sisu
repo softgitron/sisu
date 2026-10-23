@@ -1,0 +1,9 @@
+struct Point:
+    x: f64
+    print("not a member")
+    let y = 2
+    def norm(self) -> f64:
+        return self.x
+
+def main():
+    pass

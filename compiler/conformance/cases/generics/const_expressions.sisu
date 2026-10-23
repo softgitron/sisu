@@ -1,0 +1,39 @@
+# A type's constant argument may be an expression (03, "Const generics"):
+# integers, `const` parameters and constants with the integer operators,
+# computed where the type is written. An operation on a `const` parameter
+# (`W * H`, `N + 2`) is computed when a use gives the parameter a constant.
+const SIDE: int = 3
+const AREA: int = SIDE * SIDE
+
+struct Grid[T, const W: int, const H: int]:
+    cells: Array[T, W * H]
+
+    def filled(value: T) -> Grid[T, W, H] where T: Copy:
+        return Grid(cells=Array.filled(value))
+
+    def at(self, x: int, y: int) -> T where T: Copy:
+        return self.cells[y * W + x]
+
+def squares() -> Array[int, AREA]:
+    return Array.filled(0)
+
+def padded[const N: int](xs: Array[int, N]) -> Array[int, N + 2]:
+    return Array.filled(len(xs))
+
+def doubled[const N: int]() -> int:
+    return size[N * 2]()
+
+def size[const M: int]() -> int:
+    return M
+
+def main():
+    var g: Grid[int, 3, 2] = Grid.filled(7)
+    g.cells[5] = 1
+    print((len(g.cells), g.at(1, 1), g.at(2, 1)))
+    print(len(squares()))
+    let b: Array[int, 2 ** 3 - 1] = Array.filled(1)
+    print(b)
+    let p: Array[int, 9] = padded(b)
+    print(p)
+    print(doubled[5]())
+    print(size[(SIDE + 1) * -(-2)]())

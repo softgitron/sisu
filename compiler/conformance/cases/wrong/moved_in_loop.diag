@@ -1,0 +1,2 @@
+13:9-13:16 E0400 borrow.use-after-move name="o" line="13"
+  label 13:9-13:16 borrow.moved-in-loop name="o"

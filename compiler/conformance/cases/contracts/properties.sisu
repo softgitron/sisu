@@ -1,0 +1,70 @@
+# Property tests (17): `check(gen) do x: ...` runs a property on the cases
+# a generator makes, shrinks a failing one to a smallest case and prints
+# it. The compiler writes the generator of each type written in
+# `arbitrary[T]` or `exhaustive[T](max_len=n)`; a struct's cases satisfy
+# its invariant and a refinement's its predicate.
+
+type Digit = int where 0 <= self <= 9
+
+enum Shape:
+    Circle(r: int)
+    Rect(w: int, h: int)
+    Empty
+
+struct Interval:
+    lo: int
+    hi: int
+    invariant self.lo <= self.hi
+
+def area(s: Shape) -> int:
+    match s:
+        case Circle(r):
+            return 3 * r * r
+        case Rect(w, h):
+            return w * h
+        case Empty:
+            return 0
+
+def reversed(xs: Slice[int]) -> list[int]:
+    var out: list[int] = []
+    var i = len(xs)
+    while i > 0:
+        i -= 1
+        out.push(xs[i])
+    return out
+
+test "reversing twice gives the list back":
+    check(arbitrary[list[int]]) do xs:
+        return reversed(reversed(xs)) == xs
+
+test "a digit is one character":
+    check(arbitrary[Digit]) do d:
+        return len("{d}") == 1
+
+test "an interval's cases keep its invariant":
+    check(arbitrary[Interval]) do i:
+        return i.lo <= i.hi
+
+test "every digit pair sums below twenty":
+    check(exhaustive[(Digit, Digit)](max_len=2)) do pair:
+        let (a, b) = pair
+        return a + b < 19
+
+test "a wrong claim about areas shrinks to a small case":
+    check(arbitrary[Shape]) do s:
+        return area(s) < 10
+
+test "a dictionary's keys":
+    check(arbitrary[dict[String, int]]) do d:
+        return len(d.keys().collect()) == len(d)
+
+test "an option of a box":
+    check(arbitrary[Option[Box[bool]]]) do o:
+        return o.is_none() or o.is_some()
+
+test "a case past its budget fails":
+    check(Gen.of(Draws.gen_int, cases=3, steps=2000)) do n:
+        var i = 0
+        while i < 100000:
+            i += 1
+        return n == n

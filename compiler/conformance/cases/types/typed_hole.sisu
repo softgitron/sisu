@@ -1,0 +1,5 @@
+def area(r: f64) -> f64:
+    return todo("area")
+
+def main():
+    print(area(2.0))

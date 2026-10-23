@@ -1,0 +1,24 @@
+# A save that fails to check publishes nothing (10, "Debugging and
+# profiling"; D-068): the program saves a version of itself with a type
+# error at frame 1, and the run reports it and keeps running epoch 0; the
+# save at frame 2 checks, and frame 3 runs epoch 1.
+from std.time import Ticker
+
+def draw(frame: int) -> String:
+    return "frame {frame}: old"
+
+def save(sys: System, version: Path):
+    let text = sys.fs.read_to_string(version).expect("the next version")
+    sys.fs.write_text("rejected.sisu", text).expect("saved")
+
+def main(sys: System) -> !:
+    let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("a time"))
+    var ticker = Ticker.every(clock, Duration.millis(16))
+    for frame in range(4):
+        ticker.wait()?
+        print("{draw(frame)}, epoch {live.epoch()}")
+        if frame == 1:
+            save(sys, "broken.sisu")
+        if frame == 2:
+            save(sys, "fixed.sisu")
+    return Ok(())

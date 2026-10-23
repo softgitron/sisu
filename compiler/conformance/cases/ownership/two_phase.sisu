@@ -1,0 +1,14 @@
+# A `mut` borrow made for an argument is reserved until the call uses it,
+# so the other arguments may still read the value.
+
+def main():
+    var xs = [1, 2, 3]
+    xs.push(len(xs))
+    xs.insert(0, xs[3])
+    print(xs)
+    var counts: dict[String, int] = {}
+    _ = counts.insert("size".to_string(), len(counts))
+    print(counts)
+    var s = String.new("ab")
+    s.push("{len(s)}")
+    print(s)

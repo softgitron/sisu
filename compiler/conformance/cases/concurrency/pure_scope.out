@@ -1,0 +1,4 @@
+Ok([3, 6, 10])
+Err(Negative(at=1))
+Ok(2)
+Err(Negative(at=0))

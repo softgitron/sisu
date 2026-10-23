@@ -1,0 +1,2 @@
+16:5-16:17 E0416 borrow.move-out-of-drop part="f.name" name="f" ty="File"
+  label 8:9-8:13 borrow.drop-impl-here ty="File"

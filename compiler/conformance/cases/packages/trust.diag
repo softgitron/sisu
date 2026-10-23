@@ -1,0 +1,5 @@
+../rawio/src/lib.sisu:1:1-1:7 E0703 cap.untrusted package="rawio" what="`extern`"
+../rawio/src/lib.sisu:1:1-3:1 E0900 stage0.unsupported construct="`extern`" phase="foreign functions (Phase 8)"
+../rawio/src/lib.sisu:5:5-5:11 E0703 cap.untrusted package="rawio" what="`unsafe`"
+../rawio/src/lib.sisu:5:5-6:17 E0900 stage0.unsupported construct="an `unsafe` block" phase="foreign functions (Phase 8)"
+../fastmath/src/lib.sisu:2:5-3:17 E0900 stage0.unsupported construct="an `unsafe` block" phase="foreign functions (Phase 8)"

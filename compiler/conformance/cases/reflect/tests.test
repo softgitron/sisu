@@ -1,0 +1,6 @@
+test "fields are counted" ... ok
+test "names with a clock" ... ok
+test "sums (Point(x=1, y=2), 3)" ... ok
+test "sums (Point(x=0, y=0), 0)" ... ok
+test "every point" ... ok
+5 passed, 0 failed, 0 blocked

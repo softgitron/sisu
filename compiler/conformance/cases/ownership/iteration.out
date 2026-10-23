@@ -1,0 +1,14 @@
+60
+own iteration:
+  saw a
+  drop a
+  keep b
+  drop b
+  saw c
+  drop c
+borrowed iteration:
+  saw x
+  saw y
+end of main
+  drop x
+  drop y

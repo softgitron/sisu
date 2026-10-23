@@ -1,0 +1,57 @@
+# A generator that code which cannot wait takes items from (another
+# iterator's adapter, `enumerate` or `zip`; an intrinsic given it as an
+# `Iterable[T]`, `sum`, `sorted`, `any`; a generator that iterates another
+# while it is itself driven) runs to its next `yield` where it is asked,
+# outside the schedule (decision 247): no yield point switches there, so
+# the same seed gives the same schedule in the interpreter and natively.
+# Beside tasks, under many schedules; a panic in it reaches the code that
+# asked.
+# explore 20
+
+struct Loud:
+    name: String
+
+impl Drop for Loud:
+    def drop(mut self):
+        print("drop {self.name}")
+
+def evens(xs: list[int]) -> Iter[int]:
+    for x in xs:
+        if x % 2 == 0:
+            yield x
+
+def guarded(xs: list[int]) -> Iter[int]:
+    let guard = Loud(name="guarded")
+    for x in xs:
+        yield x
+
+def doubled(it: Iter[int]) -> Iter[int]:
+    var it = it
+    for x in it:
+        yield x * 2
+
+def failing(n: int) -> Iter[int]:
+    for i in range(n):
+        if i == 2:
+            panic("no {i}")
+        yield i
+
+def weigh(xs: list[int]) -> int:
+    var total = 0
+    for (i, x) in enumerate(evens(xs)):
+        total += i * x
+    for (a, b) in zip(evens(xs), doubled(evens(xs))):
+        total += a * b
+    return total + sum(doubled(evens(xs)))
+
+def main():
+    let results = task.scope do s:
+        let a = s.spawn(() -> weigh([1, 2, 3, 4, 5, 6]))
+        let b = s.spawn(() -> weigh(range(10).collect()))
+        let c = s.spawn(() -> sum(failing(5)))
+        return (a.join(), b.join(), c.join())
+    print(results)
+    print(sorted(doubled(evens([8, 5, 4, 3, 2]))))
+    print(any(guarded([1, 2, 3, 4]).map(it > 2)))
+    print(zip(guarded([7, 8]), [1, 2]).collect())
+    print(sum(failing(5)))

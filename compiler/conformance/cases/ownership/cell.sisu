@@ -1,0 +1,21 @@
+# `Cell` (04, rule 5): a value replaced through a shared reference, in one
+# task; inside a `Shared`, every owner sees the change.
+
+def bump(c: Cell[int], by: int):
+    c.set(c.get() + by)
+
+def main():
+    let c = Cell(1)
+    bump(c, 2)
+    bump(c, 3)
+    print(c.get())
+    print(c.replace(10))
+    print(c.get())
+    let counter = Shared(Cell(0))
+    let other = counter.copy()
+    counter.set(counter.get() + 1)
+    other.set(other.get() + 10)
+    print(counter.get())
+    let names = Cell("a".to_string())
+    let old = names.replace("b".to_string())
+    print("{old} -> {names:?}")

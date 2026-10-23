@@ -1,0 +1,2 @@
+9:11-9:16 E0366 type.uninitialized name="label"
+  label 5:9-5:14 borrow.declared-here name="label"

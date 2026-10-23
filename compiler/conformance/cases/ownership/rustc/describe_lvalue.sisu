@@ -1,0 +1,13 @@
+# After rustc's `borrowck-describe-lvalue`: a field is assigned while a
+# `mut` borrow of it is still used (Rust's E0506).
+
+struct Point:
+    x: int
+    y: int
+
+def main():
+    var p = Point(x=1, y=2)
+    let px = ref mut p.x
+    p.x = 3
+    px += 1
+    print(p.x)

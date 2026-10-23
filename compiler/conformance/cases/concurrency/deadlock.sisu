@@ -1,0 +1,12 @@
+# A deadlock: every task waits and no timer can wake one. The scheduler
+# stops the program with the list of what each task waits for (exit 134).
+
+def main():
+    let tx, rx = channel[int](capacity=1)
+    let tx2, rx2 = channel[int](capacity=1)
+    task.scope do s:
+        s.spawn do:
+            _ = rx.recv()
+        _ = rx2.recv()
+    _ = tx
+    _ = tx2

@@ -1,0 +1,2 @@
+2:5-2:25 E0333 type.impure-call callee="print" name="square"
+  label 1:10-1:16 type.declared-pure-here name="square"

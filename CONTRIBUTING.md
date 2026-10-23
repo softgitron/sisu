@@ -53,5 +53,6 @@ python3 tools/check_docs.py
 
 ## Licence
 
-Contributions are accepted under the repository's licence
-([Apache-2.0](LICENSE)); submitting a change means you agree to that.
+Contributions are accepted under the repository's dual licence,
+[Apache-2.0](LICENSE) or the [Unlicense](UNLICENSE) at the user's option;
+submitting a change means you agree to both.

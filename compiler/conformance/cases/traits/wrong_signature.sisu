@@ -1,0 +1,15 @@
+# An impl's method has the trait's signature, with `Self` replaced by the
+# type: here the parameter's mode differs.
+
+trait Grow:
+    def grow(mut self, by: int)
+
+struct Plant:
+    height: int
+
+impl Grow for Plant:
+    def grow(self, by: int):
+        print(by)
+
+def main():
+    pass

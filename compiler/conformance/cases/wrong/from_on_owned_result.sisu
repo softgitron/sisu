@@ -1,0 +1,8 @@
+# A wrong program: a function that returns an owned value has a `from`
+# clause.
+
+def shout(s: str) -> String from s:
+    return s.to_uppercase()
+
+def main():
+    print(shout("hey"))

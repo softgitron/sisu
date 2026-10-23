@@ -1,0 +1,13 @@
+# After rustc's `borrowck-reinit`: a variable is moved, assigned again,
+# moved again, and then used (Rust's E0382).
+
+def drop_it(own xs: list[String]):
+    print(len(xs))
+
+def main():
+    var x = ["a".to_string()]
+    let u = x
+    x = ["b".to_string()]
+    drop_it(x)
+    print(u)
+    print(x)

@@ -1,0 +1,35 @@
+# Attenuation (06, "Capabilities"): `read_only` and `restrict_to` are
+# capabilities of their own, written in Sisu (std.cap) over the `FsOps`
+# of the file system they narrow, so they compose, and an error names the
+# path the caller gave.
+
+def try_write(fs: Fs, path: Path):
+    match fs.write_text(path, "new"):
+        case Ok(()):
+            print("wrote {path}")
+        case Err(e):
+            print("refused: {e}")
+
+def main():
+    let fs = Fs.in_memory({"data/a.txt": "alpha", "data/sub/b.txt": "beta", "secret.txt": "key"})
+    let ro = fs.read_only()
+    print(ro.read_to_string("data/a.txt"))
+    try_write(ro, "data/c.txt")
+    let data = fs.restrict_to("data")
+    print(data.read_to_string("a.txt"))
+    print(data.read_to_string("../secret.txt"))
+    print(data.read_to_string("/secret.txt"))
+    print(data.exists("../secret.txt"))
+    print(data.read_to_string("missing.txt"))
+    print(data.list_dir("."))
+    print(data.list_dir("sub"))
+    # Narrowing a narrowed one cannot widen it again.
+    let sub = data.restrict_to("sub")
+    print(sub.read_to_string("b.txt"))
+    let escape = data.restrict_to("../")
+    print(escape.read_to_string("secret.txt"))
+    # Composed: below `data`, read only.
+    let both = data.read_only()
+    try_write(both, "a.txt")
+    try_write(data, "c.txt")
+    print(fs.read_to_string("data/c.txt"))

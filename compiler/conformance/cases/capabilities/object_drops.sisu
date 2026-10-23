@@ -1,0 +1,93 @@
+# A capability's object goes with the last copy of its handle (decision
+# 237). A handle is `Copy` (Q-51), and each copy is counted: in a
+# variable, a field, a list, an option, a dictionary, a cell, an argument
+# (through a `dyn` and a generic function too), a task's closure and a
+# channel. Dropping the last copy drops the object, running its `Drop`,
+# here a line that says which object went.
+
+struct Noisy:
+    name: String
+
+impl Drop for Noisy:
+    def drop(mut self):
+        print("dropped {self.name}")
+
+struct Dice:
+    noise: Noisy
+    seed: int
+
+impl RandOps for Dice:
+    def bits(self) -> int:
+        return self.seed
+
+def dice(name: str, seed: int) -> Rand:
+    return Dice(noise=Noisy(name=name.to_string()), seed=seed)
+
+@derive(Copy)
+struct Pair:
+    a: Rand
+    b: Rand
+
+trait Roller:
+    def roll(self, r: Rand) -> int
+
+struct Table:
+    bonus: int
+
+impl Roller for Table:
+    def roll(self, r: Rand) -> int:
+        return r.bits() + self.bonus
+
+def same[T: Copy](x: T) -> T:
+    return x
+
+def roll(r: Rand) -> int:
+    return r.bits()
+
+def pair_sum() -> int:
+    let one = dice("one", 1)
+    let p = Pair(a=one, b=dice("two", 2))
+    let q = p.copy()
+    return q.a.bits() + q.b.bits()
+
+def in_tasks() -> int:
+    return task.scope do s:
+        let r = dice("shared by tasks", 4)
+        let a = s.spawn(() -> roll(r))
+        let b = s.spawn do:
+            return r.bits() * 2
+        return a.join().expect("rolled") + b.join().expect("rolled")
+
+def main():
+    # Both copies of the pair go when `pair_sum` returns.
+    print("a pair: {pair_sum()}")
+    # A temporary goes at the end of its statement, after the call.
+    let table: Box[dyn Roller] = Box(Table(bonus=10))
+    print("through a dyn: {table.roll(dice("three", 3))}")
+    # A generic function drops what its `Copy` parameter holds.
+    let g = same(dice("four", 4))
+    print("through a generic: {g.bits()}")
+    print("tasks: {in_tasks()}")
+    # Replacing a dictionary's value drops the old one.
+    var d: dict[str, Rand] = {}
+    d["x"] = dice("five", 5)
+    d["x"] = dice("six", 6)
+    print("from a dictionary: {d["x"].bits()}")
+    # Copies in a list, a cell and an option keep the object.
+    let kept = dice("seven", 7)
+    let cell = Cell.new(kept)
+    let rs = [kept, cell.get(), dice("eight", 8)]
+    let maybe: Rand? = Some(kept)
+    match maybe:
+        case Some(r):
+            print("from an option: {r.bits()}")
+        case None:
+            print("none")
+    print("a list of {len(rs)}")
+    # A channel holds what was sent and not received.
+    let tx, rx = channel[Rand](capacity=2)
+    tx.send(dice("sent", 9)).expect("open")
+    tx.send(dice("never received", 10)).expect("open")
+    let got = rx.recv().expect("one waits")
+    print("from a channel: {got.bits()}")
+    print("end of main")

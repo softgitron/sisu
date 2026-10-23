@@ -1,0 +1,13 @@
+"/usr/lib/libz.so.1": Some("/usr/lib") Some("libz.so.1") Some("libz.so") Some("1") ["/", "usr", "lib", "libz.so.1"] /usr/lib/libz.so.1
+"notes.tar.gz": Some("") Some("notes.tar.gz") Some("notes.tar") Some("gz") ["notes.tar.gz"] notes.tar.gz
+".bashrc": Some("") Some(".bashrc") Some(".bashrc") None [".bashrc"] .bashrc
+"dir/": Some("") Some("dir") Some("dir") None ["dir"] dir
+"/": None None None None ["/"] /
+"": None None None None [] .
+"a/../b/./c": Some("a/../b/.") Some("c") Some("c") None ["a", "..", "b", "c"] b/c
+src/main.sisu
+src/main.sir
+Ok(["proj/a.txt", "proj/sub", "proj/sub/b.txt", "proj/sub/deeper", "proj/sub/deeper/c.txt"])
+Ok(10)
+Ok(["alpha", "beta", "gamma"])
+Err(NotFound(path="proj/missing.txt"))

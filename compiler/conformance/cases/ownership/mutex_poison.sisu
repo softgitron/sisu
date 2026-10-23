@@ -1,0 +1,34 @@
+# D-077: when unwinding drops a guard, the value's `invariant` is checked
+# again; a broken one poisons the mutex, and a `Drop` that runs later in
+# the unwinding sees it.
+
+struct Account:
+    balance: int
+    limit: int
+    invariant self.balance >= -self.limit
+
+    # Only the type's own methods change its fields (07). This one panics
+    # before it returns while the balance is negative, so its own check of
+    # the invariant on return never runs: the guard's drop checks it.
+    def take(mut self, amount: int):
+        self.balance -= amount
+        if self.balance < 0:
+            panic("overdrawn by {-self.balance}")
+
+struct Auditor:
+    accounts: Shared[Mutex[Account]]
+
+impl Drop for Auditor:
+    def drop(mut self):
+        print("poisoned: {self.accounts.is_poisoned()}")
+
+def withdraw(m: Shared[Mutex[Account]], amount: int):
+    var g = m.lock()
+    g.value.take(amount)
+
+def main():
+    let m = Shared(Mutex(Account(balance=10, limit=5)))
+    let auditor = Auditor(accounts=m.copy())
+    withdraw(m, 3)
+    print(m.lock().value.balance)
+    withdraw(m, 100)

@@ -1,0 +1,35 @@
+# What a task may borrow (06, "Tasks and scopes"): a task spawned on the
+# scope in its body may borrow what the body's environment borrows, which
+# outlives the scope, and nothing of the body's own; a task spawned
+# elsewhere borrows nothing. The loans a task holds last until the scope
+# ends, so the body cannot change what a task reads; a task that moves its
+# captures in borrows nothing.
+
+def body_local():
+    task.scope do s:
+        let name = String.new("x")
+        s.spawn(() -> print(name))
+
+def helper(s: Scope, xs: list[int]):
+    s.spawn(() -> print(len(xs)))
+
+def racy():
+    var counter = 0
+    task.scope do s:
+        s.spawn do:
+            counter += 1
+        s.spawn(() -> print(counter))
+
+def changed_while_read(xs: list[int]):
+    var ys = xs.copy()
+    task.scope do s:
+        s.spawn(() -> print(len(ys)))
+        ys.push(1)
+
+def moved_in_is_fine():
+    task.scope do s:
+        let name = String.new("x")
+        s.spawn(own () -> print(name))
+
+def main():
+    pass

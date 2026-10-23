@@ -1,0 +1,29 @@
+def a(xs: list[int]) -> int:
+    match xs:
+        case []:
+            return 0
+        case [x, *rest]:
+            return x
+
+def b(xs: list[int]) -> int:
+    match xs:
+        case [x]:
+            return x
+        case [x, y, *rest]:
+            return y
+
+def c(xs: list[bool]) -> int:
+    match xs:
+        case []:
+            return 0
+        case [True, *rest]:
+            return 1
+        case [False]:
+            return 2
+
+def d(xs: list[int]) -> int:
+    match xs:
+        case [*rest]:
+            return 0
+        case [x]:
+            return 1

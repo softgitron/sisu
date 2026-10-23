@@ -1,0 +1,10 @@
+# A local of a loop's body ends with each iteration, so a borrow of it
+# cannot be kept for the next one.
+
+def main():
+    let start = "start".to_string()
+    var last: ref String = ref start
+    for i in range(3):
+        let s = "item {i}".to_string()
+        print(last)
+        last = ref s

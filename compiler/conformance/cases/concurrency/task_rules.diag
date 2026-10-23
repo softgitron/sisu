@@ -1,0 +1,5 @@
+9:25-9:26 E0425 task.closure-literal function="s.spawn"
+13:18-14:17 E0430 task.scope-escapes ty="Scope"
+19:18-19:23 E0434 task.select-arm ty="int"
+22:5-22:20 E0436 type.generator-result name="not_a_generator" ty="()"
+25:23-25:32 E0436 type.generator-result name="wrong_result" ty="list[int]"

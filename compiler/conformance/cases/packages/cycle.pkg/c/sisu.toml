@@ -1,0 +1,7 @@
+# A package graph has no cycle (09): this one would close a -> b -> c -> a.
+[package]
+name = "c"
+version = "0.1.0"
+
+[dependencies]
+a = { path = "../a" }

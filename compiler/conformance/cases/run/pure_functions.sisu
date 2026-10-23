@@ -1,0 +1,11 @@
+# `pure` functions cannot reach capabilities or call impure functions;
+# they run like any other function.
+pure def hypot(a: f64, b: f64) -> f64:
+    return (a * a + b * b).sqrt()
+
+pure def apply_all(xs: list[int], f: pure (int) -> int) -> list[int]:
+    return [f(x) for x in xs]
+
+def main():
+    print(hypot(3.0, 4.0))
+    print(apply_all([1, 2, 3], x -> x * x))

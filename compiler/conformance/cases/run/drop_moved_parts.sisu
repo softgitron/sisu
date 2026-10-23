@@ -1,0 +1,105 @@
+# What remains of a value once a part is moved out is dropped once, on
+# every path, panics included (04, rule 6): a struct whose field one path
+# takes and another path moves whole, the error a pattern takes fields
+# out of (moved out whole first, as its set's own type, so a union of sets
+# is opened by the set that matched), and the operands a statement had
+# made when a later one leaves it with `?` or a panic.
+
+struct Loud:
+    name: String
+
+impl Drop for Loud:
+    def drop(mut self):
+        print("drop {self.name}")
+
+struct Two:
+    a: Loud
+    b: Loud
+
+def take(own x: Loud):
+    print("took {x.name}")
+
+def consume(own t: Two):
+    print("consumed {t.a.name} and {t.b.name}")
+
+def pick(n: int):
+    let t = Two(a=Loud(name="a{n}"), b=Loud(name="b{n}"))
+    if n == 1:
+        take(t.a)
+    elif n == 2:
+        consume(t)
+    print("picked {n}")
+
+error ParseError:
+    Empty
+    Bad(at: int, why: Loud)
+
+error LoadError:
+    Missing(path: Loud)
+    Denied(path: Loud, who: Loud)
+
+def load(n: int) -> int ! {ParseError, LoadError}:
+    if n == 0:
+        return Err(Empty)
+    if n == 1:
+        return Err(Bad(at=7, why=Loud(name="bad digit")))
+    if n == 2:
+        return Err(Missing(path=Loud(name="missing path")))
+    if n == 3:
+        return Err(Denied(path=Loud(name="denied path"), who=Loud(name="denied who")))
+    return Ok(n)
+
+def handle(n: int):
+    match load(n):
+        case Ok(v):
+            print("ok {v}")
+        case Err(Bad(at, why)):
+            print("bad at {at}: {why.name}")
+        case Err(Denied(path, _)):
+            print("denied {path.name}")
+        case Err(Missing(_)):
+            print("missing")
+        case Err(e):
+            print("other {e:?}")
+    print("handled {n}")
+
+struct Pair:
+    a: Loud
+    b: int
+
+def number(ok: bool) -> int ! ParseError:
+    if ok:
+        return Ok(1)
+    return Err(Empty)
+
+def make(ok: bool) -> Pair ! ParseError:
+    return Ok(Pair(a=Loud(name="first"), b=number(ok)?))
+
+def boom(why: str) -> int:
+    panic(why)
+
+def explode():
+    match load(3):
+        case Err(Denied(path, _)):
+            print("exploding with {path.name}")
+            let late = Pair(a=Loud(name="late"), b=boom("boom"))
+            print("unreachable {late.b}")
+        case _:
+            pass
+
+def main():
+    for n in range(4):
+        pick(n)
+    for n in range(5):
+        handle(n)
+    match make(True):
+        case Ok(p):
+            print("made {p.b}")
+        case Err(e):
+            print("error {e:?}")
+    match make(False):
+        case Ok(p):
+            print("made {p.b}")
+        case Err(e):
+            print("error {e:?}")
+    explode()

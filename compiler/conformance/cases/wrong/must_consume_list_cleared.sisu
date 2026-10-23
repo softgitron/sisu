@@ -1,0 +1,15 @@
+# A wrong program: a list of must-consume values is cleared, which drops
+# them.
+
+@must_consume
+struct Job:
+    id: int
+
+    def finish(own self):
+        print("finished {self.id}")
+
+def main():
+    var jobs = [Job(id=1)]
+    jobs.clear()
+    for j in own jobs:
+        j.finish()

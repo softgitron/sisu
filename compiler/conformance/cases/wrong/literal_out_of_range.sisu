@@ -1,0 +1,6 @@
+# A wrong program: a literal does not fit the sized integer type it is
+# given.
+
+def main():
+    let level: u8 = 300
+    print(level)

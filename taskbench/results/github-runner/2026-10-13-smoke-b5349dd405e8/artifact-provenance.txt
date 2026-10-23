@@ -1,0 +1,11 @@
+These files are the artifact uploaded by the ci workflow, unmodified.
+repository: softgitron/sisu
+workflow: ci (.github/workflows/ci.yml), job "taskbench build, tests and smoke run"
+run: 38416339473 (run number 1, attempt 1, event push), started 2026-10-13T14:47:02Z
+head commit: b5349dd405e8dbe7c7d8adb78fa8e19f5674f352
+artifact: taskbench-smoke-b5349dd405e8dbe7c7d8adb78fa8e19f5674f352, id 11823633884
+artifact digest: sha256:f2724e812f8a1a79fae039cad5b5b5e193e7b98e5ef5c0066712a3c19f035169 (checked on download)
+archive path: b5349dd405e8/ (the job's results/github-runner/<sha12>)
+downloaded: 2026-10-13 through the GitHub API (download_workflow_run_artifact)
+scale: smoke, one repetition, 2 worker threads (the runner's nproc)
+harness: version 0.1.0 at that commit (probe reserve defaults 16 KiB for B and 8 KiB for C; no unwinder warm-up)

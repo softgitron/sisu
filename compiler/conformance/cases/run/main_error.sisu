@@ -1,0 +1,15 @@
+error ConfigError:
+    Missing(key: String)
+
+def lookup(key: str) -> int ! ConfigError:
+    return Err(Missing(key=key.to_string()))
+
+def load() -> int !:
+    let port = lookup("port")?
+    return Ok(port)
+
+def main() -> ! ConfigError:
+    print("starting")
+    let port = load()?
+    print("port {port}")
+    return Ok(())

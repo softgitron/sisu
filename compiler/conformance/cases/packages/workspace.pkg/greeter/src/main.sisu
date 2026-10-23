@@ -1,0 +1,7 @@
+import core
+
+def main():
+    print(core.greet("workspace"))
+
+test "the application's own test":
+    assert core.greet("x") == "hello, x"

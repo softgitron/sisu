@@ -1,0 +1,25 @@
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+ownership violation: a reference was used after its loan had ended
+  the loan: a shared borrow of `n` in `main`, created at modify_while_borrowed.sisu:5:13 by `_2 = ref _1`
+  ended by: a modification of `n` at modify_while_borrowed.sisu:6:5 (`_1 = const 2`)
+  used at: modify_while_borrowed.sisu:7:5 (`_3 = call intrinsic print(copy _2)`)
+  value: `n` = 2
+  loans of `n` not ended yet: 0 shared, 0 with `mut`
+  at main (modify_while_borrowed.sisu:7:5)
+SIR of `main`:
+fn main(0) source 0 @3:5-3:9 {
+    let _0: ()
+    let _1: int "n" @4:9-4:10
+    let _2: ref int "r" @5:9-5:10
+    let _3: ()
+  bb0:
+    _1 = const 1 @4:13-4:14
+    _2 = ref _1 @5:13-5:18
+    _1 = const 2 @6:5-6:10
+    _3 = call intrinsic print(copy _2) @7:5-7:13
+    _0 = const ()
+    return
+}
+outcome: conflict reached; the run stopped at a concrete ownership conflict
+--- status 134

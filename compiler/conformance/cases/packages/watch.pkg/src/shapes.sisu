@@ -1,0 +1,3 @@
+## The shape of a frame.
+pub def shape(frame: int) -> String:
+    return "a circle of {frame + 1}"

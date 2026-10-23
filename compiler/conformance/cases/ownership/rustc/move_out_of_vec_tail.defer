@@ -1,0 +1,10 @@
+--- stderr
+error[E0338]: cannot move `first.string` out of a borrowed value; copy it with `.copy()`
+  --> move_out_of_vec_tail.sisu:11:25
+   |
+11 |             let owned = first.string
+   |                         ^^^^^^^^^^^^
+  = fix: copy it with `.copy()`: `.copy()`
+
+error[D0006]: the program was not run: errors found (1)
+--- status 1

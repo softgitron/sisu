@@ -1,0 +1,16 @@
+# A `pure` function calls only pure functions (D-074), and the end of a
+# value's scope runs its type's `Drop`: here an impure one, which prints.
+
+view struct Noisy:
+    name: str
+
+impl Drop for Noisy:
+    def drop(mut self):
+        print("dropping {self.name}")
+
+pure def measure(name: str) -> int:
+    let n = Noisy(name=name)
+    return len(n.name)
+
+def main():
+    print(measure("x"))

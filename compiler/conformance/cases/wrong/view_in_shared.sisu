@@ -1,0 +1,7 @@
+# A wrong program: a view is put in a `Shared`, which can outlive what the
+# view borrows.
+
+def main():
+    let text = "shared".to_string()
+    let s = Shared(text.trim())
+    print(Shared.count(s))

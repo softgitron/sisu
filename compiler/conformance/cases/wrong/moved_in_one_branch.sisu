@@ -1,0 +1,15 @@
+# A wrong program: a value moved in one branch is used after the `if`,
+# where it may be gone.
+
+struct Ticket:
+    code: String
+
+def cancel(own t: Ticket):
+    print("cancelled {t.code}")
+
+def main():
+    let t = Ticket(code="A1".to_string())
+    let late = True
+    if late:
+        cancel(t)
+    print(t.code)

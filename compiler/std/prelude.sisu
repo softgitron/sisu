@@ -1,0 +1,4150 @@
+##! The stage-0 prelude: the builtin types and the prelude functions of
+##! proposal/02-syntax.md ("Prelude functions and intrinsics") and the parts
+##! of std.core that Phase 2 needs.
+##!
+##! Every function without a body names a host intrinsic with
+##! `@intrinsic("name")`. The `##` comment above it is the intrinsic's
+##! contract, stated in Sisu terms: a Sisu-written std or another
+##! interpreter must behave exactly so. `@keeps(self, x)` adds to the
+##! contract that every value the named `own` and `mut` arguments hold is
+##! kept or returned, never dropped, so they may hold must-consume values
+##! (D-054). A function with a body and `@structural("name")` is written in
+##! Sisu; the intrinsic `name` computes the same result when the bounds of
+##! its type arguments are met by structural impls, and lowering calls it
+##! then. `@builtin("name")` marks a type whose
+##! values the host represents; such a type has no fields unless it lists
+##! them, and code constructs it only through its associated functions.
+##!
+##! The traits the language uses (`Display`, `Debug`, `Eq`, `PartialOrd`,
+##! `Ord`, `Hash`, `Len`, `Copy`, `Drop`, `Iterator`, the operators) are
+##! declared here, with their impls for the builtin types. An impl whose
+##! methods are intrinsics named `structural.*` implements the trait the
+##! way the interpreter compares, hashes and prints values structurally
+##! (docs/architecture.md, "Traits and generics"). `Iterable[T]` in a
+##! parameter accepts a `list`, `set`, `dict` or `Iter` whose items are `T`,
+##! and any other iterator through `iter_from` (decision 247).
+
+# ------------------------------------------------------------------ host-backed types
+
+## An owned, growable text: the bytes of its UTF-8 encoding, which only
+## ever hold a valid one (03, "Strings and text"; the methods of `str` read
+## and cut them). Views as `str` wherever a `str` is expected.
+@builtin("String")
+struct String:
+    pass
+
+## A growable sequence, the type of `[a, b]`.
+@builtin("list")
+struct list[T]:
+    pass
+
+## The integer types, `int` and the sized ones (03, "Numbers"): what
+## `truncate_to` converts to.
+trait Integer:
+    ## `n` reduced to the type's width, as two's complement wrapping does.
+    pure def wrapping_from(n: int) -> Self
+
+## A fixed number of values of one type (03, "Arrays"): `N` of them, a
+## constant that is part of the type, `Array[u32, 256]`. `xs[i]` reads and
+## writes an element, checked against the length as a list's index is;
+## nothing adds or removes one.
+@builtin("Array")
+struct Array[T, const N: int]:
+    pass
+
+## A hash map iterating in insertion order (D-074), the type of `{k: v}`.
+@builtin("dict")
+struct dict[K, V]:
+    pass
+
+## A hash set iterating in insertion order, the type of `{a, b}`.
+@builtin("set")
+struct set[T]:
+    pass
+
+## An iterator the host drives: over a collection, a range, the pieces of
+## a string. Its adapters (`map`, `filter`, `take`, ...) are `Iterator`'s,
+## written in Sisu below, and run their functions only as items are taken.
+@builtin("Iter")
+struct Iter[T]:
+    pass
+
+## A slot of a dict, from `dict.entry`.
+@builtin("Entry")
+struct Entry[K, V]:
+    pass
+
+## Anything a `for` loop can iterate whose items are `T` (a parameter type only).
+@builtin("Iterable")
+struct Iterable[T]:
+    pass
+
+## A file system path. A string literal becomes a `Path` where one is expected.
+@builtin("Path")
+struct Path:
+    pass
+
+## The sized integers (03, "Numbers"), for layouts, protocols and FFI;
+## `i64` is `int` and `uint` is `u64`. Their arithmetic traps on overflow
+## as `int`'s does, `+%`, `-%` and `*%` wrap, and `+|`, `-|` and `*|`
+## saturate. A literal takes the sized type expected (or the one its
+## suffix names, `0u32`), checked to fit. A value becomes a wider integer
+## type where one is expected when that loses nothing (`u8` to `u32`,
+## `i32` or `int`; `int` and `u64` to `i128`; `u64` to `u128`); the other
+## conversions are methods (`int.to_u8`, `u8.to_int`), the narrowing ones
+## giving `None` for a value that does not fit.
+@builtin("u8")
+struct u8:
+    pass
+
+@builtin("u16")
+struct u16:
+    pass
+
+@builtin("u32")
+struct u32:
+    pass
+
+@builtin("u64")
+struct u64:
+    pass
+
+@builtin("u128")
+struct u128:
+    pass
+
+@builtin("i8")
+struct i8:
+    pass
+
+@builtin("i16")
+struct i16:
+    pass
+
+@builtin("i32")
+struct i32:
+    pass
+
+@builtin("i128")
+struct i128:
+    pass
+
+type i64 = int
+
+type uint = u64
+
+## IEEE 754 binary32 (03, "Numbers"), for layouts, graphics and audio;
+## `f64` is the default float. Floating point is strict (D-074): each
+## operation on `f32`s rounds once to `f32`, never through a wider format,
+## and nothing fuses `a * b + c` (`a.mul_add(b, c)` is the one-rounding
+## form). A float literal takes `f32` where one is expected, or by its
+## suffix (`1.5f32`), rounded once from its text. An `f32` becomes an
+## `f64` where one is expected, which loses nothing; `x.to_f32()` rounds
+## the other way. Like `f64` it is `PartialOrd` and not `Ord` or `Hash`.
+@builtin("f32")
+struct f32:
+    pass
+
+## An immutable owned sequence of bytes (03, "Strings and text"): the type
+## of `b"..."` and of what a connection reads. It views as `Slice[u8]`
+## where one is expected; `b[i]` is a byte and `b[i:j]` a copy of a run.
+@builtin("bytes")
+struct bytes:
+    pass
+
+## A read-only view of a run of values (a `list[T]`, or `bytes` as
+## `Slice[u8]`), borrowing what it views; `s[i]` is a reference to a value.
+## Unlike `str`, a `Slice` is not `Copy` in stage 0 (it is passed by
+## reference, as a `list` is).
+@builtin("Slice")
+view struct Slice[T]:
+    pass
+
+## A point in civil time, in UTC, to the nanosecond (from 1677 to 2262).
+## `t - u` is the `Duration` from `u` to `t`; `t + d` and `t - d` move a time
+## by a `Duration`.
+@builtin("DateTime")
+struct DateTime:
+    pass
+
+## The file system capability (06, "Capabilities"): a `Copy` handle on an
+## object that implements `FsOps`, which every copy of the handle reaches,
+## so copying it grants nothing new. Where an `Fs` is expected, a value of
+## another type that implements `FsOps` becomes one: the handle takes the
+## value over (a copy of it, for a `Copy` type). That value must own what it
+## holds, be `Send` and `Sync`, and not be must-consume; a lent capability
+## (`Lent[Fs]`), being a view, never becomes a handle. The same holds for
+## each capability below and its operations trait.
+@builtin("Fs")
+struct Fs:
+    pass
+
+## The network capability: TCP connections and listeners (`NetOps`).
+@builtin("Net")
+struct Net:
+    pass
+
+## The clock capability: the time, and timers to wait for (`ClockOps`).
+@builtin("Clock")
+struct Clock:
+    pass
+
+## The randomness capability (`RandOps`).
+@builtin("Rand")
+struct Rand:
+    pass
+
+## The environment capability: arguments and variables (`EnvOps`).
+@builtin("Env")
+struct Env:
+    pass
+
+## The process capability: running other programs (`ProcOps`).
+@builtin("Proc")
+struct Proc:
+    pass
+
+## The standard input capability: the lines the program is given
+## (`StdinOps`).
+@builtin("Stdin")
+struct Stdin:
+    pass
+
+## The root of all capabilities, constructed by the runtime only when
+## `main(sys: System)` declares it, and passed to `main` alone, or to a test
+## that declares one (`test "name"(sys: System):`, which then runs alone;
+## 17). Its fields are the root objects of the host, which no code can
+## make. `System.fake(seed)` is a set of fakes in the same shape.
+@builtin("System")
+struct System:
+    fs: Fs
+    net: Net
+    clock: Clock
+    rand: Rand
+    env: Env
+    proc: Proc
+    stdin: Stdin
+
+## The host's objects behind the root capabilities of a `System`: nothing
+## constructs one, so every effect on the world passes through a `System`.
+@builtin("HostFs")
+struct HostFs:
+    pass
+
+@builtin("HostNet")
+struct HostNet:
+    pass
+
+@builtin("HostClock")
+struct HostClock:
+    pass
+
+@builtin("HostRand")
+struct HostRand:
+    pass
+
+@builtin("HostEnv")
+struct HostEnv:
+    pass
+
+@builtin("HostProc")
+struct HostProc:
+    pass
+
+@builtin("HostStdin")
+struct HostStdin:
+    pass
+
+## The run's test clock, from `Clock.fake` and `Clock.frozen_at` (17): one
+## per run (per test under `sisu test`), which every `TestClock` reads and
+## the in-memory file systems stamp their writes with. It starts at the
+## epoch and stands still until `advance` or `set`, or until every task
+## waits: then it moves to the earliest timer, as the other virtual clocks
+## do. A `Copy` handle; it becomes a `Clock` where one is expected.
+@builtin("TestClock")
+struct TestClock:
+    pass
+
+## A `Copy` handle on a value that every copy shares (06: "a fake's state
+## lives behind the handle"), the building block of capability objects
+## written in Sisu: fakes, caretakers, interceptors. Each copy is counted,
+## and the value is dropped with the last one, so a borrow of it (`get`)
+## borrows the handle it came through; it can be neither a view nor
+## must-consume, and changing it goes through a `Mutex` inside. A `Cap[T]`
+## is `Send` and `Sync` when `T` is `Sync`.
+@builtin("Cap")
+struct Cap[T]:
+    pass
+
+## A capability lent for the length of a call (06; Q-51): a view of the
+## capability `T` (`fs.lend()`), so the callee can neither keep it nor
+## copy a `T` out of it. It implements `T`'s operations trait, so a generic
+## parameter `[F: FsOps]` accepts it with every other form; a parameter of
+## type `Fs`, which can be stored, does not. A `Copy` view, at no run-time
+## cost: it is the handle.
+@builtin("Lent")
+view struct Lent[T]:
+    pass
+
+## An owned value on the heap (04, rule 7). Methods and fields of the value
+## are reached through it (its own field, `boxed`, is the value), and a
+## `Box[dyn Trait]` holds a value of any type that implements the trait.
+struct Box[T]:
+    boxed: T
+
+## Shared ownership (04, rule 5): a reference-counted pointer to a value
+## no one may change through it. `.copy()` makes another owner, which costs
+## a count increment, not a copy of the value; the value is dropped with
+## its last owner. Changing it goes through a `Cell` or a `Mutex` inside. A
+## view cannot be shared (it would outlive what it borrows), and neither can
+## a must-consume value (no owner is the last one statically). A `Shared`
+## is `Send` and `Sync` when its value is `Sync`. Whether the count is
+## atomic is decided by escape analysis per construction site (Q-2): a
+## site whose values can reach another task counts atomically, the others
+## do not (docs/architecture.md, "Shared atomicity").
+@builtin("Shared")
+struct Shared[T]:
+    pass
+
+## A handle on a `Shared` value that does not keep it alive; it breaks the
+## cycles a graph of `Shared` would leak (04, rule 5).
+@builtin("Weak")
+struct Weak[T]:
+    pass
+
+## A value tasks share and change one step at a time (06; 11's sync
+## primitives): `load`, `store`, `swap` and, for numbers and `bool`, the
+## read-modify-write operations each read and write the value in one step
+## that no other task interleaves with. `Shared(Atomic(0))` is a counter
+## tasks share. An `Atomic` is `Send` and `Sync` when its value is `Send`.
+@builtin("Atomic")
+struct Atomic[T]:
+    pass
+
+## The memory orders of the C++11 model, which atomics follow (06). The
+## runtime runs one task at a time, so every atomic operation is one step
+## of the program and each order acts as `SeqCst`.
+enum MemoryOrder:
+    Relaxed
+    Acquire
+    Release
+    AcqRel
+    SeqCst
+
+## A value replaced through a shared reference, in one task (04, rule 5):
+## no reference into it is ever given out, so replacing it invalidates none.
+## A `Cell` is never `Sync`: tasks cannot share one.
+@builtin("Cell")
+struct Cell[T]:
+    pass
+
+## Mutual exclusion over a value the mutex owns (06, "Send, Sync, and shared
+## state"): `lock` gives a guard, `guard.value` is the value, and dropping
+## the guard unlocks. `lock` waits while another task holds the mutex, and
+## panics on a mutex its own task holds (it would wait forever). A `Mutex`
+## is `Sync` when its value is `Send`, so tasks share one through a
+## reference or a `Shared`. When unwinding drops a guard,
+## the value's type's `invariant` is checked again (D-077): if it fails, the
+## mutex is poisoned and every later `lock` panics; if it holds, or the type
+## has none, the mutex unlocks.
+@builtin("Mutex")
+struct Mutex[T]:
+    pass
+
+## The lock on a `Mutex`, from `Mutex.lock`; `guard.value` is the value.
+@builtin("MutexGuard")
+struct MutexGuard[T]:
+    pass
+
+## A collection of `T` addressed by `Key[T]` handles (04, "What this
+## costs, honestly"): `insert` gives a key; `remove` frees the slot, which a
+## later `insert` reuses under a new generation. A key whose value was
+## removed is stale: `get` gives `None` and `arena[key]` panics, so a stale
+## handle is detected at use, never dangling.
+@builtin("Arena")
+struct Arena[T]:
+    pass
+
+## A handle into an `Arena[T]`: the slot and its generation when the value
+## was inserted.
+@derive(Copy, Eq, Hash)
+struct Key[T]:
+    index: int
+    generation: int
+
+## Where `Display` and `Debug` write: the text being built and the format
+## spec (`{x:>8.2}`) of the value being rendered. The parts of a value are
+## written at a greater `depth`, where the spec does not apply to them. A
+## leaf value written at depth 0 applies the whole spec itself and clears
+## it; what is left of it pads the whole text when the interpolation ends.
+struct Formatter:
+    out: String
+    spec: String
+    depth: int
+
+impl Formatter:
+    ## Appends `text`.
+    pure def write(mut self, text: str):
+        self.out.push(text)
+
+    ## The spec a leaf value applies: the whole spec when the value is the
+    ## one being rendered (depth 0), which uses it up; `None` inside another
+    ## value, or without one.
+    pure def take_spec(mut self) -> Spec?:
+        if self.depth > 0 or self.spec.is_empty():
+            return None
+        let s = Spec.parse(self.spec)
+        self.spec = String.new("")
+        return s
+
+    ## Ends an interpolation: the text, padded as text by what is left of
+    ## the spec (when the value's impl did not apply it), appended to `into`.
+    pure def finish(own self, mut into: String):
+        let rest = if self.spec.is_empty(): None else: Spec.parse(self.spec)
+        match rest:
+            case Some(s):
+                into.push(s.text(self.out))
+            case None:
+                into.push(self.out)
+
+## A format spec, the text after `:` in `{x:>8.2f}` (03, "Strings"; the
+## rules are in docs/architecture.md, "Formatting"):
+## `[[fill]align][sign][#][0][width][,|_][.precision][type]`. Numbers align
+## right and other values left unless the spec says; `0` pads a number with
+## zeros after its sign and prefix; `,` or `_` groups the digits of the
+## integer part (by four in bases other than ten); the precision is the
+## digits after the point of a float and the most characters of a text; the
+## type is `d`, `x`, `X`, `o` or `b` for an integer, `f`, `F`, `e`, `E` or `%`
+## for a number, and `?` for the `Debug` text.
+struct Spec:
+    fill: char
+    align: char?
+    sign: char?
+    alternate: bool
+    zero: bool
+    width: int
+    grouping: char?
+    precision: int?
+    kind: char?
+
+impl Spec:
+    ## The spec `text` spells, or `None` (the checker rejects a malformed
+    ## spec in an interpolation, E0399).
+    pure def parse(text: str) -> Spec?:
+        let cs = Spec.chars_of(text)
+        let n = len(cs)
+        var s = Spec(
+            fill=' ',
+            align=None,
+            sign=None,
+            alternate=False,
+            zero=False,
+            width=0,
+            grouping=None,
+            precision=None,
+            kind=None,
+        )
+        var i = 0
+        if n >= 2 and Spec.is_align(cs[1]):
+            s.fill = cs[0]
+            s.align = Some(cs[1])
+            i = 2
+        elif n >= 1 and Spec.is_align(cs[0]):
+            s.align = Some(cs[0])
+            i = 1
+        if i < n and (cs[i] == '+' or cs[i] == '-' or cs[i] == ' '):
+            s.sign = Some(cs[i])
+            i += 1
+        if i < n and cs[i] == '#':
+            s.alternate = True
+            i += 1
+        if i < n and cs[i] == '0':
+            s.zero = True
+            i += 1
+        while i < n and cs[i].is_digit():
+            s.width = s.width * 10 + (cs[i].to_digit() ?? 0)
+            i += 1
+        if i < n and (cs[i] == ',' or cs[i] == '_'):
+            s.grouping = Some(cs[i])
+            i += 1
+        if i < n and cs[i] == '.':
+            i += 1
+            var p = 0
+            while i < n and cs[i].is_digit():
+                p = p * 10 + (cs[i].to_digit() ?? 0)
+                i += 1
+            s.precision = Some(p)
+        if i < n:
+            if not Spec.is_kind(cs[i]):
+                return None
+            s.kind = Some(cs[i])
+            i += 1
+        if i != n:
+            return None
+        return Some(s)
+
+    pure def chars_of(text: str) -> list[char]:
+        var cs: list[char] = []
+        for c in text.chars():
+            cs.push(c)
+        return cs
+
+    pure def is_align(c: char) -> bool:
+        return c == '<' or c == '>' or c == '^' or c == '='
+
+    pure def is_kind(c: char) -> bool:
+        for k in "boxXdeEfF%s?".chars():
+            if k == c:
+                return True
+        return False
+
+    ## An integer by the spec.
+    pure def int(self, n: int) -> String:
+        match self.kind:
+            case Some('e') | Some('E') | Some('f') | Some('F') | Some('%'):
+                return self.float(n.to_f64())
+            case Some('s'):
+                return self.text("{n}")
+            case Some('?'):
+                return self.pad("{n:?}")
+            case _:
+                pass
+        return self.integer(n < 0, Spec.digits(n, self.base(), self.kind == Some('X')))
+
+    ## An integer of a type whose values reach past `int`'s (`u64`,
+    ## `u128`, `i128`) by the spec, as `int` would be; a float's letter
+    ## formats the nearest `f64`.
+    pure def wide[T: Display](self, n: T, negative: bool) -> String:
+        match self.kind:
+            case Some('e') | Some('E') | Some('f') | Some('F') | Some('%'):
+                return self.float("{n}".parse_float() ?? 0.0)
+            case Some('s'):
+                return self.text("{n}")
+            case Some('?'):
+                return self.pad("{n}")
+            case _:
+                pass
+        return self.integer(negative, Spec.wide_digits(n, self.base(), self.kind == Some('X')))
+
+    ## The base the spec's letter names: 16 for `x` and `X`, 8 for `o`, 2
+    ## for `b`, and otherwise 10.
+    pure def base(self) -> int:
+        return match self.kind:
+            case Some('x'): 16
+            case Some('X'): 16
+            case Some('o'): 8
+            case Some('b'): 2
+            case _: 10
+
+    ## An integer's digits with its sign, the base's prefix (`#`), the
+    ## grouping and the padding of the spec.
+    pure def integer(self, negative: bool, own digits: String) -> String:
+        let base = self.base()
+        var shown = digits
+        if self.grouping != None:
+            shown = Spec.group(shown, self.grouping ?? ',', if base == 10: 3 else: 4)
+        var prefix = ""
+        if self.alternate:
+            prefix = match base:
+                case 16: "0x"
+                case 8: "0o"
+                case 2: "0b"
+                case _: ""
+        return self.pad_number("{self.sign_of(negative)}{prefix}", shown)
+
+    ## A float by the spec: fixed with `f` (six digits after the point
+    ## unless a precision says), with an exponent with `e`, a percentage with
+    ## `%`, and otherwise the shortest text that reads back as the same
+    ## number, or that many digits after the point.
+    pure def float(self, x: f64) -> String:
+        if self.kind == Some('?'):
+            return self.pad("{x:?}")
+        if self.kind == Some('s'):
+            return self.text("{x}")
+        if x.is_nan():
+            return self.pad_number("", "NaN")
+        let kind = match self.kind:
+            case Some(k): "{k}"
+            case None: ""
+        return self.float_text(x < 0.0, Spec.float_digits(x.abs(), kind, self.precision ?? -1))
+
+    ## An `f32` by the spec, as `float` writes an `f64`: the shortest text
+    ## is the one that reads back as the same `f32`.
+    pure def float32(self, x: f32) -> String:
+        if self.kind == Some('?'):
+            return self.pad("{x:?}")
+        if self.kind == Some('s'):
+            return self.text("{x}")
+        if x.is_nan():
+            return self.pad_number("", "NaN")
+        let kind = match self.kind:
+            case Some(k): "{k}"
+            case None: ""
+        return self.float_text(x < 0.0, Spec.float32_digits(x.abs(), kind, self.precision ?? -1))
+
+    ## A float's digits with its sign, grouping and padding.
+    pure def float_text(self, negative: bool, own digits: String) -> String:
+        var body = digits
+        if self.grouping != None:
+            let cs = Spec.chars_of(body)
+            var k = 0
+            while k < len(cs) and cs[k].is_digit():
+                k += 1
+            var whole = String.new("")
+            var rest = String.new("")
+            for i in range(len(cs)):
+                if i < k:
+                    whole.push("{cs[i]}")
+                else:
+                    rest.push("{cs[i]}")
+            body = "{Spec.group(whole, self.grouping ?? ',', 3)}{rest}"
+        return self.pad_number(self.sign_of(negative), body)
+
+    ## A text by the spec: at most `precision` characters, padded.
+    pure def text(self, t: str) -> String:
+        match self.precision:
+            case Some(p):
+                var short = String.new("")
+                var i = 0
+                for c in t.chars():
+                    if i == p:
+                        break
+                    short.push("{c}")
+                    i += 1
+                return self.pad(short)
+            case None:
+                return self.pad(t)
+
+    ## `body` padded to the width, as text: aligned left unless the spec
+    ## says.
+    pure def pad(self, body: str) -> String:
+        let gap = self.width - len(body)
+        if gap <= 0:
+            return body.to_string()
+        return self.spread("", body, gap, self.align ?? '<', self.fill)
+
+    ## A number padded to the width: aligned right unless the spec says,
+    ## and with zeros after its sign and prefix (`head`) for `0`.
+    pure def pad_number(self, head: str, digits: str) -> String:
+        let gap = self.width - len(head) - len(digits)
+        if gap <= 0:
+            return "{head}{digits}"
+        if self.zero and self.align == None:
+            return self.spread(head, digits, gap, '=', '0')
+        return self.spread(head, digits, gap, self.align ?? '>', self.fill)
+
+    pure def spread(self, head: str, body: str, gap: int, align: char, fill: char) -> String:
+        let pad = "{fill}"
+        return match align:
+            case '<': "{head}{body}{pad.repeat(gap)}"
+            case '^': "{pad.repeat(gap // 2)}{head}{body}{pad.repeat(gap - gap // 2)}"
+            case '=': "{head}{pad.repeat(gap)}{body}"
+            case _: "{pad.repeat(gap)}{head}{body}"
+
+    pure def sign_of(self, negative: bool) -> str:
+        if negative:
+            return "-"
+        return match self.sign:
+            case Some('+'): "+"
+            case Some(' '): " "
+            case _: ""
+
+    ## Digits grouped by `every` from the right, with `sep` between groups.
+    pure def group(digits: str, sep: char, every: int) -> String:
+        let cs = Spec.chars_of(digits)
+        var out = String.new("")
+        for i in range(len(cs)):
+            if i > 0 and (len(cs) - i) % every == 0:
+                out.push("{sep}")
+            out.push("{cs[i]}")
+        return out
+
+    ## The digits of `|n|` in `base` (2, 8, 10 or 16; capitals with `upper`).
+    @intrinsic("fmt.digits")
+    pure def digits(n: int, base: int, upper: bool) -> String
+
+    ## The digits of `|n|`, an integer of any type, as `digits` gives
+    ## them.
+    @intrinsic("fmt.wide_digits")
+    pure def wide_digits[T](n: T, base: int, upper: bool) -> String
+
+    ## The text of `x >= 0` by the type letter `kind` (`f`, `F`, `e`, `E`,
+    ## `%`, or anything else for the shortest form) with `precision` digits
+    ## after the point (-1 for the default: six with a letter, the shortest
+    ## round trip without); `inf` for infinity. The digits are the host's
+    ## correctly rounded ones (port-debt.md, "Float to text").
+    @intrinsic("fmt.float_digits")
+    pure def float_digits(x: f64, kind: str, precision: int) -> String
+
+    ## `float_digits` of an `f32`: the same digits as of the `f64` that
+    ## holds it, except that the shortest form is the shortest that reads
+    ## back as the same `f32`.
+    @intrinsic("fmt.float32_digits")
+    pure def float32_digits(x: f32, kind: str, precision: int) -> String
+
+    ## `t` by the `strftime` pattern (UTC; the subset in docs/architecture.md).
+    @intrinsic("fmt.strftime")
+    pure def strftime(t: DateTime, pattern: str) -> String
+
+## What `Hash` feeds a value's parts into.
+struct Hasher:
+    state: int
+
+impl Hasher:
+    ## Mixes an integer into the state (FNV-1a over its value).
+    pure def write_int(mut self, n: int):
+        self.state = (self.state ^ n) *% 1099511628211
+
+# ------------------------------------------------------------------ traits
+
+## Text for a program's users: what `print` and `"{x}"` write (03, "Strings").
+trait Display:
+    ## Writes the value's text to `f`.
+    pure def fmt(self, mut f: Formatter)
+
+## Text for programmers: what `"{x:?}"` writes, the value the way it is
+## written. Every type has `Debug` (11): a struct or enum without its own
+## impl gets the derived one.
+trait Debug:
+    pure def fmt_debug(self, mut f: Formatter)
+
+    ## The derived impl (08, "Derive"), which the compiler runs for a type:
+    ## a struct's name and its fields as `name=value`, an enum value's
+    ## variant and its fields, the way they are written.
+    comptime def derive(T: type) -> impl Debug for T:
+        return impl Debug for T:
+            pure def fmt_debug(self, mut f: Formatter):
+                if comptime reflect.is_struct(T):
+                    f.write("{reflect.name_of(T)}(")
+                    f.depth += 1
+                    comptime for i, field in enumerate(reflect.fields_of(T)):
+                        if comptime i > 0:
+                            f.write(", ")
+                        f.write("{field.name}=")
+                        self.[field].fmt_debug(mut f)
+                    f.depth -= 1
+                    f.write(")")
+                elif comptime len(reflect.variants_of(T)) > 0:
+                    match self:
+                        comptime for V in reflect.variants_of(T):
+                            case V(..):
+                                if comptime len(V.fields) == 0:
+                                    f.write(V.name)
+                                else:
+                                    f.write("{V.name}(")
+                                    f.depth += 1
+                                    comptime for i, field in enumerate(V.fields):
+                                        if comptime i > 0:
+                                            f.write(", ")
+                                        if comptime field.named:
+                                            f.write("{field.name}=")
+                                        self.[field].fmt_debug(mut f)
+                                    f.depth -= 1
+                                    f.write(")")
+
+## Equality: `==` and `!=` (02, "Expressions").
+trait Eq:
+    pure def eq(self, other: Self) -> bool
+
+    ## The derived impl: equal when the variants are and the fields are.
+    comptime def derive(T: type) -> impl Eq for T:
+        return impl Eq for T:
+            pure def eq(self, other: Self) -> bool:
+                if comptime reflect.is_struct(T) or len(reflect.variants_of(T)) == 0:
+                    comptime for field in reflect.fields_of(T):
+                        if self.[field] != other.[field]:
+                            return False
+                    return True
+                else:
+                    match self:
+                        comptime for V in reflect.variants_of(T):
+                            case V(..):
+                                match other:
+                                    case V(..):
+                                        comptime for field in V.fields:
+                                            if self.[field] != other.[field]:
+                                                return False
+                                        return True
+                                    comptime if len(reflect.variants_of(T)) > 1:
+                                        case _:
+                                            return False
+
+## A partial order: `<`, `<=`, `>` and `>=`. `f64` has only this one, since
+## NaN is unordered (03, "Numbers").
+trait PartialOrd:
+    pure def partial_cmp(self, other: Self) -> Ordering?
+
+    ## The derived impl: by variant in declaration order, then field by
+    ## field, the first that differs deciding.
+    comptime def derive(T: type) -> impl PartialOrd for T:
+        return impl PartialOrd for T:
+            pure def partial_cmp(self, other: Self) -> Ordering?:
+                if comptime reflect.is_struct(T) or len(reflect.variants_of(T)) == 0:
+                    comptime for field in reflect.fields_of(T):
+                        match self.[field].partial_cmp(other.[field]):
+                            case Some(Equal):
+                                pass
+                            case c:
+                                return c
+                    return Some(Equal)
+                else:
+                    match self:
+                        comptime for V in reflect.variants_of(T):
+                            case V(..):
+                                match other:
+                                    comptime for W in reflect.variants_of(T):
+                                        case W(..):
+                                            if comptime V.index == W.index:
+                                                comptime for field in V.fields:
+                                                    match self.[field].partial_cmp(other.[field]):
+                                                        case Some(Equal):
+                                                            pass
+                                                        case c:
+                                                            return c
+                                                return Some(Equal)
+                                            elif comptime V.index < W.index:
+                                                return Some(Less)
+                                            else:
+                                                return Some(Greater)
+
+## A total order, for sorting, `min` and `max`.
+trait Ord(Eq, PartialOrd):
+    pure def cmp(self, other: Self) -> Ordering
+
+    ## The derived impl: by variant in declaration order, then field by
+    ## field, the first that differs deciding.
+    comptime def derive(T: type) -> impl Ord for T:
+        return impl Ord for T:
+            pure def cmp(self, other: Self) -> Ordering:
+                if comptime reflect.is_struct(T) or len(reflect.variants_of(T)) == 0:
+                    comptime for field in reflect.fields_of(T):
+                        match self.[field].cmp(other.[field]):
+                            case Equal:
+                                pass
+                            case c:
+                                return c
+                    return Equal
+                else:
+                    match self:
+                        comptime for V in reflect.variants_of(T):
+                            case V(..):
+                                match other:
+                                    comptime for W in reflect.variants_of(T):
+                                        case W(..):
+                                            if comptime V.index == W.index:
+                                                comptime for field in V.fields:
+                                                    match self.[field].cmp(other.[field]):
+                                                        case Equal:
+                                                            pass
+                                                        case c:
+                                                            return c
+                                                return Equal
+                                            elif comptime V.index < W.index:
+                                                return Less
+                                            else:
+                                                return Greater
+
+## Hashing, for `dict` keys and `set` elements.
+trait Hash(Eq):
+    pure def hash(self, mut h: Hasher)
+
+    ## The derived impl: the fields' hashes in order, after the variant's
+    ## index for an enum.
+    comptime def derive(T: type) -> impl Hash for T:
+        return impl Hash for T:
+            pure def hash(self, mut h: Hasher):
+                if comptime reflect.is_struct(T):
+                    comptime for field in reflect.fields_of(T):
+                        self.[field].hash(mut h)
+                elif comptime len(reflect.variants_of(T)) > 0:
+                    match self:
+                        comptime for V in reflect.variants_of(T):
+                            case V(..):
+                                h.write_int(V.index)
+                                comptime for field in V.fields:
+                                    self.[field].hash(mut h)
+
+## A value to start from, `T.default()` (D-051: nothing is made without
+## being given its value; a type that has a natural first value says so
+## with this trait).
+trait Default:
+    pure def default() -> Self
+
+    ## The derived impl (08, "Derive"): the struct with each field's own
+    ## default where it has one, and its type's `default()` otherwise. An
+    ## enum's default is one of its variants, which an impl names.
+    comptime def derive(T: type) -> impl Default for T:
+        return impl Default for T:
+            pure def default() -> Self:
+                if comptime reflect.is_struct(T):
+                    return reflect.construct(
+                        T,
+                        {f.name: Default.default() for f in reflect.fields_of(T) if not f.default},
+                    )
+                else:
+                    comptime panic(
+                        "`{reflect.name_of(T)}` is an enum: its default is one of its variants, which an impl names"
+                    )
+
+## A number of items, `len(x)`.
+trait Len:
+    pure def len(self) -> int
+
+## A collection that can tell whether it holds a value: `x in xs` is
+## `xs.contains(x)` (02), for the builtin collections and for any type
+## that implements it.
+trait Contains[T]:
+    pure def contains(self, x: T) -> bool
+
+## Values that are copied rather than moved (04, rule 1); `@derive(Copy)`
+## opts a type in when all its fields are `Copy`.
+@marker
+trait Copy:
+    pass
+
+## Values that may move to another task (06, "Send, Sync, and shared
+## state"): inferred from the type's parts, as Rust infers them, and
+## checked only where a value crosses a `spawn` (and where a bound asks).
+## Everything is `Send` except a mutex guard, a function or closure value
+## and a `dyn` value whose trait does not require `Send`, and what holds
+## one; a reference `ref T` is `Send` when `T` is `Sync`, `ref mut T` when
+## `T` is `Send`.
+@marker
+trait Send:
+    pass
+
+## Values that tasks may share through references: inferred like `Send`.
+## A `Cell` is never `Sync`; a `Mutex[T]` and a channel half are when `T`
+## is `Send`; a `Shared[T]` is `Send` and `Sync` when `T` is `Sync`.
+@marker
+trait Sync:
+    pass
+
+## Values that may leave the frame that made them: whatever holds no
+## reference or view (04, "Views").
+@marker
+trait Escapable:
+    pass
+
+## The numbers `sum` and `abs` work on.
+@sealed
+trait Num:
+    pass
+
+## Runs when a value's owner goes out of scope, before its fields are
+## dropped (04, rule 6).
+trait Drop:
+    def drop(mut self)
+
+## The items of a `for` loop (03, "Traits"). `Iter[T]` is the iterator the
+## standard library's methods return; the adapters below wrap an iterator
+## in another, and the consumers drive it to its end (or to the item they
+## look for). As in 03, `next` and the methods are not `pure`, and their
+## functions may be any (`(Item) -> U`): an impl's `next` may be `pure`
+## (the host iterators' is), and a `pure` function can loop over one.
+trait Iterator:
+    type Item
+    ## The next item, or `None` at the end.
+    def next(mut self) -> Item?
+
+    ## At most `n` items.
+    def take(own self, n: int) -> Take[Self]:
+        return Take(inner=self, left=n)
+
+    ## All but the first `n` items.
+    def skip(own self, n: int) -> Skip[Self]:
+        return Skip(inner=self, left=n)
+
+    ## Each item passed through `f`.
+    def map[U](own self, f: (Item) -> U) -> Map[Self, U]:
+        return Map(inner=self, f=f)
+
+    ## The items for which `keep` is `True`.
+    def filter(own self, keep: (ref Item) -> bool) -> Filter[Self]:
+        return Filter(inner=self, keep=keep)
+
+    ## Each item with its index, from 0.
+    def enumerate(own self) -> Enumerate[Self]:
+        return Enumerate(inner=self, index=0)
+
+    ## The first item for which `pred` is `True`.
+    def find(own self, pred: (ref Item) -> bool) -> Item?:
+        for x in self:
+            if pred(ref x):
+                return Some(x)
+        return None
+
+    ## Whether `pred` is `True` for every item; stops at the first `False`.
+    def all(own self, pred: (Item) -> bool) -> bool:
+        for x in self:
+            if not pred(x):
+                return False
+        return True
+
+    ## Whether `pred` is `True` for any item; stops at the first.
+    def any(own self, pred: (Item) -> bool) -> bool:
+        for x in self:
+            if pred(x):
+                return True
+        return False
+
+    ## The number of items.
+    def count(own self) -> int:
+        var n = 0
+        for _ in self:
+            n += 1
+        return n
+
+    ## The item at index `n` (from 0), or `None` when there are fewer.
+    def nth(own self, n: int) -> Item?:
+        var i = 0
+        for x in self:
+            if i == n:
+                return Some(x)
+            i += 1
+        return None
+
+    ## `f` applied to the running value, from `init`, and each item in turn.
+    def fold[B](own self, own init: B, f: (B, Item) -> B) -> B:
+        var acc = init
+        for x in self:
+            acc = f(acc, x)
+        return acc
+
+    ## The items in a new list.
+    def collect(own self) -> list[Item]:
+        var out: list[Item] = []
+        for x in self:
+            out.push(x)
+        return out
+
+    ## The item with the largest `key`; the first of equal ones.
+    def max_by[K: Ord](own self, key: (ref Item) -> K) -> Item?:
+        var best: Item? = None
+        for x in self:
+            # The key may borrow from its item, so the best one's is
+            # computed again rather than kept.
+            let better = match best:
+                case Some(b): key(ref x) > key(b)
+                case None: True
+            if better:
+                best = Some(x)
+        return best
+
+    ## The item with the smallest `key`; the first of equal ones.
+    def min_by[K: Ord](own self, key: (ref Item) -> K) -> Item?:
+        var best: Item? = None
+        for x in self:
+            let better = match best:
+                case Some(b): key(ref x) < key(b)
+                case None: True
+            if better:
+                best = Some(x)
+        return best
+
+    ## The sum of the items, as `sum` adds them (floats pairwise, D-074).
+    def sum(own self) -> Item where Item: Num:
+        return self.collect().sum()
+
+    ## The `Display` renderings of the items, separated by `sep`.
+    def join(own self, sep: str) -> String where Item: Display:
+        return self.collect().join(sep)
+
+## `a + b` (D-022). The other operators are `Sub`, `Mul`, `Div`, `Rem` and
+## `Neg` (`-a`).
+trait Add[Rhs = Self]:
+    ## The type of the result, `Self` unless the impl says otherwise.
+    type Output = Self
+    pure def add(self, other: Rhs) -> Output
+
+trait Sub[Rhs = Self]:
+    type Output = Self
+    pure def sub(self, other: Rhs) -> Output
+
+trait Mul[Rhs = Self]:
+    type Output = Self
+    pure def mul(self, other: Rhs) -> Output
+
+trait Div[Rhs = Self]:
+    type Output = Self
+    pure def div(self, other: Rhs) -> Output
+
+trait Rem[Rhs = Self]:
+    type Output = Self
+    pure def rem(self, other: Rhs) -> Output
+
+trait Neg:
+    type Output = Self
+    pure def neg(self) -> Output
+
+## A conversion that loses nothing, `x.into()` (03, "Numbers"): each
+## sized integer into every wider integer type that holds all its values.
+trait Into[T]:
+    pure def into(self) -> T
+
+## A type that literals can be written as (02, "Literals"; 03, "Numbers"):
+## a literal whose expected type implements `FromLiteral[L]` is
+## `from_literal` of the literal, where `L` is `int` for an integer literal,
+## `f64` for a float literal and `str` for a string literal without
+## interpolation. It applies to literals only; it is not a conversion of
+## values.
+trait FromLiteral[L]:
+    pure def from_literal(literal: L) -> Self
+
+# ------------------------------------------------------------------ core enums and error sets
+
+## `T?` is `Option[T]`.
+@derive(Eq, Ord, Hash)
+enum Option[T]:
+    Some(T)
+    None
+
+## `T ! E` is `Result[T, E]`.
+@derive(Eq, Ord, Hash)
+enum Result[T, E]:
+    Ok(T)
+    Err(E)
+
+@derive(Copy, Eq, Ord, Hash)
+enum Ordering:
+    Less
+    Equal
+    Greater
+
+## The error `Result.context` wraps another in (05, "Context and traces"):
+## what the program was doing, and the error it met, rendered with
+## `Display`. It displays as `message: cause`.
+error Contextual:
+    Context(message: String, cause: String)
+
+## The errors of the file system capability. `Revoked`: the capability is
+## a caretaker whose revoker revoked it (`Fs.revocable`, Q-51).
+error IoError:
+    NotFound(path: Path)
+    PermissionDenied(path: Path)
+    AlreadyExists(path: Path)
+    InvalidData(path: Path)
+    Interrupted
+    Revoked
+    Other(message: String)
+
+## The errors of the network capability: nothing listens at `address`, an
+## attenuation refuses it, the other end closed, the capability was revoked.
+error NetError:
+    Refused(address: String)
+    NotAllowed(address: String)
+    Closed
+    Revoked
+    Other(message: String)
+
+## The errors of std.x.http's exchanges (11): the connection failed
+## (refused, not allowed, closed early, or the wait for it cancelled); the
+## other end did not speak HTTP/1.1 as the module reads it; a `get` was
+## answered with a status that is not 2xx. In the prelude, so a program
+## that imports `http` names it bare.
+error HttpError:
+    Network(message: String)
+    Malformed(detail: String)
+    Status(code: int)
+
+## The errors of the process capability.
+error ProcError:
+    NotFound(program: String)
+    PermissionDenied(program: String)
+    Revoked
+    Other(message: String)
+
+## The error of `X.try_from(v)` for a refinement type `X` (07): `v` does
+## not satisfy the predicate of `X`, which is named with its arguments.
+error RefinementError:
+    Unsatisfied(ty: String, predicate: String)
+
+# ------------------------------------------------------------------ prelude functions
+
+## Writes the `Display` rendering of `x` and a line break to standard output.
+@intrinsic("print")
+def print[T: Display](x: T)
+
+## Writes the `Display` rendering of `x` and a line break to standard error.
+@intrinsic("print_err")
+def print_err[T: Display](x: T)
+
+## The number of items: Unicode scalar values for `str` and `String`,
+## elements for `list` and `set`, entries for `dict`.
+@intrinsic("len")
+pure def len[T: Len](x: T) -> int
+
+## `range(stop)` is `0, 1, ..., stop - 1`; `range(start, stop)` and
+## `range(start, stop, step)` count by `step`, which must not be zero, and stop
+## before reaching `stop`. With one argument the checker supplies `start = 0`.
+@intrinsic("range")
+pure def range(start: int, stop: int, step: int = 1) -> Iter[int]
+
+## Pairs each item with its index, from 0.
+@intrinsic("enumerate")
+pure def enumerate[T](xs: Iterable[T]) -> Iter[(int, T)]
+
+## Pairs the items of `a` and `b`; panics if they have different lengths (PEP 618).
+## ```
+## let ns = [1, 2]
+## let ws = ["one", "two"]
+## var pairs: list[(int, str)] = []
+## for (n, w) in zip(ns, ws):
+##     pairs.push((n, w))
+## assert pairs == [(1, "one"), (2, "two")]
+## ```
+@intrinsic("zip")
+pure def zip[A, B](a: Iterable[A], b: Iterable[B]) -> Iter[(A, B)]
+
+## Pairs the items of `a` and `b` until the shorter one ends.
+@intrinsic("zip_shortest")
+pure def zip_shortest[A, B](a: Iterable[A], b: Iterable[B]) -> Iter[(A, B)]
+
+## The items in reverse order.
+@intrinsic("reversed")
+pure def reversed[T](xs: Iterable[T]) -> Iter[T]
+
+## A new list of the items in ascending order; the sort is stable. By the
+## items' `Ord` (the host's structural order when it is the structural one).
+## ```
+## assert sorted([3, 1, 2]) == [1, 2, 3]
+## assert sorted({"b", "a"}) == ["a", "b"]
+## ```
+@structural("sorted")
+pure def sorted[T: Ord](xs: Iterable[T]) -> list[T]:
+    var out = iterable_list(xs)
+    out.sort()
+    return out
+
+## The items, in order, as a new list (of copies, unless the items are
+## references).
+@intrinsic("iterable_list")
+pure def iterable_list[T](xs: Iterable[T]) -> list[T]
+
+## The items of `it`, an iterator of a type that implements `Iterator`
+## (`xs.iter().map(f)`, a program's own), as an `Iter` that takes each one
+## from `it` only when it is asked for: what the checker passes to an
+## `Iterable[T]` parameter given such an iterator (`sum(xs.iter().map(f))`),
+## since the functions that take one iterate collections and `Iter`s. A
+## generator, which the code taking its items runs to each `yield`
+## (decision 247).
+@internal
+def iter_from[I: Iterator](own it: I) -> Iter[I.Item]:
+    for x in it:
+        yield x
+
+## The smaller of `a` and `b` by their `Ord`; `a` when they are equal.
+@structural("min")
+pure def min[T: Ord](a: T, b: T) -> T:
+    if b.cmp(a) == Ordering.Less:
+        return b.copy()
+    return a.copy()
+
+## The larger of `a` and `b` by their `Ord`; `a` when they are equal.
+## ```
+## assert max(3, 7) == 7
+## assert min("pear", "apple") == "apple"
+## ```
+@structural("max")
+pure def max[T: Ord](a: T, b: T) -> T:
+    if b.cmp(a) == Ordering.Greater:
+        return b.copy()
+    return a.copy()
+
+## The sum of the items, 0 for none; integer overflow panics. Floats are summed
+## pairwise in a fixed shape (D-074).
+@intrinsic("sum")
+pure def sum[T: Num](xs: Iterable[T]) -> T
+
+## Whether any item is `True`; stops at the first.
+@intrinsic("any")
+pure def any(xs: Iterable[bool]) -> bool
+
+## Whether every item is `True`; stops at the first `False`.
+@intrinsic("all")
+pure def all(xs: Iterable[bool]) -> bool
+
+## The absolute value; `abs` of the smallest `int` panics with an overflow.
+@intrinsic("abs")
+pure def abs[T: Num](x: T) -> T
+
+## Panics with `message`, unwinding the task (05, "Panics").
+@intrinsic("panic")
+pure def panic(message: str) -> Never
+
+## Panics with "entered unreachable code".
+@intrinsic("unreachable")
+pure def unreachable(message: str = "") -> Never
+
+## A typed hole (D-061): checks as the type its position expects; running it
+## stops the program there.
+@intrinsic("todo")
+pure def todo[T](name: str = "") -> T
+
+# ------------------------------------------------------------------ int, f64, bool, char
+
+impl int:
+    ## `Less`, `Equal` or `Greater`.
+    @intrinsic("int.cmp")
+    pure def cmp(self, other: int) -> Ordering
+    ## The nearest `f64`; exact up to 2**53.
+    @intrinsic("int.to_f64")
+    pure def to_f64(self) -> f64
+    ## The nearest `f32`; exact up to 2**24.
+    @intrinsic("int.to_f32")
+    pure def to_f32(self) -> f32
+    ## `self` raised to `exp`, which must not be negative; overflow panics.
+    @intrinsic("int.pow")
+    pure def pow(self, exp: int) -> int
+
+impl f64:
+    ## `Less`, `Equal` or `Greater`; panics if either is NaN.
+    @intrinsic("f64.cmp")
+    pure def cmp(self, other: f64) -> Ordering
+    @intrinsic("f64.sqrt")
+    pure def sqrt(self) -> f64
+    @intrinsic("f64.floor")
+    pure def floor(self) -> f64
+    @intrinsic("f64.ceil")
+    pure def ceil(self) -> f64
+    ## Rounds half away from zero.
+    @intrinsic("f64.round")
+    pure def round(self) -> f64
+    @intrinsic("f64.abs")
+    pure def abs(self) -> f64
+    ## The integer part; panics if the value is NaN or out of range for `int`.
+    @intrinsic("f64.truncate_to_int")
+    pure def truncate_to_int(self) -> int
+    @intrinsic("f64.is_nan")
+    pure def is_nan(self) -> bool
+    ## The nearest `f32` (an infinity beyond its range).
+    @intrinsic("f64.to_f32")
+    pure def to_f32(self) -> f32
+    ## `self * a + b` with one rounding, a fused multiply-add: the only way
+    ## to get one, since `self * a + b` rounds twice everywhere (D-074).
+    @intrinsic("f64.mul_add")
+    pure def mul_add(self, a: f64, b: f64) -> f64
+
+## IEEE 754 binary32. `+`, `-`, `*`, `/` and `sqrt` round the exact result
+## once to `f32`; `%` and `**` are `f64`'s on the two values, rounded once
+## to `f32`.
+impl f32:
+    ## `Less`, `Equal` or `Greater`; panics if either is NaN.
+    @intrinsic("f32.cmp")
+    pure def cmp(self, other: f32) -> Ordering
+    @intrinsic("f32.sqrt")
+    pure def sqrt(self) -> f32
+    @intrinsic("f32.floor")
+    pure def floor(self) -> f32
+    @intrinsic("f32.ceil")
+    pure def ceil(self) -> f32
+    ## Rounds half away from zero.
+    @intrinsic("f32.round")
+    pure def round(self) -> f32
+    @intrinsic("f32.abs")
+    pure def abs(self) -> f32
+    @intrinsic("f32.is_nan")
+    pure def is_nan(self) -> bool
+    ## The same value as an `f64`, which holds every `f32`.
+    @intrinsic("f32.to_f64")
+    pure def to_f64(self) -> f64
+    ## The integer part; panics if the value is NaN or out of range for `int`.
+    @intrinsic("f32.truncate_to_int")
+    pure def truncate_to_int(self) -> int
+    ## `self * a + b` with one rounding, a fused multiply-add (D-074).
+    @intrinsic("f32.mul_add")
+    pure def mul_add(self, a: f32, b: f32) -> f32
+    ## The value's 32 bits (sign, exponent, fraction), as IEEE 754 lays
+    ## them out.
+    @intrinsic("f32.to_bits")
+    pure def to_bits(self) -> u32
+    ## The `f32` whose 32 bits are `bits`.
+    @intrinsic("f32.from_bits")
+    pure def from_bits(bits: u32) -> f32
+
+impl bool:
+    @intrinsic("bool.cmp")
+    pure def cmp(self, other: bool) -> Ordering
+
+impl char:
+    @intrinsic("char.cmp")
+    pure def cmp(self, other: char) -> Ordering
+    ## Whether the character is an ASCII digit `0`..`9`.
+    @intrinsic("char.is_digit")
+    pure def is_digit(self) -> bool
+    ## The value of an ASCII digit, or `None`.
+    @intrinsic("char.to_digit")
+    pure def to_digit(self) -> int?
+    @intrinsic("char.is_alphabetic")
+    pure def is_alphabetic(self) -> bool
+    @intrinsic("char.is_whitespace")
+    pure def is_whitespace(self) -> bool
+    @intrinsic("char.is_uppercase")
+    pure def is_uppercase(self) -> bool
+    @intrinsic("char.is_lowercase")
+    pure def is_lowercase(self) -> bool
+    ## The character's Unicode scalar value.
+    @intrinsic("char.code")
+    pure def code(self) -> int
+    ## The character whose Unicode scalar value is `n`, or `None` for a
+    ## surrogate (`0xD800` to `0xDFFF`) or a value outside `0` to
+    ## `0x10FFFF`.
+    @intrinsic("char.from_code")
+    pure def from_code(n: int) -> char?
+    ## The number of bytes of the character's UTF-8 encoding, 1 to 4.
+    ##
+    ## ```
+    ## assert 'a'.len_utf8() == 1 and 'ï'.len_utf8() == 2 and '€'.len_utf8() == 3
+    ## ```
+    pure def len_utf8(self) -> int:
+        let n = self.code()
+        if n < 0x80:
+            return 1
+        if n < 0x800:
+            return 2
+        if n < 0x10000:
+            return 3
+        return 4
+
+# ------------------------------------------------------------------ str and String
+# A text is its UTF-8 encoding, which is always valid (03, "Strings and
+# text"): `String` owns the bytes and `str` views them. The host reads the
+# bytes (`byte_len`, `byte_at`, `bytes`), cuts a text at boundaries of
+# characters (`byte_slice`), decodes it (`chars`, `len`), compares it
+# (`cmp`, by code points, which is the order of the bytes) and appends to
+# it (`String.push`, `push_char`), so the bytes stay valid; the methods
+# with bodies are written over those, and of Unicode's tables only the
+# character classes (`char.is_whitespace`, ...) and the case mappings
+# (`to_lowercase`, `to_uppercase`) are the host's.
+
+impl str:
+    @intrinsic("str.cmp")
+    pure def cmp(self, other: str) -> Ordering
+    ## The number of bytes of the text's encoding.
+    @intrinsic("str.byte_len")
+    pure def byte_len(self) -> int
+    ## The byte at index `i` of the encoding, which must be in bounds.
+    @intrinsic("str.byte_at")
+    pure def byte_at(self, i: int) -> u8
+    ## The text from byte `start` up to byte `end`, which must be in
+    ## bounds, in order and at boundaries of characters.
+    ##
+    ## ```
+    ## assert "naïve".byte_slice(0, 4) == "naï"
+    ## assert "naïve".byte_len() == 6
+    ## ```
+    @intrinsic("str.byte_slice")
+    pure def byte_slice(self, start: int, end: int) -> str
+    ## The bytes of the encoding, in order.
+    @intrinsic("str.bytes")
+    pure def bytes(self) -> Iter[u8]
+    ## The Unicode scalar values the bytes encode.
+    @intrinsic("str.chars")
+    pure def chars(self) -> Iter[char]
+    pure def is_empty(self) -> bool:
+        return self.byte_len() == 0
+    ## Whether byte index `i` is where a character starts or the end of the
+    ## text.
+    pure def is_char_boundary(self, i: int) -> bool:
+        if i < 0 or i > self.byte_len():
+            return False
+        return i == self.byte_len() or not is_continuation(self.byte_at(i))
+    ## The byte index of the first occurrence of `part` that starts at
+    ## byte `start` or after it, or `None`; an empty `part` occurs at
+    ## `start`. `start` must not be negative. The search is Crochemore and
+    ## Perrin's Two-Way, as Rust's `str::find`: linear in the lengths of
+    ## the text and the part, in constant space.
+    ##
+    ## ```
+    ## assert "a=b=c".byte_find("=") == Some(1)
+    ## assert "a=b=c".byte_find("=", 2) == Some(3)
+    ## assert "a=b=c".byte_find("-") == None
+    ## assert "aaaaaaaab".byte_find("aaab") == Some(5)
+    ## ```
+    pure def byte_find(self, part: str, start: int = 0) -> int?:
+        let m = part.byte_len()
+        let last = self.byte_len() - m
+        if m == 0:
+            return if start <= last: Some(start) else: None
+        if m == 1:
+            let b = part.byte_at(0)
+            var i = start
+            while i <= last:
+                if self.byte_at(i) == b:
+                    return Some(i)
+                i += 1
+            return None
+        # The critical factorization: the later of the two maximal
+        # suffixes, by the order of the bytes and by its reverse. The part
+        # is matched right of it first, then left of it.
+        let (s1, p1) = part.maximal_suffix(False)
+        let (s2, p2) = part.maximal_suffix(True)
+        let (cut, period) = if s1 > s2: (s1, p1) else: (s2, p2)
+        var j = start
+        if part.same_bytes(0, period, cut + 1):
+            # A periodic part: after a whole match of the right side, the
+            # bytes a shift by the period keeps are not compared again.
+            var memory = -1
+            while j <= last:
+                var i = max(cut, memory) + 1
+                while i < m and part.byte_at(i) == self.byte_at(i + j):
+                    i += 1
+                if i >= m:
+                    i = cut
+                    while i > memory and part.byte_at(i) == self.byte_at(i + j):
+                        i -= 1
+                    if i <= memory:
+                        return Some(j)
+                    j += period
+                    memory = m - period - 1
+                else:
+                    j += i - cut
+                    memory = -1
+            return None
+        let shift = max(cut + 1, m - cut - 1) + 1
+        while j <= last:
+            var i = cut + 1
+            while i < m and part.byte_at(i) == self.byte_at(i + j):
+                i += 1
+            if i >= m:
+                i = cut
+                while i >= 0 and part.byte_at(i) == self.byte_at(i + j):
+                    i -= 1
+                if i < 0:
+                    return Some(j)
+                j += shift
+            else:
+                j += i - cut
+        return None
+    ## The lines: the pieces between line breaks, `\n` or `\r\n`; a final
+    ## line break ends the last line rather than starting an empty one.
+    ##
+    ## ```
+    ## var lines: list[str] = []
+    ## for l in "one\r\ntwo\n\nthree\n".lines():
+    ##     lines.push(l)
+    ## assert lines == ["one", "two", "", "three"]
+    ## ```
+    pure def lines(self) -> Iter[str]:
+        var lines: list[str] = []
+        let n = self.byte_len()
+        var start = 0
+        while start < n:
+            var end = self.byte_find("\n", start).or(n)
+            let next = end + 1
+            if end > start and end < n and self.byte_at(end - 1) == 13:
+                end -= 1
+            lines.push(self.byte_slice(start, end))
+            start = next
+        return iter_of(lines)
+    ## The runs of non-whitespace characters.
+    ##
+    ## ```
+    ## var words: list[str] = []
+    ## for w in "  the quick\tfox ".split_whitespace():
+    ##     words.push(w)
+    ## assert words == ["the", "quick", "fox"]
+    ## ```
+    pure def split_whitespace(self) -> Iter[str]:
+        var words: list[str] = []
+        var start = -1
+        var i = 0
+        for c in self.chars():
+            if c.is_whitespace():
+                if start >= 0:
+                    words.push(self.byte_slice(start, i))
+                    start = -1
+            elif start < 0:
+                start = i
+            i += c.len_utf8()
+        if start >= 0:
+            words.push(self.byte_slice(start, i))
+        return iter_of(words)
+    ## The pieces between occurrences of `sep`, which must not be empty.
+    ##
+    ## ```
+    ## var pieces: list[str] = []
+    ## for p in "a,b,,c".split(","):
+    ##     pieces.push(p)
+    ## assert pieces == ["a", "b", "", "c"]
+    ## ```
+    pure def split(self, sep: str) -> Iter[str]:
+        if sep.is_empty():
+            panic("str.split: the separator must not be empty")
+        var pieces: list[str] = []
+        var start = 0
+        while True:
+            match self.byte_find(sep, start):
+                case Some(at):
+                    pieces.push(self.byte_slice(start, at))
+                    start = at + sep.byte_len()
+                case None:
+                    pieces.push(self.byte_slice(start, self.byte_len()))
+                    return iter_of(pieces)
+    ## The text before and after the first `sep`, or `None`.
+    pure def split_once(self, sep: str) -> (str, str)?:
+        let at = self.byte_find(sep) else:
+            return None
+        return Some((self.byte_slice(0, at), self.byte_slice(at + sep.byte_len(), self.byte_len())))
+    ## The text without whitespace at either end.
+    pure def trim(self) -> str:
+        return self.trim_start().trim_end()
+    ## The text without whitespace at its start.
+    pure def trim_start(self) -> str:
+        var start = 0
+        for c in self.chars():
+            if not c.is_whitespace():
+                break
+            start += c.len_utf8()
+        return self.byte_slice(start, self.byte_len())
+    ## The text without whitespace at its end.
+    pure def trim_end(self) -> str:
+        var end = self.byte_len()
+        while end > 0:
+            var start = end - 1
+            while is_continuation(self.byte_at(start)):
+                start -= 1
+            if not self.char_at(start).is_whitespace():
+                break
+            end = start
+        return self.byte_slice(0, end)
+    pure def starts_with(self, prefix: str) -> bool:
+        return self.has_at(prefix, 0)
+    pure def ends_with(self, suffix: str) -> bool:
+        return self.has_at(suffix, self.byte_len() - suffix.byte_len())
+    pure def contains(self, part: str) -> bool:
+        return self.byte_find(part).is_some()
+    ## The text without `prefix`, or the whole text if it does not start with it.
+    pure def strip_prefix(self, prefix: str) -> str:
+        if self.starts_with(prefix):
+            return self.byte_slice(prefix.byte_len(), self.byte_len())
+        return self
+    ## The text without `suffix`, or the whole text if it does not end with it.
+    pure def strip_suffix(self, suffix: str) -> str:
+        if self.ends_with(suffix):
+            return self.byte_slice(0, self.byte_len() - suffix.byte_len())
+        return self
+    ## The index in characters of the first occurrence of `part`, or `None`.
+    ##
+    ## ```
+    ## assert "naïve cafe".find("cafe") == Some(6)
+    ## ```
+    pure def find(self, part: str) -> int?:
+        let at = self.byte_find(part) else:
+            return None
+        return Some(len(self.byte_slice(0, at)))
+    ## The text with every occurrence of `old`, which must not be empty,
+    ## replaced by `new`.
+    pure def replace(self, old: str, new: str) -> String:
+        if old.is_empty():
+            panic("str.replace: the text to replace must not be empty")
+        var out = String.new()
+        var start = 0
+        while True:
+            match self.byte_find(old, start):
+                case Some(at):
+                    out.push(self.byte_slice(start, at))
+                    out.push(new)
+                    start = at + old.byte_len()
+                case None:
+                    out.push(self.byte_slice(start, self.byte_len()))
+                    return out
+    ## Unicode lower-case mapping.
+    @intrinsic("str.to_lowercase")
+    pure def to_lowercase(self) -> String
+    @intrinsic("str.to_uppercase")
+    pure def to_uppercase(self) -> String
+    @intrinsic("str.to_string")
+    pure def to_string(self) -> String
+    ## The UTF-8 bytes of the text.
+    @intrinsic("str.encode")
+    pure def encode(self) -> bytes
+    ## The decimal integer the whole text spells, with an optional sign, or
+    ## `None`: when a character is not an ASCII digit, when there are no
+    ## digits, and when the value is out of range for `int`.
+    ##
+    ## ```
+    ## assert "-42".parse_int() == Some(-42)
+    ## assert "007".parse_int() == Some(7)
+    ## assert "4x".parse_int() == None
+    ## assert "9223372036854775808".parse_int() == None
+    ## ```
+    pure def parse_int(self) -> int?:
+        # The value is accumulated negated, so that the least `int`, whose
+        # magnitude is one more than the greatest's, parses too.
+        var negated = 0
+        var negative = False
+        var digits = 0
+        var first = True
+        for c in self.chars():
+            if first:
+                first = False
+                if c == '-' or c == '+':
+                    negative = c == '-'
+                    continue
+            let d = c.to_digit() else:
+                return None
+            if negated < -922337203685477580 or (negated == -922337203685477580 and d > 8):
+                return None
+            negated = negated * 10 - d
+            digits += 1
+        if digits == 0:
+            return None
+        if negative:
+            return Some(negated)
+        if negated == -9223372036854775807 - 1:
+            return None
+        return Some(-negated)
+    ## The decimal number the whole text spells (an optional sign, digits
+    ## with an optional fraction, an optional exponent: `-1.5`, `2e10`), as
+    ## the nearest `f64`, or `None`; `inf` and `nan` are not numbers here.
+    @intrinsic("str.parse_float")
+    pure def parse_float(self) -> f64?
+    ## The decimal number the whole text spells, as `parse_float` reads
+    ## it, rounded once to the nearest `f32`, or `None`.
+    @intrinsic("str.parse_f32")
+    pure def parse_f32(self) -> f32?
+    ## `self` repeated `n` times; `n` must not be negative.
+    pure def repeat(self, n: int) -> String:
+        if n < 0:
+            panic("str.repeat: the count {n} is negative")
+        var out = String.new()
+        for _ in range(n):
+            out.push(self)
+        return out
+    ## The maximal suffix of the text by the order of the bytes, or by its
+    ## reverse with `reversed`: where it starts, less one, and its period
+    ## (the critical factorization of Two-Way, `byte_find`).
+    @internal
+    pure def maximal_suffix(self, reversed: bool) -> (int, int):
+        let m = self.byte_len()
+        var at = -1
+        var j = 0
+        var k = 1
+        var p = 1
+        while j + k < m:
+            let a = self.byte_at(j + k)
+            let b = self.byte_at(at + k)
+            if a == b:
+                if k != p:
+                    k += 1
+                else:
+                    j += p
+                    k = 1
+            elif (a < b) != reversed:
+                j += k
+                k = 1
+                p = j - at
+            else:
+                at = j
+                j = at + 1
+                k = 1
+                p = 1
+        return (at, p)
+    ## Whether the `count` bytes at byte `a` and at byte `b` are the same.
+    @internal
+    pure def same_bytes(self, a: int, b: int, count: int) -> bool:
+        for k in range(count):
+            if self.byte_at(a + k) != self.byte_at(b + k):
+                return False
+        return True
+    ## Whether `part` occurs at byte `i`.
+    @internal
+    pure def has_at(self, part: str, i: int) -> bool:
+        let m = part.byte_len()
+        if i < 0 or i + m > self.byte_len():
+            return False
+        for j in range(m):
+            if self.byte_at(i + j) != part.byte_at(j):
+                return False
+        return True
+    ## The character whose encoding starts at byte `i`, where one starts:
+    ## the lead byte gives the length and the high bits of the code, each
+    ## continuation byte six more bits.
+    @internal
+    pure def char_at(self, i: int) -> char:
+        let lead = self.byte_at(i).to_int()
+        var code = lead
+        var more = 0
+        if lead >= 0xF0:
+            code = lead & 0x07
+            more = 3
+        elif lead >= 0xE0:
+            code = lead & 0x0F
+            more = 2
+        elif lead >= 0xC0:
+            code = lead & 0x1F
+            more = 1
+        for k in range(1, more + 1):
+            code = (code << 6) | (self.byte_at(i + k).to_int() & 0x3F)
+        return char.from_code(code).expect("a valid encoding")
+
+## Whether `b` continues the encoding of a character (`0b10xxxxxx`) rather
+## than starting one.
+@internal
+pure def is_continuation(b: u8) -> bool:
+    return b & 0xC0 == 0x80
+
+## The elements of `xs`, moved into an iterator: the pieces `str.split`
+## and the others collect.
+@internal
+@intrinsic("Iter.of")
+@keeps(xs)
+pure def iter_of[T](own xs: list[T]) -> Iter[T]
+
+impl String:
+    ## A new string: empty, or a copy of `text`.
+    @intrinsic("String.new")
+    pure def new(text: str = "") -> String
+    ## Appends `text`.
+    @intrinsic("String.push")
+    pure def push(mut self, text: str)
+    @intrinsic("String.push_char")
+    pure def push_char(mut self, c: char)
+    @intrinsic("String.clear")
+    pure def clear(mut self)
+
+impl Path:
+    @intrinsic("Path.new")
+    pure def new(text: str) -> Path
+    ## The path as text.
+    @intrinsic("Path.as_str")
+    pure def as_str(self) -> str
+
+# ------------------------------------------------------------------ collections
+
+impl[T, const N: int] Array[T, N]:
+    ## `N` copies of `value` (`value.copy()`, 04, for every element but
+    ## one).
+    ##
+    ## ```
+    ## var a: Array[int, 3] = Array.filled(7)
+    ## a[1] = 0
+    ## assert a.len() == 3 and a[0] + a[1] + a[2] == 14
+    ## ```
+    @intrinsic("Array.filled")
+    pure def filled(own value: T) -> Array[T, N]
+    ## The number of elements: `N`.
+    pure def len(self) -> int:
+        return N
+    ## The elements, in order, as a list.
+    @intrinsic("Array.to_list")
+    pure def to_list(self) -> list[T] where T: Copy
+
+impl[T] list[T]:
+    @intrinsic("list.new")
+    pure def new() -> list[T]
+    @intrinsic("list.with_capacity")
+    pure def with_capacity(n: int) -> list[T]
+    ## Appends `x` at the end.
+    @intrinsic("list.push")
+    @keeps(self, x)
+    pure def push(mut self, own x: T)
+    ## Removes and returns the last element, or `None`.
+    @intrinsic("list.pop")
+    @keeps(self)
+    pure def pop(mut self) -> T?
+    ## Inserts `x` before index `i`, which may equal the length.
+    @intrinsic("list.insert")
+    @keeps(self, x)
+    pure def insert(mut self, i: int, own x: T)
+    ## Removes and returns the element at `i`; panics if out of bounds.
+    @intrinsic("list.remove")
+    @keeps(self)
+    pure def remove(mut self, i: int) -> T
+    @intrinsic("list.is_empty")
+    pure def is_empty(self) -> bool
+    ## Whether an element equals `x`.
+    @structural("list.contains")
+    pure def contains(self, x: T) -> bool where T: Eq:
+        for y in self:
+            if y == x:
+                return True
+        return False
+    ## The element at `i`, or `None` when out of bounds.
+    @intrinsic("list.get")
+    pure def get(self, i: int) -> ref T?
+    @intrinsic("list.first")
+    pure def first(self) -> ref T?
+    @intrinsic("list.last")
+    pure def last(self) -> ref T?
+    ## Borrows each element in order.
+    @intrinsic("list.iter")
+    pure def iter(self) -> Iter[ref T]
+    ## The elements as a `Slice[T]`.
+    @intrinsic("list.as_slice")
+    pure def as_slice(self) -> Slice[T]
+    ## Sorts in ascending order; stable.
+    @structural("list.sort")
+    @keeps(self)
+    pure def sort(mut self) where T: Ord:
+        self.sort_by((a, b) -> a.cmp(b))
+    ## Sorts by `cmp`; stable. A merge sort: runs of one element, merged
+    ## pairwise until one is left.
+    pure def sort_by(mut self, cmp: pure (ref T, ref T) -> Ordering):
+        if len(self) < 2:
+            return
+        var runs: list[list[T]] = []
+        while not self.is_empty():
+            runs.push([self.pop().expect("an element")])
+        runs.reverse()
+        while len(runs) > 1:
+            var merged: list[list[T]] = []
+            if len(runs) % 2 == 1:
+                merged.push(runs.pop().expect("a run"))
+            while len(runs) >= 2:
+                let later = runs.pop().expect("a run")
+                let earlier = runs.pop().expect("a run")
+                merged.push(merge_runs(earlier, later, cmp))
+            merged.reverse()
+            runs = merged
+        self.extend(runs.pop().expect("a run"))
+    @intrinsic("list.reverse")
+    @keeps(self)
+    pure def reverse(mut self)
+    ## Exchanges the elements at `i` and `j`; panics if either is out of bounds.
+    @intrinsic("list.swap")
+    @keeps(self)
+    pure def swap(mut self, i: int, j: int)
+    @intrinsic("list.clear")
+    pure def clear(mut self)
+    ## Moves the elements of `other` to the end.
+    @intrinsic("list.extend")
+    @keeps(self, other)
+    pure def extend(mut self, own other: list[T])
+    ## The `Display` renderings of the elements, separated by `sep`.
+    @structural("list.join")
+    pure def join(self, sep: str) -> String where T: Display:
+        var out = String.new()
+        var first = True
+        for x in self:
+            if not first:
+                out.push(sep)
+            first = False
+            out.push("{x}")
+        return out
+    ## The sum of the elements, 0 for none; integer overflow panics. Floats
+    ## are summed pairwise in a fixed shape (D-074).
+    @intrinsic("sum")
+    pure def sum(self) -> T where T: Num
+
+impl[K, V] dict[K, V]:
+    @intrinsic("dict.new")
+    pure def new() -> dict[K, V]
+    @intrinsic("dict.get")
+    pure def get(self, key: K) -> ref V?
+    ## Inserts or replaces; returns the previous value.
+    @intrinsic("dict.insert")
+    @keeps(self, value)
+    pure def insert(mut self, own key: K, own value: V) -> V?
+    @intrinsic("dict.remove")
+    @keeps(self)
+    pure def remove(mut self, key: K) -> V?
+    @intrinsic("dict.contains")
+    pure def contains(self, key: K) -> bool
+    @intrinsic("dict.is_empty")
+    pure def is_empty(self) -> bool
+    ## The slot for `key`, filled or not.
+    @intrinsic("dict.entry")
+    pure def entry(mut self, own key: K) -> Entry[K, V]
+    @intrinsic("dict.keys")
+    pure def keys(self) -> Iter[ref K]
+    @intrinsic("dict.values")
+    pure def values(self) -> Iter[ref V]
+    ## The entries in insertion order.
+    @intrinsic("dict.items")
+    pure def items(self) -> Iter[(ref K, ref V)]
+
+impl[K, V] Entry[K, V]:
+    ## The value in the slot, after storing `value` there if it was empty.
+    @intrinsic("Entry.or_insert")
+    pure def or_insert(own self, own value: V) -> ref mut V
+
+impl[T] set[T]:
+    @intrinsic("set.new")
+    pure def new() -> set[T]
+    ## Adds `x`; returns whether it was new.
+    @intrinsic("set.add")
+    pure def add(mut self, own x: T) -> bool
+    @intrinsic("set.remove")
+    pure def remove(mut self, x: T) -> bool
+    @intrinsic("set.contains")
+    pure def contains(self, x: T) -> bool
+    @intrinsic("set.is_empty")
+    pure def is_empty(self) -> bool
+    @intrinsic("set.iter")
+    pure def iter(self) -> Iter[ref T]
+
+impl[T] Iter[T]:
+    ## The next item, or `None` at the end.
+    @intrinsic("Iter.next")
+    @keeps(self)
+    pure def next(mut self) -> T?
+    ## `f` applied to the running value, from `init`, and each item in
+    ## turn. Pure with a `pure` function (03, "Function types": `pure` code
+    ## demands `pure` callbacks); `Iterator.fold` takes any function.
+    pure def fold[B](own self, own init: B, f: pure (B, T) -> B) -> B:
+        var acc = init
+        for x in self:
+            acc = f(acc, x)
+        return acc
+
+## The elements of two sorted runs in one sorted run; of equal elements,
+## `earlier`'s come first (`list.sort_by`).
+pure def merge_runs[T](
+    own earlier: list[T], own later: list[T], cmp: pure (ref T, ref T) -> Ordering
+) -> list[T]:
+    var a = earlier
+    var b = later
+    var out: list[T] = []
+    # From the back: the larger last element, `later`'s when equal.
+    while not a.is_empty() and not b.is_empty():
+        if cmp(ref b[^1], ref a[^1]) != Less:
+            out.push(b.pop().expect("an element"))
+        else:
+            out.push(a.pop().expect("an element"))
+    while not a.is_empty():
+        out.push(a.pop().expect("an element"))
+    while not b.is_empty():
+        out.push(b.pop().expect("an element"))
+    out.reverse()
+    return out
+
+# ------------------------------------------------------------------ iterator adapters
+
+## `it.take(n)`: at most `left` more items of `inner`.
+struct Take[I]:
+    inner: I
+    left: int
+
+impl[I: Iterator] Iterator for Take[I]:
+    type Item = I.Item
+    def next(mut self) -> I.Item?:
+        if self.left <= 0:
+            return None
+        self.left -= 1
+        return self.inner.next()
+
+## `it.skip(n)`: the items of `inner` after the first `left`.
+struct Skip[I]:
+    inner: I
+    left: int
+
+impl[I: Iterator] Iterator for Skip[I]:
+    type Item = I.Item
+    def next(mut self) -> I.Item?:
+        while self.left > 0:
+            self.left -= 1
+            if self.inner.next().is_none():
+                return None
+        return self.inner.next()
+
+## `it.map(f)`: each item of `inner` passed through `f`. A view, since `f`
+## may borrow what it captures.
+view struct Map[I: Iterator, U]:
+    inner: I
+    f: (I.Item) -> U
+
+impl[I: Iterator, U] Iterator for Map[I, U]:
+    type Item = U
+    def next(mut self) -> U?:
+        match self.inner.next():
+            case Some(x):
+                return Some(self.f(x))
+            case None:
+                return None
+
+## `it.filter(keep)`: the items of `inner` for which `keep` is `True`.
+view struct Filter[I: Iterator]:
+    inner: I
+    keep: (ref I.Item) -> bool
+
+impl[I: Iterator] Iterator for Filter[I]:
+    type Item = I.Item
+    def next(mut self) -> I.Item?:
+        while True:
+            match self.inner.next():
+                case Some(x):
+                    if self.keep(ref x):
+                        return Some(x)
+                case None:
+                    return None
+
+## `it.enumerate()`: each item of `inner` with its index.
+struct Enumerate[I]:
+    inner: I
+    index: int
+
+impl[I: Iterator] Iterator for Enumerate[I]:
+    type Item = (int, I.Item)
+    def next(mut self) -> (int, I.Item)?:
+        match self.inner.next():
+            case Some(x):
+                let i = self.index
+                self.index += 1
+                return Some((i, x))
+            case None:
+                return None
+
+# ------------------------------------------------------------------ shared ownership, cells, mutexes, arenas
+
+# The fields and methods of the value are reached through a `Shared`
+# directly, so its own functions take it as an argument (`Shared.count(s)`)
+# rather than as `self`, and never hide the value's methods.
+impl[T] Shared[T]:
+    ## The first owner of `value`.
+    @intrinsic("Shared.new")
+    pure def new(own value: T) -> Shared[T]
+    ## The value itself.
+    @intrinsic("Shared.get")
+    pure def get(s: Shared[T]) -> ref T
+    ## A `Weak` handle on the value.
+    @intrinsic("Shared.downgrade")
+    pure def downgrade(s: Shared[T]) -> Weak[T]
+    ## The number of owners.
+    @intrinsic("Shared.count")
+    pure def count(s: Shared[T]) -> int
+
+impl[T] Weak[T]:
+    ## Another owner of the value, if it has one still.
+    @intrinsic("Weak.upgrade")
+    pure def upgrade(self) -> Shared[T]?
+
+impl[T] Cell[T]:
+    @intrinsic("Cell.new")
+    pure def new(own value: T) -> Cell[T]
+    ## A copy of the value.
+    @intrinsic("Cell.get")
+    pure def get(self) -> T where T: Copy
+    ## Replaces the value, dropping the old one.
+    @intrinsic("Cell.set")
+    def set(self, own value: T)
+    ## Replaces the value and returns the old one.
+    @intrinsic("Cell.replace")
+    def replace(self, own value: T) -> T
+
+impl[T] Mutex[T]:
+    @intrinsic("Mutex.new")
+    pure def new(own value: T) -> Mutex[T]
+    ## The lock, until the guard is dropped. A mutex another task holds is
+    ## waited for (a blocking point that cancellation does not interrupt:
+    ## `lock` cannot fail); one this task holds already panics, since it
+    ## would wait forever, as does a poisoned one.
+    @intrinsic("Mutex.lock")
+    def lock(self) -> MutexGuard[T]
+    ## Whether a guard dropped by unwinding left the value's invariant broken.
+    @intrinsic("Mutex.is_poisoned")
+    pure def is_poisoned(self) -> bool
+    ## The value, taking the mutex apart; panics if it is poisoned.
+    @intrinsic("Mutex.into_inner")
+    @keeps(self)
+    pure def into_inner(own self) -> T
+
+impl[T] Arena[T]:
+    @intrinsic("Arena.new")
+    pure def new() -> Arena[T]
+    ## Stores `value` and returns its key.
+    @intrinsic("Arena.insert")
+    @keeps(self, value)
+    pure def insert(mut self, own value: T) -> Key[T]
+    ## The value of `key`, or `None` if the key is stale.
+    @intrinsic("Arena.get")
+    pure def get(self, key: Key[T]) -> ref T?
+    @intrinsic("Arena.get_mut")
+    @keeps(self)
+    pure def get_mut(mut self, key: Key[T]) -> ref mut T?
+    ## Drops the value of `key`, if it is there; the key goes stale.
+    @intrinsic("Arena.remove")
+    pure def remove(mut self, key: Key[T])
+    ## Takes the value of `key` out, if it is there; the key goes stale.
+    @intrinsic("Arena.take")
+    @keeps(self)
+    pure def take(mut self, key: Key[T]) -> T?
+    @intrinsic("Arena.contains")
+    pure def contains(self, key: Key[T]) -> bool
+    ## The keys of the values, in slot order.
+    @intrinsic("Arena.keys")
+    pure def keys(self) -> Iter[Key[T]]
+
+impl[T] Len for Arena[T]:
+    @intrinsic("len")
+    pure def len(self) -> int
+
+impl[T: Debug] Debug for Shared[T]:
+    pure def fmt_debug(self, mut f: Formatter):
+        Shared.get(self).fmt_debug(mut f)
+
+impl[T: Display] Display for Shared[T]:
+    pure def fmt(self, mut f: Formatter):
+        Shared.get(self).fmt(mut f)
+
+impl[T: Eq] Eq for Shared[T]:
+    pure def eq(self, other: Shared[T]) -> bool:
+        return Shared.get(self) == Shared.get(other)
+
+impl[T] Debug for Weak[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T: Copy] Atomic[T]:
+    @intrinsic("Cell.new")
+    pure def new(own value: T) -> Atomic[T]
+    ## The value.
+    @intrinsic("Cell.get")
+    def load(self, order: MemoryOrder = SeqCst) -> T
+    ## Replaces the value.
+    @intrinsic("Cell.set")
+    def store(self, own value: T, order: MemoryOrder = SeqCst)
+    ## Replaces the value and returns the one before.
+    @intrinsic("Cell.replace")
+    def swap(self, own value: T, order: MemoryOrder = SeqCst) -> T
+    ## Stores `new` when the value is `current`, the two compared as values
+    ## are (C++ compares their bytes): `Ok` with the value before when it
+    ## was, `Err` with the value found otherwise.
+    @intrinsic("Atomic.compare_exchange")
+    def compare_exchange(
+        self,
+        current: T,
+        own new: T,
+        success: MemoryOrder = SeqCst,
+        failure: MemoryOrder = SeqCst,
+    ) -> Result[T, T]
+    ## The value, for `Debug`, which is `pure`.
+    @internal
+    @intrinsic("Cell.get")
+    pure def peek(self) -> T
+
+# The read-modify-write operations read and write in one step: between the
+# two intrinsics there is no call of Sisu code (an omitted argument's
+# default would be one) and no loop, so no yield point at which another
+# task could run.
+impl Atomic[int]:
+    ## Adds `n` and returns the value before; an overflow panics, as `+`
+    ## does.
+    def fetch_add(self, n: int, order: MemoryOrder = SeqCst) -> int:
+        let old = self.load(order)
+        self.store(old + n, order)
+        return old
+    ## Subtracts `n` and returns the value before.
+    def fetch_sub(self, n: int, order: MemoryOrder = SeqCst) -> int:
+        let old = self.load(order)
+        self.store(old - n, order)
+        return old
+
+impl[T: Debug + Copy] Debug for Atomic[T]:
+    pure def fmt_debug(self, mut f: Formatter):
+        f.write("Atomic(")
+        self.peek().fmt_debug(mut f)
+        f.write(")")
+
+impl[T] Debug for Cell[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for Mutex[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for MutexGuard[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for Arena[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl Debug for Scope:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for Handle[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl Debug for Cancellation:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for Sender[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for Receiver[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl Debug for Timer:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+# ------------------------------------------------------------------ tasks, channels and time (06)
+
+## What every task operation can report (06, "Cancellation" and "Panics").
+error TaskError:
+    ## The scope, or the task at its deadline, was cancelled: returned at a
+    ## blocking point.
+    Cancelled
+    ## The task panicked: the panic's message, and the stack it unwound.
+    TaskPanicked(message: String, trace: String)
+
+## What a channel operation can report besides `TaskError`.
+error ChannelError:
+    ## The other end is gone: every sender was dropped or closed (for
+    ## `recv`, once the values sent are drained), or the receiver was
+    ## dropped (for `send`).
+    Closed
+
+## A task scope, the `s` of `task.scope do s:` (06, "Tasks and scopes").
+## It ends when its body has returned and every task spawned on it has
+## finished: a task cannot outlive it, so a task's closure may borrow what
+## the body's environment borrows. A `Copy` handle; spawning on a scope
+## that has ended panics.
+@builtin("Scope")
+struct Scope:
+    pass
+
+impl Scope:
+    ## Starts `task`, written here as a closure or `do` block, and returns
+    ## its handle. The task captures its `Copy` variables by copy and the
+    ## rest by reference (an `own` closure moves them in); what it shares
+    ## must be `Sync` and what it moves `Send`, checked here. In the body of
+    ## a scope, a task may borrow what the body's environment borrows;
+    ## anywhere else it borrows nothing.
+    @intrinsic("Scope.spawn")
+    pure def spawn[T](self, own task: () -> T) -> Handle[T]
+    ## `spawn` with a deadline: the task, and every scope it opens, is
+    ## cancelled when the timer's clock reaches it.
+    @intrinsic("Scope.spawn_with")
+    def spawn_with[T](self, deadline: Timer, own task: () -> T) -> Handle[T]
+    ## Cancels the scope: its body's and its tasks' blocking operations
+    ## return `Err(Cancelled)` from now on, unless shielded.
+    @intrinsic("Scope.cancel")
+    def cancel(self)
+    ## Whether the scope is cancelled.
+    @intrinsic("Scope.is_cancelled")
+    def is_cancelled(self) -> bool
+    ## The scope's cancellation as something to wait for: a `select` arm
+    ## `case _ = s.cancelled():` is taken once the scope is cancelled.
+    @intrinsic("Scope.cancelled")
+    pure def cancelled(self) -> Cancellation
+
+## A spawned task, from `Scope.spawn`.
+@builtin("Handle")
+struct Handle[T]:
+    pass
+
+impl[T] Handle[T]:
+    ## Waits for the task and takes its result, as `T ! TaskError`, or, for
+    ## a task returning `U ! E`, as `U ! {E, TaskError}` (06): a panic is
+    ## `TaskPanicked`, a cancelled wait `Cancelled`. A second `join` of one
+    ## task panics. A blocking point.
+    @intrinsic("Handle.join")
+    pure def join(self) -> T ! TaskError
+    ## Whether the task has finished.
+    @intrinsic("Handle.is_finished")
+    def is_finished(self) -> bool
+
+## A scope's cancellation, to wait for in `select` (`Scope.cancelled`).
+@builtin("Cancellation")
+struct Cancellation:
+    pass
+
+impl Cancellation:
+    ## Waits until the scope is cancelled.
+    @intrinsic("Cancellation.wait")
+    def wait(self)
+
+## The sending half of a channel (06, "Channels and select"). `.copy()`
+## makes another sender; the channel closes when every sender is closed or
+## dropped.
+@builtin("Sender")
+struct Sender[T]:
+    pass
+
+## The receiving half of a channel. A `for` loop over it receives until the
+## channel is closed and drained (or the loop's task is cancelled).
+@builtin("Receiver")
+struct Receiver[T]:
+    pass
+
+## A bounded channel of `capacity` values, at least 1: `send` waits while
+## it is full and `recv` while it is empty. What a channel carries can be
+## neither a view nor must-consume.
+@intrinsic("channel")
+def channel[T](capacity: int) -> (Sender[T], Receiver[T])
+
+impl[T] Sender[T]:
+    ## Sends `value`, waiting while the channel is full; `Closed` once the
+    ## receiver is gone (the value is dropped). A blocking point.
+    @intrinsic("Sender.send")
+    def send(self, own value: T) -> ! {ChannelError, TaskError}
+    ## Sends `value` if there is room now, or gives it back.
+    @intrinsic("Sender.try_send")
+    def try_send(self, own value: T) -> T?
+    ## Closes the channel for every sender: the receiver drains what was
+    ## sent, then gets `Closed`.
+    @intrinsic("Sender.close")
+    def close(self)
+
+impl[T] Receiver[T]:
+    ## The next value, waiting while the channel is empty; `Closed` once it
+    ## is closed and drained. A blocking point.
+    @intrinsic("Receiver.recv")
+    def recv(self) -> T ! {ChannelError, TaskError}
+    ## The next value if there is one now.
+    @intrinsic("Receiver.try_recv")
+    def try_recv(self) -> T?
+
+## A span of time, in nanoseconds.
+@derive(Copy, Eq, Ord, Hash)
+struct Duration:
+    nanos: int
+
+impl Duration:
+    ## ```
+    ## assert Duration.minutes(2) == Duration.seconds(120)
+    ## assert Duration.millis(1500).as_seconds() == 1
+    ## assert "{Duration.millis(1500)}" == "1.5s"
+    ## ```
+    pure def seconds(n: int) -> Duration:
+        return Duration(nanos=n * 1000000000)
+    pure def millis(n: int) -> Duration:
+        return Duration(nanos=n * 1000000)
+    pure def micros(n: int) -> Duration:
+        return Duration(nanos=n * 1000)
+    pure def minutes(n: int) -> Duration:
+        return Duration(nanos=n * 60000000000)
+    pure def hours(n: int) -> Duration:
+        return Duration(nanos=n * 3600000000000)
+    ## The whole seconds.
+    pure def as_seconds(self) -> int:
+        return self.nanos // 1000000000
+    pure def as_millis(self) -> int:
+        return self.nanos // 1000000
+
+impl Add for Duration:
+    pure def add(self, other: Duration) -> Duration:
+        return Duration(nanos=self.nanos + other.nanos)
+
+impl Sub for Duration:
+    pure def sub(self, other: Duration) -> Duration:
+        return Duration(nanos=self.nanos - other.nanos)
+
+impl Display for Duration:
+    ## Seconds with as many decimals as they need: `5s`, `1.5s`, `0.001s`.
+    pure def fmt(self, mut f: Formatter):
+        let whole = self.nanos // 1000000000
+        var frac = self.nanos % 1000000000
+        if frac == 0:
+            f.write("{whole}s")
+            return
+        var digits = String.new("")
+        var scale = 100000000
+        while frac > 0:
+            digits.push("{frac // scale}")
+            frac = frac % scale
+            scale = scale // 10
+        f.write("{whole}.{digits}s")
+
+## The error of `bytes.decode`: the bytes are not UTF-8 from index `at` on.
+error Utf8Error:
+    InvalidUtf8(at: int)
+
+impl bytes:
+    ## No bytes.
+    @intrinsic("bytes.new")
+    pure def new() -> bytes
+    ## The bytes of `xs`.
+    @intrinsic("bytes.from_list")
+    pure def from_list(xs: list[u8]) -> bytes
+    ## The byte at `i`, which must be in bounds (`b[i]`).
+    @intrinsic("bytes.at")
+    pure def at(self, i: int) -> u8
+    ## The byte at `i`, or `None` out of bounds.
+    @intrinsic("bytes.get")
+    pure def get(self, i: int) -> u8?
+    @intrinsic("bytes.is_empty")
+    pure def is_empty(self) -> bool
+    ## A copy of the bytes from `start` up to `end`, both within the
+    ## bounds and in order (`b[start:end]`).
+    @intrinsic("bytes.slice")
+    pure def slice(self, start: int, end: int) -> bytes
+    ## The bytes, in order.
+    @intrinsic("bytes.iter")
+    pure def iter(self) -> Iter[u8]
+    @intrinsic("bytes.to_list")
+    pure def to_list(self) -> list[u8]
+    ## The index of the first occurrence of `part`, or `None`; an empty
+    ## `part` is at 0.
+    @intrinsic("bytes.find")
+    pure def find(self, part: bytes) -> int?
+    @intrinsic("bytes.starts_with")
+    pure def starts_with(self, prefix: bytes) -> bool
+    @intrinsic("bytes.ends_with")
+    pure def ends_with(self, suffix: bytes) -> bool
+    ## The text the bytes are in UTF-8; `InvalidUtf8` at the first byte
+    ## that does not continue a valid sequence.
+    @intrinsic("bytes.decode")
+    pure def decode(self) -> String ! Utf8Error
+    ## `self` followed by `other`, as `self + other`.
+    @intrinsic("bytes.concat")
+    pure def concat(self, other: bytes) -> bytes
+    ## The bytes as a `Slice[u8]`.
+    @intrinsic("bytes.as_slice")
+    pure def as_slice(self) -> Slice[u8]
+    ## `b[start:end]`, where a bound left out is the least `int`.
+    @internal
+    @intrinsic("bytes.cut")
+    pure def cut(self, start: int, end: int) -> bytes
+
+impl Len for bytes:
+    @intrinsic("len")
+    pure def len(self) -> int
+
+impl Add for bytes:
+    @intrinsic("bytes.concat")
+    pure def add(self, other: bytes) -> bytes
+
+impl[T] Slice[T]:
+    ## Whether the values are in order, each at most the next.
+    pure def is_sorted(self) -> bool where T: Ord:
+        var i = 1
+        while i < len(self):
+            if self[i - 1] > self[i]:
+                return False
+            i += 1
+        return True
+    ## Whether `x` is one of the values.
+    pure def contains(self, x: T) -> bool where T: Eq:
+        for v in self.iter():
+            if v == x:
+                return True
+        return False
+    ## A reference to the value at `i`, which must be in bounds (`s[i]`).
+    @intrinsic("Slice.at")
+    pure def at(self, i: int) -> ref T
+    @intrinsic("Slice.get")
+    pure def get(self, i: int) -> ref T?
+    @intrinsic("Slice.is_empty")
+    pure def is_empty(self) -> bool
+    ## The values from `start` up to `end` (`s[start:end]`).
+    @intrinsic("Slice.slice")
+    pure def slice(self, start: int, end: int) -> Slice[T]
+    ## References to the values, in order.
+    @intrinsic("Slice.iter")
+    pure def iter(self) -> Iter[ref T]
+    ## Copies of the values in a new list.
+    @intrinsic("Slice.to_list")
+    pure def to_list(self) -> list[T] where T: Copy
+    ## `s[start:end]`, where a bound left out is the least `int`.
+    @internal
+    @intrinsic("Slice.cut")
+    pure def cut(self, start: int, end: int) -> Slice[T]
+
+impl[T] Len for Slice[T]:
+    @intrinsic("len")
+    pure def len(self) -> int
+
+impl[T] Debug for Slice[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+## The error of `DateTime.parse`.
+error TimeError:
+    InvalidTime(text: String)
+
+impl DateTime:
+    ## 1970-01-01T00:00:00Z.
+    pure def epoch() -> DateTime:
+        return DateTime.from_unix_nanos(0)
+    ## The time `seconds` after the epoch (before it, for a negative number).
+    pure def from_unix(seconds: int) -> DateTime:
+        return DateTime.from_unix_nanos(seconds * 1000000000)
+    @intrinsic("DateTime.from_unix_nanos")
+    pure def from_unix_nanos(nanos: int) -> DateTime
+    ## The nanoseconds since the epoch.
+    @intrinsic("DateTime.unix_nanos")
+    pure def unix_nanos(self) -> int
+    ## The whole seconds since the epoch, rounded down.
+    pure def unix_seconds(self) -> int:
+        return self.unix_nanos() // 1000000000
+    ## The time an RFC 3339 text gives, as `2026-10-11T12:00:00Z`: a date, `T`,
+    ## a time with optional fractions of a second, and `Z` or an offset
+    ## such as `+02:00`; `InvalidTime` for anything else, or a time outside
+    ## the years 1678 to 2261.
+    ##
+    ## ```
+    ## let t = DateTime.parse("2026-10-11T12:00:00+02:00").expect("a time")
+    ## assert "{t}" == "2026-10-11T10:00:00Z"
+    ## assert DateTime.parse("yesterday").is_err()
+    ## ```
+    pure def parse(text: str) -> DateTime ! TimeError:
+        var cs: list[char] = []
+        for c in text.chars():
+            cs.push(c)
+        let n = len(cs)
+        if n < 20
+                or cs[4] != '-'
+                or cs[7] != '-'
+                or (cs[10] != 'T' and cs[10] != 't')
+                or cs[13] != ':'
+                or cs[16] != ':':
+            return Err(InvalidTime(text=text.to_string()))
+        let year = time_digits(cs, 0, 4) ?? -1
+        let month = time_digits(cs, 5, 2) ?? -1
+        let day = time_digits(cs, 8, 2) ?? -1
+        let hour = time_digits(cs, 11, 2) ?? -1
+        let minute = time_digits(cs, 14, 2) ?? -1
+        let second = time_digits(cs, 17, 2) ?? -1
+        if year < 0 or month < 1 or month > 12 or day < 1 or day > days_in_month(year, month):
+            return Err(InvalidTime(text=text.to_string()))
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59 or second < 0 or second > 59:
+            return Err(InvalidTime(text=text.to_string()))
+        var at = 19
+        var nanos = 0
+        if cs[at] == '.':
+            at += 1
+            var scale = 100000000
+            let start = at
+            while at < n and cs[at].is_digit():
+                nanos += (cs[at].to_digit() ?? 0) * scale
+                scale = scale // 10
+                at += 1
+            if at == start:
+                return Err(InvalidTime(text=text.to_string()))
+        var offset = 0
+        if at == n - 1 and (cs[at] == 'Z' or cs[at] == 'z'):
+            offset = 0
+        elif at + 6 == n and (cs[at] == '+' or cs[at] == '-') and cs[at + 3] == ':':
+            let oh = time_digits(cs, at + 1, 2) ?? -1
+            let om = time_digits(cs, at + 4, 2) ?? -1
+            if oh < 0 or oh > 23 or om < 0 or om > 59:
+                return Err(InvalidTime(text=text.to_string()))
+            offset = oh * 3600 + om * 60
+            if cs[at] == '-':
+                offset = -offset
+        else:
+            return Err(InvalidTime(text=text.to_string()))
+        let secs = days_from_civil(year, month, day) * 86400
+            + hour * 3600
+            + minute * 60
+            + second
+            - offset
+        if secs < -9223372036 or secs > 9223372035:
+            return Err(InvalidTime(text=text.to_string()))
+        return Ok(DateTime.from_unix_nanos(secs * 1000000000 + nanos))
+
+## The number that the ASCII digits `cs[at]` to `cs[at + n - 1]` spell, or `None`.
+pure def time_digits(cs: list[char], at: int, n: int) -> int?:
+    var v = 0
+    for i in range(at, at + n):
+        let c = cs.get(i) else:
+            return None
+        let d = c.to_digit() else:
+            return None
+        v = v * 10 + d
+    return Some(v)
+
+## The days in a month of the proleptic Gregorian calendar.
+pure def days_in_month(year: int, month: int) -> int:
+    if month == 2:
+        let leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+        return if leap: 29 else: 28
+    if month == 4 or month == 6 or month == 9 or month == 11:
+        return 30
+    return 31
+
+## The days from 1970-01-01 to a date of the proleptic Gregorian calendar
+## (Howard Hinnant's `days_from_civil`).
+pure def days_from_civil(year: int, month: int, day: int) -> int:
+    let y = if month <= 2: year - 1 else: year
+    let era = y // 400
+    let yoe = y - era * 400
+    let mp = (month + 9) % 12
+    let doy = (153 * mp + 2) // 5 + day - 1
+    let doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
+    return era * 146097 + doe - 719468
+
+impl Sub for DateTime:
+    type Output = Duration
+    ## The time from `other` to `self`.
+    pure def sub(self, other: DateTime) -> Duration:
+        return Duration(nanos=self.unix_nanos() - other.unix_nanos())
+
+impl Add[Duration] for DateTime:
+    pure def add(self, d: Duration) -> DateTime:
+        return DateTime.from_unix_nanos(self.unix_nanos() + d.nanos)
+
+impl Sub[Duration] for DateTime:
+    pure def sub(self, d: Duration) -> DateTime:
+        return DateTime.from_unix_nanos(self.unix_nanos() - d.nanos)
+
+## A moment on a clock that a task can wait for: `clock.after(d)`, the arm
+## of a `select`, or a deadline for `Scope.spawn_with`.
+@builtin("Timer")
+struct Timer:
+    pass
+
+impl Timer:
+    ## Waits until the timer's clock reaches it. A blocking point.
+    @intrinsic("Timer.wait")
+    def wait(self) -> ! TaskError
+
+# ------------------------------------------------------------------ Option and Result
+
+## Whether `a` and `b` are at most `n` units in the last place apart:
+## at most `n` representable `f64`s lie between them, past the first
+## (equal values, and `0.0` and `-0.0`, are 0 apart; a NaN is apart from
+## everything). What `@refines(reference, tolerance=Ulps(n))` compares (17).
+@intrinsic("f64.within_ulps")
+pure def within_ulps(a: f64, b: f64, n: int) -> bool
+
+impl[T] T?:
+    @intrinsic("Option.is_some")
+    pure def is_some(self) -> bool
+    @intrinsic("Option.is_none")
+    pure def is_none(self) -> bool
+    ## The value; panics with `message` if there is none.
+    @intrinsic("Option.expect")
+    pure def expect(own self, message: str) -> T
+    ## The value; panics if there is none.
+    pure def unwrap(own self) -> T:
+        return self.expect("")
+    ## The value, or `default`.
+    @intrinsic("Option.or")
+    pure def or(own self, own default: T) -> T
+    ## `f` of the value, if there is one.
+    def map[U](own self, f: (T) -> U) -> U?:
+        if self.is_none():
+            return None
+        return Some(f(self.expect("a value")))
+
+impl[T: Copy] ref T?:
+    ## The value the reference points to, copied, as `xs.first().copied()`
+    ## gives the first element.
+    ##
+    ## ```
+    ## let xs = [3, 1]
+    ## assert xs.first().copied() == Some(3)
+    ## assert xs.get(5).copied() == None
+    ## ```
+    pure def copied(self) -> T?:
+        match self:
+            case Some(r):
+                let v: T = r
+                return Some(v)
+            case None:
+                return None
+
+impl[T, E] Result[T, E]:
+    @intrinsic("Result.is_ok")
+    pure def is_ok(self) -> bool
+    @intrinsic("Result.is_err")
+    pure def is_err(self) -> bool
+    ## The value; panics with `message` and the error if there is an error.
+    @intrinsic("Result.expect")
+    pure def expect(own self, message: str) -> T
+    ## The value; panics with the error if there is an error.
+    pure def unwrap(own self) -> T:
+        return self.expect("")
+    ## The value, or `default`.
+    @intrinsic("Result.or")
+    pure def or(own self, own default: T) -> T
+    @intrinsic("Result.ok")
+    pure def ok(own self) -> T?
+    @intrinsic("Result.err")
+    pure def err(own self) -> E?
+    ## `f` of the value, or the error.
+    def map[U](own self, f: (T) -> U) -> Result[U, E]:
+        if self.is_ok():
+            return Ok(f(self.expect("a value")))
+        return Err(self.err().expect("an error"))
+    ## The error passed through `f`, or the value.
+    def map_err[F](own self, f: (E) -> F) -> Result[T, F]:
+        if self.is_ok():
+            return Ok(self.expect("a value"))
+        return Err(f(self.err().expect("an error")))
+    ## The error, if any, wrapped with what the program was doing:
+    ## `fs.read_to_string(p).context("loading {p}")` (05, "Context and
+    ## traces"; a std convention, not syntax).
+    pure def context(own self, message: str) -> T ! Contextual where E: Display:
+        if self.is_ok():
+            return Ok(self.expect("a value"))
+        let cause = self.err().expect("an error")
+        return Err(Context(message=message.to_string(), cause="{cause}"))
+
+# ------------------------------------------------------------------ property tests (17)
+# `check` runs a property on the cases a generator makes. A generator is a
+# function of a `Draws`, the case's choices: the compiler writes one for
+# each type a program generates (`arbitrary[T]`, the contracts `sisu test`
+# checks), out of the ones below, so random, shrunk, replayed and
+# exhaustive cases all come from the same code (Hypothesis's model).
+
+## What stopped a case or a call `test.catch` made: a panic, with its
+## message (a refused choice is one too, which `check` tells by the
+## draws' `rejected`), or running past its budget of statements.
+error Panicked:
+    Panicked(message: String)
+    TooLong(steps: int)
+
+## The state of a case's choices (`Draws`).
+struct DrawState:
+    prefix: list[int]
+    choices: list[int]
+    bounds: list[int]
+    random: bool
+    exhaustive: bool
+    state: int
+    size: int
+    rejected: bool
+
+## The choices a generator makes for one case: first those of `prefix` (a
+## shrunk case, a replayed one, the next case of an exhaustive search),
+## then the seeded stream's when `random` is on, else the smallest. Each
+## choice is recorded with its bound: shrinking works on the choices, and
+## an exhaustive search on the bounds. A `Copy` handle that every
+## generator of the case shares.
+@derive(Copy)
+struct Draws:
+    cell: Cap[Mutex[DrawState]]
+
+impl Draws:
+    ## The draws of one case; `size` bounds how big values grow (the most
+    ## items of a collection, the largest small integer).
+    def new(own prefix: list[int], random: bool, exhaustive: bool, state: int, size: int) -> Draws:
+        let st = DrawState(
+            prefix=prefix,
+            choices=[],
+            bounds=[],
+            random=random,
+            exhaustive=exhaustive,
+            state=state,
+            size=size,
+            rejected=False,
+        )
+        return Draws(cell=Cap.new(Mutex(st)))
+    ## A choice in `range(n)`; past 4096 choices the case is refused.
+    def draw(self, n: int) -> int:
+        var g = self.cell.get().lock()
+        if len(g.value.choices) >= 4096:
+            g.value.rejected = True
+            panic("the case was refused")
+        let i = len(g.value.choices)
+        var c = 0
+        if n <= 1:
+            c = 0
+        elif i < len(g.value.prefix):
+            c = min(g.value.prefix[i], n - 1)
+        elif g.value.random:
+            # SplitMix64; `>>` shifts the sign in, so each shift masks it off.
+            g.value.state = g.value.state +% -7046029254386353131
+            var z = g.value.state
+            z = (z ^ ((z >> 30) & 17179869183)) *% -4658895280553007687
+            z = (z ^ ((z >> 27) & 137438953471)) *% -7723592293110705685
+            c = ((z ^ ((z >> 31) & 8589934591)) & 9223372036854775807) % n
+        g.value.choices.push(c)
+        g.value.bounds.push(n)
+        return c
+    ## Whether a collection holding `count` items gets another.
+    def more(self, count: int) -> bool:
+        if count >= self.size():
+            return False
+        if self.exhaustive():
+            return self.draw(2) == 1
+        return self.draw(4) != 0
+    ## Refuses the case (a filter, a refinement's predicate): `check` makes
+    ## another one.
+    def reject(self) -> Never:
+        var g = self.cell.get().lock()
+        g.value.rejected = True
+        panic("the case was refused")
+    def size(self) -> int:
+        return self.cell.get().lock().value.size
+    def exhaustive(self) -> bool:
+        return self.cell.get().lock().value.exhaustive
+    def rejected(self) -> bool:
+        return self.cell.get().lock().value.rejected
+    def state(self) -> int:
+        return self.cell.get().lock().value.state
+    ## The choices made, and their bounds.
+    def choices(self) -> list[int]:
+        return self.cell.get().lock().value.choices.copy()
+    def bounds(self) -> list[int]:
+        return self.cell.get().lock().value.bounds.copy()
+    ## 0, 1, -1, 2, -2, ... for the choices 0, 1, 2, 3, 4, ...: the smaller
+    ## the choice, the nearer zero.
+    pure def zigzag(c: int) -> int:
+        if c % 2 == 0:
+            return -(c // 2)
+        return (c + 1) // 2
+    ## An integer: most often within `size` of zero, sometimes within a
+    ## thousand, sometimes within 2^62; in an exhaustive search, every one
+    ## within `size` of zero. Each is one choice after the one that picks
+    ## the range, so a shrunk range keeps the value as near as it fits.
+    def gen_int(d: Draws) -> int:
+        if d.exhaustive():
+            return Draws.zigzag(d.draw(2 * d.size() + 1))
+        let k = d.draw(8)
+        if k < 6:
+            return Draws.zigzag(d.draw(2 * d.size() + 1))
+        if k < 7:
+            return Draws.zigzag(d.draw(2001))
+        return Draws.zigzag(d.draw(9223372036854775807))
+    ## An integer in `range(lo, hi)`, nearer `lo` for smaller choices.
+    def gen_in(d: Draws, lo: int, hi: int) -> int:
+        return lo + d.draw(hi - lo)
+    def gen_bool(d: Draws) -> bool:
+        return d.draw(2) == 1
+    ## A float: an integer and a quarter.
+    def gen_f64(d: Draws) -> f64:
+        let whole = Draws.gen_int(d)
+        return whole.to_f64() + d.draw(4).to_f64() / 4.0
+    ## An `f32`: an integer and a quarter, as `gen_f64` draws them.
+    def gen_f32(d: Draws) -> f32:
+        let whole = Draws.gen_int(d)
+        return whole.to_f32() + d.draw(4).to_f32() / 4.0
+    ## A character of a small alphabet, letters first.
+    def gen_char(d: Draws) -> char:
+        let alphabet = if d.exhaustive(): "ab" else: "abcxyzABCXYZ0129 _-.,!?\u{e9}\u{3b1}\n"
+        var cs: list[char] = []
+        for c in alphabet.chars():
+            cs.push(c)
+        return cs[d.draw(len(cs))]
+    def gen_string(d: Draws) -> String:
+        var s = String.new()
+        var n = 0
+        while d.more(n):
+            s.push_char(Draws.gen_char(d))
+            n += 1
+        return s
+    def gen_u8(d: Draws) -> u8:
+        return d.draw(256).to_u8().expect("a u8")
+    def gen_u16(d: Draws) -> u16:
+        return d.draw(65536).to_u16().expect("a u16")
+    def gen_u32(d: Draws) -> u32:
+        return d.draw(4294967296).to_u32().expect("a u32")
+    def gen_i8(d: Draws) -> i8:
+        return (d.draw(256) - 128).to_i8().expect("an i8")
+    def gen_i16(d: Draws) -> i16:
+        return (d.draw(65536) - 32768).to_i16().expect("an i16")
+    def gen_i32(d: Draws) -> i32:
+        return Draws.zigzag(d.draw(4294967295)).to_i32().expect("an i32")
+    def gen_duration(d: Draws) -> Duration:
+        return Duration(nanos=Draws.gen_int(d))
+    def gen_list[T](d: Draws, elem: (Draws) -> T) -> list[T]:
+        var xs: list[T] = []
+        while d.more(len(xs)):
+            xs.push(elem(d))
+        return xs
+    def gen_set[T](d: Draws, elem: (Draws) -> T) -> set[T] where T: Hash:
+        var xs: set[T] = set()
+        var n = 0
+        while d.more(n):
+            _ = xs.add(elem(d))
+            n += 1
+        return xs
+    def gen_dict[K, V](
+        d: Draws, key: (Draws) -> K, value: (Draws) -> V
+    ) -> dict[K, V] where K: Hash:
+        var xs: dict[K, V] = {}
+        var n = 0
+        while d.more(n):
+            let k = key(d)
+            xs[k] = value(d)
+            n += 1
+        return xs
+    def gen_option[T](d: Draws, elem: (Draws) -> T) -> T?:
+        if d.draw(4) == 0:
+            return None
+        return Some(elem(d))
+    def gen_box[T](d: Draws, elem: (Draws) -> T) -> Box[T]:
+        return Box(elem(d))
+
+## How `check` makes cases: `make` builds one from a `Draws`.
+## `arbitrary[T]` draws `cases` of them at random; `exhaustive[T](max_len=n)`
+## lists every one whose collections hold at most `n` items and whose
+## integers are within `n` of zero, or in their refinement's range (17,
+## D-070).
+view struct Gen[T]:
+    make: (Draws) -> T
+    exhaustive: bool
+    max_len: int
+    cases: int
+    ## Every case refused is no failure, and a case past its budget is
+    ## refused, not failed (the cases of a contract, which its `requires`
+    ## may refuse, and whose cost is not what the contract says).
+    quiet: bool
+    ## The statements a case may run, generating its value and checking the
+    ## property, before it fails (deterministic, unlike a deadline).
+    steps: int
+
+impl[T] Gen[T]:
+    ## `cases` random cases of `make`.
+    pure def of(
+        make: (Draws) -> T, cases: int = 100, quiet: bool = False, steps: int = 1000000
+    ) -> Gen[T]:
+        return Gen(make=make, exhaustive=False, max_len=0, cases=cases, quiet=quiet, steps=steps)
+    ## Every case of `make` up to `max_len`.
+    pure def every(make: (Draws) -> T, max_len: int, steps: int = 1000000) -> Gen[T]:
+        return Gen(make=make, exhaustive=True, max_len=max_len, cases=0, quiet=False, steps=steps)
+
+## The text of the file at `path`, relative to the program's file, read
+## when the program is compiled (08): the one input a build reads besides
+## its source, recorded with it, so the same inputs give the same program.
+@intrinsic("compiler.embed")
+def embed(path: str) -> str
+
+## The cases of `T` drawn at random, written `arbitrary[T]`: the compiler
+## writes the generator of `T` (a refinement's values satisfy its
+## predicate, a struct's its invariant).
+@intrinsic("test.arbitrary")
+def arbitrary[T]() -> Gen[T]
+
+## Every case of `T` with at most `max_len` items in each collection, its
+## integers bounded by their refinements (17, D-070).
+@intrinsic("test.exhaustive")
+def exhaustive[T](max_len: int = 3) -> Gen[T]
+
+## A case that failed: its choices and why.
+struct Failure:
+    choices: list[int]
+    reason: String
+
+## How one case went.
+enum Outcome:
+    Passed
+    Refused
+    Failed(reason: String)
+
+## Runs `f(x)`, giving its result, `Panicked(message)` when it panics (a
+## typed hole is not caught) or `TooLong(steps)` when it runs more than
+## `steps` statements; only `check` uses it.
+@internal
+@intrinsic("test.catch")
+def catch[A, R](f: (A) -> R, own x: A, steps: int) -> R ! Panicked
+
+## The seed of the property's random cases in this run of the test.
+@internal
+@intrinsic("test.case_seed")
+def case_seed() -> int
+
+## The choices of the case a replay token names, run first.
+@internal
+@intrinsic("test.replay_case")
+def replay_case() -> list[int]?
+
+## Records the choices of the failing case, for the test's replay token.
+@internal
+@intrinsic("test.record_case")
+def record_case(choices: list[int])
+
+## Runs one case from `prefix`.
+def run_case[T](
+    gen: Gen[T], prop: (T) -> bool, own prefix: list[int], random: bool, state: int, size: int
+) -> (Outcome, Draws):
+    let d = Draws.new(prefix, random, gen.exhaustive, state, size)
+    match catch(gen.make, d, gen.steps):
+        case Err(Panicked(message)):
+            # A generator the compiler wrote for a contract refuses what it
+            # cannot make (an invariant that traps on a drawn value).
+            if d.rejected() or gen.quiet:
+                return (Refused, d)
+            return (Failed("the generator panicked: {message}"), d)
+        case Err(TooLong(steps)):
+            return (Failed("the generator ran past its budget of {steps} statements"), d)
+        case Ok(value):
+            match catch(prop, value, gen.steps):
+                case Ok(True):
+                    return (Passed, d)
+                case Ok(False):
+                    return (Failed("the property returned False"), d)
+                case Err(Panicked(message)):
+                    return (Failed("it panicked: {message}"), d)
+                case Err(TooLong(steps)):
+                    if gen.quiet:
+                        return (Refused, d)
+                    return (Failed("it ran past its budget of {steps} statements"), d)
+
+## The case `prefix` names, replayed, if it fails.
+def failing[T](gen: Gen[T], prop: (T) -> bool, own prefix: list[int], size: int) -> Failure?:
+    let (outcome, d) = run_case(gen, prop, prefix, False, 0, size)
+    match outcome:
+        case Failed(reason):
+            return Some(Failure(choices=d.choices(), reason=reason.copy()))
+        case _:
+            return None
+
+## `xs` without `k` items from `i`.
+pure def without(xs: list[int], i: int, k: int) -> list[int]:
+    var out: list[int] = []
+    var j = 0
+    while j < len(xs):
+        if j < i or j >= i + k:
+            out.push(xs[j])
+        j += 1
+    return out
+
+## `xs` with the item at `i` replaced by `v`.
+pure def replaced(xs: list[int], i: int, v: int) -> list[int]:
+    var out = xs.copy()
+    out[i] = v
+    return out
+
+## Whether the choices `a` are simpler than `b`: fewer, or as many and
+## smaller at the first that differs (shortlex), so shrinking ends.
+pure def simpler(a: list[int], b: list[int]) -> bool:
+    if len(a) != len(b):
+        return len(a) < len(b)
+    var i = 0
+    while i < len(a):
+        if a[i] != b[i]:
+            return a[i] < b[i]
+        i += 1
+    return False
+
+## The smallest failing case found from `start` within a budget of runs:
+## spans of choices deleted, then each choice made smaller.
+def shrink[T](gen: Gen[T], prop: (T) -> bool, own start: Failure, size: int) -> (Failure, int):
+    var best = start
+    var shrinks = 0
+    var budget = 1000
+    var improved = True
+    while improved and budget > 0:
+        improved = False
+        for k in [8, 4, 2, 1]:
+            var i = 0
+            while i + k <= len(best.choices) and budget > 0:
+                budget -= 1
+                match failing(gen, prop, without(best.choices, i, k), size):
+                    case Some(f) if simpler(f.choices, best.choices):
+                        best = f.copy()
+                        shrinks += 1
+                        improved = True
+                    case _:
+                        i += 1
+        var i = 0
+        while i < len(best.choices) and budget > 0:
+            # Zero first; then the smallest choice that still fails, by a
+            # binary search over the smaller ones in steps of two (which
+            # keep the sign of a zigzagged integer), then of one.
+            if best.choices[i] > 0:
+                budget -= 1
+                match failing(gen, prop, replaced(best.choices, i, 0), size):
+                    case Some(f) if simpler(f.choices, best.choices):
+                        best = f.copy()
+                        shrinks += 1
+                        improved = True
+                    case _:
+                        pass
+            for step in [2, 1]:
+                if i < len(best.choices):
+                    let v = best.choices[i]
+                    var lo = 0
+                    var hi = v // step + 1
+                    while hi - lo > 1 and budget > 0 and i < len(best.choices):
+                        let mid = lo + (hi - lo) // 2
+                        budget -= 1
+                        match failing(gen, prop, replaced(best.choices, i, v - step * mid), size):
+                            case Some(f) if simpler(f.choices, best.choices):
+                                best = f.copy()
+                                shrinks += 1
+                                improved = True
+                                lo = mid
+                            case _:
+                                hi = mid
+            i += 1
+    return (best, shrinks)
+
+## The next case of an exhaustive search after the one that made
+## `choices` (with `bounds`): the last choice that can grow grows, and
+## what came after it is dropped. `None` once every case was made.
+pure def next_prefix(choices: list[int], bounds: list[int]) -> list[int]?:
+    var i = len(choices) - 1
+    while i >= 0:
+        if choices[i] + 1 < bounds[i]:
+            var out: list[int] = []
+            var j = 0
+            while j < i:
+                out.push(choices[j])
+                j += 1
+            out.push(choices[i] + 1)
+            return Some(out)
+        i -= 1
+    return None
+
+## Runs `prop` on the cases of `gen` (17, "Property-based testing"): every
+## case of an exhaustive generator, else `gen.cases` random ones, after any
+## case the test's replay token names. A case for which `prop` returns
+## `False` or panics is shrunk to the smallest failing case found, and the
+## test fails showing it; its choices go into the replay token.
+def check[T: Debug](gen: Gen[T], prop: (T) -> bool):
+    var found: Failure? = None
+    var cases = 0
+    var refused = 0
+    let size = if gen.exhaustive: gen.max_len else: 8
+    match replay_case():
+        case Some(choices):
+            found = failing(gen, prop, choices, size)
+        case None:
+            pass
+    if found.is_none() and gen.exhaustive:
+        var prefix: list[int] = []
+        var going = True
+        while going:
+            let (outcome, d) = run_case(gen, prop, prefix.copy(), False, 0, size)
+            match outcome:
+                case Failed(reason):
+                    found = Some(Failure(choices=d.choices(), reason=reason.copy()))
+                    going = False
+                case Refused:
+                    refused += 1
+                case Passed:
+                    cases += 1
+            if going:
+                match next_prefix(d.choices(), d.bounds()):
+                    case Some(p):
+                        prefix = p
+                    case None:
+                        going = False
+    elif found.is_none():
+        var state = case_seed()
+        var tries = 0
+        while cases < gen.cases and tries < gen.cases * 10 and found.is_none():
+            tries += 1
+            let (outcome, d) = run_case(gen, prop, [], True, state, size)
+            state = d.state()
+            match outcome:
+                case Failed(reason):
+                    found = Some(Failure(choices=d.choices(), reason=reason.copy()))
+                case Refused:
+                    refused += 1
+                case Passed:
+                    cases += 1
+        if cases == 0 and found.is_none() and not gen.quiet:
+            panic("no case could be made: all {refused} were refused")
+    if found.is_none():
+        return
+    let first = found.expect("a failure")
+    let (best, shrinks) = if gen.exhaustive: (first, 0) else: shrink(gen, prop, first, size)
+    record_case(best.choices)
+    let d = Draws.new(best.choices.copy(), False, gen.exhaustive, 0, size)
+    let times = if shrinks == 1: "once".to_string() else: "{shrinks} times"
+    panic(
+        "the property failed for {shown(gen.make, d, gen.steps)} (case {cases + refused + 1}, shrunk {times})\n  {best.reason}"
+    )
+
+## The case `d` makes, as `{:?}` shows it.
+def shown[T: Debug](make: (Draws) -> T, d: Draws, steps: int) -> String:
+    match catch(make, d, steps):
+        case Ok(value):
+            return "{value:?}"
+        case Err(Panicked(_)):
+            return "a case its generator could not make"
+        case Err(TooLong(_)):
+            return "a case its generator could not make in {steps} statements"
+
+# ------------------------------------------------------------------ capabilities (06, "Capabilities")
+# Each capability is a handle (`Fs`, ...) on an object that implements its
+# operations trait (`FsOps`, ...): a root object of the host, an
+# attenuation, a fake or an interceptor (std.cap, `cap` in every module).
+# The handle, and a `Lent` of it, implement the trait by forwarding each
+# call to the object: the intrinsic `cap.forward` is that call through the
+# trait, with the object as `self` (a result that borrows `self` borrows
+# the handle, whose last copy's drop drops the object).
+
+## What `metadata` reports about a file or a directory.
+@derive(Copy, Eq)
+struct Metadata:
+    len: int
+    modified: DateTime
+    is_dir: bool
+
+## The operations of the file system capability: the root object, the
+## attenuations, `Lent[Fs]`, the fakes and the interceptors implement them,
+## so a parameter of type `Fs` accepts every form but the lent one, and a
+## generic parameter `[F: FsOps]` accepts every form. A path is relative to
+## the working directory of the root object.
+trait FsOps:
+    ## The whole file; `NotFound` or `PermissionDenied` on failure.
+    def read(self, path: Path) -> bytes ! IoError
+    ## Creates or replaces the file with `data`.
+    def write(self, path: Path, data: bytes) -> ! IoError
+    ## Whether the path names a file or a directory.
+    def exists(self, path: Path) -> bool
+    ## The file's or directory's size, time of last change and kind.
+    def metadata(self, path: Path) -> Metadata ! IoError
+    ## Removes the file.
+    def remove(self, path: Path) -> ! IoError
+    ## The entries of the directory, sorted, as paths that start with it.
+    def list_dir(self, path: Path) -> list[Path] ! IoError
+    ## Creates the directory and any missing parents.
+    def create_dir(self, path: Path) -> ! IoError
+    ## The whole file as text; `InvalidData` when it is not UTF-8.
+    def read_to_string(self, path: Path) -> String ! IoError:
+        let data = self.read(path)?
+        return data.decode().map_err((e) -> InvalidData(path=path.copy()))
+    ## Creates or replaces the file with `text` in UTF-8.
+    def write_text(self, path: Path, text: str) -> ! IoError:
+        return self.write(path, text.encode())
+    ## Makes the file's contents, or the directory's entries, durable: what
+    ## was written since the last sync is what a crash loses (the `sim`
+    ## profile's file system, 17).
+    def sync(self, path: Path) -> ! IoError
+
+impl FsOps for Fs:
+    @intrinsic("cap.forward")
+    def read(self, path: Path) -> bytes ! IoError
+    @intrinsic("cap.forward")
+    def write(self, path: Path, data: bytes) -> ! IoError
+    @intrinsic("cap.forward")
+    def read_to_string(self, path: Path) -> String ! IoError
+    @intrinsic("cap.forward")
+    def write_text(self, path: Path, text: str) -> ! IoError
+    @intrinsic("cap.forward")
+    def exists(self, path: Path) -> bool
+    @intrinsic("cap.forward")
+    def metadata(self, path: Path) -> Metadata ! IoError
+    @intrinsic("cap.forward")
+    def remove(self, path: Path) -> ! IoError
+    @intrinsic("cap.forward")
+    def list_dir(self, path: Path) -> list[Path] ! IoError
+    @intrinsic("cap.forward")
+    def create_dir(self, path: Path) -> ! IoError
+    @intrinsic("cap.forward")
+    def sync(self, path: Path) -> ! IoError
+
+impl Fs:
+    ## The same file system with every change refused as `PermissionDenied`.
+    ##
+    ## ```
+    ## let fs = Fs.in_memory({"notes.txt": "kept"})
+    ## let ro = fs.read_only()
+    ## assert ro.read_to_string("notes.txt").expect("readable") == "kept"
+    ## assert ro.write_text("notes.txt", "lost").is_err()
+    ## ```
+    def read_only(self) -> Fs:
+        return cap.ReadOnly(inner=self)
+    ## The same file system limited to the directory `dir`: a path is
+    ## relative to it, and one that is absolute or has a `..` part is
+    ## refused as `PermissionDenied` (and does not exist).
+    def restrict_to(self, dir: Path) -> Fs:
+        return cap.Restricted(inner=self, root=dir.as_str().strip_suffix("/").to_string())
+    ## The file system lent for a call: a view, which the callee cannot keep.
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[Fs]
+    ## A caretaker of the file system and its revoker: once revoked, every
+    ## copy of the caretaker fails with `Revoked` (Q-51).
+    def revocable(self) -> (Fs, Revoker):
+        let r = Revoker.new()
+        let fs: Fs = cap.Caretaker(inner=self, revoker=r)
+        return (fs, r)
+    ## A fake file system in memory holding `files`, text by path (17,
+    ## "Fixtures"). Each write is stamped with the run's test clock
+    ## (`Clock.fake`).
+    def in_memory(files: dict[str, str] = {}) -> Fs:
+        return cap.MemFs.new(files)
+
+impl FsOps for HostFs:
+    @intrinsic("host.fs.read")
+    def read(self, path: Path) -> bytes ! IoError
+    @intrinsic("host.fs.write")
+    def write(self, path: Path, data: bytes) -> ! IoError
+    @intrinsic("host.fs.read_to_string")
+    def read_to_string(self, path: Path) -> String ! IoError
+    @intrinsic("host.fs.write_text")
+    def write_text(self, path: Path, text: str) -> ! IoError
+    @intrinsic("host.fs.exists")
+    def exists(self, path: Path) -> bool
+    @intrinsic("host.fs.metadata")
+    def metadata(self, path: Path) -> Metadata ! IoError
+    @intrinsic("host.fs.remove")
+    def remove(self, path: Path) -> ! IoError
+    @intrinsic("host.fs.list_dir")
+    def list_dir(self, path: Path) -> list[Path] ! IoError
+    @intrinsic("host.fs.create_dir")
+    def create_dir(self, path: Path) -> ! IoError
+    @intrinsic("host.fs.sync")
+    def sync(self, path: Path) -> ! IoError
+
+impl[T: FsOps + Copy] FsOps for Lent[T]:
+    @intrinsic("cap.forward")
+    def read(self, path: Path) -> bytes ! IoError
+    @intrinsic("cap.forward")
+    def write(self, path: Path, data: bytes) -> ! IoError
+    @intrinsic("cap.forward")
+    def read_to_string(self, path: Path) -> String ! IoError
+    @intrinsic("cap.forward")
+    def write_text(self, path: Path, text: str) -> ! IoError
+    @intrinsic("cap.forward")
+    def exists(self, path: Path) -> bool
+    @intrinsic("cap.forward")
+    def metadata(self, path: Path) -> Metadata ! IoError
+    @intrinsic("cap.forward")
+    def remove(self, path: Path) -> ! IoError
+    @intrinsic("cap.forward")
+    def list_dir(self, path: Path) -> list[Path] ! IoError
+    @intrinsic("cap.forward")
+    def create_dir(self, path: Path) -> ! IoError
+    @intrinsic("cap.forward")
+    def sync(self, path: Path) -> ! IoError
+
+## A byte stream to another program, both ways: a TCP connection, or one
+## end of a fake network's in-process pipe. A read waits for data and gives
+## at most `max` bytes, and none once the other end has closed its side; a
+## write sends all of `data`. Both are blocking points.
+trait Stream(Send, Sync):
+    def read(mut self, max: int) -> bytes ! {NetError, TaskError}
+    def write(mut self, data: bytes) -> ! {NetError, TaskError}
+    ## Closes this end's side: the other end reads the end of the stream.
+    def close(mut self)
+
+## A connection (`Net.connect`, `Listener.accept`): a stream and the
+## address of the other end. Dropping it closes it.
+struct Conn:
+    stream: Box[dyn Stream]
+    peer: String
+
+impl Conn:
+    ## At most `max` bytes, waiting for some; none at the end of the stream.
+    def read(mut self, max: int = 65536) -> bytes ! {NetError, TaskError}:
+        return self.stream.read(max)
+    ## Sends all of `data`.
+    def write(mut self, data: bytes) -> ! {NetError, TaskError}:
+        return self.stream.write(data)
+    ## Every byte until the other end closes its side.
+    def read_to_end(mut self) -> bytes ! {NetError, TaskError}:
+        var out = bytes.new()
+        while True:
+            let chunk = self.stream.read(65536)?
+            if chunk.is_empty():
+                return Ok(out)
+            out = out + chunk
+    ## Closes this end's side.
+    def close(mut self):
+        self.stream.close()
+
+## Accepts the connections a listener receives.
+trait Accept(Send, Sync):
+    ## The next connection, waiting for one. A blocking point.
+    def accept(self) -> Conn ! {NetError, TaskError}
+
+## A listener (`Net.listen`) and the port it listens at.
+struct Listener:
+    inner: Box[dyn Accept]
+    port: int
+
+impl Listener:
+    ## The next connection, waiting for one. A blocking point.
+    def accept(self) -> Conn ! {NetError, TaskError}:
+        return self.inner.accept()
+
+## The operations of the network capability: TCP connections and
+## listeners, by host name and port.
+trait NetOps:
+    ## A connection to `host` at `port`; `Refused` when nothing listens
+    ## there.
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}
+    ## Listens at `port` of `host` (port 0: a free one, which the listener
+    ## tells); `host` is the machine's own name unless given.
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError
+
+impl NetOps for Net:
+    @intrinsic("cap.forward")
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}
+    @intrinsic("cap.forward")
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError
+
+impl Net:
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[Net]
+    ## The same network limited to the named hosts: a connection to or a
+    ## listener at any other is refused as `NotAllowed`.
+    def only_hosts(self, hosts: list[str]) -> Net:
+        var allowed: list[String] = []
+        for h in hosts:
+            allowed.push(h.to_string())
+        return cap.OnlyHosts(inner=self, hosts=allowed)
+    ## The same network limited to port 443, HTTPS's (stage 0 has no TLS:
+    ## the attenuation is by port).
+    def https_only(self) -> Net:
+        return cap.OnlyPorts(inner=self, ports=[443])
+    ## A caretaker of the network and its revoker (Q-51).
+    def revocable(self) -> (Net, Revoker):
+        let r = Revoker.new()
+        let net: Net = cap.NetCaretaker(inner=self, revoker=r)
+        return (net, r)
+    ## A fake network in this process (17): `listen` registers an address,
+    ## `connect` to it makes a pair of pipes, and nothing else is reached.
+    def fake() -> Net:
+        return cap.FakeNet.new()
+
+impl NetOps for HostNet:
+    @intrinsic("host.net.connect")
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}
+    @intrinsic("host.net.listen")
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError
+
+## A TCP connection of the host.
+@builtin("HostStream")
+struct HostStream:
+    pass
+
+impl Stream for HostStream:
+    @intrinsic("host.net.read")
+    def read(mut self, max: int) -> bytes ! {NetError, TaskError}
+    @intrinsic("host.net.write")
+    def write(mut self, data: bytes) -> ! {NetError, TaskError}
+    @intrinsic("host.net.close")
+    def close(mut self)
+
+## A TCP listener of the host.
+@builtin("HostListener")
+struct HostListener:
+    pass
+
+impl Accept for HostListener:
+    @intrinsic("host.net.accept")
+    def accept(self) -> Conn ! {NetError, TaskError}
+
+impl[T: NetOps + Copy] NetOps for Lent[T]:
+    @intrinsic("cap.forward")
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}
+    @intrinsic("cap.forward")
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError
+
+## The operations of the clock capability.
+trait ClockOps:
+    ## The current time on this clock.
+    def now(self) -> DateTime
+    ## A timer at `d` from now on this clock, to wait for.
+    def after(self, d: Duration) -> Timer
+
+impl ClockOps for Clock:
+    @intrinsic("cap.forward")
+    def now(self) -> DateTime
+    @intrinsic("cap.forward")
+    def after(self, d: Duration) -> Timer
+
+impl Clock:
+    ## Waits for `d` on this clock. A blocking point.
+    def sleep(self, d: Duration) -> ! TaskError:
+        return self.after(d).wait()
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[Clock]
+    ## The run's test clock (`TestClock`), as it stands.
+    @intrinsic("Clock.fake")
+    def fake() -> TestClock
+    ## The run's test clock, set to `t` (17): it stands still at `t` until
+    ## `advance`, or until every task waits for a timer.
+    def frozen_at(t: DateTime) -> TestClock:
+        let c = Clock.fake()
+        c.set(t)
+        return c
+
+impl ClockOps for HostClock:
+    @intrinsic("clock.now")
+    def now(self) -> DateTime
+    @intrinsic("clock.after")
+    def after(self, d: Duration) -> Timer
+
+impl ClockOps for TestClock:
+    @intrinsic("clock.now")
+    def now(self) -> DateTime
+    @intrinsic("clock.after")
+    def after(self, d: Duration) -> Timer
+
+impl TestClock:
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[TestClock]
+    ## Moves the clock forward by `d`; the timers it passes are due.
+    @intrinsic("TestClock.advance")
+    def advance(self, d: Duration)
+    ## Sets the clock to `t`.
+    @intrinsic("TestClock.set")
+    def set(self, t: DateTime)
+    ## Waits for `d` on this clock. A blocking point.
+    def sleep(self, d: Duration) -> ! TaskError:
+        return self.after(d).wait()
+
+impl[T: ClockOps + Copy] ClockOps for Lent[T]:
+    @intrinsic("cap.forward")
+    def now(self) -> DateTime
+    @intrinsic("cap.forward")
+    def after(self, d: Duration) -> Timer
+
+## The operations of the randomness capability.
+trait RandOps:
+    ## 64 random bits as an `int`, every pattern equally likely.
+    def bits(self) -> int
+
+impl RandOps for Rand:
+    @intrinsic("cap.forward")
+    def bits(self) -> int
+
+impl Rand:
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[Rand]
+    ## A random integer in `range(lo, hi)`, each equally likely; `hi` must
+    ## be greater than `lo`.
+    def between(self, lo: int, hi: int) -> int:
+        assert hi > lo, "an empty range"
+        let n = hi - lo
+        # 63 random bits, rejected above the largest multiple of `n`.
+        let top = 9223372036854775807
+        let over = (top % n + 1) % n
+        while True:
+            let x = self.bits() & top
+            if over == 0 or x <= top - over:
+                return lo + x % n
+    ## A random float in [0, 1), a multiple of 2**-53.
+    def unit(self) -> f64:
+        return (self.bits() & 9007199254740991).to_f64() / 9007199254740992.0
+    ## `True` or `False`, each half the time.
+    def coin(self) -> bool:
+        return self.bits() < 0
+    ## Puts the items of `xs` in a random order, each order equally likely.
+    def shuffle[T](self, mut xs: list[T]):
+        var i = len(xs) - 1
+        while i > 0:
+            let j = self.between(0, i + 1)
+            xs.swap(i, j)
+            i -= 1
+    ## A generator seeded with `seed` (SplitMix64): the same seed gives the
+    ## same values in every run.
+    def seeded(seed: int) -> Rand:
+        return cap.SeededRand.new(seed)
+
+impl RandOps for HostRand:
+    @intrinsic("host.rand.bits")
+    def bits(self) -> int
+
+impl[T: RandOps + Copy] RandOps for Lent[T]:
+    @intrinsic("cap.forward")
+    def bits(self) -> int
+
+## The operations of the environment capability.
+trait EnvOps:
+    ## The command-line arguments after the program's own name.
+    def args(self) -> list[str]
+    ## The variable `name`, or `None`.
+    def get(self, name: str) -> String?
+
+impl EnvOps for Env:
+    @intrinsic("cap.forward")
+    def args(self) -> list[str]
+    @intrinsic("cap.forward")
+    def get(self, name: str) -> String?
+
+impl Env:
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[Env]
+    ## A fake environment with these arguments and variables (17).
+    def fake(args: list[str] = [], vars: dict[str, str] = {}) -> Env:
+        return cap.FakeEnv.new(args, vars)
+
+impl EnvOps for HostEnv:
+    @intrinsic("host.env.args")
+    def args(self) -> list[str]
+    @intrinsic("host.env.get")
+    def get(self, name: str) -> String?
+
+impl[T: EnvOps + Copy] EnvOps for Lent[T]:
+    @intrinsic("cap.forward")
+    def args(self) -> list[str]
+    @intrinsic("cap.forward")
+    def get(self, name: str) -> String?
+
+## What a finished program left: its exit status and its output.
+struct ProcOutput:
+    status: int
+    stdout: String
+    stderr: String
+
+## The operations of the process capability.
+trait ProcOps:
+    ## Runs `program` with `args` to its end, with no input. A blocking point.
+    def run(self, program: str, args: list[str]) -> ProcOutput ! ProcError
+
+impl ProcOps for Proc:
+    @intrinsic("cap.forward")
+    def run(self, program: str, args: list[str]) -> ProcOutput ! ProcError
+
+impl Proc:
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[Proc]
+    ## A fake that runs the programs named in `outputs`, each printing its
+    ## text and exiting with status 0; any other program is `NotFound`.
+    def fake(outputs: dict[str, str] = {}) -> Proc:
+        return cap.FakeProc.new(outputs)
+
+impl ProcOps for HostProc:
+    @intrinsic("host.proc.run")
+    def run(self, program: str, args: list[str]) -> ProcOutput ! ProcError
+
+impl[T: ProcOps + Copy] ProcOps for Lent[T]:
+    @intrinsic("cap.forward")
+    def run(self, program: str, args: list[str]) -> ProcOutput ! ProcError
+
+## The operations of the standard input capability.
+trait StdinOps:
+    ## The next line, without its line break; `None` at the end of the
+    ## input. A blocking point.
+    def read_line(self) -> String?
+
+impl StdinOps for Stdin:
+    @intrinsic("cap.forward")
+    def read_line(self) -> String?
+
+impl Stdin:
+    @intrinsic("cap.lend")
+    def lend(self) -> Lent[Stdin]
+    ## A fake that gives these lines, then the end of the input (17).
+    def fake(lines: list[str] = []) -> Stdin:
+        return cap.FakeStdin.new(lines)
+
+impl StdinOps for HostStdin:
+    @intrinsic("host.stdin.read_line")
+    def read_line(self) -> String?
+
+impl[T: StdinOps + Copy] StdinOps for Lent[T]:
+    @intrinsic("cap.forward")
+    def read_line(self) -> String?
+
+impl System:
+    ## A test's capability set in one value (17, "Isolation and
+    ## parallelism"): an empty in-memory `Fs`, a `Net` that reaches
+    ## nothing, the run's test clock, `Rand.seeded(seed)`, an `Env` without
+    ## arguments or variables, a `Proc` that runs nothing and an empty
+    ## standard input. Each call makes a fresh set; a test that declares a
+    ## `System` receives the real one instead.
+    def fake(seed: int) -> System:
+        return System.assemble(
+            fs=Fs.in_memory(),
+            net=cap.NoNet(),
+            clock=Clock.fake(),
+            rand=Rand.seeded(seed),
+            env=Env.fake(),
+            proc=Proc.fake(),
+            stdin=Stdin.fake(),
+        )
+    ## The `sim` profile's system (17, "Simulation and replay"), which
+    ## `sisu test --sim` gives a test that declares a `System`: a
+    ## crash-consistent file system (`cap.SimFs`), an in-process network
+    ## (`cap.SimNetwork`),
+    ## the run's test clock, `Rand.seeded(seed)`, and fakes of the
+    ## environment, processes and standard input.
+    def sim(seed: int) -> System:
+        return System.assemble(
+            fs=cap.SimFs.new(),
+            net=cap.SimNetwork.new(),
+            clock=Clock.fake(),
+            rand=Rand.seeded(seed),
+            env=Env.fake(),
+            proc=Proc.fake(),
+            stdin=Stdin.fake(),
+        )
+    @internal
+    @intrinsic("System.assemble")
+    def assemble(
+        own fs: Fs,
+        own net: Net,
+        own clock: Clock,
+        own rand: Rand,
+        own env: Env,
+        own proc: Proc,
+        own stdin: Stdin,
+    ) -> System
+
+## What a transcript test's runs of `main` share (17, "Snapshots and
+## transcripts"): an in-memory `Fs` holding the transcript's fixture
+## files, a clock frozen at the epoch, and `Rand.seeded(0)`; each `$` line
+## runs with these and its own arguments and standard input.
+struct TranscriptWorld:
+    fs: Fs
+    clock: Clock
+    rand: Rand
+
+@internal
+def transcript_world(own files: list[(str, str)]) -> TranscriptWorld:
+    var d: dict[str, str] = dict()
+    for path, text in files:
+        _ = d.insert(path, text)
+    return TranscriptWorld(
+        fs=Fs.in_memory(d), clock=Clock.frozen_at(DateTime.epoch()), rand=Rand.seeded(0)
+    )
+
+@internal
+def transcript_system(
+    own world: TranscriptWorld, own args: list[str], own stdin: list[str]
+) -> System:
+    return System.assemble(
+        fs=world.fs,
+        net=cap.NoNet(),
+        clock=world.clock,
+        rand=world.rand,
+        env=Env.fake(args),
+        proc=Proc.fake(),
+        stdin=Stdin.fake(stdin),
+    )
+
+## The revoker of a caretaker (`Fs.revocable`): a `Copy` handle on the
+## flag every copy of the caretaker checks.
+@derive(Copy)
+struct Revoker:
+    flag: Cap[Mutex[bool]]
+
+impl Revoker:
+    pure def new() -> Revoker:
+        return Revoker(flag=Cap(Mutex(False)))
+    ## Every copy of the caretaker fails with `Revoked` from now on.
+    def revoke(self):
+        var g = self.flag.get().lock()
+        g.value = True
+    def is_revoked(self) -> bool:
+        return self.flag.get().lock().value
+
+impl[T] Cap[T]:
+    @intrinsic("Cap.new")
+    pure def new(own value: T) -> Cap[T]
+    ## The shared value.
+    @intrinsic("Cap.get")
+    pure def get(self) -> ref T
+
+impl[T] Debug for Cap[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for Lent[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+# ------------------------------------------------------------------ the traits of the builtin types
+# The leaf types (`int`, `f64`, `f32`, `bool`, `char`, `str`, `String`,
+# `Path`, `DateTime`, `()`) and tuples of up to six elements implement
+# `Display`, `Debug`, `Eq`, `PartialOrd`, `Ord` and `Hash` (the floats
+# neither of the last two) in the generated module
+# `<std>/builtin_impls.sisu` (see
+# compiler/crates/sisu-resolve/src/std_sources.rs), with the intrinsics
+# `structural.*`, whose contracts are written there.
+
+impl[T: Debug] Debug for list[T]:
+    pure def fmt_debug(self, mut f: Formatter):
+        f.write("[")
+        f.depth += 1
+        var first = True
+        for x in self:
+            if not first:
+                f.write(", ")
+            first = False
+            x.fmt_debug(mut f)
+        f.depth -= 1
+        f.write("]")
+
+impl[T: Debug] Display for list[T]:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl[T: Eq] Eq for list[T]:
+    pure def eq(self, other: list[T]) -> bool:
+        if len(self) != len(other):
+            return False
+        for i in range(len(self)):
+            if self[i] != other[i]:
+                return False
+        return True
+
+impl[T: PartialOrd] PartialOrd for list[T]:
+    pure def partial_cmp(self, other: list[T]) -> Ordering?:
+        var i = 0
+        while i < len(self) and i < len(other):
+            let c = self[i].partial_cmp(other[i])
+            if c != Some(Equal):
+                return c
+            i += 1
+        return Some(len(self).cmp(len(other)))
+
+impl[T: Ord] Ord for list[T]:
+    pure def cmp(self, other: list[T]) -> Ordering:
+        var i = 0
+        while i < len(self) and i < len(other):
+            let c = self[i].cmp(other[i])
+            if c != Equal:
+                return c
+            i += 1
+        return len(self).cmp(len(other))
+
+impl[T: Hash] Hash for list[T]:
+    pure def hash(self, mut h: Hasher):
+        h.write_int(len(self))
+        for x in self:
+            x.hash(mut h)
+
+impl[T] Len for list[T]:
+    @intrinsic("len")
+    pure def len(self) -> int
+
+impl[T: Eq] Contains[T] for list[T]:
+    pure def contains(self, x: T) -> bool:
+        for v in self:
+            if v == x:
+                return True
+        return False
+
+impl[T: Debug, const N: int] Debug for Array[T, N]:
+    pure def fmt_debug(self, mut f: Formatter):
+        f.write("[")
+        f.depth += 1
+        for i in range(N):
+            if i > 0:
+                f.write(", ")
+            self[i].fmt_debug(mut f)
+        f.depth -= 1
+        f.write("]")
+
+impl[T: Debug, const N: int] Display for Array[T, N]:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl[T: Eq, const N: int] Eq for Array[T, N]:
+    pure def eq(self, other: Array[T, N]) -> bool:
+        for i in range(N):
+            if self[i] != other[i]:
+                return False
+        return True
+
+impl[T: Hash, const N: int] Hash for Array[T, N]:
+    pure def hash(self, mut h: Hasher):
+        for i in range(N):
+            self[i].hash(mut h)
+
+impl[T, const N: int] Len for Array[T, N]:
+    pure def len(self) -> int:
+        return N
+
+impl[T: Debug] Debug for set[T]:
+    pure def fmt_debug(self, mut f: Formatter):
+        if len(self) == 0:
+            f.write("set()")
+            return
+        f.write("{{")
+        f.depth += 1
+        var first = True
+        for x in self:
+            if not first:
+                f.write(", ")
+            first = False
+            x.fmt_debug(mut f)
+        f.depth -= 1
+        f.write("}}")
+
+impl[T: Debug] Display for set[T]:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl[T: Hash] Eq for set[T]:
+    pure def eq(self, other: set[T]) -> bool:
+        if len(self) != len(other):
+            return False
+        for x in self:
+            if not other.contains(x):
+                return False
+        return True
+
+impl[T] Len for set[T]:
+    @intrinsic("len")
+    pure def len(self) -> int
+
+impl[T: Hash] Contains[T] for set[T]:
+    pure def contains(self, x: T) -> bool:
+        return x in self
+
+impl[K: Debug, V: Debug] Debug for dict[K, V]:
+    pure def fmt_debug(self, mut f: Formatter):
+        f.write("{{")
+        f.depth += 1
+        var first = True
+        for k, v in self:
+            if not first:
+                f.write(", ")
+            first = False
+            k.fmt_debug(mut f)
+            f.write(": ")
+            v.fmt_debug(mut f)
+        f.depth -= 1
+        f.write("}}")
+
+impl[K: Debug, V: Debug] Display for dict[K, V]:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl[K: Hash, V: Eq] Eq for dict[K, V]:
+    pure def eq(self, other: dict[K, V]) -> bool:
+        if len(self) != len(other):
+            return False
+        for k, v in self:
+            let Some(w) = other.get(k) else:
+                return False
+            if v != w:
+                return False
+        return True
+
+impl[K, V] Len for dict[K, V]:
+    @intrinsic("len")
+    pure def len(self) -> int
+
+impl[K: Hash, V] Contains[K] for dict[K, V]:
+    pure def contains(self, key: K) -> bool:
+        return key in self
+
+impl[T: Debug] Display for T?:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl[T: Debug, E: Debug] Display for Result[T, E]:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl Display for Ordering:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl[T: Debug] Debug for Box[T]:
+    pure def fmt_debug(self, mut f: Formatter):
+        self.boxed.fmt_debug(mut f)
+
+impl[T: Display] Display for Box[T]:
+    pure def fmt(self, mut f: Formatter):
+        self.boxed.fmt(mut f)
+
+impl[T] Iterator for Iter[T]:
+    type Item = T
+    @intrinsic("Iter.next")
+    @keeps(self)
+    pure def next(mut self) -> T?
+
+impl[T] Debug for Iter[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Display for Iter[T]:
+    @intrinsic("structural.display")
+    pure def fmt(self, mut f: Formatter)
+
+impl[K, V] Debug for Entry[K, V]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl FromLiteral[str] for String:
+    @intrinsic("str.to_string")
+    pure def from_literal(literal: str) -> String
+
+impl FromLiteral[str] for Path:
+    @intrinsic("Path.new")
+    pure def from_literal(literal: str) -> Path
+
+impl Num for int:
+    pass
+
+impl Num for f64:
+    pass
+
+impl Num for f32:
+    pass
+
+# ------------------------------------------------------------------ defaults
+# The builtin types with a natural first value implement `Default`: the
+# numbers' zero, `False`, the empty text and collections, `None`, and a
+# tuple of its elements' defaults. A capability, a channel or a `Mutex`
+# has none (D-051: a zero file handle is not fine).
+
+impl Default for int:
+    pure def default() -> int:
+        return 0
+
+impl Default for f64:
+    pure def default() -> f64:
+        return 0.0
+
+impl Default for f32:
+    pure def default() -> f32:
+        return 0.0
+
+impl Default for u8:
+    pure def default() -> u8:
+        return 0
+
+impl Default for u16:
+    pure def default() -> u16:
+        return 0
+
+impl Default for u32:
+    pure def default() -> u32:
+        return 0
+
+impl Default for u64:
+    pure def default() -> u64:
+        return 0
+
+impl Default for u128:
+    pure def default() -> u128:
+        return 0
+
+impl Default for i8:
+    pure def default() -> i8:
+        return 0
+
+impl Default for i16:
+    pure def default() -> i16:
+        return 0
+
+impl Default for i32:
+    pure def default() -> i32:
+        return 0
+
+impl Default for i128:
+    pure def default() -> i128:
+        return 0
+
+impl Default for bool:
+    pure def default() -> bool:
+        return False
+
+impl Default for str:
+    pure def default() -> str:
+        return ""
+
+impl Default for String:
+    pure def default() -> String:
+        return String.new()
+
+impl[T] Default for list[T]:
+    pure def default() -> list[T]:
+        return []
+
+impl[K: Hash, V] Default for dict[K, V]:
+    pure def default() -> dict[K, V]:
+        return dict()
+
+impl[T: Hash] Default for set[T]:
+    pure def default() -> set[T]:
+        return set()
+
+impl[T] Default for T?:
+    pure def default() -> T?:
+        return None
+
+impl[T0: Default] Default for (T0,):
+    pure def default() -> (T0,):
+        return (T0.default(),)
+
+impl[T0: Default, T1: Default] Default for (T0, T1):
+    pure def default() -> (T0, T1):
+        return (T0.default(), T1.default())
+
+impl[T0: Default, T1: Default, T2: Default] Default for (T0, T1, T2):
+    pure def default() -> (T0, T1, T2):
+        return (T0.default(), T1.default(), T2.default())
+
+impl[T0: Default, T1: Default, T2: Default, T3: Default] Default for (T0, T1, T2, T3):
+    pure def default() -> (T0, T1, T2, T3):
+        return (T0.default(), T1.default(), T2.default(), T3.default())

@@ -1,0 +1,7 @@
+# A wrong program: `break` outside a loop.
+
+def main():
+    let n = 3
+    if n > 2:
+        break
+    print(n)

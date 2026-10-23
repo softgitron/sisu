@@ -1,0 +1,41 @@
+import std.math
+
+const LIMIT: int = 3
+const GREETING: str = "hi"
+
+type Score = int
+
+pure def clamp(x: int, lo: int = 0, hi: int = 10) -> int:
+    if x < lo:
+        return lo
+    if x > hi:
+        return hi
+    return x
+
+def describe(name: str, *, loud: bool = False) -> String:
+    return if loud: name.to_uppercase() else: name.to_string()
+
+view struct Resource:
+    label: str
+
+impl Drop for Resource:
+    def drop(mut self):
+        print("closed {self.label}")
+
+def open(label: str) -> Resource:
+    return Resource(label=label)
+
+def main():
+    let s: Score = 7
+    print(s + LIMIT)
+    print(GREETING)
+    print(clamp(15))
+    print(clamp(-2))
+    print(clamp(5, hi=4))
+    print(describe("quiet"))
+    print(describe("loud", loud=True))
+    print(math.PI > 3.14 and math.PI < 3.15)
+    print((math.TAU / 2.0) == math.PI)
+    with open("file") as r:
+        print("using {r.label}")
+    print("after with")

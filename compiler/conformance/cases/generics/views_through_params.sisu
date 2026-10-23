@@ -1,0 +1,18 @@
+# A generic type instantiated with a reference holds what its arguments
+# hold (it is view-like, as `list[Token]` is, 04 "Views"), so it is used
+# while the referents live, and its borrows end at its last use.
+
+struct Pair[T]:
+    a: T
+    b: T
+
+def bigger[T: Ord](p: Pair[T]) -> ref T:
+    return if p.a >= p.b: ref p.a else: ref p.b
+
+def main():
+    var x = 1
+    let y = 5
+    let p = Pair(a=ref x, b=ref y)
+    print(bigger(p))
+    x += 1
+    print(x)

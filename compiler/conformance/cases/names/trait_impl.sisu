@@ -1,0 +1,9 @@
+struct P:
+    x: int
+
+impl Display for P:
+    def fmt(self) -> String:
+        return "p"
+
+def main():
+    pass

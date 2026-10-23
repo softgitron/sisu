@@ -1,0 +1,20 @@
+# A program's own type may have the name of one in the prelude (`Box`,
+# `Path`): the program's name means its own type, and the two stay apart
+# when the program runs.
+
+@derive(Debug)
+struct Box:
+    width: int
+    height: int
+
+struct Path:
+    steps: list[String]
+
+def area(b: Box) -> int:
+    return b.width * b.height
+
+def main():
+    let b = Box(width=4, height=10)
+    print("{b:?} has area {area(b)}")
+    let p = Path(steps=["north".to_string(), "east".to_string()])
+    print(p.steps.join(" then "))

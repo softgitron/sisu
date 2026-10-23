@@ -1,0 +1,29 @@
+# Compile-time code in closures (08, "Reflection"; decision 251): a
+# closure's block in a template may have `comptime for` and `comptime if`
+# among its statements, unfolded where the block is, and a closure's
+# expression may use the template's compile-time values.
+
+struct Point:
+    x: int
+    y: int
+
+def each(n: int, body: (int) -> ()):
+    for i in range(n):
+        body(i)
+
+def report[T](value: T) -> list[String]:
+    var out: list[String] = []
+    each(2) do i:
+        comptime for f in reflect.fields_of(T):
+            if i == 0:
+                out.push("{f.name}={value.[f]}")
+            else:
+                out.push("again {f.name}")
+    each(1) do:
+        out.push("{len(reflect.fields_of(T))} fields")
+    let named = (prefix: String) -> "{prefix} {reflect.name_of(T)}"
+    out.push(named(String("a")))
+    return out
+
+def main():
+    print(report(Point(x=1, y=2)))

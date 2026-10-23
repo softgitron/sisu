@@ -1,0 +1,8 @@
+# A block header that ends in `:` with a bracket still open, followed by
+# an indented block: the bracket was never closed. One diagnostic.
+def f(x: int -> int:
+    let y = 1
+    return y
+
+def main():
+    print(f(1))

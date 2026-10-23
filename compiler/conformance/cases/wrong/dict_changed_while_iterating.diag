@@ -1,0 +1,3 @@
+7:17-7:32 E0405 borrow.mut-while-borrowed name="stock" line="5" end="7"
+  label 5:14-5:19 borrow.borrowed-here
+  label 5:5-5:26 borrow.later-used

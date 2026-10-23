@@ -1,0 +1,2 @@
+6:9-6:20 E0410 borrow.store-into-caller name="text" param="out" function="split_into"
+  label 4:36-4:45 borrow.declared-here name="text"

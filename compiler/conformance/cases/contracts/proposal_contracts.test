@@ -1,0 +1,16 @@
+test "binary search finds every element" ... ok
+test "contract of binary_search" ... ok
+test "contract of Account.withdraw" ... FAILED
+test "contract of Account.try_withdraw" ... ok
+
+test "contract of Account.withdraw" ... FAILED
+panic: the property failed for (Account(balance=Money(cents=0), limit=Money(cents=0)), Money(cents=1)) (case 4, shrunk 66 times)
+  it panicked: invariant of `Account` failed: self.balance >= -self.limit
+    self.balance >= -self.limit
+    │               ││
+    Money(cents=-1) │Money(cents=0)
+                    Money(cents=0)
+  at test "contract of Account.withdraw" (<arbitrary>/main.sisu:49:5)
+replay: sisu test --replay 1-2c6ad3a430e248be-0.0.1-t2-s0-r0-c0.0.0.0.0.1 proposal_contracts.sisu
+
+3 passed, 1 failed, 0 blocked

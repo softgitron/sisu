@@ -1,0 +1,4 @@
+panic: overdrawn by 93
+  at Account.take (mutex_poison.sisu:16:13)
+  at withdraw (mutex_poison.sisu:27:5)
+  at main (mutex_poison.sisu:34:5)

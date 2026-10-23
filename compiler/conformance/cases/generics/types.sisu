@@ -1,0 +1,60 @@
+# Generic structs and enums, their methods (`impl[T] Stack[T]`), methods
+# with their own parameters, and defaulted type parameters (D-060's form).
+
+struct Stack[T]:
+    items: list[T]
+
+impl[T] Stack[T]:
+    def new() -> Stack[T]:
+        return Stack(items=[])
+    def push(mut self, own x: T):
+        self.items.push(x)
+    def pop(mut self) -> T?:
+        return self.items.pop()
+    def peek(self) -> ref T?:
+        return self.items.last()
+    def size(self) -> int:
+        return len(self.items)
+    # `f` may return what it captures, or a part of an item: both lend.
+    def map_all[U](self, f: (ref T) -> U) -> Stack[U] from self, f:
+        return Stack(items=[f(x) for x in self.items])
+
+enum Either[L, R]:
+    Left(L)
+    Right(R)
+
+impl[L: Display, R: Display] Either[L, R]:
+    def describe(self) -> String:
+        return match self:
+            case Left(x): "left {x}"
+            case Right(y): "right {y}"
+
+def lefts[L: Copy, R](xs: list[Either[L, R]]) -> list[L]:
+    var out: list[L] = []
+    for x in xs:
+        match x:
+            case Left(l):
+                out.push(l)
+            case Right(_):
+                pass
+    return out
+
+struct Tagged[T, Tag = str]:
+    value: T
+    tag: Tag
+
+def main():
+    var s: Stack[String] = Stack.new()
+    s.push("a".to_string())
+    s.push("bb".to_string())
+    print(s.size())
+    print(s.peek()?.len() ?? 0)
+    let lens = s.map_all(x -> len(x))
+    print(lens.items)
+    print(s.pop() ?? "")
+    print(s.size())
+    let es: list[Either[int, str]] = [Left(1), Right("r"), Left(3)]
+    print([e.describe() for e in es])
+    print(lefts(es))
+    let x: Tagged[int] = Tagged(value=1, tag="one")
+    print("{x.value} {x.tag}")

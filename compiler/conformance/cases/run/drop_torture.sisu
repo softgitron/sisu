@@ -1,0 +1,94 @@
+# The Phase 2 drop-order torture program (18, "Exit criteria"): nested
+# scopes, early return, `?`, conditional moves and a panic inside a loop,
+# each value with a logging Drop. 04, rule 6: at the end of a scope its
+# values drop in reverse declaration order, a value's Drop before its
+# fields', and unwinding drops exactly what is live.
+
+error Stop:
+    Early
+
+view struct Log:
+    name: str
+
+impl Drop for Log:
+    def drop(mut self):
+        print("  drop {self.name}")
+
+view struct Outer:
+    label: str
+    a: Log
+    b: Log
+
+impl Drop for Outer:
+    def drop(mut self):
+        print("  drop outer {self.label} (fields next)")
+
+def keep(own l: Log):
+    print("  keep {l.name}")
+
+def nested():
+    print("nested:")
+    let a = Log(name="a")
+    if True:
+        let b = Log(name="b")
+        if True:
+            let c = Log(name="c")
+        let d = Log(name="d")
+    let e = Log(name="e")
+
+def early(stop: bool) -> int:
+    print("early({stop}):")
+    let a = Log(name="a")
+    if stop:
+        let b = Log(name="b")
+        return 1
+    let c = Log(name="c")
+    return 2
+
+def fails() -> int ! Stop:
+    return Err(Early)
+
+def propagate() -> int ! Stop:
+    print("propagate:")
+    let a = Log(name="a")
+    let n = fails()?
+    let b = Log(name="b")
+    return Ok(n)
+
+def moves(flag: bool):
+    print("moves({flag}):")
+    let a = Log(name="a")
+    let b = Log(name="b")
+    if flag:
+        keep(a)
+    print("  end of moves")
+
+def fields():
+    print("fields:")
+    let o = Outer(label="o", a=Log(name="o.a"), b=Log(name="o.b"))
+
+def loop_panic():
+    print("loop_panic:")
+    let before = Log(name="before")
+    for i in range(3):
+        let item = Log(name="item")
+        if i == 1:
+            let xs: list[int] = []
+            print("  panicking at {i}")
+            print(xs[i])
+        print("  iteration {i} done")
+
+def main():
+    nested()
+    print(early(True))
+    print(early(False))
+    match propagate():
+        case Ok(n):
+            print(n)
+        case Err(e):
+            print("propagate failed: {e}")
+    moves(True)
+    moves(False)
+    fields()
+    let survivor = Log(name="main")
+    loop_panic()

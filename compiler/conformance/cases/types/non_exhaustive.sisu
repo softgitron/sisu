@@ -1,0 +1,14 @@
+enum Light:
+    Red
+    Amber
+    Green
+
+def action(l: Light) -> str:
+    match l:
+        case Red:
+            return "stop"
+        case Green:
+            return "go"
+
+def main():
+    print(action(Amber))

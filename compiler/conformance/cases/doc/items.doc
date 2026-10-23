@@ -1,0 +1,259 @@
+<!-- items.md -->
+# `items`
+
+`sisu doc` on a single file (decision 258): a page with every kind of
+item. A single file shows everything, `pub` or not; its tests and its
+`@cfg(test)` helpers are left out, as `sisu build` leaves them out.
+
+The `##!` lines are the page's introduction, as Markdown.
+
+## Contents
+
+- [`Point`](#Point): A point in the plane.
+- [`Counter`](#Counter): A counter that never goes above its limit.
+- [`Shape`](#Shape): The shapes there are.
+- [`ShapeError`](#ShapeError): What reading a shape can go wrong with.
+- [`Area`](#Area): Something with an area.
+- [`MAX_SHAPES`](#MAX_SHAPES): The most shapes a drawing holds.
+- [`Drawing`](#Drawing): A drawing's shapes.
+- [`Size`](#Size): A size that is never negative.
+- [`parse`](#parse): Reads a shape from its name.
+- [`save`](#save): Draws a drawing to a file.
+- [`Studio`](#Studio): What a drawing needs from the world.
+- [`open`](#open): Opens a studio.
+- [`load`](#load): Reads a drawing back through any file system.
+- [`scale`](#scale): Not finished yet.
+
+<a id="Point"></a>
+## `Point`
+
+```sisu
+@derive(Eq)
+struct Point
+    ## Across.
+    x: int
+    ## Up, zero unless given.
+    y: int = 0
+    ## The origin.
+    const ORIGIN: Point
+
+impl Display for Point
+impl Point
+```
+
+A point in the plane.
+
+Two points are equal when their coordinates are.
+
+<a id="Point.steps"></a>
+### `Point.steps`
+
+```sisu
+def steps(self, other: Point) -> int
+```
+
+The distance to `other`, in steps along the axes.
+
+```sisu
+assert Point(x=1, y=2).steps(Point(x=4, y=6)) == 7
+```
+
+<a id="Point.moved"></a>
+### `Point.moved`
+
+```sisu
+def moved(self, dx: int) -> Point
+```
+
+The point moved by `dx` across.
+
+<a id="Counter"></a>
+## `Counter`
+
+```sisu
+struct Counter
+    count: int
+    limit: int
+    invariant 0 <= self.count <= self.limit
+```
+
+A counter that never goes above its limit.
+
+<a id="Counter.bump"></a>
+### `Counter.bump`
+
+```sisu
+def bump(mut self) -> bool
+    ensures self.count <= self.limit
+    # re-checks the invariant of `Counter` on return
+```
+
+Counts one more, up to the limit.
+
+<a id="Shape"></a>
+## `Shape`
+
+```sisu
+@derive(Eq)
+enum Shape
+    ## A circle around the origin.
+    Circle(radius: int)
+    Square(side: int)
+
+impl Area for Shape
+```
+
+The shapes there are.
+
+<a id="ShapeError"></a>
+## `ShapeError`
+
+```sisu
+@derive(Eq)
+error ShapeError
+    Empty
+    Unknown(name: String)
+    ..
+```
+
+What reading a shape can go wrong with.
+
+<a id="Area"></a>
+## `Area`
+
+```sisu
+trait Area
+    ## The unit the area is in.
+    type Unit
+```
+
+Something with an area.
+
+<a id="Area.area"></a>
+### `Area.area`
+
+```sisu
+def area(self) -> int
+```
+
+The area.
+
+<a id="Area.is_empty"></a>
+### `Area.is_empty`
+
+```sisu
+def is_empty(self) -> bool
+```
+
+Whether there is no area at all.
+
+<a id="MAX_SHAPES"></a>
+## `MAX_SHAPES`
+
+```sisu
+const MAX_SHAPES: int
+```
+
+The most shapes a drawing holds.
+
+<a id="Drawing"></a>
+## `Drawing`
+
+```sisu
+type Drawing = list[Shape]
+```
+
+A drawing's shapes.
+
+<a id="Size"></a>
+## `Size`
+
+```sisu
+type Size = int where self >= 0
+    def try_from(value: int) -> Size ! RefinementError
+```
+
+A size that is never negative.
+
+<a id="parse"></a>
+## `parse`
+
+```sisu
+def parse(text: str) -> Shape ! ShapeError  # inferred
+    requires len(text) < 100
+```
+
+Reads a shape from its name.
+
+The names are those `Shape` has, in lower case:
+
+```text
+circle 3
+square 2
+```
+
+```sisu
+assert parse("circle 2") == Ok(Circle(2))
+```
+
+<a id="save"></a>
+## `save`
+
+```sisu
+def save(fs: Fs, drawing: Drawing, path: Path) -> ! IoError
+```
+
+Draws a drawing to a file.
+
+Capabilities: `fs` (`Fs`).
+
+<a id="Studio"></a>
+## `Studio`
+
+```sisu
+struct Studio
+    fs: Fs
+    clock: Clock
+```
+
+What a drawing needs from the world.
+
+<a id="open"></a>
+## `open`
+
+```sisu
+def open(studio: Studio, name: str, wait: Duration)
+```
+
+Opens a studio.
+
+Capabilities: `studio` (`Fs`, `Clock`).
+
+<a id="load"></a>
+## `load`
+
+```sisu
+def load[F: FsOps](fs: F, path: Path) -> Drawing ! {IoError, ShapeError}  # inferred
+```
+
+Reads a drawing back through any file system.
+
+Capabilities: `fs` (`Fs`).
+
+<a id="scale"></a>
+## `scale`
+
+```sisu
+def scale(own d: Drawing, by: int) -> Drawing
+```
+
+Not finished yet.
+
+Unfinished: `todo("scale")`.
+
+## Implementations
+
+```sisu
+## Lists have areas too: the sum of their parts'.
+impl Area for list[Shape]
+```

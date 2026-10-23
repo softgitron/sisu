@@ -1,0 +1,13 @@
+# A value cannot be used after it was moved (04, rule 1); `.copy()` keeps
+# a value usable.
+
+struct User:
+    name: String
+
+def archive(own u: User):
+    print("archived {u.name}")
+
+def main():
+    let roni = User(name="Roni".to_string())
+    archive(roni)
+    print(roni.name)

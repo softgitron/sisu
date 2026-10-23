@@ -1,0 +1,3 @@
+borrows live on line 16 of explain_borrow.sisu, in `main`:
+  a shared borrow of `text` from 15:29, held by `best`, `words`, used until 18:15
+  a shared borrow of `words` from 16:24, held by a temporary, used until 16:16

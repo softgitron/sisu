@@ -1,0 +1,5 @@
+test "a crash keeps what was synced and loses the rest" ... ok
+test "a file synced without its name is lost whole" ... ok
+test "a directory made but not synced goes with what is in it" ... ok
+test "each node has a file system of its own" ... ok
+4 passed, 0 failed, 0 blocked

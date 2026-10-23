@@ -1,0 +1,21 @@
+##! `textkit`, a library: its root module is `src/lib.sisu`.
+
+pub const VERSION: str = "textkit 0.4.2"
+
+## Each word with its first letter in upper case, joined by spaces.
+pub def title(words: list[str]) -> String:
+    let parts = [cap(w) for w in words]
+    return parts.join(" ")
+
+## Visible to every module of `textkit`, and to no other package.
+pub(package) def cap(w: str) -> String:
+    var out = String()
+    for c in w.chars():
+        if len(out) == 0:
+            out += "{c}".to_uppercase()
+        else:
+            out += "{c}"
+    return out
+
+test "a dependency's tests are its own":
+    assert title(["a"]) == "A"

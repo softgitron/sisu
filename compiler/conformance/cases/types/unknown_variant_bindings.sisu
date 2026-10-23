@@ -1,0 +1,15 @@
+enum Shape:
+    Circle(r: f64)
+    Square(side: f64)
+
+def perimeter(s: Shape) -> f64:
+    match s:
+        case Circle(r):
+            return 6.28 * r
+        case Triangle(a, b, c):
+            return a + b + c
+        case _:
+            return 0.0
+
+def main():
+    print(perimeter(Circle(r=1.0)))

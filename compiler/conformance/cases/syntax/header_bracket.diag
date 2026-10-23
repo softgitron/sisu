@@ -1,0 +1,2 @@
+3:6-3:7 E0009 lex.unclosed-bracket open="("
+  fix lex.close-bracket 3:13-3:13 ")"

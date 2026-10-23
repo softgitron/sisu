@@ -1,0 +1,478 @@
+##! `@must_consume` (stage 0's `sisu-borrowck/src/consume.rs`; D-054,
+##! D-064): a value of a must-consume type (or a container holding one) must
+##! be passed to an `own` parameter; a `drop` of one on a normal path is an
+##! error. Drops in cleanup blocks are the unwinding path, which is exempt,
+##! and so are the type's own methods, where its values end (`close(own
+##! self)` drops `self`).
+##!
+##! Consuming iteration discharges a container: `for r in own receipts`
+##! moves the list into an iterator, and the iterator may be dropped once
+##! its `Iter.next` has returned `None` on every path to the drop. Leaving
+##! the loop early (`break`, `return`, `?`) drops an iterator that may
+##! still hold values, which is the error 04 describes.
+
+import stage1.borrowck.elaborate
+from stage1.borrowck.finding import Finding, param
+from stage1.borrowck.init import Analysis
+from stage1.borrowck.names import is_named, is_overwrite, place_name, temp_source
+from stage1.borrowck.types import Types
+from stage1.diag import Msg
+from stage1.sir import (
+    Callee,
+    FnKind,
+    Function,
+    LocalId,
+    Operand,
+    Place,
+    Program,
+    Rvalue,
+    StatementKind,
+    Terminator,
+    Type,
+)
+from stage1.sir.write import ty as type_text
+
+## The unique statement that assigns a local, if there is exactly one.
+pure def unique_def(f: Function, l: LocalId) -> StatementKind?:
+    var found: StatementKind? = None
+    for b in f.blocks:
+        for s in b.stmts:
+            var d: Place? = None
+            match s.kind:
+                case StatementKind.Assign(p, _):
+                    d = Some(p.copy())
+                case StatementKind.Call(p, _, _):
+                    d = Some(p.copy())
+                case _:
+                    pass
+            let p = d else:
+                continue
+            if p.local == l and p.proj.is_empty():
+                if found.is_some():
+                    return None
+                found = Some(s.kind.copy())
+    return found
+
+## For each local, where the one statement that defines it as a whole is
+## (its block and index), when exactly one does: `unique_def` asked of
+## every local at once, which the dataflow below asks of its blocks in
+## every round.
+pure def unique_defs(f: Function) -> list[(int, int)?]:
+    let nl = len(f.locals)
+    var count: list[int] = []
+    var at: list[(int, int)?] = []
+    var l = 0
+    while l < nl:
+        count.push(0)
+        at.push(None)
+        l += 1
+    for b in range(len(f.blocks)):
+        let block = ref f.blocks[b]
+        for si in range(len(block.stmts)):
+            match block.stmts[si].kind:
+                case StatementKind.Assign(p, _) | StatementKind.Call(p, _, _):
+                    if p.proj.is_empty() and p.local.index < nl:
+                        count[p.local.index] += 1
+                        at[p.local.index] = Some((b, si))
+                case _:
+                    pass
+    var out: list[(int, int)?] = []
+    l = 0
+    while l < nl:
+        if count[l] == 1:
+            out.push(at[l])
+        else:
+            out.push(None)
+        l += 1
+    return out
+
+## `unique_def`, from the table `unique_defs` makes.
+pure def unique_def_in(f: Function, defs: list[(int, int)?], l: LocalId) -> StatementKind?:
+    if l.index >= len(defs):
+        return None
+    let (b, si) = defs[l.index] else:
+        return None
+    return Some(f.blocks[b].stmts[si].kind.copy())
+
+## For a block ending in the `for` loop's switch on `Iter.next`'s result,
+## the iterator local.
+pure def loop_iterator(f: Function, defs: list[(int, int)?], b: int) -> LocalId?:
+    let Terminator.Switch(value, _, _) = f.blocks[b].term.copy() else:
+        return None
+    let Operand.Copy(d) = value else:
+        return None
+    let k1 = unique_def_in(f, defs, d.local) else:
+        return None
+    let StatementKind.Assign(_, Rvalue.Discriminant(n)) = k1 else:
+        return None
+    if not n.proj.is_empty():
+        return None
+    let k2 = unique_def_in(f, defs, n.local) else:
+        return None
+    let StatementKind.Call(_, Callee.Intrinsic(name, _), args) = k2 else:
+        return None
+    if name != "Iter.next" or args.is_empty():
+        return None
+    let Operand.Copy(r) = args[0].copy() else:
+        return None
+    let k3 = unique_def_in(f, defs, r.local) else:
+        return None
+    let StatementKind.Assign(_, Rvalue.Ref(it, mutable)) = k3 else:
+        return None
+    if mutable and it.proj.is_empty():
+        return Some(it.local)
+    return None
+
+## Calls of intrinsics that may drop a must-consume value given to them.
+pure def dropping_intrinsics(f: Function, types: Types, p: Program, mut out: list[Finding]):
+    for b in range(len(f.blocks)):
+        for si in range(len(f.blocks[b].stmts)):
+            let s = ref f.blocks[b].stmts[si]
+            let StatementKind.Call(_, Callee.Intrinsic(name, _), args) = s.kind.copy() else:
+                continue
+            for i in range(len(args)):
+                var place: Place? = None
+                var given: Type? = None
+                var by_move = False
+                match args[i]:
+                    case Operand.Move(q):
+                        place = Some(q.copy())
+                        given = types.place_ty(f, q)
+                        by_move = True
+                    case Operand.Copy(q):
+                        if let Some(Type.Ref(inner, True)) = types.place_ty(f, q):
+                            place = Some(q.copy())
+                            given = Some(inner[0].copy())
+                    case _:
+                        pass
+                let pl = place else:
+                    continue
+                let ty = given else:
+                    continue
+                if not types.must_consume(ty):
+                    continue
+                # Its contract says it keeps what this argument holds.
+                if types.intrinsic_keeps(p, name, i):
+                    continue
+                var shown = pl.copy()
+                if not by_move:
+                    # A `mut` argument is a reference made for the call:
+                    # name what it borrows.
+                    if let Some(x) = borrowed_place(f, pl.local):
+                        shown = x
+                let shown_name = place_name(types, f, shown)
+                var fd = Finding.new(Msg.BorrowMustConsumeIntrinsic, f, s.loc).with(
+                    "callee", name
+                ).with_arg("name", shown_name.copy()).with("ty", type_text(ty)).note(
+                    Msg.BorrowConsumeEach, []
+                ).at(b, si)
+                let decl = f.locals[shown.local.index].loc
+                if decl.is_some() and is_named(f, shown.local):
+                    fd = fd.label(decl, Msg.BorrowDeclaredHere, [param("name", shown_name)])
+                else:
+                    if let Some(made) = temp_source(f, shown.local):
+                        fd = fd.label(Some(made), Msg.BorrowMadeHere, [])
+                out.push(fd)
+
+## The place a reference local was made to borrow, when it was made once.
+pure def borrowed_place(f: Function, r: LocalId) -> Place?:
+    let k = unique_def(f, r) else:
+        return None
+    if let StatementKind.Assign(_, Rvalue.Ref(q, _)) = k:
+        return Some(q.copy())
+    return None
+
+## The collection a consuming loop's iterator was made from: `it =
+## iter.own(move xs)` gives `xs`.
+pure def consumed_collection(f: Function, it: LocalId) -> LocalId?:
+    let k = unique_def(f, it) else:
+        return None
+    let StatementKind.Call(_, Callee.Intrinsic(name, _), args) = k else:
+        return None
+    if args.is_empty():
+        return None
+    if let Operand.Move(q) = args[0]:
+        if name == "iter.own" and q.proj.is_empty():
+            return Some(q.local)
+    return None
+
+## Whether `f` is a method of the type `ty` names: the type's own methods
+## are where its values may end (a `close(own self)` drops `self`).
+pure def own_method(f: Function, ty: Type) -> bool:
+    let Type.Named(n, _) = ty else:
+        return False
+    let k = n.byte_len()
+    return f.name.starts_with(n) and f.name.byte_len() > k and f.name.byte_at(k) == 46
+
+## The function's must-consume findings, and whether finding them read no
+## other function's body (a generic callee given a must-consume type
+## argument is read, instantiated).
+pub pure def check(f: Function, types: Types, p: Program) -> (list[Finding], bool):
+    # Drop glue drops the parts of a value whose own drop was checked where
+    # it happens.
+    if f.kind == FnKind.Glue:
+        return ([], True)
+    var out = check_body(f, types, p)
+    let alone = generic_calls(f, types, p, mut out, 0)
+    return (out, alone)
+
+## A call of a generic function with a must-consume type argument: the body
+## instantiated with the call's types must consume what it is given too,
+## or the generic function would drop it unseen (E0397). The check runs per
+## instantiation, as 18 describes for monomorphised code.
+pure def generic_calls(
+    f: Function, types: Types, p: Program, mut out: list[Finding], depth: int
+) -> bool:
+    var alone = True
+    for b in range(len(f.blocks)):
+        for si in range(len(f.blocks[b].stmts)):
+            let s = ref f.blocks[b].stmts[si]
+            let (name, tys) = call_target(s.kind, types, p) ?? (String.new(), [])
+            if name.is_empty():
+                continue
+            var found: (int, Type)? = None
+            for i in range(len(tys)):
+                if not tys[i].has_params() and types.must_consume(tys[i]):
+                    found = Some((i, tys[i].copy()))
+                    break
+            if let Some((i, ty)) = found:
+                if let Some(g) = p.function(name):
+                    alone = False
+                    if instance_drops(g, tys, types, p, depth):
+                        var param_name = "${i}"
+                        if i < len(g.type_params):
+                            param_name = g.type_params[i].copy()
+                        out.push(
+                            Finding.new(Msg.TypeMustConsumeArgument, f, s.loc).with(
+                                "ty", type_text(ty)
+                            ).with("param", param_name).note(Msg.BorrowConsumeBeforeCall, []).at(
+                                b, si
+                            )
+                        )
+    return alone
+
+## The function a call runs and its type arguments: a function's, or
+## through a trait, for types known here, the impl's method.
+pure def call_target(s: StatementKind, types: Types, p: Program) -> (String, list[Type])?:
+    match s:
+        case StatementKind.Call(_, Callee.Fn(name, tys), _):
+            return Some((name.copy(), tys.copy()))
+        case StatementKind.Call(_, Callee.Trait(name, tys), _):
+            for t in tys:
+                if t.has_params():
+                    return None
+            return types.trait_target(p, name, tys)
+        case _:
+            return None
+
+## Whether `g` with its type parameters replaced by `tys` drops a
+## must-consume value (or passes one to a generic function that does).
+pure def instance_drops(g: Function, tys: list[Type], types: Types, p: Program, depth: int) -> bool:
+    # A recursion this deep is not followed; assume the worst.
+    if depth > 8:
+        return True
+    var inst = g.copy()
+    for k in range(len(inst.locals)):
+        inst.locals[k].ty = inst.locals[k].ty.subst(tys)
+    for bi in range(len(inst.blocks)):
+        for si in range(len(inst.blocks[bi].stmts)):
+            let k = inst.blocks[bi].stmts[si].kind.copy()
+            if let StatementKind.Call(d, c, args) = k:
+                let callee = match c:
+                    case Callee.Fn(n, ts): Callee.Fn(name=n.copy(), args=subst_all(ts, tys))
+                    case Callee.Trait(n, ts): Callee.Trait(name=n.copy(), args=subst_all(ts, tys))
+                    case Callee.Intrinsic(n, ts): Callee.Intrinsic(
+                        name=n.copy(), args=subst_all(ts, tys)
+                    )
+                    case _: c.copy()
+                inst.blocks[bi].stmts[si].kind = StatementKind.Call(
+                    dest=d.copy(), callee=callee, args=args.copy()
+                )
+    # Its drops placed for the instance's types, as for any function.
+    let init = Analysis.run(inst, types)
+    elaborate.elaborate(mut inst, init, types)
+    var found = check_body(inst, types, p)
+    _ = generic_calls(inst, types, p, mut found, depth + 1)
+    return not found.is_empty()
+
+pure def subst_all(ts: list[Type], args: list[Type]) -> list[Type]:
+    var out: list[Type] = []
+    for t in ts:
+        out.push(t.subst(args))
+    return out
+
+## What a statement does to the exhausted iterators: assigning a local, or
+## borrowing it with `mut`, makes it unknown again.
+## What a statement does to the exhausted iterators: one written again,
+## or borrowed with `mut`, is not known to be exhausted. `dense` gives each
+## local's place in the state, -1 for a local that is no loop's iterator.
+pure def kill(s: StatementKind, dense: list[int], mut st: list[bool]):
+    match s:
+        case StatementKind.Assign(p, rv):
+            if p.proj.is_empty():
+                forget(p.local, dense, mut st)
+            if let Rvalue.Ref(q, True) = rv:
+                forget(q.local, dense, mut st)
+        case StatementKind.Call(dest, _, _):
+            if dest.proj.is_empty():
+                forget(dest.local, dense, mut st)
+        case _:
+            pass
+
+pure def forget(l: LocalId, dense: list[int], mut st: list[bool]):
+    if l.index < len(dense) and dense[l.index] >= 0:
+        st[dense[l.index]] = False
+
+pure def check_body(f: Function, types: Types, p: Program) -> list[Finding]:
+    let n = len(f.blocks)
+    let nl = len(f.locals)
+    if n == 0:
+        return []
+    # Which blocks end a `for` loop's step, and on which iterator: the same
+    # in every round. Only an iterator can be exhausted, so the state has a
+    # place for each (`dense`) rather than for every local.
+    let defs = unique_defs(f)
+    var iterators: list[LocalId?] = []
+    var dense: list[int] = []
+    for _ in range(nl):
+        dense.push(-1)
+    var tracked = 0
+    for b in range(n):
+        let it = loop_iterator(f, defs, b)
+        if let Some(i) = it:
+            if dense[i.index] < 0:
+                dense[i.index] = tracked
+                tracked += 1
+        iterators.push(it)
+    # Exhausted iterators: a must analysis (intersection); a block not yet
+    # reached has no state.
+    var empty: list[bool] = []
+    for _ in range(tracked):
+        empty.push(False)
+    var entry: list[list[bool]?] = []
+    for _ in range(n):
+        entry.push(None)
+    entry[0] = Some(empty.copy())
+    var changed = True
+    var rounds = 0
+    while changed and rounds < 1000:
+        changed = False
+        rounds += 1
+        for b in range(n):
+            let start = entry[b].copy() else:
+                continue
+            var st = start
+            if tracked > 0:
+                for s in f.blocks[b].stmts:
+                    kill(s.kind, dense, mut st)
+            # Each successor's state is met into its entry as it is made,
+            # in the order of the edges: each is made from `st` alone.
+            let it = iterators[b]
+            match f.blocks[b].term:
+                case Terminator.Goto(t):
+                    if meet_into(mut entry, t.index, st, tracked):
+                        changed = True
+                case Terminator.Switch(_, cases, default):
+                    for (k, t) in cases:
+                        var s2 = st.copy()
+                        if let Some(i) = it:
+                            s2[dense[i.index]] = k != 0
+                        if meet_into(mut entry, t.index, s2, tracked):
+                            changed = True
+                    var s2 = st.copy()
+                    if let Some(i) = it:
+                        s2[dense[i.index]] = True
+                    if meet_into(mut entry, default.index, s2, tracked):
+                        changed = True
+                case _:
+                    pass
+            if let Some(u) = f.blocks[b].unwind:
+                if meet_into(mut entry, u.index, st, tracked):
+                    changed = True
+    # An intersection converges too; if the bound is reached anyway, no
+    # iterator counts as exhausted, which only rejects more.
+    if changed:
+        for b in range(n):
+            if entry[b].is_some():
+                entry[b] = Some(empty.copy())
+    var out: list[Finding] = []
+    dropping_intrinsics(f, types, p, mut out)
+    # Whether a local's value must be consumed, asked once a local.
+    var whole: dict[int, bool] = {}
+    for b in range(n):
+        if f.blocks[b].cleanup:
+            continue
+        let start = entry[b].copy() else:
+            continue
+        var st = start
+        for si in range(len(f.blocks[b].stmts)):
+            let s = ref f.blocks[b].stmts[si]
+            if let StatementKind.Drop(place, _) = s.kind:
+                if let Some(ty) = types.place_ty(f, place):
+                    var must = False
+                    if place.proj.is_empty() and whole.contains(place.local.index):
+                        must = whole.get(place.local.index) ?? False
+                    else:
+                        must = types.must_consume(ty)
+                        if place.proj.is_empty():
+                            _ = whole.insert(place.local.index, must)
+                    if must:
+                        var exhausted = False
+                        if place.proj.is_empty():
+                            if let Type.Named(tn, _) = ty:
+                                let at = dense[place.local.index]
+                                exhausted = tn == "Iter" and at >= 0 and st[at]
+                        if not exhausted and not own_method(f, ty):
+                            out.push(must_consume_finding(f, types, b, si, place, ty))
+            kill(s.kind, dense, mut st)
+    return out
+
+## Meets `s` into block `t`'s entry, in place, or makes it the entry of a
+## block not reached yet; returns whether the entry changed.
+pure def meet_into(mut entry: list[list[bool]?], t: int, s: list[bool], tracked: int) -> bool:
+    if t >= len(entry):
+        return False
+    if let Some(e) = ref mut entry[t]:
+        var narrowed = False
+        var i = 0
+        while i < tracked:
+            if e[i] and not s[i]:
+                e[i] = False
+                narrowed = True
+            i += 1
+        return narrowed
+    entry[t] = Some(s.copy())
+    return True
+
+## The finding for a drop of a must-consume value: a consuming loop's
+## iterator is described by the collection it consumes.
+pure def must_consume_finding(
+    f: Function, types: Types, b: int, si: int, place: Place, ty: Type
+) -> Finding:
+    let s = ref f.blocks[b].stmts[si]
+    var collection: LocalId? = None
+    if place.proj.is_empty():
+        collection = consumed_collection(f, place.local)
+    var shown = place.copy()
+    var shown_ty = ty.copy()
+    if let Some(c) = collection:
+        shown = Place.local(c)
+        shown_ty = f.locals[c.index].ty.copy()
+    let name = place_name(types, f, shown)
+    var at_end = False
+    if let Some(l) = s.loc:
+        at_end = l.line == l.end_line and l.col == l.end_col
+    let overwrite = is_overwrite(f, b, place)
+    let m = if at_end or overwrite: Msg.BorrowMustConsume else: Msg.BorrowMustConsumeExit
+    var fd = Finding.new(m, f, s.loc).with_arg("name", name.copy()).with(
+        "ty", type_text(shown_ty)
+    ).at(b, si)
+    let decl = f.locals[shown.local.index].loc
+    if decl.is_some() and is_named(f, shown.local):
+        fd = fd.label(decl, Msg.BorrowDeclaredHere, [param("name", name.copy())])
+    else:
+        if let Some(made) = temp_source(f, shown.local):
+            fd = fd.label(Some(made), Msg.BorrowMadeHere, [])
+    if collection.is_some():
+        fd = fd.note(Msg.BorrowUnvisitedRest, [param("name", name)])
+    return fd

@@ -1,0 +1,23 @@
+maybe(True):
+  keep a
+  drop a
+  end of maybe
+  drop b
+maybe(False):
+  keep b
+  drop b
+  end of maybe
+  drop a
+in_loop(3):
+  keep item
+  drop item
+  kept item 1 until the end of the iteration
+  drop item
+  keep item
+  drop item
+assigned_later(True):
+  x is x
+  end of assigned_later
+  drop x
+assigned_later(False):
+  end of assigned_later

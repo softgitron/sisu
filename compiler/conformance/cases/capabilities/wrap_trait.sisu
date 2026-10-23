@@ -1,0 +1,59 @@
+# `cap.Wrap` of a value of one of the program's own traits implements that
+# trait (D-075): each call is shown to the interceptor before it runs and
+# after it returns, and forwarded. The compiler writes the impl from the
+# trait's methods, for a trait whose methods can all be forwarded.
+
+error MailError:
+    Refused(reason: String)
+
+trait Mailer:
+    def send(self, to: str, body: str) -> ! MailError
+    def sent(self) -> int
+    def reset(mut self, own note: String)
+    ## A provided method is forwarded too: the inner value's own runs.
+    def summary(self) -> String:
+        return "{self.sent()} sent"
+
+struct Smtp:
+    count: Cap[Mutex[int]]
+
+impl Mailer for Smtp:
+    def send(self, to: str, body: str) -> ! MailError:
+        if to == "nobody":
+            return Err(Refused(reason="no such address".to_string()))
+        self.count.get().lock().value += 1
+        return Ok(())
+    def sent(self) -> int:
+        return self.count.get().lock().value
+    def reset(mut self, own note: String):
+        print("reset: {note}")
+        self.count.get().lock().value = 0
+    def summary(self) -> String:
+        return "smtp: {self.sent()}"
+
+@derive(Copy)
+struct Audit:
+    lines: Cap[Mutex[list[String]]]
+
+impl cap.Interceptor for Audit:
+    def before(self, call: cap.Call):
+        self.lines.get().lock().value.push("> {call.capability}.{call.method}({call.args})")
+    def after(self, call: cap.Call, outcome: str):
+        self.lines.get().lock().value.push("< {call.method} = {outcome}")
+
+def welcome[M: Mailer](m: M, to: str) -> ! MailError:
+    m.send(to, "welcome")?
+    return Ok(())
+
+def main():
+    let audit = Audit(lines=Cap(Mutex(list())))
+    var m = cap.Wrap(inner=Smtp(count=Cap(Mutex(0))), hook=audit)
+    welcome(m, "ann@example.com").expect("sent")
+    print(welcome(m, "nobody"))
+    print(m.summary())
+    m.reset("done".to_string())
+    print(m.sent())
+    let d: Box[dyn Mailer] = Box(cap.Wrap(inner=Smtp(count=Cap(Mutex(5))), hook=audit))
+    print(d.sent())
+    for line in audit.lines.get().lock().value.iter():
+        print(line)

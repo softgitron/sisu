@@ -1,0 +1,6 @@
+def half(x: f64) -> f64:
+    return x / 2.0
+
+def main():
+    let n: int = "seven"
+    print(half(3))

@@ -1,0 +1,41 @@
+# Traits (03, "Traits"): required and provided methods, a provided method
+# an impl overrides, static dispatch through a bound, and method calls
+# resolved through the traits a type implements.
+
+trait Shape:
+    def area(self) -> f64
+    def name(self) -> String:
+        return "a shape of area {self.area()}"
+
+struct Circle:
+    r: f64
+
+struct Square:
+    side: f64
+
+impl Shape for Circle:
+    def area(self) -> f64:
+        return 3.0 * self.r * self.r
+
+impl Shape for Square:
+    def area(self) -> f64:
+        return self.side * self.side
+    def name(self) -> String:
+        return "a square"
+
+# Checked here, against the bound, not at each use.
+def total[S: Shape](xs: list[S]) -> f64:
+    var t = 0.0
+    for x in xs:
+        t += x.area()
+    return t
+
+def describe_all[S: Shape](xs: list[S]) -> list[String]:
+    return [x.name() for x in xs]
+
+def main():
+    print(total([Circle(r=1.0), Circle(r=2.0)]))
+    print(total([Square(side=3.0)]))
+    print(Circle(r=1.0).name())
+    print(Square(side=2.0).name())
+    print(describe_all([Circle(r=0.5)]))

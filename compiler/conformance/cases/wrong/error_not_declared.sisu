@@ -1,0 +1,20 @@
+# A wrong program: `?` passes on an error the function's result does not
+# declare.
+
+error Invalid:
+    Negative
+
+error Other:
+    Broken
+
+def check(n: int) -> int ! Invalid:
+    if n < 0:
+        return Err(Negative)
+    return Ok(n)
+
+def double(n: int) -> int ! Other:
+    let m = check(n)?
+    return Ok(m * 2)
+
+def main():
+    print(double(2))

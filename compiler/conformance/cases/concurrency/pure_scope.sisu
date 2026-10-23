@@ -1,0 +1,41 @@
+# A scope in `pure` code (06, "Effects"): fork-join stays legal, and a
+# failure is reported by spawn index, not by time: the lowest-index
+# failure is the result whatever the schedule, and only the tasks spawned
+# after a failing one are cancelled.
+# explore 30
+
+error Bad:
+    Negative(at: int)
+
+pure def check(i: int, x: int) -> int ! Bad:
+    if x < 0:
+        return Err(Negative(at=i))
+    var t = 0
+    for k in range(x):
+        t += k
+    return Ok(t)
+
+pure def checked(xs: list[int]) -> list[int] ! {Bad, TaskError}:
+    return task.scope do s:
+        var hs = list()
+        for i, x in enumerate(xs):
+            hs.push(s.spawn(() -> check(i, x)))
+        var out = list()
+        for h in hs:
+            out.push(h.join()?)
+        return Ok(out)
+
+pure def unjoined(xs: list[int]) -> int ! {Bad, TaskError}:
+    return task.scope do s:
+        for i, x in enumerate(xs):
+            s.spawn(() -> check(i, x))
+        return Ok(len(xs))
+
+def main():
+    print(checked([3, 4, 5]))
+    print(checked([3, -1, 5, -2]))
+    print(unjoined([1, 2]))
+    print(unjoined([-1, 2, -3, 4]))
+
+test "the lowest index fails, whatever the schedule":
+    assert unjoined([5, -7, 0, -9]) == Err(Negative(at=1))

@@ -1,0 +1,28 @@
+# `sisu fmt` writes `Option[T]` as `T?` (decision 152), but not where `T`
+# would then end in `?`: of `Option[Option[T]]` it writes the inner option
+# `T?`, `Option[T?]`.
+
+def depth(x: Option[Option[int]]) -> int:
+    match x:
+        case None:
+            return 0
+        case Some(None):
+            return 1
+        case Some(Some(_)):
+            return 2
+
+def deepest(x: Option[Option[Option[int]]]) -> bool:
+    return x.is_some()
+
+def viewed(x: ref Option[Option[int]]) -> bool:
+    return x.is_some()
+
+def main():
+    print(depth(None))
+    print(depth(Some(None)))
+    print(depth(Some(Some(3))))
+    print(deepest(Some(Some(None))))
+    let five: Option[Option[int]] = Some(Some(5))
+    print(viewed(ref five))
+    let all: list[Option[Option[str]]] = [None, Some(None), Some(Some("s"))]
+    print(all.len())

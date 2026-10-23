@@ -1,0 +1,3 @@
+9:13-9:39 E0409 borrow.store-in-plain-type ty="Handler" name="base"
+  label 9:25-9:38 borrow.borrowed-here
+  fix borrow.declare-view

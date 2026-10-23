@@ -1,0 +1,43 @@
+# A header without its indented block (E0101) is labelled at the keyword
+# that opens the block (`parse.opened-here`): the first place on the
+# header's line where the keyword is written as a whole word, which a
+# longer name (`matches`, `for_each`) is not, and a string can be.
+def main():
+    if ready:
+    print(1)
+    while ready:
+    print(2)
+    for for_each in xs:
+    print(3)
+    let matches = match x:
+    print(4)
+    with open() as f:
+    print(5)
+    if ready:
+        pass
+    elif done:
+    print(6)
+    let y = z else:
+    print(7)
+    xs.map("do") do x:
+    print(8)
+    unsafe:
+    print(9)
+    defer:
+    print(10)
+
+def lonely():
+
+struct Point:
+
+enum Color:
+
+trait Shape:
+
+impl Point:
+
+test "if it opens a block":
+
+def last():
+    match x:
+        case 1:

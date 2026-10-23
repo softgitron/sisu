@@ -1,0 +1,12 @@
+# A derive whose template stops in the prelude (08, "Derive"; decision
+# 238): an enum's default is one of its variants, which only an impl names.
+# The error is at the derive, and its label where the prelude's template
+# stopped, in the prelude's file.
+
+@derive(Default)
+enum Mode:
+    Fast
+    Slow
+
+def main():
+    print("modes")

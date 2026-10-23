@@ -9,6 +9,15 @@
 //!   The AST's `Drop` is iterative, so dropping a deep tree cannot overflow.
 //! * `naive`: a recursion `--naive-depth` (1M) calls deep, which exceeds every
 //!   reservation up to 8 MiB.
+//! * `framed` (with `--framed`, stackful strategies): the naive recursion with a
+//!   256-byte local array and a value with a destructor in every frame, the worst
+//!   case for the probe reserve. The harness's probe runs after the function's
+//!   prologue has allocated its frame, so it fires with up to a whole frame below
+//!   the limit, and the unwinder then runs that frame's drop code below it: the
+//!   reserve must cover the frame as well as the unwinder. (A compiler's probe that
+//!   compares the stack pointer minus the frame size before allocating removes the
+//!   frame term.) Run it with a reserve larger than the need, so that the need is
+//!   measured rather than overrun: `--framed --probe-reserve 16K`.
 //!
 //! For each case the run records whether it completed or failed with "stack
 //! exhausted" (and by which mechanism), the depth reached, the time, and whether
@@ -253,6 +262,22 @@ pub fn naive<P: StackProbe>(p: P, depth: u64, target: u64, reached: &AtomicU64) 
 
 type BoxFut = Pin<Box<dyn Future<Output = u64> + Send>>;
 
+/// `depth` levels of recursion with a 256-byte local and a destructor in every
+/// frame (the `framed` case).
+#[inline(never)]
+pub fn framed<P: StackProbe>(p: P, depth: u64, target: u64, reached: &AtomicU64) -> u64 {
+    p.check();
+    reached.store(depth, Relaxed);
+    let pad = black_box([depth as u8; 256]);
+    if depth == target {
+        return pad[0] as u64;
+    }
+    let guard = DropGuard::new();
+    let r = framed(p, black_box(depth + 1), target, reached);
+    drop(guard);
+    black_box(r) + pad[1] as u64
+}
+
 /// The stackless version: one boxed future per level.
 pub fn naive_async(depth: u64, target: u64, reached: Arc<AtomicU64>) -> BoxFut {
     Box::pin(async move {
@@ -313,7 +338,12 @@ fn reserve_used((low, limit): (usize, usize)) -> usize {
 pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
     let parse_depth = ctx.args.count("parse-depth", 10_000)? as usize;
     let naive_depth = ctx.args.count("naive-depth", 1_000_000)?;
-    let p = params(&[("parse_depth", parse_depth.to_string()), ("naive_depth", naive_depth.to_string())]);
+    let with_framed = ctx.args.flag("framed");
+    let mut pairs = vec![("parse_depth", parse_depth.to_string()), ("naive_depth", naive_depth.to_string())];
+    if with_framed {
+        pairs.push(("framed", "true".to_string()));
+    }
+    let p = params(&pairs);
     ctx.banner(&p);
     let (cases, healthy) = match ctx.args.imp.clone() {
         Impl::Tokio => {
@@ -334,7 +364,7 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
             if ctx.args.imp.is_stackless() {
                 stackless(&rt, parse_depth, naive_depth)
             } else {
-                stackful(&rt, parse_depth, naive_depth)
+                stackful(&rt, parse_depth, naive_depth, with_framed)
             }
         }
     };
@@ -360,6 +390,8 @@ pub fn run(ctx: &mut BenchCtx) -> Result<(), String> {
         ctx.metric(&p, None, &format!("{}_elapsed", c.name), c.elapsed.as_secs_f64() * 1e3, "ms");
         if c.name == "parse" {
             ctx.metric(&p, None, "parse_leaked_nodes", c.leaked_nodes as f64, "count");
+        } else if c.name == "framed" {
+            ctx.metric(&p, None, "framed_leaked_drop_guards", c.leaked_guards as f64, "count");
         } else {
             ctx.metric(&p, None, &format!("{}_leaked_drop_guards", c.name), c.leaked_guards as f64, "count");
         }
@@ -415,12 +447,17 @@ where
     }
 }
 
-fn stackful(rt: &Runtime, parse_depth: usize, naive_depth: u64) -> (Vec<CaseResult>, bool) {
+fn stackful(rt: &Runtime, parse_depth: usize, naive_depth: u64, with_framed: bool) -> (Vec<CaseResult>, bool) {
     rt.block_on(|| {
-        let cases = vec![
+        let mut cases = vec![
             run_case("parse", parse_depth as u64, |reached| Ok(parse_case(SplitStackProbe, parse_depth, reached))),
             run_case("naive", naive_depth, |reached| Ok(Ok(naive(SplitStackProbe, 0, naive_depth, reached) as i64))),
         ];
+        if with_framed {
+            cases.push(run_case("framed", naive_depth, |reached| {
+                Ok(Ok(framed(SplitStackProbe, 0, naive_depth, reached) as i64))
+            }));
+        }
         let healthy = rt::scope(|s| s.spawn(|| 7).join()).map(|r| r == Ok(7)).unwrap_or(false);
         (cases, healthy)
     })

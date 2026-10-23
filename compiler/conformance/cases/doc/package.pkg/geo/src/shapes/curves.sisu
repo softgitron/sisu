@@ -1,0 +1,9 @@
+##! Curves, a module under `geo.shapes`.
+
+## A curve through its points.
+pub struct Curve:
+    pub points: list[f64]
+
+## The length of a curve, which is not written yet.
+pub def length(c: Curve) -> f64:
+    return todo("length")

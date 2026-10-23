@@ -1,0 +1,2 @@
+schema,run_id,timestamp_utc,machine_id,implementation,benchmark,strategy,reservation_bytes,stack_bytes,threads,tasks,params,metric,value,unit,status,note
+1,20261014T011220Z-485,2026-10-14T01:12:20Z,vm,go,idle-connections,go,,,4,9900,connections=9900;go=go1.24.7,connect_time,598.409,ms,ok,

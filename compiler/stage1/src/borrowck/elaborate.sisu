@@ -1,0 +1,340 @@
+##! Drop elaboration (stage 0's `sisu-borrowck/src/elaborate.rs`): every
+##! `drop` that lowering emitted is decided by the initialisation dataflow
+##! at its point.
+##!
+##! - initialised on every path: kept;
+##! - uninitialised on every path (moved, or a payload of a variant that is
+##!   not active there): removed;
+##! - moved as a whole on some paths: guarded by a drop flag, `drop _3 if
+##!   _9`, where the flag is a `bool` local that is `true` exactly while the
+##!   path holds a value;
+##! - partly moved: opened into drops of the parts that remain, fields in
+##!   reverse declaration order (04, rule 6), each decided the same way. A
+##!   type that implements `Drop` is never opened, so its `Drop` always sees
+##!   the whole value. A value one of whose parts is moved or dropped on its
+##!   own somewhere in the function ("split") is opened whenever it may be
+##!   uninitialised, even where every part has the same two bits as the
+##!   whole: one flag cannot say whether a path moved the whole or only that
+##!   part (decision 220).
+##!
+##! Flags are set after every statement that initialises their path (or a
+##! path containing it) and cleared before every statement that moves,
+##! drops or ends it; a flagged `drop` clears its own flag as it runs. A
+##! drop outside a cleanup block still ends its block afterwards.
+
+from stage1.borrowck.init import Analysis, State, targets
+from stage1.borrowck.paths import Cover
+from stage1.borrowck.types import Types
+from stage1.sir import (
+    BasicBlock,
+    BlockId,
+    Const,
+    Function,
+    LocalDecl,
+    LocalId,
+    Operand,
+    Place,
+    Proj,
+    Rvalue,
+    Statement,
+    StatementKind,
+    Terminator,
+    Type,
+)
+
+enum Decision:
+    Keep
+    Remove
+    Flag(int)
+    Parts(list[(Place, int?)])
+
+pub pure def elaborate(mut f: Function, a: Analysis, types: Types):
+    if f.blocks.is_empty():
+        return
+    let decisions = decide_all(a, types, f)
+    # The flags the decisions read.
+    var flagged: list[int] = []
+    for d in decisions.values():
+        match d:
+            case Decision.Flag(p):
+                flagged.push(p)
+            case Decision.Parts(parts):
+                for (_, fl) in parts:
+                    if let Some(p) = fl:
+                        flagged.push(p)
+            case _:
+                pass
+    flagged.sort()
+    var unique: list[int] = []
+    for p in flagged:
+        if unique.is_empty() or unique[len(unique) - 1] != p:
+            unique.push(p)
+    var flags: dict[int, LocalId] = {}
+    for p in unique:
+        let l = LocalId(index=len(f.locals))
+        f.locals.push(LocalDecl.new(Type.Bool, Some("flag".to_string())))
+        _ = flags.insert(p, l)
+    # Rewrite every block.
+    let old_blocks = f.blocks.copy()
+    var blocks: list[BasicBlock] = []
+    var extra: list[BasicBlock] = []
+    let base = len(old_blocks)
+    for b in range(len(old_blocks)):
+        let block = ref old_blocks[b]
+        var stmts: list[Statement] = []
+        for si in range(len(block.stmts)):
+            let s = ref block.stmts[si]
+            let decision = decisions.get((b, si))
+            var reads: list[int] = []
+            match decision:
+                case Some(Decision.Flag(p)):
+                    reads.push(p)
+                case Some(Decision.Parts(parts)):
+                    for (_, fl) in parts:
+                        if let Some(p) = fl:
+                            reads.push(p)
+                case _:
+                    pass
+            for id in a.removed_paths(s):
+                for d in a.paths.descendants(id):
+                    if let Some(fl) = flags.get(d).copied():
+                        if not reads.contains(d):
+                            stmts.push(set_flag(fl, False))
+            let init = a.init_path(s)
+            match decision:
+                case None:
+                    stmts.push(s.copy())
+                case Some(Decision.Keep):
+                    stmts.push(s.copy())
+                case Some(Decision.Remove):
+                    pass
+                case Some(Decision.Flag(p)):
+                    if let StatementKind.Drop(place, _) = s.kind:
+                        let kind = StatementKind.Drop(
+                            place=place.copy(), flag=flags.get(p).copied()
+                        )
+                        stmts.push(Statement(kind=kind, loc=s.loc))
+                case Some(Decision.Parts(parts)):
+                    for (place, fl) in parts:
+                        var flag: LocalId? = None
+                        if let Some(p) = fl:
+                            flag = flags.get(p).copied()
+                        stmts.push(
+                            Statement(
+                                kind=StatementKind.Drop(place=place.copy(), flag=flag), loc=s.loc
+                            )
+                        )
+            if let Some(id) = init:
+                for d in a.paths.descendants(id):
+                    if let Some(fl) = flags.get(d).copied():
+                        stmts.push(set_flag(fl, True))
+        # Outside cleanup, each drop ends its block: split after it.
+        var pieces: list[list[Statement]] = [[]]
+        for s in stmts:
+            var is_drop = False
+            if let StatementKind.Drop(_, _) = s.kind:
+                is_drop = True
+            pieces[len(pieces) - 1].push(s.copy())
+            if is_drop and not block.cleanup:
+                pieces.push([])
+        if len(pieces) > 1 and pieces[len(pieces) - 1].is_empty():
+            _ = pieces.pop()
+        let n = len(pieces)
+        var ids = [b]
+        for _ in range(1, n):
+            ids.push(base + len(extra) + len(ids) - 1)
+        for i in range(n):
+            let last = i + 1 == n
+            var term = Terminator.Goto(BlockId(index=0))
+            var loc = block.loc
+            if last:
+                term = block.term.copy()
+            else:
+                term = Terminator.Goto(BlockId(index=ids[i + 1]))
+                loc = None
+            let bb = BasicBlock(
+                stmts=pieces[i].copy(),
+                term=term,
+                unwind=block.unwind,
+                cleanup=block.cleanup,
+                loc=loc,
+            )
+            if i == 0:
+                blocks.push(bb)
+            else:
+                extra.push(bb)
+    for bb in extra:
+        blocks.push(bb.copy())
+    f.blocks = blocks
+    # Flags start false, except those of parameters, which hold values.
+    # The flags were made in the order of their paths, so that order is
+    # theirs.
+    if not flags.is_empty():
+        var stmts: list[Statement] = []
+        for p in unique:
+            let l = flags.get(p).copied() ?? LocalId(index=0)
+            let local = a.paths.local_of(p).index
+            stmts.push(set_flag(l, local >= 1 and local <= f.param_count))
+        prepend_to_entry(mut f, stmts)
+
+pure def set_flag(l: LocalId, v: bool) -> Statement:
+    return Statement(
+        kind=StatementKind.Assign(
+            place=Place.local(l), value=Rvalue.Use(Operand.Const(Const.Bool(v)))
+        ),
+        loc=None,
+    )
+
+## Puts statements at the start of the function. When the entry block is a
+## jump target, they go in a new entry block in front of it.
+pure def prepend_to_entry(mut f: Function, own stmts: list[Statement]):
+    var targeted = False
+    for b in f.blocks:
+        if targets(b).contains(0) or b.unwind == Some(BlockId(index=0)):
+            targeted = True
+    if not targeted:
+        var s = stmts
+        for x in f.blocks[0].stmts:
+            s.push(x.copy())
+        f.blocks[0].stmts = s
+        return
+    let n = len(f.blocks)
+    let old = f.blocks[0].copy()
+    f.blocks[0] = BasicBlock(
+        stmts=stmts, term=Terminator.Goto(BlockId(index=n)), unwind=None, cleanup=False, loc=None
+    )
+    f.blocks.push(old)
+    for i in range(1, len(f.blocks)):
+        match f.blocks[i].term.copy():
+            case Terminator.Goto(t):
+                f.blocks[i].term = Terminator.Goto(fix(t, n))
+            case Terminator.Switch(value, cases, default):
+                var cs: list[(int, BlockId)] = []
+                for (v, t) in cases:
+                    cs.push((v, fix(t, n)))
+                f.blocks[i].term = Terminator.Switch(value=value, cases=cs, default=fix(default, n))
+            case _:
+                pass
+        if let Some(u) = f.blocks[i].unwind:
+            f.blocks[i].unwind = Some(fix(u, n))
+
+pure def fix(t: BlockId, n: int) -> BlockId:
+    if t.index == 0:
+        return BlockId(index=n)
+    return t
+
+## The decision on every `drop` of the function, by block and statement.
+pure def decide_all(a: Analysis, types: Types, f: Function) -> dict[(int, int), Decision]:
+    # The paths with a part below them that a statement moves or drops on
+    # its own.
+    var split: list[bool] = []
+    for _ in range(a.paths.count()):
+        split.push(False)
+    for b in f.blocks:
+        for s in b.stmts:
+            for p in a.removed_paths(s):
+                for up in a.paths.ancestors(p):
+                    split[up] = True
+    var decisions: dict[(int, int), Decision] = {}
+    for b in range(len(f.blocks)):
+        let states = a.states(f, b)
+        for si in range(len(f.blocks[b].stmts)):
+            if let StatementKind.Drop(place, None) = f.blocks[b].stmts[si].kind:
+                # A copy: `f` is passed on below while the place is used.
+                let at = place.copy()
+                var d = Decision.Remove
+                if a.reachable[b]:
+                    d = decide(a, types, f, split, states[si], at)
+                _ = decisions.insert((b, si), d)
+    return decisions
+
+## `split`: which paths have a part below them that a statement moves or
+## drops on its own (stage 0's `Cx.split`).
+pure def decide(
+    a: Analysis, types: Types, f: Function, split: list[bool], st: State, place: Place
+) -> Decision:
+    let (id, cover) = a.paths.lookup(place)
+    if cover != Cover.Exact:
+        # A place through a reference, index or key always holds a value.
+        return Decision.Keep
+    if a.fully_uninit(st, id):
+        return Decision.Remove
+    # A variant that cannot be active here holds nothing to drop: open the
+    # drop so its payload's drop goes (a `None` of must-consume values).
+    let below = a.paths.descendants(id)
+    var vacuous = False
+    for i in range(1, len(below)):
+        let d = below[i]
+        if not st.mi.contains(d) and not st.mu.contains(d):
+            vacuous = True
+    let ty = types.place_ty(f, place)
+    if a.fully_init(st, id):
+        var opened = False
+        if vacuous:
+            if let Some(t) = ty:
+                opened = not types.implements_drop(t)
+        if not opened:
+            return Decision.Keep
+    let own_mi = st.mi.contains(id)
+    let own_mu = st.mu.contains(id)
+    var uniform = id >= len(split) or not split[id]
+    for d in below:
+        if st.mi.contains(d) != own_mi or st.mu.contains(d) != own_mu:
+            uniform = False
+    if let Some(t) = ty:
+        if not uniform and not types.implements_drop(t):
+            var parts: list[(Place, int?)] = []
+            open_parts(a, types, f, split, st, place, t, mut parts)
+            return Decision.Parts(parts)
+    return Decision.Flag(id)
+
+## The parts of a partly moved value that may still hold something.
+pure def open_parts(
+    a: Analysis,
+    types: Types,
+    f: Function,
+    split: list[bool],
+    st: State,
+    place: Place,
+    ty: Type,
+    mut out: list[(Place, int?)],
+):
+    var part_places: list[Place] = []
+    match types.variant_count(ty):
+        case Some(n):
+            for v in range(n):
+                let k = types.field_count(ty, Some(v))
+                var i = k - 1
+                while i >= 0:
+                    part_places.push(place.project(Proj.Downcast(v)).project(Proj.Field(i)))
+                    i -= 1
+        case None:
+            let k = types.field_count(ty, None)
+            var i = k - 1
+            while i >= 0:
+                part_places.push(place.project(Proj.Field(i)))
+                i -= 1
+    for q in part_places:
+        if let Some(t) = types.place_ty(f, q):
+            if types.trivial_drop(t):
+                continue
+        let (qid, cover) = a.paths.lookup(q)
+        if cover == Cover.Exact:
+            match decide(a, types, f, split, st, q):
+                case Decision.Keep:
+                    out.push((q.copy(), None))
+                case Decision.Remove:
+                    pass
+                case Decision.Flag(p):
+                    out.push((q.copy(), Some(p)))
+                case Decision.Parts(ps):
+                    for x in ps:
+                        out.push(x.copy())
+            continue
+        # No path of its own: it is in the state of its closest path.
+        let mi = st.mi.contains(qid)
+        let mu = st.mu.contains(qid)
+        if mi and not mu:
+            out.push((q.copy(), None))
+        elif mi and mu:
+            out.push((q.copy(), Some(qid)))

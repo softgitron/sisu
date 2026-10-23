@@ -1,0 +1,21 @@
+# Long lines, broken inside brackets and before binary operators, and the
+# magic trailing comma.
+def combine(first_argument: int, second_argument: int, third_argument: int, fourth: int) -> int:
+    return first_argument * second_argument + third_argument * fourth - first_argument // 3 + second_argument
+def describe(name: String, count: int, verbose: bool, separator: String, prefix: String) -> list[String]:
+    let mode = if verbose: "verbose".to_string() else: "quiet".to_string()
+    let parts = [prefix.copy(), name.copy(), separator.copy(), "{count}".to_string(), separator.copy(), mode]
+    return parts
+def quiet(a: int, b: int) -> bool:
+    if a > 1000000 and b > 1000000 and a + b > 3000000 and a - b < 1000 and b - a < 1000000000 and a != b:
+        return True
+    let pair = (a,)
+    let kept = [
+        1, 2, 3,
+    ]
+    let flat = [1,
+        2, 3]
+    let squares = [x * x for x in range(100) if x % 3 == 0 and x % 5 == 0 and x % 7 == 0 and x > 10 and x < 90]
+    let table = {"alpha": combine(1, 2, 3, 4), "beta": combine(5, 6, 7, 8), "gamma": combine(9, 10, 11, 12)}
+    let inside = a not in [b, combine(a, b, a, b), combine(b, a, b, a), combine(a, a, b, b), combine(b, b, a, a)]
+    return inside or len(kept) + len(flat) + len(squares) + len(table) + pair.0 > 1000000000000000000

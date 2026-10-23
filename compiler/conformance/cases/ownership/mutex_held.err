@@ -1,0 +1,2 @@
+panic: the lock is already held by this task, which would wait for itself forever
+  at main (mutex_held.sisu:7:13)

@@ -1,0 +1,2 @@
+pub def hello(name: str) -> String:
+    return "hello, {name}"

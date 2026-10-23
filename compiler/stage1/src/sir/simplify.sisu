@@ -1,0 +1,194 @@
+##! Jump threading, run on a program the ownership checker has accepted
+##! (stage 0's `sisu-sir/src/simplify.rs`; docs/architecture.md, "The
+##! interpreter"). Lowering builds control flow from small pieces: blocks
+##! that only jump on, and jumps into blocks that only switch or return.
+##! The interpreter takes a step for every jump, so this pass removes them:
+##!
+##! - a jump to a block that only jumps on goes where that block goes;
+##! - a block that ends in a jump to a block nothing else jumps to takes
+##!   that block's statements and terminator;
+##! - a jump to a block without statements takes that block's terminator;
+##! - the blocks nothing reaches any more are removed, and the others keep
+##!   their order.
+##!
+##! No statement is removed, duplicated or moved past another. Drop glue
+##! is left as it is, since the interpreter recognises its last drop by
+##! the block's shape.
+
+from stage1.sir import BasicBlock, BlockId, FnKind, Function, Program, StatementKind, Terminator
+
+## Threads the jumps of every function but drop glue.
+pub pure def program(mut p: Program):
+    for i in range(len(p.functions)):
+        if p.functions[i].kind != FnKind.Glue:
+            function(mut p.functions[i])
+
+pure def targets(t: Terminator) -> list[int]:
+    match t:
+        case Terminator.Goto(b):
+            return [b.index]
+        case Terminator.Switch(_, cases, default):
+            var out: list[int] = []
+            for (_, b) in cases:
+                out.push(b.index)
+            out.push(default.index)
+            return out
+        case _:
+            return []
+
+## The terminator with every target `b` replaced by `to[b]`.
+pure def retarget(t: Terminator, to: list[int]) -> Terminator:
+    match t:
+        case Terminator.Goto(b):
+            return Terminator.Goto(BlockId(index=moved(to, b.index)))
+        case Terminator.Switch(value, cases, default):
+            var out: list[(int, BlockId)] = []
+            for (v, b) in cases:
+                out.push((v, BlockId(index=moved(to, b.index))))
+            let d = BlockId(index=moved(to, default.index))
+            return Terminator.Switch(value=value.copy(), cases=out, default=d)
+        case _:
+            return t.copy()
+
+pure def moved(to: list[int], b: int) -> int:
+    if b < len(to):
+        return to[b]
+    return b
+
+## The block a jump to `b` reaches once past blocks that only jump on; `b`
+## itself when those blocks go round in a cycle.
+pure def through(f: Function, b: int) -> int:
+    var seen = [b]
+    var cur = b
+    while True:
+        if cur >= len(f.blocks):
+            return cur
+        let blk = ref f.blocks[cur]
+        let Terminator.Goto(t) = blk.term else:
+            return cur
+        if not blk.stmts.is_empty() or blk.loc.is_some():
+            return cur
+        if t.index >= len(f.blocks) or seen.contains(t.index):
+            return b
+        seen.push(t.index)
+        cur = t.index
+
+## Which blocks the entry reaches, through jumps and unwinding.
+pure def reached(f: Function) -> list[bool]:
+    var seen: list[bool] = []
+    for _ in range(len(f.blocks)):
+        seen.push(False)
+    var work = [0]
+    while let Some(b) = work.pop():
+        if b >= len(seen) or seen[b]:
+            continue
+        seen[b] = True
+        let blk = ref f.blocks[b]
+        for t in targets(blk.term):
+            work.push(t)
+        if let Some(u) = blk.unwind:
+            work.push(u.index)
+    return seen
+
+## Threads the jumps of one function.
+pub pure def function(mut f: Function):
+    let n = len(f.blocks)
+    if n == 0:
+        return
+    # Jumps past blocks that only jump on.
+    var to: list[int] = []
+    for b in range(n):
+        to.push(through(f, b))
+    for i in range(n):
+        let t = retarget(f.blocks[i].term, to)
+        f.blocks[i].term = t
+        if let Some(u) = f.blocks[i].unwind:
+            f.blocks[i].unwind = Some(BlockId(index=moved(to, u.index)))
+    # Blocks that take the block they jump to.
+    let live = reached(f)
+    var preds: list[int] = []
+    for _ in range(n):
+        preds.push(0)
+    preds[0] += 1
+    for b in range(n):
+        if live[b]:
+            for t in targets(f.blocks[b].term):
+                preds[t] += 1
+            if let Some(u) = f.blocks[b].unwind:
+                preds[u.index] += 1
+    for b in range(n):
+        if not live[b]:
+            continue
+        while True:
+            let Terminator.Goto(tb) = f.blocks[b].term else:
+                break
+            let t = tb.index
+            if t == b:
+                break
+            let here_loc = f.blocks[b].loc.is_some()
+            let here_cleanup = f.blocks[b].cleanup
+            let here_empty = f.blocks[b].stmts.is_empty()
+            let here_unwind = f.blocks[b].unwind
+            let there_cleanup = f.blocks[t].cleanup
+            let there_unwind = f.blocks[t].unwind
+            let there_empty = f.blocks[t].stmts.is_empty()
+            var there_goto = False
+            if let Terminator.Goto(_) = f.blocks[t].term:
+                there_goto = True
+            # A panic in the block unwinds where the block says: its own
+            # statements and what it takes must agree on where.
+            if here_loc
+                    or here_cleanup != there_cleanup
+                    or not (here_empty or here_unwind == there_unwind):
+                break
+            # A drop ends its block outside cleanup (`validate`).
+            var after_drop = False
+            if not here_cleanup:
+                if let Some(s) = f.blocks[b].stmts.last():
+                    if let StatementKind.Drop(_, _) = s.kind:
+                        after_drop = True
+            let take = preds[t] == 1 and t != 0 and not (after_drop and not there_empty)
+            if not take and (not there_empty or there_goto):
+                break
+            # The block's unwinding edge becomes the other block's.
+            if let Some(u) = here_unwind:
+                preds[u.index] = max(preds[u.index] - 1, 0)
+            if let Some(u) = there_unwind:
+                preds[u.index] += 1
+            var taken = f.blocks[t].copy()
+            if take:
+                # Nothing else jumps there: the block takes all of it.
+                preds[t] = 0
+                if let Some(u) = there_unwind:
+                    preds[u.index] = max(preds[u.index] - 1, 0)
+                f.blocks[t] = BasicBlock(
+                    stmts=[], term=Terminator.Unreachable, unwind=None, cleanup=False, loc=None
+                )
+            else:
+                # A block without statements: the block takes its
+                # terminator, and the jump there is gone.
+                preds[t] = max(preds[t] - 1, 0)
+                for x in targets(taken.term):
+                    preds[x] += 1
+            f.blocks[b].unwind = taken.unwind
+            for s in taken.stmts:
+                f.blocks[b].stmts.push(s.copy())
+            f.blocks[b].term = taken.term.copy()
+            f.blocks[b].loc = taken.loc
+    # The blocks still reached, in their order.
+    let still = reached(f)
+    var index: list[int] = []
+    var kept = 0
+    for b in range(n):
+        index.push(kept)
+        if still[b]:
+            kept += 1
+    var blocks: list[BasicBlock] = []
+    for b in range(n):
+        if still[b]:
+            var blk = f.blocks[b].copy()
+            blk.term = retarget(blk.term, index)
+            if let Some(u) = blk.unwind:
+                blk.unwind = Some(BlockId(index=index[u.index]))
+            blocks.push(blk)
+    f.blocks = blocks

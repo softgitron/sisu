@@ -1,0 +1,21 @@
+# A generic function's body may drop what it is given: a must-consume type
+# argument is checked against the body instantiated with it (E0397). One
+# that consumes or returns its argument is fine.
+
+@must_consume
+struct Receipt:
+    amount: int
+
+    def settle(own self) -> int:
+        return self.amount
+
+def discard[T](own x: T):
+    pass
+
+def keep[T](own x: T) -> T:
+    return x
+
+def main():
+    discard(Receipt(amount=1))
+    let r = keep(Receipt(amount=2))
+    print(r.settle())

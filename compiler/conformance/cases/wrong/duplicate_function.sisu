@@ -1,0 +1,10 @@
+# A wrong program: two functions have the same name.
+
+def helper() -> int:
+    return 1
+
+def helper() -> int:
+    return 2
+
+def main():
+    print(helper())

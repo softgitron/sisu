@@ -1,0 +1,6 @@
+# An impl that overlaps one of another module of the package (03,
+# "Coherence"): the error is at the second impl, and its label at the
+# first, in the other module's file.
+[package]
+name = "shapes"
+version = "0.1.0"

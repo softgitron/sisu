@@ -1,0 +1,6 @@
+# A wrong program: a condition is an `int`, not a `bool`.
+
+def main():
+    let count = 3
+    if count:
+        print("some")

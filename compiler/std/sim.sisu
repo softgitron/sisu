@@ -1,0 +1,152 @@
+##! The `sim` profile (17, "Simulation and replay"): a whole system run in
+##! one process under the seeded, pluggable scheduler (`--scheduler`). A
+##! `Sim` holds nodes, each with a crash-consistent file system of its own,
+##! sharing one in-process network and the run's test clock; `crash` loses
+##! what a node did not sync and takes it off the network until `restart`,
+##! and `partition` cuts two nodes apart. `choose` makes a value a choice
+##! point that the bounded exhaustive scheduler enumerates, and `always`
+##! states an invariant checked at every switch between tasks. Under `sisu
+##! test --sim`, a test that declares a `System` gets `System.sim(seed)`,
+##! and capability calls fail, at the rate `--faults` gives, with errors of
+##! their declared sets.
+
+## A value in `range(n)` the simulation chooses: under `--scheduler
+## exhaustive` each one in turn, one schedule each; else a seeded draw.
+@intrinsic("sim.choose")
+def choose(n: int) -> int
+
+## Runs `body` with `holds` checked at every switch between tasks while it
+## runs, and once more when it returns: the first time it is false stops
+## the run, naming `what`.
+@intrinsic("sim.always")
+def always[R](what: str, holds: () -> bool, body: () -> R) -> R
+
+## A node of a `Sim`, by the order it was made in.
+@derive(Copy, Eq, Debug)
+struct Node:
+    index: int
+
+struct NodeState:
+    name: String
+    fs: cap.SimFs
+    up: bool
+    boots: int
+
+struct World:
+    nodes: list[NodeState]
+    ## The pairs of nodes cut apart, as `"a|b"` with `a` the lower index.
+    cuts: set[String]
+    seed: int
+
+## A simulated system of nodes. A `Copy` handle on the state every copy
+## shares.
+@derive(Copy)
+struct Sim:
+    world: Cap[Mutex[World]]
+    net: Net
+
+impl Sim:
+    ## A simulation without nodes; `seed` seeds each node's `Rand`.
+    def new(seed: int = 0) -> Sim:
+        let w = World(nodes=[], cuts=set(), seed=seed)
+        return Sim(world=Cap.new(Mutex(w)), net=Net.fake())
+
+    ## A new node named `name`, up, with an empty file system.
+    def node(self, name: str) -> Node:
+        var g = self.world.get().lock()
+        g.value.nodes.push(NodeState(name=name.to_string(), fs=cap.SimFs.new(), up=True, boots=1))
+        return Node(index=len(g.value.nodes) - 1)
+
+    ## The node's name, its host name on the network.
+    def name(self, n: Node) -> String:
+        return self.world.get().lock().value.nodes[n.index].name.copy()
+
+    ## The node's file system, to look at what a crash kept.
+    def fs(self, n: Node) -> cap.SimFs:
+        return self.world.get().lock().value.nodes[n.index].fs
+
+    ## The system the node runs with: its file system; the network as the
+    ## node reaches it (it listens at its own name, and reaches nothing
+    ## while it is down or across a partition); the run's test clock; a
+    ## `Rand` seeded from the simulation's seed and the node; and fakes of
+    ## the environment, processes and standard input.
+    def system(self, n: Node) -> System:
+        let g = self.world.get().lock()
+        let fs: Fs = g.value.nodes[n.index].fs
+        let seed = g.value.seed * 1000003 + n.index
+        let net: Net = SimNet(sim=self, node=n)
+        return System.assemble(
+            fs=fs,
+            net=net,
+            clock=Clock.fake(),
+            rand=Rand.seeded(seed),
+            env=Env.fake(),
+            proc=Proc.fake(),
+            stdin=Stdin.fake(),
+        )
+
+    ## A crash of the node: its file system goes back to what it synced,
+    ## and it is off the network until `restart`. (What runs on it is the
+    ## test's to cancel: a node's tasks belong to the test's scopes.)
+    def crash(self, n: Node):
+        var g = self.world.get().lock()
+        g.value.nodes[n.index].up = False
+        let fs = g.value.nodes[n.index].fs
+        fs.crash()
+
+    ## The node back on the network, with what its file system kept.
+    def restart(self, n: Node):
+        var g = self.world.get().lock()
+        g.value.nodes[n.index].up = True
+        g.value.nodes[n.index].boots += 1
+
+    def is_up(self, n: Node) -> bool:
+        return self.world.get().lock().value.nodes[n.index].up
+
+    ## How many times the node started: 1, and one more for each restart.
+    def boots(self, n: Node) -> int:
+        return self.world.get().lock().value.nodes[n.index].boots
+
+    ## No new connection between the two nodes until `heal`.
+    def partition(self, a: Node, b: Node):
+        var g = self.world.get().lock()
+        g.value.cuts.add(cut(a, b))
+
+    def heal(self, a: Node, b: Node):
+        var g = self.world.get().lock()
+        _ = g.value.cuts.remove(cut(a, b))
+
+    ## Whether `src` reaches the node named `host`: both up, not cut
+    ## apart. A host that is no node is reached (the fake network refuses
+    ## it if nothing listens there).
+    def reaches(self, src: Node, host: str) -> bool:
+        let g = self.world.get().lock()
+        if not g.value.nodes[src.index].up:
+            return False
+        for i in range(len(g.value.nodes)):
+            if g.value.nodes[i].name == host:
+                return g.value.nodes[i].up and not g.value.cuts.contains(cut(src, Node(index=i)))
+        return True
+
+## The key of a cut between two nodes.
+pure def cut(a: Node, b: Node) -> String:
+    if a.index <= b.index:
+        return "{a.index}|{b.index}"
+    return "{b.index}|{a.index}"
+
+## The network as a node of a `Sim` reaches it.
+@derive(Copy)
+struct SimNet:
+    sim: Sim
+    node: Node
+
+impl NetOps for SimNet:
+    def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}:
+        if not self.sim.reaches(self.node, host):
+            return Err(Refused(address="{host}:{port}"))
+        return self.sim.net.connect(host, port)
+    def listen(self, port: int, host: str = "localhost") -> Listener ! NetError:
+        let name = self.sim.name(self.node)
+        if not self.sim.is_up(self.node):
+            return Err(NotAllowed(address="{name}:{port}"))
+        return self.sim.net.listen(port, name)

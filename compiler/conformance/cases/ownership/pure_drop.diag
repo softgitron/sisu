@@ -1,0 +1,3 @@
+13:5-13:23 E0393 type.impure-drop value="n" ty="Noisy" name="measure"
+  label 12:9-12:10 borrow.declared-here name="n"
+  label 11:10-11:17 type.declared-pure-here name="measure"

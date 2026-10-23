@@ -1,0 +1,22 @@
+##! std.log: the logging facade (06, "The cost"; Q-5). Ambient like
+##! `print` and `print_err`: it writes to the process's standard error
+##! without a capability. Each record names its level and, inside a task,
+##! the task's trace context: the path of spawn indices from the root task
+##! (`[task 2.1]`), which every child inherits (06, "Interceptors and trace
+##! context"), so the records of one piece of work stay together.
+
+## Writes one record: `level: message`, after the trace context in a task.
+@intrinsic("log.write")
+def write(level: str, message: str)
+
+def error(message: str):
+    write("error", message)
+
+def warn(message: str):
+    write("warn", message)
+
+def info(message: str):
+    write("info", message)
+
+def debug(message: str):
+    write("debug", message)

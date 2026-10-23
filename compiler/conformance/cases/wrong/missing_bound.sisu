@@ -1,0 +1,8 @@
+# A wrong program: a generic function compares values of a type parameter
+# without the bound that allows it.
+
+def larger[T](a: T, b: T) -> bool:
+    return a > b
+
+def main():
+    print(larger(3, 9))

@@ -1,0 +1,26 @@
+# The names in a type's constant argument written as an expression: folding
+# stops at the first error, so a name after one is not looked up; a
+# signature may name any generic parameter there, a body only a `const`
+# one and no local; and what is wrong inside a constant's own value is
+# that constant's, reported where its value is checked.
+const HALF: f64 = 0.5
+const BIG: int = 2 ** 62
+const BAD: int = missing + 1
+
+struct S[T, const N: int]:
+    a: Array[int, N * nothing1]
+    b: Array[int, HALF + nothing2]
+    c: Array[int, BIG * 4 + nothing3]
+    d: Array[int, BAD + nothing4]
+    e: Array[int, T + nothing5]
+    f: Array[int, (1 + 2) * nothing6]
+
+def f[T, const N: int](n: int) -> Array[int, n + nope]:
+    let k = 3
+    let x: Array[int, k + nothing7] = Array.filled(0)
+    let y: Array[int, T + nothing8] = Array.filled(0)
+    let z: Array[int, N + nothing9] = Array.filled(0)
+    return Array.filled(0)
+
+def main():
+    pass

@@ -1,0 +1,5 @@
+##! Units of length: a dependency, which `geo`'s pages do not document.
+
+## A length in meters.
+pub struct Meters:
+    pub value: f64

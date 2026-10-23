@@ -1,0 +1,3 @@
+panic: no 2
+  at closure in failing (generator_driven.sisu:36:13)
+  at main (generator_driven.sisu:57:11)

@@ -1,0 +1,19 @@
+[package]
+name = "sisu-typeck"
+description = "The local bidirectional type checker: a typed tree for every input, broken or not"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sisu-diag.workspace = true
+sisu-syntax.workspace = true
+sisu-resolve.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+sisu-parser.workspace = true

@@ -1,0 +1,24 @@
+leaving the block
+drop inner
+took moved
+drop moved
+iteration 0
+drop loop
+iteration 1
+drop loop
+defer in early
+drop early.a
+1
+drop early.b
+defer in early
+drop early.a
+2
+end of main
+drop x0
+drop x1
+drop x2
+drop pair.second
+drop pair.first
+drop maybe
+drop b
+drop a

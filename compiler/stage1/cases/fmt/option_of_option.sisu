@@ -1,0 +1,5 @@
+# `Option[Option[T]]`: the outer option's `T` is optional, so it stays
+# `Option[...]`, and the inner one is written `T?` (decision 267; this was
+# D6, where stage 0 overflowed its stack).
+def nested(x: Option[Option[int]]) -> int:
+    return 0

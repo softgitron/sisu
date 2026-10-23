@@ -1,0 +1,2 @@
+pub def show(n: int) -> String:
+    return "{n} km"

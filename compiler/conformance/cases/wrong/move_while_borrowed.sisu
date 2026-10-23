@@ -1,0 +1,11 @@
+# A wrong program: a value is moved away while a borrow of it is still
+# used.
+
+def keep(own s: String):
+    print(s)
+
+def main():
+    let s = "kept".to_string()
+    let seen = ref s
+    keep(s)
+    print(seen)

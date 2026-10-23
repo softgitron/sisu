@@ -1,0 +1,98 @@
+##! Where a space goes between two tokens of a line: the spacing of PEP 8
+##! and Black, decided by the tokens' kinds and the nodes they belong to
+##! (stage 0's `sisu-fmt/src/space.rs`).
+
+from stage1.fmt.lines import Tok
+from stage1.syntax.kinds import SyntaxKind
+
+pure def is_open(k: SyntaxKind) -> bool:
+    return match k:
+        case LParen | LBracket | LBrace: True
+        case _: False
+
+pure def is_close(k: SyntaxKind) -> bool:
+    return match k:
+        case RParen | RBracket | RBrace: True
+        case _: False
+
+## Whether a space goes between `a` and `b`.
+pub pure def between(a: Tok, b: Tok) -> bool:
+    let ak = a.kind
+    let bk = b.kind
+    if is_open(ak) or is_close(bk):
+        return False
+    match bk:
+        case Comma | Colon | Semicolon:
+            return False
+        case _:
+            pass
+    # Field access, module paths and optional chaining.
+    if is_dot(ak) or is_dot(bk):
+        return False
+    # `f()?`, `T?`.
+    if bk == SyntaxKind.Question:
+        return False
+    # `x: int`, `{"a": 1}`: a space after the colon, except in a slice.
+    if ak == SyntaxKind.Colon:
+        return a.parent != SyntaxKind.Slice
+    # A keyword argument and a keyword pattern argument: `f(x=1)`.
+    if (ak == SyntaxKind.Eq and is_arg(a.parent)) or (bk == SyntaxKind.Eq and is_arg(b.parent)):
+        return False
+    # `@derive`, `*rest`, `-x`, `~x`, `^1`: a prefix hugs its operand.
+    if ak == SyntaxKind.At:
+        return False
+    if is_prefix_op(ak) and is_prefix_place(a.parent):
+        return False
+    # A call, a definition's parameters, a pattern's arguments, a variant's
+    # fields, a trait's supertraits and `pub(` hug what they follow; a tuple
+    # or a parenthesised expression does not.
+    if bk == SyntaxKind.LParen:
+        return match b.parent:
+            case ArgList | ParamList | PatArgs | Visibility | VariantDef | TraitDef: False
+            case _: True
+    # An index and type arguments or parameters hug what they follow; a
+    # list does not.
+    if bk == SyntaxKind.LBracket:
+        return match b.parent:
+            case GenericArgs | GenericParams | IndexExpr: False
+            case _: True
+    return True
+
+pure def is_dot(k: SyntaxKind) -> bool:
+    return match k:
+        case Dot | QuestionDot: True
+        case _: False
+
+pure def is_arg(k: SyntaxKind) -> bool:
+    return match k:
+        case Arg | PatArg: True
+        case _: False
+
+pure def is_prefix_op(k: SyntaxKind) -> bool:
+    return match k:
+        case Minus | Plus | Tilde | Caret | Star | StarStar: True
+        case _: False
+
+pure def is_prefix_place(k: SyntaxKind) -> bool:
+    return match k:
+        case PrefixExpr | StarPat | Param | RestPat | LiteralPat: True
+        case _: False
+
+## Whether a space goes between tokens of the kinds `a` and `b`, each in
+## a node of the kind after it.
+pure def spaced(a: SyntaxKind, a_parent: SyntaxKind, b: SyntaxKind, b_parent: SyntaxKind) -> bool:
+    return between(Tok.new(a, "", a_parent, None, 0), Tok.new(b, "", b_parent, None, 0))
+
+test "calls hug and lists do not":
+    let ident = SyntaxKind.Ident
+    let name = SyntaxKind.NameRef
+    let eq = SyntaxKind.Eq
+    let int = SyntaxKind.IntNumber
+    let literal = SyntaxKind.Literal
+    assert not spaced(ident, name, SyntaxKind.LParen, SyntaxKind.ArgList)
+    assert spaced(eq, SyntaxKind.LetStmt, SyntaxKind.LBracket, SyntaxKind.ListExpr)
+    assert not spaced(ident, SyntaxKind.PathType, SyntaxKind.LBracket, SyntaxKind.GenericArgs)
+    assert not spaced(eq, SyntaxKind.Arg, int, literal)
+    assert spaced(eq, SyntaxKind.Param, int, literal)
+    assert not spaced(SyntaxKind.Minus, SyntaxKind.PrefixExpr, ident, name)
+    assert spaced(SyntaxKind.Minus, SyntaxKind.BinExpr, ident, name)

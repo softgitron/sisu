@@ -1,0 +1,41 @@
+# `@cfg` takes conditions (decision 243): anything else is `E0266`, and
+# its item is kept. A feature that no `[features]` declares is `W0006`,
+# since such a condition never holds: a single file has no manifest, so
+# it declares none.
+
+@cfg(nonsense)
+def a() -> int:
+    return 1
+
+@cfg(test == True)
+def b() -> int:
+    return 2
+
+@cfg
+def c() -> int:
+    return 3
+
+# A feature's name is a string.
+@cfg(any(test, feature=tls))
+def d() -> int:
+    return 4
+
+@cfg(feature="tls")
+def e() -> int:
+    return 5
+
+# `not(...)` turns one condition around (decision 250), not two.
+@cfg(not(feature="tls", test))
+def f() -> int:
+    return 6
+
+struct Counter:
+    n: int
+
+impl Counter:
+    @cfg(first(test))
+    def twice(self) -> int:
+        return self.n * 2
+
+def main():
+    print(a() + b() + c() + d() + f() + Counter(n=2).twice())

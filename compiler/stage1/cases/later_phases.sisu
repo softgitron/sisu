@@ -1,0 +1,57 @@
+# Forms of later phases that parse into trees: contracts, `expect`,
+# `select`, `comptime` (statements, expressions and arms), `yield`,
+# `extern`, `bench`, `suite`, parametrised tests, `ptr mut`, `impl`
+# types, `dyn`, function types and labelled tuples.
+def f(x: int) -> (q: int, r: int):
+    requires x > 0
+    ensures result.q >= 0
+    return (x // 2, x % 2)
+
+def gen() -> Iter[int]:
+    yield 1
+    yield
+
+comptime def derive(T: type) -> impl Display for T:
+    return impl Display for T:
+        def fmt(self, f: Formatter):
+            match self:
+                comptime for v in reflect.variants(T):
+                    case v.pattern: f.write(v.name)
+                comptime if True:
+                    case _: pass
+                else:
+                    case _: pass
+
+def main():
+    select:
+        case e = rx.recv():
+            handle(e)
+        oops
+        case _ = clock.after(d):
+            timeout()
+    comptime assert N > 0
+    let x = comptime size()
+    let y = unsafe read(p)
+    expect x == y
+    let cb: pure (int, int) -> int = (a, b) -> a + b
+    let d: dyn Display = x
+    let p: ptr mut u8 = q
+    xs.each do x:
+        print(x)
+    let total = xs.fold(0) do acc, x:
+        return acc + x
+
+extern "C":
+    def strlen(s: ptr[c_char]) -> c_size
+
+bench "speed"(b: Bench):
+    pass
+
+suite "group":
+    test "one":
+        pass
+    test "two" for a, b in cases:
+        assert a == b
+
+test "real"(sys: System):
+    pass

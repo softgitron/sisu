@@ -1,0 +1,13 @@
+pub trait Area:
+    def area(self) -> int
+
+pub struct Square:
+    pub side: int
+
+impl Area for Square:
+    def area(self) -> int:
+        return self.side * self.side
+
+impl Len for int:
+    def len(self) -> int:
+        return 1

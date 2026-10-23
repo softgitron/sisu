@@ -1,0 +1,149 @@
+##! Patterns.
+##!
+##! ```text
+##! patterns  := pattern (',' pattern)*          -- a bare tuple in let and for
+##! pattern   := primary_pattern ('|' primary_pattern)*
+##! primary_pattern := '_' | lower_name | literal | '-' number
+##!              | Upper_path ('(' pattern_arg (',' pattern_arg)* ')')?
+##!              | '(' patterns ')' | '[' patterns? ']' | '*' name | '..'
+##! pattern_arg := name '=' pattern | pattern | '..'
+##! ```
+##!
+##! A lowercase name binds and a capitalised one names a variant or a
+##! constant (02, "Lexical structure"), so the parser decides by spelling.
+
+from stage1.diag import Msg
+from stage1.parser.state import Parser
+from stage1.syntax.kinds import SyntaxKind
+from stage1.text import char_at
+
+impl Parser:
+    pub(package) pure def pattern_list(mut self):
+        let cp = self.checkpoint()
+        self.pattern()
+        if self.at(SyntaxKind.Comma):
+            self.start_at(cp, SyntaxKind.TuplePat)
+            while self.eat(SyntaxKind.Comma):
+                if self.at_pattern_start():
+                    self.pattern()
+                else:
+                    break
+            self.finish_node()
+
+    pure def at_pattern_start(self) -> bool:
+        return match self.current():
+            case Ident | IntNumber | FloatNumber | CharLit | StringStart | RawString | Minus: True
+            case LParen | LBracket | Star | DotDot | SelfTypeKw: True
+            case _: False
+
+    pub(package) pure def pattern(mut self):
+        let cp = self.checkpoint()
+        self.primary_pattern()
+        if self.at(SyntaxKind.Pipe):
+            self.start_at(cp, SyntaxKind.OrPat)
+            while self.eat(SyntaxKind.Pipe):
+                self.primary_pattern()
+            self.finish_node()
+
+    pure def primary_pattern(mut self):
+        match self.current():
+            case Ident if self.current_text() == "_":
+                self.start(SyntaxKind.WildcardPat)
+                self.bump()
+                self.finish_node()
+            case Ident | SelfTypeKw:
+                let text = self.current_text()
+                let capital = not text.is_empty() and char_at(text, 0).is_uppercase()
+                if capital or self.nth(1) == SyntaxKind.Dot or self.at(SyntaxKind.SelfTypeKw):
+                    self.start(SyntaxKind.CtorPat)
+                    self.bump()
+                    while self.at(SyntaxKind.Dot):
+                        self.bump()
+                        _ = self.expect_name()
+                    if self.at(SyntaxKind.LParen):
+                        self.pattern_args()
+                    self.finish_node()
+                else:
+                    self.start(SyntaxKind.IdentPat)
+                    self.bump()
+                    self.finish_node()
+            case IntNumber | FloatNumber | CharLit | RawString:
+                self.start(SyntaxKind.LiteralPat)
+                self.bump()
+                self.finish_node()
+            case StringStart:
+                self.start(SyntaxKind.LiteralPat)
+                self.string_expr()
+                self.finish_node()
+            case Minus if self.nth_is_number(1):
+                self.start(SyntaxKind.LiteralPat)
+                self.bump()
+                self.bump()
+                self.finish_node()
+            case LParen:
+                let cp = self.checkpoint()
+                self.bump()
+                var count = 0
+                var trailing = False
+                while not self.at_list_end(SyntaxKind.RParen):
+                    self.pattern()
+                    count += 1
+                    trailing = False
+                    if not self.eat(SyntaxKind.Comma):
+                        break
+                    trailing = True
+                let single = count == 1 and not trailing
+                let kind = if single: SyntaxKind.ParenPat else: SyntaxKind.TuplePat
+                self.start_at(cp, kind)
+                _ = self.expect(SyntaxKind.RParen)
+                self.finish_node()
+            case LBracket:
+                self.start(SyntaxKind.ListPat)
+                self.bump()
+                while not self.at_list_end(SyntaxKind.RBracket):
+                    self.pattern()
+                    if not self.eat(SyntaxKind.Comma):
+                        break
+                _ = self.expect(SyntaxKind.RBracket)
+                self.finish_node()
+            case Star:
+                self.start(SyntaxKind.StarPat)
+                self.bump()
+                _ = self.expect_name()
+                self.finish_node()
+            case DotDot:
+                self.start(SyntaxKind.RestPat)
+                self.bump()
+                self.finish_node()
+            case _:
+                self.error_found(Msg.ParseExpectedPattern)
+                self.start(SyntaxKind.Error)
+                if not self.at_pattern_sync():
+                    self.bump()
+                self.finish_node()
+
+    ## Whether the `n`th token from here is a number literal.
+    pure def nth_is_number(self, n: int) -> bool:
+        let k = self.nth(n)
+        return k == SyntaxKind.IntNumber or k == SyntaxKind.FloatNumber
+
+    ## Where a missing pattern consumes nothing.
+    pure def at_pattern_sync(self) -> bool:
+        return match self.current():
+            case Newline | Colon | Eq | Comma | RParen | RBracket | Eof | Dedent | InKw | IfKw: True
+            case _: False
+
+    pure def pattern_args(mut self):
+        self.start(SyntaxKind.PatArgs)
+        self.bump()
+        while not self.at_list_end(SyntaxKind.RParen):
+            self.start(SyntaxKind.PatArg)
+            if self.at(SyntaxKind.Ident) and self.nth(1) == SyntaxKind.Eq:
+                self.bump()
+                self.bump()
+            self.pattern()
+            self.finish_node()
+            if not self.eat(SyntaxKind.Comma):
+                break
+        _ = self.expect(SyntaxKind.RParen)
+        self.finish_node()

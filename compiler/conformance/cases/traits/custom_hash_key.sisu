@@ -1,0 +1,18 @@
+# Stage 0's `dict` and `set` hash and compare keys structurally, so a key
+# type with its own `Hash` or `Eq` is rejected rather than found by the
+# wrong rule (port debt).
+
+struct Name:
+    text: String
+
+impl Eq for Name:
+    def eq(self, other: Name) -> bool:
+        return len(self.text) == len(other.text)
+
+impl Hash for Name:
+    def hash(self, mut h: Hasher):
+        h.write_int(len(self.text))
+
+def main():
+    let s = {Name(text="a".to_string())}
+    print(len(s))

@@ -1,0 +1,2 @@
+2:11-2:19 E0003 lex.unterminated-string
+  fix lex.close-string 2:18-2:18 "\""

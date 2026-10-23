@@ -1,0 +1,7 @@
+# The snapshots of `proposal_testing.sisu` (17): `sisu test --update` rewrites this file.
+
+--- help text is stable
+    --verbose
+    --retries <int>  (default: 3)
+    --output <Path>  (default: out.txt)
+    inputs...  (Path)

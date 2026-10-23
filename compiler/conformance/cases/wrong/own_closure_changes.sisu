@@ -1,0 +1,11 @@
+# A wrong program: an `own` closure changes a variable it captured.
+
+def each(n: int, f: (int) -> ()):
+    for i in range(n):
+        f(i)
+
+def main():
+    var total = 0
+    each(3) do own i:
+        total += i
+    print(total)

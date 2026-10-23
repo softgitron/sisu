@@ -1,0 +1,8 @@
+11:9-11:35 E0428 task.borrows-body-local name="name"
+  label 11:17-11:34 borrow.borrowed-here
+14:5-14:34 E0429 task.borrows-elsewhere name="xs"
+  label 13:22-13:35 borrow.borrowed-here
+21:17-21:37 E0403 borrow.use-while-mut-borrowed name="counter" line="19" end="21"
+  label 19:17-20:25 borrow.borrowed-here
+27:9-27:19 E0405 borrow.mut-while-borrowed name="ys" line="26" end="27"
+  label 26:17-26:37 borrow.borrowed-here

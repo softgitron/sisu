@@ -1,0 +1,3 @@
+panic: nobody joins this
+  at closure in main (panics.sisu:43:13)
+  at main (panics.sisu:40:5)

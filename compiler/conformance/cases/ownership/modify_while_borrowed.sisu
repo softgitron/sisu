@@ -1,0 +1,7 @@
+# A value cannot be modified while a borrow of it is still used.
+
+def main():
+    var n = 1
+    let r = ref n
+    n = 2
+    print(r)

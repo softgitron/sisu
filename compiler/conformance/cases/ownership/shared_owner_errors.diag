@@ -1,0 +1,3 @@
+14:13-14:33 E0421 borrow.view-in-owner ty="Word" owner="Shared"
+15:13-15:27 E0421 borrow.view-in-owner ty="str" owner="Cell"
+16:13-16:38 E0422 borrow.must-consume-in-owner ty="Receipt" owner="Shared"

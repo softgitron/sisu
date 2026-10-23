@@ -1,0 +1,9 @@
+{"a": 1}
+--- stderr
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+outcome: no conflict; this run ended without an ownership conflict
+  the checker still rejects line 6 (E0410 borrow.store-into-caller), which this run reached without a conflict (count: 1)
+  the checker still rejects line 9 (E0410 borrow.store-into-caller), which this run never reached
+  the checker still rejects line 14 (E0410 borrow.store-into-caller), which this run never reached
+a rejected statement was never reached: inconclusive, an untested path
+--- status 0

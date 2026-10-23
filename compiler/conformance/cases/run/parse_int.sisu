@@ -1,0 +1,26 @@
+# `str.parse_int` (written in Sisu, std/prelude.sisu): an optional sign
+# and ASCII decimal digits, nothing else; `None` for no digits, a stray
+# character (a space, a second sign, a digit of another script) and a
+# value out of range for `int`, whose least value parses.
+def main():
+    for t in [
+        "0",
+        "42",
+        "+7",
+        "-17",
+        "007",
+        "-0",
+        "",
+        "+",
+        "-",
+        "+-5",
+        "4x",
+        " 4",
+        "9223372036854775807",
+        "9223372036854775808",
+        "-9223372036854775808",
+        "-9223372036854775809",
+        "99999999999999999999",
+        "١٢",
+    ]:
+        print("{t:?} -> {t.parse_int()}")

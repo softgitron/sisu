@@ -239,6 +239,12 @@ pub trait StackStrategy: Send + Sync + 'static {
     fn counters(&self) -> StackCounters;
 }
 
+/// The probe reserve of B and C (and D over B) when `--probe-reserve` is not
+/// given: 5 KiB, the owner's decision (README, "Policy decisions", item 6), which
+/// is the measured need of an unwind whose landing pads run drop code. Until
+/// October 2026 the defaults were 16 KiB for B and 8 KiB for C.
+pub const DEFAULT_PROBE_RESERVE: usize = 5 * KIB;
+
 /// Parameters of a strategy, from the command line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StrategyConfig {
@@ -248,9 +254,10 @@ pub struct StrategyConfig {
     /// C: exact stack bytes (2-16 KiB; default 8 KiB).
     pub exact: usize,
     /// B and C: bytes below the probe limit kept for the unwinder and for callees
-    /// without probes (library code). `None` picks the default (16 KiB for B, 8 KiB
-    /// for C). `deep-recursion` measures what unwinding uses: about 1.8 KiB from a
-    /// frame without destructors and about 5 KiB when landing pads run drop code.
+    /// without probes (library code). `None` picks [`DEFAULT_PROBE_RESERVE`], the
+    /// owner's 5 KiB (README, "Policy decisions"). `deep-recursion` measures what
+    /// unwinding uses: about 1.8 KiB from a frame without destructors and about
+    /// 5 KiB when landing pads run drop code.
     pub probe_reserve: Option<usize>,
     /// A: guard bytes below each stack (default one page).
     pub guard: usize,
@@ -320,10 +327,7 @@ impl StrategyConfig {
 
     /// The probe reserve in effect.
     pub fn effective_probe_reserve(&self) -> usize {
-        self.probe_reserve.unwrap_or(match self.id {
-            StrategyId::C => 8 * KIB,
-            _ => 16 * KIB,
-        })
+        self.probe_reserve.unwrap_or(DEFAULT_PROBE_RESERVE)
     }
 
     /// Stack bytes per task for the CSV `stack_bytes` column.

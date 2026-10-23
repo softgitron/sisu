@@ -1,0 +1,68 @@
+# Contracts checked at run time (07): `requires` on entry, `ensures` on
+# every exit with `result` and `old(...)`, labelled results, and what a
+# failure prints.
+
+def isqrt(n: int) -> int:
+    requires n >= 0
+    ensures result * result <= n < (result + 1) * (result + 1)
+    var r = 0
+    while (r + 1) * (r + 1) <= n:
+        r += 1
+    return r
+
+def divmod(a: int, b: int) -> (q: int, r: int):
+    requires b > 0
+    ensures a == q * b + r and 0 <= r < b
+    return (a // b, a % b)
+
+pure def none_positive(xs: Slice[int]) -> bool:
+    for x in xs:
+        if x > 0:
+            return False
+    return True
+
+def first_positive(xs: list[int]) -> int?:
+    ensures match result:
+        case Some(i): xs[i] > 0
+        case None: none_positive(xs)
+    for (i, x) in xs.iter().enumerate():
+        if x > 0:
+            return Some(i)
+    return None
+
+def push_twice(mut xs: list[int], x: int):
+    ensures len(xs) == old(len(xs)) + 2
+    xs.push(x)
+    xs.push(x)
+
+def wrong_abs(x: int) -> int:
+    ensures result >= 0
+    if x < -10:
+        return x  # the bug the postcondition catches
+    return if x >= 0: x else: -x
+
+def main():
+    print("{isqrt(0)} {isqrt(15)} {isqrt(16)}")
+    let res = divmod(17, 5)
+    print("{res.q} {res.r}")
+    print(first_positive([-1, 0, 3]))
+    print(first_positive([-2]))
+    var xs = [1]
+    push_twice(mut xs, 7)
+    print(xs)
+    print(wrong_abs(-3))
+    print(wrong_abs(-30))
+
+test "a precondition names its clause and values":
+    _ = isqrt(-4)
+
+test "a postcondition names the result":
+    _ = wrong_abs(-20)
+
+test "labelled results":
+    let q, r = divmod(-7, 2)
+    assert q == -4 and r == 1
+
+test "every exit checks the postcondition":
+    assert first_positive([0, 0, 5]) == Some(2)
+    assert first_positive([]) == None

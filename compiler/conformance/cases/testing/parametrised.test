@@ -1,0 +1,18 @@
+test "doubles (1, 2)" ... ok
+test "doubles (2, 4)" ... ok
+test "doubles (-3, -6)" ... ok
+test "a wrong case fails on its own (1, 2)" ... ok
+test "a wrong case fails on its own (3, 7)" ... FAILED
+test "positive" ... ok
+test "double/of a large number" ... ok
+test "double/of zero" ... ok
+test "slow, outside the suite" ... ok
+
+test "a wrong case fails on its own (3, 7)" ... FAILED
+panic: assertion failed: double(x) == y
+  left:  6
+  right: 7
+  at test "a wrong case fails on its own (3, 7)" (parametrised.sisu:15:5)
+replay: sisu test --replay 1-1ad097f1d3a1f89a-0.0.1-t4-s0-r0 parametrised.sisu
+
+8 passed, 1 failed, 0 blocked

@@ -1,0 +1,6 @@
+# A wrong program: an element is moved out of a list by indexing it.
+
+def main():
+    let names = ["Aino".to_string(), "Eero".to_string()]
+    let first = names[0]
+    print(first)

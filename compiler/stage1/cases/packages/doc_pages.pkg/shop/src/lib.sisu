@@ -1,0 +1,19 @@
+##! A shop: its items and their prices, and its orders.
+
+pub from shop.items import Item, Priced, LIMIT, price_of
+pub from shop.items.prices import Price as Cost
+pub from money import Cents
+pub from std.time import Duration
+pub import shop.orders
+
+## The shop's name.
+pub const NAME: str = "corner"
+
+## Only for the shop's own modules.
+pub(package) def stock() -> int:
+    return 3
+
+## Only when the feature `fancy` is on, which it is not.
+@cfg(feature="fancy")
+pub def ribbon() -> str:
+    return "bow"

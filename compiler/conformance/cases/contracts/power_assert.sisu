@@ -1,0 +1,41 @@
+# A failed `assert` shows the value of each part of its condition under
+# the part (17, "power assert"): the parts that are evaluated whatever
+# the outcome and have no effect, so evaluating them again shows the
+# values the condition saw. A condition that calls what is not `pure`
+# shows the two sides of its comparison instead.
+
+struct Point:
+    x: int
+    y: int
+
+    pure def norm1(self) -> int:
+        return abs(self.x) + abs(self.y)
+
+def double(n: int) -> int:
+    return n * 2
+
+test "an iterator is not pure: the two sides":
+    let xs = [3, 1, 2]
+    assert len(xs) == xs.iter().count() + 1
+
+test "fields and methods":
+    let p = Point(x=3, y=-4)
+    assert p.norm1() < p.x * 2
+
+test "indexing and arithmetic":
+    let xs = [10, 20, 30]
+    let i = 1
+    assert xs[i] + xs[i + 1] == 60
+
+test "a chain of comparisons":
+    let lo = 5
+    let hi = 3
+    assert 0 <= lo <= hi
+
+test "only the left of `and` is shown when the right may not run":
+    let xs: list[int] = []
+    assert len(xs) > 0 and xs[0] == 1
+
+test "a function that is not pure: the two sides and the message":
+    let n = 7
+    assert double(n) == 15, "doubling {n}"

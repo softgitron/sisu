@@ -1,0 +1,25 @@
+# `sisu fmt` writes `Option[T]` as `T?` (decision 152) also when it is
+# spelled with spaces or over lines; only a comment inside keeps it.
+
+def spaced(x: Option[ int ]) -> int:
+    match x:
+        case Some(n):
+            return n
+        case None:
+            return -1
+
+def broken(x: Option[
+    str
+]) -> str:
+    match x:
+        case Some(s):
+            return s
+        case None:
+            return "none"
+
+def main():
+    print(spaced(Some(4)))
+    print(spaced(None))
+    print(broken(Some("text")))
+    let maybe: list[Option[ int ]] = [Some(1), None]
+    print(maybe.len())

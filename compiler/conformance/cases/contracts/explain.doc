@@ -1,0 +1,104 @@
+<!-- explain.md -->
+# `explain`
+
+## Contents
+
+- [`Percent`](#Percent): A percentage.
+- [`ParseError`](#ParseError)
+- [`RangeError`](#RangeError)
+- [`parse_percent`](#parse_percent): Reads a percentage from text.
+- [`Tank`](#Tank): A tank that never holds more than its capacity.
+- [`Gauge`](#Gauge)
+- [`total`](#total)
+
+<a id="Percent"></a>
+## `Percent`
+
+```sisu
+type Percent = int where 0 <= self <= 100
+    def try_from(value: int) -> Percent ! RefinementError
+```
+
+A percentage.
+
+<a id="ParseError"></a>
+## `ParseError`
+
+```sisu
+error ParseError
+    Empty
+    NotANumber(text: String)
+```
+
+<a id="RangeError"></a>
+## `RangeError`
+
+```sisu
+error RangeError
+    OutOfRange(n: int)
+```
+
+<a id="parse_percent"></a>
+## `parse_percent`
+
+```sisu
+def parse_percent(text: str, clamp: bool = False) -> Percent ! {ParseError, RangeError}  # inferred
+```
+
+Reads a percentage from text.
+
+<a id="Tank"></a>
+## `Tank`
+
+```sisu
+struct Tank
+    level: int
+    capacity: int
+    invariant 0 <= self.level <= self.capacity
+
+impl Gauge for Tank
+```
+
+A tank that never holds more than its capacity.
+
+<a id="Tank.fill"></a>
+### `Tank.fill`
+
+```sisu
+def fill(mut self, amount: int) -> int
+    requires amount >= 0
+    ensures self.level == min(old(self.level) + amount, self.capacity)
+    ensures result == self.level - old(self.level)
+    # re-checks the invariant of `Tank` on return
+```
+
+Adds water up to the capacity.
+
+<a id="Tank.is_full"></a>
+### `Tank.is_full`
+
+```sisu
+pure def is_full(self) -> bool
+```
+
+<a id="Gauge"></a>
+## `Gauge`
+
+```sisu
+trait Gauge
+```
+
+<a id="Gauge.reading"></a>
+### `Gauge.reading`
+
+```sisu
+def reading(self) -> int
+```
+
+<a id="total"></a>
+## `total`
+
+```sisu
+def total[T: Gauge](gauges: Slice[T]) -> int
+    ensures result >= 0
+```

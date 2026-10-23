@@ -1,0 +1,22 @@
+# `task.race` (06, D-075): the first task to finish wins, whatever its
+# outcome; the others are cancelled and joined before the race returns.
+# explore 20
+
+error Down:
+    Unavailable
+
+def fetch(clock: Clock, delay: int, name: str) -> String ! {Down, TaskError}:
+    clock.sleep(Duration.millis(delay))?
+    if name == "broken":
+        return Err(Unavailable)
+    return Ok(name.to_string())
+
+def main(sys: System):
+    let reply = task.race do r:
+        r.spawn(() -> fetch(sys.clock, 200, "replica"))
+        r.spawn(() -> fetch(sys.clock, 0, "primary"))
+    print(reply)
+    let failed = task.race do r:
+        r.spawn(() -> fetch(sys.clock, 0, "broken"))
+        r.spawn(() -> fetch(sys.clock, 200, "slow"))
+    print(failed)

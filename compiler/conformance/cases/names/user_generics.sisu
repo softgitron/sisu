@@ -1,0 +1,5 @@
+struct Box[T]:
+    value: T
+
+def main():
+    pass

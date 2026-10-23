@@ -1,0 +1,14 @@
+# A wrong program: a variable holding a must-consume value is given a new
+# one, which drops the first unconsumed.
+
+@must_consume
+struct Token:
+    id: int
+
+    def spend(own self):
+        print("spent {self.id}")
+
+def main():
+    var t = Token(id=1)
+    t = Token(id=2)
+    t.spend()

@@ -1,0 +1,10 @@
+# One error in one function; the checker still types the rest, so nothing
+# else is reported.
+def broken() -> int:
+    return "text"
+
+def fine(x: int) -> int:
+    return x * 2
+
+def main():
+    print(fine(broken()))

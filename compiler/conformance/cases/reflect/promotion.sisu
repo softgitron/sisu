@@ -1,0 +1,34 @@
+# A generic function that calls a template with its own type parameter is
+# made for each call too (promoted), so the template's instance is known.
+# Templates may call templates, each instance made once.
+
+def to_text[T](value: T) -> String:
+    if comptime reflect.is_struct(T):
+        var parts: list[String] = []
+        comptime for f in reflect.fields_of(T):
+            parts.push("{f.name}: {to_text(value.[f])}")
+        return "{reflect.name_of(T)} {{ {parts.join(", ")} }}"
+    elif comptime reflect.is_list(T):
+        return "[{value.iter().map(to_text(it)).join(", ")}]"
+    else:
+        return "{value:?}"
+
+## Not reflective itself: it becomes a template because it calls one with `T`.
+def labelled[T](label: str, value: T) -> String:
+    return "{label} = {to_text(value)}"
+
+def twice[T](value: T) -> String:
+    return "{labelled("first", value)}; {labelled("second", value)}"
+
+struct Inner:
+    n: int
+
+struct Outer:
+    name: String
+    inner: Inner
+    all: list[Inner]
+
+def main():
+    print(labelled("n", 7))
+    print(twice(Inner(n=1)))
+    print(to_text(Outer(name="o".to_string(), inner=Inner(n=2), all=[Inner(n=3), Inner(n=4)])))

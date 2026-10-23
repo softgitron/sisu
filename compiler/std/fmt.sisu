@@ -1,0 +1,5 @@
+##! `std.fmt` (11): formatting. The traits `Display` (what `{x}` writes)
+##! and `Debug` (what `{x:?}` writes), the `Formatter` they write into and
+##! the `Spec` of a placeholder (width, fill, alignment, precision) are the
+##! prelude's, which interpolation uses, and are reached from here too
+##! (`from std.fmt import Display`).

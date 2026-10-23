@@ -1,0 +1,9 @@
+# The version `restart.sisu` saves: `draw` takes a second parameter.
+
+def draw(frame: int, of: int) -> String:
+    return "frame {frame} of {of}"
+
+def main():
+    for frame in range(2):
+        live.boundary()
+        print("v2, {draw(frame, 2)}, epoch {live.epoch()}")

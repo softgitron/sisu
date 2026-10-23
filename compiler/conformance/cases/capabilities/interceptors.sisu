@@ -1,0 +1,29 @@
+# Interceptors (D-075): `cap.Wrap(inner=c, hook=h)` shows every call
+# through the capability `c` to `h` before it runs and after it returns.
+# The hook's record lives behind a `Cap`, shared by its copies.
+
+@derive(Copy)
+struct Audit:
+    lines: Cap[Mutex[list[String]]]
+
+impl cap.Interceptor for Audit:
+    def before(self, call: cap.Call):
+        var g = self.lines.get().lock()
+        g.value.push("> {call.capability}.{call.method}({call.args})")
+    def after(self, call: cap.Call, outcome: str):
+        var g = self.lines.get().lock()
+        g.value.push("< {call.method} = {outcome}")
+
+def load(fs: Fs) -> String ! IoError:
+    return fs.read_to_string("settings")
+
+def main():
+    let audit = Audit(lines=Cap(Mutex(list())))
+    let fs: Fs = cap.Wrap(inner=Fs.in_memory({"settings": "on"}), hook=audit)
+    print(load(fs))
+    print(fs.exists("other"))
+    fs.write_text("other", "x").expect("in memory")
+    let clock: Clock = cap.Wrap(inner=Clock.frozen_at(DateTime.epoch()), hook=audit)
+    print(clock.now())
+    for line in audit.lines.get().lock().value.iter():
+        print(line)

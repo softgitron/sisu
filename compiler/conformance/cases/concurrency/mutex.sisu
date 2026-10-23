@@ -1,0 +1,41 @@
+# `Mutex` across tasks (06, "Send, Sync, and shared state"): `lock` waits
+# while another task holds the mutex; a guard dropped by a panicking task
+# unlocks it, or poisons it when the value's invariant is broken (D-077).
+# explore 20
+
+struct Account:
+    balance: int
+    invariant self.balance >= 0
+
+    # Only the type's own methods change its fields (07); one that panics
+    # before it returns leaves its invariant to the guard's drop.
+    def set_then_panic(mut self, balance: int, message: str):
+        self.balance = balance
+        panic(message)
+
+def main():
+    let total = Mutex(0)
+    task.scope do s:
+        for i in range(4):
+            s.spawn do:
+                for _ in range(10):
+                    var g = total.lock()
+                    let seen = g.value
+                    task.yield_now()
+                    g.value = seen + 1
+    print(total.lock().value)
+    let account = Mutex(Account(balance=10))
+    task.scope do s:
+        let bad = s.spawn do:
+            var g = account.lock()
+            g.set_then_panic(-5, "left the account negative")
+        print(bad.join().is_err())
+    print(account.is_poisoned())
+    let kept = Mutex(Account(balance=10))
+    task.scope do s:
+        let ok = s.spawn do:
+            var g = kept.lock()
+            g.set_then_panic(7, "panicked, the invariant still holding")
+        print(ok.join().is_err())
+    print(kept.is_poisoned())
+    print(kept.lock().balance)

@@ -1,0 +1,74 @@
+# Type invariants (07): checked after construction and after every `mut
+# self` method returns, on every path out of it; a field of such a type is
+# assigned only by the type's own methods.
+
+struct Range:
+    lo: int
+    hi: int
+    invariant self.lo <= self.hi
+
+    def widen(mut self, by: int):
+        requires by >= 0
+        self.lo -= by
+        self.hi += by
+
+    def shift(mut self, by: int):
+        requires -1000 <= by <= 1000
+        self.lo += by
+        self.hi += by
+
+    def set_lo(mut self, lo: int) -> ! RangeError:
+        if lo > self.hi:
+            return Err(Inverted(lo=lo, hi=self.hi))
+        self.lo = lo
+        return Ok(())
+
+    # Broken on purpose: the invariant catches it when the method returns.
+    def collapse_wrongly(mut self):
+        self.lo = self.hi + 1
+
+    def len(self) -> int:
+        return self.hi - self.lo
+
+error RangeError:
+    Inverted(lo: int, hi: int)
+
+# A type whose invariant holds of a field that is itself a struct.
+struct Ledger:
+    entries: list[int]
+    total: int
+    invariant self.total == sum_of(self.entries)
+
+    def add(mut self, x: int):
+        self.entries.push(x)
+        self.total += x
+
+pure def sum_of(xs: Slice[int]) -> int:
+    var t = 0
+    for x in xs:
+        t += x
+    return t
+
+def main():
+    var r = Range(lo=1, hi=4)
+    r.widen(2)
+    print("{r.lo} {r.hi} {r.len()}")
+    r.shift(-10)
+    print("{r.lo} {r.hi}")
+    print(r.set_lo(100))
+    print(r.set_lo(-9))
+    print("{r.lo} {r.hi}")
+    var l = Ledger(entries=[], total=0)
+    l.add(3)
+    l.add(4)
+    print("{l.total} {l.entries}")
+    r.collapse_wrongly()
+    print("not reached")
+
+test "construction checks the invariant":
+    _ = Range(lo=5, hi=1)
+
+test "a ledger built right":
+    var l = Ledger(entries=[1, 2], total=3)
+    l.add(10)
+    assert l.total == 13
