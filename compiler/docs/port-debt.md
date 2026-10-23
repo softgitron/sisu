@@ -203,13 +203,24 @@ are parsed, the bodies the memo lacks checked, its functions put through
 the ownership checker and compiled by Cranelift on threads (decision
 219), and the derived impls' templates run and the bodies lowered on
 threads too (decision 228); what is left on one thread is the rest of
-resolution (0.13 s of a clean native build of stage 1, 3.9 s on 4 cores
-for 59 000 lines with std), lowering's worklist, and the code generator's
-writing of IR (0.6 s), which numbers types, functions and data in the
-order it meets them. A package's dependencies are not built apart and at
-once across the graph, as 10 plans. *Pay*: IR written on threads into
-functions whose numbers are given and rewritten in order when each is
-taken, and 10's builds per package.
+resolution (part of the 0.2 s that names take in a clean native build of
+stage 1, 6 s on 4 cores for its 64 000 lines with std's 11 500),
+lowering's worklist, and the code generator's writing of IR (0.9 to
+1.1 s), which numbers types, functions and data in the order it meets
+them; the numbers are in the object file
+(a type's number is an immediate in the code, the functions and data are
+declared in that order). Round 10 measured what threads would gain
+there (`SISU_NATIVE_TIMES=1`): while the IR is written the other threads
+compile what it has handed them, and they go on for another second
+after it, so code generation (2 s of the build, about 8 s of its 18 s of
+processor time) is bounded by Cranelift's compiling, and IR written on
+threads would shorten it little, while keeping the object file the same
+would need each thread's numbers given again in the order one thread
+meets them. A package's dependencies are not built apart and at once
+across the graph, as 10 plans. *Pay*: when a program's IR writing is on
+the critical path, IR written on threads with numbers of their own,
+renumbered in that order as each function is taken; and 10's builds per
+package.
 
 **Intrinsics get type arguments by a rule.** Generic Sisu functions get
 every type argument at run time; an intrinsic gets them only when
@@ -580,6 +591,14 @@ What round 1 does, and a later round must not copy:
   lookup walks the key's type to hash it and again to compare it, about
   400 instructions in stage 1); and LLVM for release builds (18, stage
   2).
+- **Where the link places a function moves a tight loop's time**:
+  functions are placed one after another at the alignment their code
+  needs (a byte), so the same instructions of a loop run up to a third
+  faster or slower with the size of the code before them (decision 266:
+  Collatz and `fib(37)` with the very same code). Aligning functions to
+  16, 32 or 64 bytes was tried and did not bring the slower placements
+  back. *Pay*: the alignment of loop headers, which Cranelift does not
+  do, or LLVM for release builds.
 - **The runtime trusts the generated code**: an address or a type number
   that breaks the runtime's rules is not checked everywhere, and where it
   is, it is `R0122` and status 134, not a diagnostic of the program.

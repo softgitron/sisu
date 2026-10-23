@@ -114,8 +114,14 @@ fn option_sugar() {
     assert_eq!(fmt("def f(x: Option[int?]):\n    pass\n"), "def f(x: Option[int?]):\n    pass\n");
     // Of an option of an option, the inner one (decision 267).
     assert_eq!(fmt("def f(x: Option[Option[int]]):\n    pass\n"), "def f(x: Option[int?]):\n    pass\n");
-    assert_eq!(fmt("def f(x: Option[Option[Option[int]]]):\n    pass\n"), "def f(x: Option[int?]?):\n    pass\n");
-    assert_eq!(fmt("def f(x: ref Option[Option[int]]):\n    pass\n"), "def f(x: ref Option[int?]):\n    pass\n");
+    assert_eq!(
+        fmt("def f(x: Option[Option[Option[int]]]):\n    pass\n"),
+        "def f(x: Option[int?]?):\n    pass\n"
+    );
+    assert_eq!(
+        fmt("def f(x: ref Option[Option[int]]):\n    pass\n"),
+        "def f(x: ref Option[int?]):\n    pass\n"
+    );
     // Spaces and line breaks inside go; a comment keeps the brackets.
     assert_eq!(
         fmt("def f(x: Option[ int ], y: Option[\n    str\n]):\n    pass\n"),

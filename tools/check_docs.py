@@ -16,6 +16,7 @@ for p in sorted(md):
     txt = open(p, encoding='utf-8').read()
     # strip fenced code blocks for link checking
     plain = re.sub(r'```.*?```', '', txt, flags=re.S)
+    plain = re.sub(r'``.+?``', '', plain)
     plain = re.sub(r'`[^`\n]*`', '', plain)
     for m in re.finditer(r'\]\(([^)\s]+)\)', plain):
         link = m.group(1)

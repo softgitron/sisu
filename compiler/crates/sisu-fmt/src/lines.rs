@@ -220,7 +220,11 @@ fn option_sugar_asked(tree: &Tree, n: NodeId, asking: Option<NodeId>) -> Option<
     let ts = type_children(tree, args);
     // `[` and `]`, and no trailing comma (the significant tokens); spaces
     // and line breaks go, but a comment would have nowhere to go.
-    if ts.len() != 1 || tree.child_tokens(args).count() != 2 || has_comment(tree, n) || has_comment(tree, args) {
+    if ts.len() != 1
+        || tree.child_tokens(args).count() != 2
+        || has_comment(tree, n)
+        || has_comment(tree, args)
+    {
         return None;
     }
     let arg = ts[0];

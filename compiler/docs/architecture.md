@@ -3646,7 +3646,13 @@ before the threads have compiled what they were given. That is 0.066 s
 for each thousand lines, so a clean debug build of 100 kLOC would take
 under 7 s, within 10's target of 10 s. A small program builds in 0.12
 to 0.15 s, of which code generation is 1 to 2 ms and the link 60 to 85
-ms; the rest is the front end, which `sisu run` spends as well.
+ms; the rest is the front end, which `sisu run` spends as well. Round 10
+measured stage 1 again, with its formatter (64 049 lines): a clean
+native build takes 5.9 to 6.4 s on the same machine, 17 to 19 s of
+processor time, of which the ownership checker is 2.0 to 2.2 s, on
+threads, and code generation about 2 s, the IR written in 0.9 to 1.1 s
+while the threads compile and a second more for them to finish
+(port-debt.md, "Some steps of a build still run on one thread").
 
 The executables run 10 to 30 times as fast as the interpreter. On stage
 1's commands, from `compiler/stage1`, with byte-identical output, as
@@ -5807,10 +5813,11 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      and return traces, which nothing observes in order). It gains little:
      stage 1's copies are mostly of its bitsets' words (a `list[int]`,
      copied as its bytes either way) and of texts, whose cost is the
-     allocation and the bytes; of `examples/wordcount`, 3.053 G
-     instructions against 3.065 G, @@COPY_SELF@@. Copying the parts a word
-     at a time rather than by `memmove` counted more instructions and is
-     not kept. This changes no front-end rule.
+     allocation and the bytes; of `examples/wordcount`, 2.913 G
+     instructions against 2.926 G without it, of its own package within a
+     tenth of a percent either way. Copying the parts a word at a time
+     rather than by `memmove` counted more instructions and is not kept.
+     This changes no front-end rule.
 263. The corpora of 18's Phase 3 that need no people. The wrong-ownership
      corpus is the programs of `wrong/` whose one error is a rule of the
      ownership model: the ownership checker's codes (`E04xx`) and the type
@@ -5848,14 +5855,15 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      runtime's dispatch. The inline code now reads its two arguments
      through any references when both are `int`s and so is the result. A
      loop taking the `max` and the `min` of 20 million values runs in
-     @@MINMAX@@; stage 1 makes 3.3 million such calls checking its own
-     package. This changes no front-end rule. `run/inline_operations` pins
-     both at their edges in the three native modes.
+     0.32 s against 2.43 s; stage 1 makes 3.3 million such calls printing
+     the SIR of its own package. This changes no front-end rule.
+     `run/inline_operations` pins both at their edges in the three native
+     modes.
 265. More of what stage 1 calls most runs without the intrinsic's
      descriptor (port-debt.md, "Stage 2"), whose decoding, finding the
      arguments through their references by the type table, and dispatch
-     cost a few hundred instructions a call: the generated code calls an
-     entry of the runtime that takes the values' words. Appending text to
+     cost about two hundred instructions a call: the generated code calls
+     an entry of the runtime that takes the values' words. Appending text to
      a `String` (`fmt.text`, `fmt.display` of a text, `String.push`) is
      `sisu_rt_text_push` with the text's address and length, `fmt.display`
      of an `int` is `sisu_rt_text_push_int`, which writes the digits
@@ -5889,19 +5897,29 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      every drop is the one its kind's rule gives, and a part that panics
      leaves the others to be dropped as cleanup, a second panic aborting,
      as before. A list looks at its element's way of dropping once, and
-     frees a list of texts' texts without a call for each. This changes no
-     front-end rule. `run/drop_parts` pins the order through tuples within
-     tuples and a panic among their parts, and drops of values that only
-     free memory, in the three native modes.
+     frees the texts of a list of texts without a call for each. This
+     changes no front-end rule. `run/drop_parts` pins the order through
+     tuples within tuples and a panic among their parts, and drops of
+     values that only free memory, in the three native modes.
 
-     Decisions 264 to 266 and 260 to 262, measured on stage 1 built in
-     release by a release `sisu` from a copy of its package and run
-     natively, each output byte for byte the same: printing the SIR of
-     its own package takes @@SELF_INSNS@@ instructions (valgrind's count)
-     against 130.8 G with round 9's compiler, @@SELF_WALL@@; of
-     `examples/wordcount`, 2.91 G against 3.46 G. The arithmetic loops of
-     decision 246 compile to the same code as before and run in the same
-     time, but for `max` and `min`: @@ARITH@@.
+     Decisions 260, 262 and 264 to 266, measured on stage 1 as the round
+     began (61 211 lines), built in release by a release `sisu` from a copy
+     of its package and run natively, each output byte for byte the same:
+     printing the SIR of its own package takes 104.6 G instructions
+     (valgrind's count) against 130.8 G with round 9's compiler, and 19.6 s
+     against 24.0 s (best of five in turn, medians 20.1 s and 24.7 s); of
+     `examples/wordcount`, 2.91 G against 3.46 G. Stage 1 with its
+     formatter merged (64 049 lines) prints its own SIR in 20.9 s against
+     25.2 s. The arithmetic loops of decision 246 compile to the same
+     instructions, but that a push without room calls
+     `sisu_rt_list_reserve`, and their times move with where the link
+     places them, since functions are not aligned: best of five against
+     round 9's compiler, Collatz 1.21 s against 1.02 s and `fib(37)` 0.56 s
+     against 0.43 s with the very same code, trial division 2.57 s against
+     2.53 s, Euclid 1.56 s against 1.54 s, the sieve 0.27 s against 0.27 s,
+     the product of matrices 0.63 s against 0.73 s; aligning functions to
+     16, 32 or 64 bytes did not bring the slower placements back
+     (port-debt.md, "Stage 2").
 267. Two accidents of the formatter that stage 1's transcription found
      (its DISCREPANCIES.md, D6 and D7), decided for the written rule of
      decision 152 (D-079). Whether an option inside another is written
