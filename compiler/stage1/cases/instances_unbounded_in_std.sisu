@@ -1,0 +1,12 @@
+# A type whose encoding needs ever larger types makes the standard
+# library's template `json.encode` ask for instances without end (08,
+# "Reflection"): the error is at the template, in its module's file.
+import json
+
+struct Tree[T]:
+    value: T
+    kids: list[Tree[list[T]]]
+
+def main():
+    let t = Tree[int](value=1, kids=[])
+    print(json.encode(t))

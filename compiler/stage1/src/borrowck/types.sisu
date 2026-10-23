@@ -5,7 +5,7 @@
 ##! trait runs. Stage 0's `Types` holds the program; here a function that
 ##! needs more of it than the declared types takes it.
 
-from stage1.sir import Function, ImplTarget, Loc, Place, Program, Type, TypeDecl
+from stage1.sir import Function, ImplTarget, IntrinsicDecl, Loc, Place, Program, Type, TypeDecl
 from stage1.sir.types import Decls, field_ty, place_ty
 
 ## The builtin types whose values can hold no loan and own nothing that
@@ -24,7 +24,7 @@ pub pure def plain_builtin(n: str) -> bool:
 ## an iterator walks a collection it may borrow, an entry borrows its dict.
 pub pure def borrowing_builtin(n: str) -> bool:
     return match n:
-        case "Iter" | "Entry" | "Iterable" | "MutexGuard" | "Lent" | "Slice": True
+        case "Iter" | "Entry" | "Iterable" | "MutexGuard" | "ReadGuard" | "Lent" | "Slice": True
         case _: False
 
 pub struct Types:
@@ -35,18 +35,46 @@ pub struct Types:
     ## function's name or place, so the index serves the program with its
     ## drops too.
     pub fns: dict[String, int]
+    ## The program's intrinsics and trait methods by name, each the index
+    ## of the first of its name, as `Program::intrinsic` and
+    ## `Program::trait_method` find them.
+    intrinsics: dict[String, int]
+    trait_methods: dict[String, int]
 
 impl Types:
     pub pure def new(types: list[TypeDecl]) -> Types:
-        return Types(decls=Decls.new(types), fns={})
+        return Types(decls=Decls.new(types), fns={}, intrinsics={}, trait_methods={})
 
-    ## The types of a program, with its functions by name.
+    ## The types of a program, with its functions, intrinsics and trait
+    ## methods by name.
     pub pure def of(p: Program) -> Types:
         var fns: dict[String, int] = {}
         for i in range(len(p.functions)):
             if not fns.contains(p.functions[i].name.copy()):
                 _ = fns.insert(p.functions[i].name.copy(), i)
-        return Types(decls=Decls.new(p.types), fns=fns)
+        var intrinsics: dict[String, int] = {}
+        for i in range(len(p.intrinsics)):
+            if not intrinsics.contains(p.intrinsics[i].name.copy()):
+                _ = intrinsics.insert(p.intrinsics[i].name.copy(), i)
+        var trait_methods: dict[String, int] = {}
+        for i in range(len(p.trait_methods)):
+            if not trait_methods.contains(p.trait_methods[i].name.copy()):
+                _ = trait_methods.insert(p.trait_methods[i].name.copy(), i)
+        return Types(
+            decls=Decls.new(p.types), fns=fns, intrinsics=intrinsics, trait_methods=trait_methods
+        )
+
+    ## The program's intrinsic of that name (`Program::intrinsic`).
+    pub pure def intrinsic(self, p: Program, name: str) -> ref IntrinsicDecl? from p:
+        if let Some(i) = self.intrinsics.get(name.to_string()):
+            return Some(ref p.intrinsics[i])
+        return None
+
+    ## The program's trait method of that name (`Program::trait_method`).
+    pub pure def trait_method(self, p: Program, name: str) -> ref IntrinsicDecl? from p:
+        if let Some(i) = self.trait_methods.get(name.to_string()):
+            return Some(ref p.trait_methods[i])
+        return None
 
     ## The declared types the places of `f` can reach, each once, in the
     ## order met: those its locals' types name, and those their fields and
@@ -422,6 +450,55 @@ impl Types:
             case _:
                 return False
 
+    ## Whether a value of the type holds a capability handle or a `Cap`,
+    ## whose object goes with the handle's last copy (decision 237): a
+    ## result that points into the object borrows the place the call
+    ## copied the handle from. A `Lent` holds loans of its own instead.
+    pub pure def holds_handle(self, t: Type) -> bool:
+        return self.holds_handle_depth(t, 0)
+
+    pure def holds_handle_depth(self, t: Type, depth: int) -> bool:
+        if depth > 16:
+            return False
+        match t:
+            case Type.Tuple(es):
+                for e in es:
+                    if self.holds_handle_depth(e, depth + 1):
+                        return True
+                return False
+            case Type.Named(n, args):
+                match n:
+                    case "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "System" | "Cap":
+                        return True
+                    case "Lent" | "Shared" | "Weak" | "list" | "Array" | "dict" | "set" | "Iter":
+                        return False
+                    case "Entry" | "Iterable" | "Cell" | "Atomic" | "Mutex" | "RwLock" | "MutexGuard":
+                        return False
+                    case "ReadGuard" | "Arena" | "Slice":
+                        return False
+                    case "Option" | "Result":
+                        for a in args:
+                            if self.holds_handle_depth(a, depth + 1):
+                                return True
+                        return False
+                    case _:
+                        pass
+                let d = self.decls.get(n) else:
+                    return False
+                match d:
+                    case TypeDecl.Struct(_, _, fields, _, _, _):
+                        for fd in fields:
+                            if self.holds_handle_depth(fd.ty.subst(args), depth + 1):
+                                return True
+                    case TypeDecl.Enum(_, _, variants, _, _, _, _):
+                        for v in variants:
+                            for (_, ft) in v.fields:
+                                if self.holds_handle_depth(ft.subst(args), depth + 1):
+                                    return True
+                return False
+            case _:
+                return False
+
     ## The index of a variant of an enum, by name.
     pub pure def variant_index(self, name: str, variant: str) -> int?:
         let d = self.decls.get(name) else:
@@ -509,7 +586,7 @@ impl Types:
                 return False
             case Type.Named(n, args):
                 # Dropping a guard unlocks its mutex, through its loan.
-                if n == "MutexGuard":
+                if n == "MutexGuard" or n == "ReadGuard":
                     return True
                 for (k, r) in done:
                     if k == t:

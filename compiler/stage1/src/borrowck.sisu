@@ -42,6 +42,7 @@ from stage1.borrowck.finding import Finding, dedup, to_diagnostic
 from stage1.borrowck.init import Analysis
 from stage1.borrowck.types import Types
 from stage1.diag import Catalog, Diagnostic, Lines, render_ids, sort_unique
+from stage1.lower.names import CONTRACTS_ALL
 from stage1.sir import Function, Program, TypeDecl
 
 ## The checked program: SIR with its drops placed, and the findings.
@@ -227,8 +228,9 @@ pure def function_text(program: str, name: str) -> String:
     var kept = typeck.StdBodies.new()
     var kept_lowered = lower.StdLowered.new()
     var kept_slots = lower.StdSlots.new()
+    let all = CONTRACTS_ALL
     let lowered = lower.lower(
-        typed, base, "main.sisu", catalog, mut kept, mut kept_lowered, mut kept_slots
+        typed, base, "main.sisu", all, catalog, mut kept, mut kept_lowered, mut kept_slots
     )
     if not lowered.beyond.is_empty():
         return lowered.beyond.join("\n")
@@ -266,8 +268,9 @@ pure def ownership_of(program: str) -> String:
     var kept = typeck.StdBodies.new()
     var kept_lowered = lower.StdLowered.new()
     var kept_slots = lower.StdSlots.new()
+    let all = CONTRACTS_ALL
     let lowered = lower.lower(
-        typed, base, "main.sisu", catalog, mut kept, mut kept_lowered, mut kept_slots
+        typed, base, "main.sisu", all, catalog, mut kept, mut kept_lowered, mut kept_slots
     )
     if not lowered.beyond.is_empty():
         return lowered.beyond.join("\n")

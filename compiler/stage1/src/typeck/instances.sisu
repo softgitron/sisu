@@ -30,8 +30,21 @@
 
 from stage1.diag import Diagnostic, Msg, TextRange
 from stage1.parser import parse
-from stage1.syntax.ast import Attr, ExprKind, FnDef, GenericParam, ItemId, ItemKind, TypeExprId, Vis
+from stage1.syntax.ast import (
+    Ast,
+    Attr,
+    Block,
+    ExprId,
+    ExprKind,
+    FnDef,
+    GenericParam,
+    ItemId,
+    ItemKind,
+    TypeExprId,
+    Vis,
+)
 from stage1.syntax.ast import build
+from stage1.syntax.ast import visit
 from stage1.typeck.collect import Resolver
 from stage1.typeck.program import Answer, DefKind, ModuleId, Request, VariantInfo, derivable
 from stage1.typeck.template import (
@@ -113,10 +126,12 @@ impl Resolver:
                 case ItemKind.Struct(s):
                     name = s.name.text.copy()
                     gps = s.generics.copy()
+                    var fields: list[(String, bool)] = []
                     for f in s.fields:
                         field_tys.push(f.ty)
                         field_names.push(f.name.text.copy())
-                    body = Body.Struct(field_names.copy())
+                        fields.push((f.name.text.copy(), f.default.is_some()))
+                    body = Body.Struct(fields)
                     is_struct = True
                 case ItemKind.Enum(e):
                     name = e.name.text.copy()
@@ -261,11 +276,11 @@ impl Resolver:
                             d = d.with("trait", t).with("ty", name).with("reason", why)
                             if tm == module:
                                 d = d.label(Msg.ComptimeDeriveHere, at.start, at.end)
-                                self.report_other(module, d)
                             else:
                                 # The template stopped in another file than
                                 # the type's.
-                                self.note_error(module, "comptime.derive-failed")
+                                d = d.label_in(Msg.ComptimeDeriveHere, at.start, at.end, tm.index)
+                            self.report_other(module, d)
                         continue
                 self.derive_checks.push(
                     DeriveCheck(ty=ty, trait_name=t.copy(), span=asked, field=None)
@@ -289,13 +304,13 @@ impl Resolver:
         let name = "{dir}/{self.prog.modules[module.index].name}.sisu"
         let is_std = self.prog.modules[module.index].is_std
         let parsed = parse(text, Shared.get(self.catalog))
-        for d in parsed.diagnostics:
-            if self.catalog.is_error(d.msg):
-                self.other_error = True
-                self.noted.push("a syntax error in code the compiler wrote".to_string())
         let generated = build.module(parsed.tree)
         let items = generated.items.copy()
         let id = self.add_module(name, is_std, generated)
+        # A syntax error in what the compiler wrote is in the file it wrote,
+        # as stage 0 reports it.
+        for d in parsed.diagnostics:
+            self.report_other(id, d.copy())
         self.prog.modules[id.index].parent = Some(module)
         self.prog.modules[id.index].package = self.prog.modules[module.index].package
         if not is_std:
@@ -303,6 +318,10 @@ impl Resolver:
         if not is_std or dir != "<derive>":
             self.generated.push((id, text.to_string()))
         self.declare_items(id, items, "")
+        # Each site of a generator in it stands for the generator's call,
+        # once every module's generators are known (`declare_written_sites`).
+        if self.sites_known and self.writes_sites(id):
+            self.write_sites_in(id)
         return id
 
     ## The checks of the derived and delegated impls of the root module, once
@@ -320,7 +339,12 @@ impl Resolver:
                 trait_def = self.prog.lookup(self.prog.prelude, c.trait_name)
             let td = trait_def else:
                 continue
-            let structural = derivable(c.trait_name) or c.field.is_some()
+            # A derive of the language's traits needs the trait of every
+            # field, the prelude's `Default` of every field without a default
+            # of its own; another trait's derive needs what its code uses,
+            # which checking the derived impl finds.
+            let default = self.prog.lookup(self.prog.prelude, "Default") == Some(td)
+            let structural = derivable(c.trait_name) or c.field.is_some() or default
             var found: DefId? = None
             for i in self.prog.impls:
                 if found.is_some():
@@ -345,7 +369,8 @@ impl Resolver:
             match self.prog.defs[c.ty.index].kind():
                 case DefKind.Struct(s):
                     for f in s.fields:
-                        fields.push((f.name.copy(), f.ty))
+                        if not default or f.default.is_none():
+                            fields.push((f.name.copy(), f.ty))
                 case DefKind.Enum(e):
                     for v in e.variants:
                         var k = 0
@@ -436,6 +461,7 @@ impl Resolver:
             self.declare_instance(def_, args, site)
         if made > 0:
             self.resolve_pending()
+            self.record_method_instances()
 
     ## The instance declared for a template and type arguments.
     pub pure def instance_of(self, def_: DefId, args: list[Ty]) -> DefId?:
@@ -450,16 +476,20 @@ impl Resolver:
         var shown: list[String] = []
         for a in args:
             shown.push(self.prog.display(self.types, a))
-        let what = "{name}[{shown.join(", ")}]"
+        var what = name.copy()
+        if not args.is_empty():
+            what = "{name}[{shown.join(", ")}]"
         var template: FnDef? = None
         if let Some(x) = self.template_fns.get(def_):
             template = Some(x.copy())
         let f = template else:
             return
         var generics: list[String] = []
+        var owner: Ty? = None
         if let Some(info) = self.prog.fn_info(def_):
             for g in info.generics:
                 generics.push(g.name.copy())
+            owner = info.owner
         # Each type the unfolded code may name (an argument, a field's
         # type, an element type) is an alias in the instance's module.
         var aliases: list[(String, Ty)] = []
@@ -467,7 +497,28 @@ impl Resolver:
         for i in range(min(len(generics), len(args))):
             let shape = self.shape(args[i], "__T{i}", 0, mut aliases)
             params.push((generics[i].copy(), shape))
-        let inst = "__instance_{len(self.prog.instances)}"
+        # A method's instance is a method of its type, which its compile-time
+        # code names `Self` (decision 244).
+        var within: str? = None
+        if let Some(t) = owner:
+            let self_ty = self.types.subst(t, args)
+            params.push(("Self".to_string(), self.shape(self_ty, "__S", 0, mut aliases)))
+            within = Some("__S")
+        # The program's types its compile-time code names
+        # (`reflect.fields_of(Point)`).
+        var types: list[(String, TypeShape)] = []
+        for n in named_types(self.ast(module), f):
+            var taken = False
+            for (p, _) in params:
+                if p == n:
+                    taken = True
+            if taken:
+                continue
+            let t = self.named_type(module, n) else:
+                continue
+            let shape = self.shape(t, "__C{len(types)}", 0, mut aliases)
+            types.push((n.copy(), shape))
+        let inst = "__instance_{self.instances_declared}"
         var source = self.text_of_module(module)
         if self.is_std(module):
             source = String.new()
@@ -477,7 +528,7 @@ impl Resolver:
         var failed: (TextRange, String)? = None
         if module.index < len(self.sources):
             let src = Src(ast=ref self.sources[module.index].ast, source=source)
-            match unfold_fn(src, f, params, inst):
+            match unfold_fn(src, f, params, types, inst, within):
                 case Ok(x):
                     unfolded = Some(x)
                 case Err(Unfolding.Failed(at, why)):
@@ -493,19 +544,64 @@ impl Resolver:
                 if not self.is_std(module):
                     if module != site_module:
                         # A label in another file than the message's.
-                        self.note_error(site_module, "comptime.instance-failed")
-                        return
-                    d = d.label(Msg.ComptimeInstanceHere, range.start, range.end)
+                        let (s, e) = (range.start, range.end)
+                        d = d.label_in(Msg.ComptimeInstanceHere, s, e, module.index)
+                    else:
+                        d = d.label(Msg.ComptimeInstanceHere, range.start, range.end)
                 self.report_other(site_module, d)
             return
         let m = self.declare_generated_in(module, "<{what}>", text)
+        self.instances_declared += 1
+        _ = self.instance_modules.add(m)
         # The types, by the names the unfolded code uses.
         for (alias, t) in aliases:
             let d = self.new_def(m, alias, TextRange.empty(0), Vis.Private, DefKind.TypeAlias(t))
             _ = self.prog.modules[m.index].items.insert(alias.copy(), d)
-        if let Some(d) = self.prog.modules[m.index].items.get(inst):
-            self.prog.instances.push((def_, args.copy(), d))
-            _ = self.prog.instance_sites.insert(d, site)
+        # A function is an item of the module; a method exists once its impl
+        # is resolved.
+        match self.prog.modules[m.index].items.get(inst):
+            case Some(d):
+                self.record_instance(d, def_, args, site)
+            case None:
+                self.method_instances.push((m, inst.copy(), def_, args.copy(), site))
+
+    pure def record_instance(
+        mut self, d: DefId, template: DefId, args: list[Ty], site: (ModuleId, TextRange)
+    ):
+        self.prog.instances.push((template, args.copy(), d))
+        _ = self.prog.instance_sites.insert(d, site)
+
+    ## The methods `declare_instance` declared, now that their impls are
+    ## resolved.
+    pure def record_method_instances(mut self):
+        let pending = self.method_instances.copy()
+        self.method_instances = []
+        for (m, inst, template, args, site) in pending:
+            var i = len(self.prog.defs) - 1
+            var found: DefId? = None
+            while i >= 0 and found.is_none():
+                let x = ref self.prog.defs[i]
+                if x.module == m and x.name == inst:
+                    if let DefKind.Fn(_) = x.kind():
+                        found = Some(DefId(index=i))
+                i -= 1
+            if let Some(d) = found:
+                self.record_instance(d, template, args, site)
+
+    ## The type `name` names in `module`, when it is a type without type
+    ## parameters: a struct, an enum, an error set or an alias.
+    pure def named_type(mut self, module: ModuleId, name: str) -> Ty?:
+        let d = self.prog.lookup(module, name) else:
+            return None
+        match self.prog.defs[d.index].kind():
+            case DefKind.Struct(_) | DefKind.Enum(_) | DefKind.ErrorSet(_):
+                if self.prog.type_generics(d).is_empty():
+                    return Some(self.types.adt(d, []))
+                return None
+            case DefKind.TypeAlias(t):
+                return Some(t)
+            case _:
+                return None
 
     ## What reflection sees of `t`, written `written` in the unfolded code
     ## (an alias, added to `aliases`, whose nested types are aliases named
@@ -705,3 +801,32 @@ pure def has_builtin(attrs: list[Attr]) -> bool:
         if a.name == "builtin":
             return True
     return False
+
+## The names the compile-time code of `f` passes to `reflect`'s queries or
+## computes with (`comptime ...`), in order: the types it may name.
+pure def named_types(ast: Ast, f: FnDef) -> list[String]:
+    var out: list[String] = []
+    var stmts: Block? = None
+    if let Some(b) = f.body:
+        stmts = Some(b.copy())
+    let body = stmts else:
+        return out
+    for e in visit.exprs_in_block(ast, body):
+        var roots: list[ExprId] = []
+        match ast.expr(e).kind:
+            case ExprKind.Call(callee, args, _):
+                if let ExprKind.Field(base, _) = ast.expr(callee).kind:
+                    if let ExprKind.Name(n) = ast.expr(base).kind:
+                        if n == "reflect":
+                            for a in args:
+                                roots.push(a.value)
+            case ExprKind.Comptime(inner):
+                roots.push(inner)
+            case _:
+                pass
+        for r in roots:
+            for x in visit.exprs_of(ast, r):
+                if let ExprKind.Name(n) = ast.expr(x).kind:
+                    if not out.contains(n):
+                        out.push(n.copy())
+    return out

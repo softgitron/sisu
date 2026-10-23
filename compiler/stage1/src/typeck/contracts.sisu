@@ -113,14 +113,14 @@ impl Checker:
         let span = ensures[0].range
         let rty = self.param_local_ty(cx, ret, Mode.Borrow)
         let r = self.new_local("result", rty, False, span)
-        self.declare("result", r)
+        self.declare(cx, "result", r, False, span)
         out.result = Some(r)
         if let TyData.Tuple(elems, labels) = self.data(ret):
             for i in range(len(elems)):
                 if i < len(labels):
                     let lt = self.param_local_ty(cx, elems[i], Mode.Borrow)
                     let x = self.new_local(labels[i], lt, False, span)
-                    self.declare(labels[i], x)
+                    self.declare(cx, labels[i], x, False, span)
                     out.labels.push((x, i))
         self.ensures = Some(EnsuresCtx(scope=scope, olds=[]))
         for c in ensures:
@@ -490,7 +490,7 @@ impl Checker:
         var found = False
         if let Some(entry) = cx.prog.generator_sites.get(key.copy()):
             found = entry.is_some()
-        let replacement = cx.prog.generator_calls.get(site.index)
+        let replacement = cx.prog.generator_calls.get((self.module.index, site.index))
         if not found or replacement.is_none():
             # `test.no-generator`: a `Gen` of nothing known, so what uses its
             # cases is not reported again.

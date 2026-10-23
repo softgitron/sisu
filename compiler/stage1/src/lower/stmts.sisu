@@ -708,11 +708,13 @@ impl FnLower:
                     wait_args.push(Operand.Const(Const.Unit))
                     continue
                 let (callee, by_value) = self.callee_for(cx, def_, type_args)
+                let owned = self.owned_params(cx, def_)
                 var ops: list[Operand] = []
                 for i in range(len(args)):
                     let x = args[i]
                     let bv = if i < len(by_value): by_value[i] else: False
-                    let o = self.arg_operand_for(cx, x, bv)
+                    let own_ = if i < len(owned): owned[i] else: True
+                    let o = self.arg_operand_for(cx, x, bv, own_)
                     # Each operand in a temporary, so it is evaluated once.
                     if let Operand.Copy(p) = o:
                         if not p.proj.is_empty():

@@ -19,12 +19,14 @@
 ##! (`owner_beyond`): the file is beyond the slice unless an error was
 ##! found.
 
+import stage1.cfg
 import stage1.typeck.call
 import stage1.typeck.contracts
 import stage1.typeck.expr
 import stage1.typeck.instances
 import stage1.typeck.pat
 import stage1.typeck.tasks
+from stage1.cfg import Features
 from stage1.diag import (
     Catalog,
     Diagnostic,
@@ -164,6 +166,11 @@ pub struct Checked:
     ## it renders): then `check` does not print all of stage 0's
     ## diagnostics.
     pub unrendered: list[String]
+    ## The bodies of the templates of the program's own modules, each with
+    ## the index of its module among them: stage 0 checks a template in its
+    ## instances only, so what the name pass finds in such a body is
+    ## reported in the instances' files instead (`in_template`).
+    pub template_bodies: list[(int, TextRange)]
     ## What lowering reads, when it asked for it.
     pub typed: Typed?
 
@@ -330,28 +337,47 @@ pub pure def check_file(
 ) -> Checked:
     let module = InputModule(path=[], file=String.new(), text=text.to_string(), package=0)
     let package = SourcePackage(name=String.new(), deps=[], trusted=True)
-    return check_program(base, [module], [package], catalog, name_error, embedded, keep, False)
+    let features = [Features.none()]
+    return check_program(
+        base, [module], [package], catalog, name_error, [], embedded, keep, False, True, features
+    )
 
 ## Checks a program of several modules and packages (09) against the
 ## resolved prelude, as `check_file` checks one file; with `multi`, every
 ## position is in the conformance form of a program of several files, its
-## file's name first.
+## file's name first. `other_error` says whether stage 0 reports an error
+## of its front end that is neither the type checker's nor the name pass's
+## (a manifest's, a `@cfg`'s), and `name_errors` where the name pass found
+## an error, each the index of its module and its start: one in a
+## template's body is no error of the program but of its instances'.
 pub pure def check_program(
     base: Base,
     modules: list[InputModule],
     packages: list[SourcePackage],
     catalog: Catalog,
-    name_error: bool,
+    other_error: bool,
+    name_errors: list[(int, int)],
     embedded: dict[String, Embedded],
     keep: bool,
     multi: bool,
+    tests: bool,
+    features: list[Features],
 ) -> Checked:
     var syntaxes: list[list[Diagnostic]] = []
     var parsed: list[Module] = []
     for m in modules:
         let p = parse(m.text, catalog)
         syntaxes.push(p.diagnostics.copy())
-        parsed.push(build.module(p.tree))
+        let module = build.module(p.tree)
+        # Each module as this build compiles it (decision 243).
+        var package_features: Features? = None
+        if m.package < len(features):
+            package_features = Some(features[m.package].copy())
+        match cfg.filter(module, tests, package_features).module:
+            case Some(built):
+                parsed.push(built)
+            case None:
+                parsed.push(module)
     # The instances of templates the program needs (08, "Reflection"):
     # check, declare what the check asked for, and check again, until it
     # asks for nothing new. An instance is declared after everything else,
@@ -364,6 +390,7 @@ pub pure def check_program(
     while True:
         var r = base.resolver.copy()
         r.prog.embedded = embedded.copy()
+        r.tests = tests
         for q in requests:
             if let Request.Promote(d) = q:
                 _ = r.promoted.add(d)
@@ -391,6 +418,7 @@ pub pure def check_program(
                 owner_beyond=[],
                 has_error=False,
                 unrendered=[],
+                template_bodies=[],
                 typed=None,
             )
         r.declare_instances(requests)
@@ -420,13 +448,17 @@ pub pure def check_program(
                     d = d.with("name", def_.name).with("count", "{len(requests)}")
                     unbounded = Some((def_.module, d))
                 let root_text = modules[0].text.copy()
+                let bodies = template_bodies(r.prog)
+                var name_error = other_error
+                for (m, at) in name_errors:
+                    if not in_template(bodies, m, at):
+                        name_error = True
                 var checked = finish_file(
-                    r, round, syntaxes, root_text, catalog, name_error, unbounded
+                    r, round, syntaxes, root_text, catalog, name_error, unbounded, base.texts
                 )
+                checked.template_bodies = bodies
                 if multi:
                     checked.name = modules[0].file.copy()
-                for m in round.file_modules:
-                    checked.file_names.push(file_name_of(r, m))
                 if keep:
                     checked.typed = Some(
                         Typed(
@@ -457,7 +489,11 @@ pure def file_name_of(r: Resolver, m: ModuleId) -> String:
     if not data.file.is_empty():
         return data.file.copy()
     if data.is_std:
-        return "<std>/{data.name}"
+        # A std module's own file is `<std>/NAME.sisu`; one written for it
+        # is named by its directory and its module's file already.
+        if data.name.ends_with(".sisu"):
+            return "<std>/{data.name}"
+        return "<std>/{data.name}.sisu"
     return data.name.copy()
 
 pure def has_request(qs: list[Request], q: Request) -> bool:
@@ -489,6 +525,14 @@ pure def check_round(
         written.push((m, t.copy()))
     for (m, t) in r.generated:
         written.push((m, t.copy()))
+    # The interceptors and fakes are a file of the compiler's too, whose
+    # signatures and bodies stage 0 checks with the rest; their typed bodies
+    # are made when lowering reaches them (`lower_reached`), so here they
+    # only report.
+    var reporting: set[ModuleId] = set()
+    for (m, t) in r.shims:
+        written.push((m, t.copy()))
+        _ = reporting.add(m)
     written.sort_by((a, b) -> a.0.index.cmp(b.0.index))
     for w in written:
         modules.push(w.copy())
@@ -540,7 +584,6 @@ pure def check_round(
             break
     var main = Bodies.new()
     main.other_error = r.other_error
-    main.noted = r.noted.copy()
     var files: list[Bodies] = []
     for _ in range(len(modules)):
         files.push(Bodies.new())
@@ -548,9 +591,8 @@ pure def check_round(
     for (m, d) in r.diags:
         if m == root_id:
             main.diags.push(d.copy())
-        elif prog.user_modules.contains(m):
-            if let Some(at) = at_module.get(m):
-                files[at].diags.push(d.copy())
+        elif let Some(at) = at_module.get(m):
+            files[at].diags.push(d.copy())
     var asserts: dict[DefId, list[Assert]] = {}
     var calls: list[(int, ConstCall)] = []
     var requests: list[Request] = []
@@ -567,11 +609,14 @@ pure def check_round(
             _ = memo.insert(d, x.copy())
             result = Some(x)
         let x = result ?? continue_never()
+        let at = at_module.get(prog.defs[d.index].module) ?? 0
+        if reporting.contains(prog.defs[d.index].module):
+            files[at].add(x, r.quiet_fns.contains(d))
+            continue
         if let Some(t) = x.typed:
             typed.push(t.copy())
         if not x.asserts.is_empty():
             _ = asserts.insert(d, x.asserts.copy())
-        let at = at_module.get(prog.defs[d.index].module) ?? 0
         for c in x.const_calls:
             calls.push((at, c.copy()))
         for q in x.requests:
@@ -605,6 +650,9 @@ pure def check_round(
             )
             let x = result_of(done)
             types = done.types
+            if reporting.contains(prog.defs[i].module):
+                files[at].add(x, False)
+                continue
             if let Some(t) = x.typed:
                 typed.push(t.copy())
             for c in x.const_calls:
@@ -613,6 +661,32 @@ pure def check_round(
                 if not has_request(requests, q):
                     requests.push(q.copy())
             files[at].add(x, False)
+    # A template without type parameters (a function or a method that
+    # reflects on the program's own types) is made once, whether anything
+    # calls it or not: `main`, a method a trait's call reaches, a value
+    # (decision 244). In stage 0's order of `functions_with_bodies`: the
+    # root module's first, then by definition.
+    var eager: list[(int, DefId)] = []
+    for i in range(len(prog.defs)):
+        let d = DefId(index=i)
+        let f = prog.fn_info(d) else:
+            continue
+        if f.body.is_none() or not f.template or not f.generics.is_empty():
+            continue
+        if instance_declared(prog, d, []):
+            continue
+        var rank = i
+        if i < len(prog.phases):
+            rank = prog.phases[i] * 10000000 + i
+        if prog.defs[i].module != root_id:
+            rank += 1000000000000
+        eager.push((rank, d))
+    eager.sort_by((a, b) -> a.0.cmp(b.0))
+    for (_, d) in eager:
+        let def_ = ref prog.defs[d.index]
+        let q = Request.Instance(def_=d, args=[], site=(def_.module, def_.span))
+        if not has_request(requests, q):
+            requests.push(q)
     # A call whose constant arguments make an assert of its callee false
     # (stage 0's `generic_asserts::check_calls`).
     if not asserts.is_empty():
@@ -631,18 +705,34 @@ pure def check_round(
                 let span = prog.defs[main_fn.index].span
                 let d = Diagnostic.new(Msg.TypeMainSignature, span.start, span.end)
                 main.diags.push(d.note(Msg.TypeMainForms))
-    # A test takes nothing, or the real `System`.
+    # A test takes nothing, the real `System`, which it then receives, or
+    # the capabilities it names, one of each, which it receives as fresh
+    # fakes (02; 17, "Isolation and parallelism"; decision 241).
     for t in prog.tests:
         let m = prog.defs[t.index].module
         if not prog.user_modules.contains(m):
             continue
         let f = prog.fn_info(t) else:
             continue
-        let ok = takes_system(prog, types, f.params)
-        if not ok and not f.header_broken:
-            var span = prog.defs[t.index].span
-            if let Some(p) = f.params.first():
-                span = p.span
+        let real = len(f.params) == 1 and is_system(prog, types, f.params[0].ty)
+        var named: list[String] = []
+        var bad: TextRange? = None
+        for p in f.params:
+            var fake: String? = None
+            if let TyData.Adt(d, a) = types.data(p.ty):
+                if a.is_empty():
+                    if let Some(b) = prog.builtin(d):
+                        if is_fake_capability(b):
+                            fake = Some(b.copy())
+            if let Some(b) = fake:
+                if not named.contains(b) and p.mode == Mode.Borrow:
+                    named.push(b.copy())
+                    continue
+            bad = Some(p.span)
+            break
+        if not real and not f.header_broken:
+            let span = bad else:
+                continue
             let d = Diagnostic.new(Msg.TypeTestSignature, span.start, span.end)
             if m == root_id:
                 main.diags.push(d)
@@ -711,21 +801,59 @@ pure def finish_file(
     catalog: Catalog,
     name_error: bool,
     unbounded: (ModuleId, Diagnostic)?,
+    std_texts: dict[String, String],
 ) -> Checked:
     var bodies = round.main.copy()
     var others = round.files.copy()
+    var file_modules = round.file_modules.copy()
     var unrendered = round.main.noted.copy()
+    # The std modules a diagnostic or a label is in (a template's, where it
+    # stopped; a template's whose instances are unbounded), whose files are
+    # not among those checked: each joins them, after the program's
+    # modules and among the files the compiler wrote by when it was made,
+    # as stage 0 numbers its files.
+    var wanted: list[ModuleId] = []
+    if let Some((m, _)) = unbounded:
+        wanted.push(m)
+    for d in bodies.diags:
+        for l in d.labels:
+            if l.file >= 0:
+                wanted.push(ModuleId(index=l.file))
+    for (_, b) in others:
+        for d in b.diags:
+            for l in d.labels:
+                if l.file >= 0:
+                    wanted.push(ModuleId(index=l.file))
+    let program_files = len(r.prog.user_modules) - 1
+    for m in wanted:
+        if m == r.prog.root or file_modules.contains(m):
+            continue
+        let std_text = std_texts.get(r.prog.modules[m.index].name) else:
+            continue
+        var at = len(file_modules)
+        var i = len(file_modules) - 1
+        while i >= program_files and i >= 0:
+            if file_modules[i].index > m.index:
+                at = i
+            i -= 1
+        file_modules.insert(at, m)
+        others.insert(at, (std_text.copy(), Bodies.new()))
     if let Some((m, d)) = unbounded:
         var placed = False
         if m == r.prog.root:
             bodies.diags.push(d.copy())
             placed = True
-        for i in range(len(round.file_modules)):
-            if round.file_modules[i] == m and i < len(others) and not placed:
+        for i in range(len(file_modules)):
+            if file_modules[i] == m and i < len(others) and not placed:
                 others[i].1.diags.push(d.copy())
                 placed = True
         if not placed:
             unrendered.push("comptime.instances-unbounded".to_string())
+    # Each label in another file names it as the checked files are numbered:
+    # 0 the root module's, `k + 1` the `k`th of the others.
+    relabel(mut bodies.diags, r.prog.root, file_modules, mut unrendered)
+    for k in range(len(others)):
+        relabel(mut others[k].1.diags, r.prog.root, file_modules, mut unrendered)
     for (_, b) in others:
         for r in b.noted:
             unrendered.push(r.copy())
@@ -779,7 +907,7 @@ pure def finish_file(
         if catalog.is_error(d.msg):
             error_outside = True
     for i in range(len(others)):
-        if not writes_generators(r, round, i):
+        if not writes_generators(r, file_modules, i):
             let b = ref others[i].1
             if b.other_error:
                 error_outside = True
@@ -793,7 +921,7 @@ pure def finish_file(
     for i in range(len(others)):
         let (t, b) = others[i].copy()
         var ds: list[Diagnostic] = []
-        if error_outside and writes_generators(r, round, i):
+        if error_outside and writes_generators(r, file_modules, i):
             ds = []
         elif i + 1 < len(syntaxes):
             let module_lines = Lines.of(t)
@@ -807,24 +935,79 @@ pure def finish_file(
             ds = b.diags.copy()
         sort_unique(mut ds, catalog)
         files.push((t.copy(), ds))
+    var file_names: list[String] = []
+    for m in file_modules:
+        file_names.push(file_name_of(r, m))
     return Checked(
         diagnostics=kept,
         files=files,
         name=String.new(),
-        file_names=[],
+        file_names=file_names,
         beyond=beyond,
         owner_beyond=owned,
         has_error=any_error,
         unrendered=unrendered,
+        template_bodies=[],
         typed=None,
     )
 
-## Whether the `i`th of a round's other files is one of the generators
-## the compiler writes (`<arbitrary>/NAME.sisu`).
-pure def writes_generators(r: Resolver, round: Round, i: int) -> bool:
-    if i >= len(round.file_modules):
+## The bodies of the templates of the program's own modules, each with the
+## index of its module among them (`Checked.template_bodies`).
+pure def template_bodies(prog: Program) -> list[(int, TextRange)]:
+    var out: list[(int, TextRange)] = []
+    for i in range(len(prog.defs)):
+        let f = prog.fn_info(DefId(index=i)) else:
+            continue
+        if not f.template:
+            continue
+        if let Some(b) = f.body:
+            let m = prog.defs[i].module
+            for k in range(len(prog.user_modules)):
+                if prog.user_modules[k] == m:
+                    out.push((k, b.range))
+    return out
+
+## Whether the position `at` of the program's `m`th module is in the body of
+## one of its templates.
+pub pure def in_template(bodies: list[(int, TextRange)], m: int, at: int) -> bool:
+    for (k, r) in bodies:
+        if k == m and at >= r.start and at < r.end:
+            return True
+    return False
+
+## Whether the `i`th of the other files, whose modules are
+## `file_modules`, is one of the generators the compiler writes
+## (`<arbitrary>/NAME.sisu`).
+pure def writes_generators(r: Resolver, file_modules: list[ModuleId], i: int) -> bool:
+    if i >= len(file_modules):
         return False
-    return r.prog.modules[round.file_modules[i].index].name.starts_with("<arbitrary>/")
+    return r.prog.modules[file_modules[i].index].name.starts_with("<arbitrary>/")
+
+## The labels of `diags` in another file than their diagnostic's, each
+## with the module it is in turned into the number of its checked file (0
+## the root module's, `k + 1` that of `file_modules[k]`); one in a file
+## that is not checked is noted, and stays in its diagnostic's.
+pure def relabel(
+    mut diags: list[Diagnostic],
+    root: ModuleId,
+    file_modules: list[ModuleId],
+    mut unrendered: list[String],
+):
+    for i in range(len(diags)):
+        for j in range(len(diags[i].labels)):
+            let at = diags[i].labels[j].file
+            if at < 0:
+                continue
+            let m = ModuleId(index=at)
+            var file = -1
+            if m == root:
+                file = 0
+            for k in range(len(file_modules)):
+                if file_modules[k] == m and file < 0:
+                    file = k + 1
+            if file < 0:
+                unrendered.push("a label in a file stage 1 does not have".to_string())
+            diags[i].labels[j].file = file
 
 ## Checks one function body.
 pure def check_one(
@@ -1172,6 +1355,13 @@ pure def takes_system(prog: Program, types: Types, params: list[ParamInfo]) -> b
         return True
     return len(params) == 1 and is_system(prog, types, params[0].ty)
 
+## Whether a test may name the capability (decision 241): one of `Fs`,
+## `Net`, `Clock`, `TestClock`, `Rand`, `Env`, `Proc` and `Stdin`.
+pure def is_fake_capability(b: str) -> bool:
+    return match b:
+        case "Fs" | "Net" | "Clock" | "TestClock" | "Rand" | "Env" | "Proc" | "Stdin": True
+        case _: False
+
 ## Whether a type is the prelude's `System`.
 pure def is_system(prog: Program, types: Types, t: Ty) -> bool:
     if let TyData.Adt(d, _) = types.data(t):
@@ -1250,7 +1440,7 @@ impl Checker:
             let owner = f.owner ?? Ty.error()
             let ty = self.param_local_ty(cx, owner, mode)
             let l = self.new_local("self", ty, False, def_span)
-            self.declare("self", l)
+            self.declare(cx, "self", l, False, def_span)
             params.push(l)
         for p in f.params:
             let ty = self.param_local_ty(cx, p.ty, p.mode)
@@ -1264,7 +1454,7 @@ impl Checker:
                     d = d.fix_edits(Msg.TypeRemovePure, [edit])
                 self.report(d)
             let l = self.new_local(p.name, ty, False, p.span)
-            self.declare(p.name, l)
+            self.declare(cx, p.name, l, False, p.span)
             params.push(l)
         self.params = params.copy()
         self.body_ret = ret
@@ -1396,8 +1586,13 @@ impl Checker:
                             seen = True
                     if not seen:
                         out.push(q)
+                # A template without type parameters has its one instance,
+                # which the value is (decision 244).
                 case TExprKind.FnRef(def_, _):
-                    if is_template(cx.prog, def_):
+                    var generic = False
+                    if let Some(f) = cx.prog.fn_info(def_):
+                        generic = not f.generics.is_empty()
+                    if is_template(cx.prog, def_) and generic:
                         let span = self.exprs[e.index].span
                         var d = Diagnostic.new(Msg.ComptimeTemplateValue, span.start, span.end)
                         self.report_other(d.with("name", cx.prog.defs[def_.index].name))

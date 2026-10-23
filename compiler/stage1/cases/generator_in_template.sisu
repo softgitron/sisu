@@ -1,0 +1,21 @@
+# A site of a generator in a template (17, D-070; 08, "Reflection"): the
+# instance's text keeps the site as the template writes it, and the site
+# stands for the same call of the generator as one in the module, which
+# the instance's scope, its template's module's, sees. The instance's
+# own warning is in its file.
+
+struct Point:
+    x: int
+    y: int
+
+def count[T](n: int) -> int:
+    comptime if reflect.is_struct(T):
+        let points = arbitrary[Point]
+        return n + 1
+    return n
+
+test "points add up either way":
+    check(arbitrary[Point], p -> p.x + p.y == p.y + p.x)
+
+def main():
+    print(count[Point](1))

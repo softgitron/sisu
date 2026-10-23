@@ -89,6 +89,17 @@ impl BitSet:
             self.words[k] = self.words[k] ^ (self.words[k] & other.words[k])
             k += 1
 
+    ## Makes this set `other`, in place when they have as many words.
+    pub pure def assign(mut self, other: BitSet):
+        let n = len(other.words)
+        if len(self.words) != n:
+            self.words = other.words.copy()
+            return
+        var k = 0
+        while k < n:
+            self.words[k] = other.words[k]
+            k += 1
+
     pub pure def clear(mut self):
         let n = len(self.words)
         var k = 0
@@ -305,6 +316,35 @@ impl Rows:
             k += 1
         return changed
 
+    ## Makes these rows `o`'s, in place when they have as many words (a
+    ## copy of the list would copy a word at a time through the run time).
+    pub pure def assign(mut self, o: Rows):
+        let n = len(o.words)
+        if self.width != o.width or len(self.words) != n:
+            self.width = o.width
+            self.rows = o.rows
+            self.slots = o.slots.copy()
+            self.words = o.words.copy()
+            return
+        var k = 0
+        while k < n:
+            self.words[k] = o.words[k]
+            k += 1
+
+    ## Makes row `r` the set that row `r` of `o`, which keeps the same rows,
+    ## is.
+    pub pure def set_from(mut self, r: int, o: Rows):
+        if self.width != o.width:
+            self.set(r, o.get(r))
+            return
+        let s = self.slot(r) else:
+            return
+        let base = s * self.width
+        var k = 0
+        while k < self.width:
+            self.words[base + k] = o.words[base + k]
+            k += 1
+
     pub pure def clear_row(mut self, r: int):
         let s = self.slot(r) else:
             return
@@ -344,6 +384,39 @@ impl Rows:
                 i += 1
             k += 1
         return out
+
+    ## `union`, adding to `marks` each row that changed.
+    pub pure def union_marking(mut self, o: Rows, mut marks: BitSet) -> bool:
+        var changed = False
+        if self.width != o.width or len(self.words) != len(o.words):
+            self.widen(o.width)
+            for r in range(min(self.rows, o.rows)):
+                if self.union_row(r, o.get(r)):
+                    _ = marks.insert(r)
+                    changed = True
+            return changed
+        let slots = Shared.get(self.slots)
+        let w = self.width
+        var r = 0
+        while r < self.rows:
+            let s = slots[r]
+            if s != LEFT_OUT:
+                let base = s * w
+                var row_changed = False
+                var k = 0
+                while k < w:
+                    let x = o.words[base + k]
+                    if x != 0:
+                        let m = self.words[base + k] | x
+                        if m != self.words[base + k]:
+                            self.words[base + k] = m
+                            row_changed = True
+                    k += 1
+                if row_changed:
+                    _ = marks.insert(r)
+                    changed = True
+            r += 1
+        return changed
 
     ## Adds every row of `o`, which keeps the same rows, to the same row
     ## here; returns whether anything changed.

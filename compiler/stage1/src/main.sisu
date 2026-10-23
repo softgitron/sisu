@@ -49,6 +49,7 @@
 ##! `../catalog/messages.catalog`.
 
 import stage1.borrowck
+import stage1.cfg
 import stage1.interp
 import stage1.lower
 import stage1.package
@@ -57,6 +58,7 @@ import stage1.sir.simplify
 import stage1.sir.write
 import stage1.typeck
 from stage1.borrowck.finding import span_of
+from stage1.cfg import Features
 from stage1.diag import (
     Catalog,
     Diagnostic,
@@ -73,6 +75,7 @@ from stage1.diag import (
     sort_unique,
 )
 from stage1.lexer import Lexed, lex
+from stage1.lower.names import CONTRACTS_ALL, CONTRACTS_OFF, CONTRACTS_PRECONDITIONS
 from stage1.mutants import Rng, mutate
 from stage1.package import Layout, Problem, Target
 from stage1.parser import parse, parse_lexed
@@ -83,6 +86,7 @@ from stage1.syntax.ast import visit
 from stage1.syntax.ast.dump import module_debug
 from stage1.syntax.kinds import KindNames
 from stage1.syntax.kinds import SyntaxKind
+from stage1.syntax.tree import Tree
 from stage1.typeck.collect import SourcePackage
 from stage1.typeck.program import DefKind, Embedded, ModuleId, Program
 from stage1.typeck.std_sources import importable
@@ -236,7 +240,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         var env = environment(sys, home)?
         var out = String.new()
         var why = String.new()
-        for input in inputs_of(sys, home, rest[1], False, mut env, catalog)?:
+        for input in inputs_of(sys, home, rest[1], False, True, mut env, catalog)?:
             let checked = types_of(base, input, catalog, mut kept)
             out.push(typeck.render(input.modules[0].text, checked, catalog))
             for b in checked.beyond:
@@ -256,7 +260,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             n += 1
             var out = String.new()
             var why = String.new()
-            for input in inputs_of(sys, home, path, False, mut env, catalog)?:
+            for input in inputs_of(sys, home, path, False, True, mut env, catalog)?:
                 let checked = types_of(base, input, catalog, mut kept)
                 out.push(typeck.render(input.modules[0].text, checked, catalog))
                 for b in checked.beyond:
@@ -264,20 +268,53 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             sys.fs.write_text(Path.new("{out_dir}/{n}.types"), out)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.beyond"), why)?
         return Ok(())
-    if command == "sir" and len(rest) <= 3:
-        # The program's path, or the package of the working directory, as
-        # `sisu sir` reads it when it names none.
-        let path = path_of(rest, ["--partial"]) else:
+    if command == "sir" and len(rest) <= 4:
+        # `--contracts=LEVEL`: the contracts lowering checks (07), all of
+        # them by default, as `sisu sir --contracts=LEVEL` lowers.
+        var level = CONTRACTS_ALL
+        var words: list[String] = []
+        for w in rest:
+            if w.starts_with("--contracts="):
+                let given = w.byte_slice(12, w.byte_len())
+                let l = contract_level(given) else:
+                    let params = [Param(name="value".to_string(), value=given.to_string())]
+                    emit("", catalog.plain_error("cli.bad-contract-level", params))
+                    return Err(Failed)
+                level = l
+            else:
+                words.push(w.copy())
+        # The program's path, or the package of the working directory or
+        # the nearest one above it, as `sisu sir` reads it when it names
+        # none; its lockfile written as stage 0 writes it (09).
+        var path = path_of(words, ["--partial"]) else:
             return Err(Usage(text=usage()))
+        if not names_path(words, ["--partial"]):
+            let found = nearest_package(sys, "sir", catalog) else:
+                return Err(Failed)
+            path = found
+        if let Some(e) = workspace_run_error(sys, path, catalog):
+            emit("", e)
+            return Err(Failed)
+        _ = write_lockfile(sys, path, True, False, catalog)?
         let base = typeck.base(std_texts(sys, home)?, catalog)
         var kept = Kept.new()
         var env = environment(sys, home)?
         var times = SirTimes(check=0, lower=0, ownership=0)
         # `--partial`: the SIR of what lowering reached, also of a program
         # beyond its slice (for comparing a package's modules one by one).
-        let partial = rest.contains("--partial")
+        let partial = words.contains("--partial")
         let done = lowering_of(
-            sys, home, path, base, mut env, catalog, mut times, partial, mut kept
+            sys,
+            home,
+            path,
+            base,
+            mut env,
+            catalog,
+            mut times,
+            partial,
+            Some(level),
+            False,
+            mut kept,
         )?
         var errs = String.new()
         for b in done.beyond:
@@ -290,14 +327,23 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         var env = environment(sys, home)?
         var times = SirTimes(check=0, lower=0, ownership=0)
         let done = lowering_of(
-            sys, home, rest[1], base, mut env, catalog, mut times, False, mut kept
+            sys, home, rest[1], base, mut env, catalog, mut times, False, None, True, mut kept
         )?
         var errs = String.new()
         for b in done.beyond:
             errs.push("beyond the slice: {b}\n")
         emit(done.ownership, errs)
         return Ok(())
-    if command == "sir-batch" and len(rest) == 3:
+    if command == "sir-batch" and (len(rest) == 3 or len(rest) == 4):
+        # With `--contracts=LEVEL`, the SIR alone, lowered with the
+        # contracts that level checks, as `sisu sir --contracts=LEVEL`
+        # prints it.
+        var level: int? = None
+        if len(rest) == 4:
+            if rest[3].starts_with("--contracts="):
+                level = contract_level(rest[3].byte_slice(12, rest[3].byte_len()))
+            if level.is_none():
+                return Err(Usage(text=usage()))
         let base = typeck.base(std_texts(sys, home)?, catalog)
         var kept = Kept.new()
         var env = environment(sys, home)?
@@ -310,7 +356,17 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
                 continue
             n += 1
             let done = lowering_of(
-                sys, home, path, base, mut env, catalog, mut times, False, mut kept
+                sys,
+                home,
+                path,
+                base,
+                mut env,
+                catalog,
+                mut times,
+                False,
+                Some(level ?? CONTRACTS_ALL),
+                level.is_none(),
+                mut kept,
             )?
             var reasons = String.new()
             for b in done.beyond:
@@ -327,12 +383,20 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         # `--format=ids`: the conformance form on standard output; else
         # the human form on standard error, as `sisu check` prints them.
         let ids = rest.contains("--format=ids")
-        let path = path_of(rest, ["--format=ids", "--format=human"]) else:
+        let flags = ["--format=ids", "--format=human", "--locked"]
+        var path = path_of(rest, flags) else:
             return Err(Usage(text=usage()))
+        if not names_path(rest, flags):
+            let found = nearest_package(sys, "check", catalog) else:
+                return Err(Failed)
+            path = found
+        # `--locked` keeps the lockfile as it is, or stops the command.
+        if not write_lockfile(sys, path, False, rest.contains("--locked"), catalog)?:
+            return Err(Failed)
         let base = typeck.base(std_texts(sys, home)?, catalog)
         var kept = Kept.new()
         var env = environment(sys, home)?
-        let reports = reports_of(sys, home, path, path, base, mut env, catalog, mut kept)?
+        let reports = reports_of(sys, home, path, path, True, base, mut env, catalog, mut kept)?
         var out = String.new()
         var why = String.new()
         var failed = False
@@ -367,7 +431,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             # A program of one file is named by its file's name, as stage
             # 0 names it when run in the file's directory.
             let name = package.file_name(path)
-            let reports = reports_of(sys, home, path, name, base, mut env, catalog, mut kept)?
+            let reports = reports_of(sys, home, path, name, True, base, mut env, catalog, mut kept)?
             var ids = String.new()
             var human = String.new()
             var why = String.new()
@@ -381,10 +445,13 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             sys.fs.write_text(Path.new("{out_dir}/{n}.beyond"), why)?
         return Ok(())
     if command == "build":
-        # `build --native [PATH] [--output OUT]`: the program checked and
-        # lowered by stage 1, its SIR built by stage 0's backend (`sisu
-        # build --native --from-sir`).
+        # `build [--native] [--release] [--contracts LEVEL] [PATH] [--output
+        # OUT]`: the program checked and lowered by stage 1 as `sisu build`
+        # builds it, and with `--native` its SIR built by stage 0's backend
+        # (`sisu build --native --from-sir`, in its release profile with
+        # `--release`, decision 232).
         var output: String? = None
+        var contracts: String? = None
         var words: list[String] = []
         var k = 0
         while k < len(rest):
@@ -392,13 +459,53 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
                 output = Some(rest[k + 1].copy())
                 k += 2
                 continue
+            if rest[k] == "--contracts" and k + 1 < len(rest):
+                contracts = Some(rest[k + 1].copy())
+                k += 2
+                continue
+            if rest[k].starts_with("--contracts="):
+                contracts = Some(rest[k].byte_slice(12, rest[k].byte_len()).to_string())
+                k += 1
+                continue
             words.push(rest[k].copy())
             k += 1
-        let path = path_of(words, ["--native"]) else:
+        let native = words.contains("--native")
+        let release = words.contains("--release")
+        let flags = ["--native", "--release", "--locked"]
+        var path = path_of(words, flags) else:
             return Err(Usage(text=usage()))
-        if not words.contains("--native"):
-            return Err(Usage(text=usage()))
-        return build_native(sys, home, path, output, catalog)
+        if not names_path(words, flags):
+            let found = nearest_package(sys, "build", catalog) else:
+                return Err(Failed)
+            path = found
+        # As stage 0 takes the options: `--output` and `--contracts` go with
+        # `--native`, a level is one of three, and `--release` goes with
+        # `--native` (`D0111`).
+        if not native:
+            var option: String? = None
+            if output.is_some():
+                option = Some("--output".to_string())
+            elif contracts.is_some():
+                option = Some("--contracts".to_string())
+            if let Some(o) = option:
+                let params = [
+                    Param(name="option".to_string(), value=o.copy()),
+                    Param(name="command".to_string(), value="build".to_string()),
+                ]
+                emit("", catalog.plain_error("cli.unknown-option", params))
+                return Err(Failed)
+        var level: int? = None
+        if let Some(c) = contracts:
+            level = contract_level(c)
+            if level.is_none():
+                let params = [Param(name="value".to_string(), value=c.copy())]
+                emit("", catalog.plain_error("cli.bad-contract-level", params))
+                return Err(Failed)
+        if release and not native:
+            emit("", catalog.plain_error("native.release", []))
+            return Err(Failed)
+        let locked = words.contains("--locked")
+        return build_command(sys, home, path, native, release, locked, level, output, catalog)
     if command == "mutate" and len(rest) == 5:
         let seed = rest[1].parse_int() ?? 1
         let count = rest[2].parse_int() ?? 0
@@ -424,18 +531,30 @@ struct Lowering:
     sir: String
     ownership: String
     beyond: list[String]
+    ## The SIR has an entry, a `main` to run.
+    entry: bool
 
 ## A program as the front end reads it (stage 0's `ProgramSource`): its
 ## modules and packages, whether stage 0 reports an error about it that is
 ## not the type checker's (a name's, a manifest's, an untrusted package's
-## `unsafe`), the files its `embed` calls name, and whether it is a program
-## of several files, whose diagnostics name their file.
+## `unsafe`, a `@cfg` that is no condition), the files its `embed` calls
+## name, and whether it is a program of several files, whose diagnostics
+## name their file.
 struct Input:
     modules: list[typeck.InputModule]
     packages: list[SourcePackage]
     named: bool
+    ## Where the name pass found an error: each the index of its module and
+    ## its start (one in a template's body is its instances' error).
+    name_errors: list[(int, int)]
     embedded: dict[String, Embedded]
     multi: bool
+    ## Whether the program is built with its tests (`check`), or without
+    ## them (`sir`, `build`; decision 243); and each package's features.
+    tests: bool
+    features: list[Features]
+    ## The problems of each module's `@cfg`s (`E0266`, `W0006`).
+    cfg: list[list[Diagnostic]]
     ## What `check` prints besides the type checker's and the ownership
     ## checker's diagnostics: each module's syntax and name diagnostics,
     ## the manifests the layout read (each name and text) with their
@@ -453,17 +572,36 @@ struct Input:
     disk: String
     package_name: String
     build_root: String?
+    ## What a build says of the program: the root package's version, the
+    ## number of its modules and its `[profile.release] contracts` (07);
+    ## and the contracts lowering checks (`lower.CONTRACTS_...`, all of them
+    ## but in a build that asks for fewer, decision 232).
+    package_version: String
+    own_modules: int
+    release_contracts: String?
+    contracts: int
 
 ## The programs the argument names, read: a file's, or each layout's that
 ## has modules (stage 0 reports the others' problems and checks nothing).
 def inputs_of(
-    sys: System, home: str, arg: str, sir: bool, mut env: Environment, catalog: Catalog
+    sys: System,
+    home: str,
+    arg: str,
+    sir: bool,
+    tests: bool,
+    mut env: Environment,
+    catalog: Catalog,
 ) -> list[Input] ! IoError:
     let layouts = layouts_of(sys, arg, sir) else:
         let text = sys.fs.read_to_string(Path.new(arg))?
-        let (syntax, names) = name_diagnostics(sys, home, text, mut env, catalog)?
+        let built = name_diagnostics(sys, home, text, tests, Features.none(), mut env, catalog)?
+        let (syntax, names, cfg_diags) = built
         var named = False
+        var name_errors: list[(int, int)] = []
         for d in names:
+            if catalog.is_error(d.msg):
+                name_errors.push((0, d.start))
+        for d in cfg_diags:
             if catalog.is_error(d.msg):
                 named = True
         let module = typeck.InputModule(path=[], file=arg.to_string(), text=text.copy(), package=0)
@@ -474,8 +612,12 @@ def inputs_of(
                     modules=[module],
                     packages=[package],
                     named=named,
+                    name_errors=name_errors,
                     embedded=embedded_files(sys, arg, text, catalog),
                     multi=False,
+                    tests=tests,
+                    features=[Features.none()],
+                    cfg=[cfg_diags],
                     syntax=[syntax],
                     names=[names],
                     manifests=[],
@@ -484,6 +626,10 @@ def inputs_of(
                     disk=arg.to_string(),
                     package_name=String.new(),
                     build_root=None,
+                    package_version=String.new(),
+                    own_modules=1,
+                    release_contracts=None,
+                    contracts=CONTRACTS_ALL,
                 ),
             ]
         )
@@ -491,14 +637,15 @@ def inputs_of(
     for layout in layouts:
         if layout.modules.is_empty():
             continue
-        out.push(layout_input(sys, home, layout, mut env, catalog)?)
+        out.push(layout_input(sys, home, layout, tests, mut env, catalog)?)
     return Ok(out)
 
-## A layout's program, read.
+## A layout's program, read, as a build with or without its tests
+## compiles it.
 def layout_input(
-    sys: System, home: str, layout: Layout, mut env: Environment, catalog: Catalog
+    sys: System, home: str, layout: Layout, tests: bool, mut env: Environment, catalog: Catalog
 ) -> Input ! IoError:
-    let named = named_modules(sys, home, layout, mut env, catalog)?
+    let (named, cfg_diags) = named_modules(sys, home, layout, tests, mut env, catalog)?
     var modules: list[typeck.InputModule] = []
     var embedded: dict[String, Embedded] = {}
     for i in range(len(layout.modules)):
@@ -522,10 +669,21 @@ def layout_input(
     # `extern` in a dependency `[trust]` does not list (`cap.untrusted`).
     var other = layout.has_errors(catalog)
     let found = resolve.resolve_program(named, packages_of(layout), env, catalog)
-    for ds in found:
+    var name_errors: list[(int, int)] = []
+    for i in range(len(found)):
+        for d in found[i]:
+            if catalog.is_error(d.msg):
+                name_errors.push((i, d.start))
+    for ds in cfg_diags:
         for d in ds:
             if catalog.is_error(d.msg):
                 other = True
+    var features: list[Features] = []
+    for p in layout.packages:
+        var declared: list[String] = []
+        for f in p.features:
+            declared.push(f.name.copy())
+        features.push(Features(declared=declared, on=p.on.copy()))
     var untrusted: list[(int, Diagnostic)] = []
     for i in range(len(layout.modules)):
         let k = layout.modules[i].package
@@ -549,8 +707,16 @@ def layout_input(
     if let Some(root) = layout.modules.first():
         disk = root.disk.copy()
     var package_name = String.new()
+    var package_version = String.new()
+    var release_contracts: String? = None
     if let Some(root) = layout.packages.first():
         package_name = root.name.copy()
+        package_version = root.version.copy()
+        release_contracts = root.release_contracts.copy()
+    var own_modules = 0
+    for m in layout.modules:
+        if m.package == 0:
+            own_modules += 1
     var build_root: String? = None
     if let Some(lock) = layout.lock.copy():
         build_root = Some(parent(lock))
@@ -559,8 +725,12 @@ def layout_input(
             modules=modules,
             packages=packages,
             named=other,
+            name_errors=name_errors,
             embedded=embedded,
             multi=True,
+            tests=tests,
+            features=features,
+            cfg=cfg_diags,
             syntax=syntax,
             names=found,
             manifests=layout.files.copy(),
@@ -569,6 +739,10 @@ def layout_input(
             disk=disk,
             package_name=package_name,
             build_root=build_root,
+            package_version=package_version,
+            own_modules=own_modules,
+            release_contracts=release_contracts,
+            contracts=CONTRACTS_ALL,
         )
     )
 
@@ -582,9 +756,12 @@ pure def check_input(
         input.packages,
         catalog,
         input.named,
+        input.name_errors,
         input.embedded,
         keep,
         input.multi,
+        input.tests,
+        input.features,
     )
 
 ## The type diagnostics of a program, with the ownership checker's `type.`
@@ -623,7 +800,9 @@ pure def ownership_types(
 ) -> list[list[Diagnostic]]?:
     let checked = check_input(base, input, catalog, True)
     let files = program_files(input, checked)
-    let lowered = lower_of(checked, base, input.modules[0].file, catalog, mut kept) else:
+    let lowered = lower_of(
+        checked, base, input.modules[0].file, input.contracts, catalog, mut kept
+    ) else:
         return None
     if not lowered.beyond.is_empty():
         return None
@@ -666,9 +845,14 @@ pure def files_by_source(lowered: lower.Lowered, files: list[ProgramFile]) -> li
     return by_source
 
 ## What stage 1 makes of the program `arg` names for `sisu sir` and the
-## ownership checker, adding where the time went to `times`: for a
-## workspace, the SIR of its one application, and every member's ownership
-## diagnostics, as `sisu check` checks each member.
+## ownership checker, adding where the time went to `times`: with `sir`,
+## the contracts lowering checks, the SIR of the program built without its
+## tests, as `sisu sir` builds it (decision 243), for a workspace of its one
+## application; with `ownership`, the ownership diagnostics of the program
+## built with them, every member's for a workspace, as `sisu check` checks
+## each member. A program that a build without its tests compiles as it is
+## goes through the pipeline once for both, when the SIR checks every
+## contract.
 def lowering_of(
     sys: System,
     home: str,
@@ -678,28 +862,63 @@ def lowering_of(
     catalog: Catalog,
     mut times: SirTimes,
     partial: bool,
+    sir: int?,
+    ownership: bool,
     mut kept: Kept,
 ) -> Lowering ! IoError:
-    let checks = inputs_of(sys, home, arg, False, mut env, catalog)?
-    var done = Lowering(sir=String.new(), ownership=String.new(), beyond=[])
-    var app: Input? = None
-    if let Some(layouts) = layouts_of(sys, arg, True):
-        if len(layouts) == 1 and not layouts[0].modules.is_empty():
-            app = Some(layout_input(sys, home, layouts[0], mut env, catalog)?)
-    elif let Some(first) = checks.first():
-        app = Some(first.copy())
+    var done = Lowering(sir=String.new(), ownership=String.new(), beyond=[], entry=False)
+    var checks: list[Input] = []
+    if ownership:
+        checks = inputs_of(sys, home, arg, False, True, mut env, catalog)?
+    let level = sir ?? CONTRACTS_ALL
+    var sir_done = sir.is_none()
     for input in checks:
         let one = sir_of(sys, base, input, catalog, mut times, partial, mut kept)
         done.ownership.push(one.ownership)
         for b in one.beyond:
             done.beyond.push(b.copy())
-        if len(checks) == 1:
+        let same = not differs_without_tests(input) and level == CONTRACTS_ALL
+        if not sir_done and len(checks) == 1 and same:
             done.sir = one.sir.copy()
-    if len(checks) != 1:
-        if let Some(input) = app:
-            let one = sir_of(sys, base, input, catalog, mut times, partial, mut kept)
-            done.sir = one.sir.copy()
+            done.entry = one.entry
+            sir_done = True
+    if sir_done:
+        return Ok(done)
+    # The program built without its tests: a file's, a package's, or a
+    # workspace's one application.
+    var app: Input? = None
+    if let Some(layouts) = layouts_of(sys, arg, True):
+        if len(layouts) == 1 and not layouts[0].modules.is_empty():
+            app = Some(layout_input(sys, home, layouts[0], False, mut env, catalog)?)
+    else:
+        let built = inputs_of(sys, home, arg, False, False, mut env, catalog)?
+        if let Some(x) = built.first():
+            app = Some(x.copy())
+    if let Some(input) = app:
+        var built = input.copy()
+        built.contracts = level
+        let one = sir_of(sys, base, built, catalog, mut times, partial, mut kept)
+        done.sir = one.sir.copy()
+        done.entry = one.entry
+        for b in one.beyond:
+            if not done.beyond.contains(b):
+                done.beyond.push(b.copy())
     return Ok(done)
+
+## Whether a build without its tests may compile the program otherwise than
+## one with them (decision 243): a module of it has a `@cfg`, or an item
+## that is a test, a suite or a benchmark, or a doc example (a fence of
+## three backquotes), which the text shows where the item begins.
+pure def differs_without_tests(input: Input) -> bool:
+    for m in input.modules:
+        let text: str = m.text
+        if text.contains("@cfg") or text.contains("```"):
+            return True
+        for line in text.lines():
+            let t = line.trim_start()
+            if t.starts_with("test") or t.starts_with("suite") or t.starts_with("bench"):
+                return True
+    return False
 
 ## The pipeline for one program, a step at a time, timed.
 def sir_of(
@@ -719,9 +938,14 @@ def sir_of(
         return done
     # The program's files, for the ownership checker's diagnostics.
     let files = program_files(input, checked)
-    let lowered = lower_of(checked, base, input.modules[0].file, catalog, mut kept) else:
+    let lowered = lower_of(
+        checked, base, input.modules[0].file, input.contracts, catalog, mut kept
+    ) else:
         return Lowering(
-            sir=String.new(), ownership=String.new(), beyond=["nothing to lower".to_string()]
+            sir=String.new(),
+            ownership=String.new(),
+            beyond=["nothing to lower".to_string()],
+            entry=False,
         )
     let t2 = now(sys)
     times.lower += t2 - t1
@@ -736,18 +960,22 @@ struct ProgramFile:
     name: String
     text: String
 
-## Lowering's part, for a program the front end checked whole.
+## Lowering's part, for a program the front end checked whole, with the
+## contracts `level` checks.
 pure def lower_of(
     own checked: typeck.Checked,
     base: typeck.Base,
     path: str,
+    level: int,
     catalog: Catalog,
     mut kept: Kept,
 ) -> lower.Lowered?:
     let typed = checked.typed else:
         return None
     return Some(
-        lower.lower(typed, base, path, catalog, mut kept.bodies, mut kept.lowered, mut kept.slots)
+        lower.lower(
+            typed, base, path, level, catalog, mut kept.bodies, mut kept.lowered, mut kept.slots
+        )
     )
 
 ## What `sir_of` gives when the front end ends it: beyond the type
@@ -760,17 +988,18 @@ pure def front_of(checked: typeck.Checked) -> Lowering?:
         if not checked.owner_beyond.contains(b):
             why.push("beyond the type checker's slice: {b}")
     if not why.is_empty():
-        return Some(Lowering(sir=String.new(), ownership=String.new(), beyond=why))
+        return Some(Lowering(sir=String.new(), ownership=String.new(), beyond=why, entry=False))
     # `sisu sir` prints nothing for a program with a front-end error, and
     # the ownership checker does not run.
     if checked.has_error:
-        return Some(Lowering(sir=String.new(), ownership=String.new(), beyond=[]))
+        return Some(Lowering(sir=String.new(), ownership=String.new(), beyond=[], entry=False))
     if checked.typed.is_none():
         return Some(
             Lowering(
                 sir=String.new(),
                 ownership=String.new(),
                 beyond=["nothing to lower".to_string()],
+                entry=False,
             )
         )
     return None
@@ -785,7 +1014,9 @@ pure def finish_of(
     mut placed: borrowck.Placed,
 ) -> Lowering:
     if not lowered.beyond.is_empty() and not partial:
-        return Lowering(sir=String.new(), ownership=String.new(), beyond=lowered.beyond.copy())
+        return Lowering(
+            sir=String.new(), ownership=String.new(), beyond=lowered.beyond.copy(), entry=False
+        )
     # A partial SIR is wanted for its statements: the drops the ownership
     # checker places, not its findings.
     var done = borrowck.check_with(lowered.program, not partial, mut placed)
@@ -798,7 +1029,7 @@ pure def finish_of(
             var reasons = lowered.beyond.copy()
             for why in evaluated.beyond:
                 reasons.push(why.copy())
-            return Lowering(sir=String.new(), ownership=String.new(), beyond=reasons)
+            return Lowering(sir=String.new(), ownership=String.new(), beyond=reasons, entry=False)
     let by_source = files_by_source(lowered, files)
     let elsewhere = "an ownership finding in a file of the standard library or one the compiler wrote"
     let per_file = borrowck.diagnostics_by_file(done.findings, by_source, len(files), catalog) else:
@@ -807,11 +1038,13 @@ pure def finish_of(
         var sir = String.new()
         if partial:
             sir = write.write(done.program)
-        return Lowering(sir=sir, ownership=String.new(), beyond=reasons)
+        return Lowering(sir=sir, ownership=String.new(), beyond=reasons, entry=False)
     var out = String.new()
     for k in range(len(files)):
         out.push(render_ids_in(files[k].name, files[k].text, per_file[k], catalog))
-    return Lowering(sir=write.write(done.program), ownership=out, beyond=lowered.beyond.copy())
+    let entry = done.program.entry.is_some()
+    let text = write.write(done.program)
+    return Lowering(sir=text, ownership=out, beyond=lowered.beyond.copy(), entry=entry)
 
 ## What `check` prints of a program (stage 0's `Db::diagnostics`): every
 ## diagnostic of each of its files, the front end's and, when it found no
@@ -888,6 +1121,7 @@ def reports_of(
     home: str,
     arg: str,
     name: str,
+    tests: bool,
     base: typeck.Base,
     mut env: Environment,
     catalog: Catalog,
@@ -895,14 +1129,14 @@ def reports_of(
 ) -> list[Report] ! IoError:
     var out: list[Report] = []
     let layouts = layouts_of(sys, arg, False) else:
-        for input in inputs_of(sys, home, arg, False, mut env, catalog)?:
+        for input in inputs_of(sys, home, arg, False, tests, mut env, catalog)?:
             out.push(report_of(base, input, name, catalog, mut kept))
         return Ok(out)
     for layout in layouts:
         if layout.modules.is_empty():
             out.push(problems_report(layout, catalog))
             continue
-        let input = layout_input(sys, home, layout, mut env, catalog)?
+        let input = layout_input(sys, home, layout, tests, mut env, catalog)?
         out.push(report_of(base, input, name, catalog, mut kept))
     return Ok(out)
 
@@ -953,6 +1187,11 @@ pure def report_of(
             var file = String.new()
             if k < len(checked.file_names):
                 file = checked.file_names[k].copy()
+            # The doc examples of a module keep its file's name, as the
+            # report names it.
+            for i in range(n):
+                if file == input.modules[i].file:
+                    file = files[i].0.copy()
             files.push((file, checked.files[k].0.copy()))
     var diags: list[Filed] = []
     for i in range(min(n, len(input.syntax))):
@@ -965,17 +1204,22 @@ pure def report_of(
         diags.push(Filed(file=n + p.file, diag=p.diag.copy(), label_files=label_files))
     for (i, d) in input.untrusted:
         diags.push(Filed(file=i, diag=d.copy(), label_files=[]))
+    for i in range(min(n, len(input.cfg))):
+        for d in input.cfg[i]:
+            diags.push(Filed(file=i, diag=d.copy(), label_files=[]))
+    # What the name pass finds in a template's body stage 0 reports in its
+    # instances, which the type checker checks.
     for i in range(min(n, len(input.names))):
         for d in input.names[i]:
-            diags.push(Filed(file=i, diag=d.copy(), label_files=[]))
+            if not typeck.in_template(checked.template_bodies, i, d.start):
+                diags.push(Filed(file=i, diag=d.copy(), label_files=[]))
     for d in checked.diagnostics:
-        diags.push(Filed(file=0, diag=d.copy(), label_files=[]))
+        diags.push(Filed(file=0, diag=d.copy(), label_files=label_files(d, 0, n, written)))
     for k in range(len(checked.files)):
-        var file = k + 1
-        if k >= n - 1:
-            file = written + k - (n - 1)
+        let file = report_file(k + 1, n, written)
         for d in checked.files[k].1:
-            diags.push(Filed(file=file, diag=d.copy(), label_files=[]))
+            let labelled = label_files(d, file, n, written)
+            diags.push(Filed(file=file, diag=d.copy(), label_files=labelled))
     sort_filed(mut diags, catalog, True)
     var beyond: list[String] = []
     for b in checked.beyond:
@@ -1008,7 +1252,9 @@ pure def report_of(
     var consuming: dict[String, String] = {}
     if let Some(typed) = checked.typed:
         consuming = consuming_methods(typed.prog)
-    let lowered = lower_of(checked, base, input.modules[0].file, catalog, mut kept) else:
+    let lowered = lower_of(
+        checked, base, input.modules[0].file, input.contracts, catalog, mut kept
+    ) else:
         return report
     if not lowered.beyond.is_empty():
         for b in lowered.beyond:
@@ -1053,6 +1299,28 @@ pure def report_of(
             report.has_error = True
     sort_filed(mut report.diags, catalog, True)
     return report
+
+## The file of a report a checked file is (`Label.file`): the root
+## module's, another of the `n` modules, or, after the manifests, one of
+## those the compiler wrote, the first of which is the report's `written`th.
+pure def report_file(checked: int, n: int, written: int) -> int:
+    if checked <= 0:
+        return 0
+    let k = checked - 1
+    if k < n - 1:
+        return k + 1
+    return written + k - (n - 1)
+
+## The file of each label of a diagnostic of the report's file `file`: its
+## own, or the one its checked file is.
+pure def label_files(d: Diagnostic, file: int, n: int, written: int) -> list[int]:
+    var out: list[int] = []
+    for l in d.labels:
+        if l.file < 0:
+            out.push(file)
+        else:
+            out.push(report_file(l.file, n, written))
+    return out
 
 ## A failed `comptime` expression as a diagnostic at the expression
 ## (stage 0's `comptime_diagnostic`), with the index of the program's file
@@ -1146,74 +1414,141 @@ pure def consume_note(d: Diagnostic, consuming: dict[String, String]) -> Diagnos
         return d.copy()
     return d.copy().note_with(Msg.BorrowConsumeWith, "methods", methods)
 
-## `build --native`: the program checked by stage 1 (its diagnostics in the
-## human form, and the build stopped by an error, as stage 0's `sisu build`
-## stops), its SIR written beside the executable and built by stage 0's
-## backend, which prints `built PATH`. The executable goes beside a file's
-## source, named by its stem, or to `build/debug/NAME` in the directory of
-## a package's lockfile (decision 231), unless `output` names it; its
-## directory is made when it is missing, as the backend makes it.
-def build_native(
-    sys: System, home: str, path: str, output: String?, catalog: Catalog
+## `build`: each program the path names (a file's, a package's, or each
+## member's of a workspace, in turn, as stage 0's driver builds them; the
+## worst outcome decides), after writing the lockfile as stage 0 does
+## (09). `level` is the contracts `--contracts` asks for.
+def build_command(
+    sys: System,
+    home: str,
+    path: str,
+    native: bool,
+    release: bool,
+    locked: bool,
+    level: int?,
+    output: String?,
+    catalog: Catalog,
 ) -> ! {IoError, CommandError}:
+    if not write_lockfile(sys, path, False, locked, catalog)?:
+        return Err(Failed)
     let base = typeck.base(std_texts(sys, home)?, catalog)
     var kept = Kept.new()
     var env = environment(sys, home)?
-    let reports = reports_of(sys, home, path, path, base, mut env, catalog, mut kept)?
-    # As stage 0's `sisu build` stops: at the front end's errors, then at
-    # the ownership checker's, after the front end's warnings.
-    var errors = 0
-    var errs = String.new()
-    var warnings = String.new()
-    var owned_errors = 0
-    var owned = String.new()
-    var failed_errors = 0
-    var failed = String.new()
+    var programs: list[Input] = []
+    var failed = False
+    match layouts_of(sys, path, False):
+        case Some(layouts):
+            for layout in layouts:
+                if layout.modules.is_empty():
+                    # Manifests broken past reading a module: their problems.
+                    emit("", problems_report(layout, catalog).human(catalog))
+                    failed = True
+                    continue
+                programs.push(layout_input(sys, home, layout, False, mut env, catalog)?)
+        case None:
+            for input in inputs_of(sys, home, path, False, False, mut env, catalog)?:
+                programs.push(input.copy())
+    for input in programs:
+        if not build_program(
+            sys, home, path, input, native, release, level, output, base, mut env, catalog, mut kept
+        )?:
+            failed = True
+    if failed:
+        return Err(Failed)
+    return Ok(())
+
+## A program built as stage 0's `sisu build` builds it, without its tests
+## (decision 243): its diagnostics in the human form, and the build stopped
+## at the front end's errors (`D0006`), then at a `comptime` expression that
+## fails (`D0006`), then at the ownership checker's (`D0021`); then with
+## `native` its SIR, lowered with the contracts the build checks (`level`;
+## for a release build without one, the root package's `[profile.release]
+## contracts`, preconditions by default, 07), written beside the executable
+## and built by stage 0's backend, which prints `built PATH`; else, or for
+## a program without `main`, the line that says it was built. Whether it
+## built.
+def build_program(
+    sys: System,
+    home: str,
+    path: str,
+    input: Input,
+    native: bool,
+    release: bool,
+    level: int?,
+    output: String?,
+    base: typeck.Base,
+    mut env: Environment,
+    catalog: Catalog,
+    mut kept: Kept,
+) -> bool ! IoError:
+    var built = input.copy()
+    built.contracts = level ?? CONTRACTS_ALL
+    if release and level.is_none():
+        built.contracts = CONTRACTS_PRECONDITIONS
+        if let Some(c) = input.release_contracts:
+            built.contracts = contract_level(c) ?? CONTRACTS_PRECONDITIONS
+    # A program of one file is named as it was given.
+    let r = report_of(base, built, path, catalog, mut kept)
+    let front = r.front(catalog, None)
+    let errors = front.errors(catalog)
     var beyond = String.new()
-    for r in reports:
-        let front = r.front(catalog, None)
-        errors += front.errors(catalog)
-        errs.push(front.human(catalog))
-        warnings.push(r.front(catalog, Some(False)).human(catalog))
-        let ownership = r.ownership()
-        owned_errors += ownership.errors(catalog)
-        owned.push(ownership.human(catalog))
-        let evaluation = r.evaluation()
-        failed_errors += evaluation.errors(catalog)
-        failed.push(evaluation.human(catalog))
-        for b in r.beyond:
-            beyond.push("beyond the slice: {b}\n")
+    for b in r.beyond:
+        beyond.push("beyond the slice: {b}\n")
     if errors > 0:
+        var errs = front.human(catalog)
         let count = Param(name="count".to_string(), value="{errors}")
         errs.push(catalog.plain_error("cli.errors-found", [count]))
         errs.push(beyond)
         emit("", errs)
-        return Err(Failed)
-    emit("", warnings)
+        return Ok(False)
+    emit("", r.front(catalog, Some(False)).human(catalog))
     # A `comptime` expression that failed is an error of the program.
-    if failed_errors > 0:
-        let count = Param(name="count".to_string(), value="{failed_errors}")
-        failed.push(catalog.plain_error("cli.errors-found", [count]))
-        failed.push(beyond)
-        emit("", failed)
-        return Err(Failed)
-    if owned_errors > 0:
-        let count = Param(name="count".to_string(), value="{owned_errors}")
-        owned.push(catalog.plain_error("cli.ownership-errors", [count]))
-        owned.push(beyond)
-        emit("", owned)
-        return Err(Failed)
+    let evaluation = r.evaluation()
+    let failed = evaluation.errors(catalog)
+    if failed > 0:
+        var errs = evaluation.human(catalog)
+        let count = Param(name="count".to_string(), value="{failed}")
+        errs.push(catalog.plain_error("cli.errors-found", [count]))
+        errs.push(beyond)
+        emit("", errs)
+        return Ok(False)
+    let ownership = r.ownership()
+    let owned = ownership.errors(catalog)
+    if owned > 0:
+        var errs = ownership.human(catalog)
+        let count = Param(name="count".to_string(), value="{owned}")
+        errs.push(catalog.plain_error("cli.ownership-errors", [count]))
+        errs.push(beyond)
+        emit("", errs)
+        return Ok(False)
     if not beyond.is_empty():
         emit("", beyond)
-        return Err(Failed)
+        return Ok(False)
     var times = SirTimes(check=0, lower=0, ownership=0)
-    let done = lowering_of(sys, home, path, base, mut env, catalog, mut times, False, mut kept)?
-    if done.sir.is_empty():
-        return Err(Failed)
-    let inputs = inputs_of(sys, home, path, True, mut env, catalog)?
-    let first = inputs.first() else:
-        return Err(Failed)
-    var exe = output_for(first.disk, first.package_name, first.build_root.copy())
+    let done = sir_of(sys, base, built, catalog, mut times, False, mut kept)
+    if not done.beyond.is_empty():
+        var why = String.new()
+        for b in done.beyond:
+            why.push("beyond the slice: {b}\n")
+        emit("", why)
+        return Ok(False)
+    if not native or not done.entry:
+        # The plain build: checked and lowered (a library has no `main` to
+        # link).
+        var line = String.new()
+        if built.package_name.is_empty():
+            let params = [Param(name="file".to_string(), value=path.to_string())]
+            line = catalog.render("cli.built-file", params)
+        else:
+            let params = [
+                Param(name="name".to_string(), value=built.package_name.copy()),
+                Param(name="version".to_string(), value=built.package_version.copy()),
+                Param(name="modules".to_string(), value="{built.own_modules}"),
+            ]
+            line = catalog.render("cli.built", params)
+        emit("{line}\n", "")
+        return Ok(True)
+    var exe = output_for(built.disk, built.package_name, built.build_root.copy(), release)
     if let Some(o) = output:
         exe = o.copy()
     # The backend makes the executable's directory before it links; here
@@ -1222,31 +1557,222 @@ def build_native(
     let sir_file = "{exe}.sir"
     sys.fs.write_text(Path.new(sir_file), done.sir)?
     let sisu = "{home}/target/release/sisu"
-    let ran = sys.proc.run(sisu, ["build", "--native", "--from-sir", sir_file, "--output", exe])
+    var backend: list[str] = ["build", "--native", "--from-sir", sir_file, "--output", exe]
+    if release:
+        backend.push("--release")
+    let ran = sys.proc.run(sisu, backend)
     _ = sys.fs.remove(Path.new(sir_file))
     match ran:
         case Ok(o):
             emit(o.stdout, o.stderr)
-            if o.status != 0:
-                return Err(Failed)
+            return Ok(o.status == 0)
         case Err(e):
             emit("", "cannot run `{sisu}`: {e}\n")
-            return Err(Failed)
-    return Ok(())
+            return Ok(False)
+
+## A level of `--contracts` (07): `off`, `preconditions` or `all`.
+pure def contract_level(word: str) -> int?:
+    return match word:
+        case "off": Some(CONTRACTS_OFF)
+        case "preconditions": Some(CONTRACTS_PRECONDITIONS)
+        case "all": Some(CONTRACTS_ALL)
+        case _: None
 
 ## Where `build` puts the executable (stage 0's `output_for`, decision
 ## 231): a package's in `build/PROFILE/NAME` in the directory of its
 ## lockfile, its workspace's or its own (`root`; without one, the
-## package's, whose root module is `src/main.sisu`); a file's beside it,
-## named by its stem. The profile is `debug`, since `--release` (decision
-## 232) is stage 0's alone.
-pure def output_for(disk: str, package_name: str, root: String?) -> String:
+## package's, whose root module is `src/main.sisu`), the profile `release`
+## for a release build and `debug` otherwise; a file's beside it, named by
+## its stem.
+pure def output_for(disk: str, package_name: str, root: String?, release: bool) -> String:
     if not package_name.is_empty():
         let dir = root.copy() ?? parent(parent(disk))
-        return package.join(dir, "build/debug/{package_name}")
+        let profile = if release: "release" else: "debug"
+        return package.join(dir, "build/{profile}/{package_name}")
     if disk.ends_with(".sisu"):
         return disk.byte_slice(0, disk.byte_len() - 5).to_string()
     return disk.to_string()
+
+## Writes the lockfile of the program `arg` names when it changed, as stage
+## 0's driver does before a command works on a package (09): beside the
+## workspace's manifest for a workspace or a member of one, with every
+## package any member's build resolved, else beside the package's own; not
+## for a file, nor when a manifest the lockfile covers has an error, nor for
+## `sir` in a workspace without one application (`cli.workspace-run`). With
+## `locked` (`--locked`), a lockfile that would change is reported instead
+## (`cli.locked`, with what changes), and the command stops: `False`.
+def write_lockfile(
+    sys: System, arg: str, sir: bool, locked: bool, catalog: Catalog
+) -> bool ! IoError:
+    let abs = absolute(sys, arg)
+    let target = package.locate(sys.fs, abs) else:
+        return Ok(True)
+    var lock: (String, String)? = None
+    var first: Layout? = None
+    match target:
+        case Target.File(_):
+            return Ok(True)
+        case Target.Workspace(root, members):
+            let all = member_layouts(sys, members)
+            if all.is_empty():
+                return Ok(True)
+            if sir and len(applications(sys, members)) != 1:
+                return Ok(True)
+            first = Some(all[0].copy())
+            lock = workspace_lock(root, all, catalog)
+        case Target.Package(d):
+            let layout = package.load_package(sys.fs, d, d)
+            first = Some(layout.copy())
+            match package.workspace_of(sys.fs, d):
+                case Some((root, members)):
+                    var all: list[Layout] = []
+                    for m in members:
+                        all.push(package.load_package(sys.fs, m, m))
+                    lock = workspace_lock(root, all, catalog)
+                case None:
+                    if let Some(at) = layout.lock.copy():
+                        lock = Some((at.copy(), package.lockfile_of([layout.copy()], parent(at))))
+    let (at, text) = lock else:
+        return Ok(True)
+    let layout = first else:
+        return Ok(True)
+    if layout.has_errors(catalog):
+        return Ok(True)
+    var old: String? = None
+    if let Ok(t) = sys.fs.read_to_string(Path.new(at)):
+        old = Some(t)
+    if old == Some(text.copy()):
+        return Ok(True)
+    if locked:
+        var what = "there is none".to_string()
+        if let Some(o) = old:
+            what = diff_lines(o, text)
+        let params = [Param(name="what".to_string(), value=what)]
+        emit("", catalog.plain_error("cli.locked", params))
+        return Ok(False)
+    sys.fs.write_text(Path.new(at), text)?
+    return Ok(True)
+
+## `old` against `new`, a line each, marked `  `, `- ` or `+ ` from their
+## longest common subsequence of lines (stage 0's `diff::lines`).
+pure def diff_lines(old: str, new: str) -> String:
+    var a: list[String] = []
+    for l in old.lines():
+        a.push(l.to_string())
+    var b: list[String] = []
+    for l in new.lines():
+        b.push(l.to_string())
+    let n = len(a)
+    let m = len(b)
+    # The length of the longest common subsequence of each pair of
+    # suffixes, a row of `m + 1` per line of `a` and one past them.
+    var lcs: list[int] = []
+    for _ in range((n + 1) * (m + 1)):
+        lcs.push(0)
+    var i = n - 1
+    while i >= 0:
+        var j = m - 1
+        while j >= 0:
+            if a[i] == b[j]:
+                lcs[i * (m + 1) + j] = lcs[(i + 1) * (m + 1) + j + 1] + 1
+            else:
+                lcs[i * (m + 1) + j] = max(lcs[(i + 1) * (m + 1) + j], lcs[i * (m + 1) + j + 1])
+            j -= 1
+        i -= 1
+    var out: list[String] = []
+    var x = 0
+    var y = 0
+    while x < n or y < m:
+        if x < n and y < m and a[x] == b[y]:
+            out.push("  {a[x]}")
+            x += 1
+            y += 1
+        elif x < n and (y == m or lcs[(x + 1) * (m + 1) + y] >= lcs[x * (m + 1) + y + 1]):
+            out.push("- {a[x]}")
+            x += 1
+        else:
+            out.push("+ {b[y]}")
+            y += 1
+    return out.join("\n")
+
+## The members of a workspace with an application (`src/main.sisu`), the
+## ones `sir` and `run` choose among.
+def applications(sys: System, members: list[String]) -> list[String]:
+    var out: list[String] = []
+    for d in members:
+        if package.is_file(sys.fs, package.join(d, "src/main.sisu")):
+            out.push(d.copy())
+    return out
+
+## `cli.workspace-run` for `sisu sir` of a workspace whose members, each a
+## package, do not have exactly one application, naming every member as
+## stage 0 names it, relative to the working directory.
+def workspace_run_error(sys: System, arg: str, catalog: Catalog) -> String?:
+    let target = package.locate(sys.fs, absolute(sys, arg)) else:
+        return None
+    let Target.Workspace(_, members) = target else:
+        return None
+    if member_layouts(sys, members).is_empty() or len(applications(sys, members)) == 1:
+        return None
+    let cwd = absolute(sys, ".")
+    var names: list[String] = []
+    for m in members:
+        names.push("`{package.relative(cwd, package.canonical(m))}`")
+    let params = [
+        Param(name="command".to_string(), value="sir".to_string()),
+        Param(name="members".to_string(), value=names.join(", ")),
+    ]
+    return Some(catalog.plain_error("cli.workspace-run", params))
+
+## The package of the working directory or the nearest directory above it,
+## which a command that names no path works on (stage 0's `locate` without
+## an argument): `None`, after `cli.no-package`, when there is none.
+def nearest_package(sys: System, command: str, catalog: Catalog) -> String?:
+    let cwd = absolute(sys, ".")
+    var dir = cwd.copy()
+    while True:
+        if package.is_file(sys.fs, package.join(dir, package.MANIFEST)):
+            return Some(dir)
+        if dir == "/":
+            break
+        dir = package.parent(dir)
+    let params = [
+        Param(name="dir".to_string(), value=cwd),
+        Param(name="command".to_string(), value=command.to_string()),
+    ]
+    emit("", catalog.plain_error("cli.no-package", params))
+    return None
+
+## Whether the words after a command name a path, beside the options
+## `flags`.
+pure def names_path(rest: list[String], flags: list[str]) -> bool:
+    for k in range(1, len(rest)):
+        var flag = False
+        for f in flags:
+            if rest[k] == f:
+                flag = True
+        if not flag:
+            return True
+    return False
+
+## The layouts of a workspace's members; none when a member has no
+## manifest, which stage 0 reports before anything is written.
+def member_layouts(sys: System, members: list[String]) -> list[Layout]:
+    var out: list[Layout] = []
+    for m in members:
+        if not package.is_file(sys.fs, package.join(m, package.MANIFEST)):
+            return []
+        out.push(package.load_package(sys.fs, m, m))
+    return out
+
+## A workspace's lockfile, beside its manifest, unless a member's layout
+## has an error.
+pure def workspace_lock(root: str, all: list[Layout], catalog: Catalog) -> (String, String)?:
+    for l in all:
+        if l.has_errors(catalog):
+            return None
+    let at = package.join(root, package.LOCKFILE)
+    return Some((at, package.lockfile_of(all, root)))
 
 ## A path without its last component.
 pure def parent(p: str) -> String:
@@ -1372,20 +1898,55 @@ def embedded_files(sys: System, path: str, text: str, catalog: Catalog) -> dict[
 pure def text_len(s: str) -> int:
     return s.byte_len()
 
-## The syntax diagnostics of `text`, and its name diagnostics as stage
-## 0's name pass reports them, after loading the std modules it imports
-## into `env`.
+## The syntax diagnostics of `text`, its name diagnostics as stage 0's
+## name pass reports them for a build with or without its tests, after
+## loading the std modules it imports into `env`, and the problems of its
+## `@cfg`s.
 def name_diagnostics(
-    sys: System, home: str, text: str, mut env: Environment, catalog: Catalog
-) -> (list[Diagnostic], list[Diagnostic]) ! IoError:
+    sys: System,
+    home: str,
+    text: str,
+    tests: bool,
+    features: Features,
+    mut env: Environment,
+    catalog: Catalog,
+) -> (list[Diagnostic], list[Diagnostic], list[Diagnostic]) ! IoError:
     let parsed = parse(text, catalog)
-    for module in imported_std_modules(text, parsed.tree):
+    let (tree, cfg_diags) = built_tree(text, parsed.tree, tests, features)
+    for module in imported_std_modules(text, tree):
         if not env.std.contains(module.copy()):
             let source = sys.fs.read_to_string(Path.new("{home}/std/{module}.sisu"))?
             let names = ModuleNames.of(source, parse(source, catalog).tree)
             _ = env.std.insert(module.copy(), names)
-    let found = resolve.resolve(text, parsed.tree, parsed.diagnostics, env, catalog)
-    return Ok((parsed.diagnostics.copy(), found))
+    let found = resolve.resolve(text, tree, parsed.diagnostics, env, catalog)
+    return Ok((parsed.diagnostics.copy(), found, cfg_diags))
+
+## A module's syntax tree as a build with or without its tests compiles it
+## (decision 243): without the items and methods its `@cfg`s or the build
+## leave out, which the name pass then passes by (`cfg.filter`); and the
+## problems of its `@cfg`s, as diagnostics.
+pure def built_tree(
+    text: str, tree: Tree, tests: bool, features: Features
+) -> (Tree, list[Diagnostic]):
+    # Nothing to leave out of a module that names no `@cfg`, built with its
+    # tests.
+    if tests and not text.contains("cfg"):
+        return (tree.copy(), [])
+    let filtered = cfg.filter(build.module(tree), tests, Some(features.copy()))
+    var diags: list[Diagnostic] = []
+    for p in filtered.problems:
+        diags.push(cfg_diagnostic(p))
+    if filtered.left_out.is_empty():
+        return (tree.copy(), diags)
+    return (tree.without(filtered.left_out), diags)
+
+## A problem of a `@cfg` as stage 0's driver reports it.
+pure def cfg_diagnostic(p: cfg.Problem) -> Diagnostic:
+    return match p:
+        case cfg.Problem.NotACondition(at): Diagnostic.new(Msg.ResolveBadCfg, at.start, at.end)
+        case cfg.Problem.UnknownFeature(at, name): Diagnostic.new(
+            Msg.ResolveUnknownFeature, at.start, at.end
+        ).with("name", name)
 
 ## The absolute form of a path given on the command line: relative to the
 ## working directory, which the shell's `PWD` names.
@@ -1413,16 +1974,26 @@ def layouts_of(sys: System, arg: str, sir: bool) -> list[Layout]?:
         return Some([layout])
     return Some(package.load_target(sys.fs, target, sir))
 
-## The modules of a layout, read and parsed, after loading the std modules
-## they import into `env`.
+## The modules of a layout, read and parsed, each as a build with or
+## without its tests compiles it, after loading the std modules they import
+## into `env`; and the problems of each one's `@cfg`s.
 def named_modules(
-    sys: System, home: str, layout: Layout, mut env: Environment, catalog: Catalog
-) -> list[NamedModule] ! IoError:
+    sys: System, home: str, layout: Layout, tests: bool, mut env: Environment, catalog: Catalog
+) -> (list[NamedModule], list[list[Diagnostic]]) ! IoError:
     var out: list[NamedModule] = []
+    var problems: list[list[Diagnostic]] = []
     for m in layout.modules:
         let text = sys.fs.read_to_string(Path.new(m.disk))?
         let parsed = parse(text, catalog)
-        for module in imported_std_modules(text, parsed.tree):
+        var features = Features.none()
+        if m.package < len(layout.packages):
+            let p = ref layout.packages[m.package]
+            for f in p.features:
+                features.declared.push(f.name.copy())
+            features.on = p.on.copy()
+        let (tree, cfg_diags) = built_tree(text, parsed.tree, tests, features)
+        problems.push(cfg_diags)
+        for module in imported_std_modules(text, tree):
             if not env.std.contains(module.copy()):
                 let source = sys.fs.read_to_string(Path.new("{home}/std/{module}.sisu"))?
                 let names = ModuleNames.of(source, parse(source, catalog).tree)
@@ -1430,13 +2001,13 @@ def named_modules(
         out.push(
             NamedModule(
                 text=text.copy(),
-                tree=parsed.tree,
+                tree=tree,
                 syntax=parsed.diagnostics,
                 path=m.path.copy(),
                 package=m.package,
             )
         )
-    return Ok(out)
+    return Ok((out, problems))
 
 ## Each package of a layout: its name and its dependencies.
 pure def packages_of(layout: Layout) -> list[(String, list[(String, int)])]:
@@ -1456,7 +2027,7 @@ def names_of(
         return names(sys, home, text, mut env, catalog)
     var out = String.new()
     for layout in layouts:
-        let modules = named_modules(sys, home, layout, mut env, catalog)?
+        let (modules, _) = named_modules(sys, home, layout, True, mut env, catalog)?
         let found = resolve.resolve_program(modules, packages_of(layout), env, catalog)
         for i in range(len(found)):
             out.push(render_ids_in(layout.modules[i].name, modules[i].text, found[i], catalog))
@@ -1467,13 +2038,7 @@ def names_of(
 def names(
     sys: System, home: str, text: str, mut env: Environment, catalog: Catalog
 ) -> String ! IoError:
-    let parsed = parse(text, catalog)
-    for module in imported_std_modules(text, parsed.tree):
-        if not env.std.contains(module.copy()):
-            let source = sys.fs.read_to_string(Path.new("{home}/std/{module}.sisu"))?
-            let names = ModuleNames.of(source, parse(source, catalog).tree)
-            _ = env.std.insert(module.copy(), names)
-    let diags = resolve.resolve(text, parsed.tree, parsed.diagnostics, env, catalog)
+    let (_, diags, _) = name_diagnostics(sys, home, text, True, Features.none(), mut env, catalog)?
     return Ok(render_ids(text, diags, catalog))
 
 ## The one path a command names after its name, but for the options

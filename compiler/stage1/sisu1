@@ -6,12 +6,17 @@
 #
 #   sisu1 check [--format=ids] [PATH]            every diagnostic, as `sisu check` prints them
 #   sisu1 sir [PATH]                             the whole program's SIR, as `sisu sir` prints it
-#   sisu1 build --native [PATH] [--output OUT]   an executable, where `sisu build --native` puts it
+#   sisu1 build [--release] [--contracts=LEVEL] [PATH] [--output OUT]
+#                                                an executable, where `sisu build --native` puts
+#                                                it (`--native` is implied), in the release
+#                                                profile with `--release` (decision 232)
 #   sisu1 run [PATH] [-- ARGS...]                the program built into a temporary directory and
 #                                                run with ARGS, with its exit status
 #
-# PATH is a file or a package's directory; without one, the package of the
-# working directory. Stage 1's other commands (`tokens`, `parse`, `names`,
+# PATH is a file or the directory of a package or workspace (whose members
+# `build` builds in turn); without one, the package of the working
+# directory, whose lockfile `check`, `sir` and `build` write as `sisu`
+# does. Stage 1's other commands (`tokens`, `parse`, `names`,
 # `types`, ...) pass through as well. The first use builds stage 1 with
 # stage 0 (`sisu build --native`) into compiler/target/stage1/, and so
 # does a use after a source of stage 1 changed.
@@ -32,18 +37,31 @@ if [ ! -x "$exe" ] || [ -n "$(find "$here/src" -name '*.sisu' -newer "$exe" -pri
         exit 1
     fi
 fi
+# `build` is the native build: `sisu1 build --release` is `sisu build
+# --native --release`, stage 1's own `build` taking stage 0's options.
+if [ "${1:-}" = build ]; then
+    shift
+    native=0
+    for a in "$@"; do
+        [ "$a" = --native ] && native=1
+    done
+    [ "$native" = 1 ] || set -- --native "$@"
+    exec "$exe" --home "$compiler" build "$@"
+fi
 if [ "${1:-}" != run ]; then
     exec "$exe" --home "$compiler" "$@"
 fi
 shift
-path="."
+# Without a path, the package of the working directory or the nearest
+# one above it, as `sisu run` finds it.
+path=()
 if [ $# -gt 0 ] && [ "$1" != "--" ]; then
-    path="$1"
+    path=("$1")
     shift
 fi
 [ "${1:-}" = "--" ] && shift
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-"$exe" --home "$compiler" build --native "$path" --output "$tmp/program" > /dev/null || exit $?
+"$exe" --home "$compiler" build --native ${path[@]+"${path[@]}"} --output "$tmp/program" > /dev/null || exit $?
 "$tmp/program" "$@"
 exit $?

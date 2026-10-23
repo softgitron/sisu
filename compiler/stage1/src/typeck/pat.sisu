@@ -12,12 +12,15 @@ from stage1.typeck.thir import BindMode, Lit, PatId, TExprKind, TPat, TPatKind
 from stage1.typeck.ty import DefId, Ty, TyData
 
 impl Checker:
-    ## A pattern of `match`, `if let`, `for`: bindings are immutable.
+    ## A pattern of `match`, `if let`, `for`: bindings are immutable, and
+    ## shadowing warns nothing.
     pub pure def check_pat(mut self, cx: Cx, p: PatternId, ty: Ty, by_ref: bool?) -> PatId:
-        return self.check_pat_with(cx, p, ty, by_ref, False)
+        return self.check_pat_with(cx, p, ty, by_ref, False, False)
 
+    ## A pattern whose bindings are `mutable`, and with `warn` (a `let`'s)
+    ## warn when they shadow a binding of an enclosing scope.
     pub pure def check_pat_with(
-        mut self, cx: Cx, p: PatternId, ty: Ty, by_ref: bool?, mutable: bool
+        mut self, cx: Cx, p: PatternId, ty: Ty, by_ref: bool?, mutable: bool, warn: bool
     ) -> PatId:
         let node = cx.ast.pattern(p)
         let span = node.range
@@ -30,11 +33,11 @@ impl Checker:
                 pass
         if not simple:
             if let TyData.Ref(inner, m) = self.types.data(t).copy():
-                let inner_p = self.check_pat_with(cx, p, inner, Some(m), mutable)
+                let inner_p = self.check_pat_with(cx, p, inner, Some(m), mutable, warn)
                 return self.add_pat(TPatKind.Deref(inner_p), t, span)
             # A refinement is matched as its base, the same value.
             if let Some((_, _, base)) = self.refinement_of(cx, t):
-                return self.check_pat_with(cx, p, base, by_ref, mutable)
+                return self.check_pat_with(cx, p, base, by_ref, mutable, warn)
         match node.kind:
             case PatKind.Wildcard:
                 return self.add_pat(TPatKind.Wild, t, span)
@@ -52,13 +55,13 @@ impl Checker:
                     return self.add_pat(TPatKind.Bind(local=l, mode=mode), t, span)
                 let l = self.new_local(n.text, lty, mutable, n.range)
                 if self.or_alt.is_none():
-                    self.declare(n.text, l)
+                    self.declare(cx, n.text, l, warn, n.range)
                 return self.add_pat(TPatKind.Bind(local=l, mode=mode), t, span)
             case PatKind.Literal(e):
                 let k = self.literal_pat(cx, e, t)
                 return self.add_pat(k, t, span)
             case PatKind.Ctor(path, args):
-                let k = self.ctor_pat(cx, path, args, t, by_ref, mutable, span)
+                let k = self.ctor_pat(cx, path, args, t, by_ref, mutable, warn, span)
                 return self.add_pat(k, t, span)
             case PatKind.Tuple(ps):
                 # `()` matches the one value of the unit type.
@@ -92,7 +95,7 @@ impl Checker:
                             elems.push(Ty.error())
                 var pats: list[PatId] = []
                 for i in range(len(ps)):
-                    pats.push(self.check_pat_with(cx, ps[i], elems[i], by_ref, mutable))
+                    pats.push(self.check_pat_with(cx, ps[i], elems[i], by_ref, mutable, warn))
                 return self.add_pat(TPatKind.Tuple(pats), t, span)
             case PatKind.List(ps):
                 var elem = Ty.error()
@@ -126,11 +129,11 @@ impl Checker:
                                 case None:
                                     let l = self.new_local(n.text, lt, mutable, n.range)
                                     if self.or_alt.is_none():
-                                        self.declare(n.text, l)
+                                        self.declare(cx, n.text, l, warn, n.range)
                                     rest = Some(l)
                         has_rest = True
                         continue
-                    let pat = self.check_pat_with(cx, sp, elem, by_ref, mutable)
+                    let pat = self.check_pat_with(cx, sp, elem, by_ref, mutable, warn)
                     if has_rest:
                         suffix.push(pat)
                     else:
@@ -154,7 +157,7 @@ impl Checker:
                 for i in range(len(ps)):
                     let sp = ps[i]
                     if i == 0:
-                        let pat = self.check_pat_with(cx, sp, t, by_ref, mutable)
+                        let pat = self.check_pat_with(cx, sp, t, by_ref, mutable, warn)
                         for l in pattern_bindings(self.pats, pat):
                             names.push((self.locals[l].name.copy(), l))
                         pats.push(pat)
@@ -164,7 +167,7 @@ impl Checker:
                         seen.push(False)
                     let outer = self.or_alt.copy()
                     self.or_alt = Some(OrAlt(names=names.copy(), seen=seen))
-                    let pat = self.check_pat_with(cx, sp, t, by_ref, mutable)
+                    let pat = self.check_pat_with(cx, sp, t, by_ref, mutable, warn)
                     let alt = self.or_alt.copy()
                     self.or_alt = outer
                     # A name of the first alternative this one does not bind.
@@ -240,6 +243,7 @@ impl Checker:
         t: Ty,
         by_ref: bool?,
         mutable: bool,
+        warn: bool,
         rng: TextRange,
     ) -> TPatKind:
         let last = path.last() else:
@@ -259,7 +263,7 @@ impl Checker:
                 if let Some(d) = cx.prog.lookup(self.module, name):
                     match cx.prog.defs[d.index].kind():
                         case DefKind.Struct(_):
-                            return self.struct_pat(cx, d, args, t, by_ref, mutable, rng)
+                            return self.struct_pat(cx, d, args, t, by_ref, mutable, warn, rng)
                         case DefKind.Const(_):
                             let diag = self.error(cx, Msg.TypeConstPattern, rng)
                             self.report(diag)
@@ -286,9 +290,9 @@ impl Checker:
                 for a in list:
                     match a:
                         case PatArg.Positional(pp):
-                            _ = self.check_pat_with(cx, pp, Ty.error(), by_ref, mutable)
+                            _ = self.check_pat_with(cx, pp, Ty.error(), by_ref, mutable, warn)
                         case PatArg.Keyword(_, pp):
-                            _ = self.check_pat_with(cx, pp, Ty.error(), by_ref, mutable)
+                            _ = self.check_pat_with(cx, pp, Ty.error(), by_ref, mutable, warn)
                         case PatArg.Rest:
                             pass
             return TPatKind.Error
@@ -341,7 +345,7 @@ impl Checker:
                 for ft in ftys:
                     fields.push(self.add_pat(TPatKind.Wild, ft, rng))
             case Some(list):
-                fields = self.field_pats(cx, vname, names, ftys, list, by_ref, mutable, rng)
+                fields = self.field_pats(cx, vname, names, ftys, list, by_ref, mutable, warn, rng)
         return TPatKind.Variant(def_=def_, variant=vi, fields=fields)
 
     pure def struct_pat(
@@ -352,6 +356,7 @@ impl Checker:
         t: Ty,
         by_ref: bool?,
         mutable: bool,
+        warn: bool,
         range: TextRange,
     ) -> TPatKind:
         let s = cx.prog.struct_info(def_) else:
@@ -374,7 +379,7 @@ impl Checker:
             names.push(Some(f.name.copy()))
         let list = args.copy() ?? []
         let owner = cx.prog.defs[def_.index].name.copy()
-        let fields = self.field_pats(cx, owner, names, ftys, list, by_ref, mutable, range)
+        let fields = self.field_pats(cx, owner, names, ftys, list, by_ref, mutable, warn, range)
         return TPatKind.Struct(def_=def_, fields=fields)
 
     pure def field_pats(
@@ -386,6 +391,7 @@ impl Checker:
         list: list[PatArg],
         by_ref: bool?,
         mutable: bool,
+        warn: bool,
         rng: TextRange,
     ) -> list[PatId]:
         let n = len(ftys)
@@ -431,7 +437,7 @@ impl Checker:
         for i in range(n):
             match slots[i]:
                 case Some(p):
-                    out.push(self.check_pat_with(cx, p, ftys[i], by_ref, mutable))
+                    out.push(self.check_pat_with(cx, p, ftys[i], by_ref, mutable, warn))
                 case None:
                     out.push(self.add_pat(TPatKind.Wild, ftys[i], rng))
         return out

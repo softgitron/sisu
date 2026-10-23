@@ -10,7 +10,20 @@ pub pure def ambient() -> list[str]:
 
 ## The std modules a program imports by path, besides the ambient ones.
 pub pure def importable() -> list[str]:
-    return ["cli", "math", "net", "time", "http", "sim", "json", "test", "collections", "num"]
+    return [
+        "cli",
+        "math",
+        "net",
+        "time",
+        "http",
+        "sim",
+        "json",
+        "test",
+        "collections",
+        "num",
+        "string",
+        "fmt",
+    ]
 
 ## The paths an import may name a std module by, for the fix of one that
 ## names none.
@@ -31,6 +44,9 @@ pub pure def module_paths() -> list[String]:
         "std.collections",
         "std.num",
         "std.live",
+        "std.core",
+        "std.string",
+        "std.fmt",
     ]:
         out.push(p.to_string())
     return out
@@ -55,6 +71,10 @@ pub pure def module_for(words: list[String]) -> String?:
         case "std.collections": Some("collections".to_string())
         case "std.num": Some("num".to_string())
         case "std.live": Some("live".to_string())
+        # The prelude is `std.core` (11).
+        case "std.core": Some("prelude".to_string())
+        case "std.string": Some("string".to_string())
+        case "std.fmt": Some("fmt".to_string())
         case _: None
 
 ## The prelude's names a std module re-exports (`from std.time import
@@ -113,6 +133,10 @@ pub pure def reexports(module: str) -> list[str]:
             "max",
             "sum",
         ]
+    if module == "string":
+        return ["String"]
+    if module == "fmt":
+        return ["Display", "Debug", "Formatter", "Spec"]
     return []
 
 ## The sized integer types (03, "Numbers"), narrowest first in each kind.

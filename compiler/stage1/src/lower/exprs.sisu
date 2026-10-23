@@ -354,9 +354,11 @@ impl FnLower:
             return self.copy_or_move(cx, p, x.ty)
         let t = self.temp(cx, x.ty)
         self.into(cx, Place.local(t), e)
-        if self.copies(cx, x.ty):
-            return Operand.Copy(Place.local(t))
-        return Operand.Move(Place.local(t))
+        # A temporary that holds a capability handle moves into what takes
+        # it, count and all (decision 237).
+        if self.needs_drop(cx, x.ty):
+            return Operand.Move(Place.local(t))
+        return Operand.Copy(Place.local(t))
 
     ## A reference to the expression's place (or to a temporary).
     pub pure def borrow_operand(mut self, cx: Cx, e: TExprId, mutable: bool) -> Operand:
@@ -367,10 +369,10 @@ impl FnLower:
         self.assign(cx, Place.local(t), Rvalue.Ref(place=p, mutable=mutable), loc)
         return Operand.Copy(Place.local(t))
 
-    ## An operand for reading without consuming: a copy of a `Copy` value,
-    ## a reference otherwise.
+    ## An operand for reading without consuming: a copy of a `Copy` value
+    ## that holds no capability handle, a reference otherwise.
     pub pure def compare_operand(mut self, cx: Cx, e: TExprId) -> Operand:
-        if self.copies(cx, self.ty_of(cx, e)):
+        if not self.needs_drop(cx, self.ty_of(cx, e)):
             return self.operand(cx, e)
         return self.borrow_operand(cx, e, False)
 
@@ -394,14 +396,41 @@ impl FnLower:
 
     ## An argument as the callee takes it; `by_value` when the callee takes
     ## by value what the call passes by reference (a trait method resolved
-    ## to the impl of a `Copy` type).
-    pub pure def arg_operand_for(mut self, cx: Cx, a: TArg, by_value: bool) -> Operand:
+    ## to the impl of a `Copy` type). `owned`: the parameter is taken with
+    ## `own`.
+    pub pure def arg_operand_for(mut self, cx: Cx, a: TArg, by_value: bool, owned: bool) -> Operand:
         if by_value and (a.mode == ArgMode.Ref or a.mode == ArgMode.Value):
             if let TyData.Ref(_, _) = self.types.data(self.ty_of(cx, a.expr)):
                 let p = self.place_of(cx, a.expr).project(Proj.Deref)
                 return Operand.Copy(p)
-            return self.operand(cx, a.expr)
+            if owned:
+                return self.operand(cx, a.expr)
+            return self.lent_copy(cx, a.expr)
+        if a.mode == ArgMode.Value and not owned:
+            if cx.prog.is_copy_in(mut self.types, self.ty_of(cx, a.expr), self.bounds):
+                return self.lent_copy(cx, a.expr)
         return self.arg_operand(cx, a)
+
+    ## Whether each parameter of a function (`self` first) is taken with
+    ## `own`.
+    pub pure def owned_params(self, cx: Cx, def_: DefId) -> list[bool]:
+        var out: list[bool] = []
+        let f = cx.prog.fn_info(def_) else:
+            return out
+        if let Some(m) = f.self_mode:
+            out.push(m == Mode.Own)
+        for p in f.params:
+            out.push(p.mode == Mode.Own)
+        return out
+
+    ## A `Copy` value a callee borrows: a copy of it, or, for one that holds
+    ## a capability handle, a copy of its place, a temporary being dropped
+    ## with the statement's others, so that the handle outlives the call
+    ## whichever callee takes the copy (decision 237).
+    pure def lent_copy(mut self, cx: Cx, e: TExprId) -> Operand:
+        if self.needs_drop(cx, self.ty_of(cx, e)):
+            return Operand.Copy(self.place_of(cx, e))
+        return self.operand(cx, e)
 
     ## A reference to the value of an expression: the expression itself
     ## when it is one, a borrow of its place otherwise.
@@ -419,7 +448,7 @@ impl FnLower:
                 return self.operand(cx, a.expr)
             case ArgMode.Borrow:
                 if self.copies(cx, ety):
-                    return self.operand(cx, a.expr)
+                    return self.lent_copy(cx, a.expr)
                 return self.borrow_operand(cx, a.expr, False)
             case ArgMode.BorrowMut:
                 if let TyData.Ref(_, True) = self.types.data(ety):
@@ -504,13 +533,18 @@ impl FnLower:
                         return
                 var c = Callee.Value(Operand.Const(Const.Unit))
                 var by_value: list[bool] = []
+                # A function value takes its arguments as its own.
+                var owned: list[bool] = []
                 match callee:
                     case TCallee.Fn(def_, type_args):
                         let (cc, bv) = self.callee_for(cx, def_, type_args)
                         c = cc
                         by_value = bv
+                        owned = self.owned_params(cx, def_)
                     case TCallee.Value(f):
                         c = Callee.Value(self.operand(cx, f))
+                        for _ in args:
+                            owned.push(True)
                 var may: list[bool] = []
                 for a in args:
                     may.push(self.may_leave(cx, a.expr))
@@ -519,8 +553,9 @@ impl FnLower:
                 var ops: list[Operand] = []
                 for i in range(len(args)):
                     let bv = if i < len(by_value): by_value[i] else: False
+                    let own_ = if i < len(owned): owned[i] else: True
                     let mark = len(self.locals)
-                    let o = self.arg_operand_for(cx, args[i], bv)
+                    let o = self.arg_operand_for(cx, args[i], bv, own_)
                     if later[i]:
                         self.hold(cx, o, mark, self.ty_of(cx, args[i].expr), mut held)
                     ops.push(o)

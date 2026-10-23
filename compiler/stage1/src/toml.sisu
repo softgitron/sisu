@@ -589,6 +589,40 @@ pure def insert_current(
             t.entries[at].1.value = Value.Table(inner)
             return done
 
+## A string as TOML writes it (stage 0's `toml::quote`): in double quotes,
+## with `"`, `\`, line breaks, tabs and other control characters escaped.
+pub pure def quote(s: str) -> String:
+    var out = "\"".to_string()
+    for c in s.chars():
+        let code = c.code()
+        if c == '"':
+            out.push("\\\"")
+        elif c == '\\':
+            out.push("\\\\")
+        elif c == '\n':
+            out.push("\\n")
+        elif c == '\t':
+            out.push("\\t")
+        elif c == '\r':
+            out.push("\\r")
+        elif code < 32:
+            out.push("\\u{hex4(code)}")
+        else:
+            out.push_char(c)
+    out.push("\"")
+    return out
+
+## Four uppercase hexadecimal digits.
+pure def hex4(n: int) -> String:
+    let digits = "0123456789ABCDEF"
+    var out = String.new()
+    var shift = 12
+    while shift >= 0:
+        let d = (n >> shift) & 15
+        out.push(digits.byte_slice(d, d + 1))
+        shift -= 4
+    return out
+
 # ------------------------------------------------------------------ tests
 
 pure def str_of(t: Table, key: str) -> String:
@@ -653,3 +687,8 @@ test "reports where":
 test "escapes":
     let t = parse("x = \"a\\\"b\\\\c\\n\\u00e9\"\n").expect("parses")
     assert str_of(t, "x") == "a\"b\\c\né"
+
+test "quotes as TOML writes":
+    assert quote("a\"b") == "\"a\\\"b\""
+    assert quote("x\ny") == "\"x\\ny\""
+    assert quote("\u{1}") == "\"\\u0001\""

@@ -117,6 +117,10 @@ pub pure def std_module(path: str) -> String?:
         case "std.collections": "collections"
         case "std.num": "num"
         case "std.live": "live"
+        # The prelude is `std.core` (11).
+        case "std.core": "prelude"
+        case "std.string": "string"
+        case "std.fmt": "fmt"
         case _: ""
     if name.is_empty():
         return None
@@ -269,6 +273,10 @@ view struct Resolver:
     has_self: bool
     ## Whether unknown names go unreported (a broken header or body).
     quiet: bool
+    ## Whether the type being resolved is a body's annotation (a `let`'s, a
+    ## closure parameter's), which stage 0's checker resolves: a name it
+    ## cannot find is reported with its whole path and without a fix.
+    annotation: bool
     ## Set before a `for` that `comptime` marks.
     comptime_for: bool
     ## The labels of the result of the function being resolved, which an
@@ -477,6 +485,9 @@ const MODULE_PATHS: list[str] = [
     "std.collections",
     "std.num",
     "std.live",
+    "std.core",
+    "std.string",
+    "std.fmt",
 ]
 
 ## The scalar types a misspelt type name is compared with.
@@ -748,6 +759,7 @@ impl Resolver:
             assoc=[],
             has_self=False,
             quiet=False,
+            annotation=False,
             comptime_for=False,
             result_labels=[],
             local_traits=ModuleNames.of(text, tree).traits,
@@ -1811,7 +1823,7 @@ impl Resolver:
             if pattern == None and is_pattern_kind(kind):
                 pattern = Some(c)
             elif is_type_kind(kind):
-                self.type_(c)
+                self.annotation_type(c)
             elif kind == SyntaxKind.LetElse:
                 else_part = Some(c)
             else:
@@ -2205,7 +2217,7 @@ impl Resolver:
             if self.kind(p) == SyntaxKind.ClosureParam:
                 for c in child_nodes(self.tree, p):
                     if is_type_kind(self.kind(c)):
-                        self.type_(c)
+                        self.annotation_type(c)
                 if let Some(t) = first_token(self.tree, p, SyntaxKind.Ident):
                     self.declare_local(t, False)
 
@@ -2306,6 +2318,26 @@ impl Resolver:
 
     ## A type: its first name must name a type, unless it is a module the
     ## program imports or a generic parameter whose associated type follows.
+    ## A body's type annotation (a `let`'s, a closure parameter's), which
+    ## stage 0's checker resolves rather than its resolver.
+    pure def annotation_type(mut self, n: int):
+        let saved = self.annotation
+        self.annotation = True
+        self.type_(n)
+        self.annotation = saved
+
+    ## The segments of a path type, joined by dots: `json.Value`.
+    pure def path_text(self, n: int) -> String:
+        var words: list[String] = []
+        for e in self.tree.nodes[n].children:
+            if let Leaf(t) = e:
+                let kind = self.tree.tokens[t].kind
+                if kind == SyntaxKind.Ident
+                        or kind == SyntaxKind.SelfTypeKw
+                        or kind == SyntaxKind.TypeKw:
+                    words.push(self.text_of(t))
+        return words.join(".")
+
     pure def type_(mut self, n: int):
         if self.kind(n) == SyntaxKind.PtrType or self.kind(n) == SyntaxKind.ImplType:
             # A raw pointer and `impl Trait for T` are later phases' (`E0900`),
@@ -2328,7 +2360,15 @@ impl Resolver:
                 let known = if segments > 1: self.knows_value(name)
                     or self.knows_type(name) else: self.knows_type(name)
                 if not known and not self.module.poisoned.contains(name.to_string()):
-                    self.undefined_type(n, name)
+                    if self.annotation:
+                        # Stage 0's checker names the whole path, and offers
+                        # no fix.
+                        let node = ref self.tree.nodes[n]
+                        let path = self.path_text(n)
+                        let d = Diagnostic.new(Msg.ResolveUndefinedType, node.start, node.end)
+                        self.report(d.with("name", path))
+                    else:
+                        self.undefined_type(n, name)
         for c in child_nodes(self.tree, n):
             let kind = self.kind(c)
             if is_type_kind(kind):

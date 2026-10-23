@@ -63,7 +63,7 @@ impl Program:
                         if let Some(b) = s.builtin:
                             let bs: str = b
                             match bs:
-                                case "MutexGuard" | "Lent" | "Slice":
+                                case "MutexGuard" | "ReadGuard" | "Lent" | "Slice":
                                     return True
                                 case _:
                                     pass
@@ -83,20 +83,14 @@ impl Program:
             case _:
                 return False
 
-    ## Whether a value of the type is a `Copy` handle on a heap cell that
-    ## nothing frees: a capability handle, a `TestClock`, a `Cap` or a
-    ## `Lent`.
-    pub pure def is_heap_handle(self, types: Types, ty: Ty) -> bool:
+    ## Whether a value of the type is a `Copy` handle on something that
+    ## lives as long as the run: a `TestClock`, the number of one of the
+    ## scheduler's clocks. A capability handle, a `Cap` and a `Lent` are
+    ## not: their object goes with the handle's last copy (decision 237).
+    pub pure def is_run_handle(self, types: Types, ty: Ty) -> bool:
         let TyData.Adt(d, _) = types.data(ty) else:
             return False
-        let b = self.builtin(d) else:
-            return False
-        let bs: str = b
-        match bs:
-            case "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "TestClock" | "Cap" | "Lent":
-                return True
-            case _:
-                return False
+        return self.builtin(d) == Some("TestClock")
 
     ## The shape of a declared result type (before substitution).
     pub pure def result_shape(self, mut types: Types, ret: Ty) -> ResultShape:
@@ -125,7 +119,7 @@ impl Program:
                         if let Some(b) = s.builtin:
                             let bs: str = b
                             match bs:
-                                case "Iter" | "Entry" | "Iterable" | "MutexGuard" | "Lent" | "Slice":
+                                case "Iter" | "Entry" | "Iterable" | "MutexGuard" | "ReadGuard" | "Lent" | "Slice":
                                     return True
                                 case _:
                                     pass
@@ -248,12 +242,19 @@ impl Program:
 
     ## 04: "A parameter counts as borrowed when it is passed without `own`
     ## and is not `Copy`, or when its type is a view, since a result may
-    ## point into a view."
+    ## point into a view." A value that holds a capability handle or a
+    ## `Cap` counts too, since a result may point into the handle's object
+    ## (decision 237).
     pub pure def is_borrowed_param(self, mut types: Types, p: SigParam) -> bool:
-        return match p.mode:
-            case Mode.Mut: True
-            case Mode.Own: False
-            case Mode.Borrow: not self.is_copy(mut types, p.ty) or self.can_borrow(mut types, p.ty)
+        match p.mode:
+            case Mode.Mut:
+                return True
+            case Mode.Own:
+                return False
+            case Mode.Borrow:
+                if not self.is_copy(mut types, p.ty) or self.can_borrow(mut types, p.ty):
+                    return True
+                return self.holds_capability(mut types, p.ty)
 
     ## Whether a borrowed parameter can lend anything to a result of type
     ## `ret`. A function value lends only what its calls return, unless the
@@ -322,12 +323,13 @@ impl Program:
         if shape == ResultShape.Plain:
             return ResultBorrows(deep=[], inner=[])
         let params = self.sig_params(f)
-        # A handle on a heap cell that is never freed lends nothing of its
-        # own: what a result reaches through it lives as long as the
-        # program.
+        # A handle on what lives as long as the run (a test clock) lends
+        # nothing of its own; what a result reaches through a capability
+        # handle, a `Cap` or a `Lent` lives as long as the handle's copy
+        # the caller passed (decision 237).
         var from_: list[int] = []
         for i in self.from_params(mut types, f):
-            if not self.is_heap_handle(types, params[i].ty):
+            if not self.is_run_handle(types, params[i].ty):
                 from_.push(i)
         var deep: list[int] = []
         for i in range(len(params)):

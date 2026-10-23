@@ -433,6 +433,72 @@ impl Checker:
     pub pure def other_rendered(mut self):
         self.other_error = True
 
+    ## Whether the names this body cannot find are the checker's to report,
+    ## as stage 0's checker reports them: its module is one the compiler
+    ## wrote for the program (its doc examples, derived and delegated impls,
+    ## interceptors and fakes, instances of templates), which stage 1's name
+    ## pass, reading the program's own modules, never sees. Elsewhere the
+    ## name pass renders them.
+    pub pure def reports_names(self, cx: Cx) -> bool:
+        if cx.prog.user_modules.contains(self.module):
+            return False
+        return not cx.prog.modules[self.module.index].is_std
+
+    ## The local or module-level name closest to a misspelt one, if one is
+    ## close enough to be the likely intent (an edit distance of at most a
+    ## third of the length, and at least one).
+    pub pure def similar_name(self, cx: Cx, n: str) -> String?:
+        var names: list[String] = []
+        for scope in self.scopes:
+            for (name, _) in scope:
+                names.push(name.copy())
+        for k in cx.prog.modules[self.module.index].items.keys():
+            names.push(k.copy())
+        for k in cx.prog.modules[cx.prog.prelude.index].items.keys():
+            if not k.starts_with("_"):
+                names.push(k.copy())
+        # The literals spelt as keywords: `true` is `True`.
+        names.push("True".to_string())
+        names.push("False".to_string())
+        return cx.prog.closest(n, names)
+
+    ## `resolve.undefined-name` for `n` at `range`, with the closest name in
+    ## scope as its fix, where the checker reports names (`reports_names`).
+    pub pure def undefined_name(mut self, cx: Cx, n: str, range: TextRange):
+        if not self.reports_names(cx):
+            self.other_rendered()
+            return
+        var d = self.error(cx, Msg.ResolveUndefinedName, range).with("name", n)
+        if let Some(similar) = self.similar_name(cx, n):
+            d = d.fix(Msg.ResolveSimilarName, "name", similar, range.start, range.end, similar)
+        self.report(d)
+
+    ## `resolve.undefined-type` for the type `name` written at `range`, where
+    ## the checker reports names: in a body, without a fix.
+    pub pure def undefined_type(mut self, cx: Cx, name: str, range: TextRange):
+        if not self.reports_names(cx):
+            self.other_rendered()
+            return
+        self.report(self.error(cx, Msg.ResolveUndefinedType, range).with("name", name))
+
+    ## `resolve.undefined-type` for the path `names` of a body's annotation,
+    ## written at `range`, named whole: where the checker reports names, and
+    ## in the program's own modules for a path whose first name names
+    ## something here, which the name pass passes by (it reports a path
+    ## whose first name names nothing).
+    pub pure def undefined_path_type(mut self, cx: Cx, names: list[String], range: TextRange):
+        var reports = self.reports_names(cx)
+        if not reports and len(names) > 1:
+            let first = names[0].copy()
+            reports = self.lookup_local(first).is_some()
+                or self.generic_names.contains(first.copy())
+                or cx.prog.lookup(self.module, first).is_some()
+        if not reports:
+            self.other_rendered()
+            return
+        let shown = names.join(".")
+        self.report(self.error(cx, Msg.ResolveUndefinedType, range).with("name", shown))
+
     # ---------------------------------------------------------------- diagnostics
 
     pub pure def report(mut self, own d: Diagnostic):
@@ -450,6 +516,31 @@ impl Checker:
     pub pure def unsupported(mut self, cx: Cx, range: TextRange, construct: str, phase: str):
         let d = self.error(cx, Msg.Stage0Unsupported, range).with("construct", construct)
         self.report_other(d.with("phase", phase))
+
+    ## `E0900` for compile-time code that unfolds (`what`) where nothing
+    ## unfolds it: a function or a method that has it is a template, made
+    ## for its type arguments (decision 244), and the other places are
+    ## named.
+    pub pure def no_unfolding(mut self, cx: Cx, range: TextRange, what: str):
+        var place = "a constant or a default"
+        var places = "constants and defaults"
+        if let Some(f) = cx.prog.fn_info(self.def_):
+            if let FnKind.Test(_) = f.kind:
+                place = "a test"
+                places = "tests"
+            elif f.comptime_:
+                place = "a `comptime def`"
+                places = "`comptime def`s"
+            elif f.trait_.is_some():
+                place = "a trait's own method"
+                places = "a trait's own methods"
+            elif f.impl_.is_some():
+                place = "a method of a generic trait impl"
+                places = "generic trait impls"
+            else:
+                place = "this function"
+                places = "more places"
+        self.unsupported(cx, range, "{what} in {place}", "reflection in {places} (Phase 8)")
 
     ## A function only the standard library may call (`@internal`): the
     ## forwarding of lent capabilities, the assembling of a `System`.
@@ -595,10 +686,27 @@ impl Checker:
 
     ## Declares a name in the innermost scope (shadowing an enclosing
     ## scope's name is the name pass's warning).
-    pub pure def declare(mut self, name: str, local: int):
+    ## Declares a name in the innermost scope. Rebinding in the same scope
+    ## is allowed; with `warn`, shadowing a name of an enclosing scope warns
+    ## (D-024), where the checker reports names (`reports_names`; in the
+    ## program's own modules the name pass warns).
+    pub pure def declare(mut self, cx: Cx, name: str, local: int, warn: bool, at: TextRange):
         if name.is_empty() or name == "_":
             return
         let last = len(self.scopes) - 1
+        if warn and self.reports_names(cx):
+            var shadows = False
+            for i in range(last):
+                for (n, _) in self.scopes[i]:
+                    if n == name:
+                        shadows = True
+            var here = False
+            for (n, _) in self.scopes[last]:
+                if n == name:
+                    here = True
+            if shadows and not here:
+                let d = self.error(cx, Msg.ResolveShadowOuter, at).with("name", name)
+                self.report(d)
         self.scopes[last].push((name.to_string(), local))
 
     pub pure def lookup_local(self, name: str) -> int?:
@@ -672,7 +780,7 @@ impl Checker:
                                 cx.prog, mut self.types, self.module, names[0], rng
                             )
                             if let Some(x) = err:
-                                self.report_const(consts.diagnostic(x, cx.catalog))
+                                self.report_const(cx, consts.diagnostic(x, cx.catalog))
                             return t
                 # `C.Item`, `Self.Item`: an associated type of a parameter.
                 if len(names) == 2:
@@ -714,8 +822,7 @@ impl Checker:
                     case Some(d):
                         return self.def_type(cx, d, targs, rng)
                     case None:
-                        # `resolve.undefined-type`.
-                        self.other_rendered()
+                        self.undefined_path_type(cx, names, rng)
                         return Ty.error()
             case TypeKind.Option(inner):
                 let t = self.resolve_ty(cx, inner)
@@ -791,15 +898,15 @@ impl Checker:
         let ts = folding.terms(cx.ast, e)
         let (t, err) = consts.const_arg(cx.prog, mut self.types, self.module, ts, scope)
         if let Some(x) = err:
-            self.report_const(consts.diagnostic(x, cx.catalog))
+            self.report_const(cx, consts.diagnostic(x, cx.catalog))
         return t
 
     ## A diagnostic of a type's constant argument: the type checker's are
     ## reported, any other error is another phase's.
-    pub pure def report_const(mut self, own d: Diagnostic):
+    pub pure def report_const(mut self, cx: Cx, own d: Diagnostic):
         if d.msg.id().starts_with("type."):
             self.report(d)
-        elif d.msg == Msg.ResolveUndefinedName:
+        elif d.msg == Msg.ResolveUndefinedName and not self.reports_names(cx):
             self.other_rendered()
         else:
             self.report_other(d)
@@ -1156,7 +1263,7 @@ impl Checker:
                 let v = self.decay(cx, v0)
                 let ty = self.ty_of(v)
                 let l = self.new_local(name.text, ty, False, name.range)
-                self.declare(name.text, l)
+                self.declare(cx, name.text, l, False, name.range)
                 let pat = self.add_pat(TPatKind.Bind(local=l, mode=BindMode.Value), ty, name.range)
                 var stmts = [TStmt.Let(pat=pat, init=Some(v), unwrap=None, else_=None, span=span)]
                 let b = self.check_block(cx, body)
@@ -1222,13 +1329,7 @@ impl Checker:
                 let x = self.comptime_block(cx, b, range)
                 out.push(TStmt.Expr(x))
             case _:
-                let what = "`comptime for` and `comptime if` outside a derive or a generic function"
-                self.unsupported(
-                    cx,
-                    range,
-                    what,
-                    "compile-time code in methods and non-generic functions (Phase 8)",
-                )
+                self.no_unfolding(cx, range, "`comptime for` and `comptime if`")
                 out.push(TStmt.Error(range))
 
     ## Whether an expression names one of the function's `const` generic
@@ -1334,7 +1435,7 @@ impl Checker:
                         target = d
                     let decayed = self.decay_ty(cx, target)
                     let el = self.check_let_else(cx, e, decayed, err_ty)
-                    let p = self.check_pat_with(cx, pat, decayed, None, mutable)
+                    let p = self.check_pat_with(cx, pat, decayed, None, mutable, True)
                     out.push(
                         TStmt.Let(pat=p, init=Some(value), unwrap=unwrap, else_=Some(el), span=span)
                     )
@@ -1349,7 +1450,7 @@ impl Checker:
                         if vt != Ty.never() and vt != Ty.error():
                             let d = self.error(cx, Msg.TypeElseMustDiverge, e.range)
                             self.report(d)
-                    let p = self.check_pat_with(cx, pat, vty, None, mutable)
+                    let p = self.check_pat_with(cx, pat, vty, None, mutable, True)
                     out.push(
                         TStmt.Let(pat=p, init=Some(value), unwrap=None, else_=Some(el), span=span)
                     )
@@ -1368,7 +1469,7 @@ impl Checker:
                     let d = self.error(cx, Msg.TypeRefutableLet, cx.ast.pattern(pat).range)
                     self.report(d)
                 let vty = declared ?? self.ty_of(value)
-                let p = self.check_pat_with(cx, pat, vty, None, mutable)
+                let p = self.check_pat_with(cx, pat, vty, None, mutable, True)
                 out.push(TStmt.Let(pat=p, init=Some(value), unwrap=None, else_=None, span=span))
 
     pure def check_let_else(mut self, cx: Cx, e: LetElse, target: Ty, err_ty: Ty) -> TLetElse:
@@ -1376,7 +1477,7 @@ impl Checker:
         var binding: int? = None
         if let Some(b) = e.binding:
             let l = self.new_local(b.text, err_ty, False, b.range)
-            self.declare(b.text, l)
+            self.declare(cx, b.text, l, False, b.range)
             binding = Some(l)
         var result = TLetElse.Fallback(binding=None, value=TExprId(index=0))
         match e.body:
@@ -1407,10 +1508,10 @@ impl Checker:
         match p.kind:
             case PatKind.Bind(n):
                 let l = self.new_local(n.text, ty, mutable, n.range)
-                self.declare(n.text, l)
+                self.declare(cx, n.text, l, True, n.range)
                 return self.add_pat(TPatKind.Bind(local=l, mode=BindMode.Value), ty, p.range)
             case _:
-                return self.check_pat_with(cx, pat, ty, None, mutable)
+                return self.check_pat_with(cx, pat, ty, None, mutable, True)
 
     pure def check_assign(
         mut self, cx: Cx, target: ExprId, op: BinOp?, value: ExprId, range: TextRange
@@ -1524,14 +1625,21 @@ impl Checker:
                 # reference the parameter is.
                 var base = e
                 var walking = True
+                var read_guard = False
                 while walking:
                     match self.exprs[base.index].kind:
                         case TExprKind.Deref(inner):
+                            let it = self.infer.resolve(self.types, self.ty_of(inner))
+                            if let TyData.Adt(g, _) = self.data(it):
+                                if cx.prog.builtin(g) == Some("ReadGuard"):
+                                    read_guard = True
                             base = inner
                         case TExprKind.Field(inner, _):
                             base = inner
                         case _:
                             walking = False
+                if read_guard:
+                    d = d.note(Msg.TypeReadGuardValue)
                 if let Some(root) = self.place_root(base):
                     if let Some(f) = cx.prog.fn_info(self.def_):
                         var at: (TextRange, String)? = None
@@ -1575,8 +1683,10 @@ impl Checker:
                         return Some(Problem.BehindSharedRef)
                     case TyData.Adt(d, _):
                         # A `Shared` value is changed only through a `Cell`
-                        # or a `Mutex` in it.
-                        if cx.prog.is_builtin(d, "Shared"):
+                        # or a `Mutex` in it, and a read guard's value by
+                        # nobody; a mutex guard's value is the guard's to
+                        # change.
+                        if cx.prog.is_builtin(d, "Shared") or cx.prog.is_builtin(d, "ReadGuard"):
                             return Some(Problem.BehindSharedRef)
                         return None
                     case _:

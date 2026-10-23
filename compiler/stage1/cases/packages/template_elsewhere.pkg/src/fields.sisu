@@ -1,0 +1,8 @@
+## How many fields a struct has, counted at compile time.
+pub def count[T]() -> int:
+    comptime if not reflect.is_struct(T):
+        comptime panic("`{reflect.name_of(T)}` is not a struct")
+    var n = 0
+    comptime for f in reflect.fields_of(T):
+        n += 1
+    return n

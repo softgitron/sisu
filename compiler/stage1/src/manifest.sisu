@@ -55,6 +55,20 @@ pub struct Dependency:
     pub when: When?
     ## A dev-dependency: only the package's tests may import it.
     pub dev: bool
+    ## `features = [...]`: the dependency's features this package turns on
+    ## (09).
+    pub features: list[(String, TextRange)]
+    ## `default-features = false` leaves the dependency's `default`
+    ## features off, as far as this package is concerned.
+    pub default_features: bool
+
+## A feature of `[features]`: its name, where it is named, and what it
+## turns on, each a feature of the package or `DEP/FEATURE`, a feature of a
+## dependency (09).
+pub struct Feature:
+    pub name: String
+    pub range: TextRange
+    pub on: list[(String, TextRange)]
 
 pub struct PackageInfo:
     pub name: String
@@ -73,8 +87,9 @@ pub struct Manifest:
     pub trust_unsafe: list[(String, TextRange)]
     ## `[workspace] members`: the members' directories, as written.
     pub members: list[(String, TextRange)]?
-    ## `[features]`: each feature and what it turns on, recorded only.
-    pub features: list[(String, list[String])]
+    ## `[features]`: each feature and what it turns on, for `@cfg`
+    ## (decision 243).
+    pub features: list[Feature]
     ## `[profile.release] contracts`.
     pub release_contracts: String?
 
@@ -239,6 +254,8 @@ impl Reader:
                 continue
             var path: (String, TextRange)? = None
             var when: When? = None
+            var features: list[(String, TextRange)] = []
+            var default_features = True
             for (sk, sv) in spec.entries:
                 match as_text(sk.value):
                     case "path":
@@ -250,9 +267,17 @@ impl Reader:
                         when = self.when(sv)
                     case "version" | "git" | "rev" | "branch" | "tag":
                         pass
-                    # Additive booleans of the dependency (09); recorded by
-                    # nothing yet.
-                    case "features" | "default-features" | "optional":
+                    # The dependency's features this package turns on (09).
+                    case "features":
+                        features = self.strings("features", sv)
+                    case "default-features":
+                        match sv.value:
+                            case Value.Bool(b):
+                                default_features = b
+                            case _:
+                                self.bad("default-features", sv, "`true` or `false`")
+                    # Optional dependencies arrive with a registry.
+                    case "optional":
                         pass
                     case _:
                         self.unknown(sk, "{table} {k.value}")
@@ -266,6 +291,8 @@ impl Reader:
                             path_range=path_range,
                             when=when,
                             dev=dev,
+                            features=features.copy(),
+                            default_features=default_features,
                         )
                     )
                 case None:
@@ -401,10 +428,8 @@ pub pure def read(text: str) -> (Manifest?, list[Diagnostic]):
             case "features":
                 if let Some(t) = r.table("features", v):
                     for (fk, fv) in t.entries:
-                        var on: list[String] = []
-                        for (s, _) in r.strings(fk.value, fv):
-                            on.push(s.copy())
-                        m.features.push((fk.value.copy(), on))
+                        let on = r.strings(fk.value, fv)
+                        m.features.push(Feature(name=fk.value.copy(), range=fk.range, on=on))
             case "profile":
                 if let Some(t) = r.table("profile", v):
                     for (pk, pv) in t.entries:

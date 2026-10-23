@@ -32,7 +32,7 @@ From this directory, with stage 0 built (`cargo build --release` in
 `compiler/`):
 
 ```text
-sisu test                                   # 101 tests, 58 of them stage 0's own, transcribed
+sisu test                                   # 102 tests, 58 of them stage 0's own, transcribed
 sisu run -- tokens [--trivia] FILE          # what `sisu tokens [--trivia] FILE` prints
 sisu run -- parse --tree [--trivia] FILE    # what `sisu parse --tree [--trivia] FILE` prints
 sisu run -- parse --print FILE              # the file, reprinted from the tree
@@ -43,17 +43,17 @@ sisu run -- batch OUT LIST                  # tokens, trees and ASTs for every f
 sisu run -- ast-batch OUT LIST              # the AST of every file LIST names, into OUT
 sisu run -- names-batch OUT LIST            # the name diagnostics of every file LIST names, into OUT
 sisu run -- types-batch OUT LIST            # the type diagnostics of every file LIST names, into OUT
-sisu run -- sir [--partial] [PATH]          # what `sisu sir [PATH]` prints: the whole program's SIR
+sisu run -- sir [--partial] [--contracts=LEVEL] [PATH]  # what `sisu sir [--contracts=LEVEL] [PATH]` prints: the whole program's SIR
 sisu run -- ownership FILE                  # the ownership checker's diagnostics of `sisu check --format=ids FILE`
-sisu run -- sir-batch OUT LIST              # both, for every file LIST names, into OUT
-sisu run -- check [--format=ids] [PATH]     # what `sisu check [--format=ids] [PATH]` prints: every diagnostic
+sisu run -- sir-batch OUT LIST [--contracts=LEVEL]  # both, for every file LIST names, into OUT (with a level, the SIR alone)
+sisu run -- check [--format=ids] [--locked] [PATH]  # what `sisu check [--format=ids] [PATH]` prints: every diagnostic
 sisu run -- check-batch OUT LIST            # both forms, for every file LIST names, into OUT
-sisu run -- build --native [PATH] [--output OUT]  # an executable: stage 1's SIR, built by stage 0's backend
+sisu run -- build [--native [--release] [--contracts=LEVEL] [--output OUT]] [--locked] [PATH]  # what `sisu build` makes
 sisu run -- mutate SEED COUNT OUT LIST      # mutants of the files LIST names
 sisu run -- profile FILE                    # the time lexing, parsing and each dump of FILE take
 ./check.sh [--native] [--self] [--mutants N] [--seed S] [--names] [--types] [--sir] [--check] [--keep DIR]
 ./bootstrap.sh [--keep DIR]                 # the fixed point alone (below, "The bootstrap")
-./sisu1 (check | sir | build --native | run) [PATH] ...  # stage 1 as the compiler's front end, from anywhere
+./sisu1 (check | sir | build | run) [PATH] ...  # stage 1 as the compiler's front end, from anywhere
 ```
 
 A `FILE` of `names`, `types`, `sir` and `ownership` (and a line of a
@@ -62,10 +62,16 @@ batch's `LIST`) may also be the directory of a package, with its
 does when run in that directory (below, "Programs of several modules"),
 and for a workspace prints each member's diagnostics and its one
 application's SIR. `sir` without a path reads the package of the working
-directory, as `sisu sir` does, so `sisu run -- sir` here prints stage 1's
-own SIR. `sir --partial` prints the SIR of what lowering reached
-even for a program beyond its slice, which it then names (the class
-`self` compares stage 1's own package that way, module by module).
+directory or of the nearest directory above it, as `sisu sir` does, so
+`sisu run -- sir` here prints stage 1's own SIR. `sir` lowers the program
+as `sisu sir` builds it, without its tests (decision 243: its `test`,
+`suite` and `bench` items and its doc examples left out, and `@cfg(test)`
+false), with every contract checked or those `--contracts=LEVEL` names
+(07), while the ownership checker's diagnostics are those of the program
+built with its tests, as `sisu check` builds it. `sir --partial` prints
+the SIR of what lowering reached even for a program beyond its slice,
+which it then names (the class `self` compares stage 1's own package that
+way, module by module).
 
 Stage 1 prints to standard output and its diagnostics to standard error,
 in the conformance form (`--format=ids`), as stage 0 does; `names` and
@@ -92,7 +98,9 @@ too. Then it compares `names`: the name diagnostics of `sisu check
 --format=ids` (the lines with `E0200`, `E0201`, `E0202`, `E0220`, `E0234`,
 `E0389` or `W0002`, with their labels and fixes) against stage 1's
 (`names-batch`), for the conformance suite's `names/` cases, stage 1's own
-cases and the programs of several modules (the conformance suite's
+cases (but those of `cases/checker_names/`, whose names stage 0's type
+checker reports rather than its resolver, which the classes of `check`
+compare) and the programs of several modules (the conformance suite's
 packages, each a directory `NAME.pkg`, or the one its `NAME.cwd` names
 inside it, which stage 0 checks from inside it, its scripts, and stage 1's
 own `cases/packages/`), and with `--names` for every program of the corpus
@@ -113,7 +121,11 @@ and `E0429`, with their labels and fixes), against stage 1's (one run of
 `sir-batch` for both), for the programs `sir.list` names, each of which
 must be within the slice of lowering and match, and with `--sir` for every
 program of the corpus, where a file within the slice must match and any
-other is beyond it. With `--self` (which `--native` implies) it checks
+other is beyond it. Then `contracts-off` and `contracts-preconditions`:
+what `sisu sir --contracts=LEVEL` prints (07; the levels a release build
+may check, decision 232) against `sir-batch OUT LIST --contracts=LEVEL`,
+for the programs of `sir.list` with a contract, each of which must match.
+With `--self` (which `--native` implies) it checks
 stage 1 over its own package, the class `self`: its name and type
 diagnostics against those of `sisu check --format=ids` run in this
 directory, and its SIR (`sir --partial`) against what `sisu sir` prints of
@@ -127,17 +139,24 @@ listed discrepancy. Stage 0 writes a package's `sisu.lock` when it checks
 it; `check.sh` removes the ones its run wrote.
 
 With `--native` it builds stage 1 once with stage 0's native backend
-(`sisu build --native --output WORK/stage1`, about 5 s for its 2959 SIR
+(`sisu build --native --output WORK/stage1`, about 5 s for its 2450 SIR
 functions) and runs that executable for every batch instead of `sisu run
---` on the interpreter; nothing else changes. The two paths give the same
+--` on the interpreter; nothing else changes, but for the class `build`,
+which needs the executable: stage 0's `sisu build` and stage 1's `build`,
+one after the other, of copies of a file, of a package whose manifest
+names its `[profile.release] contracts` and of a workspace, in the
+work directory, in the debug and the release profile, with `--contracts`
+and with `--locked`, each compared by the executable it makes, the
+lockfile it writes and what it prints. The two paths give the same
 outputs: a run of each over every class but `self`, kept (`--keep`) and
 compared file by file, differs in nothing but the timings of the summary
 (below; the classes of `check`, added since, were compared natively
 only), and stage 1 over its own package on the interpreter (`names`,
 `types` and `sir --partial`, 83 s, 460 s and 1123 s, at a peak of 2.5 GB
 of memory) prints what the native executable prints. The native run, with
-the classes `self`, `fixed` and those of `check`, takes under five
-minutes; the interpreter's without them (but `human`) about thirteen.
+the classes `self`, `fixed`, `build` and those of `check`, takes four to
+seven minutes, as the machine goes; the interpreter's without them (but
+`human` and `cases-check`) about thirteen.
 
 ## Results
 
@@ -146,36 +165,43 @@ minutes; the interpreter's without them (but `human`) about thirteen.
 
 ```text
 stage 1 against stage 0 (tokens, tree, trivia-tree, print, ast):
-  conformance   409 files,  409 identical,   0 differing as listed,   0 differing otherwise; stage 1    2.3s (271158 bytes; lex 141 ms, parse 158 ms, dumps 677 ms, ast 525 ms)
-  std            15 files,   15 identical,   0 differing as listed,   0 differing otherwise; stage 1    1.1s (238695 bytes; lex 83 ms, parse 93 ms, dumps 436 ms, ast 370 ms)
-  examples       11 files,   11 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.1s (27495 bytes; lex 11 ms, parse 13 ms, dumps 52 ms, ast 42 ms)
-  cases          31 files,   31 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.1s (14501 bytes; lex 9 ms, parse 9 ms, dumps 35 ms, ast 23 ms)
+  conformance   430 files,  430 identical,   0 differing as listed,   0 differing otherwise; stage 1    2.5s (296923 bytes; lex 176 ms, parse 192 ms, dumps 853 ms, ast 661 ms)
+  std            17 files,   17 identical,   0 differing as listed,   0 differing otherwise; stage 1    1.4s (250156 bytes; lex 98 ms, parse 119 ms, dumps 555 ms, ast 449 ms)
+  examples       11 files,   11 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.2s (27495 bytes; lex 14 ms, parse 16 ms, dumps 72 ms, ast 60 ms)
+  cases          45 files,   45 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.2s (21037 bytes; lex 13 ms, parse 15 ms, dumps 59 ms, ast 41 ms)
 stage 1's name resolution against stage 0's (names):
-  names          53 files,   53 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.3s
-  corpus-names  373 files,  373 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.7s
+  names          63 files,   63 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.4s
+  corpus-names  390 files,  390 identical,   0 differing as listed,   0 differing otherwise; stage 1    1.2s
 stage 1's type checker against stage 0's (types):
-  types         404 files,  404 identical,   0 beyond the slice and a subset,   0 differing as listed,   0 otherwise; stage 1    4.0s
-  corpus-types  401 files,  401 identical,   0 beyond the slice and a subset,   0 differing as listed,   0 otherwise; stage 1    4.2s
+  types         435 files,  435 identical,   0 beyond the slice and a subset,   0 differing as listed,   0 otherwise; stage 1    6.2s
+  corpus-types  422 files,  422 identical,   0 beyond the slice and a subset,   0 differing as listed,   0 otherwise; stage 1    6.0s
 stage 1's lowering against stage 0's (sir):
-  sir           404 files,  404 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1   11.1s (front end 3s, lowering 3s, ownership 4s)
-  corpus-sir    401 files,  401 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1   10.8s (front end 3s, lowering 3s, ownership 4s)
+  sir           435 files,  435 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1   18.8s (front end 6s, lowering 4s, ownership 6s)
+  corpus-sir    422 files,  422 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1   18.3s (front end 5s, lowering 4s, ownership 6s)
 stage 1's ownership checker against stage 0's (ownership):
-  ownership     404 files,  404 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
-  corpus-own    401 files,  401 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
+  ownership     435 files,  435 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
+  corpus-own    422 files,  422 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
+stage 1's lowering at the contract levels of a build against stage 0's (contracts):
+  contracts-off            12 files,   12 identical,   0 otherwise; stage 1    2.4s
+  contracts-preconditions  12 files,   12 identical,   0 otherwise; stage 1    2.3s
 stage 1's check against stage 0's (every diagnostic, in the human and the conformance form):
-  human          41 files,   41 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1    0.9s
-  corpus-check  401 files,  401 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1   10.5s
-  corpus-human  401 files,  401 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
+  human          41 files,   41 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1    1.2s
+  corpus-check  422 files,  422 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1   15.5s
+  corpus-human  422 files,  422 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
+  cases-check    35 files,   35 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1    2.1s
+  cases-human    35 files,   35 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
+stage 1's build against stage 0's (build: the executables, the lockfile and what each prints):
+  build           6 builds,    6 identical,   0 otherwise; both    8.2s
 stage 1 over its own package against stage 0 (self: names, types, the SIR by source file):
   self-names   identical
   self-types   identical
-  self-sir      135 files,  135 identical,   0 beyond the slice,   0 otherwise; stage 1   48.1s
+  self-sir      103 files,  103 identical,   0 beyond the slice,   0 otherwise; stage 1   54.2s
 the fixed point (fixed: stage1-A built by stage 0, stage1-B by the backend from stage1-A's SIR):
-  fixed-sir0   identical: stage1-A's SIR of its own package and stage 0's (16787279 bytes)
-  fixed-sir    identical: stage1-B's SIR of the package and stage1-A's (16787279 bytes)
-  fixed-exe    identical: stage1-B and stage1-A (21995856 bytes)
-  stage1-A 54.6s, the backend 2.0s, stage1-B 55.5s
-total: 4290 files checked, 4290 identical, 0 differing (0 listed in DISCREPANCIES.md, 0 not)
+  fixed-sir0   identical: stage1-A's SIR of its own package and stage 0's (14753397 bytes)
+  fixed-sir    identical: stage1-B's SIR of the package and stage1-A's (14753397 bytes)
+  fixed-exe    identical: stage1-B and stage1-A (22869008 bytes)
+  stage1-A 54.5s, the backend 2.8s, stage1-B 51.7s
+total: 4620 files checked, 4620 identical, 0 differing (0 listed in DISCREPANCIES.md, 0 not)
 ```
 
 On the interpreter, `./check.sh --names --types --sir` (without
@@ -215,25 +241,33 @@ token a line misses at its end, the forms of later phases, scripts, CR LF,
 Unicode beyond ASCII, type arguments where a value is written), for the
 type checker's rules (calls, conversions, control flow), the names in
 constant arguments, the five discrepancies of the first round, which
-stage 0 now shares, and a program of two packages (`cases/packages/`).
+stage 0 now shares, programs of several packages (`cases/packages/`), and
+the diagnostics no program of the corpus has that stage 1 rendered last
+(below, "Stage 1 as the compiler's front end"): a label in another
+module than its error, an error in a file the compiler wrote, and the
+names stage 0's type checker reports (`cases/checker_names/`).
 With `--mutants 2000 --seed 7` all 2000 mutants give identical outputs,
 their ASTs included (in the first round 21 differed, by D1).
 
-The corpus is 401 programs: the 383 of one module (the conformance cases
+The corpus is 422 programs: the 400 of one module (the conformance cases
 outside `packages/`, and the proposal's examples), the conformance suite's
-17 programs of several modules or with a manifest (its packages,
-workspaces and scripts) and stage 1's own package case. Every one gets
-stage 0's name diagnostics, its type diagnostics (the ownership checker's
-`type.` messages among them), its SIR, its ownership diagnostics and the
-whole of what `sisu check` prints, in both forms, exactly; `types.list`
-and `sir.list` name the 401 and stage 1's three cases of type rules. Of
-the 404 of `sir.list`, 242 are lowered, 43 of them with diagnostics of
-the ownership checker, and 162 have a front-end error, for which both
-print nothing. And stage 1 over its own package, 56 800 lines in 72
-modules, gets stage 0's name and type diagnostics (none) and
-stage 0's SIR, function for function, for all 135 of its source files: its
-own 72, the 57 the compiler writes for their derived impls, the 5 of the
-standard library it reaches, and the declarations.
+19 programs of several modules or with a manifest (its packages,
+workspaces and scripts) and stage 1's own three package cases. Every one
+gets stage 0's name diagnostics, its type diagnostics (the ownership
+checker's `type.` messages among them), its SIR, its ownership
+diagnostics and the whole of what `sisu check` prints, in both forms,
+exactly; `types.list` and `sir.list` name the 422 and stage 1's 13 cases
+of one module (three of type rules, and ten of diagnostics no program of
+the corpus has). Of the 435 of `sir.list`, 263 are lowered, 44 of them
+with diagnostics of the ownership checker, and 172 have a front-end error,
+for which both print nothing. And stage 1 over its own package, 59 400
+lines in 73 modules, gets stage 0's name and type diagnostics (none) and
+stage 0's SIR, function for function, for all 103 of its source files:
+its own 73, the 26 the compiler writes for their derived impls, the 3 of
+the standard library it reaches (the prelude, its derived impls and the
+builtin impls), and the declarations. Built without its tests, as `sisu
+sir` builds it since decision 243, the package reaches fewer derived
+impls and std modules than the 135 files its SIR had before.
 
 ## The bootstrap: the fixed point
 
@@ -297,23 +331,19 @@ What stage 0 still does that stage 1 does not:
 - **the driver's other commands**: the formatter (`sisu fmt`), `sisu doc`
   and `check --explain`, the language server, the REPL and worksheets,
   `explain-borrow` (stage 1 has the ownership checker but its
-  `explain.rs`), `audit`, `new`, `replay`, and the lockfile, which stage 1
-  reads packages without writing; `sisu sir`'s `--contracts` levels and
-  `sisu build --native --release` (decision 232: the release profile,
-  with the contracts its manifest names), since stage 1 lowers with every
-  contract checked, the default; and the plain build of a workspace's
-  libraries (`built the package`), since stage 1 builds the one member
-  with a `main`;
-- **a few of `sisu check`'s diagnostics**, none of them in the corpus:
-  those whose label is in another module than the error (an impl that
-  overlaps one of another module, a derive or an instance that fails in
-  a template of another module), the bound on a template's instances
-  reported in a file the compiler wrote, and a syntax error in a doc
-  example or in code the compiler wrote, which stage 1 notes, so that it
-  agrees on whether a program has an error and so on what SIR to print,
-  without rendering them (below, "Stage 1 as the compiler's front end");
-- **speed**: stage1-A prints its own SIR in about 55 s, stage 0 in 4 s
-  (below, "Where the time goes").
+  `explain.rs`), `audit` (`--ownership`, and `--caps`, decision 240),
+  `new`, `replay`, and `sisu test`'s cache of the tests that passed
+  (decision 242), which belongs to running them;
+- **speed**: stage1-A prints its own SIR in 30 to 55 s, as the machine
+  goes, stage 0 in 4 to 7 s (below, "Where the time goes").
+
+Since this round stage 1 builds as `sisu build` builds: in the release
+profile with `--release`, with the contracts its manifest's
+`[profile.release]` names or `--contracts` asks for, every member of a
+workspace, the libraries with the line that says so, and the lockfile
+written as stage 0 writes it; and it renders every error of stage 0's
+front end that the corpus and stage 1's own cases show, those whose
+label is in another file than the error among them (below).
 
 ## Stage 1 as the compiler's front end
 
@@ -321,35 +351,56 @@ What stage 0 still does that stage 1 does not:
 `sisu`-like command, from any directory:
 
 ```text
-sisu1 check [--format=ids] [PATH]            every diagnostic, as `sisu check` prints them
-sisu1 sir [PATH]                             the whole program's SIR, as `sisu sir` prints it
-sisu1 build --native [PATH] [--output OUT]   an executable, where `sisu build --native` puts it
-sisu1 run [PATH] [-- ARGS...]                the program built into a temporary directory and run
+sisu1 check [--format=ids] [--locked] [PATH]  every diagnostic, as `sisu check` prints them
+sisu1 sir [--contracts=LEVEL] [PATH]          the whole program's SIR, as `sisu sir` prints it
+sisu1 build [--release] [--contracts=LEVEL] [--locked] [PATH] [--output OUT]
+                                              what `sisu build --native` makes, and where
+sisu1 run [PATH] [-- ARGS...]                 the program built into a temporary directory and run
 ```
 
 `PATH` is a file or the directory of a package or workspace, by default
-the package of the working directory. The first use builds stage 1 with
-stage 0 (`sisu build --native`) into `compiler/target/stage1/`, and so does
-the first after a source of stage 1 changed; stage 1's other commands pass
-through. `check`, `sir` and `build` are stage 1's own commands; `build`
-checks the program as `check` does, stops where `sisu build` stops (at the
-front end's errors, with the line `error[D0006]: the program was not run:
-errors found (N)`, then at a `comptime` expression that fails, with
-`D0006` too, then at the ownership checker's, with `D0021`), writes
-the SIR beside the executable and hands it to stage 0's backend (`sisu
-build --native --from-sir`), which prints `built PATH`; `run` builds and
-runs the executable with the arguments, standard streams and exit status
-of the command. The executable goes where stage 0 puts it (decision 231):
-a package's to `build/debug/NAME` in the directory of its lockfile, its
-workspace's or its own (`package.workspace_of`), a file's beside it,
-named by its stem, and its directory is made when it is missing. For a
-program of one file the executable is the one stage 0 builds from the
-source, byte for byte, as the fixed point has it for stage 1 itself.
-Stage 0 does the rest: the backend, the runtime and the link.
+the package of the working directory or of the nearest directory above
+it. The first use builds stage 1 with stage 0 (`sisu build --native`) into
+`compiler/target/stage1/`, and so does the first after a source of stage 1
+changed; stage 1's other commands pass through. `check`, `sir` and
+`build` are stage 1's own commands, and each writes the lockfile of the
+package or workspace as stage 0 writes it before it works on it (09:
+`sisu.lock` beside the root manifest or its workspace's, every package
+the build resolved, sorted; rewritten when the manifests imply another,
+and with `--locked` that is the error `D0065`, with what would change).
+`build` builds each program the path names, a file's, a package's or
+each member's of a workspace in turn, as `sisu build` does: it checks the
+program as `check` does, but built without its tests (decision 243),
+stops where `sisu build` stops (at the front end's errors, with the line
+`error[D0006]: the program was not run: errors found (N)`, then at a
+`comptime` expression that fails, with `D0006` too, then at the ownership
+checker's, with `D0021`), and lowers it with every contract checked, or in
+the release profile (`--release`, decision 232) with those of the root
+package's `[profile.release] contracts`, preconditions when it names
+none, or with those `--contracts=LEVEL` names (07); a library, which has
+no `main`, is then built, and says so (`built the package NAME VERSION
+(modules: N)`), and a program with a `main` has its SIR written beside the
+executable and handed to stage 0's backend (`sisu build --native
+--from-sir`, with `--release` in the release profile), which prints
+`built PATH`. The options are checked as `sisu build` checks them
+(`--output` and `--contracts` go with `--native`, a level is `off`,
+`preconditions` or `all`, and `--release` without `--native` is
+`D0111`); `sisu1 build` is `build --native`. `run` builds and runs the
+executable with the arguments, standard streams and exit status of the
+command. The executable goes where stage 0 puts it (decision 231): a
+package's to `build/PROFILE/NAME` in the directory of its lockfile, its
+workspace's or its own (`package.workspace_of`), `PROFILE` being `debug`
+or `release`, a file's beside it, named by its stem, and its directory is
+made when it is missing. For a program of one file the executable is the
+one stage 0 builds from the source, byte for byte, as the fixed point has
+it for stage 1 itself, and so for the packages and the workspace of the
+class `build` in both profiles. Stage 0 does the rest: the backend, the
+runtime and the link.
 
 `check` prints what `sisu check` prints: the syntax diagnostics of each
-module, the manifests' problems, `cap.untrusted`, the name pass's and the
-type checker's diagnostics, sorted and without repeats, and, when the front
+module, the manifests' problems, `cap.untrusted`, the problems of the
+`@cfg`s (`E0266`, `W0006`), the name pass's and the type checker's
+diagnostics, sorted and without repeats, and, when the front
 end found no error, the ownership checker's (with the note of `sisu
 check`'s driver that names the methods consuming a must-consume value),
 in the order of stage 0's files (the modules', the manifests', then those
@@ -386,32 +437,52 @@ checker: a panic, with the message the catalog gives stage 0's interpreter
 a failed `assert` with the values of its parts drawn under it or the two
 sides it compared, a contract's broken clause), a constant a refinement
 rejects (`refine.not-satisfied`), a spent budget, a use of the world, and
-a value with no literal form. A few rules stage 1 still notes without
-rendering (none in the corpus): a label in another module than the error
-(an overlapping impl, a failing derive or instance whose template is
-another module's), the bound on instances reported in a file the compiler
-wrote, and a syntax error in a doc example or in code the compiler wrote.
-A program with one is beyond what `check` renders: `check` prints what it
-has, names the rule on standard error (`beyond the slice: stage 0 reports
-resolve.overlapping-impl, which stage 1 notes without rendering it`) and
-fails; `build` stops.
+a value with no literal form. Those whose label or whose place is in
+another file than the program's own modules, which stage 1 noted without
+rendering until this round, it renders too, each with a case of its own
+that the classes `types`, `sir` and `cases-check` compare: a label in
+another module than its error, drawn in that module's file (an impl
+that overlaps one of another module of the package,
+`cases/packages/overlapping_impl.pkg`; a template of another module that
+stops making an instance, `cases/packages/template_elsewhere.pkg`; the
+prelude's derive of `Default`, which stops for an enum,
+`derive_stopped_in_prelude`); the bound on a template's instances, at the
+template in the standard library's file (`json.encode`,
+`instances_unbounded_in_std`); a syntax error in a doc example, at its
+line of the module's file (`doc_example_syntax`), and in code the
+compiler wrote, in that code's file (an instance whose header the
+template's text breaks, `instance_syntax_error`); and a generator's site
+in code the compiler wrote, a doc example's or an instance's, which
+stands for the generator's call as a site in the module does (stage 1
+wrote that call for the module's own sites only, and noted
+`test.no-generator` at the others; `doc_example_generator`,
+`generator_in_template`). The names stage 0's type checker reports
+rather than its resolver (in code the compiler wrote, and in a body's
+annotation, with the whole path and without a fix) are reported by stage
+1's checker the same way (`cases/checker_names/`). Stage 1 keeps a note
+only for what no program is known to reach (a label, or the bound on
+instances, in a module with no file among the program's, and a
+generator's site that its walk of a module's expressions misses): a
+program with one would be beyond what `check` renders, and `check` would
+print what it has, name the rule on standard error (`beyond the slice:
+stage 0 reports test.no-generator, which stage 1 notes without rendering
+it`) and fail, and `build` would stop.
 
 `check.sh` compares both forms. The class `human`, the 41 wrong programs
 of `conformance/cases/wrong/`, each a single mistake written to read well
 in the human form, compares what `sisu check FILE` prints on standard
 error with what stage 1 prints, and every one must be within the slice and
-match. With `--check` (which `--native` implies) the classes `corpus-check`
-and `corpus-human` compare the whole of `sisu check --format=ids` and the
-human form for every program of the corpus: a program within the slice
-must match, and one beyond it may only report fewer of stage 0's
-diagnostics. All 401 are within it and match: the 37 that were beyond it
-(the resolver's checks of declarations and impls in 18, compile-time
-evaluation's in 12, one of them in both, and rules of tasks, tests,
-contracts, the resolver's `borrow.` rules and `stage0.unsupported` in 8)
-get every diagnostic of stage 0's now. Run alone, one process a program,
-each of the 401 gets the SIR and the ownership diagnostics it gets in a
-batch: what a run keeps from one program to the next (below, "Where the
-time goes") does not depend on which program came first.
+match; so must the 35 of stage 1's own cases outside `cases/packages/`, in
+both forms (`cases-check` and `cases-human`). With `--check` (which
+`--native` implies) the classes `corpus-check` and `corpus-human` compare
+the whole of `sisu check --format=ids` and the human form for every
+program of the corpus: a program within the slice must match, and one
+beyond it may only report fewer of stage 0's diagnostics. All 422 are
+within it and match. Run alone, one process a program, each of the 422
+gets the SIR and the ownership diagnostics it gets in a batch, and in a
+batch run backwards: what a run keeps from one program to the next
+(below, "Where the time goes") does not depend on which program came
+first.
 
 ## Name resolution
 
@@ -471,30 +542,44 @@ share) once (decision 168), as stage 1 always did.
 A package (09, "Modules" and "Package manifest") is read as stage 0's
 driver reads it: `toml.sisu` is the TOML subset of stage 0's `toml.rs`
 (tables, strings, integers, booleans, arrays, inline tables, and the
-positions of what it reports), `manifest.sisu` its `manifest.rs` (the
-`[package]`, `[dependencies]`, `[trust]`, `[workspace]` and `[target.*]`
-tables, each with its diagnostics), and `package.sisu` its `package.rs`:
-a single file, a script with its inline metadata, a package with its path
-dependencies, or a workspace's members, each with its module tree, which
-mirrors `src/` (the root module `src/main.sisu` or `src/lib.sisu`, a
-directory a module of its own beside a file of the same name), and its
-package's index, trust and dependencies. The names pass then resolves
-the whole program at once (`resolve.resolve_program`): every package's
-modules are declared before an import is resolved, an import names a
-module of the importing package (by the package's own name), of a
-dependency (by the dependency's name) or of the standard library,
-`pub(package)` reaches across modules of a package but not beyond, a
-dependency's tests are not its user's, and a name a module failed to
-import or did not parse is not reported again anywhere. The type checker
-does the same with the resolved program (`Resolver.add_program`, stage 0's
-`resolve_session`): each package is a package of `Program.packages`, the
-root package first and the standard library second, with the orphan rule
-for impls and the doc examples of the root package as its tests. A
+positions of what it reports, and `quote`, which the lockfile writes
+with), `manifest.sisu` its `manifest.rs` (the `[package]`,
+`[dependencies]` with a dependency's `features` and `default-features`,
+`[features]`, `[trust]`, `[workspace]`, `[profile.release]` and
+`[target.*]` tables, each with its diagnostics), and `package.sisu` its
+`package.rs`: a single file, a script with its inline metadata, a package
+with its path dependencies, or a workspace's members, each with its
+module tree, which mirrors `src/` (the root module `src/main.sisu` or
+`src/lib.sisu`, a directory a module of its own beside a file of the
+same name), and its package's index, trust, dependencies and features
+(the root's `default`, each dependency's unless every entry that reaches
+it says `default-features = false`, those the entries list and what each
+feature that is on turns on, `turn_on_features`, with `E1018` for a name
+that is no feature; decision 243), and the lockfile it writes
+(`lockfile_of`). Each module is then filtered as the build compiles it
+(`cfg.sisu`, stage 0's `cfg.rs`): an item, an item of a suite or an
+`extern` block, or a method whose `@cfg` does not hold is left out before
+names are resolved, as are the `test`, `suite` and `bench` items of a
+build without its tests, and a `@cfg` that is no condition is `E0266`,
+a feature its package does not declare `W0006`. The names pass then
+resolves the whole program at once (`resolve.resolve_program`): every
+package's modules are declared before an import is resolved, an import
+names a module of the importing package (by the package's own name), of
+a dependency (by the dependency's name) or of the standard library
+(`std.core` the prelude, and `std.string` and `std.fmt` modules that name
+its items, decision 245), `pub(package)` reaches across modules of a
+package but not beyond, a dependency's tests are not its user's, and a
+name a module failed to import or did not parse is not reported again
+anywhere. The type checker does the same with the resolved program
+(`Resolver.add_program`, stage 0's `resolve_session`): each package is a
+package of `Program.packages`, the root package first and the standard
+library second, with the orphan rule for impls and the doc examples of
+the root package as its tests when the program is built with them. A
 diagnostic is rendered with its file's name, relative to the root
 package's directory, as stage 0's conformance form writes it for a
-program of several files. Stage 1 does not write the lockfile; stage 0
-writes one beside each package it checks, so after `check.sh` the
-conformance suite's packages have one each (`git status` shows them).
+program of several files. Stage 0 writes a package's lockfile when it
+checks it, and so does stage 1's `check`, `sir` and `build` (not its
+batches); `check.sh` removes the lockfiles its run wrote.
 
 ## The AST
 
@@ -597,18 +682,35 @@ terms) beside its definition.
 Templates (08, "Derive" and "Reflection"; stage 0's `template.rs`,
 `derive.rs` and `instances.rs`) are unfolded as stage 0 unfolds them
 (`typeck.template`, `typeck.instances`): a trait's `comptime def derive`,
-the prelude's or the program's own, and a generic function that reflects
-on its type parameters run on an evaluator of compile-time code over the
-shapes of types (fields, variants, attributes) that writes source text;
-the text is parsed, declared in a module of its own whose scope is the
-template's (`<derive>/main.sisu`, `<NAME[ARGS]>/main.sisu`) and checked
-like any other code, a diagnostic there being at its line and column in
-that text. Which instances a program needs is known only once its calls
-are typed, so the driver checks the program, declares what its bodies
-asked for, and checks again until no new request comes; a generic
-function that calls a template with its own type parameters becomes a
-template too, and the program is resolved again (stage 0's
-`Db::checked`). The standard library's own derived impls are unfolded the
+the prelude's or the program's own, and a template, a function or a
+method whose body runs code at compile time by unfolding (a `reflect`
+query, `x.[f]`, a `comptime for` or `comptime if` among statements or
+arms, or a `comptime` expression over a type parameter; decision 244: a
+free function, generic or not, a method of a type or an inherent impl,
+or a method of a trait impl without type parameters), run on an
+evaluator of compile-time code over the shapes of types (fields, with
+whether each has a default, variants, attributes) that writes source
+text; the text is parsed, declared in a module of its own whose scope is
+the template's (`<derive>/main.sisu`, `<NAME[ARGS]>/main.sisu`, a
+template without type parameters `<NAME>/main.sisu`) and checked like any
+other code, a diagnostic there being at its line and column in that
+text. A method's instance is a method of an inherent impl of its type,
+whose compile-time code names the type `Self`; the types the code names
+that are not type parameters (`reflect.fields_of(Point)`) are known to
+the unfolding without being replaced in its text; an instance's module
+is never a template's, so code an instance cannot unfold is the
+instance's error; and the one instance of a template without type
+parameters takes the template's name in SIR, so whatever names the
+template runs it. Which instances a program needs is known only once its
+calls are typed, so the driver checks the program, declares what its
+bodies asked for (and, once, each template without type parameters,
+whether anything calls it or not), and checks again until no new request
+comes; a generic function or method that calls a template with its own
+type parameters becomes a template too, and the program is resolved
+again (stage 0's `Db::checked`). Compile-time code where nothing unfolds
+it (a trait's own method, a method of a generic trait impl, a `comptime
+def`, a test, a constant or a default) is `E0900`, which names the place.
+The standard library's own derived impls are unfolded the
 same way, into modules of the standard library (`<derive>/prelude.sisu`,
 whose file is `<std>/<derive>/prelude.sisu`): the base unfolds those of
 the modules it resolves, and, on a copy of itself that loads them all,
@@ -676,15 +778,16 @@ every module's items before it resolves any, so its definitions of the root
 module come before those the prelude's impls and traits make; stage 1
 resolves the prelude once, so they come after.
 
-`check.sh` checks the slice twice: `types.list` names the 404 programs
-within it, which must match (all 404 do): the 401 programs of the corpus
-(383 of one module, the 17 package and script cases of the conformance
-suite and stage 1's own package case) and stage 1's three cases of type
-rules; `--types` checks the 401 of the corpus again. Round 6's 9 programs
-beyond the slice, each for one of the ownership checker's messages (a
-`let` without a value, 5; a pure body that calls an impure function, 2;
-one that drops a value with an impure `drop`, 1; a must-consume type
-argument, 1), are within it now that `types` runs the ownership checker.
+`check.sh` checks the slice twice: `types.list` names the 435 programs
+within it, which must match (all 435 do): the 422 programs of the corpus
+(400 of one module, the 19 package and script cases of the conformance
+suite and stage 1's own three package cases) and stage 1's 13 other
+cases; `--types` checks the 422 of the corpus again. Round 6's 9
+programs beyond the slice, each for one of the ownership checker's
+messages (a `let` without a value, 5; a pure body that calls an impure
+function, 2; one that drops a value with an impure `drop`, 1; a
+must-consume type argument, 1), are within it now that `types` runs the
+ownership checker.
 
 ## Lowering and the ownership checker
 
@@ -774,13 +877,41 @@ owner's, `E0421` and `E0422` (230). The conformance suite's four new cases
 `generics/function_values` and `run/drop_moved_parts`) are in
 `types.list` and `sir.list`.
 
+Stage 0's next round changed rules of the front end again (decisions 234
+to 246), and stage 1 follows them. A value whose type holds a capability
+handle or a `Cap` is dropped, as is one that is `Copy` only by a bound
+(237: lowering's `needs_drop` asks `holds_capability`, without the
+bounds); a temporary of such a type is moved into what takes it, an
+argument a callee borrows is a copy of a place (`lent_copy`, by
+`owned_params`) and a comparison borrows it (`compare_operand`); SIR's
+drop glue drops the handles (`drops_something`); a parameter that holds
+one counts as borrowed for the elision rules (`is_borrowed_param`), only a
+`TestClock` lending nothing of its own (`is_run_handle`); and the
+ownership checker gives a call's result a loan of the place it copied a
+handle from (`handle_sources`), which a `return` may carry for a
+parameter in its `from`. `@derive(Default)` is the prelude's trait, whose
+template leaves out the fields with defaults and whose field check asks
+`Default` of the others (238). `Atomic`, `RwLock` and `ReadGuard` are
+known where `Mutex`, `MutexGuard` and `Cell` are (239: the auto traits,
+views, smart pointers, a read guard's value that nobody may change, with
+the note `type.read-guard-value`, the owner checks, `is_structural`, SIR's
+drops and `place_ty`, the glue's host types and the ownership checker's
+lists). A test takes nothing, the real `System`, or a fake of each
+capability it names, once each, and lowering keeps `System.fake` and
+`Net.fake` for it (241). Then `@cfg` and features, with `sir` and `build`
+building a program without its tests (243, above, "Programs of several
+modules"); templates beyond generic functions (244, above, "The type
+checker's slice"); and `std.core`, `std.string` and `std.fmt` (245).
+Decisions 234 to 236, 240, 242 and 246 change no rule of the front end.
+The conformance suite's 19 new cases are in `types.list` and `sir.list`.
+
 The front end must agree with stage 0 on whether a program has an error,
 since then `sisu sir` prints nothing and the ownership checker does not
 run: stage 1 reports each error of stage 0's that is not the type
 checker's (the resolver's `resolve.` and `borrow.` rules, among them the
 borrowed signatures of `borrows.rs`, which `typeck.borrows` transcribes,
-the coherence of impls and object safety), and notes the few it does not
-render (above, "Stage 1 as the compiler's front end").
+the coherence of impls and object safety), each rendered (above, "Stage 1
+as the compiler's front end").
 
 What is beyond the slice of lowering (`sir` and `ownership` print why on
 standard error, `sir-batch` writes it to `OUT/n.beyond`): what is beyond
@@ -789,9 +920,9 @@ ownership checker's `type.` messages, which the ownership checker here
 decides; a body of the standard library beyond the type checker's slice;
 an ownership finding in a file other than the program's; and a
 `comptime` expression that needs what stage 1's evaluator does not run.
-Nothing in the corpus is: all 401 programs and stage 1's three cases of
-type rules get stage 0's SIR and ownership diagnostics exactly, and
-`sir.list` names the 404. Round 6's 48 programs beyond the slice came in
+Nothing in the corpus is: all 422 programs and stage 1's 13 other cases
+get stage 0's SIR and ownership diagnostics exactly, and `sir.list` names
+the 435. Round 6's 48 programs beyond the slice came in
 by what this round added: the standard library's derived impls written
 from the templates (22; with them `<std>/<derive>/prelude.sisu` in the SIR
 of nearly every program), the `comptime` evaluator (9), the generators

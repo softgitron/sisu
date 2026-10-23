@@ -168,7 +168,8 @@ pub pure def to_diagnostic(f: Finding, text: str, lines: Lines) -> Diagnostic:
         if l.loc.is_none():
             continue
         let (ls, le) = span_of(text, lines, l.loc)
-        d.labels.push(Label(msg=l.msg, start=ls, end=le, params=params_of(text, lines, l.params)))
+        let params = params_of(text, lines, l.params)
+        d.labels.push(Label(msg=l.msg, start=ls, end=le, params=params, file=-1))
     for (m, ps) in f.notes:
         d.notes.push(Note(msg=m, params=params_of(text, lines, ps)))
     for x in f.fixes:

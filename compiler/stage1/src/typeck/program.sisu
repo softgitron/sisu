@@ -521,8 +521,9 @@ pub struct Program:
     ## Why a type written in `arbitrary[T]` has no generator, by the same
     ## key (stage 0's `Err` of `arbitrary_sites`).
     pub generator_failures: dict[String, String]
-    ## The call that stands for each such site, by the site's expression.
-    pub generator_calls: dict[int, ExprId]
+    ## The call that stands for each such site, by the site's module and
+    ## expression.
+    pub generator_calls: dict[(int, int), ExprId]
     ## The budget of steps of the `comptime` expressions of each item with
     ## `@comptime_budget(steps=N)` (08).
     pub comptime_budgets: dict[DefId, int]
@@ -887,7 +888,7 @@ impl Program:
                         if let Some(b) = s.builtin:
                             let bs: str = b
                             match bs:
-                                case "Iter" | "Entry" | "Iterable" | "MutexGuard" | "Lent" | "Slice":
+                                case "Iter" | "Entry" | "Iterable" | "MutexGuard" | "ReadGuard" | "Lent" | "Slice":
                                     return True
                                 case _:
                                     pass
@@ -1058,11 +1059,21 @@ impl Program:
                         found = self.auto_depth(
                             mut types, arg0, Auto.Send, env, mut seen, depth + 1
                         )
-                    case "Mutex" | "Sender" | "Receiver" | "Handle":
+                    case "Mutex" | "Atomic" | "Sender" | "Receiver" | "Handle":
                         found = self.auto_depth(
                             mut types, arg0, Auto.Send, env, mut seen, depth + 1
                         )
-                    case "MutexGuard":
+                    # Readers share the value: `Sync` asks it to be `Sync`
+                    # too.
+                    case "RwLock":
+                        found = self.auto_depth(
+                            mut types, arg0, Auto.Send, env, mut seen, depth + 1
+                        )
+                        if found.is_none() and auto == Auto.Sync:
+                            found = self.auto_depth(
+                                mut types, arg0, Auto.Sync, env, mut seen, depth + 1
+                            )
+                    case "MutexGuard" | "ReadGuard":
                         if auto == Auto.Send:
                             return no
                         found = self.auto_depth(
@@ -1245,9 +1256,15 @@ impl Program:
                     or name == "Result"
                     or name == "Ordering"
                     or name == "Box"
-                if module.is_std and (self.builtin(d).is_some() or core):
+                var host = False
+                if let Some(b) = self.builtin(d):
+                    host = b != "Atomic"
+                if module.is_std and (host or core):
                     # std's impls of the host-backed types and the core
-                    # enums render as the host does.
+                    # enums render as the host does; another std type's own
+                    # impl (`Duration`'s `Display`, `Atomic`'s `Debug`,
+                    # which the host would show as the `Cell` it is) is its
+                    # own.
                     for a in args:
                         if not self.structural_depth(mut types, a, tr, depth + 1):
                             return False
@@ -1531,6 +1548,73 @@ impl Program:
                     return True
                 return self.def_is_copy(mut types, d, args, depth + 1)
             case _:
+                return False
+
+    ## Whether a value of the type holds a capability handle (`Fs` and the
+    ## others of a `System`) or a `Cap` by value (decision 237). Such a
+    ## value is `Copy` (Q-51), but each copy of a handle is counted and the
+    ## object goes with the last one, so lowering drops it as it drops a
+    ## value that is not `Copy`. A `Lent` is a view of a handle, and counts
+    ## nothing; a type parameter holds none here (lowering drops a value
+    ## whose type is `Copy` only by a bound all the same).
+    pub pure def holds_capability(self, mut types: Types, ty: Ty) -> bool:
+        return self.holds_capability_depth(mut types, ty, 0)
+
+    pure def holds_capability_depth(self, mut types: Types, ty: Ty, depth: int) -> bool:
+        if depth > 32:
+            return False
+        match types.data(ty).copy():
+            case TyData.Tuple(e, _):
+                for t in e:
+                    if self.holds_capability_depth(mut types, t, depth + 1):
+                        return True
+                return False
+            case TyData.ErrSet(members):
+                for d in members:
+                    if self.def_holds_capability(mut types, d, [], depth + 1):
+                        return True
+                return False
+            case TyData.Adt(d, args):
+                return self.def_holds_capability(mut types, d, args, depth + 1)
+            case _:
+                return False
+
+    pure def def_holds_capability(
+        self, mut types: Types, d: DefId, args: list[Ty], depth: int
+    ) -> bool:
+        match self.defs[d.index].kind():
+            case Refinement(r):
+                let base = types.subst(r.base, args)
+                return self.holds_capability_depth(mut types, base, depth)
+            case Struct(s):
+                if let Some(b) = s.builtin:
+                    let bs: str = b
+                    match bs:
+                        case "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "System" | "Cap":
+                            return True
+                        case "Lent":
+                            return False
+                        case _:
+                            for a in args:
+                                if self.holds_capability_depth(mut types, a, depth + 1):
+                                    return True
+                            return False
+                for f in s.fields:
+                    let t = types.subst(f.ty, args)
+                    if self.holds_capability_depth(mut types, t, depth):
+                        return True
+                return False
+            case Enum(e) | ErrorSet(e):
+                for v in e.variants:
+                    for (_, ft) in v.fields:
+                        let t = types.subst(ft, args)
+                        if self.holds_capability_depth(mut types, t, depth):
+                            return True
+                return False
+            case _:
+                for a in args:
+                    if self.holds_capability_depth(mut types, a, depth + 1):
+                        return True
                 return False
 
     ## A `@derive(Copy)` type whose fields, with its arguments in them, are

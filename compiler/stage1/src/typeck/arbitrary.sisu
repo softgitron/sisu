@@ -716,60 +716,126 @@ impl Resolver:
                     site = n.copy()
             if site.is_empty():
                 continue
-            # The site's own range, whether it is called or not.
             var call_args: list[Arg]? = None
             if let Some(c) = calls.get(e.index):
                 call_args = Some(c.1.copy())
-            let at = self.ast(module).expr(e).range
-            let node = self.ast(module).expr(e).node
-            var method = "of"
-            let callee_name = self.add_name_expr(module, node, at, site)
-            var args = [Arg(node=node, range=at, name=None, mutable=False, value=callee_name)]
-            if kind == "exhaustive":
-                method = "every"
-                var max_len: ExprId? = None
-                if let Some(given) = call_args:
-                    for a in given:
-                        if max_len.is_none():
-                            match a.name:
-                                case None:
+            self.write_site_call(module, e, kind, call_args, site)
+
+    ## The calls that stand for the sites in the modules the compiler wrote
+    ## so far (the doc examples, the interceptors and fakes, the derived and
+    ## delegated impls), now that every module's generators are known, as
+    ## stage 0's checker makes a site's call wherever the site is checked; a
+    ## module the compiler writes from now on (an instance of a template)
+    ## has its sites' calls written as it is declared.
+    pub pure def declare_written_sites(mut self):
+        for i in range(len(self.prog.modules)):
+            let g = ModuleId(index=i)
+            if self.writes_sites(g):
+                self.write_sites_in(g)
+        self.sites_known = True
+
+    ## Whether module `g` is one the compiler wrote for the program, but for
+    ## its generators, with a site in its text whose type has a generator.
+    pub pure def writes_sites(self, g: ModuleId) -> bool:
+        if self.prog.generator_sites.is_empty() or g.index >= len(self.sources):
+            return False
+        let data = ref self.prog.modules[g.index]
+        if data.is_std
+                or data.name.starts_with("<arbitrary>/")
+                or self.prog.user_modules.contains(g):
+            return False
+        let text = self.module_texts.get(g) else:
+            return False
+        return text.contains("arbitrary") or text.contains("exhaustive")
+
+    ## The calls that stand for the sites in module `g` whose types have
+    ## generators, which the module's scope sees.
+    pub pure def write_sites_in(mut self, g: ModuleId):
+        let items = self.sources[g.index].items.copy()
+        var calls: dict[int, list[Arg]] = {}
+        let exprs = visit.exprs_in_items(self.ast(g), items)
+        for e in exprs:
+            if let ExprKind.Call(callee, args, _) = self.ast(g).expr(e).kind:
+                if let ExprKind.Index(_, _) = self.ast(g).expr(callee).kind:
+                    _ = calls.insert(callee.index, args.copy())
+        for e in exprs:
+            let ExprKind.Index(base, targs) = self.ast(g).expr(e).kind.copy() else:
+                continue
+            var kind = String.new()
+            if let ExprKind.Name(n) = self.ast(g).expr(base).kind:
+                kind = n.copy()
+            if kind != "arbitrary" and kind != "exhaustive":
+                continue
+            if len(targs) != 1:
+                continue
+            let IndexArg.Expr(t) = targs[0] else:
+                continue
+            let key = without_spaces(self.text_in(g, self.ast(g).expr(t).range))
+            var site = String.new()
+            if let Some(entry) = self.prog.generator_sites.get(key):
+                if let Some(n) = entry:
+                    site = n.copy()
+            if site.is_empty():
+                continue
+            var call_args: list[Arg]? = None
+            if let Some(c) = calls.get(e.index):
+                call_args = Some(c.copy())
+            self.write_site_call(g, e, kind, call_args, site)
+
+    ## The call `Gen.of(site)` or `Gen.every(site, max_len=n)` that stands
+    ## for the site `e` of `module` (with the arguments `call_args` of the
+    ## call the site is the callee of), written into the module's syntax.
+    pure def write_site_call(
+        mut self, module: ModuleId, e: ExprId, kind: str, call_args: list[Arg]?, site: str
+    ):
+        # The site's own range, whether it is called or not.
+        let at = self.ast(module).expr(e).range
+        let node = self.ast(module).expr(e).node
+        var method = "of"
+        let callee_name = self.add_name_expr(module, node, at, site)
+        var args = [Arg(node=node, range=at, name=None, mutable=False, value=callee_name)]
+        if kind == "exhaustive":
+            method = "every"
+            var max_len: ExprId? = None
+            if let Some(given) = call_args:
+                for a in given:
+                    if max_len.is_none():
+                        match a.name:
+                            case None:
+                                max_len = Some(a.value)
+                            case Some(n):
+                                if n.text == "max_len":
                                     max_len = Some(a.value)
-                                case Some(n):
-                                    if n.text == "max_len":
-                                        max_len = Some(a.value)
-                let three = Expr(
-                    node=node,
-                    range=at,
-                    kind=ExprKind.Int(text="3".to_string(), value=Some(three_u128()), suffix=None),
-                )
-                var value = ExprId(index=0)
-                match max_len:
-                    case Some(v):
-                        value = v
-                    case None:
-                        value = self.sources[module.index].ast.add_expr(three)
-                args.push(
-                    Arg(
-                        node=node,
-                        range=at,
-                        name=Some(Name(text="max_len".to_string(), range=at)),
-                        mutable=False,
-                        value=value,
-                    )
-                )
-            let gen = self.add_name_expr(module, node, at, "Gen")
-            let field = Expr(
+            let three = Expr(
                 node=node,
                 range=at,
-                kind=ExprKind.Field(base=gen, name=Name(text=method.to_string(), range=at)),
+                kind=ExprKind.Int(text="3".to_string(), value=Some(three_u128()), suffix=None),
             )
-            let f = self.sources[module.index].ast.add_expr(field)
-            let call = Expr(
-                node=node, range=at, kind=ExprKind.Call(callee=f, args=args, trailing=None)
+            var value = ExprId(index=0)
+            match max_len:
+                case Some(v):
+                    value = v
+                case None:
+                    value = self.sources[module.index].ast.add_expr(three)
+            args.push(
+                Arg(
+                    node=node,
+                    range=at,
+                    name=Some(Name(text="max_len".to_string(), range=at)),
+                    mutable=False,
+                    value=value,
+                )
             )
-            _ = self.prog.generator_calls.insert(
-                e.index, self.sources[module.index].ast.add_expr(call)
-            )
+        let gen = self.add_name_expr(module, node, at, "Gen")
+        let field = Expr(
+            node=node,
+            range=at,
+            kind=ExprKind.Field(base=gen, name=Name(text=method.to_string(), range=at)),
+        )
+        let f = self.sources[module.index].ast.add_expr(field)
+        let call = Expr(node=node, range=at, kind=ExprKind.Call(callee=f, args=args, trailing=None))
+        let made = self.sources[module.index].ast.add_expr(call)
+        _ = self.prog.generator_calls.insert((module.index, e.index), made)
 
     ## `@refines(reference)` (17, D-070): the function must give what its
     ## reference gives on every case, within the tolerance; its cases go to

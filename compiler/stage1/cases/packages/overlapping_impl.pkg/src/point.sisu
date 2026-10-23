@@ -1,0 +1,8 @@
+import shapes
+
+pub struct Point:
+    pub x: int
+
+impl shapes.Describe for Point:
+    def describe(self) -> String:
+        return "the point at {self.x}"

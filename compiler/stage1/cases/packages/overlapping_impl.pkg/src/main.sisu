@@ -1,0 +1,11 @@
+import shapes.point
+
+pub trait Describe:
+    def describe(self) -> String
+
+impl Describe for point.Point:
+    def describe(self) -> String:
+        return "a point"
+
+def main():
+    print(point.Point(x=1).describe())

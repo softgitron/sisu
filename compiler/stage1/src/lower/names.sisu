@@ -88,9 +88,13 @@ impl Ctx:
             # A refinement's predicate, which the compiler writes.
             if let FnKind.Predicate(r) = f.kind:
                 return "{prog.qualified_name(r)}#where"
-            # An instance of a template: `to_json#Point` (08).
+            # An instance of a template: `to_json#Point` (08); the one
+            # instance of a template without type parameters takes its name,
+            # so whatever names the template runs it (decision 244).
             if let Some(k) = self.instances.get(d):
                 let (t, args, _) = prog.instances[k].copy()
+                if args.is_empty():
+                    return self.fn_name(prog, types, t)
                 var shown: list[String] = []
                 for a in args:
                     shown.push(prog.display(types, a))

@@ -1,0 +1,15 @@
+# A doc example is a test of the module (10, "Testing"), written into a
+# module of its own whose lines are the file's: a syntax error in one is
+# reported there, with what the line then means to the type checker.
+
+## Doubles a number.
+##
+## ```
+## assert double(2) == 4
+## assert double(3 == 6
+## ```
+def double(x: int) -> int:
+    return x * 2
+
+def main():
+    print(double(2))
