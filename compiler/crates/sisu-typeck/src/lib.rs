@@ -390,7 +390,7 @@ fn check_bounds(c: &mut Checker) {
         if c.infer.has_vars(&t) || t.contains_error() {
             continue;
         }
-        if prog.can_borrow(&t) {
+        if prog.can_borrow_in(&t, &c.env) {
             let d =
                 Diagnostic::new(msg::BORROW_VIEW_IN_OWNER, span).with("ty", c.show(&t)).with("owner", owner);
             c.report(d);

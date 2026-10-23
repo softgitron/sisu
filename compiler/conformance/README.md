@@ -176,9 +176,14 @@ build's), and compares the same way: the path a self-hosted front end's
 SIR takes to native code. With `--native-release LIST` it builds each case
 with the release profile, `sisu build --native --release
 --contracts=all`: every contract checked, as the interpreter checks them,
-so that what is compared is what Cranelift's optimisations do. `cargo
-test -p sisu-driver --test native` runs the list all three ways, and CI
-runs them on every push. `--native-survey
+so that what is compared is what Cranelift's optimisations do. With
+`--interpreted-from-sir LIST` it runs each case's SIR, the file
+`--native-from-sir` builds, in the interpreter instead (`sisu run
+--from-sir NAME.sir ARGS...`), and compares standard output, the status
+and standard error as above, without the report of allocations: the path
+a self-hosted front end's SIR takes to be run rather than compiled.
+`cargo test -p sisu-driver --test native` runs the list all four ways,
+and CI runs them on every push. `--native-survey
 LIST` builds and runs every runnable case the list leaves out (one with
 an `.out`, `.err` or `.status`) and prints `pass` or the first thing that
 stopped it, which is how the list grows:
@@ -187,6 +192,7 @@ stopped it, which is how the list grows:
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-from-sir conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-release conformance/native.list
+cargo run -p sisu-conformance -- --sisu target/debug/sisu --interpreted-from-sir conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-survey conformance/native.list
 ```
 

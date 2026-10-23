@@ -125,7 +125,7 @@ impl Program {
             }
         }
         if is(wk.escapable) {
-            return if !self.can_borrow(&ty) { Answer::Yes(ImplSource::Builtin) } else { Answer::No };
+            return if !self.can_borrow_in(&ty, env) { Answer::Yes(ImplSource::Builtin) } else { Answer::No };
         }
         // A refinement implements the reading traits of its base, through
         // the base's impls (07: it "can be used wherever `T` can"); the

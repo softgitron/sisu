@@ -598,7 +598,11 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 }
             }
             I::StructuralHash => {
-                return rt::raise_msg(msg::RUN_INTERNAL, &[("detail", "hashing natively".into())]);
+                // The hasher's state is its one field (decision 256).
+                let (v, t) = c.place(0);
+                let (h, _) = c.place(1);
+                let state = crate::dict::structural_hash(mem::word(h, 0), v, t);
+                mem::set_word(h, 0, state);
             }
             I::AssertFail | I::AssertFailCompare | I::AssertFailParts => return assert_fail(c, i),
             I::ErrorTracePush => {

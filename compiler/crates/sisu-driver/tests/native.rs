@@ -57,6 +57,22 @@ fn native_conformance_release() {
     assert!(report.failures.is_empty(), "{}", report.render());
 }
 
+/// The same cases' SIR run in the interpreter (decision 254), `sisu run
+/// --from-sir` of each case's own `.sir` or of what `sisu sir` prints for
+/// it: what a front end serialised meets the expectations the source does.
+#[test]
+fn interpreted_conformance_from_sir() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let root = compiler_dir().join("conformance/cases");
+    let text =
+        std::fs::read_to_string(compiler_dir().join("conformance/native.list")).expect("the coverage list");
+    let list = sisu_conformance::native::read_list(&text);
+    let report = sisu_conformance::native::run_interpreted_from_sir(&sisu, &root, &list);
+    println!("{}", report.render());
+    assert!(report.cases > 0, "no cases in the coverage list");
+    assert!(report.failures.is_empty(), "{}", report.render());
+}
+
 /// A package's native builds go to `build/PROFILE/NAME` beside its
 /// lockfile (decision 231): `sisu build --native` to `build/debug`, with
 /// `--release` to `build/release`, which checks only the preconditions

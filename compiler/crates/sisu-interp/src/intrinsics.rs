@@ -1077,17 +1077,23 @@ impl<'p> Interp<'p, '_> {
             }
             "cmp" => Ok(Value::ordering(self.total_compare(a.get(0)?, a.get(1)?)?)),
             "hash" => {
-                // FNV-1a over the structural key's hash, into the state.
-                use std::hash::{Hash, Hasher};
-                let k = self.key_of(a.get(0)?)?;
-                let mut h = std::collections::hash_map::DefaultHasher::new();
-                k.hash(&mut h);
-                let mixed = h.finish() as i64;
+                // The parts of the value mixed into the state as
+                // `Hasher.write_int` mixes an `int` (decision 256), as the
+                // native runtime mixes them.
                 let p = self.pointer_of(a.get(1)?)?;
+                let start = match self.read(&p)? {
+                    Value::Struct(hs) => match hs.fields.first() {
+                        Some(Value::Int(st)) => *st,
+                        other => return Err(ice(format!("a hasher's state is {other:?}"))),
+                    },
+                    other => return Err(ice(format!("hashing into {other:?}"))),
+                };
+                let mut st = start;
+                self.structural_hash(&mut st, a.get(0)?)?;
                 match self.write(&p)? {
                     Value::Struct(hs) => {
-                        if let Some(Value::Int(st)) = hs.fields.get_mut(0) {
-                            *st = (*st ^ mixed).wrapping_mul(1_099_511_628_211);
+                        if let Some(Value::Int(s)) = hs.fields.get_mut(0) {
+                            *s = st;
                         }
                         Ok(Value::Unit)
                     }

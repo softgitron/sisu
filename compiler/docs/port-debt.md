@@ -55,9 +55,12 @@ functions (Q-23).
 `HashMap` as the index (`sisu-interp/src/value.rs`), over the host's
 structural key of a value, not the `Hash` and `Eq` impls: a key type with
 impls of its own is rejected (`E0398`) instead. Nothing observable
-depends on the hash, since iteration is in insertion order (D-074).
-*Pay*: write `dict` and `set` in Sisu over `Hash` and `Eq`, with the
-per-process SipHash key of D-049 as std's, and lift `E0398`.
+depends on the hash, since iteration is in insertion order (D-074). The
+native runtime's tables hash the same structural key a word at a time
+with a multiplicative mix (decision 253), keyed by nothing, so neither
+implementation resists hash flooding yet. *Pay*: write `dict` and `set`
+in Sisu over `Hash` and `Eq`, with the per-process SipHash key of D-049
+as std's, and lift `E0398`.
 
 **Text to a float at run time.** `str.parse_float` (which `cli.parse`
 uses for an `f64` option) and `str.parse_f32` are Rust's `parse`, after
@@ -564,13 +567,14 @@ What round 1 does, and a later round must not copy:
   232), not 09's LLVM, with scalars in registers and the integer
   division inline (decision 246: arithmetic loops 1.3 to 2.9 times
   faster): nothing a contract proves removes a check, and the runtime's
-  calls cost what they cost in a debug build, so stage 1, whose time is
-  the intrinsics', runs 3 to 5% faster, and there is no `release-size`.
-  *Pay*: the commonest intrinsics inline (`len`, `byte_at`, `push`, the
-  iterators' `next`, an option's tests), an intrinsic's call without the
-  descriptor read again and its arguments decoded on every call
-  (decision 233 cut only the dispatch), and LLVM for release builds (18,
-  stage 2).
+  calls cost what they cost in a debug build, and there is no
+  `release-size`. The commonest intrinsics are inline in both profiles
+  (decision 253: stage 1 twice as fast); the others still pass a
+  descriptor that the runtime decodes, and follow their arguments'
+  references by the type table, on every call. *Pay*: the rest of the
+  intrinsics stage 1 calls most (text building, a dict's reads and
+  writes, `.copy()` and drops of structured values) without the
+  descriptor, and LLVM for release builds (18, stage 2).
 - **The runtime trusts the generated code**: an address or a type number
   that breaks the runtime's rules is not checked everywhere, and where it
   is, it is `R0122` and status 134, not a diagnostic of the program.

@@ -2901,7 +2901,8 @@ commands").
 
 ```text
 sisu run [FILE] [ARGS...]    check, lower and run; `--watch` swaps in each save (hot replacement),
-                             `--sir` runs a SIR text file,
+                             `--sir` runs a SIR text file, `--from-sir FILE [ARGS...]` too
+                             (decision 254),
                              `--monitor` runs under the ownership monitor,
                              `--defer-borrow` runs a rejected program in the counterexample mode,
                              `--contracts=off|preconditions|all` what it checks (07),
@@ -3063,7 +3064,9 @@ a line for each step of checking and lowering the program (`time: names
 resolved 133.0 ms`), of generating its code, and the link.
 `sisu build --native --from-sir FILE [--output PATH]` and `sisu run
 --native --from-sir FILE [ARGS...]` compile a file of serialised SIR
-instead, without the front end (section "From serialised SIR" below).
+instead, without the front end (section "From serialised SIR" below), and
+`sisu run --from-sir FILE [ARGS...]` runs one in the interpreter
+(decision 254).
 
 ### Values
 
@@ -3175,7 +3178,7 @@ on how deep each one's stack lets it go (decision 234).
 | arithmetic on `int` | Cranelift's instructions, `+`, `-`, `*` and unary `-` with an overflow test that raises `panic.overflow` with the interpreter's operands; `//`, `%`, `**` and the shifts through `sisu_rt_int_op`; wrapping and saturating operators inline |
 | arithmetic on `f64`, `f32` | instructions, `//`, `%` and `**` through `sisu_rt_float_op`; an `f32` operation is computed in `f64` and rounded once (decision 169) |
 | comparisons of numbers, `bool`, `char` | `icmp` and `fcmp` |
-| `==`, `<`, `in`, `+` of texts on other values | `sisu_rt_binary`: structural equality, order, membership and concatenation by the type table |
+| `==`, `<`, `in`, `+` of texts on other values | `sisu_rt_binary`: structural equality, order, membership and concatenation by the type table; `==` and `!=` of texts, options and enums other than error sets inline, the runtime comparing what a word does not hold (decision 253) |
 | `not`, `~` | `x ^ 1`, `bnot` |
 | `tuple(...)`, `Point(...)` | the parts at their offsets in a new slot |
 | a variant | the tag (and for an `error` enum its type's number and an empty trace), then the fields |
@@ -3190,9 +3193,9 @@ on how deep each one's stack lets it go (decision 234).
 | `p = rvalue` | the rvalue's words stored at the place's address |
 | `call fn f[T](...)` | a direct call of the instance of `f` for the concrete type arguments |
 | `call trait Tr.m[S, ...](...)` | resolved when the instance is compiled (decision 191), then a direct call, an intrinsic, or a structural operation; with a `dyn` `S`, a call of the method's dispatcher (decision 202) |
-| `call intrinsic name(...)` | `sisu_rt_intrinsic` with the call's descriptor; the sized integers' operations through `sisu_rt_sized` and `sisu_rt_wide` (decision 193) |
+| `call intrinsic name(...)` | `sisu_rt_intrinsic` with the call's descriptor; the sized integers' operations through `sisu_rt_sized` and `sisu_rt_wide` (decision 193); the commonest inline, the runtime called where they panic, grow a buffer or keep state of their own, and a range or a borrowed list's iterator that never leaves its function in a slot of the frame (decision 253) |
 | `call _n(...)` | an indirect call of the value's code with its environment first |
-| `drop p [if flag]` | when the type needs a drop: the flag's test (clearing it), then `sisu_rt_drop`, which runs the type's drop glue or the structural drop |
+| `drop p [if flag]` | when the type needs a drop: the flag's test (clearing it), then `sisu_rt_drop`, which runs the type's drop glue or the structural drop; a text's buffer, or a list's whose elements need no drop, freed inline (decision 253) |
 | `dead _n` | nothing |
 | `goto`, `switch`, `return`, `resume` | `jump`, Cranelift's `Switch` on the scalar, the return of 0, the return of 1; an edge to a block at or before the current one passes a yield point first |
 | `unreachable` | the `unreachable` panic and the failure path |
@@ -3290,6 +3293,7 @@ The runtime's entry points (`abi::sym`) are the boundary:
 | `sisu_rt_drop(value, ty) -> u8`, `sisu_rt_copy(dst, src, ty)` | the drop and `.copy()` of a value by its type |
 | `sisu_rt_retain(value, ty)` | a copy of a value of type `ty` that holds capability handles was made: each handle's cell counts one more (decision 237) |
 | `sisu_rt_binary(op, out, a, a_ty, b, b_ty) -> u8` | equality, order, `in` and concatenation of values that are not numbers |
+| `sisu_rt_bytes_eq(a, b, n) -> u8` | whether the `n` bytes at `a` and `b` are the same: `==` of two texts of one length (decision 253) |
 | `sisu_rt_intrinsic(desc, ret, args) -> u8` | a call of an intrinsic |
 | `sisu_rt_sized(kind, op, flags, x, y, out) -> u8`, `sisu_rt_wide(kind, op, x, x_ty, y, y_ty, out) -> u8` | an operation of a sized integer type, of one word or of 128 bits |
 | `sisu_rt_table(ty, items, n, out) -> u8`, `sisu_rt_dict_slot(dict, key, key_ty, mode, out) -> u8` | a dict or set literal; a dict's value for a key |
@@ -3332,7 +3336,11 @@ intrinsic call passes a descriptor that the code generator writes once per
 shape of call (the intrinsic's number, the types of the result, of each
 argument and of each type argument) and the addresses of the arguments;
 the runtime reads through references, so an intrinsic does not care
-whether it got a value or a reference to one (decision 193). Standard
+whether it got a value or a reference to one (decision 193). The
+commonest intrinsics are compiled inline instead, on the layouts the
+table above gives, and an iterator's object begins with a header that
+the code steps a range or a borrowed list's elements in (decision 253).
+Standard
 output is buffered and written before anything goes to standard error and
 when the program ends, so the two interleave as the interpreter's do.
 
@@ -3515,9 +3523,10 @@ every case of `native.list`. `--from-sir FILE` hands such a file to the
 backend: the reader, the validator, then code generation and the link as
 for a program from source, the executable named by the file's stem. Code
 generation is deterministic, so the executable is byte for byte the one
-the program's source gives. `--from-sir` goes with `--native` only
-(`D0110`); the interpreter reads a SIR file with `sisu run --sir`
-(decision 212).
+the program's source gives. Without `--native`, `sisu run --from-sir
+FILE` runs such a file in the interpreter, as `sisu run --sir FILE` does,
+and `sisu build --from-sir` goes with `--native` (`D0110`; decisions 212
+and 254).
 
 This is the path of the self-hosted check of the bootstrap. Stage 1, the
 front end written in Sisu, is built natively and prints the SIR of a
@@ -3529,7 +3538,9 @@ SIR, the same native code. The runner's mode `sisu-conformance --native-from-sir
 conformance/native.list` builds every case of the list that way (from the
 case's own `.sir` where it has one, else from what `sisu sir` prints for
 it) and compares its runs with the interpreter's expectations, and CI runs
-it beside the native mode.
+it beside the native mode. The mode `--interpreted-from-sir` runs the same
+SIR in the interpreter (`sisu run --from-sir`), so that what a front end
+serialised is checked against both of stage 0's ways of running it.
 
 ### Coverage
 
@@ -4640,7 +4651,8 @@ what transcribing the Rust type checker found in stage 0)
      so the executable is the one the source gives, byte for byte (a test
      compares the two). `--from-sir` names its file, SIR
      whatever its extension, and goes with `--native` only (`D0110`): the
-     interpreter keeps `sisu run --sir`. The runner's mode
+     interpreter keeps `sisu run --sir` (decision 254 lets `sisu run
+     --from-sir` interpret it too). The runner's mode
      `--native-from-sir` builds each case of the list from its own `.sir`
      where it has one and from `sisu sir`'s output otherwise, and CI runs
      it beside the native mode, so the path from serialised SIR to native
@@ -5498,3 +5510,69 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      `std/process_env`, `std/json_decode`, `std/regex`, `std/text_math`,
      `traits/contains` and `std/doc_examples` pin it, natively too but the
      last.
+253. The commonest intrinsics run inline in native code (port-debt.md's
+     "Stage 2": stage 1's time was the runtime's, half of its instructions
+     in `sisu_rt_intrinsic`), each doing what the runtime's does on the
+     values' layouts and calling the runtime only where it raises a panic,
+     grows a buffer or keeps state of its own: `len` of a list or `bytes`,
+     `list.is_empty`, `first`, `last`, `pop` and, with room, `push`;
+     `str.byte_len`, `byte_at` within the text and `byte_slice` at
+     characters' edges; `char.code`, `char.from_code`, and `is_whitespace`
+     and `is_alphabetic` of an ASCII character; `is_some` and `is_none`;
+     `max` and `min` of two `int`s; `Iter.next` of a range or of a borrowed
+     list's elements, whose state the iterator's object keeps in a header
+     the code reads (`abi::ITER_KIND`: a range that would step past `int`
+     ends, its end becoming its current value); and the sized integers'
+     `&`, `|`, `^`, a signed `~`, `cmp`, widening and `to_int` but of a
+     `u64`. `==` and `!=` of two texts compare their lengths, then their
+     bytes (`sisu_rt_bytes_eq`), and of two values of an option or of a
+     declared enum other than an error set their tags, then the fields a
+     word holds, the runtime comparing any other variant's. Dropping a
+     text, a `bytes` or a list whose elements hold nothing to drop frees
+     its buffer inline. An iterator that a function makes once, by `range`
+     or over a borrowed list's elements, and only steps, through
+     references made for that, lives in a slot of the frame: it never
+     leaves the function, the runtime never sees it, and its drop frees
+     nothing. The runtime does less in what it still does: a dict's index
+     maps a key's hash to the key's entries without hashing the hash
+     again, a single entry without an allocation of its own, and a key is
+     hashed a word at a time and mixed (nothing a program sees depends on
+     the hash, since iteration is in insertion order: port-debt.md,
+     "Hashing"); a value that owns nothing is copied as its bytes; and a
+     drop skips the fields that need none. Built with a release `sisu`
+     and run natively in release, best of three in turn, stage 1 from a
+     copy of its package prints its SIR of its own package in 21.2 s
+     against 39.7 s, of `examples/wordcount` in 0.34 s against 0.70 s,
+     and its tokens and tree of the prelude in 0.063 s and 0.100 s against
+     0.103 s and 0.157 s, each output byte for byte the same. This changes
+     no front-end rule. `run/inline_operations` pins each operation at its
+     edges, natively in the three modes.
+254. `sisu run --from-sir FILE [ARGS...]` runs a file of serialised SIR in
+     the interpreter, so that what stage 1 serialises is run as well as
+     compiled: the reader and the validator of decision 212, then the run
+     `sisu run --sir FILE` gives, with the schedule's options, what follows
+     the file being the program's arguments, as what follows a source file
+     is. With `--native` it builds and runs the program, as before; `sisu
+     build --from-sir` still goes with `--native` (`D0110`), a build being
+     native code; and `--from-sir` does not combine with `--watch`
+     (`D0078`) or `--record` (`D0038`). The runner's mode
+     `--interpreted-from-sir LIST` runs every case of `native.list` so,
+     from the case's own `.sir` where it has one and from `sisu sir`'s
+     output otherwise, and compares the run with the interpreter's
+     expectations, the front end's warnings that a run from source prints
+     first left out; `cargo test -p sisu-driver --test native` and CI run
+     it beside the three native modes. This changes no front-end rule.
+255. A parameter declared without a convention whose type is a reference
+     (`t: ref mut Tally`; 04's rule 3 lets references be passed as
+     arguments) is that reference, as a `mut` parameter's local is: the
+     call passes the reference, and the body reaches the value through it.
+     It used to be a borrow of the reference, unless the reference was
+     `Copy`, so a `ref mut` parameter was a reference to a reference, and
+     writing through it stopped both implementations with an internal
+     error. In an `ensures`, `result` of a function that returns a
+     reference (and a named part of a returned tuple that is one) is that
+     reference, copied, rather than a reference to it, which a `ref mut`
+     result was, with the same failure. This changes rules of the type
+     checker (`param_local_ty`) and of lowering (`result` in a contract),
+     which stage 1 transcribes. `ownership/reference_params` and
+     `contracts/result_references` pin them, natively too.

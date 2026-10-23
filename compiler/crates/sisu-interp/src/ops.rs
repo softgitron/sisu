@@ -191,6 +191,74 @@ impl Interp<'_, '_> {
         })
     }
 
+    /// The structural hash of `v` (decision 256): its parts mixed into
+    /// `state` as `Hasher.write_int` mixes an `int`, `(state ^ n) *%
+    /// 1099511628211`: an integer of up to 64 bits, a `char`'s code, a
+    /// `bool` as 0 or 1 and a `DateTime`'s nanoseconds as one `int`; a
+    /// 128-bit integer as its low word, then its high one; a text or
+    /// `bytes` as its length in bytes, then each byte; a tuple's and a
+    /// struct's fields in order; an enum's variant index, then its fields;
+    /// a list's length, then its elements; a float as its bits; `()` and
+    /// a handle as nothing. These are the parts the derived impls and the
+    /// prelude's own impls hash, so a structural hash and a written one
+    /// agree.
+    pub(crate) fn structural_hash(&self, state: &mut i64, v: &Value) -> Result<(), Unwind> {
+        fn mix(state: &mut i64, n: i64) {
+            *state = (*state ^ n).wrapping_mul(1_099_511_628_211);
+        }
+        fn text(state: &mut i64, b: &[u8]) {
+            mix(state, b.len() as i64);
+            for x in b {
+                mix(state, i64::from(*x));
+            }
+        }
+        match self.target(v)? {
+            Value::Unit | Value::Cap(_) | Value::Clock(_) => {}
+            Value::Int(i) | Value::DateTime(i) => mix(state, *i),
+            Value::U64(i) => mix(state, *i as i64),
+            Value::I128(i) => {
+                mix(state, *i as i64);
+                mix(state, (*i >> 64) as i64);
+            }
+            Value::U128(i) => {
+                mix(state, *i as i64);
+                mix(state, (*i >> 64) as i64);
+            }
+            Value::Float(f) => mix(state, f.to_bits() as i64),
+            Value::F32(f) => mix(state, i64::from(f.to_bits())),
+            Value::Bool(b) => mix(state, i64::from(*b)),
+            Value::Char(c) => mix(state, i64::from(u32::from(*c))),
+            Value::Str(s, _) => text(state, s.as_bytes()),
+            Value::String(s) => text(state, s.as_bytes()),
+            Value::Path(s) => text(state, s.as_bytes()),
+            Value::Bytes(b) => text(state, b),
+            Value::Tuple(xs) => {
+                for x in xs {
+                    self.structural_hash(state, x)?;
+                }
+            }
+            Value::List(xs) => {
+                mix(state, xs.len() as i64);
+                for x in xs {
+                    self.structural_hash(state, x)?;
+                }
+            }
+            Value::Struct(a) => {
+                for x in &a.fields {
+                    self.structural_hash(state, x)?;
+                }
+            }
+            Value::Variant(a) => {
+                mix(state, i64::from(a.variant));
+                for x in &a.fields {
+                    self.structural_hash(state, x)?;
+                }
+            }
+            other => return Err(ice(format!("{other:?} is not hashable"))),
+        }
+        Ok(())
+    }
+
     /// `item in container`.
     pub(crate) fn contains(&self, container: &Value, item: &Value) -> Result<bool, Unwind> {
         match self.target(container)? {

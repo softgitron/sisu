@@ -4,7 +4,7 @@
 //! the ownership checker (`sisu-borrowck`) uses it at every call and checks
 //! every `return` against it.
 
-use crate::program::{DefId, DefKind, FnInfo, Program};
+use crate::program::{DefId, DefKind, FnInfo, Predicate, Program};
 use crate::ty::Ty;
 use sisu_syntax::ast::Mode;
 
@@ -84,23 +84,33 @@ impl Program {
     /// iterator or dict entry (they borrow what they walk). A generic
     /// parameter can, since it may stand for any of these.
     pub fn can_borrow(&self, ty: &Ty) -> bool {
+        self.can_borrow_in(ty, &[])
+    }
+
+    /// [`Program::can_borrow`] in an environment of bounds: a type
+    /// parameter bounded by `Escapable` holds no loan, since every type
+    /// argument it stands for must not (decision 256).
+    pub fn can_borrow_in(&self, ty: &Ty, env: &[Predicate]) -> bool {
         if let Ty::Adt(d, args) = ty
             && let Some(b) = self.refinement_base(*d, args)
         {
-            return self.can_borrow(&b);
+            return self.can_borrow_in(&b, env);
         }
         match ty {
-            Ty::Ref(..) | Ty::Str | Ty::Fn(_) | Ty::Param(_) | Ty::Var(_) | Ty::Error => true,
-            Ty::Tuple(es, _) => es.iter().any(|t| self.can_borrow(t)),
+            Ty::Param(_) => {
+                !env.iter().any(|p| p.ty == *ty && Some(p.bound.def) == self.wk.escapable && p.bound.args.is_empty())
+            }
+            Ty::Ref(..) | Ty::Str | Ty::Fn(_) | Ty::Var(_) | Ty::Error => true,
+            Ty::Tuple(es, _) => es.iter().any(|t| self.can_borrow_in(t, env)),
             Ty::Adt(d, args) => match &self.def(*d).kind {
                 DefKind::Struct(s) => match s.builtin.as_deref() {
                     Some("Iter" | "Entry" | "Iterable" | "MutexGuard" | "ReadGuard" | "Lent" | "Slice") => {
                         true
                     }
-                    Some(_) => args.iter().any(|t| self.can_borrow(t)),
-                    None => s.view || args.iter().any(|t| self.can_borrow(t)),
+                    Some(_) => args.iter().any(|t| self.can_borrow_in(t, env)),
+                    None => s.view || args.iter().any(|t| self.can_borrow_in(t, env)),
                 },
-                DefKind::Enum(_) => args.iter().any(|t| self.can_borrow(t)),
+                DefKind::Enum(_) => args.iter().any(|t| self.can_borrow_in(t, env)),
                 _ => false,
             },
             _ => false,

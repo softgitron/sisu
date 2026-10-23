@@ -142,6 +142,9 @@ jobs:
       - name: Native conformance, release profile (`--release`)
         # Cranelift's optimisations, every contract checked (decision 232).
         run: ./target/debug/sisu-conformance --sisu target/debug/sisu --native-release conformance/native.list
+      - name: The same SIR in the interpreter (`sisu run --from-sir`)
+        # What a front end serialised, run rather than compiled (decision 254).
+        run: ./target/debug/sisu-conformance --sisu target/debug/sisu --interpreted-from-sir conformance/native.list
       - name: Stage 1 compiled natively (informational, never fails)
         # The bootstrap path: stage 1 built by the backend, its token
         # stream and tree of the prelude against stage 0's.
