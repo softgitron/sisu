@@ -310,7 +310,9 @@ pub enum TExprKind:
     Unit
     Local(int)
     Const(DefId)
-    FnRef(DefId)
+    ## A function as a value, with the type arguments of a generic one
+    ## (inferred where it is used).
+    FnRef(def_: DefId, type_args: list[Ty])
     Call(callee: Callee, args: list[TArg])
     Variant(def_: DefId, variant: int, args: list[TExprId])
     Struct(def_: DefId, fields: list[FieldInit])

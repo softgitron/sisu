@@ -26,7 +26,7 @@
 ##! one of a function is `int`, when every bound is one `int` meets. The
 ##! generators are built from `Draws`'s (`std/prelude.sisu`).
 
-from stage1.diag import TextRange
+from stage1.diag import Diagnostic, Msg, TextRange
 from stage1.syntax.ast import (
     Arg,
     Ast,
@@ -87,6 +87,10 @@ pure def leaf_generator(n: str) -> bool:
         case "i8" | "i16" | "i32" | "Duration": True
         case _: False
 
+## Why the type `t` has no generator, for messages.
+pure def no_generator(ast: Ast, t: TypeExprId) -> String:
+    return "`{type_text(ast, t)}` has no generator"
+
 struct Writer:
     shapes: dict[String, Shape]
     ## Which shapes have a generator (decided once for all).
@@ -102,44 +106,51 @@ impl Writer:
         return False
 
     ## Whether every part of a type has a generator; `params` are the type
-    ## parameters in scope (each given by a generator parameter). Stage 0
-    ## gives the part that has none, for messages stage 1 does not write.
+    ## parameters in scope (each given by a generator parameter).
     pure def type_ok(self, ast: Ast, t: TypeExprId, params: list[String]) -> bool:
+        return self.type_why(ast, t, params).is_none()
+
+    ## Why a part of a type has no generator, the first such part's, or
+    ## `None` when every part has one (stage 0's `type_ok`).
+    pure def type_why(self, ast: Ast, t: TypeExprId, params: list[String]) -> String?:
         match ast.type_expr(t).kind:
             case TypeKind.Path(segments, args):
                 if len(segments) != 1:
-                    return False
+                    return Some(no_generator(ast, t))
                 let n = segments[0].text.copy()
                 if params.contains(n) and args.is_empty():
-                    return True
-                var all = True
-                for a in args:
-                    if not self.type_ok(ast, a, params):
-                        all = False
+                    return None
                 if args.is_empty() and leaf_generator(n):
-                    return True
+                    return None
                 if len(args) == 1
                         and (
                             n == "list" or n == "set" or n == "Option" or n == "Box" or n == "Slice"
                         ):
-                    return all
+                    return self.args_why(ast, args, params)
                 if len(args) == 2 and n == "dict":
-                    return all
+                    return self.args_why(ast, args, params)
                 if let Some(s) = self.shapes.get(n.copy()):
                     if len(s.generics()) == len(args) and self.has(n):
-                        return all
-                return False
+                        return self.args_why(ast, args, params)
+                return Some(no_generator(ast, t))
             case TypeKind.Option(inner):
-                return self.type_ok(ast, inner, params)
+                return self.type_why(ast, inner, params)
             case TypeKind.Tuple(es):
                 if es.is_empty():
-                    return False
+                    return Some(no_generator(ast, t))
                 for (_, e) in es:
-                    if not self.type_ok(ast, e, params):
-                        return False
-                return True
+                    if let Some(why) = self.type_why(ast, e, params):
+                        return Some(why)
+                return None
             case _:
-                return False
+                return Some(no_generator(ast, t))
+
+    ## Why the first of `args` without a generator has none.
+    pure def args_why(self, ast: Ast, args: list[TypeExprId], params: list[String]) -> String?:
+        for a in args:
+            if let Some(why) = self.type_why(ast, a, params):
+                return Some(why)
+        return None
 
     ## An expression of type `t` drawn from the `Draws` named `d`.
     pure def call(self, ast: Ast, t: TypeExprId, d: str, depth: int) -> String:
@@ -681,13 +692,22 @@ impl Resolver:
                 keys.push(key.copy())
                 let i = len(keys) - 1
                 var site: String? = None
-                if let Some(te) = self.expr_as_type(module, t):
-                    if w.type_ok(self.ast(module), te, []):
-                        let name = "__arbitrary_site_{i}"
-                        let ty = type_text(self.ast(module), te)
-                        let drawn_value = w.call(self.ast(module), te, "d", 0)
-                        w.out.push("\ndef {name}(d: Draws) -> {ty}:\n    return {drawn_value}\n")
-                        site = Some(name)
+                match self.expr_as_type(module, t):
+                    case Some(te):
+                        match w.type_why(self.ast(module), te, []):
+                            case None:
+                                let name = "__arbitrary_site_{i}"
+                                let ty = type_text(self.ast(module), te)
+                                let drawn_value = w.call(self.ast(module), te, "d", 0)
+                                w.out.push(
+                                    "\ndef {name}(d: Draws) -> {ty}:\n    return {drawn_value}\n"
+                                )
+                                site = Some(name)
+                            case Some(why):
+                                _ = self.prog.generator_failures.insert(key.copy(), why)
+                    case None:
+                        let why = "`{key}` is not a type"
+                        _ = self.prog.generator_failures.insert(key.copy(), why)
                 _ = self.prog.generator_sites.insert(key.copy(), site)
             # The call that stands for this site.
             var site = String.new()
@@ -791,43 +811,62 @@ impl Resolver:
                             tolerance = True
                             ulps = self.ulps_of(module, x.value)
                 # `test.refines-mismatch`, each reason a report of its own.
+                let at = f.name.range
+                var shown_ref = "?".to_string()
+                if let Some(r) = reference:
+                    shown_ref = r.copy()
                 let rname = reference else:
-                    self.note_error(module, "test.refines-mismatch")
+                    let why = "the reference is a function of this module, named first"
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
                     continue
                 let found = fns.get(rname.copy()) else:
-                    self.note_error(module, "test.refines-mismatch")
+                    let why = "there is no function `{rname}` in this module"
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
                     continue
                 let g = found.copy()
                 if tolerance and ulps.is_none():
-                    self.note_error(module, "test.refines-mismatch")
+                    let why = "the tolerance is written `tolerance=Ulps(n)`, with a whole number"
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
                     continue
-                let mine = self.signature_of(module, f) else:
-                    self.note_error(module, "test.refines-mismatch")
+                let mine = self.signature_of(module, f)
+                let theirs = self.signature_of(module, g)
+                if mine.is_none() or theirs.is_none():
+                    let why = "both must be free functions with named parameters"
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
                     continue
-                let theirs = self.signature_of(module, g) else:
-                    self.note_error(module, "test.refines-mismatch")
-                    continue
-                let (ps, ret) = mine
-                let (qs, gret) = theirs
+                let (ps, ret) = mine ?? ([], String.new())
+                let (qs, gret) = theirs ?? ([], String.new())
                 if not f.generics.is_empty() or not g.generics.is_empty() or ps.is_empty():
-                    self.note_error(module, "test.refines-mismatch")
+                    let why = "both must take parameters, and no type parameters"
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
                     continue
                 if ps != qs or ret != gret:
-                    self.note_error(module, "test.refines-mismatch")
+                    var mine_texts: list[String] = []
+                    for (t, _) in ps:
+                        mine_texts.push(t.copy())
+                    var their_texts: list[String] = []
+                    for (t, _) in qs:
+                        their_texts.push(t.copy())
+                    let takes = mine_texts.join(", ")
+                    let they_take = their_texts.join(", ")
+                    var why = "`{f.name.text}` takes ({takes}) and gives `{ret}`, "
+                    why.push("`{rname}` takes ({they_take}) and gives `{gret}`")
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
                     continue
                 if tolerance and ret != "f64":
-                    self.note_error(module, "test.refines-mismatch")
+                    let why = "a tolerance in ULPs compares `f64` results, not `{ret}`"
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
                     continue
                 var tys: list[TypeExprId] = []
                 for p in f.params:
                     if let ParamKind.Named(_, ty, _) = p.kind:
                         tys.push(self.drawn(module, ty))
-                var all_ok = True
+                var no_gen: String? = None
                 for t in tys:
-                    if not w.type_ok(self.ast(module), t, []):
-                        all_ok = False
-                if not all_ok:
-                    self.note_error(module, "test.refines-mismatch")
+                    if no_gen.is_none():
+                        no_gen = w.type_why(self.ast(module), t, [])
+                if let Some(why) = no_gen:
+                    self.refines_mismatch(module, at, shown_ref, f.name.text, why)
                     continue
                 let n = k
                 k += 1
@@ -888,6 +927,14 @@ impl Resolver:
     ## A free function's parameters (each type as written, with its mode)
     ## and result, as `@refines` compares them; `None` for one with a
     ## parameter that is not named.
+    ## `test.refines-mismatch` on the function named at `at`.
+    pure def refines_mismatch(
+        mut self, module: ModuleId, at: TextRange, reference: str, name: str, why: str
+    ):
+        var d = Diagnostic.new(Msg.TestRefinesMismatch, at.start, at.end)
+        d = d.with("reference", reference).with("name", name).with("why", why)
+        self.report_other(module, d)
+
     pure def signature_of(self, module: ModuleId, h: FnDef) -> (list[(String, Mode)], String)?:
         var ps: list[(String, Mode)] = []
         for p in h.params:

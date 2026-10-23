@@ -86,8 +86,7 @@ impl Checker:
             case ExprKind.Field(base, name):
                 if let Some(StaticPath.Module(m)) = self.static_path(cx, base):
                     let d = self.module_member(cx, m, name) else:
-                        # `resolve.not-in-module`.
-                        self.other("resolve.not-in-module")
+                        self.not_in_module(cx, m, name)
                         return Some(StaticPath.Type(Ty.error()))
                     return self.classify(cx, d, at)
                 return None
@@ -99,11 +98,14 @@ impl Checker:
                     if let TyData.Adt(d, _) = self.types.data(t).copy():
                         if self.is_fake_marker(cx, d):
                             var as_expr: String? = None
+                            var written = at
                             if len(args) == 1:
                                 if let IndexArg.Expr(x) = args[0]:
+                                    written = cx.ast.expr(x).range
                                     if let ExprKind.Name(n) = cx.ast.expr(x).kind:
                                         as_expr = Some(n.copy())
-                            return Some(StaticPath.Type(self.fake_named(cx, as_expr)))
+                            let fake = self.fake_named(cx, as_expr, written)
+                            return Some(StaticPath.Type(fake))
                 var tys: list[Ty] = []
                 for a in args:
                     match a:
@@ -155,25 +157,29 @@ impl Checker:
                         case Some(d):
                             path = self.classify(cx, d, names[i].range)
                         case None:
-                            self.other("resolve.not-in-module")
+                            self.not_in_module(cx, m, names[i])
                             path = Some(StaticPath.Type(Ty.error()))
                 case _:
                     return None
         return path
 
     ## `m.name` as this module sees it (09): the item, reported when it is
-    ## not visible here.
+    ## not visible here, so that nothing cascades from it.
     pub pure def module_member(mut self, cx: Cx, m: ModuleId, name: Name) -> DefId?:
         let member = cx.prog.member(m, name.text, self.module) else:
             return None
         let (d, visible) = member
         if not visible:
-            # `resolve.private-item` and its kin.
-            self.other("resolve.private-item")
+            self.report_other(cx.prog.private_item(d, m, name.range))
         return Some(d)
 
+    ## `resolve.not-in-module`: `m` has no `name`.
+    pure def not_in_module(mut self, cx: Cx, m: ModuleId, name: Name):
+        var d = self.error(cx, Msg.ResolveNotInModule, name.range)
+        self.report_other(d.with("module", cx.prog.module_path(m)).with("name", name.text))
+
     pure def classify(mut self, cx: Cx, d: DefId, range: TextRange) -> StaticPath?:
-        match cx.prog.defs[d.index].kind:
+        match cx.prog.defs[d.index].kind():
             case DefKind.Module(m):
                 return Some(StaticPath.Module(m))
             case DefKind.Struct(_) | DefKind.Enum(_) | DefKind.ErrorSet(_):
@@ -195,8 +201,7 @@ impl Checker:
         match cx.ast.expr(e).kind:
             case ExprKind.Int(_, value, None):
                 let v = value else:
-                    # `parse.expected-type`.
-                    self.other("parse.expected-type")
+                    self.expected_type(cx, e)
                     return Ty.error()
                 if let Some(n) = v.to_int():
                     return self.types.intern(TyData.Const(n))
@@ -211,7 +216,7 @@ impl Checker:
                 # A constant of the program.
                 if self.lookup_local(n).is_none():
                     if let Some(d) = cx.prog.lookup(self.module, n):
-                        if let DefKind.Const(_) = cx.prog.defs[d.index].kind:
+                        if let DefKind.Const(_) = cx.prog.defs[d.index].kind():
                             return self.const_arg(cx, e)
                 if let Some(t) = primitive_value_type(n):
                     return t
@@ -223,8 +228,9 @@ impl Checker:
             case ExprKind.Field(_, _) | ExprKind.Index(_, _):
                 if let Some(StaticPath.Type(t)) = self.static_path(cx, e):
                     return t
-                # `resolve.not-a-type`.
-                self.other("resolve.not-a-type")
+                let at = cx.ast.expr(e).range
+                let shown = self.source_text(cx, at)
+                self.report_other(self.error(cx, Msg.ResolveNotAType, at).with("name", shown))
                 return Ty.error()
             case ExprKind.Tuple(xs):
                 var tys: list[Ty] = []
@@ -237,9 +243,14 @@ impl Checker:
             case ExprKind.Binary(_, _, _) | ExprKind.Unary(_, _) | ExprKind.Paren(_):
                 return self.const_arg(cx, e)
             case _:
-                # `parse.expected-type`.
-                self.other("parse.expected-type")
+                self.expected_type(cx, e)
                 return Ty.error()
+
+    ## `parse.expected-type`: an index argument that is not a type.
+    pure def expected_type(mut self, cx: Cx, e: ExprId):
+        let at = cx.ast.expr(e).range
+        let found = "`{self.source_text(cx, at)}`"
+        self.report_other(self.error(cx, Msg.ParseExpectedType, at).with("found", found))
 
     ## `module.name`, `Type.Variant`, `Type.function`, used as a value or,
     ## with `args`, called.
@@ -256,8 +267,7 @@ impl Checker:
         match path:
             case StaticPath.Module(m):
                 let d = self.module_member(cx, m, name) else:
-                    # `resolve.not-in-module`.
-                    self.other("resolve.not-in-module")
+                    self.not_in_module(cx, m, name)
                     if let Some(a) = args:
                         self.check_args_loosely(cx, a)
                     return self.error_expr(at)
@@ -320,12 +330,12 @@ impl Checker:
                                 self.report(diag.with("name", name.text))
                                 self.check_args_loosely(cx, a)
                                 return self.error_expr(at)
-                            self.check_method_vis(cx, d)
+                            self.check_method_vis(cx, d, name.range)
                             return self.call_fn(
                                 cx, d, None, Some(ty), None, a, trailing, at, expected
                             )
                         case None:
-                            self.check_method_vis(cx, d)
+                            self.check_method_vis(cx, d, name.range)
                             return self.def_value(cx, d, name.text, at)
                 if let Some(a) = args:
                     if let Some((tr, m)) = self.trait_static(cx, ty, name.text):
@@ -534,7 +544,7 @@ impl Checker:
         at: TextRange,
         expected: Ty?,
     ) -> TExprId:
-        match cx.prog.defs[d.index].kind:
+        match cx.prog.defs[d.index].kind():
             case DefKind.Fn(f):
                 if f.self_mode.is_some():
                     let name = cx.prog.defs[d.index].name.copy()
@@ -651,8 +661,11 @@ impl Checker:
         let home = cx.prog.defs[def_.index].module
         for i in range(n):
             if not cx.prog.vis_allows(s.fields[i].vis, home, self.module):
-                # `resolve.private-field`.
-                self.other("resolve.private-field")
+                var written = at
+                if let Some(k) = slots[i]:
+                    if let Some(key) = args[k].name:
+                        written = key.range
+                self.check_field_vis(cx, def_, i, written)
                 break
         var fields: list[FieldInit] = []
         for i in range(n):
@@ -767,8 +780,10 @@ impl Checker:
                     let diag = self.error(cx, Msg.TypeNotGeneric, at).with("name", name)
                     self.report(diag)
                 else:
-                    # `resolve.type-argument-count`.
-                    self.other("resolve.type-argument-count")
+                    let name = cx.prog.defs[d.index].name.copy()
+                    var diag = self.error(cx, Msg.ResolveTypeArgumentCount, at).with("name", name)
+                    diag = diag.with("expected", "{own_count}").with("found", "{len(ex)}")
+                    self.report_other(diag)
         var vars: list[Ty] = []
         for i in range(len(f.generics)):
             var v: Ty? = None
@@ -858,8 +873,8 @@ impl Checker:
         let f = cx.prog.fn_info(d) else:
             return self.error_expr(at)
         if f.comptime_ and not self.in_comptime:
-            # `comptime.only`.
-            self.other("comptime.only")
+            let name = cx.prog.defs[d.index].name.copy()
+            self.report_other(self.error(cx, Msg.ComptimeOnly, at).with("name", name))
         self.check_internal(cx, d, at)
         # A pure body's calls are checked on SIR, by stage 0's ownership
         # checker (E0333).
@@ -929,8 +944,10 @@ impl Checker:
             let text = self.source_text(cx, at)
             let function = call_name(text)
             ret = self.task_rules(cx, tc, out, ret, spawns_before, at, function)
-        # What a `Shared`, `Cell` or `Mutex` owns can be neither a view nor
-        # must-consume (checked when the type is known).
+        # What a `Shared`, `Cell`, `Mutex` or channel owns can be neither a
+        # view nor must-consume (checked when the type is known): a
+        # channel's receiver may keep what was sent longer than what it
+        # borrows lives (decision 230).
         var owner_name: String? = None
         if intrinsic == "Shared.new":
             owner_name = Some("Shared".to_string())
@@ -940,6 +957,8 @@ impl Checker:
             owner_name = Some("Mutex".to_string())
         elif intrinsic == "Cap.new":
             owner_name = Some("Cap".to_string())
+        elif intrinsic == "channel":
+            owner_name = Some("channel".to_string())
         if let Some(o) = owner_name:
             if let Some(t) = sig.type_args.first():
                 self.owner_checks.push((t, o.copy(), at))
@@ -1417,7 +1436,7 @@ impl Checker:
         if info.header_broken:
             self.check_args_loosely(cx, args)
             return self.error_expr(at)
-        self.check_method_vis(cx, d)
+        self.check_method_vis(cx, d, name.range)
         let mode = info.self_mode else:
             let shown = self.show(cx, base)
             var diag = self.error(cx, Msg.TypeAssocNotMethod, name.range)
@@ -1650,7 +1669,7 @@ pub pure def mentions_it(ast: Ast, e: ExprId) -> bool:
 pure def unknown_method_note(cx: Cx, own d: Diagnostic, name: str) -> Diagnostic:
     var traits = String.new()
     for i in range(len(cx.prog.defs)):
-        if let DefKind.Trait(_) = cx.prog.defs[i].kind:
+        if let DefKind.Trait(_) = cx.prog.defs[i].kind():
             if cx.prog.trait_method(DefId(index=i), name).is_some():
                 if not traits.is_empty():
                     traits.push(", ")

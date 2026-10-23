@@ -506,6 +506,157 @@ pub struct Function:
     ## Index into `Program.sources` for statement locations.
     pub source: int
 
+## The end of the name of a function's value wrapper (`first#value`).
+pub const VALUE_WRAPPER: str = "#value"
+
+## The value wrapper of `f`, generic as `f` is: what `f` is as a value
+## when its constant would not do (a generic function, whose constant
+## cannot name type arguments; one that borrows a parameter, which a
+## function value takes). It is a closure that takes an empty environment
+## and `takes` (the parameters as `f`'s function type has them), and calls
+## `f`'s instance for its own type arguments: a parameter `f` borrows is
+## lent, and dropped once the call returns or panics; any other is moved
+## in.
+pub pure def value_wrapper(f: Function, takes: list[Type]) -> Function:
+    let n = f.param_count
+    var locals = [
+        LocalDecl.new(f.locals[0].ty.copy(), None),
+        LocalDecl.new(Type.Unit, Some("env".to_string())),
+    ]
+    # How each parameter goes to `f`: lent (with the mutability of `f`'s
+    # reference) or moved.
+    var lent: list[bool?] = []
+    for i in range(min(n, len(f.locals) - 1)):
+        var decl = f.locals[i + 1].copy()
+        var how: bool? = None
+        if let Type.Ref(inner, m) = f.locals[i + 1].ty:
+            if i < len(takes):
+                var by_ref = False
+                if let Type.Ref(_, _) = takes[i]:
+                    by_ref = True
+                if not by_ref and inner[0] == takes[i]:
+                    decl.ty = takes[i].copy()
+                    how = Some(m)
+        lent.push(how)
+        locals.push(decl)
+    var stmts: list[Statement] = []
+    var args: list[Operand] = []
+    for i in range(len(lent)):
+        let param = Place.local(LocalId(index=i + 2))
+        match lent[i]:
+            case Some(m):
+                let r = LocalId(index=len(locals))
+                let lent_ty = locals[i + 2].ty.copy()
+                locals.push(LocalDecl.new(Type.Ref(inner=[lent_ty], mutable=m), None))
+                stmts.push(
+                    Statement(
+                        kind=StatementKind.Assign(
+                            place=Place.local(r), value=Rvalue.Ref(place=param, mutable=m)
+                        ),
+                        loc=f.loc,
+                    )
+                )
+                args.push(Operand.Copy(Place.local(r)))
+            case None:
+                args.push(Operand.Move(param))
+    var tys: list[Type] = []
+    for i in range(len(f.type_params)):
+        tys.push(Type.Param(i))
+    stmts.push(
+        Statement(
+            kind=StatementKind.Call(
+                dest=Place.local(LocalId(index=0)),
+                callee=Callee.Fn(name=f.name.copy(), args=tys),
+                args=args,
+            ),
+            loc=f.loc,
+        )
+    )
+    # The lent parameters are dropped after the call, last first, each in
+    # a block of its own, and by a cleanup block when the call panics.
+    var dropped: list[Place] = []
+    var k = len(lent) - 1
+    while k >= 0:
+        if lent[k].is_some():
+            dropped.push(Place.local(LocalId(index=k + 2)))
+        k -= 1
+    var blocks: list[BasicBlock] = []
+    if dropped.is_empty():
+        blocks.push(
+            BasicBlock(stmts=stmts, term=Terminator.Return, unwind=None, cleanup=False, loc=None)
+        )
+    else:
+        let cleanup = BlockId(index=len(dropped) + 2)
+        blocks.push(
+            BasicBlock(
+                stmts=stmts,
+                term=Terminator.Goto(BlockId(index=1)),
+                unwind=Some(cleanup),
+                cleanup=False,
+                loc=None,
+            )
+        )
+        for j in range(len(dropped)):
+            blocks.push(
+                BasicBlock(
+                    stmts=[drop_of(dropped[j], f.loc)],
+                    term=Terminator.Goto(BlockId(index=j + 2)),
+                    unwind=None,
+                    cleanup=False,
+                    loc=None,
+                )
+            )
+        blocks.push(
+            BasicBlock(stmts=[], term=Terminator.Return, unwind=None, cleanup=False, loc=None)
+        )
+        var drops: list[Statement] = []
+        for p in dropped:
+            drops.push(drop_of(p, f.loc))
+        blocks.push(
+            BasicBlock(stmts=drops, term=Terminator.Resume, unwind=None, cleanup=True, loc=None)
+        )
+    # What the result may borrow from, a place further on (the
+    # environment is argument 0): a lent parameter whose values' loans it
+    # may hold is a parameter of the wrapper that holds them.
+    var from_: list[int] = []
+    for i in f.from_:
+        if not is_lent(lent, i):
+            from_.push(i + 1)
+    for i in f.inner:
+        if is_lent(lent, i):
+            from_.push(i + 1)
+    from_.sort()
+    var unique: list[int] = []
+    for i in from_:
+        if unique.is_empty() or unique[len(unique) - 1] != i:
+            unique.push(i)
+    var inner: list[int] = []
+    for i in f.inner:
+        if not is_lent(lent, i):
+            inner.push(i + 1)
+    return Function(
+        name="{f.name}{VALUE_WRAPPER}",
+        type_params=f.type_params.copy(),
+        kind=FnKind.Closure(ClosureRole.Plain),
+        param_count=f.param_count + 1,
+        pure=f.pure,
+        from_=unique,
+        inner=inner,
+        owns=[],
+        locals=locals,
+        blocks=blocks,
+        loc=f.loc,
+        source=f.source,
+    )
+
+## Whether parameter `i` is one `value_wrapper` lends.
+pure def is_lent(lent: list[bool?], i: int) -> bool:
+    return i < len(lent) and lent[i].is_some()
+
+## The drop of a lent parameter.
+pure def drop_of(p: Place, loc: Loc?) -> Statement:
+    return Statement(kind=StatementKind.Drop(place=p.copy(), flag=None), loc=loc)
+
 @derive(Eq)
 pub struct BasicBlock:
     pub stmts: list[Statement]

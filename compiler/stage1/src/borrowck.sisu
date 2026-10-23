@@ -225,7 +225,11 @@ pure def function_text(program: str, name: str) -> String:
     let typed = checked.typed else:
         return "not lowered"
     var kept = typeck.StdBodies.new()
-    let lowered = lower.lower(typed, base, "main.sisu", catalog, mut kept)
+    var kept_lowered = lower.StdLowered.new()
+    var kept_slots = lower.StdSlots.new()
+    let lowered = lower.lower(
+        typed, base, "main.sisu", catalog, mut kept, mut kept_lowered, mut kept_slots
+    )
     if not lowered.beyond.is_empty():
         return lowered.beyond.join("\n")
     var p = check(lowered.program).program
@@ -260,7 +264,11 @@ pure def ownership_of(program: str) -> String:
     let typed = checked.typed else:
         return "not lowered"
     var kept = typeck.StdBodies.new()
-    let lowered = lower.lower(typed, base, "main.sisu", catalog, mut kept)
+    var kept_lowered = lower.StdLowered.new()
+    var kept_slots = lower.StdSlots.new()
+    let lowered = lower.lower(
+        typed, base, "main.sisu", catalog, mut kept, mut kept_lowered, mut kept_slots
+    )
     if not lowered.beyond.is_empty():
         return lowered.beyond.join("\n")
     let done = check(lowered.program)
@@ -349,8 +357,11 @@ test "a value moved on every path is not dropped, and a part that stays is":
     assert function_text(moves_program(), "h") == moved
     let part = function_text(moves_program(), "part")
     assert part.contains("    _6 = call fn take(move _1.0) @19:5-19:14\n")
-    assert part.contains("  bb2 (cleanup):\n    drop _1.1\n    resume\n")
-    assert part.contains("  bb3:\n    drop _1.1 @19:14-19:14\n    return\n")
+    assert part.contains("  bb5 (cleanup):\n    drop _1.1\n    resume\n")
+    assert part.contains("  bb6:\n    drop _1.1 @19:14-19:14\n    return\n")
+    # The first field's value is dropped if making the second panics
+    # (decision 222).
+    assert part.contains("  bb2 (cleanup):\n    drop _2\n    resume\n")
 
 test "drop glue runs a type's drop, then its fields' in reverse order":
     var program: String = "struct Noisy:\n    n: int\n\n"

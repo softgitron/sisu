@@ -28,7 +28,7 @@
 ##! attributes of a std type, which the base does not keep the text of, are
 ##! none to `reflect.attributes_of`.
 
-from stage1.diag import TextRange
+from stage1.diag import Diagnostic, Msg, TextRange
 from stage1.parser import parse
 from stage1.syntax.ast import Attr, ExprKind, FnDef, GenericParam, ItemId, ItemKind, TypeExprId, Vis
 from stage1.syntax.ast import build
@@ -42,6 +42,7 @@ from stage1.typeck.template import (
     Target,
     Templates,
     TypeShape,
+    Unfolding,
     VariantShape,
     unfold,
     unfold_fn,
@@ -53,11 +54,13 @@ from stage1.typeck.ty import DefId, TraitRef, Ty, TyData
 ## `to_json[list[T]]`).
 pub const MAX_INSTANCES: int = 256
 
-## A derived impl to check once every impl is known: the type, the trait
-## and, for a delegated impl, the field it forwards to.
+## A derived impl to check once every impl is known: the type, the trait,
+## where it was asked for and, for a delegated impl, the field it forwards
+## to.
 pub struct DeriveCheck:
     pub ty: DefId
     pub trait_name: String
+    pub span: TextRange
     pub field: String?
 
 ## Where the template of a derive is written.
@@ -166,7 +169,7 @@ impl Resolver:
                         written = n.copy()
                     if written == "Copy":
                         # A flag on the type, checked against its fields.
-                        self.copy_checks.push(ty)
+                        self.copy_checks.push((ty, arg.range))
                     elif not written.is_empty()
                             and (
                                 derivable(written)
@@ -181,16 +184,18 @@ impl Resolver:
                         if not seen:
                             wanted.push((written, arg.range))
                     else:
-                        # `resolve.not-derivable`.
-                        self.other_error = True
-                        self.noted.push("resolve.not-derivable".to_string())
+                        let shown = self.text_in(module, arg.range)
+                        var d = Diagnostic.new(
+                            Msg.ResolveNotDerivable, arg.range.start, arg.range.end
+                        )
+                        self.report_other(module, d.with("name", shown))
             # `@delegate(Trait, ..., to="field")`: impls that forward to a
             # field.
-            let delegated = self.delegations(module, item.attrs, is_struct, field_names)
-            for (t, field, _) in delegated:
+            let delegated = self.delegations(module, item.attrs, name, is_struct, field_names)
+            for (t, field, at) in delegated:
                 delegate.push(delegate_text(name, generics, used, t, field))
                 self.derive_checks.push(
-                    DeriveCheck(ty=ty, trait_name=t.copy(), field=Some(field.copy()))
+                    DeriveCheck(ty=ty, trait_name=t.copy(), span=at, field=Some(field.copy()))
                 )
             # `Ord` brings `PartialOrd`, which it determines.
             var ord_at: TextRange? = None
@@ -214,15 +219,19 @@ impl Resolver:
                     debug = True
             if not builtin and not debug and not self.has_impl(module, items, "Debug", name):
                 wanted.push(("Debug".to_string(), TextRange.empty(item.range.start)))
-            for (t, _) in wanted:
+            for (t, asked) in wanted:
                 if made.is_some():
-                    self.derive_checks.push(DeriveCheck(ty=ty, trait_name=t.copy(), field=None))
+                    self.derive_checks.push(
+                        DeriveCheck(ty=ty, trait_name=t.copy(), span=asked, field=None)
+                    )
                     continue
                 let source = self.derive_template(module, t, templates) else:
                     continue
                 let (head, written) = header(name, generics, used, t)
                 let target = Target(name=name.copy(), written=written, body=body.copy())
                 var unfolded: String? = None
+                # Where the template stopped, in its module, and why.
+                var failed: (ModuleId, TextRange, String)? = None
                 match source:
                     case DeriveSource.Own:
                         if let Some(f) = self.derive_templates.get((module.index, t.copy())):
@@ -230,22 +239,37 @@ impl Resolver:
                             let src = Src(
                                 ast=ref self.sources[module.index].ast, source=module_text
                             )
-                            if let Ok(x) = unfold(src, f, head, target):
-                                unfolded = Some(x)
+                            match unfold(src, f, head, target):
+                                case Ok(x):
+                                    unfolded = Some(x)
+                                case Err(Unfolding.Failed(at, why)):
+                                    failed = Some((module, at, why.copy()))
                     case DeriveSource.Prelude:
                         if let Some(f) = templates.derives.get(t.copy()):
                             let src = Src(ast=ref templates.syntax, source=templates.text)
-                            if let Ok(x) = unfold(src, f, head, target):
-                                unfolded = Some(x)
+                            match unfold(src, f, head, target):
+                                case Ok(x):
+                                    unfolded = Some(x)
+                                case Err(Unfolding.Failed(at, why)):
+                                    failed = Some((self.prog.prelude, at, why.copy()))
                 match unfolded:
                     case Some(x):
                         text.push(x)
                     case None:
-                        # `comptime.derive-failed`.
-                        self.other_error = True
-                        self.noted.push("comptime.derive-failed".to_string())
+                        if let Some((tm, at, why)) = failed:
+                            var d = Diagnostic.new(Msg.ComptimeDeriveFailed, asked.start, asked.end)
+                            d = d.with("trait", t).with("ty", name).with("reason", why)
+                            if tm == module:
+                                d = d.label(Msg.ComptimeDeriveHere, at.start, at.end)
+                                self.report_other(module, d)
+                            else:
+                                # The template stopped in another file than
+                                # the type's.
+                                self.note_error(module, "comptime.derive-failed")
                         continue
-                self.derive_checks.push(DeriveCheck(ty=ty, trait_name=t.copy(), field=None))
+                self.derive_checks.push(
+                    DeriveCheck(ty=ty, trait_name=t.copy(), span=asked, field=None)
+                )
         # Delegated impls are ordinary impls, written by the compiler.
         if not delegate.is_empty():
             _ = self.declare_generated_in(module, "<delegate>", delegate)
@@ -318,7 +342,7 @@ impl Resolver:
             let info = found_info.copy()
             let env = self.prog.elaborate_env(mut self.types, info.predicates)
             var fields: list[(String, Ty)] = []
-            match self.prog.defs[c.ty.index].kind:
+            match self.prog.defs[c.ty.index].kind():
                 case DefKind.Struct(s):
                     for f in s.fields:
                         fields.push((f.name.copy(), f.ty))
@@ -342,23 +366,37 @@ impl Resolver:
             var supers: list[TraitRef] = []
             if let Some(ti) = self.prog.trait_info(td):
                 supers = ti.supertraits.copy()
+            var names: list[String] = []
+            for g in info.generics:
+                names.push(g.name.copy())
             for st in supers:
                 if self.prog.implements(mut self.types, info.self_ty, st, env) == Answer.No:
-                    # `resolve.supertrait-missing`.
-                    self.other_error = True
-                    self.noted.push("resolve.supertrait-missing".to_string())
-            for (_, fty) in fields:
+                    var d = Diagnostic.new(Msg.ResolveSupertraitMissing, c.span.start, c.span.end)
+                    d = d.with("ty", self.prog.display_in(self.types, info.self_ty, names))
+                    d = d.with("trait", c.trait_name).with(
+                        "super", self.prog.display_trait_in(self.types, st, [])
+                    )
+                    self.report_other(home, d)
+            for (fname, fty) in fields:
                 if self.types.contains_error(fty) or not structural:
                     continue
                 if self.prog.implements(mut self.types, fty, tr, env) == Answer.No:
-                    # `resolve.derive-field` or `resolve.delegate-field`.
-                    self.other_error = True
-                    self.noted.push("resolve.derive-field or resolve.delegate-field".to_string())
+                    var m = Msg.ResolveDeriveField
+                    if c.field.is_some():
+                        m = Msg.ResolveDelegateField
+                    var d = Diagnostic.new(m, c.span.start, c.span.end)
+                    d = d.with("ty", self.prog.defs[c.ty.index].name).with("trait", c.trait_name)
+                    d = d.with("field", fname).with(
+                        "fty", self.prog.display_in(self.types, fty, names)
+                    )
+                    self.report_other(home, d)
                     # The generated body would only repeat the error.
                     for (_, m) in info.methods:
-                        if let DefKind.Fn(f) = ref mut self.prog.defs[m.index].kind:
+                        var kind_now = self.prog.defs[m.index].kind().copy()
+                        if let DefKind.Fn(f) = ref mut kind_now:
                             f.body = None
                             f.body_broken = True
+                        self.prog.defs[m.index].set_kind(kind_now)
                     break
 
     # ---------------------------------------------------------------- instances
@@ -369,7 +407,7 @@ impl Resolver:
     pub pure def declare_instances(mut self, requests: list[Request]):
         var made = 0
         for q in requests:
-            let Request.Instance(def_, args) = q.copy() else:
+            let Request.Instance(def_, args, site) = q.copy() else:
                 continue
             if self.instance_of(def_, args).is_some():
                 continue
@@ -386,13 +424,16 @@ impl Resolver:
                 if self.instances_bounded:
                     break
                 self.instances_bounded = True
-                # `comptime.instances-unbounded`.
-                self.other_error = True
-                self.noted.push("comptime.instances-unbounded".to_string())
+                let at = self.prog.defs[def_.index].span
+                var d = Diagnostic.new(Msg.ComptimeInstancesUnbounded, at.start, at.end)
+                d = d.with("name", self.prog.defs[def_.index].name)
+                self.report_other(
+                    self.prog.defs[def_.index].module, d.with("count", "{MAX_INSTANCES}")
+                )
                 break
             self.instances_asked += 1
             made += 1
-            self.declare_instance(def_, args)
+            self.declare_instance(def_, args, site)
         if made > 0:
             self.resolve_pending()
 
@@ -403,7 +444,7 @@ impl Resolver:
                 return Some(inst)
         return None
 
-    pure def declare_instance(mut self, def_: DefId, args: list[Ty]):
+    pure def declare_instance(mut self, def_: DefId, args: list[Ty], site: (ModuleId, TextRange)):
         let module = self.prog.defs[def_.index].module
         let name = self.prog.defs[def_.index].name.copy()
         var shown: list[String] = []
@@ -433,14 +474,29 @@ impl Resolver:
             if let Some(t) = self.std_texts.get(self.prog.modules[module.index].name):
                 source = t.copy()
         var unfolded: String? = None
+        var failed: (TextRange, String)? = None
         if module.index < len(self.sources):
             let src = Src(ast=ref self.sources[module.index].ast, source=source)
-            if let Ok(x) = unfold_fn(src, f, params, inst):
-                unfolded = Some(x)
+            match unfold_fn(src, f, params, inst):
+                case Ok(x):
+                    unfolded = Some(x)
+                case Err(Unfolding.Failed(at, why)):
+                    failed = Some((at, why.copy()))
         let text = unfolded else:
             # `comptime.instance-failed`, at the call that needed it.
-            self.other_error = True
-            self.noted.push("comptime.instance-failed".to_string())
+            let (site_module, at) = site
+            if let Some((range, reason)) = failed:
+                var d = Diagnostic.new(Msg.ComptimeInstanceFailed, at.start, at.end)
+                d = d.with("name", what).with("reason", reason)
+                # Where the program's own template stopped; a standard
+                # library template's reason is the whole story.
+                if not self.is_std(module):
+                    if module != site_module:
+                        # A label in another file than the message's.
+                        self.note_error(site_module, "comptime.instance-failed")
+                        return
+                    d = d.label(Msg.ComptimeInstanceHere, range.start, range.end)
+                self.report_other(site_module, d)
             return
         let m = self.declare_generated_in(module, "<{what}>", text)
         # The types, by the names the unfolded code uses.
@@ -449,6 +505,7 @@ impl Resolver:
             _ = self.prog.modules[m.index].items.insert(alias.copy(), d)
         if let Some(d) = self.prog.modules[m.index].items.get(inst):
             self.prog.instances.push((def_, args.copy(), d))
+            _ = self.prog.instance_sites.insert(d, site)
 
     ## What reflection sees of `t`, written `written` in the unfolded code
     ## (an alias, added to `aliases`, whose nested types are aliases named
@@ -508,7 +565,7 @@ impl Resolver:
         mut aliases: list[(String, Ty)],
         mut s: TypeShape,
     ) -> Kind:
-        match self.prog.defs[d.index].kind.copy():
+        match self.prog.defs[d.index].kind().copy():
             case DefKind.Struct(si):
                 if depth == 0:
                     var k = 0

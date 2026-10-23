@@ -11,7 +11,11 @@
 ##! - partly moved: opened into drops of the parts that remain, fields in
 ##!   reverse declaration order (04, rule 6), each decided the same way. A
 ##!   type that implements `Drop` is never opened, so its `Drop` always sees
-##!   the whole value.
+##!   the whole value. A value one of whose parts is moved or dropped on its
+##!   own somewhere in the function ("split") is opened whenever it may be
+##!   uninitialised, even where every part has the same two bits as the
+##!   whole: one flag cannot say whether a path moved the whole or only that
+##!   part (decision 220).
 ##!
 ##! Flags are set after every statement that initialises their path (or a
 ##! path containing it) and cleared before every statement that moves,
@@ -221,6 +225,16 @@ pure def fix(t: BlockId, n: int) -> BlockId:
 
 ## The decision on every `drop` of the function, by block and statement.
 pure def decide_all(a: Analysis, types: Types, f: Function) -> dict[(int, int), Decision]:
+    # The paths with a part below them that a statement moves or drops on
+    # its own.
+    var split: list[bool] = []
+    for _ in range(a.paths.count()):
+        split.push(False)
+    for b in f.blocks:
+        for s in b.stmts:
+            for p in a.removed_paths(s):
+                for up in a.paths.ancestors(p):
+                    split[up] = True
     var decisions: dict[(int, int), Decision] = {}
     for b in range(len(f.blocks)):
         let states = a.states(f, b)
@@ -230,11 +244,15 @@ pure def decide_all(a: Analysis, types: Types, f: Function) -> dict[(int, int), 
                 let at = place.copy()
                 var d = Decision.Remove
                 if a.reachable[b]:
-                    d = decide(a, types, f, states[si], at)
+                    d = decide(a, types, f, split, states[si], at)
                 _ = decisions.insert((b, si), d)
     return decisions
 
-pure def decide(a: Analysis, types: Types, f: Function, st: State, place: Place) -> Decision:
+## `split`: which paths have a part below them that a statement moves or
+## drops on its own (stage 0's `Cx.split`).
+pure def decide(
+    a: Analysis, types: Types, f: Function, split: list[bool], st: State, place: Place
+) -> Decision:
     let (id, cover) = a.paths.lookup(place)
     if cover != Cover.Exact:
         # A place through a reference, index or key always holds a value.
@@ -259,14 +277,14 @@ pure def decide(a: Analysis, types: Types, f: Function, st: State, place: Place)
             return Decision.Keep
     let own_mi = st.mi.contains(id)
     let own_mu = st.mu.contains(id)
-    var uniform = True
+    var uniform = id >= len(split) or not split[id]
     for d in below:
         if st.mi.contains(d) != own_mi or st.mu.contains(d) != own_mu:
             uniform = False
     if let Some(t) = ty:
         if not uniform and not types.implements_drop(t):
             var parts: list[(Place, int?)] = []
-            open_parts(a, types, f, st, place, t, mut parts)
+            open_parts(a, types, f, split, st, place, t, mut parts)
             return Decision.Parts(parts)
     return Decision.Flag(id)
 
@@ -275,6 +293,7 @@ pure def open_parts(
     a: Analysis,
     types: Types,
     f: Function,
+    split: list[bool],
     st: State,
     place: Place,
     ty: Type,
@@ -301,7 +320,7 @@ pure def open_parts(
                 continue
         let (qid, cover) = a.paths.lookup(q)
         if cover == Cover.Exact:
-            match decide(a, types, f, st, q):
+            match decide(a, types, f, split, st, q):
                 case Decision.Keep:
                     out.push((q.copy(), None))
                 case Decision.Remove:

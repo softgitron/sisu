@@ -103,7 +103,7 @@ impl Checker:
                     var first_arg: TArg? = None
                     if let Some(a) = args.first():
                         first_arg = Some(TArg(expr=a.expr, mode=a.mode))
-                    self.closure_needed(first_arg, function)
+                    self.closure_needed(cx, first_arg, span, function)
                     return ret
                 if call == TaskCall.Shield:
                     return ret
@@ -120,8 +120,9 @@ impl Checker:
                 let body_ret = self.infer.zonk(mut self.types, body_ret0)
                 # A scope's body cannot hand its scope or a task's handle out.
                 if self.mentions_scope(cx, body_ret):
-                    # `task.scope-escapes`.
-                    self.other("task.scope-escapes")
+                    let shown = self.show(cx, body_ret)
+                    let d = self.error(cx, Msg.TaskScopeEscapes, span).with("ty", shown)
+                    self.report_other(d)
                 var sites: list[ClosureId] = []
                 for i in range(spawns_before, len(self.spawn_sites)):
                     let s = ref self.spawn_sites[i]
@@ -130,13 +131,15 @@ impl Checker:
                 if call == TaskCall.Race:
                     let t = self.infer.fresh(mut self.types)
                     for site in sites:
-                        var r: Ty? = None
+                        var r: (Ty, TextRange)? = None
                         if let Some(c) = self.closures[site.index]:
-                            r = Some(c.ret)
-                        if let Some(rt) = r:
+                            r = Some((c.ret, c.span))
+                        if let Some((rt, at)) = r:
                             if not self.infer.unify(mut self.types, t, rt):
-                                # `task.race-types`.
-                                self.other("task.race-types")
+                                let found = self.show(cx, rt)
+                                let expected = self.show(cx, t)
+                                var d = self.error(cx, Msg.TaskRaceTypes, at).with("found", found)
+                                self.report_other(d.with("expected", expected))
                     return self.flatten_join(cx, t, span)
                 # The scope's result carries the failures nobody joined.
                 var sets: list[DefId] = []
@@ -157,7 +160,7 @@ impl Checker:
                     var arg: TArg? = None
                     if k < len(args):
                         arg = Some(args[k])
-                    self.closure_needed(arg, function)
+                    self.closure_needed(cx, arg, span, function)
                     return ret
                 self.set_role(cid, ClosureRole.Task)
                 var scope: int? = None
@@ -183,13 +186,14 @@ impl Checker:
         if let Some(c) = ref mut self.closures[id.index]:
             c.role = role
 
-    pure def closure_needed(mut self, arg: TArg?, function: str):
+    pure def closure_needed(mut self, cx: Cx, arg: TArg?, span: TextRange, function: str):
+        var at = span
         if let Some(a) = arg:
             if self.ty_of(a.expr) == Ty.error():
                 return
-        _ = function
-        # `task.closure-literal`.
-        self.other("task.closure-literal")
+            at = self.span_of(a.expr)
+        let d = self.error(cx, Msg.TaskClosureLiteral, at).with("function", function)
+        self.report_other(d)
 
     ## Whether a type holds a `Scope` or a `Handle`, which end with their
     ## scope.
@@ -223,9 +227,7 @@ impl Checker:
             return self.result_of(cx, ok, union(m, te))
         match self.data(t):
             case TyData.Var(_):
-                # `task.result-unknown`.
-                self.other("task.result-unknown")
-                _ = span
+                self.report_other(self.error(cx, Msg.TaskResultUnknown, span))
                 return Ty.error()
             case TyData.Error:
                 return Ty.error()
@@ -442,8 +444,9 @@ impl Checker:
         if self.is_builtin(cx, self.ty_of(x), "Cancellation"):
             return (SelectOp.Cancelled(x), Ty.unit())
         if self.ty_of(x) != Ty.error():
-            # `task.select-arm`.
-            self.other("task.select-arm")
+            let shown = self.show(cx, self.ty_of(x))
+            let d = self.error(cx, Msg.TaskSelectArm, self.span_of(x)).with("ty", shown)
+            self.report_other(d)
         let span = self.span_of(x)
         return (SelectOp.Timer(self.error_expr(span)), Ty.error())
 

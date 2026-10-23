@@ -5,17 +5,18 @@
 ##! constant arguments, so it is checked at each call that gives them, once
 ##! the whole program is typed: its condition is folded with the call's
 ##! arguments for the parameters, and a false condition is the call's
-##! compile-time error (`comptime.panicked`, whose message stage 1 does not
-##! write). What such checks are made of is folded: integer and boolean
-##! arithmetic and comparisons; a condition that calls a function is checked
-##! nowhere.
+##! compile-time error (`comptime.panicked`, with the assert's message
+##! folded too). What such checks are made of is folded: integer and boolean
+##! arithmetic, comparisons and interpolated text; a condition that calls a
+##! function is checked nowhere.
 ##!
 ##! A body's asserts are kept as `Fold` trees, apart from the body's typed
 ##! expressions, which the checker keeps only when lowering asks for them;
 ##! so are its calls with constant type arguments (`ConstCall`).
 
+from stage1.diag import Catalog, Diagnostic, Msg, Param, TextRange
 from stage1.syntax.ast import BinOp, CmpOp, UnOp
-from stage1.typeck.thir import Callee, TExpr, TExprId, TExprKind
+from stage1.typeck.thir import Callee, InterpPart, TExpr, TExprId, TExprKind
 from stage1.typeck.ty import DefId, Ty, TyData, Types
 
 const INT_MAX: int = 9223372036854775807
@@ -31,18 +32,46 @@ pub enum Fold:
     Binary(op: BinOp, operands: list[Fold])
     Logic(and_: bool, operands: list[Fold])
     Compare(first: list[Fold], rest: list[(CmpOp, Fold)])
+    Str(String)
+    ## Interpolated text: its literal parts and the values in it.
+    Interp(list[FoldPart])
     ## Anything else, which does not fold.
     Other
 
-## A call of a function with type arguments, some of them constants.
+## A part of interpolated text as folding reads it.
+pub enum FoldPart:
+    Text(String)
+    ## A value without a format spec.
+    Value(Fold)
+    ## A value with one, which does not fold.
+    Other
+
+## A `comptime assert` on `const` generic parameters: its condition, its
+## message, and the condition's text for the message of a failure.
+pub struct Assert:
+    pub cond: Fold
+    pub message: Fold?
+    pub text: String
+
+## A call of a function with type arguments, some of them constants, and
+## where it is written.
 pub struct ConstCall:
     pub def_: DefId
     pub type_args: list[Ty]
+    pub span: TextRange
 
 ## A folded value.
 enum Value:
     Int(int)
     Bool(bool)
+    Text(String)
+
+impl Value:
+    pure def show(self) -> String:
+        return match self:
+            case Int(n): "{n}"
+            case Bool(b): if b: "True" else: "False"
+            case Text(t): t.copy()
 
 ## The fold tree of a typed expression.
 pub pure def fold_tree(exprs: list[TExpr], e: TExprId) -> Fold:
@@ -66,6 +95,20 @@ pub pure def fold_tree(exprs: list[TExpr], e: TExprId) -> Fold:
             for (op, x) in rest:
                 rs.push((op, fold_tree(exprs, x)))
             return Fold.Compare(first=[fold_tree(exprs, first)], rest=rs)
+        case TExprKind.Str(s):
+            return Fold.Str(s.copy())
+        case TExprKind.Interp(parts):
+            var out: list[FoldPart] = []
+            for p in parts:
+                match p:
+                    case InterpPart.Text(t):
+                        out.push(FoldPart.Text(t.copy()))
+                    case InterpPart.Value(x, _, spec):
+                        if spec.is_empty():
+                            out.push(FoldPart.Value(fold_tree(exprs, x)))
+                        else:
+                            out.push(FoldPart.Other)
+            return Fold.Interp(out)
         case _:
             return Fold.Other
 
@@ -80,7 +123,7 @@ pub pure def const_calls(exprs: list[TExpr], types: Types) -> list[ConstCall]:
                 if let TyData.Const(_) = types.data(t):
                     constant = True
             if constant:
-                out.push(ConstCall(def_=d, type_args=targs.copy()))
+                out.push(ConstCall(def_=d, type_args=targs.copy(), span=x.span))
     return out
 
 ## The value of a fold tree with the call's type arguments for the
@@ -158,6 +201,21 @@ pure def fold(f: Fold, args: list[Ty], types: Types) -> Value?:
                     return Some(Value.Bool(False))
                 left = right
             return Some(Value.Bool(True))
+        case Fold.Str(s):
+            return Some(Value.Text(s.copy()))
+        case Fold.Interp(parts):
+            var out = String.new()
+            for p in parts:
+                match p:
+                    case FoldPart.Text(t):
+                        out.push(t)
+                    case FoldPart.Value(x):
+                        let v = fold(x, args, types) else:
+                            return None
+                        out.push(v.show())
+                    case FoldPart.Other:
+                        return None
+            return Some(Value.Text(out))
         case Fold.Other:
             return None
 
@@ -216,21 +274,35 @@ pure def binary(op: BinOp, a: int, b: int) -> int?:
         case _:
             return None
 
-## Whether a call with constant arguments makes one of its callee's asserts
-## false (stage 0's `check_calls`, whose diagnostic is `comptime.panicked`
-## at the call).
-pub pure def any_fails(
-    asserts: dict[DefId, list[Fold]], calls: list[ConstCall], types: Types
-) -> bool:
-    if asserts.is_empty():
-        return False
-    for c in calls:
-        let conds = asserts.get(c.def_) else:
+## The asserts a call with constant arguments makes false, one
+## `comptime.panicked` at the call for each (stage 0's `check_calls`).
+pub pure def failures(
+    asserts: dict[DefId, list[Assert]], call: ConstCall, types: Types, catalog: Catalog
+) -> list[Diagnostic]:
+    var out: list[Diagnostic] = []
+    let list = asserts.get(call.def_) else:
+        return out
+    for a in list:
+        if bool_of(a.cond, call.type_args, types) != Some(False):
             continue
-        for cond in conds:
-            if bool_of(cond, c.type_args, types) == Some(False):
-                return True
-    return False
+        var shown: String? = None
+        if let Some(m) = a.message:
+            if let Some(v) = fold(m, call.type_args, types):
+                shown = Some(v.show())
+        var message = String.new()
+        match shown:
+            case Some(m):
+                let params = [
+                    Param(name="expr".to_string(), value=a.text.copy()),
+                    Param(name="message".to_string(), value=m.copy()),
+                ]
+                message = catalog.render("panic.assert-message", params)
+            case None:
+                let params = [Param(name="expr".to_string(), value=a.text.copy())]
+                message = catalog.render("panic.assert", params)
+        let d = Diagnostic.new(Msg.ComptimePanicked, call.span.start, call.span.end)
+        out.push(d.with("message", message))
+    return out
 
 test "a condition folds with the call's constant arguments":
     var types = Types.new()

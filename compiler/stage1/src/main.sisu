@@ -52,13 +52,16 @@ import stage1.borrowck
 import stage1.interp
 import stage1.lower
 import stage1.package
+import stage1.sir
 import stage1.sir.simplify
 import stage1.sir.write
 import stage1.typeck
+from stage1.borrowck.finding import span_of
 from stage1.diag import (
     Catalog,
     Diagnostic,
     Filed,
+    Lines,
     Msg,
     Param,
     quote,
@@ -81,7 +84,7 @@ from stage1.syntax.ast.dump import module_debug
 from stage1.syntax.kinds import KindNames
 from stage1.syntax.kinds import SyntaxKind
 from stage1.typeck.collect import SourcePackage
-from stage1.typeck.program import DefKind, ModuleId, Program
+from stage1.typeck.program import DefKind, Embedded, ModuleId, Program
 from stage1.typeck.std_sources import importable
 from stage1.typeck.ty import TyKey
 
@@ -315,8 +318,9 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             sys.fs.write_text(Path.new("{out_dir}/{n}.sir"), done.sir)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.ownership"), done.ownership)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.beyond"), reasons)?
+        let counts = "std bodies lowered {kept.lowered.lowered}, reused {kept.lowered.reused}"
         print(
-            "files {n} check {ms(times.check)} ms lower {ms(times.lower)} ms ownership {ms(times.ownership)} ms"
+            "files {n} check {ms(times.check)} ms lower {ms(times.lower)} ms ownership {ms(times.ownership)} ms ({counts})"
         )
         return Ok(())
     if command == "check":
@@ -430,7 +434,7 @@ struct Input:
     modules: list[typeck.InputModule]
     packages: list[SourcePackage]
     named: bool
-    embedded: dict[String, bool]
+    embedded: dict[String, Embedded]
     multi: bool
     ## What `check` prints besides the type checker's and the ownership
     ## checker's diagnostics: each module's syntax and name diagnostics,
@@ -442,10 +446,13 @@ struct Input:
     manifests: list[(String, String)]
     problems: list[Problem]
     untrusted: list[(int, Diagnostic)]
-    ## The root module's file on disk, and the root package's name (empty
-    ## for a program of one file): where `build` puts the executable.
+    ## The root module's file on disk, the root package's name (empty for a
+    ## program of one file) and the directory of its lockfile, its
+    ## workspace's or its own (stage 0's `build_root`; none for a program of
+    ## one file): where `build` puts the executable.
     disk: String
     package_name: String
+    build_root: String?
 
 ## The programs the argument names, read: a file's, or each layout's that
 ## has modules (stage 0 reports the others' problems and checks nothing).
@@ -476,6 +483,7 @@ def inputs_of(
                     untrusted=[],
                     disk=arg.to_string(),
                     package_name=String.new(),
+                    build_root=None,
                 ),
             ]
         )
@@ -492,7 +500,7 @@ def layout_input(
 ) -> Input ! IoError:
     let named = named_modules(sys, home, layout, mut env, catalog)?
     var modules: list[typeck.InputModule] = []
-    var embedded: dict[String, bool] = {}
+    var embedded: dict[String, Embedded] = {}
     for i in range(len(layout.modules)):
         let m = ref layout.modules[i]
         let text = named[i].text.copy()
@@ -505,7 +513,7 @@ def layout_input(
         # module that names one decides.
         for (k, v) in embedded_files(sys, m.disk, text, catalog).items():
             if not embedded.contains(k.copy()):
-                _ = embedded.insert(k.copy(), v)
+                _ = embedded.insert(k.copy(), v.copy())
     var packages: list[SourcePackage] = []
     for p in layout.packages:
         packages.push(SourcePackage(name=p.name.copy(), deps=p.deps.copy(), trusted=p.trusted))
@@ -543,6 +551,9 @@ def layout_input(
     var package_name = String.new()
     if let Some(root) = layout.packages.first():
         package_name = root.name.copy()
+    var build_root: String? = None
+    if let Some(lock) = layout.lock.copy():
+        build_root = Some(parent(lock))
     return Ok(
         Input(
             modules=modules,
@@ -557,6 +568,7 @@ def layout_input(
             untrusted=untrusted,
             disk=disk,
             package_name=package_name,
+            build_root=build_root,
         )
     )
 
@@ -734,7 +746,9 @@ pure def lower_of(
 ) -> lower.Lowered?:
     let typed = checked.typed else:
         return None
-    return Some(lower.lower(typed, base, path, catalog, mut kept.bodies))
+    return Some(
+        lower.lower(typed, base, path, catalog, mut kept.bodies, mut kept.lowered, mut kept.slots)
+    )
 
 ## What `sir_of` gives when the front end ends it: beyond the type
 ## checker's slice, or a front-end error.
@@ -779,7 +793,7 @@ pure def finish_of(
     # The compiler runs the `comptime` expressions of a program the
     # ownership checker accepts (08), and bakes their values into it.
     if done.findings.is_empty():
-        let evaluated = interp.evaluate(mut done.program)
+        let evaluated = interp.evaluate(mut done.program, catalog)
         if not evaluated.beyond.is_empty() and not partial:
             var reasons = lowered.beyond.copy()
             for why in evaluated.beyond:
@@ -814,6 +828,9 @@ struct Report:
     ## Those of `diags` that are the ownership checker's, which `build`
     ## reports apart.
     owned: list[Filed]
+    ## Those of `diags` that are failed `comptime` expressions', which
+    ## `build` reports apart too.
+    failed: list[Filed]
     ## Whether the program has an error, as far as stage 1 knows: one it
     ## renders, or one of stage 0's that it only notes.
     has_error: bool
@@ -840,7 +857,7 @@ impl Report:
     pure def front(self, catalog: Catalog, errors: bool?) -> Report:
         var kept: list[Filed] = []
         for x in self.diags:
-            if self.owned.contains(x):
+            if self.owned.contains(x) or self.failed.contains(x):
                 continue
             if let Some(e) = errors:
                 if catalog.is_error(x.diag.msg) != e:
@@ -854,6 +871,12 @@ impl Report:
     pure def ownership(self) -> Report:
         var r = self.copy()
         r.diags = self.owned.copy()
+        return r
+
+    ## The report of the failed `comptime` expressions only.
+    pure def evaluation(self) -> Report:
+        var r = self.copy()
+        r.diags = self.failed.copy()
         return r
 
 ## The reports of the programs `arg` names, a program of one file named
@@ -895,7 +918,13 @@ pure def problems_report(layout: Layout, catalog: Catalog) -> Report:
         if catalog.is_error(x.diag.msg):
             has_error = True
     return Report(
-        files=layout.files.copy(), diags=diags, multi=True, beyond=[], owned=[], has_error=has_error
+        files=layout.files.copy(),
+        diags=diags,
+        multi=True,
+        beyond=[],
+        owned=[],
+        failed=[],
+        has_error=has_error,
     )
 
 ## What `check` makes of one program (stage 0's `Db::checked` and
@@ -964,6 +993,7 @@ pure def report_of(
         multi=input.multi,
         beyond=beyond,
         owned=[],
+        failed=[],
         has_error=checked.has_error,
     )
     let errors = report.errors(catalog)
@@ -997,21 +1027,65 @@ pure def report_of(
                 "an ownership finding in a file of the standard library or one the compiler wrote"
             )
     # The compiler runs the `comptime` expressions of a program the
-    # ownership checker accepts (08).
+    # ownership checker accepts (08); one that fails is an error at it.
     if done.findings.is_empty():
         simplify.program(mut done.program)
-        let evaluated = interp.evaluate(mut done.program)
+        let evaluated = interp.evaluate(mut done.program, catalog)
         for why in evaluated.beyond:
             report.beyond.push(why.copy())
-        if not evaluated.failed.is_empty():
-            report.beyond.push("a `comptime` expression that fails, which stage 1 does not render")
+        for e in evaluated.errors:
+            match comptime_diagnostic(e, done.program, by_source):
+                case Some((k, d)):
+                    report.failed.push(Filed(file=k, diag=d, label_files=[]))
+                case None:
+                    let why = "a failed `comptime` expression in a file of the standard library or one the compiler wrote"
+                    if not report.beyond.contains(why.to_string()):
+                        report.beyond.push(why.to_string())
     sort_filed(mut report.owned, catalog, True)
+    sort_filed(mut report.failed, catalog, True)
     for x in report.owned:
+        report.diags.push(x.copy())
+        if catalog.is_error(x.diag.msg):
+            report.has_error = True
+    for x in report.failed:
         report.diags.push(x.copy())
         if catalog.is_error(x.diag.msg):
             report.has_error = True
     sort_filed(mut report.diags, catalog, True)
     return report
+
+## A failed `comptime` expression as a diagnostic at the expression
+## (stage 0's `comptime_diagnostic`), with the index of the program's file
+## that holds it; `None` when another file does.
+pure def comptime_diagnostic(
+    e: interp.Error, prog: sir.Program, by_source: list[(int, String)?]
+) -> (int, Diagnostic)?:
+    let f = prog.function(e.function) else:
+        return None
+    if f.source >= len(by_source):
+        return None
+    let (at, text) = by_source[f.source].copy() else:
+        return None
+    let (start, end) = span_of(text, Lines.of(text), f.loc)
+    # The item that holds the expression: `main` for `main#comptime0`.
+    var item = e.function.copy()
+    if let Some(k) = e.function.find("#comptime"):
+        item = e.function.byte_slice(0, k).to_string()
+    var d = Diagnostic.new(Msg.ComptimePanicked, start, end)
+    match e.failure:
+        case interp.Failure.Panicked(m):
+            d = d.with("message", m)
+        case interp.Failure.Refinement(ty, value, predicate):
+            d = Diagnostic.new(Msg.RefineNotSatisfied, start, end)
+            d = d.with("value", value).with("ty", ty).with("predicate", predicate)
+        case interp.Failure.Budget(n):
+            d = Diagnostic.new(Msg.ComptimeBudget, start, end).with("item", item)
+            d = d.with("steps", "{n}")
+        case interp.Failure.World(what):
+            d = Diagnostic.new(Msg.ComptimeIo, start, end).with("what", what)
+        case interp.Failure.NotKept(what):
+            d = Diagnostic.new(Msg.ComptimeNotKept, start, end).with("what", what)
+    return Some((at, d))
 
 ## For each struct and enum of the program by name (the first of a name),
 ## its methods that take `own self`, each in backquotes, sorted and joined:
@@ -1033,7 +1107,7 @@ pure def consuming_methods(prog: Program) -> dict[String, String]:
     for i in range(len(prog.defs)):
         let def_ = ref prog.defs[i]
         var adt = False
-        match def_.kind:
+        match def_.kind():
             case DefKind.Struct(_) | DefKind.Enum(_):
                 adt = True
             case _:
@@ -1076,8 +1150,9 @@ pure def consume_note(d: Diagnostic, consuming: dict[String, String]) -> Diagnos
 ## human form, and the build stopped by an error, as stage 0's `sisu build`
 ## stops), its SIR written beside the executable and built by stage 0's
 ## backend, which prints `built PATH`. The executable goes beside a file's
-## source, named by its stem, or into a package's directory, named by the
-## package, unless `output` names it.
+## source, named by its stem, or to `build/debug/NAME` in the directory of
+## a package's lockfile (decision 231), unless `output` names it; its
+## directory is made when it is missing, as the backend makes it.
 def build_native(
     sys: System, home: str, path: str, output: String?, catalog: Catalog
 ) -> ! {IoError, CommandError}:
@@ -1092,6 +1167,8 @@ def build_native(
     var warnings = String.new()
     var owned_errors = 0
     var owned = String.new()
+    var failed_errors = 0
+    var failed = String.new()
     var beyond = String.new()
     for r in reports:
         let front = r.front(catalog, None)
@@ -1101,6 +1178,9 @@ def build_native(
         let ownership = r.ownership()
         owned_errors += ownership.errors(catalog)
         owned.push(ownership.human(catalog))
+        let evaluation = r.evaluation()
+        failed_errors += evaluation.errors(catalog)
+        failed.push(evaluation.human(catalog))
         for b in r.beyond:
             beyond.push("beyond the slice: {b}\n")
     if errors > 0:
@@ -1110,6 +1190,13 @@ def build_native(
         emit("", errs)
         return Err(Failed)
     emit("", warnings)
+    # A `comptime` expression that failed is an error of the program.
+    if failed_errors > 0:
+        let count = Param(name="count".to_string(), value="{failed_errors}")
+        failed.push(catalog.plain_error("cli.errors-found", [count]))
+        failed.push(beyond)
+        emit("", failed)
+        return Err(Failed)
     if owned_errors > 0:
         let count = Param(name="count".to_string(), value="{owned_errors}")
         owned.push(catalog.plain_error("cli.ownership-errors", [count]))
@@ -1126,9 +1213,12 @@ def build_native(
     let inputs = inputs_of(sys, home, path, True, mut env, catalog)?
     let first = inputs.first() else:
         return Err(Failed)
-    var exe = output_for(first.disk, first.package_name)
+    var exe = output_for(first.disk, first.package_name, first.build_root.copy())
     if let Some(o) = output:
         exe = o.copy()
+    # The backend makes the executable's directory before it links; here
+    # the SIR is written into it first.
+    _ = sys.fs.create_dir(Path.new(parent(exe)))
     let sir_file = "{exe}.sir"
     sys.fs.write_text(Path.new(sir_file), done.sir)?
     let sisu = "{home}/target/release/sisu"
@@ -1144,12 +1234,16 @@ def build_native(
             return Err(Failed)
     return Ok(())
 
-## Where `build` puts the executable (stage 0's `output_for`): a package's
-## in its directory, named by the package (the root module is
-## `src/main.sisu` there); a file's beside it, named by its stem.
-pure def output_for(disk: str, package_name: str) -> String:
+## Where `build` puts the executable (stage 0's `output_for`, decision
+## 231): a package's in `build/PROFILE/NAME` in the directory of its
+## lockfile, its workspace's or its own (`root`; without one, the
+## package's, whose root module is `src/main.sisu`); a file's beside it,
+## named by its stem. The profile is `debug`, since `--release` (decision
+## 232) is stage 0's alone.
+pure def output_for(disk: str, package_name: str, root: String?) -> String:
     if not package_name.is_empty():
-        return package.join(parent(parent(disk)), package_name)
+        let dir = root.copy() ?? parent(parent(disk))
+        return package.join(dir, "build/debug/{package_name}")
     if disk.ends_with(".sisu"):
         return disk.byte_slice(0, disk.byte_len() - 5).to_string()
     return disk.to_string()
@@ -1165,16 +1259,24 @@ pure def parent(p: str) -> String:
     return p.byte_slice(0, cut).to_string()
 
 ## What a run keeps of the standard library from one program to the next:
-## its bodies as the type checker typed them (`typeck.StdBodies`), and its
+## its bodies as the type checker typed them (`typeck.StdBodies`), the
+## functions lowering made of them (`lower.StdLowered`), and those
 ## functions as the ownership checker placed their drops
 ## (`borrowck.Placed`).
 struct Kept:
     bodies: typeck.StdBodies
+    lowered: lower.StdLowered
+    slots: lower.StdSlots
     placed: borrowck.Placed
 
 impl Kept:
     pure def new() -> Kept:
-        return Kept(bodies=typeck.StdBodies.new(), placed=borrowck.Placed.new())
+        return Kept(
+            bodies=typeck.StdBodies.new(),
+            lowered=lower.StdLowered.new(),
+            slots=lower.StdSlots.new(),
+            placed=borrowck.Placed.new(),
+        )
 
 ## Where `sir-batch` spends its time, in nanoseconds: the front end, the
 ## lowering, and the ownership checker with the writing of the SIR.
@@ -1214,10 +1316,10 @@ def std_texts(sys: System, home: str) -> dict[String, String] ! IoError:
     return Ok(texts)
 
 ## The files the `embed("path")` calls of `text` name, read relative to
-## the file at `path` (stage 0's `embedded_files`): whether each could be
-## read.
-def embedded_files(sys: System, path: str, text: str, catalog: Catalog) -> dict[String, bool]:
-    var out: dict[String, bool] = {}
+## the file at `path` (stage 0's `embedded_files`): each text, or why it
+## could not be read, in words of its own, the same on every machine.
+def embedded_files(sys: System, path: str, text: str, catalog: Catalog) -> dict[String, Embedded]:
+    var out: dict[String, Embedded] = {}
     if not text.contains("embed("):
         return out
     var dir = ".".to_string()
@@ -1251,13 +1353,19 @@ def embedded_files(sys: System, path: str, text: str, catalog: Catalog) -> dict[
         for part in file.split("/"):
             if part == "..":
                 inside = False
-        var read = False
+        var read = Embedded.Failed("the path must stay inside the program's directory".to_string())
         if inside:
             match sys.fs.read_to_string(Path.new("{dir}/{file}")):
-                case Ok(_):
-                    read = True
+                case Ok(t):
+                    read = Embedded.Read(t)
+                case Err(NotFound(_)):
+                    read = Embedded.Failed("there is no such file".to_string())
+                case Err(PermissionDenied(_)):
+                    read = Embedded.Failed("it may not be read".to_string())
+                case Err(InvalidData(_)):
+                    read = Embedded.Failed("it is not UTF-8 text".to_string())
                 case Err(_):
-                    read = False
+                    read = Embedded.Failed("it cannot be read".to_string())
         _ = out.insert(file, read)
     return out
 

@@ -158,6 +158,7 @@ if [ -n "$keep" ]; then
     work="$keep"
     rm -rf "$work"
     mkdir -p "$work"
+    work=$(cd "$work" && pwd)
     trap forget_locks EXIT
 else
     work=$(mktemp -d)
@@ -745,7 +746,9 @@ if [ "$self_check" = 1 ]; then
         exit 1
     fi
     middle=$(date +%s.%N)
-    if ! "$sisu" build --native --from-sir "$work/fixed.A.sir" --output "$work/stage1-B" > "$work/fixed.B.log" 2>&1; then
+    # In this directory, as stage1-A is built: the debug information
+    # records the directory a build runs in (decision 227).
+    if ! (cd "$here" && "$sisu" build --native --from-sir "$work/fixed.A.sir" --output "$work/stage1-B" > "$work/fixed.B.log" 2>&1); then
         cat "$work/fixed.B.log" >&2
         echo "check.sh: the backend does not build stage1-A's SIR" >&2
         exit 1

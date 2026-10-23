@@ -5,12 +5,11 @@
 ##! part of its condition (17, "Assertions": every sub-expression's value).
 
 from stage1.diag import TextRange
-from stage1.lower.exprs import param_local_ty
 from stage1.lower.func import Cx, DropEntry, FnLower
 from stage1.lower.names import CONTRACTS_ALL, CONTRACTS_OFF
 from stage1.sir import Aggregate, Callee, Const, Loc, LocalId, Operand, Place, Proj, Rvalue, StatementKind, Terminator, Type
 from stage1.syntax.ast import Mode, UnOp
-from stage1.typeck.program import FnKind
+from stage1.typeck.program import FnKind, param_local_ty
 from stage1.typeck.thir import (
     ContractCheck,
     InterpPart,

@@ -39,24 +39,58 @@ pub struct Ctx:
     ## The text of each module whose bodies were checked, and its lines.
     pub texts: dict[ModuleId, String]
     pub lines: dict[ModuleId, Lines]
+    ## The place of each test, benchmark and instance among the program's,
+    ## the first of a definition (`index_names`).
+    pub tests: dict[DefId, int]
+    pub benches: dict[DefId, int]
+    pub instances: dict[DefId, int]
 
 impl Ctx:
+    ## A context that names nothing of a program's own: what the names of
+    ## the base's definitions need (`lower.StdSlots`).
+    pub pure def blank() -> Ctx:
+        return Ctx(
+            files={},
+            file_names=[],
+            path=String.new(),
+            impl_names={},
+            level=CONTRACTS_ALL,
+            root_fns=set(),
+            type_defs={},
+            texts={},
+            lines={},
+            tests={},
+            benches={},
+            instances={},
+        )
+
+    ## Finds the program's tests, benchmarks and instances by definition,
+    ## once rather than at each name.
+    pub pure def index_names(mut self, prog: Resolved):
+        for i in range(len(prog.tests)):
+            if not self.tests.contains(prog.tests[i]):
+                _ = self.tests.insert(prog.tests[i], i)
+        for i in range(len(prog.benches)):
+            if not self.benches.contains(prog.benches[i]):
+                _ = self.benches.insert(prog.benches[i], i)
+        for i in range(len(prog.instances)):
+            let inst = prog.instances[i].2
+            if not self.instances.contains(inst):
+                _ = self.instances.insert(inst, i)
+
     pub pure def fn_name(self, prog: Resolved, types: Types, d: DefId) -> String:
         let def_ = ref prog.defs[d.index]
-        for i in range(len(prog.tests)):
-            if prog.tests[i] == d:
-                return "test#{i}"
-        for i in range(len(prog.benches)):
-            if prog.benches[i] == d:
-                return "bench#{i}"
+        if let Some(i) = self.tests.get(d):
+            return "test#{i}"
+        if let Some(i) = self.benches.get(d):
+            return "bench#{i}"
         if let Some(f) = prog.fn_info(d):
             # A refinement's predicate, which the compiler writes.
             if let FnKind.Predicate(r) = f.kind:
                 return "{prog.qualified_name(r)}#where"
             # An instance of a template: `to_json#Point` (08).
-            for (t, args, inst) in prog.instances:
-                if inst != d:
-                    continue
+            if let Some(k) = self.instances.get(d):
+                let (t, args, _) = prog.instances[k].copy()
                 var shown: list[String] = []
                 for a in args:
                     shown.push(prog.display(types, a))
@@ -108,7 +142,18 @@ impl Ctx:
     ## on for a second impl of one trait for one type constructor.
     pub pure def name_impls(mut self, prog: Resolved, types: Types):
         var used: dict[String, int] = {}
-        for i in prog.impls:
+        self.name_impls_from(prog, types, 0, len(prog.impls), mut used)
+
+    ## `name_impls` for the impls from the `first`th to the `end`th, `used`
+    ## counting the impls of each trait for each type constructor named
+    ## before them.
+    pub pure def name_impls_from(
+        mut self, prog: Resolved, types: Types, first: int, end: int, mut used: dict[String, int]
+    ):
+        var k = first
+        while k < end and k < len(prog.impls):
+            let i = prog.impls[k]
+            k += 1
             let info = prog.impl_info(i) else:
                 continue
             let owner = self.owner_name(prog, types, info.self_ty)

@@ -42,8 +42,17 @@ from stage1.syntax.ast import build
 from stage1.typeck.check import Checker, Cx, Finished, RetCtx
 from stage1.typeck.collect import Resolver, SourceModule, SourcePackage
 from stage1.typeck.contracts import leading_contracts
-from stage1.typeck.generic_asserts import ConstCall, Fold, any_fails
-from stage1.typeck.program import Answer, DefKind, FnKind, ModuleId, ParamInfo, Program, Request
+from stage1.typeck.generic_asserts import Assert, ConstCall, failures
+from stage1.typeck.program import (
+    Answer,
+    DefKind,
+    Embedded,
+    FnKind,
+    ModuleId,
+    ParamInfo,
+    Program,
+    Request,
+)
 from stage1.typeck.std_sources import builtin_impls, target
 from stage1.typeck.tasks import has_yield
 from stage1.typeck.template import Templates
@@ -218,7 +227,7 @@ struct BodyResult:
     absorbed: list[DefId]
     requests: list[Request]
     typed: TBody?
-    asserts: list[Fold]
+    asserts: list[Assert]
     const_calls: list[ConstCall]
 
 pure def result_of(done: Finished) -> BodyResult:
@@ -302,10 +311,11 @@ struct Round:
     typed: list[TBody]
     texts: dict[ModuleId, String]
     inferred: dict[DefId, list[DefId]]
-    ## The conditions of the asserts on `const` generic parameters, by
-    ## function, and the calls with constant type arguments.
-    asserts: dict[DefId, list[Fold]]
-    const_calls: list[ConstCall]
+    ## The asserts on `const` generic parameters, by function, and the
+    ## calls with constant type arguments, each with the index of its file
+    ## among the program's modules.
+    asserts: dict[DefId, list[Assert]]
+    const_calls: list[(int, ConstCall)]
 
 ## Checks one file against the resolved prelude. `name_error` says
 ## whether stage 0's name pass reports an error in it; `keep` asks for
@@ -315,7 +325,7 @@ pub pure def check_file(
     text: str,
     catalog: Catalog,
     name_error: bool,
-    embedded: dict[String, bool],
+    embedded: dict[String, Embedded],
     keep: bool,
 ) -> Checked:
     let module = InputModule(path=[], file=String.new(), text=text.to_string(), package=0)
@@ -332,7 +342,7 @@ pub pure def check_program(
     packages: list[SourcePackage],
     catalog: Catalog,
     name_error: bool,
-    embedded: dict[String, bool],
+    embedded: dict[String, Embedded],
     keep: bool,
     multi: bool,
 ) -> Checked:
@@ -394,8 +404,21 @@ pub pure def check_program(
                     fresh.push(q.copy())
             rounds += 1
             if fresh.is_empty() or rounds > MAX_ROUNDS:
-                # Past the bound, `comptime.instances-unbounded`.
-                let unbounded = not fresh.is_empty()
+                # Past the bound, `comptime.instances-unbounded`, at the
+                # function the first new request names.
+                var unbounded: (ModuleId, Diagnostic)? = None
+                if let Some(q) = fresh.first():
+                    var asked = DefId(index=0)
+                    match q:
+                        case Request.Instance(d, _, _):
+                            asked = d
+                        case Request.Promote(d):
+                            asked = d
+                    let def_ = ref r.prog.defs[asked.index]
+                    let at = def_.span
+                    var d = Diagnostic.new(Msg.ComptimeInstancesUnbounded, at.start, at.end)
+                    d = d.with("name", def_.name).with("count", "{len(requests)}")
+                    unbounded = Some((def_.module, d))
                 let root_text = modules[0].text.copy()
                 var checked = finish_file(
                     r, round, syntaxes, root_text, catalog, name_error, unbounded
@@ -528,8 +551,8 @@ pure def check_round(
         elif prog.user_modules.contains(m):
             if let Some(at) = at_module.get(m):
                 files[at].diags.push(d.copy())
-    var asserts: dict[DefId, list[Fold]] = {}
-    var calls: list[ConstCall] = []
+    var asserts: dict[DefId, list[Assert]] = {}
+    var calls: list[(int, ConstCall)] = []
     var requests: list[Request] = []
     var typed: list[TBody] = []
     for d in fns:
@@ -548,12 +571,12 @@ pure def check_round(
             typed.push(t.copy())
         if not x.asserts.is_empty():
             _ = asserts.insert(d, x.asserts.copy())
+        let at = at_module.get(prog.defs[d.index].module) ?? 0
         for c in x.const_calls:
-            calls.push(c.copy())
+            calls.push((at, c.copy()))
         for q in x.requests:
             if not has_request(requests, q):
                 requests.push(q.copy())
-        let at = at_module.get(prog.defs[d.index].module) ?? 0
         files[at].add(x, r.quiet_fns.contains(d))
     # Defaults of fields and parameters, and constants.
     for i in range(len(prog.defs)):
@@ -561,7 +584,7 @@ pure def check_round(
         let at = at_module.get(prog.defs[i].module) else:
             continue
         var values: list[(ExprId, Ty, DefId?, BodyKind)] = []
-        match prog.defs[i].kind:
+        match prog.defs[i].kind():
             case DefKind.Struct(s):
                 for k in range(len(s.fields)):
                     if let Some(e) = s.fields[k].default:
@@ -585,11 +608,17 @@ pure def check_round(
             if let Some(t) = x.typed:
                 typed.push(t.copy())
             for c in x.const_calls:
-                calls.push(c.copy())
+                calls.push((at, c.copy()))
             for q in x.requests:
                 if not has_request(requests, q):
                     requests.push(q.copy())
             files[at].add(x, False)
+    # A call whose constant arguments make an assert of its callee false
+    # (stage 0's `generic_asserts::check_calls`).
+    if not asserts.is_empty():
+        for (at, c) in calls:
+            for d in failures(asserts, c, types, catalog):
+                files[at].diags.push(d.copy())
     # `main` takes nothing or one `System`, and returns nothing or `! E`.
     if let Some(main_fn) = prog.main():
         if let Some(f) = prog.fn_info(main_fn):
@@ -618,7 +647,7 @@ pure def check_round(
             if m == root_id:
                 main.diags.push(d)
             elif let Some(at) = at_module.get(m):
-                files[at].diags.push(d)
+                files[at].diags.push(d.copy())
     # The root module's bodies are the file's; the others are files of
     # their own.
     main.absorb(files[0])
@@ -681,21 +710,27 @@ pure def finish_file(
     text: str,
     catalog: Catalog,
     name_error: bool,
-    unbounded: bool,
+    unbounded: (ModuleId, Diagnostic)?,
 ) -> Checked:
     var bodies = round.main.copy()
+    var others = round.files.copy()
     var unrendered = round.main.noted.copy()
-    if unbounded:
-        unrendered.push("comptime.instances-unbounded".to_string())
-    for (_, b) in round.files:
+    if let Some((m, d)) = unbounded:
+        var placed = False
+        if m == r.prog.root:
+            bodies.diags.push(d.copy())
+            placed = True
+        for i in range(len(round.file_modules)):
+            if round.file_modules[i] == m and i < len(others) and not placed:
+                others[i].1.diags.push(d.copy())
+                placed = True
+        if not placed:
+            unrendered.push("comptime.instances-unbounded".to_string())
+    for (_, b) in others:
         for r in b.noted:
             unrendered.push(r.copy())
-    if name_error or unbounded:
+    if name_error or unbounded.is_some():
         bodies.other_error = True
-    # A call whose constant arguments make an assert of its callee false.
-    if any_fails(round.asserts, round.const_calls, round.types):
-        bodies.other_error = True
-        unrendered.push("comptime.panicked".to_string())
     for ds in syntaxes:
         for d in ds:
             if catalog.is_error(d.msg):
@@ -709,7 +744,7 @@ pure def finish_file(
     for d in bodies.diags:
         if catalog.is_error(d.msg):
             any_error = True
-    for (_, b) in round.files:
+    for (_, b) in others:
         for why in b.beyond:
             beyond.push(why.copy())
         for why in b.owner_beyond:
@@ -743,9 +778,9 @@ pure def finish_file(
     for d in bodies.diags:
         if catalog.is_error(d.msg):
             error_outside = True
-    for i in range(len(round.files)):
+    for i in range(len(others)):
         if not writes_generators(r, round, i):
-            let b = ref round.files[i].1
+            let b = ref others[i].1
             if b.other_error:
                 error_outside = True
             for d in b.diags:
@@ -755,8 +790,8 @@ pure def finish_file(
     # error as the root module does; the files the compiler wrote keep
     # their diagnostics whatever the file's syntax errors.
     var files: list[(String, list[Diagnostic])] = []
-    for i in range(len(round.files)):
-        let (t, b) = round.files[i].copy()
+    for i in range(len(others)):
+        let (t, b) = others[i].copy()
         var ds: list[Diagnostic] = []
         if error_outside and writes_generators(r, round, i):
             ds = []
@@ -878,7 +913,7 @@ pub pure def check_std_body(
     let key = (d, kind)
     let first = base.resolver.types.count()
     if not kept.entries.contains(key):
-        let (tb, t) = check_std_once(base, typed, base.resolver.types.copy(), d, kind, catalog)
+        let (tb, t) = check_std_base(base, d, kind, catalog)
         _ = kept.entries.insert(key, (tb, t.made_since(first)))
     let found = kept.entries.get(key) else:
         return (None, types)
@@ -891,6 +926,30 @@ pub pure def check_std_body(
             return (Some(remap_body(b, first, map)), made)
         case None:
             return (None, made)
+
+## A body of a module the base resolved, checked against the base alone,
+## its definitions and its table of types, which every program shares: a
+## program's own definitions cannot reach it (its impls are of its own
+## types or traits, its functions' inferred error sets its own), so
+## checking it against the base is checking it against any program, and
+## the body is the same whichever program reaches it first.
+pure def check_std_base(base: Base, d: DefId, kind: BodyKind, catalog: Catalog) -> (TBody?, Types):
+    let prog = ref base.resolver.prog
+    let types = base.resolver.types.copy()
+    let m = prog.defs[d.index].module
+    var text = ""
+    if let Some(t) = base.texts.get(prog.modules[m.index].name.copy()):
+        text = t
+    let none: dict[DefId, list[DefId]] = {}
+    # The module's syntax: the resolver's own when it kept it (a base of a
+    # prelude alone, for the tests), else the one the base took from it.
+    let sources = ref base.resolver.sources
+    if m.index < len(sources) and not sources[m.index].items.is_empty():
+        return check_std_in(prog, none, sources[m.index].ast, text, types, d, kind, catalog)
+    if m.index < len(base.std_syntax):
+        let ast = ref base.std_syntax[m.index].ast
+        return check_std_in(prog, none, ast, text, types, d, kind, catalog)
+    return (None, types)
 
 ## `check_std_body` without the memo: the body checked in the program's
 ## table of types.
@@ -919,9 +978,11 @@ pure def check_std_with(
     let m = typed.prog.defs[d.index].module
     # The syntax of a module the base resolved is the base's.
     if m.index < len(typed.syntax) and not typed.syntax[m.index].items.is_empty():
-        return check_std_in(typed, typed.syntax[m.index].ast, text, types, d, kind, catalog)
+        let ast = ref typed.syntax[m.index].ast
+        return check_std_in(typed.prog, typed.inferred, ast, text, types, d, kind, catalog)
     if m.index < len(base.std_syntax):
-        return check_std_in(typed, base.std_syntax[m.index].ast, text, types, d, kind, catalog)
+        let ast = ref base.std_syntax[m.index].ast
+        return check_std_in(typed.prog, typed.inferred, ast, text, types, d, kind, catalog)
     return (None, types)
 
 ## A type of a table that holds the base's `first` types first, made again
@@ -1023,20 +1084,27 @@ pure def remap_body(b: TBody, first: int, map: list[Ty]) -> TBody:
             out.contracts = Some(k)
     return out
 
-## `check_std_body` with the module's syntax.
+## `check_std_body` with the program it is checked in, its inferred error
+## sets and the module's syntax.
 pure def check_std_in(
-    typed: Typed, ast: Ast, text: str, own types: Types, d: DefId, kind: BodyKind, catalog: Catalog
+    prog: Program,
+    inferred: dict[DefId, list[DefId]],
+    ast: Ast,
+    text: str,
+    own types: Types,
+    d: DefId,
+    kind: BodyKind,
+    catalog: Catalog,
 ) -> (TBody?, Types):
-    let prog = ref typed.prog
     if kind == BodyKind.Fn:
-        let done = check_one(prog, ast, text, typed.inferred, types, d, catalog, True)
+        let done = check_one(prog, ast, text, inferred, types, d, catalog, True)
         if done.beyond.is_some():
             return (None, done.types)
         return (done.typed, done.types)
     var e: ExprId? = None
     var ty = Ty.error()
     var field_of: DefId? = None
-    match prog.defs[d.index].kind:
+    match prog.defs[d.index].kind():
         case DefKind.Struct(s):
             if let BodyKind.FieldDefault(_, i) = kind:
                 e = s.fields[i].default
@@ -1054,7 +1122,7 @@ pure def check_std_in(
     let x = e else:
         return (None, types)
     let done = check_value(
-        prog, ast, text, typed.inferred, types, d, x, ty, field_of, catalog, kind, True
+        prog, ast, text, inferred, types, d, x, ty, field_of, catalog, kind, True
     )
     if done.beyond.is_some():
         return (None, done.types)
@@ -1317,16 +1385,22 @@ impl Checker:
                     if not param:
                         if unknown or instance_declared(cx.prog, def_, args):
                             continue
-                        q = Request.Instance(def_=def_, args=args)
+                        # Where the program needs it: this call, or the call
+                        # that needed the instance this call is in.
+                        let site = cx.prog.instance_sites.get(self.def_)
+                            ?? (self.module, self.exprs[e.index].span)
+                        q = Request.Instance(def_=def_, args=args, site=site)
                     var seen = False
                     for x in out:
                         if x.same(q):
                             seen = True
                     if not seen:
                         out.push(q)
-                case TExprKind.FnRef(def_):
+                case TExprKind.FnRef(def_, _):
                     if is_template(cx.prog, def_):
-                        self.other("comptime.template-value")
+                        let span = self.exprs[e.index].span
+                        var d = Diagnostic.new(Msg.ComptimeTemplateValue, span.start, span.end)
+                        self.report_other(d.with("name", cx.prog.defs[def_.index].name))
                 case _:
                     pass
         return out
@@ -1504,7 +1578,7 @@ impl Checker:
     pub pure def check_comptime_types(mut self, cx: Cx):
         let sites = self.comptime_sites.copy()
         self.comptime_sites = []
-        for (id, _) in sites:
+        for (id, range) in sites:
             let cl = self.closures[id.index].copy() else:
                 continue
             var tys: list[Ty] = [cl.ret]
@@ -1516,15 +1590,18 @@ impl Checker:
                     if let Callee.Fn(_, targs) = callee:
                         for a in targs:
                             tys.push(a)
-            var param = False
+            var param: int? = None
             for t in tys:
                 let z = self.infer.zonk(mut self.types, t)
                 for w in self.types.walk(z):
-                    if let TyData.Param(_) = self.types.data(w):
-                        param = True
-            if param:
-                self.other("comptime.not-constant")
-        _ = cx
+                    if let TyData.Param(i) = self.types.data(w):
+                        if param.is_none():
+                            param = Some(i)
+            if let Some(i) = param:
+                var name = "Self".to_string()
+                if i < len(self.generic_names):
+                    name = self.generic_names[i].copy()
+                self.report_other(self.error(cx, Msg.ComptimeNotConstant, range).with("name", name))
 
     ## Whether the body calls a generic function that has a body with a
     ## must-consume type argument.

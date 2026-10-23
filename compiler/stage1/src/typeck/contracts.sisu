@@ -26,7 +26,7 @@ from stage1.syntax.ast import (
 )
 from stage1.syntax.ast import build
 from stage1.typeck.check import Checker, Cx, EnsuresCtx
-from stage1.typeck.program import DefKind, FnKind
+from stage1.typeck.program import DefKind, Embedded, FnKind
 from stage1.typeck.thir import (
     ArgMode,
     Callee,
@@ -90,9 +90,8 @@ impl Checker:
                         if let Some(check) = cx.prog.invariant_check(d):
                             out.invariant = Some((check, args.copy()))
         if is_test:
-            # `contract.not-in-test`, for each clause.
-            if not clauses.is_empty():
-                self.other("contract.not-in-test")
+            for c in clauses:
+                self.report_other(self.error(cx, Msg.ContractNotInTest, c.range))
             return
         for c in clauses:
             if c.kind == ContractKind.Requires:
@@ -103,8 +102,7 @@ impl Checker:
                 ensures.push(c)
         if ensures.is_empty() or self.generator.is_some():
             if not ensures.is_empty():
-                # `contract.generator-ensures`.
-                self.other("contract.generator-ensures")
+                self.report_other(self.error(cx, Msg.ContractGeneratorEnsures, ensures[0].range))
             self.keep_contracts(out)
             return
         # `result` (and a labelled result's labels) name the value
@@ -170,8 +168,15 @@ impl Checker:
                     self.unsupported(cx, range, what, "the contract verifier (after version 1)")
                     out.push(TStmt.Error(range))
             case ContractKind.Requires | ContractKind.Ensures:
-                # `contract.not-in-test` or `contract.misplaced`.
-                self.other("contract.not-in-test or contract.misplaced")
+                var is_test = False
+                if let Some(f) = cx.prog.fn_info(self.def_):
+                    if let FnKind.Test(_) = f.kind:
+                        is_test = True
+                if is_test:
+                    self.report_other(self.error(cx, Msg.ContractNotInTest, range))
+                else:
+                    let d = self.error(cx, Msg.ContractMisplaced, range)
+                    self.report_other(d.with("keyword", kind.keyword()))
                 out.push(TStmt.Error(range))
             case ContractKind.Decreases:
                 let what = "a termination measure (`decreases`)"
@@ -188,18 +193,16 @@ impl Checker:
             case Some(ctx):
                 scope = ctx.scope
             case None:
-                # `contract.old-outside`.
-                self.other("contract.old-outside")
+                self.report_other(self.error(cx, Msg.ContractOldOutside, at))
                 self.check_args_loosely(cx, args)
                 return self.error_expr(at)
         if len(args) != 1:
-            # `contract.old-arguments`.
-            self.other("contract.old-arguments")
+            self.report_other(self.error(cx, Msg.ContractOldArguments, at))
             self.check_args_loosely(cx, args)
             return self.error_expr(at)
         let arg = ref args[0]
         if arg.name.is_some() or trailing.is_some():
-            self.other("contract.old-arguments")
+            self.report_other(self.error(cx, Msg.ContractOldArguments, at))
             return self.error_expr(at)
         # `result` does not exist on entry.
         let hidden = self.scopes[scope].copy()
@@ -388,8 +391,7 @@ impl Checker:
                             if let TyData.Adt(o, _) = self.types.data(s):
                                 own_method = o == d
                         if cx.prog.invariant_check(d).is_some() and not own_method:
-                            # `contract.invariant-field`.
-                            self.other("contract.invariant-field")
+                            self.invariant_field(cx, owner, range)
                             return
                     cur = base
                 case TExprKind.Index(base, _, _):
@@ -400,19 +402,34 @@ impl Checker:
                             if let TyData.Adt(o, _) = self.types.data(s):
                                 own_method = o == d
                         if cx.prog.invariant_check(d).is_some() and not own_method:
-                            # `contract.invariant-field`.
-                            self.other("contract.invariant-field")
+                            self.invariant_field(cx, owner, range)
                             return
                     cur = base
                 case TExprKind.Coerce(inner, Coercion.Unrefine):
-                    if self.refinement_of(cx, self.ty_of(inner)).is_some():
-                        # `refine.change-through-base`.
-                        self.other("refine.change-through-base")
+                    let inner_ty = self.ty_of(inner)
+                    if let Some((d, _, _)) = self.refinement_of(cx, inner_ty):
+                        var pred = String.new()
+                        if let Some(r) = cx.prog.refinement(d):
+                            pred = r.text.copy()
+                        let what = self.source_text(cx, range)
+                        let shown = self.show(cx, inner_ty)
+                        var diag = self.error(cx, Msg.RefineChangeThroughBase, range).with(
+                            "what", what
+                        )
+                        self.report_other(diag.with("ty", shown).with("predicate", pred))
                     return
                 case TExprKind.Deref(inner):
                     cur = inner
                 case _:
                     return
+
+    ## `contract.invariant-field`: a change of a part of `owner`, a type
+    ## with an invariant, outside its own methods.
+    pure def invariant_field(mut self, cx: Cx, owner: Ty, range: TextRange):
+        let what = self.source_text(cx, range)
+        let shown = self.show(cx, owner)
+        let d = self.error(cx, Msg.ContractInvariantField, range).with("what", what)
+        self.report_other(d.with("ty", shown))
 
     ## Whether `base` names std's `arbitrary` or `exhaustive` (17): which.
     pub pure def generator_kind(self, cx: Cx, base: ExprId) -> String?:
@@ -462,21 +479,33 @@ impl Checker:
                 case _:
                     one = False
         if not one:
-            # `parse.expected-type`.
-            self.other("parse.expected-type")
+            let whole = cx.ast.expr(site).range
+            let found = "`{self.source_text(cx, whole)}`"
+            self.report_other(self.error(cx, Msg.ParseExpectedType, whole).with("found", found))
             return self.error_expr(range)
         var key = String.new()
         for c in self.source_text(cx, cx.ast.expr(t).range).chars():
             if c != ' ' and c != '\n' and c != '\t' and c != '\r':
                 key.push_char(c)
         var found = False
-        if let Some(entry) = cx.prog.generator_sites.get(key):
+        if let Some(entry) = cx.prog.generator_sites.get(key.copy()):
             found = entry.is_some()
         let replacement = cx.prog.generator_calls.get(site.index)
         if not found or replacement.is_none():
             # `test.no-generator`: a `Gen` of nothing known, so what uses its
             # cases is not reported again.
-            self.other("test.no-generator")
+            if found:
+                # A site the compiler wrote a generator for but no call:
+                # outside what stage 1 renders.
+                self.other("test.no-generator")
+            else:
+                var why = "the compiler writes generators only for the program's own module".to_string()
+                if let Some(w) = cx.prog.generator_failures.get(key):
+                    why = w.copy()
+                let written = cx.ast.expr(t).range
+                let shown = self.source_text(cx, written)
+                let d = self.error(cx, Msg.TestNoGenerator, written).with("ty", shown)
+                self.report_other(d.with("why", why))
             if let Some(args) = call:
                 self.check_args_loosely(cx, args)
             var ty = Ty.error()
@@ -509,14 +538,18 @@ impl Checker:
                 if plain:
                     path = Some(build.plain_text(parts))
         let p = path else:
-            # `comptime.embed-path`.
-            self.other("comptime.embed-path")
+            self.report_other(self.error(cx, Msg.ComptimeEmbedPath, range))
             return self.error_expr(range)
-        if let Some(read) = cx.prog.embedded.get(p):
-            if read:
-                return self.add(TExprKind.Str(String.new()), Ty.str(), range)
-        # `comptime.embed-failed`.
-        self.other("comptime.embed-failed")
+        var why = "only the program's own file may embed, in stage 0".to_string()
+        match cx.prog.embedded.get(p.copy()):
+            case Some(Embedded.Read(text)):
+                return self.add(TExprKind.Str(text.copy()), Ty.str(), range)
+            case Some(Embedded.Failed(w)):
+                why = w.copy()
+            case None:
+                pass
+        let d = self.error(cx, Msg.ComptimeEmbedFailed, range).with("path", p).with("reason", why)
+        self.report_other(d)
         return self.error_expr(range)
 
     ## Whether an expression is a constant: a literal (a number, possibly
@@ -541,7 +574,7 @@ impl Checker:
                     return False
                 let d = cx.prog.lookup(self.module, n) else:
                     return False
-                if let DefKind.Const(_) = cx.prog.defs[d.index].kind:
+                if let DefKind.Const(_) = cx.prog.defs[d.index].kind():
                     return True
                 return False
             case ExprKind.Unary(UnOp.Neg, inner):

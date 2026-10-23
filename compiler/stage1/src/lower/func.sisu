@@ -39,10 +39,11 @@ from stage1.sir import (
     StatementKind,
     Terminator,
     Type,
+    value_wrapper,
 )
 from stage1.syntax.ast import Mode
+from stage1.typeck.program import FnInfo, ModuleId, Predicate, param_local_ty
 from stage1.typeck.program import FnKind as DefFnKind
-from stage1.typeck.program import ModuleId, Predicate
 from stage1.typeck.program import Program as Resolved
 from stage1.typeck.thir import BlockId as TBlockId
 from stage1.typeck.thir import BodyKind, ClosureId, TBody, TCompClause, TCompKind, TExpr, TExprId, TStmt
@@ -144,6 +145,24 @@ pub enum ForBody:
 ## `@comptime_budget(steps=N)` on its item (08 leaves the number open).
 pub const DEFAULT_COMPTIME_BUDGET: int = 1000000
 
+## Whether a function is its value wrapper as a value (`f#value`) rather
+## than its constant: a generic one, whose constant cannot name type
+## arguments, and one that borrows a parameter, which a function value
+## takes (decision 225). A method is not a value.
+pub pure def value_wrapped(prog: Resolved, mut types: Types, f: FnInfo) -> bool:
+    if f.self_mode.is_some() or f.intrinsic.is_some():
+        return False
+    if not f.generics.is_empty():
+        return True
+    let env = prog.elaborate_env(mut types, f.predicates)
+    for p in f.params:
+        if let TyData.Ref(_, _) = types.data(p.ty):
+            continue
+        let local = param_local_ty(prog, mut types, p.ty, p.mode, env)
+        if let TyData.Ref(_, _) = types.data(local):
+            return True
+    return False
+
 pub pure def closure_name(owner: str, id: ClosureId) -> String:
     return "{owner}#closure{id.index}"
 
@@ -189,8 +208,18 @@ pub pure def lower_body(
     main.type_params = type_params.copy()
     main.bounds = env.copy()
     let (f0, t0) = main.run(cx, kind, source, pure, from_, inner, owns)
-    out.push(f0)
     types = t0
+    # What the function is as a value, when it is not its constant: a
+    # generic one, or one that borrows a parameter a function value takes
+    # (decision 225).
+    if body.kind == BodyKind.Fn and kind == FnKind.Normal:
+        if let Some(f) = prog.fn_info(body.def_):
+            if value_wrapped(prog, mut types, f):
+                var takes: list[Type] = []
+                for p in f.params:
+                    takes.push(cx.ctx.ty(prog, mut types, p.ty))
+                out.push(value_wrapper(f0, takes))
+    out.push(f0)
     for i in range(len(body.closures)):
         let id = ClosureId(index=i)
         let cl = ref body.closures[i]
@@ -536,6 +565,47 @@ impl FnLower:
         let n = len(self.scopes)
         if n > 0:
             self.scopes[n - 1].entries.push(e)
+
+    ## Holds the temporary an operand was just evaluated into (`mark`: the
+    ## number of locals before it was), when it is one that needs drop:
+    ## registered, so that a later operand of the same statement that
+    ## leaves (a `?`, a `return`, a panic) drops it, until `release` gives
+    ## it to the statement that takes it (decision 222).
+    pub pure def hold(mut self, cx: Cx, op: Operand, mark: int, ty: Ty, mut held: list[LocalId]):
+        var temp: LocalId? = None
+        if let Operand.Move(p) = op:
+            if p.proj.is_empty() and p.local.index == mark:
+                temp = Some(p.local)
+        let l = temp else:
+            return
+        if not self.needs_drop(cx, ty) or ty == Ty.never():
+            return
+        self.register(DropEntry.Local(l))
+        self.split(cx)
+        held.push(l)
+
+    ## Lets go of the temporaries `hold` registered: the statement that
+    ## takes them starts a block without their drops.
+    pub pure def release(mut self, cx: Cx, held: list[LocalId]):
+        if held.is_empty():
+            return
+        for i in range(len(self.scopes)):
+            var kept: list[DropEntry] = []
+            for e in self.scopes[i].entries:
+                var gone = False
+                if let DropEntry.Local(l) = e:
+                    gone = held.contains(l)
+                if not gone:
+                    kept.push(e)
+            self.scopes[i].entries = kept
+        self.split(cx)
+
+    ## Whether a value of `l` is registered to be dropped.
+    pub pure def is_registered(self, l: LocalId) -> bool:
+        for s in self.scopes:
+            if s.entries.contains(DropEntry.Local(l)):
+                return True
+        return False
 
     ## Registers in the scope `n` levels below the innermost.
     pub pure def register_below(mut self, n: int, e: DropEntry):

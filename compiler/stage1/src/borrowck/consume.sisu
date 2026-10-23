@@ -404,6 +404,8 @@ pure def check_body(f: Function, types: Types, p: Program) -> list[Finding]:
                 entry[b] = Some(empty.copy())
     var out: list[Finding] = []
     dropping_intrinsics(f, types, p, mut out)
+    # Whether a local's value must be consumed, asked once a local.
+    var whole: dict[int, bool] = {}
     for b in range(n):
         if f.blocks[b].cleanup:
             continue
@@ -414,7 +416,14 @@ pure def check_body(f: Function, types: Types, p: Program) -> list[Finding]:
             let s = ref f.blocks[b].stmts[si]
             if let StatementKind.Drop(place, _) = s.kind:
                 if let Some(ty) = types.place_ty(f, place):
-                    if types.must_consume(ty):
+                    var must = False
+                    if place.proj.is_empty() and whole.contains(place.local.index):
+                        must = whole.get(place.local.index) ?? False
+                    else:
+                        must = types.must_consume(ty)
+                        if place.proj.is_empty():
+                            _ = whole.insert(place.local.index, must)
+                    if must:
                         var exhausted = False
                         if place.proj.is_empty():
                             if let Type.Named(tn, _) = ty:
