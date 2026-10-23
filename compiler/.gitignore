@@ -1,3 +1,7 @@
 /target
 # What `sisu build --native` writes for stage 1 in place (decision 231).
 /stage1/build/
+
+# Lockfiles that stage 0 writes into the package cases it checks (stage1/check.sh removes them).
+/stage1/cases/**/sisu.lock
+/conformance/cases/**/sisu.lock
