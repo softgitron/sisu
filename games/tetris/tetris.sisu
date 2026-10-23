@@ -1,0 +1,488 @@
+##! Tetris for the terminal, written in Sisu.
+##!
+##! Standard input gives the program one line per event: the decimal code
+##! of a key's byte, or `t`, a heartbeat that lets the game fall while no
+##! key is pressed. `tetris.sh` puts the terminal into character mode and
+##! feeds it those lines; the game itself draws with ANSI escapes.
+
+const WIDTH: int = 10
+const HEIGHT: int = 20
+
+## What a key does.
+@derive(Copy, Debug, Eq)
+enum Action:
+    Left
+    Right
+    Down
+    Drop
+    RotateCw
+    RotateCcw
+    Pause
+    Restart
+    Quit
+    Nothing
+
+## A cell of a piece, relative to the corner of its box.
+@derive(Copy, Debug, Eq)
+struct Cell:
+    x: int
+    y: int
+
+## The seven pieces' cells in their spawn orientation, and the size of the
+## square box each one rotates in. Kinds are 1 to 7: I O T S Z J L.
+def base_cells(kind: int) -> list[Cell]:
+    match kind:
+        case 1:
+            return [Cell(x=0, y=1), Cell(x=1, y=1), Cell(x=2, y=1), Cell(x=3, y=1)]
+        case 2:
+            return [Cell(x=0, y=0), Cell(x=1, y=0), Cell(x=0, y=1), Cell(x=1, y=1)]
+        case 3:
+            return [Cell(x=1, y=0), Cell(x=0, y=1), Cell(x=1, y=1), Cell(x=2, y=1)]
+        case 4:
+            return [Cell(x=1, y=0), Cell(x=2, y=0), Cell(x=0, y=1), Cell(x=1, y=1)]
+        case 5:
+            return [Cell(x=0, y=0), Cell(x=1, y=0), Cell(x=1, y=1), Cell(x=2, y=1)]
+        case 6:
+            return [Cell(x=0, y=0), Cell(x=0, y=1), Cell(x=1, y=1), Cell(x=2, y=1)]
+        case _:
+            return [Cell(x=2, y=0), Cell(x=0, y=1), Cell(x=1, y=1), Cell(x=2, y=1)]
+
+def box_size(kind: int) -> int:
+    if kind == 1:
+        return 4
+    if kind == 2:
+        return 2
+    return 3
+
+## The cells of `kind` turned clockwise `rot` times.
+def piece_cells(kind: int, rot: int) -> list[Cell]:
+    let n = box_size(kind)
+    var cells = base_cells(kind)
+    for _ in range(rot % 4):
+        cells = [Cell(x=n - 1 - c.y, y=c.x) for c in cells]
+    return cells
+
+## The colour a kind is drawn in, as the parameter of an SGR background.
+def colour(kind: int) -> str:
+    match kind:
+        case 1:
+            return "46"
+        case 2:
+            return "43"
+        case 3:
+            return "45"
+        case 4:
+            return "42"
+        case 5:
+            return "41"
+        case 6:
+            return "44"
+        case _:
+            return "48;5;208"
+
+## Points for clearing `n` lines at once, before the level multiplies them.
+def line_points(n: int) -> int:
+    match n:
+        case 1:
+            return 100
+        case 2:
+            return 300
+        case 3:
+            return 500
+        case 4:
+            return 800
+        case _:
+            return 0
+
+## How long a piece waits before it falls a row, at `level`.
+def fall_millis(level: int) -> int:
+    let ms = 800 - (level - 1) * 70
+    return if ms < 80: 80 else: ms
+
+struct Game:
+    ## The settled cells, row by row: 0 is empty, else the kind that left it.
+    board: list[int]
+    kind: int
+    rot: int
+    x: int
+    y: int
+    next: int
+    bag: list[int]
+    score: int
+    lines: int
+    level: int
+    over: bool
+    paused: bool
+
+    ## A game whose first pieces come from `rand`.
+    def new(rand: Rand) -> Game:
+        var g = Game(
+            board=[0 for _ in range(WIDTH * HEIGHT)],
+            kind=1,
+            rot=0,
+            x=0,
+            y=0,
+            next=1,
+            bag=[],
+            score=0,
+            lines=0,
+            level=1,
+            over=False,
+            paused=False,
+        )
+        g.next = g.draw(rand)
+        g.spawn(rand)
+        return g
+
+    ## The next kind from a shuffled bag of all seven.
+    def draw(mut self, rand: Rand) -> int:
+        if self.bag.is_empty():
+            var kinds = [1, 2, 3, 4, 5, 6, 7]
+            while not kinds.is_empty():
+                let i = rand.between(0, len(kinds))
+                self.bag.push(kinds.remove(i))
+        return self.bag.remove(0)
+
+    ## Brings the next piece in at the top; the game is over when it does
+    ## not fit.
+    def spawn(mut self, rand: Rand):
+        self.kind = self.next
+        self.next = self.draw(rand)
+        self.rot = 0
+        self.x = (WIDTH - box_size(self.kind)) // 2
+        self.y = 0
+        if not self.fits(self.kind, self.rot, self.x, self.y):
+            self.over = True
+
+    def at(self, x: int, y: int) -> int:
+        return self.board[y * WIDTH + x]
+
+    ## Whether `kind` turned `rot` times fits with its box's corner at `x`, `y`.
+    def fits(self, kind: int, rot: int, x: int, y: int) -> bool:
+        for c in piece_cells(kind, rot):
+            let cx = x + c.x
+            let cy = y + c.y
+            if cx < 0 or cx >= WIDTH or cy < 0 or cy >= HEIGHT:
+                return False
+            if self.at(cx, cy) != 0:
+                return False
+        return True
+
+    ## Moves the piece by `dx`, `dy` if it fits there; whether it moved.
+    def shift(mut self, dx: int, dy: int) -> bool:
+        if self.fits(self.kind, self.rot, self.x + dx, self.y + dy):
+            self.x += dx
+            self.y += dy
+            return True
+        return False
+
+    ## Turns the piece by `turns` quarters clockwise, pushing it sideways
+    ## off a wall or another piece when it has to.
+    def rotate(mut self, turns: int):
+        let rot = (self.rot + turns) % 4
+        for kick in [0, -1, 1, -2, 2]:
+            if self.fits(self.kind, rot, self.x + kick, self.y):
+                self.rot = rot
+                self.x += kick
+                return
+
+    ## How far the piece would fall before it lands.
+    def drop_distance(self) -> int:
+        var d = 0
+        while self.fits(self.kind, self.rot, self.x, self.y + d + 1):
+            d += 1
+        return d
+
+    ## Settles the piece into the board, clears full rows and brings in the
+    ## next piece.
+    def lock(mut self, rand: Rand):
+        for c in piece_cells(self.kind, self.rot):
+            self.board[(self.y + c.y) * WIDTH + self.x + c.x] = self.kind
+        let cleared = self.clear_lines()
+        self.lines += cleared
+        self.score += line_points(cleared) * self.level
+        self.level = self.lines // 10 + 1
+        self.spawn(rand)
+
+    ## Removes every full row, moving the rows above it down; how many.
+    def clear_lines(mut self) -> int:
+        var kept: list[int] = []
+        var cleared = 0
+        for y in range(HEIGHT):
+            var full = True
+            for x in range(WIDTH):
+                if self.at(x, y) == 0:
+                    full = False
+            if full:
+                cleared += 1
+            else:
+                for x in range(WIDTH):
+                    kept.push(self.at(x, y))
+        var board = [0 for _ in range(cleared * WIDTH)]
+        for v in kept:
+            board.push(v)
+        self.board = board
+        return cleared
+
+    ## One step of gravity: down a row, or settle when it cannot.
+    def fall(mut self, rand: Rand):
+        if not self.shift(0, 1):
+            self.lock(rand)
+
+    ## Does what `action` says.
+    def apply(mut self, action: Action, rand: Rand):
+        if self.over or self.paused:
+            return
+        match action:
+            case Left:
+                self.shift(-1, 0)
+            case Right:
+                self.shift(1, 0)
+            case Down:
+                if self.shift(0, 1):
+                    self.score += 1
+            case Drop:
+                let d = self.drop_distance()
+                self.y += d
+                self.score += 2 * d
+                self.lock(rand)
+            case RotateCw:
+                self.rotate(1)
+            case RotateCcw:
+                self.rotate(3)
+            case _:
+                pass
+
+    ## What is shown at board cell `x`, `y`: a kind, its negative for the
+    ## shadow of where the piece will land, or 0.
+    def shown(self, x: int, y: int, ghost_y: int, cells: list[Cell]) -> int:
+        for c in cells:
+            if self.x + c.x == x and self.y + c.y == y:
+                return self.kind
+        for c in cells:
+            if self.x + c.x == x and ghost_y + c.y == y:
+                return 0 - self.kind
+        return self.at(x, y)
+
+## A cell two characters wide.
+def block(kind: int) -> String:
+    if kind > 0:
+        return String.new("\u{1b}[{colour(kind)}m  \u{1b}[0m")
+    if kind < 0:
+        return String.new("\u{1b}[90m[]\u{1b}[0m")
+    return String.new("\u{1b}[90m .\u{1b}[0m")
+
+## The text beside row `y` of the board.
+def side(g: Game, y: int) -> String:
+    if y == 1:
+        return String.new("  NEXT")
+    if y >= 2 and y <= 3:
+        var s = String.new("  ")
+        let cells = piece_cells(g.next, 0)
+        for x in range(4):
+            var filled = False
+            for c in cells:
+                if c.x == x and c.y == y - 2:
+                    filled = True
+            if filled:
+                s.push(block(g.next))
+            else:
+                s.push("  ")
+        return s
+    match y:
+        case 6:
+            return String.new("  SCORE  {g.score}")
+        case 7:
+            return String.new("  LINES  {g.lines}")
+        case 8:
+            return String.new("  LEVEL  {g.level}")
+        case 11:
+            return String.new("  \u{2190} \u{2192} / a d    move")
+        case 12:
+            return String.new("  \u{2191} / w / x    rotate")
+        case 13:
+            return String.new("  z            rotate back")
+        case 14:
+            return String.new("  \u{2193} / s        soft drop")
+        case 15:
+            return String.new("  space        hard drop")
+        case 16:
+            return String.new("  p            pause")
+        case 17:
+            return String.new("  r            restart")
+        case 18:
+            return String.new("  q            quit")
+        case _:
+            return String.new("")
+
+## The whole screen, drawn from the top left corner.
+def render(g: Game) -> String:
+    var out = String.new("\u{1b}[H")
+    out.push("  \u{1b}[1mS I S U   T E T R I S\u{1b}[0m\u{1b}[K\n")
+    let cells = piece_cells(g.kind, g.rot)
+    let ghost_y = g.y + g.drop_distance()
+    for y in range(HEIGHT):
+        out.push("  <!")
+        for x in range(WIDTH):
+            out.push(block(g.shown(x, y, ghost_y, cells)))
+        out.push("!>")
+        out.push(side(g, y))
+        out.push("\u{1b}[K\n")
+    out.push("  <!")
+    for _ in range(WIDTH):
+        out.push("==")
+    out.push("!>\u{1b}[K\n")
+    out.push("    ")
+    for _ in range(WIDTH):
+        out.push("\\/")
+    out.push("\u{1b}[K\n")
+    if g.over:
+        out.push("  \u{1b}[1;31mGAME OVER\u{1b}[0m  r: play again, q: quit\u{1b}[K")
+    elif g.paused:
+        out.push("  \u{1b}[1;33mPAUSED\u{1b}[0m  p: go on\u{1b}[K")
+    else:
+        out.push("\u{1b}[K")
+    return out
+
+## Turns the stream of key codes into actions; an arrow key comes as three
+## codes, `ESC [ A` to `ESC [ D`.
+struct Keys:
+    escape: int
+
+    def feed(mut self, code: int) -> Action:
+        if self.escape == 1:
+            self.escape = if code == 91 or code == 79: 2 else: 0
+            return Action.Nothing
+        if self.escape == 2:
+            self.escape = 0
+            match code:
+                case 65:
+                    return Action.RotateCw
+                case 66:
+                    return Action.Down
+                case 67:
+                    return Action.Right
+                case 68:
+                    return Action.Left
+                case _:
+                    return Action.Nothing
+        match code:
+            case 27:
+                self.escape = 1
+                return Action.Nothing
+            case 97 | 65 | 104:
+                return Action.Left
+            case 100 | 68 | 108:
+                return Action.Right
+            case 115 | 83 | 106:
+                return Action.Down
+            case 119 | 87 | 120 | 88 | 107:
+                return Action.RotateCw
+            case 122 | 90:
+                return Action.RotateCcw
+            case 32:
+                return Action.Drop
+            case 112 | 80:
+                return Action.Pause
+            case 114 | 82:
+                return Action.Restart
+            case 113 | 81 | 3:
+                return Action.Quit
+            case _:
+                return Action.Nothing
+
+def millis(clock: Clock) -> int:
+    return clock.now().unix_nanos() // 1000000
+
+def main(sys: System):
+    let rand = sys.rand
+    let clock = sys.clock
+    var g = Game.new(rand)
+    var keys = Keys(escape=0)
+    var next_fall = millis(clock) + fall_millis(g.level)
+    print("\u{1b}[?25l\u{1b}[2J")
+    print(render(g))
+    while let Some(line) = sys.stdin.read_line():
+        var dirty = False
+        if line != "t":
+            let code = line.parse_int() else: -1
+            let action = keys.feed(code)
+            match action:
+                case Quit:
+                    break
+                case Restart:
+                    g = Game.new(rand)
+                    next_fall = millis(clock) + fall_millis(g.level)
+                case Pause:
+                    if not g.over:
+                        g.paused = not g.paused
+                        next_fall = millis(clock) + fall_millis(g.level)
+                case Nothing:
+                    pass
+                case _:
+                    let was = g.y
+                    g.apply(action, rand)
+                    if action == Action.Down and g.y != was:
+                        next_fall = millis(clock) + fall_millis(g.level)
+            dirty = True
+        let now = millis(clock)
+        if not g.over and not g.paused and now >= next_fall:
+            g.fall(rand)
+            next_fall = now + fall_millis(g.level)
+            dirty = True
+        if dirty:
+            print(render(g))
+    print("\u{1b}[0m\u{1b}[?25h")
+    print("Final score: {g.score}, lines: {g.lines}, level: {g.level}")
+
+test "every piece has four cells in every turn, inside its box":
+    for kind in range(1, 8):
+        for rot in range(4):
+            let cells = piece_cells(kind, rot)
+            assert len(cells) == 4
+            for c in cells:
+                assert c.x >= 0 and c.x < box_size(kind)
+                assert c.y >= 0 and c.y < box_size(kind)
+
+test "four turns bring a piece back":
+    for kind in range(1, 8):
+        assert piece_cells(kind, 4) == piece_cells(kind, 0)
+
+test "a full row is cleared and the rows above fall":
+    let rand = Rand.seeded(1)
+    var g = Game.new(rand)
+    for x in range(WIDTH):
+        g.board[(HEIGHT - 1) * WIDTH + x] = 3
+    g.board[(HEIGHT - 2) * WIDTH] = 5
+    assert g.clear_lines() == 1
+    assert g.at(0, HEIGHT - 1) == 5
+    assert g.at(1, HEIGHT - 1) == 0
+
+test "a hard drop lands on the floor and scores":
+    let rand = Rand.seeded(7)
+    var g = Game.new(rand)
+    let d = g.drop_distance()
+    assert d > 0
+    g.apply(Action.Drop, rand)
+    assert g.score == 2 * d
+    var settled = 0
+    for v in g.board:
+        if v != 0:
+            settled += 1
+    assert settled == 4
+
+test "a piece stops at the wall":
+    let rand = Rand.seeded(3)
+    var g = Game.new(rand)
+    for _ in range(20):
+        g.apply(Action.Left, rand)
+    for c in piece_cells(g.kind, g.rot):
+        assert g.x + c.x >= 0
+    assert not g.shift(-1, 0)
+
+test "arrow keys arrive as escape sequences":
+    var k = Keys(escape=0)
+    assert k.feed(27) == Action.Nothing
+    assert k.feed(91) == Action.Nothing
+    assert k.feed(68) == Action.Left
+    assert k.feed(32) == Action.Drop

@@ -1009,6 +1009,9 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 }
             }
             I::HostStdinReadLine => {
+                // What was printed is shown before waiting for input, as
+                // the interpreter shows it: a prompt, or a game's frame.
+                rt::flush();
                 let mut line = String::new();
                 match std::io::stdin().read_line(&mut line) {
                     Ok(0) | Err(_) => c.none(),

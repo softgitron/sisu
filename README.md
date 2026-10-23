@@ -18,6 +18,7 @@ out.
 |---|---|
 | Understand what Sisu is in 10 minutes | [`proposal/README.md`](proposal/README.md) |
 | See code | [`proposal/01-tour.md`](proposal/01-tour.md) and [`proposal/examples/`](proposal/examples/) |
+| Play a game written in Sisu | [`games/tetris/`](games/tetris/) (terminal Tetris) |
 | Know what happens next | [`proposal/18-next-steps.md`](proposal/18-next-steps.md), then [`proposal/20-pre-registration.md`](proposal/20-pre-registration.md) |
 | Know *why* a decision was made | [`proposal/15-decision-log.md`](proposal/15-decision-log.md), then the linked research |
 | Argue about something | [`open-questions.md`](open-questions.md) |
